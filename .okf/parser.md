@@ -2055,6 +2055,61 @@ lines rather than changing any parser code — a reminder that this
 column-72 gotcha applies to test fixtures using this repo's usual
 7-space/Area-B indentation, not just to real-world source.
 
+## COMPUTE expression precedence: `_parse_unary` merged with `_parse_signed_primary` (2026-09-10)
+
+`arithmetic_parsers.py`'s expression grammar, tightest-binding first:
+`_parse_primary` (literal/identifier/parenthesized/FUNCTION) →
+`_parse_power` (`**`, left-associative — `2 ** 3 ** 2` is `(2 ** 3) ** 2 ==
+64`, not `2 ** 9`) → `_parse_unary` (leading `+`/`-`) → `_parse_term`
+(`*`/`/`) → `_parse_additive` (`+`/`-`). The exponent on the right of `**`
+may itself carry a sign (`2 ** -3`), but must not itself absorb a further
+`**` — that would make `2 ** -3 ** 2` group as `2 ** (-(3 ** 2))` instead of
+the correct `2 ** (-3)`, since a repeated `**` is `_parse_power`'s own loop,
+not `_parse_unary`'s concern. This used to be a second, hand-copied method
+(`_parse_signed_primary`, identical to `_parse_unary` except its
+non-sign fallback called `_parse_primary` directly instead of descending
+through `_parse_power`) — now one method, `_parse_unary(fallback=None)`:
+`fallback` is `_parse_power` by default and `_parse_primary` for the `**`
+right-hand-side call, threaded through the sign-recursion so a chain of
+signs (`- - -3`) keeps the same fallback throughout. Behavior unchanged —
+`tests/regression/test_review_2026_09_09_generators.py::TestFinding9PowerAssociativity`
+(`2 ** 3 ** 2 == 64`, `2 ** (3 ** 2) == 512`, `100 * 2 ** -1 == 50`) still
+passes unmodified.
+
+## `PROCEDURE DIVISION USING` now captures each parameter's passing mode (2026-09-10)
+
+`BaseDivisionParser.parse()` (`divisions/base.py`) already walked the header
+clause tokens up to the terminating period to collect bare parameter names
+into the `using_parameters` metadata list (`ast_node.set_metadata
+("using_parameters", [...])`) — this is what makes the implicit entry
+interface visible to `LinkageChecker` at all. It skipped over `BY`/`VALUE`/
+`REFERENCE` tokens as non-data-names but never recorded *which* mode a
+parameter was declared under. A second metadata key,
+`using_parameter_modes: dict[str, str]` (name upper → `"VALUE"`/
+`"REFERENCE"`), now tracks a `current_mode` that starts at COBOL's own
+`"REFERENCE"` default and flips on each `VALUE`/`REFERENCE` keyword seen
+(`BY` itself is a pure connector, no state change) — so `PROCEDURE DIVISION
+USING BY REFERENCE LK-A BY VALUE LK-B LK-C` yields `{"LK-A": "REFERENCE",
+"LK-B": "VALUE", "LK-C": "VALUE"}` (mode carries forward until it switches
+again). Backs `LinkageChecker`'s new `PASSING_MODE_MISMATCH` check — see
+[analysis.md](analysis.md)'s LinkageChecker section.
+
+## `SET`'s multi-group ENTRY-form flag was not reset per group (2026-09-10)
+
+`SetStatementParser._entry_form` (set by `_parse_action` when a value is
+introduced by `ENTRY`, read right after to call `stmt.set_metadata
+("value_is_entry", True)` for the *first* `targets TO/UP/DOWN value` group)
+was reset to `False` once, before that first group's `_parse_action` call,
+but never again before parsing a later group in the same multi-group SET
+(`SET SW-1 TO ON SW-2 TO OFF`-shaped statements, 2026-07-24). A first
+group's `SET p TO ENTRY 'X'` would leave the flag set for every later
+group's own `_parse_action` call, and there was nowhere to even put a
+later group's own answer: `SetStatement.add_group()` had no `is_entry`
+parameter at all. Fixed on both ends — the flag is now reset before each
+group's `_parse_action` call, and `add_group(..., is_entry=self._entry_form)`
+records it per group as the additive `"value_is_entry"` group-dict key (see
+[ast-models.md](ast-models.md)).
+
 # EJECT compiler-directing statement was unrecognized (2026-08-05)
 
 `EJECT` (the source-listing page-eject directive — not the column-7 `/`

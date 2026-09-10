@@ -39,6 +39,42 @@ _SECTION_NAMES: dict[str, str] = {
 _OF_IN_RE = re.compile(r"\s+(?:OF|IN)\s+", re.IGNORECASE)
 
 
+def split_qualified_name(text: str | None) -> tuple[str, list[str]] | None:
+    """Split a data-name -- bare, ``A OF B [OF C ...]``, or dotted ``B.A``
+    -- into ``(base, qualifiers)``, upper-cased. ``None`` when *text* has
+    nothing resolvable in it (e.g. just ``"OF"`` alone, or an empty/blank
+    string).
+
+    The one place this grammar is parsed: :meth:`ProgramLayoutIndex.resolve`
+    and ``analysis.const_fold``'s own qualifier splitting (``_group_paths``)
+    both call this rather than each re-deriving it, so a name like
+    ``"A OF B"`` cannot resolve differently depending on which one asked.
+    """
+    stripped = (text or "").strip()
+    if not stripped:
+        return None
+
+    if _OF_IN_RE.search(stripped):
+        # "A OF B [OF C ...]" -- the field comes first, qualifiers follow.
+        parts = [p.strip() for p in _OF_IN_RE.split(stripped) if p.strip()]
+        if not parts:
+            # e.g. text is just "OF"/"IN" with nothing either side --
+            # every segment stripped to empty. Not a resolvable name.
+            return None
+        return parts[0].upper(), [p.upper() for p in parts[1:]]
+
+    if "." in stripped:
+        # "B.A" mirrors FieldSpec.qualified_name (root-first, field-last),
+        # so the field is the *last* segment and qualifiers precede it.
+        parts = [p.strip() for p in stripped.split(".") if p.strip()]
+        if not parts:
+            # e.g. text is "."/".." -- every segment stripped to empty.
+            return None
+        return parts[-1].upper(), [p.upper() for p in parts[:-1]]
+
+    return stripped.upper(), []
+
+
 @dataclass(frozen=True)
 class FileFacts:
     """Physical/organizational facts about one FILE-CONTROL / FD-SD file.
@@ -257,27 +293,10 @@ class ProgramLayoutIndex:
             return None
         text = name.strip()
 
-        if _OF_IN_RE.search(text):
-            # "A OF B [OF C ...]" -- the field comes first, qualifiers follow.
-            parts = [p.strip() for p in _OF_IN_RE.split(text) if p.strip()]
-            if not parts:
-                # e.g. text is just "OF"/"IN" with nothing either side --
-                # every segment stripped to empty. Not a resolvable name.
-                return None
-            base = parts[0].upper()
-            qualifiers = [p.upper() for p in parts[1:]]
-        elif "." in text:
-            # "B.A" mirrors FieldSpec.qualified_name (root-first, field-last),
-            # so the field is the *last* segment and qualifiers precede it.
-            parts = [p.strip() for p in text.split(".") if p.strip()]
-            if not parts:
-                # e.g. text is "."/".." -- every segment stripped to empty.
-                return None
-            base = parts[-1].upper()
-            qualifiers = [p.upper() for p in parts[:-1]]
-        else:
-            base = text.upper()
-            qualifiers = []
+        split = split_qualified_name(text)
+        if split is None:
+            return None
+        base, qualifiers = split
 
         candidates = self._name_index.get(base)
         if not candidates:

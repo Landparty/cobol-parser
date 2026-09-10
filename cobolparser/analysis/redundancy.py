@@ -39,6 +39,7 @@ from ..models.statements.control import (
     PerformStatement,
     SearchStatement,
 )
+from ._names import IDENTIFIER_TOKEN_RE
 from .dead_code import DeadCodeAnalyzer, DeadCodeItem
 from .program_flow.condition_text import render_condition_text
 
@@ -57,7 +58,6 @@ from .unused_variables import (
 )
 
 _QUOTED_TEXT_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
-_IDENTIFIER_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
 
 
 def _normalize_text(text: str, type2: bool, id_map: dict[str, str]) -> str:
@@ -95,7 +95,7 @@ def _normalize_text(text: str, type2: bool, id_map: dict[str, str]) -> str:
         if kind == "quoted":
             out.append(chunk)
         else:
-            out.append(_IDENTIFIER_TOKEN_RE.sub(repl, chunk))
+            out.append(IDENTIFIER_TOKEN_RE.sub(repl, chunk))
     return "".join(out)
 
 

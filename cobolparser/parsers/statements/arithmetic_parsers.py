@@ -6,6 +6,7 @@ binary-form parsers (ADD/SUBTRACT/MULTIPLY/DIVIDE) share their operand and
 target plumbing through helpers in :mod:`_utils`.
 """
 
+from collections.abc import Callable
 from typing import Any, Protocol, TypeVar, cast
 
 from ...core.ast_factory import create_node
@@ -686,17 +687,29 @@ class _ExpressionTreeParser:
             node = self._binary(op, node, self._parse_unary())
         return node
 
-    def _parse_unary(self) -> str | CobolExpression:
+    def _parse_unary(
+        self, fallback: Callable[[], str | CobolExpression] | None = None
+    ) -> str | CobolExpression:
+        """A primary with any number of leading unary signs.
+
+        *fallback* is where a non-sign token descends to once every leading
+        sign is consumed: defaults to ``_parse_power`` for ordinary
+        unary-minus precedence. ``_parse_power`` passes ``_parse_primary``
+        instead for the right-hand side of ``**`` -- skipping back into
+        ``_parse_power`` itself -- so an exponentiation chain stays
+        left-associative (see its own docstring).
+        """
+        next_level = fallback or self._parse_power
         tok = self._peek()
         if tok == "+":
             self._advance()
-            return self._parse_unary()
+            return self._parse_unary(fallback)
         if tok == "-":
             self._advance()
             node = ArithmeticExpression("NEGATE", self._location)
-            node.set_right_operand(self._parse_unary())
+            node.set_right_operand(self._parse_unary(fallback))
             return node
-        return self._parse_power()
+        return next_level()
 
     def _parse_power(self) -> str | CobolExpression:
         node = self._parse_primary()
@@ -706,25 +719,10 @@ class _ExpressionTreeParser:
             # IBM evaluates operators of the same precedence left to right,
             # so ``2 ** 3 ** 2`` is ``(2 ** 3) ** 2 == 64``, not ``2 ** 9``.
             # The exponent may itself carry a sign (``2 ** -3``), hence the
-            # signed-primary parse on the right -- which deliberately does
+            # signed-unary parse on the right -- which deliberately does
             # NOT absorb a further ``**`` of its own.
-            node = self._binary("**", node, self._parse_signed_primary())
+            node = self._binary("**", node, self._parse_unary(self._parse_primary))
         return node
-
-    def _parse_signed_primary(self) -> str | CobolExpression:
-        """A primary with any number of leading unary signs, for the
-        right-hand side of ``**`` -- ``_parse_unary`` minus its descent into
-        ``_parse_power``, so exponentiation chains stay left-associative."""
-        tok = self._peek()
-        if tok == "+":
-            self._advance()
-            return self._parse_signed_primary()
-        if tok == "-":
-            self._advance()
-            node = ArithmeticExpression("NEGATE", self._location)
-            node.set_right_operand(self._parse_signed_primary())
-            return node
-        return self._parse_primary()
 
     def _parse_primary(self) -> str | CobolExpression:
         tok = self._peek()

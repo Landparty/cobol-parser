@@ -64,6 +64,14 @@ class PictureClause(ASTNode):
         self.is_signed: bool = False
         self.has_scaling_factor: bool = False
         self.scaling_factor: int = 0
+        # Direction of the P run for a scaled picture (see
+        # `_parse_scaled_pattern`): True for a leading run (`PPP9(3)`, a
+        # fraction), False for a trailing one (`9(3)PPP`, a large integer),
+        # None when the picture is not P-scaled at all. The one place this
+        # is decided -- every other consumer that cares about direction
+        # (`generators/data/layout.py`'s `FieldSpec.scaling_positions`)
+        # reads it from here instead of re-deriving it from the raw pattern.
+        self.scaling_leading: bool | None = None
         self.is_edited: bool = False
         self.is_numeric_edited: bool = False
         self.is_alphanumeric_edited: bool = False
@@ -395,6 +403,7 @@ class PictureClause(ASTNode):
         if any(s != "P" for s in run):
             return False
 
+        self.scaling_leading = leading
         if leading:
             self.integer_digits = 0
             self.decimal_digits = ps + nines

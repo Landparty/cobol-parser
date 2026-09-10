@@ -28,6 +28,7 @@ from ..models.statements import (
     IORewriteStatement,
     IOWriteStatement,
 )
+from ._files import record_to_file_map, resolve_file_name
 
 
 @dataclass
@@ -309,18 +310,11 @@ class CRUDMatrixGenerator:
         The data division parser sets ``fd_file_name`` metadata on 01-level data
         items when it detects an ``FD`` declaration preceding them.  This mapping
         lets WRITE/REWRITE statements (which carry a record name, not a file name)
-        be attributed to the correct file.
+        be attributed to the correct file. Shared with ``io_logger``/
+        ``io_sequence`` via ``_files.record_to_file_map`` so the three
+        analyzers cannot disagree about which file a record belongs to.
         """
-        data_div = ast.get_division("DATA")
-        if data_div is None:
-            return
-        file_section = data_div._sections.get("FILE")
-        if file_section is None:
-            return
-        for item in file_section.data_items:
-            fd_file = item.get_metadata("fd_file_name")
-            if fd_file and item.name:
-                self._record_to_file[item.name.upper()] = fd_file.upper()
+        self._record_to_file = record_to_file_map(ast)
 
     # ------------------------------------------------------------------
     # OPEN mode tracking
@@ -378,12 +372,13 @@ class CRUDMatrixGenerator:
     def _resolve_file_name(
         self, file_name: str | None, record_name: str | None
     ) -> str | None:
-        """Return an upper-cased file name, falling back to record-to-file mapping."""
-        if file_name:
-            return file_name.upper()
-        if record_name:
-            return self._record_to_file.get(record_name.upper())
-        return None
+        """Return an upper-cased file name, falling back to record-to-file
+        mapping. Shared resolution logic (``_files.resolve_file_name``),
+        upper-cased here since ``self._file_entries`` is keyed by upper-case
+        name -- ``io_logger``'s own use of the same helper keeps the file
+        name as written for its human-readable report instead."""
+        fn = resolve_file_name(file_name, record_name, self._record_to_file)
+        return fn.upper() if fn else None
 
     def _mark_file_crud(self, statements: list) -> None:
         """Mark C/R/U/D for COBOL file operations."""

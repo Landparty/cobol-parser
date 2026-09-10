@@ -24,6 +24,7 @@ from cobolparser.analysis.move_type_checker import (
     MoveViolationKind,
     _classify_literal,
     _classify_picture,
+    _is_non_integer_picture,
 )
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import CobolDataItem, PictureClause
@@ -58,6 +59,29 @@ class TestClassifyPicture:
 
     def test_a_n_alphabetic(self):
         assert _classify_picture(_pic("A(20)")) == DataCategory.ALPHABETIC
+
+
+class TestIsNonIntegerPicture:
+    """`_is_non_integer_picture` now reads only the canonical
+    `PictureClause.decimal_digits` -- the single source
+    `models.data_items.PictureClause._parse_scaled_pattern` already
+    populates for both an ordinary `V`-decimal and a leading-`P`-scaled
+    fraction -- rather than also re-deriving the leading-`P` case from the
+    raw pattern string."""
+
+    def test_ordinary_integer_is_not_flagged(self):
+        assert _is_non_integer_picture(_pic("9(5)")) is False
+
+    def test_v_decimal_is_flagged(self):
+        assert _is_non_integer_picture(_pic("9(5)V99")) is True
+
+    def test_leading_p_scaled_fraction_is_flagged(self):
+        assert _is_non_integer_picture(_pic("SVPP9(3)")) is True
+
+    def test_trailing_p_scaled_value_is_a_scaled_integer_not_flagged(self):
+        # `9(3)PPP` is an integer whose low 3 digits are always zero
+        # (123000), not a fraction -- decimal_digits == 0.
+        assert _is_non_integer_picture(_pic("9(3)PPP")) is False
 
     def test_nine_numeric(self):
         assert _classify_picture(_pic("9")) == DataCategory.NUMERIC

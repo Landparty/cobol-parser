@@ -361,8 +361,32 @@ FieldSpec:         .name .path .column .level .picture .usage .category
                    .value_clause .condition_values .subscripts .redefines
                    .sign_clause .synchronized .occurs_depending_on
                    .odo_controls .odo_counter_bounds
-                   .qualified_name .storage_size .to_dict()
+                   .total_digits .scaling_leading (2026-09-10; read straight
+                       off the item's own PictureClause at construction --
+                       see below)
+                   .qualified_name .storage_size .scaling_positions
+                   .stored_digits .to_dict()
 OdoControl:        .depending_on .subscript_index .min_times .max_times
+```
+
+**P-scaling: one canonical parse, not a second regex over the raw picture
+string (2026-09-10).** `FieldSpec.scaling_positions` (signed `P` count:
+positive trailing, negative leading, zero otherwise) and `.stored_digits`
+(digit positions actually stored, `P`s excluded) used to come from a
+module-level `scaling_positions(picture: str)` function that re-parsed the
+raw picture text with its own regex — a second implementation of exactly
+what `models.data_items.PictureClause._parse_scaled_pattern` already
+decides while building the AST. `flatten_record`'s `_flatten_into` now
+copies `picture.total_digits`/`picture.scaling_leading` straight onto the
+`FieldSpec` at construction time (the same `picture.total_digits`
+`generators/data/layout_offsets.py`, the `data-items` CLI, already reads
+directly), and the two properties compute from those instead of re-deriving
+anything. See [ast-models.md](ast-models.md)'s `scaling_leading` note and
+[analysis.md](analysis.md)'s MoveTypeChecker section (`_is_non_integer_picture`
+was the third independent P-scaling check; now reads `decimal_digits`
+alone).
+
+```python
 VaryingLength:     .minimum .maximum .depending_on
                    .from_fd_clauses(clauses, *, record_size)
                    .build(minimum, maximum, depending_on, record_size)

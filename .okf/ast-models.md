@@ -146,6 +146,16 @@ Serialization fidelity notes (2026-07-07):
   stored `9`s (3 bytes) while `integer_digits`/`decimal_digits` include the
   `P` positions (6/0 and 0/5). Floating-insertion strings (`$$$,$$9`,
   `$Z,ZZ9`) count their leftmost symbol as the sign/currency, not a digit.
+  `scaling_leading: bool | None` (2026-09-10) records the P run's direction
+  -- `True` for `PPP9(3)` (leading, a fraction), `False` for `9(3)PPP`
+  (trailing, a scaled integer), `None` when not P-scaled at all -- the one
+  place this is decided; `generators/data/layout.py`'s
+  `FieldSpec.scaling_positions`/`stored_digits` read it (and `total_digits`)
+  directly instead of re-deriving the P run from the raw picture string, and
+  `analysis/move_type_checker.py`'s `_is_non_integer_picture` reads
+  `decimal_digits` alone rather than a second heuristic. See
+  [generators.md](generators.md)'s P-scaling note and [analysis.md](analysis.md)'s
+  MoveTypeChecker section.
 * `ArithmeticStatement.givings: list[str]` (2026-07-24) — full ordered
   list of comma/space-separated `GIVING` result targets (`ADD A TO B
   GIVING C, D`); `.giving` keeps the first for backward compatibility,
@@ -312,7 +322,12 @@ audit" section). Also from that audit: `ExecCicsStatement` /
 still `"EXEC_CICS"` / `"EXEC_IMS"`, `to_dict()` shape unchanged) so
 `CobolProgram.get_all_statements()` returns them; `SetStatement.groups`
 (additional `targets TO/UP/DOWN value` groups of a multi-group SET, also
-serialized as `"groups"`); `IOOpenStatement.no_rewind` / `.with_lock` /
+serialized as `"groups"`; each group dict's `"value_is_entry"` key
+(2026-09-10, additive) mirrors the top-level statement's own
+`value_is_entry` metadata for that group specifically -- a later group's
+own `SET p TO ENTRY 'X'` used to leak into a following group's flag since
+`SetStatementParser._entry_form` was reset only before the first group's
+`_parse_action` call); `IOOpenStatement.no_rewind` / `.with_lock` /
 `.reversed_mode` (`"no_rewind"` / `"with_lock"` / `"reversed"`);
 `IOAcceptStatement.on_exception` / `.not_on_exception` (serialized only when
 present). `ReceiveStatement`'s `no_data_clause` / `with_data_clause` and

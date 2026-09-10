@@ -92,6 +92,11 @@ class SetStatementParser(IStatementParser):
             if ended:
                 stmt.add_group(group_targets, None, None, False)
                 return stmt
+            # Reset before each group's own _parse_action call, same as
+            # before the first group above -- otherwise an earlier group's
+            # `TO ENTRY 'X'` would leave this flag set for every later group
+            # in the same SET statement, even one that never mentions ENTRY.
+            self._entry_form = False
             group_action = self._parse_action(token_stream)
             if not group_targets and group_action is None:
                 break
@@ -99,7 +104,13 @@ class SetStatementParser(IStatementParser):
                 stmt.add_group(group_targets, None, None, False)
             else:
                 set_type, value, is_address_of = group_action
-                stmt.add_group(group_targets, set_type, value, is_address_of)
+                stmt.add_group(
+                    group_targets,
+                    set_type,
+                    value,
+                    is_address_of,
+                    is_entry=self._entry_form,
+                )
 
         skip_whitespace(token_stream)
         # Consume period

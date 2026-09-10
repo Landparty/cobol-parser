@@ -17,15 +17,16 @@ built for the same program (Phase 1).
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.sql_statements import ExecSQLStatement, FetchStatement
 from ..models.statements.base import (
+    ArithmeticExpression,
     CobolExpression,
     ConditionalExpression,
+    FunctionCall,
     LogicalExpression,
 )
 from ..models.statements.call import CallStatement
@@ -48,6 +49,7 @@ from ..models.statements.io import (
     IOWriteStatement,
 )
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement, ExecImsStatement
+from ._names import RELAXED_IDENTIFIER_TOKEN_RE
 from .value_tracker import DynamicCallAnalyzer
 
 if TYPE_CHECKING:
@@ -161,18 +163,36 @@ def _condition_field_names(expr: CobolExpression | None) -> list[str]:
     looks these up against a name map, so a stray literal simply never
     matches anything real). Shared with ``constraints.py``, which imports it
     from here (the dependency runs constraints -> boundary_inventory, never
-    the other way round)."""
+    the other way round).
+
+    Walks every expression shape the parser can nest an operand under --
+    ``ConditionalExpression``/``ArithmeticExpression`` (``left_operand``/
+    ``right_operand``, either a bare string or another expression) and
+    ``FunctionCall`` (``arguments``) -- not just the top-level comparison, so
+    a name buried in ``A + B = C`` or ``FUNCTION UPPER-CASE(WS-X)`` is not
+    silently invisible to the read scan below.
+    """
     if expr is None:
         return []
     if isinstance(expr, LogicalExpression):
         return _condition_field_names(expr.left_condition) + _condition_field_names(
             expr.right_condition
         )
-    if isinstance(expr, ConditionalExpression):
+    if isinstance(expr, (ConditionalExpression, ArithmeticExpression)):
         names = []
         for operand in (expr.left_operand, expr.right_operand):
             if isinstance(operand, str) and operand.strip():
                 names.append(operand.strip())
+            elif isinstance(operand, CobolExpression):
+                names.extend(_condition_field_names(operand))
+        return names
+    if isinstance(expr, FunctionCall):
+        names = []
+        for argument in expr.arguments:
+            if isinstance(argument, str) and argument.strip():
+                names.append(argument.strip())
+            elif isinstance(argument, CobolExpression):
+                names.extend(_condition_field_names(argument))
         return names
     return []
 
@@ -190,9 +210,12 @@ def _condition_read_names(statement: Any) -> list[str]:
         until = statement.until_condition
         names.extend(_condition_field_names(getattr(until, "condition_tree", None)))
     elif isinstance(statement, EvaluateStatement):
-        names.extend(
-            subject for subject in statement.subjects if isinstance(subject, str)
-        )
+        for subject in statement.subjects:
+            if isinstance(subject, str):
+                if subject.strip():
+                    names.append(subject.strip())
+            elif isinstance(subject, CobolExpression):
+                names.extend(_condition_field_names(subject))
         for clause in statement.when_clauses:
             for selector in clause.selectors:
                 if not isinstance(selector, dict):
@@ -203,14 +226,11 @@ def _condition_read_names(statement: Any) -> list[str]:
                         names.append(value.strip())
                 text = selector.get("text")
                 if isinstance(text, str):
-                    names.extend(_RELATIONAL_TEXT_OPERAND_RE.findall(text))
+                    # Over-approximates (a literal word is included too),
+                    # harmless since every name is looked up against the
+                    # layout index.
+                    names.extend(RELAXED_IDENTIFIER_TOKEN_RE.findall(text))
     return names
-
-
-#: Word-shaped tokens of a raw ``EVALUATE TRUE`` selector text ("WS-G = B"),
-#: for the read scan above: over-approximates (a literal word is included
-#: too), harmless since every name is looked up against the layout index.
-_RELATIONAL_TEXT_OPERAND_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
 
 
 _WRITE_SHAPED_ATTRS = ("targets", "givings", "target", "into_target", "into_targets")

@@ -218,6 +218,18 @@ class FieldSpec:
     occurs_depending_on: str | None = None
     odo_controls: tuple[OdoControl, ...] = ()
     odo_counter_bounds: tuple[int, int] | None = None
+    # The canonical P-scaling facts, read directly off the item's own
+    # `PictureClause` at construction time (see `_flatten_into`) rather than
+    # re-derived from the raw picture string: `total_digits` is `None` for a
+    # picture with no PICTURE clause at all standing in for "not this item's
+    # concern", `scaling_leading` is `None` when the picture is not P-scaled.
+    # `scaling_positions`/`stored_digits` below are computed from these, so
+    # there is exactly one place a P run is ever counted --
+    # `models.data_items.PictureClause._parse_scaled_pattern` -- matching
+    # what `generators/data/layout_offsets.py` (the `data-items` CLI) already
+    # does with the same `picture.total_digits`.
+    total_digits: int | None = None
+    scaling_leading: bool | None = None
 
     @property
     def scaling_positions(self) -> int:
@@ -230,14 +242,17 @@ class FieldSpec:
         :attr:`integer_digits`/:attr:`decimal_digits` -- which describe the
         *value* -- include them.
         """
-        return scaling_positions(self.picture)
+        if self.scaling_leading is None or self.total_digits is None:
+            return 0
+        count = max(0, self.integer_digits + self.decimal_digits - self.total_digits)
+        return -count if self.scaling_leading else count
 
     @property
     def stored_digits(self) -> int:
         """Digit positions the field actually stores: every ``9``, no ``P``."""
-        return max(
-            0, self.integer_digits + self.decimal_digits - abs(self.scaling_positions)
-        )
+        if self.total_digits is not None:
+            return max(0, self.total_digits)
+        return max(0, self.integer_digits + self.decimal_digits)
 
     @property
     def storage_size(self) -> int:
@@ -367,35 +382,6 @@ def _condition_values(item: CobolDataItem) -> list[str]:
         values.extend(expand_condition_values(child.values))
     # Preserve first-seen order while removing duplicates.
     return list(dict.fromkeys(v for v in values if v != ""))
-
-
-_PIC_REPEAT_EXPAND_RE = re.compile(r"([^()])\((\d+)\)")
-
-
-def scaling_positions(picture: str | None) -> int:
-    """Signed ``P`` count of *picture*: ``+n`` trailing, ``-n`` leading, else 0.
-
-    See :attr:`FieldSpec.scaling_positions`.  Only the plain scaled shapes
-    the :class:`~...models.data_items.PictureClause` parser recognises
-    (``S``/``V``/``P``/``9`` with one contiguous ``P`` run at one end) count;
-    anything else reports zero, so an edited picture is never misread.
-    """
-    if not picture:
-        return 0
-    expanded = _PIC_REPEAT_EXPAND_RE.sub(
-        lambda m: m.group(1) * int(m.group(2)), picture.upper()
-    )
-    core = [ch for ch in expanded if ch not in ("S", "V")]
-    if not core or any(ch not in ("9", "P") for ch in core):
-        return 0
-    count = core.count("P")
-    if count == 0 or count == len(core):
-        return 0
-    if core[0] == "P" and all(ch == "P" for ch in core[:count]):
-        return -count
-    if core[-1] == "P" and all(ch == "P" for ch in core[-count:]):
-        return count
-    return 0
 
 
 def _strip_literal_quotes(value: str) -> str:
@@ -606,6 +592,8 @@ def _flatten_into(
                 size=size,
                 integer_digits=integer_digits,
                 decimal_digits=decimal_digits,
+                total_digits=picture.total_digits if picture else None,
+                scaling_leading=picture.scaling_leading if picture else None,
                 is_signed=_is_signed(picture),
                 value_clause=item.value_clause,
                 condition_values=_condition_values(item),

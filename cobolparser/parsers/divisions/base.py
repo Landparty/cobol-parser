@@ -209,6 +209,7 @@ class BaseDivisionParser(IDivisionParser, ABC):
                 )
             token_stream.consume()
             using_parameters: list[str] = []
+            using_parameter_modes: dict[str, str] = {}
         else:
 
             # Parse (rather than blindly discard) optional header clauses
@@ -221,6 +222,15 @@ class BaseDivisionParser(IDivisionParser, ABC):
             # deliberately excluded. All remaining tokens up to (and
             # including) the period terminate the header either way.
             using_parameters = []
+            # Passing mode (BY REFERENCE / BY VALUE) declared for each USING
+            # parameter, keyed upper-case -- REFERENCE is COBOL's own
+            # default and applies to every parameter up to the first BY
+            # VALUE/REFERENCE keyword, and to every parameter after it until
+            # the mode switches again. `LinkageChecker` reads this to check
+            # a CALL's own BY VALUE/BY REFERENCE against what this program's
+            # PROCEDURE DIVISION USING actually declares.
+            using_parameter_modes = {}
+            current_mode = "REFERENCE"
             skip_next_identifier = False  # set right after consuming GIVING
             while not token_stream.is_empty():
                 tok = token_stream.peek(0)
@@ -232,17 +242,25 @@ class BaseDivisionParser(IDivisionParser, ABC):
                 val_upper = (tok.value or "").upper()
                 if val_upper == "GIVING":
                     skip_next_identifier = True
+                elif val_upper == "VALUE":
+                    current_mode = "VALUE"
+                elif val_upper == "REFERENCE":
+                    current_mode = "REFERENCE"
                 elif (
                     tok.type == TokenType.IDENTIFIER
                     and tok.value
                     # REFERENCE/CONTENT/CHAINING have no dedicated TokenType
                     # (unlike BY/VALUE/OPTIONAL, which do and so never reach
                     # this branch) and would otherwise be misread as
-                    # data-names.
+                    # data-names. REFERENCE is handled above (it also sets
+                    # the mode); CONTENT/CHAINING are not valid on a
+                    # PROCEDURE DIVISION USING parameter but are excluded
+                    # here for the same reason they always have been.
                     and val_upper not in ("USING", "REFERENCE", "CONTENT", "CHAINING")
                 ):
                     if not skip_next_identifier:
                         using_parameters.append(tok.value)
+                        using_parameter_modes[tok.value.upper()] = current_mode
                     skip_next_identifier = False
                 token_stream.consume()
 
@@ -255,6 +273,7 @@ class BaseDivisionParser(IDivisionParser, ABC):
         )
         if self.division_name == "PROCEDURE" and using_parameters:
             ast_node.set_metadata("using_parameters", using_parameters)
+            ast_node.set_metadata("using_parameter_modes", using_parameter_modes)
 
         return ast_node
 

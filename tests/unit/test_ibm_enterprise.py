@@ -797,19 +797,25 @@ class TestIBMEnterpriseCobol:
         """Test getting signature for existing intrinsic functions."""
         dialect = IBMEnterpriseCobol()
 
-        # Test CURRENT-DATE function
+        # Test CURRENT-DATE function -- description now comes from the
+        # le_signatures catalogue's own summary (no more hand-written
+        # override table); "length" is still added on top since the
+        # catalogue has no structured field for it.
         sig = dialect.get_intrinsic_function_signature("CURRENT-DATE")
         assert sig is not None
         assert sig["return_type"] == "alphanumeric"
         assert sig["length"] == 21
         assert sig["parameters"] == []
-        assert "Returns current date and time" in sig["description"]
+        assert "current date" in sig["description"].lower()
 
-        # Test LENGTH function
+        # Test LENGTH function -- return_type/parameters come straight from
+        # the le_signatures catalogue now (no more hand-written override
+        # table): LENGTH returns an integer count and accepts any argument
+        # category, not just alphanumeric.
         sig = dialect.get_intrinsic_function_signature("LENGTH")
         assert sig is not None
-        assert sig["return_type"] == "numeric"
-        assert sig["parameters"] == ["string"]
+        assert sig["return_type"] == "integer"
+        assert sig["parameters"] == ["any"]
 
         # Test case insensitive
         sig = dialect.get_intrinsic_function_signature("current-date")

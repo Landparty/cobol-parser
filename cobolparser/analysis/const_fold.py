@@ -97,9 +97,6 @@ _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 _QUOTED_LITERAL_RE = re.compile(r'^(["\'])(.*)\1$', re.DOTALL)
 #: A subscript or reference-modification suffix: ``WS-T ( 1 )``, ``WS-B(1:1)``.
 _SUFFIX_RE = re.compile(r"\s*\(.*$", re.DOTALL)
-#: ``A OF B`` / ``A IN B`` qualification, as ``ProgramLayoutIndex.resolve``
-#: reads it.
-_OF_IN_RE = re.compile(r"\s+(?:OF|IN)\s+", re.IGNORECASE)
 
 _TEXT_CATEGORIES = frozenset(
     {FieldCategory.ALPHANUMERIC, FieldCategory.ALPHABETIC, FieldCategory.NATIONAL}
@@ -266,7 +263,20 @@ def _link_redefines(
 ) -> None:
     """Union every leaf under a REDEFINES slot (``[base, redefiner, ...]``,
     chains included) into one alias class: a write to any of them may
-    change the bytes every other one reads."""
+    change the bytes every other one reads.
+
+    Deliberately not built on ``layout_offsets._walk_redefines_chain``,
+    despite both starting from the same ``item.redefines`` pointers: that
+    function walks *one* item's own chain outward (for reporting its
+    ``redefines_chain``, ordered, one-directional) and has no way to answer
+    "which other siblings also redefine the same base" -- exactly what a
+    write-invalidation alias class needs when more than one sibling
+    redefines the same base item (``C REDEFINES B``, ``D REDEFINES B``: C
+    and D share B's bytes with each other, not just with B, which a
+    per-item chain walk never surfaces). The union-find below groups
+    transitively-linked siblings into one set regardless of how many
+    redefine the same base; a chain walk answers a different question and
+    was checked before writing this rather than assumed different."""
     if len(siblings) < 2:
         return
     first_by_name: dict[str, int] = {}
@@ -311,25 +321,20 @@ def _group_paths(index: ProgramLayoutIndex, name: str) -> list[str]:
     B``, or dotted ``B.A``. Every match is returned: when a bare name is
     declared in more than one record the walk poisons all of them rather
     than guess which one the program meant."""
-    text = (name or "").strip()
-    if not text:
+    # Local import: same circular-import guard as the TYPE_CHECKING-only
+    # `ProgramLayoutIndex` import above -- a top-level import of
+    # program_layout here would be circular (cobolparser.generators
+    # constructs ConstantFolder).
+    from ..generators.data.program_layout import split_qualified_name
+
+    split = split_qualified_name(name)
+    if split is None:
         return []
-    if _OF_IN_RE.search(text):
-        parts = [p.strip() for p in _OF_IN_RE.split(text) if p.strip()]
-        if not parts:
-            return []
-        base, qualifiers = parts[0], parts[1:]
-    elif "." in text:
-        parts = [p.strip() for p in text.split(".") if p.strip()]
-        if not parts:
-            return []
-        base, qualifiers = parts[-1], parts[:-1]
-    else:
-        base, qualifiers = text, []
-    candidates = _facts(index).groups.get(base.upper(), [])
+    base, qualifiers = split
+    candidates = _facts(index).groups.get(base, [])
     if not qualifiers:
         return list(candidates)
-    wanted = {q.upper() for q in qualifiers}
+    wanted = set(qualifiers)
     return [
         qpath
         for qpath in candidates
@@ -666,11 +671,11 @@ def _fold_read(
     first = bool(file_name) and file_name not in state.read_files
     if file_name:
         state.read_files.add(file_name)
-    paths = _file_record_paths(index, stmt.file_name)
-    if stmt.into_target:
-        paths.extend(_target_paths(stmt.into_target, index))
-    for qpath in paths:
+    for qpath in _file_record_paths(index, stmt.file_name):
         _reset_under(qpath, index, state, restore=first)
+    if stmt.into_target:
+        for qpath, exact in _target_paths(stmt.into_target, index):
+            _reset_under(qpath, index, state, restore=first and exact)
 
 
 def _fold_accept(
@@ -685,21 +690,33 @@ def _fold_accept(
     first = bool(key) and key not in state.accepted
     if key:
         state.accepted.add(key)
-    for qpath in _target_paths(stmt.target, index):
-        _reset_under(qpath, index, state, restore=first)
+    for qpath, exact in _target_paths(stmt.target, index):
+        _reset_under(qpath, index, state, restore=first and exact)
 
 
-def _target_paths(name: str, index: ProgramLayoutIndex) -> list[str]:
-    """Qualified path(s) a write target denotes: the leaf it resolves to,
-    else the group/record item(s) of that name. A subscripted or
-    reference-modified target denotes its base item as a whole."""
-    base, _ = _base_name(name)
+def _target_paths(name: str, index: ProgramLayoutIndex) -> list[tuple[str, bool]]:
+    """Qualified path(s) a write target denotes, paired with whether *name*
+    names each one exactly (``True``) or only through a subscript /
+    reference-modification suffix (``False``).
+
+    A plain name resolves to the leaf (or the group/record item(s) of that
+    name) exactly. A subscripted or reference-modified name (``WS-T(1)``,
+    ``WS-B(1:1)``) denotes only *part* of its base item -- this walk does
+    not model position by position (see ``_base_name``) -- so a caller must
+    never restore it to a known value on the strength of this call alone,
+    only poison it; that is exactly how ``_apply_move_target``/
+    ``_write_numeric`` already treat ``has_suffix`` elsewhere in this
+    module. Before this, a first READ/ACCEPT into a subscripted target
+    restored the *entire* base item to its seed value even though only the
+    subscripted slice was actually written.
+    """
+    base, has_suffix = _base_name(name)
     if not base or not base.strip(" ."):
         return []
     resolved = _safe_resolve(index, base)
     if resolved is not None:
-        return [resolved.spec.qualified_name]
-    return _group_paths(index, base)
+        return [(resolved.spec.qualified_name, not has_suffix)]
+    return [(qpath, not has_suffix) for qpath in _group_paths(index, base)]
 
 
 def _reset_under(

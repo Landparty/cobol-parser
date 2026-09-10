@@ -10,9 +10,16 @@ and a cross-check against IOLogger's independent file-operations walk.
 from __future__ import annotations
 
 from cobolparser import parse_cobol
-from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+from cobolparser.analysis.boundary_inventory import (
+    BoundaryInventoryAnalyzer,
+    _condition_field_names,
+    _condition_read_names,
+)
 from cobolparser.analysis.io_logger import IOLogger
 from cobolparser.generators import ProgramLayoutIndex
+from cobolparser.models.ast_base import SourceLocation
+from cobolparser.models.statements.base import ArithmeticExpression, FunctionCall
+from cobolparser.models.statements.control import EvaluateStatement
 
 
 def _analyze(source: str, filename: str = "t.cbl"):
@@ -434,3 +441,48 @@ class TestLayoutIndexUnresolvedPropagation:
 
         report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
         assert report.unresolved == index.unresolved
+
+
+class TestConditionFieldNamesExpressionTrees:
+    """`_condition_field_names`/`_condition_read_names` against hand-built
+    AST nodes exercising the ``str | CobolExpression`` shapes
+    ``EvaluateStatement.subjects``/``ConditionalExpression`` operands are
+    typed for. The current parser only ever produces bare strings for these
+    (arithmetic sub-expressions are flattened to text before they reach the
+    condition tree), so this is regression coverage for the documented type
+    contract itself -- a future parser change that starts building real
+    nested expressions must not silently go unread by the CALL
+    argument-direction ladder the way a plain string subject already is.
+    """
+
+    def test_evaluate_subject_that_is_an_expression_is_still_read(self):
+        loc = SourceLocation(line=1, column=1)
+        arithmetic = ArithmeticExpression("+", loc)
+        arithmetic.set_left_operand("WS-RC")
+        arithmetic.set_right_operand("0")
+
+        stmt = EvaluateStatement(loc)
+        stmt.add_subject(arithmetic)
+
+        assert _condition_read_names(stmt) == ["WS-RC", "0"]
+
+    def test_function_call_arguments_are_read(self):
+        loc = SourceLocation(line=1, column=1)
+        call = FunctionCall("UPPER-CASE", loc)
+        call.add_argument("WS-NAME")
+
+        assert _condition_field_names(call) == ["WS-NAME"]
+
+    def test_nested_arithmetic_operand_inside_a_comparison_is_read(self):
+        from cobolparser.models.statements.base import ConditionalExpression
+
+        loc = SourceLocation(line=1, column=1)
+        arithmetic = ArithmeticExpression("+", loc)
+        arithmetic.set_left_operand("WS-A")
+        arithmetic.set_right_operand("WS-B")
+
+        comparison = ConditionalExpression("EQUAL", loc)
+        comparison.set_left_operand(arithmetic)
+        comparison.set_right_operand("WS-C")
+
+        assert _condition_field_names(comparison) == ["WS-A", "WS-B", "WS-C"]
