@@ -196,12 +196,18 @@ _FLOATING_POINT_USAGES = frozenset({"COMP-1", "COMP-2"})
 
 def _is_non_integer_picture(pic: PictureClause) -> bool:
     """True for a numeric PICTURE describing a non-integer value: digits
-    after an assumed decimal point (``9(5)V99``) or a decimal-scaling ``P``
-    to the left of every digit (``PPP9``, value .000n)."""
-    if (pic.decimal_digits or 0) > 0:
-        return True
-    pattern = (pic.pattern or "").upper().replace("S", "")
-    return pattern.startswith("P")
+    after an assumed decimal point (``9(5)V99``) or a leading decimal-scaling
+    ``P`` run (``PPP9``, value .000n).
+
+    ``decimal_digits`` alone is the single canonical source for this: a
+    leading-``P`` picture already reports ``decimal_digits = P-count +
+    9-count`` from ``PictureClause._parse_scaled_pattern`` (a trailing-``P``
+    picture like ``9(3)PPP`` is a *scaled integer* -- ``decimal_digits == 0``
+    -- and correctly excluded). This used to also re-derive the leading-P
+    case from the raw pattern string independently; that duplicate check was
+    redundant with (and could disagree with) the canonical parse.
+    """
+    return (pic.decimal_digits or 0) > 0
 
 
 def _is_floating_point_usage(usage: str | None) -> bool:

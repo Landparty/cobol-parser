@@ -248,6 +248,24 @@ scenarios and a lower `targeted` count than it did before. That is the
 corrected number, not a regression — the previous count included arms nothing
 reached.
 
+**No bump for the `PIC N`/`PIC G` byte-width fix, and why.** `PIC N(n)`/`PIC
+G(n)` items now size at 2 bytes per character instead of 1 — correct for IBM
+Enterprise COBOL's national/DBCS storage, where each `N`/`G` position is one
+double-byte character (`models/data_items.py`'s `PictureClause._parse_pattern`).
+No key was removed, retyped, or given a new meaning: `FieldSpec`/`layout`'s
+`"length"`/`"byte_offset"`-shaped keys are still `int` byte counts with the
+same meaning as before. What changed is the *value* those keys carry for a
+record containing such an item — the same shape of change the 2026-09-07 note
+above describes, so the same reasoning applies and the gate correctly does not
+fire.
+
+What a consumer *will* notice: a program with a `PIC N`/`PIC G` field now
+generates (`gen-data`), reports (`data-items`), and lays out
+(`FixtureBundle.layout`) that field at twice its previous byte width, and
+every field after it in the same record shifts to a correspondingly higher
+byte offset. That is the corrected width, not a regression — the previous
+width silently treated a double-byte national character as single-byte.
+
 **Versioning contract this surface must honor:** any change to
 `generate_with_scenarios_from_file`'s signature, a key removed or
 retyped from `FixtureBundle`/`Scenario`/`BoundaryFixture`/`Expectation`, or

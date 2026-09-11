@@ -126,13 +126,13 @@ class DeadCodeAnalyzer:
         self._ordered_procedures: list[str] = []
         # Maps section name -> list of paragraph names within that section
         self._section_paragraphs: dict[str, list[str]] = {}
-        # Maps paragraph name -> parent section name (if any). Only the
-        # first same-named paragraph is registered as a procedure, but every
-        # section holding one is recorded in ``_paragraph_sections`` so a
-        # bare ``PERFORM 100-DO`` (or a qualified ``PERFORM 100-DO OF
-        # SEC-A``, whose qualifier the parser keeps only as metadata) keeps
-        # each of those sections alive rather than just the last one seen.
-        self._paragraph_section: dict[str, str] = {}
+        # Maps paragraph name -> every parent section name it appears under
+        # (a name may repeat across sections). Only the first same-named
+        # paragraph is registered as a procedure, but every section holding
+        # one is recorded here so a bare ``PERFORM 100-DO`` (or a qualified
+        # ``PERFORM 100-DO OF SEC-A``, whose qualifier the parser keeps only
+        # as metadata) keeps each of those sections alive rather than just
+        # the last one seen.
         self._paragraph_sections: dict[str, set[str]] = {}
         # Closing paragraphs of every PERFORM/SORT/MERGE ... THRU range. A
         # GO TO landing on one of these (the ``GO TO 1000-EXIT`` idiom
@@ -163,7 +163,6 @@ class DeadCodeAnalyzer:
         self._referenced_names = set()
         self._ordered_procedures = []
         self._section_paragraphs = {}
-        self._paragraph_section = {}
         self._paragraph_sections = {}
         self._range_ends = set()
         self._paragraph_nodes = {}
@@ -246,7 +245,6 @@ class DeadCodeAnalyzer:
                         if name:
                             sec_upper = name.upper()
                             self._section_paragraphs[sec_upper].append(upper_pname)
-                            self._paragraph_section[upper_pname] = sec_upper
                             self._paragraph_sections.setdefault(upper_pname, set()).add(
                                 sec_upper
                             )
@@ -329,7 +327,20 @@ class DeadCodeAnalyzer:
                 self._collect_entry_refs(stmt)
 
     def _collect_range_end(self, stmt: Any) -> None:
-        """Record the closing paragraph of a PERFORM/SORT/MERGE THRU range."""
+        """Record the closing paragraph of a PERFORM/SORT/MERGE THRU range.
+
+        Not built on ``program_flow.edges.EdgeCollector.range_members``/
+        ``thru_target`` (checked before writing this rather than assumed
+        different): this analyzer only ever needs a set membership test
+        ("is paragraph X some range's end"), a three-attribute read
+        (``thru_paragraph``/``input_procedure_thru``/``output_procedure_
+        thru``) already this cheap. Building the full CFG `EdgeCollector`
+        constructs (node classification, cycle detection, every edge of
+        every kind) to answer that one question would be a much heavier
+        dependency for the same result -- unlike ``recursion_risk.py``,
+        which genuinely needs the CFG's cycle data and correctly reuses
+        ``ProgramFlowAnalyzer`` for it.
+        """
         ends: list[str | None] = []
         if isinstance(stmt, PerformStatement):
             ends.append(stmt.thru_paragraph)

@@ -851,6 +851,46 @@ too (see commands above).
   carrying the copybook they are really in (this is what the VS Code
   extension consumes).
 
+# Cross-repo review follow-up fixes (2026-09-10)
+
+* `tests/unit/analysis/test_const_fold.py::TestObservationPoints` — two new
+  regression cases (`test_accept_into_reference_modified_target_...`,
+  `test_read_into_reference_modified_target_...`) pin that a subscripted/
+  reference-modified READ INTO/ACCEPT target is poisoned, not restored to
+  the whole base item's seed value.
+* `tests/unit/analysis/test_boundary_inventory.py::TestConditionFieldNamesExpressionTrees`
+  — hand-built `EvaluateStatement`/`ArithmeticExpression`/`FunctionCall`
+  nodes exercise `_condition_read_names`/`_condition_field_names` shapes the
+  real parser does not currently produce (an `EVALUATE` subject that is a
+  `CobolExpression`, a nested arithmetic operand inside a comparison) —
+  regression coverage for the documented type contract, not a reachable-bug
+  repro.
+* `tests/unit/generators/data/test_layout.py::TestFieldSpecScalingPositions`
+  and `tests/unit/analysis/test_move_type_checker.py::TestIsNonIntegerPicture`
+  — `FieldSpec.scaling_positions`/`.stored_digits` and
+  `_is_non_integer_picture` now reading `PictureClause`'s own
+  `total_digits`/`scaling_leading`/`decimal_digits` fields instead of each
+  re-deriving them from the raw picture string.
+* `tests/unit/analysis/test_lint.py::TestFlowReportReuse::test_linkage_check_collects_entry_interfaces_once_per_file`
+  — a 3-program-unit fixture confirms `LinkageChecker._collect_interfaces`
+  is called exactly 3 times for a whole-file `linkage-check` lint pass, not
+  9 (the O(units²) it used to be).
+* `tests/unit/analysis/test_linkage_checker.py::TestPassingModeMismatch` —
+  the new `PASSING_MODE_MISMATCH` violation: a CALL's BY VALUE/BY REFERENCE
+  (explicit or defaulted) checked against the callee's own declared
+  `PROCEDURE DIVISION USING` mode per position, never against an `ENTRY`
+  statement's USING (which carries no BY clause in COBOL) or a `BY CONTENT`
+  argument (no USING counterpart to compare against).
+* `tests/regression/test_review_2026_09_09_parser.py::TestFinding12CheapExtras`
+  — two new cases pin `SET`'s per-group `value_is_entry` flag: a later
+  group must not inherit an earlier group's `ENTRY` value, and must record
+  its own.
+* `tests/unit/test_ibm_enterprise.py::test_get_intrinsic_function_signature_existing`
+  — updated for `LENGTH`'s corrected `return_type`/`parameters` (`integer`/
+  `["any"]`, not the stale hand-written `numeric`/`["string"]`) now that the
+  override table only supplies `CURRENT-DATE`'s byte length, a fact the
+  `le_signatures` catalogue has no structured field for at all.
+
 # See Also
 
 * `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` — the

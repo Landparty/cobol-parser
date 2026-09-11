@@ -16,12 +16,23 @@ Detected issues:
   - CALL has more arguments than the matching ENTRY / PROCEDURE DIVISION USING
   - CALL has fewer arguments than declared (missing required args)
   - LINKAGE SECTION 01-items not referenced by any ENTRY or CALL
+  - CALL passes an argument BY VALUE/BY REFERENCE that disagrees with the
+    callee's own declared ``PROCEDURE DIVISION USING BY VALUE``/``BY
+    REFERENCE`` for that (positional) parameter
 
-Passing a LINKAGE item ``BY VALUE`` is deliberately *not* an issue: COBOL has
-no such rule. ``BY VALUE`` is what a caller must write when the callee
-declares ``PROCEDURE DIVISION USING BY VALUE``, and the item's own section is
+Passing a LINKAGE item ``BY VALUE`` is deliberately *not*, on its own, an
+issue: COBOL has no rule tying an item's own section to how it may be
+passed. ``BY VALUE`` is what a caller must write when the callee declares
+``PROCEDURE DIVISION USING BY VALUE``, and the item's own section is
 irrelevant to that (a former ``VALUE_TO_LINKAGE`` rule flagged exactly that
-legal call as an error).
+legal call as an error). What *is* checked instead is the callee's actual
+declared convention: ``PASSING_MODE_MISMATCH`` fires only when the CALL's
+own BY VALUE/BY REFERENCE (explicit or COBOL's own BY REFERENCE default)
+disagrees with what the callee's ``PROCEDURE DIVISION USING`` explicitly
+declares for that position, resolvable only for a static CALL to a program
+in this same source whose implicit entry interface was collected -- an
+ENTRY statement's own USING phrase carries no BY VALUE/REFERENCE in COBOL,
+so a CALL to one is never checked for this.
 """
 
 from __future__ import annotations
@@ -42,6 +53,7 @@ class LinkageViolationKind(Enum):
     TOO_FEW_ARGS = auto()  # CALL passes fewer args than declared
     UNREFERENCED_LINKAGE = auto()  # 01-item in LINKAGE not used by any ENTRY/CALL
     UNKNOWN_ENTRY = auto()  # CALL targets an entry not found in this program
+    PASSING_MODE_MISMATCH = auto()  # CALL's BY VALUE/REFERENCE disagrees with USING
 
 
 @dataclass
@@ -130,6 +142,12 @@ class LinkageChecker:
         # entry_name (upper) → list of parameter names from ENTRY USING /
         # PROCEDURE DIVISION USING, across every unit in scope
         self._entry_interfaces: dict[str, list[str]] = {}
+        # entry_name (upper) → {parameter name (upper): "VALUE" | "REFERENCE"},
+        # populated only for the implicit PROCEDURE DIVISION USING entry --
+        # an ENTRY statement's own USING phrase carries no BY VALUE/BY
+        # REFERENCE in COBOL, so it is never a key here, and a mismatch is
+        # never checked against it.
+        self._entry_parameter_modes: dict[str, dict[str, str]] = {}
         # 01-level linkage items of the unit being checked:
         # name (upper) → referenced?  (plus where each was declared)
         self._linkage_items: dict[str, bool] = {}
@@ -138,7 +156,12 @@ class LinkageChecker:
         self._violations: list[LinkageViolation] = []
 
     def check(
-        self, ast: CobolProgram, *, interface_scope: CobolProgram | None = None
+        self,
+        ast: CobolProgram,
+        *,
+        interface_scope: CobolProgram | None = None,
+        entry_interfaces: dict[str, list[str]] | None = None,
+        entry_parameter_modes: dict[str, dict[str, str]] | None = None,
     ) -> LinkageReport:
         """Analyze *ast* and return a LinkageReport.
 
@@ -148,20 +171,41 @@ class LinkageChecker:
                 interfaces CALLs in *ast* may target. Defaults to *ast*
                 itself; a caller checking one contained unit at a time
                 passes the outermost program so calls to sibling units
-                still resolve.
+                still resolve. Ignored when *entry_interfaces* is given.
+            entry_interfaces: A precomputed
+                :meth:`collect_entry_interfaces` result, when the caller
+                already has one for *interface_scope*. A caller checking
+                every unit of the same file in turn (``LintAnalyzer``) would
+                otherwise pay this scope-wide collection pass again on each
+                unit's own ``check()`` call -- O(units²) instead of O(units)
+                for a file with several ``PROGRAM-ID``s.
+            entry_parameter_modes: A precomputed
+                :meth:`collect_entry_parameter_modes` result, the passing-
+                mode counterpart of *entry_interfaces* shared the same way.
+                Omitting it while *entry_interfaces* is given simply means
+                no ``PASSING_MODE_MISMATCH`` is ever reported for this call.
 
         Returns:
             LinkageReport with all detected violations.
         """
-        self._entry_interfaces = {}
         self._linkage_items = {}
         self._linkage_locations = {}
         self._all_linkage_items = set()
         self._violations = []
 
-        scope = interface_scope if interface_scope is not None else ast
-        for unit in scope.program_units():
-            self._collect_interfaces(unit)
+        if entry_interfaces is not None:
+            self._entry_interfaces = {k: list(v) for k, v in entry_interfaces.items()}
+            self._entry_parameter_modes = (
+                {k: dict(v) for k, v in entry_parameter_modes.items()}
+                if entry_parameter_modes is not None
+                else {}
+            )
+        else:
+            self._entry_interfaces = {}
+            self._entry_parameter_modes = {}
+            scope = interface_scope if interface_scope is not None else ast
+            for unit in scope.program_units():
+                self._collect_interfaces(unit)
 
         units = ast.program_units() if self._include_contained_programs else [ast]
         for unit in units:
@@ -171,6 +215,48 @@ class LinkageChecker:
             violations=list(self._violations),
             entry_interfaces={k: list(v) for k, v in self._entry_interfaces.items()},
             linkage_items=sorted(self._all_linkage_items),
+        )
+
+    @staticmethod
+    def _collect_scope(scope: CobolProgram) -> LinkageChecker:
+        """One scope-wide interface-collection walk, as a throwaway
+        collector a caller reads either or both result dicts off of."""
+        collector = LinkageChecker()
+        for unit in scope.program_units():
+            collector._collect_interfaces(unit)
+        return collector
+
+    @staticmethod
+    def collect_entry_interfaces(scope: CobolProgram) -> dict[str, list[str]]:
+        """Every ENTRY / ``PROCEDURE DIVISION USING`` interface declared
+        anywhere in *scope*, keyed by entry name (upper) -- the scope-wide
+        half of :meth:`check`'s work, computable once and reused across
+        every unit of *scope* via ``check(..., entry_interfaces=...)``."""
+        collector = LinkageChecker._collect_scope(scope)
+        return {k: list(v) for k, v in collector._entry_interfaces.items()}
+
+    @staticmethod
+    def collect_entry_parameter_modes(scope: CobolProgram) -> dict[str, dict[str, str]]:
+        """The BY VALUE/BY REFERENCE passing mode declared for each
+        parameter of *scope*'s implicit ``PROCEDURE DIVISION USING``
+        entries, keyed the same way as :meth:`collect_entry_interfaces` --
+        its passing-mode counterpart, for sharing across a caller's own
+        per-unit ``check()`` calls the same way."""
+        collector = LinkageChecker._collect_scope(scope)
+        return {k: dict(v) for k, v in collector._entry_parameter_modes.items()}
+
+    @staticmethod
+    def collect_scope_interfaces(
+        scope: CobolProgram,
+    ) -> tuple[dict[str, list[str]], dict[str, dict[str, str]]]:
+        """``(collect_entry_interfaces(scope), collect_entry_parameter_modes
+        (scope))`` from a single scope walk -- what a caller needing both
+        (``LintAnalyzer``) should call instead of calling each separately
+        and walking every unit of *scope* twice."""
+        collector = LinkageChecker._collect_scope(scope)
+        return (
+            {k: list(v) for k, v in collector._entry_interfaces.items()},
+            {k: dict(v) for k, v in collector._entry_parameter_modes.items()},
         )
 
     # ------------------------------------------------------------------
@@ -189,6 +275,8 @@ class LinkageChecker:
                 self._entry_interfaces[prog_name] = [
                     p if isinstance(p, str) else str(p) for p in using_params
                 ]
+                using_modes = proc_div.get_metadata("using_parameter_modes") or {}
+                self._entry_parameter_modes[prog_name] = dict(using_modes)
         for node in self._own_nodes(unit):
             if isinstance(node, EntryStatement):
                 entry_name = (node.entry_name or "").upper().strip()
@@ -321,6 +409,42 @@ class LinkageChecker:
                     ),
                 )
             )
+
+        # BY VALUE/BY REFERENCE, position by position -- only ever checked
+        # against the implicit PROCEDURE DIVISION USING entry (the only kind
+        # `_entry_parameter_modes` has an entry for at all; an ENTRY
+        # statement's own USING carries no BY clause in COBOL).
+        modes = self._entry_parameter_modes.get(target)
+        if modes:
+            # strict=False: declared_params/call_params length mismatches
+            # are exactly TOO_MANY_ARGS/TOO_FEW_ARGS above, not a bug here --
+            # only the positions present on both sides are mode-checked.
+            for position, (declared_name, call_param) in enumerate(
+                zip(declared_params, call_params, strict=False), start=1
+            ):
+                declared_mode = modes.get(declared_name.upper())
+                if declared_mode is None:
+                    continue
+                call_mode = (call_param.passing_mode or "REFERENCE").upper()
+                if call_mode == "CONTENT":
+                    # BY CONTENT is its own passing convention -- a copy the
+                    # callee may modify without affecting the caller -- and
+                    # PROCEDURE DIVISION USING has no CONTENT form to
+                    # compare it against, so it is never flagged either way.
+                    continue
+                if call_mode != declared_mode:
+                    self._violations.append(
+                        LinkageViolation(
+                            kind=LinkageViolationKind.PASSING_MODE_MISMATCH,
+                            call_target=target,
+                            location=loc,
+                            message=(
+                                f"CALL '{target}' passes argument {position} "
+                                f"('{call_param.name}') BY {call_mode} but "
+                                f"the entry declares BY {declared_mode}"
+                            ),
+                        )
+                    )
 
     # ------------------------------------------------------------------
     # Unreferenced linkage check

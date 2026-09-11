@@ -17,6 +17,7 @@ Version 1.9.0. Author: Samuel Dion.
 ## Analysis & Generation
 
 * [Analysis](analysis.md) — 24 static-analysis modules plus the `program_flow/` package (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, `RecursionRiskAnalyzer`, `ComplexityAnalyzer`, `RedundancyAnalyzer`, `TechnicalDebtAnalyzer`, etc.)
+* [Dialects](dialects.md) — `IBMEnterpriseCobol`, EXEC SQL/CICS/IMS AST node types, intrinsic-function/LE-service lookups (`le_signatures.py` details live in `analysis.md`)
 * [Generators](generators.md) — flowcharts (Mermaid/DOT) and copybook → CSV synthetic test data
 * [Batch Parsing](batch.md) — `parse_files()` / `parse_files_with_copybooks()`, per-file fault isolation
 * [CLI](cli.md) — `cobol-parser` subcommands and flags

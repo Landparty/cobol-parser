@@ -475,6 +475,7 @@ class TestClauseLevelGaps:
                 "set_type": "TO",
                 "value": "OFF",
                 "value_is_address_of": False,
+                "value_is_entry": False,
             }
         ]
         assert stmt.operands == ["SW-1", "ON", "SW-2", "OFF"]

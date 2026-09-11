@@ -11,6 +11,22 @@ a qualified reference silently misses every lookup keyed by the bare name.
 
 from __future__ import annotations
 
+import re
+
+#: A COBOL identifier-shaped token: a letter, then letters/digits/hyphens.
+#: The canonical tokenizer for pulling identifier-shaped words out of a raw
+#: text blob that has no AST-level operand list of its own to walk (a
+#: paragraph's source text for clone-detection renaming, an unstructured
+#: EVALUATE selector). Shared so a future fix to what counts as an
+#: identifier token does not have to be made in more than one place.
+IDENTIFIER_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
+
+#: Same, but also matches a token that *starts* with a digit. Only where a
+#: stray non-identifier match is harmless -- the caller looks every match up
+#: against a name map, so a digit-led word (part of a numeric literal, say)
+#: simply never matches anything real.
+RELAXED_IDENTIFIER_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
+
 
 def base_data_name(ref: str) -> str:
     """Return the referenced data item's own name from a folded reference.

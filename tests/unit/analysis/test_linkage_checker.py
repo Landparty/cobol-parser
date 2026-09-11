@@ -532,6 +532,97 @@ class TestByContentMode:
         assert not report.has_violations
 
 
+def _two_unit_program(caller_using: str, callee_using: str) -> CobolProgram:
+    """OUTER CALLs INNER, each with its own PROCEDURE DIVISION USING
+    (the only kind of interface `PASSING_MODE_MISMATCH` is checked
+    against -- an ENTRY statement's USING carries no BY clause in COBOL).
+    """
+    source = f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTER.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01  LK-N              PIC S9(9) COMP.
+       PROCEDURE DIVISION USING LK-N.
+       0000-MAIN.
+           CALL 'INNER' {caller_using}.
+           GOBACK.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INNER.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01  IN-N              PIC S9(9) COMP.
+       PROCEDURE DIVISION {callee_using}.
+       0000-INNER.
+           DISPLAY IN-N.
+           GOBACK.
+       END PROGRAM INNER.
+       END PROGRAM OUTER.
+"""
+    result = parse_cobol(source, filename="t.cbl")
+    assert result.ast is not None, result.errors
+    return result.ast
+
+
+class TestPassingModeMismatch:
+    """A CALL's own BY VALUE/BY REFERENCE (explicit or COBOL's own BY
+    REFERENCE default) checked against the callee's declared PROCEDURE
+    DIVISION USING BY VALUE/BY REFERENCE for that position."""
+
+    def test_call_by_reference_default_against_declared_by_value_is_flagged(self):
+        ast = _two_unit_program(
+            caller_using="USING LK-N", callee_using="USING BY VALUE IN-N"
+        )
+        report = LinkageChecker().check(ast)
+        assert [v.kind for v in report.violations] == [
+            LinkageViolationKind.PASSING_MODE_MISMATCH
+        ]
+        assert "BY REFERENCE" in report.violations[0].message
+        assert "BY VALUE" in report.violations[0].message
+
+    def test_call_by_value_against_declared_by_reference_default_is_flagged(self):
+        ast = _two_unit_program(
+            caller_using="USING BY VALUE LK-N", callee_using="USING IN-N"
+        )
+        report = LinkageChecker().check(ast)
+        assert [v.kind for v in report.violations] == [
+            LinkageViolationKind.PASSING_MODE_MISMATCH
+        ]
+
+    def test_matching_by_value_on_both_sides_is_not_flagged(self):
+        ast = _two_unit_program(
+            caller_using="USING BY VALUE LK-N", callee_using="USING BY VALUE IN-N"
+        )
+        report = LinkageChecker().check(ast)
+        assert not report.has_violations
+
+    def test_matching_by_reference_on_both_sides_is_not_flagged(self):
+        ast = _two_unit_program(
+            caller_using="USING BY REFERENCE LK-N", callee_using="USING IN-N"
+        )
+        report = LinkageChecker().check(ast)
+        assert not report.has_violations
+
+    def test_by_content_is_never_flagged_either_way(self):
+        # BY CONTENT has no PROCEDURE DIVISION USING counterpart to compare
+        # against, so it is deliberately never checked for this.
+        ast = _two_unit_program(
+            caller_using="USING BY CONTENT LK-N", callee_using="USING BY VALUE IN-N"
+        )
+        report = LinkageChecker().check(ast)
+        assert not report.has_violations
+
+    def test_not_checked_against_an_entry_statement(self):
+        # ENTRY's own USING carries no BY clause in real COBOL, so a CALL
+        # to one is never checked for a passing-mode mismatch.
+        report = _check(
+            linkage_items=["PARM-A"],
+            entry_params={"MY-ENTRY": ["PARM-A"]},
+            calls=[("MY-ENTRY", [("PARM-A", "VALUE")])],
+        )
+        assert not report.has_violations
+
+
 class TestCaseInsensitiveMatching:
     """CALL targets and ENTRY names should be matched case-insensitively."""
 

@@ -109,6 +109,43 @@ CLEAN_PROGRAM = """\
 """
 
 
+# Three program units in one file, each with its own LINKAGE SECTION and
+# ENTRY -- enough units that an O(units^2) interface-collection pass (one
+# full scope walk per unit's own linkage-check) is distinguishable from an
+# O(units) one (one scope walk shared by all three) by a call count.
+THREE_UNIT_PROGRAM = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTERP.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01  LK-OUTER            PIC X(5).
+       PROCEDURE DIVISION USING LK-OUTER.
+       OUTER-MAIN.
+           CALL 'MIDDLEP' USING LK-OUTER.
+           GOBACK.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MIDDLEP.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01  LK-MIDDLE           PIC X(5).
+       PROCEDURE DIVISION USING LK-MIDDLE.
+       MIDDLE-MAIN.
+           CALL 'INNERP' USING LK-MIDDLE.
+           GOBACK.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INNERP.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01  LK-INNER            PIC X(5).
+       PROCEDURE DIVISION USING LK-INNER.
+       INNER-MAIN.
+           GOBACK.
+       END PROGRAM INNERP.
+       END PROGRAM MIDDLEP.
+       END PROGRAM OUTERP.
+"""
+
+
 def _ast(source: str = PROGRAM):
     result = parse_cobol(source, filename="lintme.cbl")
     assert result.ast is not None
@@ -382,3 +419,25 @@ class TestFlowReportReuse:
         ) as flow_analyzer_class:
             LintAnalyzer(["recursion-check", "complexity"]).analyze(_ast())
         assert flow_analyzer_class.call_count == 1
+
+    def test_linkage_check_collects_entry_interfaces_once_per_file(self) -> None:
+        # Regression: every one of a file's N units' own linkage-check used
+        # to redo LinkageChecker.check()'s whole-scope interface collection
+        # from scratch (an O(N^2) cost in program units) instead of the
+        # single scope-wide pass this now shares across all N. With three
+        # units, the walk that visits each unit ONCE (_collect_interfaces)
+        # must be called exactly 3 times in total -- not 3*3 = 9.
+        from cobolparser.analysis.linkage_checker import LinkageChecker
+
+        with patch.object(
+            LinkageChecker,
+            "_collect_interfaces",
+            wraps=LinkageChecker._collect_interfaces,
+            autospec=True,
+        ) as collect:
+            report = LintAnalyzer(["linkage-check"]).analyze(_ast(THREE_UNIT_PROGRAM))
+        assert collect.call_count == 3
+        # And the result is unaffected by sharing the collection: no false
+        # linkage findings on a file where every CALL matches its callee's
+        # declared interface exactly.
+        assert _by_rule(report, "linkage-check") == []

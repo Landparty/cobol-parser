@@ -96,6 +96,7 @@ _SEVERITY_LINKAGE: dict[str, str] = {
     "TOO_FEW_ARGS": "error",
     "UNKNOWN_ENTRY": "error",
     "UNREFERENCED_LINKAGE": "warning",
+    "PASSING_MODE_MISMATCH": "error",
 }
 
 # Recursion risk grades itself HIGH when the cycle it found has no escape
@@ -393,6 +394,20 @@ class LintAnalyzer:
         """
         report = LintReport()
         units = ast.program_units()
+        entry_interfaces: dict[str, list[str]] | None = None
+        entry_parameter_modes: dict[str, dict[str, str]] | None = None
+        if "linkage-check" in self._rules:
+            from .linkage_checker import LinkageChecker
+
+            # Scope-wide (every unit's ENTRY / PROCEDURE DIVISION USING),
+            # computed once and handed to every unit's own linkage-check
+            # collector below -- otherwise each of the file's N units would
+            # redo this same whole-scope walk, an O(N^2) cost in program
+            # units for no correctness benefit (LinkageChecker.check()'s own
+            # collection loop, run N times over the same N units).
+            entry_interfaces, entry_parameter_modes = (
+                LinkageChecker.collect_scope_interfaces(ast)
+            )
         for index, unit in enumerate(units):
             # A caller-supplied flow report describes the outermost unit only;
             # the others build their own.
@@ -402,6 +417,8 @@ class LintAnalyzer:
                 root=ast,
                 flow_report=flow_report if index == 0 else None,
                 copybook_item_names=copybook_item_names,
+                entry_interfaces=entry_interfaces,
+                entry_parameter_modes=entry_parameter_modes,
             )
 
         report.findings.sort(key=_sort_key)
@@ -419,12 +436,18 @@ class LintAnalyzer:
         root: CobolProgram,
         flow_report: ProgramFlowReport | None,
         copybook_item_names: set[str] | None,
+        entry_interfaces: dict[str, list[str]] | None = None,
+        entry_parameter_modes: dict[str, dict[str, str]] | None = None,
     ) -> None:
         """Run every selected rule over one program unit, into *report*.
 
         *root* is the outermost program of the file, for the one rule
         (``linkage-check``) whose findings are per unit but whose knowledge
-        -- which entry declares which parameters -- spans the file.
+        -- which entry declares which parameters, and in what passing mode
+        -- spans the file. *entry_interfaces*/*entry_parameter_modes* are
+        that same rule's precomputed ``LinkageChecker.collect_entry_interfaces
+        (root)``/``collect_entry_parameter_modes(root)``, when the caller
+        (``analyze()``) already built them for every unit to share.
         """
         collectors: dict[str, Callable[[], list[LintFinding]]] = {
             "dead-code": lambda: self._dead_code(ast),
@@ -433,7 +456,9 @@ class LintAnalyzer:
             ),
             "move-type-check": lambda: self._move_type_check(ast, report),
             "io-sequence": lambda: self._io_sequence(ast),
-            "linkage-check": lambda: self._linkage_check(ast, root),
+            "linkage-check": lambda: self._linkage_check(
+                ast, root, entry_interfaces, entry_parameter_modes
+            ),
             "recursion-check": lambda: self._recursion_check(
                 ast, self._flow(ast, flow_report)
             ),
@@ -563,7 +588,11 @@ class LintAnalyzer:
         ]
 
     def _linkage_check(
-        self, ast: CobolProgram, root: CobolProgram
+        self,
+        ast: CobolProgram,
+        root: CobolProgram,
+        entry_interfaces: dict[str, list[str]] | None = None,
+        entry_parameter_modes: dict[str, dict[str, str]] | None = None,
     ) -> list[LintFinding]:
         from .linkage_checker import LinkageChecker
 
@@ -571,8 +600,18 @@ class LintAnalyzer:
         # the checker recurse too would report a contained program's items
         # twice -- or, for two units declaring a same-named item, once with
         # no location, which _deduplicate then folds into one finding.
+        #
+        # entry_interfaces/entry_parameter_modes, when the caller
+        # (analyze()) already built them for `root`, are passed straight
+        # through instead of interface_scope -- letting LinkageChecker.
+        # check() skip its own scope-wide collection pass, which would
+        # otherwise re-walk every unit of `root` again for each of this
+        # file's units.
         result = LinkageChecker(include_contained_programs=False).check(
-            ast, interface_scope=root
+            ast,
+            interface_scope=root,
+            entry_interfaces=entry_interfaces,
+            entry_parameter_modes=entry_parameter_modes,
         )
         return [
             LintFinding(

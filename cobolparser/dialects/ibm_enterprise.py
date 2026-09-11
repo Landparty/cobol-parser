@@ -678,35 +678,15 @@ class IBMEnterpriseCobol:
 
         return warnings
 
-    # The pre-2026-09-09 hand-written table, kept so the keys those callers
-    # read (return_type / parameters / description / length) are unchanged.
-    _LEGACY_INTRINSIC_SIGNATURES: dict[str, dict[str, Any]] = {
-        "CURRENT-DATE": {
-            "return_type": "alphanumeric",
-            "length": 21,
-            "parameters": [],
-            "description": "Returns current date and time",
-        },
-        "LENGTH": {
-            "return_type": "numeric",
-            "parameters": ["string"],
-            "description": "Returns length of string argument",
-        },
-        "NUMVAL": {
-            "return_type": "numeric",
-            "parameters": ["alphanumeric"],
-            "description": "Convert alphanumeric to numeric",
-        },
-        "UPPER-CASE": {
-            "return_type": "alphanumeric",
-            "parameters": ["alphanumeric"],
-            "description": "Convert to uppercase",
-        },
-        "LOWER-CASE": {
-            "return_type": "alphanumeric",
-            "parameters": ["alphanumeric"],
-            "description": "Convert to lowercase",
-        },
+    # A fact the catalogue has no structured field for at all -- CURRENT-DATE's
+    # fixed return length -- rather than a second, competing copy of facts
+    # the catalogue already states (return_type/parameters/description used
+    # to also live here for five functions, silently overriding whatever the
+    # catalogue said for them, including a case where the catalogue's answer
+    # had since become the more precise one -- see get_intrinsic_function_
+    # signature's docstring).
+    _INTRINSIC_EXTRA_FIELDS: dict[str, dict[str, Any]] = {
+        "CURRENT-DATE": {"length": 21},
     }
 
     def get_intrinsic_function_signature(
@@ -719,7 +699,15 @@ class IBMEnterpriseCobol:
         accepts has a signature here -- previously only five did. The dict
         carries the catalogue's keys (``returns``, ``arguments``,
         ``call_example``, ...) plus the historical ``return_type`` /
-        ``parameters`` / ``description`` keys.
+        ``parameters`` / ``description`` keys, derived from the catalogue's
+        own ``returns``/``arguments``/``summary`` rather than a hand-written
+        second copy of the same facts -- a hand-written copy for these five
+        functions used to live here too and always won regardless of which
+        answer was more correct; e.g. it kept reporting LENGTH's argument as
+        ``["string"]`` after the catalogue was corrected to the more precise
+        ``["any"]`` (LENGTH accepts any category, not just alphanumeric).
+        ``_INTRINSIC_EXTRA_FIELDS`` adds only what the catalogue has no
+        field for at all (CURRENT-DATE's fixed return length).
         """
         from .le_signatures import intrinsic_signature
 
@@ -730,7 +718,7 @@ class IBMEnterpriseCobol:
         info.setdefault("return_type", sig.returns)
         info.setdefault("parameters", [a.category for a in sig.arguments])
         info.setdefault("description", sig.summary)
-        info.update(self._LEGACY_INTRINSIC_SIGNATURES.get(sig.name, {}))
+        info.update(self._INTRINSIC_EXTRA_FIELDS.get(sig.name, {}))
         return info
 
     def is_reserved_word(self, word: str) -> bool:

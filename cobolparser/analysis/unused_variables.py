@@ -42,6 +42,7 @@ from ..models.statements.data import (
     UnstringStatement,
 )
 from ..models.statements.misc import MergeStatement, SelectStatement, SortStatement
+from ._names import IDENTIFIER_TOKEN_RE
 
 # DATA DIVISION section names whose data items are in scope for this
 # analysis. Matches the exact names the DATA DIVISION parser assigns (see
@@ -117,7 +118,6 @@ _NON_IDENTIFIER_WORDS = frozenset(
 )
 
 _QUOTED_TEXT_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
-_IDENTIFIER_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
 
 # Statement attributes holding a single identifier string that isn't
 # already folded into `.operands` by the statement's own setters -- found
@@ -278,7 +278,7 @@ def _extract_identifiers(operand: Any) -> set[str]:
 
     stripped = _QUOTED_TEXT_RE.sub(" ", operand)
     tokens: set[str] = set()
-    for match in _IDENTIFIER_TOKEN_RE.findall(stripped):
+    for match in IDENTIFIER_TOKEN_RE.findall(stripped):
         upper = match.upper()
         if upper in _NON_IDENTIFIER_WORDS:
             continue

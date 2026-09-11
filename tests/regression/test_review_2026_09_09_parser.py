@@ -411,6 +411,32 @@ class TestFinding12CheapExtras:
         assert st.value == "SUB1"
         assert st.get_metadata("value_is_entry") is True
 
+    def test_set_entry_form_does_not_leak_into_a_later_group(self):
+        # Regression: _entry_form used to be reset only before the FIRST
+        # group's _parse_action call, so a later group in the same SET
+        # statement inherited an earlier group's ENTRY-ness even when its
+        # own value is an ordinary identifier.
+        result = _proc("SET I TO ENTRY 'SUB1' J TO 2.")
+        st = _stmt(result, "SET")
+        assert st.value == "SUB1"
+        assert st.get_metadata("value_is_entry") is True
+        (group,) = st.groups
+        assert group["targets"] == ["J"]
+        assert group["value"] == "2"
+        assert group["value_is_entry"] is False
+
+    def test_set_entry_form_is_tracked_per_group_not_just_the_first(self):
+        # The other direction: a SECOND group's own ENTRY value must be
+        # recorded on that group, not silently dropped.
+        result = _proc("SET I TO 1 J TO ENTRY 'SUB2'.")
+        st = _stmt(result, "SET")
+        assert st.value == "1"
+        assert st.get_metadata("value_is_entry") is None
+        (group,) = st.groups
+        assert group["targets"] == ["J"]
+        assert group["value"] == "SUB2"
+        assert group["value_is_entry"] is True
+
     def test_perform_thru_qualifier(self):
         result = _proc("PERFORM P1 IN S1 THRU P2 OF S1.")
         assert result.warnings == []

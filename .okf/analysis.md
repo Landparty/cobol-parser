@@ -298,8 +298,12 @@ and were falsely reported unused. `_extract_identifiers` (renamed from
 the narrower `_extract_identifier_tokens`, which now also replaces the
 old boolean `_is_identifier_operand` gate everywhere) is the single
 extraction path for every operand/extra-field/condition-fallback value:
-it strips quoted substrings, regex-extracts every letter-led token, and
-filters `_NON_IDENTIFIER_WORDS` (figurative constants merged with
+it strips quoted substrings, regex-extracts every letter-led token
+(`_names.IDENTIFIER_TOKEN_RE`, shared with `redundancy.py`'s clone-detection
+renaming and `boundary_inventory.py`'s `EVALUATE TRUE` selector-text read
+scan -- the latter uses the sibling `RELAXED_IDENTIFIER_TOKEN_RE`, which
+also accepts a token starting with a digit, harmless there since a match is
+only ever looked up against a name map), and filters `_NON_IDENTIFIER_WORDS` (figurative constants merged with
 qualification/special-register/intrinsic-function keywords `OF`/`IN`/
 `FUNCTION`/`LENGTH`/`ADDRESS` and the raw-condition-text stopwords). A
 bare numeric literal never matches at all since a token must start with
@@ -983,6 +987,19 @@ wants a real all-clear must now check `not violations and unresolved_count
 == 0`, not just `not violations`. Pinned by
 `tests/regression/test_open_findings_high_regressions.py::TestH5MoveTypeCheckerUnresolvedCount`.
 
+**`_is_non_integer_picture` reads one canonical field, not two independent
+checks (2026-09-10):** it used to also re-derive the leading-`P`-scaled
+fraction case (`PPP9`) from the raw pattern string
+(`pattern.replace("S", "").startswith("P")`) *in addition to* checking
+`decimal_digits > 0` — redundant, since `PictureClause._parse_scaled_pattern`
+already sets `decimal_digits = P-count + 9-count` for a leading-`P` picture
+(a *trailing*-`P` picture like `9(3)PPP` is a scaled *integer*,
+`decimal_digits == 0`, correctly excluded either way). Now just
+`decimal_digits > 0`, the same field `generators/data/layout.py`'s
+`FieldSpec.stored_digits`/`scaling_positions` and `layout_offsets.py` (the
+`data-items` CLI) already key off of — see this doc's own P-scaling note in
+[generators.md](generators.md).
+
 ## LinkageChecker
 
 ```python
@@ -1002,6 +1019,29 @@ produced a false positive (a lint `error`) exactly where it could see the
 callee. `UNREFERENCED_LINKAGE` findings now carry the item's declaration
 `location` and `LinkageViolation.item_name`, so lint keeps one finding per
 program unit instead of collapsing same-text findings from different units.
+
+**`PASSING_MODE_MISMATCH` (replaces the removed rule with a real check):**
+a CALL's own BY VALUE/BY REFERENCE (explicit, or COBOL's own BY REFERENCE
+default) checked position-by-position against what the *callee's own*
+`PROCEDURE DIVISION USING` explicitly declares — never against the LINKAGE
+item's own section. Needs `divisions/base.py`'s new `using_parameter_modes`
+metadata (name → `"VALUE"`/`"REFERENCE"`, alongside the existing
+`using_parameters` name list) to know the callee's declared mode; only
+resolvable for a static CALL to a program in the same source whose implicit
+entry interface was collected — an `ENTRY` statement's own USING carries no
+BY clause in COBOL, so a CALL to one is never checked for this. `BY CONTENT`
+call arguments are never flagged either way (no USING counterpart to compare
+against).
+
+**O(units²) → O(units) interface collection (2026-09-10):** `LintAnalyzer`
+used to have each of a file's N program units' own `linkage-check` collector
+call `LinkageChecker.check()` with no shared state, and `check()`'s own
+scope-wide `_collect_interfaces` walk re-visited all N units every time —
+O(N²) AST visits for the file. `LinkageChecker.collect_scope_interfaces(ast)`
+computes the interface map (and the passing-mode map above) once;
+`check(..., entry_interfaces=..., entry_parameter_modes=...)` accepts either
+or both precomputed, skipping its own collection loop entirely.
+`LintAnalyzer.analyze()` now calls it once per file, not once per unit.
 
 ## LanguageEnvironmentAnalyzer
 
@@ -1078,6 +1118,16 @@ now reads `IOOpenStatement.file_modes` (the authoritative per-file dict the
 parser populates per mode group), falling back to `open_mode` only for a
 file with no per-file entry. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestA3OpenModesPerFile`.
+
+**Record→file resolution is shared, not its own copy (2026-09-10):**
+`_collect_record_to_file_mapping`/`_resolve_file_name` now call
+`analysis._files.record_to_file_map()`/`resolve_file_name()` -- the same
+FILE SECTION `fd_file_name`-metadata walk `io_logger.py` and `io_sequence.py`
+already use -- instead of an independent copy of the same walk. `_files`'s
+`resolve_file_name()` returns a direct `file_name` argument verbatim
+(case preserved, for `io_logger`'s human-readable report); this generator
+still upper-cases the result itself since `self._file_entries` is keyed by
+upper-case name.
 
 ## DynamicCallAnalyzer
 
@@ -1296,6 +1346,23 @@ boundary it gates on never had a `status_field`. DELETE/START/UNLOCK are
    statement's own `.operands` also contains its target, which would
    otherwise misread a write as a read of the same name.
 4. Otherwise **BIDIRECTIONAL**, `provenance="assumed-bidirectional"`.
+
+**Rung 3's "read" also covers a branching statement's own condition**
+(`_condition_read_names`, 2026-09-09): an `IfStatement`'s condition tree, a
+`PerformStatement UNTIL`'s guard, and an `EvaluateStatement`'s subjects and
+WHEN selectors don't reach the statement's generic `.operands` bag (an
+`IfStatement`'s is empty), so a CALL argument whose only later use is `IF
+WS-RC = 'Y'` used to look unread and misclassify as OUT. Two 2026-09-10
+follow-ups to that walk: (1) `_condition_field_names` now recurses into a
+`ConditionalExpression`/`ArithmeticExpression` operand that is itself an
+expression (`A + B = C`) and into a `FunctionCall`'s arguments
+(`FUNCTION UPPER-CASE(WS-X)`), not just bare-string operands; (2) an
+`EVALUATE` subject that arrives as a `CobolExpression` rather than a plain
+string (`EvaluateStatement.subjects: list[str | CobolExpression]`) is walked
+the same way instead of silently skipped -- the real parser only ever
+produces string subjects today, so this guards the documented type contract
+against a future parser change rather than a reachable bug, but the read
+scan would otherwise go silently blind the day it changes.
 
 `RETURNING`/`GIVING` parameters are always `IN` (`provenance=
 "giving-parameter"`) -- the callee produces them by definition.
@@ -1713,6 +1780,16 @@ internal env) rather than approximating:
   resolved direction to tell them apart (only `BoundaryInventoryAnalyzer`'s
   own richer analysis does) -- deferred to a future version rather than risk
   treating an OUT value as still-known.
+* **A subscripted/reference-modified READ INTO or ACCEPT target is poisoned,
+  never restored (2026-09-10 fix).** `_target_paths()` used to drop the
+  `has_suffix` flag `_base_name()` returns and resolve straight to the base
+  item's *whole* qualified name, so `READ F INTO WS-BUFFER(1:5)` restored
+  all of `WS-BUFFER` to its seed value on the first READ even though only
+  bytes 1-5 were actually written — the same `has_suffix` case
+  `_apply_move_target`/`_write_numeric` already poison rather than assert a
+  value for. `_target_paths()` now returns `(qpath, exact)` pairs; a
+  suffixed target's `_reset_under` call always passes `restore=False`
+  regardless of whether this is the file/target's first occurrence.
 * Any other statement type this module has no specific rule for
   (`INITIALIZE`, `SET`, `STRING`/`UNSTRING`, `INSPECT`, and the CALL/SQL/
   CICS/DLI cases above) conservatively poisons every name in its `.operands`

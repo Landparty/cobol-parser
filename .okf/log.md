@@ -1,5 +1,45 @@
 # OKF Update Log
 
+## 2026-09-10 — code-review follow-up: 15 findings across analysis/generators/parsers
+
+A code-review pass over the 2026-09-09 review-fix diff (`CHANGELOG.md` →
+Unreleased), one finder per angle (correctness, reuse, simplification,
+efficiency, altitude/CLAUDE.md conventions, removed-behavior), each finding
+verified before being accepted. Regression tests are spread across the
+existing suite (see `tests.md`'s "Cross-repo review follow-up fixes"
+section) rather than one new file per finding this time.
+
+Three worth keeping in mind beyond their own doc sections:
+
+* **A `has_suffix` flag dropped in one of four call sites is a real
+  correctness bug, not a style nit (`analysis.md`).** `const_fold.py`'s
+  `_apply_move_target`/`_write_numeric` correctly poison a subscripted/
+  reference-modified write target instead of asserting a value; a third
+  function computing the same "base item, with suffix" split
+  (`_target_paths`, used by READ INTO/ACCEPT) silently dropped the flag and
+  fully restored the base item instead. Same input shape, three call sites
+  agreeing and a fourth silently not — worth grepping for every caller of a
+  shared helper when auditing one of its call sites, not just reading the
+  one you started at.
+* **"Remove the duplicate" is not always right (`generators.md`,
+  `analysis.md`).** Two reuse findings from the same review batch
+  (`const_fold._link_redefines` vs `layout_offsets._walk_redefines_chain`;
+  `dead_code._collect_range_end` vs `program_flow.edges.range_members`)
+  turned out, on inspection, to solve genuinely different problems from a
+  shared input shape — forcing a merge would have added a real dependency
+  (a full CFG build, in the second case) for no correctness gain. Both are
+  documented in place instead, with the investigation's own reasoning kept
+  in the code comment rather than assumed away.
+* **A stale override can mask a since-corrected value (`analysis.md`,
+  `dialects.md`).** `ibm_enterprise.py`'s `_LEGACY_INTRINSIC_SIGNATURES`
+  table was assumed at review time to be merely redundant with
+  `le_signatures`'s catalogue; checking found it was actively wrong for
+  `LENGTH` (`return_type`/`parameters` reported `"numeric"`/`["string"]`
+  after the catalogue had already been corrected to the more precise
+  `"integer"`/`["any"]`, silently overridden by the older hand-written
+  value every time). Removed down to the one fact the catalogue has no
+  field for at all (`CURRENT-DATE`'s byte length).
+
 ## 2026-09-09 — cross-repo bug review: 46 fixes across the pipeline
 
 A review pass over every layer (lexer/preprocess, parsers, analysis,

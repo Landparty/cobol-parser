@@ -367,7 +367,14 @@ END PROGRAM OUTER.
         assert "VALUE_TO_LINKAGE" not in _SEVERITY_LINKAGE
 
     def test_argument_count_mismatch_still_reported(self):
-        ast = _parse(self.PROGRAM.replace("USING BY VALUE LK-N.", "USING LK-N LK-N."))
+        # Both arguments stay BY VALUE, matching INNER's own BY VALUE IN-N
+        # for the one position it declares -- isolates the count mismatch
+        # this test is about from the (separately tested) passing-mode
+        # check below, which the extra argument has no declared mode to
+        # disagree with anyway.
+        ast = _parse(
+            self.PROGRAM.replace("USING BY VALUE LK-N.", "USING BY VALUE LK-N LK-N.")
+        )
         kinds = [v.kind for v in LinkageChecker().check(ast).violations]
         assert kinds == [LinkageViolationKind.TOO_MANY_ARGS]
 

@@ -605,6 +605,50 @@ class TestObservationPoints:
         fold = ConstantFolder().fold(result.ast, index, seed_values={"F1-QTY": "10"})
         assert fold.known == {"F1-QTY": "11"}
 
+    def test_accept_into_reference_modified_target_poisons_rather_than_restores(self):
+        # Regression: a subscripted/reference-modified ACCEPT target only
+        # writes PART of its base item, unlike the plain-target case in
+        # test_accept_does_not_poison_its_own_seeded_value above, so it must
+        # be poisoned (forgotten) rather than restored to the seeded value
+        # of the WHOLE field.
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           ACCEPT WS-NAME(1:2).\n"
+            "           DISPLAY WS-NAME.\n",
+            seed_values={"WS-NAME": "ABCDE"},
+        )
+        assert "WS-NAME" not in fold.known
+
+    def test_read_into_reference_modified_target_poisons_rather_than_restores(self):
+        # Same regression as above, for READ INTO: only bytes 1-5 of
+        # WS-BUFFER are actually written by this READ, so the whole field
+        # must not be asserted as the seeded value.
+        source = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. FOLDTEST.\n"
+            "       ENVIRONMENT DIVISION.\n"
+            "       INPUT-OUTPUT SECTION.\n"
+            "       FILE-CONTROL.\n"
+            "           SELECT F1 ASSIGN TO 'F1.DAT'.\n"
+            "       DATA DIVISION.\n"
+            "       FILE SECTION.\n"
+            "       FD  F1.\n"
+            "       01  F1-REC                PIC X(10).\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01  WS-BUFFER             PIC X(20).\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           READ F1 INTO WS-BUFFER(1:5).\n"
+            "           DISPLAY WS-BUFFER.\n"
+        )
+        result = parse_cobol(source, filename="t.cbl")
+        assert result.ast is not None, result.errors
+        index = ProgramLayoutIndex.build(result.ast)
+        fold = ConstantFolder().fold(
+            result.ast, index, seed_values={"WS-BUFFER": "X" * 20}
+        )
+        assert "WS-BUFFER" not in fold.known
+
 
 class TestToDict:
     def test_known_dict_round_trips(self):

@@ -259,14 +259,23 @@ class SetStatement(CobolStatement):
         set_type: str | None,
         value: str | None,
         is_address_of: bool = False,
+        *,
+        is_entry: bool = False,
     ) -> None:
-        """Record an additional target/value group of a multi-group SET."""
+        """Record an additional target/value group of a multi-group SET.
+
+        ``is_entry`` mirrors the top-level statement's own
+        ``value_is_entry`` metadata (``SET p TO ENTRY 'X'``) for this group
+        specifically -- a later group in the same statement may or may not
+        itself be an ENTRY value, independently of the first.
+        """
         self.groups.append(
             {
                 "targets": list(targets),
                 "set_type": set_type.upper() if set_type else None,
                 "value": value,
                 "value_is_address_of": is_address_of,
+                "value_is_entry": is_entry,
             }
         )
         for target in targets:
