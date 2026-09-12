@@ -626,6 +626,69 @@ class TestValidateCopybookContent:
 
         assert not any("missing terminating period" in w.lower() for w in warnings)
 
+    def test_no_false_positive_when_entry_continues_onto_next_line(self):
+        """A data-description entry is one sentence, and writing it across
+        several lines is ordinary COBOL: the PICTURE on one line and the
+        VALUE (with the terminating period) on the next. Judging each
+        physical line alone reported every such entry as unterminated --
+        which made a copybook of legal PIC/VALUE pairs read as a copybook
+        of errors."""
+        content = (
+            "       05  ACH-R01-DESC              PIC X(30)\n"
+            "               VALUE 'INSUFFICIENT FUNDS            '.\n"
+            "       05  ACH-R02-DESC              PIC X(30)\n"
+            "               VALUE 'ACCOUNT CLOSED                '.\n"
+        )
+
+        warnings = validate_copybook_content(content, "/path/test.cpy")
+
+        assert not any("missing terminating period" in w.lower() for w in warnings)
+
+    def test_missing_period_detected_on_multi_line_entry(self):
+        """The multi-line case must still be CHECKED, not just exempted: an
+        entry spanning two lines with no period anywhere is unterminated."""
+        content = (
+            "       05  ACH-R01-DESC              PIC X(30)\n"
+            "               VALUE 'INSUFFICIENT FUNDS            '\n"
+        )
+
+        warnings = validate_copybook_content(content, "/path/test.cpy")
+
+        missing = [w for w in warnings if "missing terminating period" in w.lower()]
+        assert len(missing) == 1
+        assert "Line 1" in missing[0]
+
+    def test_multi_line_entry_does_not_swallow_the_entry_below_it(self):
+        """An unterminated entry ends where the next entry starts, so a
+        correctly terminated neighbour can never hide a missing period --
+        including behind a single-digit level number."""
+        content = (
+            "       05  FIELD-A                   PIC X(10)\n"
+            "       5   FIELD-B                   PIC X(20).\n"
+        )
+
+        warnings = validate_copybook_content(content, "/path/test.cpy")
+
+        missing = [w for w in warnings if "missing terminating period" in w.lower()]
+        assert len(missing) == 1
+        assert "Line 1" in missing[0]
+
+    def test_blanked_comment_inside_an_entry_does_not_split_it(self):
+        """remove_comment_lines() blanks comments before this check runs. A
+        comment between an entry's PIC line and its VALUE line is ordinary
+        source -- treating the blank it leaves as an entry terminator would
+        reintroduce the false positive by another route."""
+        raw = (
+            "       05  ACH-R01-DESC              PIC X(30)\n"
+            "      * why this text is padded to 30 columns\n"
+            "               VALUE 'INSUFFICIENT FUNDS            '.\n"
+        )
+        content = remove_comment_lines(raw)
+
+        warnings = validate_copybook_content(content, "/path/test.cpy")
+
+        assert not any("missing terminating period" in w.lower() for w in warnings)
+
     def test_valid_content(self):
         """Test that valid content produces no/minimal warnings."""
         # Use proper fixed-format COBOL with sequence area and indicators

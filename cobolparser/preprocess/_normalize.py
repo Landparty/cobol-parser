@@ -22,11 +22,61 @@ from collections.abc import Callable, Iterable, Mapping
 _DEFINE_RE = re.compile(
     r">>DEFINE\s+(\w+)(?:\s+(?:AS\s+)?(?!OVERRIDE\s*$)(.+?))?(?:\s+OVERRIDE)?\s*$"
 )
+#: Starts a data-description entry: a level number followed by a name. Used to
+#: find where one entry ENDS -- at the line that starts the next one -- since a
+#: single entry may legally span several lines. ``\d{1,2}`` rather than
+#: ``\d{2}`` on purpose: a single-digit level (``5 FIELD-A``) is legal and must
+#: still close the entry above it, or that entry would swallow this one.
+_DATA_ENTRY_START_RE = re.compile(r"^[ \t]*\d{1,2}[ \t]+[A-Za-z][A-Za-z0-9-]*\b")
+#: An entry that declares a PICTURE, and so is one whose missing terminating
+#: period is worth reporting. Matched against a whole entry, not one line.
 _DATA_DEF_RE = re.compile(
-    r"^[ \t]*\d{2}[ \t]+[A-Za-z][A-Za-z0-9-]*[ \t]+PIC[ \t]+[^\s]*[^\s.][ \t]*$",
-    re.MULTILINE,
+    r"^[ \t]*\d{2}[ \t]+[A-Za-z][A-Za-z0-9-]*[ \t]+.*\bPIC(?:TURE)?\b",
+    re.IGNORECASE | re.DOTALL,
 )
+#: A line that is not part of the entry above it even though it does not start
+#: one either -- an in-line ``EXEC SQL`` block being the copybook case.
+_NON_ENTRY_LINE_RE = re.compile(r"^[ \t]*EXEC\b", re.IGNORECASE)
 _LEVEL_NUMBER_RE = re.compile(r"^\s*(\d{2})\s+[A-Za-z]", re.MULTILINE)
+
+
+def _unterminated_data_entries(content: str) -> list[int]:
+    """Line numbers (1-based) of PICTURE entries with no terminating period.
+
+    A data-description entry is one COBOL sentence, and it is routinely
+    written across several lines -- ``05 WS-B PIC X(30)`` on one and
+    ``VALUE 'TEXT'.`` on the next is correct, terminated source. Judging
+    each physical line on its own reports every such entry as unterminated,
+    which is how this check used to read a whole copybook of legal
+    ``PIC``/``VALUE`` pairs as a whole copybook of errors. So the unit
+    examined here is the ENTRY: the line that starts it, plus every line up
+    to (not including) the one that starts the next.
+
+    Blank lines never close an entry. ``remove_comment_lines`` blanks comment
+    lines to whitespace before this runs, and a comment sitting between an
+    entry's ``PIC`` line and its ``VALUE`` line is ordinary source -- treating
+    the blank it leaves behind as a terminator would resurrect the same false
+    positive by another route.
+    """
+    lines = content.splitlines()
+    starts = [i for i, line in enumerate(lines) if _DATA_ENTRY_START_RE.match(line)]
+    unterminated: list[int] = []
+
+    for position, first in enumerate(starts):
+        # The entry runs to the next entry, or to the next line that belongs
+        # to neither (an EXEC block), or to the end of the content.
+        limit = starts[position + 1] if position + 1 < len(starts) else len(lines)
+        last = first + 1
+        while last < limit and not _NON_ENTRY_LINE_RE.match(lines[last]):
+            last += 1
+
+        entry = "\n".join(lines[first:last]).rstrip()
+        if entry.endswith("."):
+            continue
+        if _DATA_DEF_RE.match(entry):
+            unterminated.append(first + 1)
+
+    return unterminated
 
 
 class PreprocessingError(Exception):
@@ -1537,8 +1587,7 @@ def validate_copybook_content(
         warnings.append(f"Possible unbalanced double quotes in '{copybook_path}'")
 
     # Check for potential missing terminating period on data definitions
-    for match in _DATA_DEF_RE.finditer(content):
-        line_num = content[: match.start()].count("\n") + 1
+    for line_num in _unterminated_data_entries(content):
         warnings.append(
             f"Line {line_num} in '{copybook_path}' may be missing terminating period"
         )

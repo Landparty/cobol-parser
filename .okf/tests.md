@@ -891,6 +891,24 @@ too (see commands above).
   override table only supplies `CURRENT-DATE`'s byte length, a fact the
   `le_signatures` catalogue has no structured field for at all.
 
+# Copybook missing-period check, per entry (2026-09-12)
+
+* `tests/unit/test_preprocess_init_coverage.py::TestValidateCopybookContent`
+  — four new cases around `validate_copybook_content`'s "may be missing
+  terminating period" warning now that it judges a whole data-description
+  entry instead of one physical line (see [preprocessing.md](preprocessing.md)):
+  `test_no_false_positive_when_entry_continues_onto_next_line` (a `PIC` line
+  terminated by a `VALUE` line below it is correct source),
+  `test_missing_period_detected_on_multi_line_entry` (the multi-line case is
+  still *checked*, not exempted),
+  `test_multi_line_entry_does_not_swallow_the_entry_below_it` (an
+  unterminated entry ends where the next one starts — including behind a
+  single-digit level number), and
+  `test_blanked_comment_inside_an_entry_does_not_split_it` (the blank left by
+  `remove_comment_lines` inside an entry is not a terminator). They sit
+  alongside the decimal-point-PIC pair from the 2026-07-27 fix to the same
+  check, which pins the opposite direction.
+
 # See Also
 
 * `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` — the

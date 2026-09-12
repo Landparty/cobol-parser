@@ -1,5 +1,21 @@
 # OKF Update Log
 
+## 2026-09-12 — missing-period check judges the entry, not the line
+
+Found by running the `legacy-application` corpus through the COBOL Analyzer
+extension's own surfaces: every one of the 20 expansions carried 8 identical
+"may be missing terminating period" warnings, all false, all from one
+copybook's multi-line `PIC` / `VALUE` entries. `validate_copybook_content`
+now examines a whole data-description entry rather than a physical line.
+See `preprocessing.md` for the mechanism and why blank lines still do not
+close an entry.
+
+The general lesson is the one the 2026-07-27 fix to this same check already
+half-learned: COBOL's unit of source is the *sentence*, and any check
+written against a line will be wrong for every construct that legally spans
+more than one.
+
+
 ## 2026-09-10 — code-review follow-up: 15 findings across analysis/generators/parsers
 
 A code-review pass over the 2026-09-09 review-fix diff (`CHANGELOG.md` →

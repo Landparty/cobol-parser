@@ -369,6 +369,37 @@ under-enforced: 3x inclusion of a 76-byte copybook with `max_total_size=
 true content bytes. Cache hits now add the cached content's byte length
 to `context.total_bytes` and re-check the limit, identically to a miss.
 
+**`validate_copybook_content` missing-period check now judges the ENTRY, not
+the physical line (fixed 2026-09-12):** `_DATA_DEF_RE` matched a single line
+ending in a `PICTURE` clause with no trailing period. But a data-description
+entry is one COBOL sentence and is routinely written across several lines --
+`05 WS-B PIC X(30)` on one and `VALUE 'TEXT'.` on the next -- so every such
+(correct) entry was reported as unterminated. On the `legacy-application`
+corpus this produced 8 false warnings on every one of the 20 expansions, all
+from one copybook's legal `PIC`/`VALUE` pairs, and those warnings are
+rendered into the banner of the expanded listing by the COBOL Analyzer
+extension, so they are read by users rather than discarded.
+
+The scan is now `_unterminated_data_entries()`: `_DATA_ENTRY_START_RE`
+(`\d{1,2}` + name -- single-digit levels included, or a `5 FIELD-B` would be
+swallowed by the entry above it) marks where each entry begins, the entry
+runs to the line that starts the next one (or to an `EXEC` block, or EOF),
+and the *joined* entry text is checked for a trailing period. `_DATA_DEF_RE`
+survives as the "is this entry a PICTURE entry at all" predicate, now matched
+against the whole entry with `DOTALL` rather than against one line.
+
+Blank lines deliberately do NOT close an entry: `remove_comment_lines` blanks
+comment lines to whitespace *before* this runs (see the 2026-07-27 entry
+below), and a comment between an entry's `PIC` line and its `VALUE` line is
+ordinary source -- treating the blank it leaves behind as a terminator would
+reintroduce the same false positive by another route. Both directions are
+pinned by `tests/unit/test_preprocess_init_coverage.py::
+TestValidateCopybookContent` (`test_no_false_positive_when_entry_continues_
+onto_next_line`, `test_missing_period_detected_on_multi_line_entry`,
+`test_multi_line_entry_does_not_swallow_the_entry_below_it`,
+`test_blanked_comment_inside_an_entry_does_not_split_it`), alongside the
+decimal-point-PIC pair from the earlier fix.
+
 **`validate_copybook_content` missing-period regex no longer crosses blanked
 comment lines, and comment-only copybooks report correctly (fixed
 2026-07-27):** `_DATA_DEF_RE` (the "may be missing terminating period"
