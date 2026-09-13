@@ -350,6 +350,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **preprocess:** `validate_copybook_content`'s "may be missing terminating
+  period" check no longer fires on a data-description entry written across
+  several lines. The check matched one *physical* line ending in a `PICTURE`
+  clause, but an entry is one COBOL sentence and routinely spans lines --
+  `05 WS-B PIC X(30)` followed by `VALUE 'TEXT'.` is correct, terminated
+  source. Every such pair was reported as unterminated, so a copybook of
+  legal `PIC`/`VALUE` entries read as a copybook of errors (8 spurious
+  warnings on one sample member, and these warnings are rendered into the
+  header of the expanded listing by downstream consumers). The unit examined
+  is now the whole entry -- its first line through to the line that starts
+  the next one -- so a genuinely unterminated entry is still flagged,
+  including one that spans lines and ends without a period. Blank lines do
+  not close an entry, since `remove_comment_lines` has already blanked any
+  comment sitting inside one. Entry-start detection and the
+  is-this-a-PICTURE-entry predicate share one definition of an entry head,
+  so a single-digit level (`5 FIELD-B`, legal COBOL) is both able to close
+  the entry above it and checked for its own missing period.
 * **preprocess:** continuation lines no longer collapse the line count.
   `normalize_fixed_format` merged N physical records into one logical line
   and emitted nothing for the other N-1, so every location after the first
