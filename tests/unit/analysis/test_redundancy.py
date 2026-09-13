@@ -592,3 +592,11 @@ class TestFingerprintSerialization:
 
     def test_nesting_is_not_flattened(self) -> None:
         assert _canonical((("A",), ("B",))) != _canonical(("A", "B"))
+
+    def test_a_non_string_scalar_is_carried_through(self) -> None:
+        """A PERFORM_INLINE fingerprint carries `perform_type`, which is not
+        a str. It must serialize, and it must not collide with the string of
+        the same text -- hence the distinct `V` prefix."""
+        assert _canonical(3) != _canonical("3")
+        assert _canonical(("PERFORM_INLINE", 3)) == _canonical(("PERFORM_INLINE", 3))
+        assert _canonical(("PERFORM_INLINE", 3)) != _canonical(("PERFORM_INLINE", 4))
