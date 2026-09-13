@@ -673,6 +673,29 @@ class TestValidateCopybookContent:
         assert len(missing) == 1
         assert "Line 1" in missing[0]
 
+    def test_single_digit_level_entry_is_checked_like_any_other(self):
+        """A single-digit level (`5 FIELD-B`) is legal COBOL, and such an
+        entry must be judged on its own missing period -- not merely close
+        the entry above it. Entry-start detection and the is-this-a-PICTURE
+        -entry predicate share one definition of an entry head so they
+        cannot disagree about that; when they did, this entry closed its
+        neighbour but could never be reported itself."""
+        unterminated = "       5   FIELD-B                   PIC X(20)\n"
+        terminated = "       5   FIELD-B                   PIC X(20).\n"
+
+        missing = [
+            w
+            for w in validate_copybook_content(unterminated, "/path/test.cpy")
+            if "missing terminating period" in w.lower()
+        ]
+        assert len(missing) == 1
+        assert "Line 1" in missing[0]
+
+        assert not any(
+            "missing terminating period" in w.lower()
+            for w in validate_copybook_content(terminated, "/path/test.cpy")
+        )
+
     def test_blanked_comment_inside_an_entry_does_not_split_it(self):
         """remove_comment_lines() blanks comments before this check runs. A
         comment between an entry's PIC line and its VALUE line is ordinary

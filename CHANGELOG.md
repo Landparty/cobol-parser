@@ -363,7 +363,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the next one -- so a genuinely unterminated entry is still flagged,
   including one that spans lines and ends without a period. Blank lines do
   not close an entry, since `remove_comment_lines` has already blanked any
-  comment sitting inside one.
+  comment sitting inside one. Entry-start detection and the
+  is-this-a-PICTURE-entry predicate share one definition of an entry head,
+  so a single-digit level (`5 FIELD-B`, legal COBOL) is both able to close
+  the entry above it and checked for its own missing period.
 * **preprocess:** continuation lines no longer collapse the line count.
   `normalize_fixed_format` merged N physical records into one logical line
   and emitted nothing for the other N-1, so every location after the first

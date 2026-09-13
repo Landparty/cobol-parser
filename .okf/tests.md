@@ -903,7 +903,11 @@ too (see commands above).
   still *checked*, not exempted),
   `test_multi_line_entry_does_not_swallow_the_entry_below_it` (an
   unterminated entry ends where the next one starts — including behind a
-  single-digit level number), and
+  single-digit level number),
+  `test_single_digit_level_entry_is_checked_like_any_other` (such an entry is
+  judged on its own missing period too, not merely used to close the one
+  above it — the two patterns share one `_ENTRY_HEAD` fragment so they cannot
+  disagree about that), and
   `test_blanked_comment_inside_an_entry_does_not_split_it` (the blank left by
   `remove_comment_lines` inside an entry is not a terminator). They sit
   alongside the decimal-point-PIC pair from the 2026-07-27 fix to the same

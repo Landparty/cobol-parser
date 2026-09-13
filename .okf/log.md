@@ -15,6 +15,15 @@ half-learned: COBOL's unit of source is the *sentence*, and any check
 written against a line will be wrong for every construct that legally spans
 more than one.
 
+Follow-up the same day: the first cut of that fix left its two patterns
+disagreeing about what a level number is (`\d{1,2}` for finding where an
+entry starts, the original `\d{2}` for deciding whether to report it), so a
+single-digit-level entry closed its neighbour but was never checked itself —
+a hole that reads exactly like a clean result. They now share one
+`_ENTRY_HEAD` fragment. Two regexes that must describe the same construct
+are a drift hazard whether or not they currently agree; deriving both from
+one definition is cheaper than the test that catches the drift later.
+
 
 ## 2026-09-10 — code-review follow-up: 15 findings across analysis/generators/parsers
 

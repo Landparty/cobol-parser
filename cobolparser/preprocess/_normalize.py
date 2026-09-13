@@ -22,16 +22,21 @@ from collections.abc import Callable, Iterable, Mapping
 _DEFINE_RE = re.compile(
     r">>DEFINE\s+(\w+)(?:\s+(?:AS\s+)?(?!OVERRIDE\s*$)(.+?))?(?:\s+OVERRIDE)?\s*$"
 )
-#: Starts a data-description entry: a level number followed by a name. Used to
-#: find where one entry ENDS -- at the line that starts the next one -- since a
-#: single entry may legally span several lines. ``\d{1,2}`` rather than
-#: ``\d{2}`` on purpose: a single-digit level (``5 FIELD-A``) is legal and must
-#: still close the entry above it, or that entry would swallow this one.
-_DATA_ENTRY_START_RE = re.compile(r"^[ \t]*\d{1,2}[ \t]+[A-Za-z][A-Za-z0-9-]*\b")
+#: The head of a data-description entry: a level number and the name it
+#: introduces. Shared by the two patterns below so they cannot disagree about
+#: what an entry looks like -- when they did, a single-digit level closed the
+#: entry above it (via the first) but could never be reported for its own
+#: missing period (via the second). ``\d{1,2}`` because a single-digit level
+#: (``5 FIELD-A``) is legal COBOL.
+_ENTRY_HEAD = r"[ \t]*\d{1,2}[ \t]+[A-Za-z][A-Za-z0-9-]*"
+#: Starts a data-description entry. Used to find where one entry ENDS -- at the
+#: line that starts the next one -- since a single entry may legally span
+#: several lines.
+_DATA_ENTRY_START_RE = re.compile(rf"^{_ENTRY_HEAD}\b")
 #: An entry that declares a PICTURE, and so is one whose missing terminating
 #: period is worth reporting. Matched against a whole entry, not one line.
 _DATA_DEF_RE = re.compile(
-    r"^[ \t]*\d{2}[ \t]+[A-Za-z][A-Za-z0-9-]*[ \t]+.*\bPIC(?:TURE)?\b",
+    rf"^{_ENTRY_HEAD}[ \t]+.*\bPIC(?:TURE)?\b",
     re.IGNORECASE | re.DOTALL,
 )
 #: A line that is not part of the entry above it even though it does not start

@@ -380,13 +380,23 @@ from one copybook's legal `PIC`/`VALUE` pairs, and those warnings are
 rendered into the banner of the expanded listing by the COBOL Analyzer
 extension, so they are read by users rather than discarded.
 
-The scan is now `_unterminated_data_entries()`: `_DATA_ENTRY_START_RE`
-(`\d{1,2}` + name -- single-digit levels included, or a `5 FIELD-B` would be
-swallowed by the entry above it) marks where each entry begins, the entry
-runs to the line that starts the next one (or to an `EXEC` block, or EOF),
-and the *joined* entry text is checked for a trailing period. `_DATA_DEF_RE`
-survives as the "is this entry a PICTURE entry at all" predicate, now matched
-against the whole entry with `DOTALL` rather than against one line.
+The scan is now `_unterminated_data_entries()`: `_DATA_ENTRY_START_RE` marks
+where each entry begins, the entry runs to the line that starts the next one
+(or to an `EXEC` block, or EOF), and the *joined* entry text is checked for a
+trailing period. `_DATA_DEF_RE` survives as the "is this entry a PICTURE
+entry at all" predicate, now matched against the whole entry with `DOTALL`
+rather than against one line.
+
+Both patterns are built from one shared `_ENTRY_HEAD` fragment (`\d{1,2}` +
+name -- single-digit levels included, since `5 FIELD-B` is legal COBOL).
+They must agree on what an entry head looks like, and a first cut of this
+fix had them disagree: entry-start detection took `\d{1,2}` while the
+predicate still carried the original `\d{2}`, so an entry starting at a
+single-digit level closed the entry above it (correct) but could never be
+reported for its own missing period (silently unchecked). Sharing the
+fragment is what makes that class of drift impossible rather than merely
+currently-absent; `test_single_digit_level_entry_is_checked_like_any_other`
+pins both directions.
 
 Blank lines deliberately do NOT close an entry: `remove_comment_lines` blanks
 comment lines to whitespace *before* this runs (see the 2026-07-27 entry
