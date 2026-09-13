@@ -209,6 +209,12 @@ from .profiling import (
     FunctionProfile,
     ProfilingResult,
 )
+from .scan import (
+    ScanOptions,
+    ScanReport,
+    cross_file_clone_groups,
+    scan_files,
+)
 
 # Other dialects will be added when implemented
 # from .dialects import (
@@ -261,6 +267,11 @@ __all__ = [
     # Batch parsing
     "parse_files",
     "BatchResult",
+    # Multi-file analyzer scan
+    "scan_files",
+    "ScanOptions",
+    "ScanReport",
+    "cross_file_clone_groups",
     # Profiling
     "ProfilingResult",
     "FunctionProfile",

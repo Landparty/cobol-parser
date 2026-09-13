@@ -11,7 +11,7 @@ Covers:
 """
 
 from cobolparser.analysis.dead_code import DeadCodeAnalyzer
-from cobolparser.analysis.redundancy import RedundancyAnalyzer
+from cobolparser.analysis.redundancy import RedundancyAnalyzer, _canonical
 from cobolparser.analysis.unused_variables import UnusedVariableAnalyzer
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.program import CobolDivision, CobolParagraph, CobolProgram
@@ -387,3 +387,216 @@ class TestReportSerialization:
             assert key in summary
         assert summary["clone_group_count"] == 1
         assert summary["cloned_statement_count"] == 8
+
+
+class TestParagraphFingerprints:
+    """The digests that make clone detection work ACROSS programs.
+
+    `clone_groups` can only ever answer "which paragraphs in this one
+    program duplicate each other". These tests pin the property the
+    cross-file consumer actually depends on: two paragraphs in two
+    SEPARATE programs, neither duplicated within its own file (so neither
+    program reports a clone group at all), still carry equal digests.
+    """
+
+    @staticmethod
+    def _fingerprint(report, name: str):
+        for fingerprint in report.paragraph_fingerprints:
+            if fingerprint.name == name:
+                return fingerprint
+        return None
+
+    def test_identical_paragraphs_in_separate_programs_share_a_type1_digest(
+        self,
+    ) -> None:
+        body = """\
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           DISPLAY "DONE"
+           STOP RUN.
+"""
+        _, left = _analyze(
+            HEADER + "       PROCEDURE DIVISION.\n       ONLY-PARA.\n" + body
+        )
+        _, right = _analyze(
+            HEADER + "       PROCEDURE DIVISION.\n       OTHER-NAME.\n" + body
+        )
+
+        # Neither program duplicates anything internally, which is exactly
+        # the case the group-level report cannot see.
+        assert left.clone_groups == []
+        assert right.clone_groups == []
+
+        a = self._fingerprint(left, "ONLY-PARA")
+        b = self._fingerprint(right, "OTHER-NAME")
+        assert a is not None and b is not None
+        assert a.type1 == b.type1
+        assert a.statement_count == b.statement_count == 4
+
+    def test_renamed_identifiers_share_a_type2_digest_but_not_type1(self) -> None:
+        _, left = _analyze(HEADER + """\
+       PROCEDURE DIVISION.
+       ONLY-PARA.
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           DISPLAY "DONE"
+           STOP RUN.
+""")
+        _, right = _analyze(HEADER + """\
+       PROCEDURE DIVISION.
+       OTHER-NAME.
+           MOVE 1 TO WS-C
+           MOVE 2 TO WS-A
+           DISPLAY "DONE"
+           STOP RUN.
+""")
+        a = self._fingerprint(left, "ONLY-PARA")
+        b = self._fingerprint(right, "OTHER-NAME")
+        assert a is not None and b is not None
+        assert a.type1 != b.type1
+        assert a.type2 == b.type2
+
+    def test_a_changed_literal_breaks_both_digests(self) -> None:
+        """A literal is behavior, not a name -- the Type-2 pass must not
+        normalize it away, or a scan would report two paragraphs that write
+        different values as duplicates."""
+        _, left = _analyze(HEADER + """\
+       PROCEDURE DIVISION.
+       ONLY-PARA.
+           MOVE 1 TO WS-A
+           DISPLAY "ALPHA"
+           STOP RUN.
+""")
+        _, right = _analyze(HEADER + """\
+       PROCEDURE DIVISION.
+       ONLY-PARA.
+           MOVE 1 TO WS-A
+           DISPLAY "OMEGA"
+           STOP RUN.
+""")
+        a = self._fingerprint(left, "ONLY-PARA")
+        b = self._fingerprint(right, "ONLY-PARA")
+        assert a is not None and b is not None
+        assert a.type1 != b.type1
+        assert a.type2 != b.type2
+
+    def test_digests_agree_with_the_within_program_grouping(self) -> None:
+        """The two halves of this module must not be able to disagree: a
+        pair the group pass calls a Type-1 clone must have equal `type1`
+        digests, and vice versa."""
+        source = HEADER + """\
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           PERFORM CLONE-A
+           PERFORM CLONE-B
+           STOP RUN.
+       CLONE-A.
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           DISPLAY "DONE"
+           STOP RUN.
+       CLONE-B.
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           DISPLAY "DONE"
+           STOP RUN.
+"""
+        _, report = _analyze(source)
+        group = _group_with(report, "CLONE-A")
+        assert group is not None and group.clone_type == "TYPE_1"
+
+        digests = {
+            m.name: self._fingerprint(report, m.name).type1 for m in group.members
+        }
+        assert len(set(digests.values())) == 1
+
+    def test_min_clone_statements_filters_fingerprints_too(self) -> None:
+        """The same threshold the group pass applies: a paragraph too small
+        to be meaningful redundancy in one program is no more meaningful
+        across two."""
+        source = HEADER + """\
+       PROCEDURE DIVISION.
+       BIG-PARA.
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           DISPLAY "DONE"
+           STOP RUN.
+       TINY-PARA.
+           STOP RUN.
+"""
+        _, report = _analyze(source)
+        names = {f.name for f in report.paragraph_fingerprints}
+        assert "BIG-PARA" in names
+        assert "TINY-PARA" not in names
+
+        _, permissive = _analyze(source, min_clone_statements=1)
+        assert "TINY-PARA" in {f.name for f in permissive.paragraph_fingerprints}
+
+    def test_digest_is_stable_across_runs(self) -> None:
+        """The digest travels between processes -- a scan hashes it in one
+        worker and groups it in another -- so it may never depend on
+        anything per-run (an id(), a PYTHONHASHSEED-sensitive hash())."""
+        source = HEADER + """\
+       PROCEDURE DIVISION.
+       ONLY-PARA.
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           DISPLAY "DONE"
+           STOP RUN.
+"""
+        _, first = _analyze(source)
+        _, second = _analyze(source)
+        assert (
+            first.paragraph_fingerprints[0].type1
+            == second.paragraph_fingerprints[0].type1
+        )
+        assert (
+            first.paragraph_fingerprints[0].type2
+            == second.paragraph_fingerprints[0].type2
+        )
+
+    def test_to_dict_carries_fingerprints(self) -> None:
+        source = HEADER + """\
+       PROCEDURE DIVISION.
+       ONLY-PARA.
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           DISPLAY "DONE"
+           STOP RUN.
+"""
+        _, report = _analyze(source)
+        entries = report.to_dict()["paragraph_fingerprints"]
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry["name"] == "ONLY-PARA"
+        assert entry["statement_count"] == 4
+        assert len(entry["type1"]) == 16
+        assert len(entry["type2"]) == 16
+        assert entry["location"]["line"] > 0
+
+
+class TestFingerprintSerialization:
+    """`_canonical` is what the digest is taken over, so its injectivity is
+    the whole correctness argument for the digest."""
+
+    def test_length_prefix_stops_content_forging_structure(self) -> None:
+        """Without the length prefix, ("A,B",) and ("A", "B") would
+        serialize alike and two structurally different paragraphs would
+        collide."""
+        assert _canonical(("A,B",)) != _canonical(("A", "B"))
+
+    def test_none_and_the_string_none_are_distinct(self) -> None:
+        """EVALUATE's absent WHEN OTHER is None; a paragraph whose operand
+        is literally the text "N" must not look like it."""
+        assert _canonical(None) != _canonical("N")
+
+    def test_nesting_is_not_flattened(self) -> None:
+        assert _canonical((("A",), ("B",))) != _canonical(("A", "B"))
+
+    def test_a_non_string_scalar_is_carried_through(self) -> None:
+        """A PERFORM_INLINE fingerprint carries `perform_type`, which is not
+        a str. It must serialize, and it must not collide with the string of
+        the same text -- hence the distinct `V` prefix."""
+        assert _canonical(3) != _canonical("3")
+        assert _canonical(("PERFORM_INLINE", 3)) == _canonical(("PERFORM_INLINE", 3))
+        assert _canonical(("PERFORM_INLINE", 3)) != _canonical(("PERFORM_INLINE", 4))

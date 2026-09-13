@@ -30,6 +30,8 @@ _SUBCOMMANDS = frozenset(
         "recursion-check",
         "complexity",
         "health",
+        "redundancy",
+        "scan",
         "io-sequence",
         "move-type-check",
         "linkage-check",
@@ -2048,6 +2050,271 @@ def _cmd_health(args: argparse.Namespace) -> None:
     _emit_report(report.to_dict(), args, prof, ast)
 
 
+# -- Subcommand: redundancy ---------------------------------------------------
+
+
+def _build_redundancy_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "redundancy",
+        help=(
+            "Report dead code, unused variables and duplicate-paragraph "
+            "clone groups, with a structural digest per paragraph"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser redundancy program.cbl\n"
+            "  cobol-parser redundancy program.cbl --min-clone-statements 5"
+        ),
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    _add_compact_arg(p)
+    _add_source_format_args(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_program_arg(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    _add_profiling_args(p)
+    _add_min_clone_statements_arg(p)
+    p.set_defaults(func=_cmd_redundancy)
+
+
+def _add_min_clone_statements_arg(p: argparse.ArgumentParser) -> None:
+    """The clone-size floor, shared by ``redundancy`` and ``scan``.
+
+    Both subcommands must default to the same number, and to the same one
+    ``RedundancyAnalyzer.analyze`` defaults to: a workspace scan and a
+    single-file run that disagreed about what counts as a clone would report
+    different clone groups for the same program, which reads as a bug in
+    whichever one the user ran second.
+    """
+    p.add_argument(
+        "--min-clone-statements",
+        type=int,
+        default=3,
+        metavar="N",
+        help=(
+            "Smallest paragraph (in leaf statements) eligible to be reported "
+            "as a clone. Below this, two trivially-small paragraphs matching "
+            "each other is not meaningful redundancy. Default: 3."
+        ),
+    )
+
+
+def _cmd_redundancy(args: argparse.Namespace) -> None:
+    from ..analysis.redundancy import RedundancyAnalyzer
+
+    ast, prof = _parse_or_fail(args)
+
+    report = RedundancyAnalyzer().analyze(
+        ast, min_clone_statements=max(1, args.min_clone_statements)
+    )
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
+# -- Subcommand: scan ---------------------------------------------------------
+
+
+def _build_scan_parser(subparsers: argparse._SubParsersAction) -> None:
+    from ..scan import ANALYZERS, DEFAULT_ANALYZERS
+
+    p = subparsers.add_parser(
+        "scan",
+        help=(
+            "Run analyzers over many files in one process, with per-file "
+            "fault isolation and cross-file clone detection"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser scan src/*.cbl\n"
+            "  cobol-parser scan --glob 'src/**/*.cbl' --workers 8\n"
+            "  cobol-parser scan --glob 'src/**/*.cbl' --analyzer health --clones\n"
+            "\n"
+            "Unlike running an analyzer once per file, the parse and the\n"
+            "analysis both happen inside a worker and only the reports come\n"
+            "back, so a whole checkout fits in one invocation. A file that\n"
+            "cannot be read or parsed is reported under `failures` and costs\n"
+            "the scan nothing else."
+        ),
+    )
+    p.add_argument("files", nargs="*", help="Paths to COBOL source files")
+    p.add_argument(
+        "--glob",
+        action="append",
+        default=[],
+        metavar="PATTERN",
+        help="Glob pattern to collect source files (repeatable, e.g. 'src/**/*.cbl')",
+    )
+    p.add_argument(
+        "--files-from",
+        metavar="FILE",
+        help=(
+            "Read the file list from FILE, one path per line (blank lines and "
+            "lines starting with # are skipped; '-' reads stdin). Combines "
+            "with file arguments and --glob. Needed for a list too long for "
+            "the command line: a Windows command line caps at 8191 "
+            "characters, which a few dozen absolute paths already exceed."
+        ),
+    )
+    p.add_argument(
+        "--analyzer",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "Analyzer to run (repeatable, or comma-separated). One of: "
+            + ", ".join(ANALYZERS)
+            + ". Default: "
+            + ",".join(DEFAULT_ANALYZERS)
+            + "."
+        ),
+    )
+    p.add_argument(
+        "--clones",
+        action="store_true",
+        help=(
+            "Also group every scanned paragraph into cross-file clone groups. "
+            "Requires the `redundancy` analyzer (in the default set); a scan "
+            "without it reports no groups rather than an empty result."
+        ),
+    )
+    p.add_argument(
+        "--min-clone-members",
+        type=int,
+        default=2,
+        metavar="N",
+        help="Smallest cross-file clone group to report with --clones. Default: 2.",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Number of worker processes (default: CPU count)",
+    )
+    p.add_argument(
+        "--encoding",
+        default="utf-8",
+        help="File encoding (default: utf-8)",
+    )
+    _add_compact_arg(p)
+    _add_source_format_args(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_output_arg(p)
+    _add_min_clone_statements_arg(p)
+    p.set_defaults(func=_cmd_scan)
+
+
+def _collect_scan_files(args: argparse.Namespace) -> list[str]:
+    """Explicit paths plus every ``--glob`` expansion, deduped, in order.
+
+    Lifted from ``_cmd_batch``'s own collection, and deliberately identical
+    to it: the two subcommands take the same ``files``/``--glob`` pair, and a
+    user who learned one spelling should not discover that the other resolves
+    duplicates differently.
+    """
+    import glob as _glob
+    from pathlib import Path as _Path
+
+    file_list: list[str] = list(args.files)
+    file_list.extend(_read_file_list(getattr(args, "files_from", None)))
+    for pattern in args.glob:
+        expanded = sorted(_glob.glob(pattern, recursive=True))
+        if not expanded:
+            print(
+                f"warning: glob pattern {pattern!r} matched no files", file=sys.stderr
+            )
+        file_list.extend(expanded)
+
+    # Dedup on the resolved path so ./a.cbl, a.cbl and /abs/a.cbl are one file.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for path in file_list:
+        key = str(_Path(path).resolve())
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
+
+
+def _read_file_list(source: str | None) -> list[str]:
+    """Paths from a list file, one per line. ``-`` reads stdin.
+
+    Blank lines and ``#`` comments are skipped so the file can be generated
+    with a header, and each line is stripped -- a trailing ``\r`` from a
+    list written on Windows would otherwise become part of the path and the
+    file would be reported as unreadable with a confusing name.
+    """
+    if not source:
+        return []
+    if source == "-":
+        text = sys.stdin.read()
+    else:
+        from pathlib import Path as _Path
+
+        try:
+            text = _Path(source).read_text(encoding="utf-8")
+        except OSError as exc:
+            _fail(f"--files-from could not be read: {exc}")
+    out: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#"):
+            out.append(line)
+    return out
+
+
+def _cmd_scan(args: argparse.Namespace) -> None:
+    from ..scan import (
+        ScanOptions,
+        cross_file_clone_groups,
+        parse_analyzer_list,
+        scan_files,
+    )
+
+    files = _collect_scan_files(args)
+    if not files:
+        _fail("No input files specified. Provide file arguments or use --glob.")
+
+    if args.workers is not None and args.workers < 1:
+        _fail("--workers must be >= 1")
+
+    analyzers = parse_analyzer_list(args.analyzer)
+    options = ScanOptions(
+        analyzers=analyzers,
+        dialect=_DIALECT_MAP[args.dialect],
+        error_recovery=_get_error_recovery(args),
+        copybook_paths=tuple(getattr(args, "copybook_path", []) or []),
+        min_clone_statements=max(1, args.min_clone_statements),
+        encoding=args.encoding,
+        free_form=bool(_source_format_kwargs(args).get("free_form", False)),
+    )
+
+    try:
+        report = scan_files(files, options, workers=args.workers)
+    except ValueError as exc:
+        # An unknown --analyzer name. argparse `choices` would reject the
+        # comma-separated spelling this flag accepts, so the check lives in
+        # scan_files and its message is already the one to print.
+        _fail(str(exc))
+
+    output = report.to_dict()
+    if args.clones:
+        groups = cross_file_clone_groups(
+            report, min_members=max(2, args.min_clone_members)
+        )
+        output["cross_file_clone_groups"] = [g.to_dict() for g in groups]
+        output["summary"]["cross_file_clone_group_count"] = len(groups)
+
+    _json_out(output, args.compact, getattr(args, "output", None))
+
+
 # -- Subcommand: io-sequence --------------------------------------------------
 
 
@@ -2726,6 +2993,8 @@ def _build_parser() -> argparse.ArgumentParser:
         profiling=True,
         examples="  cobol-parser dclgen-check program.cbl",
     )
+    _build_redundancy_parser(subparsers)
+    _build_scan_parser(subparsers)
     _build_lint_parser(subparsers)
     _build_analyzer_parser(
         subparsers,

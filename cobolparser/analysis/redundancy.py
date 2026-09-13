@@ -27,6 +27,7 @@ Combines two kinds of "this code is redundant weight, not real work":
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -188,6 +189,84 @@ class _Fingerprinter:
         return (stype, operands)
 
 
+def _canonical(fingerprint: Any) -> str:
+    """Serialize a fingerprint tuple to one deterministic string.
+
+    Written out rather than leaning on ``repr()`` because this string is
+    hashed into a digest that travels *between processes and between
+    programs* (see :class:`ParagraphFingerprint`): two paragraphs in two
+    different files must produce byte-identical text for identical
+    structure, on any interpreter, forever. ``repr()`` happens to satisfy
+    that today for tuples of ``str``/``None``, but it is a debugging
+    representation with no such guarantee, and a future quoting change in
+    CPython would silently break every stored digest rather than fail
+    loudly.
+
+    Strings are length-prefixed so no content can forge the structure:
+    without it, the one-element tuple ``("A,B",)`` and the two-element
+    ``("A", "B")`` would serialize alike and two structurally different
+    paragraphs would share a digest.
+    """
+    if fingerprint is None:
+        return "N"
+    if isinstance(fingerprint, str):
+        return f"S{len(fingerprint)}:{fingerprint}"
+    if isinstance(fingerprint, tuple):
+        return "T(" + ",".join(_canonical(part) for part in fingerprint) + ")"
+    # perform_type and friends: a non-str scalar carried through verbatim.
+    text = str(fingerprint)
+    return f"V{len(text)}:{text}"
+
+
+# 16 hex characters (64 bits). A workspace scan compares fingerprints across
+# every paragraph of every program it read -- tens of thousands in a large
+# shop -- and 64 bits keeps the chance of a collision among 100k paragraphs
+# around 3e-10. Truncating further to shorten the JSON would trade a real
+# correctness property for bytes.
+_DIGEST_BYTES = 8
+
+
+def _digest(fingerprint: Any) -> str:
+    return hashlib.blake2b(
+        _canonical(fingerprint).encode("utf-8"), digest_size=_DIGEST_BYTES
+    ).hexdigest()
+
+
+@dataclass
+class ParagraphFingerprint:
+    """One paragraph's structural digests, for clone detection across files.
+
+    :class:`CloneGroup` answers "which paragraphs in *this* program are
+    duplicates of each other". The far more common shape of COBOL copy-paste
+    is a paragraph cloned into a *different* program, where neither copy is
+    duplicated within its own file and no clone group is reported at all.
+    Answering that needs the fingerprints themselves rather than the groups
+    derived from them, so they are reported here and the grouping is left to
+    whoever holds more than one program's report.
+
+    Both digests are always present. A consumer merging across files must
+    apply the same precedence the within-program pass does -- group on
+    ``type1`` first, and only consider ``type2`` for paragraphs that did not
+    land in a Type-1 group -- or a pair of exact clones would be reported
+    twice, once under each type.
+    """
+
+    name: str
+    location: SourceLocation
+    statement_count: int
+    type1: str
+    type2: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "location": self.location.to_dict(),
+            "statement_count": self.statement_count,
+            "type1": self.type1,
+            "type2": self.type2,
+        }
+
+
 @dataclass
 class CloneMember:
     """One paragraph participating in a clone group."""
@@ -225,6 +304,11 @@ class RedundancyReport:
     unused_items: list[UnusedVariableItem] = field(default_factory=list)
     total_variables: int = 0
     clone_groups: list[CloneGroup] = field(default_factory=list)
+    #: Every clone-eligible paragraph's digests, in source order. The raw
+    #: material `clone_groups` is derived from, reported so a caller holding
+    #: several programs' reports can group across them -- see
+    #: :class:`ParagraphFingerprint`.
+    paragraph_fingerprints: list[ParagraphFingerprint] = field(default_factory=list)
 
     @property
     def dead_ratio(self) -> float:
@@ -249,6 +333,9 @@ class RedundancyReport:
             "dead_code": [item.to_dict() for item in self.dead_items],
             "unused_variables": [item.to_dict() for item in self.unused_items],
             "clone_groups": [g.to_dict() for g in self.clone_groups],
+            "paragraph_fingerprints": [
+                f.to_dict() for f in self.paragraph_fingerprints
+            ],
             "summary": {
                 "total_procedures": self.total_procedures,
                 "dead_procedure_count": len(self.dead_items),
@@ -308,6 +395,9 @@ class RedundancyAnalyzer:
             report.clone_groups = self._find_clone_groups(
                 proc_division, min_clone_statements
             )
+            report.paragraph_fingerprints = self._paragraph_fingerprints(
+                proc_division, min_clone_statements
+            )
 
         return report
 
@@ -318,6 +408,53 @@ class RedundancyAnalyzer:
             paragraphs.extend(section.paragraphs)
         paragraphs.extend(proc_division.paragraphs)
         return paragraphs
+
+    def _paragraph_fingerprints(
+        self, proc_division: CobolDivision, min_clone_statements: int
+    ) -> list[ParagraphFingerprint]:
+        """Both digests for every paragraph large enough to be a clone.
+
+        A pass of its own rather than a restructuring of
+        ``_find_clone_groups`` to compute and return both at once. That
+        would save one fingerprinting sweep, but it would also rewrite the
+        Type-1/Type-2 precedence logic that this module's tests pin
+        precisely, and fingerprinting is a tuple walk over an already-parsed
+        AST -- immaterial next to the parse that produced it. The two agree
+        because both build their fingerprints through the same
+        ``_Fingerprinter`` over the same ``_collect_paragraphs`` order.
+
+        ``min_clone_statements`` is applied here for the same reason
+        ``_find_clone_groups`` applies it: a paragraph too small to be
+        meaningful redundancy inside one program is no more meaningful
+        across two, and emitting every three-line paragraph in a 5,000-file
+        shop would dominate a scan's output for nothing.
+        """
+        out: list[ParagraphFingerprint] = []
+        for para in self._collect_paragraphs(proc_division):
+            if not para.paragraph_name:
+                continue
+            exact = _Fingerprinter(type2=False)
+            exact_fp = exact.fingerprint_paragraph(para)
+            # leaf_count is only populated by the walk above, so read it
+            # after fingerprinting, never before.
+            if exact.leaf_count == 0 or exact.leaf_count < min_clone_statements:
+                continue
+            renamed = _Fingerprinter(type2=True)
+            renamed_fp = renamed.fingerprint_paragraph(para)
+            out.append(
+                ParagraphFingerprint(
+                    # Uppercased to match CloneMember and every other
+                    # analyzer's procedure-name convention, so a consumer can
+                    # join a fingerprint to a dead-code or complexity entry
+                    # by name without re-casing either side.
+                    name=para.paragraph_name.upper(),
+                    location=para.location,
+                    statement_count=exact.leaf_count,
+                    type1=_digest(exact_fp),
+                    type2=_digest(renamed_fp),
+                )
+            )
+        return out
 
     def _find_clone_groups(
         self, proc_division: CobolDivision, min_clone_statements: int

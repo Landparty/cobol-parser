@@ -63,8 +63,53 @@ handle them. Pinned by
 `tests/integration/test_batch_coverage_gaps.py::TestParseFilesWithCopybooksParseException`
 and `::TestParseFilesWithCopybooksDecodeError`.
 
+# Multi-file analysis: `scan.py` (2026-09-13)
+
+```python
+from cobolparser import scan_files, ScanOptions, cross_file_clone_groups
+
+report = scan_files(paths, ScanOptions(analyzers=("health", "redundancy")), workers=8)
+report.ok_files / report.failed_files
+groups = cross_file_clone_groups(report)     # across programs, not within one
+```
+
+**A separate module from `batch.py`, deliberately.** `parse_files` hands
+every `ParseResult` -- and therefore every AST -- back to the caller, which
+is the right shape for a caller that wants the trees and the wrong one for
+"grade this whole checkout": a 5,000-file shop's ASTs do not usefully fit in
+one process, and pickling them out of each worker costs far more than the
+analysis does. `scan.py` inverts it -- parse and analyze both inside the
+worker, only the small JSON-shaped report dicts come back.
+
+Three properties it owes its caller, all pinned by `tests/unit/test_scan.py`:
+
+* **Fault isolation is per file.** A scan of a real legacy checkout WILL hit
+  files that do not parse (a half-migrated member, a JCL file with a `.cbl`
+  extension, an EBCDIC artifact), and one that aborts on the first can never
+  be run at all. Same principle as `parse_files` above, one level up.
+* **Every program unit is reported**, contained programs included, each with
+  its `depth`. Reporting only the outermost would present a contained
+  program as clean because nothing looked at it.
+* **Nothing is silently omitted.** An analyzer that raises on one unit lands
+  in that unit's `failed_analyzers`; the summary's
+  `file_count == scanned + failed` identity lets a consumer prove every file
+  was accounted for.
+
+A file whose copybook expansion fails is NOT dropped -- it falls back to the
+unexpanded parse, the same degradation `parse_files_with_copybooks` makes
+above. Copybook paths matter more here than they look: an unexpanded
+program's WORKING-STORAGE is missing whatever its COPY members declare, so
+`unused-variables` (and therefore `health`'s redundancy component, and
+therefore the grade a portfolio table sorts on) would grade a program
+against a record layout it cannot see.
+
+Backs `cobol-parser scan` (see cli.md) and the COBOL Analyzer extension's
+Analyze Workspace.
+
 # See Also
 
 * [parser.md](parser.md) — `CobolParser`/`parse_cobol` used per file
+* [analysis.md](analysis.md) — the analyzers `scan` runs, and the paragraph
+  fingerprints `cross_file_clone_groups` groups on
 * [preprocessing.md](preprocessing.md) — `expand_copybooks` used by the
   copybook-aware entry point

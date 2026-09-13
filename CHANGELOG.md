@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **analysis/cli:** clone detection now works **across programs**, not only
+  within one. `RedundancyAnalyzer` already fingerprinted every paragraph to
+  find duplicates inside a single file and then threw the fingerprints away,
+  so the commoner shape of COBOL copy-paste -- a paragraph cloned into a
+  *different* program, neither copy duplicated inside its own file -- was
+  invisible. `RedundancyReport` gained `paragraph_fingerprints`: per
+  paragraph, its Type-1 (exact) and Type-2 (renamed-identifier) digests, over
+  a canonical serialization written out rather than `repr()` because the
+  digest travels between processes and must be stable forever.
+* **cli:** new `cobol-parser redundancy <file.cbl>` subcommand -- the full
+  redundancy report (dead code, unused variables, clone groups, and the
+  fingerprints nothing else exposes). Previously `RedundancyAnalyzer` was
+  reachable only folded into `health`'s score and `redundancy_summary`.
+* **scan/cli:** new `cobolparser/scan.py` and `cobol-parser scan FILE...` --
+  run analyzers over a whole checkout in **one process**, with per-file fault
+  isolation, every program unit reported (contained programs included), and
+  `--clones` for cross-file clone grouping. The parse and the analysis both
+  happen inside the worker and only the report dicts come back, so a worker's
+  peak memory is one file's AST rather than the whole shop's. `scan_files`,
+  `ScanOptions`, `ScanReport` and `cross_file_clone_groups` are exported from
+  the top-level package. `--files-from` reads the file list from a file (a
+  Windows command line caps at 8191 characters, so a workspace scan cannot
+  put its paths on argv at all). Backs the COBOL Analyzer extension's
+  Analyze Workspace.
+
 * **preprocess/cli:** copybook expansion now reports **where every expanded
   line came from**. `expand_copybooks(preserve_source_locations=True)` builds
   a real `source_location_map` -- one `(file, original line)` per expanded
