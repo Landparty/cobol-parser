@@ -29,8 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   happen inside the worker and only the report dicts come back, so a worker's
   peak memory is one file's AST rather than the whole shop's. `scan_files`,
   `ScanOptions`, `ScanReport` and `cross_file_clone_groups` are exported from
-  the top-level package. Backs the COBOL Analyzer extension's Analyze
-  Workspace.
+  the top-level package. `--files-from` reads the file list from a file (a
+  Windows command line caps at 8191 characters, so a workspace scan cannot
+  put its paths on argv at all). Backs the COBOL Analyzer extension's
+  Analyze Workspace.
 
 * **preprocess/cli:** copybook expansion now reports **where every expanded
   line came from**. `expand_copybooks(preserve_source_locations=True)` builds

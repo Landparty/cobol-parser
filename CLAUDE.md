@@ -108,7 +108,7 @@ cobol-parser complexity <file.cbl>
 cobol-parser health <file.cbl>
 cobol-parser redundancy <file.cbl> [--min-clone-statements N]
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
-cobol-parser scan FILE... [--glob PATTERN] [--analyzer health|redundancy|complexity|dead-code|unused-variables] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR]
+cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR]
 cobol-parser io-sequence <file.cbl>
 cobol-parser move-type-check <file.cbl>
 cobol-parser linkage-check <file.cbl>

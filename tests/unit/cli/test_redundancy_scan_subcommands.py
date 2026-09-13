@@ -284,3 +284,144 @@ class TestScanSubcommand:
                 main()
         assert exit_info.value.code != 0
         assert "--glob" in capsys.readouterr().err
+
+
+class TestScanFilesFrom:
+    """A workspace scan cannot put its file list on the command line: a
+    Windows command line caps at 8191 characters, which a few dozen absolute
+    paths already exceed, and the COBOL Analyzer extension spawns through
+    `shell: true` on Windows. `--files-from` is what makes the whole feature
+    possible there, not a convenience."""
+
+    def test_reads_paths_from_a_list_file(self, tmp_path: Path, capsys) -> None:
+        paths = [
+            _write(tmp_path, "A.cbl", _program("PROGA", "ONLY-PARA")),
+            _write(tmp_path, "B.cbl", _program("PROGB", "OTHER-NAME")),
+        ]
+        listing = tmp_path / "files.txt"
+        listing.write_text("\n".join(paths) + "\n")
+
+        with patch(
+            "sys.argv",
+            [
+                "cobol-parser",
+                "scan",
+                "--files-from",
+                str(listing),
+                "--compact",
+                "--workers",
+                "1",
+            ],
+        ):
+            main()
+        data = json.loads(capsys.readouterr().out)
+        assert data["summary"]["file_count"] == 2
+        assert data["summary"]["scanned_file_count"] == 2
+
+    def test_blank_lines_and_comments_are_skipped(self, tmp_path: Path, capsys) -> None:
+        path = _write(tmp_path, "A.cbl", _program("PROGA", "ONLY-PARA"))
+        listing = tmp_path / "files.txt"
+        listing.write_text(f"# generated list\n\n{path}\n\n")
+
+        with patch(
+            "sys.argv",
+            [
+                "cobol-parser",
+                "scan",
+                "--files-from",
+                str(listing),
+                "--compact",
+                "--workers",
+                "1",
+            ],
+        ):
+            main()
+        assert json.loads(capsys.readouterr().out)["summary"]["file_count"] == 1
+
+    def test_windows_line_endings_do_not_corrupt_the_path(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A trailing \\r left on the path would make the file unreadable and
+        report a failure naming a path that looks correct."""
+        path = _write(tmp_path, "A.cbl", _program("PROGA", "ONLY-PARA"))
+        listing = tmp_path / "files.txt"
+        listing.write_bytes(f"{path}\r\n".encode())
+
+        with patch(
+            "sys.argv",
+            [
+                "cobol-parser",
+                "scan",
+                "--files-from",
+                str(listing),
+                "--compact",
+                "--workers",
+                "1",
+            ],
+        ):
+            main()
+        data = json.loads(capsys.readouterr().out)
+        assert data["summary"]["scanned_file_count"] == 1
+        assert data["failures"] == []
+
+    def test_combines_with_explicit_file_arguments(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        listed = _write(tmp_path, "A.cbl", _program("PROGA", "ONLY-PARA"))
+        explicit = _write(tmp_path, "B.cbl", _program("PROGB", "OTHER-NAME"))
+        listing = tmp_path / "files.txt"
+        listing.write_text(listed + "\n")
+
+        with patch(
+            "sys.argv",
+            [
+                "cobol-parser",
+                "scan",
+                explicit,
+                "--files-from",
+                str(listing),
+                "--compact",
+                "--workers",
+                "1",
+            ],
+        ):
+            main()
+        assert json.loads(capsys.readouterr().out)["summary"]["file_count"] == 2
+
+    def test_a_path_listed_twice_is_scanned_once(self, tmp_path: Path, capsys) -> None:
+        path = _write(tmp_path, "A.cbl", _program("PROGA", "ONLY-PARA"))
+        listing = tmp_path / "files.txt"
+        listing.write_text(f"{path}\n{path}\n")
+
+        with patch(
+            "sys.argv",
+            [
+                "cobol-parser",
+                "scan",
+                "--files-from",
+                str(listing),
+                "--compact",
+                "--workers",
+                "1",
+            ],
+        ):
+            main()
+        assert json.loads(capsys.readouterr().out)["summary"]["file_count"] == 1
+
+    def test_an_unreadable_list_file_fails_loudly(self, tmp_path: Path, capsys) -> None:
+        """Not silently an empty scan: a typo'd list path would otherwise
+        report 'no input files' and look like an empty workspace."""
+        with patch(
+            "sys.argv",
+            [
+                "cobol-parser",
+                "scan",
+                "--files-from",
+                str(tmp_path / "nope.txt"),
+                "--compact",
+            ],
+        ):
+            with pytest.raises(SystemExit) as exit_info:
+                main()
+        assert exit_info.value.code != 0
+        assert "--files-from" in capsys.readouterr().err

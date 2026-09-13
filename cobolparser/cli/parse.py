@@ -2150,6 +2150,17 @@ def _build_scan_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Glob pattern to collect source files (repeatable, e.g. 'src/**/*.cbl')",
     )
     p.add_argument(
+        "--files-from",
+        metavar="FILE",
+        help=(
+            "Read the file list from FILE, one path per line (blank lines and "
+            "lines starting with # are skipped; '-' reads stdin). Combines "
+            "with file arguments and --glob. Needed for a list too long for "
+            "the command line: a Windows command line caps at 8191 "
+            "characters, which a few dozen absolute paths already exceed."
+        ),
+    )
+    p.add_argument(
         "--analyzer",
         action="append",
         default=[],
@@ -2212,6 +2223,7 @@ def _collect_scan_files(args: argparse.Namespace) -> list[str]:
     from pathlib import Path as _Path
 
     file_list: list[str] = list(args.files)
+    file_list.extend(_read_file_list(getattr(args, "files_from", None)))
     for pattern in args.glob:
         expanded = sorted(_glob.glob(pattern, recursive=True))
         if not expanded:
@@ -2229,6 +2241,33 @@ def _collect_scan_files(args: argparse.Namespace) -> list[str]:
             seen.add(key)
             unique.append(path)
     return unique
+
+
+def _read_file_list(source: str | None) -> list[str]:
+    """Paths from a list file, one per line. ``-`` reads stdin.
+
+    Blank lines and ``#`` comments are skipped so the file can be generated
+    with a header, and each line is stripped -- a trailing ``\r`` from a
+    list written on Windows would otherwise become part of the path and the
+    file would be reported as unreadable with a confusing name.
+    """
+    if not source:
+        return []
+    if source == "-":
+        text = sys.stdin.read()
+    else:
+        from pathlib import Path as _Path
+
+        try:
+            text = _Path(source).read_text(encoding="utf-8")
+        except OSError as exc:
+            _fail(f"--files-from could not be read: {exc}")
+    out: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#"):
+            out.append(line)
+    return out
 
 
 def _cmd_scan(args: argparse.Namespace) -> None:

@@ -724,7 +724,7 @@ counts as a clone would report different groups for the same program.
 ## `scan` (2026-09-13)
 
 ```
-cobol-parser scan FILE... [--glob PATTERN]... [--analyzer NAME]... [--clones]
+cobol-parser scan FILE... [--glob PATTERN]... [--files-from LIST] [--analyzer NAME]... [--clones]
                           [--min-clone-members N] [--min-clone-statements N]
                           [--workers N] [--copybook-path DIR] [--encoding ENC]
                           [--compact] [-o out.json]
@@ -750,6 +750,15 @@ every shop's programs open with a near-identical four-statement
 `0000-MAIN-PROCESS`, and ranking on spread buries a sixteen-statement
 verbatim copy under that boilerplate. Requires the `redundancy` analyzer;
 without it no groups are reported rather than an empty result.
+
+`--files-from FILE` reads the list from a file, one path per line (`-` for
+stdin, `#` comments and blank lines skipped, each line stripped so a
+Windows `\r` never becomes part of a path). Not a convenience: a Windows
+command line caps at 8191 characters, which a few dozen absolute paths
+already exceed, and the COBOL Analyzer extension spawns through
+`shell: true` there -- so this is what makes a workspace scan possible at
+all on that platform. An unreadable list file exits 1 rather than scanning
+nothing, since "no input files" would read as an empty workspace.
 
 Output carries `scan_version` (read it before trusting any other key), an
 `analyzers` echo, a `summary` whose `file_count == scanned + failed` by
