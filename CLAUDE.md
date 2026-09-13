@@ -573,9 +573,9 @@ tests/
 
 ### Coverage Requirement
 
-90% line coverage is enforced by `--cov-fail-under=90` in `pyproject.toml`'s `addopts`, and branch coverage is enabled. Full-suite total as of 2026-09-07: **91.76%**.
+90% line coverage is enforced by `--cov-fail-under=90` in `pyproject.toml`'s `addopts`, and branch coverage is enabled. Full-suite total as of 2026-09-13: **92.11%** (26,929 statements, 10,167 tests).
 
-**Measure it on a pure-Python build.** coverage.py cannot see into a compiled Cython extension, so once `build_ext --inplace` has run, the pure-Python bodies those extensions shadow read as unexecuted: the same suite reports 54.32% with the extensions built and 91.76% without. CI splits the two accordingly — the `build` matrix runs the suite `--no-cov` after `build_ext` (its job is to exercise the extensions), and a separate `coverage` job installs with `COBOLPARSER_SKIP_EXT=1` and enforces the floor. Locally, use `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` before trusting a coverage number.
+**Measure it on a pure-Python build.** coverage.py cannot see into a compiled Cython extension, so once `build_ext --inplace` has run, the pure-Python bodies those extensions shadow read as unexecuted: the same suite, on one commit (2026-09-07), reported 54.32% with the extensions built and 91.76% without. CI splits the two accordingly — the `build` matrix runs the suite `--no-cov` after `build_ext` (its job is to exercise the extensions), and a separate `coverage` job installs with `COBOLPARSER_SKIP_EXT=1` and enforces the floor. Locally, use `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` before trusting a coverage number.
 
 When running only a subset of tests, expect the check to fail -- that is normal and unrelated.
 
@@ -588,7 +588,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main` (and manua
 3. **build** -- `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` + `python -m pytest tests/ -q -p no:randomly -n auto --no-cov` on matrix: Python 3.11, 3.12, 3.13 (verifies install, the Cython extension build, and the full suite against those extensions; runs only on PRs/dispatch, not on push to `main`)
 4. **coverage** -- `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` + the full suite on Python 3.13, enforcing `--cov-fail-under=90` (PRs/dispatch only)
 
-The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather than the pure-Python fallback -- with `--no-cov`, because coverage.py cannot see into a compiled extension (54.32% with them built vs 91.76% without). The `coverage` job is where `--cov-fail-under=90` is enforced, on a pure-Python install. A push to `main` runs lint and typecheck only. Run the suite locally during development too (`python -m pytest tests/ -v`).
+The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather than the pure-Python fallback -- with `--no-cov`, because coverage.py cannot see into a compiled extension (54.32% with them built vs 91.76% without, measured together on 2026-09-07). The `coverage` job is where `--cov-fail-under=90` is enforced, on a pure-Python install. A push to `main` runs lint and typecheck only. Run the suite locally during development too (`python -m pytest tests/ -v`).
 
 ## Release & Distribution
 
