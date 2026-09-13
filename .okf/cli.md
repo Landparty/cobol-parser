@@ -705,12 +705,68 @@ usage, sign, and missing null indicators. Registered via
 `_build_analyzer_parser(..., profiling=True)` like the other analyzer
 subcommands, and also available as the `dclgen-check` rule of `lint`.
 
+## `redundancy` (2026-09-13)
+
+```
+cobol-parser redundancy <file.cbl> [--min-clone-statements N] [--program NAME]
+                                   [--copybook-path DIR] [--compact] [-o out.json]
+```
+
+`RedundancyAnalyzer`'s whole report: `dead_code`, `unused_variables`,
+`clone_groups`, and `paragraph_fingerprints` -- the last of which no other
+subcommand exposes (`health` folds redundancy into a score and a summary and
+drops the digests). Built with its own parser rather than
+`_build_analyzer_parser` only because of `--min-clone-statements`, which it
+shares with `scan` through `_add_min_clone_statements_arg` so the two cannot
+default differently: a scan and a single-file run that disagreed about what
+counts as a clone would report different groups for the same program.
+
+## `scan` (2026-09-13)
+
+```
+cobol-parser scan FILE... [--glob PATTERN]... [--analyzer NAME]... [--clones]
+                          [--min-clone-members N] [--min-clone-statements N]
+                          [--workers N] [--copybook-path DIR] [--encoding ENC]
+                          [--compact] [-o out.json]
+```
+
+Many files, one process. Unlike running an analyzer once per file, the parse
+*and* the analysis happen inside a worker and only the report dicts come
+back, so a whole checkout fits in one invocation and a worker's peak memory
+is one file's AST. Implemented in `cobolparser/scan.py` (not `batch.py` --
+see batch.md for why the two are separate).
+
+`--analyzer` takes both the repeated and the comma-separated spelling
+(`parse_analyzer_list`); one of `health`, `redundancy`, `complexity`,
+`dead-code`, `unused-variables`, defaulting to `health,redundancy`. An
+unknown name exits 1 naming the known set -- argparse `choices` would reject
+the comma spelling, so the check lives in `scan_files` instead.
+
+`--clones` additionally groups every scanned paragraph into cross-file clone
+groups by fingerprint (`cross_file_clone_groups`), Type-1 taking precedence
+over Type-2 exactly as the within-program pass does. Groups are ranked by
+*duplicated volume* (statements x members), NOT by how many files they span:
+every shop's programs open with a near-identical four-statement
+`0000-MAIN-PROCESS`, and ranking on spread buries a sixteen-statement
+verbatim copy under that boilerplate. Requires the `redundancy` analyzer;
+without it no groups are reported rather than an empty result.
+
+Output carries `scan_version` (read it before trusting any other key), an
+`analyzers` echo, a `summary` whose `file_count == scanned + failed` by
+construction, `files[]` and `failures[]`. A file that cannot be read or
+parsed is a `failures` entry and costs the scan nothing else; an analyzer
+that raises on one unit is named in that unit's `failed_analyzers` with its
+other reports intact. Every program unit of a multi-`PROGRAM-ID` file is
+reported, each with its nesting `depth` -- the same argument `lint` makes
+for linting every unit.
+
 # See Also
 
 * [analysis.md](analysis.md) — the underlying analyzers, including
   `BoundaryInventoryAnalyzer` (`gen-fixtures`, Phase 2) and
   `ConstraintExtractor`/`domains.solve()` (Phase 4, feeds `--scenarios`)
 * [parser.md](parser.md) — `parse_cobol` used by most subcommands
+* [batch.md](batch.md) — `scan_files` behind `scan`, and why it is not `batch.py`
 * [generators.md](generators.md) — `ProgramLayoutIndex` / `ProgramFixtureGenerator`
   / `FixtureBundle` / `ScenarioPlanner` (`gen-fixtures`, Phases 1, 3, 5-6)
 * [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) — the

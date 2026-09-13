@@ -779,8 +779,45 @@ unlike the walking-discipline tuples other analysis modules duplicate
 data-name" is a single well-defined question both modules ask, and a second
 list would just drift out of sync with the first for no benefit.
 
-CLI: embedded in `cobol-parser health <file.cbl>`'s `redundancy_summary` (no
-standalone `redundancy` subcommand in v1; see cli.md).
+### Paragraph fingerprints (cross-file clones, 2026-09-13)
+
+`report.paragraph_fingerprints: list[ParagraphFingerprint]` -- per paragraph:
+`name`, `location`, `statement_count`, and both digests (`type1`, `type2`) as
+16-hex-character blake2b over a canonical serialization of the same
+`_Fingerprinter` tuple the grouping uses.
+
+The reason it exists: `clone_groups` can only answer "which paragraphs in
+*this* program duplicate each other". The commoner shape of COBOL
+copy-paste is a paragraph cloned into a *different* program, where neither
+copy is duplicated inside its own file and no clone group is reported at
+all. Answering that needs the fingerprints, not the groups derived from
+them, so the digests are reported and the grouping across programs is left
+to whoever holds more than one report (`scan.cross_file_clone_groups`).
+
+Computed by `_paragraph_fingerprints`, a pass of its own rather than a
+restructuring of `_find_clone_groups` -- that would save one fingerprinting
+sweep but rewrite the Type-1/Type-2 precedence logic this module's tests pin
+precisely, and fingerprinting is immaterial next to the parse that produced
+the AST. Both build through the same `_Fingerprinter` over the same
+`_collect_paragraphs` order, so they cannot disagree (pinned by
+`test_digests_agree_with_the_within_program_grouping`).
+
+`_canonical` is written out rather than leaning on `repr()`: the digest
+travels between processes and between programs, so identical structure must
+serialize byte-identically on any interpreter forever, and `repr()` is a
+debugging representation with no such guarantee. Strings are
+length-prefixed so content cannot forge structure -- without it `("A,B",)`
+and `("A", "B")` would collide.
+
+`min_clone_statements` filters the emitted fingerprints as well as the
+groups: a paragraph too small to be meaningful redundancy inside one program
+is no more meaningful across two, and emitting every three-line paragraph in
+a 5,000-file shop would dominate a scan's output.
+
+CLI: `cobol-parser redundancy <file.cbl> [--min-clone-statements N]` for the
+full report (the only surface that exposes the fingerprints), and embedded in
+`cobol-parser health <file.cbl>`'s `redundancy_summary` as before. Across
+files: `cobol-parser scan --clones` (see cli.md and batch.md).
 
 ## TechnicalDebtAnalyzer (`technical_debt.py`, 2026-08-16)
 
