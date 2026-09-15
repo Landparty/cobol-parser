@@ -106,7 +106,9 @@ class ExecCICSStatement(CobolStatement):
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         result = super().to_dict()
-        result.update({"cics_command": self.cics_command, "options": self.cics_options})
+        result.update(
+            {"cics_command": self.cics_command, "cics_options": self.cics_options}
+        )
         return result
 
 
