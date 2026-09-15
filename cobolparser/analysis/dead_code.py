@@ -26,6 +26,7 @@ from ..models.statements.misc import (
     GobackStatement,
     MergeStatement,
     SortStatement,
+    XmlJsonStatement,
 )
 
 
@@ -149,6 +150,11 @@ class DeadCodeAnalyzer:
         # A strict subset of ``_referenced_names``: see the class docstring
         # for why a PERFORM/SORT-procedure target is excluded.
         self._fallthrough_sources: set[str] = set()
+        # Sections declared between DECLARATIVES. and END DECLARATIVES.
+        # (and their paragraphs): USE procedures the runtime invokes, so
+        # they are live without any PERFORM naming them, and they are never
+        # the program's entry point.
+        self._declarative_procs: set[str] = set()
 
     def analyze(self, ast: CobolProgram) -> DeadCodeReport:
         """Analyze a COBOL program for dead code.
@@ -167,20 +173,29 @@ class DeadCodeAnalyzer:
         self._range_ends = set()
         self._paragraph_nodes = {}
         self._fallthrough_sources = set()
+        self._declarative_procs = set()
 
         proc_division = ast.procedure_division
         if proc_division is None:
             return DeadCodeReport()
 
         self._collect_procedures(proc_division)
+        self._collect_declaratives(proc_division)
         self._collect_references(ast)
 
         # Entry point is always referenced. Marked before the fall-through
         # pass (which propagates left-to-right and needs to know the first
-        # procedure is reachable) rather than after.
-        if self._ordered_procedures:
-            self._referenced_names.add(self._ordered_procedures[0])
-            self._fallthrough_sources.add(self._ordered_procedures[0])
+        # procedure is reachable) rather than after. Declaratives come
+        # first in source order but are never the entry point: control
+        # enters at the first procedure after END DECLARATIVES.
+        entry = next(
+            (p for p in self._ordered_procedures if p not in self._declarative_procs),
+            None,
+        )
+        if entry is not None:
+            self._referenced_names.add(entry)
+            self._fallthrough_sources.add(entry)
+        self._referenced_names.update(self._declarative_procs)
 
         self._collect_fallthrough_refs()
 
@@ -261,6 +276,17 @@ class DeadCodeAnalyzer:
                         self._ordered_procedures.append(upper_pname)
                         self._paragraph_nodes[upper_pname] = item
 
+    def _collect_declaratives(self, proc_division: CobolDivision) -> None:
+        """Record every DECLARATIVES section and its paragraphs."""
+        for item in proc_division._sections.values():
+            if not isinstance(item, CobolSection) or not item.is_declarative:
+                continue
+            if item.section_name:
+                self._declarative_procs.add(item.section_name.upper())
+            for para in item.paragraphs:
+                if para.paragraph_name:
+                    self._declarative_procs.add(para.paragraph_name.upper())
+
     def _propagate_section_references(self) -> None:
         """Propagate section references in both directions.
 
@@ -325,6 +351,31 @@ class DeadCodeAnalyzer:
                 self._collect_alter_refs(stmt)
             elif isinstance(stmt, EntryStatement):
                 self._collect_entry_refs(stmt)
+            elif isinstance(stmt, XmlJsonStatement):
+                self._collect_xml_refs(stmt)
+            elif getattr(stmt, "node_type", None) == "EXEC_CICS":
+                self._collect_cics_handle_refs(stmt)
+
+    def _collect_xml_refs(self, stmt: XmlJsonStatement) -> None:
+        """``XML PARSE ... PROCESSING PROCEDURE p [THRU q]`` runs p (through
+        q) once per XML event -- an out-of-line PERFORM the parser invokes."""
+        if stmt.processing_procedure:
+            self._add_ref(stmt.processing_procedure)
+        if stmt.processing_procedure_thru:
+            self._add_ref(stmt.processing_procedure_thru)
+            self._mark_thru_range(
+                stmt.processing_procedure, stmt.processing_procedure_thru
+            )
+
+    def _collect_cics_handle_refs(self, stmt: Any) -> None:
+        """``EXEC CICS HANDLE AID|CONDITION|ABEND`` names paragraphs CICS
+        branches to (``PF3(9000-EXIT)``, ``NOTFND(9000-NOT-FOUND)``,
+        ``LABEL(9100-ABEND)``): each is a GO TO the runtime performs."""
+        if (getattr(stmt, "cics_command", "") or "").upper() != "HANDLE":
+            return
+        for value in (getattr(stmt, "options", None) or {}).values():
+            if value and self._is_valid_procedure_name(value):
+                self._add_goto_ref(value)
 
     def _collect_range_end(self, stmt: Any) -> None:
         """Record the closing paragraph of a PERFORM/SORT/MERGE THRU range.

@@ -61,6 +61,9 @@ _VERBOSE_EDGE_TYPES = {
     "SORT_OUTPUT_PROCEDURE_THRU",
     "MERGE_OUTPUT_PROCEDURE",
     "MERGE_OUTPUT_PROCEDURE_THRU",
+    "XML_PROCESSING_PROCEDURE",
+    "XML_PROCESSING_PROCEDURE_THRU",
+    "CICS_HANDLE",
     "ALTER",
     "IF_THEN",
     "IF_ELSE",
@@ -83,9 +86,11 @@ _PERFORM_EDGE_TYPE_VALUES = frozenset(
         "SORT_OUTPUT_PROCEDURE_THRU",
         "MERGE_OUTPUT_PROCEDURE",
         "MERGE_OUTPUT_PROCEDURE_THRU",
+        "XML_PROCESSING_PROCEDURE",
+        "XML_PROCESSING_PROCEDURE_THRU",
     }
 )
-_GOTO_EDGE_TYPE_VALUES = frozenset({"GOTO", "GOTO_DEPENDING", "ALTER"})
+_GOTO_EDGE_TYPE_VALUES = frozenset({"GOTO", "GOTO_DEPENDING", "ALTER", "CICS_HANDLE"})
 
 _RECURSION_LINK_STYLE = "stroke:#e0a800,stroke-width:2px,stroke-dasharray:5 5"
 _GOTO_LINK_STYLE = "stroke:#d6336c,stroke-width:2px,stroke-dasharray:3 3"
@@ -220,6 +225,9 @@ def _short_edge_label(edge_type: str) -> str:
         "SORT_OUTPUT_PROCEDURE_THRU": "SORT OUTPUT THRU",
         "MERGE_OUTPUT_PROCEDURE": "MERGE OUTPUT",
         "MERGE_OUTPUT_PROCEDURE_THRU": "MERGE OUTPUT THRU",
+        "XML_PROCESSING_PROCEDURE": "XML PARSE handler",
+        "XML_PROCESSING_PROCEDURE_THRU": "XML PARSE handler THRU",
+        "CICS_HANDLE": "CICS HANDLE",
         "ALTER": "ALTER",
         "FALL_THROUGH": "fall-through",
         "IF_BRANCH": "IF",

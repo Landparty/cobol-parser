@@ -477,9 +477,14 @@ class TestH7ConditionalCompilationWarnings:
         )
         assert any("unclosed >>IF" in w for w in warnings)
 
-    def test_unknown_directive_warns_but_passes_through(self):
+    def test_unknown_directive_warns_and_is_blanked(self):
+        """2026-09-15: an unknown ``>>`` directive is a compiler directive,
+        never program text, so it is blanked out (line count kept) with a
+        warning rather than passed to the lexer as a stray ``>>`` pair --
+        which the parser then reported as unparsed content."""
         out, warnings = self._preprocess(">>CALLINTERFACE DYNAMIC\nDISPLAY 'X'.\n")
-        assert ">>CALLINTERFACE DYNAMIC" in out
+        assert ">>CALLINTERFACE DYNAMIC" not in out
+        assert out == "\nDISPLAY 'X'."
         assert any("unknown compiler directive" in w for w in warnings)
 
     def test_evaluate_directive_is_now_supported(self):

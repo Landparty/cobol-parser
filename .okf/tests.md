@@ -928,3 +928,36 @@ too (see commands above).
   index, and program fixture bundle generator tests
 * [analysis.md](analysis.md) — `tests/unit/analysis/` covers analyzers
 * [parser.md](parser.md) — `tests/integration/` covers end-to-end parsing
+
+
+# Enterprise program-type corpus (2026-09-15)
+
+`tests/samples/enterprise/` holds one program per IBM Enterprise COBOL
+program type (22 programs + `copybooks/`; the matrix with every
+distinguishing construct is `docs/enterprise-program-types.md`).
+`tests/integration/test_enterprise_program_types.py` (`integration`
+marker) asserts, per program: a FAIL_FAST parse with no errors and no
+warnings other than the informational "Compilation unit contains N
+program units"; a JSON round trip; every analyzer over every unit without
+raising and `LintReport.failed_rules == []`; `gen-fixtures --scenarios
+all` and `scan` accepting it; and per-type traits (the CICS commands,
+DL/I function codes, MQ calls, OO unit tree, declarative sections, flow
+edges, 6.x data attributes ... that make the program its kind).
+`TestCorpusShape` fails when the directory and `PROGRAM_TYPES` disagree, so
+a new type has to be added to both. `tests/samples/*.cbl` smoke checks
+(`test_all_samples.py`) cover the corpus too, since it lives under
+`tests/samples/`. The same 22 files are copied into
+`mocky-mock/tests/fixtures/enterprise/`, where
+`tests/unit/test_enterprise_corpus.py` pins `mockymock generate`'s outcome
+per program.
+
+`tests/unit/test_enterprise_syntax.py` pins each construct the corpus
+surfaced in isolation: PROGRAM-ID attributes, OO units, DECLARATIVES,
+`USE BEFORE REPORTING`, the 6.x data clauses, `OCCURS UNBOUNDED`, JSON
+`CONVERTING`, `RETURNING`, `SET ADDRESS OF`, conditional compilation by
+default, and REPLACE partial words.
+
+Three older tests changed on purpose: the missing period after the
+`PROGRAM-ID` keyword is tolerated (IBM), the mandatory-PROGRAM-ID message
+names CLASS-ID / METHOD-ID too, and an unknown `>>` directive is blanked
+rather than passed through.

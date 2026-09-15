@@ -219,6 +219,13 @@ class IOSequenceAnalyzer:
 
         for entity in entities:
             if isinstance(entity, CobolSection):
+                # A DECLARATIVES section is a USE procedure the runtime
+                # invokes on an I/O error (or before a report group); it is
+                # not on the fall-through path and cannot be PERFORMed, so
+                # walking it inline reported its WRITE/CLOSE against a file
+                # state it never runs in (WRITE before OPEN, and so on).
+                if entity.is_declarative:
+                    continue
                 sec_name = (entity.section_name or "").upper()
                 start = len(self._linear)
                 for para in entity.paragraphs:

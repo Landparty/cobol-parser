@@ -158,8 +158,17 @@ class XmlJsonStatementParser(IStatementParser):
             # A new statement keyword ends the clause region -- unless it is
             # one of this construct's own clause words (SUPPRESS ..., NOT ON
             # EXCEPTION is handled above).
-            is_clause_word = upper in _CLAUSE_CONTINUATION_WORDS or (
-                seen_suppress and upper in _SUPPRESS_CONTINUATION_WORDS
+            is_clause_word = (
+                upper in _CLAUSE_CONTINUATION_WORDS
+                or (seen_suppress and upper in _SUPPRESS_CONTINUATION_WORDS)
+                # JSON GENERATE ... CONVERTING item TO JSON DECIMAL|BOOLEAN
+                # (Enterprise COBOL 6.3): the word JSON after TO is the
+                # target type, not the start of a new JSON statement.
+                or (
+                    upper == "JSON"
+                    and bool(clause_parts)
+                    and clause_parts[-1].upper() == "TO"
+                )
             )
             if is_statement_boundary(token) and not is_clause_word:
                 break

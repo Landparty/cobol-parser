@@ -103,7 +103,12 @@ _SEVERITY_LINKAGE: dict[str, str] = {
 # route (an unconditional PERFORM/GO TO loop, or a program that CALLs
 # itself) -- that is an infinite loop, not a smell. MEDIUM means an escape
 # route exists and the loop terminates if the data ever satisfies it.
-_SEVERITY_RECURSION: dict[str, str] = {"HIGH": "error", "MEDIUM": "warning"}
+# LOW is a self-CALL in a program declared IS RECURSIVE: legal, only noted.
+_SEVERITY_RECURSION: dict[str, str] = {
+    "HIGH": "error",
+    "MEDIUM": "warning",
+    "LOW": "info",
+}
 
 # Complexity is never an error: a 40-branch paragraph is hard to test, not
 # wrong. HIGH (above the thresholds' `high` band) is worth a warning, and

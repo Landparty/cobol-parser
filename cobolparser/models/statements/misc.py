@@ -519,6 +519,9 @@ class UseStatement(CobolStatement):
         self.use_type: str | None = None  # EXCEPTION, ERROR, DEBUGGING, REPORTING
         self.is_global: bool = False
         self.file_names: list[str] = []
+        #: ``USE BEFORE REPORTING group-name``: the report groups (Report
+        #: Writer) this declarative runs before, in source order.
+        self.report_groups: list[str] = []
 
     def set_use_type(self, use_type: str) -> None:
         self.use_type = use_type.upper()
@@ -529,6 +532,9 @@ class UseStatement(CobolStatement):
     def add_file_name(self, name: str) -> None:
         self.file_names.append(name)
 
+    def add_report_group(self, name: str) -> None:
+        self.report_groups.append(name)
+
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         result.update(
@@ -536,6 +542,7 @@ class UseStatement(CobolStatement):
                 "use_type": self.use_type,
                 "is_global": self.is_global,
                 "file_names": self.file_names,
+                "report_groups": list(self.report_groups),
             }
         )
         return result

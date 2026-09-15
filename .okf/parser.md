@@ -2776,3 +2776,92 @@ fixes. Pinned by `tests/regression/test_corpus_residual_findings.py`.
   `start_parser.py`).
 
 (see log 2026-09-02 for the XML/JSON structured-clause follow-up)
+
+
+# Enterprise program-type coverage (2026-09-15)
+
+`tests/samples/enterprise/` (one program per IBM Enterprise COBOL program
+type; matrix in `docs/enterprise-program-types.md`) is parsed FAIL_FAST with
+no errors and no warnings by
+`tests/integration/test_enterprise_program_types.py`. The parser changes it
+took, all in this release:
+
+## Object-oriented units (`CLASS-ID` / `FACTORY` / `OBJECT` / `METHOD-ID`)
+
+`IdentificationDivisionParser` accepts `CLASS-ID[.] name [INHERITS [FROM]
+name]` and `METHOD-ID[.] name` in the PROGRAM-ID position (metadata
+`unit_kind` = `"CLASS"` / `"METHOD"`, `inherits`; `program_id` carries the
+class/method name so the "mandatory" check and the program-name plumbing
+are unchanged). `parse_class_id_clause` / `parse_method_id_clause` are
+static so `CobolParser._handle_oo_unit_marker` can call them for the
+header-less forms: a bare `METHOD-ID` (IBM makes the IDENTIFICATION
+DIVISION header optional in front of it), the `FACTORY.` / `OBJECT.`
+paragraphs, and `END METHOD|FACTORY|OBJECT|CLASS [name] [.]`. Each opens a
+new `CobolProgram` (`unit_kind` `"FACTORY"` / `"OBJECT"` / `"METHOD"`)
+attached to the *current* unit when that unit is a class-family container
+(`_OO_CONTAINER_KINDS`) -- `_attach_new_unit` pushes the parent on
+`_unit_stack` and the `END` marker pops it -- so a class contains its
+factory and object units and those contain their methods. Nested
+`PROGRAM-ID` units keep their historical flat attachment to the primary
+program. Method names are alphanumeric literals in IBM (Java names are
+case-sensitive); `_unit_name` strips the quotes and keeps the case.
+
+Every division parser had to learn to stop at those markers: the
+identification loop (`_at_oo_unit_start`), the ENVIRONMENT division loop
+and `ConfigurationSectionParser._at_stop` (a class's REPOSITORY paragraph
+is the last thing before `FACTORY.`), and `ProcedureDivisionParser` (a
+factory's or object's PROCEDURE DIVISION is usually empty and followed by
+`METHOD-ID`; `END METHOD` etc. are in `_OO_UNIT_END_WORDS`). The "N
+program units" warning now counts every unit via `program_units()`.
+
+## PROGRAM-ID attributes and RETURNING
+
+`_parse_program_id` consumes `[IS] INITIAL | COMMON | RECURSIVE`
+(repeatable) and the optional trailing word `PROGRAM`; the period after
+the `PROGRAM-ID` keyword is optional (IBM). Attributes land in
+identification metadata `program_attributes` and on
+`CobolProgram.program_attributes` / `is_recursive`.
+`BaseDivisionParser.parse` records `PROCEDURE DIVISION ... RETURNING x` as
+metadata `returning_parameter` instead of a USING parameter.
+
+## DECLARATIVES
+
+`ProcedureDivisionParser.parse_division` consumes `DECLARATIVES.` and `END
+DECLARATIVES.` as markers (no pseudo-paragraphs any more) and flags every
+section opened in between: section dict key `declarative`, becoming
+`CobolSection` metadata `declarative` / property `is_declarative`.
+`UseStatementParser` understands `USE [GLOBAL] BEFORE REPORTING group...`
+(`use_type "REPORTING"`, `report_groups`) and skips the word `FOR`.
+
+## Data clauses (6.x)
+
+`data_clauses.py`: `VOLATILE`, `BYTE-LENGTH n`, `DYNAMIC LENGTH [LIMIT [IS]
+n]` and `[USAGE] [IS] OBJECT REFERENCE [[FACTORY OF] class]` branches
+(`_consume_integer`, `_at_object_reference`, `_parse_object_reference`);
+the four words joined `_PICTURE_TERMINATOR_KEYWORDS` so a PICTURE scan
+stops at them. `_parse_occurs_clause` handles `OCCURS UNBOUNDED DEPENDING
+ON` (peeked with `_peek_next_meaningful(offset=0)` so the count read's
+line-crossing guard keeps working; `min_times` 1, `max_times` None,
+`OccursClause.is_unbounded`). The Cython walker in `_data_fast.pyx` bails
+out to the Python path when the word after `OCCURS` is `UNBOUNDED` and when
+`USAGE [IS]` is followed by `OBJECT` (it used to delegate to
+`parse_usage_clause`, which took `OBJECT` as the usage and left `REFERENCE
+class` as dropped tokens -- the extension-built CI matrix would have caught
+what the pure-Python coverage job could not); the `.c` was regenerated. `PictureClause` accepts `U` (`_PIC_UTF8_RE`, one
+byte per symbol).
+
+## Statements
+
+`XmlJsonStatement`'s clause loop keeps `JSON` after `TO` (`CONVERTING x
+TO JSON DECIMAL`). `SetStatement.targets_are_address_of` is set by
+`SetStatementParser._collect_targets` for `SET ADDRESS OF x TO p` (it
+returns a third value now). `DeclareTableStatement` accepts a qualified
+`DECLARE SCHEMA.TABLE TABLE` (spaces around the period tolerated, name
+normalized).
+
+## Pre-header lines
+
+`CobolParser._skip_to_identification_division` keeps `>>` directive lines
+(and `CBL`/`PROCESS`) that precede the header instead of blanking them --
+`>>DEFINE` is legal anywhere and the conditional pass runs after this
+step.

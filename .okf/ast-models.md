@@ -454,3 +454,31 @@ pass and the CLI's `--program NAME` (see [cli.md](cli.md)). Pinned by
 
 * [parser.md](parser.md) — produces AST nodes
 * [analysis.md](analysis.md) — consumes AST via analyzer interfaces
+
+
+# Program-type corpus additions (2026-09-15)
+
+* `CobolProgram.unit_kind` -- `"PROGRAM"` (default; not serialized) or,
+  for IBM object-oriented COBOL, `"CLASS"` / `"FACTORY"` / `"OBJECT"` /
+  `"METHOD"` (serialized as `unit_kind`). A class contains its factory and
+  object units, which contain their methods, all via
+  `contained_programs`, so `program_units()` enumerates every method.
+  Identification-division metadata carries `unit_kind`, `inherits` and
+  `program_attributes`.
+* `CobolProgram.program_attributes` (`["INITIAL", "COMMON", "RECURSIVE"]`
+  subset, source order) and `is_recursive`.
+* `CobolSection.is_declarative` (metadata `declarative`) for sections
+  between `DECLARATIVES.` and `END DECLARATIVES.`.
+* PROCEDURE DIVISION metadata `returning_parameter`.
+* `CobolDataItem.is_volatile`, `byte_length` (`set_byte_length` also sizes
+  the PICTURE), `is_dynamic_length` + `dynamic_length_limit`
+  (`set_dynamic_length`), `object_class` (`set_object_reference`; usage
+  `"OBJECT REFERENCE"`) -- each serialized only when set.
+  `OccursClause.is_unbounded` (`max_times` None; serialized when True).
+  `PictureClause` accepts `U` (UTF-8, one byte per symbol).
+* `UseStatement.report_groups` (`USE BEFORE REPORTING`).
+* `SetStatement.targets_are_address_of` (`SET ADDRESS OF x TO p`).
+* `DeclareTableStatement.table_name` is `"SCHEMA.TABLE"` for a qualified
+  declaration.
+* Flow model: `FlowEdgeType.XML_PROCESSING_PROCEDURE[_THRU]`,
+  `FlowEdgeType.CICS_HANDLE`; `FlowNode.is_declarative`.

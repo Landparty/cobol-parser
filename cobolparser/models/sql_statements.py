@@ -29,8 +29,12 @@ _SQL_INTO_VARS_RE = re.compile(r"INTO\s+(:[\w-]+(?:\s*,\s*:[\w-]+)*)", re.IGNORE
 _SQL_DECLARE_CURSOR_RE = re.compile(
     r"DECLARE\s+([A-Za-z_][A-Za-z0-9_-]*)\s+CURSOR", re.IGNORECASE
 )
+# The table may be qualified (``DECLARE SCHEMA.TABLE TABLE`` -- every DCLGEN
+# member is), and the token-joined SQL text may carry spaces around the
+# period (``BANK. ACCOUNT``); the name is normalized to ``SCHEMA.TABLE``.
 _SQL_DECLARE_TABLE_RE = re.compile(
-    r"DECLARE\s+([A-Za-z_][A-Za-z0-9_]*)\s+TABLE", re.IGNORECASE
+    r"DECLARE\s+([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)*)\s+TABLE",
+    re.IGNORECASE,
 )
 # Matches a single column definition: NAME  TYPE[(len[,scale])]  [NOT NULL]
 _SQL_COLUMN_DEF_RE = re.compile(
@@ -1013,7 +1017,7 @@ class DeclareTableStatement(ExecSQLStatement):
         # Extract table name
         m = _SQL_DECLARE_TABLE_RE.search(sql_text)
         if m:
-            self.table_name = m.group(1).upper()
+            self.table_name = re.sub(r"\s*\.\s*", ".", m.group(1)).upper()
             if self.table_name not in self.tables:
                 self.tables.append(self.table_name)
         # Parse columns

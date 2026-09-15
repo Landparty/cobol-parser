@@ -15,6 +15,9 @@ from .ast_base import ASTNode, SourceLocation
 _PIC_P_FACTOR_RE = re.compile(r"P(\((\d+)\))?")
 _PIC_ALPHA_RE = re.compile(r"([XA])(\((\d+)\))?$")
 _PIC_NATIONAL_RE = re.compile(r"N(\((\d+)\))?$")
+# UTF-8 (``PIC U`` / ``PIC U(n)``, Enterprise COBOL 6.3): one *byte* per
+# symbol -- the item holds n bytes of UTF-8, not n characters.
+_PIC_UTF8_RE = re.compile(r"^U(?:\((\d+)\))?$")
 _PIC_DBCS_RE = re.compile(r"G(\((\d+)\))?$")
 _PIC_BASIC_NUMERIC_RE = re.compile(r"S?9(\((\d+)\))?$")
 _PIC_SIGNED_RE = re.compile(r"S(9+|\((\d+)\)|9\((\d+)\))$")
@@ -46,7 +49,7 @@ _PIC_FLOATING_SYMBOLS: frozenset[str] = frozenset("$+-")
 # removed. ``G``/``N`` cover DBCS/national items and ``E`` the (rare) external
 # floating-point form; including them keeps validation from flagging valid
 # vendor pictures. ``(`` and ``)`` are validated separately.
-_PIC_VALID_SYMBOLS: frozenset[str] = frozenset("ABXSVPZ90/,.+-*$GNE")
+_PIC_VALID_SYMBOLS: frozenset[str] = frozenset("ABXSVPZ90/,.+-*$GNEU")
 # Matches a single (possibly empty / non-numeric) repeat factor with no nesting.
 _PIC_REPEAT_RE = re.compile(r"\(([^()]*)\)")
 
@@ -135,6 +138,17 @@ class PictureClause(ASTNode):
             if wide_match:
                 count_str = wide_match.group(2)
                 self.size = 2 * (int(count_str) if count_str else 1)
+                return
+
+        # 1c. UTF-8 (PIC U) patterns: U, U(n). ``PIC U(n)`` reserves n
+        # bytes (IBM sizes UTF-8 items in bytes, not characters); ``PIC U
+        # BYTE-LENGTH n`` reaches the same size through
+        # ``CobolDataItem.set_byte_length``.
+        if first == "U":
+            utf8_match = _PIC_UTF8_RE.match(pattern)
+            if utf8_match:
+                count_str = utf8_match.group(1)
+                self.size = int(count_str) if count_str else 1
                 return
 
         # 2. Basic numeric patterns: 9, 9(n)
@@ -505,6 +519,10 @@ class OccursClause(ASTNode):
         self.min_times: int | None = None
         self.max_times: int | None = None
         self.depending_on: str | None = None
+        #: ``OCCURS UNBOUNDED DEPENDING ON`` (Enterprise COBOL 5+): the table
+        #: has no declared maximum, so ``max_times`` stays None. Only legal
+        #: in the LINKAGE SECTION, where the caller supplies the storage.
+        self.is_unbounded: bool = False
         self.indexed_by: str | None = None
         # INDEXED BY may name several indexes; ``indexed_by`` keeps the first
         # for backward compatibility, ``index_names`` keeps them all.
@@ -527,7 +545,7 @@ class OccursClause(ASTNode):
         self.max_times = times
 
     def set_variable_occurs(
-        self, min_times: int, max_times: int, depending_on: str
+        self, min_times: int, max_times: int | None, depending_on: str | None
     ) -> None:
         """Set variable OCCURS (e.g., OCCURS 1 TO 100 TIMES DEPENDING ON)."""
         self.min_times = min_times
@@ -563,6 +581,8 @@ class OccursClause(ASTNode):
             result["index_names"] = list(self.index_names)
         if self.key_clauses:
             result["key_clauses"] = [dict(kc) for kc in self.key_clauses]
+        if self.is_unbounded:
+            result["is_unbounded"] = True
         return result
 
 
@@ -585,6 +605,19 @@ class CobolDataItem(ASTNode):
         self.blank_when_zero: bool = False
         self.is_external: bool = False
         self.is_global: bool = False
+        #: ``VOLATILE`` (Enterprise COBOL 6.2): the item may be changed by
+        #: something the compiler cannot see, so it is never optimized away.
+        self.is_volatile: bool = False
+        #: ``PIC U BYTE-LENGTH n`` (UTF-8, 6.3): the declared byte width,
+        #: which also becomes the PICTURE's ``size``.
+        self.byte_length: int | None = None
+        #: ``DYNAMIC LENGTH [LIMIT n]`` (6.3): a dynamic-length elementary
+        #: item; ``dynamic_length_limit`` is the LIMIT, None when unstated.
+        self.is_dynamic_length: bool = False
+        self.dynamic_length_limit: int | None = None
+        #: ``USAGE OBJECT REFERENCE [class-name]`` (OO COBOL): the class the
+        #: reference is typed with, or None for a universal reference.
+        self.object_class: str | None = None
 
     @property
     def initial_value(self) -> str | None:
@@ -600,6 +633,22 @@ class CobolDataItem(ASTNode):
         """Set the PICTURE clause for this data item."""
         self.picture_clause = picture
         self.add_child(picture)
+
+    def set_byte_length(self, byte_length: int) -> None:
+        """Record ``BYTE-LENGTH n`` and size the PICTURE accordingly."""
+        self.byte_length = byte_length
+        if self.picture_clause is not None:
+            self.picture_clause.size = byte_length
+
+    def set_dynamic_length(self, limit: int | None = None) -> None:
+        """Record ``DYNAMIC LENGTH [LIMIT n]``."""
+        self.is_dynamic_length = True
+        self.dynamic_length_limit = limit
+
+    def set_object_reference(self, class_name: str | None = None) -> None:
+        """Record ``[USAGE] OBJECT REFERENCE [class-name]``."""
+        self.usage = "OBJECT REFERENCE"
+        self.object_class = class_name
 
     def set_usage(self, usage: str) -> None:
         """Set the USAGE clause for this data item."""
@@ -780,6 +829,15 @@ class CobolDataItem(ASTNode):
             result["is_external"] = True
         if self.is_global:
             result["is_global"] = True
+        if self.is_volatile:
+            result["is_volatile"] = True
+        if self.byte_length is not None:
+            result["byte_length"] = self.byte_length
+        if self.is_dynamic_length:
+            result["is_dynamic_length"] = True
+            result["dynamic_length_limit"] = self.dynamic_length_limit
+        if self.object_class is not None:
+            result["object_class"] = self.object_class
 
         if self.redefines:
             result["redefines"] = self.redefines

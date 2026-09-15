@@ -426,16 +426,30 @@ def remove_comment_lines(source: str) -> str:
     return "\n".join(result)
 
 
+#: ``EXEC SQL`` immediately before an ``INCLUDE`` keyword (any layout
+#: between the words); the match starts at ``EXEC`` so the whole statement,
+#: terminator included, is the span the expander replaces.
+_EXEC_SQL_TAIL_RE = re.compile(r"EXEC\s+SQL\s*$", re.IGNORECASE)
+
+
 class CopyStatementLexer:
     """
     A robust state-based lexer for extracting COPY statements from COBOL source.
     """
 
-    def __init__(self, source: str, source_file: str = "<main>"):
+    def __init__(
+        self, source: str, source_file: str = "<main>", *, sql_include: bool = False
+    ):
         self.source = source
         self.source_file = source_file
         self.pos = 0
         self.length = len(source)
+        #: Also recognize ``EXEC SQL INCLUDE member END-EXEC`` as a copy
+        #: statement (see :attr:`CopyStatement.sql_include`). Off by
+        #: default: the un-expanding parse path strips what this lexer
+        #: finds, and an INCLUDE it cannot expand must reach the parser
+        #: intact as the EXEC SQL statement it is.
+        self.sql_include = sql_include
         #: Diagnostics for COPY statements that were recognized but could not
         #: be tokenized into a complete CopyStatement (and are therefore never
         #: expanded). Callers surface these via ExpansionStatistics.warnings /
@@ -581,30 +595,69 @@ class CopyStatementLexer:
                 self.pos = self.length if newline == -1 else newline
                 continue
 
-            # 2. Find next 'COPY'
-            if not self._match_keyword("COPY"):
+            # 2. Find next 'COPY' -- or, when enabled, an EXEC SQL INCLUDE
+            is_include = False
+            if self._match_keyword("COPY"):
+                match_start = self.pos - 4
+                # Word-boundary check on the LEFT side: "GOODCOPY." must not
+                # be treated as an identifier followed by a COPY statement.
+                if match_start > 0:
+                    prev_char = self.source[match_start - 1]
+                    if prev_char.isalnum() or prev_char in ("-", "_"):
+                        continue
+            elif self.sql_include and self._match_keyword("INCLUDE"):
+                keyword_start = self.pos - len("INCLUDE")
+                if keyword_start > 0:
+                    prev_char = self.source[keyword_start - 1]
+                    if prev_char.isalnum() or prev_char in ("-", "_"):
+                        continue
+                exec_sql = _EXEC_SQL_TAIL_RE.search(self.source[:keyword_start])
+                if exec_sql is None:
+                    continue  # INCLUDE as an ordinary word, not EXEC SQL INCLUDE
+                match_start = exec_sql.start()
+                is_include = True
+            else:
                 self._advance()
                 continue
-
-            match_start = self.pos - 4
-            # Word-boundary check on the LEFT side: "GOODCOPY." must not be
-            # treated as an identifier followed by a COPY statement.
-            if match_start > 0:
-                prev_char = self.source[match_start - 1]
-                if prev_char.isalnum() or prev_char in ("-", "_"):
-                    continue
             self._skip_separators()
 
             # 3. Read Member Name
             member_name = self._read_operand()
             if not member_name:
                 self.warnings.append(
-                    f"{self.source_file}: COPY statement at line "
+                    f"{self.source_file}: {'EXEC SQL INCLUDE' if is_include else 'COPY'} "
+                    f"statement at line "
                     f"{self._line_of(match_start, newline_positions)} has no "
                     "member name and was ignored"
                 )
                 continue
             stmt_count_before = len(statements)
+
+            if is_include:
+                # EXEC SQL INCLUDE member END-EXEC [.] -- no clauses; the
+                # scope terminator is the only thing that may follow.
+                self._skip_separators()
+                if not self._match_keyword("END-EXEC"):
+                    self.warnings.append(
+                        f"{self.source_file}: EXEC SQL INCLUDE {member_name} at "
+                        f"line {self._line_of(match_start, newline_positions)} "
+                        "has no END-EXEC and was ignored"
+                    )
+                    continue
+                if self._peek() == "." and not self._peek(1).isalnum():
+                    self._advance()
+                line_num, col_num = self._line_col_of(match_start, newline_positions)
+                statements.append(
+                    CopyStatement(
+                        member_name=member_name.strip(),
+                        source_location=(self.source_file, line_num, col_num),
+                        original_text=self.source[match_start : self.pos],
+                        start_index=match_start,
+                        end_index=self.pos,
+                        sql_include=True,
+                    )
+                )
+                continue
 
             library_qualifier = None
             suppress_clause = None
@@ -721,6 +774,14 @@ class CopyStatementLexer:
                 )
 
         return statements
+
+    @staticmethod
+    def _line_col_of(index: int, newline_positions: list[int]) -> tuple[int, int]:
+        """1-based (line, column) of *index*, like the COPY branch computes."""
+        nl_idx = bisect.bisect_right(newline_positions, index)
+        prev_nl_idx = nl_idx - 1
+        col = index - (newline_positions[prev_nl_idx] if prev_nl_idx >= 0 else -1)
+        return nl_idx + 1, col
 
     @staticmethod
     def _line_of(index: int, newline_positions: list[int]) -> int:

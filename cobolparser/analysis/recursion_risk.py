@@ -288,6 +288,28 @@ class RecursionRiskAnalyzer:
                 continue
 
             call_kind = "dynamically " if stmt.is_dynamic else ""
+            if ast.is_recursive:
+                # ``PROGRAM-ID. name IS RECURSIVE``: re-entry is legal and
+                # the programmer said so. What remains is the ordinary
+                # unbounded-recursion question every recursive routine
+                # carries, which static analysis cannot settle -- worth
+                # noting, not worth an error.
+                risks.append(
+                    RecursionRisk(
+                        mechanism="CALL",
+                        severity="LOW",
+                        program=program_name,
+                        is_dynamic=stmt.is_dynamic,
+                        explanation=(
+                            f"This CALL {call_kind}targets '{program_name}', "
+                            "the program's own PROGRAM-ID, which is declared "
+                            "IS RECURSIVE -- re-entry is legal (LOCAL-STORAGE "
+                            "is per invocation). The recursion still needs a "
+                            "base case the analyzer cannot verify."
+                        ),
+                    )
+                )
+                continue
             risks.append(
                 RecursionRisk(
                     mechanism="CALL",

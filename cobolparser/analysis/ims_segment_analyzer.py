@@ -267,7 +267,7 @@ class IMSSegmentAnalyzer:
     # ── Pass 3: build IMSDLICall results ─────────────────────────────────────
 
     def _build_dli_calls(self, ast: CobolProgram) -> list[IMSDLICall]:
-        results: list[IMSDLICall] = []
+        results: list[IMSDLICall] = self._build_exec_dli_calls(ast)
         for stmt in ast.get_ims_interface_calls():
             if not isinstance(stmt, CallStatement):
                 # Bare CobolStatement stubs (e.g. from unit-test fixtures) are
@@ -298,7 +298,51 @@ class IMSSegmentAnalyzer:
                     segment_names=[self._resolve_ssa_segment(n) for n in ssa_names],
                 )
             )
+        results.sort(key=lambda call: (call.location.line, call.location.column))
         return results
+
+    @staticmethod
+    def _build_exec_dli_calls(ast: CobolProgram) -> list[IMSDLICall]:
+        """One :class:`IMSDLICall` per ``EXEC DLI`` statement.
+
+        The command-level interface names everything the CALL form hides
+        in an SSA: the function is the command word, the PCB is
+        ``USING PCB(n)``, the I/O area is ``INTO(...)`` / ``FROM(...)`` and
+        each ``SEGMENT(name)`` option names a segment on the path. Program
+        control commands (``SCHD``, ``TERM``, ``CHKP``, ...) are reported
+        too, with no segment, so a program's full DL/I surface is visible.
+        """
+        calls: list[IMSDLICall] = []
+        for stmt in ast.find_all_by_type("ExecImsStatement"):
+            command = (getattr(stmt, "ims_command", "") or "").upper()
+            if not command:
+                continue
+            pcb_name: str | None = None
+            io_area: str | None = None
+            segments: list[str | None] = []
+            for argument in getattr(stmt, "arguments", None) or []:
+                keyword, _, rest = argument.partition("(")
+                keyword = keyword.strip().upper()
+                value = rest[:-1].strip() if rest.endswith(")") else rest.strip()
+                if keyword == "PCB" and value:
+                    pcb_name = f"PCB({value})"
+                elif keyword in ("INTO", "FROM") and value and io_area is None:
+                    io_area = value
+                elif keyword == "SEGMENT" and value:
+                    segments.append(value.upper())
+            calls.append(
+                IMSDLICall(
+                    location=stmt.location,
+                    interface="EXEC DLI",
+                    function_code=command,
+                    function_code_var=None,
+                    pcb_name=pcb_name,
+                    io_area_name=io_area,
+                    ssa_names=[],
+                    segment_names=segments,
+                )
+            )
+        return calls
 
     # ── Resolution helpers ───────────────────────────────────────────────────
 

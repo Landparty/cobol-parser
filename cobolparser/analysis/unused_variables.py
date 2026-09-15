@@ -488,6 +488,18 @@ class UnusedVariableAnalyzer:
             for item in by_name.get(name, []):
                 _mark_subtree_used(item, group_used)
 
+        # The CICS translator's own LINKAGE items. DFHEIBLK is the EXEC
+        # interface block: the translator declares every EIB field and the
+        # runtime fills them, so an untouched EIBRESP2 is not an unused
+        # variable in any sense a reviewer cares about -- and the 30-odd
+        # fields would bury the real findings of every CICS program.
+        # DFHCOMMAREA itself is passed by the translator-generated USING;
+        # its *fields* are the program's own and stay assessed.
+        for item in by_name.get("DFHEIBLK", []):
+            _mark_subtree_used(item, group_used)
+        for item in by_name.get("DFHCOMMAREA", []):
+            group_used[id(item)] = True
+
         # REDEFINES: when the redefining item is used, its target shares
         # the same physical storage and counts as used too. Iterated to a
         # fixpoint for REDEFINES chains (A REDEFINES B REDEFINES C).

@@ -107,12 +107,27 @@ def _word_eq(source_word: str, find_word: str) -> bool:
 
 
 class _ReplacePair:
-    """A single ``==find== BY ==replace==`` operand pair, pre-tokenized."""
+    """A single ``==find== BY ==replace==`` operand pair, pre-tokenized.
 
-    __slots__ = ("find_tokens", "replace_text")
+    ``partial_word`` is set for the IBM *partial-word* form ``==:TAG:==``:
+    a pseudo-text that is a single word delimited by colons matches that
+    text *inside* a source word (``:TAG:-ROWS`` -> ``WS-ROWS``), the way
+    ``COPY ... REPLACING ==:TAG:==`` does. ``find_tokens`` is then empty.
+    """
+
+    __slots__ = ("find_tokens", "partial_word", "replace_text")
 
     def __init__(self, find_text: str, replace_text: str) -> None:
         self.find_tokens: list[str] = [w[0] for w in _tokenize_text_words(find_text)]
+        self.partial_word: str | None = None
+        if (
+            len(self.find_tokens) == 1
+            and len(self.find_tokens[0]) > 2
+            and self.find_tokens[0][0] == ":"
+            and self.find_tokens[0][-1] == ":"
+        ):
+            self.partial_word = self.find_tokens[0].upper()
+            self.find_tokens = []
         # Replacement is emitted verbatim as text words joined by single
         # spaces; a period token is joined without a leading space so a
         # sentence terminator stays attached.
@@ -294,7 +309,7 @@ def _apply_pairs_to_segment(segment: str, pairs: list[_ReplacePair]) -> str:
     text-word scan (first matching pair wins at each position). Non-matched text
     — including all whitespace and newlines — is preserved verbatim; a replaced
     span re-emits its newline count so the line total is unchanged."""
-    active = [p for p in pairs if p.find_tokens]
+    active = [p for p in pairs if p.find_tokens or p.partial_word]
     if not active:
         return segment
     words = _tokenize_text_words(segment)
@@ -304,7 +319,22 @@ def _apply_pairs_to_segment(segment: str, pairs: list[_ReplacePair]) -> str:
     n_words = len(words)
     while wi < n_words:
         matched: _ReplacePair | None = None
+        partial_text: str | None = None
         for pair in active:
+            if pair.partial_word is not None:
+                word = words[wi][0]
+                if word[:1] in _QUOTES:
+                    continue  # a literal is never partially replaced
+                hit = word.upper().find(pair.partial_word)
+                if hit < 0:
+                    continue
+                matched = pair
+                partial_text = (
+                    word[:hit]
+                    + pair.replace_text
+                    + word[hit + len(pair.partial_word) :]
+                )
+                break
             flen = len(pair.find_tokens)
             if wi + flen > n_words:
                 continue
@@ -314,6 +344,13 @@ def _apply_pairs_to_segment(segment: str, pairs: list[_ReplacePair]) -> str:
                 matched = pair
                 break
         if matched is None:
+            wi += 1
+            continue
+        if partial_text is not None:
+            start_char, end_char = words[wi][1], words[wi][2]
+            out.append(segment[pos:start_char])
+            out.append(partial_text)
+            pos = end_char
             wi += 1
             continue
         flen = len(matched.find_tokens)

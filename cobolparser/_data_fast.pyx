@@ -274,8 +274,25 @@ def parse_data_item_clauses_fast(
                 data_item.set_value_clause(value)
             continue
 
-        # USAGE clause -- same: delegate to Python helper.
+        # USAGE clause -- same: delegate to Python helper. ``USAGE [IS]
+        # OBJECT REFERENCE [class]`` (OO COBOL) is not a one-word usage; the
+        # Python clause loop models it, so hand the whole clause back.
         if value_upper == "USAGE":
+            look = _skip_layout(tokens, pos + 1, n, newline_type, comma_type, semicolon_type)
+            if (
+                look < n
+                and tokens[look] is not None
+                and tokens[look].value
+                and tokens[look].value.upper() == "IS"
+            ):
+                look = _skip_layout(tokens, look + 1, n, newline_type, comma_type, semicolon_type)
+            if (
+                look < n
+                and tokens[look] is not None
+                and tokens[look].value
+                and tokens[look].value.upper() == "OBJECT"
+            ):
+                break
             pos += 1  # consume USAGE keyword
             token_stream._pos = pos
             usage = parser_self._parse_usage_clause(token_stream)
@@ -312,6 +329,16 @@ def parse_data_item_clauses_fast(
         # OCCURS clause -- walk it inline; pure token-driven, no
         # sub-parsing callbacks needed.
         if value_upper == "OCCURS":
+            # ``OCCURS UNBOUNDED DEPENDING ON`` has no count to read; hand
+            # the whole clause to the Python walker, which models it.
+            look = _skip_layout(tokens, pos + 1, n, newline_type, comma_type, semicolon_type)
+            if (
+                look < n
+                and tokens[look] is not None
+                and tokens[look].value
+                and tokens[look].value.upper() == "UNBOUNDED"
+            ):
+                break
             pos += 1  # consume OCCURS
             occurs = occurs_clause_cls(location)
             min_count = 0

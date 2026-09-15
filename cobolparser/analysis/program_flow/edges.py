@@ -16,6 +16,7 @@ from ...models.statements.misc import (
     CancelStatement,
     MergeStatement,
     SortStatement,
+    XmlJsonStatement,
 )
 from .condition_text import render_condition_text
 from .models import FlowEdge, FlowEdgeType
@@ -34,7 +35,10 @@ INTERNAL_EDGE_TYPES: frozenset[FlowEdgeType] = frozenset(
         FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
         FlowEdgeType.MERGE_OUTPUT_PROCEDURE,
         FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
+        FlowEdgeType.XML_PROCESSING_PROCEDURE,
+        FlowEdgeType.XML_PROCESSING_PROCEDURE_THRU,
         FlowEdgeType.ALTER,
+        FlowEdgeType.CICS_HANDLE,
         FlowEdgeType.IF_BRANCH,
         FlowEdgeType.IF_THEN,
         FlowEdgeType.IF_ELSE,
@@ -56,11 +60,18 @@ PERFORM_EDGE_TYPES: frozenset[FlowEdgeType] = frozenset(
         FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
         FlowEdgeType.MERGE_OUTPUT_PROCEDURE,
         FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
+        FlowEdgeType.XML_PROCESSING_PROCEDURE,
+        FlowEdgeType.XML_PROCESSING_PROCEDURE_THRU,
     }
 )
 
 GOTO_EDGE_TYPES: frozenset[FlowEdgeType] = frozenset(
-    {FlowEdgeType.GOTO, FlowEdgeType.GOTO_DEPENDING, FlowEdgeType.ALTER}
+    {
+        FlowEdgeType.GOTO,
+        FlowEdgeType.GOTO_DEPENDING,
+        FlowEdgeType.ALTER,
+        FlowEdgeType.CICS_HANDLE,
+    }
 )
 
 
@@ -268,6 +279,69 @@ class EdgeCollector:
                         location=stmt.location,
                         thru_target=thru,
                         range_members=list(members),
+                    )
+                )
+
+    def process_xml_parse(self, stmt: XmlJsonStatement, source: str) -> None:
+        """Create edges for ``XML PARSE ... PROCESSING PROCEDURE p [THRU q]``.
+
+        The XML parser PERFORMs the handler once per event, so the edge is
+        PERFORM-shaped (it returns), carrying the THRU range like
+        :meth:`process_sort` does.
+        """
+        if not stmt.processing_procedure:
+            return
+        target = stmt.processing_procedure.upper()
+        thru = (
+            stmt.processing_procedure_thru.upper()
+            if stmt.processing_procedure_thru
+            else None
+        )
+        members = self.range_members(target, thru) if thru else []
+        self._edges.append(
+            FlowEdge(
+                source=source,
+                target=target,
+                edge_type=FlowEdgeType.XML_PROCESSING_PROCEDURE,
+                location=stmt.location,
+                thru_target=thru,
+                range_members=list(members),
+            )
+        )
+        if thru:
+            self._edges.append(
+                FlowEdge(
+                    source=source,
+                    target=thru,
+                    edge_type=FlowEdgeType.XML_PROCESSING_PROCEDURE_THRU,
+                    location=stmt.location,
+                    thru_target=thru,
+                    range_members=list(members),
+                )
+            )
+
+    def process_cics_handle(self, stmt: Any, source: str) -> None:
+        """Create edges for ``EXEC CICS HANDLE AID|CONDITION|ABEND``.
+
+        Every option whose argument names a procedure of this program
+        (``PF3(9000-EXIT)``, ``NOTFND(9000-NOT-FOUND)``, ``LABEL(9100-ABEND)``)
+        is a branch CICS takes when that AID/condition occurs: GO TO-shaped,
+        control does not come back.
+        """
+        if (getattr(stmt, "cics_command", "") or "").upper() != "HANDLE":
+            return
+        known = {name.upper() for name in self._ordered_procedures}
+        for value in (getattr(stmt, "options", None) or {}).values():
+            if not value:
+                continue
+            target = value.strip().upper()
+            if target in known:
+                self._edges.append(
+                    FlowEdge(
+                        source=source,
+                        target=target,
+                        edge_type=FlowEdgeType.CICS_HANDLE,
+                        location=stmt.location,
                     )
                 )
 

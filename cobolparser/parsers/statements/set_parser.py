@@ -67,7 +67,8 @@ class SetStatementParser(IStatementParser):
         start_column = token_column(start)
         skip_whitespace(token_stream)
 
-        targets, ended = self._collect_targets(token_stream, start_column)
+        targets, ended, address_of = self._collect_targets(token_stream, start_column)
+        stmt.targets_are_address_of = address_of
         for target in targets:
             stmt.add_target(target)
         if ended:
@@ -88,7 +89,7 @@ class SetStatementParser(IStatementParser):
         # Previously only the first group was parsed and the rest was
         # reported as dropped "unparsed tokens".
         while self._starts_another_group(token_stream):
-            group_targets, ended = self._collect_targets(token_stream, start_column)
+            group_targets, ended, _ = self._collect_targets(token_stream, start_column)
             if ended:
                 stmt.add_group(group_targets, None, None, False)
                 return stmt
@@ -124,9 +125,15 @@ class SetStatementParser(IStatementParser):
     @staticmethod
     def _collect_targets(
         token_stream: ITokenStream, start_column: int | None
-    ) -> tuple[list[str], bool]:
-        """Collect targets up to TO/UP/DOWN. Returns (targets, period_seen)."""
+    ) -> tuple[list[str], bool, bool]:
+        """Collect targets up to TO/UP/DOWN.
+
+        Returns ``(targets, period_seen, address_of)`` -- the last True for
+        the ``SET ADDRESS OF target ...`` form, where the targets are
+        LINKAGE items being based rather than items being assigned.
+        """
         targets: list[str] = []
+        address_of = False
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token:
@@ -134,7 +141,7 @@ class SetStatementParser(IStatementParser):
             val = _val(token)
             if token.type == TokenType.PERIOD:
                 token_stream.consume()
-                return targets, True
+                return targets, True, address_of
             if val in ("TO", "UP", "DOWN"):
                 break
             # A following statement's verb that lexes as a plain IDENTIFIER
@@ -171,8 +178,11 @@ class SetStatementParser(IStatementParser):
                 token_stream.consume()
                 # Skip ADDRESS and OF keywords (OF lexes as its own dedicated
                 # TokenType, not IDENTIFIER, so it must be listed explicitly
-                # above or this branch never reaches it).
-                if val in ("ADDRESS", "OF"):
+                # above or this branch never reaches it). ADDRESS is
+                # remembered: ``SET ADDRESS OF x TO p`` bases x on p.
+                if val == "ADDRESS":
+                    address_of = True
+                elif val == "OF":
                     pass
                 else:
                     # A trailing `(subscript[, subscript]...)` group (e.g.
@@ -194,7 +204,7 @@ class SetStatementParser(IStatementParser):
             else:
                 break
             skip_whitespace(token_stream)
-        return targets, False
+        return targets, False, address_of
 
     def _parse_action(
         self,
