@@ -637,7 +637,17 @@ extensions=...)` before calling `get_available_copybooks` -- the
 caller's own `search_config` object is never mutated, and
 `suggestion_extensions=search_config.extensions` restores the old broad
 pool for a caller that wants it. Pinned by
-`tests/regression/test_copybook_suggestion_pool.py`. Reported from
+`tests/regression/test_copybook_suggestion_pool.py`.
+
+Review follow-up (same day): the pool is `(".cpy", ".CPY", "")`, not
+`.cpy`/`.CPY` alone -- a PDS download has no extensions at all, and
+narrowing to `.cpy` would have left every such shop with no suggestion
+ever. That works because `get_available_copybooks`'s `""` branch now
+lists only *extensionless* files (`path.suffix == ""`), which is what
+`""` means for resolution (`COPY X` via `""` looks for a file literally
+named `X`); it used to add every file's stem, so `ACCTMNT.cbl` was
+reported as an available copybook named `ACCTMNT` that `""` could never
+have resolved. `PathResolver.list_available()` is corrected the same way. Reported from
 mocky-mock's real-world example corpus; see mocky-mock's
 `docs/2026-09-15-copybook-discovery-defaults-design.md`.
 
