@@ -769,6 +769,107 @@ other reports intact. Every program unit of a multi-`PROGRAM-ID` file is
 reported, each with its nesting `depth` -- the same argument `lint` makes
 for linting every unit.
 
+## Cross-reference, signatures, codebase graph, SQL/CICS lint, diff, JCL
+
+Seven subcommands landed together in PR #212 (`_cmd_xref`,
+`_cmd_program_signature`, `_cmd_codebase_graph`, `_cmd_copybook_impact`,
+`_cmd_sql_cics_check`, `_cmd_diff`, `_cmd_jcl` in `cli/parse.py`). Four are
+ordinary single-file analyzers built through `_build_analyzer_parser()` and so
+take the usual shared flags (`--program`, `--copybook-path`, `--source-format`,
+`--dialect`, `--define`, `--compact`, `-o`, `--profile`); three build their own
+parser because their arguments do not fit that shape.
+
+### Ordinary analyzer subcommands
+
+```bash
+cobol-parser xref program.cbl
+cobol-parser program-signature SUBPGM.cbl [--copybook-path ./copybooks]
+cobol-parser sql-cics-check program.cbl
+```
+
+* **`xref`** emits `XrefReport.to_dict()` — `entries` (each with `definition`,
+  `references`, `reference_count`), `undefined`, `caveats`,
+  `duplicate_declarations` and a `summary`. It additionally appends the
+  parser's unexpanded-COPY warnings to `caveats`: a member the parser could not
+  expand leaves every field it declares looking undeclared, so the warning
+  belongs next to the `undefined` list it explains.
+* **`program-signature`** reports **every program unit** in the file by default,
+  not the outermost — a caller may target a contained program as readily as the
+  outer one, and reporting only the outermost would hide the other entry points
+  from exactly the consumer that needs them. `--program` still narrows. Output
+  is `{"signatures": [...]}`.
+* **`sql-cics-check`** emits `SqlCicsReport.to_dict()`. Its lint rule id inside
+  `cobol-parser lint` is `sql-cics-check` — the subcommand's own name, per the
+  lint rule-id convention.
+
+### `diff` — two positionals
+
+```bash
+cobol-parser diff old/PROG.cbl new/PROG.cbl
+cobol-parser diff old/PROG.cbl new/PROG.cbl --format text
+cobol-parser diff old/PROG.cbl new/PROG.cbl --rename-threshold 1.0
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--format json\|text` | `text` renders `DiffReport.to_text()` (the `+`/`-`/`~` summary); default `json` |
+| `--rename-threshold RATIO` | 0.0–1.0 similarity before an unmatched pair is called a rename instead of remove + add (default 0.8; 1.0 accepts only identical bodies). Out-of-range exits 1 |
+
+Takes two positionals rather than the usual single `file`, so it cannot share
+`_build_analyzer_parser`. Each side is parsed through the *same* helper the
+single-file subcommands use, by swapping `args.file` — so both sides honour
+`--source-format`, `--dialect`, `--copybook-path` and `--define` identically.
+Parsing the two sides under different options would make the diff meaningless.
+JSON output is `{"old_file", "new_file", **report.to_dict()}`.
+
+**No `--program` yet**: contained programs are not compared (they appear as a
+caveat instead).
+
+### `codebase-graph` / `copybook-impact` — a tree, not a file
+
+```bash
+cobol-parser codebase-graph ./src
+cobol-parser codebase-graph ./src --copybook-path ./copybooks
+cobol-parser codebase-graph ./src --format mermaid -o graph.mmd
+cobol-parser codebase-graph a.cbl b.cbl --format dot
+cobol-parser copybook-impact CUSTREC ./src --copybook-path ./copybooks
+```
+
+Both take **one directory to walk, or any number of COBOL source files**, plus:
+
+| Flag | Meaning |
+|------|---------|
+| `--extension EXT` | Source extension to walk for, repeatable; accepted **with or without** the leading dot (`--extension cbl` and `--extension .cbl` both work) |
+| `--workers N` | Worker processes for the batch parse (default: chosen by input size) |
+| `--copybook-path DIR` | Where COPY members are resolved from, as elsewhere |
+| `--format json\|dot\|mermaid` | `codebase-graph` only — `to_dot()` / `to_mermaid()` reuse the flowchart renderer's conventions |
+
+`copybook-impact` takes the member name first (bare name, file name or path),
+then the paths, and emits `ImpactReport.to_dict()`: `direct_programs`,
+`transitive_programs`, the COPY `chains` that reach each one, the `fields` the
+member contributes, `unresolved`, and a `summary`.
+
+### `jcl` — the one non-COBOL subcommand
+
+```bash
+cobol-parser jcl JOB.jcl
+cobol-parser jcl JOB.jcl --dd-map
+cobol-parser jcl JOB.jcl --bindings
+cobol-parser jcl JOB.jcl --program INVUPDT
+cobol-parser jcl JOB.jcl --strict
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--dd-map` | Only the `ddname -> datasets` mapping, which is what a COBOL `SELECT ... ASSIGN TO ddname` resolves through |
+| `--bindings` | One row per DD binding (ddname, dataset, step, job, DISP, RECFM, LRECL) instead of the job structure |
+| `--program NAME` | Only the steps that run this program (also filters `--bindings` to those steps) |
+| `--strict` | **Exit 3** when any card could not be parsed — a CI gate, kept deliberately distinct from exit 1, which still means the run itself failed |
+
+It reads a language other than COBOL, so it shares none of the COBOL parse
+flags: no `--dialect`, no `--source-format`, no `--copybook-path`. `--compact`
+and `-o` work as everywhere else. See [jcl.md](jcl.md).
+
 # See Also
 
 * [analysis.md](analysis.md) — the underlying analyzers, including
@@ -778,20 +879,7 @@ for linting every unit.
 * [batch.md](batch.md) — `scan_files` behind `scan`, and why it is not `batch.py`
 * [generators.md](generators.md) — `ProgramLayoutIndex` / `ProgramFixtureGenerator`
   / `FixtureBundle` / `ScenarioPlanner` (`gen-fixtures`, Phases 1, 3, 5-6)
+* [jcl.md](jcl.md) — the JCL front end behind `jcl`: card format,
+  procedure expansion, and the `ddname -> dataset` binding
 * [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) — the
   full `FixtureBundle` JSON shape `gen-fixtures --format json` produces
-
-
-## xref / program-signature / codebase-graph / copybook-impact / sql-cics-check / diff / jcl (PR #212, 2026-09-15)
-
-Seven subcommands from PR #212 (`_cmd_xref`, `_cmd_program_signature`,
-`_cmd_codebase_graph`, `_cmd_copybook_impact`, the `sql-cics-check`
-analyzer, `_cmd_diff`, `_cmd_jcl` in `cli/parse.py`). `xref` and
-`program-signature` take `--program`; `xref` appends the parser's
-unexpanded-COPY warnings to `caveats` (a member the parser could not
-expand leaves every field it declares looking undeclared).
-`codebase-graph`/`copybook-impact` take one directory or a file list and
-`--extension EXT` with or without a leading dot. The lint rule for the
-SQL/CICS analyzer is `sql-cics-check`, the subcommand's own name. `diff`
-has no `--program` yet (contained programs are not compared -- noted in
-the PR review). See [analysis.md](analysis.md).

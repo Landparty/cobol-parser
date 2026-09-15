@@ -920,23 +920,6 @@ too (see commands above).
   alongside the decimal-point-PIC pair from the 2026-07-27 fix to the same
   check, which pins the opposite direction.
 
-# See Also
-
-* `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` — the
-  `gen-data --format record|hex` flags, that CSV output is unchanged by any
-  of them, and (counting `encode_record` calls) that `--output` encodes the
-  dataset exactly once. `::TestRecordFormatFlag` covers `--record-format`
-  alongside it
-* `tests/unit/generators/data/test_variable_length.py` — fixed vs variable
-  record length: ODO layout linking, per-row trimming, counter bounds, RDW
-  framing, and the length reporting built on them
-* [cli.md](cli.md) — `tests/unit/cli/` covers CLI subcommands
-* [generators.md](generators.md) — flowchart, copybook → CSV, program layout
-  index, and program fixture bundle generator tests
-* [analysis.md](analysis.md) — `tests/unit/analysis/` covers analyzers
-* [parser.md](parser.md) — `tests/integration/` covers end-to-end parsing
-
-
 # Enterprise program-type corpus (2026-09-15)
 
 `tests/samples/enterprise/` holds one program per IBM Enterprise COBOL
@@ -955,8 +938,8 @@ a new type has to be added to both. `tests/samples/*.cbl` smoke checks
 (`test_all_samples.py`) cover the corpus too, since it lives under
 `tests/samples/`. The same 22 files are copied into
 `mocky-mock/tests/fixtures/enterprise/`, where
-`tests/unit/test_enterprise_corpus.py` pins `mockymock generate`'s outcome
-per program.
+`mocky-mock/tests/unit/test_enterprise_corpus.py` pins `mockymock generate`'s
+outcome per program (that path is in the *sibling* repo, not this one).
 
 `tests/unit/test_enterprise_syntax.py` pins each construct the corpus
 surfaced in isolation: PROGRAM-ID attributes, OO units, DECLARATIVES,
@@ -968,3 +951,38 @@ Three older tests changed on purpose: the missing period after the
 `PROGRAM-ID` keyword is tolerated (IBM), the mandatory-PROGRAM-ID message
 names CLASS-ID / METHOD-ID too, and an unknown `>>` directive is blanked
 rather than passed through.
+
+
+# OKF staleness map guard (2026-09-15)
+
+`tests/test_okf_staleness_map.py` pins `scripts/okf_staleness_check.py`'s
+`OKF_MAP`: every tracked `.py`/`.pyx` under `cobolparser/` must map to at
+least one OKF file, every mapped OKF file must exist, and every prefix that
+names a directory must end with `/`.
+
+A file missing from that map is not a lint nit -- it is a file whose
+documentation can rot silently, because the pre-commit hook will never ask
+for an update when it changes. That is exactly how `cobolparser/jcl/` (a
+1,900-line JCL front end) and `cobolparser/parser.py` (the parse
+orchestrator, missed because the `cobolparser/parsers/` prefix ends in a
+slash and so never matched it) both went unmapped; 15 files were uncovered
+when the guard was written. The directory-slash assertion exists because
+dropping the slash would make `cobolparser/parsers` swallow
+`cobolparser/parser.py` -- the inverse mistake.
+
+
+# See Also
+
+* `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` — the
+  `gen-data --format record|hex` flags, that CSV output is unchanged by any
+  of them, and (counting `encode_record` calls) that `--output` encodes the
+  dataset exactly once. `::TestRecordFormatFlag` covers `--record-format`
+  alongside it
+* `tests/unit/generators/data/test_variable_length.py` — fixed vs variable
+  record length: ODO layout linking, per-row trimming, counter bounds, RDW
+  framing, and the length reporting built on them
+* [cli.md](cli.md) — `tests/unit/cli/` covers CLI subcommands
+* [generators.md](generators.md) — flowchart, copybook → CSV, program layout
+  index, and program fixture bundle generator tests
+* [analysis.md](analysis.md) — `tests/unit/analysis/` covers analyzers
+* [parser.md](parser.md) — `tests/integration/` covers end-to-end parsing

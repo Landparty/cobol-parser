@@ -24,9 +24,10 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | Parser, `DivisionParserFactory`, statement parsers | `.okf/parser.md` |
 | `normalize_fixed_format`, copybook expansion | `.okf/preprocessing.md` |
 | `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `.okf/ast-models.md` |
-| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, `LintAnalyzer`, etc.) | `.okf/analysis.md` |
+| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, `LintAnalyzer`, `XrefAnalyzer`, `ProgramSignatureExtractor`, `CodebaseGraphBuilder`, `SqlCicsAnalyzer`, `ProgramDiffer`, etc.) | `.okf/analysis.md` |
 | Flowcharts, copybook → CSV test data (`CopybookDataGenerator`) | `.okf/generators.md` |
 | `parse_files`, `parse_files_with_copybooks`, batch fault isolation | `.okf/batch.md` |
+| z/OS JCL: cards, jobs/steps, DD → dataset bindings | `.okf/jcl.md` |
 | CLI subcommands and flags | `.okf/cli.md` |
 | Test layout, markers, coverage floor | `.okf/tests.md` |
 
