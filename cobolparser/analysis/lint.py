@@ -67,7 +67,7 @@ RULES: tuple[str, ...] = (
     "recursion-check",
     "complexity",
     "dclgen-check",
-    "sql-cics",
+    "sql-cics-check",
 )
 
 _RULE_ORDER: dict[str, int] = {name: order for order, name in enumerate(RULES)}
@@ -470,7 +470,7 @@ class LintAnalyzer:
             ),
             "complexity": lambda: self._complexity(ast, self._flow(ast, flow_report)),
             "dclgen-check": lambda: self._dclgen_check(ast, report),
-            "sql-cics": lambda: self._sql_cics(ast, report),
+            "sql-cics-check": lambda: self._sql_cics(ast, report),
         }
 
         for rule in self._rules:
@@ -729,13 +729,13 @@ class LintAnalyzer:
         # per block, since "could not check" is not a defect in the program.
         if result.unchecked:
             report.caveats.append(
-                f"sql-cics: {len(result.unchecked)} EXEC block(s) or host "
+                f"sql-cics-check: {len(result.unchecked)} EXEC block(s) or host "
                 "variable(s) could not be checked -- run "
                 "`cobol-parser sql-cics-check` for the reason per item"
             )
         return [
             LintFinding(
-                rule="sql-cics",
+                rule="sql-cics-check",
                 severity=violation.severity,
                 message=violation.message,
                 location=violation.location,

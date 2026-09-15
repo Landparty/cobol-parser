@@ -1007,3 +1007,26 @@ def test_a_mixed_program_reports_each_concern_once():
     assert report.worst_severity() == SEVERITY_ERROR
     assert report.sql_statements == 2
     assert report.cics_statements == 2
+
+
+class TestReviewFollowUps:
+    """Review follow-ups on PR #212."""
+
+    def test_declare_global_temporary_table_is_executable(self):
+        report = _analyze(
+            "       MAIN.\n"
+            "           EXEC SQL DECLARE GLOBAL TEMPORARY TABLE SESSION.T\n"
+            "               (A INT) END-EXEC\n"
+            "           STOP RUN.\n"
+        )
+        assert "SQL_NO_SQLCODE_CHECK" in _kinds(report)
+
+    def test_declare_cursor_table_and_statement_stay_non_executable(self):
+        report = _analyze(
+            "       MAIN.\n"
+            "           EXEC SQL DECLARE C1 CURSOR FOR SELECT A FROM T END-EXEC\n"
+            "           EXEC SQL DECLARE T TABLE (A INT) END-EXEC\n"
+            "           EXEC SQL DECLARE S1 STATEMENT END-EXEC\n"
+            "           STOP RUN.\n"
+        )
+        assert "SQL_NO_SQLCODE_CHECK" not in _kinds(report)

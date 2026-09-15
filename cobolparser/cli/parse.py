@@ -2714,9 +2714,16 @@ def _cmd_program_signature(args: argparse.Namespace) -> None:
 def _cmd_xref(args: argparse.Namespace) -> None:
     from ..analysis.xref import XrefAnalyzer
 
-    ast, prof = _parse_or_fail(args)
+    result, prof = _parse_result_or_fail(args)
+    ast = result.ast
 
     report = XrefAnalyzer().analyze(ast)
+    # A COPY member the parser could not expand leaves every field it
+    # declares looking undeclared; the parse warning that says so belongs
+    # next to the ``undefined`` list it explains.
+    for warning in getattr(result, "warnings", None) or []:
+        if "COPY" in str(warning).upper():
+            report.caveats.append(f"parse warning: {warning}")
 
     _emit_report(report.to_dict(), args, prof, ast)
 

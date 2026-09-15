@@ -1,4 +1,4 @@
-"""Tests for the `sql-cics-check` subcommand and the `sql-cics` lint rule.
+"""Tests for the `sql-cics-check` subcommand and the `sql-cics-check` lint rule.
 
 The analyzer's own behaviour is covered in
 tests/unit/analysis/test_sql_cics_lint.py. What is pinned here is the two
@@ -121,23 +121,23 @@ class TestSubcommand:
 
 class TestLintRule:
     def test_sql_cics_is_a_registered_rule(self):
-        assert "sql-cics" in RULES
+        assert "sql-cics-check" in RULES
 
     def test_the_rule_reports_the_same_findings_as_the_subcommand(self):
         result = parse_cobol(UNCHECKED_SQL, filename="PROG.cbl")
         assert result.ast is not None
 
-        report = LintAnalyzer(["sql-cics"]).analyze(result.ast)
+        report = LintAnalyzer(["sql-cics-check"]).analyze(result.ast)
 
         kinds = {f.kind for f in report.findings}
         assert kinds == {"SQL_NO_SQLCODE_CHECK", "CICS_NO_RESP_HANDLING"}
-        assert report.rules_run == ["sql-cics"]
+        assert report.rules_run == ["sql-cics-check"]
 
     def test_severity_is_carried_across_from_the_analyzer(self):
         result = parse_cobol(UNCHECKED_SQL, filename="PROG.cbl")
         assert result.ast is not None
 
-        report = LintAnalyzer(["sql-cics"]).analyze(result.ast)
+        report = LintAnalyzer(["sql-cics-check"]).analyze(result.ast)
 
         assert {f.severity for f in report.findings} == {"warning"}
         assert report.worst_severity() == "warning"
@@ -146,10 +146,10 @@ class TestLintRule:
         result = parse_cobol(CHECKED_SQL, filename="PROG.cbl")
         assert result.ast is not None
 
-        report = LintAnalyzer(["sql-cics"]).analyze(result.ast)
+        report = LintAnalyzer(["sql-cics-check"]).analyze(result.ast)
 
         assert report.findings == []
-        assert "sql-cics" in report.rules_run
+        assert "sql-cics-check" in report.rules_run
 
     def test_the_rule_runs_as_part_of_the_default_rule_set(self):
         result = parse_cobol(UNCHECKED_SQL, filename="PROG.cbl")
@@ -157,5 +157,5 @@ class TestLintRule:
 
         report = LintAnalyzer().analyze(result.ast)
 
-        assert "sql-cics" in report.rules_run
-        assert any(f.rule == "sql-cics" for f in report.findings)
+        assert "sql-cics-check" in report.rules_run
+        assert any(f.rule == "sql-cics-check" for f in report.findings)

@@ -1734,3 +1734,32 @@ def test_third_repeated_filler_gets_its_own_positional_key():
 
     changes = _of_kind(report, "value-changed")
     assert [c.symbol for c in changes] == ["WS-GRP.FILLER#3"]
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (PR #212)
+# ---------------------------------------------------------------------------
+
+
+def test_statements_without_a_dedicated_signature_still_report_an_edit():
+    """A COMPUTE's expression, an OPEN's mode and an EXEC SQL's text live off
+    ``operands``; the fallback signature must not read them as unchanged."""
+    old = _program(
+        "       MAIN.\n"
+        "           COMPUTE WS-N = WS-M + 1\n"
+        "           OPEN INPUT F1\n"
+        "           EXEC SQL SELECT A INTO :WS-N FROM T END-EXEC\n"
+        "           STOP RUN.\n",
+        data=(
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-N PIC 9(4).\n"
+            "       01 WS-M PIC 9(4).\n"
+        ),
+    )
+    new = (
+        old.replace("WS-M + 1", "WS-M * 2")
+        .replace("OPEN INPUT F1", "OPEN OUTPUT F1")
+        .replace("SELECT A INTO", "SELECT B INTO")
+    )
+    report = _diff(old, new)
+    assert len(report.changes) >= 3, [c.to_dict() for c in report.changes]

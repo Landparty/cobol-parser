@@ -916,7 +916,13 @@ def test_report_to_dict_shape():
     )
     payload = XrefAnalyzer().analyze(prog).to_dict()
 
-    assert set(payload) == {"entries", "undefined", "caveats", "summary"}
+    assert set(payload) == {
+        "entries",
+        "undefined",
+        "caveats",
+        "duplicate_declarations",
+        "summary",
+    }
     assert payload["undefined"] == ["WS-MISSING"]
     summary = payload["summary"]
     assert summary["total_symbols"] == 4  # WS-A, WS-UNUSED, MAIN-PARA, WS-MISSING
@@ -1589,3 +1595,103 @@ def test_reserved_and_intrinsic_names_are_never_reported_undefined():
         "reserved word, an intrinsic function name" in caveat
         for caveat in report.caveats
     )
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (PR #212)
+# ---------------------------------------------------------------------------
+
+
+def test_digit_led_procedure_names_are_credited_verbatim():
+    """``PERFORM 1000-INIT THRU 1000-EXIT`` must credit those paragraphs, not
+    split them into ``INIT``/``EXIT`` (the dominant mainframe convention)."""
+    report = _analyze_source("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DIGITS.
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           PERFORM 1000-INIT THRU 1000-EXIT
+           GO TO 2000-LOOP.
+       1000-INIT.
+           CONTINUE.
+       1000-EXIT.
+           EXIT.
+       2000-LOOP.
+           STOP RUN.
+""")
+    by_name = {entry.name: entry for entry in report.entries}
+    assert by_name["1000-INIT"].reference_count == 1
+    assert by_name["1000-EXIT"].reference_count == 1
+    assert by_name["2000-LOOP"].reference_count == 1
+    assert report.undefined == []
+
+
+def test_contained_program_references_never_read_as_the_outer_units_undefined():
+    report = _analyze_source("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTER.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-OUT PIC X.
+       PROCEDURE DIVISION.
+       MAIN.
+           MOVE 'A' TO WS-OUT
+           STOP RUN.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INNER.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-IN PIC X.
+       PROCEDURE DIVISION.
+       INNER-MAIN.
+           MOVE 'B' TO WS-IN
+           GOBACK.
+       END PROGRAM INNER.
+       END PROGRAM OUTER.
+""")
+    assert report.undefined == []
+    assert {entry.name for entry in report.entries} >= {"WS-OUT", "MAIN"}
+    assert "WS-IN" not in {entry.name for entry in report.entries}
+
+
+def test_string_literal_words_are_not_undefined_symbols():
+    report = _analyze_source("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. STRLIT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-OUT PIC X(40).
+       PROCEDURE DIVISION.
+       MAIN.
+           STRING 'VERY LONG TEXT' DELIMITED BY SIZE INTO WS-OUT
+           STOP RUN.
+""")
+    assert report.undefined == []
+
+
+def test_special_registers_are_excluded_from_undefined_with_a_caveat():
+    report = _analyze_source("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. REGS.
+       PROCEDURE DIVISION.
+       MAIN.
+           MOVE 8 TO RETURN-CODE
+           STOP RUN.
+""")
+    assert "RETURN-CODE" not in report.undefined
+    assert any("RETURN-CODE" in caveat for caveat in report.caveats)
+
+
+def test_duplicate_declarations_are_reported_on_the_report():
+    report = _analyze_source("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-REC.
+          05 CUST-ID PIC X(5).
+       LINKAGE SECTION.
+       01 LK-REC.
+          05 CUST-ID PIC X(5).
+       PROCEDURE DIVISION USING LK-REC.
+       MAIN.
+           MOVE 'A' TO CUST-ID OF WS-REC
+           GOBACK.
+""")
+    assert report.duplicate_declarations == ["CUST-ID"]
+    assert "duplicate_declarations" in report.to_dict()

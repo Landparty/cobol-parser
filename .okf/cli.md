@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-08-18T00:00:00Z
+timestamp: 2026-09-15T00:00:00Z
 ---
 
 # Overview
@@ -780,3 +780,18 @@ for linting every unit.
   / `FixtureBundle` / `ScenarioPlanner` (`gen-fixtures`, Phases 1, 3, 5-6)
 * [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) — the
   full `FixtureBundle` JSON shape `gen-fixtures --format json` produces
+
+
+## xref / program-signature / codebase-graph / copybook-impact / sql-cics-check / diff / jcl (PR #212, 2026-09-15)
+
+Seven subcommands from PR #212 (`_cmd_xref`, `_cmd_program_signature`,
+`_cmd_codebase_graph`, `_cmd_copybook_impact`, the `sql-cics-check`
+analyzer, `_cmd_diff`, `_cmd_jcl` in `cli/parse.py`). `xref` and
+`program-signature` take `--program`; `xref` appends the parser's
+unexpanded-COPY warnings to `caveats` (a member the parser could not
+expand leaves every field it declares looking undeclared).
+`codebase-graph`/`copybook-impact` take one directory or a file list and
+`--extension EXT` with or without a leading dot. The lint rule for the
+SQL/CICS analyzer is `sql-cics-check`, the subcommand's own name. `diff`
+has no `--program` yet (contained programs are not compared -- noted in
+the PR review). See [analysis.md](analysis.md).

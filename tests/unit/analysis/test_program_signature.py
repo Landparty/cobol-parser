@@ -299,6 +299,7 @@ class TestSerialization:
             "kind",
             "parameter_count",
             "parameters",
+            "returning",
             "call_example",
             "location",
         }
@@ -364,3 +365,93 @@ class TestMultipleProgramUnits:
         inner = by_name["INNERP"].primary
         assert inner is not None
         assert [p.name for p in inner.parameters] == ["LK-IN"]
+
+
+class TestReviewFollowUps:
+    """Review follow-ups on PR #212."""
+
+    def test_returning_operand_is_not_a_fourth_using_parameter(self):
+        signature = _signature("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BYV.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01 LK-A PIC X.
+       01 LK-B PIC X.
+       01 LK-RET PIC 9.
+       PROCEDURE DIVISION USING LK-A LK-B RETURNING LK-RET.
+       MAIN.
+           MOVE LK-A TO LK-B
+           MOVE 1 TO LK-RET
+           GOBACK.
+""")
+        entry = signature.entry_points[0]
+        assert [p.name for p in entry.parameters] == ["LK-A", "LK-B"]
+        assert entry.returning == "LK-RET"
+        assert entry.call_example() == 'CALL "BYV" USING LK-A, LK-B RETURNING LK-RET'
+        assert "RETURNING" not in signature.undeclared_parameters
+
+    def test_contained_programs_entry_is_not_the_outer_units(self):
+        result = parse_cobol(
+            """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTERP.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01 LK-OUT PIC X.
+       PROCEDURE DIVISION USING LK-OUT.
+       MAIN.
+           GOBACK.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INNERP.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01 LK-IN PIC X.
+       PROCEDURE DIVISION.
+       INNER-MAIN.
+           ENTRY 'INNERALT' USING LK-IN
+           GOBACK.
+       END PROGRAM INNERP.
+       END PROGRAM OUTERP.
+""",
+            filename="NEST.cbl",
+        )
+        assert result.ast is not None, result.errors
+        outer = ProgramSignatureExtractor().analyze(result.ast)
+        assert [e.name for e in outer.entry_points] == ["OUTERP"]
+        assert outer.undeclared_parameters == []
+
+    def test_host_variable_and_call_argument_roles_are_unknown_not_input(self):
+        signature = _signature("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AMBIG.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01 LK-NAME PIC X(20).
+       01 LK-REC PIC X(80).
+       PROCEDURE DIVISION USING LK-NAME LK-REC.
+       MAIN.
+           EXEC SQL SELECT NAME INTO :LK-NAME FROM T END-EXEC
+           CALL 'X' USING LK-REC
+           GOBACK.
+""")
+        directions = {p.name: p.direction for p in signature.entry_points[0].parameters}
+        assert directions == {"LK-NAME": "unknown", "LK-REC": "unknown"}
+        assert any("LK-NAME" in note for note in signature.unchecked)
+        assert any("LK-REC" in note for note in signature.unchecked)
+
+    def test_group_with_fields_declared_twice_is_unknown(self):
+        signature = _signature("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-CUST.
+          05 CUST-ID PIC X(5).
+       LINKAGE SECTION.
+       01 LK-CUST.
+          05 CUST-ID PIC X(5).
+       PROCEDURE DIVISION USING LK-CUST.
+       MAIN.
+           MOVE 'ABC' TO CUST-ID OF WS-CUST
+           GOBACK.
+""")
+        parameter = signature.entry_points[0].parameters[0]
+        assert parameter.direction == "unknown"
+        assert any("declared more than once" in note for note in signature.unchecked)

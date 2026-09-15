@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 24 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, DCLGEN/host-variable, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, and more.
 tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk]
-timestamp: 2026-09-04T00:00:00Z
+timestamp: 2026-09-15T00:00:00Z
 ---
 
 # Overview
@@ -2052,3 +2052,55 @@ program.
 
 `tests/integration/test_enterprise_program_types.py` pins each of these
 through the corpus program that exposed it.
+
+
+## XrefAnalyzer, ProgramSignatureExtractor, CodebaseGraphBuilder, SqlCicsAnalyzer, ProgramDiffer (PR #212, 2026-09-15)
+
+Six modules landed together, still marked work in progress by their PR;
+this section records what a reviewer needs to know, not the full design.
+
+* `xref.py` -- `XrefAnalyzer().analyze(ast) -> XrefReport` (`entries`,
+  `undefined`, `caveats`, `duplicate_declarations`). Procedure names
+  (PERFORM/GO TO targets) are credited verbatim, so digit-led paragraphs
+  (`1000-INIT`) resolve; `_COBOL_WORD_RE` allows a leading digit with at
+  least one letter. Contained programs are AST children and are skipped
+  in every sweep (`_contained_node_ids`). `_SPECIAL_REGISTERS` (RETURN-CODE,
+  SQLCODE, SQLCA, EIB*, DFH*, XML-*/JSON-*, TALLY, ...) are never
+  `undefined`; a caveat names the ones seen. STRING operands are inexact
+  (the parser strips literal quotes). `duplicate_declarations` lists names
+  declared more than once in one namespace -- every reference goes to the
+  first declaration, so nothing downstream may attribute a reference to
+  the second.
+* `program_signature.py` -- `ProgramSignatureExtractor().analyze(ast)`,
+  `extract_signatures(ast)` for every unit. `EntryPoint.returning` comes
+  from the parser's `returning_parameter` metadata. Direction grading:
+  `write` + any read = `input-output`; a reference only as a CALL
+  argument or SQL host variable (`_AMBIGUOUS_ROLES`) is `unknown` and
+  listed in `unchecked`; a group whose fields xref reports duplicated is
+  `unknown` rather than inferred from the same-named WORKING-STORAGE
+  field. ENTRY statements of contained programs are not the outer unit's.
+* `codebase.py` -- `CodebaseGraphBuilder(copybook_paths=...).build(paths)`
+  / `.build_from_directory(root, extensions=...)`. Paths are keyed by
+  `str(Path(p))`, the spelling `BatchResult.path` returns, so `./X.cbl`
+  matches its parsed units; extensions are accepted with or without the
+  leading dot; `_member_paths`/`_member_copies` reset per build.
+* `sql_cics_lint.py` -- `SqlCicsAnalyzer().analyze(ast)`; lint rule id
+  `sql-cics-check` (= the subcommand name, per the lint convention).
+  `DECLARE GLOBAL TEMPORARY TABLE` executes and is graded; DECLARE
+  CURSOR/TABLE/STATEMENT/VARIABLE are not. Known gaps (reported in the
+  PR review, not yet fixed): a VARCHAR host structure written through its
+  subordinate `49` item is not traced to `PREPARE ... FROM :hv`; SQLCODE
+  checked in a `PERFORM UNTIL` guard or in the calling paragraph is not
+  seen.
+* `ast_diff.py` -- `ProgramDiffer().diff(old_ast, new_ast)`. Dedicated
+  signatures for MOVE/PERFORM/CALL/GO TO/IF/EVALUATE/SEARCH plus (review
+  follow-up) OPEN, EXEC SQL, EXEC CICS, COMPUTE, INSPECT, UNSTRING,
+  ACCEPT, DISPLAY; every other statement compares on operands *and* its
+  rendered text, so an unmodelled edit over-reports rather than reads as
+  unchanged. Known gaps: statements outside any named paragraph and
+  contained programs are not compared.
+* `cobolparser/jcl/` -- `parse_jcl(text)`. An unnamed `// PROC` header
+  marks a cataloged procedure: its keywords seed the symbolic defaults and
+  the JOB-less body is a note, not an error. Known gaps: a *named* PROC
+  without PEND at EOF is still an error; `DSN=*.step.dd` backward
+  references are not resolved.

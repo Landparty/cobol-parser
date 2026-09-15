@@ -57,6 +57,10 @@ from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.call import EntryStatement
+from .xref import ROLE_CALL_ARGUMENT, ROLE_HOST_VARIABLE
+
+#: Roles that may read *or* write the operand: graded ``unknown``.
+_AMBIGUOUS_ROLES = frozenset({ROLE_CALL_ARGUMENT, ROLE_HOST_VARIABLE})
 
 #: Section name the DATA DIVISION parser assigns to the LINKAGE SECTION.
 #: Matches the convention ``LinkageChecker``/``UnusedVariableAnalyzer`` use.
@@ -136,6 +140,9 @@ class EntryPoint:
     kind: str
     parameters: list[SignatureParameter] = field(default_factory=list)
     location: SourceLocation | None = None
+    #: The ``RETURNING`` operand of ``PROCEDURE DIVISION USING ... RETURNING``
+    #: (``None`` when there is none).
+    returning: str | None = None
 
     @property
     def parameter_count(self) -> int:
@@ -148,10 +155,13 @@ class EntryPoint:
         operand *order* is preserved verbatim from the USING clause rather
         than sorted anywhere in this module.
         """
-        if not self.parameters:
-            return f'CALL "{self.name}"'
-        operands = ", ".join(p.name for p in self.parameters)
-        return f'CALL "{self.name}" USING {operands}'
+        text = f'CALL "{self.name}"'
+        if self.parameters:
+            operands = ", ".join(p.name for p in self.parameters)
+            text = f"{text} USING {operands}"
+        if self.returning:
+            text = f"{text} RETURNING {self.returning}"
+        return text
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -159,6 +169,7 @@ class EntryPoint:
             "kind": self.kind,
             "parameter_count": self.parameter_count,
             "parameters": [p.to_dict() for p in self.parameters],
+            "returning": self.returning,
             "call_example": self.call_example(),
             "location": self.location.to_dict() if self.location else None,
         }
@@ -259,8 +270,17 @@ class ProgramSignatureExtractor:
     :func:`extract_signatures` for a file holding several PROGRAM-IDs.
     """
 
+    def __init__(self) -> None:
+        # Per-analysis state set by ``_parameter_directions``: which roles
+        # left a parameter's direction unknown, and which names xref saw
+        # declared more than once.
+        self._ambiguous_roles: dict[str, list[str]] = {}
+        self._duplicate_declarations: set[str] = set()
+
     def analyze(self, ast: CobolProgram) -> ProgramSignature:
         signature = ProgramSignature(program_id=ast.program_name or "")
+        self._ambiguous_roles = {}
+        self._duplicate_declarations = set()
 
         records = _linkage_records(ast)
         # Name -> declaration, over the whole LINKAGE subtree: a USING
@@ -302,8 +322,8 @@ class ProgramSignatureExtractor:
             )
         return signature
 
-    @staticmethod
     def _direction_for(
+        self,
         key: str,
         declaration: CobolDataItem,
         directions: dict[str, str],
@@ -324,14 +344,42 @@ class ProgramSignatureExtractor:
         either stays ``unknown`` and says so in ``unchecked``.
         """
         own = directions.get(key)
+        if own == "unknown":
+            roles = ", ".join(self._ambiguous_roles.get(key, []))
+            signature.unchecked.append(
+                f"{key}: direction not classified (referenced only as {roles}, "
+                "which may read or write it)"
+            )
+            return own
         if own is not None:
             return own
 
-        child_directions = {
-            directions[node.name.upper()]
+        child_names = [
+            node.name.upper()
             for node in _flatten(declaration)[1:]
             if node.name and node.name.upper() in directions
-        }
+        ]
+        duplicated = sorted(
+            name for name in child_names if name in self._duplicate_declarations
+        )
+        if duplicated:
+            # The same field name is declared elsewhere too (a copybook in
+            # both WORKING-STORAGE and LINKAGE): every reference to it was
+            # attributed to the first declaration, so nothing here says
+            # whether it was *this* group's field that was touched.
+            signature.unchecked.append(
+                f"{key}: direction not classified (its field(s) "
+                f"{', '.join(duplicated)} are declared more than once, so their "
+                "references cannot be attributed to this group)"
+            )
+            return "unknown"
+        child_directions = {directions[name] for name in child_names}
+        if "unknown" in child_directions:
+            signature.unchecked.append(
+                f"{key}: direction not classified (a field under it is "
+                "referenced only in a way that may read or write it)"
+            )
+            return "unknown"
         if not child_directions:
             signature.unchecked.append(
                 f"{key}: direction not classified (the operand and every field "
@@ -380,7 +428,20 @@ class ProgramSignatureExtractor:
         if proc_div is not None:
             raw = proc_div.get_metadata("using_parameters") or []
             names = [str(p) for p in raw if str(p).strip()]
-            if names:
+            # ``PROCEDURE DIVISION USING a b RETURNING r``: the parser keeps
+            # RETURNING and its operand in the USING list. The operand is
+            # the value the callee hands back, not a fourth USING operand.
+            returning: str | None = None
+            declared_returning = proc_div.get_metadata("returning_parameter")
+            if declared_returning:
+                returning = str(declared_returning).upper()
+            upper_names = [n.upper() for n in names]
+            if "RETURNING" in upper_names:
+                at = upper_names.index("RETURNING")
+                rest = names[at + 1 :]
+                returning = rest[0].upper() if rest else None
+                names = names[:at]
+            if names or returning:
                 entries.append(
                     EntryPoint(
                         name=ast.program_name or "",
@@ -389,12 +450,21 @@ class ProgramSignatureExtractor:
                             SignatureParameter(name=n.upper(), position=i)
                             for i, n in enumerate(names, start=1)
                         ],
+                        returning=returning,
                         location=proc_div.location,
                     )
                 )
 
+        inner = {
+            id(node)
+            for contained in ast.contained_programs
+            for node in contained.traverse_depth_first()
+        }
         for stmt in ast.find_all_by_type("EntryStatement"):
             if not isinstance(stmt, EntryStatement):  # pragma: no cover - defensive
+                continue
+            if id(stmt) in inner:
+                # A contained program's ENTRY is its own entry point.
                 continue
             name = (stmt.entry_name or "").strip().strip("'\"")
             if not name:
@@ -448,18 +518,28 @@ class ProgramSignatureExtractor:
             return {}
 
         directions: dict[str, str] = {}
+        self._ambiguous_roles = {}
         for entry in report.entries:
             roles = {ref.role for ref in entry.references}
             if not roles:
                 continue
+            # Handed to a sub-CALL (BY REFERENCE by default) or to SQL as a
+            # host variable (``INTO :X`` writes it), the operand may have
+            # been written by something this analyzer does not see; that is
+            # graded ``unknown`` and said so, never guessed as ``input``.
+            ambiguous = roles & _AMBIGUOUS_ROLES
             writes = "write" in roles
-            reads = bool(roles - {"write"})
+            reads = bool(roles - {"write"} - ambiguous)
             if writes and reads:
                 directions[entry.name.upper()] = "input-output"
+            elif ambiguous:
+                directions[entry.name.upper()] = "unknown"
+                self._ambiguous_roles[entry.name.upper()] = sorted(ambiguous)
             elif writes:
                 directions[entry.name.upper()] = "output"
             elif reads:
                 directions[entry.name.upper()] = "input"
+        self._duplicate_declarations = set(report.duplicate_declarations)
         return directions
 
 

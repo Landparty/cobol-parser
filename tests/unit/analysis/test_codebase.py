@@ -880,3 +880,63 @@ class TestHelpers:
         unresolved: list[str] = []
         assert builder._member_direct_copies("OUTER", unresolved) == []
         assert any("could not be read" in note for note in unresolved)
+
+
+class TestReviewFollowUps:
+    """Review follow-ups on PR #212."""
+
+    def test_dot_slash_path_does_not_create_a_phantom_program(
+        self, tmp_path, monkeypatch
+    ):
+        (tmp_path / "PROG1.cbl").write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. ABC123.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       COPY CUSTREC.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN.\n"
+            "           STOP RUN.\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        graph = CodebaseGraphBuilder().build(["./PROG1.cbl"])
+        assert [node.program_id for node in graph.programs] == ["ABC123"]
+        assert graph.programs_using("CUSTREC", transitive=False) == ["ABC123"]
+
+    def test_extension_without_a_leading_dot_is_accepted(self, tmp_path):
+        (tmp_path / "A.cbl").write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. A.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder().build_from_directory(
+            str(tmp_path), extensions=("cbl",)
+        )
+        assert [node.program_id for node in graph.programs] == ["A"]
+
+    def test_member_caches_do_not_leak_between_builds(self, tmp_path):
+        copybooks = tmp_path / "cpy"
+        copybooks.mkdir()
+        (copybooks / "OUTER.cpy").write_text("       01 WS-A PIC X.\n")
+        (copybooks / "INNER2.cpy").write_text("       01 WS-B PIC X.\n")
+        program = tmp_path / "P.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. P.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       COPY OUTER.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN.\n"
+            "           STOP RUN.\n"
+        )
+        builder = CodebaseGraphBuilder(copybook_paths=[str(copybooks)])
+        first = builder.build([str(program)])
+        assert ("OUTER", "INNER2") not in {
+            (e.program, e.member) for e in first.copy_edges
+        }
+        (copybooks / "OUTER.cpy").write_text("       COPY INNER2.\n")
+        second = builder.build([str(program)])
+        assert ("OUTER", "INNER2") in {(e.program, e.member) for e in second.copy_edges}

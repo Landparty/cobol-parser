@@ -143,7 +143,17 @@ _NON_EXECUTABLE_SQL_TYPES = frozenset(
 _NON_EXECUTABLE_PREFIXES: tuple[str, ...] = (
     "BEGIN DECLARE SECTION",
     "END DECLARE SECTION",
-    "DECLARE",  # DECLARE ... STATEMENT / ... CURSOR / ... TABLE
+)
+
+_DECLARE_GLOBAL_TEMPORARY_RE = re.compile(
+    r"^DECLARE\s+GLOBAL\s+TEMPORARY\s+TABLE\b", re.IGNORECASE
+)
+
+#: ``DECLARE`` is non-executable only in these forms; ``DECLARE GLOBAL
+#: TEMPORARY TABLE`` executes and sets SQLCODE like any other statement.
+_DECLARE_NON_EXECUTABLE_RE = re.compile(
+    r"^DECLARE\s+\S+\s+(?:.*\b)?(?:CURSOR|STATEMENT|VARIABLE)\b|^DECLARE\s+\S+\s+TABLE\b",
+    re.IGNORECASE,
 )
 
 #: CICS commands that manage the condition handlers rather than request a
@@ -659,9 +669,15 @@ def _is_non_executable(statement: ExecSQLStatement, upper: str) -> bool:
     """True for a precompiler declaration -- nothing to check a status of."""
     if isinstance(statement, DeclareCursorStatement):
         return True
+    if _DECLARE_GLOBAL_TEMPORARY_RE.match(upper):
+        # The parser files this under DECLARE TABLE, but it executes (it
+        # creates the table) and sets SQLCODE like any other statement.
+        return False
     if (statement.sql_type or "").upper() in _NON_EXECUTABLE_SQL_TYPES:
         return True
-    return any(upper.startswith(prefix) for prefix in _NON_EXECUTABLE_PREFIXES)
+    if any(upper.startswith(prefix) for prefix in _NON_EXECUTABLE_PREFIXES):
+        return True
+    return _DECLARE_NON_EXECUTABLE_RE.match(upper) is not None
 
 
 def _is_singleton_select_without_into(statement: ExecSQLStatement, upper: str) -> bool:

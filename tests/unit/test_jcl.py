@@ -787,6 +787,9 @@ class TestProcedures:
 //
 """)
         assert any("cataloged-procedure header" in n for n in result.unresolved)
+        # The header's keywords are the body's symbolic defaults, and the
+        # card is not an "unknown operation" on top of being noted.
+        assert result.errors == []
 
 
 class TestIfThenElse:

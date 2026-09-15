@@ -160,7 +160,70 @@ _RESERVED_WORDS: frozenset[str] = frozenset(CobolLexer.KEYWORDS) | frozenset(
 #: parser sometimes truncates (an UNSTRING ``DELIMITER IN`` operand can
 #: arrive as ``"WS-"``), and a fragment like that is not a symbol -- it is
 #: dropped and counted rather than reported as an undeclared name.
-_COBOL_WORD_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$")
+_COBOL_WORD_RE = re.compile(
+    r"^(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$"
+)
+
+#: IBM special registers and precompiler/translator-supplied items: never
+#: declared in the DATA DIVISION the analyzer sees, yet not undeclared
+#: either. A reference to one is counted and reported in a caveat rather
+#: than listed in ``undefined``, which would otherwise name RETURN-CODE or
+#: SQLCODE on nearly every enterprise program and make the list useless as
+#: a lint signal.
+_SPECIAL_REGISTERS: frozenset[str] = frozenset(
+    {
+        "RETURN-CODE",
+        "SORT-RETURN",
+        "SORT-MESSAGE",
+        "SORT-CORE-SIZE",
+        "SORT-FILE-SIZE",
+        "SORT-MODE-SIZE",
+        "SORT-CONTROL",
+        "TALLY",
+        "WHEN-COMPILED",
+        "DEBUG-ITEM",
+        "SHIFT-IN",
+        "SHIFT-OUT",
+        "LINAGE-COUNTER",
+        "ADDRESS",
+        "LENGTH",
+        "XML-CODE",
+        "XML-EVENT",
+        "XML-TEXT",
+        "XML-NTEXT",
+        "XML-NAMESPACE",
+        "XML-NNAMESPACE",
+        "XML-NAMESPACE-PREFIX",
+        "XML-NNAMESPACE-PREFIX",
+        "XML-INFORMATION",
+        "JSON-CODE",
+        "JSON-STATUS",
+        "SQLCODE",
+        "SQLSTATE",
+        "SQLCA",
+        "SQLERRD",
+        "SQLERRM",
+        "SQLERRMC",
+        "SQLWARN0",
+        "SQLDA",
+        "EIBCALEN",
+        "EIBRESP",
+        "EIBRESP2",
+        "EIBTRNID",
+        "EIBTRMID",
+        "EIBAID",
+        "EIBFN",
+        "EIBRCODE",
+        "EIBDATE",
+        "EIBTIME",
+        "EIBTASKN",
+        "EIBCPOSN",
+        "DFHRESP",
+        "DFHVALUE",
+        "DFHCOMMAREA",
+        "DFHEIBLK",
+    }
+)
 
 _PAREN_RE = re.compile(r"\(([^()]*)\)")
 _FUNCTION_RE = re.compile(r"\bFUNCTION\b", re.IGNORECASE)
@@ -236,6 +299,11 @@ class XrefReport:
     entries: list[XrefEntry] = field(default_factory=list)
     undefined: list[str] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
+    #: Names declared more than once in one namespace (a copybook COPYed
+    #: into both WORKING-STORAGE and LINKAGE is the common shape). Every
+    #: reference to such a name is attributed to the first declaration, so
+    #: a consumer grading *which* declaration was touched must not trust it.
+    duplicate_declarations: list[str] = field(default_factory=list)
 
     @property
     def total_references(self) -> int:
@@ -264,6 +332,7 @@ class XrefReport:
             "entries": [entry.to_dict() for entry in self.entries],
             "undefined": list(self.undefined),
             "caveats": list(self.caveats),
+            "duplicate_declarations": list(self.duplicate_declarations),
             "summary": {
                 "total_symbols": len(self.entries),
                 "defined_symbols": len(defined),
@@ -319,6 +388,19 @@ def _partition_operand(text: str) -> tuple[set[str], set[str], bool]:
 
     base = _extract_identifiers(remaining)
     return base - subscripts, subscripts, True
+
+
+def _contained_node_ids(ast: CobolProgram) -> set[int]:
+    """``id()`` of every node under a program contained in *ast*.
+
+    ``traverse_depth_first`` descends into contained programs (they are AST
+    children); the outer unit's cross-reference must not see them.
+    """
+    return {
+        id(node)
+        for contained in ast.contained_programs
+        for node in contained.traverse_depth_first()
+    }
 
 
 class XrefAnalyzer:
@@ -391,6 +473,8 @@ class XrefAnalyzer:
         self._generic_statements: set[str] = set()
         self._location_fallbacks: int = 0
         self._dropped_tokens: int = 0
+        self._special_registers: set[str] = set()
+        self._duplicates: set[str] = set()
 
     # ------------------------------------------------------------------
     # Entry point
@@ -414,6 +498,8 @@ class XrefAnalyzer:
         self._generic_statements = set()
         self._location_fallbacks = 0
         self._dropped_tokens = 0
+        self._special_registers = set()
+        self._duplicates = set()
 
         self._collect_data_definitions(ast)
         self._collect_file_definitions(ast)
@@ -463,10 +549,17 @@ class XrefAnalyzer:
             )
         entries.sort(key=lambda e: (_KIND_ORDER.get(e.kind, len(_KIND_ORDER)), e.name))
 
+        if self._special_registers:
+            names = ", ".join(sorted(self._special_registers))
+            self._caveat(
+                "special registers / precompiler-supplied items referenced but "
+                f"not declared here, excluded from 'undefined': {names}"
+            )
         return XrefReport(
             entries=entries,
             undefined=sorted({e.name for e in self._undefined.values()}),
             caveats=list(self._caveats),
+            duplicate_declarations=sorted(self._duplicates),
         )
 
     # ------------------------------------------------------------------
@@ -492,6 +585,7 @@ class XrefAnalyzer:
         table = self._table_for_kind(kind)
         existing = table.get(upper)
         if existing is not None:
+            self._duplicates.add(upper)
             self._caveat(
                 f"{existing.kind} '{upper}' is declared more than once; every "
                 "reference is attributed to the first declaration"
@@ -563,7 +657,10 @@ class XrefAnalyzer:
         ``SELECT`` carries the location when there is one, otherwise the FD
         record's own location does.
         """
+        inner = _contained_node_ids(ast)
         for node in ast.traverse_depth_first():
+            if id(node) in inner:
+                continue
             if isinstance(node, SelectStatement) and node.file_name:
                 self._define_file(node.file_name, node.location)
 
@@ -651,7 +748,12 @@ class XrefAnalyzer:
                 else:
                     self._visit_paragraph(item, visited)
 
+        inner = _contained_node_ids(ast)
         for node in ast.traverse_depth_first():
+            if id(node) in inner:
+                # A contained program is an AST child; its statements
+                # belong to its own symbol table, not this unit's.
+                continue
             if isinstance(node, CobolStatement) and id(node) not in visited:
                 visited.add(id(node))
                 if isinstance(node, SelectStatement):
@@ -746,6 +848,13 @@ class XrefAnalyzer:
         """
         if value is None:
             return []
+        if role in _PROCEDURE_ROLES and isinstance(value, str):
+            # A procedure name is one word, and the dominant mainframe
+            # convention makes it digit-led (``1000-INIT``); the generic
+            # identifier extraction would split that into ``INIT``.
+            target = value.strip().upper()
+            if _COBOL_WORD_RE.match(target):
+                return [(target, role, True)]
         if isinstance(value, _RawText):
             return [
                 (name, role, False) for name in sorted(_extract_identifiers(value.text))
@@ -789,6 +898,9 @@ class XrefAnalyzer:
         """
         upper = name.upper()
         entry = self._lookup(upper, role)
+        if entry is None and upper in _SPECIAL_REGISTERS:
+            self._special_registers.add(upper)
+            return
         if entry is None and (
             upper in _RESERVED_WORDS or not _COBOL_WORD_RE.match(upper)
         ):
@@ -932,8 +1044,12 @@ class XrefAnalyzer:
                 for value in (stmt.into_target, stmt.pointer_variable)
                 if value
             }
+            # The STRING parser hands literal operands through quote-
+            # stripped (``'VERY LONG TEXT'`` arrives as ``VERY LONG TEXT``),
+            # so an operand cannot be told from a run of words: inexact,
+            # never reported undefined.
             pairs += [
-                (operand, ROLE_READ, True)
+                (operand, ROLE_READ, False)
                 for operand in stmt.operands
                 if operand.upper() not in consumed
             ]

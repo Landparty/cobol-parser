@@ -608,6 +608,10 @@ class CodebaseGraphBuilder:
 
     def build(self, paths: list[str]) -> CodebaseGraph:
         """Build the graph for *paths* (files; directories are ignored)."""
+        # Per-build caches: a copybook edited between two builds on one
+        # long-lived builder must not serve the previous build's chain.
+        self._member_paths = {}
+        self._member_copies = {}
         files = self._normalize_paths(paths)
 
         nodes: list[ProgramNode] = []
@@ -682,7 +686,9 @@ class CodebaseGraphBuilder:
         if not root_path.is_dir():
             raise NotADirectoryError(f"not a directory: {root}")
 
-        wanted = {ext.lower() for ext in extensions}
+        wanted = {
+            (ext if ext.startswith(".") else f".{ext}").lower() for ext in extensions
+        }
         found: list[str] = []
         for dirpath, dirnames, filenames in os.walk(root_path):
             dirnames.sort()
@@ -703,7 +709,11 @@ class CodebaseGraphBuilder:
             if key in seen:
                 continue
             seen.add(key)
-            unique.append(raw)
+            # ``str(Path(...))`` is the spelling ``BatchResult.path`` comes
+            # back with (``./PROG.cbl`` -> ``PROG.cbl``); keying on the raw
+            # spelling instead left the parsed units unmatched and every
+            # COPY edge attributed to a phantom program named after the file.
+            unique.append(str(Path(raw)))
         return unique
 
     def _chunks(self, files: list[str]) -> list[list[str]]:

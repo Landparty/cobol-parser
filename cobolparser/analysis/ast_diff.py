@@ -112,6 +112,7 @@ Example:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any
@@ -119,6 +120,8 @@ from typing import Any
 from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolParagraph, CobolProgram, CobolSection
+from ..models.sql_statements import ExecSQLStatement
+from ..models.statements.arithmetic import ComputeStatement
 from ..models.statements.base import CobolExpression, CobolStatement
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
@@ -128,8 +131,15 @@ from ..models.statements.control import (
     PerformStatement,
     SearchStatement,
 )
-from ..models.statements.data import MoveStatement
+from ..models.statements.data import (
+    DisplayStatement,
+    InspectStatement,
+    MoveStatement,
+    UnstringStatement,
+)
+from ..models.statements.io import IOAcceptStatement, IOOpenStatement
 from ..models.statements.misc import SelectStatement
+from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 from .program_flow.condition_text import render_condition_text
 from .program_flow.statement_text import summarize_statement
 
@@ -453,7 +463,77 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
         return (kind, tuple(_text_of(subject) for subject in stmt.subjects))
     if isinstance(stmt, SearchStatement):
         return (kind, stmt.table_name or "", stmt.varying_variable or "")
-    return (kind, tuple(str(operand) for operand in getattr(stmt, "operands", [])))
+    if isinstance(stmt, IOOpenStatement):
+        return (
+            kind,
+            stmt.open_mode or "",
+            tuple(stmt.file_names),
+            tuple(sorted(stmt.file_modes.items())),
+        )
+    if isinstance(stmt, ExecSQLStatement):
+        return (kind, " ".join((stmt.sql_text or "").split()).upper())
+    if isinstance(stmt, ExecCicsStatement):
+        return (
+            kind,
+            " ".join((stmt.cics_text or "").split()).upper(),
+            tuple(sorted((k, str(v)) for k, v in (stmt.options or {}).items())),
+        )
+    if isinstance(stmt, ComputeStatement):
+        return (
+            kind,
+            tuple(stmt.targets),
+            " ".join(_text_of(stmt.expression).split()),
+            bool(stmt.rounded),
+        )
+    if isinstance(stmt, InspectStatement):
+        return (
+            kind,
+            stmt.target or "",
+            stmt.inspect_type or "",
+            _json_key(stmt.tallying_clauses),
+            _json_key(stmt.replacing_clauses),
+            stmt.converting_from or "",
+            stmt.converting_to or "",
+        )
+    if isinstance(stmt, UnstringStatement):
+        return (
+            kind,
+            stmt.source_operand or "",
+            tuple(stmt.delimiters),
+            _json_key(stmt.into_targets),
+            stmt.pointer_variable or "",
+            stmt.tallying_variable or "",
+        )
+    if isinstance(stmt, IOAcceptStatement):
+        return (
+            kind,
+            stmt.target or "",
+            stmt.from_source or "",
+            stmt.environment_name or "",
+        )
+    if isinstance(stmt, DisplayStatement):
+        return (
+            kind,
+            tuple(stmt.display_items),
+            stmt.output_device or "",
+            bool(stmt.with_no_advancing),
+        )
+    # No dedicated branch: compare on the operands *and* the rendered text,
+    # so a statement model that keeps its semantics off ``operands``
+    # (COMPUTE's expression, INSPECT's clauses, OPEN's mode, an EXEC SQL
+    # block's text, ...) still reports an edit rather than reading as
+    # unchanged. The text is a rendering, so this can over-report a
+    # cosmetic difference; it can no longer under-report a real one.
+    return (
+        kind,
+        tuple(str(operand) for operand in getattr(stmt, "operands", [])),
+        _statement_text(stmt),
+    )
+
+
+def _json_key(value: Any) -> str:
+    """A stable, comparable rendering of a clause list of plain dicts."""
+    return json.dumps(value, sort_keys=True, default=str)
 
 
 def _statement_kind(stmt: Any) -> str:

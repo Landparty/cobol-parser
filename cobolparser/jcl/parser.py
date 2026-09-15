@@ -176,6 +176,9 @@ class _Builder:
         self._seen_errors: set[tuple[int, str]] = set()
         self._seen_unresolved: set[str] = set()
         self._implicit_job_reported = False
+        # Set once an unnamed ``// PROC`` header has been seen: the file is
+        # a cataloged procedure, whose steps legitimately precede any JOB.
+        self._cataloged_procedure = False
 
     # -- diagnostics -----------------------------------------------------
     def _error(self, line: int, message: str) -> None:
@@ -228,6 +231,7 @@ class _Builder:
                     )
                     continue
                 if not card.name:
+                    self._cataloged_procedure = True
                     self._note(
                         f"PROC statement (line {card.line}): no procedure name, so "
                         "this is a cataloged-procedure header rather than an "
@@ -376,11 +380,15 @@ class _Builder:
     def _implicit_job(self, card: JclCard) -> JclJob:
         if not self._implicit_job_reported:
             self._implicit_job_reported = True
-            self._error(
-                card.line,
+            message = (
                 f"{card.operation} statement appears before any JOB statement; "
-                "its steps are attached to an unnamed job",
+                "its steps are attached to an unnamed job"
             )
+            if self._cataloged_procedure:
+                # Expected of a cataloged procedure: it has no JOB card.
+                self._note(message)
+            else:
+                self._error(card.line, message)
         return JclJob(name="", steps=[], parameters=[], line=card.line)
 
     def _close_sink(self, sink: _Sink) -> None:
@@ -413,6 +421,12 @@ class _Builder:
                 f"INCLUDE {member} (line {card.line}): the group was not expanded; "
                 "this parser reads only the file it was given"
             )
+        elif operation == "PROC":
+            # An unnamed ``// PROC`` card is a cataloged procedure's own
+            # header: its keywords are the symbolic-parameter defaults for
+            # the body that follows, read here as ordinary JCL.
+            for keyword, value in self._procedure_defaults(card).items():
+                sink.symbols.setdefault(keyword, value)
         elif operation == "JCLLIB":
             self._note(
                 f"JCLLIB (line {card.line}): procedure libraries are not searched, "
