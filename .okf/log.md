@@ -1,5 +1,100 @@
+---
+type: Log
+title: OKF Update Log
+description: Dated log of OKF bundle updates, newest first.
+tags: [log, changelog, history]
+timestamp: 2026-09-15T00:00:00Z
+---
+
 # OKF Update Log
 
+Newest first. A follow-up entry may sit directly under the entry it
+follows up on even when a day or two out of order -- that adjacency is
+deliberate. Anything else appended to the bottom is a mistake: five
+entries, including both 2026-09-15 sections, were found there on
+2026-09-15 and moved back up.
+
+## 2026-09-15 -- OKF bundle repair: ordering, routing, and the map that lets it rot
+
+A review of the bundle against the source tree, and the four things it found
+fixed.
+
+* **`OKF_MAP` had 15 holes, which is the mechanism behind everything else.**
+  `scripts/okf_staleness_check.py` maps source paths to OKF files, and the
+  pre-commit hook only asks for an update when a *mapped* path changes.
+  Unmapped: the whole `cobolparser/jcl/` package, `cobolparser/parser.py`,
+  `scan.py`, `plugins/`, `profiling.py`, `_errors.py` and more. The
+  `parser.py` miss is the instructive one -- the map's
+  `cobolparser/parsers/` prefix ends in a slash, so it never matched the
+  orchestrator module sitting beside that package. A directory prefix and a
+  same-named module are two entries, never one.
+  `tests/test_okf_staleness_map.py` now fails if any source file maps
+  nowhere, if a mapped OKF file does not exist, or if a directory prefix
+  loses its slash.
+* **`log.md` was not in log order.** Five entries had been appended to the
+  bottom of a newest-first file, after the oldest (2026-06-28) section --
+  including *both* 2026-09-15 entries, so the two newest entries in the repo
+  were the last thing in a 4,356-line file and a reader skimming the top for
+  recent work saw 2026-09-12 and stopped. Moved back into place; content is
+  unchanged line for line. A follow-up entry may still sit under the entry it
+  follows up on when a day or two out of order -- that adjacency is
+  deliberate and the header now says so.
+* **PR #212 had appendix-level coverage.** 8,253 lines across six modules
+  had ~50 lines of OKF, explicitly "what a reviewer needs to know, not the
+  full design". `xref`, `program_signature`, `codebase`, `sql_cics_lint` and
+  `ast_diff` now have real sections in [analysis.md](analysis.md) (API,
+  report shapes, the grading rules, and the known gaps kept where they
+  were), and the JCL front end -- a whole second language, previously six
+  lines *inside analysis.md*, where nobody would look for it -- has its own
+  [jcl.md](jcl.md).
+* **`index.md` did not route to any of it.** It claimed 24 analysis modules
+  (28), hand-mirrored the package version, and listed no JCL at all. It now
+  leads with a task -> file table and drops the version mirror.
+
+Same append-after-the-end mistake, twice more: `cli.md` and `tests.md` both
+had a section sitting *after* their "See Also". Both moved, and `cli.md`'s
+seven-subcommand stub was replaced with real flag tables under the
+Subcommand Reference where the other subcommands live.
+
+The general lesson: a docs-staleness check is only as good as its map, and
+nothing was checking the map. A convention that lives only in people's heads
+("newest first", "See Also goes last") drifts exactly as fast.
+
+
+## 2026-09-15 -- Enterprise COBOL program-type coverage
+
+One representative program per program type (`tests/samples/enterprise/`,
+22 programs; `docs/enterprise-program-types.md`) run through the whole
+stack, and the gaps it found closed: OO COBOL units (CLASS-ID / FACTORY /
+OBJECT / METHOD-ID, OBJECT REFERENCE), PROGRAM-ID attributes (RECURSIVE,
+the PROGRAM word, optional period), RETURNING, 6.x data clauses (PIC U,
+BYTE-LENGTH, DYNAMIC LENGTH, VOLATILE, OCCURS UNBOUNDED), DECLARATIVES
+modelled (and honoured by dead-code, program-flow, io-sequence), XML
+PROCESSING PROCEDURE and CICS HANDLE targets as references, EXEC DLI in
+the IMS analyzer, CICS translator items and SET ADDRESS OF in
+linkage-check / unused-variables, IS RECURSIVE in recursion-check,
+conditional compilation by default, REPLACE partial words, JSON
+CONVERTING, qualified DECLARE TABLE names, EXEC SQL INCLUDE expansion.
+See [parser.md](parser.md), [analysis.md](analysis.md),
+[ast-models.md](ast-models.md), [preprocessing.md](preprocessing.md),
+[tests.md](tests.md) (each has a 2026-09-15 section) and the CHANGELOG.
+
+
+## 2026-09-15 -- Review follow-ups on PR #212 (xref, signatures, codebase, SQL/CICS lint, diff, JCL) and #219
+
+PR #219's did-you-mean pool keeps extensionless copybooks (see
+[preprocessing.md](preprocessing.md)). PR #212's six modules get their
+first OKF sections ([analysis.md](analysis.md), [cli.md](cli.md)) and the
+fixes the review found: digit-led paragraph names credited, contained
+programs excluded from the outer unit's xref/signature, special registers
+and STRING literals out of `undefined`, `duplicate_declarations` on the
+xref report, `returning` and ambiguous-role / duplicated-field grading on
+signatures, normalized path keys and dot-less extensions on the codebase
+graph, unexpanded-COPY caveats on `xref`, the `sql-cics-check` rule id,
+DECLARE GLOBAL TEMPORARY TABLE graded, explicit diff signatures for the
+statement types whose semantics live off `operands`, and the cataloged
+`// PROC` header in JCL. Gaps the review found but this pass did not
+close are listed per module in analysis.md.
 ## 2026-09-12 — missing-period check judges the entry, not the line
 
 Found by running the `legacy-application` corpus through the COBOL Analyzer
@@ -694,6 +789,71 @@ character count rather than the storage width.
   purely additive: identical once the four new keys are stripped) and
   re-copied to mocky-mock, whose golden `.cut` test reads it.
 
+## 2026-09-05 — A stale `_data_fast` build no longer costs the DATA DIVISION
+
+Reported on Python 3.14: a compiled `_data_fast` accepting 18 arguments where
+`data_clauses.parse_data_item` passes 19, so every COBOL file with a DATA
+DIVISION failed to parse, degrading to a near-empty AST.
+
+Root cause is drift between two separately compiled halves, not a bad `.c`:
+the checked-in `_data_fast.c` was verified in sync with `_data_fast.pyx`
+(regenerated, argument tables compared — same for `_lexer_fast` and
+`_preprocess_fast`), so the 18-parameter binary can only have come from a
+stale *build* — an in-place `.so` older than the tree, a cached `build/`, or
+an installed wheel shadowing the source.
+
+What made a build problem into a parse problem: the fast-path call site was
+unconditional and positional, guarded only by `try/except ImportError` at
+import. A present-but-mismatched extension sails past that guard and raises
+`TypeError` from the middle of every data-description entry; `parser.py`'s
+broad `except Exception` recorded it as a generic error at line 1 column 1 and
+recovered by abandoning the division — losing the DATA *and* PROCEDURE
+divisions and reporting only an argument count.
+
+Fix: `_data_fast_usable()` probes the compiled helper once at import with an
+empty token list (the clause loop never runs, so it returns `pos` without
+reading any other parameter). On mismatch the fast path is disabled and
+`logger.warning` names the rebuild; a missing extension stays silent, since
+that is a normal pure-Python install. Verified against a real compiled
+extension, and fast-path vs fallback ASTs compared byte-for-byte across the
+94-file sample + shamrice corpus (zero mismatches).
+
+Two self-review findings, both fixed before merge:
+
+- The report was first written with `warnings.warn`, which at import time
+  turns a stale build into an `import cobolparser` failure under `-W error`
+  (reproduced) — inverting the guard's purpose. Now `logger.warning`.
+- `_DATA_FAST_ARG_COUNT` is a third copy of the arity, and nothing checked it
+  against the *literal call site* — only against the compiled extension. Bump
+  the constant and the `.pyx` while missing the call and the probe passes
+  while the real call raises. A second test now counts the call's arguments
+  from `data_clauses.py`'s AST.
+
+Not changed: `parser.py`'s division-level recovery still turns an unexpected
+exception into a generic line-1 error and drops the division. That is the
+reason this bug read as "empty AST" rather than "stale extension", but
+narrowing it touches `COLLECT_ALL` semantics for every division parser and is
+its own change.
+
+Also not changed: `_lexer_fast` and `_preprocess_fast` keep the bare
+`try/except ImportError`. Same two-halves structure, materially different
+blast radius — verified, not assumed. Drift there does *not* "fail loudly"
+(an earlier draft of this entry said so, wrongly): the `TypeError` is caught
+by `parser.py`'s top-level safety net at `_parse_core` and becomes
+`ParseError("Parser error: ...")` with `ast=None`. The difference that
+matters is that every parse then returns `ast is None` / `success False` —
+a total, unmissable failure — where `_data_fast` returned a *partially
+populated* AST (IDENTIFICATION present, program name set) that a caller
+reading `result.ast` would consume as real. `normalize_fixed_format`'s
+non-`lines` parameters are also keyword-only, so appending one is backward
+compatible by construction. Probing the lexer subclass would mean
+constructing a lexer and calling internals, which is not the cheap one-call
+check `_data_fast` allows.
+
+See "Signature-drift guard" in [lexer.md](lexer.md);
+`tests/regression/test_data_fast_signature_drift.py`.
+
+
 ## 2026-09-04 (level-88 branch seeding fixed; per-row witness groundwork)
 
 Reported from a real `mockymock generate --with-data` run: scenarios named
@@ -727,6 +887,71 @@ for a branch arm were seeded with data that could not reach it.
   `docs/plans/2026-09-04-cross-record-correlation-design.md`. `FixtureBundle`
   untouched, `BUNDLE_VERSION` unchanged.
 
+
+## 2026-09-04 — Scenarios verify themselves, and carry their path condition
+
+A scenario's *name* was a claim nothing checked. Two changes, one root cause:
+
+- **[analysis]** `BranchConstraints.enclosing` — every decision point now
+  records the `(branch_id, arm_id)` chain whose arms must all be taken for it
+  to be reached. `_walk_list` threads it down through
+  `_nested_statement_lists`, which pairs each nested statement list with the
+  arm id it sits under; the ids match the keys registered in `arms`, by
+  construction, which is what lets `ScenarioPlanner` join on them. A
+  non-branch nesting (`AT END`, `ON EXCEPTION`, an inline `PERFORM` body)
+  contributes nothing — it is a path condition in the general sense but is
+  not modeled as a branch arm here, and an invented id would join to nothing.
+- **[generators]** `ScenarioPlanner._path_constraints` folds those enclosing
+  conjuncts into a targeted arm's own before solving. This was the biggest
+  single source of scenarios whose data never reached their own arm: on
+  `IF INV-QTY > 500 / IF INV-TYPE = "AB"` the inner arm's scenario pinned
+  `INV-TYPE` and left `INV-QTY` to chance. An arm that becomes unsatisfiable
+  once its path is added is now `missed` with that reason; an enclosing arm
+  that was never modeled becomes a `PlannedScenario.path_gaps` entry rather
+  than silence.
+- **[generators]** New `generators/verification.py` +
+  `Scenario.verification`: after generating, re-read the scenario's OWN rows
+  and re-check every planned conjunct against them. Deliberately independent
+  of the solver — it evaluates against the concrete rendered strings a mock
+  will move into the program, so a solver bug, a rendering bug, and a witness
+  that never reached any fixture all surface as findings. `unknown` is a real
+  answer: `IF WS-INPUT > 0` on a `PIC X(10)` field cannot be decided from a
+  rendered string (IBM COBOL only allows that ordering comparison when the
+  alphanumeric operand is integer-like), and stamping it "verified" would be
+  the same silent optimism this whole change removes.
+
+Measured on the repo's own corpus (shamrice + tests/samples): 115 verified,
+16 unverified across two real finding classes — an ACCEPT-fed text field
+compared to a numeric literal, and enclosing arms with no modeled condition.
+Additive to the bundle (`bundle_version` stays 1); `gen-fixtures` reports on
+stderr, and mockymock renders the reasons as a `*> UNVERIFIED:` comment.
+
+## 2026-09-04 — Review fixes on the path-folding machinery (PR #198)
+
+Three findings from Copilot's review, all verified against the code before
+changing anything, plus one found while verifying them:
+
+- **[generators]** An OR-split enclosing arm was never folded.
+  `_register_variants` registers `THEN#1`/`THEN#2`/... and no bare `THEN`
+  for a condition containing an OR, while `BranchConstraints.enclosing`
+  names the base arm id -- so the join missed every such arm. Replaced
+  `_path_constraints` with `_path_options` (alternatives per enclosing arm)
+  + `_solve_with_path` (try combinations, keep the first that stays
+  satisfiable). Trying rather than fixing on the first disjunct is
+  load-bearing: for `IF A = 100 OR A = 200 / IF A = 200`, the first disjunct
+  makes the set unsatisfiable and would report a reachable arm as missed.
+- **[generators]** `_merge_candidates` dropped a merged-in candidate's
+  `path_gaps` (found while building the repro for the above). That turned an
+  unpinned enclosing arm into a silently `verified` scenario -- the exact
+  false positive the gap list exists to prevent.
+- **[analysis]** SEARCH's `AT END` is a modeled arm (`_extract_search`
+  registers `arms["AT_END"]`) but reached the walk through
+  `_NESTED_STATEMENT_ATTRS` untagged, so a branch nested under it lost its
+  enclosing chain and could read `verified` without its data establishing
+  that the search found nothing. New `_ARM_BEARING_ATTRS` tags it.
+- A test-name typo (`branchs` -> `branches`).
+
+All four pinned by tests in `test_scenario_verification.py`.
 
 ## 2026-09-02 (REPORT SECTION parsed; XML/JSON handler bodies and PROCESSING PROCEDURE structured)
 
@@ -4190,167 +4415,3 @@ each surfaced genuine, runtime-reproduced silent drops. Full audit:
   [preprocessing](preprocessing.md), [ast-models](ast-models.md),
   [analysis](analysis.md), [cli](cli.md), [tests](tests.md).
 
-## 2026-09-04 — Scenarios verify themselves, and carry their path condition
-
-A scenario's *name* was a claim nothing checked. Two changes, one root cause:
-
-- **[analysis]** `BranchConstraints.enclosing` — every decision point now
-  records the `(branch_id, arm_id)` chain whose arms must all be taken for it
-  to be reached. `_walk_list` threads it down through
-  `_nested_statement_lists`, which pairs each nested statement list with the
-  arm id it sits under; the ids match the keys registered in `arms`, by
-  construction, which is what lets `ScenarioPlanner` join on them. A
-  non-branch nesting (`AT END`, `ON EXCEPTION`, an inline `PERFORM` body)
-  contributes nothing — it is a path condition in the general sense but is
-  not modeled as a branch arm here, and an invented id would join to nothing.
-- **[generators]** `ScenarioPlanner._path_constraints` folds those enclosing
-  conjuncts into a targeted arm's own before solving. This was the biggest
-  single source of scenarios whose data never reached their own arm: on
-  `IF INV-QTY > 500 / IF INV-TYPE = "AB"` the inner arm's scenario pinned
-  `INV-TYPE` and left `INV-QTY` to chance. An arm that becomes unsatisfiable
-  once its path is added is now `missed` with that reason; an enclosing arm
-  that was never modeled becomes a `PlannedScenario.path_gaps` entry rather
-  than silence.
-- **[generators]** New `generators/verification.py` +
-  `Scenario.verification`: after generating, re-read the scenario's OWN rows
-  and re-check every planned conjunct against them. Deliberately independent
-  of the solver — it evaluates against the concrete rendered strings a mock
-  will move into the program, so a solver bug, a rendering bug, and a witness
-  that never reached any fixture all surface as findings. `unknown` is a real
-  answer: `IF WS-INPUT > 0` on a `PIC X(10)` field cannot be decided from a
-  rendered string (IBM COBOL only allows that ordering comparison when the
-  alphanumeric operand is integer-like), and stamping it "verified" would be
-  the same silent optimism this whole change removes.
-
-Measured on the repo's own corpus (shamrice + tests/samples): 115 verified,
-16 unverified across two real finding classes — an ACCEPT-fed text field
-compared to a numeric literal, and enclosing arms with no modeled condition.
-Additive to the bundle (`bundle_version` stays 1); `gen-fixtures` reports on
-stderr, and mockymock renders the reasons as a `*> UNVERIFIED:` comment.
-
-## 2026-09-04 — Review fixes on the path-folding machinery (PR #198)
-
-Three findings from Copilot's review, all verified against the code before
-changing anything, plus one found while verifying them:
-
-- **[generators]** An OR-split enclosing arm was never folded.
-  `_register_variants` registers `THEN#1`/`THEN#2`/... and no bare `THEN`
-  for a condition containing an OR, while `BranchConstraints.enclosing`
-  names the base arm id -- so the join missed every such arm. Replaced
-  `_path_constraints` with `_path_options` (alternatives per enclosing arm)
-  + `_solve_with_path` (try combinations, keep the first that stays
-  satisfiable). Trying rather than fixing on the first disjunct is
-  load-bearing: for `IF A = 100 OR A = 200 / IF A = 200`, the first disjunct
-  makes the set unsatisfiable and would report a reachable arm as missed.
-- **[generators]** `_merge_candidates` dropped a merged-in candidate's
-  `path_gaps` (found while building the repro for the above). That turned an
-  unpinned enclosing arm into a silently `verified` scenario -- the exact
-  false positive the gap list exists to prevent.
-- **[analysis]** SEARCH's `AT END` is a modeled arm (`_extract_search`
-  registers `arms["AT_END"]`) but reached the walk through
-  `_NESTED_STATEMENT_ATTRS` untagged, so a branch nested under it lost its
-  enclosing chain and could read `verified` without its data establishing
-  that the search found nothing. New `_ARM_BEARING_ATTRS` tags it.
-- A test-name typo (`branchs` -> `branches`).
-
-All four pinned by tests in `test_scenario_verification.py`.
-
-## 2026-09-05 — A stale `_data_fast` build no longer costs the DATA DIVISION
-
-Reported on Python 3.14: a compiled `_data_fast` accepting 18 arguments where
-`data_clauses.parse_data_item` passes 19, so every COBOL file with a DATA
-DIVISION failed to parse, degrading to a near-empty AST.
-
-Root cause is drift between two separately compiled halves, not a bad `.c`:
-the checked-in `_data_fast.c` was verified in sync with `_data_fast.pyx`
-(regenerated, argument tables compared — same for `_lexer_fast` and
-`_preprocess_fast`), so the 18-parameter binary can only have come from a
-stale *build* — an in-place `.so` older than the tree, a cached `build/`, or
-an installed wheel shadowing the source.
-
-What made a build problem into a parse problem: the fast-path call site was
-unconditional and positional, guarded only by `try/except ImportError` at
-import. A present-but-mismatched extension sails past that guard and raises
-`TypeError` from the middle of every data-description entry; `parser.py`'s
-broad `except Exception` recorded it as a generic error at line 1 column 1 and
-recovered by abandoning the division — losing the DATA *and* PROCEDURE
-divisions and reporting only an argument count.
-
-Fix: `_data_fast_usable()` probes the compiled helper once at import with an
-empty token list (the clause loop never runs, so it returns `pos` without
-reading any other parameter). On mismatch the fast path is disabled and
-`logger.warning` names the rebuild; a missing extension stays silent, since
-that is a normal pure-Python install. Verified against a real compiled
-extension, and fast-path vs fallback ASTs compared byte-for-byte across the
-94-file sample + shamrice corpus (zero mismatches).
-
-Two self-review findings, both fixed before merge:
-
-- The report was first written with `warnings.warn`, which at import time
-  turns a stale build into an `import cobolparser` failure under `-W error`
-  (reproduced) — inverting the guard's purpose. Now `logger.warning`.
-- `_DATA_FAST_ARG_COUNT` is a third copy of the arity, and nothing checked it
-  against the *literal call site* — only against the compiled extension. Bump
-  the constant and the `.pyx` while missing the call and the probe passes
-  while the real call raises. A second test now counts the call's arguments
-  from `data_clauses.py`'s AST.
-
-Not changed: `parser.py`'s division-level recovery still turns an unexpected
-exception into a generic line-1 error and drops the division. That is the
-reason this bug read as "empty AST" rather than "stale extension", but
-narrowing it touches `COLLECT_ALL` semantics for every division parser and is
-its own change.
-
-Also not changed: `_lexer_fast` and `_preprocess_fast` keep the bare
-`try/except ImportError`. Same two-halves structure, materially different
-blast radius — verified, not assumed. Drift there does *not* "fail loudly"
-(an earlier draft of this entry said so, wrongly): the `TypeError` is caught
-by `parser.py`'s top-level safety net at `_parse_core` and becomes
-`ParseError("Parser error: ...")` with `ast=None`. The difference that
-matters is that every parse then returns `ast is None` / `success False` —
-a total, unmissable failure — where `_data_fast` returned a *partially
-populated* AST (IDENTIFICATION present, program name set) that a caller
-reading `result.ast` would consume as real. `normalize_fixed_format`'s
-non-`lines` parameters are also keyword-only, so appending one is backward
-compatible by construction. Probing the lexer subclass would mean
-constructing a lexer and calling internals, which is not the cheap one-call
-check `_data_fast` allows.
-
-See "Signature-drift guard" in [lexer.md](lexer.md);
-`tests/regression/test_data_fast_signature_drift.py`.
-
-
-## 2026-09-15 -- Enterprise COBOL program-type coverage
-
-One representative program per program type (`tests/samples/enterprise/`,
-22 programs; `docs/enterprise-program-types.md`) run through the whole
-stack, and the gaps it found closed: OO COBOL units (CLASS-ID / FACTORY /
-OBJECT / METHOD-ID, OBJECT REFERENCE), PROGRAM-ID attributes (RECURSIVE,
-the PROGRAM word, optional period), RETURNING, 6.x data clauses (PIC U,
-BYTE-LENGTH, DYNAMIC LENGTH, VOLATILE, OCCURS UNBOUNDED), DECLARATIVES
-modelled (and honoured by dead-code, program-flow, io-sequence), XML
-PROCESSING PROCEDURE and CICS HANDLE targets as references, EXEC DLI in
-the IMS analyzer, CICS translator items and SET ADDRESS OF in
-linkage-check / unused-variables, IS RECURSIVE in recursion-check,
-conditional compilation by default, REPLACE partial words, JSON
-CONVERTING, qualified DECLARE TABLE names, EXEC SQL INCLUDE expansion.
-See [parser.md](parser.md), [analysis.md](analysis.md),
-[ast-models.md](ast-models.md), [preprocessing.md](preprocessing.md),
-[tests.md](tests.md) (each has a 2026-09-15 section) and the CHANGELOG.
-
-
-## 2026-09-15 -- Review follow-ups on PR #212 (xref, signatures, codebase, SQL/CICS lint, diff, JCL) and #219
-
-PR #219's did-you-mean pool keeps extensionless copybooks (see
-[preprocessing.md](preprocessing.md)). PR #212's six modules get their
-first OKF sections ([analysis.md](analysis.md), [cli.md](cli.md)) and the
-fixes the review found: digit-led paragraph names credited, contained
-programs excluded from the outer unit's xref/signature, special registers
-and STRING literals out of `undefined`, `duplicate_declarations` on the
-xref report, `returning` and ambiguous-role / duplicated-field grading on
-signatures, normalized path keys and dot-less extensions on the codebase
-graph, unexpanded-COPY caveats on `xref`, the `sql-cics-check` rule id,
-DECLARE GLOBAL TEMPORARY TABLE graded, explicit diff signatures for the
-statement types whose semantics live off `operands`, and the cataloged
-`// PROC` header in JCL. Gaps the review found but this pass did not
-close are listed per module in analysis.md.

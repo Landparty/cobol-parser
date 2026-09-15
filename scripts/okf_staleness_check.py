@@ -14,20 +14,41 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Longest-prefix-wins is NOT how this is matched: *every* entry whose prefix
+# matches contributes, so a file may map to several OKF docs. Two rules keep
+# the map honest, both learned from a real drift:
+#
+#   1. A directory prefix ends with "/" and therefore does NOT cover a
+#      same-named module beside it -- "cobolparser/parsers/" never matched
+#      "cobolparser/parser.py", so the parse orchestrator changed for months
+#      without ever asking for an OKF update. Every module gets its own entry.
+#   2. Every non-test .py/.pyx file under cobolparser/ must match at least one
+#      prefix. tests/test_okf_staleness_map.py enforces that, so a new
+#      package (the way cobolparser/jcl/ arrived) cannot land undocumented.
 OKF_MAP = [
     ("cobolparser/lexer.py", [".okf/lexer.md"]),
     ("cobolparser/_lexer_fast.pyx", [".okf/lexer.md"]),
+    ("cobolparser/_literals.py", [".okf/lexer.md"]),
     ("cobolparser/preprocess/", [".okf/preprocessing.md"]),
     ("cobolparser/_preprocess_fast.pyx", [".okf/preprocessing.md"]),
+    ("cobolparser/parser.py", [".okf/parser.md"]),
     ("cobolparser/parsers/", [".okf/parser.md"]),
     ("cobolparser/core/", [".okf/parser.md"]),
+    ("cobolparser/_errors.py", [".okf/parser.md"]),
+    ("cobolparser/plugins/", [".okf/parser.md"]),
     ("cobolparser/models/", [".okf/ast-models.md"]),
     ("cobolparser/_data_fast.pyx", [".okf/ast-models.md"]),
+    ("cobolparser/_storage.py", [".okf/ast-models.md"]),
     ("cobolparser/analysis/", [".okf/analysis.md"]),
     ("cobolparser/generators/", [".okf/generators.md"]),
     ("cobolparser/batch.py", [".okf/batch.md"]),
+    ("cobolparser/scan.py", [".okf/batch.md"]),
     ("cobolparser/cli/", [".okf/cli.md"]),
+    ("cobolparser/__main__.py", [".okf/cli.md"]),
     ("cobolparser/dialects/", [".okf/dialects.md"]),
+    ("cobolparser/jcl/", [".okf/jcl.md"]),
+    ("cobolparser/profiling.py", [".okf/parser.md"]),
+    ("cobolparser/__init__.py", [".okf/index.md"]),
     ("tests/", [".okf/tests.md"]),
 ]
 

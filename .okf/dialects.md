@@ -1,3 +1,11 @@
+---
+type: Module
+title: Dialects
+description: IBMEnterpriseCobol dialect support — EXEC SQL/CICS/IMS node types, IBM data-item validation, and the intrinsic-function / LE callable-service lookups.
+tags: [dialects, ibm-enterprise, exec-sql, exec-cics, exec-ims, intrinsic-functions, le-services]
+timestamp: 2026-09-15T00:00:00Z
+---
+
 # Dialects (`cobolparser/dialects/`)
 
 IBM Enterprise COBOL dialect support: extra AST node types for EXEC
