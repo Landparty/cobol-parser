@@ -27,7 +27,9 @@ def _program(data: str = "", proc: str = "           GOBACK.\n", head: str = "")
 
 
 def _parse(source: str, filename: str = "t.cbl"):
-    result = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST).parse(source, filename)
+    result = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST).parse(
+        source, filename
+    )
     assert result.errors == [], result.errors
     assert result.ast is not None
     return result
@@ -39,7 +41,9 @@ def _item(ast, name):
 
 class TestProgramIdAttributes:
     def test_recursive_and_trailing_program_word(self):
-        src = _program().replace("PROGRAM-ID. T.", "PROGRAM-ID. T IS RECURSIVE PROGRAM.")
+        src = _program().replace(
+            "PROGRAM-ID. T.", "PROGRAM-ID. T IS RECURSIVE PROGRAM."
+        )
         result = _parse(src)
         assert result.warnings == []
         assert result.ast.program_attributes == ["RECURSIVE"]
@@ -123,7 +127,9 @@ class TestObjectOrientedUnits:
         assert make.procedure_division.get_metadata("returning_parameter") == "LK-OUT"
         deposit = ast.find_program_unit("deposit")
         assert deposit.procedure_division.get_metadata("using_parameters") == ["LK-AMT"]
-        assert [w for w in result.warnings if not w.startswith("Compilation unit")] == []
+        assert [
+            w for w in result.warnings if not w.startswith("Compilation unit")
+        ] == []
 
     def test_class_without_environment_division(self):
         src = self.CLASS.replace(
@@ -312,7 +318,10 @@ class TestProcedureDivisionReturning:
         )
         proc = _parse(src, "r.cbl").ast.procedure_division
         assert proc.get_metadata("using_parameters") == ["A", "B"]
-        assert proc.get_metadata("using_parameter_modes") == {"A": "REFERENCE", "B": "VALUE"}
+        assert proc.get_metadata("using_parameter_modes") == {
+            "A": "REFERENCE",
+            "B": "VALUE",
+        }
         assert proc.get_metadata("returning_parameter") == "RC"
 
 
@@ -365,7 +374,9 @@ class TestConditionalCompilationByDefault:
         assert result.errors == [] and result.warnings == []
         items = {i.name: i.value_clause for i in result.ast.get_data_items()}
         assert items == {"LIM": "500", "BIG": None}
-        displays = [d.display_items for d in result.ast.find_all_by_type("DisplayStatement")]
+        displays = [
+            d.display_items for d in result.ast.find_all_by_type("DisplayStatement")
+        ]
         assert displays == [['"OTHER"']]
         # Directive lines are blanked, not removed: later lines keep their numbers
         assert result.ast.find_all_by_type("DisplayStatement")[0].location.line == 21
@@ -373,7 +384,8 @@ class TestConditionalCompilationByDefault:
     def test_hyphenated_define_symbol(self):
         warnings: list[str] = []
         out = preprocess_conditional_compilation(
-            ">>DEFINE MAX-ROWS AS 500\n>>IF MAX-ROWS = 500\nX\n>>END-IF\n", warnings=warnings
+            ">>DEFINE MAX-ROWS AS 500\n>>IF MAX-ROWS = 500\nX\n>>END-IF\n",
+            warnings=warnings,
         )
         assert warnings == []
         assert out.splitlines() == ["", "", "X"]
@@ -384,7 +396,9 @@ class TestConditionalCompilationByDefault:
             ">>CALLINTERFACE DYNAMIC\nDISPLAY 'X'.\n", warnings=warnings
         )
         assert out == "\nDISPLAY 'X'."
-        assert any("unknown compiler directive" in w and "ignored" in w for w in warnings)
+        assert any(
+            "unknown compiler directive" in w and "ignored" in w for w in warnings
+        )
 
 
 class TestReplacePartialWord:

@@ -125,7 +125,9 @@ class TestCorpusShape:
 
     @pytest.mark.parametrize("name", _params())
     def test_no_content_past_column_72(self, name: str) -> None:
-        for number, line in enumerate((CORPUS / f"{name}.cbl").read_text().splitlines(), 1):
+        for number, line in enumerate(
+            (CORPUS / f"{name}.cbl").read_text().splitlines(), 1
+        ):
             assert not line[72:].strip(), f"{name}:{number}: content past column 72"
 
 
@@ -239,7 +241,11 @@ def _item(ast: CobolProgram, name: str) -> Any:
 class TestBatchAndFiles:
     def test_batchseq_sort_with_procedures(self, corpus_asts) -> None:
         ast, _ = corpus_asts["BATCHSEQ"]
-        assert {"SortStatement", "ReleaseStatement", "ReturnStatement"} <= _statement_types(ast)
+        assert {
+            "SortStatement",
+            "ReleaseStatement",
+            "ReturnStatement",
+        } <= _statement_types(ast)
         sort = ast.find_all_by_type("SortStatement")[0]
         assert sort.input_procedure == "2000-SELECT-INPUT"
         assert sort.output_procedure == "3000-WRITE-REPORT"
@@ -266,9 +272,10 @@ class TestBatchAndFiles:
             "IODeleteStatement",
             "IOReadStatement",
         } <= _statement_types(ast)
-        assert {("START", "CUST-MASTER"), ("REWRITE", "CUST-MASTER-REC")} & _boundary_keys(
-            ast
-        ) or ("DELETE", "CUST-MASTER") in _boundary_keys(ast)
+        assert {
+            ("START", "CUST-MASTER"),
+            ("REWRITE", "CUST-MASTER-REC"),
+        } & _boundary_keys(ast) or ("DELETE", "CUST-MASTER") in _boundary_keys(ast)
 
 
 class TestCics:
@@ -290,7 +297,9 @@ class TestCics:
         # HANDLE AID PF3(9000-EXIT-PROGRAM) is a branch CICS takes
         flow = ProgramFlowAnalyzer().analyze(ast)
         handle_edges = {
-            (e.source, e.target) for e in flow.edges if e.edge_type.value == "CICS_HANDLE"
+            (e.source, e.target)
+            for e in flow.edges
+            if e.edge_type.value == "CICS_HANDLE"
         }
         assert ("2000-PROCESS-INPUT", "9000-EXIT-PROGRAM") in handle_edges
         assert DeadCodeAnalyzer().analyze(ast).dead_items == []
@@ -301,14 +310,23 @@ class TestCics:
 
     def test_cicschnl_channels_containers_web_and_json(self, corpus_asts) -> None:
         ast, _ = corpus_asts["CICSCHNL"]
-        assert {"GET", "PUT", "INVOKE", "START", "WRITEQ", "SYNCPOINT"} <= _cics_commands(ast)
+        assert {
+            "GET",
+            "PUT",
+            "INVOKE",
+            "START",
+            "WRITEQ",
+            "SYNCPOINT",
+        } <= _cics_commands(ast)
         json_statements = ast.find_all_by_type("XmlJsonStatement")
         assert {(s.verb, s.action) for s in json_statements} == {
             ("JSON", "PARSE"),
             ("JSON", "GENERATE"),
         }
         keys = _boundary_keys(ast)
-        assert any(cat == "CICS" and key.startswith("GET CONTAINER") for cat, key in keys)
+        assert any(
+            cat == "CICS" and key.startswith("GET CONTAINER") for cat, key in keys
+        )
 
     def test_cicslink_translated_form(self, corpus_asts) -> None:
         ast, _ = corpus_asts["CICSLINK"]
@@ -331,7 +349,9 @@ class TestIms:
         calls = IMSSegmentAnalyzer().analyze(ast)
         codes = {c.function_code for c in calls}
         assert {"GN", "GNP", "GHU", "GHN", "REPL", "DLET", "CHKP", "XRST"} <= codes
-        assert {"CUSTSEG", "ACCTSEG"} <= set(IMSSegmentAnalyzer().get_all_segment_names(calls))
+        assert {"CUSTSEG", "ACCTSEG"} <= set(
+            IMSSegmentAnalyzer().get_all_segment_names(calls)
+        )
         entry = ast.get_entry_statements()[0]
         assert entry.using_parameters == ["IO-PCB", "CUST-PCB"]
 
@@ -339,7 +359,11 @@ class TestIms:
         ast, _ = corpus_asts["IMSMPP"]
         proc = ast.procedure_division
         assert proc is not None
-        assert proc.get_metadata("using_parameters") == ["IO-PCB", "ALT-PCB", "ACCT-PCB"]
+        assert proc.get_metadata("using_parameters") == [
+            "IO-PCB",
+            "ALT-PCB",
+            "ACCT-PCB",
+        ]
         codes = {c.function_code for c in IMSSegmentAnalyzer().analyze(ast)}
         assert {"GU", "ISRT", "CHNG", "PURG"} <= codes
 
@@ -392,7 +416,11 @@ class TestDb2AndMq:
         proc = ast.procedure_division
         assert proc is not None
         assert len(proc.get_metadata("using_parameters")) == 12
-        assert {("SQL", "DECLARE"), ("SQL", "OPEN"), ("SQL", "SELECT")} <= _boundary_keys(ast)
+        assert {
+            ("SQL", "DECLARE"),
+            ("SQL", "OPEN"),
+            ("SQL", "SELECT"),
+        } <= _boundary_keys(ast)
 
     def test_mqbatch_mqi_calls(self, corpus_asts) -> None:
         ast, _ = corpus_asts["MQBATCH"]
@@ -422,7 +450,9 @@ class TestProgramStructure:
         ]
         assert proc.get_metadata("using_parameter_modes")["LK-DAYS"] == "VALUE"
         assert proc.get_metadata("returning_parameter") == "LK-RETURN-CODE"
-        assert [e.entry_name.strip("'\"") for e in ast.get_entry_statements()] == ["SUBPROG2"]
+        assert [e.entry_name.strip("'\"") for e in ast.get_entry_statements()] == [
+            "SUBPROG2"
+        ]
         factorial = ast.find_program_unit("FACTORL")
         assert factorial is not None and factorial.is_recursive
         risks = RecursionRiskAnalyzer().analyze(factorial).risks
@@ -509,7 +539,9 @@ class TestObjectOriented:
             ("METHOD", "get-balance"),
         ]
         factory = ast.contained_programs[0]
-        assert [u.program_name for u in factory.contained_programs] == ["create-account"]
+        assert [u.program_name for u in factory.contained_programs] == [
+            "create-account"
+        ]
         assert {i.name for i in factory.get_data_items()} >= {"FACT-NEXT-ACCT-NO"}
         deposit = ast.find_program_unit("deposit")
         assert deposit is not None
@@ -537,7 +569,9 @@ class TestObjectOriented:
 class TestDataAndText:
     def test_xml_json_handlers_and_clauses(self, corpus_asts) -> None:
         ast, _ = corpus_asts["XMLJSON"]
-        statements = {(s.verb, s.action): s for s in ast.find_all_by_type("XmlJsonStatement")}
+        statements = {
+            (s.verb, s.action): s for s in ast.find_all_by_type("XmlJsonStatement")
+        }
         assert set(statements) == {
             ("XML", "PARSE"),
             ("XML", "GENERATE"),
@@ -570,7 +604,9 @@ class TestDataAndText:
             "CEE3ABD",
             "CEEGMT",
         } <= set(report.unique_services)
-        assert {"CURRENT-DATE", "INTEGER-OF-DATE", "UPPER-CASE"} <= set(report.unique_functions)
+        assert {"CURRENT-DATE", "INTEGER-OF-DATE", "UPPER-CASE"} <= set(
+            report.unique_functions
+        )
         assert _item(ast, "HANDLER-ROUTINE").usage == "PROCEDURE-POINTER"
         # SET ADDRESS OF HEAP-BUFFER TO ptr references the LINKAGE item
         assert _lint(ast, "linkage-check") == []
@@ -578,10 +614,7 @@ class TestDataAndText:
     def test_compiler_directives(self, corpus_asts) -> None:
         ast, warnings = corpus_asts["COMPDIR"]
         assert warnings == []
-        moves = [
-            (m.source, m.targets)
-            for m in ast.find_all_by_type("MoveStatement")
-        ]
+        moves = [(m.source, m.targets) for m in ast.find_all_by_type("MoveStatement")]
         assert ('"PROD"', ["WS-ENV"]) in moves  # >>EVALUATE picked the PROD arm
         assert not any(src in ('"TEST"', '"DEV "') for src, _ in moves)
         assert ("0", ["WS-ROWS"]) in moves  # REPLACE ==:PFX:== BY ==WS== applied
@@ -604,7 +637,11 @@ class TestDataAndText:
         assert _item(ast, "WS-ADDRESS-64").usage == "POINTER-64"
         assert _item(ast, "WS-FUNC-PTR").usage == "FUNCTION-POINTER"
         assert _item(ast, "WS-SIGN-SEP").sign_clause is not None
-        assert {"AllocateStatement", "FreeStatement", "SearchStatement"} <= _statement_types(ast)
+        assert {
+            "AllocateStatement",
+            "FreeStatement",
+            "SearchStatement",
+        } <= _statement_types(ast)
         # SET ADDRESS OF LK-DYNAMIC-AREA TO ptr counts as a reference
         assert _lint(ast, "linkage-check") == []
         assert DeadCodeAnalyzer().analyze(ast).dead_items == []
@@ -612,7 +649,12 @@ class TestDataAndText:
     def test_copybook_program(self, corpus_asts) -> None:
         ast, _ = corpus_asts["COPYREPL"]
         names = {i.name for i in ast.get_data_items()}
-        assert {"IN-CUST-ID", "IN-CITY", "OUT-CUST-ID", "OUT-CITY"} <= names  # REPLACING
+        assert {
+            "IN-CUST-ID",
+            "IN-CITY",
+            "OUT-CUST-ID",
+            "OUT-CITY",
+        } <= names  # REPLACING
         assert {"WS-COUNTERS", "WS-FLAGS", "WS-EOF-FLAG"} <= names  # nested COPY
         assert {"SQLCA", "SQLCODE", "DCLCUSTOMER", "CUST-NAME-TEXT"} <= names  # INCLUDE
         proc = ast.procedure_division
