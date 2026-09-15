@@ -67,6 +67,7 @@ RULES: tuple[str, ...] = (
     "recursion-check",
     "complexity",
     "dclgen-check",
+    "sql-cics",
 )
 
 _RULE_ORDER: dict[str, int] = {name: order for order, name in enumerate(RULES)}
@@ -469,6 +470,7 @@ class LintAnalyzer:
             ),
             "complexity": lambda: self._complexity(ast, self._flow(ast, flow_report)),
             "dclgen-check": lambda: self._dclgen_check(ast, report),
+            "sql-cics": lambda: self._sql_cics(ast, report),
         }
 
         for rule in self._rules:
@@ -712,6 +714,32 @@ class LintAnalyzer:
                 message=violation.message,
                 location=violation.location,
                 symbol=violation.host_variable,
+                kind=violation.kind,
+            )
+            for violation in result.violations
+        ]
+
+    def _sql_cics(self, ast: CobolProgram, report: LintReport) -> list[LintFinding]:
+        from .sql_cics_lint import SqlCicsAnalyzer
+
+        result = SqlCicsAnalyzer().analyze(ast)
+        # An EXEC block whose handler state or host-variable origin could not
+        # be established is not a clean one -- it is an unexamined one. Said
+        # once with a count, like dclgen-check above, rather than as a finding
+        # per block, since "could not check" is not a defect in the program.
+        if result.unchecked:
+            report.caveats.append(
+                f"sql-cics: {len(result.unchecked)} EXEC block(s) or host "
+                "variable(s) could not be checked -- run "
+                "`cobol-parser sql-cics-check` for the reason per item"
+            )
+        return [
+            LintFinding(
+                rule="sql-cics",
+                severity=violation.severity,
+                message=violation.message,
+                location=violation.location,
+                symbol=violation.symbol,
                 kind=violation.kind,
             )
             for violation in result.violations

@@ -655,16 +655,21 @@ class UnusedVariableAnalyzer:
         # IMS/DLI (`ExecImsStatement.arguments`: a positional list, e.g.
         # ["PCB(1)", "SEGMENT(EMPLOYEE)"]) carry their operands as raw
         # joined text rather than a structural tree, the same shape as EXEC
-        # SQL's host_variables above -- but unlike EXEC SQL, neither class
-        # extends CobolStatement (they extend ASTNode directly -- see
-        # parsers/statements/ibm_exec_statements.py), so neither ever
-        # appears in ``ast.get_all_statements()`` and the loop above never
-        # sees them at all. They're still real AST nodes reachable via
-        # ``find_all_by_type``, so swept here separately via duck typing
-        # (importing the classes would add an analysis -> parsers layering
-        # dependency for no real type-safety benefit, since these fields are
-        # untyped raw text either way). Previously a field referenced only
-        # inside one of these was falsely reported unused.
+        # SQL's host_variables above, so the operand loop cannot decompose
+        # them and they are swept here by duck typing (importing the classes
+        # would add an analysis -> parsers layering dependency for no real
+        # type-safety benefit, since these fields are untyped raw text
+        # either way). Previously a field referenced only inside one of
+        # these was falsely reported unused.
+        #
+        # This sweep once existed because neither class extended
+        # CobolStatement, so neither reached ``get_all_statements()`` at all.
+        # Both do now (see ibm_exec_statements.py, whose docstring records
+        # why that changed), so the loop above already visits them and this
+        # pass is a harmless set union rather than the only coverage. Do not
+        # read it as evidence that these nodes are still invisible to
+        # ``get_all_statements()`` -- a new analyzer does not need to
+        # reproduce this workaround.
         # One shared traversal for both node types (find_all_by_type would
         # walk the whole AST once per type -- two extra full walks on every
         # analysis run, for nodes most programs don't contain at all).
