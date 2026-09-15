@@ -143,7 +143,7 @@ COBOL source (.cbl/.cob)
 - `path_resolver.py` -- Secure copybook path resolution with traversal prevention
 - `models.py` -- `CopybookExpansion`, `CopyStatement`, `CopybookSearchPath`, `ExpansionStatistics`
 
-**`cobolparser/parser.py`** -- `CobolParser` orchestrates parsing via `DivisionParserFactory`. Returns `ParseResult(ast, errors, warnings, statistics)`.
+**`cobolparser/parser.py`** -- `CobolParser` orchestrates parsing via `DivisionParserFactory`. Returns `ParseResult(ast, errors, warnings, statistics)`. Multi-unit compilation units (nested/stacked `PROGRAM-ID`s, and IBM object-oriented `CLASS-ID` units with their `FACTORY` / `OBJECT` / `METHOD-ID` units, `CobolProgram.unit_kind`) parse into `contained_programs`; `program_units()` enumerates them all. Conditional compilation (`>>DEFINE` / `>>IF` / `>>EVALUATE`) and `REPLACE` (including IBM `==:TAG:==` partial words) are applied before lexing.
 
 **`cobolparser/core/`** -- Infrastructure:
 - `interfaces.py` -- `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParserHost` protocol; `ParseContext` for nested statement parsing
@@ -545,6 +545,8 @@ tests/
     io_statements/       # IO parser unit tests
   integration/           # Integration tests - end-to-end parsing
     test_shamrice_examples.py  # Parametrized: all *.cbl in examples/cobol/shamrice/ must parse error-free
+    test_enterprise_program_types.py  # tests/samples/enterprise/: FAIL_FAST clean parse, every analyzer,
+                                      # gen-fixtures, scan, and per-program-type traits
     io/                  # IO coverage reporting integration
     io_statements/       # IO statement parsing, VSAM
   contracts/             # API contract tests - stability guarantees
@@ -554,6 +556,9 @@ tests/
   samples/               # Shared COBOL test fixtures
     copybook_programs/   # Programs with COPY statements
     copybooks/           # Copybook files (.CPY)
+    enterprise/          # One program per IBM Enterprise COBOL program type
+                         # (batch, VSAM, CICS, IMS, DB2, MQ, OO, Report Writer,
+                         # DECLARATIVES, ...) -- see docs/enterprise-program-types.md
     io/                  # IO test samples
       positive/          # Valid IO operations
       negative/          # Invalid IO patterns
@@ -622,6 +627,7 @@ The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather
 ## Example COBOL Files
 
 - `tests/samples/` -- ~48 COBOL sample programs covering all statement types (plus copybook and IO sub-directories)
+- `tests/samples/enterprise/` -- 22 programs, one per IBM Enterprise COBOL *program type* (QSAM batch/SORT, VSAM, CICS pseudo-conversational / channels / translated LINK server, IMS DL/I batch / MPP / EXEC DLI, DB2 batch / stored procedure, MQ, subprogram, nested programs, Report Writer, OO class + client, XML/JSON, DECLARATIVES, LE services, compiler directives, 6.x data, copybooks); all parse FAIL_FAST with no warnings and run through every analyzer. Matrix: `docs/enterprise-program-types.md`
 - `examples/cobol/` -- NIST COBOL-85 test suite (459 .CBL files) and copybooks (.CPY)
 - `examples/cobol/shamrice/` -- 24 IBM COBOL programs from shamrice/COBOL-Examples (ACCEPT variants, COMP types, SEARCH, SORT/MERGE, SQL, JSON/XML GENERATE, sub-programs); all parse cleanly under FAIL_FAST
 

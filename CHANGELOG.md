@@ -9,6 +9,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Enterprise COBOL program-type corpus.** `tests/samples/enterprise/`
+  holds one representative program per *kind* of program an Enterprise
+  COBOL shop compiles -- QSAM batch with SORT, VSAM maintenance, CICS
+  pseudo-conversational / channel-container / translated LINK server,
+  IMS DL/I batch, IMS MPP, EXEC DLI, DB2 batch, a DB2 stored procedure,
+  MQ, a called subprogram, nested programs, Report Writer, an OO class and
+  its client, XML/JSON, DECLARATIVES, LE services, compiler directives, the
+  6.x data clauses and a copybook-heavy program -- and
+  `tests/integration/test_enterprise_program_types.py` runs every one
+  through a FAIL_FAST parse with **no errors and no warnings**, every
+  analyzer, the fixture generator, the whole-checkout scanner, and
+  per-type trait assertions. `docs/enterprise-program-types.md` is the
+  matrix. Everything below is what that corpus surfaced.
+* **Object-oriented COBOL units.** `CLASS-ID ... INHERITS`, the `FACTORY.`
+  and `OBJECT.` paragraphs, `METHOD-ID` (literal or bare name, with or
+  without its own IDENTIFICATION DIVISION header) and `END METHOD` /
+  `END FACTORY` / `END OBJECT` / `END CLASS` parse into nested
+  `CobolProgram` units: `CobolProgram.unit_kind` is `"CLASS"` /
+  `"FACTORY"` / `"OBJECT"` / `"METHOD"` (`"PROGRAM"` otherwise, and the
+  key is only serialized when it is not), a class contains its factory and
+  object units, and those contain their methods -- so `program_units()`
+  enumerates every method like every nested program, and every analyzer
+  runs over each. A class definition used to fail with "PROGRAM-ID is
+  mandatory". `[USAGE] OBJECT REFERENCE [class-name]` is a usage
+  (`CobolDataItem.object_class`) instead of two dropped tokens.
+* **PROGRAM-ID attributes.** `[IS] INITIAL | COMMON | RECURSIVE`, in any
+  order and number, followed by the optional word `PROGRAM`, are consumed
+  and recorded (`CobolProgram.program_attributes`, `is_recursive`;
+  identification-division metadata `program_attributes`). `RECURSIVE` and
+  the `PROGRAM` word used to leave a "missing period" warning. The period
+  after the `PROGRAM-ID` keyword is optional, as in Enterprise COBOL.
+* **`PROCEDURE DIVISION ... RETURNING item`** is recorded as metadata
+  `returning_parameter` instead of being appended to `using_parameters`.
+* **Enterprise COBOL 6.x data clauses.** `PIC U` / `PIC U(n)` (UTF-8,
+  sized in bytes), `PIC U BYTE-LENGTH n` (`CobolDataItem.byte_length`,
+  also the PICTURE's size), `DYNAMIC LENGTH [LIMIT n]`
+  (`is_dynamic_length`, `dynamic_length_limit`), `VOLATILE`
+  (`is_volatile`) and `OCCURS UNBOUNDED DEPENDING ON`
+  (`OccursClause.is_unbounded`, `max_times` None). `VOLATILE` and
+  `BYTE-LENGTH` after a PICTURE used to be glued into the pattern
+  (`X(8)VOLATILE`), the rest were dropped with a warning.
+* **DECLARATIVES are modelled.** Every section between `DECLARATIVES.`
+  and `END DECLARATIVES.` carries `CobolSection.is_declarative`
+  (metadata `declarative`); the two marker lines no longer produce
+  pseudo-paragraphs named `DECLARATIVES`. `USE BEFORE REPORTING group`
+  records `UseStatement.report_groups`. Consumers: the dead-code analyzer
+  and the program-flow analyzer take the first procedure *after* `END
+  DECLARATIVES` as the entry point and treat every declarative section as
+  a runtime entry (never dead, never unreachable; `FlowNode.is_declarative`),
+  and `IOSequenceAnalyzer` no longer walks a USE procedure inline (a WRITE
+  inside an error handler was reported as "WRITE before OPEN").
+* **Out-of-line handlers the runtime invokes are references.** `XML PARSE
+  ... PROCESSING PROCEDURE p [THRU q]` (new flow edge types
+  `XML_PROCESSING_PROCEDURE[_THRU]`, PERFORM-shaped) and `EXEC CICS HANDLE
+  AID | CONDITION | ABEND option(paragraph)` (new `CICS_HANDLE`,
+  GO TO-shaped) count for dead-code, program-flow, complexity and the
+  flowcharts; the handler paragraph used to be reported dead.
+* **`IMSSegmentAnalyzer` reports `EXEC DLI` statements** (interface
+  `"EXEC DLI"`, function code from the command word, `USING PCB(n)`,
+  `INTO`/`FROM` I/O area, every `SEGMENT(...)` on the path), interleaved
+  with the `CBLTDLI` calls in source order. Command-level IMS programs
+  used to produce an empty report.
+* **Copybook expansion inlines `EXEC SQL INCLUDE member END-EXEC`** from
+  the same search path as `COPY` -- the DB2 precompiler resolves both from
+  SYSLIB. A member that cannot be found (`SQLCA`, `SQLDA` -- supplied by
+  the precompiler) is left as written, so the parser still sees the EXEC
+  SQL statement. `CopyStatementLexer(sql_include=True)` /
+  `CopyStatement.sql_include`; the un-expanding parse path is unchanged.
+
+### Changed
+
+* **Conditional compilation runs by default.** `>>DEFINE` / `>>IF` /
+  `>>ELSE` / `>>END-IF` / `>>EVALUATE` / `>>WHEN` are evaluated in every
+  parse (`parse_cobol`, `CobolParser.parse`, and after expansion), not only
+  under `expand_copybooks(process_conditionals=True)`; a `>>IF` block
+  used to reach the parser as unparsed content. Hyphenated symbols
+  (`>>DEFINE MAX-ROWS`) are accepted -- `\w+` rejected every such name as
+  malformed. Any other `>>` directive (`>>CALLINTERFACE`, `>>INLINE`, ...)
+  is blanked with a warning instead of being passed to the lexer as a
+  stray `>>` token pair. Directive lines ahead of the IDENTIFICATION
+  DIVISION survive the pre-header skip, since IBM allows `>>DEFINE`
+  anywhere.
+* **`REPLACE` supports IBM partial-word pseudo-text**: `REPLACE ==:TAG:==
+  BY ==WS==.` rewrites `:TAG:-ROWS` to `WS-ROWS`, the way `COPY ...
+  REPLACING ==:TAG:==` does; literals are never partially replaced.
+* **`JSON GENERATE ... CONVERTING item TO JSON DECIMAL | BOOLEAN`** (6.3)
+  no longer ends the statement at the word `JSON`.
+* **`DECLARE schema.TABLE TABLE`** (every DCLGEN member qualifies the
+  table) now yields `DeclareTableStatement.table_name == "SCHEMA.TABLE"`;
+  the unqualified-only pattern left it None, so `HostVariableResolver` and
+  `dclgen-check` never saw a DCLGEN block placed in WORKING-STORAGE.
+* **`linkage-check`** treats `DFHEIBLK` and `DFHCOMMAREA` as referenced
+  (the CICS translator passes them on the USING it generates), a `SET
+  ADDRESS OF item TO pointer` target and a CICS `SET(ADDRESS OF item)`
+  option as references (a based LINKAGE item is addressed, not passed),
+  and the `RETURNING` item as referenced.
+* **`unused-variables`** never reports the fields of `DFHEIBLK` (the
+  translator declares all 30-odd EIB fields; the runtime fills them) nor
+  `DFHCOMMAREA` itself; its fields stay assessed.
+* **`recursion-check`**: a self-CALL in a program declared `IS RECURSIVE`
+  is graded `LOW` (lint `info`) with an explanation that re-entry is legal,
+  not `HIGH`.
+* **`SetStatement.targets_are_address_of`** marks the `SET ADDRESS OF
+  target TO pointer` form (the targets are based, not assigned).
+* The "Compilation unit contains N program units" warning counts every
+  unit, nested ones included, instead of the primary program's direct
+  children only.
+
 * **analysis/cli:** clone detection now works **across programs**, not only
   within one. `RedundancyAnalyzer` already fingerprinted every paragraph to
   find duplicates inside a single file and then threw the fingerprints away,

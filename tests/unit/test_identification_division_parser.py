@@ -249,10 +249,12 @@ class TestIdentificationDivisionErrorHandling:
 
         with pytest.raises(ParseError) as exc_info:
             parser.parse(stream)
-        assert "PROGRAM-ID is mandatory" in str(exc_info.value)
+        assert "is mandatory in IDENTIFICATION DIVISION" in str(exc_info.value)
 
-    def test_error_missing_period_after_program_id_keyword(self):
-        """Test error when period is missing after PROGRAM-ID keyword."""
+    def test_missing_period_after_program_id_keyword_is_tolerated(self):
+        """``PROGRAM-ID BADPROG.`` -- the period after the keyword is
+        optional in IBM Enterprise COBOL (2026-09-15), so this parses and
+        names the program rather than raising "Expected '.'"."""
         parser = IdentificationDivisionParser()
         tokens = [
             Token(
@@ -269,9 +271,8 @@ class TestIdentificationDivisionErrorHandling:
         ]
         stream = self.create_token_stream(tokens)
 
-        with pytest.raises(ParseError) as exc_info:
-            parser.parse(stream)
-        assert "Expected '.'" in str(exc_info.value)
+        node = parser.parse(stream)
+        assert node.metadata["program_id"] == "BADPROG"
 
     def test_missing_period_after_program_name_is_tolerated(self):
         """IBM Enterprise COBOL tolerates a missing period after the

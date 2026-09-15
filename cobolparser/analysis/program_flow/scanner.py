@@ -29,6 +29,7 @@ from ...models.statements.misc import (
     MergeStatement,
     ReturnStatement,
     SortStatement,
+    XmlJsonStatement,
 )
 from .condition_text import render_condition_text
 from .edges import EdgeCollector
@@ -514,6 +515,10 @@ class ProcedureScanner:
                 self._collector.process_sort(stmt, proc_name)
             elif isinstance(stmt, MergeStatement):
                 self._collector.process_merge(stmt, proc_name)
+            elif isinstance(stmt, XmlJsonStatement):
+                self._collector.process_xml_parse(stmt, proc_name)
+            elif getattr(stmt, "node_type", None) == "EXEC_CICS":
+                self._collector.process_cics_handle(stmt, proc_name)
             elif isinstance(stmt, AlterStatement):
                 self._collector.process_alter(stmt, source_id)
             elif isinstance(stmt, CancelStatement):

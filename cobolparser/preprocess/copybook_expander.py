@@ -20,6 +20,7 @@ from typing import Any
 from . import (
     ALL_COMMENT_INDICATORS,
     CircularReferenceError,
+    CopybookNotFoundError,
     EncodingError,
     NestingDepthError,
     TotalExpansionSizeExceededError,
@@ -1152,7 +1153,7 @@ def _expand_source_recursive(
         )
 
     # Extract COPY statements using the robust lexer on normalized source
-    lexer = CopyStatementLexer(normalized_source, source_file)
+    lexer = CopyStatementLexer(normalized_source, source_file, sql_include=True)
     copy_statements = lexer.tokenize_copy_statements()
     # Surface COPY statements the lexer recognized but had to drop (missing
     # terminating period, unterminated pseudo-text) — they are never expanded
@@ -1186,9 +1187,18 @@ def _expand_source_recursive(
     )
     for statement in reversed(copy_statements):
         # Find copybook file
-        copybook_path = path_resolver.resolve(
-            statement.member_name, statement.library_qualifier
-        )
+        try:
+            copybook_path = path_resolver.resolve(
+                statement.member_name, statement.library_qualifier
+            )
+        except CopybookNotFoundError:
+            if statement.sql_include:
+                # EXEC SQL INCLUDE of a member the precompiler supplies
+                # (SQLCA, SQLDA) or one the shop keeps elsewhere: leave the
+                # statement as written -- the parser handles it as the EXEC
+                # SQL statement it is -- rather than failing the expansion.
+                continue
+            raise
 
         # Check if we have a cached expansion (without nested COPY processing)
         # Note: We can only use cache for the same file + same replacements

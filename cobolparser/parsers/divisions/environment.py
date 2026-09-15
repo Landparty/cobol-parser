@@ -75,6 +75,15 @@ class EnvironmentDivisionParser(BaseDivisionParser):
                 break
             if any(token_value == f"{kw} DIVISION" for kw in _stop_div):
                 break
+            # In a CLASS-ID unit the ENVIRONMENT DIVISION (REPOSITORY) is
+            # followed by the ``FACTORY.`` / ``OBJECT.`` paragraph that opens
+            # the next unit, or by a ``METHOD-ID``; none of those is ours.
+            if token_value == "METHOD-ID":
+                break
+            if token_value in ("FACTORY", "OBJECT"):
+                nxt = token_stream.peek(1)
+                if nxt is not None and nxt.value == ".":
+                    break
 
             # Parse specific sections
             if token_value == "CONFIGURATION":

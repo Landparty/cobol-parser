@@ -23,6 +23,23 @@ from cobolparser.models.program import CobolDivision
 
 from .base import BaseDivisionParser, at_division_boundary
 
+#: PROGRAM-ID attributes IBM Enterprise COBOL accepts after the program name.
+_PROGRAM_ATTRIBUTES: frozenset[str] = frozenset({"INITIAL", "COMMON", "RECURSIVE"})
+
+
+def _unit_name(raw: str | None) -> str:
+    """A class/method name as written, with a literal's quotes removed.
+
+    Method names are alphanumeric literals in IBM Enterprise COBOL
+    (``METHOD-ID. "deposit".``) so the quotes are not part of the name; a
+    bare word is returned unchanged (case preserved -- Java names are
+    case-sensitive).
+    """
+    text = (raw or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        return text[1:-1]
+    return text
+
 
 class IdentificationDivisionParser(BaseDivisionParser):
     """Parser for COBOL Identification Division.
@@ -63,6 +80,17 @@ class IdentificationDivisionParser(BaseDivisionParser):
             return True
         return bool(col <= header_col)
 
+    @staticmethod
+    def _at_oo_unit_start(token_stream: ITokenStream, token_value: str) -> bool:
+        """True at ``METHOD-ID`` or at a ``FACTORY.`` / ``OBJECT.`` paragraph
+        header (the word immediately followed by the separator period)."""
+        if token_value == "METHOD-ID":
+            return True
+        if token_value in ("FACTORY", "OBJECT"):
+            nxt = token_stream.peek(1)
+            return bool(nxt is not None and nxt.value == ".")
+        return False
+
     def _at_comment_entry_aware_boundary(
         self, token_stream: ITokenStream, in_comment_entry: bool
     ) -> bool:
@@ -85,7 +113,7 @@ class IdentificationDivisionParser(BaseDivisionParser):
             return True
         return self._token_in_area_a(token_stream.peek(0))
 
-    def parse_division(self, token_stream: ITokenStream) -> dict[str, str | None]:
+    def parse_division(self, token_stream: ITokenStream) -> dict[str, Any]:
         """Parse Identification Division content.
 
         Parses all identification clauses (PROGRAM-ID is mandatory, others optional):
@@ -110,8 +138,17 @@ class IdentificationDivisionParser(BaseDivisionParser):
             - remarks: Optional[str]
             - security: Optional[str]
         """
-        content: dict[str, str | None] = {
+        content: dict[str, Any] = {
             "program_id": None,
+            # "PROGRAM" for a PROGRAM-ID unit, "CLASS" for a CLASS-ID unit
+            # and "METHOD" for a METHOD-ID unit (IBM Enterprise COBOL
+            # object-oriented syntax for Java interoperability).
+            "unit_kind": "PROGRAM",
+            # PROGRAM-ID attributes in source order: INITIAL, COMMON,
+            # RECURSIVE. Empty for a plain program.
+            "program_attributes": [],
+            # CLASS-ID only: the INHERITS class name, if any.
+            "inherits": None,
             "author": None,
             "installation": None,
             "date_written": None,
@@ -146,6 +183,23 @@ class IdentificationDivisionParser(BaseDivisionParser):
             if token_value == "PROGRAM-ID":
                 in_comment_entry = False
                 content["program_id"] = self._parse_program_id(token_stream)
+                content["program_attributes"] = list(self._program_attributes)
+            elif token_value == "CLASS-ID":
+                in_comment_entry = False
+                class_name, inherits = self.parse_class_id_clause(token_stream)
+                content["program_id"] = class_name
+                content["unit_kind"] = "CLASS"
+                content["inherits"] = inherits
+            elif token_value == "METHOD-ID":
+                in_comment_entry = False
+                content["program_id"] = self.parse_method_id_clause(token_stream)
+                content["unit_kind"] = "METHOD"
+            elif self._at_oo_unit_start(token_stream, token_value):
+                # ``FACTORY.`` / ``OBJECT.`` / ``METHOD-ID.`` open the next
+                # unit of a class definition (a class with no ENVIRONMENT
+                # DIVISION goes straight from CLASS-ID to FACTORY); the
+                # program-level parser takes over there.
+                break
             elif token_value in self._COMMENT_ENTRY_CLAUSES:
                 # Only an entry that itself starts in Area A opens an
                 # Area B–swallowing comment-entry; a loosely indented source
@@ -165,22 +219,29 @@ class IdentificationDivisionParser(BaseDivisionParser):
                     in_comment_entry = False
                 token_stream.consume()
 
-        # Validate mandatory PROGRAM-ID
+        # Validate mandatory PROGRAM-ID (or CLASS-ID / METHOD-ID for an
+        # object-oriented unit)
         if not content["program_id"]:
-            raise ParseError("PROGRAM-ID is mandatory in IDENTIFICATION DIVISION")
+            raise ParseError(
+                "PROGRAM-ID (or CLASS-ID / METHOD-ID) is mandatory in "
+                "IDENTIFICATION DIVISION"
+            )
 
         return content
 
     def _parse_program_id(self, token_stream: ITokenStream) -> str:
         """Parse PROGRAM-ID clause.
 
-        Format: PROGRAM-ID. program-name [IS INITIAL|COMMON].
+        Format: PROGRAM-ID[.] program-name [[IS] INITIAL|COMMON|RECURSIVE]...
+                [PROGRAM] [.]
 
         In fixed-format COBOL, the elements may be on different lines:
             000200 PROGRAM-ID.
             000300     program-name.
 
-        Supports optional IS INITIAL or IS COMMON clauses for IBM Enterprise COBOL.
+        Supports the optional IS INITIAL / IS COMMON / IS RECURSIVE
+        attributes (and the trailing PROGRAM word) of IBM Enterprise COBOL;
+        the attributes seen are left in ``self._program_attributes``.
 
         Args:
             token_stream: Token stream positioned at PROGRAM-ID keyword
@@ -193,20 +254,15 @@ class IdentificationDivisionParser(BaseDivisionParser):
         """
         # Consume PROGRAM-ID keyword
         token_stream.consume()
+        self._program_attributes = []
 
-        # Expect period after PROGRAM-ID
-        try:
-            token_stream.expect(".")
-        except TokenMismatch as e:
-            _t147 = token_stream.peek(0)
-            raise ParseError(
-                "Expected '.' after PROGRAM-ID keyword",
-                line_number=(
-                    (_t147.location.line if _t147 is not None else 1)
-                    if not token_stream.is_empty()
-                    else 1
-                ),
-            ) from e
+        # The period after PROGRAM-ID is optional in IBM Enterprise COBOL
+        # (``PROGRAM-ID program-name.`` is accepted by the compiler), so
+        # accept both spellings rather than raising on the shorter one.
+        token_stream.skip_whitespace_and_comments()
+        period = token_stream.peek(0)
+        if period is not None and period.value == ".":
+            token_stream.consume()
 
         # Skip newlines and whitespace after the period (for fixed-format COBOL)
         token_stream.skip_whitespace_and_comments()
@@ -218,25 +274,26 @@ class IdentificationDivisionParser(BaseDivisionParser):
         name_token = token_stream.consume()
         program_name = name_token.value
 
-        # Check for optional repeated IS INITIAL / IS COMMON clauses.
+        # Optional attributes: ``[IS] INITIAL | COMMON | RECURSIVE``
+        # (repeatable, in any order) followed by the optional word
+        # ``PROGRAM`` -- ``PROGRAM-ID. X IS INITIAL PROGRAM.`` is the full
+        # IBM form. Every attribute is recorded, in source order, so
+        # analyzers can tell a program that *declared* itself re-entrant
+        # (RECURSIVE) from one that merely calls itself.
         token_stream.skip_whitespace_and_comments()
         while not token_stream.is_empty():
             token = token_stream.peek(0)
-            if not token or not token.value or token.value.upper() != "IS":
-                break
-
-            token_stream.consume()
-            token_stream.skip_whitespace_and_comments()
-
-            if token_stream.is_empty():
-                break
-
-            next_token = token_stream.peek(0)
-            if not next_token or not next_token.value:
-                break
-
-            val = next_token.value.upper()
-            if val in ("INITIAL", "COMMON"):
+            val = token.value.upper() if token and token.value else ""
+            if val == "IS":
+                token_stream.consume()
+                token_stream.skip_whitespace_and_comments()
+                continue
+            if val in _PROGRAM_ATTRIBUTES:
+                self._program_attributes.append(val)
+                token_stream.consume()
+                token_stream.skip_whitespace_and_comments()
+                continue
+            if val == "PROGRAM" and self._program_attributes:
                 token_stream.consume()
                 token_stream.skip_whitespace_and_comments()
                 continue
@@ -265,6 +322,80 @@ class IdentificationDivisionParser(BaseDivisionParser):
                 )
 
         return program_name
+
+    @staticmethod
+    def parse_class_id_clause(token_stream: ITokenStream) -> tuple[str, str | None]:
+        """Parse ``CLASS-ID[.] class-name [INHERITS [FROM] class-name-2] [.]``.
+
+        The stream is positioned at the ``CLASS-ID`` word. Returns
+        ``(class_name, inherits)``. Shared with :class:`CobolParser`, which
+        meets the same clause without a preceding ``IDENTIFICATION
+        DIVISION`` header (the header is optional in front of every unit of
+        an object-oriented compilation unit).
+        """
+        token_stream.consume()  # CLASS-ID
+        token_stream.skip_whitespace_and_comments()
+        period = token_stream.peek(0)
+        if period is not None and period.value == ".":
+            token_stream.consume()
+        token_stream.skip_whitespace_and_comments()
+        if token_stream.is_empty():
+            raise ParseError("Expected class name after CLASS-ID.")
+        class_name = _unit_name(token_stream.consume().value)
+        inherits: str | None = None
+        token_stream.skip_whitespace_and_comments()
+        while not token_stream.is_empty():
+            token = token_stream.peek(0)
+            val = token.value.upper() if token and token.value else ""
+            if val in ("IS", "FROM"):
+                token_stream.consume()
+            elif val == "INHERITS":
+                token_stream.consume()
+                token_stream.skip_whitespace_and_comments()
+                nxt = token_stream.peek(0)
+                if nxt is not None and nxt.value and nxt.value.upper() == "FROM":
+                    token_stream.consume()
+                    token_stream.skip_whitespace_and_comments()
+                    nxt = token_stream.peek(0)
+                if nxt is not None and nxt.value and nxt.value != ".":
+                    inherits = _unit_name(nxt.value)
+                    token_stream.consume()
+            elif val == ".":
+                token_stream.consume()
+                break
+            else:
+                break
+            token_stream.skip_whitespace_and_comments()
+        return class_name, inherits
+
+    @staticmethod
+    def parse_method_id_clause(token_stream: ITokenStream) -> str:
+        """Parse ``METHOD-ID[.] method-name [.]``.
+
+        The stream is positioned at the ``METHOD-ID`` word. IBM requires
+        the method name to be an alphanumeric literal (Java method names
+        are case-sensitive); a bare word is accepted too. Returns the
+        name with its quotes stripped.
+        """
+        token_stream.consume()  # METHOD-ID
+        token_stream.skip_whitespace_and_comments()
+        period = token_stream.peek(0)
+        if period is not None and period.value == ".":
+            token_stream.consume()
+        token_stream.skip_whitespace_and_comments()
+        if token_stream.is_empty():
+            raise ParseError("Expected method name after METHOD-ID.")
+        method_name = _unit_name(token_stream.consume().value)
+        token_stream.skip_whitespace_and_comments()
+        # ``METHOD-ID. "name" OVERRIDE.`` (COBOL 2002; tolerated)
+        nxt = token_stream.peek(0)
+        if nxt is not None and nxt.value and nxt.value.upper() == "OVERRIDE":
+            token_stream.consume()
+            token_stream.skip_whitespace_and_comments()
+            nxt = token_stream.peek(0)
+        if nxt is not None and nxt.value == ".":
+            token_stream.consume()
+        return method_name
 
     def _parse_clause_value(
         self, token_stream: ITokenStream, in_comment_entry: bool = False
@@ -375,6 +506,11 @@ class IdentificationDivisionParser(BaseDivisionParser):
         division_node.metadata.update(
             {
                 "program_id": division_content.get("program_id"),
+                "unit_kind": division_content.get("unit_kind", "PROGRAM"),
+                "program_attributes": list(
+                    division_content.get("program_attributes") or []
+                ),
+                "inherits": division_content.get("inherits"),
                 "author": division_content.get("author"),
                 "installation": division_content.get("installation"),
                 "date_written": division_content.get("date_written"),

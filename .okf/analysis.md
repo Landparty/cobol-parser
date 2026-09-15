@@ -1996,3 +1996,59 @@ format prints the origin's own `file:line:column:` prefix so the output stays
 clickable after expansion. Pinned by
 `tests/regression/test_expansion_source_map_and_comments.py::TestApplySourceMap`
 and `tests/regression/test_nested_program_units.py`.
+
+
+# Program-type corpus fixes (2026-09-15)
+
+What running every analyzer over `tests/samples/enterprise/` (one program
+per IBM Enterprise COBOL program type; `docs/enterprise-program-types.md`)
+changed. Each was a false positive on a *kind* of program, not on one
+program.
+
+* **DECLARATIVES** (`DECLARE`, `RPTWRTR`): `DeadCodeAnalyzer` and
+  `ProgramFlowAnalyzer` take the first procedure that is *not* in a
+  declarative section as the entry point (control enters after `END
+  DECLARATIVES`), mark every declarative section and paragraph referenced
+  (`_collect_declaratives`), and the flow analyzer registers each
+  declarative *section* as an entry point after the real one
+  (`FlowNode.is_declarative`, serialized when True) so it is never
+  "unreachable". `IOSequenceAnalyzer._collect_procedures` skips
+  declarative sections entirely: a USE procedure is not on the
+  fall-through path and cannot be PERFORMed, so walking it inline reported
+  its WRITE against a file state it never runs in.
+* **Runtime-invoked handlers** (`XMLJSON`, `CICSONLN`, `CICSLINK`): `XML
+  PARSE ... PROCESSING PROCEDURE p [THRU q]` is a reference in
+  `DeadCodeAnalyzer._collect_xml_refs` and a PERFORM-shaped edge
+  (`FlowEdgeType.XML_PROCESSING_PROCEDURE[_THRU]`,
+  `EdgeCollector.process_xml_parse`); `EXEC CICS HANDLE AID|CONDITION|
+  ABEND option(paragraph)` is a GO TO-shaped reference
+  (`_collect_cics_handle_refs`, `FlowEdgeType.CICS_HANDLE`,
+  `process_cics_handle` -- only option values naming a known procedure).
+  Both joined `INTERNAL_EDGE_TYPES` and the PERFORM/GOTO sets the cycle
+  classifier, complexity and the flowcharts read
+  (`flowchart.py`'s label/verbose/perform/goto tables).
+* **CICS translator items** (`CICSONLN`, `CICSLINK`): `LinkageChecker`
+  marks `DFHEIBLK` and `DFHCOMMAREA` referenced unconditionally
+  (`_CICS_TRANSLATOR_ITEMS` -- the translator passes them on the USING it
+  generates), plus the `RETURNING` item, every `SET ADDRESS OF x TO p`
+  target (`SetStatement.targets_are_address_of`) and any CICS option of
+  the form `SET(ADDRESS OF x)` (`_ADDRESS_OF_RE`).
+  `UnusedVariableAnalyzer` marks the `DFHEIBLK` subtree used and the
+  `DFHCOMMAREA` 01 used (its fields stay assessed) -- the translator
+  declares all 30-odd EIB fields and buried the real findings of every
+  CICS program.
+* **EXEC DLI** (`EXECDLI`): `IMSSegmentAnalyzer._build_exec_dli_calls`
+  produces one `IMSDLICall` per `ExecImsStatement` (interface `"EXEC
+  DLI"`, `function_code` = command word, `pcb_name` `"PCB(n)"`,
+  `io_area_name` from `INTO`/`FROM`, `segment_names` from every
+  `SEGMENT(...)`), merged with the `CBLTDLI` calls in source order.
+* **IS RECURSIVE** (`SUBPROG`): `RecursionRiskAnalyzer._call_recursion_risks`
+  grades a self-CALL `LOW` when `ast.is_recursive`; `lint`'s
+  `_SEVERITY_RECURSION` maps `LOW` to `info`.
+* **DCLGEN in WORKING-STORAGE** (`DB2BATCH`): `DeclareTableStatement`
+  now extracts a qualified `SCHEMA.TABLE` name, so `HostVariableResolver`
+  and `DclgenChecker` finally see the DECLARE TABLE block every DCLGEN
+  member emits.
+
+`tests/integration/test_enterprise_program_types.py` pins each of these
+through the corpus program that exposed it.

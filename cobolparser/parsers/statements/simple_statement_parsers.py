@@ -532,6 +532,8 @@ class UseStatementParser(IStatementParser):
 
     Syntax: USE [GLOBAL] AFTER [STANDARD] {EXCEPTION|ERROR} PROCEDURE
             ON {file-name|INPUT|OUTPUT|I-O|EXTEND}
+            USE [GLOBAL] BEFORE REPORTING report-group-name   (Report Writer)
+            USE FOR DEBUGGING ON {procedure-name|ALL PROCEDURES}
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
@@ -568,11 +570,18 @@ class UseStatementParser(IStatementParser):
                 stmt.set_use_type(val)
             elif val == "DEBUGGING":
                 stmt.set_use_type("DEBUGGING")
+            elif val == "REPORTING":
+                # USE BEFORE REPORTING group: the names that follow are
+                # report groups (RD 01 entries), not files.
+                stmt.set_use_type("REPORTING")
             elif val in ("INPUT", "OUTPUT", "I-O", "EXTEND"):
                 stmt.add_file_name(val)
-            elif val not in ("AFTER", "BEFORE", "STANDARD", "PROCEDURE", "ON"):
+            elif val not in ("AFTER", "BEFORE", "STANDARD", "PROCEDURE", "ON", "FOR"):
                 if token.type == TokenType.IDENTIFIER:
-                    stmt.add_file_name(token.value or "")
+                    if stmt.use_type == "REPORTING":
+                        stmt.add_report_group(token.value or "")
+                    else:
+                        stmt.add_file_name(token.value or "")
             token_stream.consume()
             skip_whitespace(token_stream)
 

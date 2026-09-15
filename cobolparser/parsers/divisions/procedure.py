@@ -49,6 +49,11 @@ from .procedure_registry import create_statement_registry
 logger = logging.getLogger(__name__)
 
 
+#: The word after ``END`` that closes an object-oriented unit (IBM Enterprise
+#: COBOL ``END METHOD`` / ``END FACTORY`` / ``END OBJECT`` / ``END CLASS``).
+_OO_UNIT_END_WORDS: frozenset[str] = frozenset({"METHOD", "FACTORY", "OBJECT", "CLASS"})
+
+
 class ProcedureDivisionParser(BaseDivisionParser):
     """Parser for COBOL Procedure Division with registry-based statement parsing.
 
@@ -148,6 +153,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
         section_order: list[str] = []
         # Track the current section so paragraphs are associated correctly
         current_section: dict[str, Any] | None = None
+        # True between ``DECLARATIVES.`` and ``END DECLARATIVES.``: every
+        # section opened in that span is a declarative (USE) procedure the
+        # runtime invokes, not one the program's own control flow reaches.
+        in_declaratives = False
 
         # H9 paragraph-boundary disambiguation: computed once per division
         # parse and threaded to statement parsers via ParseContext.
@@ -193,15 +202,42 @@ class ProcedureDivisionParser(BaseDivisionParser):
             if any(token_value == f"{kw} DIVISION" for kw in _stop_div):
                 break
 
-            # Check for END PROGRAM or END DIVISION
+            # ``DECLARATIVES.`` opens the declaratives span; the marker is
+            # not a paragraph (previously it produced one named
+            # DECLARATIVES, and ``END DECLARATIVES.`` a second one).
+            if token_value == "DECLARATIVES" and self._next_is_period(token_stream):
+                token_stream.consume()  # DECLARATIVES
+                token_stream.consume()  # .
+                in_declaratives = True
+                current_section = None
+                continue
+
+            # Check for END PROGRAM / END DIVISION (unit ends), END
+            # DECLARATIVES (span ends), and the object-oriented unit ends
+            # END METHOD / END FACTORY / END OBJECT / END CLASS.
             if token_value == "END":
                 next_token = token_stream.peek(1)
-                if (
-                    next_token
-                    and next_token.value
-                    and next_token.value.upper() in ("PROGRAM", "DIVISION")
-                ):
+                next_value = (
+                    next_token.value.upper() if next_token and next_token.value else ""
+                )
+                if next_value in ("PROGRAM", "DIVISION"):
                     break
+                if next_value in _OO_UNIT_END_WORDS:
+                    break
+                if next_value == "DECLARATIVES":
+                    token_stream.consume()  # END
+                    token_stream.consume()  # DECLARATIVES
+                    if self._next_is_period(token_stream, offset=0):
+                        token_stream.consume()  # .
+                    in_declaratives = False
+                    current_section = None
+                    continue
+
+            # A METHOD-ID / CLASS-ID header ends the (usually empty)
+            # PROCEDURE DIVISION of a FACTORY / OBJECT paragraph and starts
+            # the next unit; the program-level parser takes over from here.
+            if token_value in ("METHOD-ID", "CLASS-ID"):
+                break
 
             # Skip stray control markers so following statements can be recovered.
             if token_value in ("ELSE", "WHEN", "END-IF", "END-PERFORM", "END-EVALUATE"):
@@ -241,6 +277,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     "name": section_name,
                     "location": section_location,
                     "paragraphs": [],
+                    "declarative": in_declaratives,
                 }
                 if section_name not in section_order:
                     section_order.append(section_name)
@@ -474,6 +511,12 @@ class ProcedureDivisionParser(BaseDivisionParser):
         """Warn about skipped content (delegates to StatementRecoveryHandler)."""
         self._recovery.warn_unsupported_statement(token)
 
+    @staticmethod
+    def _next_is_period(token_stream: ITokenStream, offset: int = 1) -> bool:
+        """True when the token at *offset* is the separator period."""
+        token = token_stream.peek(offset)
+        return bool(token is not None and token.value == ".")
+
     def _is_paragraph_or_section_start(self, token_stream: ITokenStream) -> bool:
         """Check for a paragraph/section start (delegates to procedure_boundaries)."""
         return is_paragraph_or_section_start(token_stream)
@@ -548,6 +591,8 @@ class ProcedureDivisionParser(BaseDivisionParser):
             section_info = sections_data.get(section_name, {})
             section_location = section_info.get("location", start_location)
             section = CobolSection(section_name, section_location)
+            if section_info.get("declarative"):
+                section.set_metadata("declarative", True)
 
             # Add paragraphs belonging to this section
             for para_info in section_info.get("paragraphs", []):

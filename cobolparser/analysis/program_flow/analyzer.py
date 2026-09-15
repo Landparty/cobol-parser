@@ -9,7 +9,7 @@ for the whole-graph post-passes — and assembles the final
 
 from typing import Any
 
-from ...models.program import CobolProgram
+from ...models.program import CobolDivision, CobolProgram, CobolSection
 from .cycles import classify_cycles, detect_cycles
 from .edges import (
     GOTO_EDGE_TYPES,
@@ -124,6 +124,10 @@ class ProgramFlowAnalyzer:
 
         # Pass 1: Collect all procedures as nodes
         scanner.collect_procedures(proc_division)
+        declaratives = self._declarative_procedures(proc_division)
+        for name in declaratives:
+            if name in self._nodes:
+                self._nodes[name].is_declarative = True
 
         # Pass 2: Scan statements to build edges and node metrics
         scanner.scan_statements(proc_division)
@@ -141,12 +145,29 @@ class ProgramFlowAnalyzer:
 
         # Mark the first procedure as entry point before cycle/reachability analysis
         # so that the entry point set is complete when those passes run.
-        if self._ordered_procedures:
-            first = self._ordered_procedures[0]
-            if first in self._nodes:
-                self._nodes[first].is_entry_point = True
-                if first not in self._entry_points:
-                    self._entry_points.insert(0, first)
+        # DECLARATIVES precede the main code in source order but control
+        # never enters there: the entry point is the first procedure after
+        # END DECLARATIVES. Each declarative *section* is itself an entry
+        # the runtime uses (a USE procedure runs on an I/O error), so it is
+        # registered as one too -- after the real entry -- rather than being
+        # reported unreachable.
+        first = next(
+            (p for p in self._ordered_procedures if p not in declaratives), None
+        )
+        if first is not None and first in self._nodes:
+            self._nodes[first].is_entry_point = True
+            if first not in self._entry_points:
+                self._entry_points.insert(0, first)
+        for name in self._ordered_procedures:
+            node = self._nodes.get(name)
+            if (
+                node is not None
+                and node.is_declarative
+                and node.procedure_type == "SECTION"
+                and name not in self._entry_points
+            ):
+                node.is_entry_point = True
+                self._entry_points.append(name)
 
         # Pass 4a: Compute convergence nodes for branch decisions
         compute_convergence_nodes(self._edges, self._branch_nodes)
@@ -176,6 +197,20 @@ class ProgramFlowAnalyzer:
         report.unreachable_nodes = self._unreachable_nodes
         report.branch_nodes = self._branch_nodes
         return report
+
+    @staticmethod
+    def _declarative_procedures(proc_division: CobolDivision) -> set[str]:
+        """Every DECLARATIVES section name and paragraph name, upper-cased."""
+        names: set[str] = set()
+        for section in proc_division._sections.values():
+            if not isinstance(section, CobolSection) or not section.is_declarative:
+                continue
+            if section.section_name:
+                names.add(section.section_name.upper())
+            for para in section.paragraphs:
+                if para.paragraph_name:
+                    names.add(para.paragraph_name.upper())
+        return names
 
     def _detect_unreachable_nodes(self) -> None:
         """Find nodes not reachable from any entry point via internal edges."""

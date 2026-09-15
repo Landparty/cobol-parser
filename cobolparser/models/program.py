@@ -33,6 +33,14 @@ class CobolSection(ASTNode):
         self.paragraphs: list[CobolParagraph] = []
         self.data_items: list[CobolDataItem] = []
 
+    @property
+    def is_declarative(self) -> bool:
+        """True for a section declared between ``DECLARATIVES.`` and ``END
+        DECLARATIVES.`` -- a USE procedure the runtime invokes on an I/O
+        error or before a report group is printed, never reached by the
+        program's own PERFORM / GO TO / fall-through control flow."""
+        return bool(self.get_metadata("declarative"))
+
     def add_paragraph(self, paragraph: "CobolParagraph") -> None:
         """Add a paragraph to this section."""
         self.add_child(paragraph)
@@ -243,6 +251,14 @@ class CobolProgram(ASTNode):
         # nested programs delimited by END PROGRAM). Historically everything
         # after the first program was silently dropped.
         self.contained_programs: list[CobolProgram] = []
+        #: What kind of compilation unit this is: ``"PROGRAM"`` (a
+        #: PROGRAM-ID, the default) or, for IBM object-oriented COBOL, one
+        #: of ``"CLASS"`` (CLASS-ID), ``"FACTORY"``, ``"OBJECT"`` and
+        #: ``"METHOD"`` (METHOD-ID). A class unit contains its factory and
+        #: object units, which contain their method units, all through
+        #: ``contained_programs`` -- so ``program_units()`` enumerates every
+        #: method like it enumerates every nested program.
+        self.unit_kind: str = "PROGRAM"
         # The SerializationConfig the building parser was constructed with;
         # to_dict()/to_json() fall back to it when called without one.
         self.serialization_config: SerializationConfig | None = None
@@ -285,6 +301,20 @@ class CobolProgram(ASTNode):
         self._divisions[division.division_name] = division
         # Invalidate S1 statement cache — a new division may add statements.
         self._cached_all_statements = None
+
+    @property
+    def program_attributes(self) -> list[str]:
+        """The PROGRAM-ID attributes (``INITIAL``, ``COMMON``, ``RECURSIVE``)
+        this unit declared, in source order; empty when it declared none."""
+        division = self.identification_division
+        attrs = division.get_metadata("program_attributes") if division else None
+        return list(attrs or [])
+
+    @property
+    def is_recursive(self) -> bool:
+        """True when the unit declared ``PROGRAM-ID. name IS RECURSIVE``:
+        it may legally be re-entered while still active."""
+        return "RECURSIVE" in self.program_attributes
 
     def program_units(self) -> list["CobolProgram"]:
         """This program and every program contained in it, outermost first.
@@ -831,6 +861,8 @@ class CobolProgram(ASTNode):
                 name: division.to_dict() for name, division in self._divisions.items()
             },
         }
+        if self.unit_kind != "PROGRAM":
+            result["unit_kind"] = self.unit_kind
 
         if self.contained_programs:
             result["contained_programs"] = [

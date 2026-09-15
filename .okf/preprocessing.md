@@ -957,3 +957,26 @@ comes back, the member does not.
 
 Both pinned by `tests/regression/test_expansion_source_map_and_comments.py`
 and, at the CLI level, `tests/unit/cli/test_expand_source_map_cli.py`.
+
+
+# Conditional compilation by default, REPLACE partial words, EXEC SQL INCLUDE (2026-09-15)
+
+* `CobolParser.parse` runs `preprocess_conditional_compilation` on every
+  source that contains `>>` (after normalization, before the COPY strip
+  and REPLACE), so `>>DEFINE` / `>>IF` / `>>EVALUATE` are honoured in
+  `parse_cobol` and after expansion, not only under
+  `expand_copybooks(process_conditionals=True)`. `_DEFINE_RE` accepts
+  hyphenated symbols. An unrecognized `>>` directive is blanked with a
+  warning ("ignored") instead of passed to the lexer.
+  `_skip_to_identification_division` keeps `>>` lines ahead of the header.
+* `apply_replace_statements`: a single pseudo-text word delimited by
+  colons (`==:TAG:==`) is a *partial-word* pattern
+  (`_ReplacePair.partial_word`): it matches inside any non-literal source
+  word and only that substring is replaced.
+* `CopyStatementLexer(sql_include=True)` also recognizes `EXEC SQL INCLUDE
+  member END-EXEC [.]` (`_EXEC_SQL_TAIL_RE` anchors the span at `EXEC`) as
+  a `CopyStatement(sql_include=True)`; `_expand_source_recursive` turns it
+  on and, when the resolver raises `CopybookNotFoundError` for such a
+  statement, leaves it as written (SQLCA/SQLDA come from the
+  precompiler). `strip_unexpanded_copy_statements` keeps the default
+  (off), so the un-expanding parse never touches an INCLUDE.

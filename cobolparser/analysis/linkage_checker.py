@@ -37,13 +37,33 @@ so a CALL to one is never checked for this.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram, CobolSection
-from ..models.statements import CallStatement, EntryStatement
+from ..models.statements import CallStatement, EntryStatement, SetStatement
+
+#: LINKAGE items the CICS command-level translator itself passes on the
+#: PROCEDURE DIVISION USING it generates; a source that declares them is a
+#: CICS program and references them by construction.
+_CICS_TRANSLATOR_ITEMS: frozenset[str] = frozenset({"DFHEIBLK", "DFHCOMMAREA"})
+
+#: ``ADDRESS OF item`` as it appears in a CICS option (``SET(ADDRESS OF
+#: WS-REC)``) -- the item is being based, which is a reference to it.
+_ADDRESS_OF_RE = re.compile(r"^\s*ADDRESS\s+OF\s+([A-Za-z0-9-]+)", re.IGNORECASE)
+
+
+def _bare_name(operand: str) -> str:
+    """The data name of *operand* without a subscript or OF/IN qualifier."""
+    text = operand.strip()
+    for stop in ("(", " OF ", " IN "):
+        cut = text.upper().find(stop)
+        if cut >= 0:
+            text = text[:cut]
+    return text.strip()
 
 
 class LinkageViolationKind(Enum):
@@ -316,19 +336,42 @@ class LinkageChecker:
         self._collect_linkage_items(unit)
         self._all_linkage_items.update(self._linkage_items)
 
-        # 2. Its PROCEDURE DIVISION USING clause references them
+        # 2. Its PROCEDURE DIVISION USING / RETURNING clause references them
         proc_div = unit.procedure_division
         if proc_div:
             for p in proc_div.get_metadata("using_parameters") or []:
                 self._mark_referenced(p if isinstance(p, str) else str(p))
+            returning = proc_div.get_metadata("returning_parameter")
+            if returning:
+                self._mark_referenced(str(returning))
 
-        # 3. So do its ENTRY USING clauses; its CALLs are validated
+        # 2b. The CICS translator supplies DFHEIBLK and DFHCOMMAREA on the
+        # PROCEDURE DIVISION USING it generates, so a CICS program that
+        # declares either in LINKAGE (the translated form does, and the
+        # untranslated form may declare DFHCOMMAREA) references it by
+        # construction -- there is no USING clause in the source to see.
+        for name in _CICS_TRANSLATOR_ITEMS:
+            self._mark_referenced(name)
+
+        # 3. So do its ENTRY USING clauses and every ``SET ADDRESS OF item
+        # TO pointer`` (a based LINKAGE item is addressed, not passed --
+        # the CICS ``SET(ADDRESS OF item)`` option is the same idiom);
+        # its CALLs are validated
         for node in self._own_nodes(unit):
             if isinstance(node, EntryStatement):
                 for p in node.using_parameters or []:
                     self._mark_referenced(p)
             elif isinstance(node, CallStatement):
                 self._validate_call(node)
+            elif isinstance(node, SetStatement) and node.targets_are_address_of:
+                for target in node.targets:
+                    self._mark_referenced(_bare_name(target))
+            elif getattr(node, "node_type", None) == "EXEC_CICS":
+                for value in (getattr(node, "options", None) or {}).values():
+                    if value:
+                        based = _ADDRESS_OF_RE.match(value)
+                        if based:
+                            self._mark_referenced(_bare_name(based.group(1)))
 
         # 4. Warn on unreferenced LINKAGE items
         self._check_unreferenced_linkage()

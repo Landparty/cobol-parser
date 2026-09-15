@@ -36,6 +36,7 @@ from .preprocess import (
     TEXT_END_COL,
     TEXT_START_COL,
     normalize_fixed_format,
+    preprocess_conditional_compilation,
     strip_compiler_directives,
 )
 from .preprocess.replace_statement import (
@@ -45,6 +46,11 @@ from .preprocess.replace_statement import (
 from .profiling import ProfilerContext, ProfilingResult
 
 logger = logging.getLogger(__name__)
+
+#: Unit kinds whose contained units nest under them (see
+#: ``CobolParser._attach_new_unit``): a class holds its factory and object
+#: units, and those hold their methods.
+_OO_CONTAINER_KINDS: frozenset[str] = frozenset({"CLASS", "FACTORY", "OBJECT"})
 
 # Pre-compiled regex for ID division detection (avoids re-compilation per parse call).
 # Fixed-format source may carry a sequence area in columns 1-6, so an optional
@@ -163,13 +169,31 @@ class CobolParser:
 
     @staticmethod
     def _skip_to_identification_division(content: str) -> str:
-        """Skip all lines before IDENTIFICATION DIVISION, preserving line numbers."""
+        """Blank every line before the IDENTIFICATION DIVISION, preserving
+        line numbers -- except compiler directives.
+
+        JCL, listing headers and other junk ahead of the header are dropped.
+        A ``>>DEFINE`` / ``>>IF`` directive line is kept where it is: IBM
+        allows ``>>DEFINE`` anywhere, and the conditional-compilation pass
+        that runs later must still see it, or every ``>>IF`` on the symbol
+        evaluates to FALSE. (``CBL`` / ``PROCESS`` option lines are removed
+        by ``strip_compiler_directives`` right after this step.)
+        """
         lines = content.splitlines(keepends=True)
 
         for i, line in enumerate(lines):
             if _ID_DIV_RE.search(line):
-                blank_lines = ["\n"] * i
-                return "".join(blank_lines + lines[i:])
+                kept = [
+                    (
+                        preceding
+                        if preceding.strip().startswith(">>")
+                        or preceding.strip()[6:8].strip().startswith(">>")
+                        or preceding.strip().upper().startswith(("CBL", "PROCESS"))
+                        else "\n"
+                    )
+                    for preceding in lines[:i]
+                ]
+                return "".join(kept + lines[i:])
 
         return content
 
@@ -301,6 +325,17 @@ class CobolParser:
             # preserve line count. In the copybook-expansion pipeline COPY is
             # already inlined before this point, so the COPY strip is a no-op
             # there.
+            # Conditional compilation (``>>DEFINE`` / ``>>IF`` / ``>>EVALUATE``)
+            # runs first, exactly as the compiler orders it: a directive
+            # decides which lines exist before COPY/REPLACE see them. Every
+            # directive line and every line of a skipped block is blanked
+            # in place, so line numbers are unchanged. Gated on the two
+            # characters every directive starts with, so the common case
+            # (no directives at all) costs one substring scan.
+            if ">>" in cleaned_source:
+                cleaned_source = preprocess_conditional_compilation(
+                    cleaned_source, warnings=preprocess_warnings
+                )
             cleaned_source = strip_unexpanded_copy_statements(
                 cleaned_source, warnings=preprocess_warnings
             )
@@ -472,6 +507,10 @@ class CobolParser:
         # Create initial program (will be updated with metadata from ID division)
         primary_program = CobolProgram(program_name, program_location)
         self.current_program = primary_program
+        # Object-oriented units nest: a CLASS-ID unit holds its FACTORY and
+        # OBJECT units, each holding METHOD-ID units. ``END METHOD`` / ``END
+        # FACTORY`` / ``END OBJECT`` / ``END CLASS`` pop back to the parent.
+        self._unit_stack: list[CobolProgram] = []
 
         # Parse divisions in order: IDENTIFICATION -> ENVIRONMENT -> DATA -> PROCEDURE
         divisions_parsed: list[Any] = []
@@ -485,6 +524,14 @@ class CobolParser:
 
                 if self.stream.is_empty():
                     break
+
+                # IBM object-oriented COBOL unit markers that carry no
+                # division header of their own: ``CLASS-ID.`` / ``METHOD-ID.``
+                # without a preceding IDENTIFICATION DIVISION, the ``FACTORY.``
+                # and ``OBJECT.`` paragraphs, and the ``END METHOD|FACTORY|
+                # OBJECT|CLASS`` unit terminators.
+                if self._handle_oo_unit_marker(primary_program, divisions_parsed):
+                    continue
 
                 # Try to find a parser for the current token
                 parser = self._division_factory.find_parser(self.stream)
@@ -534,8 +581,7 @@ class CobolParser:
                     parser, IdentificationDivisionParser
                 ) and self.current_program.has_division("IDENTIFICATION"):
                     new_program = CobolProgram("UNKNOWN", self.get_current_location())
-                    primary_program.add_contained_program(new_program)
-                    self.current_program = new_program
+                    self._attach_new_unit(primary_program, new_program)
 
                 try:
                     # Set host on ProcedureDivisionParser for ParseContext creation
@@ -559,6 +605,9 @@ class CobolParser:
                             if isinstance(metadata, dict) and "program_id" in metadata:
                                 program_name = metadata["program_id"]
                                 self.current_program.program_name = program_name
+                                unit_kind = metadata.get("unit_kind")
+                                if unit_kind:
+                                    self.current_program.unit_kind = str(unit_kind)
 
                 except ParseError as pe:
                     # Already-formatted parse error from a division/statement
@@ -600,17 +649,126 @@ class CobolParser:
                 return primary_program if divisions_parsed else None
 
         if primary_program.contained_programs:
-            names = ", ".join(
-                p.program_name for p in primary_program.contained_programs
-            )
+            # Every unit below the primary one, nested ones included (an OO
+            # class holds its factory/object units, which hold its methods).
+            extra_units = primary_program.program_units()[1:]
+            names = ", ".join(p.program_name for p in extra_units)
             self.add_warning(
                 f"Compilation unit contains "
-                f"{len(primary_program.contained_programs) + 1} program units; "
+                f"{len(extra_units) + 1} program units; "
                 f"additional program(s) [{names}] attached to "
                 f"contained_programs of '{primary_program.program_name}'"
             )
 
         return primary_program
+
+    def _attach_new_unit(
+        self, primary_program: CobolProgram, new_program: CobolProgram
+    ) -> None:
+        """Make *new_program* the current unit, contained by the right parent.
+
+        A method belongs to the factory/object unit it is written in, and a
+        factory/object to its class, so inside an object-oriented unit the
+        parent is the current unit (pushed for ``END ...`` to pop back to).
+        Nested PROGRAM-ID units keep their historical flat attachment to
+        the primary program.
+        """
+        parent = self.current_program or primary_program
+        if parent.unit_kind in _OO_CONTAINER_KINDS:
+            parent.add_contained_program(new_program)
+            self._unit_stack.append(parent)
+        else:
+            primary_program.add_contained_program(new_program)
+        self.current_program = new_program
+
+    def _handle_oo_unit_marker(
+        self, primary_program: CobolProgram, divisions_parsed: list[Any]
+    ) -> bool:
+        """Consume one object-oriented unit marker at the stream head.
+
+        Handles ``CLASS-ID`` / ``METHOD-ID`` clauses written without an
+        IDENTIFICATION DIVISION header, the ``FACTORY.`` / ``OBJECT.``
+        paragraphs that open those units, and ``END METHOD [name].`` /
+        ``END FACTORY.`` / ``END OBJECT.`` / ``END CLASS [name].``. Returns
+        True when a marker was consumed (the caller continues its loop).
+        """
+        if not self.stream:
+            return False
+        token = self.stream.peek()
+        value = (token.value or "").upper() if token else ""
+        if not value:
+            return False
+
+        if value in ("CLASS-ID", "METHOD-ID"):
+            location = self.get_current_location()
+            if value == "CLASS-ID":
+                name, inherits = IdentificationDivisionParser.parse_class_id_clause(
+                    self.stream
+                )
+                kind = "CLASS"
+            else:
+                name = IdentificationDivisionParser.parse_method_id_clause(self.stream)
+                inherits = None
+                kind = "METHOD"
+            unit = self.current_program or primary_program
+            if unit.has_division("IDENTIFICATION") or divisions_parsed:
+                unit = CobolProgram(name, location)
+                self._attach_new_unit(primary_program, unit)
+            unit.program_name = name
+            unit.unit_kind = kind
+            ident = CobolDivision("IDENTIFICATION", location)
+            ident.metadata.update(
+                {
+                    "program_id": name,
+                    "unit_kind": kind,
+                    "program_attributes": [],
+                    "inherits": inherits,
+                }
+            )
+            unit.add_division(ident)
+            divisions_parsed.append(ident)
+            return True
+
+        if value in ("FACTORY", "OBJECT"):
+            nxt = self.stream.peek(1)
+            if nxt is None or nxt.value != ".":
+                return False
+            location = self.get_current_location()
+            self.stream.consume()  # FACTORY | OBJECT
+            self.stream.consume()  # .
+            unit = CobolProgram(value, location)
+            self._attach_new_unit(primary_program, unit)
+            unit.unit_kind = value
+            ident = CobolDivision("IDENTIFICATION", location)
+            ident.metadata.update(
+                {"program_id": value, "unit_kind": value, "program_attributes": []}
+            )
+            unit.add_division(ident)
+            divisions_parsed.append(ident)
+            return True
+
+        if value == "END":
+            nxt = self.stream.peek(1)
+            nxt_value = (nxt.value or "").upper() if nxt else ""
+            if nxt_value not in ("METHOD", "FACTORY", "OBJECT", "CLASS"):
+                return False
+            self.stream.consume()  # END
+            self.stream.consume()  # METHOD | FACTORY | OBJECT | CLASS
+            self.stream.skip_whitespace_and_comments()
+            tail = self.stream.peek()
+            if tail is not None and tail.value and tail.value != ".":
+                self.stream.consume()  # optional unit name
+                self.stream.skip_whitespace_and_comments()
+                tail = self.stream.peek()
+            if tail is not None and tail.value == ".":
+                self.stream.consume()
+            if self._unit_stack:
+                self.current_program = self._unit_stack.pop()
+            else:
+                self.current_program = primary_program
+            return True
+
+        return False
 
     def _peek_is_end_program(self) -> bool:
         """True if the stream is at an ``END PROGRAM`` marker."""

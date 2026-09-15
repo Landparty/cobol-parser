@@ -92,6 +92,14 @@ _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
         "BLANK",
         "EXTERNAL",
         "GLOBAL",
+        # Enterprise COBOL 6.x clauses that may follow a PICTURE: ``PIC X(8)
+        # VOLATILE``, ``PIC U BYTE-LENGTH 120``, ``PIC U DYNAMIC LENGTH``,
+        # and OO COBOL's ``OBJECT REFERENCE``. None is a picture symbol
+        # string, so each is a safe terminator.
+        "VOLATILE",
+        "BYTE-LENGTH",
+        "DYNAMIC",
+        "OBJECT",
         # Report-group clause words (REPORT SECTION, 2026-09-02): ``PIC ZZ9
         # SOURCE WS-X`` must stop the picture scan at SOURCE. None of these
         # is a valid picture string, so they are safe terminators everywhere.
@@ -446,9 +454,47 @@ class DataItemClauseParser:
             # USAGE clause
             elif value_upper == "USAGE":
                 token_stream.consume()  # Consume USAGE keyword
-                usage = self.parse_usage_clause(token_stream)
-                if usage:
-                    data_item.set_usage(usage)
+                if self._at_object_reference(token_stream):
+                    self._parse_object_reference(token_stream, data_item)
+                else:
+                    usage = self.parse_usage_clause(token_stream)
+                    if usage:
+                        data_item.set_usage(usage)
+
+            # OBJECT REFERENCE [class-name] without the USAGE keyword
+            elif value_upper == "OBJECT" and self._at_object_reference(token_stream):
+                self._parse_object_reference(token_stream, data_item)
+
+            # VOLATILE (Enterprise COBOL 6.2)
+            elif value_upper == "VOLATILE":
+                data_item.is_volatile = True
+                token_stream.consume()
+
+            # PIC U BYTE-LENGTH n (UTF-8, Enterprise COBOL 6.3)
+            elif value_upper == "BYTE-LENGTH":
+                token_stream.consume()  # BYTE-LENGTH
+                self._skip_clause_separators(token_stream)
+                if self._consume_if(token_stream, "IS") is not None:
+                    self._skip_clause_separators(token_stream)
+                length = self._consume_integer(token_stream)
+                if length is None:
+                    self._warn_dropped_data_token(token, data_item)
+                else:
+                    data_item.set_byte_length(length)
+
+            # DYNAMIC LENGTH [LIMIT [IS] n] (Enterprise COBOL 6.3)
+            elif value_upper == "DYNAMIC":
+                token_stream.consume()  # DYNAMIC
+                self._skip_clause_separators(token_stream)
+                self._consume_if(token_stream, "LENGTH")
+                self._skip_clause_separators(token_stream)
+                limit: int | None = None
+                if self._consume_if(token_stream, "LIMIT") is not None:
+                    self._skip_clause_separators(token_stream)
+                    if self._consume_if(token_stream, "IS") is not None:
+                        self._skip_clause_separators(token_stream)
+                    limit = self._consume_integer(token_stream)
+                data_item.set_dynamic_length(limit)
 
             # COMP, COMP-3, etc. without USAGE keyword
             elif value_upper in _COMP_KEYWORDS:
@@ -662,6 +708,61 @@ class DataItemClauseParser:
             data_item.set_metadata("report_clauses", clauses)
         return clauses  # type: ignore[no-any-return]
 
+    def _consume_integer(self, token_stream: ITokenStream) -> int | None:
+        """Consume an unsigned integer operand (``BYTE-LENGTH 120``,
+        ``LIMIT 4000``) whatever the lexer called it -- a two-digit count
+        lexes as a LEVEL_NUMBER token -- returning None, consuming nothing,
+        when the next token is not one."""
+        token = token_stream.peek()
+        if token is None or not token.value or not str(token.value).isdigit():
+            return None
+        token_stream.consume()
+        return int(token.value)
+
+    @staticmethod
+    def _at_object_reference(token_stream: ITokenStream) -> bool:
+        """True at ``OBJECT REFERENCE`` (the stream is at ``OBJECT`` or, after
+        a consumed USAGE keyword, at ``[IS] OBJECT``)."""
+        offset = 0
+        first = token_stream.peek(0)
+        if first is not None and first.type == TokenType.IS:
+            offset = 1
+            first = token_stream.peek(1)
+        if first is None or (first.value or "").upper() != "OBJECT":
+            return False
+        second = token_stream.peek(offset + 1)
+        return bool(second is not None and (second.value or "").upper() == "REFERENCE")
+
+    def _parse_object_reference(
+        self, token_stream: ITokenStream, data_item: CobolDataItem
+    ) -> None:
+        """Consume ``[IS] OBJECT REFERENCE [[FACTORY OF] class-name |
+        ACTIVE-CLASS]`` and record it on *data_item* (IBM OO COBOL)."""
+        if self._consume_if(token_stream, "IS") is not None:
+            pass
+        token_stream.consume()  # OBJECT
+        token_stream.consume()  # REFERENCE
+        self._skip_clause_separators(token_stream)
+        class_name: str | None = None
+        nxt = token_stream.peek()
+        nxt_upper = (nxt.value or "").upper() if nxt is not None else ""
+        if nxt is not None and nxt_upper == "FACTORY":
+            token_stream.consume()
+            self._skip_clause_separators(token_stream)
+            self._consume_if(token_stream, "OF")
+            self._skip_clause_separators(token_stream)
+            nxt = token_stream.peek()
+            nxt_upper = (nxt.value or "").upper() if nxt is not None else ""
+        if (
+            nxt is not None
+            and nxt.type == TokenType.IDENTIFIER
+            and nxt_upper not in _PICTURE_TERMINATOR_KEYWORDS
+            and nxt_upper not in ("PIC", "PICTURE")
+        ):
+            class_name = nxt.value
+            token_stream.consume()
+        data_item.set_object_reference(class_name)
+
     def _consume_if(self, token_stream: ITokenStream, *words: str) -> str | None:
         """Consume the next meaningful token when its upper-cased value is
         one of *words*; return that value, else None (nothing consumed)."""
@@ -795,8 +896,24 @@ class DataItemClauseParser:
         # item from the AST (a worse failure than the missing count).
         # Same-line counts keep the historical unconditional read.
         min_count = 0
-        max_count = 0
-        count_token, count_offset = self._peek_count_token(token_stream)
+        max_count: int | None = 0
+        # ``OCCURS UNBOUNDED DEPENDING ON counter`` (Enterprise COBOL 5+, a
+        # LINKAGE SECTION table with no declared maximum): there is no
+        # count to read, the minimum is 1 and the maximum stays None.
+        # Peeked without consuming layout: the count read below keeps its
+        # own line-crossing guard, which a consumed newline would defeat.
+        first = self._peek_next_meaningful(token_stream, offset=0)
+        unbounded = bool(
+            first is not None and (first.value or "").upper() == "UNBOUNDED"
+        )
+        if unbounded:
+            self._skip_clause_separators(token_stream)
+            token_stream.consume()
+            min_count = 1
+            max_count = None
+        count_token, count_offset = (
+            (None, 0) if unbounded else self._peek_count_token(token_stream)
+        )
         if count_token is not None:
             try:
                 min_count = int(count_token.value)
@@ -920,10 +1037,16 @@ class DataItemClauseParser:
                 else:
                     break
 
+        if unbounded:
+            occurs.is_unbounded = True
+            occurs.set_variable_occurs(min_count, None, depending_var)
+            data_item.set_occurs_clause(occurs)
+            return
+
         if depending_var:
             occurs.set_variable_occurs(min_count, max_count, depending_var)
         else:
-            occurs.set_fixed_occurs(max_count)
+            occurs.set_fixed_occurs(max_count or 0)
 
         if occurs.max_times is not None:
             data_item.set_occurs_clause(occurs)

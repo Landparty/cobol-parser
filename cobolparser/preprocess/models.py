@@ -185,6 +185,12 @@ class CopyStatement:
     original_text: str = ""
     start_index: int = 0
     end_index: int = 0
+    #: True for an ``EXEC SQL INCLUDE member END-EXEC`` statement recognized
+    #: by :class:`CopyStatementLexer` (``sql_include=True``): the DB2
+    #: precompiler resolves it from the same library as ``COPY``, so the
+    #: expander inlines a member it can find and leaves one it cannot
+    #: (``SQLCA``, ``SQLDA`` -- supplied by the precompiler) as written.
+    sql_include: bool = False
 
     @property
     def is_suppressed(self) -> bool:

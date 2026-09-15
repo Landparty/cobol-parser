@@ -19,8 +19,10 @@ from collections.abc import Callable, Iterable, Mapping
 #: ``>>DEFINE name [AS] {literal | PARAMETER | OFF} [OVERRIDE]`` (IBM). The
 #: value is captured lazily so a trailing ``OVERRIDE`` is never taken as
 #: part of it (``AS 2 OVERRIDE`` used to define the value ``"2 OVERRIDE"``).
+#: The symbol may carry hyphens like any COBOL word (``>>DEFINE MAX-ROWS``);
+#: ``\w+`` alone rejected every such name as malformed.
 _DEFINE_RE = re.compile(
-    r">>DEFINE\s+(\w+)(?:\s+(?:AS\s+)?(?!OVERRIDE\s*$)(.+?))?(?:\s+OVERRIDE)?\s*$"
+    r">>DEFINE\s+([\w-]+)(?:\s+(?:AS\s+)?(?!OVERRIDE\s*$)(.+?))?(?:\s+OVERRIDE)?\s*$"
 )
 #: The head of a data-description entry: a level number and the name it
 #: introduces. Shared by the two patterns below so they cannot disagree about
@@ -1247,8 +1249,8 @@ def preprocess_conditional_compilation(
       ``>>WHEN OTHER`` branch can be selected.
     - Stray ``>>ELSE``/``>>END-IF``/``>>WHEN``/``>>END-EVALUATE`` are
       ignored; unclosed ``>>IF``/``>>EVALUATE`` at end of input warn.
-    - Any other ``>>`` directive is passed through to the lexer
-      unprocessed, with a warning.
+    - Any other ``>>`` directive is blanked out with a warning (it is a
+      compiler directive, never program text).
 
     Args:
         source: COBOL source code containing directives
@@ -1473,13 +1475,18 @@ def preprocess_conditional_compilation(
             result_lines.append("")
             continue
 
-        # Any other >> compiler directive is not understood: it is passed
-        # through and will reach the lexer as tokens.
+        # Any other >> compiler directive (>>CALLINTERFACE, >>INLINE,
+        # >>SOURCE FORMAT, ...) is not evaluated here, but it is a directive
+        # to the compiler and never program text, so it is blanked out like
+        # the ones above rather than handed to the lexer as a stray ``>>``
+        # token pair that the parser would then report as unparsed content.
         elif stripped.startswith(">>"):
             _warn(
                 f"Line {line_no}: unknown compiler directive "
-                f"'{line.strip()}' passed through unprocessed"
+                f"'{line.strip()}' ignored"
             )
+            result_lines.append("")
+            continue
 
         # Regular line - include if not skipping. A skipped line still
         # occupies a source line, so emit a blank placeholder rather than

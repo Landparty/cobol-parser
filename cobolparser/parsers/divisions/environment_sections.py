@@ -74,6 +74,15 @@ class ConfigurationSectionParser:
             v = token.value.upper()
             if v in _body_stop:
                 return True
+            # In a CLASS-ID unit the REPOSITORY paragraph is the last thing
+            # before ``FACTORY.`` / ``OBJECT.`` (or a ``METHOD-ID``) opens
+            # the next unit; those belong to the program-level parser.
+            if v == "METHOD-ID":
+                return True
+            if v in ("FACTORY", "OBJECT"):
+                nxt = token_stream.peek(1)
+                if nxt is not None and nxt.value == ".":
+                    return True
             return any(v == f"{kw} DIVISION" for kw in _stop_divs)
 
         # Scan configuration section body for SPECIAL-NAMES paragraph

@@ -210,6 +210,7 @@ class BaseDivisionParser(IDivisionParser, ABC):
             token_stream.consume()
             using_parameters: list[str] = []
             using_parameter_modes: dict[str, str] = {}
+            returning_parameter: str | None = None
         else:
 
             # Parse (rather than blindly discard) optional header clauses
@@ -232,6 +233,8 @@ class BaseDivisionParser(IDivisionParser, ABC):
             using_parameter_modes = {}
             current_mode = "REFERENCE"
             skip_next_identifier = False  # set right after consuming GIVING
+            returning_seen = False
+            returning_parameter = None
             while not token_stream.is_empty():
                 tok = token_stream.peek(0)
                 if not tok:
@@ -242,6 +245,11 @@ class BaseDivisionParser(IDivisionParser, ABC):
                 val_upper = (tok.value or "").upper()
                 if val_upper == "GIVING":
                     skip_next_identifier = True
+                elif val_upper == "RETURNING":
+                    # PROCEDURE DIVISION [USING ...] RETURNING item: the
+                    # item is the value handed back, not a parameter.
+                    skip_next_identifier = True
+                    returning_seen = True
                 elif val_upper == "VALUE":
                     current_mode = "VALUE"
                 elif val_upper == "REFERENCE":
@@ -261,6 +269,8 @@ class BaseDivisionParser(IDivisionParser, ABC):
                     if not skip_next_identifier:
                         using_parameters.append(tok.value)
                         using_parameter_modes[tok.value.upper()] = current_mode
+                    elif returning_seen and returning_parameter is None:
+                        returning_parameter = tok.value
                     skip_next_identifier = False
                 token_stream.consume()
 
@@ -274,6 +284,8 @@ class BaseDivisionParser(IDivisionParser, ABC):
         if self.division_name == "PROCEDURE" and using_parameters:
             ast_node.set_metadata("using_parameters", using_parameters)
             ast_node.set_metadata("using_parameter_modes", using_parameter_modes)
+        if self.division_name == "PROCEDURE" and returning_parameter:
+            ast_node.set_metadata("returning_parameter", returning_parameter)
 
         return ast_node
 

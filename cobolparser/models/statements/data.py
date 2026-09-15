@@ -245,6 +245,9 @@ class SetStatement(CobolStatement):
         self.targets: list[str] = []
         self.value: str | None = None
         self.value_is_address_of: bool = False
+        #: ``SET ADDRESS OF target TO pointer``: the targets are LINKAGE
+        #: items being *based* on a pointer, not items being assigned.
+        self.targets_are_address_of: bool = False
         #: Further ``targets TO/UP/DOWN value`` groups of the same SET
         #: statement (``SET SW-1 TO ON SW-2 TO OFF``); the first group is
         #: held in ``targets``/``set_type``/``value`` above.
@@ -300,6 +303,7 @@ class SetStatement(CobolStatement):
                 "targets": self.targets,
                 "value": self.value,
                 "value_is_address_of": self.value_is_address_of,
+                "targets_are_address_of": self.targets_are_address_of,
                 "groups": [dict(g) for g in self.groups],
             }
         )

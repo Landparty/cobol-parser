@@ -29,6 +29,13 @@ class FlowEdgeType(Enum):
     SORT_OUTPUT_PROCEDURE_THRU = "SORT_OUTPUT_PROCEDURE_THRU"
     MERGE_OUTPUT_PROCEDURE = "MERGE_OUTPUT_PROCEDURE"
     MERGE_OUTPUT_PROCEDURE_THRU = "MERGE_OUTPUT_PROCEDURE_THRU"
+    # XML PARSE ... PROCESSING PROCEDURE p [THRU q]: the parser PERFORMs the
+    # handler once per XML event.
+    XML_PROCESSING_PROCEDURE = "XML_PROCESSING_PROCEDURE"
+    XML_PROCESSING_PROCEDURE_THRU = "XML_PROCESSING_PROCEDURE_THRU"
+    # EXEC CICS HANDLE AID/CONDITION/ABEND option(paragraph): CICS branches
+    # there (a GO TO the runtime performs) when the AID/condition occurs.
+    CICS_HANDLE = "CICS_HANDLE"
     ALTER = "ALTER"
     FALL_THROUGH = "FALL_THROUGH"
     IF_BRANCH = "IF_BRANCH"
@@ -48,6 +55,9 @@ class FlowNode:
     location: SourceLocation
     is_entry_point: bool = False
     is_exit_point: bool = False
+    #: A DECLARATIVES (USE procedure) section or one of its paragraphs:
+    #: invoked by the runtime, never by the program's own control flow.
+    is_declarative: bool = False
     statement_count: int = 0
     has_stop_run: bool = False
     has_goback: bool = False
@@ -77,6 +87,8 @@ class FlowNode:
             result["is_entry_point"] = True
         if self.is_exit_point:
             result["is_exit_point"] = True
+        if self.is_declarative:
+            result["is_declarative"] = True
         result["statement_count"] = self.statement_count
         if self.has_stop_run:
             result["has_stop_run"] = True

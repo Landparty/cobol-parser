@@ -4318,3 +4318,22 @@ check `_data_fast` allows.
 
 See "Signature-drift guard" in [lexer.md](lexer.md);
 `tests/regression/test_data_fast_signature_drift.py`.
+
+
+## 2026-09-15 -- Enterprise COBOL program-type coverage
+
+One representative program per program type (`tests/samples/enterprise/`,
+22 programs; `docs/enterprise-program-types.md`) run through the whole
+stack, and the gaps it found closed: OO COBOL units (CLASS-ID / FACTORY /
+OBJECT / METHOD-ID, OBJECT REFERENCE), PROGRAM-ID attributes (RECURSIVE,
+the PROGRAM word, optional period), RETURNING, 6.x data clauses (PIC U,
+BYTE-LENGTH, DYNAMIC LENGTH, VOLATILE, OCCURS UNBOUNDED), DECLARATIVES
+modelled (and honoured by dead-code, program-flow, io-sequence), XML
+PROCESSING PROCEDURE and CICS HANDLE targets as references, EXEC DLI in
+the IMS analyzer, CICS translator items and SET ADDRESS OF in
+linkage-check / unused-variables, IS RECURSIVE in recursion-check,
+conditional compilation by default, REPLACE partial words, JSON
+CONVERTING, qualified DECLARE TABLE names, EXEC SQL INCLUDE expansion.
+See [parser.md](parser.md), [analysis.md](analysis.md),
+[ast-models.md](ast-models.md), [preprocessing.md](preprocessing.md),
+[tests.md](tests.md) (each has a 2026-09-15 section) and the CHANGELOG.
