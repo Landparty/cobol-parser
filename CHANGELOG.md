@@ -483,6 +483,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **preprocess:** `suggest_similar_copybooks`'s did-you-mean pool no longer
+  includes non-copybook files. It called `get_available_copybooks` with
+  `CopybookSearchPath`'s own `extensions` default, which is deliberately
+  broad for *resolution* (`.cpy`/`.cbl`/`.cob`, plus a trailing `""`
+  meaning "any extension") -- but wrong for a *suggestion*: a program
+  referencing a missing copybook in its own directory would get its own
+  `.cbl` file suggested back as a "did you mean." A new
+  `suggestion_extensions` parameter (default `.cpy`/`.CPY` only) narrows
+  the candidate pool for suggestions specifically; actual copybook
+  resolution is unaffected, and the old broad pool is still available by
+  passing `suggestion_extensions=search_config.extensions` explicitly.
+  Reported from mocky-mock's own examples (`ACCTMNT.cbl` referencing a
+  missing `ACCTMAST` copybook suggested `ACCTMNT`); see
+  mocky-mock's `docs/2026-09-15-copybook-discovery-defaults-design.md`.
 * **preprocess:** `validate_copybook_content`'s "may be missing terminating
   period" check no longer fires on a data-description entry written across
   several lines. The check matched one *physical* line ending in a `PICTURE`

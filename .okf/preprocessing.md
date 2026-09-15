@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-08-22T00:00:00Z
+timestamp: 2026-09-15T00:00:00Z
 ---
 
 # Overview
@@ -621,6 +621,25 @@ substring matching — a filename merely *containing* `".."` (e.g.
 traversal attempt. Now a path-segment check: `.replace("\\", "/").split
 ("/")` and reject only when a whole segment equals `".."`. Both pinned by
 `tests/regression/test_open_findings_high_regressions.py::TestH6PathResolverContainment`.
+
+**Suggestion pool narrowed to real copybook extensions (2026-09-15):**
+`suggest_similar_copybooks`'s did-you-mean candidate pool used to be
+built from `get_available_copybooks(search_config)` with the search
+config's own `extensions` -- correct for *resolution* (`.cpy`/`.cbl`/
+`.cob`, plus `""` meaning "any extension," so a copybook without an
+extension still resolves) but wrong for a *suggestion*: every file in
+the search directory, including the referencing program's own `.cbl`
+source, became a candidate. A missing copybook sitting next to its own
+program's `.cbl` file suggested that `.cbl` file back. Fixed by a new
+`suggestion_extensions` parameter (default `_SUGGESTION_EXTENSIONS =
+(".cpy", ".CPY")`), applied via `dataclasses.replace(search_config,
+extensions=...)` before calling `get_available_copybooks` -- the
+caller's own `search_config` object is never mutated, and
+`suggestion_extensions=search_config.extensions` restores the old broad
+pool for a caller that wants it. Pinned by
+`tests/regression/test_copybook_suggestion_pool.py`. Reported from
+mocky-mock's real-world example corpus; see mocky-mock's
+`docs/2026-09-15-copybook-discovery-defaults-design.md`.
 
 # Line-Number Preservation (audit 2026-07-08)
 

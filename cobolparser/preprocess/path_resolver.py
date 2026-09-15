@@ -9,6 +9,8 @@ and providing fuzzy matching suggestions for misspelled copybook names.
 
 import os
 import sys
+from collections.abc import Sequence
+from dataclasses import replace
 from difflib import get_close_matches
 from pathlib import Path
 
@@ -123,11 +125,23 @@ def get_available_copybooks(search_config: CopybookSearchPath) -> list[str]:
     return sorted(available)
 
 
+# Extensions considered for a did-you-mean suggestion: unambiguous copybook
+# extensions only. Deliberately narrower than CopybookSearchPath's own
+# `extensions` default (which includes ".cbl"/".cob" and even "" -- "any
+# file" -- so that a copybook without an extension still *resolves*). That
+# breadth is right for resolution but wrong for a typo suggestion: a
+# missing "ACCTMAST" copybook sitting next to "ACCTMNT.cbl" (the program's
+# own source file) must never suggest "ACCTMNT" back to the user. See
+# docs/2026-09-15-copybook-discovery-defaults-design.md (mocky-mock).
+_SUGGESTION_EXTENSIONS = (".cpy", ".CPY")
+
+
 def suggest_similar_copybooks(
     member_name: str,
     search_config: CopybookSearchPath,
     max_suggestions: int = 3,
     cutoff: float = 0.6,
+    suggestion_extensions: Sequence[str] | None = None,
 ) -> list[str]:
     """
     Find similarly-named copybooks for typo detection.
@@ -140,6 +154,13 @@ def suggest_similar_copybooks(
         search_config: Search configuration
         max_suggestions: Maximum number of suggestions to return
         cutoff: Minimum similarity ratio (0.0 to 1.0)
+        suggestion_extensions: Extensions to consider when building the
+            candidate pool (default: `_SUGGESTION_EXTENSIONS`, i.e.
+            `.cpy`/`.CPY` only). Pass `search_config.extensions` explicitly
+            to restore the old (broader, resolution-shaped) candidate
+            pool. This parameter affects only which files are *offered*
+            as a suggestion -- actual copybook resolution
+            (`PathResolver.resolve`) is unaffected either way.
 
     Returns:
         List of similar copybook names
@@ -148,7 +169,13 @@ def suggest_similar_copybooks(
         >>> suggest_similar_copybooks("EMPLOYE", config)
         ['EMPLOYEE']
     """
-    available = get_available_copybooks(search_config)
+    extensions = (
+        _SUGGESTION_EXTENSIONS
+        if suggestion_extensions is None
+        else suggestion_extensions
+    )
+    suggestion_config = replace(search_config, extensions=list(extensions))
+    available = get_available_copybooks(suggestion_config)
 
     # Normalize to uppercase for comparison
     member_upper = member_name.upper()
