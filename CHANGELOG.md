@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Cross-reference, program signatures, codebase graph, SQL/CICS lint,
+  semantic diff, JCL** (PR #212, work in progress): `cobol-parser xref`
+  (`analysis/xref.py`, every symbol's declaration and every reference with
+  its role), `program-signature` (`analysis/program_signature.py`, the
+  callee's calling interface from `PROCEDURE DIVISION USING` / `ENTRY` /
+  LINKAGE with graded operand directions), `codebase-graph` and
+  `copybook-impact` (`analysis/codebase.py`, whole-checkout CALL and COPY
+  graph), `sql-cics-check` (`analysis/sql_cics_lint.py`, also the
+  `sql-cics-check` lint rule: unchecked SQLCODE / CICS RESP, dynamic SQL
+  built by concatenation), `diff` (`analysis/ast_diff.py`, structural diff
+  of two program versions) and `jcl` (`cobolparser/jcl/`, DD-to-dataset
+  and step-to-program resolution). Review follow-ups on the same PR:
+  digit-led paragraph names (`1000-INIT`) are credited by `xref` rather
+  than split; a contained program's statements, SELECTs and ENTRYs no
+  longer read as the outer unit's undefined symbols or entry points;
+  STRING literal words and IBM special registers (`RETURN-CODE`,
+  `SQLCODE`, `EIBCALEN`, ...) are excluded from `undefined` (the latter
+  with a caveat); `XrefReport.duplicate_declarations` names symbols
+  declared more than once; `program-signature` reports `returning`,
+  grades an operand referenced only as a CALL argument or SQL host
+  variable `unknown` (never `input`), and degrades a group whose fields
+  are declared in two sections to `unknown`; `codebase-graph` keys files
+  by their normalized path (`./PROG.cbl` no longer yields a phantom
+  program), accepts `--extension cbl` without the dot and resets its
+  per-build member caches; `xref` carries unexpanded-COPY parse warnings
+  as caveats; `diff` compares COMPUTE expressions, INSPECT/UNSTRING
+  clauses, OPEN modes, ACCEPT sources, DISPLAY targets and EXEC SQL/CICS
+  text (previously read as unchanged) and any unmodelled statement on
+  its rendered text; `sql-cics-check` grades `DECLARE GLOBAL TEMPORARY
+  TABLE` as executable; the JCL parser accepts an unnamed `// PROC`
+  header (its keywords become the symbolic defaults, and the JOB-less
+  body is a note, not an error).
+
 * **Enterprise COBOL program-type corpus.** `tests/samples/enterprise/`
   holds one representative program per *kind* of program an Enterprise
   COBOL shop compiles -- QSAM batch with SORT, VSAM maintenance, CICS
@@ -483,6 +516,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **preprocess:** `suggest_similar_copybooks`'s did-you-mean pool no longer
+  includes non-copybook files. It called `get_available_copybooks` with
+  `CopybookSearchPath`'s own `extensions` default, which is deliberately
+  broad for *resolution* (`.cpy`/`.cbl`/`.cob`, plus a trailing `""`
+  meaning "any extension") -- but wrong for a *suggestion*: a program
+  referencing a missing copybook in its own directory would get its own
+  `.cbl` file suggested back as a "did you mean." A new
+  `suggestion_extensions` parameter (default `.cpy`/`.CPY` only) narrows
+  the candidate pool for suggestions specifically; actual copybook
+  resolution is unaffected, and the old broad pool is still available by
+  passing `suggestion_extensions=search_config.extensions` explicitly.
+  Reported from mocky-mock's own examples (`ACCTMNT.cbl` referencing a
+  missing `ACCTMAST` copybook suggested `ACCTMNT`); see
+  mocky-mock's `docs/2026-09-15-copybook-discovery-defaults-design.md`.
 * **preprocess:** `validate_copybook_content`'s "may be missing terminating
   period" check no longer fires on a data-description entry written across
   several lines. The check matched one *physical* line ending in a `PICTURE`

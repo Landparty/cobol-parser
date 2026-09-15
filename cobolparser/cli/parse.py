@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any, NoReturn
 
@@ -39,6 +40,13 @@ _SUBCOMMANDS = frozenset(
         "ims-dli",
         "data-items",
         "le-info",
+        "program-signature",
+        "xref",
+        "diff",
+        "codebase-graph",
+        "copybook-impact",
+        "sql-cics-check",
+        "jcl",
     }
 )
 
@@ -2671,6 +2679,404 @@ def _cmd_data_items(args: argparse.Namespace) -> None:
 # -- Subcommand: le-info ------------------------------------------------------
 
 
+# -- Subcommand: program-signature --------------------------------------------
+
+
+def _cmd_program_signature(args: argparse.Namespace) -> None:
+    """Report the calling interface of every program unit in the file.
+
+    Unlike the other analyzer subcommands, this one defaults to reporting
+    *every* unit rather than the outermost: the question it answers is "what
+    may a caller call in this file, and with what", and a caller may target a
+    contained program as readily as the outermost one. Reporting only the
+    outermost would hide the other entry points from exactly the consumer
+    that needs them.
+
+    ``--program`` still narrows, via the shared parse path, for a caller that
+    knows which unit it means.
+    """
+    from ..analysis.program_signature import extract_signatures
+
+    ast, prof = _parse_or_fail(args)
+
+    signatures = extract_signatures(ast)
+    _emit_report(
+        {"signatures": [s.to_dict() for s in signatures]},
+        args,
+        prof,
+        ast,
+    )
+
+
+# -- Subcommand: xref ---------------------------------------------------------
+
+
+def _cmd_xref(args: argparse.Namespace) -> None:
+    from ..analysis.xref import XrefAnalyzer
+
+    result, prof = _parse_result_or_fail(args)
+    ast = result.ast
+
+    report = XrefAnalyzer().analyze(ast)
+    # A COPY member the parser could not expand leaves every field it
+    # declares looking undeclared; the parse warning that says so belongs
+    # next to the ``undefined`` list it explains.
+    for warning in getattr(result, "warnings", None) or []:
+        if "COPY" in str(warning).upper():
+            report.caveats.append(f"parse warning: {warning}")
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
+# -- Subcommand: diff ---------------------------------------------------------
+
+
+def _build_diff_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "diff",
+        help="Structurally diff two versions of a COBOL program (what changed "
+        "in behavior, not which lines moved)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser diff old/PROG.cbl new/PROG.cbl\n"
+            "  cobol-parser diff old/PROG.cbl new/PROG.cbl --format text\n"
+            "  cobol-parser diff old/PROG.cbl new/PROG.cbl --rename-threshold 1.0"
+        ),
+    )
+    p.add_argument("old", help="Path to the old version of the COBOL source")
+    p.add_argument("new", help="Path to the new version of the COBOL source")
+    p.add_argument(
+        "--format",
+        choices=["json", "text"],
+        default="json",
+        dest="output_format",
+        help="Output format (default: json)",
+    )
+    p.add_argument(
+        "--rename-threshold",
+        type=float,
+        default=0.8,
+        metavar="RATIO",
+        help="How similar two unmatched bodies must be (0.0-1.0) before the "
+        "pair is reported as a rename rather than a removal plus an addition "
+        "(default: 0.8; 1.0 accepts only identical bodies)",
+    )
+    _add_compact_arg(p)
+    _add_source_format_args(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_diff)
+
+
+def _cmd_diff(args: argparse.Namespace) -> None:
+    """Diff two program versions structurally.
+
+    Takes two positionals rather than the usual single ``file``, so it cannot
+    share ``_build_analyzer_parser``. Each side is parsed through the same
+    helper the single-file subcommands use, by swapping ``args.file`` -- so
+    both sides honour --source-format, --dialect, --copybook-path and
+    --define identically. Parsing them under different options would make the
+    diff meaningless.
+    """
+    from ..analysis.ast_diff import ProgramDiffer
+
+    if not 0.0 <= args.rename_threshold <= 1.0:
+        print(
+            f"Error: --rename-threshold must be between 0.0 and 1.0, "
+            f"got {args.rename_threshold}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    old_args = argparse.Namespace(**{**vars(args), "file": args.old})
+    new_args = argparse.Namespace(**{**vars(args), "file": args.new})
+    old_ast, _ = _parse_or_fail(old_args)
+    new_ast, _ = _parse_or_fail(new_args)
+
+    report = ProgramDiffer(rename_threshold=args.rename_threshold).diff(
+        old_ast, new_ast
+    )
+
+    if args.output_format == "text":
+        _text_out(report.to_text(), getattr(args, "output", None))
+        return
+
+    _json_out(
+        {"old_file": args.old, "new_file": args.new, **report.to_dict()},
+        args.compact,
+        getattr(args, "output", None),
+    )
+
+
+# -- Subcommand: codebase-graph -----------------------------------------------
+
+
+def _build_codebase_graph_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "codebase-graph",
+        help="Build the cross-program CALL graph and copybook dependency "
+        "graph for a whole source tree",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser codebase-graph ./src\n"
+            "  cobol-parser codebase-graph ./src --copybook-path ./copybooks\n"
+            "  cobol-parser codebase-graph ./src --format mermaid -o graph.mmd\n"
+            "  cobol-parser codebase-graph a.cbl b.cbl --format dot"
+        ),
+    )
+    p.add_argument(
+        "paths",
+        nargs="+",
+        metavar="PATH",
+        help="One directory to walk, or any number of COBOL source files",
+    )
+    p.add_argument(
+        "--format",
+        choices=["json", "dot", "mermaid"],
+        default="json",
+        dest="output_format",
+        help="Output format (default: json)",
+    )
+    p.add_argument(
+        "--extension",
+        action="append",
+        dest="extensions",
+        metavar="EXT",
+        help="Source extension to walk for, repeatable "
+        "(default: .cbl, .cob, .cobol)",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Worker processes for the batch parse (default: chosen by size)",
+    )
+    _add_compact_arg(p)
+    _add_copybook_args(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_codebase_graph)
+
+
+def _build_graph(args: argparse.Namespace) -> Any:
+    """Build a CodebaseGraph from the paths given on the command line.
+
+    A single directory argument is walked; anything else is treated as an
+    explicit file list. Mixing the two is rejected rather than silently
+    resolved, since "walk this and also that one file" has no obvious
+    right answer and guessing one would hide a typo.
+    """
+    from ..analysis.codebase import CodebaseGraphBuilder
+
+    builder = CodebaseGraphBuilder(
+        copybook_paths=list(args.copybook_path or []),
+        workers=args.workers,
+    )
+
+    directories = [p for p in args.paths if os.path.isdir(p)]
+    if directories and len(args.paths) > 1:
+        print(
+            "Error: give either one directory to walk or a list of files, " "not both",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if directories:
+        # `directories[0]` was just confirmed to be one, so
+        # build_from_directory's NotADirectoryError cannot fire here and is
+        # deliberately not caught -- a handler for it would be dead code.
+        extensions = tuple(args.extensions) if args.extensions else None
+        if extensions:
+            return builder.build_from_directory(directories[0], extensions=extensions)
+        return builder.build_from_directory(directories[0])
+
+    # Anything that is not a directory is treated as a source file, including
+    # a path that does not exist: the builder records it in `errors` and
+    # `unresolved` rather than dropping it, so a mistyped file name surfaces
+    # instead of quietly shrinking the graph.
+    return builder.build(list(args.paths))
+
+
+def _cmd_codebase_graph(args: argparse.Namespace) -> None:
+    graph = _build_graph(args)
+
+    if args.output_format == "dot":
+        _verbatim_out(graph.to_dot(), getattr(args, "output", None))
+        return
+    if args.output_format == "mermaid":
+        _verbatim_out(graph.to_mermaid(), getattr(args, "output", None))
+        return
+
+    _json_out(graph.to_dict(), args.compact, getattr(args, "output", None))
+
+
+# -- Subcommand: copybook-impact ----------------------------------------------
+
+
+def _build_copybook_impact_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "copybook-impact",
+        help="Answer 'can I safely change this copybook?': every program that "
+        "COPYs it, directly or through a nesting chain",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser copybook-impact CUSTREC ./src "
+            "--copybook-path ./copybooks\n"
+            "  cobol-parser copybook-impact CUSTREC.CPY prog1.cbl prog2.cbl"
+        ),
+    )
+    p.add_argument("member", help="Copybook member name, file name or path")
+    p.add_argument(
+        "paths",
+        nargs="+",
+        metavar="PATH",
+        help="One directory to walk, or any number of COBOL source files",
+    )
+    p.add_argument(
+        "--extension",
+        action="append",
+        dest="extensions",
+        metavar="EXT",
+        help="Source extension to walk for, repeatable "
+        "(default: .cbl, .cob, .cobol)",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Worker processes for the batch parse (default: chosen by size)",
+    )
+    _add_compact_arg(p)
+    _add_copybook_args(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_copybook_impact)
+
+
+def _cmd_copybook_impact(args: argparse.Namespace) -> None:
+    from ..analysis.codebase import CopybookImpactAnalyzer
+
+    graph = _build_graph(args)
+    report = CopybookImpactAnalyzer(graph).analyze(args.member)
+
+    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+
+
+# -- Subcommand: sql-cics-check -----------------------------------------------
+
+
+def _cmd_sql_cics_check(args: argparse.Namespace) -> None:
+    from ..analysis.sql_cics_lint import SqlCicsAnalyzer
+
+    ast, prof = _parse_or_fail(args)
+
+    report = SqlCicsAnalyzer().analyze(ast)
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
+# -- Subcommand: jcl ----------------------------------------------------------
+
+
+def _build_jcl_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "jcl",
+        help="Parse z/OS JCL: which program each step runs, and which dataset "
+        "each DD name is bound to",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser jcl JOB.jcl\n"
+            "  cobol-parser jcl JOB.jcl --dd-map\n"
+            "  cobol-parser jcl JOB.jcl --bindings\n"
+            "  cobol-parser jcl JOB.jcl --program INVUPDT\n"
+            "  cobol-parser jcl JOB.jcl --strict"
+        ),
+    )
+    p.add_argument("file", help="Path to the JCL file")
+    p.add_argument(
+        "--dd-map",
+        action="store_true",
+        help="Emit only the DD name -> datasets mapping, which is what a "
+        "COBOL SELECT ... ASSIGN TO ddname resolves through",
+    )
+    p.add_argument(
+        "--bindings",
+        action="store_true",
+        help="Emit one row per DD binding (ddname, dataset, step, job, DISP, "
+        "RECFM, LRECL) instead of the job structure",
+    )
+    p.add_argument(
+        "--program",
+        metavar="NAME",
+        help="Report only the steps that run this program",
+    )
+    p.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 3 when any card could not be parsed (a CI gate, kept "
+        "distinct from exit 1, which still means the run itself failed)",
+    )
+    _add_compact_arg(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_jcl)
+
+
+def _cmd_jcl(args: argparse.Namespace) -> None:
+    """Parse a JCL file.
+
+    The only subcommand that reads a language other than COBOL, so it shares
+    none of the COBOL parse flags -- there is no dialect, no source format
+    and no copybook path to honour. What it exists for is the join: a COBOL
+    ``SELECT INV-FILE ASSIGN TO INVFILE`` names a DD, and only the JCL says
+    which dataset that DD is.
+    """
+    from ..jcl import parse_jcl, resolve_dd_bindings
+
+    source = _read_source(args.file)
+    result = parse_jcl(source, filename=args.file)
+
+    payload: dict[str, Any]
+    if args.bindings:
+        bindings = resolve_dd_bindings(result)
+        if args.program:
+            wanted = {s.name for s in result.steps_running(args.program)}
+            bindings = [b for b in bindings if b.step in wanted]
+        payload = {"bindings": [b.to_dict() for b in bindings]}
+    elif args.dd_map:
+        payload = {"dd_map": result.dd_map()}
+    elif args.program:
+        payload = {
+            "program": args.program,
+            "steps": [s.to_dict() for s in result.steps_running(args.program)],
+        }
+    else:
+        payload = result.to_dict()
+
+    # Errors and unresolved travel with every view, not just the default
+    # one: a --dd-map that silently omitted the cards it could not read
+    # would be the exact failure mode this repo's reports exist to avoid.
+    payload.setdefault(
+        "errors", [{"line": e["line"], "message": e["message"]} for e in result.errors]
+    )
+    payload.setdefault("unresolved", list(result.unresolved))
+
+    _json_out(
+        {"source_file": args.file, **payload},
+        args.compact,
+        getattr(args, "output", None),
+    )
+
+    if args.strict and result.errors:
+        sys.exit(3)
+
+
 def _build_le_info_parser(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "le-info",
@@ -3005,6 +3411,42 @@ def _build_parser() -> argparse.ArgumentParser:
         profiling=True,
         examples="  cobol-parser data-items program.cbl",
     )
+    _build_analyzer_parser(
+        subparsers,
+        "program-signature",
+        "Report a program's calling interface: every entry point's USING "
+        "operands joined to their LINKAGE declarations, with the direction "
+        "the callee uses each one in",
+        _cmd_program_signature,
+        profiling=True,
+        examples=(
+            "  cobol-parser program-signature SUBPGM.cbl\n"
+            "  cobol-parser program-signature SUBPGM.cbl --copybook-path ./copybooks"
+        ),
+    )
+    _build_analyzer_parser(
+        subparsers,
+        "xref",
+        "Cross-reference listing: every symbol's definition and every "
+        "reference to it, with the role each reference plays",
+        _cmd_xref,
+        profiling=True,
+        examples="  cobol-parser xref program.cbl",
+    )
+    _build_diff_parser(subparsers)
+    _build_codebase_graph_parser(subparsers)
+    _build_copybook_impact_parser(subparsers)
+    _build_analyzer_parser(
+        subparsers,
+        "sql-cics-check",
+        "Lint embedded SQL and CICS: unchecked SQLCODE, dynamic SQL built by "
+        "concatenation, hardcoded credentials, CICS commands with no RESP or "
+        "HANDLE CONDITION",
+        _cmd_sql_cics_check,
+        profiling=True,
+        examples="  cobol-parser sql-cics-check program.cbl",
+    )
+    _build_jcl_parser(subparsers)
     _build_le_info_parser(subparsers)
 
     return parser

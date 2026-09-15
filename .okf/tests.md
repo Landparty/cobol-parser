@@ -3,10 +3,17 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-08-17T00:00:00Z
+timestamp: 2026-09-15T00:00:00Z
 ---
 
 # Overview
+
+2026-09-15: `tests/regression/test_copybook_suggestion_pool.py` (4 tests)
+pins `suggest_similar_copybooks`'s narrowed did-you-mean candidate pool
+(`.cpy`/`.CPY` only by default, via a new `suggestion_extensions`
+parameter) -- a missing copybook must never suggest the referencing
+program's own `.cbl` file back. See `preprocessing.md`'s "Copybook Path
+Resolution" section.
 
 2026-09-05 (part 3): `TestBothMechanismsAtOnce` in the same file, after a
 Copilot review on PR #204 found the "table decides" rule documented but not

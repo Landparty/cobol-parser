@@ -9,6 +9,8 @@ and providing fuzzy matching suggestions for misspelled copybook names.
 
 import os
 import sys
+from collections.abc import Sequence
+from dataclasses import replace
 from difflib import get_close_matches
 from pathlib import Path
 
@@ -115,12 +117,31 @@ def get_available_copybooks(search_config: CopybookSearchPath) -> list[str]:
                     if path.is_file():
                         available.add(path.stem.upper())
             else:
-                # No extension - add all files
+                # "" means "the member name as-is, no extension appended" --
+                # that is exactly what resolution tries for it (see
+                # `resolve_copybook_path`), so list only the files that
+                # resolution could actually hit through it: those with no
+                # extension at all (a PDS member downloaded verbatim). It
+                # used to add *every* file's stem, which made "ACCTMNT.cbl"
+                # look like an available copybook named ACCTMNT even
+                # though `COPY ACCTMNT` could never resolve to it via "".
                 for path in Path(search_dir).iterdir():
-                    if path.is_file():
-                        available.add(path.stem.upper())
+                    if path.is_file() and not path.suffix:
+                        available.add(path.name.upper())
 
     return sorted(available)
+
+
+# Extensions considered for a did-you-mean suggestion: unambiguous copybook
+# shapes only -- ".cpy"/".CPY", plus "" for extensionless members (the
+# shape a PDS download has). Deliberately narrower than CopybookSearchPath's
+# own `extensions` default (which also includes ".cbl"/".cob" so that a
+# copybook stored under a program-source extension still *resolves*). That
+# breadth is right for resolution but wrong for a typo suggestion: a
+# missing "ACCTMAST" copybook sitting next to "ACCTMNT.cbl" (the program's
+# own source file) must never suggest "ACCTMNT" back to the user. See
+# docs/2026-09-15-copybook-discovery-defaults-design.md (mocky-mock).
+_SUGGESTION_EXTENSIONS = (".cpy", ".CPY", "")
 
 
 def suggest_similar_copybooks(
@@ -128,6 +149,7 @@ def suggest_similar_copybooks(
     search_config: CopybookSearchPath,
     max_suggestions: int = 3,
     cutoff: float = 0.6,
+    suggestion_extensions: Sequence[str] | None = None,
 ) -> list[str]:
     """
     Find similarly-named copybooks for typo detection.
@@ -140,6 +162,13 @@ def suggest_similar_copybooks(
         search_config: Search configuration
         max_suggestions: Maximum number of suggestions to return
         cutoff: Minimum similarity ratio (0.0 to 1.0)
+        suggestion_extensions: Extensions to consider when building the
+            candidate pool (default: `_SUGGESTION_EXTENSIONS`, i.e.
+            `.cpy`/`.CPY` only). Pass `search_config.extensions` explicitly
+            to restore the old (broader, resolution-shaped) candidate
+            pool. This parameter affects only which files are *offered*
+            as a suggestion -- actual copybook resolution
+            (`PathResolver.resolve`) is unaffected either way.
 
     Returns:
         List of similar copybook names
@@ -148,7 +177,13 @@ def suggest_similar_copybooks(
         >>> suggest_similar_copybooks("EMPLOYE", config)
         ['EMPLOYEE']
     """
-    available = get_available_copybooks(search_config)
+    extensions = (
+        _SUGGESTION_EXTENSIONS
+        if suggestion_extensions is None
+        else suggestion_extensions
+    )
+    suggestion_config = replace(search_config, extensions=list(extensions))
+    available = get_available_copybooks(suggestion_config)
 
     # Normalize to uppercase for comparison
     member_upper = member_name.upper()

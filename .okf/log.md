@@ -4337,3 +4337,20 @@ CONVERTING, qualified DECLARE TABLE names, EXEC SQL INCLUDE expansion.
 See [parser.md](parser.md), [analysis.md](analysis.md),
 [ast-models.md](ast-models.md), [preprocessing.md](preprocessing.md),
 [tests.md](tests.md) (each has a 2026-09-15 section) and the CHANGELOG.
+
+
+## 2026-09-15 -- Review follow-ups on PR #212 (xref, signatures, codebase, SQL/CICS lint, diff, JCL) and #219
+
+PR #219's did-you-mean pool keeps extensionless copybooks (see
+[preprocessing.md](preprocessing.md)). PR #212's six modules get their
+first OKF sections ([analysis.md](analysis.md), [cli.md](cli.md)) and the
+fixes the review found: digit-led paragraph names credited, contained
+programs excluded from the outer unit's xref/signature, special registers
+and STRING literals out of `undefined`, `duplicate_declarations` on the
+xref report, `returning` and ambiguous-role / duplicated-field grading on
+signatures, normalized path keys and dot-less extensions on the codebase
+graph, unexpanded-COPY caveats on `xref`, the `sql-cics-check` rule id,
+DECLARE GLOBAL TEMPORARY TABLE graded, explicit diff signatures for the
+statement types whose semantics live off `operands`, and the cataloged
+`// PROC` header in JCL. Gaps the review found but this pass did not
+close are listed per module in analysis.md.
