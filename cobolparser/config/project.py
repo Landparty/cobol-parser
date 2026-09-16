@@ -228,7 +228,10 @@ def _int(value: Any, where: str, source: Path) -> int | None:
     # bool is an int subclass; `seed: true` is a mistake, not seed 1.
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"{source}: '{where}' must be an integer")
-    return value
+    # int() rather than a bare `return value`: the parameter is Any (the YAML
+    # reader returns whatever the document held), and mypy will not narrow it
+    # to int through the negated isinstance above.
+    return int(value)
 
 
 def _defines(value: Any, source: Path) -> tuple[str, ...]:
