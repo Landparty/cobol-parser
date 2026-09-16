@@ -8,9 +8,11 @@ import os
 import sys
 from typing import Any, NoReturn
 
+from ..config import ConfigError, ProjectConfig, load_project_config
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
 from ..parser import parse_cobol
 from ..plugins.core import DialectType, ErrorRecoveryMode
+from . import _project_config
 
 _SUBCOMMANDS = frozenset(
     {
@@ -47,6 +49,7 @@ _SUBCOMMANDS = frozenset(
         "copybook-impact",
         "sql-cics-check",
         "jcl",
+        "config",
     }
 )
 
@@ -3285,6 +3288,113 @@ def _fail(message: str) -> NoReturn:
     sys.exit(1)
 
 
+# -- config subcommand --------------------------------------------------------
+
+
+def _build_config_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "config",
+        help="Show the effective cobol.yml project config and where it came from",
+        description=(
+            "Report which cobol.yml/cobol.yaml is in effect for the current "
+            "directory and every setting it supplies. Settings the file does "
+            "not mention are omitted rather than shown at their built-in "
+            "default, so what is printed is exactly what the file changes."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser config\n"
+            "  cobol-parser config --json\n"
+            "  cobol-parser --config ./other/cobol.yml config"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--json", action="store_true", help="Emit JSON instead of text")
+    _add_compact_arg(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_config)
+
+
+def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:
+    """The loaded config as JSON, with unset keys left out entirely."""
+
+    def prune(mapping: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in mapping.items() if v not in (None, (), [], {})}
+
+    return {
+        "config_file": str(config.source) if config.source else None,
+        "version": config.version,
+        "project": prune(
+            {
+                "copybook_path": list(config.copybook_path),
+                "callee_path": list(config.callee_path),
+                "source_format": config.source_format,
+                "dialect": config.dialect,
+                "error_recovery": config.error_recovery,
+                "seed": config.seed,
+                "extensions": list(config.extensions),
+                "define": list(config.define),
+            }
+        ),
+        "data": prune(
+            {
+                "charset": config.data.charset,
+                "endian": config.data.endian,
+                "record_format": config.data.record_format,
+                "record_separator": config.data.record_separator,
+                "rows": config.data.rows,
+            }
+        ),
+        "lint": prune(
+            {
+                "rules": list(config.lint.rules),
+                "min_severity": config.lint.min_severity,
+                "fail_on": config.lint.fail_on,
+            }
+        ),
+        "tools": dict(config.tools),
+    }
+
+
+def _cmd_config(args: argparse.Namespace) -> None:
+    config: ProjectConfig = getattr(args, "_project_config", None) or ProjectConfig()
+    payload = _config_to_dict(config)
+
+    if args.json:
+        _json_out(payload, args.compact, args.output)
+        return
+
+    lines: list[str] = []
+    if config.source is None:
+        lines.append("No cobol.yml found (searched upward from the current directory).")
+        lines.append("")
+        lines.append("Create one to set copybook paths, source format, dialect and")
+        lines.append("record encoding once for every tool that reads it.")
+        _text_out("\n".join(lines), args.output)
+        return
+
+    lines.append(f"Config file: {config.source}")
+    lines.append(f"Schema version: {config.version}")
+    for section in ("project", "data", "lint"):
+        values = payload[section]
+        if not values:
+            continue
+        lines.append("")
+        lines.append(f"[{section}]")
+        for key, value in values.items():
+            if isinstance(value, list):
+                lines.append(f"  {key}:")
+                lines.extend(f"    - {entry}" for entry in value)
+            else:
+                lines.append(f"  {key}: {value}")
+    for name, section_data in payload["tools"].items():
+        lines.append("")
+        lines.append(f"[{name}]  (read by that tool, not by cobol-parser)")
+        for key, value in section_data.items():
+            lines.append(f"  {key}: {value}")
+    _text_out("\n".join(lines), args.output)
+
+
 # -- Top-level parser with subcommands ----------------------------------------
 
 
@@ -3299,6 +3409,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
+    )
+    # Declared for --help only. main() strips both out of argv before
+    # argparse runs (see _project_config.extract_config_flags), so they work
+    # on either side of the subcommand and cannot be mistaken for a source
+    # file by the legacy "prepend parse" rewrite below.
+    parser.add_argument(
+        "--config", metavar="FILE", default=None, help=_project_config.CONFIG_FLAG_HELP
+    )
+    parser.add_argument(
+        "--no-config",
+        action="store_true",
+        help=_project_config.NO_CONFIG_FLAG_HELP,
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -3448,14 +3570,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _build_jcl_parser(subparsers)
     _build_le_info_parser(subparsers)
+    _build_config_parser(subparsers)
 
     return parser
 
 
 def main() -> None:
+    argv = sys.argv[1:]
+
+    # --config/--no-config are pulled out first so they may appear on either
+    # side of the subcommand, and so the legacy rewrite below cannot mistake
+    # a config path for a source file.
+    try:
+        argv, config_path, config_disabled = _project_config.extract_config_flags(argv)
+    except ConfigError as exc:
+        _fail(str(exc))
+
     # Backward compatibility: if the first non-flag argument is not a known
     # subcommand, assume the user is using the legacy syntax and prepend "parse".
-    argv = sys.argv[1:]
     if argv:
         first_positional = None
         for arg in argv:
@@ -3469,6 +3601,25 @@ def main() -> None:
 
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # Loaded even when nothing is found (an all-default ProjectConfig), so
+    # `cobol-parser config` can report the "no file anywhere" case, and so a
+    # malformed file is an error naming it rather than a silent fallback.
+    if config_disabled:
+        config = ProjectConfig()
+    else:
+        try:
+            config = load_project_config(path=config_path)
+        except ConfigError as exc:
+            _fail(str(exc))
+    args._project_config = config
+
+    if config.source is not None:
+        # The second parse (see cli/_project_config) is what separates a flag
+        # the user typed from one that merely defaulted; it only runs when
+        # there is a config file with something to say.
+        args_provided = _project_config.provided_dests(_build_parser, argv)
+        _project_config.apply_project_config(args, config, args_provided)
 
     if not hasattr(args, "func"):
         parser.print_help()
