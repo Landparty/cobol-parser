@@ -44,6 +44,7 @@ OKF_MAP = [
     ("cobolparser/batch.py", [".okf/batch.md"]),
     ("cobolparser/scan.py", [".okf/batch.md"]),
     ("cobolparser/cli/", [".okf/cli.md"]),
+    ("cobolparser/config/", [".okf/cli.md"]),
     ("cobolparser/__main__.py", [".okf/cli.md"]),
     ("cobolparser/dialects/", [".okf/dialects.md"]),
     ("cobolparser/jcl/", [".okf/jcl.md"]),
