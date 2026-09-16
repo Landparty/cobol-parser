@@ -586,7 +586,7 @@ tests/
 
 ### Coverage Requirement
 
-90% line coverage is enforced by `--cov-fail-under=90` in `pyproject.toml`'s `addopts`, and branch coverage is enabled. Full-suite total as of 2026-09-15: **92.23%** (27,469 statements, 10,368 tests).
+90% line coverage is enforced by `--cov-fail-under=90` in `pyproject.toml`'s `addopts`, and branch coverage is enabled. Full-suite total as of 2026-09-16: **93.04%** (31,613 statements, ~11,100 tests).
 
 **Measure it on a pure-Python build.** coverage.py cannot see into a compiled Cython extension, so once `build_ext --inplace` has run, the pure-Python bodies those extensions shadow read as unexecuted: the same suite, on one commit (2026-09-07), reported 54.32% with the extensions built and 91.76% without. CI splits the two accordingly — the `build` matrix runs the suite `--no-cov` after `build_ext` (its job is to exercise the extensions), and a separate `coverage` job installs with `COBOLPARSER_SKIP_EXT=1` and enforces the floor. Locally, use `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` before trusting a coverage number.
 
