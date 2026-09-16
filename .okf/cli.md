@@ -107,6 +107,16 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   indentation and duplicate keys are **rejected with a line number**. Two
   deliberate YAML 1.2-core departures from 1.1: `yes`/`no`/`on`/`off` stay
   strings, and a duplicate key is an error rather than last-one-wins.
+* **Comment stripping tracks quote state, and a backslash escape consumes
+  the character after it.** `_strip_comment` runs before the parser, so it
+  has to know which `#` is inside a string. It used to advance *one*
+  character past a `\` escape instead of two, leaving the escaped quote to
+  be read on its own — which closed the string it was meant to sit inside.
+  An even number of escaped quotes re-opened it and hid the damage; an odd
+  number left a later `#` looking unquoted, so `msg: "a \" # b"` lost its
+  tail and then failed with "unterminated quoted string". Fixed 2026-09-16
+  (index-driven loop); pinned by
+  `tests/regression/test_audit_2026_09_16.py`.
 * **Tool sections** — `mockymock:` and `analyzer:` are validated only as
   mappings and carried verbatim on `ProjectConfig.tools`; this package never
   needs to know their schemas.

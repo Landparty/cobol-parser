@@ -1,5 +1,18 @@
 # cobolparser — Open Findings (as of 2026-09-09, post-review)
 
+> **Status of `reports/audit-2026-09-16.md`:** all four findings in that
+> pass are **fixed at HEAD** — the HIGH `ConstantFolder` one (both halves of
+> the "exact by construction" gate decided exactness in inexact decimal
+> arithmetic, so a COMPUTE could fold to a wrong integer digit and emit it
+> as a `field_equals` expectation), the `config/_yaml.py` comment stripper
+> mis-advancing past a backslash escape, a `# pragma: no cover` in
+> `encoding.py` claiming a guard that is never called on that branch, and
+> stale counts in `CLAUDE.md`. Pinned by
+> `tests/regression/test_audit_2026_09_16.py`; design notes in `.okf/log.md`'s
+> 2026-09-16 entry. That pass also **re-verified eight of the LOW / carried-
+> forward items below and found all eight still reproduce** — this file is
+> accurate, not stale.
+
 > **2026-09-09 cross-repo bug review:** 46 further defects fixed in the
 > same branch — see `CHANGELOG.md` → Unreleased → Fixed and the `.okf/log.md`
 > entry of that date; pinned by

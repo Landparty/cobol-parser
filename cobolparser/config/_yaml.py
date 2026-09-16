@@ -447,18 +447,32 @@ def _strip_comment(raw: str) -> str:
     matters for a file full of COBOL-ish literals.
     """
     quote: str | None = None
-    for i, char in enumerate(raw):
+    i = 0
+    while i < len(raw):
+        char = raw[i]
         if quote:
+            # A backslash escape inside a double-quoted scalar consumes the
+            # NEXT character, so it has to advance the cursor by two. As a
+            # `continue` in a `for` loop it advanced by one and left the
+            # escaped character to be read on its own -- which made `\"`
+            # close the string it was meant to sit inside. An even number of
+            # escaped quotes then re-opened it and hid the damage; an odd
+            # number left a later `#` looking unquoted, so
+            # `msg: "a \" # b"` lost its tail and failed to parse at all.
             if char == "\\" and quote == '"':
+                i += 2
                 continue
             if char == quote:
                 quote = None
+            i += 1
             continue
         if char in "\"'":
             quote = char
+            i += 1
             continue
         if char == "#" and (i == 0 or raw[i - 1] in " \t"):
             return raw[:i]
+        i += 1
     return raw
 
 

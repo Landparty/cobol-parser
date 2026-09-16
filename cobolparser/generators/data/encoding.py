@@ -445,7 +445,16 @@ def _encode_binary(text: str, spec: FieldSpec, opts: EncodingOptions) -> bytes:
         scaled = -scaled
     try:
         return scaled.to_bytes(width, order, signed=spec.is_signed)  # type: ignore[arg-type]
-    except OverflowError as exc:  # pragma: no cover - guarded by _digits_string
+    except OverflowError as exc:
+        # Reachable, unlike the zoned and packed encoders: those run their
+        # magnitude through `_digits_string`, which truncates to the
+        # PICTURE's digit count the way a COBOL numeric MOVE does, so they
+        # cannot overflow. Binary has no such step -- a value that does not
+        # fit the field's *byte width* has no representation at all here, so
+        # it is refused rather than silently reshaped. Nothing this package
+        # generates can reach it (`ValueFactory` respects the PICTURE, and a
+        # VALUE clause is clamped to it); a caller handing `encode_record` a
+        # row of its own can.
         raise RecordEncodingError(
             f"{spec.qualified_name}: value {scaled} does not fit "
             f"{width} bytes of {usage}"

@@ -14,6 +14,59 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-16 -- audit: an exactness gate that was itself inexact
+
+A repo-wide audit (lint/format/typecheck clean, 11,088 tests green, parser
+and all 23 analyzers fuzzed to zero crashes over 95 programs x 5 mutants,
+copybook path traversal and symlink escape both correctly refused,
+encode/decode round-tripping exact across the PICTURE/USAGE cross product).
+Three defects found, two of them the same one twice.
+
+* **`const_fold.py` could record a value that is wrong.** The module's whole
+  contract is "exact by construction, or absent", and both halves of the
+  machinery enforcing it decided exactness *using inexact decimal
+  arithmetic*. `_exact_divide` multiplied the quotient back inside the same
+  `prec=80` block the division ran in -- where the rounding error is by
+  construction too small to represent, so the product rounded straight back
+  to the dividend and the check passed for every inexact quotient it existed
+  to catch. `_fits_exactly`, the last gate before a value is stored, scaled
+  with `Decimal` operators running in the ambient 28-digit context, so a
+  value carrying more precision was silently rounded by the very `abs()` and
+  `*` used to test it. Together:
+  `COMPUTE WS-T = 3 / 0.3333333333333333333333333333334` into
+  `PIC S9(9)V9(9)` folded to `9.000000000` where COBOL stores
+  `8.999999999` -- a wrong integer digit, emitted as a `field_equals`
+  expectation into a generated fixture bundle. Both now decide over
+  `Fraction`. Separately, a `/` inside a COMPUTE tree never went through
+  `_exact_divide` at all; it does now, so both spellings of a division hold
+  the same contract.
+
+  The general lesson, and the reason this sat behind a green suite: a check
+  written in the same arithmetic as the thing it checks has no independent
+  standing. The tests all used short literals, where the defect is
+  unreachable -- it needs an operand carrying more than ~28 significant
+  digits, which IBM Enterprise COBOL permits under `ARITH(EXTEND)`. A
+  differential test against exact rationals found in one pass what the
+  suite could not.
+
+* **`config/_yaml.py` mis-tracked a backslash escape.** `_strip_comment`
+  advanced one character past `\` instead of two, so the escaped quote was
+  read on its own and closed the string it sat inside. An even number of
+  escaped quotes re-opened it and hid the damage; an odd number left a
+  later `#` looking unquoted, so `msg: "a \" # b"` lost its tail and then
+  failed with "unterminated quoted string" -- a legal config file rejected.
+
+* **`encoding.py` carried a `# pragma: no cover` that claimed a guard it
+  did not have**, saying the binary encoder's overflow branch was
+  "guarded by `_digits_string`" when that helper is never called there. The
+  asymmetry is real and deliberate (zoned/packed truncate like a COBOL MOVE;
+  binary refuses a value with no representation in its byte width) -- only
+  the comment was wrong. Behavior unchanged; the comment now says what is
+  actually true and `generators.md` records the asymmetry.
+
+Also corrected: `CLAUDE.md` claimed 24 analysis modules (28) and ~9,400
+tests across 356 files (~11,100 across 388).
+
 ## 2026-09-15 -- OKF bundle repair: ordering, routing, and the map that lets it rot
 
 A review of the bundle against the source tree, and the four things it found

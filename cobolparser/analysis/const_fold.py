@@ -33,7 +33,8 @@ than guessing:
   dividend/divisor order): mode-less nodes, ROUNDED, the nonstandard
   ``DIVIDE a BY b`` without GIVING, non-exact quotients, and every
   REMAINDER target are all still poisoned -- see ``_fold_divide``. A ``/``
-  inside a COMPUTE expression tree folds as before.
+  inside a COMPUTE expression tree goes through the same ``_exact_divide``
+  gate, so both spellings of a division hold the same contract.
 * ROUNDED, CORRESPONDING, and any target this module cannot resolve to an
   elementary numeric/text field are all poisoned rather than approximated.
 * A numeric MOVE/arithmetic result is only ever recorded when it fits its
@@ -55,6 +56,7 @@ import weakref
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, localcontext
+from fractions import Fraction
 from typing import TYPE_CHECKING, Any
 
 from ..models.data_items import CobolDataItem
@@ -1203,18 +1205,26 @@ def _fold_multiply(
 
 def _exact_divide(dividend: Decimal, divisor: Decimal) -> Decimal | None:
     """``dividend / divisor`` only when the quotient is exactly
-    representable -- verified by multiplying back at wide precision, so a
-    quotient the context silently rounded (e.g. a 30-digit repeating
-    fraction that happens to round to an integral-looking value) can never
-    masquerade as exact. None means "poison", same contract as every other
-    helper here."""
-    if divisor == 0:
+    representable. None means "poison", same contract as every other helper
+    here.
+
+    The multiply-back that proves exactness is done over :class:`Fraction`,
+    not over :class:`Decimal`. Verifying in decimal at the *same* precision
+    the division used cannot work: the rounding error is by construction
+    smaller than that precision can represent, so ``quotient * divisor``
+    rounds straight back to ``dividend`` and the check passes for every
+    inexact quotient it was written to catch. ``3 / 0.3333333333333333333333333333334``
+    at 80 digits multiplies back to exactly ``3`` while the quotient is
+    really ``8.999...9982``. A rational multiply-back has no precision to
+    hide in.
+    """
+    if divisor == 0 or not dividend.is_finite() or not divisor.is_finite():
         return None
     with localcontext() as ctx:
         ctx.prec = 80
         quotient = dividend / divisor
-        if quotient * divisor != dividend:
-            return None
+    if Fraction(quotient) * Fraction(divisor) != Fraction(dividend):
+        return None
     return quotient
 
 
@@ -1335,7 +1345,18 @@ def _eval_expr(
             if node.operator == "*":
                 return left * right
             if node.operator == "/":
-                return None if right == 0 else left / right
+                # `_exact_divide`, not a bare `/`: the ambient decimal
+                # context silently rounds an inexact quotient to its own
+                # precision, and a quotient rounded that way can come back
+                # looking clean enough to pass `_fits_exactly` -- which is
+                # the one gate standing between this module and a fabricated
+                # answer.  `COMPUTE X = 3 / 0.3333333333333333333333333333334`
+                # is just under 9, rounds to exactly 9 at 28 digits, and was
+                # recorded as 9 where COBOL stores 8.999999999.  The
+                # multiply-back check inside `_exact_divide` (already used by
+                # `_fold_divide`) rejects exactly that case, so every DIVIDE
+                # shape and every `/` in a COMPUTE now hold the same contract.
+                return _exact_divide(left, right)
             if node.operator == "**":
                 if right == right.to_integral_value():
                     return left ** int(right)
@@ -1367,14 +1388,23 @@ def _fits_exactly(value: Decimal, spec: FieldSpec) -> bool:
         # A P-scaled field stores only some of the digits its value shows
         # (``9(3)PPP`` keeps 123 of 123456); truncation rules not modeled.
         return False
+    if not value.is_finite():
+        return False
     if value < 0 and not spec.is_signed:
         return False
-    magnitude = abs(value)
-    scaled = magnitude * (Decimal(10) ** spec.decimal_digits)
-    if scaled != scaled.to_integral_value():
+    # Decided over `Fraction`, not `Decimal`. This is the one gate between
+    # this module and a fabricated answer, and decimal arithmetic runs in
+    # the ambient context: a value carrying more precision than that context
+    # (anything out of `_exact_divide`'s 80-digit block) was silently
+    # rounded by the very `abs()` and `*` used to test it, so a quotient of
+    # 8.999...9982 arrived here already rounded to 9 and passed as exact.
+    # A rational has no precision to round to.
+    magnitude = abs(Fraction(value))
+    if (magnitude * 10**spec.decimal_digits).denominator != 1:
         return False
-    ceiling = Decimal(10) ** spec.integer_digits
-    return magnitude < ceiling
+    # bool(): Fraction's rich comparisons are untyped, so mypy reads the
+    # comparison as Any under `disallow_any_return`.
+    return bool(magnitude < 10**spec.integer_digits)
 
 
 def _render_numeric(value: Decimal, spec: FieldSpec) -> str:
