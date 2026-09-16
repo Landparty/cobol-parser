@@ -592,6 +592,17 @@ module docstring — that suite is the regression guard):
 | `COMP-1` / `COMP-2` | IEEE 754 binary32/binary64, byte order as `COMP-5` |
 | `INDEX` / `POINTER` | binary zeros — an occurrence number and an address are not record content |
 
+**Overflow is not uniform across those rows, deliberately.** The zoned and
+packed encoders run their magnitude through `_digits_string`, which
+high-order-truncates to the PICTURE's digit count the way a COBOL numeric
+MOVE does, so neither can overflow. The binary encoder has no such step: a
+value that does not fit the field's *byte width* has no representation at
+all, so it raises `RecordEncodingError` rather than silently reshaping the
+bytes. Nothing this package generates can reach it — `ValueFactory` respects
+the PICTURE and a `VALUE` clause is clamped to it — but a caller handing
+`encode_record()` a row of its own can. (A `# pragma: no cover` on that
+branch used to claim `_digits_string` guarded it; it never ran there.)
+
 **Overpunch conventions follow the charset**, not a separate knob: EBCDIC
 zones the sign into the `C`/`D` nibbles (`-12345` → `F1F2F3F4D5`), ASCII sets
 `0x40` in the signed digit's zone (`-12345` → `1234u`), which is what

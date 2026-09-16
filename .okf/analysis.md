@@ -1766,7 +1766,7 @@ internal env) rather than approximating:
   Still "exact by construction, or absent": a mode-less node (older AST),
   `ROUNDED`, the nonstandard `DIVIDE a BY b` without GIVING,
   divide-by-zero, and any non-exact quotient all poison — exactness is
-  verified by multiplying the quotient back at `prec=80`
+  verified by multiplying the quotient back **over `Fraction`**
   (`_exact_divide`), so a context-rounded repeating fraction can never
   masquerade as exact. A `REMAINDER` target is always poisoned (it is
   defined via the quotient as truncated to the GIVING target's PICTURE,
@@ -1774,9 +1774,33 @@ internal env) rather than approximating:
   in the IF-arm/handler-body write scan (previously missed). The GIVING
   value stays safe to fold alongside a poisoned REMAINDER: it is only
   recorded when the true quotient fits exactly, i.e. truncation was a
-  no-op. A `/` inside a `COMPUTE` expression tree folds as before
-  (divide-by-zero and non-terminating decimals poison, not truncate).
+  no-op. A `/` inside a `COMPUTE` expression tree goes through the same
+  `_exact_divide` gate, so both spellings of a division hold the same
+  contract (divide-by-zero and non-terminating decimals poison, not
+  truncate).
   Pinned by `tests/regression/test_bug_review_2026_08_12.py::TestDivideMode`.
+* **Exactness is decided over `Fraction`, never over `Decimal`** (2026-09-16
+  audit). Both halves of the exactness machinery used to decide exactness
+  *using inexact decimal arithmetic*, and both let a wrong value through:
+  * `_exact_divide` multiplied the quotient back inside the same `prec=80`
+    block the division ran in. The rounding error is by construction too
+    small for that precision to represent, so the product rounded straight
+    back to the dividend and the check passed for *every* inexact quotient
+    it was written to catch.
+  * `_fits_exactly` — the last gate before a value is stored — scaled with
+    `Decimal` operators, which run in the ambient 28-digit context. A value
+    carrying more precision than that was silently rounded by the very
+    `abs()` and `*` used to test it, so `8.999…9982` arrived already
+    rounded to `9` and passed as an exact fit.
+
+  Together: `COMPUTE WS-T = 3 / 0.3333333333333333333333333333334` into
+  `PIC S9(9)V9(9)` folded to `9.000000000` where COBOL stores
+  `8.999999999` — a wrong integer digit, emitted as a `field_equals`
+  expectation. Both now convert to `Fraction`, which has no precision to
+  round to. Reachability needed an operand carrying more than ~28
+  significant digits (a 29–31 digit literal, which IBM Enterprise COBOL
+  permits under `ARITH(EXTEND)`); short-literal expressions were already
+  safe. Pinned by `tests/regression/test_audit_2026_09_16.py`.
 * `ROUNDED`, `CORRESPONDING`, and any target that does not resolve to an
   elementary field are poisoned rather than approximated. A numeric
   MOVE/arithmetic result is only ever recorded when it fits its target

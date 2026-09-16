@@ -8,6 +8,18 @@ timestamp: 2026-09-15T00:00:00Z
 
 # Overview
 
+2026-09-16: `tests/regression/test_audit_2026_09_16.py` (12 tests) pins the
+findings of that date's repo audit. Nine cover `ConstantFolder`'s exactness
+machinery, which decided exactness *using inexact decimal arithmetic* in two
+places and so could record a value that is wrong: `_exact_divide` proved a
+quotient exact by multiplying it back at the same precision the division
+used (where the rounding error cannot be represented, so the check always
+passed), and `_fits_exactly` scaled with `Decimal` operators running in the
+ambient 28-digit context (so an over-precise value was rounded by the very
+arithmetic testing it). Both now decide over `Fraction`. Three cover
+`config/_yaml.py`'s comment stripper, which advanced one character past a
+backslash escape instead of two. See `analysis.md` and `cli.md`.
+
 2026-09-15: `tests/regression/test_copybook_suggestion_pool.py` (4 tests)
 pins `suggest_similar_copybooks`'s narrowed did-you-mean candidate pool
 (`.cpy`/`.CPY` only by default, via a new `suggestion_extensions`

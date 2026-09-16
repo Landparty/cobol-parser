@@ -63,7 +63,7 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (90% minimum; ~9,400 tests across 356 files).
+# Run all tests with coverage (90% minimum; ~11,100 tests across 388 files).
 # Measure coverage on a pure-Python build -- see "Coverage Requirement".
 python -m pytest tests/ -v
 
@@ -182,7 +182,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/le_signatures.py`** -- Call signatures for IBM Language Environment callable services and COBOL intrinsic functions: per operand, its direction, its exact COBOL declaration, whether it may be omitted, and whether it repeats. Coverage of the LE services is partial *and reported* (`services_without_signature()`), so "no signature catalogued" is never mistaken for "not an LE service"; the intrinsic half is complete and pinned by a test. `IBM_LE_SERVICE_INFO` is derived from it. Backs the `le-info` CLI subcommand and the COBOL Analyzer extension's LE hover. See `.okf/analysis.md`
 
-**`cobolparser/analysis/`** -- 24 static analysis modules:
+**`cobolparser/analysis/`** -- 28 static analysis modules (plus the `program_flow/` package and two private helpers, `_files.py` / `_names.py`). The list below covers the ones with their own entry here; `.okf/analysis.md` is the complete and current index:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -540,7 +540,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~9,400 tests across 356 files in 5 directories:
+~11,100 tests across 388 files in 5 directories:
 
 ```
 tests/

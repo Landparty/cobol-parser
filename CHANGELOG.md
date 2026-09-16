@@ -533,6 +533,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **analysis:** `ConstantFolder` could record a folded value that is
+  **wrong**, breaking the module's "exact by construction, or absent"
+  contract and emitting a bad `field_equals` expectation into a generated
+  fixture bundle. Two compounding defects in the exactness machinery, both
+  of which decided exactness *using inexact decimal arithmetic*:
+  `_exact_divide` proved a quotient exact by multiplying it back at the same
+  80-digit precision the division used -- where the rounding error is by
+  construction too small to represent, so the product rounded straight back
+  to the dividend and the check passed for every inexact quotient it existed
+  to catch; and `_fits_exactly`, the last gate before a value is stored,
+  scaled with `Decimal` operators that run in the ambient 28-digit context,
+  so a value carrying more precision was silently rounded by the very
+  `abs()` and `*` used to test it. `COMPUTE WS-T = 3 / 0.3333333333333333333333333333334`
+  into `PIC S9(9)V9(9)` folded to `9.000000000` where COBOL stores
+  `8.999999999` -- a wrong integer digit. Both checks now decide over
+  `Fraction`, which has no precision to round to. Separately, a `/` inside a
+  COMPUTE expression tree divided with a bare `Decimal` `/` instead of going
+  through `_exact_divide` at all, so the two spellings of a division did not
+  hold the same contract; it now does. Genuinely exact quotients still fold.
+  (`tests/regression/test_audit_2026_09_16.py`)
+* **config:** a `#` inside a double-quoted `cobol.yml` value was mistaken for
+  a comment when the value also contained an odd number of escaped quotes.
+  `_strip_comment` advanced one character past a backslash escape instead of
+  two, so the escaped quote was read on its own and closed the string it sat
+  inside; an even number of them re-opened it and hid the damage, an odd
+  number left the following `#` looking unquoted. `msg: "a \" # b"` lost its
+  tail and then failed to parse at all with "unterminated quoted string".
+  (`tests/regression/test_audit_2026_09_16.py`)
 * **preprocess:** `suggest_similar_copybooks`'s did-you-mean pool no longer
   includes non-copybook files. It called `get_available_copybooks` with
   `CopybookSearchPath`'s own `extensions` default, which is deliberately
