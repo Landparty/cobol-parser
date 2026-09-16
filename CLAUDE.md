@@ -28,7 +28,7 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | Flowcharts, copybook → CSV test data (`CopybookDataGenerator`) | `.okf/generators.md` |
 | `parse_files`, `parse_files_with_copybooks`, batch fault isolation | `.okf/batch.md` |
 | z/OS JCL: cards, jobs/steps, DD → dataset bindings | `.okf/jcl.md` |
-| CLI subcommands and flags | `.okf/cli.md` |
+| CLI subcommands and flags, the `cobol.yml` project config | `.okf/cli.md` |
 | Test layout, markers, coverage floor | `.okf/tests.md` |
 
 The OKF is more specific and more current than this file for the above topics. When they conflict, trust the OKF.
@@ -89,6 +89,10 @@ python -m black .
 python -m mypy cobolparser/
 
 # CLI subcommands
+# Every subcommand also takes the two global config flags, on either side of
+# the subcommand: [--config FILE] to read a specific cobol.yml, [--no-config]
+# to ignore any of them. See "Project Config" below and docs/project-config.md
+cobol-parser config [--json]
 cobol-parser parse <file.cbl> [path] [--compact] [--source-format auto|fixed|free] [--free-form] [--dialect ibm-enterprise] [--errors] [--stats]
 cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
@@ -216,8 +220,11 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/profiling.py`** -- `ProfilerContext` wraps any parse call with `cProfile`, `tracemalloc`, and optional `psutil` CPU accounting. Returns `ProfilingResult` (wall-clock, CPU, peak memory, top `FunctionProfile` entries). Install the `profiling` extra (`pip install -e ".[profiling]"`) to enable CPU accounting; the module imports `psutil` lazily so the package remains usable without it.
 
+**`cobolparser/config/`** -- The **universal project config file**, `cobol.yml` (or `cobol.yaml`), read by every tool in the family: this CLI, the `mockymock` CLI, and the COBOL Analyzer VS Code extension. A shop states its copybook directories, source format, dialect and record encoding once at the project root instead of on every invocation. Discovery walks up from the cwd the way `git` walks up looking for `.git`; paths inside resolve against the config file's own directory, not the cwd. Precedence is always **explicit CLI flag > config file > built-in default**. `project.py` owns the schema and the discovery; `_yaml.py` is a stdlib-only reader for the strict YAML subset a config file needs (the package has no runtime dependencies, so PyYAML is not an option) that **rejects** anchors, tags, block scalars, merge keys, multi-document files, tabs in indentation and duplicate keys with a line number rather than guessing. `mockymock:` / `analyzer:` sections are carried through verbatim for the tools that own them. User-facing reference: [`docs/project-config.md`](docs/project-config.md). See `.okf/cli.md`
+
 **`cobolparser/cli/`** -- Command-line interface:
 - `parse.py` -- Implements all CLI subcommands (see "Commands" above for the full list); most analyzer subcommands share argument-building via `_build_analyzer_parser()`
+- `_project_config.py` -- Merges `cobol.yml` into the parsed arguments, in one place, so every `_cmd_*` keeps reading `args.copybook_path` unchanged. Also owns `--config`/`--no-config`, which are stripped from argv *before* argparse so they work on either side of the subcommand and cannot be mistaken for a source file by `main()`'s legacy "prepend parse" rewrite. Telling "the user typed `--charset ascii`" from "`--charset` defaulted to ascii" is done by re-parsing argv against a parser whose optional defaults are sentinels -- most flags here have a non-`None` default, so `is None` cannot answer it
 - `coverage.py` -- IO coverage CLI tools
 
 ### Statement Parsers (cobolparser/parsers/statements/)

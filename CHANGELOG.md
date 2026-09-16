@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Universal project config file (`cobol.yml`)**: one YAML file at a
+  project's root, read by `cobol-parser`, `mockymock` and the COBOL Analyzer
+  VS Code extension, so copybook directories, source format, dialect, record
+  encoding and lint gates are stated once instead of on every invocation and
+  in every editor's settings. New `cobolparser/config/` package
+  (`load_project_config()`, `ProjectConfig`) plus a stdlib-only reader for
+  the YAML subset a config file needs — the library keeps its zero runtime
+  dependencies, and everything outside that subset (anchors, tags, block
+  scalars, merge keys, multi-document files, tabs in indentation, duplicate
+  keys) is rejected with a line number rather than guessed at. Discovery
+  walks up from the cwd; paths resolve against the config file's own
+  directory. Precedence is explicit CLI flag > config file > built-in
+  default, and a flag the user typed always wins even when its value equals
+  the built-in default. New global `--config FILE` / `--no-config` flags
+  (usable on either side of the subcommand) and a new `cobol-parser config`
+  subcommand that reports which file is in effect and only the settings it
+  actually changes. Full reference: `docs/project-config.md`.
 * **Cross-reference, program signatures, codebase graph, SQL/CICS lint,
   semantic diff, JCL** (PR #212, work in progress): `cobol-parser xref`
   (`analysis/xref.py`, every symbol's declaration and every reference with

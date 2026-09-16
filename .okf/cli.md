@@ -55,6 +55,76 @@ pinned by `tests/unit/cli/test_output_identification.py`):
   `program_id` key). `--format csv-dir` writes a directory instead of
   stdout; its `MANIFEST.json` carries the same identification.
 
+# Project config file (`cobol.yml`, 2026-09-16)
+
+The **universal** project config the whole tool family reads — this CLI,
+`mockymock`, and the COBOL Analyzer extension. One file per project instead
+of the same flags on every invocation and in every editor's settings.
+User-facing reference: `docs/project-config.md`.
+
+Source: `cobolparser/config/` (`_yaml.py` reader, `project.py` schema +
+discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
+
+* **Discovery** — `cobol.yml` then `cobol.yaml` in the cwd and each parent,
+  first match wins, walk bounded at 32 levels. Finding nothing is the common
+  case and not an error. Paths inside the file resolve against **the file's
+  own directory**, so a run from a subdirectory searches the same copybook
+  libraries as one from the project root.
+* **Precedence** — explicit CLI flag > config file > built-in default, merged
+  in exactly one place (`_project_config.apply_project_config`), so every
+  `_cmd_*` keeps reading `args.copybook_path` etc. unchanged.
+* **`--config FILE` / `--no-config`** — stripped from argv by
+  `extract_config_flags()` *before* argparse and before `main()`'s legacy
+  "first positional isn't a subcommand, so prepend parse" rewrite. Two
+  reasons: they work on either side of the subcommand, and the rewrite would
+  otherwise take `--config`'s argument for the source file. They are declared
+  on the top-level parser for `--help` only; argparse never sees them.
+* **Telling a typed flag from a defaulted one** — most flags here have a
+  non-`None` default (`--charset ascii`, `--dialect ibm-enterprise`,
+  `--source-format auto`), so `is None` cannot answer "did the user pass
+  this?". `provided_dests()` re-parses the same argv against a throwaway
+  parser whose optional defaults are replaced with a sentinel (append actions
+  get `None`, since argparse's append copies-and-appends to the default and a
+  non-list sentinel would raise). Only runs when a config file was found.
+* **Bound dests** — `copybook_path`, `callee_path`, `source_format`,
+  `dialect`, `error_recovery`, `seed`, `extensions`, `define`, `charset`,
+  `endian`, `record_format`, `record_separator`, `rows`, `rules`,
+  `min_severity`, `fail_on`. Note `extensions`/`rules` are argparse *dests*,
+  not the `--extension`/`--rule` flag spellings — getting that wrong is how
+  the binding silently does nothing.
+* **`--free-form`** is skipped when the user passed it: it is the legacy
+  spelling of `--source-format`, which `_source_format_kwargs()` reads first,
+  so filling `source_format` from the config would override a layout stated
+  on the command line.
+* **Fail-closed** — a malformed file, an unknown key, an out-of-range enum
+  value or a missing `--config` target is `ConfigError` → `_fail()` → exit 1
+  naming the file (and, for YAML syntax, the line). Never a silent fallback
+  to defaults.
+* **The YAML subset** — stdlib only (this package has no runtime
+  dependencies). Nested mappings, block/flow sequences, flow mappings,
+  quoted/plain scalars, `#` comments, one optional leading `---`. Anchors,
+  aliases, tags, block scalars, merge keys, multiple documents, tabs in
+  indentation and duplicate keys are **rejected with a line number**. Two
+  deliberate YAML 1.2-core departures from 1.1: `yes`/`no`/`on`/`off` stay
+  strings, and a duplicate key is an error rather than last-one-wins.
+* **Tool sections** — `mockymock:` and `analyzer:` are validated only as
+  mappings and carried verbatim on `ProjectConfig.tools`; this package never
+  needs to know their schemas.
+
+Tests: `tests/unit/test_config_yaml.py`, `tests/unit/test_project_config.py`,
+`tests/unit/cli/test_project_config_cli.py`.
+
+## Config
+
+```bash
+cobol-parser config [--json] [--compact] [-o FILE]
+```
+
+Reports which `cobol.yml` is in effect and every setting it supplies.
+Settings the file does not mention are **omitted** rather than shown at their
+built-in default, so what is printed is exactly what the file changes. With
+no file found anywhere, says so and suggests creating one.
+
 # Subcommand Reference
 
 ## Parse

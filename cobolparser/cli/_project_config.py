@@ -1,0 +1,205 @@
+"""Merging ``cobol.yml`` into parsed CLI arguments.
+
+Precedence is **explicit CLI flag > config file > built-in default**, and
+this module is the single place that merge happens, so every subcommand
+keeps reading ``args.copybook_path`` (and friends) unchanged.
+
+The hard part is telling "the user passed ``--charset ascii``" apart from
+"``--charset`` defaulted to ascii" -- most of this CLI's flags have a
+non-``None`` default, so a plain ``is None`` test cannot distinguish them.
+Rather than rewrite 65 ``add_argument`` calls to default to ``None``, this
+module parses the same argv a second time against a throwaway parser whose
+optional-argument defaults have been replaced with a sentinel: whatever
+comes back as the sentinel is a flag the user did **not** type. That second
+parse only runs when a config file was actually found, so a user without one
+pays nothing for it.
+"""
+
+from __future__ import annotations
+
+import argparse
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from typing import Any
+
+from ..config import ConfigError, ProjectConfig
+
+__all__ = [
+    "CONFIG_FLAG_HELP",
+    "apply_project_config",
+    "extract_config_flags",
+    "provided_dests",
+]
+
+
+class _Unset:
+    """Sentinel for "this option did not appear in argv"."""
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid only
+        return "<unset>"
+
+
+_UNSET = _Unset()
+
+CONFIG_FLAG_HELP = (
+    "Read project defaults from FILE instead of searching for a "
+    "cobol.yml/cobol.yaml upward from the current directory. May appear "
+    "anywhere on the command line."
+)
+
+NO_CONFIG_FLAG_HELP = (
+    "Ignore any cobol.yml/cobol.yaml entirely and use only flags and "
+    "built-in defaults. May appear anywhere on the command line."
+)
+
+
+# Each entry maps an argparse ``dest`` to the config value that fills it when
+# the user did not pass the corresponding flag. Returning ``None`` means the
+# config says nothing about it, leaving the built-in default in place.
+#
+# Only genuinely project-level settings appear here. Per-invocation choices
+# (--program, --output, --format, --compact, ...) stay flags: putting them in
+# a shared file would make two people in the same repo get different output
+# from the same command.
+_BINDINGS: dict[str, Callable[[ProjectConfig], Any]] = {
+    "copybook_path": lambda c: list(c.copybook_path) or None,
+    "callee_path": lambda c: list(c.callee_path) or None,
+    "source_format": lambda c: c.source_format,
+    "dialect": lambda c: c.dialect,
+    "error_recovery": lambda c: c.error_recovery,
+    "seed": lambda c: c.seed,
+    # `--extension` and `--rule` below declare a dest that is not their flag
+    # name; these keys are argparse dests, not flag spellings.
+    "extensions": lambda c: list(c.extensions) or None,
+    "define": lambda c: list(c.define) or None,
+    "charset": lambda c: c.data.charset,
+    "endian": lambda c: c.data.endian,
+    "record_format": lambda c: c.data.record_format,
+    "record_separator": lambda c: c.data.record_separator,
+    "rows": lambda c: c.data.rows,
+    "rules": lambda c: list(c.lint.rules) or None,
+    "min_severity": lambda c: c.lint.min_severity,
+    "fail_on": lambda c: c.lint.fail_on,
+}
+
+
+def extract_config_flags(argv: list[str]) -> tuple[list[str], Path | None, bool]:
+    """Pull ``--config FILE`` / ``--config=FILE`` / ``--no-config`` out of argv.
+
+    Handled before argparse rather than as ordinary arguments so they can
+    appear either side of the subcommand, and -- more importantly -- so
+    ``main()``'s legacy "first positional isn't a subcommand, so prepend
+    parse" rewrite does not mistake a config path for a source file.
+
+    Returns the remaining argv, the explicit config path (if any), and
+    whether config loading was switched off.
+    """
+    remaining: list[str] = []
+    path: Path | None = None
+    disabled = False
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--no-config":
+            disabled = True
+        elif arg == "--config":
+            if index + 1 >= len(argv):
+                raise ConfigError("--config requires a file path")
+            path = Path(argv[index + 1])
+            index += 1
+        elif arg.startswith("--config="):
+            value = arg[len("--config=") :]
+            if not value:
+                raise ConfigError("--config requires a file path")
+            path = Path(value)
+        else:
+            remaining.append(arg)
+        index += 1
+    if disabled and path is not None:
+        raise ConfigError("--config and --no-config cannot be used together")
+    return remaining, path, disabled
+
+
+def _iter_parsers(parser: argparse.ArgumentParser) -> Iterator[argparse.ArgumentParser]:
+    """Every parser in the tree, subparsers included, each yielded once.
+
+    Reaches into argparse's ``_actions`` / ``_SubParsersAction.choices``
+    because there is no public way to enumerate a parser's subparsers. Both
+    have been stable across every Python release this package supports, and
+    the alternative -- threading a registry through 40-odd builder functions
+    -- would put the same knowledge in 40 places instead of one.
+    """
+    seen: set[int] = set()
+
+    def walk(current: argparse.ArgumentParser) -> Iterator[argparse.ArgumentParser]:
+        if id(current) in seen:
+            return
+        seen.add(id(current))
+        yield current
+        for action in current._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for sub in action.choices.values():
+                    yield from walk(sub)
+
+    yield from walk(parser)
+
+
+def _strip_defaults(parser: argparse.ArgumentParser) -> None:
+    """Replace every optional argument's default with a sentinel.
+
+    ``append`` actions get ``None`` instead: argparse's append
+    implementation copies and appends to whatever the default is, so a
+    non-list sentinel there would raise the moment the flag is used. ``None``
+    serves the same purpose for them, since no command line can produce it.
+    """
+    for sub in _iter_parsers(parser):
+        for action in sub._actions:
+            if not action.option_strings:
+                continue  # positional: always present, never config-filled
+            if action.default is argparse.SUPPRESS:
+                continue  # --help / --version
+            if isinstance(action, argparse._AppendAction):
+                action.default = None
+            else:
+                action.default = _UNSET
+
+
+def provided_dests(
+    build_parser: Callable[[], argparse.ArgumentParser], argv: list[str]
+) -> set[str]:
+    """The argparse ``dest``s the user actually typed a flag for.
+
+    ``build_parser`` is called to get a *fresh* parser -- the defaults are
+    stripped destructively, and the parser that produced the real namespace
+    must be left intact.
+    """
+    parser = build_parser()
+    _strip_defaults(parser)
+    namespace = parser.parse_args(argv)
+    return {
+        dest
+        for dest, value in vars(namespace).items()
+        if value is not _UNSET and value is not None
+    }
+
+
+def apply_project_config(
+    args: argparse.Namespace, config: ProjectConfig, provided: set[str]
+) -> None:
+    """Fill every config-backed argument the user did not pass explicitly.
+
+    Mutates ``args`` in place. Arguments the running subcommand does not
+    define are skipped, so this is safe to call for every subcommand.
+    """
+    for dest, read in _BINDINGS.items():
+        if dest in provided or not hasattr(args, dest):
+            continue
+        if dest == "source_format" and "free_form" in provided:
+            # --free-form is the legacy spelling of the same setting, and
+            # _source_format_kwargs() reads --source-format first. Letting
+            # the config fill source_format here would silently override a
+            # layout the user stated on the command line.
+            continue
+        value = read(config)
+        if value is not None:
+            setattr(args, dest, value)
