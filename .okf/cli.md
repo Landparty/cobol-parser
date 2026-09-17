@@ -572,7 +572,8 @@ one subcommand (and one re-parse) per concern.
 `--rule` (repeatable) selects rules; the ids are deliberately the analyzer
 subcommand names themselves: `dead-code`, `unused-variables`,
 `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`,
-`complexity`, `dclgen-check`. Argparse `choices` rejects an unknown id, so a typo can never
+`complexity`, `dclgen-check`, `sql-cics-check`. Argparse `choices` rejects an
+unknown id, so a typo can never
 read as "that rule found nothing". Ordering and duplicates in the flags do not
 affect the report — the selection is normalized to the canonical rule order.
 
