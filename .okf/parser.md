@@ -2865,3 +2865,12 @@ normalized).
 (and `CBL`/`PROCESS`) that precede the header instead of blanking them --
 `>>DEFINE` is legal anywhere and the conditional pass runs after this
 step.
+
+# Line splitting (2026-09-17)
+
+`parse_cobol`, `_parse_core`, `_detect_fixed_format` and the
+`lines_parsed` statistic split source with
+`cobolparser._lines.split_source_lines`, never `str.splitlines()`: the
+latter also breaks on form feed / NEL / U+2028, which put every later
+`location.line` off by one against the editor and the listing. See
+`preprocessing.md` ("Audit 2026-09-17").

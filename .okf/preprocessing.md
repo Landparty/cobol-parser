@@ -1009,3 +1009,104 @@ and, at the CLI level, `tests/unit/cli/test_expand_source_map_cli.py`.
   statement, leaves it as written (SQLCA/SQLDA come from the
   precompiler). `strip_unexpanded_copy_statements` keeps the default
   (off), so the un-expanding parse never touches an INCLUDE.
+
+# Audit 2026-09-17: record boundaries, continuation, text words, EBCDIC NL
+
+Nine defects in the stages ahead of the lexer, all found by reading the
+code against the IBM Enterprise COBOL rules and confirmed by running a
+repro; pinned by `tests/regression/test_audit_2026_09_17_preprocessing.py`
+(42 tests). Every one of them was invisible to the suite because the
+suite's inputs are well-formed ASCII with one statement per line.
+
+**A line is a record, nothing else (`cobolparser/_lines.py`).** Every
+stage split source with `str.splitlines()`, which also breaks on form
+feed, vertical tab, NEL (U+0085), U+2028/2029 and `\x1c`-`\x1e`. A page
+eject inside a comment (`*\x0c`), or a cp1252 `…` decoded through latin-1,
+became two lines and every later `location.line` was +1 against the
+editor and the listing. `split_source_lines(text, keepends=False)` splits
+on `\n` / `\r\n` / `\r` only and is otherwise `splitlines`-shaped; it is
+what `parse_cobol`, `_parse_core`, `_detect_fixed_format`,
+`CobolLexer.__init__`, `normalize_fixed_format` (string form, pure and
+Cython), `preprocess_conditional_compilation`, `strip_compiler_directives`,
+`validate_copybook_content` and the expander's line counts all use now.
+Do not reintroduce `splitlines()` on source text.
+
+**EBCDIC NL records (0x15).** `detect_encoding` scores 0x15 as the EBCDIC
+newline, but cp037 decodes it to U+0085, which `split("\n")` in the
+sequence-area / comment / continuation passes never treated as a break --
+so a z/OS member with NL record separators read as ONE 72-column line and
+lost everything past the first record, silently. `convert_to_utf8` now
+runs `_normalize_record_separators` after an EBCDIC decode (`\r\x85` and
+`\x85` -> `\n`; codec detected by what it does to the bytes of `ABC`,
+`_is_ebcdic_codec`, so an unlisted variant is classified correctly).
+ASCII/UTF-8 text is never rewritten.
+
+**`validate_copybook_content(..., indicator_position=)`.** The expander
+validates the *stripped* member (indicator at index 0) but the continued-
+literal quote discount still looked at `line[6]`, so it never fired and
+every copybook with a continued literal drew a false "Possible unbalanced
+single quotes" (rendered to users by the extension). Same knob
+`apply_replacing_clauses` already had: 6 for raw source, 0 after
+`strip_sequence_area`, `None` for a free-form member (no continuation).
+
+**COPY ... REPLACING compares text words, once each.** Two defects in
+`apply_replacing_clauses`. (1) The search text was a literal regex, so
+`==PIC X(10)==` missed `PIC  X(10)` and `== A ==` (blanks kept by the
+lexer path's `_read_operand`) could never match `01 A.`. Pseudo-text is
+now stripped at the operand and compiled through `_PSEUDO_TEXT_WORD_RE`:
+blanks between words match a run of blanks, a parenthesis is a word of
+its own with optional blanks beside it (`X (10)` too). Comparison still
+stays within one source line -- a pseudo-text split across two source
+lines is not matched, as before. (2) Clauses were applied one full pass
+each over already-rewritten text, so a replacement could be replaced
+again: `==A== BY ==B== ==B== BY ==A==` turned every A *and* B into A.
+All clauses now go into ONE alternation (longest search text first, as
+before) applied in ONE left-to-right pass per segment, so each word is
+replaced at most once. Literal protection is unchanged: only a clause
+whose search text contains a quote is in the alternation used inside
+string literals.
+
+**REPLACE: a parenthesis is a text word (`_tokenize_text_words`).** Only
+space/comma/semicolon/newline/quotes/period ended a word, so `WS-A(1)`
+was the single word `WS-A(1)` and `REPLACE ==WS-A== BY ==WS-B==` never
+touched a subscripted or reference-modified reference (`WS-A(1:2)`).
+`(` and `)` are now separators and words of their own; a replacement's
+parentheses stay attached when re-emitted (`WS-B(2)`). The `==:TAG:==`
+partial-word form is unaffected.
+
+**`>>IF name [IS] [NOT] DEFINED`.** `IS` is optional in IBM's diagram;
+`_parse_primary` only looked for `[NOT] DEFINED` after matching `IS`, so
+`>>IF DEBUG DEFINED` warned "unexpected trailing token" and evaluated
+FALSE -- and since conditional compilation runs on every `parse_cobol`,
+the guarded block was silently dropped. A dangling `IS` / `NOT` is still
+a syntax error.
+
+**A continuation line follows a comment for any continued text.** The
+comment and blank/short branches of `normalize_fixed_format` deferred the
+placeholder only while a *literal* was open; otherwise they flushed the
+logical line, so `MOVE WS-CO` / `* note` / `-    UNT TO X.` reached the
+lexer as `WS-CO UNT` (two operands, no diagnostic). IBM: the continuation
+line is the next line that is neither a comment nor blank, whatever is
+being continued. Both branches now look one program-text line ahead
+(`_continuation_follows`, cached so a run of comment lines costs one
+scan; `_next_code_line` in the Cython mirror) and defer when it is a
+`-` record. Line counts are preserved exactly as for the literal case.
+
+**Quotation mark in column 72 + continuation starting with two quotation
+marks.** IBM: the literal did not close; the pair is one doubled quote,
+the value gets a single quotation mark, and the literal continues.
+`_update_quote_state` closed the literal at column 72 and the `''` on the
+continuation opened a new one, leaving an unterminated literal and an
+"Unparsed token dropped" warning on legal source (and `ValueError` from
+`normalize_fixed_format` called directly). `closing_quote_at_72`
+remembers a quote that closed a literal exactly in column 72 (a quote
+there with no literal left open can only be a closing one); the
+continuation branch re-opens the literal and keeps one of the pair so the
+joined text reads `'AB''CD'`. Mirrored in `_preprocess_fast.pyx`; the
+`.c` was regenerated with the same Cython 3.3.0.
+
+**Regenerating the Cython mirror.** `python setup.py build_ext --inplace`
+re-cythonizes the `.pyx` when Cython is installed and rewrites the
+checked-in `.c`; both files are committed together. Remove the built
+`*.so` afterwards before measuring coverage.
+

@@ -17,6 +17,7 @@ import time
 from collections import OrderedDict
 from typing import Any
 
+from .._lines import split_source_lines
 from . import (
     ALL_COMMENT_INDICATORS,
     CircularReferenceError,
@@ -427,7 +428,9 @@ def convert_to_utf8(
 
     if errors == "strict":
         try:
-            return content.decode(detected_encoding, errors="strict")
+            return _normalize_record_separators(
+                content.decode(detected_encoding, errors="strict"), detected_encoding
+            )
         except UnicodeDecodeError as e:
             raise EncodingError(
                 source_label,
@@ -467,7 +470,37 @@ def convert_to_utf8(
             f"explicitly to silence this warning."
         )
 
-    return text
+    return _normalize_record_separators(text, detected_encoding)
+
+
+def _is_ebcdic_codec(encoding: str) -> bool:
+    """True when *encoding* names an EBCDIC code page (cp037, cp500,
+    cp1047, cp273, cp1140, ...). Decided by what the codec does to the
+    bytes of ``ABC`` rather than by a list of names, so a variant this
+    module never heard of is classified correctly too."""
+    try:
+        return b"\xc1\xc2\xc3".decode(encoding) == "ABC"
+    except (LookupError, UnicodeDecodeError):
+        return False
+
+
+def _normalize_record_separators(text: str, encoding: str) -> str:
+    """Turn the EBCDIC NL record separator into ``\\n``.
+
+    On z/OS a text member's records end in NL (0x15), which every EBCDIC
+    codec decodes to U+0085 -- a character no line splitter downstream
+    (``split("\\n")`` in the sequence-area / comment / continuation
+    passes) treats as a line break, so the whole member read as ONE
+    72-column line and everything past the first record was silently
+    cut. ``detect_encoding`` already scores 0x15 as the EBCDIC newline;
+    this makes the decoded text agree with it. LF (0x25 -> ``\\n``) and
+    CR LF (0x0D 0x25) records were already fine and are untouched; a CR NL
+    pair collapses to one break. ASCII/UTF-8 text is never rewritten:
+    U+0085 there is ordinary (if odd) text, not a record boundary.
+    """
+    if "\x85" not in text or not _is_ebcdic_codec(encoding):
+        return text
+    return text.replace("\r\x85", "\n").replace("\x85", "\n")
 
 
 def read_file_with_encoding(
@@ -729,7 +762,7 @@ def _looks_fixed_format(text: str) -> bool:
 
     # Tabs are expanded first, as every column-sensitive step here does.
     text = text.expandtabs(8)
-    non_blank = [line for line in text.splitlines() if line.strip()]
+    non_blank = [line for line in split_source_lines(text) if line.strip()]
     if len(non_blank) >= 3:
         return _detect_fixed_format(text)
     for line in non_blank:
@@ -976,7 +1009,7 @@ def expand_copybooks(
     stats.parse_time_ms = elapsed_ms
 
     # Scan expanded lines to count them
-    expanded_lines = expanded_source.splitlines()
+    expanded_lines = split_source_lines(expanded_source)
     stats.total_lines = len(expanded_lines)
     stats.file_count = 1 + len(included_copybooks)  # Main + copybooks
 
@@ -1281,6 +1314,12 @@ def _expand_source_recursive(
                     copybook_content,
                     copybook_path,
                     raw_content=raw_copybook_content,
+                    # The content validated here is the STRIPPED one: its
+                    # indicator sits at index 0, not 6. Validating with the
+                    # raw-source default made the continued-literal quote
+                    # discount never fire, so every copybook with a
+                    # continued literal drew a false "unbalanced quotes".
+                    indicator_position=None if member_free_form else 0,
                 )
                 if stats and warnings:
                     stats.warnings.extend(warnings)

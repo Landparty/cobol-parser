@@ -63,7 +63,7 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (90% minimum; ~11,100 tests across 388 files).
+# Run all tests with coverage (90% minimum; ~11,140 tests across 389 files).
 # Measure coverage on a pure-Python build -- see "Coverage Requirement".
 python -m pytest tests/ -v
 
@@ -156,6 +156,8 @@ COBOL source (.cbl/.cob)
 - `registry.py` -- `StatementParserRegistry` with first-match dispatch strategy
 - `exceptions.py` -- `TokenMismatch`, `UnexpectedEndOfInput`, `DivisionNotFoundError`, `UnknownStatementError`, `ValidationError` (all extend `ParseError`)
 - `ast_factory.py` -- `ASTNodeFactory` for validated AST node creation; use `get_factory()` / `create_node()` rather than instantiating nodes directly. Raises `NodeTypeError`, `FieldValidationError`
+
+**`cobolparser/_lines.py`** -- `split_source_lines()`: the one line splitter for source text, on `\n` / `\r\n` / `\r` only. `str.splitlines()` also breaks on form feed / NEL / U+2028, which shifted every later line number when one sat inside a record; never use it on source text.
 
 **`cobolparser/_errors.py`** -- Canonical `ParseError` base class with zero internal dependencies (avoids circular imports between `plugins.core` and `core.exceptions`).
 
@@ -540,7 +542,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~11,100 tests across 388 files in 5 directories:
+~11,140 tests across 389 files in 5 directories:
 
 ```
 tests/

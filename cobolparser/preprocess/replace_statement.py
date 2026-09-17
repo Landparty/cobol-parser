@@ -32,6 +32,10 @@ from .copy_statement_parser import CopyStatementLexer
 # is itself a text word — so it is deliberately absent here.
 _WORD_SEPARATORS = frozenset(" \t\r\n,;")
 _QUOTES = ("'", '"')
+# A parenthesis is a separator AND a text word of its own (IBM "text words"),
+# so ``WS-A(1)`` is the words ``WS-A`` ``(`` ``1`` ``)`` and ``==WS-A==``
+# finds the subscripted reference too.
+_PARENS = ("(", ")")
 
 
 def _tokenize_text_words(text: str) -> list[tuple[str, int, int]]:
@@ -41,6 +45,7 @@ def _tokenize_text_words(text: str) -> list[tuple[str, int, int]]:
 
     * a literal (``"..."`` / ``'...'``, doubled quotes kept intact) — one word;
     * a *separator period* (a ``.`` that is not a decimal point) — one word;
+    * a parenthesis — one word;
     * otherwise a maximal run of non-separator characters.
 
     Space, comma, and semicolon separators are treated as equivalent to a
@@ -76,11 +81,16 @@ def _tokenize_text_words(text: str) -> list[tuple[str, int, int]]:
             words.append((".", i, i + 1))
             i += 1
             continue
-        # Ordinary word: run until a separator, quote, or separator period.
+        if c in _PARENS:
+            words.append((c, i, i + 1))
+            i += 1
+            continue
+        # Ordinary word: run until a separator, quote, parenthesis, or
+        # separator period.
         j = i
         while j < n:
             cj = text[j]
-            if cj in _WORD_SEPARATORS or cj in _QUOTES:
+            if cj in _WORD_SEPARATORS or cj in _QUOTES or cj in _PARENS:
                 break
             if cj == ".":
                 nxt = text[j + 1] if j + 1 < n else ""
@@ -130,14 +140,17 @@ class _ReplacePair:
             self.find_tokens = []
         # Replacement is emitted verbatim as text words joined by single
         # spaces; a period token is joined without a leading space so a
-        # sentence terminator stays attached.
+        # sentence terminator stays attached, and so are parentheses on
+        # both sides (``WS-B(2)`` stays ``WS-B(2)``).
         replace_tokens = [w[0] for w in _tokenize_text_words(replace_text)]
         parts: list[str] = []
+        attach_next = False
         for tok in replace_tokens:
-            if tok == "." and parts:
-                parts[-1] = parts[-1] + "."
+            if parts and (attach_next or tok in (".", "(", ")")):
+                parts[-1] = parts[-1] + tok
             else:
                 parts.append(tok)
+            attach_next = tok == "("
         self.replace_text = " ".join(parts)
 
 

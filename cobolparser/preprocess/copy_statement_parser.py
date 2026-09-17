@@ -511,7 +511,10 @@ class CopyStatementLexer:
             self._advance(2)
             while not self._is_at_end():
                 if self._peek() == "=" and self._peek(1) == "=":
-                    text = self.source[start_pos + 2 : self.pos]
+                    # Leading/trailing blanks of pseudo-text are not part of
+                    # it (``== A ==`` finds the word A), as in
+                    # parse_replacing_clause.
+                    text = self.source[start_pos + 2 : self.pos].strip()
                     self._advance(2)
                     return text
                 self._advance()
@@ -947,9 +950,23 @@ def parse_replacing_clause(replacing_text: str) -> list[ReplacingClause]:
     return clauses
 
 
-def _build_clause_pattern(clause: ReplacingClause) -> "re.Pattern[str] | None":
+#: The text words of a pseudo-text operand: a literal (doubled quotes kept),
+#: a parenthesis (a text word of its own), or a run of anything else.
+_PSEUDO_TEXT_WORD_RE = re.compile(
+    r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|[()]|[^\s()'\"]+"
+)
+
+
+def _build_clause_pattern(clause: ReplacingClause) -> str | None:
     """
-    Compile the regex pattern for a single REPLACING clause.
+    Build the regex *source* for a single REPLACING clause.
+
+    Pseudo-text is compared as COBOL *text words*, not as raw characters:
+    the blanks between two words of the search text match any run of
+    blanks in the source (``==PIC X(10)==`` finds ``PIC  X(10)``), and a
+    parenthesis is a text word of its own, so the blank beside it is
+    optional (``X (10)`` too). Leading/trailing blanks of the pseudo-text
+    are not part of it. Comparison stays within one source line.
 
     Uses identifier-safe boundaries to avoid partial word collisions: regex
     ``\\b`` is unsuitable because COBOL identifiers can contain hyphens, so a
@@ -961,29 +978,32 @@ def _build_clause_pattern(clause: ReplacingClause) -> "re.Pattern[str] | None":
     Returns None when the clause cannot be applied (empty search text or an
     unknown mode), in which case the clause is skipped.
     """
-    find_text = clause.find_text
+    find_text = clause.find_text.strip()
     if not find_text:
         return None
+    words = _PSEUDO_TEXT_WORD_RE.findall(find_text)
+    if not words:
+        return None
+
+    body = ""
+    for index, word in enumerate(words):
+        if index:
+            beside_paren = word in ("(", ")") or words[index - 1] in ("(", ")")
+            body += r"[ \t]*" if beside_paren else r"[ \t]+"
+        body += re.escape(word)
 
     is_start_word = find_text[0].isalnum() or find_text[0] == "-"
     is_end_word = find_text[-1].isalnum() or find_text[-1] == "-"
 
     start_boundary = r"(?<![A-Za-z0-9-])" if is_start_word else r""
     end_boundary = r"(?![A-Za-z0-9-])" if is_end_word else r""
-    escaped = re.escape(find_text)
 
     if clause.mode == "ALL":
-        return re.compile(start_boundary + escaped + end_boundary, re.IGNORECASE)
+        return start_boundary + body + end_boundary
     if clause.mode == "LEADING":
-        return re.compile(
-            start_boundary + escaped + (r"(?=[A-Za-z0-9-])" if is_end_word else r""),
-            re.IGNORECASE,
-        )
+        return start_boundary + body + (r"(?=[A-Za-z0-9-])" if is_end_word else r"")
     if clause.mode == "TRAILING":
-        return re.compile(
-            (r"(?<=[A-Za-z0-9-])" if is_start_word else r"") + escaped + end_boundary,
-            re.IGNORECASE,
-        )
+        return (r"(?<=[A-Za-z0-9-])" if is_start_word else r"") + body + end_boundary
     return None
 
 
@@ -1073,37 +1093,61 @@ def apply_replacing_clauses(
     # Sort clauses by length descending to prioritize longer matches (e.g. 'ABC-1' before 'ABC')
     sorted_clauses = sorted(clauses, key=lambda c: len(c.find_text), reverse=True)
 
-    for clause in sorted_clauses:
-        pattern = _build_clause_pattern(clause)
-        if pattern is None:
+    # Every clause goes into ONE alternation applied in ONE left-to-right
+    # pass per segment, so each text word is compared against the clauses
+    # (longest search text first) and replaced at most once -- the
+    # standard's rule. The previous one-pass-per-clause loop re-scanned the
+    # text an earlier clause had just emitted, so
+    # ``==A== BY ==B== ==B== BY ==A==`` turned every A *and* B into A
+    # instead of swapping them.
+    replacements: dict[str, str] = {}
+    code_alternatives: list[str] = []
+    literal_alternatives: list[str] = []
+    for index, clause in enumerate(sorted_clauses):
+        source = _build_clause_pattern(clause)
+        if source is None:
             continue
-
+        name = f"c{index}"
+        alternative = f"(?P<{name}>{source})"
+        replacements[name] = clause.replace_text
+        code_alternatives.append(alternative)
         # A search text that itself contains a quote deliberately targets
-        # literal text; only then may string literals be rewritten.
-        protect_literals = '"' not in clause.find_text and "'" not in clause.find_text
+        # literal text; only such clauses may rewrite inside string literals.
+        if '"' in clause.find_text or "'" in clause.find_text:
+            literal_alternatives.append(alternative)
+    if not code_alternatives:
+        return content
+    code_pattern = re.compile("|".join(code_alternatives), re.IGNORECASE)
+    literal_pattern = (
+        re.compile("|".join(literal_alternatives), re.IGNORECASE)
+        if literal_alternatives
+        else None
+    )
 
+    def _replacement(match: re.Match[str]) -> str:
         # The replacement is literal text, never an re template: a
         # backslash in it (`'C:\TEMP\1'`) would otherwise raise re.error or
         # be silently reinterpreted as a group reference.
-        def _literal_replacement(
-            _m: re.Match[str], r: str = clause.replace_text
-        ) -> str:
-            return r
+        return replacements[match.lastgroup or ""]
 
-        for idx, line in enumerate(lines):
-            if is_comment[idx]:
-                continue
-            if protect_literals and ('"' in line or "'" in line):
-                lines[idx] = "".join(
+    for idx, line in enumerate(lines):
+        if is_comment[idx]:
+            continue
+        if '"' in line or "'" in line:
+            lines[idx] = "".join(
+                (
                     (
-                        segment
-                        if is_literal
-                        else pattern.sub(_literal_replacement, segment)
+                        literal_pattern.sub(_replacement, segment)
+                        if literal_pattern is not None
+                        else segment
                     )
-                    for segment, is_literal in _split_literal_segments(line)
+                    if is_literal
+                    else code_pattern.sub(_replacement, segment)
                 )
-            else:
-                lines[idx] = pattern.sub(_literal_replacement, line)
+                for segment, is_literal in _split_literal_segments(line)
+            )
+        else:
+            lines[idx] = code_pattern.sub(_replacement, line)
 
     return "\n".join(lines)
 

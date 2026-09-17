@@ -3,10 +3,21 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-09-15T00:00:00Z
+timestamp: 2026-09-17T00:00:00Z
 ---
 
 # Overview
+
+2026-09-17: `tests/regression/test_audit_2026_09_17_preprocessing.py` (42
+tests) pins the nine preprocessing defects of that date's audit: record-only
+line splitting (`cobolparser/_lines.py`), EBCDIC NL (0x15) copybook
+records, the continued-literal quote discount on stripped copybook content,
+text-word / single-pass `COPY ... REPLACING`, parentheses as text words in
+`REPLACE`, `>>IF name DEFINED` without `IS`, a non-literal continuation
+across a comment line, and the column-72 quotation-mark rule. The last two
+are mirrored in `_preprocess_fast.pyx`, so run this file once with the
+extensions built too (`python setup.py build_ext --inplace`, then delete the
+`*.so`). See `preprocessing.md`.
 
 2026-09-16: `tests/regression/test_audit_2026_09_16.py` (12 tests) pins the
 findings of that date's repo audit. Nine cover `ConstantFolder`'s exactness

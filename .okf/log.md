@@ -14,6 +14,42 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-17 -- audit: the text-manipulation stages, read against the IBM rules
+
+A second repo-wide audit, this time of everything that runs before the
+lexer: record splitting, fixed-format continuation, `COPY ... REPLACING`,
+`REPLACE`, `>>IF`, and EBCDIC copybook decoding. A differential fuzz of
+`parse_cobol` (27k mutated parses over every sample program) found no
+crash; reading the code against the IBM Enterprise COBOL reference found
+nine defects, every one confirmed by a repro, none reachable by a suite
+whose inputs are well-formed ASCII with one statement per line. Full
+write-up in [preprocessing.md](preprocessing.md) ("Audit 2026-09-17");
+pinned by `tests/regression/test_audit_2026_09_17_preprocessing.py`.
+
+* **`str.splitlines()` is not a record splitter.** Form feed, NEL and the
+  other Unicode line boundaries inside a record made two lines of it and
+  shifted every later `location.line`. New `cobolparser/_lines.py`
+  (`split_source_lines`) is used by every stage; `OKF_MAP` maps it.
+* **EBCDIC NL records were silently truncated to the first record** --
+  `detect_encoding` knew 0x15 was a newline, the decoder did not.
+* **`validate_copybook_content` looked for the indicator in column 7 of
+  content the expander had already stripped**, so every continued literal
+  in a copybook produced a false "unbalanced quotes" warning.
+* **`COPY ... REPLACING` compared raw characters, and re-applied clauses
+  over its own output** -- `PIC  X(10)` missed, `== A ==` never matched,
+  and a swap turned everything into one side. Text words, one pass.
+* **`REPLACE` did not see `(` `)` as separators**, so a subscripted
+  reference was never replaced.
+* **`>>IF DEBUG DEFINED` (no `IS`) evaluated FALSE with a warning** and
+  dropped the block on every parse.
+* **A word continued across a comment line was split in two**, with no
+  diagnostic; the comment/blank branches only deferred for an open literal.
+* **A quotation mark in column 72 followed by `''` on the continuation**
+  closed the literal instead of continuing it.
+
+The two continuation fixes are mirrored in `_preprocess_fast.pyx`
+(`_next_code_line`, `closing_quote_at_72`) and its regenerated `.c`.
+
 ## 2026-09-16 -- audit: an exactness gate that was itself inexact
 
 A repo-wide audit (lint/format/typecheck clean, 11,088 tests green, parser
