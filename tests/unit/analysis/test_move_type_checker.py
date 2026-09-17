@@ -245,13 +245,14 @@ class TestLegalMoves:
         )
         assert not report.violations
 
-    def test_figurative_constant_source_skipped(self):
+    def test_figurative_fill_constant_to_alphanumeric_is_legal(self):
         report = _check(
             [("TGT", "A(10)")],
             [("SPACES", ["TGT"])],
         )
-        # SPACES is figurative → no type check applied
+        # SPACES has no digit value but fills an alphabetic receiver fine.
         assert not report.violations
+        assert report.unresolved_count == 0
 
     def test_unknown_source_skipped(self):
         # Source not in catalog and not a recognizable literal → UNKNOWN → skip
@@ -717,12 +718,11 @@ class TestSpecialRegisters:
         assert report.unresolved_count == 0
         assert not report.violations
 
-    def test_figurative_zero_to_return_code_still_unresolved(self):
-        # A figurative constant source is never category-checked (it is
-        # compatible with any receiving category), regardless of how well
-        # the target resolves -- unchanged pre-existing behavior.
+    def test_figurative_zero_to_return_code_is_legal(self):
+        # ZERO has a digit value, so it is a legal source for the numeric
+        # RETURN-CODE special register -- genuinely checked, not skipped.
         report = _check([], [("ZERO", ["RETURN-CODE"])])
-        assert report.unresolved_count == 1
+        assert report.unresolved_count == 0
         assert not report.violations
 
     def test_alphabetic_to_return_code_is_error(self):
@@ -766,6 +766,66 @@ class TestIntrinsicFunctionSources:
         # guessing at its category.
         report = _check([("TGT", "9(5)")], [("FUNCTION SOME-OTHER-FUNC", ["TGT"])])
         assert report.unresolved_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Figurative constant MOVE sources -- ZERO has a digit value and is legal
+# into any receiver; the "fill" constants (SPACES, HIGH-VALUE, LOW-VALUE,
+# QUOTE) are legal everywhere except a numeric/numeric-edited receiver; NULL
+# stays unresolved (legal only into a POINTER receiver, unmodeled here).
+# ---------------------------------------------------------------------------
+
+
+class TestFigurativeConstantMoves:
+    def test_zero_to_numeric_is_legal(self):
+        report = _check([("TGT", "9(5)")], [("ZERO", ["TGT"])])
+        assert report.unresolved_count == 0
+        assert not report.violations
+
+    def test_zero_to_alphanumeric_is_legal(self):
+        report = _check([("TGT", "X(5)")], [("ZERO", ["TGT"])])
+        assert report.unresolved_count == 0
+        assert not report.violations
+
+    def test_zeros_to_numeric_edited_is_legal(self):
+        report = _check([("TGT", "Z9")], [("ZEROS", ["TGT"])])
+        assert report.unresolved_count == 0
+        assert not report.violations
+
+    def test_spaces_to_numeric_is_error(self):
+        report = _check([("TGT", "9(5)")], [("SPACES", ["TGT"])])
+        assert report.unresolved_count == 0
+        assert report.has_errors
+        assert report.errors[0].source_category == DataCategory.FIGURATIVE
+        assert report.errors[0].target_category == DataCategory.NUMERIC
+
+    def test_spaces_to_numeric_edited_is_error(self):
+        report = _check([("TGT", "Z9")], [("SPACES", ["TGT"])])
+        assert report.has_errors
+
+    def test_high_value_to_numeric_is_error(self):
+        report = _check([("TGT", "9(5)")], [("HIGH-VALUE", ["TGT"])])
+        assert report.has_errors
+
+    def test_low_values_to_numeric_is_error(self):
+        report = _check([("TGT", "9(5)")], [("LOW-VALUES", ["TGT"])])
+        assert report.has_errors
+
+    def test_quote_to_numeric_is_error(self):
+        report = _check([("TGT", "9(5)")], [("QUOTE", ["TGT"])])
+        assert report.has_errors
+
+    def test_spaces_to_alphabetic_is_legal(self):
+        report = _check([("TGT", "A(5)")], [("SPACES", ["TGT"])])
+        assert report.unresolved_count == 0
+        assert not report.violations
+
+    def test_null_source_still_unresolved(self):
+        # NULL is only legal into a POINTER receiving item, a category this
+        # checker does not model -- left unresolved rather than guessed at.
+        report = _check([("TGT", "9(5)")], [("NULL", ["TGT"])])
+        assert report.unresolved_count == 1
+        assert not report.violations
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,8 @@ COBOL data categories (simplified):
 Key incompatibility rules caught:
   - NUMERIC  →  ALPHABETIC  (ILLEGAL)
   - ALPHABETIC  →  NUMERIC  (ILLEGAL)
+  - SPACES/HIGH-VALUE/LOW-VALUE/QUOTE  →  NUMERIC/NUMERIC-EDITED  (ILLEGAL;
+    none of these figurative constants has a digit value)
 """
 
 from __future__ import annotations
@@ -84,11 +86,13 @@ class MoveTypeReport:
 
     violations: list[MoveTypeViolation] = field(default_factory=list)
     #: Count of source/target operands that could not be resolved to a known
-    #: DataCategory (e.g. an undeclared identifier, or an unexpanded
-    #: copybook field) and were therefore skipped rather than checked. A
-    #: report with zero violations and a non-zero unresolved_count means
-    #: "nothing was found wrong" is not the same as "everything was
-    #: checked" -- see reports/open-findings.md H5.
+    #: DataCategory (e.g. an undeclared identifier, an unexpanded copybook
+    #: field, or a NULL/NULLS figurative constant -- legal only into a
+    #: POINTER receiver, which this checker does not model) and were
+    #: therefore skipped rather than checked. A report with zero violations
+    #: and a non-zero unresolved_count means "nothing was found wrong" is
+    #: not the same as "everything was checked" -- see
+    #: reports/open-findings.md H5.
     unresolved_count: int = 0
 
     @property
@@ -138,6 +142,38 @@ _FIGURATIVE_CONSTANTS = frozenset(
         "NULL",
         "NULLS",
     }
+)
+
+# ZERO has a digit value, so it is a legal MOVE source into every category
+# this checker models (numeric, numeric-edited, alphabetic, alphanumeric,
+# alphanumeric-edited) -- unlike the other figurative constants below, it
+# never produces a violation and never needs the catalog to resolve it.
+_FIGURATIVE_ZERO = frozenset({"ZERO", "ZEROS", "ZEROES"})
+
+# The "fill" figurative constants: legal into an alphabetic, alphanumeric or
+# alphanumeric-edited receiver (they fill it with the given character/byte),
+# illegal into a numeric or numeric-edited one -- none of them has a digit
+# value. NULL/NULLS are deliberately excluded from both sets: per the COBOL
+# standard they are legal only into a USAGE POINTER (or FUNCTION-POINTER /
+# OBJECT REFERENCE) receiving item, a category this checker does not model,
+# so a NULL source is left statically unresolved rather than risk a wrong
+# verdict against an ordinary numeric/alphanumeric target.
+_FIGURATIVE_FILL = frozenset(
+    {
+        "SPACE",
+        "SPACES",
+        "HIGH-VALUE",
+        "HIGH-VALUES",
+        "LOW-VALUE",
+        "LOW-VALUES",
+        "QUOTE",
+        "QUOTES",
+    }
+)
+
+# Receiver categories a fill figurative constant has no digit value for.
+_FIGURATIVE_FILL_ILLEGAL_TARGETS: frozenset[DataCategory] = frozenset(
+    {DataCategory.NUMERIC, DataCategory.NUMERIC_EDITED}
 )
 
 # COBOL special registers with a fixed, implicit numeric picture -- they never
@@ -394,10 +430,17 @@ class MoveTypeChecker:
             return
 
         source_cat = self._resolve_category(source_name)
-        if source_cat in (DataCategory.UNKNOWN, DataCategory.FIGURATIVE):
-            # Cannot determine source category statically -- every target of
-            # this MOVE goes unchecked as a result, so count the statement
-            # once rather than the number of targets.
+        figurative = source_name.upper().strip() if source_cat == DataCategory.FIGURATIVE else None
+        if source_cat == DataCategory.UNKNOWN or (
+            figurative is not None
+            and figurative not in _FIGURATIVE_ZERO
+            and figurative not in _FIGURATIVE_FILL
+        ):
+            # Cannot determine source category statically -- either an
+            # undeclared identifier, or a figurative constant with no fixed
+            # rule here (NULL/NULLS). Every target of this MOVE goes
+            # unchecked as a result, so count the statement once rather than
+            # the number of targets.
             self._unresolved_count += 1
             return
 
@@ -414,6 +457,32 @@ class MoveTypeChecker:
             if target_cat == DataCategory.UNKNOWN:
                 self._unresolved_count += 1
                 continue  # Cannot validate unknown target
+
+            if figurative is not None:
+                # ZERO has a digit value and is legal everywhere; a fill
+                # constant (SPACES, HIGH-VALUE, ...) is legal into anything
+                # but a numeric/numeric-edited receiver, which has no room
+                # for it.
+                if (
+                    figurative in _FIGURATIVE_FILL
+                    and target_cat in _FIGURATIVE_FILL_ILLEGAL_TARGETS
+                ):
+                    violations.append(
+                        MoveTypeViolation(
+                            kind=MoveViolationKind.ERROR,
+                            source_name=source_name,
+                            target_name=target_name,
+                            source_category=source_cat,
+                            target_category=target_cat,
+                            location=loc,
+                            message=(
+                                f"Illegal MOVE: figurative constant '{source_name}' "
+                                f"has no digit value and cannot be moved to "
+                                f"{target_cat.name} item '{target_name}'"
+                            ),
+                        )
+                    )
+                continue
 
             pair = (source_cat, target_cat)
             if pair in _ILLEGAL_MOVES:

@@ -128,6 +128,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SQL statement. `CopyStatementLexer(sql_include=True)` /
   `CopyStatement.sql_include`; the un-expanding parse path is unchanged.
 
+### Fixed
+
+* **`move-type-check` no longer counts `MOVE ZERO`/`SPACES`/etc. as
+  unresolved.** A figurative-constant MOVE source was always skipped and
+  added to `unresolved_count`, regardless of whether copybooks resolved --
+  so an ordinary `MOVE ZERO TO RETURN-CODE` produced the same "MOVE
+  operand(s) whose data category could not be resolved (most often an
+  unresolved COPY)" lint caveat as a genuinely missing `COPY`, sending users
+  chasing `--copybook-path` for a warning that had nothing to do with
+  copybooks. `ZERO`/`ZEROS`/`ZEROES` are now checked as legal into every
+  modeled category (they have a digit value); `SPACES`/`HIGH-VALUE(S)`/
+  `LOW-VALUE(S)`/`QUOTE(S)` are checked as illegal into a numeric or
+  numeric-edited receiver and legal everywhere else. `NULL`/`NULLS` are
+  still left unresolved -- legal only into a `POINTER` receiver, a category
+  this checker does not model.
+
 ### Fixed (preprocessing audit, 2026-09-17)
 
 * **Line numbers no longer drift after a form feed / NEL inside a record.**
