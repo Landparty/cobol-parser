@@ -430,7 +430,11 @@ class MoveTypeChecker:
             return
 
         source_cat = self._resolve_category(source_name)
-        figurative = source_name.upper().strip() if source_cat == DataCategory.FIGURATIVE else None
+        figurative = (
+            source_name.upper().strip()
+            if source_cat == DataCategory.FIGURATIVE
+            else None
+        )
         if source_cat == DataCategory.UNKNOWN or (
             figurative is not None
             and figurative not in _FIGURATIVE_ZERO
