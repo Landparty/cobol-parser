@@ -15,6 +15,8 @@ they are thin re-export stubs). Import these names from
 import re
 from collections.abc import Callable, Iterable, Mapping
 
+from .._lines import split_source_lines
+
 # Pre-compiled regex patterns for preprocessing (avoids re-compilation per call)
 #: ``>>DEFINE name [AS] {literal | PARAMETER | OFF} [OVERRIDE]`` (IBM). The
 #: value is captured lazily so a trailing ``OVERRIDE`` is never taken as
@@ -65,7 +67,7 @@ def _unterminated_data_entries(content: str) -> list[int]:
     the blank it leaves behind as a terminator would resurrect the same false
     positive by another route.
     """
-    lines = content.splitlines()
+    lines = split_source_lines(content)
     starts = [i for i, line in enumerate(lines) if _DATA_ENTRY_START_RE.match(line)]
     unterminated: list[int] = []
 
@@ -343,7 +345,7 @@ def strip_compiler_directives(
         >>> 'IDENTIFICATION' in result
         True
     """
-    lines = source.splitlines(keepends=True)
+    lines = split_source_lines(source, keepends=True)
     result_lines = []
     in_directive_section = True  # We start in the directive section
     in_continuation = False
@@ -532,7 +534,10 @@ def normalize_fixed_format(
     if isinstance(lines, str):
         # A whole source string is a common caller mistake (iterating it
         # would feed one *character* per "line" and normalize to nothing).
-        lines = lines.splitlines()
+        lines = split_source_lines(lines)
+    # The comment/blank-line branches below look one code line ahead (a
+    # continuation record may follow them), which needs random access.
+    lines = list(lines)
     result: list[str] = []
     pending_literal = False
     quote_char: str | None = None
@@ -564,6 +569,53 @@ def normalize_fixed_format(
     # Track quote state incrementally to avoid O(n²) rescanning
     _quote_open = False
     _quote_ch: str | None = None
+    # The quote character that closed a literal exactly in column 72 of the
+    # last program-text line, else None. IBM's continuation rule for that
+    # case: if the next continuation line starts with two consecutive
+    # quotation marks, the literal was NOT closed -- the column-72 quote and
+    # the first of the pair are one doubled (escaped) quote, the value gets
+    # a single quotation mark, and the literal carries on.
+    closing_quote_at_72: str | None = None
+    # One-code-line lookahead for the comment/blank branches: the index of
+    # the next program-text line after the one being examined, and whether
+    # it is a continuation record. IBM: a continuation line is "the next
+    # line that is neither a comment line nor a blank line", for ANY
+    # continued text -- not only an open literal -- so a word split across
+    # a comment (``MOVE WS-CO`` / ``* note`` / ``-    UNT TO X``) must rejoin.
+    next_code_idx = -1
+    next_code_is_cont = False
+
+    def _is_comment_indicator(ch: str) -> bool:
+        return (
+            ch in COMMENT_INDICATORS
+            or (debug_lines_as_comments and ch in DEBUG_INDICATORS)
+            or (version_tag_lines_as_comments and ch in VERSION_TAG_INDICATORS)
+        )
+
+    def _continuation_follows(idx: int) -> bool:
+        """True when the next program-text line after physical index
+        *idx* has ``-`` in its indicator column. Cached, so a run of
+        comment lines ahead of one continuation costs one scan, not one
+        per comment line."""
+        nonlocal next_code_idx, next_code_is_cont
+        if next_code_idx <= idx:
+            next_code_idx = len(lines)
+            next_code_is_cont = False
+            for j in range(idx + 1, len(lines)):
+                candidate = lines[j].rstrip("\n").expandtabs(8)
+                if len(candidate) < TEXT_START_COL - 1:
+                    continue
+                ind = (
+                    candidate[INDICATOR_COL - 1]
+                    if len(candidate) >= INDICATOR_COL
+                    else " "
+                )
+                if _is_comment_indicator(ind):
+                    continue
+                next_code_idx = j
+                next_code_is_cont = ind == "-"
+                break
+        return next_code_is_cont
 
     def _update_quote_state(text: str) -> None:
         """Incrementally update quote state for new text chunk.
@@ -665,6 +717,9 @@ def normalize_fixed_format(
                 deferred += 1
                 literal_suspended = True
                 continue
+            if has_line and _continuation_follows(line_no - 1):
+                deferred += 1
+                continue
             flush_parts()
             result.append("")
             continue
@@ -687,6 +742,9 @@ def normalize_fixed_format(
             if pending_literal and merge_continued_literals and has_line:
                 deferred += 1
                 literal_suspended = True
+                continue
+            if has_line and _continuation_follows(line_no - 1):
+                deferred += 1
                 continue
             flush_parts()
             result.append("")
@@ -762,7 +820,25 @@ def normalize_fixed_format(
             if has_line:
                 deferred += 1
             literal_suspended = False
-            if pending_literal and merge_continued_literals:
+            lead = text_slice.lstrip()
+            if (
+                merge_continued_literals
+                and not pending_literal
+                and closing_quote_at_72 is not None
+                and lead.startswith(closing_quote_at_72 * 2)
+            ):
+                # Column-72 quote + a continuation opening with two quotes:
+                # the literal never closed (see closing_quote_at_72). Re-open
+                # it, keep one of the pair so the joined text reads as the
+                # doubled quote it is, and scan on from the second.
+                _quote_open = True
+                _quote_ch = closing_quote_at_72
+                rest = lead[2:]
+                _update_quote_state(rest)
+                parts.append(closing_quote_at_72 + rest)
+                if not pending_literal:
+                    parts[-1] = parts[-1].rstrip()
+            elif pending_literal and merge_continued_literals:
                 chunk = text_slice.lstrip()
                 if chunk and chunk[0] == quote_char:
                     chunk = chunk[1:]
@@ -798,6 +874,22 @@ def normalize_fixed_format(
             else:
                 chunk = text_slice.rstrip()
             parts.append(chunk)
+
+        # Remember a literal closed exactly in column 72 for the next
+        # continuation record (see closing_quote_at_72). A quote there with
+        # no literal left open can only be a closing one: an opening quote
+        # would leave pending_literal set, and a doubled pair straddling
+        # columns 71-72 inside a literal likewise.
+        closing_quote_at_72 = (
+            text_slice[-1]
+            if (
+                merge_continued_literals
+                and not pending_literal
+                and len(text_slice) == TEXT_END_COL - TEXT_START_COL + 1
+                and text_slice[-1] in ("'", '"')
+            )
+            else None
+        )
 
         # Either branch above always appends to `parts` (even an empty
         # string), so this physical line has real content pending flush.
@@ -1010,29 +1102,30 @@ class _ConditionParser:
 
         operand = self._parse_operand()
 
-        # operand IS [NOT] DEFINED | operand IS [NOT] <op> operand
-        if self._match_word("IS"):
-            negate = self._match_word("NOT") is not None
-            if self._match_word("DEFINED"):
-                if operand[0] != "word":
-                    raise _ConditionSyntaxError(
-                        "only a symbol name can be tested with IS [NOT] DEFINED"
-                    )
-                exists = operand[1] in self._defined
-                return not exists if negate else exists
-            op = self._match_op()
-            if op is None:
+        # operand [IS] [NOT] DEFINED | operand [IS] [NOT] <op> operand.
+        # IBM's diagram makes IS optional in both forms (``>>IF DEBUG
+        # DEFINED`` is legal), so it is matched and then ignored; NOT is
+        # what carries meaning.
+        has_is = self._match_word("IS") is not None
+        negate = self._match_word("NOT") is not None
+        if self._match_word("DEFINED"):
+            if operand[0] != "word":
                 raise _ConditionSyntaxError(
-                    "expected DEFINED or a comparison operator after IS"
+                    "only a symbol name can be tested with [IS] [NOT] DEFINED"
                 )
-            result = self._compare(operand, op, self._parse_operand())
-            return not result if negate else result
+            exists = operand[1] in self._defined
+            return not exists if negate else exists
 
         op = self._match_op()
-        if op is not None:
-            return self._compare(operand, op, self._parse_operand())
-
-        return self._truthy(operand)
+        if op is None:
+            if has_is or negate:
+                keyword = "NOT" if negate else "IS"
+                raise _ConditionSyntaxError(
+                    f"expected DEFINED or a comparison operator after {keyword}"
+                )
+            return self._truthy(operand)
+        result = self._compare(operand, op, self._parse_operand())
+        return not result if negate else result
 
     def _parse_operand(self) -> tuple[str, str]:
         token = self._peek()
@@ -1284,7 +1377,7 @@ def preprocess_conditional_compilation(
     def _active() -> bool:
         return all(frame.active for frame in frames)
 
-    for line_no, line in enumerate(source.splitlines(), start=1):
+    for line_no, line in enumerate(split_source_lines(source), start=1):
         stripped = line.strip().upper()
         if not stripped.startswith(">>"):
             # A directive in a sequence-numbered fixed-format line
@@ -1515,7 +1608,11 @@ def preprocess_conditional_compilation(
 
 
 def validate_copybook_content(
-    content: str, copybook_path: str, raw_content: str | None = None
+    content: str,
+    copybook_path: str,
+    raw_content: str | None = None,
+    *,
+    indicator_position: int | None = 6,
 ) -> list[str]:
     """
     Validate copybook content before expansion.
@@ -1537,6 +1634,12 @@ def validate_copybook_content(
         raw_content: Optional original content, before comment lines were
             blanked out, used only to distinguish a comment-only copybook
             from a genuinely empty one.
+        indicator_position: Index of the fixed-format indicator column in
+            each line -- 6 for raw source with its sequence area, 0 for
+            content that already went through ``strip_sequence_area``
+            (which is what the expander validates), ``None`` for free-form
+            content, which has no continuation lines at all. Only the
+            continued-literal quote discount below depends on it.
 
     Returns:
         List of warning messages (empty if no issues)
@@ -1558,7 +1661,7 @@ def validate_copybook_content(
     # Check for comment-only content
     lines = [
         line
-        for line in stripped.splitlines()
+        for line in split_source_lines(stripped)
         if line.strip() and not line.strip().startswith("*")
     ]
     if not lines:
@@ -1581,11 +1684,15 @@ def validate_copybook_content(
     # (e.g. the previous line ends with VALUE), whose quotes all count.
     effective_singles = 0
     effective_doubles = 0
-    for line in content.splitlines():
+    for line in split_source_lines(content):
         line_doubles = line.count('"') - (line.count('""') * 2)
         line_singles = line.count("'") - (line.count("''") * 2)
-        if len(line) > 7 and line[6] == "-":
-            resumed = line[7:72].lstrip()
+        if (
+            indicator_position is not None
+            and len(line) > indicator_position + 1
+            and line[indicator_position] == "-"
+        ):
+            resumed = line[indicator_position + 1 : indicator_position + 66].lstrip()
             if resumed.startswith('"') and effective_doubles % 2 == 1:
                 line_doubles -= 1
             elif resumed.startswith("'") and effective_singles % 2 == 1:

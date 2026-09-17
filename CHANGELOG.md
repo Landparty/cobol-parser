@@ -128,6 +128,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SQL statement. `CopyStatementLexer(sql_include=True)` /
   `CopyStatement.sql_include`; the un-expanding parse path is unchanged.
 
+### Fixed (preprocessing audit, 2026-09-17)
+
+* **Line numbers no longer drift after a form feed / NEL inside a record.**
+  Every stage split source with `str.splitlines()`, which also breaks on
+  `\x0c`, `\x85`, U+2028 and friends, so a page eject in a comment moved
+  every later `location.line` by one. New `cobolparser/_lines.py`
+  (`split_source_lines`) splits on `\n` / `\r\n` / `\r` only.
+* **EBCDIC copybooks with NL (0x15) record separators expand whole.** They
+  decoded to one 72-column line and lost every record but the first,
+  silently. `convert_to_utf8` now normalizes NL after an EBCDIC decode.
+* **No more false "Possible unbalanced quotes" for a copybook with a
+  continued literal**: `validate_copybook_content` takes
+  `indicator_position` (the expander validates stripped content).
+* **`COPY ... REPLACING` compares text words and replaces each once**:
+  `==PIC X(10)==` finds `PIC  X(10)` and `X (10)`, `== A ==` finds `A`, and
+  `==A== BY ==B== ==B== BY ==A==` swaps instead of turning both into `A`.
+* **`REPLACE` treats `(` and `)` as text words**, so `==WS-A== BY ==WS-B==`
+  rewrites `WS-A(1)` and `WS-A(1:2)` too.
+* **`>>IF name DEFINED` / `>>IF name NOT DEFINED` (no `IS`) evaluate**
+  instead of warning and dropping the guarded block.
+* **A continuation line after a comment/blank line joins for any continued
+  text**, not only an open literal: `MOVE WS-CO` / `* note` /
+  `-    UNT TO X.` is `MOVE WS-COUNT TO X.` again.
+* **IBM's column-72 quotation-mark rule**: a literal whose quote lands in
+  column 72 and whose continuation starts with two quotation marks now
+  continues (the pair is one quote in the value) instead of closing and
+  leaving an unterminated literal behind.
+
 ### Changed
 
 * **Conditional compilation runs by default.** `>>DEFINE` / `>>IF` /

@@ -14,12 +14,37 @@ cimport cython
 
 from collections.abc import Iterable
 
+from cobolparser._lines import split_source_lines
+
 # Cannot import from preprocess/__init__.py (circular import); values must mirror it.
 _SEQ_END    = 6   # DEFAULT_SEQ_COL_END
 _IND_IDX    = 6   # INDICATOR_COL - 1
 _TEXT_START = 7   # TEXT_START_COL - 1
 _TEXT_END   = 72  # TEXT_END_COL
 _ID_END     = 80  # IDENTIFICATION_END_COL
+
+
+cdef tuple _next_code_line(list lines, Py_ssize_t idx,
+                           bint debug_lines_as_comments,
+                           bint version_tag_lines_as_comments):
+    """Index of the next program-text line after physical index *idx*
+    (``len(lines)`` when there is none) and whether it is a continuation
+    record. Mirrors the pure-Python `_continuation_follows` lookahead."""
+    cdef Py_ssize_t j, n = len(lines)
+    cdef str candidate, ind
+    for j in range(idx + 1, n):
+        candidate = lines[j].rstrip("\n").expandtabs(8)
+        if len(candidate) < _TEXT_START:
+            continue
+        ind = candidate[_IND_IDX] if len(candidate) > _IND_IDX else " "
+        if (
+            ind == "*" or ind == "/"
+            or (debug_lines_as_comments and (ind == "D" or ind == "d"))
+            or (version_tag_lines_as_comments and (ind == "V" or ind == "v"))
+        ):
+            continue
+        return (j, ind == "-")
+    return (n, False)
 
 
 def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_as_comments=True, version_tag_lines_as_comments=True, warnings=None):
@@ -58,9 +83,23 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     # line; such a literal keeps the historical "closed at the interruption"
     # outcome at EOF instead of raising (mirrors `literal_suspended`).
     cdef bint literal_suspended = False
+    # Mirrors the pure-Python `closing_quote_at_72`: the quote that closed a
+    # literal exactly in column 72 of the last program-text line. IBM's
+    # rule: a continuation line then starting with two quotation marks
+    # means the literal never closed -- the pair is one doubled quote and
+    # the literal carries on.
+    cdef str closing_quote_at_72 = None
+    cdef str lead, rest
+    # Mirrors the pure-Python one-code-line lookahead (`_continuation_follows`):
+    # a comment/blank line followed by a continuation record is deferred
+    # behind the logical line for ANY continued text, not only an open
+    # literal, so a word split across a comment rejoins.
+    cdef Py_ssize_t next_code_idx = -1
+    cdef bint next_code_is_cont = False
 
     if isinstance(lines, str):
-        lines = lines.splitlines()
+        lines = split_source_lines(lines)
+    lines = list(lines)
 
     result = []
     parts  = []
@@ -76,6 +115,15 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 deferred += 1
                 literal_suspended = True
                 continue
+            if has_line:
+                if next_code_idx <= line_no - 1:
+                    next_code_idx, next_code_is_cont = _next_code_line(
+                        lines, line_no - 1,
+                        debug_lines_as_comments, version_tag_lines_as_comments,
+                    )
+                if next_code_is_cont:
+                    deferred += 1
+                    continue
             # Flush accumulated parts for this logical line, then emit an
             # empty placeholder for this physical line so later lines keep
             # their true line number (mirrors the pure-Python fix — a
@@ -114,6 +162,15 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 deferred += 1
                 literal_suspended = True
                 continue
+            if has_line:
+                if next_code_idx <= line_no - 1:
+                    next_code_idx, next_code_is_cont = _next_code_line(
+                        lines, line_no - 1,
+                        debug_lines_as_comments, version_tag_lines_as_comments,
+                    )
+                if next_code_is_cont:
+                    deferred += 1
+                    continue
             if has_line:
                 result.append("".join(parts))
             if deferred:
@@ -189,7 +246,46 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
             if has_line:
                 deferred += 1
             literal_suspended = False
-            if pending_literal and merge_continued_literals:
+            lead = text_slice.lstrip()
+            if (
+                merge_continued_literals
+                and not pending_literal
+                and closing_quote_at_72 is not None
+                and lead.startswith(closing_quote_at_72 * 2)
+            ):
+                # Column-72 quote + a continuation opening with two quotes:
+                # the literal never closed. Re-open it, keep one of the pair
+                # so the joined text reads as the doubled quote it is, and
+                # scan on from the second (mirrors the pure-Python branch).
+                quote_open = True
+                quote_ch   = closing_quote_at_72
+                rest = lead[2:]
+                n = len(rest)
+                i = 0
+                while i < n:
+                    ch = rest[i]
+                    if quote_open:
+                        if ch == quote_ch:
+                            if i + 1 < n and rest[i + 1] == quote_ch:
+                                i += 2
+                                continue
+                            quote_open = False
+                            quote_ch   = None
+                        i += 1
+                    else:
+                        if ch == "'" or ch == '"':
+                            quote_open = True
+                            quote_ch   = ch
+                            i += 1
+                        elif ch == "*" and i + 1 < n and rest[i + 1] == ">":
+                            break
+                        else:
+                            i += 1
+                pending_literal = quote_open
+                parts.append(
+                    closing_quote_at_72 + (rest if pending_literal else rest.rstrip())
+                )
+            elif pending_literal and merge_continued_literals:
                 chunk = text_slice.lstrip()
                 if chunk and quote_ch is not None and chunk[0] == quote_ch:
                     chunk = chunk[1:]
@@ -304,6 +400,19 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 parts.append(text_slice if pending_literal else text_slice.rstrip())
             else:
                 parts.append(text_slice.rstrip())
+
+        # Mirrors the pure-Python rule: a quote in column 72 with no literal
+        # left open can only have closed one -- remember it for the next
+        # continuation record.
+        if (
+            merge_continued_literals
+            and not pending_literal
+            and len(text_slice) == _TEXT_END - _TEXT_START
+            and (text_slice[-1] == "'" or text_slice[-1] == '"')
+        ):
+            closing_quote_at_72 = text_slice[-1]
+        else:
+            closing_quote_at_72 = None
 
         # Either branch above (continuation or new logical line) always
         # appends to `parts` (even an empty string), so this physical line

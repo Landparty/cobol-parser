@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 # Core parsing infrastructure
+from ._lines import split_source_lines
 from .core.token_stream import TokenStream
 from .lexer import CobolLexer, Token
 from .models.ast_base import SourceLocation
@@ -179,7 +180,7 @@ class CobolParser:
         evaluates to FALSE. (``CBL`` / ``PROCESS`` option lines are removed
         by ``strip_compiler_directives`` right after this step.)
         """
-        lines = content.splitlines(keepends=True)
+        lines = split_source_lines(content, keepends=True)
 
         for i, line in enumerate(lines):
             if _ID_DIV_RE.search(line):
@@ -273,7 +274,7 @@ class CobolParser:
                     # back to a best-effort normalization that never raises
                     # (merge_continued_literals=False) so a single bad literal
                     # no longer loses the whole program under COLLECT_ALL.
-                    source_lines = cleaned_source.splitlines()
+                    source_lines = split_source_lines(cleaned_source)
                     try:
                         cleaned_source = normalize_fixed_format(
                             source_lines, warnings=preprocess_warnings
@@ -379,7 +380,7 @@ class CobolParser:
                     unit.serialization_config = self.serialization_config
 
             self.statistics.end_timing()
-            self.statistics.lines_parsed = len(source.splitlines())
+            self.statistics.lines_parsed = len(split_source_lines(source))
             # The CLI's --stats reports lines_processed; keep both counters in step.
             self.statistics.lines_processed = self.statistics.lines_parsed
             self.statistics.tokens_processed = len(self.tokens)
@@ -978,7 +979,7 @@ def _detect_fixed_format(source: str) -> bool:
        anchor is what keeps genuine free-form source (which never puts a
        division header at column 8) from being dragged in by rule 2.
     """
-    lines = source.splitlines()
+    lines = split_source_lines(source)
     non_empty_lines = [line for line in lines if line.strip()]
 
     if len(non_empty_lines) < 3:
@@ -1134,7 +1135,7 @@ def parse_cobol(
     if preprocess_fixed:
         try:
             source_str = normalize_fixed_format(
-                source_str.splitlines(), warnings=normalize_warnings
+                split_source_lines(source_str), warnings=normalize_warnings
             )
             free_form = True
         except ValueError as exc:

@@ -15,6 +15,7 @@ import sys
 from dataclasses import dataclass
 from enum import IntEnum, auto
 
+from ._lines import split_source_lines
 from .models.ast_base import SourceLocation
 from .plugins.core import DialectType, ParseError
 
@@ -712,7 +713,7 @@ class _CobolLexerPure:
         self.source = source
         self.filename = filename
         self.dialect = dialect
-        self.lines = source.splitlines()
+        self.lines = split_source_lines(source)
         self.current_line = 0
         self.current_column = 0
         self.current_pos = 0
@@ -1969,7 +1970,7 @@ def _fixed_format_comment_tokens(
         # Code lines with program text produce no placeholder.
 
     next_placeholder = 0
-    for norm_idx, norm_line in enumerate(normalized.splitlines()):
+    for norm_idx, norm_line in enumerate(split_source_lines(normalized)):
         if norm_line:
             continue
         if next_placeholder >= len(placeholders):
@@ -2050,7 +2051,7 @@ def _tokenize_source(
             else preprocess_fixed
         )
         if should_normalize:
-            physical_lines = source.splitlines()
+            physical_lines = split_source_lines(source)
             errors: list[LexerError] = []
             normalize_warnings: list[str] = []
             try:

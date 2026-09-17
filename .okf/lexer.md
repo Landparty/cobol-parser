@@ -441,3 +441,12 @@ and `read_word_from_text` re-scans the whole word anyway. The old
 dash-then-letter disjunct in the decision expression was removed as dead:
 the segment scan already sets `has_alpha` for it, and when an exponent was
 consumed the character at `lookahead_pos` is E/e, never a dash.
+
+# Line splitting (2026-09-17)
+
+`CobolLexer.__init__` and the fixed-format placeholder walk split source
+with `cobolparser._lines.split_source_lines`, never `str.splitlines()`:
+the latter also breaks on form feed / NEL / U+2028 etc., which shifted
+every later token's line number by one. See `preprocessing.md`
+("Audit 2026-09-17").
+
