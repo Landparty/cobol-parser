@@ -517,6 +517,13 @@ unaffected (`Decimal(str(float))` round-trips); declared VALUEs, level-88
 literals, and solved witnesses now render digit-for-digit. Pinned by
 `tests/regression/test_bug_review_2026_08_12.py::TestWideNumericPrecision`.
 
+`COMP-1`/`COMP-2` do not go through `_format_number` at all — they carry no
+PICTURE to fit. `_float_value` draws one uniform over ±10,000 and hands it to
+`_render_float(value, single=...)`, which quantises through binary32 for a
+COMP-1 and renders to the 7 / 15 significant digits `decoding._decode_float`
+uses, so the CSV cell is exactly what the record image gives back. See the
+round-trip note under "Reading a record back".
+
 `_format_number`'s `allow_random_sign` guards a subtle trap: a signed field
 negates a freshly generated magnitude ~25 % of the time so negatives get
 exercised, but values the copybook *declared* (levels 1-2 above) must be
@@ -739,10 +746,21 @@ dispatched on the same `USAGE`-then-category ladder:
 leading zeros, the field's own `decimal_digits` places, a leading `-` only on
 a non-zero negative) — `_render_number()` exists solely to keep that
 equality, which is what makes `decode(encode(row)) == row` a property the
-suite can assert rather than a hope. Two columns are exempt **by
-construction**: a float comes back in shortest form (`2675.6950` reads as
-`2675.695`), and `FILLER` comes back empty because `encode_field()`
+suite can assert rather than a hope. **Floats are held to the same equality**
+by `values._render_float()`, which quantises a drawn value through the
+field's own storage and renders it to the digit count the decoder uses. Two
+things used to break it: a COMP-1 value drawn to four decimals over
+±10,000 needs nine significant digits and binary32 holds about seven
+(`-9419.8954` read back `-9419.896`), and the decoder's `%g` drops the
+trailing zero `%.4f` had added to a COMP-2 (`-7960.5120` read back
+`-7960.512`, roughly one row in ten). One column is still exempt **by
+construction**: `FILLER` comes back empty because `encode_field()`
 deliberately writes spaces there rather than the generated cell.
+
+The decoder's COMP-1 caveat (`result.caveats`) still stands and is about a
+*foreign* file: an arbitrary binary32 written by some other program carries
+more than the seven digits shown. It says nothing about a value this
+generator wrote, which is a fixed point of the round trip.
 
 **Sign conventions are read more widely than they are written.** The encoder
 writes one convention per charset; real files carry several, so `_zoned_digit`
