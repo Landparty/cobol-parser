@@ -5,11 +5,48 @@ from __future__ import annotations
 import random
 import re
 import string
+import struct
 from decimal import Decimal, InvalidOperation
 
 from .layout import FieldCategory, FieldSpec, _strip_literal_quotes
 from .options import DataGeneratorOptions
-from .storage import POINTER_USAGES
+from .storage import POINTER_USAGES, SINGLE_FLOAT_USAGES
+
+#: Significant digits each float usage can carry, mirroring
+#: ``decoding._FLOAT_DIGITS`` / ``_DOUBLE_DIGITS``.  The two must agree or the
+#: round trip cannot close -- see :func:`_render_float`.
+_SINGLE_FLOAT_DIGITS = 7
+_DOUBLE_FLOAT_DIGITS = 15
+
+#: Decimals a freely drawn float value is quantised to before storage.
+_FLOAT_DECIMALS = 4
+
+
+def _render_float(value: float, *, single: bool) -> str:
+    """Render *value* as the float field it is about to be stored in.
+
+    ``decode(encode(row)) == row`` is the generator's contract with
+    :mod:`.decoding`, and a float field is where a freely drawn value stops
+    honouring it unless the generator renders the value the same way the
+    decoder will.  Two separate ways it used to break:
+
+    * **COMP-1** is binary32, which holds about seven significant digits,
+      while a value drawn to four decimals over +/-10,000 needs nine.
+      ``-9419.8954`` written into four bytes read back as ``-9419.896``.
+    * **COMP-2** recovers its value exactly, but the decoder renders it with
+      ``%g``, which drops trailing zeros -- so a generated ``-7960.5120``
+      read back as ``-7960.512``.  Roughly one COMP-2 value in ten.
+
+    Either way the CSV disagreed with the record image built from it.
+    Quantising through the field's own storage and rendering to the digit
+    count the decoder uses makes the value a fixed point of the round trip.
+    """
+    digits = _SINGLE_FLOAT_DIGITS if single else _DOUBLE_FLOAT_DIGITS
+    stored = round(value, _FLOAT_DECIMALS)
+    if single:
+        stored = struct.unpack("<f", struct.pack("<f", stored))[0]
+    return f"{stored:.{digits}g}"
+
 
 # Figurative constants: the standard COBOL literal values
 _FIGURATIVE_CONSTANTS: dict[str, str] = {
@@ -477,8 +514,10 @@ class ValueFactory:
         return None
 
     def _float_value(self, spec: FieldSpec) -> str:
-        del spec  # COMP-1/COMP-2 carry no picture to constrain the value.
-        return f"{self._rng.uniform(-10_000, 10_000):.4f}"
+        # COMP-1/COMP-2 carry no picture to constrain the value.
+        value = self._rng.uniform(-10_000, 10_000)
+        single = (spec.usage or "").upper() in SINGLE_FLOAT_USAGES
+        return _render_float(value, single=single)
 
     def _format_number(
         self,

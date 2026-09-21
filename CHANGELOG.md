@@ -130,6 +130,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Generated `COMP-1`/`COMP-2` values now survive the record round trip.**
+  `decode(encode(row)) == row` is the contract between `gen-data` and
+  `decode`, and a float column broke it two ways. `ValueFactory._float_value`
+  drew a value to four decimals over +/-10,000 and rendered it with `%.4f`;
+  `COMP-1` is binary32 and holds about seven significant digits, not the nine
+  that needs, so `-9419.8954` written into four bytes read back as
+  `-9419.896`. `COMP-2` recovers its value exactly but the decoder renders it
+  with `%g`, which drops the trailing zero `%.4f` adds -- a generated
+  `-7960.5120` read back as `-7960.512`, roughly one row in ten. Either way
+  the CSV disagreed with the record image built from it. A new
+  `_render_float()` quantises the drawn value through the field's own storage
+  and renders it to the same 7 / 15 significant digits
+  `decoding._decode_float` uses, making the value a fixed point of the round
+  trip. The decoder's `COMP-1` caveat is unchanged and still correct: it is
+  about a *foreign* file, whose binary32 can carry more than the seven digits
+  shown.
+
 * **`move-type-check` no longer counts `MOVE ZERO`/`SPACES`/etc. as
   unresolved.** A figurative-constant MOVE source was always skipped and
   added to `unresolved_count`, regardless of whether copybooks resolved --

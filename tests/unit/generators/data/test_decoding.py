@@ -90,14 +90,8 @@ def _decoder(source: str, opts: EncodingOptions, **kwargs) -> RecordDecoder:
 # ---------------------------------------------------------------------------
 
 
-#: The one column of EVERY_USAGE that does not round-trip *as text*: a float
-#: is rendered in shortest form on the way back, so the generator's
-#: ``2675.6950`` reads as ``2675.695``. The number is identical; only the
-#: trailing zero the generator's own ``%.4f`` added is gone, and inventing it
-#: back would mean claiming a precision the bytes do not carry.
-_FLOAT_COLUMN = "W-DOUBLE"
-
-#: FILLER is the other one, and by the encoder's own deliberate choice: it
+#: FILLER is the one column of EVERY_USAGE that does not round-trip, and by
+#: the encoder's own deliberate choice: it
 #: writes spaces rather than whatever the value generator put in a FILLER
 #: cell, because FILLER names nothing a program reads. So the bytes really
 #: do not carry the generated value, and a decoder that produced it anyway
@@ -109,8 +103,6 @@ def _compare_row(decoded: list[str], expected: list[str], columns: list[str]):
     for value, cell, column in zip(decoded, expected, columns, strict=True):
         if column.startswith(_DISCARDED_COLUMN):
             assert value == ""
-        elif column == _FLOAT_COLUMN:
-            assert float(value) == pytest.approx(float(cell))
         else:
             assert value == cell
 
@@ -470,3 +462,46 @@ def test_the_endian_option_reaches_comp_5():
     )
     assert big.value == "256"
     assert little.value == "65536"
+
+
+FLOATS = """
+       01  FLOAT-REC.
+           05  F-SINGLE    COMP-1.
+           05  F-DOUBLE    COMP-2.
+           05  F-TAG       PIC X(4).
+"""
+
+
+@pytest.mark.parametrize("charset", [Charset.ASCII, Charset.EBCDIC])
+@pytest.mark.parametrize("endian", [Endian.BIG, Endian.LITTLE])
+def test_generated_float_columns_round_trip_exactly(charset, endian):
+    """A *generated* float value reads back as the same text, digit for digit.
+
+    The decoder renders a COMP-1 to seven significant digits and a COMP-2
+    with ``%g``; the generator used to draw a four-decimal value over
+    +/-10,000 and render it with ``%.4f``, which agrees with neither.
+    ``-9419.8954`` in four bytes came back ``-9419.896`` (binary32 cannot
+    hold nine digits) and a COMP-2 ``-7960.5120`` came back ``-7960.512``
+    (``%g`` drops the trailing zero) -- so a generated file disagreed with
+    its own decoding in roughly one COMP-2 row in ten and in nearly every
+    COMP-1 row. The generator now renders a drawn value the way the field
+    will give it back.
+    """
+    dataset = _dataset(FLOATS, rows=400)
+    opts = EncodingOptions(charset=charset, endian=endian)
+    result = _decoder(FLOATS, opts).decode_bytes(dataset.to_records(opts))
+
+    assert result.error_count == 0
+    assert result.to_csv() == dataset.to_csv()
+
+
+def test_a_generated_comp_1_survives_binary32():
+    """The value in the CSV is one binary32 can hold, not a rounded-off one."""
+    import struct
+
+    dataset = _dataset(FLOATS, rows=200)
+    single = dataset.header.index("F-SINGLE")
+    for row in dataset.rows:
+        value = float(row[single])
+        stored = struct.unpack("<f", struct.pack("<f", value))[0]
+        assert f"{stored:.7g}" == row[single]
