@@ -22,6 +22,36 @@ _IND_IDX    = 6   # INDICATOR_COL - 1
 _TEXT_START = 7   # TEXT_START_COL - 1
 _TEXT_END   = 72  # TEXT_END_COL
 _ID_END     = 80  # IDENTIFICATION_END_COL
+_MIN_ID_STAMP_EVIDENCE = 3  # MIN_ID_STAMP_EVIDENCE_LINES
+
+
+cdef bint _has_identification_stamp_convention(list lines):
+    """True when *lines* demonstrably stamp a per-line numeric
+    identification code into columns 73-80 while keeping program text
+    within column 72. Mirrors the pure-Python
+    `_has_identification_stamp_convention`: only lines whose column 72 is
+    blank (nothing could have been split there), whose columns-73+ tail is
+    non-empty and all digits, and whose content stays inside the
+    traditional 80-column width count as evidence; `_MIN_ID_STAMP_EVIDENCE`
+    of them settle it. Returns as soon as the threshold is met."""
+    cdef Py_ssize_t j, n = len(lines)
+    cdef int evidence = 0
+    cdef str candidate, tail
+    for j in range(n):
+        candidate = lines[j].rstrip("\n").expandtabs(8)
+        if len(candidate) <= _TEXT_END:
+            continue
+        if len(candidate.rstrip()) > _ID_END:
+            continue
+        if not candidate[_TEXT_END - 1].isspace():
+            continue
+        tail = candidate[_TEXT_END:].strip()
+        if not tail.isdigit():
+            continue
+        evidence += 1
+        if evidence >= _MIN_ID_STAMP_EVIDENCE:
+            return True
+    return False
 
 
 cdef tuple _next_code_line(list lines, Py_ssize_t idx,
@@ -96,6 +126,12 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     # literal, so a word split across a comment rejoins.
     cdef Py_ssize_t next_code_idx = -1
     cdef bint next_code_is_cont = False
+    # Mirrors the pure-Python `stamps_identification_area`: whether this
+    # file stamps a numeric identification code into columns 73-80. A
+    # whole-file property, so it is computed at most once -- -1 means "not
+    # asked yet", 0/1 the cached answer.
+    cdef int stamps_identification_area = -1
+    cdef bint is_short_id_stamp
 
     if isinstance(lines, str):
         lines = split_source_lines(lines)
@@ -219,11 +255,31 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 is_numeric_id_stamp = (
                     content_len == _ID_END and dropped.isdigit()
                 )
+                # Mirrors the pure-Python rule: a *shorter* all-digit tail
+                # is the same convention whenever the file itself proves it
+                # uses one (a shop change-tracking stamp is commonly 4-6
+                # digits at column 73, not the full 8-column field). Per
+                # line that is indistinguishable from a data name's own
+                # trailing digits getting cut; across the file it is not,
+                # so the question is asked of the file.
+                is_short_id_stamp = (
+                    not is_numeric_id_stamp
+                    and content_len <= _ID_END
+                    and dropped.isdigit()
+                )
                 # Mirrors the pure-Python rule: a dropped tail that is only
                 # the statement-terminating period (e.g. a banner-style
                 # VALUE literal whose closing quote lands on column 72)
                 # closed cleanly -- nothing was actually split mid-token.
                 is_bare_terminal_period = dropped == "."
+                if mid_token and is_short_id_stamp:
+                    # Only now is the whole-file scan worth its cost.
+                    if stamps_identification_area < 0:
+                        stamps_identification_area = (
+                            1 if _has_identification_stamp_convention(lines) else 0
+                        )
+                    if stamps_identification_area == 1:
+                        is_numeric_id_stamp = True
                 if mid_token and not is_numeric_id_stamp and not is_bare_terminal_period:
                     warnings.append(
                         f"Line {line_no}: content beyond column {_TEXT_END} "

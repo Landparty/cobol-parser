@@ -78,9 +78,34 @@ satisfying the mid-token shape (both columns non-blank) even though nothing
 was split: the string closed cleanly, and the dropped tail is *only* the
 period, a single-character token the parser already tolerates missing
 entirely. See ``TestBareTerminalPeriodDoesNotWarn`` below.
+
+**Short change-tracking stamps are a whole-file property (2026-09-21):** the
+numeric-stamp gate above only excuses a tail that fills columns 73-80
+*exactly*, because per line a shorter all-digit tail is indistinguishable
+from a data name's own trailing digits getting cut. Reported against a real
+mainframe program whose change-control tool (Panvalet/Librarian/Endevor
+style) stamps a **5-digit** code at column 73 -- non-sequential
+(``00551``, ``00257``, ``01641``), columns 1-6 blank -- so every line whose
+statement happened to end exactly on column 72 warned
+``content beyond column 72 was dropped mid-token``. Nothing was split:
+column 73 was always the stamp. Those warnings are load-bearing downstream
+(mockymock refuses fail-closed on any ``ParseResult.warnings`` entry), so
+the whole program was rejected.
+
+Per line the shape is genuinely ambiguous; across the file it is not. A file
+that uses the convention also carries lines where the stamp is preceded by a
+blank at column 72 -- there nothing *could* have been split, so the tail is
+provably identification-area content. ``_has_identification_stamp_convention``
+counts those, and ``MIN_ID_STAMP_EVIDENCE_LINES`` (3) of them let the
+shorter all-digit tails be read the same way. See
+``TestShortIdentificationStampConvention`` below.
 """
 
 from cobolparser.preprocess import _normalize_fixed_format_pure, normalize_fixed_format
+from cobolparser.preprocess._normalize import (
+    MIN_ID_STAMP_EVIDENCE_LINES,
+    _has_identification_stamp_convention,
+)
 
 IMPLS = [
     ("fast", normalize_fixed_format),
@@ -302,6 +327,145 @@ class TestBareTerminalPeriodDoesNotWarn:
             impl([line], warnings=warnings)
             assert len(warnings) == 1, name
             assert ".B" in warnings[0], name
+
+
+def _stamped(text: str, stamp: str, *, start_col: int = 8) -> str:
+    """A fixed-format line holding *text* from *start_col*, blank-padded to
+    column 72, with *stamp* in the identification area from column 73."""
+    body = " " * (start_col - 1) + text
+    assert len(body) <= 72, len(body)
+    return body.ljust(72) + stamp
+
+
+def _stamped_flush(text: str, stamp: str) -> str:
+    """The ambiguous shape: *text* ends exactly on column 72, so *stamp*
+    abuts it with no separating blank (columns 72 and 73 both non-blank)."""
+    body = " " * (72 - len(text)) + text
+    assert len(body) == 72, len(body)
+    return body + stamp
+
+
+class TestShortIdentificationStampConvention:
+    """A shop change-tracking stamp shorter than the full 8-column
+    identification field: excused when the *file* proves it uses one, still
+    flagged when it doesn't."""
+
+    # Three unambiguous stamped lines (column 72 blank, so nothing could
+    # have been split) establish the convention for the file.
+    EVIDENCE = [
+        _stamped("IDENTIFICATION DIVISION.", "00100"),
+        _stamped("PROGRAM-ID. HY11301.", "00110"),
+        _stamped("DATA DIVISION.", "00120"),
+    ]
+
+    def test_reported_repro_does_not_warn(self):
+        # The reported program's three shapes, each ending exactly on
+        # column 72 with a 5-digit stamp at column 73: a PICTURE clause's
+        # period, a VALUE literal's closing quote + period, and a MOVE's
+        # receiving field name.
+        lines = self.EVIDENCE + [
+            _stamped_flush(
+                "10  WS-FORM-DATE-MM REDEFINES WS-FORM-DATE-MM-X PIC 9(2).", "00551"
+            ),
+            _stamped_flush(
+                "05  CST-ABEND-MSG-1BB PIC X(24) VALUE 'COMMUNIQUEZ AU SAC'.", "00257"
+            ),
+            _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01641"),
+        ]
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            out = impl(lines, warnings=warnings)
+            assert warnings == [], name
+            # The truncation itself is unchanged -- only the diagnostic is.
+            assert "PIC 9(2)." in out, name
+            assert "COM-HY11301-ECHEANCE-REELLE" in out, name
+            assert "00551" not in out, name
+
+    def test_below_evidence_threshold_still_warns(self):
+        # One fewer unambiguous stamped line than the threshold: a couple of
+        # numbers dangling past column 72 is an authoring accident, not a
+        # convention, so the mid-token rule stands.
+        lines = self.EVIDENCE[: MIN_ID_STAMP_EVIDENCE_LINES - 1] + [
+            _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01641")
+        ]
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl(lines, warnings=warnings)
+            assert len(warnings) == 1, name
+            assert "01641" in warnings[0], name
+
+    def test_non_numeric_tail_still_warns_in_a_stamped_file(self):
+        # The gate is shaped on the file's own stamp: a dropped tail that is
+        # not a stamp at all (the reviewer's WS-PARM-DORM-DAYS split) is a
+        # real truncation and must still be flagged, stamped file or not.
+        lines = self.EVIDENCE + [_stamped_flush("MOVE SPACES TO WS-PARM-DORM-D", "AYS")]
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl(lines, warnings=warnings)
+            assert len(warnings) == 1, name
+            assert "'AYS'" in warnings[0], name
+
+    def test_tail_past_column_80_still_warns_in_a_stamped_file(self):
+        # A numeric tail that overruns the 8-column identification area is
+        # not the file's stamp either: the line is 81 columns wide, past the
+        # traditional punch-card maximum, so it still warns.
+        lines = self.EVIDENCE + [_stamped_flush("MOVE 1 TO WS-A", "012345678")]
+        assert len(lines[-1]) == 81
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl(lines, warnings=warnings)
+            assert len(warnings) == 1, name
+            assert "'012345678'" in warnings[0], name
+
+    def test_evidence_requires_a_blank_column_72(self):
+        # Lines of the ambiguous shape can never vouch for themselves: a
+        # file made only of them has no evidence at all and every line warns.
+        lines = [
+            _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01641"),
+            _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLF", "01642"),
+            _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLG", "01643"),
+            _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLH", "01644"),
+        ]
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl(lines, warnings=warnings)
+            assert len(warnings) == 4, name
+
+    def test_helper_counts_only_unambiguous_stamped_lines(self):
+        assert _has_identification_stamp_convention(self.EVIDENCE) is True
+        assert _has_identification_stamp_convention(self.EVIDENCE[:-1]) is False
+        # Non-numeric identification text (NIST's per-line test-case id) is
+        # not the numeric-stamp convention this gate recognizes.
+        assert (
+            _has_identification_stamp_convention(
+                [_stamped("DISPLAY 'X'.", "IX2094.2")] * 5
+            )
+            is False
+        )
+        # Content past column 80 is not identification-area text at all.
+        assert (
+            _has_identification_stamp_convention(
+                [_stamped("DISPLAY 'X'.", "012345678")] * 5
+            )
+            is False
+        )
+
+    def test_fast_and_pure_agree_on_multi_line_files(self):
+        cases = [
+            self.EVIDENCE
+            + [_stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01641")],
+            self.EVIDENCE[:2]
+            + [_stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01641")],
+            self.EVIDENCE + [_stamped_flush("MOVE SPACES TO WS-PARM-DORM-D", "AYS")],
+            self.EVIDENCE + [_stamped_flush("MOVE 1 TO WS-A", "012345678")],
+        ]
+        for lines in cases:
+            fast_warnings: list[str] = []
+            pure_warnings: list[str] = []
+            fast_out = normalize_fixed_format(lines, warnings=fast_warnings)
+            pure_out = _normalize_fixed_format_pure(lines, warnings=pure_warnings)
+            assert fast_out == pure_out, lines
+            assert fast_warnings == pure_warnings, lines
 
 
 class TestWordBoundaryOverflowWarns:

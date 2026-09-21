@@ -310,6 +310,53 @@ DEBUG_INDICATORS = frozenset({"D", "d"})  # debug lines (flag-gated in normalize
 VERSION_TAG_INDICATORS = frozenset({"V", "v"})  # version tags (flag-gated too)
 ALL_COMMENT_INDICATORS = COMMENT_INDICATORS | DEBUG_INDICATORS | VERSION_TAG_INDICATORS
 
+# How many *unambiguous* stamped lines a file must show before its
+# columns-73+ numeric tails are read as an identification-area stamping
+# convention rather than as split code. See
+# _has_identification_stamp_convention below.
+MIN_ID_STAMP_EVIDENCE_LINES = 3
+
+
+def _has_identification_stamp_convention(lines: list[str]) -> bool:
+    """True when *lines* demonstrably stamp a per-line numeric identification
+    code into columns 73-80 while keeping all program text within column 72.
+
+    This is the file-level counterpart to the columns-1-6 sequence-number
+    gate in ``normalize_fixed_format``: both answer "does this deck use the
+    traditional 80-column convention, where columns 73-80 are an
+    identification field the compiler ignores unconditionally?" -- the
+    question the per-line column-72/73 shape cannot answer on its own.
+
+    Only *unambiguous* lines count as evidence: column 72 blank (so no token
+    could have been split there), a non-empty all-digit tail in columns 73
+    onward, and total content within the traditional 80-column width. On
+    such a line the tail cannot be anything but identification-area content,
+    whatever columns 1-6 hold. ``MIN_ID_STAMP_EVIDENCE_LINES`` of them is
+    the threshold: one or two numbers dangling past column 72 is an
+    authoring accident, a whole deck of them is a convention.
+
+    Returns as soon as the threshold is met, so a stamped file pays for a
+    handful of lines rather than a full scan.
+    """
+    evidence = 0
+    for raw in lines:
+        candidate = raw.rstrip("\n").expandtabs(8)
+        if len(candidate) <= TEXT_END_COL:
+            continue
+        if len(candidate.rstrip()) > IDENTIFICATION_END_COL:
+            continue
+        if not candidate[TEXT_END_COL - 1].isspace():
+            # Column 72 non-blank: this line is itself ambiguous (it is the
+            # very shape under investigation), so it can never be evidence.
+            continue
+        tail = candidate[TEXT_END_COL:].strip()
+        if not tail.isdigit():
+            continue
+        evidence += 1
+        if evidence >= MIN_ID_STAMP_EVIDENCE_LINES:
+            return True
+    return False
+
 
 def strip_compiler_directives(
     source: str, *, preserve_line_numbers: bool = True
@@ -584,6 +631,11 @@ def normalize_fixed_format(
     # a comment (``MOVE WS-CO`` / ``* note`` / ``-    UNT TO X``) must rejoin.
     next_code_idx = -1
     next_code_is_cont = False
+    # Whether this file stamps a numeric identification code into columns
+    # 73-80 (see _has_identification_stamp_convention). None until the first
+    # line that would warn about a short all-digit tail asks for it -- the
+    # answer is a whole-file property, so it is computed once and reused.
+    stamps_identification_area: bool | None = None
 
     def _is_comment_indicator(ch: str) -> bool:
         return (
@@ -780,6 +832,21 @@ def normalize_fixed_format(
                 is_numeric_id_stamp = (
                     content_len == IDENTIFICATION_END_COL and dropped.isdigit()
                 )
+                # A *shorter* all-digit tail is the same convention whenever
+                # the file itself proves it uses one -- a shop's
+                # change-tracking stamp (Panvalet/Librarian/Endevor and
+                # friends) is commonly 4-6 digits at column 73, not the full
+                # 8-column field, and jumps around non-sequentially rather
+                # than counting lines. Per line that is indistinguishable
+                # from a data name's own trailing digits getting cut, which
+                # is why the rule above demands the full width; across the
+                # file it is not, so the question is asked of the file. See
+                # _has_identification_stamp_convention.
+                is_short_id_stamp = (
+                    not is_numeric_id_stamp
+                    and content_len <= IDENTIFICATION_END_COL
+                    and dropped.isdigit()
+                )
                 # A dropped tail that is *only* the statement-terminating
                 # period (nothing else survives the rstrip) never corrupts a
                 # token: whatever ended at column 72 -- most commonly a
@@ -792,6 +859,16 @@ def normalize_fixed_format(
                 # split -- and floods well-formed source whose closing quote
                 # merely lands on column 72 with a spurious warning.
                 is_bare_terminal_period = dropped == "."
+                if mid_token and is_short_id_stamp:
+                    # Only now is the whole-file scan worth its cost: a file
+                    # with no such line never pays for it, and one that has
+                    # them pays once.
+                    if stamps_identification_area is None:
+                        stamps_identification_area = (
+                            _has_identification_stamp_convention(lines)
+                        )
+                    if stamps_identification_area:
+                        is_numeric_id_stamp = True
                 if (
                     mid_token
                     and not is_numeric_id_stamp
