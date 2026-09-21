@@ -38,6 +38,17 @@ _PROGRAM = """       IDENTIFICATION DIVISION.
 """
 
 
+def _stamped_line(
+    text: str, stamp: str, *, start_col: int = 8, flush: bool = False
+) -> str:
+    """A fixed-format line carrying *stamp* in the identification area from
+    column 73. ``flush=True`` right-aligns *text* so it ends exactly on
+    column 72, leaving no blank between it and the stamp."""
+    body = " " * ((72 - len(text)) if flush else (start_col - 1)) + text
+    assert len(body) <= 72, len(body)
+    return body.ljust(72) + stamp
+
+
 def _get_table_item(result):
     section = result.ast.get_division("DATA").get_section_by_name("WORKING-STORAGE")
     rec = section.data_items[0]
@@ -123,3 +134,50 @@ class TestInitialWarningsConsumedOnce:
 
         second = parser.parse(self._CLEAN)
         assert second.warnings == []
+
+
+class TestShortChangeStampDeckParsesWarningFree:
+    """A whole program stamped with a short (5-digit) change-tracking code in
+    columns 73-77, columns 1-6 blank -- the 2026-09-21 report. Every line
+    whose statement ended exactly on column 72 used to warn ``dropped
+    mid-token`` even though column 73 was never anything but the stamp, and
+    a single warning is enough for a downstream consumer to refuse the
+    program outright (mockymock refuses fail-closed on any
+    ``ParseResult.warnings`` entry). Pins the end-to-end outcome: no
+    warnings, and the AST still holds what the source really said."""
+
+    _PROGRAM = "\n".join(
+        [
+            _stamped_line("IDENTIFICATION DIVISION.", "00100"),
+            _stamped_line("PROGRAM-ID. HY11301.", "00110"),
+            _stamped_line("DATA DIVISION.", "00120"),
+            _stamped_line("WORKING-STORAGE SECTION.", "00130"),
+            _stamped_line("01  WS-FORM-DATE-MM-X       PIC X(2).", "00540"),
+            _stamped_line(
+                "10  WS-FORM-DATE-MM REDEFINES WS-FORM-DATE-MM-X PIC 9(2).",
+                "00551",
+                flush=True,
+            ),
+            _stamped_line("01  COM-HY11301-ECHEANCE-REELLE PIC 9(8).", "01600"),
+            _stamped_line("PROCEDURE DIVISION.", "01700"),
+            _stamped_line("MAIN-PARA.", "01800"),
+            _stamped_line(
+                "MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01641", flush=True
+            ),
+            _stamped_line("STOP RUN.", "01900", start_col=12),
+        ]
+    )
+
+    def test_parses_without_warnings_or_errors(self):
+        result = parse_cobol(self._PROGRAM, error_recovery=ErrorRecoveryMode.FAIL_FAST)
+        assert result.warnings == [], result.warnings
+        assert result.errors == [], result.errors
+        assert result.success
+
+    def test_stamp_is_not_mistaken_for_code(self):
+        result = parse_cobol(self._PROGRAM, error_recovery=ErrorRecoveryMode.FAIL_FAST)
+        moves = result.ast.find_all_by_type("MoveStatement")
+        assert len(moves) == 1
+        # The receiving field ends exactly on column 72; the stamp that
+        # abuts it at column 73 is identification-area text, not part of it.
+        assert "01641" not in result.ast.to_json()

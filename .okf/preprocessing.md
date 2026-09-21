@@ -276,6 +276,43 @@ flagged as a likely authoring mistake — is unaffected. Pinned by
 `test_numeric_identification_stamp_still_warns_past_traditional_width` in
 `tests/regression/test_normalize_column_overflow_warning.py`.
 
+**A *shorter* numeric stamp is a whole-file question** (added 2026-09-21).
+The gate above only excuses a tail that fills columns 73-80 *exactly*,
+because per line a shorter all-digit tail is indistinguishable from a data
+name's own trailing digits getting cut. Reported against a real mainframe
+program whose change-control tool (Panvalet/Librarian/Endevor style) stamps
+a **5-digit** code at column 73 — non-sequential (`00551`, `00257`,
+`01641`: it stamps physical lines as they change, it does not count them) —
+with columns 1-6 blank. Every line whose statement happened to end exactly
+on column 72 warned, ~19 of them in one program; nothing was split, column
+73 was always the stamp. Downstream that is fatal rather than noisy:
+mockymock refuses a program fail-closed on *any* `ParseResult.warnings`
+entry, so the whole program was rejected.
+
+Per line the shape is genuinely ambiguous; across the file it is not. A file
+using the convention also carries lines where the stamp is preceded by a
+blank at column 72 — there nothing *could* have been split, so the tail is
+provably identification-area content whatever columns 1-6 hold.
+`_has_identification_stamp_convention(lines)` counts those unambiguous lines
+(column 72 blank, non-empty all-digit tail from column 73, total content
+within column 80) and `MIN_ID_STAMP_EVIDENCE_LINES` (3) of them settle it:
+one or two numbers dangling past column 72 is an authoring accident, a whole
+deck of them is a convention. Rule 1 then treats a short all-digit tail the
+same as the full-width one.
+
+Cost and scope: the scan is lazy and computed at most once per
+`normalize_fixed_format` call — only a line that *would* warn about a short
+all-digit tail asks for it, and the scan returns at the third evidence line —
+so a file without the shape never pays. The gate is shaped on the file's own
+stamp, so a non-numeric dropped tail (the reviewer's `WS-PARM-DORM-D` +
+`AYS` split) and a numeric run past column 80 still warn in a stamped file.
+Pinned by `TestShortIdentificationStampConvention` in
+`tests/regression/test_normalize_column_overflow_warning.py` (including
+fast/pure parity over *multi-line* inputs — the older parity cases are all
+single lines, which by construction can never establish the convention) and
+end-to-end by `TestShortChangeStampDeckParsesWarningFree` in
+`tests/regression/test_fixed_format_word_boundary_overflow.py`.
+
 When `warnings` is passed a list, each qualifying line appends one message
 to it — `f"Line {n}: content beyond column {TEXT_END_COL} was dropped
 mid-token: {dropped!r}"` for rule 1, or `f"Line {n}: content beyond column

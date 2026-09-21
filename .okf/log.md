@@ -14,6 +14,34 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-21 -- a short columns-73+ change stamp is not truncated code
+
+Reported from a mockymock session: a real mainframe program was rejected
+outright because `normalize_fixed_format` emitted ~19 `content beyond
+column 72 was dropped mid-token` warnings, and mockymock refuses a program
+fail-closed on *any* `ParseResult.warnings` entry. Nothing had been
+truncated. The file's change-control tool stamps a 5-digit code at column
+73 (`00551`, `00257`, `01641` -- it stamps physical lines as they change,
+so the numbers jump around) with columns 1-6 blank, and every line whose
+statement happened to end exactly on column 72 hit the mid-token shape.
+
+The existing numeric-stamp gate only excused a tail filling columns 73-80
+*exactly*, because per line a shorter all-digit tail is indistinguishable
+from a data name's own trailing digits getting cut. That ambiguity is real
+per line and absent across the file: a stamped deck also carries lines
+where the stamp is preceded by a blank at column 72, where nothing *could*
+have been split. `_has_identification_stamp_convention()` counts those, and
+`MIN_ID_STAMP_EVIDENCE_LINES` (3) of them let the ambiguous lines be read
+the same way. Lazy -- only a line that would warn asks for the scan, and it
+returns at the third evidence line. A non-numeric tail and a numeric run
+past column 80 still warn, stamped file or not. Mirrored in
+`_preprocess_fast.pyx` (and its checked-in `.c`), with fast/pure parity
+pinned over *multi-line* inputs, since the older parity cases are single
+lines that can never establish a convention. Details in
+[preprocessing.md](preprocessing.md); pinned by
+`TestShortIdentificationStampConvention` and
+`TestShortChangeStampDeckParsesWarningFree`.
+
 ## 2026-09-17 -- audit: the text-manipulation stages, read against the IBM rules
 
 A second repo-wide audit, this time of everything that runs before the

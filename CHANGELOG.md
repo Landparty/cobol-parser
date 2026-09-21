@@ -130,6 +130,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A short change-tracking stamp in columns 73-80 no longer reads as
+  truncated code.** `normalize_fixed_format`'s mid-token overflow warning
+  excused an all-digit identification-area tail only when it filled columns
+  73-80 exactly, because per line a shorter one is indistinguishable from a
+  data name's own trailing digits getting cut. Real shops stamp shorter
+  codes: a reported mainframe program carried a 5-digit, non-sequential
+  change-control stamp (`00551`, `00257`, `01641`) at column 73 with columns
+  1-6 blank, so ~19 lines whose statement ended exactly on column 72 warned
+  `content beyond column 72 was dropped mid-token` when nothing had been
+  split. Downstream that was fatal rather than noisy — `mockymock` refuses a
+  program fail-closed on any `ParseResult.warnings` entry, so the whole
+  program was rejected. The question is now asked of the *file* instead of
+  the line: `_has_identification_stamp_convention()` counts the lines that
+  are unambiguous (column 72 blank, so nothing could have been split, with
+  an all-digit tail from column 73 inside the 80-column width), and three of
+  them let the ambiguous lines be read the same way. The scan is lazy and
+  runs at most once per call, so a file without the shape pays nothing. A
+  non-numeric dropped tail and a numeric run past column 80 still warn,
+  stamped file or not. Mirrored in the Cython `_preprocess_fast` path.
 * **Generated `COMP-1`/`COMP-2` values now survive the record round trip.**
   `decode(encode(row)) == row` is the contract between `gen-data` and
   `decode`, and a float column broke it two ways. `ValueFactory._float_value`
