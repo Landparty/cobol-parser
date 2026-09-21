@@ -25,13 +25,32 @@ _ID_END     = 80  # IDENTIFICATION_END_COL
 _MIN_ID_STAMP_EVIDENCE = 3  # MIN_ID_STAMP_EVIDENCE_LINES
 
 
+cdef bint _is_numeric_id_stamp_text(str tail):
+    """True when *tail* has the shape of a numeric identification-area
+    stamp: at least one digit, and nothing but digits and blanks. Mirrors
+    the pure-Python `_is_numeric_id_stamp_text` -- blanks are part of the
+    shape, because a change-control tool lays the identification field out
+    in fixed sub-fields (a real observed one writes ``01636  0``). Any
+    letter or punctuation still fails it."""
+    cdef Py_ssize_t i, n = len(tail)
+    cdef bint saw_digit = False
+    cdef str ch
+    for i in range(n):
+        ch = tail[i]
+        if ch.isdigit():
+            saw_digit = True
+        elif not ch.isspace():
+            return False
+    return saw_digit
+
+
 cdef bint _has_identification_stamp_convention(list lines):
     """True when *lines* demonstrably stamp a per-line numeric
     identification code into columns 73-80 while keeping program text
     within column 72. Mirrors the pure-Python
     `_has_identification_stamp_convention`: only lines whose column 72 is
     blank (nothing could have been split there), whose columns-73+ tail is
-    non-empty and all digits, and whose content stays inside the
+    stamp-shaped (`_is_numeric_id_stamp_text`), and whose content stays inside the
     traditional 80-column width count as evidence; `_MIN_ID_STAMP_EVIDENCE`
     of them settle it. Returns as soon as the threshold is met."""
     cdef Py_ssize_t j, n = len(lines)
@@ -46,7 +65,7 @@ cdef bint _has_identification_stamp_convention(list lines):
         if not candidate[_TEXT_END - 1].isspace():
             continue
         tail = candidate[_TEXT_END:].strip()
-        if not tail.isdigit():
+        if not _is_numeric_id_stamp_text(tail):
             continue
         evidence += 1
         if evidence >= _MIN_ID_STAMP_EVIDENCE:
@@ -249,13 +268,15 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 # stamp (e.g. IBM Z Open Editor/ISPF-style auto numbering
                 # like 03050009, always the full 8-column field) even when
                 # columns 1-6 are blank -- not an actual token split. A
-                # shorter all-digit tail (a data name's own trailing digits
-                # spilling past 72) and a mixed alnum tail (e.g. NIST's
-                # IX2094.2 test-case id) both still warn.
+                # mixed alnum tail (e.g. NIST's IX2094.2 test-case id) still
+                # warns. The shape allows blanks *between* digits
+                # (`01636  0`), because a change-control tool lays the
+                # identification field out in fixed sub-fields -- see
+                # _is_numeric_id_stamp_text.
                 is_numeric_id_stamp = (
-                    content_len == _ID_END and dropped.isdigit()
+                    content_len == _ID_END and _is_numeric_id_stamp_text(dropped)
                 )
-                # Mirrors the pure-Python rule: a *shorter* all-digit tail
+                # Mirrors the pure-Python rule: a *shorter* stamp-shaped tail
                 # is the same convention whenever the file itself proves it
                 # uses one (a shop change-tracking stamp is commonly 4-6
                 # digits at column 73, not the full 8-column field). Per
@@ -265,7 +286,7 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 is_short_id_stamp = (
                     not is_numeric_id_stamp
                     and content_len <= _ID_END
-                    and dropped.isdigit()
+                    and _is_numeric_id_stamp_text(dropped)
                 )
                 # Mirrors the pure-Python rule: a dropped tail that is only
                 # the statement-terminating period (e.g. a banner-style

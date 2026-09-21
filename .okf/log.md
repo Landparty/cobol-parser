@@ -14,6 +14,27 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-21 (follow-up) -- the stamp shape admits blanks between digits
+
+Re-running the reported program against the fix below took its 19 warnings
+down to 3. The residue was a second stamp layout in the same file: the
+identification field laid out in *sub-fields* -- `01636  0`, a 5-digit
+change id, two blanks, a 1-digit level, filling columns 73-80 exactly.
+Both gates tested the tail with a plain `str.isdigit()`, which an embedded
+blank fails, so the shop's own stamp still read as split code there.
+
+`_is_numeric_id_stamp_text(tail)` is now the one definition of the shape --
+at least one digit, nothing but digits and blanks -- used by the full-width
+gate, the short-tail gate and the evidence test alike. Blanks are part of
+an identification field's layout, not noise around it. Nothing the shape
+excluded before is admitted now: any letter or punctuation still fails it
+(`IX2094.2`, `AYS`, `ON WS-COUNT.`), and a sub-fielded run past column 80
+still warns. The three reported lines are full-80-width, so the full-width
+gate settles them with no file evidence needed; the whole-file gate covers
+the shorter sub-fielded case. Corpus sweep unchanged at 3 genuine hits.
+Pinned by `TestSubfieldedNumericStamp` and
+`TestSubfieldedChangeStampDeckParsesWarningFree`.
+
 ## 2026-09-21 -- a short columns-73+ change stamp is not truncated code
 
 Reported from a mockymock session: a real mainframe program was rejected

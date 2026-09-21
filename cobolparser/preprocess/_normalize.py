@@ -317,6 +317,24 @@ ALL_COMMENT_INDICATORS = COMMENT_INDICATORS | DEBUG_INDICATORS | VERSION_TAG_IND
 MIN_ID_STAMP_EVIDENCE_LINES = 3
 
 
+def _is_numeric_id_stamp_text(tail: str) -> bool:
+    """True when *tail* has the shape of a numeric identification-area stamp:
+    at least one digit, and nothing but digits and blanks.
+
+    Blanks are part of the shape, not noise around it. A change-control tool
+    lays the identification field out in fixed sub-fields -- a real observed
+    one writes ``01636  0`` (a 5-digit change id, two blanks, a 1-digit
+    level), filling columns 73-80 exactly -- so a plain ``str.isdigit()``
+    reads the shop's own stamp as split code. What the shape still excludes
+    is any letter or punctuation, so a mixed identification code (NIST's
+    ``IX2094.2``) and real truncated program text (``AYS``, ``ON
+    WS-COUNT.``) are unaffected.
+    """
+    return any(ch.isdigit() for ch in tail) and all(
+        ch.isdigit() or ch.isspace() for ch in tail
+    )
+
+
 def _has_identification_stamp_convention(lines: list[str]) -> bool:
     """True when *lines* demonstrably stamp a per-line numeric identification
     code into columns 73-80 while keeping all program text within column 72.
@@ -328,8 +346,9 @@ def _has_identification_stamp_convention(lines: list[str]) -> bool:
     question the per-line column-72/73 shape cannot answer on its own.
 
     Only *unambiguous* lines count as evidence: column 72 blank (so no token
-    could have been split there), a non-empty all-digit tail in columns 73
-    onward, and total content within the traditional 80-column width. On
+    could have been split there), a stamp-shaped tail in columns 73 onward
+    (``_is_numeric_id_stamp_text``), and total content within the
+    traditional 80-column width. On
     such a line the tail cannot be anything but identification-area content,
     whatever columns 1-6 hold. ``MIN_ID_STAMP_EVIDENCE_LINES`` of them is
     the threshold: one or two numbers dangling past column 72 is an
@@ -350,7 +369,7 @@ def _has_identification_stamp_convention(lines: list[str]) -> bool:
             # very shape under investigation), so it can never be evidence.
             continue
         tail = candidate[TEXT_END_COL:].strip()
-        if not tail.isdigit():
+        if not _is_numeric_id_stamp_text(tail):
             continue
         evidence += 1
         if evidence >= MIN_ID_STAMP_EVIDENCE_LINES:
@@ -828,11 +847,16 @@ def normalize_fixed_format(
                 # alnum+punctuation tail (e.g. the NIST-style `IX2094.2`
                 # test-case id already covered by
                 # test_blank_sequence_area_with_same_shape_still_warns)
-                # fails `.isdigit()` -- both keep warning exactly as before.
+                # fails the stamp shape -- both keep warning exactly as
+                # before. The shape itself allows blanks *between* digits
+                # (`01636  0`), because a change-control tool lays the
+                # identification field out in fixed sub-fields -- see
+                # _is_numeric_id_stamp_text.
                 is_numeric_id_stamp = (
-                    content_len == IDENTIFICATION_END_COL and dropped.isdigit()
+                    content_len == IDENTIFICATION_END_COL
+                    and _is_numeric_id_stamp_text(dropped)
                 )
-                # A *shorter* all-digit tail is the same convention whenever
+                # A *shorter* stamp-shaped tail is the same convention whenever
                 # the file itself proves it uses one -- a shop's
                 # change-tracking stamp (Panvalet/Librarian/Endevor and
                 # friends) is commonly 4-6 digits at column 73, not the full
@@ -845,7 +869,7 @@ def normalize_fixed_format(
                 is_short_id_stamp = (
                     not is_numeric_id_stamp
                     and content_len <= IDENTIFICATION_END_COL
-                    and dropped.isdigit()
+                    and _is_numeric_id_stamp_text(dropped)
                 )
                 # A dropped tail that is *only* the statement-terminating
                 # period (nothing else survives the rstrip) never corrupts a
