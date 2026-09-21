@@ -313,6 +313,29 @@ single lines, which by construction can never establish the convention) and
 end-to-end by `TestShortChangeStampDeckParsesWarningFree` in
 `tests/regression/test_fixed_format_word_boundary_overflow.py`.
 
+**The stamp shape admits blanks between digits** (added 2026-09-21, same
+day). Re-running the reported program against the fix above took 19 warnings
+down to 3. The residue was a second stamp layout in the same file: the
+identification field is laid out in *sub-fields* — `01636  0`, a 5-digit
+change id, two blanks, a 1-digit level, filling columns 73-80 exactly — and
+both gates tested the tail with a plain `str.isdigit()`, which an embedded
+blank fails. So the shop's own stamp still read as split code on exactly
+those lines.
+
+`_is_numeric_id_stamp_text(tail)` is now the single definition of the shape,
+used by all three sites (the full-width gate, the short-tail gate, and
+`_has_identification_stamp_convention`'s evidence test): **at least one
+digit, and nothing but digits and blanks**. Blanks are part of an
+identification field's layout, not noise around it. Everything the shape
+excludes is unchanged — any letter or punctuation fails it, so NIST's
+`IX2094.2`, the `WS-PARM-DORM-D` + `AYS` split and `ON WS-COUNT.` all still
+warn, as does a sub-fielded run that spills past column 80. Pinned by
+`TestSubfieldedNumericStamp` and
+`TestSubfieldedChangeStampDeckParsesWarningFree`. Note the three reported
+lines are full-80-width, so the full-width gate settles them on its own with
+no file-level evidence needed; the whole-file gate covers the shorter
+sub-fielded case.
+
 When `warnings` is passed a list, each qualifying line appends one message
 to it — `f"Line {n}: content beyond column {TEXT_END_COL} was dropped
 mid-token: {dropped!r}"` for rule 1, or `f"Line {n}: content beyond column

@@ -181,3 +181,41 @@ class TestShortChangeStampDeckParsesWarningFree:
         # The receiving field ends exactly on column 72; the stamp that
         # abuts it at column 73 is identification-area text, not part of it.
         assert "01641" not in result.ast.to_json()
+
+
+class TestSubfieldedChangeStampDeckParsesWarningFree:
+    """The same deck, but with the identification field laid out in
+    sub-fields -- a 5-digit change id, two blanks, a 1-digit level, filling
+    columns 73-80 exactly. Three of the reported program's nineteen lines
+    carried this shape and kept warning after the first fix, because the
+    stamp test was a plain ``str.isdigit()`` and the embedded blanks failed
+    it."""
+
+    _PROGRAM = "\n".join(
+        [
+            _stamped_line("IDENTIFICATION DIVISION.", "01600  0"),
+            _stamped_line("PROGRAM-ID. HY11301.", "01610  0"),
+            _stamped_line("DATA DIVISION.", "01620  0"),
+            _stamped_line("WORKING-STORAGE SECTION.", "01630  0"),
+            _stamped_line("01  COM-HY11301-ECHEANCE-REELLE PIC 9(8).", "01634  0"),
+            _stamped_line("PROCEDURE DIVISION.", "01635  0"),
+            _stamped_line("MAIN-PARA.", "01636  0"),
+            _stamped_line(
+                "MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01641  0", flush=True
+            ),
+            _stamped_line("STOP RUN.", "02124  0", start_col=12),
+        ]
+    )
+
+    def test_parses_without_warnings_or_errors(self):
+        # Every line is exactly 80 columns wide, stamp included.
+        assert {len(line) for line in self._PROGRAM.splitlines()} == {80}
+        result = parse_cobol(self._PROGRAM, error_recovery=ErrorRecoveryMode.FAIL_FAST)
+        assert result.warnings == [], result.warnings
+        assert result.errors == [], result.errors
+        assert result.success
+
+    def test_stamp_is_not_mistaken_for_code(self):
+        result = parse_cobol(self._PROGRAM, error_recovery=ErrorRecoveryMode.FAIL_FAST)
+        assert len(result.ast.find_all_by_type("MoveStatement")) == 1
+        assert "01641" not in result.ast.to_json()

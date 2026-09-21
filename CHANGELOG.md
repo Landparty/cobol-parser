@@ -130,6 +130,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **An identification-area stamp laid out in sub-fields no longer reads as
+  truncated code either.** Follow-up to the entry below: re-running the
+  reported program took its 19 warnings down to 3, and the residue was a
+  second stamp layout in the same file — `01636  0`, a 5-digit change id,
+  two blanks, a 1-digit level, filling columns 73-80 exactly. Both gates
+  tested the tail with a plain `str.isdigit()`, which an embedded blank
+  fails, so the shop's own stamp still read as split code on those lines.
+  `_is_numeric_id_stamp_text()` is now the single definition of the shape —
+  at least one digit, nothing but digits and blanks — shared by the
+  full-width gate, the short-tail gate and the whole-file evidence test.
+  Blanks are part of an identification field's layout, not noise around it.
+  Nothing previously excluded is admitted: any letter or punctuation still
+  fails it (`IX2094.2`, `AYS`, `ON WS-COUNT.`), and a sub-fielded run past
+  column 80 still warns. Mirrored in the Cython `_preprocess_fast` path.
 * **A short change-tracking stamp in columns 73-80 no longer reads as
   truncated code.** `normalize_fixed_format`'s mid-token overflow warning
   excused an all-digit identification-area tail only when it filled columns

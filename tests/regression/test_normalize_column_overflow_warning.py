@@ -105,6 +105,7 @@ from cobolparser.preprocess import _normalize_fixed_format_pure, normalize_fixed
 from cobolparser.preprocess._normalize import (
     MIN_ID_STAMP_EVIDENCE_LINES,
     _has_identification_stamp_convention,
+    _is_numeric_id_stamp_text,
 )
 
 IMPLS = [
@@ -458,6 +459,97 @@ class TestShortIdentificationStampConvention:
             + [_stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01641")],
             self.EVIDENCE + [_stamped_flush("MOVE SPACES TO WS-PARM-DORM-D", "AYS")],
             self.EVIDENCE + [_stamped_flush("MOVE 1 TO WS-A", "012345678")],
+        ]
+        for lines in cases:
+            fast_warnings: list[str] = []
+            pure_warnings: list[str] = []
+            fast_out = normalize_fixed_format(lines, warnings=fast_warnings)
+            pure_out = _normalize_fixed_format_pure(lines, warnings=pure_warnings)
+            assert fast_out == pure_out, lines
+            assert fast_warnings == pure_warnings, lines
+
+
+class TestSubfieldedNumericStamp:
+    """A stamp whose identification field is laid out in sub-fields, so the
+    tail holds blanks *between* digits (``01636  0``). Reported as the
+    residue of the 2026-09-21 fix: 16 of one program's 19 lines went quiet,
+    and the three that didn't all carried this shape, where a plain
+    ``str.isdigit()`` reads the shop's own stamp as split code."""
+
+    # The three residual lines, verbatim in shape: 5-digit change id, two
+    # blanks, a 1-digit level -- columns 73-80 exactly, so each is settled
+    # by the full-width gate alone, with no file-level evidence needed.
+    REPRO = [
+        _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01636  0"),
+        _stamped_flush("MOVE AT-ALP-HIGH-UNPR-UNM TO HY1-COD-RENOUV-AUTO", "01641  0"),
+        _stamped_flush("TS-COD-OPTION (TS-NB-PRET-MULTICHOIX).", "02124  0"),
+    ]
+
+    def test_each_reported_line_alone_does_not_warn(self):
+        for line in self.REPRO:
+            assert len(line) == 80
+            assert line[71] != " "  # column 72: real code
+            assert line[72] != " "  # column 73: first digit of the stamp
+            for name, impl in IMPLS:
+                warnings: list[str] = []
+                impl([line], warnings=warnings)
+                assert warnings == [], (name, line)
+
+    def test_short_subfielded_stamp_needs_file_evidence(self):
+        # Below the full 8-column width the whole-file gate decides, exactly
+        # as it does for an unbroken short stamp.
+        flush = _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REEL", "016 36")
+        evidence = TestShortIdentificationStampConvention.EVIDENCE
+        for name, impl in IMPLS:
+            with_evidence: list[str] = []
+            impl([*evidence, flush], warnings=with_evidence)
+            assert with_evidence == [], name
+
+            without: list[str] = []
+            impl([*evidence[:1], flush], warnings=without)
+            assert len(without) == 1, name
+            assert "016 36" in without[0], name
+
+    def test_letters_among_the_digits_still_warn(self):
+        # The shape admits blanks, not arbitrary separators: anything that
+        # is neither a digit nor a blank is real dropped text.
+        line = _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01636-A0")
+        assert len(line) == 80
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl([line], warnings=warnings)
+            assert len(warnings) == 1, name
+            assert "01636-A0" in warnings[0], name
+
+    def test_subfielded_digits_past_column_80_still_warn(self):
+        line = _stamped_flush("MOVE 1 TO WS-A", "01636  00")
+        assert len(line) == 81
+        for name, impl in IMPLS:
+            warnings: list[str] = []
+            impl([line], warnings=warnings)
+            assert len(warnings) == 1, name
+
+    def test_helper_shape(self):
+        assert _is_numeric_id_stamp_text("01636  0") is True
+        assert _is_numeric_id_stamp_text("03050009") is True
+        assert _is_numeric_id_stamp_text("016 36") is True
+        # No digit at all is not a stamp, however blank it looks.
+        assert _is_numeric_id_stamp_text("") is False
+        assert _is_numeric_id_stamp_text("   ") is False
+        # Letters and punctuation are dropped program text, not a stamp.
+        assert _is_numeric_id_stamp_text("IX2094.2") is False
+        assert _is_numeric_id_stamp_text("AYS") is False
+        assert _is_numeric_id_stamp_text("01636-A0") is False
+
+    def test_fast_and_pure_agree(self):
+        cases = [
+            *([line] for line in self.REPRO),
+            [_stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REELLE", "01636-A0")],
+            [_stamped_flush("MOVE 1 TO WS-A", "01636  00")],
+            [
+                *TestShortIdentificationStampConvention.EVIDENCE,
+                _stamped_flush("MOVE ZEROES TO COM-HY11301-ECHEANCE-REEL", "016 36"),
+            ],
         ]
         for lines in cases:
             fast_warnings: list[str] = []
