@@ -1587,6 +1587,24 @@ def _is_split_relational_operator(prev_token: Token | None, token: Token) -> boo
     return cur_loc.column == prev_loc.column + len(prev_value)
 
 
+def _follows_qualifier_period(prev_token: Token | None, token: Token) -> bool:
+    """Return True if *token* is glued to a preceding qualifier period.
+
+    ``BANK.ACCOUNT`` lexes as ``BANK`` ``.`` ``ACCOUNT``; the period already
+    attaches to ``BANK``, and without this the name after it got a space
+    (``BANK. ACCOUNT``), so the table extractor read the schema ``BANK`` as a
+    table of its own. Same column-adjacency rule as
+    :func:`_is_split_relational_operator`: ``T. X`` written with a space keeps it.
+    """
+    if prev_token is None or prev_token.type != TokenType.PERIOD:
+        return False
+    prev_loc = prev_token.location
+    cur_loc = token.location
+    if prev_loc is None or cur_loc is None or prev_loc.line != cur_loc.line:
+        return False
+    return cur_loc.column == prev_loc.column + len(prev_token.value or "")
+
+
 def collect_exec_sql_text(stream: ITokenStream) -> str:
     """Collect the raw SQL text from a token stream up to (and consuming) END-EXEC.
 
@@ -1641,6 +1659,7 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
                 prev_was_colon
                 or token.type in _EXEC_SQL_NO_SPACE_BEFORE
                 or _is_split_relational_operator(prev_token, token)
+                or _follows_qualifier_period(prev_token, token)
             )
             if no_space_before:
                 if sql_parts:

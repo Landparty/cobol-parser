@@ -297,6 +297,11 @@ its last name (and was lost entirely when a KEY clause preceded it). See
 AST nodes for EXEC SQL, EXEC CICS, and EXEC IMS DLI blocks captured by
 `ibm_exec_statements.py`.
 
+`ExecSQLStatement.tables` holds full, qualified names (`BANK.ACCOUNT`,
+`LOC.SCHEMA.TABLE`); the FROM/INTO/UPDATE/JOIN regexes match qualified names
+(`_SQL_TABLE_NAME`). Before 2026-09-23 they stopped at the first `.`, so every
+qualified table also reported its schema (`BANK`, `SYSIBM`) as a table.
+
 # Statement Models (`models/statements/`)
 
 | File | Node Classes |
