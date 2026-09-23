@@ -8,6 +8,11 @@ timestamp: 2026-09-17T00:00:00Z
 
 # Overview
 
+2026-09-23: `tests/unit/test_exec_sql_qualified_tables.py` (8 tests) pins
+schema-qualified DB2 names in EXEC SQL: one table per qualified name (no bare
+schema), JOINs, three-part names, and the rebuilt `sql_text` keeping
+`SCHEMA.TABLE` intact while preserving a space the source really has.
+
 2026-09-17: `tests/regression/test_audit_2026_09_17_preprocessing.py` (42
 tests) pins the nine preprocessing defects of that date's audit: record-only
 line splitting (`cobolparser/_lines.py`), EBCDIC NL (0x15) copybook

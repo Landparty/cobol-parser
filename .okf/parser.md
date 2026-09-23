@@ -1771,6 +1771,9 @@ misfiled as a bogus options key. Fixed by skipping layout tokens first.
 Separately, EXEC SQL/DLI raw-text reconstruction inserted a spurious space
 when rejoining a lexer-split `>=`/`<=`/`<>` relational operator (each lexes
 as two adjacent tokens), corrupting WHERE-clause text fidelity.
+The same column-adjacency rule (`_follows_qualifier_period`, 2026-09-23) keeps
+a qualified name together: `BANK.ACCOUNT` used to come back as
+`BANK. ACCOUNT`, while a period written with a space (`T. X`) keeps it.
 
 **`INSPECT` `TALLYING`/`REPLACING` `BEFORE`/`AFTER INITIAL` qualifiers**
 (`initialize_inspect_parsers.py`): the original 2026-07-07 implementation

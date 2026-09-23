@@ -21,10 +21,13 @@ _SQL_INDICATOR_RE = re.compile(
 _SQL_INDICATOR_KW_RE = re.compile(
     r"INDICATOR\s+:([A-Za-z][A-Za-z0-9-]*)", re.IGNORECASE
 )
-_SQL_FROM_TABLE_RE = re.compile(r"FROM\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
-_SQL_JOIN_TABLE_RE = re.compile(r"JOIN\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
-_SQL_INTO_TABLE_RE = re.compile(r"INTO\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
-_SQL_UPDATE_TABLE_RE = re.compile(r"UPDATE\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+# A table name may be qualified (schema.table, location.schema.table); matching
+# only the first part used to report the schema itself (BANK) as a table.
+_SQL_TABLE_NAME = r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)"
+_SQL_FROM_TABLE_RE = re.compile(r"FROM\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
+_SQL_JOIN_TABLE_RE = re.compile(r"JOIN\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
+_SQL_INTO_TABLE_RE = re.compile(r"INTO\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
+_SQL_UPDATE_TABLE_RE = re.compile(r"UPDATE\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
 _SQL_INTO_VARS_RE = re.compile(r"INTO\s+(:[\w-]+(?:\s*,\s*:[\w-]+)*)", re.IGNORECASE)
 _SQL_DECLARE_CURSOR_RE = re.compile(
     r"DECLARE\s+([A-Za-z_][A-Za-z0-9_-]*)\s+CURSOR", re.IGNORECASE
