@@ -338,6 +338,11 @@ class MoveTypeChecker:
         # in the PICTURE, or COMP-1/COMP-2 usage) -- the IBM move rules
         # treat those as a category of their own on the sending side.
         self._non_integer: set[str] = set()
+        # Group items (catalogued ALPHANUMERIC). A MOVE *into* a group is a
+        # group move -- the sending item's bytes copied as if both were
+        # alphanumeric, legal whatever the sender's category -- so no
+        # elementary MOVE rule applies to a group receiver.
+        self._groups: set[str] = set()
         self._unresolved_count = 0
 
     def check(self, ast: CobolProgram) -> MoveTypeReport:
@@ -351,6 +356,7 @@ class MoveTypeChecker:
         """
         self._catalog = {}
         self._non_integer = set()
+        self._groups = set()
         self._unresolved_count = 0
         violations: list[MoveTypeViolation] = []
 
@@ -399,6 +405,7 @@ class MoveTypeChecker:
                 for child in getattr(node, "children", ())
             ):
                 self._catalog[name] = DataCategory.ALPHANUMERIC
+                self._groups.add(name)
 
         if hasattr(node, "children"):
             for child in node.children:
@@ -461,9 +468,33 @@ class MoveTypeChecker:
             if target_cat == DataCategory.UNKNOWN:
                 self._unresolved_count += 1
                 continue  # Cannot validate unknown target
+            if base_data_name(target_name).upper() in self._groups:
+                continue  # A group move is legal from any sending item
 
             if figurative is not None:
-                # ZERO has a digit value and is legal everywhere; a fill
+                if (
+                    figurative in _FIGURATIVE_ZERO
+                    and target_cat == DataCategory.ALPHABETIC
+                ):
+                    # ZERO is numeric, and a numeric value has no place in
+                    # an alphabetic item (letters and spaces only).
+                    violations.append(
+                        MoveTypeViolation(
+                            kind=MoveViolationKind.ERROR,
+                            source_name=source_name,
+                            target_name=target_name,
+                            source_category=source_cat,
+                            target_category=target_cat,
+                            location=loc,
+                            message=(
+                                f"Illegal MOVE: figurative constant '{source_name}' "
+                                f"is numeric and cannot be moved to ALPHABETIC "
+                                f"item '{target_name}'"
+                            ),
+                        )
+                    )
+                    continue
+                # ZERO has a digit value and is legal everywhere else; a fill
                 # constant (SPACES, HIGH-VALUE, ...) is legal into anything
                 # but a numeric/numeric-edited receiver, which has no room
                 # for it.

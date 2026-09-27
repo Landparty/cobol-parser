@@ -42,6 +42,10 @@ arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
 
+2026-09-27: `tests/unit/analysis/test_move_type_checker.py::TestGroupReceiverAndZeroToAlphabetic`
+(4 tests) pins group receivers being exempt from elementary MOVE rules and
+`ZERO` → `PIC A` being illegal. See `analysis.md`.
+
 2026-09-27: `tests/regression/test_copy_replacing_literal_operand.py` (5
 tests) pins COPY REPLACING literal operands matching literals (not
 identifiers). See `preprocessing.md`.

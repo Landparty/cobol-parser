@@ -1001,6 +1001,17 @@ report: MoveTypeReport = MoveTypeChecker().check(ast)
 Detects MOVE statements with type-incompatible sending/receiving fields based on
 PICTURE clause categories.
 
+**Group receivers and `ZERO` → alphabetic (2026-09-27):** a MOVE *into* a
+group item is a group move (bytes copied as alphanumeric) and legal from any
+sender, so group receivers are exempt from every elementary rule -- `MOVE
+WS-AMT TO WS-GROUP` with a `V99` sender was reported as an illegal
+non-integer→alphanumeric MOVE. `MOVE ZERO TO` a `PIC A` item is now an error
+(ZERO is numeric). Both found by comparing a sender×receiver matrix against
+GnuCOBOL's own MOVE legality check; the remaining disagreements are where
+IBM is stricter than GnuCOBOL's `-std=ibm` (non-integer → alphanumeric) or a
+documented choice here (HIGH/LOW-VALUE, QUOTE → numeric). Pinned by
+`tests/unit/analysis/test_move_type_checker.py::TestGroupReceiverAndZeroToAlphabetic`.
+
 **Picture classification fixes (2026-08-16 audit):** `_PIC_ALPHA_ONLY_RE`
 now matches any concatenation of `A`/`A(n)` parts (`AA(3)`, `A(2)A(3)`) —
 they previously fell through to ALPHANUMERIC, hiding illegal

@@ -906,3 +906,50 @@ class TestGroupItemMoveOperand:
         report = MoveTypeChecker().check(prog)
         assert report.unresolved_count == 0
         assert not report.violations
+
+
+def _check_source(data: str, move: str) -> MoveTypeReport:
+    src = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. T.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        f"{data}"
+        "       PROCEDURE DIVISION.\n"
+        f"           {move}.\n"
+        "           STOP RUN.\n"
+    )
+    result = parse_cobol(src)
+    assert result.ast is not None, result.errors
+    return MoveTypeChecker().check(result.ast)
+
+
+class TestGroupReceiverAndZeroToAlphabetic:
+    """Cross-checked against GnuCOBOL's own MOVE legality check."""
+
+    _GROUP = (
+        "       01 ND PIC 9(3)V99.\n"
+        "       01 GR.\n"
+        "          05 GR-A PIC X(2).\n"
+        "          05 GR-B PIC 9(2).\n"
+    )
+
+    def test_non_integer_into_a_group_is_a_legal_group_move(self):
+        assert not _check_source(self._GROUP, "MOVE ND TO GR").violations
+        assert not _check_source(self._GROUP, "MOVE 12.5 TO GR").violations
+
+    def test_non_integer_into_an_alphanumeric_item_is_still_illegal(self):
+        report = _check_source(
+            self._GROUP + "       01 AN PIC X(5).\n", "MOVE ND TO AN"
+        )
+        assert report.has_errors
+
+    def test_zero_into_alphabetic_is_illegal(self):
+        report = _check_source("       01 AB PIC A(5).\n", "MOVE ZERO TO AB")
+        assert report.has_errors
+        assert "ALPHABETIC" in report.errors[0].message
+
+    def test_zero_into_alphanumeric_is_legal(self):
+        assert not _check_source(
+            "       01 AN PIC X(5).\n", "MOVE ZEROS TO AN"
+        ).violations
