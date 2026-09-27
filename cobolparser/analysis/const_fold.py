@@ -59,6 +59,7 @@ from decimal import Decimal, InvalidOperation, localcontext
 from fractions import Fraction
 from typing import TYPE_CHECKING, Any
 
+from .._literals import unquote_literal
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolParagraph, CobolProgram
 from ..models.statements.arithmetic import (
@@ -966,9 +967,9 @@ def _resolve_move_source(
             return ("numeric", Decimal(source))
         except InvalidOperation:
             return None
-    quoted = _QUOTED_LITERAL_RE.match(source)
-    if quoted:
-        return ("text", quoted.group(2))
+    if _QUOTED_LITERAL_RE.match(source):
+        # Doubled delimiters collapsed: MOVE '"' arrives as `""""`.
+        return ("text", unquote_literal(source))
     if source.strip().upper() in _ZERO_FIGURATIVES:
         return ("zero", Decimal(0))
     resolved = _safe_resolve(index, source)

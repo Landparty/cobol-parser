@@ -986,6 +986,16 @@ gated on `stop_type == "RUN"`, the same distinction `dead_code.py`'s and
 `program_flow/scanner.py`'s `_is_terminator` already draw. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestB1StopLiteralIsNotTermination`.
 
+`_literals.py`'s `quote_literal()` re-emits a decoded literal doubling
+each embedded `"`; its inverse `unquote_literal()` (2026-09-27) strips the
+delimiters *and* collapses the doubled delimiter. Any consumer reading a
+re-emitted literal back must use it: `generators/data/layout.py`
+(`_strip_literal_quotes`, VALUE clauses), `analysis/constraints.py`
+(`_strip_quotes`, branch witnesses) and `analysis/const_fold.py` (MOVE
+sources) each stripped only the delimiters, so `VALUE "A""B"` generated
+`A""B` and `MOVE '"'` folded to two quote characters. Pinned by
+`tests/regression/test_doubled_quote_literal_values.py`.
+
 ## MoveTypeChecker
 
 ```python

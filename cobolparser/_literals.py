@@ -27,3 +27,19 @@ def quote_literal(value: str | None) -> str:
     as a bogus ``invalid symbol '%'`` two lines further on.
     """
     return '"' + (value or "").replace('"', '""') + '"'
+
+
+def unquote_literal(text: str) -> str:
+    """The inverse of :func:`quote_literal`: a quoted COBOL literal's content.
+
+    Strips the delimiters and collapses each doubled delimiter to one, so
+    ``"A""B"`` reads back as ``A"B`` and ``'IT''S'`` as ``IT'S``. Text that is
+    not a quoted literal comes back stripped but otherwise unchanged.
+    Stripping the delimiters alone read ``quote_literal('"')`` -- the one
+    character ``"`` -- back as two.
+    """
+    stripped = text.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in "\"'":
+        quote = stripped[0]
+        return stripped[1:-1].replace(quote * 2, quote)
+    return stripped

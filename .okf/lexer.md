@@ -157,6 +157,18 @@ same input. Fixed by replacing the Cython `.strip()` call with the same
 explicit `" \t"`-only loop the pure-Python lexer uses. Pinned by
 `tests/regression/test_normalize_line_number_preservation.py::TestLexerLineStartQuoteWhitespaceParity`.
 
+# Literal round trip
+
+`_literals.py`'s `quote_literal()` re-emits a decoded literal doubling
+each embedded `"`; its inverse `unquote_literal()` (2026-09-27) strips the
+delimiters *and* collapses the doubled delimiter. Any consumer reading a
+re-emitted literal back must use it: `generators/data/layout.py`
+(`_strip_literal_quotes`, VALUE clauses), `analysis/constraints.py`
+(`_strip_quotes`, branch witnesses) and `analysis/const_fold.py` (MOVE
+sources) each stripped only the delimiters, so `VALUE "A""B"` generated
+`A""B` and `MOVE '"'` folded to two quote characters. Pinned by
+`tests/regression/test_doubled_quote_literal_values.py`.
+
 # Errors
 
 `LexerError` — extends `ParseError` (`cobolparser/_errors.py`). Raised for

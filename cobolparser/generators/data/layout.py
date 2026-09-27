@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 
+from ..._literals import unquote_literal
 from ...models.data_items import (
     CobolDataItem,
     ConditionNameItem,
@@ -385,11 +386,9 @@ def _condition_values(item: CobolDataItem) -> list[str]:
 
 
 def _strip_literal_quotes(value: str) -> str:
-    """Remove the surrounding quotes from a COBOL literal, if present."""
-    text = value.strip()
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
-        return text[1:-1]
-    return text
+    """A COBOL literal's content: delimiters removed and each doubled
+    delimiter collapsed (``"A""B"`` is ``A"B``), see ``unquote_literal``."""
+    return unquote_literal(value)
 
 
 def _classify(item: CobolDataItem, picture: PictureClause | None) -> FieldCategory:

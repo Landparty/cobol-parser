@@ -531,6 +531,16 @@ formatted with `allow_random_sign=False` — otherwise `88 ST-LOW VALUE 5` on a
 `PIC S9(3)` field emits `-5`, a value the copybook never permits. Pinned by
 `test_declared_domain_values_are_never_randomly_negated`.
 
+`_literals.py`'s `quote_literal()` re-emits a decoded literal doubling
+each embedded `"`; its inverse `unquote_literal()` (2026-09-27) strips the
+delimiters *and* collapses the doubled delimiter. Any consumer reading a
+re-emitted literal back must use it: `generators/data/layout.py`
+(`_strip_literal_quotes`, VALUE clauses), `analysis/constraints.py`
+(`_strip_quotes`, branch witnesses) and `analysis/const_fold.py` (MOVE
+sources) each stripped only the delimiters, so `VALUE "A""B"` generated
+`A""B` and `MOVE '"'` folded to two quote characters. Pinned by
+`tests/regression/test_doubled_quote_literal_values.py`.
+
 **Signedness.** `PictureClause.is_signed` only reports an explicit `S`, so
 `_is_signed()` additionally treats a numeric-edited picture carrying `+`,
 `-`, `CR`, or `DB` as signed — `PIC -ZZ,ZZ9.99` is the canonical signed
