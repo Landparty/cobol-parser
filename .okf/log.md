@@ -14,6 +14,17 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-27 -- bug hunt round 2: expanded-line locations, VB short tail, YAML strictness
+
+[batch.md](batch.md) / [cli.md](cli.md): `scan` and `unused-variables
+--copybook-path` reported expanded-text line numbers; report locations now
+carry an `"origin"` from the expander's source map, as lint findings did.
+[generators.md](generators.md): `variable-bare` decoding reported a short
+trailing partial record as one more (truncated) row instead of `trailing`.
+[cli.md](cli.md): the config YAML reader took `1_000` as an int, `key: a: b`
+as the string `a: b`, `- - x` as the string `- x`, and counted form feeds as
+line breaks.
+
 ## 2026-09-27 -- bug hunt: compare-bytes ignore, YAML apostrophes, split PIC repeats
 
 [generators.md](generators.md): `compare_bytes=True` no longer reports an

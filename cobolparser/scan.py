@@ -283,8 +283,18 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
         )
 
     scan = FileScan(path=path, parse_error_count=len(result.errors))
+    source_map = getattr(result, "expansion_source_map", None)
     for unit, depth in _units_with_depth(result.ast):
-        scan.units.append(_scan_unit(unit, depth, options))
+        unit_scan = _scan_unit(unit, depth, options)
+        if source_map:
+            # With copybooks expanded, every report location counts lines of
+            # the expanded text -- past the first COPY it is not the line the
+            # code sits on in *path*, and inside a member it is not in *path*
+            # at all. Give each one the same "origin" lint findings carry.
+            from .analysis.lint import stamp_report_origins
+
+            stamp_report_origins(unit_scan.reports, source_map)
+        scan.units.append(unit_scan)
     return scan
 
 
@@ -409,14 +419,21 @@ class CrossFileCloneMember:
     program_name: str
     paragraph: str
     line: int
+    #: Where the paragraph really is when the scan expanded copybooks
+    #: (``line`` then counts lines of the expanded text); ``None`` otherwise.
+    origin_file: str | None = None
+    origin_line: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "path": self.path,
             "program_name": self.program_name,
             "paragraph": self.paragraph,
             "line": self.line,
         }
+        if self.origin_file is not None and self.origin_line is not None:
+            out["origin"] = {"file": self.origin_file, "line": self.origin_line}
+        return out
 
 
 @dataclass
@@ -478,11 +495,14 @@ def cross_file_clone_groups(
             if not isinstance(redundancy, dict):
                 continue
             for entry in redundancy.get("paragraph_fingerprints", []):
+                origin = entry.get("origin") or {}
                 member = CrossFileCloneMember(
                     path=file_scan.path,
                     program_name=unit.program_name,
                     paragraph=entry.get("name", ""),
                     line=int((entry.get("location") or {}).get("line", 0)),
+                    origin_file=origin.get("file"),
+                    origin_line=origin.get("line"),
                 )
                 sizes.setdefault(
                     entry.get("type1", ""), int(entry.get("statement_count", 0))

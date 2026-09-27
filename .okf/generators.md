@@ -830,7 +830,7 @@ module can say (`test_the_wrong_copybook_shows_up_as_a_wall_of_errors`).
 |---|---|
 | `FIXED` | `record_length` override, else `base.length` |
 | `VARIABLE` | the 4-byte RDW; an RDW longer than the file raises `RecordDecodingError` rather than being guessed at |
-| `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. With a `record_separator` set, split on that instead |
+| `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. A tail shorter than the record its own counters describe is `trailing`, not one more truncated row (`_ran_short`, 2026-09-27 — RECFM=F already did this). With a `record_separator` set, split on that instead |
 
 `EncodingOptions.record_separator` is consumed after each record when it is
 actually there. Fields past the end of a short record come back

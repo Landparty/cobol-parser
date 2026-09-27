@@ -123,6 +123,13 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   `_strip_comment`, `_split_key` and `_is_mapping_entry`. Mid-word it is a
   plain character: `owner: Sam's shop  # note` had kept `# note` in the value
   and `don't: 1` failed to parse. Fixed 2026-09-27.
+* **Stricter where YAML is stricter** (2026-09-27, round 2): numbers resolve
+  only for the YAML 1.2 core spellings (`1_000`, `\u0663`, `0x1F` stay strings;
+  Python's `int()` had taken the first two); a plain value holding `: `
+  (`key: a: b`) is rejected -- quote it; `- - x` is a nested sequence, not the
+  string `"- x"`; and line numbers count `\n`/`\r\n`/`\r` records only
+  (`split_source_lines`), not the form feeds / NEL / U+2028 `splitlines()`
+  also broke on.
 * **Tool sections** — `mockymock:` and `analyzer:` are validated only as
   mappings and carried verbatim on `ProjectConfig.tools`; this package never
   needs to know their schemas.
@@ -502,6 +509,11 @@ determined by parsing the source a second time *without* expansion
 (`_parse_without_copybook_expansion`) and diffing declared item names
 against the expanded AST — `expand_copybooks`'s own line-tracking
 (`preserve_source_locations`) doesn't work (see `.okf/analysis.md`).
+With `--copybook-path`, each unused item also carries
+`"origin": {"file", "line"}` from `ParseResult.expansion_source_map`
+(`analysis.lint.stamp_report_origins`, 2026-09-27): `location.line` counts
+lines of the expanded text, so past the first `COPY` it was not the line on
+disk. `location` is left as it was.
 
 ## Program-Flow
 

@@ -112,6 +112,21 @@ class TestUnusedVariablesCopybookCLI:
         assert by_name["WS-LOCAL-UNUSED"]["from_copybook"] is False
         assert data["summary"]["skipped_copybook_variables"] == 0
 
+    def test_locations_carry_the_on_disk_origin(self, copybook_setup, capsys):
+        # `location` counts lines of the expanded text (the 3-line member
+        # pushes WS-LOCAL-UNUSED from line 6 to line 8); `origin` says where
+        # each item really is, the way lint findings already did.
+        program, cpy_dir = copybook_setup
+        _run_main(["unused-variables", str(program), "--copybook-path", str(cpy_dir)])
+        data = json.loads(capsys.readouterr().out)
+        by_name = {i["name"]: i for i in data["unused_variables"]}
+        assert by_name["WS-LOCAL-UNUSED"]["origin"] == {
+            "file": str(program),
+            "line": 6,
+        }
+        assert by_name["CUST-ID"]["origin"]["file"].endswith("CUSTREC.CPY")
+        assert by_name["CUST-ID"]["origin"]["line"] == 2
+
     def test_exclude_copybook_variables_filters_and_tallies(
         self, copybook_setup, capsys
     ):

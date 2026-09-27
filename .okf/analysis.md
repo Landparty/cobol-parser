@@ -2050,6 +2050,9 @@ format prints the origin's own `file:line:column:` prefix so the output stays
 clickable after expansion. Pinned by
 `tests/regression/test_expansion_source_map_and_comments.py::TestApplySourceMap`
 and `tests/regression/test_nested_program_units.py`.
+`stamp_report_origins(report_dict, source_map)` (2026-09-27) is its twin for
+a serialized analyzer report: every `"location": {"line": N}` mapping gains a
+sibling `"origin"`. Used by `scan_one` and the `unused-variables` CLI.
 
 
 # Program-type corpus fixes (2026-09-15)

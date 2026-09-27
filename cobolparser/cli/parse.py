@@ -2081,7 +2081,8 @@ def _cmd_unused_variables(args: argparse.Namespace) -> None:
         collect_declared_items,
     )
 
-    ast, prof = _parse_or_fail(args)
+    result, prof = _parse_result_or_fail(args)
+    ast = result.ast
 
     copybook_paths = getattr(args, "copybook_path", [])
     exclude_copybook = getattr(args, "exclude_copybook_variables", False)
@@ -2122,7 +2123,14 @@ def _cmd_unused_variables(args: argparse.Namespace) -> None:
         copybook_item_names=copybook_item_names,
     )
 
-    _emit_report(report.to_dict(), args, prof, ast)
+    # Locations count lines of the copybook-expanded text; say where each
+    # item really is, the way lint does (see stamp_report_origins).
+    from ..analysis.lint import stamp_report_origins
+
+    payload = stamp_report_origins(
+        report.to_dict(), getattr(result, "expansion_source_map", None)
+    )
+    _emit_report(payload, args, prof, ast)
 
 
 # -- Subcommand: program-flow -------------------------------------------------
