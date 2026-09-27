@@ -1424,3 +1424,72 @@ $$
 """)
         assert result.errors == []
         assert result.jobs[0].steps[0].dd("SYSUT1").instream_lines == ["DATA LINE"]
+
+
+def _deck(*cards: str) -> str:
+    return "\n".join(cards) + "\n"
+
+
+class TestDummyAndBackwardReferences:
+    def test_nullfile_is_dummy_not_a_dataset(self):
+        result = parse_jcl(_deck("//J1 JOB", "//S1 EXEC PGM=X", "//IN DD DSN=NULLFILE"))
+        dd = result.jobs[0].steps[0].dd("IN")
+        assert dd.is_dummy
+        assert dd.dataset is None
+        assert result.dd_map() == {"IN": []}
+
+    def test_dummy_ignores_a_coded_dsn(self):
+        result = parse_jcl(
+            _deck("//J1 JOB", "//S1 EXEC PGM=X", "//IN DD DUMMY,DSN=A.B")
+        )
+        assert result.dd_map() == {"IN": []}
+
+    def test_dummy_override_replaces_procedure_dataset(self):
+        result = parse_jcl(
+            _deck(
+                "//J1 JOB",
+                "//P1 PROC",
+                "//S EXEC PGM=X",
+                "//IN DD DSN=A.B,DISP=SHR",
+                "// PEND",
+                "//S1 EXEC P1",
+                "//S.IN DD DUMMY",
+            )
+        )
+        dd = result.jobs[0].step("S1.S").dd("IN")
+        assert dd.is_dummy
+        assert dd.dataset is None
+        assert result.dd_map() == {"IN": []}
+
+    def test_dataset_override_replaces_procedure_dummy(self):
+        result = parse_jcl(
+            _deck(
+                "//J1 JOB",
+                "//P1 PROC",
+                "//S EXEC PGM=X",
+                "//IN DD DUMMY",
+                "//OUT DD SYSOUT=*",
+                "// PEND",
+                "//S1 EXEC P1",
+                "//S.IN DD DSN=REAL.DATA,DISP=SHR",
+                "//S.OUT DD DSN=OUT.DATA,DISP=(NEW,CATLG)",
+            )
+        )
+        step = result.jobs[0].step("S1.S")
+        assert not step.dd("IN").is_dummy
+        assert step.dd("IN").dataset == "REAL.DATA"
+        assert step.dd("OUT").sysout is None
+        assert step.dd("OUT").dataset == "OUT.DATA"
+
+    def test_backward_reference_is_reported_unresolved(self):
+        result = parse_jcl(
+            _deck(
+                "//J1 JOB",
+                "//S1 EXEC PGM=X",
+                "//IN DD DSN=X.Y,DISP=SHR",
+                "//S2 EXEC PGM=Y",
+                "//IN DD DSN=*.S1.IN,DISP=SHR",
+            )
+        )
+        assert result.jobs[0].step("S2").dd("IN").dataset == "*.S1.IN"
+        assert any("backward reference" in u for u in result.unresolved)

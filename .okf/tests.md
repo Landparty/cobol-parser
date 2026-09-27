@@ -42,6 +42,11 @@ arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
 
+2026-09-27: `tests/unit/test_jcl.py::TestDummyAndBackwardReferences` (5
+tests) pins DUMMY/NULLFILE reading no dataset, DSN/DUMMY/SYSOUT overrides
+replacing each other, and `DSN=*.` backward references landing in
+`unresolved`. See `jcl.md`.
+
 2026-09-27: `tests/unit/test_config_yaml.py` +3 tests pin the indentless
 block sequence (`key:` then `- item` at the key's own column) as a mapping
 value, ending at the parent's next key; it used to be rejected. See `cli.md`.
