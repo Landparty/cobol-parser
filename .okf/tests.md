@@ -42,6 +42,10 @@ arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
 
+2026-09-27: `tests/unit/test_data_items.py::test_edited_picture_sizes` (9
+cases) pins edited-picture byte sizes with `B`/`0` insertions and with a `V`
+(`Z(3)V99` = 5). See `ast-models.md`.
+
 2026-09-27: `tests/unit/test_jcl.py::TestDummyAndBackwardReferences` (5
 tests) pins DUMMY/NULLFILE reading no dataset, DSN/DUMMY/SYSOUT overrides
 replacing each other, and `DSN=*.` backward references landing in

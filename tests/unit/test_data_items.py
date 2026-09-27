@@ -15,6 +15,8 @@ Test Coverage Goals:
 - Edge cases and error conditions
 """
 
+import pytest
+
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import CobolDataItem, OccursClause, PictureClause
 
@@ -1288,3 +1290,37 @@ class TestCalculateSizeRegressions:
             if layout.qualified_name == "REC"
         )
         assert record.calculate_size() == root.byte_length == 4 + 5 + 4 + 4 + 10
+
+
+@pytest.mark.parametrize(
+    ("pattern", "size", "numeric_edited", "alnum_edited", "integer", "decimal"),
+    [
+        # A V in an edited picture used to be split as if it held only 9s,
+        # which lost every Z position: Z(3)V99 sized two bytes, not five.
+        ("Z(3)V99", 5, True, False, 3, 2),
+        ("ZZZV99", 5, True, False, 3, 2),
+        # B and 0 are insertion characters: each one is a byte.
+        ("999B99", 6, True, False, 5, 0),
+        ("9(3)B9(2)", 6, True, False, 5, 0),
+        ("0009", 4, True, False, 1, 0),
+        ("XXBXX", 5, False, True, None, None),
+        ("X(3)0X", 5, False, True, None, None),
+        # Unedited pictures are unaffected.
+        ("9(10)", 10, False, False, 10, 0),
+        ("S9(5)V99", 7, False, False, 5, 2),
+    ],
+)
+def test_edited_picture_sizes(
+    pattern, size, numeric_edited, alnum_edited, integer, decimal
+):
+    pic = PictureClause(pattern, SourceLocation(1, 1))
+    assert pic.size == size
+    assert pic.is_numeric_edited is numeric_edited
+    assert pic.is_alphanumeric_edited is alnum_edited
+    assert pic.integer_digits == integer
+    assert pic.decimal_digits == decimal
+
+
+def test_b_in_a_junk_pattern_keeps_the_lenient_fallback():
+    # C and D are not PICTURE symbols, so the B here is junk too.
+    assert PictureClause("ABCD", SourceLocation(1, 1)).size == 1

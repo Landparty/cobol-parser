@@ -31,11 +31,15 @@ _PIC_NINE_RE = re.compile(r"9")
 _PIC_PAREN_COUNT_RE = re.compile(r"\(\d+\)")
 
 # Editing/insertion symbols that only ever appear in *edited* picture clauses.
-# Plain data-description symbols (9 X A S V P) are deliberately excluded, and so
-# are the ambiguous single-character insertions B and 0 -- on their own they are
-# indistinguishable from junk letters/digits in a malformed pattern, so they only
-# count as positions once an item is already known to be edited via another symbol.
+# Plain data-description symbols (9 X A S V P) are deliberately excluded. The
+# simple insertions B and 0 are kept apart: in a well-formed PICTURE they can
+# only be insertion characters, so ``999B99`` / ``0009`` / ``XXBXX`` are edited
+# items whose size counts them (reading them as anything else sized ``999B99``
+# at five bytes instead of six and shifted every later record offset). In a
+# pattern that also holds characters no PICTURE may contain they are just
+# more junk, and the pattern keeps the lenient fallback.
 _PIC_EDIT_SYMBOLS: frozenset[str] = frozenset("Z*+-,./$")
+_PIC_SIMPLE_INSERTION_SYMBOLS: frozenset[str] = frozenset("B0")
 # Symbols that always occupy a digit position in a numeric-edited item.
 _PIC_EDIT_DIGIT_SYMBOLS: frozenset[str] = frozenset("9Z*")
 # Symbols that occupy a digit position only as part of a *floating* insertion
@@ -178,8 +182,11 @@ class PictureClause(ASTNode):
             self.size = digit_count
             return
 
-        # 4. Decimal patterns: split at V and parse each side
-        if "V" in self.pattern:
+        # 4. Decimal patterns: split at V and parse each side. An edited
+        # picture with a V (``Z(3)V99``) is left to step 7, which counts its
+        # Z/*/insertion positions; the split here only understands 9s and
+        # would size ``Z(3)V99`` as two bytes.
+        if "V" in self.pattern and not self._is_edited_pattern(pattern):
             parts = self.pattern.split("V")
             if len(parts) == 2:
                 left_part = parts[0]
@@ -343,7 +350,11 @@ class PictureClause(ASTNode):
         skeleton = _PIC_PAREN_COUNT_RE.sub("", pattern).upper()
         if any(ch in _PIC_EDIT_SYMBOLS for ch in skeleton):
             return True
-        return "CR" in skeleton or "DB" in skeleton
+        if "CR" in skeleton or "DB" in skeleton:
+            return True
+        return any(ch in _PIC_SIMPLE_INSERTION_SYMBOLS for ch in skeleton) and all(
+            ch in _PIC_VALID_SYMBOLS for ch in skeleton
+        )
 
     @staticmethod
     def _expand_symbols(pattern: str) -> list[str]:
