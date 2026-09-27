@@ -76,6 +76,14 @@ tests, replacing `TestAmbiguousSelfReference`'s two poison assertions) and
 also targets/GIVINGs, `MOVE ZERO`, and `PIC N` truncation -- every value
 checked against GnuCOBOL. See `analysis.md`.
 
+2026-09-27: `tests/unit/generators/data/test_compare.py` (29 tests) and
+`tests/unit/cli/test_compare_cli.py` (10 tests) pin the record compare: key vs
+positional pairing, ignore by column / field name / group, value vs byte
+compare (C vs F sign nibble, slack past the layout), VB records with absent
+`OCCURS DEPENDING ON` occurrences, and the CLI's 0/1/2 exit statuses. Every
+fixture is a record image from `encode_record`, not a hand-built decode
+result. See `generators.md`'s "Record compare".
+
 2026-09-27: `tests/unit/generators/data/test_layout_offsets.py::TestSynchronizedSlack`
 (4 tests) pins `data-items` flagging offsets that unmodelled SYNC slack
 could shift. See `generators.md`.
