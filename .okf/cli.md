@@ -772,6 +772,38 @@ compiled against them. Implementation:
   **`--strict`** turns either of the last two into exit 1 — the CI form of
   "does this copybook actually describe this file?".
 
+## Compare
+
+```bash
+cobol-parser compare <expected> <actual> --copybook <FILE.cpy> \
+    [--record NAME] [--view NAME] [--key FIELD]... [--ignore FIELD]... \
+    [--compare-bytes] [--max-differences N] [--format text|json] \
+    [--charset ascii|ebcdic] [--endian auto|big|little|native] \
+    [--record-format fixed|variable|variable-bare|auto] \
+    [--record-length N] [--record-separator none|newline] [--compact] [-o OUT]
+```
+
+Two record files, one copybook, field-level differences: the expected output
+of a batch run against the actual one. Implementation:
+`generators/data/compare.py`, documented in [generators.md](generators.md)'s
+"Record compare".
+
+* **Exit status follows `cmp`/`diff`**: 0 equal, 1 different, 2 the
+  comparison could not be made (unknown key/ignore name, unreadable file,
+  layout error, unwritable `-o`). `_cmd_compare` therefore uses its own
+  `_compare_fail()` (exit 2) and its own output writer rather than `_fail()` /
+  `_verbatim_out()`, both of which exit 1 -- which here would read as "the
+  files differ".
+* **`--key`** (repeatable) pairs records by key; **`--ignore`** (repeatable)
+  drops a column, a field name (every occurrence) or a group. Both are checked
+  against the layout; a typo is exit 2 with the valid column names.
+* The file-format flags (`--charset` through `--record-separator`) are shared
+  with `decode` through `_add_record_file_args()`, so they mean exactly the
+  same thing and pick up the same `cobol.yml` `data:` settings. Both files are
+  read with the same options.
+* `--format text` (default) is a report with 1-based record numbers; `json` is
+  `CompareResult.to_dict()` plus the three input paths, with 0-based indexes.
+
 ## Dclgen-Check
 
 ```bash

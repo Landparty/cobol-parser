@@ -24,6 +24,7 @@ _SUBCOMMANDS = frozenset(
         "gen-data",
         "gen-fixtures",
         "decode",
+        "compare",
         "dclgen-check",
         "analyze",
         "lint",
@@ -1320,6 +1321,56 @@ def _record_length_notes(dataset: Any, opts: Any) -> list[str]:
     return notes
 
 
+def _add_record_file_args(p: argparse.ArgumentParser) -> None:
+    """How a record image file is encoded and framed -- decode and compare."""
+    p.add_argument(
+        "--charset",
+        choices=["ascii", "ebcdic"],
+        default="ascii",
+        help="Encoding of the file's DISPLAY bytes (default: ascii)",
+    )
+    p.add_argument(
+        "--endian",
+        choices=["auto", "big", "little", "native"],
+        default="auto",
+        help=(
+            "Byte order for COMP-5 and COMP-1/COMP-2 (default: auto -- "
+            "big-endian for --charset ebcdic, host order otherwise). "
+            "COMP/COMP-4 are always big-endian"
+        ),
+    )
+    p.add_argument(
+        "--record-format",
+        choices=["fixed", "variable", "variable-bare", "auto"],
+        default=None,
+        help=(
+            "How the file frames its records: fixed (default) cuts every "
+            "record at the layout's length, as RECFM=F/FB writes them; "
+            "variable reads the 4-byte RDW in front of each record, as "
+            "RECFM=V/VB writes it; variable-bare has no RDW and is framed by "
+            "the layout's own OCCURS DEPENDING ON counters; auto picks "
+            "variable when the layout has a DEPENDING ON table"
+        ),
+    )
+    p.add_argument(
+        "--record-length",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "LRECL to cut fixed-length records at, when the file's records "
+            "are longer than the copybook describes (trailing slack, or a "
+            "copybook covering only a prefix)"
+        ),
+    )
+    p.add_argument(
+        "--record-separator",
+        choices=["none", "newline"],
+        default="none",
+        help="Bytes separating records in the file (default: none)",
+    )
+
+
 def _build_decode_parser(
     subparsers: argparse._SubParsersAction,
 ) -> None:
@@ -1389,52 +1440,7 @@ def _build_decode_parser(
             "the field boundaries"
         ),
     )
-    p.add_argument(
-        "--charset",
-        choices=["ascii", "ebcdic"],
-        default="ascii",
-        help="Encoding of the file's DISPLAY bytes (default: ascii)",
-    )
-    p.add_argument(
-        "--endian",
-        choices=["auto", "big", "little", "native"],
-        default="auto",
-        help=(
-            "Byte order for COMP-5 and COMP-1/COMP-2 (default: auto -- "
-            "big-endian for --charset ebcdic, host order otherwise). "
-            "COMP/COMP-4 are always big-endian"
-        ),
-    )
-    p.add_argument(
-        "--record-format",
-        choices=["fixed", "variable", "variable-bare", "auto"],
-        default=None,
-        help=(
-            "How the file frames its records: fixed (default) cuts every "
-            "record at the layout's length, as RECFM=F/FB writes them; "
-            "variable reads the 4-byte RDW in front of each record, as "
-            "RECFM=V/VB writes it; variable-bare has no RDW and is framed by "
-            "the layout's own OCCURS DEPENDING ON counters; auto picks "
-            "variable when the layout has a DEPENDING ON table"
-        ),
-    )
-    p.add_argument(
-        "--record-length",
-        type=int,
-        default=None,
-        metavar="N",
-        help=(
-            "LRECL to cut fixed-length records at, when the file's records "
-            "are longer than the copybook describes (trailing slack, or a "
-            "copybook covering only a prefix)"
-        ),
-    )
-    p.add_argument(
-        "--record-separator",
-        choices=["none", "newline"],
-        default="none",
-        help="Bytes separating records in the file (default: none)",
-    )
+    _add_record_file_args(p)
     p.add_argument(
         "--max-records",
         type=int,
@@ -1559,6 +1565,163 @@ def _cmd_decode(args: argparse.Namespace) -> None:
 
     if args.strict and (result.error_count or result.trailing):
         sys.exit(1)
+
+
+def _build_compare_parser(
+    subparsers: argparse._SubParsersAction,
+) -> None:
+    p = subparsers.add_parser(
+        "compare",
+        help=(
+            "Compare two record files field by field through a copybook "
+            "(expected vs actual output of a batch run)"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Exit status is 0 when the files are equal, 1 when they differ, "
+            "and 2 when\nthe comparison could not be made -- like cmp and "
+            "diff, so a test or CI\nstep can gate on it directly.\n\n"
+            "Examples:\n"
+            "  cobol-parser compare CUST.EXPECTED CUST.ACTUAL --copybook "
+            "CUSTOMER.cpy --charset ebcdic\n"
+            "  cobol-parser compare BASE.DAT OUT.DAT -c CUSTOMER.cpy "
+            "--key CUST-ID --ignore LAST-UPDATE-TS\n"
+            "  cobol-parser compare BASE.VB OUT.VB -c ORDER.cpy "
+            "--record-format variable --format json"
+        ),
+    )
+    p.add_argument("expected", help="The baseline record file")
+    p.add_argument("actual", help="The record file under test")
+    p.add_argument(
+        "--copybook",
+        "-c",
+        required=True,
+        metavar="FILE",
+        help="Copybook (or COBOL program) whose record layout describes both files",
+    )
+    p.add_argument(
+        "--record",
+        default=None,
+        metavar="NAME",
+        help="Level-01 record in the copybook to read through (default: the first)",
+    )
+    p.add_argument(
+        "--view",
+        default=None,
+        metavar="NAME",
+        help="REDEFINES overlay to read both files through (default: the record)",
+    )
+    p.add_argument(
+        "--key",
+        action="append",
+        default=[],
+        metavar="FIELD",
+        help=(
+            "Pair records on this field instead of by position (repeatable, "
+            "for a multi-field key). An inserted or deleted record is then "
+            "reported once instead of shifting every record after it"
+        ),
+    )
+    p.add_argument(
+        "--ignore",
+        action="append",
+        default=[],
+        metavar="FIELD",
+        help=(
+            "Leave a field out of the compare (repeatable): a column "
+            "(QTY(2)), a field name (QTY, every occurrence), or a group "
+            "(everything under it). For timestamps, run ids and the like"
+        ),
+    )
+    p.add_argument(
+        "--compare-bytes",
+        action="store_true",
+        help=(
+            "Compare raw bytes rather than decoded values (a C and an F sign "
+            "nibble then differ), and report bytes no field covers"
+        ),
+    )
+    p.add_argument(
+        "--max-differences",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Report at most N differing records (the counts stay exact)",
+    )
+    p.add_argument(
+        "--format",
+        dest="output_format",
+        choices=["text", "json"],
+        default="text",
+        help="text (default) is a report to read; json is every difference in full",
+    )
+    _add_record_file_args(p)
+    _add_compact_arg(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_compare)
+
+
+def _compare_fail(message: str) -> NoReturn:
+    """Exit 2: ``compare`` keeps 1 for "the files differ", as cmp/diff do."""
+    print(f"error: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def _cmd_compare(args: argparse.Namespace) -> None:
+    from ..generators.data.compare import CompareError, compare_files
+    from ..generators.data.decoding import RecordDecoder, RecordDecodingError
+    from ..generators.data.errors import CopybookLayoutError
+
+    if args.max_differences is not None and args.max_differences < 0:
+        _compare_fail("--max-differences cannot be negative")
+    try:
+        decoder = RecordDecoder.from_copybook_file(
+            args.copybook,
+            record=args.record,
+            opts=_decode_encoding_options(args),
+            record_length=args.record_length,
+        )
+        result = compare_files(
+            decoder,
+            args.expected,
+            args.actual,
+            view=args.view,
+            key=args.key,
+            ignore=args.ignore,
+            compare_bytes=args.compare_bytes,
+            max_differences=args.max_differences,
+        )
+    except (CompareError, RecordDecodingError, CopybookLayoutError) as exc:
+        _compare_fail(str(exc))
+    except OSError as exc:
+        _compare_fail(f"Cannot read file: {exc}")
+
+    if args.output_format == "json":
+        text = (
+            json.dumps(
+                {
+                    "expected_file": args.expected,
+                    "actual_file": args.actual,
+                    "copybook": args.copybook,
+                    **result.to_dict(),
+                },
+                indent=None if args.compact else 2,
+            )
+            + "\n"
+        )
+    else:
+        text = result.to_text()
+    output_path = getattr(args, "output", None)
+    if output_path:
+        # Not _verbatim_out: its failure exits 1, which here means "differ".
+        try:
+            with open(output_path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+        except OSError as exc:
+            _compare_fail(f"Cannot write output file: {exc}")
+    else:
+        print(text, end="")
+    sys.exit(0 if result.equal else 1)
 
 
 def _build_gen_fixtures_parser(
@@ -3431,6 +3594,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_expand_parser(subparsers)
     _build_gen_data_parser(subparsers)
     _build_decode_parser(subparsers)
+    _build_compare_parser(subparsers)
     _build_gen_fixtures_parser(subparsers)
     _build_analyzer_parser(
         subparsers,

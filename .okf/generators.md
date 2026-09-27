@@ -306,6 +306,7 @@ into focused, reusable modules:
 - **`encoding.py`** — record-image encoding: the display value from `values.py` rendered into the bytes a COBOL program would actually read, at fixed or variable record length. See "Record images" and "Fixed- and variable-length records" below.
 - **`views.py`** — `PlacedField` / `RecordView` / `RecordViews` / `build_record_views()`: the offset-annotated byte map the *decoder* reads a record through. See "Record views and decoding" below.
 - **`decoding.py`** — the inverse of `encoding.py`: `RecordDecoder`, `decode_field()`, `decode_record()`, `DecodedField` / `DecodedRecord` / `DecodeResult`, `decoded_hex_dump()`. Backs the `decode` CLI subcommand. See "Record views and decoding" below.
+- **`compare.py`** — `compare_records()` / `compare_files()`, `CompareResult`, `RecordDifference`, `FieldDifference`, `CompareError`: two decoded files through one view, compared field by field, paired by key or by position. Backs the `compare` CLI subcommand. See "Record compare" below.
 - **`dataset.py`** — `GeneratedDataset` class; holds rows, fields, seed, and `to_csv()` / `write_csv()` / `to_dicts()` export methods, plus the record-image trio `to_records()` / `write_records()` / `to_hex_dump()` and the length quartet `record_length()` / `minimum_record_length()` / `record_lengths(opts)` / `is_variable_length`.
 - **`copybook.py`** — `parse_copybook_records()` function and `CopybookDataGenerator` class; the public entry points for copybook parsing and CSV generation.
 - **`__init__.py`** — Package exports of the above plus re-exports for backwards compatibility.
@@ -853,6 +854,49 @@ than calling the rest of the file a broken tail.
   every line ties an offset and a length to the field that owns those bytes
   and to the value read out of them, with `! field: error` lines under the
   bad ones.
+
+### Record compare (`data/compare.py`, 2026-09-27)
+
+Phase 1 of the test-data-environments initiative (design:
+`backend/docs/superpowers/specs/2026-09-27-test-data-environments-design.md`):
+the check that closes an integration test -- the dataset a batch run wrote
+against the baseline it should match. Built entirely on the decoder above; it
+adds pairing and field comparison, and decodes nothing itself.
+
+* **Pairing.** With `key=[...]`, records pair on the tuple of key-field
+  values: an inserted or deleted record is reported once, as `extra` /
+  `missing`, instead of shifting every later record into `changed` (the
+  failure of a byte compare / IEBCOMPR). Duplicate keys pair in file order and
+  are named in `caveats` (the first ten; the rest counted). Without a key,
+  records pair by position.
+* **Field comparison is by decoded value** -- a `C` and an `F` sign nibble on
+  the same packed number are equal, as they are to the program.
+  `compare_bytes=True` compares raw bytes, and additionally reports a
+  `(unmapped bytes)` pseudo-field when two records agree field by field but
+  not byte by byte (slack past the layout under `record_length`). A field that
+  did not decode cleanly on *either* side is always compared by bytes: its
+  best-effort value is not evidence.
+* **Absent fields** (a shorter VB record, an `OCCURS DEPENDING ON` occurrence
+  its counter excludes) compare as absent: `FieldDifference.expected` /
+  `.actual` is `None`, rendered `(absent)` in the text report.
+* **Name resolution is against the `RecordView`, not the records**, so a
+  typo is caught even when both files are empty. A key token resolves, in
+  order, as a column (`QTY(2)`), a qualified name, or a field's own name, and
+  must hit exactly one elementary column (a group, a table name, or a name
+  two groups share is an error). An ignore token matches a column, a field
+  name (every occurrence), a qualified name, or any group on the path
+  (everything under it); `CompareResult.ignored` lists what was *actually*
+  skipped. A name that is not in the layout, or a key that is also ignored,
+  raises `CompareError` -- never a silent no-op that hides a real difference.
+* **Counts are exact, the list is capped.** `max_differences` bounds
+  `differences`; `changed_count` / `missing_count` / `extra_count` never are,
+  and `truncated` says when the list stopped short.
+* **Everything the decode was unsure of carries over**: decode caveats from
+  both sides (de-duplicated), per-side decode-error counts, per-side trailing
+  bytes.
+* **Memory.** The first cut decodes both files fully and builds an in-memory
+  key index. A streaming, key-sorted merge for files that do not fit is a
+  planned follow-up (design doc, Risks).
 
 ### `select_record()` (`data/copybook.py`)
 

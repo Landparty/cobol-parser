@@ -95,6 +95,14 @@ from .bundle import (
     FixtureBundle,
     Scenario,
 )
+from .compare import (
+    CompareError,
+    CompareResult,
+    FieldDifference,
+    RecordDifference,
+    compare_files,
+    compare_records,
+)
 from .copybook import CopybookDataGenerator, parse_copybook_records, select_record
 from .dataset import GeneratedDataset
 from .decoding import (
@@ -145,6 +153,8 @@ __all__ = [
     "BUNDLE_VERSION",
     "BoundaryFixture",
     "Charset",
+    "CompareError",
+    "CompareResult",
     "CopybookDataGenerator",
     "CopybookLayoutError",
     "CoverageSummary",
@@ -156,6 +166,7 @@ __all__ = [
     "Endian",
     "Expectation",
     "FieldCategory",
+    "FieldDifference",
     "FieldSpec",
     "FileFacts",
     "FixtureBundle",
@@ -168,6 +179,7 @@ __all__ = [
     "RDW_SIZE",
     "RecordDecoder",
     "RecordDecodingError",
+    "RecordDifference",
     "RecordEncodingError",
     "RecordFormat",
     "RecordView",
@@ -178,6 +190,8 @@ __all__ = [
     "VaryingLength",
     "binary_byte_length",
     "build_record_views",
+    "compare_files",
+    "compare_records",
     "decode_field",
     "decode_record",
     "decoded_hex_dump",

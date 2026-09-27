@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **`cobol-parser compare`: field-level compare of two record files through a
+  copybook** (`generators/data/compare.py`, `compare_records()` /
+  `compare_files()`): the expected output of a batch run against the actual
+  one, the check that closes an integration test. Records pair by `--key`
+  (so an inserted record is reported once, as `extra`, instead of cascading
+  into every later record) or by position; fields compare by decoded value
+  (`--compare-bytes` for raw bytes, which also reports bytes no field covers);
+  `--ignore` drops volatile fields by column, field name or group. A key or
+  ignore name not in the layout is an error, never a no-op. Exit status
+  follows `cmp`/`diff`: 0 equal, 1 different, 2 trouble. Shares every
+  file-format flag with `decode`. Phase 1 of the test-data-environments
+  initiative (design in the backend repo,
+  `docs/superpowers/specs/2026-09-27-test-data-environments-design.md`).
+
 * **Universal project config file (`cobol.yml`)**: one YAML file at a
   project's root, read by `cobol-parser`, `mockymock` and the COBOL Analyzer
   VS Code extension, so copybook directories, source format, dialect, record

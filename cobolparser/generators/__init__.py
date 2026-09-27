@@ -162,6 +162,17 @@ def __getattr__(name: str) -> object:
         }
         return _map[name]
     if name in (
+        "CompareError",
+        "CompareResult",
+        "FieldDifference",
+        "RecordDifference",
+        "compare_files",
+        "compare_records",
+    ):
+        from .data import compare as _compare
+
+        return getattr(_compare, name)
+    if name in (
         "DotFlowchartGenerator",
         "FlowchartOptions",
         "MermaidFlowchartGenerator",
@@ -189,6 +200,8 @@ __all__ = [
     "BUNDLE_VERSION",
     "BoundaryFixture",
     "Charset",
+    "CompareError",
+    "CompareResult",
     "CopybookDataGenerator",
     "CopybookLayoutError",
     "CoverageSummary",
@@ -201,6 +214,7 @@ __all__ = [
     "Endian",
     "Expectation",
     "FieldCategory",
+    "FieldDifference",
     "FieldSpec",
     "FileFacts",
     "FixtureBundle",
@@ -216,6 +230,7 @@ __all__ = [
     "RDW_SIZE",
     "RecordDecoder",
     "RecordDecodingError",
+    "RecordDifference",
     "RecordEncodingError",
     "RecordFormat",
     "RecordView",
@@ -224,6 +239,8 @@ __all__ = [
     "Scenario",
     "VaryingLength",
     "build_record_views",
+    "compare_files",
+    "compare_records",
     "decoded_hex_dump",
     "encode_rdw",
     "encoding_caveats",
