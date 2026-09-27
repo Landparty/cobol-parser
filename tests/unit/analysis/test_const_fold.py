@@ -4,7 +4,7 @@ Phase 7 tier 2 of the `gen-fixtures` initiative. Covers: chains that fold
 (MOVE literal/copy, ADD/SUBTRACT/MULTIPLY/COMPUTE), chains poisoned by an
 unknown or unmodeled write, GIVING forms (target unmodified, base read from
 its own current value), loop/branch write-poisoning, DIVIDE's unconditional
-poison, the documented self-reference gap, PERFORM (inline/paragraph/THRU)
+poison, self-referencing operands, PERFORM (inline/paragraph/THRU)
 chaining, GO TO/STOP RUN stopping the walk, and DISPLAY/WRITE as the only
 observation points that make a folded value visible in the result.
 """
@@ -282,29 +282,83 @@ class TestArithmeticFolding:
         assert fold.known == {}
 
 
-class TestAmbiguousSelfReference:
-    """A well-formed ADD/SUBTRACT always has >= 1 real addend; `.operands`
-    dedups a target's own name against a pre-existing addend of the same
-    name, so a wholly self-referencing accumulate is indistinguishable from
-    "no addend at all" -- poisoned rather than silently under-computed."""
+class TestSelfReference:
+    """An operand that is also a target or GIVING name is still an addend.
+    ``.operands`` dedups those names, so these used to be poisoned (TO/FROM)
+    or silently under-counted (GIVING); ``source_operands`` keeps what was
+    written before TO/FROM/GIVING. Every expected value was checked against
+    GnuCOBOL."""
 
-    def test_add_x_to_x_is_poisoned_not_undercounted(self):
+    def test_add_x_to_x_doubles_it(self):
         fold = _fold(
             "       MAIN-PARA.\n"
             "           MOVE 5 TO WS-A.\n"
             "           ADD WS-A TO WS-A.\n"
             "           DISPLAY WS-A.\n"
         )
-        assert fold.known == {}
+        assert fold.known == {"WS-A": "10"}
 
-    def test_subtract_x_from_x_is_poisoned(self):
+    def test_subtract_x_from_x_zeroes_it(self):
         fold = _fold(
             "       MAIN-PARA.\n"
             "           MOVE 5 TO WS-A.\n"
             "           SUBTRACT WS-A FROM WS-A.\n"
             "           DISPLAY WS-A.\n"
         )
-        assert fold.known == {}
+        assert fold.known == {"WS-A": "0"}
+
+    def test_add_with_giving_to_one_of_its_own_addends(self):
+        # `ADD 7 WS-A GIVING WS-A` is 7 + WS-A, not 7: the GIVING name is an
+        # addend too. It used to fold to 7.
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 5 TO WS-A.\n"
+            "           ADD 7 WS-A GIVING WS-A.\n"
+            "           DISPLAY WS-A.\n"
+        )
+        assert fold.known == {"WS-A": "12"}
+
+    def test_partial_overlap_is_not_undercounted(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 5 TO WS-A.\n"
+            "           MOVE 2 TO WS-B.\n"
+            "           ADD WS-A, WS-B TO WS-A.\n"
+            "           DISPLAY WS-A.\n"
+        )
+        assert fold.known == {"WS-A": "12"}
+
+    def test_subtract_giving_from_its_own_subtrahend(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 5 TO WS-A.\n"
+            "           SUBTRACT WS-A FROM 20 GIVING WS-A.\n"
+            "           DISPLAY WS-A.\n"
+        )
+        assert fold.known == {"WS-A": "15"}
+
+
+class TestFigurativeZeroAndNational:
+    def test_move_zero_then_arithmetic_folds(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE ZERO TO WS-A WS-NAME.\n"
+            "           MOVE ZEROES TO WS-B.\n"
+            "           ADD 3 TO WS-A.\n"
+            "           ADD WS-A ZERO GIVING WS-B.\n"
+            "           DISPLAY WS-A WS-B WS-NAME.\n"
+        )
+        assert fold.known == {"WS-A": "3", "WS-B": "3", "WS-NAME": "00000"}
+
+    def test_national_move_truncates_to_characters_not_bytes(self):
+        # PIC N(3) is six bytes but three characters.
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            '           MOVE "ABCDEF" TO WS-NAT.\n'
+            "           DISPLAY WS-NAT.\n",
+            extra_data="       01  WS-NAT              PIC N(3).\n",
+        )
+        assert fold.known == {"WS-NAT": "ABC"}
 
 
 class TestLoopAndBranchPoisoning:

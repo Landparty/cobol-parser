@@ -161,6 +161,13 @@ Serialization fidelity notes (2026-07-07):
   `decimal_digits` alone rather than a second heuristic. See
   [generators.md](generators.md)'s P-scaling note and [analysis.md](analysis.md)'s
   MoveTypeChecker section.
+* `ArithmeticStatement.source_operands: list[str] | None` (2026-09-27) --
+  the operands written before TO/FROM/GIVING, duplicates kept, set by the
+  ADD/SUBTRACT parsers; `None` on a node built any other way. **Not
+  serialized** (`to_dict()` is unchanged). `operands` cannot stand in for it:
+  `set_target`/`set_giving` append a name only when absent, so
+  `ADD A B GIVING B` and `ADD A GIVING B` leave the same `[A, B]`. Read by
+  `analysis/const_fold.py`; see `analysis.md`.
 * `ArithmeticStatement.givings: list[str]` (2026-07-24) — full ordered
   list of comma/space-separated `GIVING` result targets (`ADD A TO B
   GIVING C, D`); `.giving` keeps the first for backward compatibility,

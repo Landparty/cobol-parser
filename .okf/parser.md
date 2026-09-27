@@ -404,6 +404,12 @@ returned `[]` — an inner `CALL` in `AT END` vanished from the AST entirely,
 blinding mockymock's boundary detection. Pinned by
 `tests/unit/io_statements/test_clause_bodies.py`.
 
+**ADD/SUBTRACT record `source_operands`** (2026-09-27,
+`arithmetic_parsers.py`): the operand list parsed before TO/FROM/GIVING,
+duplicates kept, stored on the node so a consumer can tell an addend from a
+target/GIVING of the same name (`.operands` dedups them). See
+`ast-models.md`.
+
 **SUBTRACT/ADD trailing `GIVING` on a continuation line, subscripted DISPLAY
 operands, and `WRITE ... FROM` literal (`arithmetic_parsers.py` /
 `display_parser.py` / `write_parser.py` / `_utils.py`, 2026-07-07):** three

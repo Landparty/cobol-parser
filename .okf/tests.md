@@ -42,6 +42,12 @@ arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
 
+2026-09-27: `tests/unit/analysis/test_const_fold.py::TestSelfReference` (5
+tests, replacing `TestAmbiguousSelfReference`'s two poison assertions) and
+`::TestFigurativeZeroAndNational` (2) pin exact folds for operands that are
+also targets/GIVINGs, `MOVE ZERO`, and `PIC N` truncation -- every value
+checked against GnuCOBOL. See `analysis.md`.
+
 2026-09-27: `tests/unit/generators/data/test_layout_offsets.py::TestSynchronizedSlack`
 (4 tests) pins `data-items` flagging offsets that unmodelled SYNC slack
 could shift. See `generators.md`.

@@ -95,6 +95,7 @@ class AddStatementParser(IStatementParser):
         operands, separator = parse_arithmetic_operands(token_stream, {"TO", "GIVING"})
         for operand in operands:
             stmt.add_operand(operand)
+        stmt.source_operands = list(operands)
 
         if not operands:
             report_or_raise(
@@ -165,6 +166,7 @@ class SubtractStatementParser(IStatementParser):
         )
         for operand in operands:
             stmt.add_operand(operand)
+        stmt.source_operands = list(operands)
 
         if not operands:
             report_or_raise(

@@ -1808,24 +1808,22 @@ internal env) rather than approximating:
   no truncated integer digits, no sign coercion into an unsigned field) --
   real COBOL's MOVE truncation rules are well-defined, but replicating them
   exactly is out of scope for v1; an overflowing result is poisoned instead.
-* **A well-formed ADD/SUBTRACT self-reference is poisoned, not
-  under-computed.** `ArithmeticStatement.operands` is a deduplicated union
-  of the real addend/subtrahend tokens *and* the target/giving names
-  (`set_target`/`set_giving` both call the same `_add_unique_operand` the
-  addend-collection phase does) -- so `ADD X TO X` (doubling X) and "X was
-  never a separate addend at all" produce the *identical* `.operands`
-  shape, and the distinction is unrecoverable from the final AST. Since a
-  well-formed ADD/SUBTRACT always has >= 1 real addend (parser-enforced),
-  filtering target/giving names out of `.operands` and finding *nothing
-  left* proves every addend coincided with a target -- the one shape this
-  module can safely detect and poison. A blanket "poison on any operand/
-  target overlap" was tried and rejected during development: a target's own
-  name *always* ends up in `.operands` by construction (regardless of any
-  genuine overlap), so that check fired on every ordinary `ADD 1 TO WS-X`,
-  not just a self-reference -- found immediately via this module's own
-  tests, before it ever reached the corpus sweep. A *partial* overlap
-  (`ADD X, Y TO X`) is not caught and silently undercounts -- narrower and
-  rarer, and documented in the source rather than silently. `MULTIPLY`'s
+  `MOVE ZERO`/`ZEROS`/`ZEROES` folds (0 into a numeric field, `"0"` in every
+  position of an alphanumeric one) and `ZERO` is a known arithmetic operand.
+  A text MOVE into `PIC N(n)` truncates to n characters (`spec.size` is
+  bytes, two per national character; it had kept 2n).
+* **ADD/SUBTRACT addends come from `ArithmeticStatement.source_operands`**
+  (2026-09-27), the operands written before TO/FROM/GIVING with duplicates
+  kept, set by the ADD/SUBTRACT parsers and not serialized.
+  `ArithmeticStatement.operands` cannot answer "which names are addends":
+  `set_target`/`set_giving` append a name only when it is absent, so
+  `ADD A B GIVING B` and `ADD A GIVING B` both leave `[A, B]`. The folder
+  used to filter target/GIVING names out of `.operands`, which poisoned
+  `ADD X TO X` and -- worse, breaking the exact-or-absent contract --
+  silently dropped a real addend in `ADD -6.05 N8 GIVING N8` (folded to
+  -6.05) and `ADD X, Y TO X`. Found by fuzzing random straight-line
+  programs against GnuCOBOL (~12,000 folded values compared, all now
+  matching). A node without `source_operands` is poisoned. `MULTIPLY`'s
   format-1 (`MULTIPLY A BY B`, no GIVING) has no analogous issue:
   reusing the target's own name as the second operand is directly what the
   statement means (multiplication has no target-is-also-an-addend hidden
