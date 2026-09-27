@@ -531,11 +531,28 @@ def _field_differences(
         act_field = actual_fields.get(name)
         if act_field is None or not _same(exp_field, act_field, compare_bytes):
             differences.append(_difference(exp_field, act_field))
-    if compare_bytes and not differences and exp.raw != act.raw:
-        # Every field agrees, yet the images do not: the difference is in
-        # bytes no field covers. A bytes compare exists to catch exactly this.
-        differences.append(_unmapped(exp, act))
+    if compare_bytes and not differences:
+        # Every field agrees, yet the images may not: the difference is in
+        # bytes no field covers. A bytes compare exists to catch exactly this
+        # -- but bytes of an *ignored* field are not "unmapped", so they are
+        # blanked out on both sides before the images are compared.
+        exp_raw = _without_ignored(exp, skip)
+        act_raw = _without_ignored(act, skip)
+        if exp_raw != act_raw:
+            differences.append(_unmapped(exp, act, exp_raw, act_raw))
     return differences
+
+
+def _without_ignored(item: DecodedRecord, skip: frozenset[str]) -> bytes:
+    """The record image with every ignored field's bytes zeroed."""
+    if not skip:
+        return item.raw
+    image = bytearray(item.raw)
+    for decoded in item.fields:
+        if decoded.present and decoded.name.upper() in skip:
+            end = min(decoded.offset + decoded.length, len(image))
+            image[decoded.offset : end] = bytes(max(end - decoded.offset, 0))
+    return bytes(image)
 
 
 def _same(exp: DecodedField, act: DecodedField, compare_bytes: bool) -> bool:
@@ -562,14 +579,18 @@ def _difference(exp: DecodedField, act: DecodedField | None) -> FieldDifference:
     )
 
 
-def _unmapped(exp: DecodedRecord, act: DecodedRecord) -> FieldDifference:
+def _unmapped(
+    exp: DecodedRecord, act: DecodedRecord, exp_raw: bytes, act_raw: bytes
+) -> FieldDifference:
+    # The first differing byte is found in the images with ignored fields
+    # blanked, so an ignored field ahead of the real difference is skipped.
     start = next(
         (
             index
-            for index, (left, right) in enumerate(zip(exp.raw, act.raw, strict=False))
+            for index, (left, right) in enumerate(zip(exp_raw, act_raw, strict=False))
             if left != right
         ),
-        min(len(exp.raw), len(act.raw)),
+        min(len(exp_raw), len(act_raw)),
     )
     return FieldDifference(
         name=UNMAPPED_BYTES,

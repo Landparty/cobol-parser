@@ -873,7 +873,10 @@ adds pairing and field comparison, and decodes nothing itself.
   the same packed number are equal, as they are to the program.
   `compare_bytes=True` compares raw bytes, and additionally reports a
   `(unmapped bytes)` pseudo-field when two records agree field by field but
-  not byte by byte (slack past the layout under `record_length`). A field that
+  not byte by byte (slack past the layout under `record_length`). Bytes of an
+  *ignored* field are blanked on both sides before that image check
+  (2026-09-27: `--compare-bytes --ignore UPD-TS` had reported the ignored
+  timestamp's bytes as `(unmapped bytes)`, so the ignore did nothing). A field that
   did not decode cleanly on *either* side is always compared by bytes: its
   best-effort value is not evidence.
 * **Absent fields** (a shorter VB record, an `OCCURS DEPENDING ON` occurrence

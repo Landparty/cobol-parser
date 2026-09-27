@@ -121,6 +121,25 @@ def test_comments_stripped_but_not_inside_quotes_or_mid_token():
     assert doc == {"a": 1, "b": "has # inside", "c": "PIC-X#Y"}
 
 
+def test_apostrophe_inside_a_plain_scalar_does_not_hide_a_comment():
+    # A quote only opens a quoted scalar at the start of a value; mid-word it
+    # is an ordinary character and must not swallow the comment after it.
+    doc = parse_yaml(
+        "owner: Sam's shop  # who runs it\n"
+        "don't: 1\n"
+        "list:\n"
+        "  - it's here  # note\n"
+        "  - 'quoted # kept'\n"
+        "dash: -'x # c\n"
+    )
+    assert doc == {
+        "owner": "Sam's shop",
+        "don't": 1,
+        "list": ["it's here", "quoted # kept"],
+        "dash": "-'x",
+    }
+
+
 def test_leading_document_marker_allowed():
     assert parse_yaml("---\na: 1\n") == {"a": 1}
 

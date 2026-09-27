@@ -1493,6 +1493,16 @@ def _cmd_decode(args: argparse.Namespace) -> None:
     )
     from ..generators.data.errors import CopybookLayoutError
 
+    # Checked here rather than left to the decoder: a negative --record-length
+    # surfaced as "the layout is zero bytes long", --record-length 0 was
+    # silently replaced by the layout's own length, and a negative
+    # --max-records decoded nothing without a word.
+    if args.record_length is not None and args.record_length <= 0:
+        _fail("--record-length must be a positive number of bytes")
+    if args.max_records is not None and args.max_records < 0:
+        _fail("--max-records cannot be negative")
+    if args.skip < 0:
+        _fail("--skip cannot be negative")
     encoding = _decode_encoding_options(args)
     try:
         decoder = RecordDecoder.from_copybook_file(
@@ -1674,6 +1684,8 @@ def _cmd_compare(args: argparse.Namespace) -> None:
 
     if args.max_differences is not None and args.max_differences < 0:
         _compare_fail("--max-differences cannot be negative")
+    if args.record_length is not None and args.record_length <= 0:
+        _compare_fail("--record-length must be a positive number of bytes")
     try:
         decoder = RecordDecoder.from_copybook_file(
             args.copybook,

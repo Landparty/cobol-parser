@@ -14,6 +14,16 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-27 -- bug hunt: compare-bytes ignore, YAML apostrophes, split PIC repeats
+
+[generators.md](generators.md): `compare_bytes=True` no longer reports an
+ignored field's bytes as `(unmapped bytes)`. [cli.md](cli.md): the config
+YAML reader no longer treats a mid-word apostrophe as opening a quote (it
+swallowed trailing comments); `decode`/`compare` reject negative paging
+flags and a non-positive `--record-length`. [ast-models.md](ast-models.md):
+`PictureClause` sizes unedited pictures with split repeat factors
+(`X(2)X(3)`, `9(2)9(3)`, `NN`) correctly.
+
 ## 2026-09-27 -- audit patch batch: typed VALUE literals, linear COPY scan, REPLACING size
 
 From `AUDIT.md` §8 step 1. `VALUE X"4142"` kept only its content, so

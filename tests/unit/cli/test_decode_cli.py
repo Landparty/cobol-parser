@@ -251,6 +251,26 @@ def test_decoding_without_a_data_file_fails_cleanly(tmp_path, capsys):
     assert "needs a data file" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    ("flags", "message"),
+    [
+        (["--record-length", "-2"], "--record-length must be a positive"),
+        (["--record-length", "0"], "--record-length must be a positive"),
+        (["--max-records", "-1"], "--max-records cannot be negative"),
+        (["--skip", "-1"], "--skip cannot be negative"),
+    ],
+)
+def test_out_of_range_paging_flags_fail_cleanly(sample, capsys, flags, message):
+    # Before: a negative --record-length claimed the layout was zero bytes
+    # long, 0 was silently swapped for the layout length, and a negative
+    # --max-records printed a header and nothing else, exit 0.
+    copybook, data = sample
+    with pytest.raises(SystemExit) as excinfo:
+        _run(["decode", str(data), "--copybook", str(copybook), *flags])
+    assert excinfo.value.code == 1
+    assert message in capsys.readouterr().err
+
+
 def test_an_unreadable_copybook_fails_cleanly(tmp_path, capsys):
     with pytest.raises(SystemExit) as excinfo:
         _run(

@@ -302,6 +302,33 @@ def test_bytes_compare_reports_slack_no_field_covers():
     assert diff.actual_hex == "FF 40 40"
 
 
+def test_bytes_compare_does_not_report_an_ignored_field_as_unmapped():
+    later = _with(ALICE, 7, "20261231")
+    result = _compare([ALICE], [later], ignore=["UPD-TS"], compare_bytes=True)
+    assert result.equal, result.to_text()
+
+
+def test_bytes_compare_skips_an_ignored_field_ahead_of_real_slack():
+    decoder = RecordDecoder.from_copybook_source(
+        CUSTOMER, opts=EBCDIC, record_length=44
+    )
+    later = _with(ALICE, 7, "20261231")
+    expected = decoder.decode_bytes(_image(CUSTOMER, [ALICE], EBCDIC) + b"\x40" * 5)
+    actual = decoder.decode_bytes(
+        _image(CUSTOMER, [later], EBCDIC) + b"\x40\x40\xff\x40\x40"
+    )
+    result = compare_records(
+        expected,
+        actual,
+        view=decoder.views.base,
+        ignore=["UPD-TS"],
+        compare_bytes=True,
+    )
+    [diff] = result.differences[0].fields
+    assert diff.name == UNMAPPED_BYTES
+    assert diff.offset == 41
+
+
 def test_a_field_that_does_not_decode_is_compared_by_its_bytes():
     decoder = RecordDecoder.from_copybook_source(CUSTOMER, opts=EBCDIC)
     image = _image(CUSTOMER, [ALICE], EBCDIC)

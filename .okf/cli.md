@@ -118,6 +118,11 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   tail and then failed with "unterminated quoted string". Fixed 2026-09-16
   (index-driven loop); pinned by
   `tests/regression/test_audit_2026_09_16.py`.
+* **A quote only opens a quoted span at the start of a scalar** (line start,
+  or after `:`, `- `, `[`, `{`, `,`) -- `_opens_quote()`, shared by
+  `_strip_comment`, `_split_key` and `_is_mapping_entry`. Mid-word it is a
+  plain character: `owner: Sam's shop  # note` had kept `# note` in the value
+  and `don't: 1` failed to parse. Fixed 2026-09-27.
 * **Tool sections** — `mockymock:` and `analyzer:` are validated only as
   mappings and carried verbatim on `ProjectConfig.tools`; this package never
   needs to know their schemas.
@@ -766,6 +771,11 @@ compiled against them. Implementation:
   slack, or a copybook covering only a prefix).
 * **`--max-records`/`--skip`** page a large file. A run stopped by
   `--max-records` does *not* report the rest of the file as trailing bytes.
+  A negative `--max-records`/`--skip`, or a `--record-length` that is not
+  positive, is an error (exit 1; exit 2 on `compare`) -- 2026-09-27: a
+  negative length had claimed the layout was zero bytes long, `0` was
+  silently replaced by the layout length, and `--max-records -1` printed
+  only a header.
 * **stderr is never silent about a mismatch**: every caveat, a count of
   fields that did not decode cleanly, and any trailing bytes that are not a
   whole record (which nearly always means the record length is wrong).

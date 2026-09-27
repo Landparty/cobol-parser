@@ -275,7 +275,7 @@ class _Parser:
                 if char == quote:
                     quote = None
                 continue
-            if char in "\"'":
+            if char in "\"'" and _opens_quote(text, i):
                 quote = char
                 continue
             if char == ":" and (i + 1 == len(text) or text[i + 1] in " \t"):
@@ -447,7 +447,7 @@ def _is_mapping_entry(text: str) -> bool:
             if char == quote:
                 quote = None
             continue
-        if char in "\"'":
+        if char in "\"'" and _opens_quote(text, i):
             quote = char
         elif char in "[{":
             depth += 1
@@ -458,6 +458,24 @@ def _is_mapping_entry(text: str) -> bool:
         ):
             return True
     return False
+
+
+def _opens_quote(text: str, i: int) -> bool:
+    """Whether the quote character at ``text[i]`` starts a quoted scalar.
+
+    A quote only opens a quoted span at the *start* of a scalar -- the first
+    thing on the line, or right after the ``:``, ``- ``, ``[``, ``{`` or
+    ``,`` that introduces a value. Anywhere else it is an ordinary character
+    of a plain scalar: the apostrophe in ``owner: Sam's shop  # note`` must
+    not hide the comment after it (or, in a key, the colon after it).
+    """
+    before = text[:i].rstrip(" \t")
+    if not before:
+        return True
+    if before[-1] == "-":
+        # `- 'x'` is a sequence entry; `-'x'` is a plain scalar.
+        return len(before) < i
+    return before[-1] in ":[{,"
 
 
 def _strip_comment(raw: str) -> str:
@@ -487,7 +505,7 @@ def _strip_comment(raw: str) -> str:
                 quote = None
             i += 1
             continue
-        if char in "\"'":
+        if char in "\"'" and _opens_quote(raw, i):
             quote = char
             i += 1
             continue
