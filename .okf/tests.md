@@ -8,6 +8,12 @@ timestamp: 2026-09-17T00:00:00Z
 
 # Overview
 
+2026-09-27: `tests/unit/test_exec_sql_merge_cte.py` (6 tests) pins EXEC SQL
+`MERGE` (type `MERGE`, target first, then the `USING` table or the tables a
+`USING (SELECT ...)` subquery reads, none for `USING (VALUES ...)`) and `WITH`
+statements (main verb's type, main SELECT's columns, base tables but never
+the CTE names), plus a plain-SELECT guard.
+
 2026-09-23: `tests/unit/test_exec_sql_qualified_tables.py` (8 tests) pins
 schema-qualified DB2 names in EXEC SQL: one table per qualified name (no bare
 schema), JOINs, three-part names, and the rebuilt `sql_text` keeping

@@ -14,6 +14,21 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-27 -- EXEC SQL MERGE and WITH (CTE) statements get a type and tables
+
+`ExecSQLStatement` classified only statements that start with their verb,
+and table extraction is keyed on the type, so `MERGE INTO ... USING ...` and
+`WITH cte AS (...) SELECT ...` were `"UNKNOWN"` with `tables == []`: a
+program writing a table through MERGE, or reading through a CTE, showed no
+DB2 table use (the backend's MERGE-as-WRITE handling never ran). New
+`SQLStatementType.MERGE`; the target (`INTO`) and source (`USING`) are read
+by the tokenized pass, a `USING (SELECT ...)` subquery's tables by the FROM
+regex, and the target is kept first. `_split_common_table_expressions()`
+peels the CTE list off a `WITH` statement: the type is the main verb's, the
+SELECT list is the main SELECT's, and CTE names are dropped from `tables`.
+`ast-models.md` updated. Regression tests:
+`tests/unit/test_exec_sql_merge_cte.py`.
+
 ## 2026-09-21 (follow-up) -- the stamp shape admits blanks between digits
 
 Re-running the reported program against the fix below took its 19 warnings

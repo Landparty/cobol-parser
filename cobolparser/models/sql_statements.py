@@ -276,6 +276,48 @@ def _read_qualified_name(tokens: list[tuple[str, int]], index: int) -> tuple[str
     return "".join(parts), index
 
 
+_CTE_MAIN_VERBS = ("SELECT", "INSERT", "UPDATE", "DELETE", "MERGE")
+
+
+def _split_common_table_expressions(
+    tokens: list[tuple[str, int]],
+) -> tuple[list[str], int]:
+    """Split a ``WITH name [(cols)] AS (...) [, ...] <statement>`` scan.
+
+    Returns the CTE names and the index of the main statement's first token.
+    A scan that does not start with ``WITH`` yields ``([], 0)``.
+    """
+    if not tokens or tokens[0][1] != 0 or tokens[0][0].upper() != "WITH":
+        return [], 0
+    names: list[str] = []
+    n = len(tokens)
+    i = 1
+    while i < n:
+        token, depth = tokens[i]
+        if depth != 0 or not _is_sql_word(token):
+            break
+        if token.upper() in _CTE_MAIN_VERBS:
+            return names, i
+        names.append(token)
+        i += 1
+        # Optional column list, then AS, then the parenthesised body. Each
+        # parenthesised group is its opening "(" at depth 0, the body at
+        # depth >= 1 and its closing ")" back at depth 0.
+        for _ in range(2):
+            if i < n and tokens[i][0].upper() == "AS" and tokens[i][1] == 0:
+                i += 1
+            if i < n and tokens[i] == ("(", 0):
+                i += 1
+                while i < n and tokens[i] != (")", 0):
+                    i += 1
+                i += 1
+        if i < n and tokens[i] == (",", 0):
+            i += 1
+            continue
+        break
+    return names, i
+
+
 def _extract_tables_tokenized(
     tokens: list[tuple[str, int]], sql_type: str
 ) -> list[str]:
@@ -321,7 +363,7 @@ def _extract_tables_tokenized(
     )
     n = len(tokens)
     i = 0
-    insert_into_pending = sql_type == SQLStatementType.INSERT
+    insert_into_pending = sql_type in (SQLStatementType.INSERT, SQLStatementType.MERGE)
     while i < n:
         token, depth = tokens[i]
         if depth == 0:
@@ -338,6 +380,13 @@ def _extract_tables_tokenized(
                 name, j = _read_qualified_name(tokens, i + 1)
                 add(name)
                 insert_into_pending = False
+                i = max(j, i + 1)
+                continue
+            if upper == "USING" and sql_type == SQLStatementType.MERGE:
+                # MERGE ... USING table: the source (a parenthesised
+                # subquery or VALUES list has no name here).
+                name, j = _read_qualified_name(tokens, i + 1)
+                add(name)
                 i = max(j, i + 1)
                 continue
             if upper == "UPDATE" and sql_type == SQLStatementType.UPDATE and i == 0:
@@ -369,6 +418,7 @@ class SQLStatementType:
     INSERT: ClassVar[str] = "INSERT"
     UPDATE: ClassVar[str] = "UPDATE"
     DELETE: ClassVar[str] = "DELETE"
+    MERGE: ClassVar[str] = "MERGE"
     DECLARE_CURSOR: ClassVar[str] = "DECLARE CURSOR"
     DECLARE_TABLE: ClassVar[str] = "DECLARE TABLE"
     OPEN_CURSOR: ClassVar[str] = "OPEN"
@@ -629,17 +679,35 @@ class ExecSQLStatement(CobolStatement):
         # Extract host variables (:variable_name)
         self._extract_host_variables(scrubbed)
 
+        tokens = _scan_sql_tokens(scrubbed)
+
+        # ``WITH cte AS (...) SELECT ...``: the statement is its main verb,
+        # and the CTE names are not tables.
+        cte_names, main_start = _split_common_table_expressions(tokens)
+        if cte_names and self._sql_type == SQLStatementType.UNKNOWN:
+            main = tokens[main_start][0].upper() if main_start < len(tokens) else ""
+            self._sql_type = self._determine_sql_type(main)
+        main_tokens = tokens[main_start:]
+
         # Extract table names (regex pass — preserved for compatibility)
         self._extract_tables(scrubbed)
 
         # Tokenizer pass: adds structure the regexes miss (multi-table FROM
         # lists, JOIN chains, SELECT columns, WHERE presence).
-        tokens = _scan_sql_tokens(scrubbed)
-        for table in _extract_tables_tokenized(tokens, self._sql_type):
+        tokenized = _extract_tables_tokenized(main_tokens, self._sql_type)
+        for table in tokenized:
             if table not in self.tables:
                 self.tables.append(table)
+        if cte_names:
+            ctes = {name.upper() for name in cte_names}
+            self.tables = [t for t in self.tables if t.upper() not in ctes]
+        if self._sql_type == SQLStatementType.MERGE and tokenized:
+            # The MERGE target (read by the tokenizer from ``MERGE INTO``)
+            # leads, ahead of the tables its USING subquery reads.
+            target = tokenized[0]
+            self.tables = [target] + [t for t in self.tables if t != target]
         self.select_columns = (
-            _extract_select_columns(tokens)
+            _extract_select_columns(main_tokens)
             if self._sql_type == SQLStatementType.SELECT
             else []
         )
@@ -677,6 +745,8 @@ class ExecSQLStatement(CobolStatement):
             return SQLStatementType.UPDATE
         elif upper_sql.startswith("DELETE"):
             return SQLStatementType.DELETE
+        elif upper_sql.startswith("MERGE"):
+            return SQLStatementType.MERGE
 
         # Transaction control
         if upper_sql.startswith("COMMIT"):
@@ -736,6 +806,11 @@ class ExecSQLStatement(CobolStatement):
 
         elif self._sql_type == SQLStatementType.DELETE:
             compiled_patterns.append(_SQL_FROM_TABLE_RE)
+
+        elif self._sql_type == SQLStatementType.MERGE:
+            # Tables read by a ``USING (SELECT ... FROM t)`` source.
+            compiled_patterns.append(_SQL_FROM_TABLE_RE)
+            compiled_patterns.append(_SQL_JOIN_TABLE_RE)
 
         elif self._sql_type == SQLStatementType.DECLARE_CURSOR:
             compiled_patterns.append(_SQL_FROM_TABLE_RE)

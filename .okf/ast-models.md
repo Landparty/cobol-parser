@@ -302,6 +302,15 @@ AST nodes for EXEC SQL, EXEC CICS, and EXEC IMS DLI blocks captured by
 (`_SQL_TABLE_NAME`). Before 2026-09-23 they stopped at the first `.`, so every
 qualified table also reported its schema (`BANK`, `SYSIBM`) as a table.
 
+`MERGE INTO tgt USING src ...` has `sql_type == "MERGE"`; `tables` lists the
+target first, then the `USING` source table or the tables its `USING
+(SELECT ...)` subquery reads (a `USING (VALUES ...)` source adds none). A
+statement led by common table expressions (`WITH x AS (...) SELECT ...`)
+takes the type of its main verb, and `tables` lists the base tables the CTE
+bodies and main statement read -- never the CTE names themselves
+(`_split_common_table_expressions()`). Before 2026-09-27 both were
+`"UNKNOWN"` with no tables.
+
 # Statement Models (`models/statements/`)
 
 | File | Node Classes |
