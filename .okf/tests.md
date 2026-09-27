@@ -42,6 +42,10 @@ arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
 
+2026-09-27: `tests/unit/generators/data/test_layout_offsets.py::TestSynchronizedSlack`
+(4 tests) pins `data-items` flagging offsets that unmodelled SYNC slack
+could shift. See `generators.md`.
+
 2026-09-27: `tests/unit/generators/data/test_editing.py` (87 tests) pins
 numeric-edited record bytes (36 cases checked against GnuCOBOL 3), the
 de-edit inverse, and encode/decode round trips in ASCII and EBCDIC.

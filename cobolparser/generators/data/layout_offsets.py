@@ -20,7 +20,7 @@ from typing import Any
 from ...models.data_items import CobolDataItem, ConditionNameItem
 from ...models.program import CobolProgram, CobolSection
 from .layout import expand_condition_values
-from .storage import storage_size
+from .storage import BINARY_USAGES, FLOAT_USAGES, POINTER_USAGES, storage_size
 
 _SECTION_NAMES = ("FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE")
 
@@ -372,6 +372,54 @@ def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
     return out
 
 
+def _alignment(item: CobolDataItem) -> int:
+    """The boundary a ``SYNCHRONIZED`` *item* is aligned on, or 0 when
+    SYNCHRONIZED has no effect on it (DISPLAY, packed decimal, a group).
+    Binary, floating-point, pointer and index items align on their own
+    width: 2, 4 or 8 bytes."""
+    if not item.synchronized or _direct_data_children(item):
+        return 0
+    usage = (item.usage or "DISPLAY").upper()
+    if usage in BINARY_USAGES or usage in FLOAT_USAGES:
+        return _elementary_byte_length(item)
+    if usage == "INDEX" or usage in POINTER_USAGES:
+        return _elementary_byte_length(item)
+    return 0
+
+
+def _first_unaligned_sync(
+    record: CobolDataItem, offsets: dict[str, int | None]
+) -> tuple[str, list[str]] | None:
+    """The first ``SYNCHRONIZED`` item in *record* (source order) whose
+    alignment this module cannot vouch for, plus every item's qualified name
+    from it to the end of the record in source order.
+
+    ``SYNCHRONIZED`` slack bytes are not modelled (by the record encoder
+    either -- see ``encoding.py``), so an aligned item that already sits on
+    its boundary is harmless, but one that does not -- or that sits inside
+    an OCCURS table, where slack can also fall *between* occurrences --
+    shifts itself and everything after it by bytes these offsets omit.
+    """
+    order: list[tuple[str, CobolDataItem, bool]] = []
+
+    def walk(item: CobolDataItem, path: tuple[str, ...], in_table: bool) -> None:
+        item_path = (*path, item.name)
+        in_table = in_table or item.occurs_clause is not None
+        order.append((".".join(item_path), item, in_table))
+        for child in _direct_data_children(item):
+            walk(child, item_path, in_table)
+
+    walk(record, (), False)
+    for index, (name, item, in_table) in enumerate(order):
+        boundary = _alignment(item)
+        if not boundary:
+            continue
+        offset = offsets.get(name)
+        if in_table or offset is None or offset % boundary:
+            return name, [later for later, _, _ in order[index:]]
+    return None
+
+
 def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
     """Compute layout facts for every top-level (01/77) record in every
     DATA DIVISION section of *ast*. Record-relative offsets -- see the
@@ -406,6 +454,7 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
                 record_layout[0].redefines_chain = _walk_redefines_chain(
                     record, siblings_by_name
                 )
+            _flag_sync_slack(record, record_layout, unresolved)
             for layout_item in record_layout:
                 items.append(layout_item.to_dict())
 
@@ -419,3 +468,29 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
                     items.append(layout_item.to_dict())
 
     return {"items": items, "unresolved": unresolved}
+
+
+def _flag_sync_slack(
+    record: CobolDataItem, layout: list[LayoutItem], unresolved: list[str]
+) -> None:
+    """Mark every offset a ``SYNCHRONIZED`` item's slack bytes could shift
+    as ``offset_ambiguous``, and say why in *unresolved* -- a quiet report
+    of confident offsets that are short by the slack would be wrong."""
+    offsets = {entry.qualified_name: entry.byte_offset for entry in layout}
+    found = _first_unaligned_sync(record, offsets)
+    if found is None:
+        return
+    first, affected = found
+    shifted = set(affected)
+    for entry in layout:
+        base = (
+            entry.parent_qualified_name
+            if entry.level == 88 and entry.parent_qualified_name
+            else entry.qualified_name
+        )
+        if base in shifted:
+            entry.offset_ambiguous = True
+    unresolved.append(
+        f"{first}: SYNCHRONIZED alignment is not modelled; its offset and "
+        "every later one in the record may be short by slack bytes"
+    )

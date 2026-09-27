@@ -447,3 +447,72 @@ class TestComputeProgramDataItems:
         assert by_name["WS-CTR"]["is_group"] is False
         assert by_name["WS-CTR"]["byte_length"] == 2  # COMP, <=4 digits -> 2 bytes
         assert by_name["WS-CTR"]["byte_offset"] == 0
+
+
+def _program_items(data_division_body: str) -> dict:
+    source = f"""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. LAYOUTTEST.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+{data_division_body}
+       PROCEDURE DIVISION.
+           STOP RUN.
+"""
+    result = parse_cobol(
+        source, filename="layouttest.cbl", error_recovery=ErrorRecoveryMode.FAIL_FAST
+    )
+    return compute_program_data_items(result.ast)
+
+
+class TestSynchronizedSlack:
+    """SYNCHRONIZED slack bytes are not modelled, so offsets they would
+    shift are flagged rather than reported as exact. (GnuCOBOL -std=ibm puts
+    A2 below at offset 4, not 3.)"""
+
+    def test_unaligned_sync_item_and_everything_after_are_ambiguous(self):
+        report = _program_items(
+            "       01 REC.\n"
+            "          05 A1 PIC X(3).\n"
+            "          05 A2 PIC S9(4) COMP SYNC.\n"
+            "          05 A3 PIC X.\n"
+            "       01 SPARE PIC X(4).\n"
+        )
+        flags = {i["qualified_name"]: i["offset_ambiguous"] for i in report["items"]}
+        assert flags == {
+            "REC": False,
+            "REC.A1": False,
+            "REC.A2": True,
+            "REC.A3": True,
+            "SPARE": False,
+        }
+        assert len(report["unresolved"]) == 1
+        assert report["unresolved"][0].startswith("REC.A2: SYNCHRONIZED")
+
+    def test_aligned_sync_item_is_exact(self):
+        report = _program_items(
+            "       01 REC.\n"
+            "          05 A1 PIC X(4).\n"
+            "          05 A2 PIC S9(9) COMP SYNC.\n"
+            "          05 A3 PIC X.\n"
+        )
+        assert not any(i["offset_ambiguous"] for i in report["items"])
+        assert report["unresolved"] == []
+
+    def test_sync_on_display_has_no_effect(self):
+        report = _program_items(
+            "       01 REC.\n"
+            "          05 A1 PIC X(3).\n"
+            "          05 A2 PIC 9(4) SYNC.\n"
+        )
+        assert report["unresolved"] == []
+
+    def test_sync_inside_a_table_is_ambiguous(self):
+        report = _program_items(
+            "       01 REC.\n"
+            "          05 T OCCURS 3.\n"
+            "             10 T1 PIC S9(4) COMP SYNC.\n"
+            "             10 T2 PIC X.\n"
+        )
+        flags = {i["qualified_name"]: i["offset_ambiguous"] for i in report["items"]}
+        assert flags["REC.T.T1"] and flags["REC.T.T2"]
+        assert not flags["REC.T"]

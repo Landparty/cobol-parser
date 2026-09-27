@@ -642,7 +642,12 @@ header):
   item would shift every following offset, and this package's offset model
   (`layout_offsets.compute_record_layout`, which backs `data-items`) is
   unaligned throughout. Two contradictory offset models in one repo is worse
-  than one documented gap.
+  than one documented gap. `compute_program_data_items` (2026-09-27) no longer
+  reports those unaligned offsets as exact: the first `SYNCHRONIZED`
+  binary/float/pointer/index item that is off its boundary (2/4/8 bytes, its
+  own width) or inside an `OCCURS` table, and every item after it in source
+  order, get `offset_ambiguous: True`, with one `unresolved` line naming it.
+  An aligned SYNC item, or SYNC on DISPLAY/packed, changes nothing.
 * **`COMP-1`/`COMP-2` are IEEE 754, not z/OS hexadecimal floating point.**
   Matches GnuCOBOL and Enterprise COBOL under `FLOAT(IEEE)`.
 * **`OCCURS ... DEPENDING ON` is written at its maximum** under
