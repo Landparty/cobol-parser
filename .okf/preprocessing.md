@@ -392,6 +392,16 @@ Features:
 - LRU file cache (configurable via `set_file_cache_size`)
 - REPLACING clause support including multi-token substitution
 
+**Literal REPLACING operands keep their quotes** (2026-09-27).
+`COPY B REPLACING 'ABC' BY 'XYZ'` replaces the *literal* `'ABC'` with the
+literal `'XYZ'` (checked against `cobc -E`). `CopyStatementLexer._read_operand`
+stripped a literal operand's quotes -- right for `COPY 'MEMBER'`, wrong for
+REPLACING -- so the clause searched for the word `ABC`: it never matched the
+literal, and rewrote an identifier `ABC` to a bare `XYZ`. REPLACING operands
+now read with `keep_literal_quotes=True`, and `apply_replacing_clauses`'s
+existing rule (a search text containing a quote may match inside literals)
+does the rest. Pinned by `tests/regression/test_copy_replacing_literal_operand.py`.
+
 **Sequence/identification areas stripped before REPLACING and
 conditional compilation (fixed 2026-07-21):** in `_expand_source_recursive`,
 a copybook's sequence-number (columns 1-6) and identification (columns

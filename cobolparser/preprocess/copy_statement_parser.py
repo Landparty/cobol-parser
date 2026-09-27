@@ -491,13 +491,19 @@ class CopyStatementLexer:
         self.pos = start_pos
         return False
 
-    def _read_operand(self) -> str | None:
+    def _read_operand(self, *, keep_literal_quotes: bool = False) -> str | None:
         """Read a pseudo-text, literal, or identifier operand.
 
         Pseudo-text delimiters are stripped from the returned text. This
         applies both to the standard ``==text==`` form and to the alternate
         ``:text:`` form (e.g. ``REPLACING :ABC: BY :XYZ:`` yields the operand
         pair ``ABC`` / ``XYZ``), mirroring :func:`parse_replacing_clause`.
+
+        A literal comes back as its content (``COPY 'REC'`` names member
+        ``REC``) unless *keep_literal_quotes*, which REPLACING operands need:
+        ``'ABC' BY 'XYZ'`` replaces the *literal* ``'ABC'`` with the literal
+        ``'XYZ'``. Stripped, it became the word ``ABC``, which never matched
+        the literal and rewrote an identifier ``ABC`` to a bare ``XYZ``.
         """
         self._skip_separators()
         if self._is_at_end():
@@ -549,6 +555,8 @@ class CopyStatementLexer:
                     self._advance(2)
                 elif self._peek() == quote:
                     self._advance()
+                    if keep_literal_quotes:
+                        return self.source[start_pos : self.pos]
                     return self.source[start_pos + 1 : self.pos - 1].replace(
                         quote * 2, quote
                     )
@@ -732,7 +740,7 @@ class CopyStatementLexer:
                         elif self._match_keyword("TRAILING"):
                             mode = "TRAILING"
 
-                        search = self._read_operand()
+                        search = self._read_operand(keep_literal_quotes=True)
                         if not search:
                             # If no operand, break REPLACING loop
                             break
@@ -744,7 +752,7 @@ class CopyStatementLexer:
                             # We break and let the outer loop handle the next token
                             break
 
-                        replace = self._read_operand()
+                        replace = self._read_operand(keep_literal_quotes=True)
                         if replace is None:
                             break
 
