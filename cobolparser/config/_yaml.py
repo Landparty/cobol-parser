@@ -194,7 +194,10 @@ class _Parser:
             result[key] = self._parse_value_for(rest, line, indent)
         return result
 
-    def _parse_sequence(self, indent: int) -> list[Any]:
+    def _parse_sequence(self, indent: int, indentless: bool = False) -> list[Any]:
+        """A block sequence at ``indent``. An ``indentless`` one is a mapping
+        value sharing its key's column, so it ends at the parent mapping's
+        next key rather than treating that key as an error."""
         result: list[Any] = []
         while True:
             line = self._peek()
@@ -203,6 +206,8 @@ class _Parser:
             if line.indent > indent:
                 raise self._error("unexpected indentation", line)
             if line.text != "-" and not line.text.startswith("- "):
+                if indentless:
+                    break
                 raise self._error(
                     "mapping entry where a '- ' sequence entry was expected", line
                 )
@@ -230,6 +235,22 @@ class _Parser:
         as an indented block on the following lines."""
         if rest:
             return self._scalar(rest, line)
+        # A mapping value may also be a sequence written at the key's own
+        # indentation -- the "indentless" form YAML allows and many
+        # formatters emit:
+        #
+        #     copybook_paths:
+        #     - ./copy
+        #
+        # Only a sequence may sit at the key's column; a mapping there is
+        # the parent's next key, handled by the caller.
+        nxt = self._peek()
+        if (
+            nxt is not None
+            and nxt.indent == indent
+            and (nxt.text == "-" or nxt.text.startswith("- "))
+        ):
+            return self._parse_sequence(indent, indentless=True)
         return self._parse_nested_block(line, indent)
 
     def _parse_nested_block(self, line: _Line, indent: int) -> Any:

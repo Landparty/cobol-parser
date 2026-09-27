@@ -42,6 +42,10 @@ arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
 
+2026-09-27: `tests/unit/test_config_yaml.py` +3 tests pin the indentless
+block sequence (`key:` then `- item` at the key's own column) as a mapping
+value, ending at the parent's next key; it used to be rejected. See `cli.md`.
+
 2026-09-15: `tests/regression/test_copybook_suggestion_pool.py` (4 tests)
 pins `suggest_similar_copybooks`'s narrowed did-you-mean candidate pool
 (`.cpy`/`.CPY` only by default, via a new `suggestion_extensions`
