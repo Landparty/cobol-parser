@@ -541,12 +541,6 @@ sources) each stripped only the delimiters, so `VALUE "A""B"` generated
 `A""B` and `MOVE '"'` folded to two quote characters. Pinned by
 `tests/regression/test_doubled_quote_literal_values.py`.
 
-`_strip_literal_quotes` also decodes a typed literal through
-`_literals.typed_literal_content()` (2026-09-27, audit 2.1): the VALUE clause
-now keeps `X"4142"` as written, and gen-data renders it `AB` rather than the
-old `41`. Latin-1 code points, so an EBCDIC record image re-encodes the
-characters, not the original bytes -- see `lexer.md` "Literal round trip".
-
 **Signedness.** `PictureClause.is_signed` only reports an explicit `S`, so
 `_is_signed()` additionally treats a numeric-edited picture carrying `+`,
 `-`, `CR`, or `DB` as signed — `PIC -ZZ,ZZ9.99` is the canonical signed

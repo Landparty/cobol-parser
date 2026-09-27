@@ -14,19 +14,6 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
-## 2026-09-27 -- audit patch batch: typed VALUE literals, linear COPY scan, REPLACING size
-
-From `AUDIT.md` §8 step 1. `VALUE X"4142"` kept only its content, so
-gen-data wrote `41` for the bytes `AB`: the VALUE clause now keeps a typed
-literal's source text (`data_clauses.literal_source`) and generators decode
-it (`_literals.typed_literal_content`). The COPY scanner re-skipped a whole
-whitespace run at every character of it (quadratic: 4,000 blank lines took
-~170 s); it now jumps whole runs. REPLACING growth now counts toward
-`max_total_size`. `cobolparser/error_log.txt`, a stray debug file that
-shipped as package data, is deleted. `lexer.md`, `parser.md`,
-`generators.md`, `preprocessing.md`, `tests.md` updated. Regression tests:
-`tests/regression/test_audit_2026_09_27.py`.
-
 ## 2026-09-27 -- EXEC SQL MERGE and WITH (CTE) statements get a type and tables
 
 `ExecSQLStatement` classified only statements that start with their verb,

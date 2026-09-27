@@ -1598,13 +1598,6 @@ delimiters, so it does). Pinned by
 form was additionally verified to compile and run under real GnuCOBOL 4.0;
 the old three-quote form does not compile at all.
 
-**Typed literals in VALUE (2026-09-27, audit 2.1).** `parse_value_clause`
-(both the plain and the `VALUE ALL` branch) renders a STRING_LITERAL through
-`data_clauses.literal_source()`, which returns `raw_value` when the lexer set
-one (only typed literals: `X"..."`, `Z"..."`, `N"..."`, ...) and
-`quote_literal(value)` otherwise. `VALUE X"4142"` had serialized as `"4142"`.
-The `_data_fast` path delegates VALUE to this helper, so both builds agree.
-
 # Adding a New Statement Parser
 
 1. Create `cobolparser/parsers/statements/foo_parser.py` implementing `IStatementParser` (`parse()` + `matches()`)
