@@ -6,7 +6,7 @@
 | **Commit audited** | `cde5468` (`main`, after PR #231) |
 | **Version** | 1.9.0 released; 1.10.0 pending in release PR #201 |
 | **Scope** | `cobolparser/` (171 modules, about 80k lines), `tests/` (394 files), CI/release workflows, packaging, docs |
-| **Status** | Read-only audit. No production file was changed. |
+| **Status** | Audit written read-only against `cde5468`. The §8 step-1 patch batch (2.1, S1, S2, S8) was then fixed on this branch; each fixed item is marked ✅. |
 
 ## How this audit was done
 
@@ -68,7 +68,7 @@ not reproduce is marked **requires validation**.
 
 None of these is a security emergency. They are what I would block the 1.10.0 cut on.
 
-### 2.1 `VALUE X"…"` loses its hex prefix, producing wrong generated data (verified)
+### 2.1 `VALUE X"…"` loses its hex prefix, producing wrong generated data (verified) ✅ fixed in this PR
 
 **Evidence:** `parse_value_clause` in `cobolparser/parsers/divisions/data_clauses.py:1373` returns `quote_literal(token.value)`, which drops the literal's `X`/`N`/`Z`/`G` prefix. The data item's `value_clause` then serializes as `"4142"`, with no way to tell it apart from the alphanumeric literal `"4142"`.
 
@@ -144,14 +144,14 @@ There is no auth, payment or PII handling in this library. Its attack surface is
 
 | # | Sev | Finding | Evidence | Fix |
 |---|---|---|---|---|
-| S1 | **High** | **Quadratic-time DoS in the COPY scanner** *(verified)* | `CopyStatementLexer.tokenize_copy_statements` (`preprocess/copy_statement_parser.py:591-632`) calls `_match_keyword("COPY")` at every position. That skips the whole following whitespace run (`_skip_separators`, `:470`), fails, rewinds and advances one character. A program with `COPY OK.` plus 250 / 500 / 1,000 blank lines took **0.68 s / 2.69 s / 10.78 s** in `parse_cobol_with_expansion`, about 4× per doubling. The agent measured a 28 KB file at 168 s, and `gen-data` on a 60 KB copybook of blank lines at 112 s, because every copybook uses this lexer. The backend vendors this library. | On a failed match, jump past the whole whitespace run. Better, locate candidates with `re.finditer(r"\bCOPY\b", re.I)`. Solves §3.1 too. |
-| S2 | Medium | **`max_total_size` is not checked after `REPLACING` expands the text** | `copybook_expander.py:1273-1282` counts raw copybook bytes before REPLACING. The agent ran a 48 KB copybook with `REPLACING ==XX== BY ==<long>==` under `max_total_size=1_000_000` and got **5.5 MB** of output. Under the 100 MB default, 192 KB of input produced **54 MB of output, took 54 s and used 475 MB RSS** without tripping the limit. | Enforce the limit on the post-REPLACING text and on the final assembled output. |
+| S1 | **High** | ✅ **Quadratic-time DoS in the COPY scanner** *(verified; fixed in this PR)* | `CopyStatementLexer.tokenize_copy_statements` (`preprocess/copy_statement_parser.py:591-632`) calls `_match_keyword("COPY")` at every position. That skips the whole following whitespace run (`_skip_separators`, `:470`), fails, rewinds and advances one character. A program with `COPY OK.` plus 250 / 500 / 1,000 blank lines took **0.68 s / 2.69 s / 10.78 s** in `parse_cobol_with_expansion`, about 4× per doubling. The agent measured a 28 KB file at 168 s, and `gen-data` on a 60 KB copybook of blank lines at 112 s, because every copybook uses this lexer. The backend vendors this library. | On a failed match, jump past the whole whitespace run. Better, locate candidates with `re.finditer(r"\bCOPY\b", re.I)`. Solves §3.1 too. |
+| S2 | Medium | ✅ **`max_total_size` is not checked after `REPLACING` expands the text** *(fixed in this PR)* | `copybook_expander.py:1273-1282` counts raw copybook bytes before REPLACING. The agent ran a 48 KB copybook with `REPLACING ==XX== BY ==<long>==` under `max_total_size=1_000_000` and got **5.5 MB** of output. Under the 100 MB default, 192 KB of input produced **54 MB of output, took 54 s and used 475 MB RSS** without tripping the limit. | Enforce the limit on the post-REPLACING text and on the final assembled output. |
 | S3 | Medium | **Uncaught `RecursionError` on deeply nested `EVALUATE`** *(verified)* | 1,000 nested `EVALUATE A WHEN 1`: `cobol-parser parse` exits rc=1 with a raw `RecursionError` traceback. The agent also saw 300 levels parse with `success=True` and then fail in `to_json()` (`models/statements/control.py:174`); my simpler 300-level shape serialized fine, so that half **requires validation**. IF, PERFORM and parentheses nested 3,000 deep are fine. | Cap nesting depth in the EVALUATE parser and report a `ParseError`. Catch `RecursionError` at the CLI and serialization boundary. |
 | S4 | Low | **Mermaid label injection from a CALL literal** *(code verified)* | `generators/flowchart.py:337` interpolates `target` raw into `(["{target}"])`, with no `_escape_mermaid_label`. A crafted `CALL 'A"]);click …'` breaks out of the label. It is mitigated by upper-casing and Mermaid's default `securityLevel: strict`. The DOT generator escapes the same input correctly. | Apply `_escape_mermaid_label(target)`. |
 | S5 | Low | **CSV formula injection** | `generators/data/decoding.py:295` and `generators/data/dataset.py:59,83` write cells starting with `= + - @` verbatim. A `VALUE "=1+1"`, or a decoded record, reaches a spreadsheet as a formula. | Add an opt-in `--safe-csv` flag, or at least document it. |
 | S6 | Low | **A `cobol.yml` in any parent directory can redirect copybook reads** | `config/project.py:399-416` walks up to 32 levels with no ownership or VCS-root stop, and `:202-212` accepts absolute paths. A `copybook_path: ["/etc"]` in a parent directory made `expand` inline `/etc/hostname`. This matters on shared hosts (`/tmp/cobol.yml`) and in CI. | Stop the search at the VCS root or `$HOME`, and ignore files owned by another uid, as git's `safe.directory` does. |
 | S7 | Low | **Backtracking-prone regexes** | `generators/data/copybook.py:34-35` (`^\s*` under `re.M` spans newlines) and `preprocess/_normalize.py:1047` (`(?:\s+(.*?))?\s*$`). Matched directly on 80 KB of whitespace they took 26 s and 4.4 s. | Use `[ \t]*`, and `rstrip()` before matching the tail. |
-| S8 | Low | **Stray debug file shipped as package data** *(verified)* | `cobolparser/error_log.txt` is tracked in git (128 bytes of stale `DEBUG:` output) and is not excluded by `exclude-package-data`, so it would ship in wheels. | Delete it. |
+| S8 | Low | ✅ **Stray debug file shipped as package data** *(verified; fixed in this PR)* | `cobolparser/error_log.txt` is tracked in git (128 bytes of stale `DEBUG:` output) and is not excluded by `exclude-package-data`, so it would ship in wheels. | Delete it. |
 
 **Checked and found sound:**
 - **Copybook path containment.** These were all rejected with `PathTraversalError` or `CopybookNotFoundError`: `../`, absolute member and library names, symlinked directories and files, `LIB/../../`, quoted `../`, NUL bytes, backslashes and URL encoding. The only minor oracle: the error type differs by whether the file exists, and the message echoes the resolved path.
@@ -384,12 +384,13 @@ Security rows (same scale):
 
 ---
 
-## 8. Recommended order of work (proposal only; nothing has been changed)
+## 8. Recommended order of work
 
 1. **Before 1.10.0:**
-   - Fix 2.1 (hex VALUE), with a regression test.
+   - ✅ Fix 2.1 (hex VALUE), with a regression test. Follow-up: level-88 `values` keep only the decoded content of a typed literal (`88 C VALUE X"41"` records `41`); fixing that changes a second public shape, so it was left out of this batch.
    - Get CI to run on #201 (2.3).
-   - Fix S1 (quadratic COPY scanner, which also delivers the §3.1 speedup), S2 (post-REPLACING size limit) and S8 (stray file).
+   - ✅ Fix S1 (quadratic COPY scanner, which also delivers most of the §3.1 speedup: NC105A's scan went from 0.72 s to 0.07 s), S2 (post-REPLACING size limit) and S8 (stray file). All pinned by `tests/regression/test_audit_2026_09_27.py`.
+   - Known limit of the 2.1 fix: a hex literal decodes to Latin-1 code points, so an EBCDIC record image re-encodes those characters rather than writing the original bytes.
 2. **Next sprint:**
    - Performance fixes 3.1, 3.2 and 3.3, each with a scaling test that asserts a time bound.
    - The corpus parity test (3.4).

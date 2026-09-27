@@ -431,6 +431,16 @@ def remove_comment_lines(source: str) -> str:
 #: terminator included, is the span the expander replaces.
 _EXEC_SQL_TAIL_RE = re.compile(r"EXEC\s+SQL\s*$", re.IGNORECASE)
 
+#: Runs the statement scan can skip whole once a keyword match fails at their
+#: first character: from anywhere inside a separator run ``_match_keyword``
+#: skips to the same next character and fails the same way, and a keyword
+#: starting inside an identifier is always rejected by the left word-boundary
+#: check. Stepping through them one character at a time made the scan
+#: quadratic in the length of a whitespace run (a few thousand blank lines
+#: took minutes).
+_SEPARATOR_RUN_RE = re.compile(r"[\s,;]+")
+_WORD_RUN_RE = re.compile(r"[\w-]+")
+
 
 class CopyStatementLexer:
     """
@@ -628,7 +638,13 @@ class CopyStatementLexer:
                 match_start = exec_sql.start()
                 is_include = True
             else:
-                self._advance()
+                run = _SEPARATOR_RUN_RE.match(self.source, self.pos) or (
+                    _WORD_RUN_RE.match(self.source, self.pos)
+                )
+                if run:
+                    self.pos = run.end()
+                else:
+                    self._advance()
                 continue
             self._skip_separators()
 
