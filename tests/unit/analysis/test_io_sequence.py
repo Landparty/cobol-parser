@@ -660,3 +660,49 @@ class TestViolationMessages:
             v for v in report.violations if v.kind == IOViolationKind.CLOSE_NOT_OPEN
         )
         assert "GHOST-FILE" in v.message
+
+
+_GOTO_LOOP_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. T.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-F ASSIGN TO INF.
+       DATA DIVISION.
+       FILE SECTION.
+       FD IN-F.
+       01 IN-REC PIC X(10).
+       PROCEDURE DIVISION.
+       MAIN-P.
+           OPEN INPUT IN-F.
+       LOOP-P.
+           READ IN-F AT END GO TO END-P.
+           GO TO LOOP-P.
+       END-P.
+"""
+
+
+def _goto_loop_violations(end_paragraph: str) -> list[str]:
+    result = parse_cobol(_GOTO_LOOP_HEADER + end_paragraph)
+    report = IOSequenceAnalyzer().analyze(result.ast)
+    return [v.kind.name for v in report.violations]
+
+
+class TestGoToReadLoop:
+    """``READ ... AT END GO TO END-P`` / ``GO TO LOOP-P``: the walk used to
+    stop at the loop and never see END-P, reporting the file left open."""
+
+    def test_close_in_the_loop_exit_paragraph_is_seen(self):
+        assert (
+            _goto_loop_violations("           CLOSE IN-F.\n           STOP RUN.\n")
+            == []
+        )
+
+    def test_missing_close_in_the_exit_paragraph_is_still_reported(self):
+        assert _goto_loop_violations("           STOP RUN.\n") == ["FILE_LEFT_OPEN"]
+
+    def test_double_close_in_the_exit_paragraph_is_still_reported(self):
+        assert _goto_loop_violations(
+            "           CLOSE IN-F.\n           CLOSE IN-F.\n           STOP RUN.\n"
+        ) == ["DOUBLE_CLOSE"]

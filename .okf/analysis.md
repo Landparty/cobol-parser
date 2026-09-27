@@ -973,6 +973,17 @@ via a range stack; per-chain visited sets keep GO TO cycles finite).
 Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Conditional
 branches still share one state (unchanged conservatism); paragraphs
 unreachable from the entry procedure are no longer walked at all.
+
+**Conditional GO TO targets are walked once the chain loops (2026-09-27).**
+`READ IN-F AT END GO TO END-P` / `GO TO LOOP-P` -- the textbook sequential
+loop -- stopped the walk at the revisit of LOOP-P, so END-P's CLOSE was never
+seen and FILE_LEFT_OPEN was reported. GO TO targets met inside a branch or
+handler are now queued (`_pending_gotos`) and the chain resumes at the next
+unvisited one when it loops back. If it still ends on a loop without reaching
+STOP RUN/GOBACK, no FILE_LEFT_OPEN is claimed (`_ended_in_cycle`): the walk
+never reached program end. A missing or duplicate CLOSE in the exit
+paragraph is still reported. Pinned by
+`tests/unit/analysis/test_io_sequence.py::TestGoToReadLoop`.
 Contained programs are no longer walked either (single-program scope,
 matching every other analyzer). Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA1IoSequenceExecutionOrder`.

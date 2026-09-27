@@ -138,6 +138,14 @@ class IOSequenceAnalyzer:
         self._name_last: dict[str, int] = {}
         self._perform_stack: list[tuple[int, int]] = []
         self._terminated = False
+        # GO TO targets met inside a conditional branch (``AT END GO TO
+        # 9000-EOF``, ``IF ... GO TO ...``), walked once the fall-through
+        # chain has looped back on itself.
+        self._pending_gotos: list[str] = []
+        # True once the walk ended because it looped back to a paragraph it
+        # had already run, with no STOP RUN/GOBACK reached: whatever is
+        # still open then was open *inside* a loop, not at program end.
+        self._ended_in_cycle = False
         # FILE SECTION record name -> owning FD/SD name (upper-cased). WRITE
         # and REWRITE name a record, never a file, so without this map they
         # could never be checked against the open-file set at all.
@@ -160,6 +168,8 @@ class IOSequenceAnalyzer:
         self._name_last = {}
         self._perform_stack = []
         self._terminated = False
+        self._pending_gotos = []
+        self._ended_in_cycle = False
         self._record_to_file = record_to_file_map(ast)
 
         proc_division = ast.procedure_division
@@ -167,8 +177,12 @@ class IOSequenceAnalyzer:
             self._collect_procedures(proc_division)
             if self._linear:
                 self._run_chain(0)
-        # Any files still open at end-of-program are violations
-        for file_name in sorted(self._open_files):
+        # Any files still open at end-of-program are violations -- unless
+        # the walk never reached the end of the program: it stopped at a
+        # loop it could not see out of, so "still open" is only "open at the
+        # point the walk gave up".
+        leftover = () if self._ended_in_cycle else sorted(self._open_files)
+        for file_name in leftover:
             self._violations.append(
                 IOSequenceViolation(
                     kind=IOViolationKind.FILE_LEFT_OPEN,
@@ -247,15 +261,25 @@ class IOSequenceAnalyzer:
             self._name_last.setdefault(name, idx)
 
     def _run_chain(self, start_idx: int) -> None:
-        """Fall-through execution from *start_idx*, following GO TOs."""
+        """Fall-through execution from *start_idx*, following GO TOs.
+
+        When the chain loops back to a paragraph it already ran -- the
+        ``READ ... AT END GO TO END-P`` / ``GO TO LOOP-P`` idiom -- the walk
+        resumes at a GO TO target it met inside a conditional branch and has
+        not run yet (sharing state, like every other branch here), since
+        that is how such a loop is left. Without it, the CLOSE in the loop's
+        exit paragraph was never seen and the file was reported left open.
+        """
         visited: set[int] = set()
         idx: int | None = start_idx
-        while (
-            idx is not None
-            and 0 <= idx < len(self._linear)
-            and not self._terminated
-            and idx not in visited
-        ):
+        while not self._terminated:
+            if idx is not None and idx in visited:
+                idx = self._next_pending(visited)
+                if idx is None:
+                    self._ended_in_cycle = True
+                    return
+            if idx is None or not 0 <= idx < len(self._linear):
+                return
             visited.add(idx)
             outcome, target = self._run_paragraph(self._linear[idx])
             if self._terminated or outcome == "stop":
@@ -264,6 +288,14 @@ class IOSequenceAnalyzer:
                 idx = self._name_first.get(target or "")
                 continue
             idx += 1
+
+    def _next_pending(self, visited: set[int]) -> int | None:
+        """The next conditional GO TO target the chain has not run yet."""
+        while self._pending_gotos:
+            idx = self._name_first.get(self._pending_gotos.pop(0))
+            if idx is not None and idx not in visited:
+                return idx
+        return None
 
     def _run_paragraph(self, para: CobolParagraph) -> tuple[str, str | None]:
         """Process one paragraph's statements; report how it ends.
@@ -311,6 +343,12 @@ class IOSequenceAnalyzer:
                 return
             visited.add(id(node))
             self._dispatch(node)
+            if isinstance(node, GoStatement):
+                # Reached through _visit, so nested in a branch or handler
+                # (a paragraph's own top-level GO TO never gets here).
+                self._pending_gotos.extend(
+                    name.upper() for name in node.target_paragraphs if name
+                )
             if (
                 isinstance(node, PerformStatement)
                 and node.target_paragraph
