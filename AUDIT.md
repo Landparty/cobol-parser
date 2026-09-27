@@ -43,7 +43,7 @@ not reproduce is marked **requires validation**.
   - Strict mypy, ruff and black are all clean.
   - Zero runtime dependencies.
   - 99.8% of the NIST COBOL-85 corpus parses cleanly (458/459; README claims 99.1%).
-  - I found no security vulnerability rated above Medium (§2.4).
+  - Security review found no auth, secret-handling or path-traversal problems. It did find one High DoS: the COPY scanner is quadratic in whitespace runs (§2.4).
 - **One silent wrong-output bug should be fixed before 1.10.0.** A hex literal in a VALUE clause loses its `X` prefix, so `gen-data` writes `41` for `VALUE X"4142"` instead of `AB` (§2.1).
 - **Three analyzers scale badly on hostile or large input.**
   - io-sequence is exponential in PERFORM nesting depth and raises `RecursionError` on a 400-paragraph PERFORM chain.
@@ -140,7 +140,30 @@ Time grows about 4× per +2 depth.
 
 ### 2.4 Security findings
 
-_Security review in progress: this section is filled in by the next commit on this branch._
+There is no auth, payment or PII handling in this library. Its attack surface is **untrusted COBOL source, copybooks, config and data files**. Findings are ordered by severity. Items marked *verified* I re-ran myself; the rest come from the security agent's reproductions.
+
+| # | Sev | Finding | Evidence | Fix |
+|---|---|---|---|---|
+| S1 | **High** | **Quadratic-time DoS in the COPY scanner** *(verified)* | `CopyStatementLexer.tokenize_copy_statements` (`preprocess/copy_statement_parser.py:591-632`) calls `_match_keyword("COPY")` at every position. That skips the whole following whitespace run (`_skip_separators`, `:470`), fails, rewinds and advances one character. A program with `COPY OK.` plus 250 / 500 / 1,000 blank lines took **0.68 s / 2.69 s / 10.78 s** in `parse_cobol_with_expansion`, about 4× per doubling. The agent measured a 28 KB file at 168 s, and `gen-data` on a 60 KB copybook of blank lines at 112 s, because every copybook uses this lexer. The backend vendors this library. | On a failed match, jump past the whole whitespace run. Better, locate candidates with `re.finditer(r"\bCOPY\b", re.I)`. Solves §3.1 too. |
+| S2 | Medium | **`max_total_size` is not checked after `REPLACING` expands the text** | `copybook_expander.py:1273-1282` counts raw copybook bytes before REPLACING. The agent ran a 48 KB copybook with `REPLACING ==XX== BY ==<long>==` under `max_total_size=1_000_000` and got **5.5 MB** of output. Under the 100 MB default, 192 KB of input produced **54 MB of output, took 54 s and used 475 MB RSS** without tripping the limit. | Enforce the limit on the post-REPLACING text and on the final assembled output. |
+| S3 | Medium | **Uncaught `RecursionError` on deeply nested `EVALUATE`** *(verified)* | 1,000 nested `EVALUATE A WHEN 1`: `cobol-parser parse` exits rc=1 with a raw `RecursionError` traceback. The agent also saw 300 levels parse with `success=True` and then fail in `to_json()` (`models/statements/control.py:174`); my simpler 300-level shape serialized fine, so that half **requires validation**. IF, PERFORM and parentheses nested 3,000 deep are fine. | Cap nesting depth in the EVALUATE parser and report a `ParseError`. Catch `RecursionError` at the CLI and serialization boundary. |
+| S4 | Low | **Mermaid label injection from a CALL literal** *(code verified)* | `generators/flowchart.py:337` interpolates `target` raw into `(["{target}"])`, with no `_escape_mermaid_label`. A crafted `CALL 'A"]);click …'` breaks out of the label. It is mitigated by upper-casing and Mermaid's default `securityLevel: strict`. The DOT generator escapes the same input correctly. | Apply `_escape_mermaid_label(target)`. |
+| S5 | Low | **CSV formula injection** | `generators/data/decoding.py:295` and `generators/data/dataset.py:59,83` write cells starting with `= + - @` verbatim. A `VALUE "=1+1"`, or a decoded record, reaches a spreadsheet as a formula. | Add an opt-in `--safe-csv` flag, or at least document it. |
+| S6 | Low | **A `cobol.yml` in any parent directory can redirect copybook reads** | `config/project.py:399-416` walks up to 32 levels with no ownership or VCS-root stop, and `:202-212` accepts absolute paths. A `copybook_path: ["/etc"]` in a parent directory made `expand` inline `/etc/hostname`. This matters on shared hosts (`/tmp/cobol.yml`) and in CI. | Stop the search at the VCS root or `$HOME`, and ignore files owned by another uid, as git's `safe.directory` does. |
+| S7 | Low | **Backtracking-prone regexes** | `generators/data/copybook.py:34-35` (`^\s*` under `re.M` spans newlines) and `preprocess/_normalize.py:1047` (`(?:\s+(.*?))?\s*$`). Matched directly on 80 KB of whitespace they took 26 s and 4.4 s. | Use `[ \t]*`, and `rstrip()` before matching the tail. |
+| S8 | Low | **Stray debug file shipped as package data** *(verified)* | `cobolparser/error_log.txt` is tracked in git (128 bytes of stale `DEBUG:` output) and is not excluded by `exclude-package-data`, so it would ship in wheels. | Delete it. |
+
+**Checked and found sound:**
+- **Copybook path containment.** These were all rejected with `PathTraversalError` or `CopybookNotFoundError`: `../`, absolute member and library names, symlinked directories and files, `LIB/../../`, quoted `../`, NUL bytes, backslashes and URL encoding. The only minor oracle: the error type differs by whether the file exists, and the message echoes the resolved path.
+- **Copybook fan-out and cycles.** `A→B→A` raises `CircularReferenceError`. A 4¹² fan-out stops at the size limit in 1.3 s.
+- **No dangerous primitives in the package.** There is no `eval`, `exec`, `pickle.load`, `subprocess`, `shell=True` or `yaml.load` in `cobolparser/`.
+- **Closed-source exclusion rules** are correct, apart from S8.
+- **Every bandit hit is a false positive.**
+  - The `assert`s are type narrowing after existing checks, and nothing security-relevant changes under `-O`.
+  - B608 at `environment_select.py:205` is a warning string, not SQL.
+  - The B105 "passwords" are COBOL keywords.
+
+**Requires validation:** whether the backend runs `parse_cobol_with_expansion` or `to_dict()` on *uploaded* source. That decides whether S1–S3 are remotely triggerable, and so their final severity.
 
 ---
 
@@ -345,6 +368,18 @@ The top five, which are also churn hotspots:
 | 5.1 | `datetime.utcnow()` deprecation | 2 | 1 | **2** | Low | S |
 | 5.3 | Dead code (5 items) | 1 | 1 | **1** | Low | S |
 
+Security rows (same scale):
+
+| ID | Finding | L | I | Score | Band | Effort |
+|---|---|---|---|---|---|---|
+| S1 | Quadratic COPY scanner (DoS) | 3 | 5 | **15** | Critical | S |
+| S2 | REPLACING bypasses `max_total_size` | 2 | 4 | **8** | High | S |
+| S3 | Nested EVALUATE → RecursionError | 2 | 3 | **6** | Medium | S |
+| S6 | Parent-dir `cobol.yml` hijack | 1 | 3 | **3** | Low | S |
+| S4/S5 | Mermaid / CSV output injection | 1 | 2 | **2** | Low | S |
+| S7 | Backtracking regexes | 1 | 2 | **2** | Low | S |
+| S8 | Stray `error_log.txt` in package | 2 | 1 | **2** | Low | XS |
+
 
 
 ---
@@ -354,7 +389,7 @@ The top five, which are also churn hotspots:
 1. **Before 1.10.0:**
    - Fix 2.1 (hex VALUE), with a regression test.
    - Get CI to run on #201 (2.3).
-   - Pick up the quick security fixes from §2.4.
+   - Fix S1 (quadratic COPY scanner, which also delivers the §3.1 speedup), S2 (post-REPLACING size limit) and S8 (stray file).
 2. **Next sprint:**
    - Performance fixes 3.1, 3.2 and 3.3, each with a scaling test that asserts a time bound.
    - The corpus parity test (3.4).
