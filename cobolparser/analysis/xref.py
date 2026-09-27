@@ -43,6 +43,7 @@ from ..models.statements.arithmetic import (
     ArithmeticStatement,
     ComputeStatement,
     DivideStatement,
+    MultiplyStatement,
 )
 from ..models.statements.base import CobolExpression, CobolStatement
 from ..models.statements.call import CallStatement, EntryStatement
@@ -1000,20 +1001,29 @@ class XrefAnalyzer:
             if stmt.expression_tree is not None:
                 pairs.append((stmt.expression_tree, ROLE_READ, True))
         elif isinstance(stmt, ArithmeticStatement):
-            written: list[str] = [*stmt.targets, *stmt.givings]
-            if stmt.target:
-                written.append(stmt.target)
-            if stmt.giving:
-                written.append(stmt.giving)
+            # With GIVING, only the GIVING (and REMAINDER) items change: the
+            # TO/FROM operand of `SUBTRACT A FROM B GIVING C` is read, never
+            # written. Without GIVING, the TO/FROM/BY/INTO target is both
+            # read and written (`ADD A TO B` is B = B + A).
+            givings = [*stmt.givings, *([stmt.giving] if stmt.giving else [])]
+            targets = [*stmt.targets, *([stmt.target] if stmt.target else [])]
+            written: list[str] = list(givings) if givings else list(targets)
             if isinstance(stmt, DivideStatement) and stmt.remainder:
                 written.append(stmt.remainder)
+            # The sending operands. `.operands` also holds target/GIVING
+            # names, appended only when absent, so it cannot tell `ADD A B
+            # GIVING B` from `ADD A GIVING B`: ADD/SUBTRACT record what was
+            # written before TO/FROM/GIVING, and MULTIPLY/DIVIDE always put
+            # their two operands first.
+            if stmt.source_operands is not None:
+                read: list[str] = [*stmt.source_operands, *targets]
+            elif isinstance(stmt, (MultiplyStatement, DivideStatement)):
+                read = list(stmt.operands[:2])
+            else:
+                consumed = {name.upper() for name in written}
+                read = [op for op in stmt.operands if op.upper() not in consumed]
             pairs += [(name, ROLE_WRITE, True) for name in written]
-            consumed = {name.upper() for name in written}
-            pairs += [
-                (operand, ROLE_READ, True)
-                for operand in stmt.operands
-                if operand.upper() not in consumed
-            ]
+            pairs += [(name, ROLE_READ, True) for name in read]
         elif isinstance(stmt, SetStatement):
             pairs += [(t, ROLE_WRITE, True) for t in stmt.targets]
             if stmt.value:

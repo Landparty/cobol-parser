@@ -42,6 +42,11 @@ arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
 
+2026-09-27: `tests/unit/analysis/test_xref.py` (+3 tests, one updated:
+`ADD 1 TO WS-COUNT` is now read *and* write) and
+`test_program_signature.py` (+1) pin arithmetic read/write roles and the
+LINKAGE directions derived from them. See `analysis.md`.
+
 2026-09-27: `tests/unit/analysis/test_io_sequence.py::TestGoToReadLoop` (3
 tests) pins the READ ... AT END GO TO loop not reporting its file left open,
 while a missing/duplicate CLOSE in its exit paragraph still is. See

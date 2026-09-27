@@ -2116,6 +2116,18 @@ sections — where it is *defined* and every place it is *referenced*, each
 reference carrying its location, the statement it sits in, the enclosing
 paragraph, and the **role** it plays there.
 
+**Arithmetic roles (2026-09-27).** With GIVING, only the GIVING/REMAINDER
+items are `write`; the TO/FROM operand is `read` (`SUBTRACT A FROM B GIVING
+C` used to record B as written). Without GIVING, the TO/FROM/BY/INTO target
+is both `read` and `write` (`ADD 1 TO X` used to be `write` only). Sending
+operands come from `ArithmeticStatement.source_operands` (ADD/SUBTRACT) or
+the first two operands (MULTIPLY/DIVIDE), so `ADD A B GIVING B` keeps B's
+read. `program_signature.py` grades LINKAGE directions from these roles:
+an accumulated parameter is now `input-output` (was `output`) and a
+`SUBTRACT ... FROM LK-B GIVING` operand `input` (was `output`). Pinned by
+`test_xref.py::test_giving_leaves_the_from_operand_unwritten` and friends and
+`test_program_signature.py::test_accumulated_and_giving_operands_get_the_right_direction`.
+
 This is the natural completion of `unused_variables.py`. That analyzer answers
 "is this name referenced at all?" with a flat `set[str]`; this one keeps the
 locations and roles that set throws away, so "unused" becomes "fully
