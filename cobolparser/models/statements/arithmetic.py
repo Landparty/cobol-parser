@@ -21,6 +21,13 @@ class ArithmeticStatement(CobolStatement):
         self.givings: list[str] = []  # All GIVING targets, in order
         self.rounded: bool = False  # True if ROUNDED appeared on any target
         self.is_corresponding: bool = False  # For CORRESPONDING/CORR clause
+        # The operands written before TO/FROM/GIVING, duplicates kept, in
+        # source order -- set by the ADD/SUBTRACT parsers. ``operands`` cannot
+        # answer "which names are addends": ``set_target``/``set_giving``
+        # skip a name already present, so ``ADD A B GIVING B`` and
+        # ``ADD A GIVING B`` both leave ``[A, B]`` there. ``None`` when the
+        # node was built some other way. Not serialized.
+        self.source_operands: list[str] | None = None
 
     def set_target(self, target: str) -> None:
         """Add a TO/FROM target (result stored in target).

@@ -146,6 +146,11 @@ Serialization fidelity notes (2026-07-07):
   stored `9`s (3 bytes) while `integer_digits`/`decimal_digits` include the
   `P` positions (6/0 and 0/5). Floating-insertion strings (`$$$,$$9`,
   `$Z,ZZ9`) count their leftmost symbol as the sign/currency, not a digit.
+  Simple insertion `B`/`0` make a picture edited and count one byte each
+  (2026-09-27: `999B99` had sized 5, `0009` 1, `XXBXX` 4) -- unless the
+  pattern also holds characters no PICTURE may contain, which keeps the
+  lenient fallback. An edited picture with a `V` (`Z(3)V99`) is sized by the
+  edited path, not the 9s-only `V` split (it had sized 2, not 5).
   `scaling_leading: bool | None` (2026-09-10) records the P run's direction
   -- `True` for `PPP9(3)` (leading, a fraction), `False` for `9(3)PPP`
   (trailing, a scaled integer), `None` when not P-scaled at all -- the one
@@ -156,6 +161,13 @@ Serialization fidelity notes (2026-07-07):
   `decimal_digits` alone rather than a second heuristic. See
   [generators.md](generators.md)'s P-scaling note and [analysis.md](analysis.md)'s
   MoveTypeChecker section.
+* `ArithmeticStatement.source_operands: list[str] | None` (2026-09-27) --
+  the operands written before TO/FROM/GIVING, duplicates kept, set by the
+  ADD/SUBTRACT parsers; `None` on a node built any other way. **Not
+  serialized** (`to_dict()` is unchanged). `operands` cannot stand in for it:
+  `set_target`/`set_giving` append a name only when absent, so
+  `ADD A B GIVING B` and `ADD A GIVING B` leave the same `[A, B]`. Read by
+  `analysis/const_fold.py`; see `analysis.md`.
 * `ArithmeticStatement.givings: list[str]` (2026-07-24) — full ordered
   list of comma/space-separated `GIVING` result targets (`ADD A TO B
   GIVING C, D`); `.giving` keeps the first for backward compatibility,

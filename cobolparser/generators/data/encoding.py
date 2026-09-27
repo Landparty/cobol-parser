@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from enum import StrEnum
 
+from .editing import edit_numeric
 from .errors import CopybookLayoutError
 from .layout import (
     FieldCategory,
@@ -512,11 +513,17 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         return _encode_packed(text, spec)
     if usage in BINARY_USAGES:
         return _encode_binary(text, spec, opts)
-    # DISPLAY from here down.  An edited picture's generated text is already
-    # the edited form and already the picture's own width, so it encodes as
-    # text; only an unedited numeric picture is zoned decimal.
+    # DISPLAY from here down.  An unedited numeric picture is zoned decimal.
+    # A numeric-edited one holds what a MOVE into it would leave: the CSV
+    # cell is the logical value (`1234.56`), the bytes are the edited form
+    # (`$1,234.56`).  A picture `edit_numeric` does not model keeps the
+    # cell's text as is.
     if spec.category is FieldCategory.NUMERIC:
         return _encode_zoned(text, spec, opts)
+    if spec.category is FieldCategory.NUMERIC_EDITED:
+        edited = edit_numeric(spec.picture, text)
+        if edited is not None and len(edited) == width:
+            return _encode_text(edited, width, opts)
     return _encode_text(text, width, opts)
 
 

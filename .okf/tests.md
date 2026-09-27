@@ -42,6 +42,57 @@ arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
 
+2026-09-27: `tests/unit/analysis/test_xref.py` (+3 tests, one updated:
+`ADD 1 TO WS-COUNT` is now read *and* write) and
+`test_program_signature.py` (+1) pin arithmetic read/write roles and the
+LINKAGE directions derived from them. See `analysis.md`.
+
+2026-09-27: `tests/unit/analysis/test_io_sequence.py::TestGoToReadLoop` (3
+tests) pins the READ ... AT END GO TO loop not reporting its file left open,
+while a missing/duplicate CLOSE in its exit paragraph still is. See
+`analysis.md`.
+
+2026-09-27: `tests/regression/test_doubled_quote_literal_values.py` (3
+tests) pins `unquote_literal` inverting `quote_literal`, and generated VALUE
+data / folded MOVEs collapsing doubled quotes. See `lexer.md`.
+
+2026-09-27: `tests/unit/analysis/test_move_type_checker.py::TestGroupReceiverAndZeroToAlphabetic`
+(4 tests) pins group receivers being exempt from elementary MOVE rules and
+`ZERO` → `PIC A` being illegal. See `analysis.md`.
+
+2026-09-27: `tests/regression/test_copy_replacing_literal_operand.py` (5
+tests) pins COPY REPLACING literal operands matching literals (not
+identifiers). See `preprocessing.md`.
+
+2026-09-27: `tests/unit/analysis/test_const_fold.py::TestSelfReference` (5
+tests, replacing `TestAmbiguousSelfReference`'s two poison assertions) and
+`::TestFigurativeZeroAndNational` (2) pin exact folds for operands that are
+also targets/GIVINGs, `MOVE ZERO`, and `PIC N` truncation -- every value
+checked against GnuCOBOL. See `analysis.md`.
+
+2026-09-27: `tests/unit/generators/data/test_layout_offsets.py::TestSynchronizedSlack`
+(4 tests) pins `data-items` flagging offsets that unmodelled SYNC slack
+could shift. See `generators.md`.
+
+2026-09-27: `tests/unit/generators/data/test_editing.py` (87 tests) pins
+numeric-edited record bytes (36 cases checked against GnuCOBOL 3), the
+de-edit inverse, and encode/decode round trips in ASCII and EBCDIC.
+`test_encoding.py::test_numeric_edited_keeps_its_edit_mask` now asserts the
+exact bytes (`- 12.34`) instead of the unedited `-12.34`. See `generators.md`.
+
+2026-09-27: `tests/unit/test_data_items.py::test_edited_picture_sizes` (9
+cases) pins edited-picture byte sizes with `B`/`0` insertions and with a `V`
+(`Z(3)V99` = 5). See `ast-models.md`.
+
+2026-09-27: `tests/unit/test_jcl.py::TestDummyAndBackwardReferences` (5
+tests) pins DUMMY/NULLFILE reading no dataset, DSN/DUMMY/SYSOUT overrides
+replacing each other, and `DSN=*.` backward references landing in
+`unresolved`. See `jcl.md`.
+
+2026-09-27: `tests/unit/test_config_yaml.py` +3 tests pin the indentless
+block sequence (`key:` then `- item` at the key's own column) as a mapping
+value, ending at the parent's next key; it used to be rejected. See `cli.md`.
+
 2026-09-15: `tests/regression/test_copybook_suggestion_pool.py` (4 tests)
 pins `suggest_similar_copybooks`'s narrowed did-you-mean candidate pool
 (`.cpy`/`.CPY` only by default, via a new `suggestion_extensions`

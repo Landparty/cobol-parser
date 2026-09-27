@@ -215,6 +215,14 @@ stored exactly as coded and reported in `unresolved`.
   body is still stored and usable).
 * **`DSN=*.step.ddname` backward references are not resolved** — the text is
   kept as coded and reported.
+
+# DUMMY and overrides
+
+`DUMMY` and `DSN=NULLFILE` both mark a DD `is_dummy` with `dataset=None`,
+whatever DSN is also coded. `DSN`/`DSNAME`, `DUMMY` and `SYSOUT` are mutually
+exclusive: an overriding `procstep.ddname` card that codes any of them drops
+whichever the procedure DD coded, so `//S.IN DD DUMMY` really dummies out a
+procedure dataset (it used to leave `IN -> A.B` in `dd_map()`).
 * Datasets are not resolved across *files*: a job that `INCLUDE`s a member or
   `EXEC`s a cataloged procedure from a PROCLIB gets an `unresolved` entry, not
   a lookup.

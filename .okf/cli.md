@@ -101,7 +101,8 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   naming the file (and, for YAML syntax, the line). Never a silent fallback
   to defaults.
 * **The YAML subset** — stdlib only (this package has no runtime
-  dependencies). Nested mappings, block/flow sequences, flow mappings,
+  dependencies). Nested mappings, block/flow sequences (a block sequence
+  may sit at its key's own column -- the indentless form), flow mappings,
   quoted/plain scalars, `#` comments, one optional leading `---`. Anchors,
   aliases, tags, block scalars, merge keys, multiple documents, tabs in
   indentation and duplicate keys are **rejected with a line number**. Two

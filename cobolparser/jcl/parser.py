@@ -136,6 +136,10 @@ class _Sink:
     if_stack: list[_IfFrame] = field(default_factory=list)
 
 
+#: The mutually exclusive parameters that decide what a DD *is*.
+_DD_KIND_KEYWORDS = frozenset({"DSN", "DSNAME", "DUMMY", "SYSOUT"})
+
+
 def _clone_dd(dd: DDStatement, *, procstep: str | None = None) -> DDStatement:
     """A deep-enough copy of ``dd`` so callers can mutate it independently."""
     return DDStatement(
@@ -600,6 +604,19 @@ class _Builder:
                     record_length = self._as_length(
                         param.subparameters["LRECL"], name, line
                     )
+        if dataset is not None and dataset.upper() == "NULLFILE":
+            # `DSN=NULLFILE` is z/OS's spelling of DUMMY, not a dataset.
+            is_dummy = True
+        if is_dummy:
+            # A DUMMY DD reads no dataset, whatever DSN is also coded on it
+            # (or left behind by the procedure DD it overrides).
+            dataset = None
+        if dataset is not None and dataset.startswith("*."):
+            self._note(
+                f"DD {name or '(unnamed)'} (line {line}): dataset name "
+                f"{dataset!r} is a backward reference, which is not resolved; "
+                "it is reported exactly as coded"
+            )
         if dataset is not None and "&" in dataset and not dataset.startswith("&&"):
             self._note(
                 f"DD {name or '(unnamed)'} (line {line}): dataset name "
@@ -805,6 +822,11 @@ class _Builder:
             )
             for p in base.parameters
         ]
+        # DSN, DUMMY and SYSOUT are mutually exclusive ways of saying what a
+        # DD is. An override coding one of them replaces whichever the
+        # procedure coded, rather than leaving both in effect.
+        if any(p.keyword.upper() in _DD_KIND_KEYWORDS for p in override.parameters):
+            params = [p for p in params if p.keyword.upper() not in _DD_KIND_KEYWORDS]
         for param in override.parameters:
             keyword = param.keyword.upper()
             replaced = False

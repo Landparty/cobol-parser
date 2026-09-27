@@ -973,6 +973,17 @@ via a range stack; per-chain visited sets keep GO TO cycles finite).
 Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Conditional
 branches still share one state (unchanged conservatism); paragraphs
 unreachable from the entry procedure are no longer walked at all.
+
+**Conditional GO TO targets are walked once the chain loops (2026-09-27).**
+`READ IN-F AT END GO TO END-P` / `GO TO LOOP-P` -- the textbook sequential
+loop -- stopped the walk at the revisit of LOOP-P, so END-P's CLOSE was never
+seen and FILE_LEFT_OPEN was reported. GO TO targets met inside a branch or
+handler are now queued (`_pending_gotos`) and the chain resumes at the next
+unvisited one when it loops back. If it still ends on a loop without reaching
+STOP RUN/GOBACK, no FILE_LEFT_OPEN is claimed (`_ended_in_cycle`): the walk
+never reached program end. A missing or duplicate CLOSE in the exit
+paragraph is still reported. Pinned by
+`tests/unit/analysis/test_io_sequence.py::TestGoToReadLoop`.
 Contained programs are no longer walked either (single-program scope,
 matching every other analyzer). Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA1IoSequenceExecutionOrder`.
@@ -985,6 +996,16 @@ CLOSE` produced spurious FILE_LEFT_OPEN + READ_BEFORE_OPEN violations. Now
 gated on `stop_type == "RUN"`, the same distinction `dead_code.py`'s and
 `program_flow/scanner.py`'s `_is_terminator` already draw. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestB1StopLiteralIsNotTermination`.
+
+`_literals.py`'s `quote_literal()` re-emits a decoded literal doubling
+each embedded `"`; its inverse `unquote_literal()` (2026-09-27) strips the
+delimiters *and* collapses the doubled delimiter. Any consumer reading a
+re-emitted literal back must use it: `generators/data/layout.py`
+(`_strip_literal_quotes`, VALUE clauses), `analysis/constraints.py`
+(`_strip_quotes`, branch witnesses) and `analysis/const_fold.py` (MOVE
+sources) each stripped only the delimiters, so `VALUE "A""B"` generated
+`A""B` and `MOVE '"'` folded to two quote characters. Pinned by
+`tests/regression/test_doubled_quote_literal_values.py`.
 
 ## MoveTypeChecker
 
@@ -1000,6 +1021,17 @@ report: MoveTypeReport = MoveTypeChecker().check(ast)
 
 Detects MOVE statements with type-incompatible sending/receiving fields based on
 PICTURE clause categories.
+
+**Group receivers and `ZERO` → alphabetic (2026-09-27):** a MOVE *into* a
+group item is a group move (bytes copied as alphanumeric) and legal from any
+sender, so group receivers are exempt from every elementary rule -- `MOVE
+WS-AMT TO WS-GROUP` with a `V99` sender was reported as an illegal
+non-integer→alphanumeric MOVE. `MOVE ZERO TO` a `PIC A` item is now an error
+(ZERO is numeric). Both found by comparing a sender×receiver matrix against
+GnuCOBOL's own MOVE legality check; the remaining disagreements are where
+IBM is stricter than GnuCOBOL's `-std=ibm` (non-integer → alphanumeric) or a
+documented choice here (HIGH/LOW-VALUE, QUOTE → numeric). Pinned by
+`tests/unit/analysis/test_move_type_checker.py::TestGroupReceiverAndZeroToAlphabetic`.
 
 **Picture classification fixes (2026-08-16 audit):** `_PIC_ALPHA_ONLY_RE`
 now matches any concatenation of `A`/`A(n)` parts (`AA(3)`, `A(2)A(3)`) —
@@ -1808,24 +1840,22 @@ internal env) rather than approximating:
   no truncated integer digits, no sign coercion into an unsigned field) --
   real COBOL's MOVE truncation rules are well-defined, but replicating them
   exactly is out of scope for v1; an overflowing result is poisoned instead.
-* **A well-formed ADD/SUBTRACT self-reference is poisoned, not
-  under-computed.** `ArithmeticStatement.operands` is a deduplicated union
-  of the real addend/subtrahend tokens *and* the target/giving names
-  (`set_target`/`set_giving` both call the same `_add_unique_operand` the
-  addend-collection phase does) -- so `ADD X TO X` (doubling X) and "X was
-  never a separate addend at all" produce the *identical* `.operands`
-  shape, and the distinction is unrecoverable from the final AST. Since a
-  well-formed ADD/SUBTRACT always has >= 1 real addend (parser-enforced),
-  filtering target/giving names out of `.operands` and finding *nothing
-  left* proves every addend coincided with a target -- the one shape this
-  module can safely detect and poison. A blanket "poison on any operand/
-  target overlap" was tried and rejected during development: a target's own
-  name *always* ends up in `.operands` by construction (regardless of any
-  genuine overlap), so that check fired on every ordinary `ADD 1 TO WS-X`,
-  not just a self-reference -- found immediately via this module's own
-  tests, before it ever reached the corpus sweep. A *partial* overlap
-  (`ADD X, Y TO X`) is not caught and silently undercounts -- narrower and
-  rarer, and documented in the source rather than silently. `MULTIPLY`'s
+  `MOVE ZERO`/`ZEROS`/`ZEROES` folds (0 into a numeric field, `"0"` in every
+  position of an alphanumeric one) and `ZERO` is a known arithmetic operand.
+  A text MOVE into `PIC N(n)` truncates to n characters (`spec.size` is
+  bytes, two per national character; it had kept 2n).
+* **ADD/SUBTRACT addends come from `ArithmeticStatement.source_operands`**
+  (2026-09-27), the operands written before TO/FROM/GIVING with duplicates
+  kept, set by the ADD/SUBTRACT parsers and not serialized.
+  `ArithmeticStatement.operands` cannot answer "which names are addends":
+  `set_target`/`set_giving` append a name only when it is absent, so
+  `ADD A B GIVING B` and `ADD A GIVING B` both leave `[A, B]`. The folder
+  used to filter target/GIVING names out of `.operands`, which poisoned
+  `ADD X TO X` and -- worse, breaking the exact-or-absent contract --
+  silently dropped a real addend in `ADD -6.05 N8 GIVING N8` (folded to
+  -6.05) and `ADD X, Y TO X`. Found by fuzzing random straight-line
+  programs against GnuCOBOL (~12,000 folded values compared, all now
+  matching). A node without `source_operands` is poisoned. `MULTIPLY`'s
   format-1 (`MULTIPLY A BY B`, no GIVING) has no analogous issue:
   reusing the target's own name as the second operand is directly what the
   statement means (multiplication has no target-is-also-an-addend hidden
@@ -2085,6 +2115,18 @@ declares — data items, level-88 condition names, files, paragraphs and
 sections — where it is *defined* and every place it is *referenced*, each
 reference carrying its location, the statement it sits in, the enclosing
 paragraph, and the **role** it plays there.
+
+**Arithmetic roles (2026-09-27).** With GIVING, only the GIVING/REMAINDER
+items are `write`; the TO/FROM operand is `read` (`SUBTRACT A FROM B GIVING
+C` used to record B as written). Without GIVING, the TO/FROM/BY/INTO target
+is both `read` and `write` (`ADD 1 TO X` used to be `write` only). Sending
+operands come from `ArithmeticStatement.source_operands` (ADD/SUBTRACT) or
+the first two operands (MULTIPLY/DIVIDE), so `ADD A B GIVING B` keeps B's
+read. `program_signature.py` grades LINKAGE directions from these roles:
+an accumulated parameter is now `input-output` (was `output`) and a
+`SUBTRACT ... FROM LK-B GIVING` operand `input` (was `output`). Pinned by
+`test_xref.py::test_giving_leaves_the_from_operand_unwritten` and friends and
+`test_program_signature.py::test_accumulated_and_giving_operands_get_the_right_direction`.
 
 This is the natural completion of `unused_variables.py`. That analyzer answers
 "is this name referenced at all?" with a flat `set[str]`; this one keeps the

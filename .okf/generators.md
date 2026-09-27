@@ -531,6 +531,16 @@ formatted with `allow_random_sign=False` — otherwise `88 ST-LOW VALUE 5` on a
 `PIC S9(3)` field emits `-5`, a value the copybook never permits. Pinned by
 `test_declared_domain_values_are_never_randomly_negated`.
 
+`_literals.py`'s `quote_literal()` re-emits a decoded literal doubling
+each embedded `"`; its inverse `unquote_literal()` (2026-09-27) strips the
+delimiters *and* collapses the doubled delimiter. Any consumer reading a
+re-emitted literal back must use it: `generators/data/layout.py`
+(`_strip_literal_quotes`, VALUE clauses), `analysis/constraints.py`
+(`_strip_quotes`, branch witnesses) and `analysis/const_fold.py` (MOVE
+sources) each stripped only the delimiters, so `VALUE "A""B"` generated
+`A""B` and `MOVE '"'` folded to two quote characters. Pinned by
+`tests/regression/test_doubled_quote_literal_values.py`.
+
 **Signedness.** `PictureClause.is_signed` only reports an explicit `S`, so
 `_is_signed()` additionally treats a numeric-edited picture carrying `+`,
 `-`, `CR`, or `DB` as signed — `PIC -ZZ,ZZ9.99` is the canonical signed
@@ -539,7 +549,14 @@ display field and would otherwise never generate a negative.
 **Edited pictures** contribute their *logical* numeric value, not the edited
 display form: a CSV is consumed by tooling that wants the value, and the
 edit mask is a presentation concern of the COBOL program. Likewise `COMP-3`
-carries the decimal value, not packed bytes.
+carries the decimal value, not packed bytes.  The *record image* is the other
+side: there an edited field holds the edited bytes (2026-09-27; it used to
+hold the CSV's logical value left-justified, e.g. `9516.07 ` for
+`PIC $$,$$9.99`, which no COBOL program writes). `editing.py` implements
+IBM's editing rules -- Z/`*` suppression, floating `$`/`+`/`-` strings,
+fixed `+`/`-`/`CR`/`DB`/`$`, `B`/`0`/`/`/`,` insertion, the all-`Z`/all-`*`
+zero case -- and every case in `tests/unit/generators/data/test_editing.py`
+was checked byte for byte against GnuCOBOL 3.
 
 **Line terminator.** `to_csv()` and `write_csv()` share
 `_DEFAULT_LINE_TERMINATOR = "\n"`, deliberately *not* the `csv` module's
@@ -591,7 +608,8 @@ module docstring — that suite is the regression guard):
 
 | Storage | Bytes |
 |---------|-------|
-| DISPLAY alphanumeric / edited | left-justified, space-padded, truncated; charset's space byte |
+| DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte |
+| DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is |
 | DISPLAY numeric (zoned) | one byte per digit; sign as an overpunch, or a real `+`/`-` byte under `SIGN IS SEPARATE` |
 | `COMP-3` / `PACKED-DECIMAL` | two BCD nibbles per byte, sign nibble `C`/`D` signed, `F` unsigned |
 | `COMP` / `COMP-4` / `BINARY` | two's complement, **always big-endian** |
@@ -634,7 +652,12 @@ header):
   item would shift every following offset, and this package's offset model
   (`layout_offsets.compute_record_layout`, which backs `data-items`) is
   unaligned throughout. Two contradictory offset models in one repo is worse
-  than one documented gap.
+  than one documented gap. `compute_program_data_items` (2026-09-27) no longer
+  reports those unaligned offsets as exact: the first `SYNCHRONIZED`
+  binary/float/pointer/index item that is off its boundary (2/4/8 bytes, its
+  own width) or inside an `OCCURS` table, and every item after it in source
+  order, get `offset_ambiguous: True`, with one `unresolved` line naming it.
+  An aligned SYNC item, or SYNC on DISPLAY/packed, changes nothing.
 * **`COMP-1`/`COMP-2` are IEEE 754, not z/OS hexadecimal floating point.**
   Matches GnuCOBOL and Enterprise COBOL under `FLOAT(IEEE)`.
 * **`OCCURS ... DEPENDING ON` is written at its maximum** under

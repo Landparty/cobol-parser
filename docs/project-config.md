@@ -150,7 +150,8 @@ same command.
 
 This package has no runtime dependencies, so it ships a small reader rather
 than taking on PyYAML. It supports what a config file needs — nested
-mappings, block and flow sequences, flow mappings, quoted and plain scalars,
+mappings, block sequences (indented under their key or written at the
+key's own column), flow sequences, flow mappings, quoted and plain scalars,
 `#` comments, one optional leading `---` — and **rejects** everything else
 with a line number: anchors and aliases, tags, block scalars (`|`, `>`),
 merge keys, multiple documents, tabs in indentation, duplicate keys.

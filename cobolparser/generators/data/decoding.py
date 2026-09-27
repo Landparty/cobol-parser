@@ -66,6 +66,7 @@ from decimal import Decimal
 from typing import Any
 
 from ...models.data_items import CobolDataItem
+from .editing import deedit_numeric, edit_numeric
 from .encoding import (
     EBCDIC_CODEC,
     RDW_SIZE,
@@ -367,6 +368,30 @@ def _render_number(magnitude: int, negative: bool, decimals: int) -> str:
     return f"-{text}" if negative and magnitude != 0 else text
 
 
+def _decode_edited(
+    raw: bytes, spec: FieldSpec, opts: EncodingOptions
+) -> tuple[str, str | None]:
+    """A numeric-edited field's bytes back to its logical value.
+
+    The inverse of the edit :func:`.encoding.encode_field` applies, so
+    ``$1,234.56`` reads back as ``1234.56`` -- the same text the CSV holds.
+    A picture :func:`.editing.edit_numeric` does not model reads as plain
+    text, as it did before edited fields were edited; text that is not an
+    edited form of the picture at all is an error, shown as read.
+    """
+    codec = EBCDIC_CODEC if opts.charset is Charset.EBCDIC else "latin-1"
+    text = raw.decode(codec, errors="replace")
+    if edit_numeric(spec.picture, "0") is None or len(raw) < spec.storage_size:
+        return _decode_text(raw, opts), None
+    parsed = deedit_numeric(spec.picture, text)
+    if parsed is None:
+        return text.rstrip(" \x00"), (
+            f"{text!r} is not a value PIC {spec.picture} can display"
+        )
+    magnitude, negative = parsed
+    return _render_number(magnitude, negative, spec.decimal_digits), None
+
+
 def _decode_text(raw: bytes, opts: EncodingOptions) -> str:
     """DISPLAY text: the charset's characters, trailing pad stripped.
 
@@ -554,6 +579,8 @@ def decode_field(
         value, error = _decode_binary(raw, spec, opts)
     elif spec.category is FieldCategory.NUMERIC:
         value, error = _decode_zoned(raw, spec, opts)
+    elif spec.category is FieldCategory.NUMERIC_EDITED:
+        value, error = _decode_edited(raw, spec, opts)
     else:
         value = _decode_text(raw, opts)
 

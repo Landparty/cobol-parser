@@ -455,3 +455,31 @@ class TestReviewFollowUps:
         parameter = signature.entry_points[0].parameters[0]
         assert parameter.direction == "unknown"
         assert any("declared more than once" in note for note in signature.unchecked)
+
+
+def test_accumulated_and_giving_operands_get_the_right_direction():
+    # `ADD 1 TO LK-COUNT` reads the caller's value before writing it back
+    # (input-output, not output); the FROM operand of `SUBTRACT ... GIVING`
+    # is only read (input, not output).
+    source = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. SUB.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "       01 WS-C PIC 9(3).\n"
+        "       LINKAGE SECTION.\n"
+        "       01 LK-COUNT PIC 9(3).\n"
+        "       01 LK-A PIC 9(3).\n"
+        "       01 LK-B PIC 9(3).\n"
+        "       PROCEDURE DIVISION USING LK-COUNT LK-A LK-B.\n"
+        "           ADD 1 TO LK-COUNT.\n"
+        "           SUBTRACT LK-A FROM LK-B GIVING WS-C.\n"
+        "           GOBACK.\n"
+    )
+    signature = ProgramSignatureExtractor().analyze(parse_cobol(source).ast)
+    params = signature.to_dict()["entry_points"][0]["parameters"]
+    assert {p["name"]: p["direction"] for p in params} == {
+        "LK-COUNT": "input-output",
+        "LK-A": "input",
+        "LK-B": "input",
+    }

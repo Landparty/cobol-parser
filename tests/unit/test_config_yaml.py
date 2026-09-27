@@ -238,3 +238,24 @@ def test_error_messages_name_the_file_and_line():
     # go fix the line; the message has to say which one.
     with pytest.raises(YamlError, match=r"^cobol\.yml:3: duplicate key 'a'"):
         parse_yaml("a: 1\nb: 2\na: 3\n", "cobol.yml")
+
+
+def test_indentless_sequence_as_mapping_value():
+    # `key:` followed by `- item` at the key's own column is valid YAML and
+    # the form many formatters emit; it used to be rejected.
+    assert parse_yaml("copybook_paths:\n- ./copy\n- ./more\n") == {
+        "copybook_paths": ["./copy", "./more"]
+    }
+
+
+def test_indentless_sequence_ends_at_the_next_key():
+    text = "a:\n- x: 1\n  y: 2\n- z\nb:\n  c:\n  - q\n  d: 1\n"
+    assert parse_yaml(text) == {
+        "a": [{"x": 1, "y": 2}, "z"],
+        "b": {"c": ["q"], "d": 1},
+    }
+
+
+def test_indentless_sequence_still_rejects_duplicate_key():
+    with pytest.raises(YamlError, match="duplicate key"):
+        parse_yaml("a:\n- 1\na: 2\n")

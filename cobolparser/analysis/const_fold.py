@@ -59,6 +59,7 @@ from decimal import Decimal, InvalidOperation, localcontext
 from fractions import Fraction
 from typing import TYPE_CHECKING, Any
 
+from .._literals import unquote_literal
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolParagraph, CobolProgram
 from ..models.statements.arithmetic import (
@@ -97,6 +98,9 @@ from ..generators.data.layout import FieldCategory
 
 _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 _QUOTED_LITERAL_RE = re.compile(r'^(["\'])(.*)\1$', re.DOTALL)
+#: The figurative constant ZERO in all three spellings: numeric zero moved
+#: into a numeric field, a run of "0" characters into an alphanumeric one.
+_ZERO_FIGURATIVES = frozenset({"ZERO", "ZEROS", "ZEROES"})
 #: A subscript or reference-modification suffix: ``WS-T ( 1 )``, ``WS-B(1:1)``.
 _SUFFIX_RE = re.compile(r"\s*\(.*$", re.DOTALL)
 
@@ -963,9 +967,11 @@ def _resolve_move_source(
             return ("numeric", Decimal(source))
         except InvalidOperation:
             return None
-    quoted = _QUOTED_LITERAL_RE.match(source)
-    if quoted:
-        return ("text", quoted.group(2))
+    if _QUOTED_LITERAL_RE.match(source):
+        # Doubled delimiters collapsed: MOVE '"' arrives as `""""`.
+        return ("text", unquote_literal(source))
+    if source.strip().upper() in _ZERO_FIGURATIVES:
+        return ("zero", Decimal(0))
     resolved = _safe_resolve(index, source)
     if resolved is None:
         return None
@@ -997,6 +1003,17 @@ def _apply_move_target(
     if source is None:
         return
     kind, value = source
+    if kind == "zero":
+        # MOVE ZERO fills the whole field: 0 in a numeric one, "0" in every
+        # character position of an alphanumeric one.
+        if resolved.spec.category is FieldCategory.NUMERIC:
+            env[qname] = Decimal(0)
+        elif (
+            resolved.spec.category is FieldCategory.ALPHANUMERIC
+            and resolved.spec.size > 0
+        ):
+            env[qname] = "0" * resolved.spec.size
+        return
     if kind == "numeric" and isinstance(value, Decimal):
         if resolved.spec.category is FieldCategory.NUMERIC and _fits_exactly(
             value, resolved.spec
@@ -1005,6 +1022,10 @@ def _apply_move_target(
     elif kind == "text" and isinstance(value, str):
         if resolved.spec.category in _TEXT_CATEGORIES:
             size = resolved.spec.size if resolved.spec.size > 0 else len(value)
+            if resolved.spec.category is FieldCategory.NATIONAL:
+                # `size` is bytes; a national character is two of them, so
+                # PIC N(3) (six bytes) holds three characters, not six.
+                size //= 2
             if qname in _facts(index).justified:
                 # JUSTIFIED RIGHT keeps the RIGHTMOST characters of an
                 # oversized value; a shorter one is padded on the left,
@@ -1027,6 +1048,8 @@ def _resolve_operand(
             return Decimal(token)
         except InvalidOperation:
             return None
+    if token.strip().upper() in _ZERO_FIGURATIVES:
+        return Decimal(0)
     resolved = _safe_resolve(index, token)
     if resolved is None:
         return None
@@ -1100,20 +1123,17 @@ def _fold_add_subtract_giving(
     env: dict[str, Decimal | str],
 ) -> None:
     """The GIVING form always reads OLD values and never modifies an
-    operand in place -- `_fold_giving_form` (via `base`, below) separately
-    reads the (at most one, in standard grammar) TO/FROM operand's own
-    current value, so filtering `.operands` by target/giving names to get
-    the addend list is the right general shape. But a well-formed ADD/
-    SUBTRACT always has >= 1 real addend (parser-enforced), so if that
-    filter empties the list entirely, every addend token coincided with a
-    target/giving name -- `.operands` deduplicates on insertion, so
-    "``ADD X TO X GIVING Y`` really lists X twice" is indistinguishable
-    from "X was never a separate addend" without this check. A *partial*
-    overlap (`ADD X, Z TO X GIVING Y`) is not caught and silently
-    undercounts -- narrower and rarer, and documented here rather than
-    silently."""
-    reserved = set(stmt.targets) | set(stmt.givings)
-    addend_tokens = [op for op in stmt.operands if op not in reserved]
+    operand in place: ``result = base (+/-) sum(addends)``, where ``base`` is
+    the (at most one, in standard grammar) TO/FROM operand, or zero.
+
+    The addends are ``stmt.source_operands`` -- what was written before
+    TO/FROM/GIVING, duplicates kept. ``.operands`` cannot stand in for it:
+    a target or GIVING name is appended there only when not already
+    present, so ``ADD A B GIVING B`` and ``ADD A GIVING B`` look identical,
+    and filtering target/GIVING names out of it silently dropped a real
+    addend (``ADD -6.05 N8 GIVING N8`` folded to -6.05). A node without
+    ``source_operands`` is poisoned rather than guessed at."""
+    addend_tokens = stmt.source_operands
     if not addend_tokens:
         _poison_names(stmt.givings, index, env)
         return
@@ -1148,19 +1168,11 @@ def _fold_add_subtract_accumulate(
     env: dict[str, Decimal | str],
 ) -> None:
     """Format 1 (no GIVING): each target accumulates `target := target (+/-)
-    sum(addends)`. A target's own name is *expected* to appear in
-    `.operands` regardless of any real overlap (`set_target` always ends up
-    adding it there, see the module's arithmetic-operand notes) -- checking
-    for that would fire on every ordinary `ADD 1 TO WS-X`, not just a
-    genuine self-reference. The one case worth catching: a well-formed
-    ADD/SUBTRACT always has >= 1 real addend, so if removing target names
-    from `.operands` leaves nothing at all, every addend token coincided
-    with a target -- `ADD X TO X` doubles X, but `.operands` deduplication
-    makes that indistinguishable from "no real addend at all" without this
-    check. A *partial* overlap (`ADD X, Y TO X`) is not caught and silently
-    undercounts -- narrower and rarer, and documented here rather than
-    silently."""
-    addend_tokens = [op for op in stmt.operands if op not in stmt.targets]
+    sum(addends)`, the addends being ``stmt.source_operands`` (see
+    `_fold_add_subtract_giving` for why ``.operands`` cannot answer that:
+    ``ADD X TO X`` doubles X, but its ``.operands`` is just ``[X]``). A node
+    without ``source_operands`` is poisoned rather than guessed at."""
+    addend_tokens = stmt.source_operands
     if not addend_tokens:
         _poison_names(stmt.targets, index, env)
         return

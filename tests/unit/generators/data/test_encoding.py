@@ -197,10 +197,12 @@ class TestAlphanumeric:
         assert encode_field(spec, "ABCDEF", EncodingOptions()) == b"ABC"
 
     def test_numeric_edited_keeps_its_edit_mask(self):
+        # The fixed `-` stays in column 1 and the suppressed Z becomes a
+        # space -- what GnuCOBOL's MOVE -12.34 TO F leaves there.
         spec = one_spec("F PIC -ZZ9.99.")
         raw = encode_field(spec, "-12.34", EncodingOptions())
         assert len(raw) == spec.storage_size
-        assert raw.strip() == b"-12.34"
+        assert raw == b"- 12.34"
 
 
 class TestStorageOnlyUsages:

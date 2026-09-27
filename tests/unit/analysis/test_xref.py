@@ -191,7 +191,8 @@ def test_arithmetic_roles_from_source():
 
 
 def test_arithmetic_target_recorded_once_per_statement():
-    """`target` and `targets` hold the same operand -- one reference, not two."""
+    """`target` and `targets` hold the same operand -- one reference per
+    role, not two. The accumulating target is both read and written."""
     report = _analyze_source("""
        IDENTIFICATION DIVISION.
        PROGRAM-ID. ARITH2.
@@ -203,7 +204,7 @@ def test_arithmetic_target_recorded_once_per_statement():
            ADD 1 TO WS-COUNT
            STOP RUN.
 """)
-    assert _roles(report, "WS-COUNT") == [ROLE_WRITE]
+    assert sorted(_roles(report, "WS-COUNT")) == sorted([ROLE_READ, ROLE_WRITE])
 
 
 def test_compute_target_is_write_and_operands_are_read():
@@ -1695,3 +1696,57 @@ def test_duplicate_declarations_are_reported_on_the_report():
 """)
     assert report.duplicate_declarations == ["CUST-ID"]
     assert "duplicate_declarations" in report.to_dict()
+
+
+_ARITH_HEADER = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ARITH3.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  N1 PIC 9(3).
+       01  N2 PIC 9(3).
+       01  N3 PIC 9(3).
+       01  RM PIC 9(3).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+"""
+
+
+def _arith_roles(statement: str) -> dict[str, list[str]]:
+    report = _analyze_source(
+        _ARITH_HEADER + f"           {statement}\n           STOP RUN.\n"
+    )
+    return {
+        name: sorted(_roles(report, name))
+        for name in ("N1", "N2", "N3", "RM")
+        if report.entry_for(name) and report.entry_for(name).references
+    }
+
+
+def test_giving_leaves_the_from_operand_unwritten():
+    # `SUBTRACT N1 FROM N2 GIVING N3` changes only N3.
+    assert _arith_roles("SUBTRACT N1 FROM N2 GIVING N3") == {
+        "N1": [ROLE_READ],
+        "N2": [ROLE_READ],
+        "N3": [ROLE_WRITE],
+    }
+
+
+def test_giving_to_one_of_its_own_operands_still_reads_it():
+    assert _arith_roles("ADD N1 N2 GIVING N2") == {
+        "N1": [ROLE_READ],
+        "N2": sorted([ROLE_READ, ROLE_WRITE]),
+    }
+
+
+def test_multiply_and_divide_forms():
+    assert _arith_roles("MULTIPLY N1 BY N2") == {
+        "N1": [ROLE_READ],
+        "N2": sorted([ROLE_READ, ROLE_WRITE]),
+    }
+    assert _arith_roles("DIVIDE N1 INTO N2 GIVING N3 REMAINDER RM") == {
+        "N1": [ROLE_READ],
+        "N2": [ROLE_READ],
+        "N3": [ROLE_WRITE],
+        "RM": [ROLE_WRITE],
+    }

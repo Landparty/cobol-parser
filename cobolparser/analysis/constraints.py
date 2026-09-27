@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .._literals import unquote_literal
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.statements.base import (
@@ -1150,10 +1151,9 @@ def _figurative_name(text: str) -> str | None:
 
 
 def _strip_quotes(text: str) -> str:
-    t = text.strip()
-    if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'":
-        return t[1:-1]
-    return t
+    # Delimiters off and doubled delimiters collapsed: `IF X = '"'` reaches
+    # here as `""""` (see `quote_literal`) and means the one character `"`.
+    return unquote_literal(text)
 
 
 #: A sign the lexer emitted as its own token, so ``-5`` reaches us as
