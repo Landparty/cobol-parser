@@ -130,6 +130,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`VALUE X"..."` generated the wrong data** (audit 2026-09-27, 2.1): a
+  typed literal in a VALUE clause lost its prefix, so `value_clause` read
+  `"4142"` for `X"4142"` and `gen-data` wrote `41` instead of `AB`. The
+  clause now keeps the literal as written (`X"4142"`, `ALL X"41"`) and the
+  generators decode it (`X` to its bytes, `NX` UTF-16BE, `UX` UTF-8, `Z` with
+  its NUL). Level-88 values are unchanged (tracked in `AUDIT.md`).
+* **COPY scanning was quadratic in whitespace** (audit 2026-09-27, S1): a
+  file with a few thousand blank lines took minutes to expand, or to
+  `gen-data` when in a copybook. The scanner now skips whole separator and
+  word runs; results are identical and a typical NIST program scans ~10x
+  faster.
+* **REPLACING could exceed `max_total_size` unchecked** (audit 2026-09-27,
+  S2): the limit was charged before REPLACING, so a long `BY` text could
+  multiply a member far past it. The growth is now charged too.
+* **A stray `cobolparser/error_log.txt` shipped as package data**; removed.
 * **An identification-area stamp laid out in sub-fields no longer reads as
   truncated code either.** Follow-up to the entry below: re-running the
   reported program took its 19 warnings down to 3, and the residue was a

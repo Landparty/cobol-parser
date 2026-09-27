@@ -60,6 +60,12 @@ data / folded MOVEs collapsing doubled quotes. See `lexer.md`.
 (4 tests) pins group receivers being exempt from elementary MOVE rules and
 `ZERO` → `PIC A` being illegal. See `analysis.md`.
 
+2026-09-27: `tests/regression/test_audit_2026_09_27.py` (22 tests) pins the
+audit patch batch: typed VALUE literals keeping their prefix and decoding in
+gen-data (`lexer.md`, `parser.md`), the COPY scanner staying linear on long
+whitespace runs, and REPLACING growth counting toward `max_total_size`
+(`preprocessing.md`).
+
 2026-09-27: `tests/regression/test_copy_replacing_literal_operand.py` (5
 tests) pins COPY REPLACING literal operands matching literals (not
 identifiers). See `preprocessing.md`.

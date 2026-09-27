@@ -1351,11 +1351,27 @@ def _expand_source_recursive(
             # Apply REPLACING clause if present (using enhanced function).
             # copybook_content is already stripped (indicator at index 0).
             if statement.replacing_clauses:
+                pre_replacing_size = len(copybook_content.encode("utf-8"))
                 copybook_content = apply_replacing_clauses(
                     copybook_content,
                     statement.replacing_clauses,
                     indicator_position=0,
                 )
+                # The raw-content charge above is taken before REPLACING, and
+                # a REPLACING BY text longer than its operand multiplies the
+                # member: a 48 KB copybook grew to 5.5 MB under a 1 MB
+                # max_total_size. Charge the growth too, so the limit bounds
+                # what the expansion actually produces.
+                growth = len(copybook_content.encode("utf-8")) - pre_replacing_size
+                if growth > 0:
+                    context.total_bytes += growth
+                    if stats:
+                        stats.total_bytes_processed = context.total_bytes
+                    if context.total_bytes > path_resolver.search_config.max_total_size:
+                        raise TotalExpansionSizeExceededError(
+                            context.total_bytes,
+                            path_resolver.search_config.max_total_size,
+                        )
 
             # Handle SUPPRESS clause (for listing control - we still include the content)
             # SUPPRESS is mainly for compiler listing output, not actual code inclusion

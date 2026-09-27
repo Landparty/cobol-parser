@@ -439,6 +439,13 @@ under-enforced: 3x inclusion of a 76-byte copybook with `max_total_size=
 true content bytes. Cache hits now add the cached content's byte length
 to `context.total_bytes` and re-check the limit, identically to a miss.
 
+**REPLACING growth is charged too (2026-09-27, audit S2).** The miss path
+charges the raw member *before* REPLACING, so a `BY` text longer than its
+operand could multiply a member past the limit unchecked (48 KB became
+5.5 MB under `max_total_size=1_000_000`). After `apply_replacing_clauses` the
+growth, when positive, is added to `context.total_bytes` and the limit
+re-checked. The cache-hit path already charged post-REPLACING content.
+
 **`validate_copybook_content` missing-period check now judges the ENTRY, not
 the physical line (fixed 2026-09-12):** `_DATA_DEF_RE` matched a single line
 ending in a `PICTURE` clause with no trailing period. But a data-description
@@ -542,6 +549,19 @@ and whose ambiguous REPLACING sub-pattern backtracked exponentially on
 unterminated input (`COPY X REPLACING BY BY ... BY %`). Deleted (and
 removed from `__all__`) rather than de-ambiguated. Guarded by
 `tests/regression/test_audit_2026_08_12_core.py::TestS1CopyPatternRemoved`.
+
+**The scanner skips whole runs (2026-09-27, audit S1).** "Linear" above was
+not true: at a position where `_match_keyword("COPY")` fails the loop
+advanced one character, but `_match_keyword` first skips the whole
+separator run -- so every blank line re-scanned the rest of the run, and a
+file of a few thousand blank lines took minutes (a DoS through a copybook
+too, since gen-data tokenizes every member). On a failed match the loop now
+jumps past the whole separator run (`_SEPARATOR_RUN_RE`) or identifier
+(`_WORD_RUN_RE`): from anywhere inside either, a match fails the same way
+(same landing character; a keyword inside a word fails the left
+word-boundary check). Differentially identical to the old loop over all 641
+corpus files and 40,000 fuzzed inputs, and ~10x faster on NC105A. Pinned by
+`tests/regression/test_audit_2026_09_27.py::TestCopyScannerLinear`.
 
 `parse_cobol_with_expansion` copies `expansion.statistics.warnings` (lossy
 encoding decodes, content-validation and level-number warnings) onto the
