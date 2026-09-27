@@ -314,10 +314,21 @@ class DeadCodeAnalyzer:
         """
         # Downward: a *directly* referenced section makes all its paragraphs
         # referenced too (must run before the upward pass -- see docstring).
+        #
+        # Entering a section runs its paragraphs in order, so a paragraph is
+        # reached only while the one before it (in the same section) was
+        # reached and does not terminate: a paragraph after one ending in
+        # STOP RUN / GOBACK / an unconditional GO TO is not executed just
+        # because its section is PERFORMed or fallen into. Marking every
+        # paragraph of a referenced section hid exactly that dead code.
         for sec_name, para_names in self._section_paragraphs.items():
             if sec_name in self._referenced_names:
+                live = True
                 for pname in para_names:
-                    self._referenced_names.add(pname)
+                    reached = live or pname in self._fallthrough_sources
+                    if reached:
+                        self._referenced_names.add(pname)
+                    live = reached and not self._terminates(pname)
 
         # Upward: paragraph referenced -> parent section is referenced.
         # Every section holding a paragraph of that name, not just the last

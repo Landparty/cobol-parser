@@ -607,6 +607,11 @@ stderr. Pinned by
 / `::TestH7ConditionalCompilationWarnings` (updated to the new semantics)
 and `tests/regression/test_open_findings_m10_regression.py`.
 
+A `*>` floating comment on a `>>` directive line (outside a literal) is
+stripped before the directive is read (`_strip_directive_comment`, 2026-09-27):
+`>>DEFINE DEBUG AS 1 *> on` used to define DEBUG as `1 *> ON`, silently
+making `>>IF DEBUG = 1` false, and `>>WHEN OTHER *> x` failed to parse.
+
 # Source-Text Manipulation: REPLACE + un-expanded COPY (2026-07-14)
 
 `preprocess/replace_statement.py` implements the two source-text

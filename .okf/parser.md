@@ -1796,6 +1796,15 @@ order (IBM Enterprise COBOL). Refactored into a shared `_parse_before_after`
 helper that loops until neither qualifier matches (each captured at most
 once), used by both `_parse_tallying` and `_parse_replacing`.
 
+2026-09-27 follow-up: `_parse_before_after` now reads its delimiter through
+`_consume_inspect_value`, so `BEFORE INITIAL SPACE` (a figurative constant)
+and `AFTER INITIAL ENT(2)` are taken whole -- previously SPACE was left in
+the stream and every later TALLYING counter clause was silently dropped. A
+subscripted TALLYING counter (`CNT(2) FOR ...`) is folded in too, and
+`CONVERTING` takes subscripted/figurative operands and keeps its
+BEFORE/AFTER phrase as `converting_before` / `converting_after` (emitted in
+`to_dict()` only when present; read by unused-variables and xref).
+
 **`PIC N(n)` (national/DBCS fields) sized as 1 regardless of `n`**
 (`models/data_items.py::PictureClause`): the size-inference cascade had a
 branch for `X`/`A` (alphanumeric/alphabetic) patterns but none for `N`

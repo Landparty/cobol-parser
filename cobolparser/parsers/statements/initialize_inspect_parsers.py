@@ -294,9 +294,10 @@ class InspectStatementParser(IStatementParser):
             ):
                 break
 
-            # Counter name
-            counter = token.value or ""
+            # Counter name (a subscripted / qualified counter folded in, or
+            # its ``(1)`` would stand where FOR is expected)
             ts.consume()
+            counter = consume_optional_qualifiers(ts, token.value or "")
             skip_whitespace(ts)
 
             # Expect FOR
@@ -473,18 +474,17 @@ class InspectStatementParser(IStatementParser):
             if p and _val(p) == "INITIAL":
                 ts.consume()
                 skip_whitespace(ts)
-            p = ts.peek()
-            if p and p.type in (
-                TokenType.IDENTIFIER,
-                TokenType.STRING_LITERAL,
-                TokenType.NUMERIC_LITERAL,
-            ):
-                ts.consume()
+            # The delimiter may be a figurative constant (``BEFORE INITIAL
+            # SPACE``) or a subscripted/qualified identifier; accepting only
+            # a bare identifier/literal left SPACE (or ``(2)``) in the stream,
+            # and the TALLYING loop then silently dropped every later
+            # counter clause.
+            value = self._consume_inspect_value(ts)
+            if value is not None:
                 if qualifier == "BEFORE":
-                    before = p.value
+                    before = value
                 else:
-                    after = p.value
-                skip_whitespace(ts)
+                    after = value
             else:
                 # Qualifier with no value (malformed) -- stop rather than
                 # loop forever on the same unconsumable token.
@@ -492,24 +492,24 @@ class InspectStatementParser(IStatementParser):
         return before, after
 
     def _parse_converting(self, ts: ITokenStream, stmt: InspectStatement) -> None:
-        """Parse CONVERTING from TO to."""
-        token = ts.peek()
-        if token and token.type in (
-            TokenType.IDENTIFIER,
-            TokenType.STRING_LITERAL,
-        ):
-            from_val = token.value or ""
-            ts.consume()
-            skip_whitespace(ts)
+        """Parse CONVERTING from TO to [BEFORE|AFTER [INITIAL] delimiter]...
 
-            nxt = ts.peek()
-            if nxt and _val(nxt) == "TO":
-                ts.consume()
-                skip_whitespace(ts)
-                to_tok = ts.peek()
-                if to_tok and to_tok.type in (
-                    TokenType.IDENTIFIER,
-                    TokenType.STRING_LITERAL,
-                ):
-                    ts.consume()
-                    stmt.set_converting(from_val, to_tok.value or "")
+        Operands go through the same reader TALLYING/REPLACING use, so a
+        subscripted / qualified identifier or a figurative constant is taken
+        whole rather than dropping the clause, and the BEFORE/AFTER phrase
+        is kept instead of being skipped by the trailer in ``parse()``."""
+        from_val = self._consume_inspect_value(ts)
+        if from_val is None:
+            return
+        nxt = ts.peek()
+        if not (nxt and _val(nxt) == "TO"):
+            return
+        ts.consume()
+        skip_whitespace(ts)
+        to_val = self._consume_inspect_value(ts)
+        if to_val is None:
+            return
+        stmt.set_converting(from_val, to_val)
+        before, after = self._parse_before_after(ts)
+        stmt.converting_before = before
+        stmt.converting_after = after

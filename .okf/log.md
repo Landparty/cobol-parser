@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-27 -- bug hunt round 3: INSPECT delimiters, directive comments, section dead code
+
+[parser.md](parser.md): INSPECT `BEFORE INITIAL SPACE` dropped every later
+TALLYING clause; CONVERTING lost subscripted operands and its BEFORE/AFTER.
+[preprocessing.md](preprocessing.md): `*>` comments on `>>` directive lines
+became part of the directive. [analysis.md](analysis.md): dead-code no longer
+treats every paragraph of a referenced section as live past a terminator.
+
 ## 2026-09-27 -- bug hunt round 2: expanded-line locations, VB short tail, YAML strictness
 
 [batch.md](batch.md) / [cli.md](cli.md): `scan` and `unused-variables

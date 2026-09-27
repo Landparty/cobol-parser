@@ -468,6 +468,44 @@ class TestPreprocessConditionalCompilation:
         assert "Flag false" not in result
 
 
+class TestDirectiveFloatingComment:
+    """A ``*>`` floating comment on a ``>>`` directive line is comment text,
+    not part of the directive."""
+
+    def test_define_value_ignores_trailing_comment(self):
+        warnings_out: list[str] = []
+        source = (
+            ">>DEFINE DEBUG AS 1   *> switch tracing on\n"
+            ">>IF DEBUG = 1 *> traced build\n"
+            "X\n"
+            ">>ELSE\n"
+            "Y\n"
+            ">>END-IF\n"
+        )
+        result = preprocess_conditional_compilation(source, warnings=warnings_out)
+        assert result.split("\n") == ["", "", "X", "", "", ""]
+        assert warnings_out == []
+
+    def test_when_other_and_evaluate_subject_with_comment(self):
+        warnings_out: list[str] = []
+        source = (
+            ">>DEFINE V AS 'A*>B'\n"
+            ">>EVALUATE V *> subject\n"
+            ">>WHEN 'Z' *> no\n"
+            "X\n"
+            ">>WHEN OTHER *> fallback\n"
+            "Y\n"
+            ">>END-EVALUATE\n"
+        )
+        result = preprocess_conditional_compilation(source, warnings=warnings_out)
+        assert "Y" in result.split("\n") and "X" not in result.split("\n")
+        assert warnings_out == []
+
+    def test_comment_marker_inside_literal_is_kept(self):
+        source = ">>DEFINE V AS 'A*>B'\n>>IF V = 'A*>B'\nX\n>>END-IF\n"
+        assert "X" in preprocess_conditional_compilation(source).split("\n")
+
+
 class TestValidateCopybookContent:
     """Tests for validate_copybook_content function."""
 

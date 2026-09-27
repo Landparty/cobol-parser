@@ -1101,8 +1101,13 @@ class XrefAnalyzer:
                         pairs.append((clause[key], ROLE_READ, False))
             if stmt.converting_from:
                 pairs.append((stmt.converting_from, ROLE_READ, False))
-            if stmt.converting_to:
-                pairs.append((stmt.converting_to, ROLE_READ, False))
+            for value in (
+                stmt.converting_to,
+                stmt.converting_before,
+                stmt.converting_after,
+            ):
+                if value:
+                    pairs.append((value, ROLE_READ, False))
         elif isinstance(stmt, XmlJsonStatement):
             if stmt.primary_operand:
                 role = ROLE_WRITE if stmt.action == "GENERATE" else ROLE_READ

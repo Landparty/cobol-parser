@@ -1740,3 +1740,70 @@ class TestFallThroughOnlyEscapesReachableRuns:
         )
         report = DeadCodeAnalyzer().analyze(prog)
         assert [item.name for item in report.dead_items] == ["ORPHAN"]
+
+
+class TestSectionParagraphsAfterTerminator:
+    """A referenced section does not make every paragraph in it live: one
+    after a paragraph that ends the run (STOP RUN, GOBACK, an unconditional
+    GO TO) is never reached by running the section."""
+
+    def test_paragraph_after_stop_run_in_fallen_into_section_is_dead(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. FALLSEC.
+       PROCEDURE DIVISION.
+       MAIN SECTION.
+       M1.
+           DISPLAY 'M'.
+       S2 SECTION.
+       P1.
+           DISPLAY 'X'
+           STOP RUN.
+       P2.
+           DISPLAY 'Y'.
+"""
+        result = parse_cobol(source, filename="fallsec.cbl")
+        assert result.ast is not None
+        report = DeadCodeAnalyzer().analyze(result.ast)
+        assert [item.name for item in report.dead_items] == ["P2"]
+
+    def test_paragraph_jumped_over_in_performed_section_is_dead(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. JUMPSEC.
+       PROCEDURE DIVISION.
+       MAIN SECTION.
+       M1.
+           PERFORM S2
+           STOP RUN.
+       S2 SECTION.
+       P1.
+           GO TO P3.
+       P2.
+           DISPLAY 'Y'.
+       P3.
+           EXIT.
+"""
+        result = parse_cobol(source, filename="jumpsec.cbl")
+        assert result.ast is not None
+        report = DeadCodeAnalyzer().analyze(result.ast)
+        assert [item.name for item in report.dead_items] == ["P2"]
+
+    def test_performed_section_without_terminator_is_all_live(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. LIVESEC.
+       PROCEDURE DIVISION.
+       MAIN SECTION.
+       M1.
+           PERFORM S2
+           STOP RUN.
+       S2 SECTION.
+       P1.
+           DISPLAY 'X'.
+       P2.
+           DISPLAY 'Y'.
+"""
+        result = parse_cobol(source, filename="livesec.cbl")
+        assert result.ast is not None
+        assert not DeadCodeAnalyzer().analyze(result.ast).has_dead_code

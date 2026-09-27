@@ -1049,6 +1049,28 @@ _DIRECTIVE_LINE_RE = re.compile(r"^>>\s*([A-Z][A-Z0-9-]*)(?:\s+(.*?))?\s*$")
 _OPERAND_KINDS = frozenset({"word", "string", "number", "boollit"})
 
 
+def _strip_directive_comment(text: str) -> str:
+    """Drop a ``*>`` floating comment from a ``>>`` directive line.
+
+    Outside a literal, ``*>`` starts a comment that runs to end of line, on
+    a directive line as on any other. Left in place it became part of the
+    directive: ``>>DEFINE DEBUG AS 1 *> on`` defined DEBUG as ``1 *> ON``
+    (so a later ``>>IF DEBUG = 1`` was silently false), and ``>>IF ...
+    *> why`` / ``>>WHEN OTHER *> x`` failed to parse. Inside a quoted
+    literal ``*>`` is literal text and is kept.
+    """
+    quote: str | None = None
+    for i, ch in enumerate(text):
+        if quote is not None:
+            if ch == quote:
+                quote = None  # a doubled quote reopens on the next char
+        elif ch in ("'", '"'):
+            quote = ch
+        elif text.startswith("*>", i):
+            return text[:i].rstrip()
+    return text
+
+
 def _strip_quotes(text: str) -> str:
     """Strip one pair of matching surrounding quotes, if present."""
     text = text.strip()
@@ -1487,6 +1509,8 @@ def preprocess_conditional_compilation(
             if fixed_text is not None:
                 stripped = fixed_text
 
+        if stripped.startswith(">>"):
+            stripped = _strip_directive_comment(stripped)
         directive_match = (
             _DIRECTIVE_LINE_RE.match(stripped) if stripped.startswith(">>") else None
         )

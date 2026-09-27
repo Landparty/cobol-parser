@@ -280,3 +280,92 @@ MAIN-PARA.
         clause = stmts[0].to_dict()["replacing_clauses"][0]
         assert clause["before"] == "X"
         assert clause["after"] == "Y"
+
+
+# ---------------------------------------------------------------------------
+# Figurative / subscripted delimiters, subscripted counters, CONVERTING
+# ---------------------------------------------------------------------------
+
+
+def _inspect_of(statement: str) -> dict:
+    source = f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. T.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 A PIC X(10).
+       01 B PIC X(10).
+       01 C PIC 9(4).
+       01 D PIC 9(4).
+       01 P PIC X.
+       01 TBL.
+          05 ENT PIC X OCCURS 5.
+          05 CNT PIC 9(4) OCCURS 5.
+       PROCEDURE DIVISION.
+       MAIN.
+           {statement}
+           MOVE 1 TO C.
+           STOP RUN.
+"""
+    result = parse_cobol(source)
+    assert result.ast is not None and not result.errors
+    stmts = [s.to_dict() for s in result.ast.get_all_statements()]
+    assert [s["statement_type"] for s in stmts] == ["INSPECT", "MOVE", "STOP"]
+    return stmts[0]
+
+
+class TestInspectDelimiterAndOperandShapes:
+    def test_figurative_delimiter_keeps_following_counter_clause(self) -> None:
+        d = _inspect_of(
+            "INSPECT A TALLYING C FOR CHARACTERS BEFORE INITIAL SPACE\n"
+            "                                 D FOR ALL 'Z'"
+        )
+        assert d["tallying_clauses"] == [
+            {
+                "counter": "C",
+                "for_type": "CHARACTERS",
+                "value": None,
+                "before": "SPACE",
+                "after": None,
+            },
+            {
+                "counter": "D",
+                "for_type": "ALL",
+                "value": "Z",
+                "before": None,
+                "after": None,
+            },
+        ]
+
+    def test_subscripted_delimiter_and_counter(self) -> None:
+        d = _inspect_of("INSPECT A TALLYING CNT(2) FOR ALL 'X' AFTER INITIAL ENT(2)")
+        [clause] = d["tallying_clauses"]
+        assert clause["counter"] == "CNT ( 2 )"
+        assert clause["after"] == "ENT ( 2 )"
+
+    def test_converting_keeps_subscripted_operand_and_before_after(self) -> None:
+        d = _inspect_of("INSPECT A CONVERTING ENT(1) TO B AFTER INITIAL P")
+        assert d["converting_from"] == "ENT ( 1 )"
+        assert d["converting_to"] == "B"
+        assert d["converting_after"] == "P"
+        assert "converting_before" not in d
+
+    def test_converting_delimiter_counts_as_a_reference(self) -> None:
+        from cobolparser import UnusedVariableAnalyzer
+
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. T.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 A PIC X(10).
+       01 P PIC X.
+       PROCEDURE DIVISION.
+       MAIN.
+           INSPECT A CONVERTING 'ab' TO 'AB' BEFORE INITIAL P.
+           STOP RUN.
+"""
+        result = parse_cobol(source)
+        assert result.ast is not None
+        report = UnusedVariableAnalyzer().analyze(result.ast)
+        assert "P" not in {item.name for item in report.unused_items}

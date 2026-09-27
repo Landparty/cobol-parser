@@ -321,6 +321,8 @@ class InspectStatement(CobolStatement):
         self.replacing_clauses: list[dict[str, Any]] = []
         self.converting_from: str | None = None
         self.converting_to: str | None = None
+        self.converting_before: str | None = None
+        self.converting_after: str | None = None
 
     def set_target(self, target: str) -> None:
         self.target = target
@@ -384,6 +386,10 @@ class InspectStatement(CobolStatement):
         if self.converting_from:
             result["converting_from"] = self.converting_from
             result["converting_to"] = self.converting_to
+            if self.converting_before is not None:
+                result["converting_before"] = self.converting_before
+            if self.converting_after is not None:
+                result["converting_after"] = self.converting_after
         return result
 
 

@@ -42,6 +42,14 @@ from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 
 ## DeadCodeAnalyzer
 
+> 2026-09-27: a referenced section no longer marks *every* paragraph in it
+> live. `_propagate_section_references` walks the section's paragraphs in
+> order and stops after one that `_terminates` (STOP RUN, GOBACK, EXIT
+> PROGRAM, unconditional GO TO); a later paragraph is live only if it is a
+> fall-through source of its own (GO TO/ALTER/ENTRY target). A paragraph
+> after `STOP RUN`, or one jumped over by `GO TO`, in a PERFORMed or
+> fallen-into section is now reported dead.
+
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]
