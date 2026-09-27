@@ -539,7 +539,14 @@ display field and would otherwise never generate a negative.
 **Edited pictures** contribute their *logical* numeric value, not the edited
 display form: a CSV is consumed by tooling that wants the value, and the
 edit mask is a presentation concern of the COBOL program. Likewise `COMP-3`
-carries the decimal value, not packed bytes.
+carries the decimal value, not packed bytes.  The *record image* is the other
+side: there an edited field holds the edited bytes (2026-09-27; it used to
+hold the CSV's logical value left-justified, e.g. `9516.07 ` for
+`PIC $$,$$9.99`, which no COBOL program writes). `editing.py` implements
+IBM's editing rules -- Z/`*` suppression, floating `$`/`+`/`-` strings,
+fixed `+`/`-`/`CR`/`DB`/`$`, `B`/`0`/`/`/`,` insertion, the all-`Z`/all-`*`
+zero case -- and every case in `tests/unit/generators/data/test_editing.py`
+was checked byte for byte against GnuCOBOL 3.
 
 **Line terminator.** `to_csv()` and `write_csv()` share
 `_DEFAULT_LINE_TERMINATOR = "\n"`, deliberately *not* the `csv` module's
@@ -591,7 +598,8 @@ module docstring — that suite is the regression guard):
 
 | Storage | Bytes |
 |---------|-------|
-| DISPLAY alphanumeric / edited | left-justified, space-padded, truncated; charset's space byte |
+| DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte |
+| DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is |
 | DISPLAY numeric (zoned) | one byte per digit; sign as an overpunch, or a real `+`/`-` byte under `SIGN IS SEPARATE` |
 | `COMP-3` / `PACKED-DECIMAL` | two BCD nibbles per byte, sign nibble `C`/`D` signed, `F` unsigned |
 | `COMP` / `COMP-4` / `BINARY` | two's complement, **always big-endian** |

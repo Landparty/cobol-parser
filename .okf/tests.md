@@ -42,6 +42,12 @@ arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
 
+2026-09-27: `tests/unit/generators/data/test_editing.py` (87 tests) pins
+numeric-edited record bytes (36 cases checked against GnuCOBOL 3), the
+de-edit inverse, and encode/decode round trips in ASCII and EBCDIC.
+`test_encoding.py::test_numeric_edited_keeps_its_edit_mask` now asserts the
+exact bytes (`- 12.34`) instead of the unedited `-12.34`. See `generators.md`.
+
 2026-09-27: `tests/unit/test_data_items.py::test_edited_picture_sizes` (9
 cases) pins edited-picture byte sizes with `B`/`0` insertions and with a `V`
 (`Z(3)V99` = 5). See `ast-models.md`.
