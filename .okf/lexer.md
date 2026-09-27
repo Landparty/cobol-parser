@@ -169,6 +169,18 @@ sources) each stripped only the delimiters, so `VALUE "A""B"` generated
 `A""B` and `MOVE '"'` folded to two quote characters. Pinned by
 `tests/regression/test_doubled_quote_literal_values.py`.
 
+**Typed literals (2026-09-27, audit 2.1).** A typed literal's token carries
+its prefixed source text in `raw_value` (`X"4142"`); `value` is the decoded
+content (`4142`). Anything that re-emits one as COBOL must use `raw_value`,
+not `quote_literal(value)`, or the two-byte hex literal becomes the
+four-character text literal `"4142"`. MOVE/DISPLAY already did; the VALUE
+clause (`data_clauses.literal_source()`) now does too. The reading side is
+`_literals.typed_literal_content()`: `X` decodes to its bytes' code points
+(Latin-1, so `X"4142"` is `AB`), `NX` as UTF-16BE, `UX` as UTF-8, `Z` gains
+its NUL, `N`/`G`/`U` are their content; `None` for anything untyped. Level-88
+`values` still store the decoded content without the prefix -- a known
+follow-up (AUDIT.md). Pinned by `tests/regression/test_audit_2026_09_27.py`.
+
 # Errors
 
 `LexerError` — extends `ParseError` (`cobolparser/_errors.py`). Raised for

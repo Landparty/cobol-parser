@@ -1,3 +1,0 @@
-DEBUG: Found 1 errors
-DEBUG: Error 0: Parser error: type object 'TokenType' has no attribute 'LPAREN'
-DEBUG: result.ast is NONE

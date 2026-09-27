@@ -22,7 +22,7 @@ from typing import Any
 
 from cobolparser._literals import quote_literal
 from cobolparser.core.interfaces import ITokenStream
-from cobolparser.lexer import TokenType
+from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import CobolDataItem, OccursClause, PictureClause
 
@@ -245,6 +245,17 @@ else:
             "with `python setup.py build_ext --inplace`, or reinstall "
             "cobolparser, to restore it."
         )
+
+
+def literal_source(token: Token) -> str:
+    """A STRING_LITERAL token rendered back as COBOL source text.
+
+    A typed literal (``X"4142"``, ``Z"..."``, ``N"..."``) keeps its prefixed
+    source text from ``raw_value``, as the MOVE/DISPLAY parsers already do:
+    re-quoting only the decoded content silently turned the two-byte hex
+    literal ``X"4142"`` into the four-character text literal ``"4142"``.
+    """
+    return token.raw_value if token.raw_value else quote_literal(token.value)
 
 
 class DataItemClauseParser:
@@ -1412,7 +1423,7 @@ class DataItemClauseParser:
             literal = token_stream.peek()
             if literal and literal.type == TokenType.STRING_LITERAL:
                 token_stream.consume()
-                return f"ALL {quote_literal(literal.value)}"
+                return f"ALL {literal_source(literal)}"
             if literal and literal.type == TokenType.FIGURATIVE_CONSTANT:
                 token_stream.consume()
                 return f"ALL {literal.value}"
@@ -1438,7 +1449,7 @@ class DataItemClauseParser:
             TokenType.LEVEL_NUMBER,
         ]:
             value = (
-                quote_literal(token.value)
+                literal_source(token)
                 if token.type == TokenType.STRING_LITERAL
                 else f"{sign}{token.value}"
             )

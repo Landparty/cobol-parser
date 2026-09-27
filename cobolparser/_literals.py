@@ -43,3 +43,39 @@ def unquote_literal(text: str) -> str:
         quote = stripped[0]
         return stripped[1:-1].replace(quote * 2, quote)
     return stripped
+
+
+_TYPED_PREFIXES = ("NX", "UX", "X", "N", "G", "Z", "U")
+
+
+def typed_literal_content(text: str) -> str | None:
+    """The characters a typed literal (``X"4142"``, ``Z"AB"``, ...) stands for.
+
+    Returns ``None`` when *text* is not a typed literal, so callers fall back
+    to :func:`unquote_literal`. Hex forms decode to the code points of their
+    bytes -- ``X"4142"`` is ``AB``, as an ASCII or Latin-1 host reads those
+    bytes -- ``NX`` as UTF-16BE and ``UX`` as UTF-8. ``Z"..."`` gains its
+    terminating NUL. ``N``/``G``/``U`` literals are their content. Hex that
+    does not decode (odd length, a non-hex digit) comes back as the digits
+    themselves; the lexer has already warned about it.
+    """
+    stripped = text.strip()
+    upper = stripped.upper()
+    for prefix in _TYPED_PREFIXES:
+        if upper.startswith(prefix) and stripped[len(prefix) : len(prefix) + 1] in (
+            '"',
+            "'",
+        ):
+            content = unquote_literal(stripped[len(prefix) :])
+            if prefix in ("X", "NX", "UX"):
+                try:
+                    data = bytes.fromhex(content)
+                    return data.decode(
+                        {"X": "latin-1", "NX": "utf-16-be", "UX": "utf-8"}[prefix]
+                    )
+                except (ValueError, UnicodeDecodeError):
+                    return content
+            if prefix == "Z":
+                return content + "\x00"
+            return content
+    return None
