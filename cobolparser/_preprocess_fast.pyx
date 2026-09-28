@@ -15,6 +15,7 @@ cimport cython
 from collections.abc import Iterable
 
 from cobolparser._lines import split_source_lines
+from cobolparser._source_directive import source_format_directive
 
 # Cannot import from preprocess/__init__.py (circular import); values must mirror it.
 _SEQ_END    = 6   # DEFAULT_SEQ_COL_END
@@ -161,6 +162,12 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     # asked yet", 0/1 the cached answer.
     cdef int stamps_identification_area = -1
     cdef bint is_short_id_stamp
+    # Mirrors the pure-Python `free_mode`: after ``>>SOURCE FORMAT IS FREE``
+    # every line is passed through whole as its own logical line until a
+    # ``>>SOURCE FORMAT IS FIXED``; the directive record becomes a blank line.
+    cdef bint free_mode = False
+    cdef str free_text
+    cdef object directive
 
     if isinstance(lines, str):
         lines = split_source_lines(lines)
@@ -170,6 +177,37 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     parts  = []
 
     for line_no, raw in enumerate(lines, start=1):
+        if free_mode or ">>" in raw:
+            if free_mode:
+                free_text = raw.rstrip("\r\n")
+                directive = (
+                    source_format_directive(free_text) if ">>" in free_text else None
+                )
+            else:
+                directive = source_format_directive(
+                    raw.rstrip("\n").expandtabs(8)[_IND_IDX : _TEXT_END]
+                )
+            if free_mode or directive is not None:
+                # Flush the logical line in progress (mirrors flush_parts).
+                if has_line:
+                    result.append("".join(parts))
+                if deferred:
+                    result.extend([""] * deferred)
+                    deferred = 0
+                parts         = []
+                has_line      = False
+                literal_suspended = False
+                quote_open    = False
+                quote_ch      = None
+                pending_literal = False
+                closing_quote_at_72 = None
+                if directive is not None:
+                    free_mode = directive == "FREE"
+                    result.append("")
+                else:
+                    result.append(free_text.rstrip())
+                continue
+
         line = raw.rstrip("\n").expandtabs(8)
 
         if len(line) < _TEXT_START:

@@ -1239,6 +1239,17 @@ replaced at most once. Literal protection is unchanged: only a clause
 whose search text contains a quote is in the alternation used inside
 string literals.
 
+**COPY ... REPLACING: a separator comma / semicolon is a blank
+(2026-09-28).** IBM: when comparing pseudo-text, "a separator comma or
+separator semicolon ... is considered to be a space". `_build_clause_pattern`
+now joins words with `_SEPARATOR_GAP` (a blank, or `,`/`;` followed by a
+blank) instead of `[ \t]`, so `==X(3) VALUE==` finds `X(3), VALUE`; and
+`_pseudo_text_words` drops a `,`/`;` that ends a non-literal search word
+before a blank or the end, so `==A, B==` finds `A B`. A comma not followed
+by a blank (`A,B`, `1,5`) is not a separator and still compares as text.
+Matching still stays within one source line. Pinned by
+`tests/regression/test_fixes_2026_09_28_preprocessing.py`.
+
 **REPLACE: a parenthesis is a text word (`_tokenize_text_words`).** Only
 space/comma/semicolon/newline/quotes/period ended a word, so `WS-A(1)`
 was the single word `WS-A(1)` and `REPLACE ==WS-A== BY ==WS-B==` never
@@ -1277,6 +1288,27 @@ there with no literal left open can only be a closing one); the
 continuation branch re-opens the literal and keeps one of the pair so the
 joined text reads `'AB''CD'`. Mirrored in `_preprocess_fast.pyx`; the
 `.c` was regenerated with the same Cython 3.3.0.
+
+**`>>SOURCE FORMAT IS FREE` / `FIXED` inside a fixed-format file
+(2026-09-28).** Was not honoured: every line after the directive still had
+columns 1-7 (and 73+) cut off, and conditional compilation blanked the
+directive as "unknown". Now `normalize_fixed_format` (and the Cython
+mirror, which must agree) recognises `>>SOURCE [FORMAT] [IS] {FREE|FIXED}`
+(`cobolparser/_source_directive.py`, dependency-free so the `.pyx` can
+import it) from column 7 to 72 of a fixed record, or anywhere on a free
+line. The directive record becomes a blank line; each free-format line is
+passed through whole as its own logical line (no continuation merging, no
+column-72 warnings) until `>>SOURCE FIXED`. One output line per physical
+line, so line numbers are unchanged. The copybook expander carries it too:
+`free_format_flags()` makes `remove_comment_lines` / `strip_sequence_area`
+keep free lines whole (behind a blank indicator) and the final re-pad skip
+them (no pad, no width wrap), so the source map stays 1:1; the expander's
+conditional-compilation passes use
+`preprocess_conditional_compilation(..., keep_source_format_directives=True)`
+so the directive survives to the final parse. Not handled: a free-format
+literal continuation, and a `>>SOURCE FIXED` in a file the detector calls
+free (that file never goes through the fixed normalizer). Pinned by
+`tests/regression/test_fixes_2026_09_28_preprocessing.py`.
 
 **Regenerating the Cython mirror.** `python setup.py build_ext --inplace`
 re-cythonizes the `.pyx` when Cython is installed and rewrites the

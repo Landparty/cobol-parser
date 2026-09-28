@@ -89,6 +89,13 @@ ROWSET forms included) and `fetch_count` the `FOR n ROWS` size. Before
 matrix lost the cursor's read -- and the direction was a substring test
 (`INTO :WS-LAST-NAME` made a FETCH LAST). Pinned by
 `tests/unit/test_exec_sql_fetch_orientation.py`.
+## `ExecSQLStatement.cursor_name` on positioned UPDATE/DELETE
+
+`UPDATE ... WHERE CURRENT OF C1` / `DELETE FROM T WHERE CURRENT OF C1` set
+`cursor_name` to the cursor (`_SQL_CURRENT_OF_RE`); a searched UPDATE/DELETE
+leaves it `None`. Before 2026-09-28 it was `None` for both. `tables[0]` is
+still the target table, so `io_logger`'s `target` is unchanged. Pinned by
+`test_sql_statements.py::TestCursorOperations::test_positioned_update_delete_names_the_cursor`.
 
 ## `ExecSQLStatement.tables` (`models/sql_statements.py`)
 

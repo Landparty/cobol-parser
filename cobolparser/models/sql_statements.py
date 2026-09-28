@@ -119,6 +119,11 @@ def _parse_fetch_clause(sql: str) -> tuple[str | None, str | None, int | None]:
 
 _SQL_OPEN_RE = re.compile(r"OPEN\s+([A-Za-z_][A-Za-z0-9_-]*)", re.IGNORECASE)
 _SQL_CLOSE_RE = re.compile(r"CLOSE\s+([A-Za-z_][A-Za-z0-9_-]*)", re.IGNORECASE)
+# Positioned UPDATE/DELETE: ``... WHERE CURRENT OF C1`` names the cursor whose
+# current row is changed.
+_SQL_CURRENT_OF_RE = re.compile(
+    r"\bWHERE\s+CURRENT\s+OF\s+([A-Za-z_][A-Za-z0-9_-]*)", re.IGNORECASE
+)
 _SQL_PREPARE_RE = re.compile(
     r"PREPARE\s+([A-Za-z_][A-Za-z0-9_-]*)\s+FROM", re.IGNORECASE
 )
@@ -977,6 +982,11 @@ class ExecSQLStatement(CobolStatement):
 
         elif self._sql_type == SQLStatementType.CLOSE_CURSOR:
             match = _SQL_CLOSE_RE.search(sql)
+            if match:
+                self.cursor_name = match.group(1)
+
+        elif self._sql_type in (SQLStatementType.UPDATE, SQLStatementType.DELETE):
+            match = _SQL_CURRENT_OF_RE.search(sql)
             if match:
                 self.cursor_name = match.group(1)
 

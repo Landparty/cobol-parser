@@ -791,6 +791,13 @@ compiled against them. Implementation:
   the bad ones.
 * **`--charset`/`--endian`/`--record-format`/`--record-separator`** mean
   exactly what they mean on `gen-data`, and are the same `EncodingOptions`.
+  `--record-format auto` resolves the same way on both sides for the same
+  source: variable when the layout has a DEPENDING ON table **or** the
+  `--copybook` is a whole program whose FD declares `RECORD VARYING`
+  (`RecordDecoder.varying`, read off `fd_clauses` in `from_record()`).
+  Before 2026-09-28 decode's auto only looked at the layout, so the
+  RDW-framed file `gen-data v.cbl --record-format auto` wrote was read back
+  fixed-length and garbled, exit 0.
   `--record-length` is decode-only: an LRECL to cut fixed-length records at
   when the file's records are longer than the copybook describes (trailing
   slack, or a copybook covering only a prefix).

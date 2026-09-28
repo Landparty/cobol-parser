@@ -173,6 +173,38 @@ class TestFdRecordVarying:
             AUTO.resolved_format(dataset.fields, varying=True) is RecordFormat.VARIABLE
         )
 
+    def test_decode_auto_reads_what_gen_data_auto_wrote(self):
+        # Regression (2026-09-28): decode's auto looked only at the layout,
+        # which has no DEPENDING ON table, so it framed the RDW-framed file
+        # gen-data's auto wrote as fixed-length records and garbled it.
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        dataset = empvl()
+        raw = dataset.to_records(AUTO)
+        decoder = RecordDecoder.from_copybook_source(
+            EMPVL_PROGRAM, filename="EMPVL.cbl", opts=AUTO
+        )
+        assert decoder.varying == VaryingLength(47, 80, "EMPREC-LEN")
+        result = decoder.decode_bytes(raw)
+        assert result.trailing == b""
+        assert len(result.records) == len(dataset.declared_lengths)
+        assert [len(r.raw) for r in result.records] == dataset.declared_lengths
+        assert all(r.rdw is not None for r in result.records)
+        assert [r.values()["EMP-ID"] for r in result.records] == [
+            row[0] for row in dataset.rows
+        ]
+
+    def test_decode_auto_honours_an_explicit_record_varying(self):
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        records = parse_copybook_records(EMPVL_PROGRAM, filename="EMPVL.cbl")
+        record = next(r for r in records if r.name == "EMP-RECORD80")
+        # An explicit range overrides the FD's, as it does for gen-data.
+        decoder = RecordDecoder.from_record(
+            record, opts=AUTO, options=DataGeneratorOptions(record_varying=(10, 20))
+        )
+        assert decoder.varying == VaryingLength(10, 20, None)
+
     def test_fixed_writes_full_length_records_and_says_so(self):
         dataset = empvl()
         raw = dataset.to_records(FIXED)

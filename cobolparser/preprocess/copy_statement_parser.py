@@ -15,6 +15,7 @@ Properly handles:
 import bisect
 import re
 
+from .._source_directive import free_format_flags
 from ._normalize import ALL_COMMENT_INDICATORS
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
@@ -286,11 +287,18 @@ def strip_sequence_area(source: str) -> str:
     # tab-indented member is cut at the same columns the final parse uses.
     lines = source.expandtabs(8).split("\n")
     result = []
+    # Lines after ``>>SOURCE FORMAT IS FREE`` have no sequence area,
+    # indicator column or column-72 limit: kept whole, behind a blank
+    # indicator so the stripped shape (indicator at index 0) still holds.
+    free = free_format_flags(lines) if ">>" in source else None
 
     # Define column boundaries (0-indexed)
     SEQUENCE_NUMBER_END = 6  # Columns 1-6 (indices 0-5)
 
-    for line in lines:
+    for index, line in enumerate(lines):
+        if free is not None and free[index]:
+            result.append(" " + line if line.strip() else "")
+            continue
         if len(line) < 7:
             # Short line: in strict fixed format every character it has
             # lies within columns 1-6, the sequence area this function
@@ -436,9 +444,14 @@ def remove_comment_lines(source: str) -> str:
     # will judge it (a tab-indented line is never a comment in either).
     lines = source.expandtabs(8).split("\n")
     result = []
+    # A free-format line (after ``>>SOURCE FORMAT IS FREE``) has no
+    # indicator column, so column 7 says nothing about it.
+    free = free_format_flags(lines) if ">>" in source else None
 
-    for line in lines:
-        if is_comment_line(line):
+    for index, line in enumerate(lines):
+        if free is not None and free[index]:
+            result.append(line)
+        elif is_comment_line(line):
             result.append(" " * len(line))
         else:
             result.append(line)
@@ -1001,6 +1014,38 @@ _PSEUDO_TEXT_WORD_RE = re.compile(
 )
 
 
+#: One separator between two text words of the source: a blank, or a
+#: separator comma / semicolon (one followed by a blank).  IBM: "a separator
+#: comma or separator semicolon ... is considered to be a space" when
+#: comparing pseudo-text, so ``==X(3) VALUE==`` finds ``X(3), VALUE``.
+_SEPARATOR_GAP = r"(?:[ \t]|[,;](?=[ \t]))"
+
+#: A separator comma / semicolon at the end of a pseudo-text word.
+_TRAILING_SEPARATOR_RE = re.compile(r"[,;]+$")
+
+
+def _pseudo_text_words(text: str) -> list[str]:
+    """The text words of pseudo-text *text*, separator commas dropped.
+
+    A comma or semicolon ending a (non-literal) word is a separator, not
+    part of the word, so it is dropped rather than compared -- the other
+    half of the rule :data:`_SEPARATOR_GAP` applies to the source side.
+    Only one at the very end of *text* or followed by a blank counts: a
+    comma inside a word (``1,5`` under DECIMAL-POINT IS COMMA) is kept.
+    """
+    words: list[str] = []
+    for match in _PSEUDO_TEXT_WORD_RE.finditer(text):
+        word = match.group(0)
+        if word[0] not in "'\"":
+            after = text[match.end() : match.end() + 1]
+            if after in ("", " ", "\t", "\n", "\r"):
+                word = _TRAILING_SEPARATOR_RE.sub("", word)
+            if not word:
+                continue
+        words.append(word)
+    return words
+
+
 def _build_clause_pattern(clause: ReplacingClause) -> str | None:
     """
     Build the regex *source* for a single REPLACING clause.
@@ -1009,8 +1054,10 @@ def _build_clause_pattern(clause: ReplacingClause) -> str | None:
     the blanks between two words of the search text match any run of
     blanks in the source (``==PIC X(10)==`` finds ``PIC  X(10)``), and a
     parenthesis is a text word of its own, so the blank beside it is
-    optional (``X (10)`` too). Leading/trailing blanks of the pseudo-text
-    are not part of it. Comparison stays within one source line.
+    optional (``X (10)`` too). A separator comma or semicolon counts as a
+    blank on both sides (``==X(3) VALUE==`` finds ``X(3), VALUE``).
+    Leading/trailing blanks of the pseudo-text are not part of it.
+    Comparison stays within one source line.
 
     Uses identifier-safe boundaries to avoid partial word collisions: regex
     ``\\b`` is unsuitable because COBOL identifiers can contain hyphens, so a
@@ -1025,7 +1072,7 @@ def _build_clause_pattern(clause: ReplacingClause) -> str | None:
     find_text = clause.find_text.strip()
     if not find_text:
         return None
-    words = _PSEUDO_TEXT_WORD_RE.findall(find_text)
+    words = _pseudo_text_words(find_text)
     if not words:
         return None
 
@@ -1033,7 +1080,7 @@ def _build_clause_pattern(clause: ReplacingClause) -> str | None:
     for index, word in enumerate(words):
         if index:
             beside_paren = word in ("(", ")") or words[index - 1] in ("(", ")")
-            body += r"[ \t]*" if beside_paren else r"[ \t]+"
+            body += _SEPARATOR_GAP + ("*" if beside_paren else "+")
         if word[0] in ("'", '"'):
             # Literal content is case-sensitive even though the pattern as a
             # whole is compiled IGNORECASE (``=='abc'==`` must not rewrite

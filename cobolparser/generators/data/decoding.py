@@ -76,7 +76,7 @@ from .encoding import (
     RecordFormat,
 )
 from .errors import CopybookLayoutError
-from .layout import FieldCategory, FieldSpec
+from .layout import FieldCategory, FieldSpec, VaryingLength
 from .options import DataGeneratorOptions
 from .storage import (
     BINARY_NATIVE_USAGES,
@@ -806,6 +806,7 @@ class RecordDecoder:
         opts: EncodingOptions | None = None,
         *,
         record_length: int | None = None,
+        varying: VaryingLength | None = None,
     ) -> None:
         """
         Args:
@@ -818,10 +819,17 @@ class RecordDecoder:
                 A file whose records carry trailing slack (or whose
                 copybook covers only a prefix of them) needs this; without
                 it the layout's length is used.
+            varying: The FD's ``RECORD VARYING FROM min TO max`` range, when
+                the source was a whole program (or an explicit
+                :attr:`DataGeneratorOptions.record_varying`).  It lives
+                outside the layout, so ``--record-format auto`` could not see
+                it otherwise; with it, auto reads the RDW-framed file
+                ``gen-data --record-format auto`` writes for the same source.
         """
         self.views = views
         self.options = opts or EncodingOptions()
         self.record_length = record_length
+        self.varying = varying
 
     # -- construction -------------------------------------------------------
 
@@ -881,12 +889,24 @@ class RecordDecoder:
         options: DataGeneratorOptions | None = None,
         record_length: int | None = None,
     ) -> RecordDecoder:
-        """Build a decoder from an already-parsed record item."""
-        return cls(
-            build_record_views(record, options),
-            opts,
-            record_length=record_length,
-        )
+        """Build a decoder from an already-parsed record item.
+
+        The record-length range is found the way
+        :class:`~.copybook.CopybookDataGenerator` finds it -- an explicit
+        :attr:`DataGeneratorOptions.record_varying` first, else the record's
+        own FD ``RECORD VARYING`` clause -- so ``record_format=AUTO`` resolves
+        to the same format on both sides for the same source.
+        """
+        views = build_record_views(record, options)
+        size = views.base.length
+        declared = options.record_varying if options is not None else None
+        if declared is not None:
+            varying = VaryingLength.build(declared[0], declared[1], None, size)
+        else:
+            varying = VaryingLength.from_fd_clauses(
+                record.get_metadata("fd_clauses"), record_size=size
+            )
+        return cls(views, opts, record_length=record_length, varying=varying)
 
     # -- decoding -----------------------------------------------------------
 
@@ -937,7 +957,8 @@ class RecordDecoder:
         # them all. Resolved once, from the base view, because it is a
         # property of the file rather than of the view being read.
         trim_tables = options.resolved_format(
-            [placed.spec for placed in self.views.base.fields]
+            [placed.spec for placed in self.views.base.fields],
+            varying=self.varying is not None,
         ).is_variable
         position = 0
         index = 0
@@ -1014,7 +1035,10 @@ class RecordDecoder:
         plausible-looking rubbish.
         """
         view = self.views.base
-        fmt = opts.resolved_format([placed.spec for placed in view.fields])
+        fmt = opts.resolved_format(
+            [placed.spec for placed in view.fields],
+            varying=self.varying is not None,
+        )
         separator = opts.record_separator
         remaining = len(data) - position
 

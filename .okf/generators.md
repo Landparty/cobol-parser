@@ -1086,6 +1086,13 @@ bytes each *record* carries.
 * **The `DEPENDING ON` item is filled in when it *is* in the record.** Usually
   it isn't. When a copybook does put it there, leaving the generated value
   would contradict the record's own length.
+* **Decoding agrees.** `RecordDecoder.from_record()` finds the range the same
+  way (explicit `options.record_varying` first, else `fd_clauses`) and keeps
+  it as `RecordDecoder.varying`; both `resolved_format()` calls in
+  `decoding.py` pass `varying=`, so `decode --record-format auto` reads the
+  RDW-framed file `gen-data --record-format auto` wrote (2026-09-28; it used
+  to frame it fixed-length). Pinned by
+  `test_variable_length.py::TestFdRecordVarying::test_decode_auto_reads_what_gen_data_auto_wrote`.
 * **Both mechanisms at once**: the table decides, the FD range is not applied
   on top of it, and a caveat says so. Enforced in *two* places, because a
   caveat that the code contradicts is worse than no caveat: the generator

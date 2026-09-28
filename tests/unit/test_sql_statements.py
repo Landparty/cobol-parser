@@ -173,6 +173,25 @@ class TestCursorOperations:
         assert "DECLARE emp_cursor CURSOR" in output.cursor
         assert "SELECT" in output.query
 
+    @pytest.mark.parametrize(
+        "sql, table",
+        [
+            ("UPDATE EMP SET SAL = :WS-SAL WHERE CURRENT OF C1", "EMP"),
+            ("DELETE FROM EMP WHERE CURRENT OF EMP-CUR", "EMP"),
+        ],
+    )
+    def test_positioned_update_delete_names_the_cursor(self, sql, table):
+        # Regression (2026-09-28): WHERE CURRENT OF left cursor_name None.
+        stmt = parse_exec_sql(sql, SourceLocation(1, 1))
+        assert stmt.cursor_name == sql.rsplit(" ", 1)[1]
+        assert stmt.tables[0] == table
+
+    def test_searched_update_has_no_cursor(self):
+        stmt = parse_exec_sql(
+            "UPDATE EMP SET SAL = 1 WHERE ID = 5", SourceLocation(1, 1)
+        )
+        assert stmt.cursor_name is None
+
     def test_declare_cursor_with_host_variables(self):
         """Test DECLARE CURSOR with host variables."""
         location = SourceLocation(1, 1)
