@@ -516,3 +516,24 @@ class TestSynchronizedSlack:
         flags = {i["qualified_name"]: i["offset_ambiguous"] for i in report["items"]}
         assert flags["REC.T.T1"] and flags["REC.T.T2"]
         assert not flags["REC.T"]
+
+
+class TestGroupUsageInheritance:
+    """A group's USAGE / SIGN clause sizes its elementary children."""
+
+    def test_offsets_follow_the_inherited_storage(self):
+        record = _parse_record(
+            "       01  R.\n"
+            "           05  G1 COMP-3.\n"
+            "               10  A PIC S9(5).\n"
+            "               10  B PIC S9(3).\n"
+            "           05  G2 SIGN LEADING SEPARATE.\n"
+            "               10  C PIC S9(3).\n"
+            "           05  Z PIC X.\n"
+        )
+        by_name = {item.name: item for item in compute_record_layout(record)}
+        assert by_name["R"].byte_length == 10
+        assert (by_name["A"].byte_offset, by_name["A"].byte_length) == (0, 3)
+        assert (by_name["B"].byte_offset, by_name["B"].byte_length) == (3, 2)
+        assert (by_name["C"].byte_offset, by_name["C"].byte_length) == (5, 4)
+        assert (by_name["Z"].byte_offset, by_name["Z"].byte_length) == (9, 1)

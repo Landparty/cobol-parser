@@ -19,6 +19,7 @@ delegated to focused collaborators:
   names, level-66 RENAMES, and data-division EXEC SQL blocks
 """
 
+import re
 from typing import Any
 
 from cobolparser.core.interfaces import ITokenStream
@@ -37,6 +38,84 @@ from .data_clauses import _DIVISION_TOKEN_TYPES, DataItemClauseParser
 from .data_file_description import FileDescriptionClauseParser
 from .data_report_description import ReportDescriptionClauseParser
 from .data_special_entries import SpecialEntryParser
+
+# Usages that only make sense on a numeric item.  A group USAGE of one of
+# these is not pushed onto an alphanumeric child (which the compiler would
+# reject anyway): leaving it DISPLAY keeps its width the PICTURE's width
+# instead of inventing a packed/binary size for a PIC X.
+_NUMERIC_ONLY_USAGES: frozenset[str] = frozenset(
+    {
+        "BINARY",
+        "COMP",
+        "COMP-3",
+        "COMP-4",
+        "COMP-5",
+        "COMPUTATIONAL",
+        "COMPUTATIONAL-3",
+        "COMPUTATIONAL-4",
+        "COMPUTATIONAL-5",
+        "PACKED-DECIMAL",
+    }
+)
+_REPEAT_COUNT_RE = re.compile(r"\(\d+\)")
+_NUMERIC_PIC_CHARS = frozenset("S9VP")
+
+
+def _is_numeric_picture(item: CobolDataItem) -> bool:
+    """True when *item* has a plain (unedited) numeric PICTURE."""
+    picture = item.picture_clause
+    if picture is None or picture.is_edited:
+        return False
+    body = _REPEAT_COUNT_RE.sub("", picture.pattern.upper())
+    return bool(body) and set(body) <= _NUMERIC_PIC_CHARS
+
+
+def propagate_group_usage_and_sign(
+    items: list[Any],
+    usage: str | None = None,
+    sign_clause: str | None = None,
+) -> None:
+    """Push a group's USAGE and SIGN clauses down to its subordinates.
+
+    IBM Enterprise COBOL: a USAGE (or SIGN) clause written on a group item
+    applies to every subordinate elementary item, and an entry that states
+    its own clause overrides it for itself and everything below it.  Without
+    this, ``05 G COMP-3. 10 A PIC S9(5).`` sized ``A`` as five DISPLAY
+    bytes instead of three packed ones, and every offset after it drifted.
+
+    Decided after clause parsing (``usage_explicit`` is set by
+    ``CobolDataItem.set_usage``, which the pure-Python and Cython clause
+    loops both call), so the two paths cannot disagree.  Only entries with
+    no USAGE clause of their own inherit; a subordinate group that inherits
+    is re-labelled too so the AST says what the storage is, but its
+    ``usage_explicit`` stays False.  SIGN is only stamped on signed numeric
+    elementary items, the only ones it can describe.
+    """
+    for item in items:
+        if not isinstance(item, CobolDataItem):
+            continue
+        item_usage = usage
+        if item.usage_explicit:
+            item_usage = item.usage
+        elif usage is not None and (
+            usage.upper() not in _NUMERIC_ONLY_USAGES
+            or item.picture_clause is None
+            or _is_numeric_picture(item)
+        ):
+            item.usage = usage
+        children = [c for c in item.children if isinstance(c, CobolDataItem)]
+        if children:
+            propagate_group_usage_and_sign(
+                children, item_usage, item.sign_clause or sign_clause
+            )
+        elif (
+            item.sign_clause is None
+            and sign_clause is not None
+            and item.picture_clause is not None
+            and item.picture_clause.is_signed
+        ):
+            item.sign_clause = sign_clause
+
 
 # Hoisted out of _parse_section -- these were being rebuilt as set
 # literals on every call.
@@ -533,6 +612,7 @@ class DataDivisionParser(BaseDivisionParser):
             # Add current item to stack
             stack.append((current_level, item))
 
+        propagate_group_usage_and_sign(top_level_items)
         return top_level_items
 
     # ------------------------------------------------------------------
