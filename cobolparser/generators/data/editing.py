@@ -236,5 +236,15 @@ def deedit_numeric(picture: str | None, text: str) -> tuple[int, bool] | None:
             negative = negative or chunk == "-"
         elif sym in ("CR", "DB"):
             negative = negative or chunk.upper() == sym
+        elif (
+            sym in _SIMPLE_INSERTION
+            and layout.float_first < i < layout.float_last
+            and layout.floating in ("+", "-")
+        ):
+            # A floating sign lands immediately left of the first digit
+            # kept, which may be an insertion position inside the floating
+            # string: ``PIC +++,+++`` edits -514 as ``   -514``, the ``-``
+            # sitting where the comma would be.
+            negative = negative or chunk == "-"
     magnitude = int("".join(digits)) if digits else 0
     return magnitude, negative and magnitude != 0
