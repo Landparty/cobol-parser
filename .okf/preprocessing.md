@@ -648,6 +648,20 @@ defined_symbols=...)`). A `>>DEFINE` *inside* a member still does not
 reach the parent's text after the COPY. Pinned by
 `tests/regression/test_copybook_resolution_2026_09_28.py::TestDefinedSymbolsReachCopybooks`.
 
+**COPY in an excluded `>>IF` block is not resolved (2026-09-28):**
+`parse_cobol_with_expansion(process_conditionals=...)` now defaults to
+**True**, and `parse_files_with_copybooks` and the CLI's
+`--copybook-path` parse path pass it. Expansion used to run before any
+directive was evaluated (the parser's own pass came after), so `COPY
+DFHAID` under `>>IF CICS DEFINED` was resolved even with CICS undefined,
+and a member that exists only for the other branch failed the whole parse
+(CLI exit 1; batch/scan silently fell back to the unexpanded parse).
+The parser runs the same directive pass anyway, so only the *order*
+changes. `expand_copybooks` itself keeps `process_conditionals=False` by
+default (and `expand` processes directives only with `--define`), since
+its output is the text as written. Pinned by
+`tests/regression/test_copybook_resolution_2026_09_28.py::TestCopyInExcludedConditionalBlock`.
+
 A `*>` floating comment on a `>>` directive line (outside a literal) is
 stripped before the directive is read (`_strip_directive_comment`, 2026-09-27):
 `>>DEFINE DEBUG AS 1 *> on` used to define DEBUG as `1 *> ON`, silently

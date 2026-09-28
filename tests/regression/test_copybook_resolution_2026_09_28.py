@@ -5,10 +5,15 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
+
 from cobolparser import expand_copybooks
+from cobolparser.batch import parse_files_with_copybooks
 from cobolparser.cli.parse import main
+from cobolparser.preprocess import CopybookNotFoundError
 from cobolparser.preprocess.copybook_expander import (
     detect_encoding,
+    parse_cobol_with_expansion,
     read_file_with_encoding,
 )
 from cobolparser.preprocess.models import CopybookSearchPath
@@ -242,3 +247,62 @@ class TestDefinedSymbolsReachCopybooks:
             "--compact",
         )
         assert _records(json.loads(out)["expanded_source"]) == ["DBG-REC"]
+
+
+_GUARDED_COPY = (
+    _HEADER
+    + "       >>IF CICS DEFINED\n"
+    + "       COPY DFHAID.\n"
+    + "       >>END-IF\n"
+    + "       COPY MEM.\n"
+    + "       PROCEDURE DIVISION.\n"
+    + "           STOP RUN.\n"
+)
+
+
+class TestCopyInExcludedConditionalBlock:
+    """A COPY inside an excluded ``>>IF`` block was resolved anyway: the
+    expander ran before the parser's directive pass, so a member that exists
+    only for the other branch (``COPY DFHAID`` under ``>>IF CICS DEFINED``)
+    failed the whole parse with CopybookNotFoundError."""
+
+    def test_parse_cobol_with_expansion_skips_excluded_copy(self, tmp_path):
+        (tmp_path / "MEM.cpy").write_text(_DBG_MEMBER)
+        result = parse_cobol_with_expansion(
+            _GUARDED_COPY, "P.cbl", copybook_paths=[str(tmp_path)]
+        )
+        assert result.ast is not None
+        assert not result.errors
+        assert "NODBG-REC" in result.ast.to_json()
+
+    def test_batch_expands_instead_of_falling_back(self, tmp_path):
+        (tmp_path / "MEM.cpy").write_text(_DBG_MEMBER)
+        prog = tmp_path / "P.cbl"
+        prog.write_text(_GUARDED_COPY)
+        [res] = parse_files_with_copybooks([prog], copybook_paths=[str(tmp_path)])
+        assert res.result is not None
+        # The member was really expanded (the old fallback parsed the raw,
+        # unexpanded source after DFHAID failed to resolve).
+        assert "NODBG-REC" in res.result.ast.to_json()
+
+    def test_cli_parse_with_copybook_path(self, tmp_path, capsys):
+        (tmp_path / "MEM.cpy").write_text(_DBG_MEMBER)
+        prog = tmp_path / "P.cbl"
+        prog.write_text(_GUARDED_COPY)
+        argv = ["parse", str(prog), "--copybook-path", str(tmp_path), "--compact"]
+        with patch("sys.argv", ["cobol-parser", "--no-config", *argv]):
+            try:
+                main()
+            except SystemExit as exc:
+                assert not exc.code
+        assert '"NODBG-REC"' in capsys.readouterr().out
+
+    def test_defined_symbol_still_selects_the_copy(self, tmp_path):
+        (tmp_path / "MEM.cpy").write_text(_DBG_MEMBER)
+        with pytest.raises(CopybookNotFoundError, match="DFHAID"):
+            parse_cobol_with_expansion(
+                _GUARDED_COPY,
+                "P.cbl",
+                copybook_paths=[str(tmp_path)],
+                defined_symbols={"CICS": "TRUE"},
+            )

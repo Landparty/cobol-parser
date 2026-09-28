@@ -1694,7 +1694,7 @@ def parse_cobol_with_expansion(
     filename: str,
     copybook_paths: list[str],
     max_nesting_depth: int = 100,
-    process_conditionals: bool = False,
+    process_conditionals: bool = True,
     defined_symbols: dict[str, str] | None = None,
     **parser_kwargs: Any,
 ) -> Any:
@@ -1710,7 +1710,15 @@ def parse_cobol_with_expansion(
         copybook_paths: List of directory paths to search for copybooks
         max_nesting_depth: Maximum allowed nesting depth (default: 100)
         process_conditionals: Whether to process >>DEFINE/>>IF/>>EVALUATE
-            conditional compilation directives before parsing (default: False)
+            conditional compilation directives during expansion (default:
+            True). The parser runs the same directive pass over whatever
+            text it is given anyway, so this changes *when* it happens,
+            not whether: during expansion, a COPY inside an excluded
+            ``>>IF`` block is never resolved (it used to be expanded first,
+            and a member that only exists for the other branch -- a CICS
+            ``COPY DFHAID`` under ``>>IF CICS DEFINED`` -- failed the whole
+            parse), and a ``>>DEFINE`` reaches the copybooks below it.
+            False keeps the old order.
         defined_symbols: Pre-defined symbols for conditional compilation
         **parser_kwargs: Additional arguments passed to parse_cobol()
 

@@ -438,7 +438,7 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
                     source,
                     filename=args.file,
                     copybook_paths=copybook_paths,
-                    process_conditionals=bool(defines),
+                    process_conditionals=True,
                     defined_symbols=defines,
                     **parse_kwargs,
                 )

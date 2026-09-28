@@ -388,6 +388,11 @@ def parse_files_with_copybooks(
                 max_nesting_depth=max_nesting_depth,
                 validate_content=False,  # Skip validation for speed in batch mode
                 path_resolver=path_resolver,
+                # Directives decide which COPY statements exist: one inside an
+                # excluded >>IF must not be resolved (parse_cobol_with_expansion
+                # does the same). The parser's own directive pass would
+                # otherwise run only after the fact.
+                process_conditionals=True,
             )
             expanded_source = expansion.expanded_source
         except Exception as exc:
