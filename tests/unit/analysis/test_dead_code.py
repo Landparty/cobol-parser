@@ -1807,3 +1807,69 @@ class TestSectionParagraphsAfterTerminator:
         result = parse_cobol(source, filename="livesec.cbl")
         assert result.ast is not None
         assert not DeadCodeAnalyzer().analyze(result.ast).has_dead_code
+
+
+class TestContainedProgramScope:
+    """Procedure names are local to a program unit: a nested program's
+    PERFORM / ENTRY names its own paragraph, never its container's."""
+
+    SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTER.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY 'X'
+           STOP RUN.
+       HELPER.
+           DISPLAY 'DEAD IN OUTER'.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INNER.
+       PROCEDURE DIVISION.
+       IN-MAIN.
+           PERFORM HELPER
+           GOBACK.
+       HELPER.
+           DISPLAY 'LIVE IN INNER'.
+       END PROGRAM INNER.
+       END PROGRAM OUTER.
+"""
+
+    def test_inner_perform_does_not_revive_outer_paragraph(self) -> None:
+        result = parse_cobol(self.SOURCE, filename="nested.cbl")
+        assert result.ast is not None
+        report = DeadCodeAnalyzer().analyze(result.ast)
+        assert [item.name for item in report.dead_items] == ["HELPER"]
+
+    def test_inner_program_itself_still_sees_its_own_perform(self) -> None:
+        result = parse_cobol(self.SOURCE, filename="nested.cbl")
+        assert result.ast is not None
+        inner = next(
+            unit for unit in result.ast.program_units() if unit.program_name == "INNER"
+        )
+        assert not DeadCodeAnalyzer().analyze(inner).has_dead_code
+
+    def test_inner_entry_is_not_an_outer_entry_point(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTER.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           STOP RUN.
+       ALT-PARA.
+           DISPLAY 'DEAD IN OUTER'.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INNER.
+       PROCEDURE DIVISION.
+       ALT-PARA.
+           ENTRY 'ALTIN'
+           GOBACK.
+       END PROGRAM INNER.
+       END PROGRAM OUTER.
+"""
+        result = parse_cobol(source, filename="nested_entry.cbl")
+        assert result.ast is not None
+        dead = [i.name for i in DeadCodeAnalyzer().analyze(result.ast).dead_items]
+        assert dead == ["ALT-PARA"]
+        flow = ProgramFlowAnalyzer().analyze(result.ast)
+        assert "ALT-PARA" not in flow.entry_points
+        assert "ALT-PARA" in flow.unreachable_nodes

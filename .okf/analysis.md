@@ -50,6 +50,14 @@ from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 > after `STOP RUN`, or one jumped over by `GO TO`, in a PERFORMed or
 > fallen-into section is now reported dead.
 
+> 2026-09-28: references are collected from the unit's **own** statements
+> only. `get_all_statements()` also returns every contained program's, and
+> procedure names are local to a program unit, so a nested program's
+> `PERFORM HELPER` kept the container's same-named, never-referenced
+> `HELPER` alive. `ProcedureScanner.collect_entry_points` had the same leak
+> (a nested `ENTRY` made the container's same-named paragraph an entry
+> point). Pinned by `TestContainedProgramScope` in `test_dead_code.py`.
+
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]
