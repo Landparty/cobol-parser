@@ -1358,7 +1358,9 @@ def _add_record_file_args(p: argparse.ArgumentParser) -> None:
             "variable reads the 4-byte RDW in front of each record, as "
             "RECFM=V/VB writes it; variable-bare has no RDW and is framed by "
             "the layout's own OCCURS DEPENDING ON counters; auto picks "
-            "variable when the layout has a DEPENDING ON table"
+            "variable when the layout has a DEPENDING ON table or --copybook "
+            "is a whole program whose FD declares RECORD VARYING -- the same "
+            "choice gen-data's auto makes for the same source"
         ),
     )
     p.add_argument(
