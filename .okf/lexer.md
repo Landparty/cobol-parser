@@ -474,3 +474,24 @@ the latter also breaks on form feed / NEL / U+2028 etc., which shifted
 every later token's line number by one. See `preprocessing.md`
 ("Audit 2026-09-17").
 
+
+# `&` literal concatenation merged post-tokenize (2026-09-28)
+
+`&` is still never a token (both lexers skip it as a separator), but
+`tokenize()` -- pure-Python and `_lexer_fast.pyx` alike -- now ends with
+`CobolLexer._post_tokenize()`, which runs `_merge_concatenated_literals()`
+then `_flag_stray_sql_chars()` and rewrites `self.tokens` in place (the
+Cython path returns the same list). Two consecutive STRING_LITERAL tokens
+(NEWLINEs between them allowed) are joined into one when the source text
+between them is whitespace + exactly one `&` + whitespace
+(`_ampersand_joins` reads `self.lines` back from the second literal's
+location; a fixed-format line is read in columns 8-72 only). IBM:
+`"AB" & "CD"` is the literal `"ABCD"` anywhere a literal may appear;
+before this a VALUE clause kept only `"AB"` (and warned about the rest) and
+a MOVE source read `"AB" "CD"`. Only literals of one kind are joined
+(plain, or the same `X` / `N` / `NX` / `G` / `U` prefix; `Z` and `B`
+literals never); a typed result's `raw_value` is rebuilt (`X"C1C2"`). The
+merged token keeps the first literal's location; NEWLINEs between the
+parts follow it. Fast path: no `&` in any line -> no work. The
+`_lexer_fast.c` was regenerated with Cython 3.3.0. Pinned by
+`tests/regression/test_literal_concatenation.py`.

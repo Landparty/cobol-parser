@@ -1845,8 +1845,118 @@ class _CobolLexerPure:
         final_location = SourceLocation(len(self.lines) + 1, 1, 1)
         self.tokens.append(Token(TokenType.EOF, "", final_location))
 
-        self._flag_stray_sql_chars()
+        self._post_tokenize()
         return self.tokens
+
+    def _post_tokenize(self) -> None:
+        """Token-list post-passes shared by the pure-Python and Cython paths.
+
+        Both ``tokenize()`` implementations call this once, after the EOF
+        token is appended; it rewrites ``self.tokens`` in place (the Cython
+        path returns the same list object).
+        """
+        self._merge_concatenated_literals()
+        self._flag_stray_sql_chars()
+
+    #: Literal prefixes whose literals may be joined with ``&`` (IBM:
+    #: alphanumeric, national and DBCS literals). ``Z`` (null-terminated) and
+    #: ``B`` (boolean) literals may not be concatenated.
+    _CONCATENABLE_PREFIXES = frozenset({"", "X", "N", "NX", "G", "U"})
+
+    @staticmethod
+    def _literal_prefix(token: Token) -> str:
+        raw = token.raw_value
+        if not raw:
+            return ""
+        for index, ch in enumerate(raw):
+            if ch in "\"'":
+                return raw[:index].upper()
+        return raw.upper()
+
+    def _ampersand_joins(self, prev: Token, token: Token) -> bool:
+        """Whether the source between two literal tokens is ``&`` alone.
+
+        ``&`` never becomes a token (the lexer skips it), so the source text
+        is read back: scanning left from *token*'s first character, only
+        whitespace, exactly one ``&``, more whitespace, then the closing
+        quote of *prev* may appear. A fixed-format line is read in columns
+        8-72 only, so a sequence number never reads as program text.
+        """
+        lines = self.lines
+        lo = 0 if self.free_form else _FF_AREA_A
+        prev_line = prev.location.line - 1
+        prev_col = prev.location.column - 1
+        line_idx = token.location.line - 1
+        if line_idx >= len(lines):
+            return False
+        pos = token.location.column - 2
+        seen_amp = False
+        while True:
+            line = lines[line_idx].rstrip("\n")
+            pos = min(pos, len(line) - 1)
+            while pos >= lo:
+                ch = line[pos]
+                if ch.isspace():
+                    pos -= 1
+                elif ch == "&" and not seen_amp:
+                    seen_amp = True
+                    pos -= 1
+                else:
+                    return (
+                        seen_amp
+                        and ch in "\"'"
+                        and (line_idx, pos) > (prev_line, prev_col)
+                    )
+            line_idx -= 1
+            if line_idx < prev_line:
+                return False
+            pos = len(lines[line_idx]) if self.free_form else _FF_LINE_END - 1
+
+    def _merge_concatenated_literals(self) -> None:
+        """Join ``lit-1 & lit-2 [& ...]`` into one STRING_LITERAL token.
+
+        IBM Enterprise COBOL allows alphanumeric / national / DBCS literals
+        of one kind to be concatenated with ``&``: ``"AB" & "CD"`` is the
+        literal ``"ABCD"`` wherever a literal may appear (a VALUE clause, a
+        MOVE source, ...). The lexer drops ``&`` as a separator, so before
+        this every consumer saw two literals -- a data item kept only the
+        first and warned, a MOVE source read ``"AB" "CD"``. Merging here
+        means every consumer sees the one literal the compiler does.
+        Literals of different kinds are left as they are.
+        """
+        tokens = self.tokens
+        if not any("&" in line for line in self.lines):
+            return
+        merged: list[Token] = []
+        last_index = -1  # index in *merged* of the last non-NEWLINE token
+        for token in tokens:
+            prev = merged[last_index] if last_index >= 0 else None
+            if (
+                token.type == TokenType.STRING_LITERAL
+                and prev is not None
+                and prev.type == TokenType.STRING_LITERAL
+            ):
+                prefix = self._literal_prefix(token)
+                if (
+                    prefix == self._literal_prefix(prev)
+                    and prefix in self._CONCATENABLE_PREFIXES
+                    and self._ampersand_joins(prev, token)
+                ):
+                    value = prev.value + token.value
+                    raw_value: str | None = None
+                    if prefix:
+                        quote = prev.raw_value[len(prefix)]  # type: ignore[index]
+                        raw_value = (
+                            prefix + quote + value.replace(quote, quote * 2) + quote
+                        )
+                    merged[last_index] = Token(
+                        TokenType.STRING_LITERAL, value, prev.location, raw_value
+                    )
+                    continue
+            merged.append(token)
+            if token.type != TokenType.NEWLINE:
+                last_index = len(merged) - 1
+        tokens[:] = merged
 
     def _flag_stray_sql_chars(self) -> None:
         """Record an "Invalid character" error for '!' / '|' / '¬' tokens
