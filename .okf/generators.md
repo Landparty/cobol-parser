@@ -588,7 +588,10 @@ hold the CSV's logical value left-justified, e.g. `9516.07 ` for
 IBM's editing rules -- Z/`*` suppression, floating `$`/`+`/`-` strings,
 fixed `+`/`-`/`CR`/`DB`/`$`, `B`/`0`/`/`/`,` insertion, the all-`Z`/all-`*`
 zero case -- and every case in `tests/unit/generators/data/test_editing.py`
-was checked byte for byte against GnuCOBOL 3.
+was checked byte for byte against GnuCOBOL 3. A floating `+`/`-` can land on
+an insertion position inside its own string (`PIC +++,+++` edits -514 as
+`   -514`, the sign where the comma would be); `deedit_numeric` reads the sign
+there too (2026-09-28: it skipped insertion positions and decoded +514).
 
 **Line terminator.** `to_csv()` and `write_csv()` share
 `_DEFAULT_LINE_TERMINATOR = "\n"`, deliberately *not* the `csv` module's
