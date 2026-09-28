@@ -901,7 +901,12 @@ onto `assign_to` and `file_status` stayed empty
 (`test_environment_division_parser.py::test_status_clause_without_the_word_file`). `DECIMAL-POINT IS COMMA` in
 SPECIAL-NAMES used to warn that the lexer ignored it (H4); since 2026-09-28
 it is honoured (comma-decimal literals, `,`/`.` exchanged in PICTURE -- see
-[lexer.md](lexer.md)) and the warning is gone. All division parsers can reach the host warning channel:
+[lexer.md](lexer.md)) and the warning is gone. `RECORD KEY IS K6 OF R6` and
+`ALTERNATE RECORD KEY IS A6 IN R6` (2026-09-28): `_consume_qualifiers`
+reads the `OF`/`IN` chain after the key name into `record_key_qualifiers`
+/ the alternate key's `qualifiers` (innermost first; the key stays the bare
+name); the qualifier used to be warned "Unparsed token" and knocked out a
+following `WITH DUPLICATES`. All division parsers can reach the host warning channel:
 `BaseDivisionParser.host` is set by the division loop (`parser.py`).
 
 **Comment-entries verbatim (`identification.py`, 2026-09-28):**

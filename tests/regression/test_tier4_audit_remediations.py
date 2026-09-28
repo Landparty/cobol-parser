@@ -289,8 +289,18 @@ class TestH5SelectClauseCapture:
             "               ALTERNATE RECORD KEY IS K3.\n"
         )
         assert sel.alternate_keys == [
-            {"key": "K2", "duplicates_allowed": True, "password": None},
-            {"key": "K3", "duplicates_allowed": False, "password": None},
+            {
+                "key": "K2",
+                "duplicates_allowed": True,
+                "password": None,
+                "qualifiers": [],
+            },
+            {
+                "key": "K3",
+                "duplicates_allowed": False,
+                "password": None,
+                "qualifiers": [],
+            },
         ]
         d = sel.to_dict()
         assert d["alternate_keys"][0]["key"] == "K2"
