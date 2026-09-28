@@ -555,9 +555,7 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
             LEParameter("input_hours", IN, "int32", "Hours, 0 to 23."),
             LEParameter("input_minutes", IN, "int32", "Minutes, 0 to 59."),
             LEParameter("input_seconds", IN, "int32", "Seconds, 0 to 59."),
-            LEParameter(
-                "input_milliseconds", IN, "int32", "Milliseconds, 0 to 999."
-            ),
+            LEParameter("input_milliseconds", IN, "int32", "Milliseconds, 0 to 999."),
             LEParameter(
                 "output_seconds",
                 OUT,
@@ -849,9 +847,7 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
         "condition",
         "Terminate the enclave with an abend",
         (
-            LEParameter(
-                "abcode", IN, "int32", "The abend code to issue, 0 to 4095."
-            ),
+            LEParameter("abcode", IN, "int32", "The abend code to issue, 0 to 4095."),
             LEParameter(
                 "clean_up",
                 IN,
