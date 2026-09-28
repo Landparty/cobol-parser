@@ -406,7 +406,13 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     top_n = getattr(args, "profile_top_n", 20)
     prof_output = getattr(args, "profile_output", None)
 
-    if defines:
+    # With copybook paths, conditional compilation is left to the expander
+    # (process_conditionals below): run here first, it consumed the program's
+    # >>DEFINE lines and the --define symbols never reached the copybooks --
+    # the parser's own directive pass over the expanded text sees neither --
+    # so a member's `>>IF DBG DEFINED` took the wrong branch under
+    # `--define DBG`.
+    if defines and not copybook_paths:
         from ..preprocess import preprocess_conditional_compilation
 
         conditional_warnings: list[str] = []
@@ -432,6 +438,8 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
                     source,
                     filename=args.file,
                     copybook_paths=copybook_paths,
+                    process_conditionals=True,
+                    defined_symbols=defines,
                     **parse_kwargs,
                 )
             except PreprocessingError as exc:
@@ -922,19 +930,16 @@ def _build_expand_parser(
 
 
 def _cmd_expand(args: argparse.Namespace) -> None:
-    from ..preprocess import preprocess_conditional_compilation
     from ..preprocess.copybook_expander import expand_copybooks
 
     source = _read_source(args.file)
 
+    # Conditional compilation is left to expand_copybooks (process_conditionals
+    # below): it must see the program's own >>DEFINE lines to hand them to the
+    # copybooks COPYd beneath them. Running it here first consumed those
+    # lines, so every copybook saw only the --define symbols. Its diagnostics
+    # land in the JSON's statistics.warnings.
     defines = _parse_defines(args.define)
-    if defines:
-        conditional_warnings: list[str] = []
-        source = preprocess_conditional_compilation(
-            source, defines, warnings=conditional_warnings
-        )
-        for cw in conditional_warnings:
-            print(f"warning: {cw}", file=sys.stderr)
 
     result = expand_copybooks(
         source,

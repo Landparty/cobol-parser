@@ -250,6 +250,27 @@ def _try_strict_utf8(prefix: bytes, truncated: bool) -> str | None:
         return None
 
 
+def _single_byte_codec(prefix: bytes) -> str:
+    """The codec for ASCII-shaped text that is *not* valid UTF-8.
+
+    Such a file carries bytes >= 0x80 that are not UTF-8 sequences -- in
+    practice a Windows / Micro Focus shop's cp1252 (or ISO-8859-1) copybook,
+    with an accented ``VALUE 'CAFÉ'`` or a ``€`` in a comment. It used to be
+    labelled ``'ascii'``, which cannot represent a single one of those bytes:
+    every accented character was silently turned into U+FFFD (and, under
+    ``encoding_errors="strict"``, the whole expansion failed). cp1252 is a
+    superset of ISO-8859-1's printable range; the five bytes it leaves
+    undefined fall back to latin-1, which maps every byte.
+    """
+    if prefix.isascii():
+        return "ascii"
+    try:
+        prefix.decode("cp1252")
+    except UnicodeDecodeError:
+        return "latin-1"
+    return "cp1252"
+
+
 def detect_encoding(file_path: str) -> str:
     """
     Detect character encoding of a file using pure-Python heuristics.
@@ -284,7 +305,8 @@ def detect_encoding(file_path: str) -> str:
 
     Returns:
         Encoding name string ('utf-8-sig', 'utf-8', 'utf-16', 'cp037' for
-        EBCDIC, or 'ascii')
+        EBCDIC, 'cp1252' / 'latin-1' for 8-bit ASCII-shaped text that is not
+        valid UTF-8, or 'ascii')
 
     Raises:
         EncodingError: If file cannot be read
@@ -343,7 +365,7 @@ def detect_encoding(file_path: str) -> str:
 
     # --- Decisive check 2: ASCII line endings + overwhelmingly printable ---
     if has_ascii_newline and printable_ratio >= 0.95:
-        return "utf-8" if utf8_text is not None else "ascii"
+        return "utf-8" if utf8_text is not None else _single_byte_codec(prefix)
 
     # --- Decisive check 3: valid UTF-8 with real multi-byte characters -----
     if utf8_text is not None and any(ord(ch) > 0x7F for ch in utf8_text):
@@ -370,7 +392,7 @@ def detect_encoding(file_path: str) -> str:
     if ebcdic_score > ascii_score:
         return "cp037"
 
-    return "utf-8" if utf8_text is not None else "ascii"
+    return "utf-8" if utf8_text is not None else _single_byte_codec(prefix)
 
 
 #: U+FFFD REPLACEMENT CHARACTER — emitted by Python's ``errors="replace"``
@@ -1017,12 +1039,17 @@ def expand_copybooks(
 
     # Pre-process conditional compilation if requested
     conditional_warnings: list[str] = []
+    # The symbol table after each >>DEFINE in the program, so every COPY is
+    # expanded with the symbols defined above it (see _symbols_at_line).
+    define_log: list[tuple[int, dict[str, str]]] | None = None
     if process_conditionals:
+        define_log = []
         source_code = preprocess_conditional_compilation(
             source_code,
             defined_symbols or {},
             warnings=conditional_warnings,
             keep_source_format_directives=True,
+            define_log=define_log,
         )
 
     # Create search configuration
@@ -1073,6 +1100,7 @@ def expand_copybooks(
         validate_levels,
         process_conditionals,
         stats,
+        define_log=define_log,
     )
 
     # Calculate statistics
@@ -1179,6 +1207,20 @@ def expand_copybooks(
     )
 
 
+def _symbols_at_line(
+    define_log: list[tuple[int, dict[str, str]]], line: int
+) -> dict[str, str]:
+    """The conditional-compilation symbols in effect on *line*: the last
+    ``define_log`` snapshot taken on an earlier line (see
+    ``preprocess_conditional_compilation(define_log=...)``)."""
+    current = define_log[0][1]
+    for logged_line, symbols in define_log:
+        if logged_line >= line:
+            break
+        current = symbols
+    return current
+
+
 def _expand_source_recursive(
     source_code: str,
     source_file: str,
@@ -1192,6 +1234,7 @@ def _expand_source_recursive(
     stats: ExpansionStatistics | None = None,
     already_stripped: bool = False,
     free_form: bool | None = None,
+    define_log: list[tuple[int, dict[str, str]]] | None = None,
 ) -> tuple[str, int, bool, list[LineOrigin]]:
     """
     Recursively expand COPY statements in source code.
@@ -1219,6 +1262,10 @@ def _expand_source_recursive(
             merged, and the result is never re-padded. None (the default)
             detects it from the text; the copybook branch passes each
             member's own verdict down.
+        define_log: The ``define_log`` that conditional-compilation
+            processing of *source_code* produced (``process_conditionals``
+            only): each COPY's member is processed with the symbols in effect
+            on the COPY's own line, not the ones the caller started with.
 
     Returns:
         Tuple of (expanded_source, max_depth_reached, is_normalized, origins)
@@ -1326,11 +1373,26 @@ def _expand_source_recursive(
                 continue
             raise
 
+        # A >>DEFINE above this COPY is in effect inside the member (IBM
+        # processes compiler directives and COPY in one sequential pass).
+        # The member's conditional compilation therefore depends on where
+        # the COPY sits, so those symbols are part of the cache key.
+        member_symbols: dict[str, str] | None = None
+        if process_conditionals:
+            member_symbols = context.defined_symbols
+            if define_log:
+                copy_line = expanded_source.count("\n", 0, statement.start_index)
+                if copy_line < len(origins):
+                    member_symbols = _symbols_at_line(define_log, origins[copy_line][1])
+
         # Check if we have a cached expansion (without nested COPY processing)
         # Note: We can only use cache for the same file + same replacements
+        # (and, under conditional compilation, the same symbols).
         full_cache_key = context.get_cache_key(
             copybook_path, statement.replacing_clauses
         )
+        if member_symbols is not None:
+            full_cache_key += "::" + repr(sorted(member_symbols.items()))
 
         expanded_copybook = context.cache_get(full_cache_key)
         if expanded_copybook is not None:
@@ -1430,12 +1492,19 @@ def _expand_source_recursive(
                         stats.warnings.extend(level_warnings)
 
             # Process conditional compilation directives if requested
+            member_define_log: list[tuple[int, dict[str, str]]] | None = None
             if process_conditionals:
+                member_define_log = []
                 copybook_content = preprocess_conditional_compilation(
                     copybook_content,
-                    context.defined_symbols,
+                    (
+                        member_symbols
+                        if member_symbols is not None
+                        else context.defined_symbols
+                    ),
                     warnings=stats.warnings if stats is not None else None,
                     keep_source_format_directives=True,
+                    define_log=member_define_log,
                 )
 
             # Track this copybook
@@ -1491,6 +1560,7 @@ def _expand_source_recursive(
                     # A free-form member under a fixed-format parent was
                     # just given the stripped fixed shape above.
                     free_form=member_free_form and free_form,
+                    define_log=member_define_log,
                 )
             )
 
@@ -1624,7 +1694,7 @@ def parse_cobol_with_expansion(
     filename: str,
     copybook_paths: list[str],
     max_nesting_depth: int = 100,
-    process_conditionals: bool = False,
+    process_conditionals: bool = True,
     defined_symbols: dict[str, str] | None = None,
     **parser_kwargs: Any,
 ) -> Any:
@@ -1640,7 +1710,15 @@ def parse_cobol_with_expansion(
         copybook_paths: List of directory paths to search for copybooks
         max_nesting_depth: Maximum allowed nesting depth (default: 100)
         process_conditionals: Whether to process >>DEFINE/>>IF/>>EVALUATE
-            conditional compilation directives before parsing (default: False)
+            conditional compilation directives during expansion (default:
+            True). The parser runs the same directive pass over whatever
+            text it is given anyway, so this changes *when* it happens,
+            not whether: during expansion, a COPY inside an excluded
+            ``>>IF`` block is never resolved (it used to be expanded first,
+            and a member that only exists for the other branch -- a CICS
+            ``COPY DFHAID`` under ``>>IF CICS DEFINED`` -- failed the whole
+            parse), and a ``>>DEFINE`` reaches the copybooks below it.
+            False keeps the old order.
         defined_symbols: Pre-defined symbols for conditional compilation
         **parser_kwargs: Additional arguments passed to parse_cobol()
 

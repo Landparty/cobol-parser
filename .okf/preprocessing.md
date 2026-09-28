@@ -619,10 +619,48 @@ unknown `>>` directives (passed through to the lexer), and unclosed
 blanked in place so line numbers stay stable. The copybook expansion path
 (`process_conditionals=True`) routes warnings into
 `ExpansionStatistics.warnings`; the CLI (`--define`) prints them to
-stderr. Pinned by
+stderr (without `--copybook-path`; with it -- and always for `expand` --
+they land in the JSON's `warnings`). Pinned by
 `tests/regression/test_tier4_audit_remediations.py::TestH6CopybookSilentChannels`
 / `::TestH7ConditionalCompilationWarnings` (updated to the new semantics)
 and `tests/regression/test_open_findings_m10_regression.py`.
+
+**`>>DEFINE` reaches the copybooks below it (2026-09-28):** with
+`process_conditionals=True` each COPY's member is processed with the
+symbols in effect *on the COPY's own line* -- the caller's
+`defined_symbols` plus every active `>>DEFINE` above it, in the program or
+in an enclosing member. `preprocess_conditional_compilation(...,
+define_log=[...])` records `(line, symbols)` after each `>>DEFINE`
+(`(0, initial)` first); `_expand_source_recursive(define_log=...)` looks
+the COPY's line up through its origin (`_symbols_at_line`), and those
+symbols join the expansion-cache key, so one member COPYd before and after
+a `>>DEFINE` expands both ways. Before, every member saw only the caller's
+initial symbols. The CLI pre-pass had the same effect from the outside:
+`expand --define` and `parse`/analyzers `--define X --copybook-path`
+ran the program through `preprocess_conditional_compilation` *before*
+expansion, consuming its `>>DEFINE` lines -- and for `parse`, `--define`
+itself never reached a member either (neither the expander nor the
+parser's own directive pass over the expanded text received it), so
+`>>IF DBG DEFINED` in a copybook took the `>>ELSE` branch under
+`--define DBG`. With copybook paths the CLI now leaves conditionals to the
+expander (`parse_cobol_with_expansion(process_conditionals=True,
+defined_symbols=...)`). A `>>DEFINE` *inside* a member still does not
+reach the parent's text after the COPY. Pinned by
+`tests/regression/test_copybook_resolution_2026_09_28.py::TestDefinedSymbolsReachCopybooks`.
+
+**COPY in an excluded `>>IF` block is not resolved (2026-09-28):**
+`parse_cobol_with_expansion(process_conditionals=...)` now defaults to
+**True**, and `parse_files_with_copybooks` and the CLI's
+`--copybook-path` parse path pass it. Expansion used to run before any
+directive was evaluated (the parser's own pass came after), so `COPY
+DFHAID` under `>>IF CICS DEFINED` was resolved even with CICS undefined,
+and a member that exists only for the other branch failed the whole parse
+(CLI exit 1; batch/scan silently fell back to the unexpanded parse).
+The parser runs the same directive pass anyway, so only the *order*
+changes. `expand_copybooks` itself keeps `process_conditionals=False` by
+default (and `expand` processes directives only with `--define`), since
+its output is the text as written. Pinned by
+`tests/regression/test_copybook_resolution_2026_09_28.py::TestCopyInExcludedConditionalBlock`.
 
 A `*>` floating comment on a `>>` directive line (outside a literal) is
 stripped before the directive is read (`_strip_directive_comment`, 2026-09-27):
@@ -724,8 +762,12 @@ These two passes are what let NIST `SM208A` (30x `REPLACE`) and `SM206A`
 1. **Tier 1** — a resolution cache keyed by `member_name` (exact repeat
    lookups are O(1) with no filesystem access).
 2. **Tier 2** — a per-directory index (`_dir_index`, built once via
-   `os.scandir()`) keyed by uppercased basename-without-extension AND full
-   filename, for O(1) lookup against every directory without re-scanning.
+   `os.scandir()`) keyed by full filename (uppercased when
+   case-insensitive), for O(1) lookup against every directory without
+   re-scanning. `resolve` probes the member name, then the name plus each
+   configured extension in order, and takes the hit from the
+   first-configured directory (then the first probe) -- exactly Tier 3's
+   order.
 3. **Tier 3** — a full filesystem search (`find_copybook_file`) as the
    fallback when the index misses.
 
@@ -738,6 +780,14 @@ unconditional `index[name_upper] = abs_path` instead of `setdefault`), so
 `resolve("SHARED.cpy")` and `resolve("SHARED")` could return files from
 different directories. Pinned by
 `tests/regression/test_audit_2026_08_12_core.py::TestPB6FirstDirectoryWins`.
+
+**Tier-2 stem key removed (2026-09-28):** the index used to carry a
+bare-stem key too (`MEM` for `MEM.bak`), so `COPY MEM` resolved to a file
+of *any* extension -- `MEM.bak`, `NOTES.txt`, `ZZ.exe`, or the program's
+own `SUB.cbl` over `SUB.cpy` -- whichever `os.scandir()` listed first,
+ignoring `CopybookSearchPath.extensions` and disagreeing with Tier 3.
+Pinned by `tests/regression/test_copybook_resolution_2026_09_28.py::
+TestIndexedLookupHonoursConfiguredExtensions`.
 
 All three tiers funnel through `validate_path_within_directory(path,
 search_dir)`, which resolves symlinks (`Path.resolve()`) and confirms the
@@ -923,6 +973,14 @@ misdetected. `CopybookSearchPath.encoding_errors` /
 `"replace"` (default) substitutes U+FFFD and warns with a replacement
 count; `"strict"` raises `EncodingError` with file/offset context. Pinned
 by `tests/regression/test_open_findings_m15_regression.py`.
+
+**8-bit, non-UTF-8 text (2026-09-28):** ASCII-shaped bytes that are not
+valid UTF-8 (a Windows / Micro Focus cp1252 copybook with `VALUE 'CAFÉ'`)
+are detected as `cp1252` -- or `latin-1` when a byte cp1252 leaves
+undefined is present -- by `_single_byte_codec`. They were labelled
+`ascii`, which turned every accented byte into U+FFFD (and failed the
+expansion under `encoding_errors="strict"`). Pinned by
+`tests/regression/test_copybook_resolution_2026_09_28.py::TestEightBitCopybookEncoding`.
 
 # Expansion output: REPLACING width overflow + sequence-area change tags (2026-08-23)
 

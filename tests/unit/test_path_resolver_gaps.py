@@ -42,9 +42,10 @@ class TestDirectoryIndex:
         config = CopybookSearchPath(directories=[str(d)], case_sensitive=True)
         resolver = PathResolver(config)
         index = resolver._build_directory_index()
-        # The index records both the exact filename and the bare stem.
+        # The index records the full filename only; a bare stem key would
+        # let `COPY REAL` hit a file of any extension (REAL.bak, ...).
         assert "REAL.cpy" in index
-        assert "REAL" in index
+        assert "REAL" not in index
         assert "NESTED" not in index
 
     def test_case_insensitive_index(self, tmp_path):

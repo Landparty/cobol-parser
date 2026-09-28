@@ -1626,6 +1626,7 @@ def preprocess_conditional_compilation(
     warnings: list[str] | None = None,
     *,
     keep_source_format_directives: bool = False,
+    define_log: list[tuple[int, dict[str, str]]] | None = None,
 ) -> str:
     """
     Process IBM Enterprise COBOL conditional compilation directives.
@@ -1673,6 +1674,12 @@ def preprocess_conditional_compilation(
         warnings: Optional list that receives diagnostics (see the
             degradation rules above); the function never raises for
             malformed directives.
+        define_log: When a list is given, it receives ``(0, symbols)`` for
+            the symbols in effect before line 1 and then ``(line, symbols)``
+            after every active ``>>DEFINE`` -- the symbol table as it stands
+            from that line on. The copybook expander reads it to hand each
+            ``COPY`` the symbols defined *above* it, so a ``>>DEFINE`` in a
+            program is in effect inside the copybooks it copies afterwards.
         keep_source_format_directives: Leave an active ``>>SOURCE FORMAT``
             directive line in place (unwarned) instead of blanking it, for a
             caller that runs this *before* ``normalize_fixed_format`` -- the
@@ -1691,6 +1698,8 @@ def preprocess_conditional_compilation(
         '\\n\\n       DISPLAY "Debug mode".\\n'
     """
     defined = _normalize_defined_symbols(defined_symbols)
+    if define_log is not None:
+        define_log.append((0, dict(defined)))
     result_lines: list[str] = []
     frames: list[_CondFrame] = []
 
@@ -1751,6 +1760,8 @@ def preprocess_conditional_compilation(
                             if arith_value is not None
                             else _strip_quotes(raw_value)
                         )
+                    if define_log is not None:
+                        define_log.append((line_no, dict(defined)))
             else:
                 _warn(
                     f"Line {line_no}: malformed >>DEFINE directive "
