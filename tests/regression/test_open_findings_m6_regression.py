@@ -106,7 +106,12 @@ class TestM6TokenizeParity:
         tokens = tokenize_cobol(FIXED_SOURCE, "m6.cbl")
         strings = [t for t in tokens if t.type == TokenType.STRING_LITERAL]
         assert len(strings) == 1
-        assert strings[0].value == "HELLO CONTINUEDWORLD"
+        # The continued record stops short of column 72; the literal still
+        # runs through it, so the missing columns are blanks in its value.
+        opener = '       01 WS-MSG PIC X(30) VALUE "HELLO CONTINUED'
+        assert (
+            strings[0].value == "HELLO CONTINUED" + " " * (72 - len(opener)) + "WORLD"
+        )
 
     def test_free_form_input_unchanged(self):
         """free_form=True bypasses detection/normalization entirely."""

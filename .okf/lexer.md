@@ -3,7 +3,7 @@ type: Module
 title: Lexer
 description: Tokenizes COBOL source into Token objects; 243 TokenType values; optional Cython hot-path.
 tags: [lexer, tokenizer, cython, token-type]
-timestamp: 2026-08-14T23:45:00Z
+timestamp: 2026-09-28T00:00:00Z
 ---
 
 # Overview
@@ -85,6 +85,16 @@ except ImportError:
 
 The same pattern applies in `preprocess/__init__.py` (for `normalize_fixed_format`)
 and `parsers/divisions/data_clauses.py` (for `parse_data_item_clauses_fast`).
+
+**Typed locals must not narrow what the pure path accepts (2026-09-28).**
+`parse_data_item_clauses_fast` held the OCCURS min/max counts in `cdef int`s.
+`int()` of a count past 2**31-1 then raised `OverflowError`, which escaped the
+`(TypeError, ValueError)` guards mirrored from the pure walker; the division
+loop recovered by abandoning the DATA DIVISION (every item gone, one "value
+too large to convert to int" error at line 1) where the pure path kept the
+count. They are `cdef object` now. When C-typing a mirror, only type values
+whose range the pure path also bounds (loop indexes, positions) -- never a
+value read out of the source.
 
 **Signature-drift guard (`_data_fast`, added 2026-09-05):** `ImportError` is not
 the only way the fast path can be wrong. The extension is compiled separately

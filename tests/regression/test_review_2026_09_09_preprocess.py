@@ -43,6 +43,12 @@ def _prog(*body: str) -> str:
     return "\n".join(body) + "\n"
 
 
+def _to_72(record: str) -> str:
+    """The blanks a record stopping short of column 72 is missing -- part of
+    a literal left open on it."""
+    return " " * (72 - len(record))
+
+
 # ---------------------------------------------------------------------------
 # Finding 1 -- continuation lines must not collapse the physical line count
 # ---------------------------------------------------------------------------
@@ -69,7 +75,13 @@ class TestFinding1ContinuationLinesKeepLineCount:
         out = normalize(lines)
         assert out.count("\n") == len(lines)
         rows = out.split("\n")
-        assert rows[4] == '01  WS-A   PIC X(30) VALUE "ABCDEFGHIJKLMNOPQRSTUVWXYZ".'
+        assert rows[4] == (
+            '01  WS-A   PIC X(30) VALUE "ABCDEFGHIJ'
+            + _to_72(lines[4])
+            + "KLMNOPQRST"
+            + _to_72(lines[5])
+            + 'UVWXYZ".'
+        )
         assert rows[5] == "" and rows[6] == ""
         assert rows[9] == '    MOVE "X" TO WS-B.'
 
@@ -105,12 +117,14 @@ class TestFinding1ContinuationLinesKeepLineCount:
             '      -    "DEF".',
         ]
         out = normalize(lines)
-        assert out == '01  WS-A PIC X(20) VALUE "ABCDEF".\n\n\n'
+        assert out == '01  WS-A PIC X(20) VALUE "ABC' + _to_72(lines[0]) + 'DEF".\n\n\n'
 
     @pytest.mark.parametrize("normalize", NORMALIZERS)
     def test_blank_line_between_literal_pieces_does_not_sever_it(self, normalize):
         lines = ['       01  WS-A PIC X(20) VALUE "ABC', "", '      -    "DEF".']
-        assert normalize(lines) == '01  WS-A PIC X(20) VALUE "ABCDEF".\n\n\n'
+        assert normalize(lines) == (
+            '01  WS-A PIC X(20) VALUE "ABC' + _to_72(lines[0]) + 'DEF".\n\n\n'
+        )
 
     @pytest.mark.parametrize("normalize", NORMALIZERS)
     def test_literal_open_before_trailing_comment_keeps_old_verdict(self, normalize):
@@ -186,7 +200,9 @@ class TestFinding2InlineCommentApostrophe:
     @pytest.mark.parametrize("normalize", NORMALIZERS)
     def test_quote_inside_open_literal_is_not_a_comment(self, normalize):
         lines = ['       01  WS-A PIC X(9) VALUE "A *> B', '      -    "C".']
-        assert normalize(lines) == '01  WS-A PIC X(9) VALUE "A *> BC".\n\n'
+        assert normalize(lines) == (
+            '01  WS-A PIC X(9) VALUE "A *> B' + _to_72(lines[0]) + 'C".\n\n'
+        )
 
     def test_parses_under_both_recovery_modes(self):
         for mode in (ErrorRecoveryMode.FAIL_FAST, ErrorRecoveryMode.COLLECT_ALL):
@@ -297,18 +313,24 @@ class TestFinding4ExpanderContinuedLiterals:
         )
         direct = parse_cobol(src.replace("       COPY CPY1.\n", ""))
         expanded = parse_cobol_with_expansion(src, "t4.cbl", [str(tmp_path)])
-        assert self._value(direct, "WS-A") == '"ABC   DEF"'
-        assert self._value(expanded, "WS-A") == '"ABC   DEF"'
+        opener = '       01  WS-A   PIC X(10) VALUE "ABC   '
+        want = '"ABC   ' + _to_72(opener) + 'DEF"'
+        assert self._value(direct, "WS-A") == want
+        assert self._value(expanded, "WS-A") == want
 
     def test_quote_state_not_quote_parity(self):
         # An apostrophe literal holding a double quote is still open on the
         # first line -- counting quotes said otherwise.
-        src = '           DISPLAY \'IT"S\n      -    "MORE".\n'
+        opener = "           DISPLAY 'IT\"S"
+        src = opener + '\n      -    "MORE".\n'
         out = normalize_continuation_lines(src)
-        assert out == '           DISPLAY \'IT"S"MORE".\n'
+        assert out == opener + _to_72(opener) + '"MORE".\n'
         # ...and a doubled quote is an escape, not a close.
-        src = "           DISPLAY 'IT''S \n      -    'MORE'.\n"
-        assert normalize_continuation_lines(src) == "           DISPLAY 'IT''S MORE'.\n"
+        opener = "           DISPLAY 'IT''S "
+        src = opener + "\n      -    'MORE'.\n"
+        assert normalize_continuation_lines(src) == (
+            opener + _to_72(opener) + "MORE'.\n"
+        )
 
     def test_crlf_source_keeps_the_literal_whole(self, tmp_path):
         (tmp_path / "LFCPY.cpy").write_text("       01  LF-ITEM PIC X.\n")
@@ -325,7 +347,8 @@ class TestFinding4ExpanderContinuedLiterals:
         )
         result = parse_cobol_with_expansion(crlf, "tf.cbl", [str(tmp_path)])
         assert not result.errors
-        assert self._value(result, "WS-A") == '"ABCD"'
+        opener = "       01  WS-A PIC X(5) VALUE 'AB"
+        assert self._value(result, "WS-A") == '"AB' + _to_72(opener) + 'CD"'
 
 
 # ---------------------------------------------------------------------------

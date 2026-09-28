@@ -317,6 +317,22 @@ ALL_COMMENT_INDICATORS = COMMENT_INDICATORS | DEBUG_INDICATORS | VERSION_TAG_IND
 MIN_ID_STAMP_EVIDENCE_LINES = 3
 
 
+def _literal_pad(text_slice: str) -> str:
+    """Blanks standing in for the columns a *short* record never had.
+
+    A literal left open at the end of a fixed-format line runs through
+    column 72: the blanks between its last written character and column 72
+    are part of its value (the M5 rule). Source whose trailing blanks were
+    stripped -- by an editor, a file transfer, a commit filter; i.e. most
+    copies of a deck kept off the mainframe -- ends such a line early, but
+    the columns it lost are blanks to the compiler all the same. Without
+    this pad ``VALUE 'ERROR: NOT `` + ``-    'FOUND'.`` read
+    ``'ERROR: NOTFOUND'`` once its trailing blank was stripped, and
+    ``'ERROR: NOT FOUND'`` while it was still there: one program, two values.
+    """
+    return " " * (TEXT_END_COL - TEXT_START_COL + 1 - len(text_slice))
+
+
 def _is_numeric_id_stamp_text(tail: str) -> bool:
     """True when *tail* has the shape of a numeric identification-area stamp:
     at least one digit, and nothing but digits and blanks.
@@ -642,6 +658,9 @@ def normalize_fixed_format(
     # the first of the pair are one doubled (escaped) quote, the value gets
     # a single quotation mark, and the literal carries on.
     closing_quote_at_72: str | None = None
+    # Blanks owed to a literal left open on a line shorter than column 72
+    # (see _literal_pad); paid only if a continuation record resumes it.
+    literal_pad = ""
     # One-code-line lookahead for the comment/blank branches: the index of
     # the next program-text line after the one being examined, and whether
     # it is a continuation record. IBM: a continuation line is "the next
@@ -949,7 +968,9 @@ def normalize_fixed_format(
                 # fixed-format continuation rule) -- only strip them once
                 # we know no literal is left dangling (M5).
                 out_chunk = chunk if pending_literal else chunk.rstrip()
-                parts.append(out_chunk)
+                # The continued record's missing columns first: they sit
+                # inside the literal, ahead of the resumed text.
+                parts.append(literal_pad + out_chunk)
             else:
                 # Non-literal continuation: '-' in column 7 with no
                 # alphanumeric literal currently open. Per COBOL fixed-format
@@ -990,6 +1011,15 @@ def normalize_fixed_format(
                 and text_slice[-1] in ("'", '"')
             )
             else None
+        )
+
+        # A literal still open here runs through column 72; if this record
+        # stops short of it (trailing blanks stripped), the next
+        # continuation owes the literal those blanks.
+        literal_pad = (
+            _literal_pad(text_slice)
+            if merge_continued_literals and pending_literal
+            else ""
         )
 
         # Either branch above always appends to `parts` (even an empty

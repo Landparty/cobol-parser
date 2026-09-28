@@ -39,6 +39,19 @@ DCB overrides merge; `DD *,DLM=` keeps `//` cards as data; continued
 strings keep blanks through column 71; CR/LF-only line splitting.
 [cli.md](cli.md): `cobol.yml` reader handles `''` / `\"` escapes, rejects
 content after `...`, ignores a UTF-8 BOM.
+## 2026-09-28 -- accelerator audit: OCCURS count overflow, short-record literals, `*>` in data entries
+
+Differential run (Cython vs forced pure-Python) over tests/samples,
+examples/cobol and ~35k generated fixed/free-form inputs: tokens, normalized
+text and ASTs agreed everywhere except one. [lexer.md](lexer.md):
+`_data_fast` OCCURS counts past INT_MAX raised `OverflowError` and cost the
+whole DATA DIVISION (`cdef int` -> `cdef object`).
+[preprocessing.md](preprocessing.md): a continued literal on a record whose
+trailing blanks were stripped lost the blanks through column 72 (pure,
+Cython and the expander). [parser.md](parser.md): `*>` floating comments
+are dropped from the parser's `TokenStream`, so a comment between a data
+clause keyword and its operand no longer drops the operand or fabricates a
+level-number item.
 
 ## 2026-09-28 -- bug hunt round 7: batch .prof collisions, DOT escaping, >>DEFINE arithmetic, nested ALTER in health
 

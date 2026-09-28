@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 # Core parsing infrastructure
 from ._lines import split_source_lines
 from .core.token_stream import TokenStream
-from .lexer import CobolLexer, Token
+from .lexer import CobolLexer, Token, TokenType
 from .models.ast_base import SourceLocation
 from .models.program import CobolDivision, CobolProgram
 from .parsers.divisions.data import DataDivisionParser
@@ -372,8 +372,18 @@ class CobolParser:
                 for warning in lexer.get_warnings():
                     self.add_warning(f"Lexer warning: {warning}")
 
-            # Initialize TokenStream and parse program
-            self.stream = TokenStream(self.tokens)
+            # Initialize TokenStream and parse program. A `*>` floating
+            # comment (IBM Enterprise COBOL 6.x) is layout wherever it sits:
+            # it may end any line, including one that stops between a clause
+            # keyword and its operand (``OCCURS 10 *> rows`` / ``INDEXED BY
+            # IX``). Every sub-clause reader that skips line breaks would
+            # otherwise have to skip COMMENT tokens too, and most did not --
+            # the operand after the comment was dropped as an "unparsed
+            # token", or (``OCCURS *> n`` / ``10 TIMES``) read as a new
+            # item's level number. The lexer's own token list keeps them.
+            self.stream = TokenStream(
+                [t for t in self.tokens if t.type is not TokenType.COMMENT]
+            )
             program = self.parse_program()
             if program is not None:
                 for unit in program.program_units():
