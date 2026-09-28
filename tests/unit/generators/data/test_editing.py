@@ -113,3 +113,21 @@ def test_record_image_holds_the_edited_form():
     assert dataset.to_records(EncodingOptions()) == edit_numeric(
         "$$,$$9.99", value
     ).encode("ascii")
+
+
+@pytest.mark.parametrize(
+    "picture, value, edited",
+    [
+        # The floating sign lands on the insertion comma inside the string.
+        ("+++,+++", "-514", "   -514"),
+        ("---,---.99", "-5", "     -5.00"),
+        ("+,+++,+++", "-1000", "   -1,000"),
+    ],
+)
+def test_floating_sign_on_an_insertion_position_reads_back_negative(
+    picture, value, edited
+):
+    assert edit_numeric(picture, value) == edited
+    magnitude, negative = deedit_numeric(picture, edited)
+    assert negative is True
+    assert magnitude != 0

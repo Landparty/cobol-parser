@@ -170,3 +170,30 @@ def test_unwritable_output_exits_two_not_one(files, capsys):
     expected = _write(tmp / "E.DAT", ROWS)
     target = tmp / "no-such-dir" / "report.txt"
     assert _run(_args(copybook, expected, expected, "-o", str(target))) == 2
+
+
+def test_missing_config_file_exits_two_not_one(files, capsys):
+    # Exit 1 means "the files differ"; a config error is trouble (2).
+    tmp, copybook = files
+    expected = _write(tmp / "E.DAT", ROWS)
+    argv = _args(copybook, expected, expected, "--config", str(tmp / "nope.yml"))
+    assert _run(argv) == 2
+    assert "config file not found" in capsys.readouterr().err
+
+
+def test_malformed_project_config_exits_two_not_one(files, capsys, monkeypatch):
+    tmp, copybook = files
+    expected = _write(tmp / "E.DAT", ROWS)
+    (tmp / "cobol.yml").write_text("copybook_paths: [\n", encoding="utf-8")
+    monkeypatch.chdir(tmp)
+    assert _run(_args(copybook, expected, expected)) == 2
+    assert "cobol.yml" in capsys.readouterr().err
+
+
+def test_binary_copybook_exits_two_not_one(files, capsys):
+    tmp, _copybook = files
+    expected = _write(tmp / "E.DAT", ROWS)
+    bad = tmp / "BAD.cpy"
+    bad.write_bytes(b"\xff\xfe\x00\x81")
+    assert _run(_args(str(bad), expected, expected)) == 2
+    assert "Cannot read copybook" in capsys.readouterr().err

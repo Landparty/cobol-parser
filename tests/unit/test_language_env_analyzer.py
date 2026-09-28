@@ -652,3 +652,37 @@ class TestIntrinsicReferenceBoundaries:
             ("UPPER-CASE", "STRING"),
         ]
         assert all(u.is_ibm_function for u in report.intrinsic_usages)
+
+
+class TestEnterpriseSixIntrinsics:
+    """Intrinsics added after COBOL-85 (Enterprise COBOL 3.x-6.4) are IBM
+    functions too; TRIM, NUMVAL-F, FORMATTED-DATETIME and BYTE-LENGTH used
+    to be reported with is_ibm_function False."""
+
+    _SRC = (
+        _MINIMAL_HEADER
+        + """\
+       01 WS-A PIC X(20).
+       01 WS-N PIC 9(8).
+       01 WS-TS PIC X(40).
+"""
+        + _PROCEDURE_HEADER
+        + """\
+           MOVE FUNCTION TRIM(WS-A) TO WS-A.
+           COMPUTE WS-N = FUNCTION NUMVAL-F(WS-A).
+           MOVE FUNCTION FORMATTED-DATETIME('YYYYMMDDThhmmss' WS-N 1)
+             TO WS-TS.
+           COMPUTE WS-N = FUNCTION BYTE-LENGTH(WS-A).
+           GOBACK.
+"""
+    )
+
+    def test_reported_as_ibm_functions(self):
+        report = LanguageEnvironmentAnalyzer().analyze(_parse(self._SRC))
+        found = {u.function_name: u.is_ibm_function for u in report.intrinsic_usages}
+        assert found == {
+            "TRIM": True,
+            "NUMVAL-F": True,
+            "FORMATTED-DATETIME": True,
+            "BYTE-LENGTH": True,
+        }

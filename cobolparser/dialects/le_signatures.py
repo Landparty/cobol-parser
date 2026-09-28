@@ -555,6 +555,7 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
             LEParameter("input_hours", IN, "int32", "Hours, 0 to 23."),
             LEParameter("input_minutes", IN, "int32", "Minutes, 0 to 59."),
             LEParameter("input_seconds", IN, "int32", "Seconds, 0 to 59."),
+            LEParameter("input_milliseconds", IN, "int32", "Milliseconds, 0 to 999."),
             LEParameter(
                 "output_seconds",
                 OUT,
@@ -846,12 +847,14 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
         "condition",
         "Terminate the enclave with an abend",
         (
-            LEParameter("abend_code", IN, "int32", "The abend code to issue."),
+            LEParameter("abcode", IN, "int32", "The abend code to issue, 0 to 4095."),
             LEParameter(
-                "timing",
+                "clean_up",
                 IN,
                 "int32",
-                "0 abends after LE cleanup, 1 abends immediately.",
+                "0 abends immediately, without clean-up; 1 abends after "
+                "normal enclave termination processing (2 to 5 also run "
+                "termination, choosing which dumps are taken).",
             ),
         ),
         notes=("CEE3ABD does not return, and takes no feedback code.",),
@@ -1348,6 +1351,315 @@ _INTRINSICS: tuple[IntrinsicSignature, ...] = (
         "Expand a two-digit year to a four-digit year",
         "integer",
         (_int_arg(description="A year of the form YY."), _WINDOW),
+    ),
+    # -- Added after the COBOL-85 intrinsic set: Enterprise COBOL 3.x/4.x
+    # (Unicode, DISPLAY-OF / NATIONAL-OF), 6.1 (COBOL 2002/2014 date-time,
+    # NUMVAL-F, TEST-*, E/PI/EXP, TRIM), 6.3 (BIT-/HEX- conversions) and
+    # 6.4 (UUID4).  Leaving them out made the analyzer report FUNCTION TRIM
+    # as a non-IBM function and `le-info TRIM` answer "unknown".
+    _fn(
+        "ABS",
+        "Absolute value of the argument",
+        "same class as argument-1",
+        (_num(description="Any numeric value."),),
+    ),
+    _fn(
+        "BIT-OF",
+        "The bit pattern of the argument, as a string of 0 and 1 characters",
+        "alphanumeric",
+        (
+            IntrinsicArgument(
+                "argument-1",
+                "any",
+                "A data item, literal or function result of any usage.",
+            ),
+        ),
+    ),
+    _fn(
+        "BIT-TO-CHAR",
+        "The characters a string of 0 and 1 characters describes",
+        "alphanumeric",
+        (_alnum(description="Only 0 and 1 characters, a multiple of 8 long."),),
+    ),
+    _fn(
+        "BYTE-LENGTH",
+        "Size of the argument in bytes",
+        "integer",
+        (
+            IntrinsicArgument(
+                "argument-1",
+                "any",
+                "Any data item, literal, or function result.",
+            ),
+        ),
+    ),
+    _fn(
+        "COMBINED-DATETIME",
+        "An integer date and a seconds-past-midnight value in one number",
+        "numeric",
+        (
+            _int_arg("argument-1", "Days since 31 December 1600."),
+            _num("argument-2", "Seconds past midnight, 0 to less than 86400."),
+        ),
+    ),
+    _fn(
+        "DISPLAY-OF",
+        "National characters converted to alphanumeric in a code page",
+        "alphanumeric",
+        (
+            IntrinsicArgument("argument-1", "national", "The national text."),
+            IntrinsicArgument(
+                "argument-2",
+                "integer",
+                "Target CCSID. Defaults to the CODEPAGE compiler option.",
+                optional=True,
+            ),
+        ),
+    ),
+    _fn("E", "The mathematical constant e", "numeric", ()),
+    _fn(
+        "EXP",
+        "e raised to the power of the argument",
+        "numeric",
+        (_num(description="The exponent."),),
+    ),
+    _fn(
+        "EXP10",
+        "10 raised to the power of the argument",
+        "numeric",
+        (_num(description="The exponent."),),
+    ),
+    _fn(
+        "FORMATTED-CURRENT-DATE",
+        "The current date and time in a stated ISO 8601 format",
+        "alphanumeric",
+        (_alnum("argument-1", "A combined date-time format literal."),),
+    ),
+    _fn(
+        "FORMATTED-DATE",
+        "An integer date in a stated ISO 8601 date format",
+        "alphanumeric",
+        (
+            _alnum("argument-1", "A date format literal, e.g. 'YYYY-MM-DD'."),
+            _int_arg("argument-2", "Days since 31 December 1600."),
+        ),
+    ),
+    _fn(
+        "FORMATTED-DATETIME",
+        "An integer date and a time in a stated ISO 8601 format",
+        "alphanumeric",
+        (
+            _alnum("argument-1", "A combined date-time format literal."),
+            _int_arg("argument-2", "Days since 31 December 1600."),
+            _num("argument-3", "Seconds past midnight."),
+            IntrinsicArgument(
+                "argument-4",
+                "integer",
+                "Offset from UTC in minutes, or the keyword SYSTEM-OFFSET. "
+                "Only meaningful when the format has an offset.",
+                optional=True,
+            ),
+        ),
+    ),
+    _fn(
+        "FORMATTED-TIME",
+        "Seconds past midnight in a stated ISO 8601 time format",
+        "alphanumeric",
+        (
+            _alnum("argument-1", "A time format literal, e.g. 'hhmmss'."),
+            _num("argument-2", "Seconds past midnight."),
+            IntrinsicArgument(
+                "argument-3",
+                "integer",
+                "Offset from UTC in minutes, or the keyword SYSTEM-OFFSET. "
+                "Only meaningful when the format has an offset.",
+                optional=True,
+            ),
+        ),
+    ),
+    _fn(
+        "HEX-OF",
+        "The argument's bytes as hexadecimal digit characters",
+        "alphanumeric",
+        (
+            IntrinsicArgument(
+                "argument-1",
+                "any",
+                "A data item, literal or function result of any usage.",
+            ),
+        ),
+    ),
+    _fn(
+        "HEX-TO-CHAR",
+        "The bytes a string of hexadecimal digit characters describes",
+        "alphanumeric",
+        (_alnum(description="Hexadecimal digits, an even number of them."),),
+    ),
+    _fn(
+        "INTEGER-OF-FORMATTED-DATE",
+        "Integer date form of a date in a stated ISO 8601 format",
+        "integer",
+        (
+            _alnum("argument-1", "A date or date-time format literal."),
+            _alnum("argument-2", "A date in that format."),
+        ),
+    ),
+    _fn(
+        "INTEGER-PART",
+        "The integer part of the argument (truncated toward zero)",
+        "integer",
+        (_num(description="Any numeric value."),),
+    ),
+    _fn(
+        "NATIONAL-OF",
+        "Alphanumeric or DBCS text converted to national characters",
+        "national",
+        (
+            _alnum("argument-1", "The text to convert."),
+            IntrinsicArgument(
+                "argument-2",
+                "integer",
+                "Source CCSID. Defaults to the CODEPAGE compiler option.",
+                optional=True,
+            ),
+        ),
+    ),
+    _fn(
+        "NUMVAL-F",
+        "Numeric value of a string holding a floating-point number",
+        "numeric",
+        (_alnum(description='A string such as " -1.5E+03".'),),
+    ),
+    _fn("PI", "The mathematical constant pi", "numeric", ()),
+    _fn(
+        "SECONDS-FROM-FORMATTED-TIME",
+        "Seconds past midnight of a time in a stated ISO 8601 format",
+        "numeric",
+        (
+            _alnum("argument-1", "A time or date-time format literal."),
+            _alnum("argument-2", "A time in that format."),
+        ),
+    ),
+    _fn("SECONDS-PAST-MIDNIGHT", "Seconds past midnight, now", "numeric", ()),
+    _fn(
+        "SIGN",
+        "-1, 0 or +1 by the sign of the argument",
+        "integer",
+        (_num(description="Any numeric value."),),
+    ),
+    _fn(
+        "TEST-DATE-YYYYMMDD",
+        "0 when the argument is a valid YYYYMMDD date, else the bad part",
+        "integer",
+        (_int_arg(description="A date of the form YYYYMMDD."),),
+    ),
+    _fn(
+        "TEST-DAY-YYYYDDD",
+        "0 when the argument is a valid YYYYDDD date, else the bad part",
+        "integer",
+        (_int_arg(description="A date of the form YYYYDDD."),),
+    ),
+    _fn(
+        "TEST-FORMATTED-DATETIME",
+        "0 when argument-2 is valid in format argument-1, else its position",
+        "integer",
+        (
+            _alnum("argument-1", "A date, time or date-time format literal."),
+            _alnum("argument-2", "The value to test."),
+        ),
+    ),
+    _fn(
+        "TEST-NUMVAL",
+        "0 when the argument is valid for NUMVAL, else the bad position",
+        "integer",
+        (_alnum(description="The string to test."),),
+    ),
+    _fn(
+        "TEST-NUMVAL-C",
+        "0 when the argument is valid for NUMVAL-C, else the bad position",
+        "integer",
+        (
+            _alnum("argument-1", "The string to test."),
+            IntrinsicArgument(
+                "argument-2",
+                "alphanumeric",
+                "The currency sign to expect, as for NUMVAL-C.",
+                optional=True,
+            ),
+        ),
+    ),
+    _fn(
+        "TEST-NUMVAL-F",
+        "0 when the argument is valid for NUMVAL-F, else the bad position",
+        "integer",
+        (_alnum(description="The string to test."),),
+    ),
+    _fn(
+        "TRIM",
+        "The argument without leading and/or trailing spaces",
+        "same class as argument-1",
+        (
+            _alnum("argument-1", "The text to trim."),
+            IntrinsicArgument(
+                "argument-2",
+                "keyword",
+                "LEADING or TRAILING. Both ends are trimmed when omitted.",
+                optional=True,
+            ),
+        ),
+    ),
+    _fn(
+        "ULENGTH",
+        "Number of Unicode characters in a UTF-8 or UTF-16 argument",
+        "integer",
+        (_alnum(description="UTF-8 alphanumeric or national text."),),
+    ),
+    _fn(
+        "UPOS",
+        "Byte position of the Nth Unicode character in the argument",
+        "integer",
+        (
+            _alnum("argument-1", "UTF-8 alphanumeric or national text."),
+            _int_arg("argument-2", "The character number, from 1."),
+        ),
+    ),
+    _fn(
+        "USUBSTR",
+        "A substring of a UTF-8 or UTF-16 argument, counted in characters",
+        "same class as argument-1",
+        (
+            _alnum("argument-1", "UTF-8 alphanumeric or national text."),
+            _int_arg("argument-2", "Starting character position, from 1."),
+            _int_arg("argument-3", "Number of characters."),
+        ),
+    ),
+    _fn(
+        "USUPPLEMENTARY",
+        "Position of the first Unicode supplementary character, or 0",
+        "integer",
+        (_alnum(description="UTF-8 alphanumeric or national text."),),
+    ),
+    _fn(
+        "UUID4",
+        "A random (version 4) UUID",
+        "alphanumeric",
+        (),
+        notes=("36 characters: hexadecimal digits in the 8-4-4-4-12 form.",),
+    ),
+    _fn(
+        "UVALID",
+        "0 when the argument is valid UTF-8 or UTF-16, else the bad position",
+        "integer",
+        (_alnum(description="UTF-8 alphanumeric or national text."),),
+    ),
+    _fn(
+        "UWIDTH",
+        "Width in bytes of the Nth Unicode character in the argument",
+        "integer",
+        (
+            _alnum("argument-1", "UTF-8 alphanumeric or national text."),
+            _int_arg("argument-2", "The character number, from 1."),
+        ),
     ),
 )
 
