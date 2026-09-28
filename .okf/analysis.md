@@ -982,6 +982,11 @@ Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Conditional
 branches still share one state (unchanged conservatism); paragraphs
 unreachable from the entry procedure are no longer walked at all.
 
+**`CLOSE f REEL` / `CLOSE f UNIT` keep the file open (2026-09-28).** They
+close only the current volume (`close_options[f]["reel"/"unit"]`); treating
+them as a file close reported READ_BEFORE_OPEN / DOUBLE_CLOSE on the legal
+READ or plain CLOSE that follows.
+
 **Conditional GO TO targets are walked once the chain loops (2026-09-27).**
 `READ IN-F AT END GO TO END-P` / `GO TO LOOP-P` -- the textbook sequential
 loop -- stopped the walk at the revisit of LOOP-P, so END-P's CLOSE was never
@@ -1110,6 +1115,14 @@ BY clause in COBOL, so a CALL to one is never checked for this. `BY CONTENT`
 call arguments are never flagged either way (no USING counterpart to compare
 against).
 
+**CALL argument forms reference their item (2026-09-28).** A CALL
+`USING`/`RETURNING` operand is reduced to its data names
+(`_argument_names`: `ADDRESS OF` / `LENGTH OF` dropped, subscripts and
+reference modifiers removed, every `OF`/`IN` qualifier kept) and a
+subordinate item maps to its 01-level owner, so `LK-REC(1:4)`,
+`ADDRESS OF LK-REC`, `LK-ITEM OF LK-REC` and `LK-ITEM` no longer report
+`LK-REC` as UNREFERENCED_LINKAGE.
+
 **O(units²) → O(units) interface collection (2026-09-10):** `LintAnalyzer`
 used to have each of a file's N program units' own `linkage-check` collector
 call `LinkageChecker.check()` with no shared state, and `check()`'s own
@@ -1205,6 +1218,13 @@ already use -- instead of an independent copy of the same walk. `_files`'s
 (case preserved, for `io_logger`'s human-readable report); this generator
 still upper-cases the result itself since `self._file_entries` is keyed by
 upper-case name.
+
+**SQL write statements (2026-09-28):** for INSERT/UPDATE/DELETE/MERGE only
+`stmt.tables[0]` (the target -- see [dialects.md](dialects.md)) gets the
+write flag; every other table a subquery / `INSERT ... SELECT` / `MERGE ...
+USING` names is marked **R**. `DELETE FROM T WHERE X IN (SELECT X FROM S)`
+used to mark S deleted. MERGE (previously ignored) marks its target with the
+actions its `THEN INSERT|UPDATE|DELETE` clauses take.
 
 ## DynamicCallAnalyzer
 

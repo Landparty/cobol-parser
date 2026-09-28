@@ -31,6 +31,17 @@ dialect.get_dialect_info() -> dict[str, Any]
 statements and IBM-specific data items build on: `ExecSQLStatement`,
 `ExecCICSStatement`, `ExecIMSStatement`, `IBMDataItem`, `IBMDataType`.
 
+## `ExecSQLStatement.tables` (`models/sql_statements.py`)
+
+Source order, with the statement's **target first** for INSERT / UPDATE /
+DELETE / MERGE (`io_logger` and the CRUD matrix rely on `tables[0]`); the
+rest are tables a subquery, `INSERT ... SELECT` or `MERGE ... USING` reads
+(INSERT/UPDATE subquery tables were missing before 2026-09-28). A FROM that
+separates function arguments -- `EXTRACT(YEAR FROM D)`, `TRIM(... FROM C)`,
+`SUBSTRING(N FROM 1)` -- is blanked first (`_blank_function_argument_froms`:
+a FROM directly inside a parenthesised group not opening with SELECT/WITH),
+so the column after it is no longer reported as a table.
+
 ## `get_intrinsic_function_signature` (2026-09-10)
 
 Backed by the complete catalogue in `dialects/le_signatures.py` (the one

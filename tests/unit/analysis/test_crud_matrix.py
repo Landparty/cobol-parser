@@ -1256,3 +1256,50 @@ class TestCursorEdgeCases:
         assert result.ast is not None
         m = CRUDMatrixGenerator().analyze(result.ast)
         assert m.table_entries == []
+
+
+# ---------------------------------------------------------------------------
+# CRUDMatrixGenerator – SQL: a write statement's subquery tables are only read
+# ---------------------------------------------------------------------------
+
+_SUBQUERY_WRITES_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SUBQ.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           EXEC SQL DELETE FROM ORDERS
+               WHERE CUST_ID IN (SELECT ID FROM CLOSED_CUST)
+           END-EXEC
+           EXEC SQL UPDATE ACCOUNT SET RATE = 1
+               WHERE TIER = (SELECT MAX(TIER) FROM TIERS)
+           END-EXEC
+           EXEC SQL INSERT INTO ARCHIVE SELECT * FROM HISTORY END-EXEC
+           EXEC SQL MERGE INTO BALANCE B USING DAILY_TXN D
+               ON B.ID = D.ID
+               WHEN MATCHED THEN UPDATE SET B.AMT = D.AMT
+               WHEN NOT MATCHED THEN INSERT (ID, AMT) VALUES (D.ID, D.AMT)
+           END-EXEC
+           EXEC SQL SELECT EXTRACT(YEAR FROM HIRE_DATE) INTO :WS-Y
+               FROM EMP
+           END-EXEC
+           STOP RUN.
+"""
+
+
+class TestSQLWriteSubqueryTables:
+    def test_crud_per_table(self):
+        result = parse_cobol(_SUBQUERY_WRITES_SOURCE)
+        assert result.ast is not None
+        m = CRUDMatrixGenerator().analyze(result.ast)
+        crud = {e.table_name: e.crud.as_string() for e in m.table_entries}
+        assert crud == {
+            "ORDERS": "---D",
+            "CLOSED_CUST": "-R--",
+            "ACCOUNT": "--U-",
+            "TIERS": "-R--",
+            "ARCHIVE": "C---",
+            "HISTORY": "-R--",
+            "BALANCE": "C-U-",
+            "DAILY_TXN": "-R--",
+            "EMP": "-R--",
+        }

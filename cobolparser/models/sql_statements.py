@@ -169,6 +169,55 @@ def _strip_sql_literals_and_comments(sql: str) -> str:
     return "".join(out)
 
 
+_SQL_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _blank_function_argument_froms(sql: str) -> str:
+    """Blank every ``FROM`` that separates a function's arguments.
+
+    ``EXTRACT(YEAR FROM HIRE_DATE)``, ``TRIM(LEADING '0' FROM ACCT_NO)`` and
+    ``SUBSTRING(NAME FROM 1 FOR 3)`` use FROM inside a parenthesised group
+    that is not a subquery; the ``FROM table`` regexes read the column after
+    it as a table. A FROM directly inside a group whose first word is not
+    SELECT/WITH is replaced by spaces of the same length (a subquery's own
+    FROM, and every top-level FROM, is kept). *sql* must already be scrubbed
+    of literals and comments.
+    """
+    out = list(sql)
+    # One entry per open parenthesis: is that group a subquery? ``None``
+    # until its first word has been seen.
+    groups: list[bool | None] = []
+    i = 0
+    n = len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch == "(":
+            groups.append(None)
+            i += 1
+            continue
+        if ch == ")":
+            if groups:
+                closed = groups.pop()
+                # ``((SELECT ...) UNION SELECT ...)``: a group that opens
+                # with a parenthesised subquery is itself a fullselect.
+                if closed and groups and groups[-1] is None:
+                    groups[-1] = True
+            i += 1
+            continue
+        match = _SQL_WORD_RE.match(sql, i) if (ch.isalpha() or ch == "_") else None
+        if match is None or (i > 0 and (sql[i - 1].isalnum() or sql[i - 1] in "_-:.")):
+            i += 1
+            continue
+        word = match.group(0).upper()
+        if groups:
+            if groups[-1] is None:
+                groups[-1] = word in ("SELECT", "WITH")
+            elif word == "FROM" and groups[-1] is False:
+                out[i : match.end()] = " " * (match.end() - i)
+        i = match.end()
+    return "".join(out)
+
+
 def _scan_sql_tokens(sql: str) -> list[tuple[str, int]]:
     """Tokenize literal/comment-scrubbed SQL into ``(token, paren_depth)``.
 
@@ -690,7 +739,7 @@ class ExecSQLStatement(CobolStatement):
         main_tokens = tokens[main_start:]
 
         # Extract table names (regex pass — preserved for compatibility)
-        self._extract_tables(scrubbed)
+        self._extract_tables(_blank_function_argument_froms(scrubbed))
 
         # Tokenizer pass: adds structure the regexes miss (multi-table FROM
         # lists, JOIN chains, SELECT columns, WHERE presence).
@@ -799,10 +848,16 @@ class ExecSQLStatement(CobolStatement):
             compiled_patterns.append(_SQL_JOIN_TABLE_RE)
 
         elif self._sql_type == SQLStatementType.INSERT:
+            # The target first, then what an ``INSERT ... SELECT`` reads.
             compiled_patterns.append(_SQL_INTO_TABLE_RE)
+            compiled_patterns.append(_SQL_FROM_TABLE_RE)
+            compiled_patterns.append(_SQL_JOIN_TABLE_RE)
 
         elif self._sql_type == SQLStatementType.UPDATE:
+            # The target first, then what a ``SET``/``WHERE`` subquery reads.
             compiled_patterns.append(_SQL_UPDATE_TABLE_RE)
+            compiled_patterns.append(_SQL_FROM_TABLE_RE)
+            compiled_patterns.append(_SQL_JOIN_TABLE_RE)
 
         elif self._sql_type == SQLStatementType.DELETE:
             compiled_patterns.append(_SQL_FROM_TABLE_RE)
@@ -956,6 +1011,7 @@ class DeclareCursorStatement(ExecSQLStatement):
     def _extract_tables_from_select(self, sql: str) -> None:
         """Extract tables from the cursor's SELECT statement."""
         compiled_patterns = [_SQL_FROM_TABLE_RE, _SQL_JOIN_TABLE_RE]
+        sql = _blank_function_argument_froms(_strip_sql_literals_and_comments(sql))
         for pattern in compiled_patterns:
             matches = pattern.findall(sql)
             for table in matches:

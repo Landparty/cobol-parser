@@ -14,6 +14,17 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-28 -- bug hunt round 4: linkage arguments, CLOSE REEL, SQL tables, CRUD writes
+
+[analysis.md](analysis.md): linkage-check matched CALL arguments verbatim, so
+subscripted / ref-modified / qualified / `ADDRESS OF` LINKAGE items read as
+unreferenced; io-sequence treated `CLOSE f REEL|UNIT` as closing the file;
+the CRUD matrix marked a write statement's subquery tables with the write
+flag and ignored MERGE. [dialects.md](dialects.md): `ExecSQLStatement.tables`
+no longer lists the column after a function-argument FROM
+(`EXTRACT(YEAR FROM HIRE_DATE)`), and INSERT/UPDATE now also list the tables
+their subqueries read (target still first).
+
 ## 2026-09-27 -- bug hunt round 3: INSPECT delimiters, directive comments, section dead code
 
 [parser.md](parser.md): INSPECT `BEFORE INITIAL SPACE` dropped every later

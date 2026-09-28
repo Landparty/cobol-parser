@@ -714,3 +714,48 @@ class TestViolationMessages:
             if v.kind == LinkageViolationKind.UNREFERENCED_LINKAGE
         )
         assert "LONELY-PARAM" in v.message
+
+
+class TestCallArgumentForms:
+    """A LINKAGE item passed on in any argument form is referenced.
+
+    The recorded parameter text keeps its subscript / reference modifier /
+    qualifier / ADDRESS OF, so matching it against the bare 01-level name
+    reported every one of these as UNREFERENCED_LINKAGE.
+    """
+
+    _SRC = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PX.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01 LK-A.
+          05 LK-A1 PIC X OCCURS 3.
+       01 LK-B PIC X(4).
+       01 LK-C PIC X(4).
+       01 LK-D PIC X(4).
+       01 LK-E.
+          05 LK-E1 PIC X(4).
+       01 LK-F PIC X(4).
+       01 LK-UNUSED PIC X(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL 'SUB1' USING LK-A1(1) OF LK-A
+           CALL 'SUB2' USING BY REFERENCE ADDRESS OF LK-B
+           CALL 'SUB3' USING BY CONTENT LENGTH OF LK-C
+           CALL 'SUB4' USING LK-D(1:2)
+           CALL 'SUB5' USING LK-E1
+           CALL 'SUB6' RETURNING LK-F
+           GOBACK.
+"""
+
+    def test_only_the_really_unused_item_is_reported(self):
+        result = parse_cobol(self._SRC)
+        assert result.errors == []
+        report = LinkageChecker().check(result.ast)
+        unreferenced = [
+            v.item_name
+            for v in report.violations
+            if v.kind == LinkageViolationKind.UNREFERENCED_LINKAGE
+        ]
+        assert unreferenced == ["LK-UNUSED"]

@@ -497,9 +497,15 @@ class IOSequenceAnalyzer:
     def _handle_close(self, node: IOCloseStatement, loc: SourceLocation | None) -> None:
         """Process a CLOSE statement."""
         files = self._get_close_files(node)
+        options = getattr(node, "close_options", None) or {}
         for file_name in files:
             if not file_name.strip():
                 continue  # Skip empty/whitespace names
+            # CLOSE f REEL / UNIT closes only the current volume: the file
+            # itself stays open (a later READ, or a plain CLOSE f, is legal).
+            opts = options.get(file_name) or {}
+            if opts.get("reel") or opts.get("unit"):
+                continue
             key = file_name.upper()
             if key in self._open_files:
                 self._open_files.discard(key)
