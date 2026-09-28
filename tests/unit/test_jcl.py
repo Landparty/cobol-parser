@@ -1693,6 +1693,38 @@ CARD
             ("L.THREE", "SHR"),
         ]
 
+    def test_column_72_is_not_part_of_the_parameter_field(self):
+        first = (
+            "//IN DD DSN=A.B,DISP=SHR,UNIT=SYSDA,SPACE=(TRK,1),DCB=(RECFM=FB,LR=12),"
+        )
+        assert len(first) == 71
+        text = (
+            "//J JOB 1\n//S1 EXEC PGM=A\n"
+            + first
+            + "X00000300\n//             LRECL=80\n//\n"
+        )
+        result = parse_jcl(text)
+        assert result.errors == []
+        dd = result.jobs[0].steps[0].dd("IN")
+        assert [p.keyword for p in dd.parameters][-2:] == ["DCB", "LRECL"]
+        assert dd.record_length == 80
+
+    def test_nonblank_column_72_continues_the_comment_field(self):
+        first = ("//IN DD DSN=A.B,DISP=SHR".ljust(40) + "FIRST PART").ljust(71)
+        text = (
+            "//J JOB 1\n//S1 EXEC PGM=A\n"
+            + first
+            + "X\n//             SECOND PART\n//OUT DD SYSOUT=*\n//\n"
+        )
+        result = parse_jcl(text)
+        assert result.errors == []
+        step = result.jobs[0].steps[0]
+        assert step.dd("IN").dataset == "A.B"
+        assert step.dd("OUT").line == 5
+        card = scan_cards(text).cards[2]
+        assert card.comment == "FIRST PART SECOND PART"
+        assert card.end_line == 4
+
     def test_override_naming_a_missing_procedure_step_is_reported(self):
         result = parse_jcl(self.PROC + "//S EXEC P,PARM.NOPE=X\n//\n")
         assert result.errors == []

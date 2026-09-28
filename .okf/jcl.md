@@ -114,11 +114,15 @@ statement: continuation already joined, in-stream data already separated.
 |---------|---------|
 | 1–2 | `//` identifier field (`//*` comment, `/*` delimiter) |
 | 3 | first column of the name field; blank means "no name" |
-| 3–72 | name, operation and parameter fields, blank-separated |
+| 3–71 | name, operation and parameter fields, blank-separated |
+| 72 | continuation column (`CONTINUATION_INDICATOR_COLUMN`): never part of a field |
 | 73–80 | identification/sequence field, **discarded before anything reads the card** |
 
-Because columns 73–80 go first, a sequence-numbered deck parses identically to
-an unnumbered one. Card kinds are `KIND_STATEMENT`, `KIND_COMMENT`,
+Because columns 72–80 go first, a sequence-numbered deck parses identically to
+an unnumbered one, and a parameter coded through column 71 is not lengthened
+by a column-72 marker. A nonblank in column 72 on a statement that is not
+otherwise continued continues its **comment field**: the next `//` card with
+a blank column 3 is read as more comment, not as a statement. Card kinds are `KIND_STATEMENT`, `KIND_COMMENT`,
 `KIND_NULL`, `KIND_JES`.
 
 ## Continuation — the rule that is usually got wrong

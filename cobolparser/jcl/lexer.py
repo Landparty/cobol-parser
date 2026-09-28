@@ -16,12 +16,15 @@ Columns       Meaning
 ============  ==========================================================
 1-2           ``//`` identifier field (``//*`` comment, ``/*`` delimiter)
 3             first column of the name field; blank means "no name"
-3-72          name, operation and parameter fields, blank-separated
+3-71          name, operation and parameter fields, blank-separated
+72            continuation column, never part of a field
 73-80         identification/sequence field, ignored
 ============  ==========================================================
 
-Columns 73-80 are discarded before anything else looks at the card, so a
-sequence-numbered deck parses the same as an unnumbered one.
+Columns 72-80 are discarded before anything else looks at the card, so a
+sequence-numbered deck parses the same as an unnumbered one.  A nonblank in
+column 72 of a statement not otherwise continued continues its comment field
+onto the next ``//`` card with a blank column 3.
 
 Continuation -- the rule that is usually got wrong
 --------------------------------------------------
@@ -72,6 +75,10 @@ from .._lines import split_source_lines
 
 #: Columns 73-80 are the identification field and are discarded.
 CARD_WIDTH = 72
+
+#: Column 72 is not part of any field: a nonblank there continues a
+#: statement's comment onto the next card.
+CONTINUATION_INDICATOR_COLUMN = 72
 
 #: A continued parameter field must resume within these columns (1-based).
 CONTINUATION_MIN_COLUMN = 4
@@ -292,8 +299,18 @@ def _scan_parameter_segment(
 
 
 def _card_text(line: str) -> str:
-    """Columns 1-72 of a card image, trailing blanks removed."""
-    return line.rstrip()[:CARD_WIDTH]
+    """Columns 1-71 of a card image, trailing blanks removed.
+
+    Column 72 is the continuation column, never part of a field: a
+    parameter coded through column 71 followed by a marker in column 72
+    must not read as one character longer.
+    """
+    return line[: CONTINUATION_INDICATOR_COLUMN - 1].rstrip()
+
+
+def _marks_comment_continuation(line: str) -> bool:
+    """Whether ``line`` has a nonblank in column 72, continuing its comment."""
+    return line[CONTINUATION_INDICATOR_COLUMN - 1 : CARD_WIDTH].strip() != ""
 
 
 def _open_quote_padding(card_text: str, in_quote: bool) -> str:
@@ -435,6 +452,18 @@ class _Scanner:
             elif joined.endswith(","):
                 continuation = "parameter"
             else:
+                # A nonblank in column 72 continues the comment field onto
+                # a following `//` card with a blank column 3.
+                if (
+                    _marks_comment_continuation(self.lines[cursor])
+                    and cursor + 1 < len(self.lines)
+                    and _is_continuation_card(_card_text(self.lines[cursor + 1]))
+                    and self.lines[cursor + 1][2:3] != "*"
+                ):
+                    cursor += 1
+                    raw_lines.append(self.lines[cursor])
+                    comments.append(_card_text(self.lines[cursor])[2:].strip())
+                    continue
                 break
 
             if cursor + 1 >= len(self.lines):
