@@ -2396,8 +2396,12 @@ RETURNING item counts as named, so it is never `unreferenced_linkage`.
 DIVISION uses each parameter, reusing xref's role vocabulary:
 
 * `write` plus any read → `input-output`.
-* A reference only as a CALL argument or SQL host variable (`_AMBIGUOUS_ROLES`)
-  → `unknown`, and listed in `unchecked`. A caller told "input-only" about a
+* A reference as a BY REFERENCE CALL argument or SQL host variable
+  (`_AMBIGUOUS_ROLES`), with no write elsewhere → `unknown`, and listed in
+  `unchecked`. A `BY CONTENT` / `BY VALUE` CALL argument is not ambiguous:
+  the callee gets a copy, so xref records it `read` (2026-09-28; it used to
+  be `call-argument`, which graded a parameter only passed on BY CONTENT
+  `unknown`). A caller told "input-only" about a
   field the callee overwrites has been told something worse than nothing.
   xref files `ENTRY "X" USING p` itself under the CALL-argument role
   (`statement == "EntryStatement"`); those refs are dropped before grading,
