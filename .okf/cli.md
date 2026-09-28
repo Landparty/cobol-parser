@@ -196,6 +196,10 @@ Under `auto` (the default) normalisation runs only when `_detect_fixed_format`
 classifies the source as fixed (it used to run unconditionally, silently
 slicing columns off genuine free-form input); `--source-format=fixed` forces
 it; `--source-format=free` skips it entirely.
+Records are split with `_lines.split_source_lines` (\n / \r\n / \r only),
+the same splitter the parser uses. Before 2026-09-28 `preprocess` used
+`str.splitlines()`, so a form feed / NEL / U+2028 inside a comment record
+split it in two and the comment's tail came out as code.
 
 ## Source layout (`--source-format`)
 

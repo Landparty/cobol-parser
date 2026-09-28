@@ -857,9 +857,15 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
     if source_format == "fixed" or (
         source_format == "auto" and _detect_fixed_format(source)
     ):
+        from .._lines import split_source_lines
+
         normalize_warnings: list[str] = []
+        # split_source_lines, not str.splitlines(): the latter also breaks on
+        # a form feed (a page eject inside a comment record), NEL, U+2028...
+        # which split one record in two and emitted the tail of a comment
+        # as code -- output `parse` itself never sees.
         source = normalize_fixed_format(
-            source.splitlines(), warnings=normalize_warnings
+            split_source_lines(source), warnings=normalize_warnings
         )
         for nw in normalize_warnings:
             print(f"warning: {nw}", file=sys.stderr)
