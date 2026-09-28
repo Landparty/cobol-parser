@@ -66,6 +66,19 @@ INTO too). The list regexes (`_SQL_HV_LIST`) take `\s*` after the keyword
 `sql_cics_lint` had grown text-regex fallbacks for it, still in place.
 Pinned by `tests/unit/test_exec_sql_host_variable_lists.py`.
 
+## `FetchStatement` cursor / orientation (`models/sql_statements.py`)
+
+`_parse_fetch_clause()` reads `FETCH [SENSITIVE|INSENSITIVE] [WITH CONTINUE]
+[orientation] [FROM] cursor [FOR n ROWS]` positionally: `cursor_name` is the
+first word none of those may be, `fetch_direction` the orientation word
+(NEXT default; PRIOR/FIRST/LAST/CURRENT/BEFORE/AFTER/ABSOLUTE/RELATIVE, the
+ROWSET forms included) and `fetch_count` the `FOR n ROWS` size. Before
+2026-09-28 `FETCH NEXT ROWSET FROM C1` named cursor `ROWSET` (likewise
+`ABSOLUTE`, `SENSITIVE`), `FETCH PRIOR FROM C1` named none -- so the CRUD
+matrix lost the cursor's read -- and the direction was a substring test
+(`INTO :WS-LAST-NAME` made a FETCH LAST). Pinned by
+`tests/unit/test_exec_sql_fetch_orientation.py`.
+
 ## `ExecSQLStatement.tables` (`models/sql_statements.py`)
 
 Source order, with the statement's **target first** for INSERT / UPDATE /

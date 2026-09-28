@@ -56,9 +56,60 @@ _SQL_COLUMN_DEF_RE = re.compile(
     r"(?:\s+(NOT\s+NULL))?",  # optional NOT NULL
     re.IGNORECASE,
 )
-_SQL_FETCH_RE = re.compile(
-    r"FETCH\s+(?:NEXT\s+)?(?:FROM\s+)?([A-Za-z_][A-Za-z0-9_-]*)", re.IGNORECASE
+_SQL_FETCH_WORD_RE = re.compile(r":?[A-Za-z_][A-Za-z0-9_-]*|[+-]?\d+")
+_SQL_FETCH_ROWS_RE = re.compile(r"\bFOR\s+(\d+)\s+ROWS?\b", re.IGNORECASE)
+#: Words that may stand between FETCH and the cursor name (DB2 for z/OS:
+#: sensitivity, WITH CONTINUE, and the scroll / rowset orientations).
+_SQL_FETCH_SKIP_WORDS = frozenset(
+    {"INSENSITIVE", "SENSITIVE", "WITH", "CONTINUE", "ROWSET", "STARTING", "AT"}
 )
+_SQL_FETCH_ORIENTATIONS = frozenset(
+    {"NEXT", "PRIOR", "FIRST", "LAST", "CURRENT", "BEFORE", "AFTER"}
+)
+#: Orientations followed by a position operand (an integer or a host variable).
+_SQL_FETCH_POSITIONED = frozenset({"ABSOLUTE", "RELATIVE"})
+
+
+def _parse_fetch_clause(sql: str) -> tuple[str | None, str | None, int | None]:
+    """Read ``(orientation, cursor name, rowset size)`` off a FETCH statement.
+
+    ``FETCH [SENSITIVE] [WITH CONTINUE] [orientation] [FROM] cursor
+    [FOR n ROWS] ...``. The cursor is the first word that is none of the
+    words that may precede it; a regex taking "the word after FETCH [NEXT]
+    [FROM]" read ``FETCH NEXT ROWSET FROM C1`` as cursor ``ROWSET``,
+    ``FETCH ABSOLUTE 5 FROM C1`` as ``ABSOLUTE`` and ``FETCH PRIOR FROM C1``
+    as no cursor at all.
+    """
+    words = _SQL_FETCH_WORD_RE.findall(sql)
+    if not words or words[0].upper() != "FETCH":
+        return None, None, None
+    orientation: str | None = None
+    i = 1
+    while i < len(words):
+        word = words[i].upper()
+        if word in _SQL_FETCH_SKIP_WORDS or word == "FROM":
+            i += 1
+        elif word in _SQL_FETCH_ORIENTATIONS:
+            orientation = orientation or word
+            i += 1
+        elif word in _SQL_FETCH_POSITIONED:
+            orientation = orientation or word
+            i += 2  # the position operand
+        else:
+            break
+    cursor: str | None = None
+    if i < len(words):
+        candidate = words[i]
+        if not candidate.startswith(":") and candidate.upper() not in {
+            "INTO",
+            "FOR",
+            "USING",
+        }:
+            cursor = candidate
+    rows = _SQL_FETCH_ROWS_RE.search(sql)
+    return orientation, cursor, int(rows.group(1)) if rows else None
+
+
 _SQL_OPEN_RE = re.compile(r"OPEN\s+([A-Za-z_][A-Za-z0-9_-]*)", re.IGNORECASE)
 _SQL_CLOSE_RE = re.compile(r"CLOSE\s+([A-Za-z_][A-Za-z0-9_-]*)", re.IGNORECASE)
 _SQL_PREPARE_RE = re.compile(
@@ -910,17 +961,7 @@ class ExecSQLStatement(CobolStatement):
                 self.cursor_name = match.group(1)
 
         elif self._sql_type == SQLStatementType.FETCH:
-            match = _SQL_FETCH_RE.search(sql)
-            if match:
-                cursor_candidate = match.group(1)
-                if cursor_candidate.upper() not in [
-                    "INTO",
-                    "NEXT",
-                    "PRIOR",
-                    "FIRST",
-                    "LAST",
-                ]:
-                    self.cursor_name = cursor_candidate
+            self.cursor_name = _parse_fetch_clause(sql)[1]
 
         elif self._sql_type == SQLStatementType.OPEN_CURSOR:
             match = _SQL_OPEN_RE.search(sql)
@@ -1191,11 +1232,13 @@ class FetchStatement(ExecSQLStatement):
     def __init__(self, location: SourceLocation):
         super().__init__(location)
         self.statement_type = "FETCH"
-        self.fetch_direction: str = "NEXT"  # NEXT, PRIOR, FIRST, LAST
+        #: NEXT (the default), PRIOR, FIRST, LAST, CURRENT, BEFORE, AFTER,
+        #: ABSOLUTE or RELATIVE.
+        self.fetch_direction: str = "NEXT"
         self.fetch_count: int | None = None
 
     def set_fetch_direction(self, direction: str) -> None:
-        """Set fetch direction (NEXT, PRIOR, FIRST, LAST)."""
+        """Set the fetch orientation (NEXT, PRIOR, FIRST, LAST, ...)."""
         self.fetch_direction = direction.upper()
 
     def get_structured_output(self) -> SQLStatementInfo:
@@ -1325,11 +1368,12 @@ def parse_exec_sql(sql_text: str, location: SourceLocation) -> ExecSQLStatement:
     if upper_sql.startswith("FETCH"):
         fetch_stmt = FetchStatement(location)
         fetch_stmt.set_sql_text(sql_text)
-        # Extract direction
-        for direction in ["NEXT", "PRIOR", "FIRST", "LAST"]:
-            if direction in upper_sql:
-                fetch_stmt.set_fetch_direction(direction)
-                break
+        # Orientation and rowset size, read positionally: a substring test
+        # took ``FETCH C1 INTO :WS-LAST-NAME`` for a FETCH LAST.
+        direction, _cursor, rows = _parse_fetch_clause(normalized)
+        if direction:
+            fetch_stmt.set_fetch_direction(direction)
+        fetch_stmt.fetch_count = rows
         return fetch_stmt
 
     elif upper_sql.startswith("PREPARE") or upper_sql.startswith("EXECUTE"):

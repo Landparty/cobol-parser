@@ -8,6 +8,10 @@ timestamp: 2026-09-17T00:00:00Z
 
 # Overview
 
+2026-09-28: `tests/unit/test_exec_sql_fetch_orientation.py` (10 tests) pins
+FETCH cursor name / orientation / rowset size for scroll, sensitive and
+rowset forms, and a rowset FETCH's cursor in the CRUD matrix.
+
 2026-09-28: `tests/unit/test_exec_sql_host_variable_lists.py` (6 tests)
 pins `into_variables` / `using_variables` read from parsed source (no blank
 after INTO/USING), indicators kept in the list rather than ending it.
