@@ -263,6 +263,38 @@ def test_blank_when_zero_reads_spaces_as_zero(charset):
         assert record.errors == []
 
 
+@pytest.mark.parametrize("charset", [Charset.ASCII, Charset.EBCDIC])
+def test_justified_right_round_trips_and_is_right_aligned(charset):
+    source = (
+        "       01  R.\n"
+        "           05  J PIC X(8) JUSTIFIED RIGHT.\n"
+        "           05  K PIC X(4).\n"
+    )
+    opts = EncodingOptions(charset=charset)
+    decoder = _decoder(source, opts)
+    specs = [placed.spec for placed in decoder.views.base.fields]
+    data = encode_record(specs, ["AB", "CD"], opts)
+    space = bytes([opts.space])
+    assert data[:8] == space * 6 + "AB".encode(
+        "cp037" if opts.space == 0x40 else "ascii"
+    )
+    record = decoder.decode_bytes(data).records[0]
+    assert [f.value for f in record.fields] == ["AB", "CD"]
+    assert record.errors == []
+
+
+def test_a_thirty_one_digit_packed_field_decodes_exactly():
+    # ARITH(EXTEND): 31 digits, more than Decimal's default 28-digit context,
+    # which used to read this back as ...456790.00.
+    field = _one_field(
+        "       01  R.\n           05  F PIC S9(29)V99 COMP-3.\n",
+        bytes.fromhex("1234567890123456789012345678901d"),
+        EncodingOptions(),
+    )
+    assert field.value == "-12345678901234567890123456789.01"
+    assert field.error is None
+
+
 def test_without_blank_when_zero_spaces_are_still_an_error():
     field = _one_field(
         "       01  R.\n           05  D PIC 9(3).\n", b"   ", EncodingOptions()
@@ -377,6 +409,17 @@ def test_a_sign_zone_outside_the_sign_position_is_an_error_not_a_negation():
 # ---------------------------------------------------------------------------
 # Bytes that are not what the PICTURE says
 # ---------------------------------------------------------------------------
+
+
+def test_a_non_zero_packed_pad_nibble_is_reported_not_read_as_a_digit():
+    # An even digit count leaves the first byte's high nibble as pad. Reading
+    # it as a digit made PIC S9(2)V99 hold 123.45, which it cannot.
+    source = "       01  R.\n           05  P PIC S9(2)V99 COMP-3.\n"
+    field = _one_field(source, bytes.fromhex("12345c"), EncodingOptions())
+    assert field.value == "23.45"
+    assert field.error is not None and "pad nibble" in field.error
+    clean = _one_field(source, bytes.fromhex("01234d"), EncodingOptions())
+    assert (clean.value, clean.error) == ("-12.34", None)
 
 
 def test_a_bad_packed_sign_nibble_is_reported_with_a_best_effort_value():

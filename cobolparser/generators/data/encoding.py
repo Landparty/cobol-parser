@@ -46,7 +46,7 @@ from __future__ import annotations
 import struct
 import sys
 from dataclasses import dataclass
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Context, Decimal, InvalidOperation
 from enum import StrEnum
 
 from .editing import edit_numeric
@@ -329,14 +329,28 @@ def field_storage_size(spec: FieldSpec) -> int:
     return spec.storage_size
 
 
-def _encode_text(text: str, size: int, opts: EncodingOptions) -> bytes:
+def _encode_text(
+    text: str, size: int, opts: EncodingOptions, *, justified: bool = False
+) -> bytes:
     """Left-justified, space-padded, truncated to *size* -- COBOL's own
-    alphanumeric MOVE semantics, applied at the byte level."""
+    alphanumeric MOVE semantics, applied at the byte level.
+
+    *justified* (``JUSTIFIED RIGHT``) mirrors it: the value is right-aligned
+    behind leading spaces, and an oversized one loses its leftmost
+    characters rather than its rightmost.
+    """
     codec = EBCDIC_CODEC if opts.charset is Charset.EBCDIC else "ascii"
     raw = text.encode(codec, errors="replace")
     if len(raw) >= size:
-        return raw[:size]
-    return raw + bytes([opts.space]) * (size - len(raw))
+        return raw[len(raw) - size :] if justified else raw[:size]
+    pad = bytes([opts.space]) * (size - len(raw))
+    return pad + raw if justified else raw + pad
+
+
+#: Exact decimal arithmetic for :func:`_scaled_integer`.  The default context
+#: holds 28 significant digits, and ``scaleb`` rounds to it: a 31-digit
+#: ``ARITH(EXTEND)`` value lost its low-order digits before it was packed.
+_EXACT = Context(prec=1000)
 
 
 def _scaled_integer(text: str, spec: FieldSpec) -> int:
@@ -358,15 +372,23 @@ def _scaled_integer(text: str, spec: FieldSpec) -> int:
         return 0
     # Quantize by shifting the exponent rather than multiplying: exact for
     # every value _format_number can have produced, including PIC 9(18).
-    units = value.scaleb(spec.decimal_digits)
+    units = value.scaleb(spec.decimal_digits, context=_EXACT)
     scaling = spec.scaling_positions
     if scaling > 0:
         # Trailing P: the low `scaling` digits are implied zeros that no
         # byte holds -- ``123000`` in ``9(3)PPP`` is stored as ``123``.
         # Truncation, not rounding, is what the compiler does with a value
         # that is not a whole multiple (``123456`` -> ``123``).
-        return int(units.scaleb(-scaling).to_integral_value(rounding=ROUND_DOWN))
-    return int(units.to_integral_value())
+        return int(
+            units.scaleb(-scaling, context=_EXACT).to_integral_value(
+                rounding=ROUND_DOWN, context=_EXACT
+            )
+        )
+    # Decimal places beyond the PICTURE's are truncated, not rounded, as a
+    # COBOL numeric MOVE does: ``9.999`` into ``9V99`` stores ``999``.
+    # Rounding (half-even) stored ``1000``, which the high-order truncation
+    # in `_digits_string` then turned into ``000`` -- a zero.
+    return int(units.to_integral_value(rounding=ROUND_DOWN, context=_EXACT))
 
 
 def _digits_string(magnitude: int, digits: int) -> str:
@@ -519,7 +541,7 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         # (see ``encoding_caveats``), so -- like a ``PIC N`` field -- the
         # value is written as text padded to the field's full width rather
         # than as five zoned bytes in a ten-byte slot.
-        return _encode_text(text, width, opts)
+        return _encode_text(text, width, opts, justified=spec.justified)
     # DISPLAY from here down.  An unedited numeric picture is zoned decimal.
     # A numeric-edited one holds what a MOVE into it would leave: the CSV
     # cell is the logical value (`1234.56`), the bytes are the edited form
@@ -542,7 +564,7 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         )
         if edited is not None and len(edited) == width:
             return _encode_text(edited, width, opts)
-    return _encode_text(text, width, opts)
+    return _encode_text(text, width, opts, justified=spec.justified)
 
 
 def encode_record(

@@ -183,6 +183,57 @@ class TestZonedDecimal:
         assert encode_field(spec, "", EncodingOptions()) == b"00000"
 
 
+class TestExcessDecimalPlaces:
+    """A value with more decimal places than the PICTURE is truncated, as a
+    COBOL numeric MOVE does -- it used to be rounded half-even, so ``9.999``
+    into ``9V99`` became ``1000``, high-order truncated to ``000``: zero."""
+
+    def test_zoned_truncates_rather_than_rounds(self):
+        spec = one_spec("F PIC 9V99.")
+        assert encode_field(spec, "9.999", EncodingOptions()) == b"999"
+
+    def test_packed_truncates_toward_zero(self):
+        spec = one_spec("F PIC S9V99 COMP-3.")
+        assert encode_field(spec, "-1.239", EncodingOptions()) == bytes.fromhex("123d")
+
+    def test_binary_truncates(self):
+        spec = one_spec("F PIC 9(3)V9 COMP.")
+        assert encode_field(spec, "12.35", EncodingOptions()) == (123).to_bytes(
+            2, "big"
+        )
+
+    def test_numeric_edited_truncates(self):
+        spec = one_spec("F PIC ZZ9.99.")
+        assert encode_field(spec, "9.999", EncodingOptions()) == b"  9.99"
+
+
+class TestThirtyOneDigits:
+    """``ARITH(EXTEND)`` allows 31 digits; Decimal's default 28-digit context
+    used to round the low-order ones away before they were written."""
+
+    VALUE = "1234567890123456789012345678901"
+
+    def test_packed_keeps_every_digit(self):
+        spec = one_spec("F PIC S9(31) COMP-3.")
+        raw = encode_field(spec, self.VALUE, EncodingOptions())
+        assert raw == bytes.fromhex(self.VALUE + "c")
+
+    def test_packed_with_decimals_keeps_every_digit(self):
+        spec = one_spec("F PIC S9(29)V99 COMP-3.")
+        raw = encode_field(spec, "12345678901234567890123456789.01", EncodingOptions())
+        assert raw == bytes.fromhex(self.VALUE + "c")
+
+    def test_zoned_and_edited_keep_every_digit(self):
+        assert (
+            encode_field(one_spec("F PIC 9(31)."), self.VALUE, EncodingOptions())
+            == self.VALUE.encode()
+        )
+        assert (
+            encode_field(one_spec("F PIC Z(30)9."), self.VALUE, EncodingOptions())
+            == self.VALUE.encode()
+        )
+
+
 class TestAlphanumeric:
     def test_short_value_is_space_padded_on_the_right(self):
         spec = one_spec("F PIC X(6).")
@@ -203,6 +254,27 @@ class TestAlphanumeric:
         raw = encode_field(spec, "-12.34", EncodingOptions())
         assert len(raw) == spec.storage_size
         assert raw == b"- 12.34"
+
+
+class TestJustifiedRight:
+    """``JUSTIFIED RIGHT`` reverses the alphanumeric MOVE: pad on the left,
+    truncate on the left.  The encoder used to ignore the clause and write
+    ``AB    `` where a COBOL MOVE leaves ``    AB``."""
+
+    def test_short_value_is_space_padded_on_the_left(self):
+        spec = one_spec("F PIC X(6) JUSTIFIED RIGHT.")
+        assert spec.justified
+        assert encode_field(spec, "AB", EncodingOptions()) == b"    AB"
+        assert encode_field(spec, "AB", EBCDIC) == b"\x40" * 4 + bytes.fromhex("c1c2")
+
+    def test_oversized_value_loses_its_leftmost_characters(self):
+        spec = one_spec("F PIC X(3) JUST.")
+        assert encode_field(spec, "ABCDEF", EncodingOptions()) == b"DEF"
+
+    def test_without_the_clause_nothing_changes(self):
+        spec = one_spec("F PIC X(6).")
+        assert not spec.justified
+        assert encode_field(spec, "AB", EncodingOptions()) == b"AB    "
 
 
 class TestStorageOnlyUsages:
