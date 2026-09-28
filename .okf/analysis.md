@@ -1694,7 +1694,14 @@ of an `in_set` over the word itself (which rendered `"SPA"`);
 figurative constants (`SPACES`/`ZEROS`/`LOW-VALUES`/...) become `figurative`
 with the symbolic name preserved in `values`, not its literal expansion (the
 solver fills an alphanumeric field's whole width with it: `ZEROS` on `PIC
-X(3)` is `"000"`, since `"0"` pads to `"0  "`);
+X(3)` is `"000"`, since `"0"` pads to `"0  "`); `LOW-VALUES` / `HIGH-VALUES` / `NULL`
+(binary X'00' / X'FF', which generated character data never holds -- both
+tables map them to `""`, which rendered as *blanks*) make the positive test
+`Unsatisfiable` instead of witnessing spaces, and a numeric field compared
+equal to any non-zero figurative (`SPACES`, `QUOTES`, ...) likewise, rather
+than no-op'ing to an arbitrary number (2026-09-28,
+`tests/regression/test_domains_unrepresentable_figuratives.py`); the negated
+forms narrow nothing;
 class tests (`IS NUMERIC`/`IS ALPHABETIC`) become `class_numeric`/
 `class_alphabetic`; sign/zero tests (`IS POSITIVE`/`NEGATIVE`/`ZERO`) fold
 directly into the relational vocabulary (`gt 0`/`lt 0`/`eq 0`) rather than
