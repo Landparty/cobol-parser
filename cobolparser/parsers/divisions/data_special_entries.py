@@ -121,6 +121,8 @@ class SpecialEntryParser:
             else:
                 break
 
+        self._parse_when_set_to_false(token_stream, item)
+
         # Consume trailing period
         if not token_stream.is_empty():
             t = token_stream.peek()
@@ -128,6 +130,55 @@ class SpecialEntryParser:
                 token_stream.consume()
 
         return item
+
+    @staticmethod
+    def _parse_when_set_to_false(
+        token_stream: ITokenStream, item: ConditionNameItem
+    ) -> None:
+        """``WHEN SET TO FALSE [IS] literal`` after a level-88 value list.
+
+        IBM Enterprise COBOL: the literal is what ``SET condition-name TO
+        FALSE`` stores in the conditional variable. It used to be skipped to
+        the period with no trace. Recorded as ``item.false_value``; a sign
+        token before a numeric literal is folded in as in the value list.
+        """
+        t = token_stream.peek()
+        if not t or not t.value or t.value.upper() != "WHEN":
+            return
+        offset = 1
+        for keyword in ("SET", "TO"):
+            nxt = token_stream.peek(offset)
+            if nxt and nxt.value and nxt.value.upper() == keyword:
+                offset += 1
+        nxt = token_stream.peek(offset)
+        if not nxt or not nxt.value or nxt.value.upper() != "FALSE":
+            return
+        offset += 1
+        nxt = token_stream.peek(offset)
+        if nxt and nxt.value and nxt.value.upper() == "IS":
+            offset += 1
+        literal = token_stream.peek(offset)
+        sign = ""
+        if literal and literal.type in (TokenType.MINUS, TokenType.PLUS):
+            after = token_stream.peek(offset + 1)
+            if not after or after.type not in (
+                TokenType.NUMERIC_LITERAL,
+                TokenType.LEVEL_NUMBER,
+            ):
+                return
+            sign = literal.value
+            offset += 1
+            literal = after
+        if not literal or literal.type not in (
+            TokenType.STRING_LITERAL,
+            TokenType.NUMERIC_LITERAL,
+            TokenType.FIGURATIVE_CONSTANT,
+            TokenType.LEVEL_NUMBER,
+        ):
+            return
+        item.false_value = f"{sign}{literal.value}"
+        for _ in range(offset + 1):
+            token_stream.consume()
 
     def parse_renames_item(self, token_stream: ITokenStream) -> RenamesItem | None:
         """Parse a level-66 RENAMES item.

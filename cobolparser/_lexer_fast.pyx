@@ -171,10 +171,12 @@ class CobolLexer(_CobolLexerBase):
         out_tokens.append(
             Token(TokenType.EOF, "", SourceLocation(n_lines + 1, 1, 1))
         )
-        # Inherited pure-Python post-pass (lexer.py): flags '!'/'|'/'¬'
-        # tokens outside EXEC ... END-EXEC as the invalid characters they
-        # are. One linear scan; not worth a C-typed mirror.
-        self._flag_stray_sql_chars()
+        # Inherited pure-Python post-passes (lexer.py ``_post_tokenize``):
+        # joins ``lit & lit`` into one literal and flags '!'/'|'/'¬' tokens
+        # outside EXEC ... END-EXEC as the invalid characters they are.
+        # Both rewrite ``out_tokens`` in place; linear scans, not worth a
+        # C-typed mirror.
+        self._post_tokenize()
         return out_tokens
 
     # ------------------------------------------------------------------

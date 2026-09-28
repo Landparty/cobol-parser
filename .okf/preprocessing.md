@@ -621,6 +621,20 @@ exactly (undefined / non-integer operand, division by zero, inexact
 division) keeps the raw text as before. Arithmetic inside an `>>IF`
 comparison is still unsupported (warns, FALSE).
 
+**Literal contents are case-sensitive; `-1` and `'O''BRIEN'` are operands
+(2026-09-28).** The directive line used to be `line.strip().upper()`-ed as a
+whole, so `>>DEFINE X AS 'abc'` then `>>IF X = 'ABC'` was TRUE.
+`_upper_outside_literals` now folds only keywords / symbol names (text
+outside quotes); `_compare` / `_values_equal` compare non-numeric values
+exactly. A caller-supplied `defined_symbols` value that is *quoted* keeps
+its case; an *unquoted* one is a word and is upper-cased (so
+`{"ENV": "prod"}` still matches `'PROD'`, as before). `_COND_TOKEN_RE`
+accepts a signed number (`[-+]?\d+...`) and literals with a doubled
+delimiter; `_strip_quotes` un-doubles it (`'O''BRIEN'` -> `O'BRIEN`), for
+both `>>DEFINE` values and `>>IF` / `>>WHEN` operands. Both used to make the
+condition unparseable (FALSE + warning). Pinned by
+`tests/regression/test_conditional_compilation_literals.py`.
+
 # Source-Text Manipulation: REPLACE + un-expanded COPY (2026-07-14)
 
 `preprocess/replace_statement.py` implements the two source-text

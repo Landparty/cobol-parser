@@ -222,6 +222,13 @@ class InitializeStatement(CobolStatement):
         self.targets: list[str] = []
         self.replacing_clauses: list[dict[str, str]] = []
         self.with_filler: bool = False
+        #: ``{ALL | category} TO VALUE`` (Enterprise COBOL 6): which items
+        #: are set to their VALUE clause -- ``"ALL"`` or a category name;
+        #: ``None`` when the phrase is absent.
+        self.to_value_category: str | None = None
+        #: ``[THEN] TO DEFAULT``: items not otherwise initialized get the
+        #: default for their category.
+        self.to_default: bool = False
 
     def add_target(self, target: str) -> None:
         self.targets.append(target)
@@ -239,6 +246,8 @@ class InitializeStatement(CobolStatement):
                 "targets": self.targets,
                 "replacing_clauses": self.replacing_clauses,
                 "with_filler": self.with_filler,
+                "to_value_category": self.to_value_category,
+                "to_default": self.to_default,
             }
         )
         return result

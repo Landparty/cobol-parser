@@ -948,6 +948,10 @@ class ConditionNameItem(ASTNode):
         super().__init__("ConditionNameItem", location)
         self.name = name
         self.values: list[str] = []
+        #: ``VALUE ... WHEN SET TO FALSE [IS] literal`` (IBM): the value
+        #: ``SET condition-name TO FALSE`` moves into the conditional
+        #: variable; ``None`` when the entry has no such phrase.
+        self.false_value: str | None = None
 
     def add_value(self, value: str) -> None:
         """Add a VALUE entry for this condition name."""
@@ -958,6 +962,7 @@ class ConditionNameItem(ASTNode):
             "node_type": self.node_type,
             "name": self.name,
             "values": self.values,
+            "false_value": self.false_value,
             "location": self.location.to_dict(),
             "metadata": self._metadata or {},
         }
