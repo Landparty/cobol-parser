@@ -2912,3 +2912,22 @@ step.
 latter also breaks on form feed / NEL / U+2028, which put every later
 `location.line` off by one against the editor and the listing. See
 `preprocessing.md` ("Audit 2026-09-17").
+
+# Level-88 `WHEN SET TO FALSE`, INITIALIZE `TO VALUE` / `TO DEFAULT` (2026-09-28)
+
+* **`88 name VALUE ... WHEN SET TO FALSE [IS] literal`** (IBM): the value
+  loop in `SpecialEntryParser.parse_condition_name_item` stopped at `WHEN`
+  and the rest of the entry was skipped to the period with no warning.
+  `_parse_when_set_to_false` accepts `WHEN [SET] [TO] FALSE [IS]` + a
+  (signed) literal or figurative constant and records it as
+  `ConditionNameItem.false_value`; anything else after `WHEN` is left for
+  the old skip.
+* **`INITIALIZE id ... [WITH FILLER] [{ALL | category} TO VALUE] [THEN
+  REPLACING ...] [THEN TO DEFAULT]`** (Enterprise COBOL 6): the
+  `TO VALUE` / `TO DEFAULT` phrases warned "Unparsed tokens" and were
+  dropped. The target loop now also stops at `ALL` / `THEN` / `TO` / a
+  category word (`_INITIALIZE_PHRASE_STARTS`); the phrases are recorded as
+  `InitializeStatement.to_value_category` / `.to_default`. `THEN` is
+  optional before `REPLACING` / `TO DEFAULT` (`_match_then`).
+
+Pinned by `tests/regression/test_level88_false_and_initialize_phrases.py`.

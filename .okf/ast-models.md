@@ -512,3 +512,14 @@ pass and the CLI's `--program NAME` (see [cli.md](cli.md)). Pinned by
   declaration.
 * Flow model: `FlowEdgeType.XML_PROCESSING_PROCEDURE[_THRU]`,
   `FlowEdgeType.CICS_HANDLE`; `FlowNode.is_declarative`.
+
+# `ConditionNameItem.false_value`, `InitializeStatement.to_value_category` / `.to_default` (2026-09-28)
+
+* `ConditionNameItem.false_value: str | None` -- the literal of a level-88
+  `WHEN SET TO FALSE [IS] literal` phrase (a sign folded into a numeric
+  literal as in `values`: `"-0"`; a figurative constant by name: `"SPACE"`),
+  `None` when absent. Always present in `to_dict()`.
+* `InitializeStatement.to_value_category: str | None` (`"ALL"` or a category
+  name such as `"NUMERIC"`, from Enterprise COBOL 6's `{ALL | category} TO
+  VALUE`) and `.to_default: bool` (`[THEN] TO DEFAULT`). Both always present
+  in `to_dict()`.

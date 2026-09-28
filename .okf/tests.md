@@ -996,6 +996,15 @@ too (see commands above).
   `["any"]`, not the stale hand-written `numeric`/`["string"]`) now that the
   override table only supplies `CURRENT-DATE`'s byte length, a fact the
   `le_signatures` catalogue has no structured field for at all.
+* `tests/regression/test_conditional_compilation_literals.py` (2026-09-28)
+  — `>>DEFINE`/`>>IF`/`>>WHEN` literal contents compare case-sensitively;
+  `-1` and doubled-delimiter literals (`'O''BRIEN'`) are operands.
+* `tests/regression/test_literal_concatenation.py` (2026-09-28) — `lit & lit`
+  merged into one STRING_LITERAL by both lexers (VALUE clause, MOVE source,
+  across lines, fixed-format columns); unlike kinds / `Z` literals kept apart.
+* `tests/regression/test_level88_false_and_initialize_phrases.py`
+  (2026-09-28) — `ConditionNameItem.false_value`; INITIALIZE
+  `to_value_category` / `to_default`.
 
 # Copybook missing-period check, per entry (2026-09-12)
 
