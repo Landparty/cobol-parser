@@ -144,9 +144,13 @@ swallowed.
 
 The parameter field ends at the first blank outside both quotes and
 parentheses; the rest of the card is a comment. Blanks *inside* parentheses are
-kept — which is what makes `// IF (STEP1.RC = 0) THEN` survive — and
-`IF`/`ELSE`/`ENDIF` are scanned to end-of-card because their operand is a
-relational expression, not a parameter list.
+kept. `IF`/`ELSE`/`ENDIF` follow their own rule because their operand is a
+relational expression, not a parameter list: `IF`'s expression runs, blanks
+included, up to `THEN` — continued onto following cards (text in columns
+4-16, a card opening with an operation word is never a continuation) until
+`THEN` is found — and whatever follows `THEN` is a comment, so a comment
+holding an apostrophe or ending in a comma no longer reads as a continuation.
+`ELSE`/`ENDIF` take no operand; the rest of their card is a comment.
 
 ## In-stream data
 

@@ -1635,6 +1635,42 @@ CARD
         assert in2.instream_lines == []
         assert result.dd_map()["SYSIN"] == []
 
+    def test_if_expression_continued_onto_the_next_card(self):
+        result = parse_jcl("""\
+//J JOB 1
+//S1 EXEC PGM=A
+// IF (S1.RC = 0 &
+//     S1.RC < 8) THEN
+//S2 EXEC PGM=B
+// ENDIF
+//
+""")
+        assert result.errors == []
+        step = result.jobs[0].step("S2")
+        assert step.condition == "(S1.RC = 0 & S1.RC < 8)"
+        assert step.line == 5
+
+    def test_comments_on_if_else_endif_are_not_continuations(self):
+        result = parse_jcl("""\
+//J JOB 1
+//S1 EXEC PGM=A
+// IF RC = 0 THEN   RUN IT'S STEP
+//S2 EXEC PGM=B
+// ELSE           OTHERWISE,
+//S3 EXEC PGM=C
+// ENDIF  END OF BLOCK,
+//S4 EXEC PGM=D
+//
+""")
+        assert result.errors == []
+        job = result.jobs[0]
+        assert job.step("S2").condition == "RC = 0"
+        assert job.step("S3").condition == "NOT (RC = 0)"
+        assert job.step("S4").condition is None
+        scan = scan_cards("// IF RC = 0 THEN   RUN IT'S STEP\n")
+        assert scan.cards[0].parameters == "RC = 0 THEN"
+        assert scan.cards[0].comment == "RUN IT'S STEP"
+
     def test_override_naming_a_missing_procedure_step_is_reported(self):
         result = parse_jcl(self.PROC + "//S EXEC P,PARM.NOPE=X\n//\n")
         assert result.errors == []
