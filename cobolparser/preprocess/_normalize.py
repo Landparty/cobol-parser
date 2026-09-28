@@ -1036,8 +1036,8 @@ _COND_TOKEN_RE = re.compile(
     | (?P<rparen>\))
     | (?P<op>>=|<=|<>|=|>|<)
     | (?P<boollit>B'[01]'|B"[01]")
-    | (?P<string>'[^']*'|"[^"]*")
-    | (?P<number>\d+(?:\.\d+)?)
+    | (?P<string>'(?:[^']|'')*'|"(?:[^"]|"")*")
+    | (?P<number>[-+]?\d+(?:\.\d+)?)
     | (?P<word>[A-Z_][A-Z0-9_-]*)
     """,
     re.VERBOSE,
@@ -1072,11 +1072,44 @@ def _strip_directive_comment(text: str) -> str:
 
 
 def _strip_quotes(text: str) -> str:
-    """Strip one pair of matching surrounding quotes, if present."""
+    """Strip one pair of matching surrounding quotes, if present.
+
+    A doubled delimiter inside the literal stands for one occurrence of it
+    (``'O''BRIEN'`` is ``O'BRIEN``), as in any COBOL literal.
+    """
     text = text.strip()
     if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
-        return text[1:-1]
+        quote = text[0]
+        return text[1:-1].replace(quote * 2, quote)
     return text
+
+
+def _upper_outside_literals(text: str) -> str:
+    """Upper-case *text* except the contents of quoted literals.
+
+    Directive keywords and compilation-variable names are case-insensitive,
+    but a literal's contents are not: ``>>DEFINE X AS 'abc'`` then ``>>IF X
+    = 'ABC'`` is FALSE. Upper-casing the whole directive line made it TRUE.
+    A doubled delimiter inside a literal is kept as literal text.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    start = 0
+    for i, ch in enumerate(text):
+        if quote is None:
+            if ch in ("'", '"'):
+                out.append(text[start:i].upper())
+                quote = ch
+                start = i
+        elif ch == quote:
+            # A doubled delimiter closes and immediately reopens: the
+            # contents between are still literal text either way.
+            out.append(text[start : i + 1])
+            quote = None
+            start = i + 1
+    tail = text[start:]
+    out.append(tail if quote is not None else tail.upper())
+    return "".join(out)
 
 
 _DEFINE_ARITH_TOKEN_RE = re.compile(r"\s*(?:([A-Za-z0-9][\w-]*)|([-+*/()]))")
@@ -1175,11 +1208,13 @@ def _try_number(text: str) -> float | None:
 
 def _values_equal(left: str, right: str) -> bool:
     """Compare two resolved values: numerically when both are numeric,
-    otherwise as case-insensitive strings."""
+    otherwise as strings. Case matters -- a literal's contents are never
+    folded (keywords and symbol names already are, before this is reached).
+    """
     ln, rn = _try_number(left), _try_number(right)
     if ln is not None and rn is not None:
         return ln == rn
-    return left.upper() == right.upper()
+    return left == right
 
 
 def _tokenize_condition(text: str) -> list[tuple[str, str]]:
@@ -1368,7 +1403,7 @@ class _ConditionParser:
         if ln is not None and rn is not None:
             lc, rc = ln, rn
         else:
-            lc, rc = lv.upper(), rv.upper()
+            lc, rc = lv, rv
         if op == "=":
             return lc == rc
         if op == "<>":
@@ -1431,12 +1466,21 @@ def _evaluate_condition(
 
 
 def _coerce_symbol_value(value: str | int | float | bool) -> str:
-    """Normalize a caller-supplied symbol value to its string form."""
+    """Normalize a caller-supplied symbol value to its string form.
+
+    A quoted value is an alphanumeric literal and keeps its case
+    (``"'prod'"`` is ``prod``); an unquoted one is taken as a word, which --
+    like a word on a directive line -- is case-insensitive and so folded
+    (``"prod"`` is ``PROD``).
+    """
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
     if isinstance(value, (int, float)):
         return str(value)
-    return _strip_quotes(value)
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in "'\"":
+        return _strip_quotes(stripped)
+    return stripped.upper()
 
 
 def _normalize_defined_symbols(
@@ -1507,7 +1551,7 @@ def _fixed_format_directive_text(line: str) -> str | None:
 
     if not _sequence_area_is_fixed_like(expanded[:DEFAULT_SEQ_COL_END])[0]:
         return None
-    text = expanded[TEXT_START_COL - 1 : TEXT_END_COL].strip().upper()
+    text = _upper_outside_literals(expanded[TEXT_START_COL - 1 : TEXT_END_COL].strip())
     return text if text.startswith(">>") else None
 
 
@@ -1537,7 +1581,8 @@ def preprocess_conditional_compilation(
     - ``symbol IS [NOT] DEFINED`` and ``DEFINED(symbol)``
     - comparisons ``=``, ``<>``, ``>``, ``<``, ``>=``, ``<=`` between
       symbols and numeric/string literals (numeric when both sides are
-      numeric, otherwise case-insensitive string comparison)
+      numeric, otherwise a case-sensitive comparison of literal contents;
+      keywords and symbol names are case-insensitive)
     - boolean literals ``B'0'``/``B'1'``, ``TRUE``, ``FALSE``
     - ``AND`` / ``OR`` / ``NOT`` with parentheses
 
@@ -1587,7 +1632,7 @@ def preprocess_conditional_compilation(
         return all(frame.active for frame in frames)
 
     for line_no, line in enumerate(split_source_lines(source), start=1):
-        stripped = line.strip().upper()
+        stripped = _upper_outside_literals(line.strip())
         if not stripped.startswith(">>"):
             # A directive in a sequence-numbered fixed-format line
             # (``000400     >>IF ...``) starts at column 8, not column 1.
