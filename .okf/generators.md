@@ -1501,7 +1501,15 @@ deserializer as a real bundle would silently iterate a string character-
 by-character instead of hitting a type error) plus a new `csv_path` key
 (the relative CSV path, or `null` if this fixture got no CSV), so a
 consumer can discover what scenarios/fixtures exist — and where each one's
-CSV lives — without walking the directory tree first. See
+CSV lives — without walking the directory tree first. **Names are made
+unique** (2026-09-28): scenario names repeat (two IFs in one paragraph both
+plan `"<PARA>: THEN"`), and both used to slug to one directory, the later
+scenario's CSV overwriting the earlier one's with both manifest entries
+pointing at the survivor. `_unique_names` suffixes a repeated slug `-2`,
+`-3`, ... (first keeps its plain slug, case-insensitive), and `_csv_names`
+does the same for a `<KEY>.csv` two fixtures would write with *different*
+rows (identical same-key fixtures still share one file). Both passes use the
+one precomputed name list, so `csv_path` always names the file written. See
 `docs/fixture-bundle-schema.md`'s own "write_csv_dir" section for the full
 manifest shape.
 

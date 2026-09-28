@@ -373,6 +373,62 @@ def expand_condition_values(raw_values: list[str]) -> list[str]:
     return list(dict.fromkeys(v for v in values if v != ""))
 
 
+def condition_values_exhaustive(raw_values: list[str], decimal_digits: int) -> bool:
+    """Whether :func:`expand_condition_values` lists *every* value the
+    condition name admits, for a field with *decimal_digits* decimals.
+
+    A positive test (``IF COND``) only ever needs one member, so a partial
+    list is still sound for it. A *negated* one (``IF NOT COND``, or the
+    ``WHEN OTHER`` after ``WHEN COND``) is modelled as ``not_in_set`` over the
+    listed values, which is only sound when nothing else satisfies ``COND``.
+    That fails for a ``THRU`` range the expansion cannot enumerate: a
+    non-integer range (only its endpoints are listed), one wider than the
+    expansion cap, or any range over a field with decimal places (``VALUE 1
+    THRU 2`` on ``PIC 9V9`` also admits 1.5). A figurative constant
+    (``VALUE SPACES``) is not a literal value at all.
+    """
+    previous: str | None = None
+    for raw in raw_values:
+        match = _THROUGH_RE.match(raw)
+        if match is None:
+            cleaned = _strip_literal_quotes(raw)
+            if raw.strip().upper() in _FIGURATIVE_WORDS or raw.strip().upper() == "ALL":
+                return False
+            previous = cleaned
+            continue
+        end = _strip_literal_quotes(match.group(1))
+        if (
+            decimal_digits > 0
+            or previous is None
+            or not _INTEGER_LITERAL_RE.match(previous)
+            or not _INTEGER_LITERAL_RE.match(end)
+            or abs(int(end) - int(previous)) > _MAX_RANGE_EXPANSION
+        ):
+            return False
+        previous = end
+    return True
+
+
+#: Figurative constants as they can appear in a level-88 VALUE clause.
+_FIGURATIVE_WORDS = frozenset(
+    {
+        "SPACE",
+        "SPACES",
+        "ZERO",
+        "ZEROS",
+        "ZEROES",
+        "LOW-VALUE",
+        "LOW-VALUES",
+        "HIGH-VALUE",
+        "HIGH-VALUES",
+        "QUOTE",
+        "QUOTES",
+        "NULL",
+        "NULLS",
+    }
+)
+
+
 def _condition_values(item: CobolDataItem) -> list[str]:
     """Collect level-88 VALUEs under *item*, merged across all its
     level-88 children -- FieldSpec.condition_values needs "any value that

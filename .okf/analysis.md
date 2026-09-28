@@ -1639,9 +1639,23 @@ arm of an `EVALUATE TRUE / WHEN <88>` chain produce a byte-identical
 constraint, so the solver picked the first 88's value for all of them and the
 scenario named for the second arm was seeded with the first arm's value and
 never reached the branch it was named for. Both lookups stay available
-because they answer different questions;
+because they answer different questions. **A negated 88 needs the whole
+set** (2026-09-28): `condition_values()` is only a *sample* when a `THRU`
+range could not be enumerated (a non-integer range lists its endpoints, an
+integer one is capped at 65 values, and any range over a field with
+decimals admits values in between). `NOT <88>` over such a name, and the
+`WHEN OTHER` after `WHEN <88>`, are reported in `unsupported` rather than
+modelled as a `not_in_set` whose witness can sit inside the range
+(`layout.condition_values_exhaustive()` over
+`ProgramLayoutIndex.condition_raw_values()` decides; a non-exhaustive
+positive `in_set` carries `FieldConstraint.exhaustive=False`, not part of
+`to_dict()`). An 88 whose one VALUE is a figurative constant (`VALUE
+SPACES`) becomes the `figurative` constraint `IF X = SPACES` would, instead
+of an `in_set` over the word itself (which rendered `"SPA"`);
 figurative constants (`SPACES`/`ZEROS`/`LOW-VALUES`/...) become `figurative`
-with the symbolic name preserved in `values`, not its literal expansion;
+with the symbolic name preserved in `values`, not its literal expansion (the
+solver fills an alphanumeric field's whole width with it: `ZEROS` on `PIC
+X(3)` is `"000"`, since `"0"` pads to `"0  "`);
 class tests (`IS NUMERIC`/`IS ALPHABETIC`) become `class_numeric`/
 `class_alphabetic`; sign/zero tests (`IS POSITIVE`/`NEGATIVE`/`ZERO`) fold
 directly into the relational vocabulary (`gt 0`/`lt 0`/`eq 0`) rather than
@@ -1692,11 +1706,14 @@ solved against. A genuine contradiction (`in_set ("A")` AND
 `not_in_set ("A")`) is still `Unsatisfiable`.
 
 **AND/OR/NOT via De Morgan.** `IfStatement.condition` is walked once for the
-THEN arm (`negate=False`) and once more for the ELSE arm (`negate=True`) --
-there is no structural "NOT" node in this parser to walk instead (confirmed
-against `_conditions.py`: negation is baked directly into concrete operator
-strings like `NOT_EQUAL`/`IS NOT NUMERIC`, or resolved by the caller passing
-`negate=True`). An AND stays a single conjunct list; a negated AND becomes a
+THEN arm (`negate=False`) and once more for the ELSE arm (`negate=True`).
+Most negation is baked into concrete operator strings (`NOT_EQUAL`/`IS NOT
+NUMERIC`), but `_conditions.py` wraps a negation it cannot fold -- `NOT
+FLAG-ON`, `NOT (A = 1 AND B = 2)` -- in a unary `LogicalExpression("NOT")`
+whose operand is `left_condition`; `_extract_expr` walks that operand with
+`negate` flipped (2026-09-28: it used to reject the wrapper as an
+"unsupported logical operator", leaving both arms of `IF NOT <88>`
+unmodeled). An AND stays a single conjunct list; a negated AND becomes a
 disjunction (`NOT(A AND B) = NOT A OR NOT B`) and vice versa for OR --
 implemented as one `(operator == "AND") != negate` boolean flip, not two
 separate code paths. A conjunction drops the *whole* variant if either side
