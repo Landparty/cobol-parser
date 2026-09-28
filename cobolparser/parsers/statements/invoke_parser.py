@@ -8,9 +8,11 @@ from ...models.statements import InvokeStatement
 from ._utils import (
     SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
+    consume_optional_qualifiers,
     consume_period,
     get_parse_context,
     matches_keyword,
+    peek_past_noise,
     report_parse_error,
     skip_whitespace,
     token_location,
@@ -51,8 +53,9 @@ class InvokeStatementParser(IStatementParser):
         # "MOVE silently accepted malformed/incomplete input" audit).
         token = token_stream.peek()
         if token and token.type == TokenType.IDENTIFIER and token.value:
-            stmt.set_object_name(token.value)
             token_stream.consume()
+            # ``INVOKE WS-OBJ-TAB (I) "m"`` / ``INVOKE OBJ OF GRP "m"``
+            stmt.set_object_name(consume_optional_qualifiers(token_stream, token.value))
             skip_whitespace(token_stream)
         else:
             report_parse_error(
@@ -114,8 +117,13 @@ class InvokeStatementParser(IStatementParser):
                 skip_whitespace(token_stream)
                 target = token_stream.peek()
                 if target and target.type == TokenType.IDENTIFIER and target.value:
-                    stmt.set_returning_target(target.value)
                     token_stream.consume()
+                    # ``RETURNING WS-R (2)`` / ``RETURNING X OF GRP`` -- the
+                    # subscript/qualifier is part of the target, not a
+                    # stray token to be warned about and dropped.
+                    stmt.set_returning_target(
+                        consume_optional_qualifiers(token_stream, target.value)
+                    )
                     skip_whitespace(token_stream)
                 continue
 
@@ -160,14 +168,43 @@ class InvokeStatementParser(IStatementParser):
                     skip_whitespace(token_stream)
                 continue
 
+            if token.type == TokenType.OMITTED:
+                token_stream.consume()
+                stmt.add_using_parameter("OMITTED", passing_mode)
+                continue
+            if token.type == TokenType.FIGURATIVE_CONSTANT:
+                token_stream.consume()
+                stmt.add_using_parameter((token.value or "").upper(), passing_mode)
+                continue
             if token.type in (
-                TokenType.IDENTIFIER,
                 TokenType.STRING_LITERAL,
                 TokenType.NUMERIC_LITERAL,
                 TokenType.LEVEL_NUMBER,
-                TokenType.FIGURATIVE_CONSTANT,
             ):
                 stmt.add_using_parameter(token.value or "", passing_mode)
                 token_stream.consume()
-            else:
-                break
+                continue
+            if token.type == TokenType.IDENTIFIER and token.value:
+                token_stream.consume()
+                name = token.value
+                # ``LENGTH OF x`` / ``ADDRESS OF x`` are one argument, and a
+                # subscript / OF-IN qualifier chain belongs to the argument
+                # before it (the same forms CALL's USING folds). Before
+                # 2026-09-28 the loop stopped at the ``(`` / ``OF``, the
+                # rest of the statement -- RETURNING included -- was
+                # warned about and dropped.
+                if name.upper() in ("ADDRESS", "LENGTH"):
+                    of_tok, of_idx = peek_past_noise(token_stream, 0)
+                    if of_tok and token_value_upper(of_tok) == "OF":
+                        name_tok, _ = peek_past_noise(token_stream, of_idx + 1)
+                        if name_tok and name_tok.type == TokenType.IDENTIFIER:
+                            skip_whitespace(token_stream)
+                            token_stream.consume()  # OF
+                            skip_whitespace(token_stream)
+                            token_stream.consume()  # identifier
+                            name = f"{name.upper()} OF {name_tok.value}"
+                stmt.add_using_parameter(
+                    consume_optional_qualifiers(token_stream, name), passing_mode
+                )
+                continue
+            break
