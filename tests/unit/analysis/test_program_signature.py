@@ -542,3 +542,30 @@ class TestEntryUsingAndPassingModes:
 
         assert "LK-R" not in signature.unreferenced_linkage
         assert signature.unreferenced_linkage == []
+
+
+def test_by_content_and_by_value_call_arguments_are_input():
+    # A sub-CALL BY CONTENT / BY VALUE hands the callee a copy, so the
+    # parameter cannot be written back through it; only BY REFERENCE is
+    # ambiguous.
+    source = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. SUB.\n"
+        "       DATA DIVISION.\n"
+        "       LINKAGE SECTION.\n"
+        "       01 LK-A PIC X(4).\n"
+        "       01 LK-B PIC S9(9) COMP-5.\n"
+        "       01 LK-C PIC X(4).\n"
+        "       PROCEDURE DIVISION USING LK-A LK-B LK-C.\n"
+        "           CALL 'OTHER' USING BY CONTENT LK-A BY VALUE LK-B\n"
+        "                              BY REFERENCE LK-C.\n"
+        "           GOBACK.\n"
+    )
+    signature = ProgramSignatureExtractor().analyze(parse_cobol(source).ast)
+    params = signature.to_dict()["entry_points"][0]["parameters"]
+    assert {p["name"]: p["direction"] for p in params} == {
+        "LK-A": "input",
+        "LK-B": "input",
+        "LK-C": "unknown",
+    }
+    assert [note.split(":")[0] for note in signature.unchecked] == ["LK-C"]

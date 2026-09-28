@@ -2396,8 +2396,12 @@ RETURNING item counts as named, so it is never `unreferenced_linkage`.
 DIVISION uses each parameter, reusing xref's role vocabulary:
 
 * `write` plus any read → `input-output`.
-* A reference only as a CALL argument or SQL host variable (`_AMBIGUOUS_ROLES`)
-  → `unknown`, and listed in `unchecked`. A caller told "input-only" about a
+* A reference as a BY REFERENCE CALL argument or SQL host variable
+  (`_AMBIGUOUS_ROLES`), with no write elsewhere → `unknown`, and listed in
+  `unchecked`. A `BY CONTENT` / `BY VALUE` CALL argument is not ambiguous:
+  the callee gets a copy, so xref records it `read` (2026-09-28; it used to
+  be `call-argument`, which graded a parameter only passed on BY CONTENT
+  `unknown`). A caller told "input-only" about a
   field the callee overwrites has been told something worse than nothing.
   xref files `ENTRY "X" USING p` itself under the CALL-argument role
   (`statement == "EntryStatement"`); those refs are dropped before grading,
@@ -2541,6 +2545,13 @@ mistaken for the data item WS-KEY; before that the two reduced to the same
 tokens.) A quiet report
 with a populated `unchecked` is not a clean program, it is an unexamined one.
 
+The search for a status check after an `EXEC SQL` stops at the next
+executable `EXEC SQL` written directly in a paragraph (also inside a
+PERFORMed one): it resets the SQLCA, so `DELETE` / `COMMIT` / `IF SQLCODE`
+reports the DELETE (2026-09-28; before, the one check was credited to both).
+SQL inside an IF/EVALUATE body may not run and does not end the search;
+neither does a declaration or `WHENEVER`.
+
 `DECLARE GLOBAL TEMPORARY TABLE` is executable and is graded;
 DECLARE CURSOR / TABLE / STATEMENT / VARIABLE are not
 (`_NON_EXECUTABLE_SQL_TYPES`). A `DECLARE TABLE` or `INCLUDE` in the DATA
@@ -2586,7 +2597,10 @@ STATUS, ASSIGN, OPTIONAL, plus the FD's presence, record size, recording mode
 and FD-vs-SD kind); data items keyed by section plus qualified path
 (`WORKING-STORAGE:WS-TAB.WS-ENT` — PICTURE/USAGE/level/VALUE/OCCURS/REDEFINES
 plus the SIGN / JUSTIFIED / SYNCHRONIZED / BLANK WHEN ZERO / EXTERNAL / GLOBAL
-flags and level-88 names and values); procedures (added, removed, renamed,
+flags and level-88 names and values — an entry with no data-name, which the
+parser names `ANONYMOUS-<level>-<line>`, is keyed as a positional `FILLER`
+since 2026-09-28, so a line shift no longer reports it removed and re-added);
+procedures (added, removed, renamed,
 **moved** — reordered without a body change, reported separately so a pure
 reshuffle never reads as a rewrite — and body-changed); and statements within
 matched paragraphs.
@@ -2621,8 +2635,12 @@ following paragraph as moved, and a pure reformat reports nothing at all.
 Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
 IF, EVALUATE, SEARCH, and (review follow-up) OPEN, EXEC SQL, EXEC CICS, COMPUTE,
 INSPECT, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
-operands *and* its rendered text**, so an unmodelled edit over-reports rather
-than reading as unchanged.
+operands, its rendered text *and* its own `to_dict()` fields** (locations and
+nested statement bodies stripped — those are compared on their own), so an
+unmodelled edit over-reports rather than reading as unchanged. (2026-09-28:
+the rendered text is a truncated summary that omits STRING's INTO, READ's
+INTO/KEY, WRITE's FROM, ...; before the `to_dict()` fields were added,
+`STRING ... INTO A` → `INTO B` diffed as no change.)
 
 Determinism: the same pair always produces byte-identical `to_dict()` — changes
 sorted by category, symbol, kind then remaining fields (`_sort_key` is a total

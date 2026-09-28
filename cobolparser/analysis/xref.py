@@ -1233,7 +1233,13 @@ class XrefAnalyzer:
         elif isinstance(stmt, CallStatement):
             for parameter in stmt.using_parameters:
                 if parameter.name:
-                    pairs.append((parameter.name, ROLE_CALL_ARGUMENT, True))
+                    # BY CONTENT / BY VALUE hand the callee a copy: the
+                    # caller's item is read and can never be written back.
+                    # Only BY REFERENCE (the default) may go either way.
+                    mode = (parameter.passing_mode or "REFERENCE").upper()
+                    by_copy = mode in ("CONTENT", "VALUE")
+                    role = ROLE_READ if by_copy else ROLE_CALL_ARGUMENT
+                    pairs.append((parameter.name, role, True))
             for attr in ("returning_parameter", "giving_parameter"):
                 value = getattr(stmt, attr, None)
                 if value:
