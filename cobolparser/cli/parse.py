@@ -1724,6 +1724,10 @@ def _cmd_compare(args: argparse.Namespace) -> None:
         _compare_fail(str(exc))
     except OSError as exc:
         _compare_fail(f"Cannot read file: {exc}")
+    except UnicodeDecodeError as exc:
+        # A copybook that is not text (a record file passed as --copybook).
+        # Uncaught, the traceback exits 1 -- "the files differ".
+        _compare_fail(f"Cannot read copybook {args.copybook}: {exc}")
 
     if args.output_format == "json":
         text = (
@@ -3781,6 +3785,19 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _config_fail(message: str, argv: list[str]) -> NoReturn:
+    """A config error before the subcommand ran.
+
+    Exit 1 like every other failure -- except for ``compare``, whose exit 1
+    means "the files differ": a CI gate reading that status would report a
+    missing or malformed ``cobol.yml`` as a data regression.
+    """
+    subcommand = next((arg for arg in argv if not arg.startswith("-")), None)
+    if subcommand == "compare":
+        _compare_fail(message)
+    _fail(message)
+
+
 def main() -> None:
     argv = sys.argv[1:]
 
@@ -3790,7 +3807,7 @@ def main() -> None:
     try:
         argv, config_path, config_disabled = _project_config.extract_config_flags(argv)
     except ConfigError as exc:
-        _fail(str(exc))
+        _config_fail(str(exc), argv)
 
     # Backward compatibility: if the first non-flag argument is not a known
     # subcommand, assume the user is using the legacy syntax and prepend "parse".
@@ -3817,7 +3834,7 @@ def main() -> None:
         try:
             config = load_project_config(path=config_path)
         except ConfigError as exc:
-            _fail(str(exc))
+            _config_fail(str(exc), argv)
     args._project_config = config
 
     if config.source is not None:

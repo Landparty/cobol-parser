@@ -835,7 +835,11 @@ of a batch run against the actual one. Implementation:
   layout error, unwritable `-o`). `_cmd_compare` therefore uses its own
   `_compare_fail()` (exit 2) and its own output writer rather than `_fail()` /
   `_verbatim_out()`, both of which exit 1 -- which here would read as "the
-  files differ".
+  files differ". Two failures happen before `_cmd_compare` runs or outside
+  its expected exceptions and used to exit 1 (2026-09-28): a `--config` /
+  `cobol.yml` error (`main()` now routes it through `_config_fail()`, which
+  exits 2 when the subcommand is `compare`), and a copybook that is not text
+  (a `UnicodeDecodeError` traceback; now caught).
 * **`--key`** (repeatable) pairs records by key; **`--ignore`** (repeatable)
   drops a column, a field name (every occurrence) or a group. Both are checked
   against the layout; a typo is exit 2 with the valid column names.
