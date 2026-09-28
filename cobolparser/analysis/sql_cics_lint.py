@@ -690,9 +690,8 @@ def _is_singleton_select_without_into(statement: ExecSQLStatement, upper: str) -
         return False
     if statement.into_variables or statement.cursor_name:
         return False
-    # ``into_variables`` is populated by a regex that wants whitespace after
-    # INTO, and the EXEC text collector writes ``INTO:WS-NAME``; check the
-    # text directly rather than trust an empty list.
+    # ``into_variables`` reads ``INTO:WS-NAME`` as written by the EXEC text
+    # collector since 2026-09-28; the direct text check stays as a backstop.
     return _INTO_HOST_VAR_RE.search(upper) is None
 
 

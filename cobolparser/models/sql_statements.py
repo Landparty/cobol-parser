@@ -28,7 +28,16 @@ _SQL_FROM_TABLE_RE = re.compile(r"FROM\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
 _SQL_JOIN_TABLE_RE = re.compile(r"JOIN\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
 _SQL_INTO_TABLE_RE = re.compile(r"INTO\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
 _SQL_UPDATE_TABLE_RE = re.compile(r"UPDATE\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
-_SQL_INTO_VARS_RE = re.compile(r"INTO\s+(:[\w-]+(?:\s*,\s*:[\w-]+)*)", re.IGNORECASE)
+# A host-variable list (``INTO`` / ``USING``): each item is ``:hv``, optionally
+# qualified (``:REC.FIELD``) and optionally followed by its indicator
+# (``:hv:ind`` / ``:hv INDICATOR :ind``). The EXEC text collector writes no
+# blank before a colon (``INTO:WS-A``), so none is required after the keyword
+# -- requiring one (``INTO\s+``) left into_variables empty for every parsed
+# program, and an indicator ended the list at its first item.
+_SQL_HV = r":[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*"
+_SQL_HV_ITEM = rf"{_SQL_HV}(?:\s*(?:INDICATOR\s*)?{_SQL_HV})?"
+_SQL_HV_LIST = rf"({_SQL_HV_ITEM}(?:\s*,\s*{_SQL_HV_ITEM})*)"
+_SQL_INTO_VARS_RE = re.compile(r"\bINTO\s*" + _SQL_HV_LIST, re.IGNORECASE)
 _SQL_DECLARE_CURSOR_RE = re.compile(
     r"DECLARE\s+([A-Za-z_][A-Za-z0-9_-]*)\s+CURSOR", re.IGNORECASE
 )
@@ -57,7 +66,7 @@ _SQL_PREPARE_RE = re.compile(
 )
 _SQL_EXECUTE_RE = re.compile(r"EXECUTE\s+([A-Za-z_][A-Za-z0-9_-]*)", re.IGNORECASE)
 _SQL_FOR_SELECT_RE = re.compile(r"FOR\s+(SELECT.+)", re.IGNORECASE | re.DOTALL)
-_SQL_USING_VARS_RE = re.compile(r"USING\s+(:[\w-]+(?:\s*,\s*:[\w-]+)*)", re.IGNORECASE)
+_SQL_USING_VARS_RE = re.compile(r"\bUSING\s*" + _SQL_HV_LIST, re.IGNORECASE)
 _SQL_SAVEPOINT_RE = re.compile(
     r"TO\s+(?:SAVEPOINT\s+)?([A-Za-z_][A-Za-z0-9_-]*)", re.IGNORECASE
 )

@@ -327,6 +327,11 @@ bodies and main statement read -- never the CTE names themselves
 (`_split_common_table_expressions()`). Before 2026-09-27 both were
 `"UNKNOWN"` with no tables.
 
+`into_variables` / `DynamicSQLStatement.using_variables` list every host
+variable of the INTO / USING list, indicators included; before 2026-09-28
+both were empty for any statement parsed from source. See
+[dialects.md](dialects.md).
+
 # Statement Models (`models/statements/`)
 
 | File | Node Classes |

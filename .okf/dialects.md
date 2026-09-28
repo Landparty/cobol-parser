@@ -54,6 +54,18 @@ variable. EXEC CICS / DLI text is still collected unquoted (option values are
 read bare by the codebase graph and signature extractor). Pinned by
 `tests/unit/test_exec_sql_literals_comments.py`.
 
+## `into_variables` / `using_variables` (`models/sql_statements.py`)
+
+Every host variable of the `INTO` (SELECT / FETCH) or `USING` (PREPARE /
+EXECUTE) list, in order, **indicators included** (they are written by the
+INTO too). The list regexes (`_SQL_HV_LIST`) take `\s*` after the keyword
+-- the collector writes `INTO:WS-A` -- and an item may carry an indicator
+(`:A:IND`, `:A INDICATOR :IND`) or a qualifier (`:REC.FLD`). Before
+2026-09-28 both lists were empty for every statement parsed from source
+(`INTO\s+:` never matched) and an indicator ended the list; `io_logger` and
+`sql_cics_lint` had grown text-regex fallbacks for it, still in place.
+Pinned by `tests/unit/test_exec_sql_host_variable_lists.py`.
+
 ## `ExecSQLStatement.tables` (`models/sql_statements.py`)
 
 Source order, with the statement's **target first** for INSERT / UPDATE /
