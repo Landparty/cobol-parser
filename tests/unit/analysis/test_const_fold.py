@@ -711,3 +711,109 @@ class TestToDict:
         # to_dict() must be a copy, not an alias, of the internal dict.
         fold.to_dict()["known"]["WS-A"] = "mutated"
         assert fold.known["WS-A"] == "5"
+
+
+class TestLoopVariablesAndAliases:
+    """Writes that hide outside a statement's body/operands: PERFORM VARYING
+    / AFTER counters, SEARCH VARYING, and a level-66 RENAMES alias."""
+
+    def test_inline_perform_varying_poisons_its_loop_variable(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           MOVE 5 TO WS-B.\n"
+            "           PERFORM VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3\n"
+            "               CONTINUE\n"
+            "           END-PERFORM.\n"
+            "           DISPLAY WS-A WS-B.\n"
+        )
+        # WS-A ends at 4, never at its pre-loop 7; WS-B is untouched.
+        assert fold.known == {"WS-B": "5"}
+
+    def test_out_of_line_perform_varying_poisons_its_loop_variable(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           PERFORM HELPER VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3.\n"
+            "           DISPLAY WS-A.\n"
+            "           STOP RUN.\n"
+            "       HELPER.\n"
+            "           CONTINUE.\n"
+        )
+        assert fold.known == {}
+
+    def test_perform_varying_after_poisons_every_loop_variable(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           MOVE 7 TO WS-B.\n"
+            "           PERFORM VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3\n"
+            "                   AFTER WS-B FROM 1 BY 1 UNTIL WS-B > 2\n"
+            "               CONTINUE\n"
+            "           END-PERFORM.\n"
+            "           DISPLAY WS-A WS-B.\n"
+        )
+        assert fold.known == {}
+
+    def test_perform_varying_nested_in_an_if_arm_poisons_its_loop_variable(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           IF WS-FLAG = 'Y'\n"
+            "               PERFORM VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3\n"
+            "                   CONTINUE\n"
+            "               END-PERFORM\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-A.\n"
+        )
+        assert fold.known == {}
+
+    def test_search_varying_poisons_its_varying_variable(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-A.\n"
+            "           SEARCH WS-E VARYING WS-A AT END CONTINUE\n"
+            "               WHEN WS-E (IX) = 'A' CONTINUE\n"
+            "           END-SEARCH.\n"
+            "           DISPLAY WS-A.\n",
+            extra_data=(
+                "       01  WS-T.\n"
+                "           05  WS-E PIC X OCCURS 3 INDEXED BY IX.\n"
+            ),
+        )
+        assert fold.known == {}
+
+    def test_write_through_renames_alias_poisons_the_covered_leaves(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 'AA' TO WS-G.\n"
+            "           MOVE 'XY' TO WS-H.\n"
+            "           MOVE 'ZZ' TO WS-I.\n"
+            "           MOVE 'BB' TO WS-J.\n"
+            "           MOVE 'PQRS' TO WS-RN.\n"
+            "           DISPLAY WS-G WS-H WS-I WS-J.\n",
+            extra_data=(
+                "       01  WS-GRP.\n"
+                "           05  WS-G PIC X(2).\n"
+                "           05  WS-H PIC X(2).\n"
+                "           05  WS-I PIC X(2).\n"
+                "           05  WS-J PIC X(2).\n"
+                "       66  WS-RN RENAMES WS-H THRU WS-I.\n"
+            ),
+        )
+        # Only WS-H..WS-I share the alias's bytes; WS-G / WS-J stay known.
+        assert fold.known == {"WS-GRP.WS-G": "AA", "WS-GRP.WS-J": "BB"}
+
+    def test_single_operand_renames_alias_poisons_its_field(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 'XY' TO WS-H.\n"
+            "           MOVE 'PQ' TO WS-RN.\n"
+            "           DISPLAY WS-H.\n",
+            extra_data=(
+                "       01  WS-GRP.\n"
+                "           05  WS-H PIC X(2).\n"
+                "       66  WS-RN RENAMES WS-H.\n"
+            ),
+        )
+        assert fold.known == {}
