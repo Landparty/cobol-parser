@@ -273,6 +273,18 @@ class DataItemClauseParser:
             parser: The ``DataDivisionParser`` this collaborator belongs to.
         """
         self._parser = parser
+        # Non-``$`` currency symbols (``CURRENCY SIGN IS '£'``) the most
+        # recent parse_picture_clause() collected; read by
+        # _picture_clause() right after, on both the pure-Python and the
+        # Cython data-item paths.
+        self._picture_currency_symbols: frozenset[str] = frozenset()
+
+    def _picture_clause(self, pattern: str, location: SourceLocation) -> PictureClause:
+        """Build the PictureClause for the pattern parse_picture_clause()
+        just returned, with the declared currency symbols it contains."""
+        return PictureClause(
+            pattern, location, currency_symbols=self._picture_currency_symbols
+        )
 
     def parse_data_item(
         self, token_stream: ITokenStream, report_group: bool = False
@@ -367,7 +379,7 @@ class DataItemClauseParser:
                     _COMP_KEYWORDS,
                     _COMP_TOKEN_TYPES,
                     _DIVISION_TOKEN_TYPES,
-                    PictureClause,
+                    self._picture_clause,
                     OccursClause,
                     TokenType.PERIOD,
                     TokenType.LEVEL_NUMBER,
@@ -452,7 +464,7 @@ class DataItemClauseParser:
                 picture_pattern = self.parse_picture_clause(token_stream)
                 if picture_pattern:
                     data_item.set_picture_clause(
-                        PictureClause(picture_pattern, location)
+                        self._picture_clause(picture_pattern, location)
                     )
 
             # VALUE clause
@@ -1227,6 +1239,7 @@ class DataItemClauseParser:
 
         pattern_parts = []
         paren_depth = 0  # Track parenthesis nesting
+        currency_symbols: set[str] = set()
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -1263,6 +1276,10 @@ class DataItemClauseParser:
             # Editing symbols emitted as their own token types ($ + - * /)
             elif token.type in _PICTURE_SYMBOL_TOKEN_TYPES:
                 pattern_parts.append(token.value)
+                if token.type == TokenType.CURRENCY and token.value != "$":
+                    # A SPECIAL-NAMES CURRENCY SIGN symbol (the lexer only
+                    # emits a non-``$`` CURRENCY token for a declared one).
+                    currency_symbols.add(token.value)
                 token_stream.consume()
             elif token.value == "(":
                 pattern_parts.append(token.value)
@@ -1296,6 +1313,7 @@ class DataItemClauseParser:
             else:
                 break
 
+        self._picture_currency_symbols = frozenset(currency_symbols)
         result = "".join(pattern_parts) if pattern_parts else None
         return result
 

@@ -496,3 +496,17 @@ a comment-entry paragraph name at a line start. The fixed-format
 (`free_form=False`) path is unchanged; the parser always lexes normalized
 free-form text. `tests/regression/test_comment_entry_verbatim.py` (includes
 a pure/Cython parity check).
+
+# Declared currency symbols (2026-09-28)
+
+`CURRENCY SIGN IS '£'` / `CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL '#'`
+makes the symbol a PICTURE editing character like `$`. `__init__` now
+collects the declared non-alphanumeric symbols
+(`_declared_currency_symbols(source)`, one regex scan) into
+`self._currency_symbols`; in `tokenize_program_text` (both lexers) a
+character that would otherwise be an "Invalid character" error is emitted
+as a `CURRENCY` token when it is declared. Characters that already lex as
+something (`& ! | < > :`, letters) are not rerouted. Before, every `£` in
+`PIC £££9.99` was a lexer error. See [ast-models.md](ast-models.md) for
+how the PictureClause sizes it. `tests/regression/test_currency_sign_picture_symbol.py`.
+

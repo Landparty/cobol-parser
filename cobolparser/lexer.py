@@ -104,6 +104,42 @@ def _comment_entry_starts(source: str, lines: list[str]) -> dict[int, int]:
     return starts
 
 
+# ---------------------------------------------------------------------------
+# SPECIAL-NAMES CURRENCY SIGN: the PICTURE symbols a program declares
+# ---------------------------------------------------------------------------
+# ``CURRENCY SIGN IS '£'`` (or ``CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL
+# '#'``) makes that character a PICTURE editing symbol exactly like ``$``.
+# Characters that are otherwise not COBOL characters at all (``£``, ``€``,
+# ``#``, ``@``, ...) would hit the lexer's "Invalid character" error inside
+# the PICTURE string, so the declared symbols are collected up front and
+# lexed as CURRENCY tokens.
+_CURRENCY_CLAUSE_RE = re.compile(
+    r"\bCURRENCY(?:[ \t\r\n]+SIGN)?(?:[ \t\r\n]+IS)?[ \t\r\n]+"
+    r"(?:\"([^\"\r\n]+)\"|'([^'\r\n]+)')"
+    r"(?:[ \t\r\n]+(?:WITH[ \t\r\n]+)?PICTURE[ \t\r\n]+SYMBOL[ \t\r\n]+"
+    r"(?:\"([^\"\r\n])\"|'([^'\r\n])'))?",
+    re.IGNORECASE,
+)
+
+
+def _declared_currency_symbols(source: str) -> frozenset[str]:
+    """The PICTURE currency symbols a SPECIAL-NAMES paragraph declares.
+
+    A clause without ``PICTURE SYMBOL`` declares its sign as the symbol, so
+    only a one-character sign counts there. Alphanumeric symbols are left
+    out -- they already lex as (part of) a word.
+    """
+    symbols: set[str] = set()
+    for match in _CURRENCY_CLAUSE_RE.finditer(source):
+        sign = match.group(1) or match.group(2) or ""
+        symbol = match.group(3) or match.group(4)
+        if symbol is None and len(sign) == 1:
+            symbol = sign
+        if symbol and not symbol.isalnum() and not symbol.isspace():
+            symbols.add(symbol)
+    return frozenset(symbols)
+
+
 class TokenType(IntEnum):
     """Token types for COBOL lexical analysis.
 
@@ -802,6 +838,9 @@ class _CobolLexerPure:
         self._open_string_quote: str | None = None
         self._open_string_value: list[str] = []
         self._open_string_location: SourceLocation | None = None
+        # PICTURE currency symbols declared by SPECIAL-NAMES CURRENCY SIGN
+        # clauses (lexed as CURRENCY tokens, like ``$``).
+        self._currency_symbols: frozenset[str] = _declared_currency_symbols(source)
 
     def _comment_entry_line_tokens(
         self, text: str, line_num: int, start_col: int, entry_start: int
@@ -1472,6 +1511,13 @@ class _CobolLexerPure:
                 # concatenations in vendor extensions. We treat it as an ignorable separator so
                 # it doesn't raise a hard lexer error. If future semantics are needed we can
                 # introduce a specific token type.
+                pos += 1
+                continue
+
+            # A PICTURE currency symbol declared by SPECIAL-NAMES
+            # (``CURRENCY SIGN IS '£'``) -- an editing symbol like ``$``.
+            if char in self._currency_symbols:
+                tokens.append(Token(TokenType.CURRENCY, char, location))
                 pos += 1
                 continue
 

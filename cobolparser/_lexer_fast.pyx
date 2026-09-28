@@ -535,6 +535,14 @@ class CobolLexer(_CobolLexerBase):
                 pos += 1
                 continue
 
+            # ---- declared PICTURE currency symbol ------------------
+            # Mirrors lexer.py: a SPECIAL-NAMES ``CURRENCY SIGN IS '£'``
+            # symbol is an editing symbol like ``$``.
+            if char in self._currency_symbols:
+                tokens.append(Token(TokenType.CURRENCY, char, location))
+                pos += 1
+                continue
+
             # ---- unknown character ---------------------------------
             self.errors.append(LexerError(f"Invalid character: {char}", location, char))
             pos += 1

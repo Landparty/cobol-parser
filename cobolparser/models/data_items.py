@@ -61,9 +61,27 @@ _PIC_REPEAT_RE = re.compile(r"\(([^()]*)\)")
 class PictureClause(ASTNode):
     """AST node for COBOL PICTURE clauses."""
 
-    def __init__(self, pattern: str, location: SourceLocation):
+    def __init__(
+        self,
+        pattern: str,
+        location: SourceLocation,
+        currency_symbols: frozenset[str] | set[str] | None = None,
+    ):
+        """*currency_symbols* are the PICTURE currency symbols the program
+        declares through ``SPECIAL-NAMES. CURRENCY SIGN IS ...`` (other than
+        the default ``$``) that occur in *pattern*. Each is edited exactly
+        like ``$`` -- a fixed or floating currency insertion character -- so
+        the pattern is sized and validated as if it were written with
+        ``$``, while :attr:`pattern` keeps the characters as written."""
         super().__init__("PictureClause", location)
-        self.pattern = pattern
+        self.currency_symbols: frozenset[str] = frozenset(currency_symbols or ())
+        # Sized and validated through the ``$`` spelling (see above); the
+        # verbatim pattern is restored once both passes have run.
+        self.pattern = (
+            pattern.translate({ord(sym): "$" for sym in self.currency_symbols})
+            if self.currency_symbols
+            else pattern
+        )
         self.size: int | None = None
         self.integer_digits: int | None = None
         self.decimal_digits: int | None = None
@@ -90,6 +108,9 @@ class PictureClause(ASTNode):
         self.validation_errors: list[str] = []
         self._parse_pattern()
         self._validate_pattern()
+        if self.currency_symbols:
+            self.pattern = pattern
+            self._metadata["currency_symbols"] = sorted(self.currency_symbols)
 
     def _parse_pattern(self) -> None:
         """Parse the PICTURE pattern to extract size and digit information."""
