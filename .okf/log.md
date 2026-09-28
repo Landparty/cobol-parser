@@ -14,14 +14,31 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
-## 2026-09-28 -- bug hunt round 8: SEARCH swallow, INITIALIZE qualifiers, NOT >=, DELIMITED without BY, DISPLAY FUNCTION
+## 2026-09-28 -- bug hunt round 8: parsers, preprocessing, generators, analysis, JCL/config
 
 [parser.md](parser.md): SEARCH without END-SEARCH no longer eats an
 enclosing ELSE and the rest of the sentence; INITIALIZE targets / REPLACING
 BY values keep subscripts and OF/IN qualifiers; `NOT >=` / `NOT GREATER
 THAN OR EQUAL TO` resolve to LESS (and the `<=` family to GREATER);
 STRING/UNSTRING `DELIMITED` without `BY` keeps its delimiters; `DISPLAY
-FUNCTION TRIM(A)` is one item.
+FUNCTION TRIM(A)` is one item; group USAGE / SIGN are inherited by
+subordinate elementary items (`usage_explicit`).
+[preprocessing.md](preprocessing.md): a long continued literal survives
+copybook expansion (re-continued, not truncated); REPLACE LEADING/TRAILING;
+a malformed REPLACE warns; `:TAG:` replaced every time in a word; COPY
+REPLACING matches code+literal search text, compares literals
+case-sensitively, and no longer splits `1.5` or `WS_A`.
+[generators.md](generators.md): complex-ODO counter lookup falls back by
+name in the decoder; variable-bare framing by layout before separator;
+BLANK WHEN ZERO; national-content caveat.
+[analysis.md](analysis.md): ConstantFolder forgets PERFORM VARYING/AFTER and
+SEARCH VARYING variables and writes through level-66 RENAMES; program
+signatures grade ENTRY parameters, carry BY VALUE, and count the RETURNING
+item as named. [jcl.md](jcl.md): SET values are taken at the EXEC card;
+DCB overrides merge; `DD *,DLM=` keeps `//` cards as data; continued
+strings keep blanks through column 71; CR/LF-only line splitting.
+[cli.md](cli.md): `cobol.yml` reader handles `''` / `\"` escapes, rejects
+content after `...`, ignores a UTF-8 BOM.
 
 ## 2026-09-28 -- bug hunt round 7: batch .prof collisions, DOT escaping, >>DEFINE arithmetic, nested ALTER in health
 
