@@ -195,3 +195,64 @@ class TestShortRecordContinuedLiteral:
         assert normalize_continuation_lines(src) == (
             first + _to_72(first) + "DEF" + _to_72(second) + "GHI'.\n"
         )
+
+
+# ---------------------------------------------------------------------------
+# 3. `*>` floating comments inside a data description entry
+# ---------------------------------------------------------------------------
+
+
+class TestFloatingCommentInDataEntry:
+    """A ``*>`` floating comment (Enterprise COBOL 6.x) can end any line of a
+    data description entry, including one that breaks between a clause
+    keyword and its operand. The sub-clause readers skipped line breaks but
+    not COMMENT tokens, so the operand after the comment was dropped as an
+    "unparsed token" -- or, for ``OCCURS *> ...`` / ``10 TIMES``, read as a
+    phantom data item with level number 10. Both clause loops did it."""
+
+    @pytest.mark.parametrize("data_path", DATA_PATHS, indirect=True)
+    def test_indexed_by_after_a_comment(self, data_path):
+        result = parse_cobol(
+            _prog(
+                "       01 WS-T.",
+                "          05 WS-E PIC X OCCURS 10 TIMES *> one per region",
+                "                  INDEXED BY IX.",
+            )
+        )
+        assert result.warnings == []
+        occurs = _items(result)["WS-E"]["occurs_clause"]
+        assert occurs["max_times"] == 10
+        assert occurs["index_names"] == ["IX"]
+
+    @pytest.mark.parametrize("data_path", DATA_PATHS, indirect=True)
+    def test_occurs_count_after_a_comment_is_not_a_level_number(self, data_path):
+        result = parse_cobol(
+            _prog(
+                "       01 WS-T.",
+                "          05 WS-E PIC X OCCURS *> sized for the worst case",
+                "                  10 TIMES DEPENDING ON WS-N.",
+                "       01 WS-N PIC 99.",
+            )
+        )
+        assert result.warnings == []
+        items = _items(result)
+        assert set(items) == {"WS-T", "WS-E", "WS-N"}
+        occurs = items["WS-E"]["occurs_clause"]
+        assert (occurs["max_times"], occurs["depending_on"]) == (10, "WS-N")
+
+    @pytest.mark.parametrize("data_path", DATA_PATHS, indirect=True)
+    def test_picture_and_value_operands_after_a_comment(self, data_path):
+        result = parse_cobol(
+            _prog(
+                "       01 WS-A PIC *> customer name",
+                "              X(10) VALUE *> blank until read",
+                "              SPACES.",
+                "       01 WS-B REDEFINES *> same bytes",
+                "              WS-A PIC 9(10).",
+            )
+        )
+        assert result.warnings == []
+        items = _items(result)
+        assert items["WS-A"]["picture_clause"]["pattern"] == "X(10)"
+        assert items["WS-A"]["value_clause"] == "SPACES"
+        assert items["WS-B"]["redefines"] == "WS-A"

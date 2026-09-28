@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-08-28T00:00:00Z
+timestamp: 2026-09-28T00:00:00Z
 ---
 
 # Overview
@@ -101,7 +101,7 @@ CobolParser.parse(source)
   ├─ normalize_fixed_format()          # fixed-format → free-form
   ├─ strip_compiler_directives()       # remove compiler control statements
   ├─ CobolLexer.tokenize()             # → List[Token]
-  ├─ TokenStream(tokens)               # lookahead abstraction
+  ├─ TokenStream(tokens - COMMENT)     # lookahead abstraction; `*>` comments dropped
   └─ DivisionParserFactory
        ├─ IdentificationDivisionParser
        ├─ EnvironmentDivisionParser
@@ -2912,3 +2912,21 @@ step.
 latter also breaks on form feed / NEL / U+2028, which put every later
 `location.line` off by one against the editor and the listing. See
 `preprocessing.md` ("Audit 2026-09-17").
+
+# `*>` floating comments never reach the division parsers (2026-09-28)
+
+`CobolParser._parse_core` builds its `TokenStream` from the lexer's tokens
+*minus* `COMMENT` tokens (`self.tokens` itself, and the `tokens_processed`
+statistic, keep them). A `*>` floating comment (Enterprise COBOL 6.x) is
+layout wherever it sits, and it can end any line -- including one that breaks
+a data description entry between a clause keyword and its operand. Every
+DATA DIVISION sub-clause reader (`_skip_clause_separators`,
+`_peek_count_token`, `_skip_newlines`, the picture/value readers, and their
+`_data_fast` mirrors `_skip_layout` / `_peek_count_pos`) skipped NEWLINE but
+not COMMENT, so `OCCURS 10 TIMES *> note` / `INDEXED BY IX.` dropped the
+INDEXED BY clause as unparsed tokens, `PIC *> note` / `X(10)` lost the
+picture, and `OCCURS *> note` / `10 TIMES ...` read `10` as a *new item's
+level number* (a phantom `ANONYMOUS-10-n` item). Both clause loops did it,
+so no fast/pure differential could see it. Filtering once at the stream
+fixes every reader, pure and compiled, without touching `_data_fast`'s
+arity. Pinned by `tests/regression/test_audit_2026_09_28_accelerators.py`.
