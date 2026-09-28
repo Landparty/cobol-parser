@@ -27,10 +27,20 @@ from __future__ import annotations
 #: item was sized from its (absent) picture and came out as zero bytes,
 #: silently collapsing every following offset in the record.
 INDEX_BYTES = 4
-#: ``USAGE POINTER`` and its relatives.
+#: ``USAGE POINTER``, ``FUNCTION-POINTER`` and ``OBJECT REFERENCE``: one
+#: 31-bit address.
 POINTER_BYTES = 4
+#: ``USAGE PROCEDURE-POINTER`` is *two* words on IBM Enterprise COBOL (the
+#: entry address plus a second word the runtime uses), so 8 bytes -- sizing
+#: it as a fullword shifted every offset after it by four.
+PROCEDURE_POINTER_BYTES = 8
 
-POINTER_USAGES = frozenset({"POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER"})
+#: Usages that hold an address rather than data.  ``OBJECT REFERENCE`` (OO
+#: COBOL) is one too; with no PICTURE it used to be sized as zero bytes,
+#: collapsing every following offset in the record.
+POINTER_USAGES = frozenset(
+    {"POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER", "OBJECT REFERENCE"}
+)
 PACKED_USAGES = frozenset({"COMP-3", "COMPUTATIONAL-3", "PACKED-DECIMAL"})
 #: Binary usages whose byte order is fixed big-endian, per IBM Enterprise
 #: COBOL and GnuCOBOL's default ``binary-byteorder``.
@@ -74,6 +84,7 @@ def storage_size(
     total_digits: int | None,
     sign_clause: str | None = None,
     is_signed: bool = False,
+    national_picture: bool = False,
 ) -> int:
     """One occurrence's real storage byte length.
 
@@ -87,8 +98,16 @@ def storage_size(
     PICTURE to take a size from but still occupies a fullword, and a DISPLAY
     field with ``SIGN IS SEPARATE`` spends a whole byte on the sign that its
     PICTURE's character count does not include.
+
+    ``USAGE NATIONAL`` stores every character position as a two-byte UTF-16
+    unit.  An ``N`` picture's size already counts bytes
+    (*national_picture*); a numeric or numeric-edited picture's counts
+    positions, so ``PIC 9(5) USAGE NATIONAL`` is ten bytes, and a separate
+    sign is one more national character (two bytes), not one byte.
     """
     normalized = (usage or "DISPLAY").upper()
+    if normalized == "PROCEDURE-POINTER":
+        return PROCEDURE_POINTER_BYTES
     if normalized in POINTER_USAGES:
         return POINTER_BYTES
     if normalized == "INDEX":
@@ -102,6 +121,10 @@ def storage_size(
     if normalized in BINARY_USAGES:
         return binary_byte_length(total_digits) if total_digits else 0
     size = picture_size or 0
+    if normalized == "NATIONAL" and not national_picture:
+        if size and is_signed and "SEPARATE" in (sign_clause or "").upper():
+            size += 1
+        return 2 * size
     # DISPLAY only: SIGN IS SEPARATE spends a byte the PICTURE does not
     # count.  A COMP-3/COMP field's sign lives inside its own encoding, so
     # the clause (which COBOL permits but ignores there) adds nothing.

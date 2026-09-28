@@ -274,6 +274,7 @@ class FieldSpec:
             total_digits=self.stored_digits,
             sign_clause=self.sign_clause,
             is_signed=self.is_signed,
+            national_picture=self.category is FieldCategory.NATIONAL,
         )
 
     @property

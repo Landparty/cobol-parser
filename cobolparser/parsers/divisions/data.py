@@ -95,7 +95,13 @@ def propagate_group_usage_and_sign(
         if not isinstance(item, CobolDataItem):
             continue
         item_usage = usage
-        if item.usage_explicit:
+        if item.group_usage is not None:
+            # ``GROUP-USAGE NATIONAL``: the group and everything below it
+            # that states no USAGE of its own is national.
+            item_usage = item.group_usage
+            if not item.usage_explicit:
+                item.usage = item.group_usage
+        elif item.usage_explicit:
             item_usage = item.usage
         elif usage is not None and (
             usage.upper() not in _NUMERIC_ONLY_USAGES

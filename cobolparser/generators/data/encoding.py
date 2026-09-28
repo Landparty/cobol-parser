@@ -513,6 +513,13 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         return _encode_packed(text, spec)
     if usage in BINARY_USAGES:
         return _encode_binary(text, spec, opts)
+    if usage == "NATIONAL":
+        # Numeric / numeric-edited national (``PIC 9(5) USAGE NATIONAL``):
+        # two bytes per position.  National data is not modelled as UTF-16
+        # (see ``encoding_caveats``), so -- like a ``PIC N`` field -- the
+        # value is written as text padded to the field's full width rather
+        # than as five zoned bytes in a ten-byte slot.
+        return _encode_text(text, width, opts)
     # DISPLAY from here down.  An unedited numeric picture is zoned decimal.
     # A numeric-edited one holds what a MOVE into it would leave: the CSV
     # cell is the logical value (`1234.56`), the bytes are the edited form

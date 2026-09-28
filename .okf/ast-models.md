@@ -308,6 +308,24 @@ Two shapes here regularly surprise consumers (both confirmed against source
   the DATA DIVISION parser; not fixed here, since correcting it changes an
   established `ConditionNameItem.values` shape that other consumers read.
 
+**National data and address usages (2026-09-28).**
+`PictureClause.is_national` (an `N` or national-edited picture; `size`
+already counts bytes) and `is_national_edited` (`N` with `B`/`0`/`/`:
+`N(2)BN` is 8 bytes, not 4, and no longer numeric-edited).
+`CobolDataItem.set_picture_clause` gives an entry with no USAGE clause the
+usage its picture implies -- `NATIONAL` for `N`, `DISPLAY-1` for `G`
+(IBM default `NSYMBOL(NATIONAL)`); `usage_explicit` stays False and a
+later USAGE clause still wins. `CobolDataItem.group_usage` records
+`GROUP-USAGE NATIONAL|UTF-8` (serialized as `group_usage`).
+`OccursClause.depending_on_qualifiers` (serialized only when non-empty).
+`_storage.storage_size(..., national_picture=)`: `USAGE NATIONAL` on a
+numeric / numeric-edited picture is 2 bytes per position (`PIC 9(5)
+NATIONAL` = 10, a separate sign is one more national character);
+`PROCEDURE-POINTER` is 8 bytes (IBM: two words; was 4) and
+`OBJECT REFERENCE` joined `POINTER_USAGES` (4 bytes; was 0). The encoder /
+decoder write and read a numeric national field as text padded to its
+width, like `PIC N` (see generators.md).
+
 `index_names` and `key_clauses` are serialized only when non-empty. Before
 2026-07-09 `ASCENDING/DESCENDING KEY` was dropped and `INDEXED BY` kept only
 its last name (and was lost entirely when a KEY clause preceded it). See

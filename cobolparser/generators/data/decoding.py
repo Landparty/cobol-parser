@@ -577,6 +577,9 @@ def decode_field(
         value, error = _decode_packed(raw, spec)
     elif usage in BINARY_USAGES:
         value, error = _decode_binary(raw, spec, opts)
+    elif usage == "NATIONAL":
+        # The encoder writes national data as text (see ``encode_field``).
+        value = _decode_text(raw, opts)
     elif (
         spec.blank_when_zero
         and spec.category in (FieldCategory.NUMERIC, FieldCategory.NUMERIC_EDITED)

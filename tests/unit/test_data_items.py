@@ -751,13 +751,18 @@ class TestCobolDataItem:
         assert item2.calculate_size() == 8  # 10+ digits -> 8 bytes
 
     def test_calculate_size_pointer_types(self):
-        """POINTER, PROCEDURE-POINTER, and FUNCTION-POINTER are 4 bytes (IBM z/OS 31-bit)."""
+        """POINTER and FUNCTION-POINTER are 4 bytes (IBM z/OS 31-bit);
+        PROCEDURE-POINTER is 8 (entry address plus a second word)."""
         location = SourceLocation(1, 1)
 
-        for usage in ["POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER"]:
+        for usage, size in [
+            ("POINTER", 4),
+            ("PROCEDURE-POINTER", 8),
+            ("FUNCTION-POINTER", 4),
+        ]:
             item = CobolDataItem(f"WS-{usage}", 5, location)
             item.set_usage(usage)
-            assert item.calculate_size() == 4, f"{usage} should be 4 bytes"
+            assert item.calculate_size() == size, f"{usage} should be {size} bytes"
 
     def test_calculate_size_with_occurs(self):
         """Test size calculation with OCCURS clause."""

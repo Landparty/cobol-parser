@@ -68,6 +68,11 @@ _POINTER_KEYWORDS: frozenset[str] = frozenset(
     }
 )
 
+# USAGE values with no token type of their own that may be written without
+# the USAGE keyword. ``DISPLAY-1`` is a token type of its own
+# (``TokenType.DISPLAY_1``) and is matched on that as well.
+_BARE_USAGE_WORDS: frozenset[str] = frozenset({"NATIONAL", "UTF-8", "DISPLAY-1"})
+
 # Hoisted out of _parse_picture_clause -- the union was being rebuilt on
 # every iteration of that method's inner loop.
 _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
@@ -100,6 +105,13 @@ _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
         "BYTE-LENGTH",
         "DYNAMIC",
         "OBJECT",
+        # The USAGE word is optional, so ``PIC N(5) NATIONAL`` / ``PIC U(4)
+        # UTF-8`` name their usage straight after the picture. Both lex as
+        # IDENTIFIERs, which the picture scan collects: ``NATIONAL`` was
+        # glued onto the pattern (``N(5)NATIONAL``, sized 3 bytes).
+        # (DISPLAY / DISPLAY-1 have token types of their own and already
+        # stopped the scan.)
+        *_BARE_USAGE_WORDS,
         # Report-group clause words (REPORT SECTION, 2026-09-02): ``PIC ZZ9
         # SOURCE WS-X`` must stop the picture scan at SOURCE. None of these
         # is a valid picture string, so they are safe terminators everywhere.
@@ -542,6 +554,29 @@ class DataItemClauseParser:
                 data_item.set_usage("INDEX")
                 token_stream.consume()
 
+            # GROUP-USAGE [IS] NATIONAL | UTF-8 (a national / UTF-8 group:
+            # every subordinate elementary item takes that usage -- applied
+            # by ``propagate_group_usage_and_sign`` once the hierarchy is
+            # built). It used to be dropped with two "Unparsed token"
+            # warnings, leaving ``PIC 9`` children sized as DISPLAY.
+            elif value_upper == "GROUP-USAGE":
+                token_stream.consume()  # GROUP-USAGE
+                self._consume_if(token_stream, "IS")
+                group_usage = self._consume_if(token_stream, "NATIONAL", "UTF-8")
+                if group_usage is None:
+                    self._warn_dropped_data_token(token, data_item)
+                else:
+                    data_item.group_usage = group_usage
+
+            # NATIONAL / DISPLAY-1 / UTF-8 without the USAGE keyword
+            # (``05 X PIC N(5) NATIONAL.``, ``05 X PIC G(4) DISPLAY-1.``).
+            # None can name a data item, so in clause position each is the
+            # usage; before, NATIONAL was glued onto the PICTURE and
+            # DISPLAY-1 dropped with an "Unparsed token" warning.
+            elif value_upper in _BARE_USAGE_WORDS or tok_type == TokenType.DISPLAY_1:
+                data_item.set_usage(value_upper)
+                token_stream.consume()
+
             # SIGN clause: SIGN [IS] LEADING|TRAILING [SEPARATE [CHARACTER]]
             # (each keyword may start a continuation line -- and the
             # direction read is restricted to LEADING/TRAILING: the old
@@ -635,10 +670,10 @@ class DataItemClauseParser:
             elif value_upper == "IS":
                 nxt = self._peek_next_meaningful(token_stream)
                 nxt_upper = nxt.value.upper() if nxt and nxt.value else ""
-                if nxt_upper in _POINTER_KEYWORDS or nxt_upper in (
-                    "EXTERNAL",
-                    "GLOBAL",
-                    "INDEX",
+                if (
+                    nxt_upper in _POINTER_KEYWORDS
+                    or nxt_upper in _BARE_USAGE_WORDS
+                    or nxt_upper in ("EXTERNAL", "GLOBAL", "INDEX")
                 ):
                     token_stream.consume()  # Consume the optional IS
                 else:
@@ -973,6 +1008,10 @@ class DataItemClauseParser:
             if dep_token and dep_token.type == TokenType.IDENTIFIER:
                 depending_var = dep_token.value
                 token_stream.consume()
+                # ``DEPENDING ON CNT OF CTL``: the qualifiers used to stop
+                # the walk, so every KEY / INDEXED BY after them was
+                # dropped as an unparsed token.
+                occurs.depending_on_qualifiers = self._consume_qualifiers(token_stream)
 
         # ASCENDING / DESCENDING KEY IS key-1 [key-2 ...] clauses
         # (may repeat). These sit between DEPENDING ON and INDEXED BY
@@ -1019,6 +1058,9 @@ class DataItemClauseParser:
                 ):
                     keys.append(key_token.value)
                     token_stream.consume()
+                    # A key may be qualified (``KEY IS K1 OF ENTRY``); the
+                    # key is the bare name, the qualifier only locates it.
+                    self._consume_qualifiers(token_stream)
                 else:
                     break
             if keys:
@@ -1128,6 +1170,30 @@ class DataItemClauseParser:
                 token_stream.consume()
             else:
                 break
+
+    def _consume_qualifiers(self, token_stream: ITokenStream) -> list[str]:
+        """Consume an ``OF|IN data-name`` qualifier chain; return the names.
+
+        ``OCCURS ... DEPENDING ON CNT OF CTL`` is how a counter whose name
+        is not unique is written.  ``OF``/``IN`` is only taken when a name
+        follows it, so a malformed clause cannot swallow anything else.
+        """
+        qualifiers: list[str] = []
+        while True:
+            keyword = self._peek_next_meaningful(token_stream, offset=0)
+            if not (
+                keyword and keyword.value and keyword.value.upper() in ("OF", "IN")
+            ):
+                break
+            self._skip_newlines(token_stream)
+            name = self._peek_next_meaningful(token_stream, offset=1)
+            if name is None or name.type != TokenType.IDENTIFIER:
+                break
+            token_stream.consume()  # OF / IN
+            self._skip_newlines(token_stream)
+            qualifiers.append(name.value)
+            token_stream.consume()
+        return qualifiers
 
     @staticmethod
     def _peek_count_token(token_stream: ITokenStream) -> tuple[Any, int]:
