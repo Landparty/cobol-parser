@@ -300,13 +300,10 @@ Two shapes here regularly surprise consumers (both confirmed against source
   `THROUGH:` prefix, and the intermediate values are not enumerated. A
   consumer wanting the field's full domain has to expand the range itself
   (and bound the expansion — `VALUE 1 THRU 999999` is legal COBOL).
-  Worse, the marker is emitted **only when the range end is unsigned**:
-  `88 X VALUE -5 THRU -1.` arrives as `["-5", "-1"]` with no `THROUGH:` at
-  all, which is indistinguishable from two discrete values `VALUE -5, -1`.
-  A signed *start* is fine (`VALUE -2 THRU 2` → `["-2", "THROUGH:2"]`), so
-  the loss is specific to a signed endpoint. Confirmed 2026-08-02 against
-  the DATA DIVISION parser; not fixed here, since correcting it changes an
-  established `ConditionNameItem.values` shape that other consumers read.
+  A signed range end keeps its marker too (`88 X VALUE -5 THRU -1.` →
+  `["-5", "THROUGH:-1"]`, distinct from `VALUE -5, -1` → `["-5", "-1"]`);
+  re-checked 2026-09-28 -- an earlier note here said a signed end lost the
+  marker, which is no longer true.
 
 **National data and address usages (2026-09-28).**
 `PictureClause.is_national` (an `N` or national-edited picture; `size`
@@ -459,10 +456,16 @@ from cobolparser.core.ast_factory import get_factory, create_node
 factory = get_factory()
 # create_node takes the node CLASS (not a string) and the node's own
 # constructor kwargs; location is passed positionally to the node.
-node = create_node(MoveStatement, loc, source="WS-A", targets=["WS-B"])
+node = create_node(MoveStatement, loc)   # MoveStatement.__init__(location)
+node.set_source("WS-A"); node.add_target("WS-B")
 ```
 
-Raises `NodeTypeError` for unknown node types, `FieldValidationError` for bad fields.
+Raises `TypeError` for a class that is not an `ASTNode` subclass or whose
+`__init__` does not take `location` first (`CobolDataItem`, `CobolSection`,
+...: construct those directly), `ValidationError` when the created node has
+no location / node_type, and `FieldValidationError` from a validator
+registered with `register_validator()`. Keyword arguments go to the node's
+constructor, so they must be parameters it actually takes.
 
 # Traversal
 
@@ -479,6 +482,22 @@ class name (`"MoveStatement"`, `"CallStatement"`, `"ExecSQLStatement"`,
 `statement_type`), so the class name is the only way to select a specific
 statement kind — this is what the CLI `analyze` and `parse --find-type`
 subcommands rely on.
+
+**Query helpers (2026-09-28).** `has_sql()` / `has_cics()` / `has_ims()`
+and `get_sql_statements()` / `get_cics_statements()` /
+`get_ims_statements()` classify through `program._exec_kind()`: any
+`sql_statements.ExecSQLStatement` (so `FetchStatement`,
+`DeclareCursorStatement`, `TransactionControlStatement`, ... too) is SQL, and
+`statement_type` `"EXEC CICS"` (parser) or `"EXEC-CICS"` (dialect nodes) is
+CICS, likewise IMS. They used to test `statement_type == "EXEC-CICS"` alone,
+a spelling no parsed statement carries, so every real CICS / EXEC DLI
+program answered False. `get_statistics()["statement_count"]` counts
+`CobolStatement` instances (it had skipped `EXEC_CICS` / `EXEC_IMS`
+node_types). `find_statements_using_variable(name)` matches a whole COBOL
+word, case-insensitively, outside quoted literals (was a substring test:
+`WS-A` matched `WS-AMOUNT`). `get_intrinsic_function_usages()` delegates to
+`LanguageEnvironmentAnalyzer` (its own regex had reported `OF` for
+`DLI-FUNCTION OF REC` and words inside literals).
 
 `find_all_by_type()` results are cached per `node_type` on the node, but
 each call returns a fresh copy of that cache — mutating the returned list
