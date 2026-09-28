@@ -510,8 +510,16 @@ def _decode_packed(raw: bytes, spec: FieldSpec) -> tuple[str, str | None]:
     error: str | None = None
     if sign_nibble not in _SIGN_NIBBLES:
         error = f"sign nibble {nibbles[-1]} is not a valid packed sign"
+    # An even digit count leaves the high nibble of the first byte as pad,
+    # which the compiler writes as zero. It is not a digit of the field: a
+    # PIC S9(2)V99 field holding x'12345C' is not 123.45, a value the
+    # PICTURE cannot hold, so the pad is reported rather than read.
+    pad = max(0, len(nibbles) - 1 - _total_digits(spec))
+    for position, char in enumerate(nibbles[:pad]):
+        if char != "0" and error is None:
+            error = f"pad nibble {position} ({char}) is not zero"
     magnitude = 0
-    for position, char in enumerate(nibbles[:-1]):
+    for position, char in enumerate(nibbles[pad:-1], start=pad):
         digit = int(char, 16)
         if digit > 9:
             if error is None:

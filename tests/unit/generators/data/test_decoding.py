@@ -411,6 +411,17 @@ def test_a_sign_zone_outside_the_sign_position_is_an_error_not_a_negation():
 # ---------------------------------------------------------------------------
 
 
+def test_a_non_zero_packed_pad_nibble_is_reported_not_read_as_a_digit():
+    # An even digit count leaves the first byte's high nibble as pad. Reading
+    # it as a digit made PIC S9(2)V99 hold 123.45, which it cannot.
+    source = "       01  R.\n           05  P PIC S9(2)V99 COMP-3.\n"
+    field = _one_field(source, bytes.fromhex("12345c"), EncodingOptions())
+    assert field.value == "23.45"
+    assert field.error is not None and "pad nibble" in field.error
+    clean = _one_field(source, bytes.fromhex("01234d"), EncodingOptions())
+    assert (clean.value, clean.error) == ("-12.34", None)
+
+
 def test_a_bad_packed_sign_nibble_is_reported_with_a_best_effort_value():
     source = "       01  R.\n           05  P PIC S9(3) COMP-3.\n"
     field = _one_field(source, b"\x12\x35", EncodingOptions())
