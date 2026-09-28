@@ -216,18 +216,20 @@ class FixtureBundle:
 
         root = str(path)
         os.makedirs(root, exist_ok=True)
-        for scenario in self.scenarios:
-            slug = _slugify(scenario.name)
+        # Computed once and shared with the manifest pass below, so a
+        # `csv_path` always names the file this pass actually wrote.
+        slugs = _unique_names([_slugify(s.name) for s in self.scenarios])
+        csv_names = [_csv_names(scenario.fixtures) for scenario in self.scenarios]
+        for scenario, slug, names in zip(self.scenarios, slugs, csv_names, strict=True):
             scenario_dir = os.path.join(root, slug)
             os.makedirs(scenario_dir, exist_ok=True)
-            for fixture in scenario.fixtures:
+            for fixture, safe_key in zip(scenario.fixtures, names, strict=True):
                 if not fixture.layout or not fixture.sequence:
                     continue
                 header = [f.column for f in fixture.layout]
                 rows = [
                     [row.get(col, "") for col in header] for row in fixture.sequence
                 ]
-                safe_key = _sanitize_key(fixture.ref.key)
                 csv_path = os.path.join(scenario_dir, f"{safe_key}.csv")
                 if os.path.dirname(os.path.abspath(csv_path)) != os.path.abspath(
                     scenario_dir
@@ -242,12 +244,11 @@ class FixtureBundle:
                     writer.writerows(rows)
 
         manifest = self.to_dict()
-        for scenario, scenario_dict in zip(
-            self.scenarios, manifest["scenarios"], strict=True
+        for scenario, scenario_dict, slug, names in zip(
+            self.scenarios, manifest["scenarios"], slugs, csv_names, strict=True
         ):
-            slug = _slugify(scenario.name)
-            for fixture, fixture_dict in zip(
-                scenario.fixtures, scenario_dict["fixtures"], strict=True
+            for fixture, fixture_dict, safe_key in zip(
+                scenario.fixtures, scenario_dict["fixtures"], names, strict=True
             ):
                 wrote_csv = bool(fixture.layout and fixture.sequence)
                 # Keep `sequence`'s type identical to the normal bundle schema
@@ -262,9 +263,7 @@ class FixtureBundle:
                 # condition above exactly).
                 fixture_dict["sequence"] = []
                 fixture_dict["csv_path"] = (
-                    f"{slug}/{_sanitize_key(fixture.ref.key)}.csv"
-                    if wrote_csv
-                    else None
+                    f"{slug}/{safe_key}.csv" if wrote_csv else None
                 )
         with open(os.path.join(root, "MANIFEST.json"), "w", encoding="utf-8") as handle:
             _json.dump(manifest, handle, indent=2)
@@ -285,6 +284,61 @@ def _slugify(name: str) -> str:
             previous_was_sep = True
     slug = out.getvalue().strip("-")
     return slug or "scenario"
+
+
+def _unique_names(names: list[str]) -> list[str]:
+    """*names* with every repeat suffixed ``-2``, ``-3``, ... in order.
+
+    Scenario names are not unique -- two IFs in one paragraph both yield a
+    ``"<PARA>: ELSE"`` scenario -- and neither are slugs of distinct names
+    (``"A: B"`` / ``"A-B"``). (Boundary keys get the same treatment in
+    :func:`_csv_names`.)
+    Written as-is, the later scenario's CSV silently overwrote the earlier
+    one's and both manifest entries pointed at the survivor. Compared
+    case-insensitively, so a case-insensitive filesystem cannot merge two
+    names either. The first occurrence keeps its plain name, so a bundle
+    with no collision is written exactly as before.
+    """
+    taken: set[str] = set()
+    out: list[str] = []
+    for name in names:
+        candidate, n = name, 1
+        while candidate.lower() in taken:
+            n += 1
+            candidate = f"{name}-{n}"
+        taken.add(candidate.lower())
+        out.append(candidate)
+    return out
+
+
+def _csv_names(fixtures: list[BoundaryFixture]) -> list[str]:
+    """One CSV base name per fixture: ``<KEY>`` unless another fixture that
+    writes *different* rows already took it.
+
+    Only fixtures that get a CSV at all (both a `layout` and a `sequence`)
+    compete for a name, so the OPEN/CLOSE of a file never displaces its
+    READ. Two fixtures with the same key and byte-identical content (the
+    same READ boundary reached from two places) keep sharing one file, as
+    they always have; only a key whose fixtures disagree gets a ``-2``.
+    """
+    names = [_sanitize_key(f.ref.key) for f in fixtures]
+    taken: dict[str, tuple[Any, ...]] = {}
+    for i, fixture in enumerate(fixtures):
+        if not fixture.layout or not fixture.sequence:
+            continue
+        header = tuple(f.column for f in fixture.layout)
+        content = (
+            header,
+            tuple(tuple(row.get(c, "") for c in header) for row in fixture.sequence),
+        )
+        base, n = names[i], 1
+        candidate = base
+        while candidate.lower() in taken and taken[candidate.lower()] != content:
+            n += 1
+            candidate = f"{base}-{n}"
+        taken[candidate.lower()] = content
+        names[i] = candidate
+    return names
 
 
 _UNSAFE_KEY_CHARS = re.compile(r"[\\/\x00]+")
