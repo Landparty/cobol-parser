@@ -37,6 +37,13 @@ results = parse_files_with_copybooks(files, copybook_paths=["/path/to/cpy"])
 (always a plain `str`, pickle-safe on Windows spawn), `profiling:
 ProfilingResult | None`.
 
+With `enable_profiling=True, prof_output=DIR`, each file's cProfile dump is
+`DIR/<stem>.prof`; inputs sharing a stem (`a/PROG.cbl` + `b/PROG.cbl`, or
+`PROG.cbl` + `PROG.cob`) get `<stem>-2.prof`, `<stem>-3.prof`, ... in input
+order (`_prof_file_names`, case-insensitive). Before 2026-09-28 they all
+wrote `<stem>.prof` and overwrote one another. `profiling.prof_file` names
+each result's own file.
+
 # Per-File Fault Isolation
 
 Both entry points guarantee that **one poisoned file cannot abort the whole

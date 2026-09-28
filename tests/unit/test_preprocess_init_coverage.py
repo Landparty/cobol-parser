@@ -372,6 +372,51 @@ class TestPreprocessConditionalCompilation:
 
         assert "Version defined" in result
 
+    def test_define_arithmetic_expression_is_evaluated(self):
+        """``>>DEFINE V AS 2 + 1`` defines V as 3 (IBM allows an arithmetic
+        expression of integer literals and compilation variables); the raw
+        text "2 + 1" used to be stored, so ``>>IF V = 3`` was silently FALSE.
+        """
+        source = """>>DEFINE V AS 2 + 1
+>>DEFINE W AS (V - 1) * 3 / 2
+>>IF V = 3
+       DISPLAY "V is three".
+>>END-IF
+>>IF W = 3
+       DISPLAY "W is three".
+>>END-IF
+"""
+        warnings: list[str] = []
+        result = preprocess_conditional_compilation(source, warnings=warnings)
+        assert "V is three" in result
+        assert "W is three" in result
+        assert warnings == []
+
+    def test_define_values_that_are_not_expressions_are_kept(self):
+        """Quoted literals holding operators, negative numbers and inexact
+        divisions are not rewritten."""
+        source = """>>DEFINE S AS 'A + B'
+>>DEFINE N AS -5
+>>DEFINE X AS 7 / 2
+>>IF S = 'A + B'
+       DISPLAY "S kept".
+>>END-IF
+>>IF N < 0
+       DISPLAY "N kept".
+>>END-IF
+>>IF X IS DEFINED
+       DISPLAY "X defined".
+>>END-IF
+>>IF X = 3
+       DISPLAY "X truncated".
+>>END-IF
+"""
+        result = preprocess_conditional_compilation(source)
+        assert "S kept" in result
+        assert "N kept" in result
+        assert "X defined" in result
+        assert "X truncated" not in result
+
     def test_if_not_defined(self):
         """Test >>IF ... IS NOT DEFINED."""
         source = """>>IF UNDEFINED_SYMBOL IS NOT DEFINED

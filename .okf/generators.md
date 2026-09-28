@@ -170,6 +170,12 @@ Program Flow webview (Mermaid v11, `htmlLabels:false`,
   is how the COBOL literal read anyway. This supersedes the earlier
   bare `.replace('"', "#quot;")` used since the 2026-08-11 quoted-edge-
   label fix. DOT labels are not escaped — Graphviz has no such mangling.
+- **DOT string escaping (2026-09-28).** Edge attribute values now go
+  through `_dot_str` like node labels: a PERFORM UNTIL / IF condition with
+  a `"` inside an apostrophe literal was emitted raw into `label="..."`,
+  ending the DOT string early. And the node label's `\n (N stmts)` break is
+  appended *after* `_dot_str` -- passed through it, the `\n` became `\\n`,
+  which Graphviz renders as a literal backslash-n.
 - **Arm boxes show statement summaries.** `BranchArm.summary` (see
   [analysis.md](analysis.md)'s statement_text section) renders instead of
   the bare `THEN`/`ELSE`/`WHEN x` keyword, which duplicated the edge label

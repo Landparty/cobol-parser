@@ -848,10 +848,12 @@ positive weights work -- the composite normalizes by the weights' actual
 sum): `complexity` (share of procedures rated MODERATE/HIGH, weighted units
 `moderate*1 + high*3` over `3*total`), `redundancy` (mean of
 `dead_ratio`/`unused_ratio`/cloned-statement ratio), `control_flow` (capped
-penalties: GO TO density, `ALTER` usage via `ast.find_all_by_type` --
-`ASTNode.find_all_by_type` is a *deep*, cached subtree search via
-`traverse_depth_first()`, not a shallow direct-children scan, confirmed
-empirically -- HIGH-severity `RecursionRiskAnalyzer` risks, unreachable-node
+penalties: GO TO density, `ALTER` usage via `find_all_by_type` on the
+unit's own PROCEDURE division -- `ASTNode.find_all_by_type` is a *deep*,
+cached subtree search via `traverse_depth_first()`, so called on the
+program node it also counted every contained program's ALTERs, charging
+them to the container as well (fixed 2026-09-28; a contained program hangs
+off the `CobolProgram` node, never off its divisions) -- HIGH-severity `RecursionRiskAnalyzer` risks, unreachable-node
 ratio), `size` (share of procedures over `size_threshold`, default 50
 statements). Final score is the weighted average of the four 0-100
 component scores, clamped to `[0, 100]` and **rounded to the 2 decimals

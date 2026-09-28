@@ -14,6 +14,15 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-28 -- bug hunt round 7: batch .prof collisions, DOT escaping, >>DEFINE arithmetic, nested ALTER in health
+
+[batch.md](batch.md): per-file `.prof` dumps of inputs sharing a stem no
+longer overwrite each other (`<stem>-2.prof`, ...). [generators.md](generators.md):
+DOT edge labels are escaped, node-label line break no longer double-escaped.
+[preprocessing.md](preprocessing.md): `>>DEFINE V AS 2 + 1` evaluates the
+arithmetic expression. [analysis.md](analysis.md): `TechnicalDebtAnalyzer`
+counts only the unit's own ALTERs, not its contained programs'.
+
 ## 2026-09-28 -- bug hunt round 6: IMS parmcount, LE FUNCTION words, callee USING order, report origins
 
 [analysis.md](analysis.md): IMSSegmentAnalyzer read CBLTDLI/AIBTDLI's

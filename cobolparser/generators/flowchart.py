@@ -671,7 +671,9 @@ class DotFlowchartGenerator:
                 attrs["style"] = "dashed"
             if attrs:
                 attr_str = (
-                    " [" + ", ".join(f'{k}="{v}"' for k, v in attrs.items()) + "]"
+                    " ["
+                    + ", ".join(f"{k}={self._dot_str(v)}" for k, v in attrs.items())
+                    + "]"
                 )
             else:
                 attr_str = ""
@@ -701,10 +703,13 @@ class DotFlowchartGenerator:
         return f'"{escaped}"'
 
     def _node_label_dot(self, node: FlowNode, options: FlowchartOptions) -> str:
-        name = node.name
+        label = self._dot_str(node.name)
         if options.show_statement_counts and node.statement_count > 0:
-            return self._dot_str(f"{name}\\n({node.statement_count} stmts)")
-        return self._dot_str(name)
+            # The "\n" line break is DOT escape syntax and must reach the
+            # output as-is: passed through _dot_str it became "\\n", which
+            # Graphviz renders as a literal backslash followed by "n".
+            label = f'{label[:-1]}\\n({node.statement_count} stmts)"'
+        return label
 
     def _edge_attrs(
         self,

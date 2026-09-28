@@ -612,6 +612,15 @@ stripped before the directive is read (`_strip_directive_comment`, 2026-09-27):
 `>>DEFINE DEBUG AS 1 *> on` used to define DEBUG as `1 *> ON`, silently
 making `>>IF DEBUG = 1` false, and `>>WHEN OTHER *> x` failed to parse.
 
+`>>DEFINE name AS arithmetic-expression` (IBM; 2026-09-28): an unquoted value
+made of integer literals / already-defined integer compilation variables,
+`+ - * /` and parentheses is evaluated (`_eval_define_arithmetic`), so
+`>>DEFINE V AS 2 + 1` defines V as `3`. It used to store the raw `2 + 1`,
+making `>>IF V = 3` silently false. An expression that cannot be evaluated
+exactly (undefined / non-integer operand, division by zero, inexact
+division) keeps the raw text as before. Arithmetic inside an `>>IF`
+comparison is still unsupported (warns, FALSE).
+
 # Source-Text Manipulation: REPLACE + un-expanded COPY (2026-07-14)
 
 `preprocess/replace_statement.py` implements the two source-text
