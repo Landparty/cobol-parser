@@ -101,7 +101,7 @@ the only way the fast path can be wrong. The extension is compiled separately
 from its caller, so the binary can be *older* than the Python module that calls
 it — a stale in-place `.so`, a cached `build/` tree, or an installed wheel
 shadowing the source tree. `data_clauses.parse_data_item` calls
-`parse_data_item_clauses_fast` with `_DATA_FAST_ARG_COUNT` (19) positional
+`parse_data_item_clauses_fast` with `_DATA_FAST_ARG_COUNT` (20) positional
 arguments and no guard, so that drift raised a `TypeError` from the middle of
 *every* data-description entry; the division loop recorded it as a generic
 error and recovered by abandoning the division, so a build problem degraded
