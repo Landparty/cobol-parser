@@ -896,6 +896,25 @@ SPECIAL-NAMES emits a warning that the clause is recorded but not honored
 by the lexer (H4). All division parsers can reach the host warning channel:
 `BaseDivisionParser.host` is set by the division loop (`parser.py`).
 
+**SPECIAL-NAMES clause boundaries (`environment_sections.py`, 2026-09-28):**
+IBM writes SPECIAL-NAMES as *one sentence* with a single closing period, so
+a clause ends where the next one starts. `CLASS` / `ALPHABET` operands used
+to run until the next CURRENCY/DECIMAL-POINT/CLASS/ALPHABET word or a
+period, swallowing a following `SYMBOLIC CHARACTERS` or mnemonic clause
+(`C01 IS TOP-OF-PAGE` vanished from `mnemonic_definitions`) plus the `"\n"`
+NEWLINE tokens; `SYMBOLIC CHARACTERS NUL IS 1` was read as a mnemonic
+clause; and a following `REPOSITORY.` paragraph's `CLASS X IS 'java.X'`
+entries became SPECIAL-NAMES class conditions. Now every operand collection
+stops at `_at_clause_start()` (a clause word in `_SPECIAL_NAMES_CLAUSES`, a
+`name IS` / `name ON|OFF STATUS` mnemonic start, a period) and the
+paragraph ends at any CONFIGURATION SECTION paragraph header
+(`_CONFIGURATION_PARAGRAPHS`). New metadata: `symbolic_characters`
+(`[{name, ordinal, alphabet}]`, a group is only taken when an integer
+follows its IS/ARE) and `currency_signs` (`[{sign, picture_symbol}]`, every
+CURRENCY clause; `currency_sign` keeps its last-wins value). `CLASS`/
+`ALPHABET ... FOR ALPHANUMERIC|NATIONAL` and the name-less `UPSI-0 ON STATUS
+IS x` form are accepted. `tests/regression/test_special_names_clause_boundaries.py`.
+
 # Statement-coverage audit (2026-09-02)
 
 Question asked of the parser: *can a PROCEDURE DIVISION statement leave the
