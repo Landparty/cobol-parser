@@ -912,7 +912,9 @@ Output carries `scan_version` (read it before trusting any other key), an
 construction, `files[]` and `failures[]`. A file that cannot be read or
 parsed is a `failures` entry and costs the scan nothing else; an analyzer
 that raises on one unit is named in that unit's `failed_analyzers` with its
-other reports intact. Every program unit of a multi-`PROGRAM-ID` file is
+other reports intact. A file whose copybook expansion failed is still
+scanned (unexpanded) and carries `copybook_error` naming why. Every program
+unit of a multi-`PROGRAM-ID` file is
 reported, each with its nesting `depth` -- the same argument `lint` makes
 for linting every unit.
 

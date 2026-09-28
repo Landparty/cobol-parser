@@ -319,9 +319,7 @@ class TestGraphWorkersValidation:
     parse_files; batch and scan reject it with a one-line error."""
 
     @pytest.mark.parametrize("workers", [0, -1])
-    def test_codebase_graph_rejects_non_positive_workers(
-        self, tree, capsys, workers
-    ):
+    def test_codebase_graph_rejects_non_positive_workers(self, tree, capsys, workers):
         with pytest.raises(SystemExit) as exit_info:
             _cmd_codebase_graph(_graph_args([str(tree)], workers=workers))
         assert exit_info.value.code == 1

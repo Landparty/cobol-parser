@@ -444,8 +444,7 @@ class TestScanSourceFormat:
         body = _program("TAGGED", "MAIN-PARA", "           PERFORM SUB-PARA.\n")
         body += "       SUB-PARA.\n           DISPLAY WS-A.\n"
         lines = [
-            "AB 12 " + line[6:] if line.strip() else line
-            for line in body.splitlines()
+            "AB 12 " + line[6:] if line.strip() else line for line in body.splitlines()
         ]
         return _write(tmp_path, "TAGGED.cbl", "\n".join(lines) + "\n")
 

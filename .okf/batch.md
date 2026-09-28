@@ -116,7 +116,11 @@ so `scan --source-format fixed|free` silently auto-detected.
 
 A file whose copybook expansion fails is NOT dropped -- it falls back to the
 unexpanded parse, the same degradation `parse_files_with_copybooks` makes
-above. Copybook paths matter more here than they look: an unexpanded
+above. The reason is kept as the file's `copybook_error`
+(`FileScan.copybook_error`, serialized only when set): the unexpanded parse
+is usually error-free -- a COPY statement parses without its member -- so
+before 2026-09-28, when the fallback was a bare `pass`, such a file's
+reports were indistinguishable from an expanded scan's. Copybook paths matter more here than they look: an unexpanded
 program's WORKING-STORAGE is missing whatever its COPY members declare, so
 `unused-variables` (and therefore `health`'s redundancy component, and
 therefore the grade a portfolio table sorts on) would grade a program
