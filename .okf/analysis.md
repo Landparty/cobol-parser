@@ -1161,6 +1161,16 @@ report a fictitious intrinsic function `KEYS` and set
 `uses_intrinsic_functions` true. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA3FunctionInsideLiteralIsProse`.
 
+**`FUNCTION` must be its own word; conditions and STRING are scanned
+(2026-09-28):** the regex matched `FUNCTION` inside a data name --
+`WS-FUNCTIONAL`, `DLI-FUNCTIONS`, `FUNCTIONAL-CODE` reported intrinsics
+`AL`, `S`, `AL-CODE`. It now needs no name character before it, and the
+no-blank form (`FUNCTIONLENGTH`) is accepted only for a known intrinsic.
+IF / PERFORM UNTIL conditions (their operands live on the condition tree)
+and STRING's split `"FUNCTION"`, `"UPPER-CASE ( X )"` operands used to be
+missed. `TestIntrinsicReferenceBoundaries` in
+`tests/unit/test_language_env_analyzer.py`.
+
 ### Call signatures (`dialects/le_signatures.py`)
 
 The analyzer answers "is this an LE service?"; `le_signatures.py` answers the
@@ -1288,6 +1298,13 @@ whose child fields share a name (both `SSA-SEG-NAME`, qualified
 differently — the shape `test_multiple_ssas_path_call` pins) would
 otherwise cross-contaminate each other's static values. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA4IMSMovedSegmentName`.
+
+**Optional parmcount (2026-09-28):** `CALL 'CBLTDLI' USING parmcount,
+function, pcb, ...` (also AIBTDLI; CEETDLI takes none) used to read the count
+as the function code and shift PCB / I/O area / SSAs by one. A first operand
+that is a numeric literal or a data item with a purely numeric PICTURE
+(function codes are always `PIC X(4)`) is now skipped.
+`TestParmcountOperand` in `tests/unit/test_ims_segment_analyzer.py`.
 
 ## HostVariableResolver
 
@@ -1447,6 +1464,12 @@ boundary it gates on never had a `status_field`. DELETE/START/UNLOCK are
    subprogram entirely (found via `tests/samples/subprogram_demo.cbl`'s
    CALCULATOR, which computes its result exactly that way; a MOVE-only
    check silently mis-classified it as OUT).
+   "Nth" is the Nth name of the callee's `PROCEDURE DIVISION USING`
+   (RETURNING excluded), not the Nth LINKAGE 01 in declaration order --
+   those differ whenever LINKAGE is declared in another order or holds
+   `SET ADDRESS OF` items (fixed 2026-09-28; the old binding inverted the
+   directions). Declaration order is only the fallback for a callee with
+   no USING.
 3. Caller-side dataflow in the enclosing paragraph's own statement list
    (source order): last write before the CALL with no read after -> **OUT**;
    first read after with no write before -> **IN**; both -> **BIDIRECTIONAL**.

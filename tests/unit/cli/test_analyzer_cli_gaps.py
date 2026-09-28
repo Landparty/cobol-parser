@@ -250,3 +250,41 @@ class TestProgramFlowProfileTextFormats:
         _run_main(["program-flow", str(program), "--format", "mermaid"])
         captured = capsys.readouterr()
         assert "warning:" not in captured.err
+
+
+DEAD_COPY_PROGRAM = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DCP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY CUSTREC.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           STOP RUN.
+       DEAD-PARA.
+           DISPLAY 'DEAD'.
+"""
+
+
+class TestEveryAnalyzerStampsOrigins:
+    """Only lint and unused-variables used to say where an expanded-listing
+    location really is; every other analyzer subcommand taking
+    --copybook-path reported DEAD-PARA at line 11 of a file whose line 11
+    does not exist, with nothing to map it back."""
+
+    def test_dead_code_location_gains_origin(self, tmp_path, capsys):
+        cpy_dir = tmp_path / "cpy"
+        cpy_dir.mkdir()
+        (cpy_dir / "CUSTREC.CPY").write_text(COPYBOOK)
+        program = tmp_path / "dead.cbl"
+        program.write_text(DEAD_COPY_PROGRAM)
+
+        _run_main(["dead-code", str(program), "--copybook-path", str(cpy_dir)])
+        (item,) = json.loads(capsys.readouterr().out)["dead_code"]
+        assert item["location"]["line"] == 11  # expanded listing, unchanged
+        assert item["origin"] == {"file": str(program), "line": 9}
+
+    def test_no_origin_without_expansion(self, tmp_path, capsys):
+        program = tmp_path / "flow.cbl"
+        program.write_text(FLOW_PROGRAM)
+        _run_main(["complexity", str(program)])
+        assert '"origin"' not in capsys.readouterr().out

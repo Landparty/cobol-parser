@@ -486,3 +486,51 @@ class TestConditionFieldNamesExpressionTrees:
         comparison.set_right_operand("WS-C")
 
         assert _condition_field_names(comparison) == ["WS-A", "WS-B", "WS-C"]
+
+
+class TestCalleeSourceBindsByProcedureUsing:
+    """Rung 2 matched the Nth argument to the callee's Nth LINKAGE 01 in
+    declaration order; the formal parameter is the Nth name of its
+    PROCEDURE DIVISION USING. With LINKAGE declared A, B, C and USING B C A,
+    the argument the callee writes (the third) used to read OUT and the
+    first IN."""
+
+    _CALLEE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SUB1.
+       DATA DIVISION.
+       LINKAGE SECTION.
+       01 LK-A PIC X(4).
+       01 LK-B PIC X(4).
+       01 LK-C PIC X(4).
+       PROCEDURE DIVISION USING LK-B LK-C LK-A.
+           MOVE 'X' TO LK-A.
+           GOBACK.
+"""
+    _CALLER = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MAIN1.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-1 PIC X(4).
+       01 WS-2 PIC X(4).
+       01 WS-3 PIC X(4).
+       PROCEDURE DIVISION.
+       P1.
+           CALL 'SUB1' USING WS-1 WS-2 WS-3.
+           GOBACK.
+"""
+
+    def test_directions_follow_using_order(self):
+        callee = parse_cobol(self._CALLEE).ast
+        caller = parse_cobol(self._CALLER).ast
+        report = BoundaryInventoryAnalyzer().analyze(
+            caller,
+            ProgramLayoutIndex.build(caller),
+            callee_indexes={"SUB1": ProgramLayoutIndex.build(callee)},
+            callee_asts={"SUB1": callee},
+        )
+        (boundary,) = report.boundaries
+        assert [(a.name, a.direction, a.provenance) for a in boundary.call_args] == [
+            ("WS-1", "OUT", "callee-source"),
+            ("WS-2", "OUT", "callee-source"),
+            ("WS-3", "IN", "callee-source"),
+        ]

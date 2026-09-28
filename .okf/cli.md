@@ -514,6 +514,13 @@ With `--copybook-path`, each unused item also carries
 (`analysis.lint.stamp_report_origins`, 2026-09-27): `location.line` counts
 lines of the expanded text, so past the first `COPY` it was not the line on
 disk. `location` is left as it was.
+As of 2026-09-28 this stamping is done once, in `_emit_report`, for every
+analyzer subcommand that takes `--copybook-path` (dead-code, complexity,
+health, move-type-check, xref, ...): `_parse_result_or_fail` remembers the
+map on `args._expansion_source_map`. Previously only lint and
+unused-variables said where an expanded-listing line really is. Additive:
+no map (no `--copybook-path`), no `origin`. `gen-fixtures` is *not* stamped
+(its bundle uses bare `line` keys under `bundle_version`).
 
 ## Program-Flow
 

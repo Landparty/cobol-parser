@@ -148,6 +148,9 @@ class UnstringStatement(CobolStatement):
         self.not_on_overflow: list[CobolStatement] | None = None
         self.source_operand: str | None = None
         self.delimiters: list[str] = []
+        #: Parallel to ``delimiters``: True where the delimiter was written
+        #: ``ALL`` (consecutive occurrences count as one delimiter).
+        self.delimiter_all: list[bool] = []
         self.into_targets: list[dict[str, Any]] = []
         self.pointer_variable: str | None = None
         self.tallying_variable: str | None = None
@@ -156,9 +159,10 @@ class UnstringStatement(CobolStatement):
         """Set the UNSTRING source operand."""
         self.source_operand = source
 
-    def add_delimiter(self, delimiter: str) -> None:
-        """Add a DELIMITED BY delimiter."""
+    def add_delimiter(self, delimiter: str, all_occurrences: bool = False) -> None:
+        """Add a DELIMITED BY delimiter (``all_occurrences`` for ``ALL``)."""
         self.delimiters.append(delimiter)
+        self.delimiter_all.append(all_occurrences)
 
     def add_into_target(
         self,
@@ -194,6 +198,10 @@ class UnstringStatement(CobolStatement):
             result["source_operand"] = self.source_operand
         if self.delimiters:
             result["delimiters"] = self.delimiters
+        if any(self.delimiter_all):
+            # Additive and only when some delimiter is `ALL`, so the shape
+            # of every UNSTRING without one is unchanged.
+            result["delimiter_all"] = self.delimiter_all
         if self.into_targets:
             result["into_targets"] = self.into_targets
         if self.pointer_variable:

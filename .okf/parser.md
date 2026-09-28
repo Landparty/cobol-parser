@@ -1784,6 +1784,10 @@ delimiter (`UnstringStatement.delimiters`) instead of keeping only the
 first; `TALLYING IN counter` — documented in the parser's own docstring
 but never implemented — now populates a new
 `UnstringStatement.tallying_variable` field.
+`DELIMITED BY ALL x` (2026-09-28): the `ALL` flag used to be consumed and
+dropped. `UnstringStatement.delimiter_all` is a bool list parallel to
+`delimiters`; `to_dict()` emits it only when some delimiter is `ALL`, so
+every other UNSTRING serializes as before.
 
 **EXEC CICS lost its command verb when written on the line after `EXEC
 CICS`** (`ibm_exec_statements.py`) — the idiomatic, most common layout

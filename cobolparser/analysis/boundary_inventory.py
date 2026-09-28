@@ -157,6 +157,23 @@ def _write_targets(statement: Any) -> list[str]:
     return names
 
 
+def _procedure_using_names(ast: CobolProgram) -> list[str]:
+    """The callee's ``PROCEDURE DIVISION USING`` operands, uppercased and in
+    calling order -- without the ``RETURNING`` item the parser keeps in the
+    same list (see ``ProgramSignatureExtractor``)."""
+    procedure = ast.get_division("PROCEDURE")
+    if procedure is None:
+        return []
+    names = [
+        str(name).strip().upper()
+        for name in procedure.get_metadata("using_parameters") or []
+        if str(name).strip()
+    ]
+    if "RETURNING" in names:
+        names = names[: names.index("RETURNING")]
+    return names
+
+
 def _condition_field_names(expr: CobolExpression | None) -> list[str]:
     """Every bare operand string anywhere in *expr*'s tree (over-approximates
     -- a literal like ``"Y"`` is included too -- but the caller only ever
@@ -801,9 +818,24 @@ class BoundaryInventoryAnalyzer:
         that refinement is left to a later phase.
         """
         linkage_records = callee_index.linkage_records()
-        if position >= len(linkage_records):
-            return None
-        linkage_root = linkage_records[position]
+        # The Nth argument binds to the Nth name of the callee's
+        # `PROCEDURE DIVISION USING`, not to its Nth LINKAGE 01 in source
+        # order -- the two differ whenever LINKAGE is declared in another
+        # order or holds items no USING names (SET ADDRESS OF targets).
+        # Declaration order is only the fallback for a callee with no USING.
+        formals = _procedure_using_names(callee_ast)
+        if formals:
+            if position >= len(formals):
+                return None
+            by_name = {record.name.upper(): record for record in linkage_records}
+            found = by_name.get(formals[position])
+            if found is None:
+                return None
+            linkage_root = found
+        else:
+            if position >= len(linkage_records):
+                return None
+            linkage_root = linkage_records[position]
         candidate_names = {linkage_root.name.upper()}
         for child in linkage_root.get_all_children():
             candidate_names.add(child.name.upper())

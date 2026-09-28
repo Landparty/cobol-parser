@@ -299,6 +299,12 @@ def _emit_report(
     The report is prefixed with the standard identification header so the
     output is self-describing (see :func:`_identification`).
     """
+    # With --copybook-path every location counts lines of the expanded
+    # text; stamp each with the file and line it really came from, the way
+    # lint does. Additive: nothing is added without an expansion map.
+    from ..analysis.lint import stamp_report_origins
+
+    data = stamp_report_origins(data, getattr(args, "_expansion_source_map", None))
     output = {**_identification(args, ast), **data}
     if prof is not None:
         output["profiling"] = prof.to_dict()
@@ -488,6 +494,9 @@ def _parse_result_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
             file=sys.stderr,
         )
     _select_program_unit(args, result)
+    # Remembered for `_emit_report`, which stamps source-map origins onto
+    # every report location (see `stamp_report_origins`).
+    args._expansion_source_map = getattr(result, "expansion_source_map", None)
     return result, prof
 
 
@@ -2123,14 +2132,9 @@ def _cmd_unused_variables(args: argparse.Namespace) -> None:
         copybook_item_names=copybook_item_names,
     )
 
-    # Locations count lines of the copybook-expanded text; say where each
-    # item really is, the way lint does (see stamp_report_origins).
-    from ..analysis.lint import stamp_report_origins
-
-    payload = stamp_report_origins(
-        report.to_dict(), getattr(result, "expansion_source_map", None)
-    )
-    _emit_report(payload, args, prof, ast)
+    # Locations count lines of the copybook-expanded text; _emit_report
+    # stamps where each item really is, the way lint does.
+    _emit_report(report.to_dict(), args, prof, ast)
 
 
 # -- Subcommand: program-flow -------------------------------------------------

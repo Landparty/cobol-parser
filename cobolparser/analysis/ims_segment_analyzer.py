@@ -22,6 +22,7 @@ consist only of those 8 bytes plus a trailing space; qualified SSAs follow
 with a parenthesised field/operator/value expression.
 """
 
+import re
 from dataclasses import dataclass, field
 
 from ..models.ast_base import ASTNode, SourceLocation
@@ -60,6 +61,11 @@ _PARAM_SSA_START = 3
 
 # Segment name occupies the first 8 bytes of every SSA
 _SSA_SEGMENT_NAME_LEN = 8
+
+# Interfaces that accept an optional leading parameter-count operand
+# (`CALL 'CBLTDLI' USING parmcount, function, ...`). CEETDLI takes none.
+_PARMCOUNT_INTERFACES: frozenset[str] = frozenset({"CBLTDLI", "AIBTDLI"})
+_NUMERIC_PICTURE_RE = re.compile(r"^S?[9()0-9]+$")
 
 
 # ── Result dataclass ──────────────────────────────────────────────────────────
@@ -275,6 +281,15 @@ class IMSSegmentAnalyzer:
                 continue
 
             params = stmt.using_parameters
+            interface = (_strip_quotes(stmt.called_program or "") or "").upper()
+            if (
+                interface in _PARMCOUNT_INTERFACES
+                and params
+                and self._is_parmcount(params[0].name)
+            ):
+                # `CALL 'CBLTDLI' USING parmcount, function, pcb, ...`: the
+                # optional leading count shifts every positional operand.
+                params = params[1:]
             func_var = (
                 params[_PARAM_FUNC_CODE].name
                 if len(params) > _PARAM_FUNC_CODE
@@ -289,7 +304,7 @@ class IMSSegmentAnalyzer:
             results.append(
                 IMSDLICall(
                     location=stmt.location,
-                    interface=(_strip_quotes(stmt.called_program or "") or "").upper(),
+                    interface=interface,
                     function_code=self._resolve_func_code(func_var),
                     function_code_var=func_var,
                     pcb_name=pcb_name,
@@ -345,6 +360,23 @@ class IMSSegmentAnalyzer:
         return calls
 
     # ── Resolution helpers ───────────────────────────────────────────────────
+
+    def _is_parmcount(self, name: str | None) -> bool:
+        """True when *name* is the optional leading parameter-count operand.
+
+        IMS takes it as a binary fullword (``PIC S9(9) BINARY``), while a
+        function code is always 4 alphanumeric bytes, so a numeric literal
+        or a data item with a purely numeric PICTURE can only be the count.
+        """
+        if not name:
+            return False
+        text = name.strip()
+        if text.lstrip("+-").isdigit():
+            return True
+        item = self._data_items.get(text.upper())
+        if item is None or item.picture_clause is None:
+            return False
+        return bool(_NUMERIC_PICTURE_RE.match(item.picture_clause.pattern.upper()))
 
     def _resolve_func_code(self, var_name: str | None) -> str | None:
         """Resolve a function-code variable/literal to an IMS verb like ``"GU"``."""

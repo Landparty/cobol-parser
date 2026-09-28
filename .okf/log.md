@@ -14,6 +14,18 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-28 -- bug hunt round 6: IMS parmcount, LE FUNCTION words, callee USING order, report origins
+
+[analysis.md](analysis.md): IMSSegmentAnalyzer read CBLTDLI/AIBTDLI's
+optional leading parmcount as the function code (every operand shifted);
+LanguageEnvironmentAnalyzer reported intrinsics out of data names containing
+FUNCTION and missed them in conditions / STRING; the boundary inventory's
+callee-source rung bound arguments to LINKAGE declaration order instead of
+`PROCEDURE DIVISION USING`. [cli.md](cli.md): every analyzer subcommand now
+stamps `origin` under `--copybook-path` (was lint / unused-variables only).
+[parser.md](parser.md): UNSTRING `DELIMITED BY ALL` recorded
+(`delimiter_all`, emitted only when present).
+
 ## 2026-09-28 -- bug hunt round 5: STATUS without FILE, CALL USING literals, refmod MOVEs, SQL indicators
 
 [parser.md](parser.md): `SELECT ... STATUS IS x` (IBM's optional FILE) was
