@@ -64,6 +64,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .._lines import split_source_lines
+
 #: Columns 73-80 are the identification field and are discarded.
 CARD_WIDTH = 72
 
@@ -73,6 +75,8 @@ CONTINUATION_MAX_COLUMN = 16
 
 #: A continued quoted string must resume in exactly this column (1-based).
 STRING_CONTINUATION_COLUMN = 16
+#: A quoted string that is continued is coded through this column.
+STRING_LAST_COLUMN = 71
 
 #: Default in-stream data delimiter; overridable per DD card with ``DLM=``.
 DEFAULT_DELIMITER = "/*"
@@ -262,6 +266,18 @@ def _card_text(line: str) -> str:
     return line.rstrip()[:CARD_WIDTH]
 
 
+def _open_quote_padding(card_text: str, in_quote: bool) -> str:
+    """The blanks a quoted string continued past this card still holds.
+
+    A continued string runs through column 71; `_card_text` has already
+    stripped trailing blanks, but blanks inside the open quote are part of
+    the string's value, not padding.
+    """
+    if not in_quote:
+        return ""
+    return " " * max(0, STRING_LAST_COLUMN - len(card_text))
+
+
 def _is_continuation_card(text: str) -> bool:
     return text.startswith("//") and text[2:3] == " " and bool(text[2:].strip())
 
@@ -373,6 +389,7 @@ class _Scanner:
         segment, comment, in_quote, _depth = _scan_parameter_segment(
             body, position, in_quote=False, stop_on_blank=stop_on_blank
         )
+        segment += _open_quote_padding(text, in_quote)
         parts = [segment]
         comments = [comment] if comment else []
         raw_lines = [raw_first]
@@ -436,6 +453,7 @@ class _Scanner:
                 segment, comment, in_quote, _depth = _scan_parameter_segment(
                     next_text, begin, in_quote=False, stop_on_blank=stop_on_blank
                 )
+            segment += _open_quote_padding(next_text, in_quote)
             parts.append(segment)
             if comment:
                 comments.append(comment)
@@ -464,13 +482,17 @@ class _Scanner:
         if first not in ("*", "DATA"):
             return
         delimiter = DEFAULT_DELIMITER
+        dlm_coded = False
         for part in parts[1:]:
             stripped = part.strip()
             if stripped.upper().startswith("DLM="):
+                dlm_coded = True
                 delimiter = stripped[4:].strip()
                 if delimiter.startswith("'") and delimiter.endswith("'"):
                     delimiter = delimiter[1:-1]
-        stop_on_jcl = first == "*"
+        # Once DLM names another delimiter, the data may itself hold "//"
+        # and "/*" cards: only the coded delimiter ends it.
+        stop_on_jcl = first == "*" and not dlm_coded
         data: list[str] = []
         terminated = False
         while self.index < len(self.lines):
@@ -502,4 +524,4 @@ def scan_cards(text: str) -> ScanResult:
     and ``DD *`` / ``DD DATA`` content is attached to its DD card instead of
     being parsed as JCL.
     """
-    return _Scanner(text.splitlines()).scan()
+    return _Scanner(split_source_lines(text)).scan()

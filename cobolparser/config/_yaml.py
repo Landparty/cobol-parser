@@ -87,7 +87,9 @@ def parse_yaml(text: str, filename: str = "<config>") -> Any:
     for an empty/comment-only file. Raises `YamlError` naming ``filename``
     and the offending line for anything unsupported or malformed.
     """
-    parser = _Parser(text, filename)
+    # A byte-order mark (what some Windows editors put at the top of a UTF-8
+    # file) is an encoding artefact, not part of the first key.
+    parser = _Parser(text.removeprefix("﻿"), filename)
     return parser.parse()
 
 
@@ -112,6 +114,7 @@ class _Parser:
         entry nor a sequence entry."""
         lines: list[_Line] = []
         seen_document_start = False
+        seen_document_end = False
         for number, raw in enumerate(split_source_lines(text), start=1):
             stripped = _strip_comment(raw)
             if not stripped.strip():
@@ -147,7 +150,16 @@ class _Parser:
                 seen_document_start = True
                 continue
             if content == "...":
-                break
+                # The end-of-document marker. Anything significant after it
+                # would be a further document -- rejected, like a second
+                # `---`, rather than silently dropped.
+                seen_document_end = True
+                continue
+            if seen_document_end:
+                raise YamlError(
+                    f"{self.filename}:{number}: multiple YAML documents are "
+                    f"not supported in a config file"
+                )
 
             lines.append(_Line(indent, content, number))
         return lines
@@ -276,19 +288,22 @@ class _Parser:
             raise self._error("YAML merge keys (<<) are not supported", line)
 
         quote: str | None = None
-        for i, char in enumerate(text):
+        i = 0
+        while i < len(text):
+            char = text[i]
             if quote:
-                if char == quote:
-                    quote = None
+                i, quote = _step_in_quote(text, i, quote)
                 continue
             if char in "\"'" and _opens_quote(text, i):
                 quote = char
+                i += 1
                 continue
             if char == ":" and (i + 1 == len(text) or text[i + 1] in " \t"):
                 key_text = text[:i].strip()
                 if not key_text:
                     raise self._error("mapping entry with an empty key", line)
                 return self._scalar_key(key_text, line), text[i + 1 :].strip()
+            i += 1
         raise self._error(
             "expected 'key: value' (a colon followed by a space)",
             line,
@@ -451,15 +466,34 @@ class _Parser:
         raise self._error("unterminated quoted string", line)
 
 
+def _step_in_quote(text: str, i: int, quote: str) -> tuple[int, str | None]:
+    """Advance past ``text[i]`` inside a quoted span opened by *quote*.
+
+    Returns the next index and the quote still open (``None`` once the span
+    closes). ``''`` inside single quotes and a backslash escape inside double
+    quotes are the escaped forms of a character, not the end of the span:
+    ``'it''s # x'`` and ``"a\\": b"`` are each one scalar.
+    """
+    char = text[i]
+    if quote == '"' and char == "\\":
+        return i + 2, quote
+    if char == quote:
+        if quote == "'" and i + 1 < len(text) and text[i + 1] == "'":
+            return i + 2, quote
+        return i + 1, None
+    return i + 1, quote
+
+
 def _is_mapping_entry(text: str) -> bool:
     """Whether `text` looks like `key: value` rather than a bare scalar.
     Only used to decide how to read a `- ...` sequence entry."""
     quote: str | None = None
     depth = 0
-    for i, char in enumerate(text):
+    i = 0
+    while i < len(text):
+        char = text[i]
         if quote:
-            if char == quote:
-                quote = None
+            i, quote = _step_in_quote(text, i, quote)
             continue
         if char in "\"'" and _opens_quote(text, i):
             quote = char
@@ -471,6 +505,7 @@ def _is_mapping_entry(text: str) -> bool:
             char == ":" and depth == 0 and (i + 1 == len(text) or text[i + 1] in " \t")
         ):
             return True
+        i += 1
     return False
 
 
@@ -512,12 +547,7 @@ def _strip_comment(raw: str) -> str:
             # escaped quotes then re-opened it and hid the damage; an odd
             # number left a later `#` looking unquoted, so
             # `msg: "a \" # b"` lost its tail and failed to parse at all.
-            if char == "\\" and quote == '"':
-                i += 2
-                continue
-            if char == quote:
-                quote = None
-            i += 1
+            i, quote = _step_in_quote(raw, i, quote)
             continue
         if char in "\"'" and _opens_quote(raw, i):
             quote = char

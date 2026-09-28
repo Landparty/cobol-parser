@@ -144,8 +144,15 @@ def test_leading_document_marker_allowed():
     assert parse_yaml("---\na: 1\n") == {"a": 1}
 
 
-def test_document_end_marker_stops_parsing():
-    assert parse_yaml("a: 1\n...\nb: 2\n") == {"a": 1}
+def test_document_end_marker_ends_the_document():
+    assert parse_yaml("a: 1\n...\n# only a comment after it\n") == {"a": 1}
+
+
+def test_content_after_document_end_marker_is_rejected():
+    # What follows `...` is a further document; dropping it silently would
+    # leave settings the user wrote quietly out of effect.
+    with pytest.raises(YamlError, match=":3: multiple YAML documents"):
+        parse_yaml("a: 1\n...\nb: 2\n")
 
 
 def test_value_containing_colon_is_not_split():
@@ -320,3 +327,23 @@ def test_line_numbers_count_records_not_unicode_line_breaks(sep):
     # later line number past the one the editor shows.
     with pytest.raises(YamlError, match=r"^<config>:2: unterminated flow"):
         parse_yaml(f"a: x{sep}y\nb: [\n")
+
+
+# -- escaped quotes inside quoted scalars --------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("k: 'it''s # not a comment'", {"k": "it's # not a comment"}),
+        ("'a'': b': 1", {"a': b": 1}),
+        ("- 'x'': y'", ["x': y"]),
+        ('"a\\": b": c', {'a": b': "c"}),
+    ],
+)
+def test_escaped_quote_does_not_end_the_quoted_span(text, expected):
+    assert parse_yaml(text) == expected
+
+
+def test_utf8_byte_order_mark_is_ignored():
+    assert parse_yaml("﻿version: 1\n") == {"version": 1}

@@ -103,7 +103,9 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
 * **The YAML subset** — stdlib only (this package has no runtime
   dependencies). Nested mappings, block/flow sequences (a block sequence
   may sit at its key's own column -- the indentless form), flow mappings,
-  quoted/plain scalars, `#` comments, one optional leading `---`. Anchors,
+  quoted/plain scalars (`''` and `\"` escapes), `#` comments, one optional
+  leading `---`, an optional trailing `...` (anything significant after it is
+  a second document and rejected), a leading UTF-8 BOM (ignored). Anchors,
   aliases, tags, block scalars, merge keys, multiple documents, tabs in
   indentation and duplicate keys are **rejected with a line number**. Two
   deliberate YAML 1.2-core departures from 1.1: `yes`/`no`/`on`/`off` stay

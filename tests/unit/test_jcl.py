@@ -460,15 +460,32 @@ class TestContinuation:
         assert result.jobs[0].steps[0].dd("OUT").disposition == "SHR"
 
     def test_continuation_inside_a_quoted_string(self):
-        result = parse_jcl("""\
+        # The string is coded through column 71, as IBM requires.
+        first = "//S1 EXEC PGM=RPTGEN,PARM='REPORT=MONTHLY,REGION=NORTHEAST,FORMAT=WI"
+        first = first.ljust(71, "X")[:71]
+        result = parse_jcl(f"""\
 //J JOB 1
-//S1 EXEC PGM=RPTGEN,PARM='REPORT=MONTHLY,REGION=NORTHEAST,FORM
-//             AT=WIDE'
+{first}
+//             DE'
 //
 """)
         assert result.errors == []
         step = result.jobs[0].steps[0]
-        assert step.parm == "REPORT=MONTHLY,REGION=NORTHEAST,FORMAT=WIDE"
+        assert step.parm == first[27:] + "DE"
+
+    def test_continued_quoted_string_keeps_its_blanks_through_column_71(self):
+        # Blanks up to column 71 are inside the open quote: they belong to
+        # the string's value even when the file has its trailing blanks
+        # stripped.
+        result = parse_jcl("""\
+//J JOB 1
+//S1 EXEC PGM=X,PARM='ABC
+//             DEF'
+//
+""")
+        assert result.errors == []
+        parm = result.jobs[0].steps[0].parm
+        assert parm == "ABC" + " " * (71 - len("//S1 EXEC PGM=X,PARM='ABC")) + "DEF"
 
     def test_quoted_string_continuation_must_resume_in_column_16(self):
         result = parse_jcl("""\
@@ -1493,3 +1510,63 @@ class TestDummyAndBackwardReferences:
         )
         assert result.jobs[0].step("S2").dd("IN").dataset == "*.S1.IN"
         assert any("backward reference" in u for u in result.unresolved)
+
+
+class TestBugHuntRegressions:
+    def test_set_after_exec_does_not_reach_back_into_the_procedure(self):
+        result = parse_jcl("""\
+//J JOB 1
+//P PROC
+//S EXEC PGM=X
+//IN DD DSN=&HLQ..A,DISP=SHR
+// PEND
+// SET HLQ=OLD
+//S1 EXEC P
+// SET HLQ=NEW
+//S2 EXEC PGM=Y
+//
+""")
+        assert result.errors == []
+        assert result.jobs[0].step("S1.S").dd("IN").dataset == "OLD.A"
+
+    def test_dcb_override_merges_sub_parameters(self):
+        result = parse_jcl("""\
+//J JOB 1
+//P PROC
+//S EXEC PGM=X
+//IN DD DSN=A.B,DISP=SHR,DCB=(RECFM=FB,LRECL=80)
+// PEND
+//S1 EXEC P
+//S.IN DD DCB=(LRECL=100)
+//
+""")
+        assert result.errors == []
+        dd = result.jobs[0].step("S1.S").dd("IN")
+        assert dd.record_format == "FB"
+        assert dd.record_length == 100
+
+    def test_dd_star_with_dlm_keeps_slash_slash_cards_as_data(self):
+        result = parse_jcl("""\
+//J JOB 1
+//S EXEC PGM=X
+//IN DD *,DLM=$$
+// THIS IS DATA
+/* SO IS THIS
+$$
+//OUT DD DSN=A.B,DISP=SHR
+//
+""")
+        assert result.errors == []
+        step = result.jobs[0].steps[0]
+        assert step.dd("IN").instream_lines == ["// THIS IS DATA", "/* SO IS THIS"]
+        assert step.dd("OUT").dataset == "A.B"
+
+    def test_form_feed_in_instream_data_is_not_a_line_break(self):
+        result = parse_jcl(
+            "//J JOB 1\n//S EXEC PGM=X\n//IN DD DATA\nab\x0ccd\n/*\n"
+            "//OUT DD DSN=A.B,DISP=SHR\n//\n"
+        )
+        assert result.errors == []
+        step = result.jobs[0].steps[0]
+        assert step.dd("IN").instream_lines == ["ab\x0ccd"]
+        assert step.dd("OUT").line == 6
