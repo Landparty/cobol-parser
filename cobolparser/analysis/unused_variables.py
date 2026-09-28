@@ -126,7 +126,12 @@ _QUOTED_TEXT_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
 _STR_ATTR_EXTRAS: dict[type, tuple[str, ...]] = {
     UnstringStatement: ("source_operand", "pointer_variable", "tallying_variable"),
     StringStatement: ("into_target", "pointer_variable"),
-    InspectStatement: ("converting_from", "converting_to"),
+    InspectStatement: (
+        "converting_from",
+        "converting_to",
+        "converting_before",
+        "converting_after",
+    ),
     SearchStatement: ("table_name", "varying_variable"),
 }
 

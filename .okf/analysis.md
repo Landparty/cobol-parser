@@ -42,6 +42,14 @@ from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 
 ## DeadCodeAnalyzer
 
+> 2026-09-27: a referenced section no longer marks *every* paragraph in it
+> live. `_propagate_section_references` walks the section's paragraphs in
+> order and stops after one that `_terminates` (STOP RUN, GOBACK, EXIT
+> PROGRAM, unconditional GO TO); a later paragraph is live only if it is a
+> fall-through source of its own (GO TO/ALTER/ENTRY target). A paragraph
+> after `STOP RUN`, or one jumped over by `GO TO`, in a PERFORMed or
+> fallen-into section is now reported dead.
+
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]
@@ -840,10 +848,12 @@ positive weights work -- the composite normalizes by the weights' actual
 sum): `complexity` (share of procedures rated MODERATE/HIGH, weighted units
 `moderate*1 + high*3` over `3*total`), `redundancy` (mean of
 `dead_ratio`/`unused_ratio`/cloned-statement ratio), `control_flow` (capped
-penalties: GO TO density, `ALTER` usage via `ast.find_all_by_type` --
-`ASTNode.find_all_by_type` is a *deep*, cached subtree search via
-`traverse_depth_first()`, not a shallow direct-children scan, confirmed
-empirically -- HIGH-severity `RecursionRiskAnalyzer` risks, unreachable-node
+penalties: GO TO density, `ALTER` usage via `find_all_by_type` on the
+unit's own PROCEDURE division -- `ASTNode.find_all_by_type` is a *deep*,
+cached subtree search via `traverse_depth_first()`, so called on the
+program node it also counted every contained program's ALTERs, charging
+them to the container as well (fixed 2026-09-28; a contained program hangs
+off the `CobolProgram` node, never off its divisions) -- HIGH-severity `RecursionRiskAnalyzer` risks, unreachable-node
 ratio), `size` (share of procedures over `size_threshold`, default 50
 statements). Final score is the weighted average of the four 0-100
 component scores, clamped to `[0, 100]` and **rounded to the 2 decimals
@@ -974,6 +984,11 @@ Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Conditional
 branches still share one state (unchanged conservatism); paragraphs
 unreachable from the entry procedure are no longer walked at all.
 
+**`CLOSE f REEL` / `CLOSE f UNIT` keep the file open (2026-09-28).** They
+close only the current volume (`close_options[f]["reel"/"unit"]`); treating
+them as a file close reported READ_BEFORE_OPEN / DOUBLE_CLOSE on the legal
+READ or plain CLOSE that follows.
+
 **Conditional GO TO targets are walked once the chain loops (2026-09-27).**
 `READ IN-F AT END GO TO END-P` / `GO TO LOOP-P` -- the textbook sequential
 loop -- stopped the walk at the revisit of LOOP-P, so END-P's CLOSE was never
@@ -1032,6 +1047,16 @@ GnuCOBOL's own MOVE legality check; the remaining disagreements are where
 IBM is stricter than GnuCOBOL's `-std=ibm` (non-integer → alphanumeric) or a
 documented choice here (HIGH/LOW-VALUE, QUOTE → numeric). Pinned by
 `tests/unit/analysis/test_move_type_checker.py::TestGroupReceiverAndZeroToAlphabetic`.
+
+**Glued subscripts and reference modification (2026-09-28):** the MOVE
+parser folds a *source* as `T-E(2)` / `WS-A(1:3)` (no blanks), which
+`base_data_name` does not split, so such a MOVE was silently skipped --
+`_reference_name()` recovers the item name locally (value_tracker keeps the
+old behaviour, so a substring never propagates whole values). A
+reference-modified operand (source or receiver) is ALPHANUMERIC whatever
+its base item is: `MOVE WS-A TO WS-N(2:3)` no longer warns, `MOVE
+WS-D(1:2) TO WS-A` with a `V99` base is legal. Pinned by
+`test_move_type_checker.py::TestSubscriptedAndReferenceModifiedOperands`.
 
 **Picture classification fixes (2026-08-16 audit):** `_PIC_ALPHA_ONLY_RE`
 now matches any concatenation of `A`/`A(n)` parts (`AA(3)`, `A(2)A(3)`) —
@@ -1102,6 +1127,14 @@ BY clause in COBOL, so a CALL to one is never checked for this. `BY CONTENT`
 call arguments are never flagged either way (no USING counterpart to compare
 against).
 
+**CALL argument forms reference their item (2026-09-28).** A CALL
+`USING`/`RETURNING` operand is reduced to its data names
+(`_argument_names`: `ADDRESS OF` / `LENGTH OF` dropped, subscripts and
+reference modifiers removed, every `OF`/`IN` qualifier kept) and a
+subordinate item maps to its 01-level owner, so `LK-REC(1:4)`,
+`ADDRESS OF LK-REC`, `LK-ITEM OF LK-REC` and `LK-ITEM` no longer report
+`LK-REC` as UNREFERENCED_LINKAGE.
+
 **O(units²) → O(units) interface collection (2026-09-10):** `LintAnalyzer`
 used to have each of a file's N program units' own `linkage-check` collector
 call `LinkageChecker.check()` with no shared state, and `check()`'s own
@@ -1129,6 +1162,16 @@ that are quoted literals — `DISPLAY 'FUNCTION KEYS ARE DISABLED'` used to
 report a fictitious intrinsic function `KEYS` and set
 `uses_intrinsic_functions` true. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA3FunctionInsideLiteralIsProse`.
+
+**`FUNCTION` must be its own word; conditions and STRING are scanned
+(2026-09-28):** the regex matched `FUNCTION` inside a data name --
+`WS-FUNCTIONAL`, `DLI-FUNCTIONS`, `FUNCTIONAL-CODE` reported intrinsics
+`AL`, `S`, `AL-CODE`. It now needs no name character before it, and the
+no-blank form (`FUNCTIONLENGTH`) is accepted only for a known intrinsic.
+IF / PERFORM UNTIL conditions (their operands live on the condition tree)
+and STRING's split `"FUNCTION"`, `"UPPER-CASE ( X )"` operands used to be
+missed. `TestIntrinsicReferenceBoundaries` in
+`tests/unit/test_language_env_analyzer.py`.
 
 ### Call signatures (`dialects/le_signatures.py`)
 
@@ -1198,6 +1241,13 @@ already use -- instead of an independent copy of the same walk. `_files`'s
 still upper-cases the result itself since `self._file_entries` is keyed by
 upper-case name.
 
+**SQL write statements (2026-09-28):** for INSERT/UPDATE/DELETE/MERGE only
+`stmt.tables[0]` (the target -- see [dialects.md](dialects.md)) gets the
+write flag; every other table a subquery / `INSERT ... SELECT` / `MERGE ...
+USING` names is marked **R**. `DELETE FROM T WHERE X IN (SELECT X FROM S)`
+used to mark S deleted. MERGE (previously ignored) marks its target with the
+actions its `THEN INSERT|UPDATE|DELETE` clauses take.
+
 ## DynamicCallAnalyzer
 
 ```python
@@ -1251,6 +1301,13 @@ differently — the shape `test_multiple_ssas_path_call` pins) would
 otherwise cross-contaminate each other's static values. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA4IMSMovedSegmentName`.
 
+**Optional parmcount (2026-09-28):** `CALL 'CBLTDLI' USING parmcount,
+function, pcb, ...` (also AIBTDLI; CEETDLI takes none) used to read the count
+as the function code and shift PCB / I/O area / SSAs by one. A first operand
+that is a numeric literal or a data item with a purely numeric PICTURE
+(function codes are always `PIC X(4)`) is now skipped.
+`TestParmcountOperand` in `tests/unit/test_ims_segment_analyzer.py`.
+
 ## HostVariableResolver
 
 ```python
@@ -1297,6 +1354,12 @@ checker reports that no column matches *any* host variable — i.e. it checks
 nothing while looking like it had. That was the first bug found in
 development, and `test_an_underscored_column_is_matched_to_its_hyphenated_host_variable`
 pins it.
+
+**Null indicators are not host variables here (2026-09-28).** An indicator
+(`:X:IND`, `:X INDICATOR :IND`) is picked up by the `:name` scan like any
+host variable but binds to no column; names in any statement's
+`null_indicators` are dropped from the checked set (unless a column of
+that name exists), instead of each being reported as `unchecked`.
 
 | kind | severity | what it costs at runtime |
 |------|----------|--------------------------|
@@ -1403,6 +1466,12 @@ boundary it gates on never had a `status_field`. DELETE/START/UNLOCK are
    subprogram entirely (found via `tests/samples/subprogram_demo.cbl`'s
    CALCULATOR, which computes its result exactly that way; a MOVE-only
    check silently mis-classified it as OUT).
+   "Nth" is the Nth name of the callee's `PROCEDURE DIVISION USING`
+   (RETURNING excluded), not the Nth LINKAGE 01 in declaration order --
+   those differ whenever LINKAGE is declared in another order or holds
+   `SET ADDRESS OF` items (fixed 2026-09-28; the old binding inverted the
+   directions). Declaration order is only the fallback for a callee with
+   no USING.
 3. Caller-side dataflow in the enclosing paragraph's own statement list
    (source order): last write before the CALL with no read after -> **OUT**;
    first read after with no write before -> **IN**; both -> **BIDIRECTIONAL**.
@@ -2050,6 +2119,9 @@ format prints the origin's own `file:line:column:` prefix so the output stays
 clickable after expansion. Pinned by
 `tests/regression/test_expansion_source_map_and_comments.py::TestApplySourceMap`
 and `tests/regression/test_nested_program_units.py`.
+`stamp_report_origins(report_dict, source_map)` (2026-09-27) is its twin for
+a serialized analyzer report: every `"location": {"line": N}` mapping gains a
+sibling `"origin"`. Used by `scan_one` and the `unused-variables` CLI.
 
 
 # Program-type corpus fixes (2026-09-15)

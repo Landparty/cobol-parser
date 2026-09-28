@@ -66,6 +66,29 @@ def _bare_name(operand: str) -> str:
     return text.strip()
 
 
+#: ``ADDRESS OF`` / ``LENGTH OF`` in front of a CALL argument: the item
+#: after it is still the one being referenced.
+_SPECIAL_REGISTER_OF_RE = re.compile(r"^\s*(?:ADDRESS|LENGTH)\s+OF\s+", re.IGNORECASE)
+_PARENTHESISED_RE = re.compile(r"\([^()]*\)")
+_QUALIFIER_RE = re.compile(r"\s+(?:OF|IN)\s+", re.IGNORECASE)
+
+
+def _argument_names(operand: str) -> list[str]:
+    """Every data name a CALL argument references.
+
+    ``LK-REC(1:4)``, ``LK-ITEM(IDX) OF LK-REC`` and ``ADDRESS OF LK-REC``
+    all reference their data items; the parameter's recorded text carries
+    the subscript / reference modifier / qualifier / special register, so
+    matching it against a bare 01-level name as-is never succeeded.
+    """
+    text = _SPECIAL_REGISTER_OF_RE.sub("", operand)
+    previous = None
+    while previous != text:  # nested subscripts: LK-T(LK-IX(1))
+        previous = text
+        text = _PARENTHESISED_RE.sub(" ", text)
+    return [part.strip() for part in _QUALIFIER_RE.split(text) if part.strip()]
+
+
 class LinkageViolationKind(Enum):
     """Types of LINKAGE / CALL parameter mismatches."""
 
@@ -172,6 +195,8 @@ class LinkageChecker:
         # name (upper) → referenced?  (plus where each was declared)
         self._linkage_items: dict[str, bool] = {}
         self._linkage_locations: dict[str, SourceLocation | None] = {}
+        # subordinate item name (upper) → the 01-level item(s) holding it
+        self._linkage_owners: dict[str, set[str]] = {}
         self._all_linkage_items: set[str] = set()
         self._violations: list[LinkageViolation] = []
 
@@ -210,6 +235,7 @@ class LinkageChecker:
         """
         self._linkage_items = {}
         self._linkage_locations = {}
+        self._linkage_owners = {}
         self._all_linkage_items = set()
         self._violations = []
 
@@ -331,6 +357,7 @@ class LinkageChecker:
         """Check one program unit's LINKAGE items and CALL statements."""
         self._linkage_items = {}
         self._linkage_locations = {}
+        self._linkage_owners = {}
 
         # 1. Collect this unit's LINKAGE SECTION 01-level items
         self._collect_linkage_items(unit)
@@ -395,6 +422,12 @@ class LinkageChecker:
                             self._linkage_locations[name] = getattr(
                                 item, "location", None
                             )
+                            for child in item.get_all_children():
+                                child_name = (child.name or "").upper().strip()
+                                if child_name:
+                                    self._linkage_owners.setdefault(
+                                        child_name, set()
+                                    ).add(name)
 
     def _mark_referenced(self, name: str) -> None:
         key = name.upper()
@@ -409,9 +442,17 @@ class LinkageChecker:
         """Validate a single CALL statement against the known entry interfaces."""
         call_params = stmt.using_parameters or []
         # Passing a LINKAGE item on to a callee references it, whatever the
-        # target and however it is passed.
-        for param in call_params:
-            self._mark_referenced(param.name)
+        # target and however it is passed -- subscripted, reference-modified,
+        # qualified, as ADDRESS OF / LENGTH OF, or one of its subordinate
+        # items -- and so does receiving the callee's RETURNING value in it.
+        passed = [param.name for param in call_params]
+        if stmt.returning_parameter:
+            passed.append(stmt.returning_parameter)
+        for operand in passed:
+            for name in _argument_names(operand):
+                self._mark_referenced(name)
+                for owner in self._linkage_owners.get(name.upper(), ()):
+                    self._mark_referenced(owner)
 
         target = (stmt.called_program or "").upper().strip()
         if not target or stmt.is_dynamic:

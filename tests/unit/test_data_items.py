@@ -238,6 +238,35 @@ class TestPictureClause:
         pic_empty = PictureClause("", location)
         assert pic_empty.size == 1  # Default fallback
 
+    @pytest.mark.parametrize(
+        ("pattern", "size", "integer_digits", "decimal_digits"),
+        [
+            # One symbol's run split across several repeat factors, or a
+            # factor mixed with repeated letters. The single-run regexes
+            # missed these and the fallback ignored the repeat factors.
+            ("X(2)X(3)", 5, None, None),
+            ("AAX(2)", 4, None, None),
+            ("A(2)X", 3, None, None),
+            ("X(2)9(2)", 4, None, None),
+            ("9(2)9(3)", 5, 5, 0),
+            ("S9(3)99", 5, 5, 0),
+            ("9(2)V9(2)9", 5, 2, 3),
+            # National/DBCS: two bytes per position, however it is spelled.
+            ("NN", 4, None, None),
+            ("N(2)N", 6, None, None),
+            ("GG", 4, None, None),
+        ],
+    )
+    def test_picture_split_repeat_factors_count_every_position(
+        self, pattern, size, integer_digits, decimal_digits
+    ):
+        pic = PictureClause(pattern, SourceLocation(1, 1))
+        assert pic.size == size
+        if integer_digits is not None:
+            assert pic.integer_digits == integer_digits
+            assert pic.decimal_digits == decimal_digits
+            assert pic.total_digits == integer_digits + decimal_digits
+
     def test_picture_to_dict(self):
         """Test PictureClause to_dict() method."""
         location = SourceLocation(5, 15)

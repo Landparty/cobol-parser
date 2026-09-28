@@ -113,6 +113,16 @@ class PictureClause(ASTNode):
             if self._parse_scaled_pattern(pattern):
                 return
 
+        # 0. Unedited pictures that split one symbol's run across several
+        # repeat factors, or mix a factor with repeated letters: ``X(2)X(3)``,
+        # ``AAX(2)``, ``9(2)9(3)``, ``S9(3)99``, ``NN``.  The regexes below
+        # each match a single ``C(n)`` or a bare run of one letter, so these
+        # fell through to the digit-counting fallback, which ignores repeat
+        # factors and national doubling -- ``X(2)X(3)`` was sized at two bytes
+        # instead of five, shifting every later offset in the record.
+        if self._parse_plain_pattern(pattern):
+            return
+
         # Use the first character as a cheap guard for the simple
         # alphanumeric/national branches below, so we avoid those regexes
         # when the pattern cannot be X/A/N-based.
@@ -393,6 +403,43 @@ class PictureClause(ASTNode):
             symbols.append(ch)
             i += 1
         return symbols
+
+    def _parse_plain_pattern(self, pattern: str) -> bool:
+        """Populate the fields for an unedited, unscaled picture of any shape.
+
+        Handles numeric (``S``/``V``/``9``), alphanumeric (``X``/``A``/``9``)
+        and national/DBCS (``N``/``G``) pictures after expanding every repeat
+        factor, so the size counts each character position however the
+        picture spells it.  Returns False for anything else -- edited, ``P``
+        scaled, malformed -- leaving the general parse to deal with it.
+        """
+        if "(" in pattern and not all(
+            inner.isdigit() and int(inner) > 0
+            for inner in _PIC_REPEAT_RE.findall(pattern)
+        ):
+            return False
+        symbols = [s.upper() for s in self._expand_symbols(pattern)]
+        kinds = set(symbols)
+        if not symbols:
+            return False
+        if kinds <= {"S", "V", "9"}:
+            if "9" not in kinds or symbols.count("V") > 1 or symbols.count("S") > 1:
+                return False
+            if "S" in kinds and symbols[0] != "S":
+                return False
+            split = symbols.index("V") if "V" in kinds else len(symbols)
+            self.integer_digits = symbols[:split].count("9")
+            self.decimal_digits = symbols[split:].count("9")
+            self.total_digits = self.integer_digits + self.decimal_digits
+            self.size = self.total_digits
+            return True
+        if kinds <= {"X", "A", "9"}:
+            self.size = len(symbols)
+            return True
+        if kinds in ({"N"}, {"G"}):
+            self.size = 2 * len(symbols)
+            return True
+        return False
 
     def _parse_scaled_pattern(self, pattern: str) -> bool:
         """Populate the fields for a ``P``-scaled numeric picture.

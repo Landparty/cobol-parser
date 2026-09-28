@@ -953,3 +953,41 @@ class TestGroupReceiverAndZeroToAlphabetic:
         assert not _check_source(
             "       01 AN PIC X(5).\n", "MOVE ZEROS TO AN"
         ).violations
+
+
+class TestSubscriptedAndReferenceModifiedOperands:
+    """The MOVE parser folds a source operand with its subscript /
+    reference-modification glued on (``T-E(2)``, ``WS-A(1:3)``); those missed
+    the catalog, so the MOVE went silently unchecked. A reference-modified
+    operand is alphanumeric whatever its base item is."""
+
+    SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. REFMOD.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-A PIC X(10).
+       01 WS-N PIC 9(5).
+       01 WS-D PIC 9(3)V99.
+       01 WS-AL PIC A(5).
+       01 TBL.
+          05 T-E PIC X(4) OCCURS 10 INDEXED BY IX.
+       PROCEDURE DIVISION.
+           MOVE WS-A(1:3) TO WS-N
+           MOVE T-E(2) TO WS-N
+           MOVE T-E(IX)(1:2) TO WS-N
+           MOVE WS-A TO WS-N(2:3)
+           MOVE WS-D(1:2) TO WS-A
+           MOVE WS-N(1:2) TO WS-AL
+           STOP RUN.
+"""
+
+    def test_verdicts(self):
+        result = parse_cobol(self.SOURCE)
+        report = MoveTypeChecker().check(result.ast)
+        found = [(v.location.line, v.kind, v.source_name) for v in report.violations]
+        assert found == [
+            (12, MoveViolationKind.WARNING, "WS-A(1:3)"),
+            (13, MoveViolationKind.WARNING, "T-E(2)"),
+            (14, MoveViolationKind.WARNING, "T-E(IX)(1:2)"),
+        ]
+        assert report.to_dict()["unresolved_count"] == 0

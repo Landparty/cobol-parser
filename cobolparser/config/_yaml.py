@@ -29,7 +29,10 @@ chosen because the surprising behavior is worse than the missing feature:
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+from cobolparser._lines import split_source_lines
 
 __all__ = ["YamlError", "parse_yaml"]
 
@@ -109,7 +112,7 @@ class _Parser:
         entry nor a sequence entry."""
         lines: list[_Line] = []
         seen_document_start = False
-        for number, raw in enumerate(text.splitlines(), start=1):
+        for number, raw in enumerate(split_source_lines(text), start=1):
             stripped = _strip_comment(raw)
             if not stripped.strip():
                 continue
@@ -221,11 +224,14 @@ class _Parser:
             # `- key: value` opens a mapping whose remaining keys line up
             # with the column the key itself starts at, which is what
             # `indent + dash offset` computes.
-            if _is_mapping_entry(rest):
+            # `- - x` likewise opens a nested sequence at that column. Read
+            # as a scalar it became the string "- x" -- a list the user
+            # wrote, silently turned into text.
+            if rest == "-" or rest.startswith("- ") or _is_mapping_entry(rest):
                 inline_indent = indent + (len(line.text) - len(line.text[1:].lstrip()))
                 nested = _Line(inline_indent, rest, line.number)
                 self.lines.insert(self.index, nested)
-                result.append(self._parse_mapping(inline_indent))
+                result.append(self._parse_block(inline_indent))
             else:
                 result.append(self._scalar(rest, line))
         return result
@@ -275,7 +281,7 @@ class _Parser:
                 if char == quote:
                     quote = None
                 continue
-            if char in "\"'":
+            if char in "\"'" and _opens_quote(text, i):
                 quote = char
                 continue
             if char == ":" and (i + 1 == len(text) or text[i + 1] in " \t"):
@@ -316,6 +322,14 @@ class _Parser:
             value, consumed = self._parse_quoted(text, 0, line)
             self._require_flow_end(text, consumed, line)
             return value
+        if _is_mapping_entry(text):
+            # `key: a: b` -- YAML rejects a plain scalar holding `: ` ("mapping
+            # values are not allowed here"); taking it as the string "a: b"
+            # hides what is usually a lost newline or missing quotes.
+            raise self._error(
+                f"unexpected ': ' inside plain value {text!r}; quote the value",
+                line,
+            )
         return _plain_scalar(text)
 
     def _require_flow_end(self, text: str, consumed: int, line: _Line) -> None:
@@ -447,7 +461,7 @@ def _is_mapping_entry(text: str) -> bool:
             if char == quote:
                 quote = None
             continue
-        if char in "\"'":
+        if char in "\"'" and _opens_quote(text, i):
             quote = char
         elif char in "[{":
             depth += 1
@@ -458,6 +472,24 @@ def _is_mapping_entry(text: str) -> bool:
         ):
             return True
     return False
+
+
+def _opens_quote(text: str, i: int) -> bool:
+    """Whether the quote character at ``text[i]`` starts a quoted scalar.
+
+    A quote only opens a quoted span at the *start* of a scalar -- the first
+    thing on the line, or right after the ``:``, ``- ``, ``[``, ``{`` or
+    ``,`` that introduces a value. Anywhere else it is an ordinary character
+    of a plain scalar: the apostrophe in ``owner: Sam's shop  # note`` must
+    not hide the comment after it (or, in a key, the colon after it).
+    """
+    before = text[:i].rstrip(" \t")
+    if not before:
+        return True
+    if before[-1] == "-":
+        # `- 'x'` is a sequence entry; `-'x'` is a plain scalar.
+        return len(before) < i
+    return before[-1] in ":[{,"
 
 
 def _strip_comment(raw: str) -> str:
@@ -487,7 +519,7 @@ def _strip_comment(raw: str) -> str:
                 quote = None
             i += 1
             continue
-        if char in "\"'":
+        if char in "\"'" and _opens_quote(raw, i):
             quote = char
             i += 1
             continue
@@ -510,15 +542,18 @@ def _plain_scalar(text: str) -> Any:
         return True
     if text in ("false", "False", "FALSE"):
         return False
-    try:
+    # Python's int()/float() are far looser than YAML's core schema: they
+    # take `1_000`, surrounding whitespace, non-ASCII digits (`٣`) and
+    # `inf`/`nan`. Only the YAML 1.2 core spellings resolve to numbers;
+    # anything else stays the string the user wrote.
+    if _INT_RE.fullmatch(text):
         return int(text)
-    except ValueError:
-        pass
-    try:
-        # Guard against float() accepting "inf"/"nan"/"infinity", which in a
-        # config file are far more likely to be a string someone meant.
-        if text.lstrip("+-").lower() not in ("inf", "infinity", "nan"):
-            return float(text)
-    except ValueError:
-        pass
+    if _FLOAT_RE.fullmatch(text):
+        return float(text)
     return text
+
+
+_INT_RE = re.compile(r"[-+]?[0-9]+", re.ASCII)
+_FLOAT_RE = re.compile(
+    r"[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?", re.ASCII
+)

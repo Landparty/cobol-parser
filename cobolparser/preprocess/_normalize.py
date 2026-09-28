@@ -1049,12 +1049,120 @@ _DIRECTIVE_LINE_RE = re.compile(r"^>>\s*([A-Z][A-Z0-9-]*)(?:\s+(.*?))?\s*$")
 _OPERAND_KINDS = frozenset({"word", "string", "number", "boollit"})
 
 
+def _strip_directive_comment(text: str) -> str:
+    """Drop a ``*>`` floating comment from a ``>>`` directive line.
+
+    Outside a literal, ``*>`` starts a comment that runs to end of line, on
+    a directive line as on any other. Left in place it became part of the
+    directive: ``>>DEFINE DEBUG AS 1 *> on`` defined DEBUG as ``1 *> ON``
+    (so a later ``>>IF DEBUG = 1`` was silently false), and ``>>IF ...
+    *> why`` / ``>>WHEN OTHER *> x`` failed to parse. Inside a quoted
+    literal ``*>`` is literal text and is kept.
+    """
+    quote: str | None = None
+    for i, ch in enumerate(text):
+        if quote is not None:
+            if ch == quote:
+                quote = None  # a doubled quote reopens on the next char
+        elif ch in ("'", '"'):
+            quote = ch
+        elif text.startswith("*>", i):
+            return text[:i].rstrip()
+    return text
+
+
 def _strip_quotes(text: str) -> str:
     """Strip one pair of matching surrounding quotes, if present."""
     text = text.strip()
     if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
         return text[1:-1]
     return text
+
+
+_DEFINE_ARITH_TOKEN_RE = re.compile(r"\s*(?:([A-Za-z0-9][\w-]*)|([-+*/()]))")
+
+
+def _eval_define_arithmetic(text: str, defined: Mapping[str, str]) -> int | None:
+    """Value of a ``>>DEFINE name AS arithmetic-expression`` operand.
+
+    IBM allows ``>>DEFINE V AS 2 + 1`` / ``AS MAX-ROWS * 2``: integer
+    literals and already-defined compilation variables combined with
+    ``+ - * /`` and parentheses. Returns ``None`` when *text* is not such an
+    expression or cannot be evaluated exactly (an undefined or non-integer
+    operand, an inexact division) -- the caller then keeps the raw text.
+    Before this the raw text was stored verbatim, so ``>>IF V = 3`` compared
+    against ``"2 + 1"`` and was silently FALSE.
+    """
+    tokens: list[str] = []
+    pos = 0
+    text = text.rstrip()
+    while pos < len(text):
+        match = _DEFINE_ARITH_TOKEN_RE.match(text, pos)
+        if match is None:
+            return None
+        tokens.append((match.group(1) or match.group(2)).upper())
+        pos = match.end()
+    if not any(tok in "+-*/" for tok in tokens):
+        return None  # a plain literal or word, not an expression
+
+    index = 0
+
+    def _peek() -> str | None:
+        return tokens[index] if index < len(tokens) else None
+
+    def _next() -> str | None:
+        nonlocal index
+        tok = _peek()
+        index += 1
+        return tok
+
+    def _primary() -> int | None:
+        tok = _next()
+        if tok is None:
+            return None
+        if tok in ("+", "-"):
+            value = _primary()
+            return None if value is None else (value if tok == "+" else -value)
+        if tok == "(":
+            value = _sum()
+            return value if _next() == ")" else None
+        if tok.isdigit():
+            return int(tok)
+        symbol_value = defined.get(tok)
+        if symbol_value is None:
+            return None
+        symbol_value = symbol_value.strip()
+        if symbol_value.lstrip("+-").isdigit():
+            return int(symbol_value)
+        return None
+
+    def _product() -> int | None:
+        value = _primary()
+        while value is not None and _peek() in ("*", "/"):
+            op = _next()
+            rhs = _primary()
+            if rhs is None:
+                return None
+            if op == "*":
+                value *= rhs
+            elif rhs == 0 or value % rhs:
+                return None  # division by zero / inexact: do not guess
+            else:
+                value //= rhs
+        return value
+
+    def _sum() -> int | None:
+        value = _product()
+        while value is not None and _peek() in ("+", "-"):
+            op = _next()
+            rhs = _product()
+            if rhs is None:
+                return None
+            value = value + rhs if op == "+" else value - rhs
+        return value
+
+    result = _sum()
+    return result if index == len(tokens) else None
 
 
 def _try_number(text: str) -> float | None:
@@ -1487,6 +1595,8 @@ def preprocess_conditional_compilation(
             if fixed_text is not None:
                 stripped = fixed_text
 
+        if stripped.startswith(">>"):
+            stripped = _strip_directive_comment(stripped)
         directive_match = (
             _DIRECTIVE_LINE_RE.match(stripped) if stripped.startswith(">>") else None
         )
@@ -1520,7 +1630,12 @@ def preprocess_conditional_compilation(
                                 "left undefined"
                             )
                     else:
-                        defined[symbol] = _strip_quotes(raw_value)
+                        arith_value = _eval_define_arithmetic(raw_value, defined)
+                        defined[symbol] = (
+                            str(arith_value)
+                            if arith_value is not None
+                            else _strip_quotes(raw_value)
+                        )
             else:
                 _warn(
                     f"Line {line_no}: malformed >>DEFINE directive "

@@ -112,3 +112,36 @@ def test_parse_files_profiling_parallel(cobol_files):
 def test_parse_files_no_profiling_parallel(cobol_files):
     results = parse_files(cobol_files, workers=2)
     assert all(r.profiling is None for r in results)
+
+
+def _same_stem_files(tmp_path):
+    """a/PROG.cbl, b/PROG.cbl and a/PROG.cob -- three inputs, one stem."""
+    files = []
+    for rel in ("a/PROG.cbl", "b/PROG.cbl", "a/PROG.cob"):
+        p = tmp_path / rel
+        p.parent.mkdir(exist_ok=True)
+        p.write_text(_HELLO, encoding="utf-8")
+        files.append(str(p))
+    return files
+
+
+@pytest.mark.parametrize("entry", ["parse_files", "parse_files_with_copybooks"])
+def test_batch_prof_output_same_stem_files_do_not_overwrite(tmp_path, entry):
+    """Files sharing a stem each get their own .prof instead of every one
+    writing -- and silently overwriting -- <stem>.prof."""
+    files = _same_stem_files(tmp_path)
+    prof_dir = str(tmp_path / "profs")
+    if entry == "parse_files":
+        results = parse_files(
+            files, workers=1, enable_profiling=True, prof_output=prof_dir
+        )
+    else:
+        results = parse_files_with_copybooks(
+            files, copybook_paths=[], enable_profiling=True, prof_output=prof_dir
+        )
+    written = sorted(p.name for p in Path(prof_dir).iterdir())
+    assert written == ["PROG-2.prof", "PROG-3.prof", "PROG.prof"]
+    # Each result names its own, distinct file; a unique stem keeps <stem>.prof.
+    prof_files = [r.profiling.prof_file for r in results]
+    assert len(set(prof_files)) == 3
+    assert Path(prof_files[0]).name == "PROG.prof"

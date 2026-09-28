@@ -37,6 +37,13 @@ results = parse_files_with_copybooks(files, copybook_paths=["/path/to/cpy"])
 (always a plain `str`, pickle-safe on Windows spawn), `profiling:
 ProfilingResult | None`.
 
+With `enable_profiling=True, prof_output=DIR`, each file's cProfile dump is
+`DIR/<stem>.prof`; inputs sharing a stem (`a/PROG.cbl` + `b/PROG.cbl`, or
+`PROG.cbl` + `PROG.cob`) get `<stem>-2.prof`, `<stem>-3.prof`, ... in input
+order (`_prof_file_names`, case-insensitive). Before 2026-09-28 they all
+wrote `<stem>.prof` and overwrote one another. `profiling.prof_file` names
+each result's own file.
+
 # Per-File Fault Isolation
 
 Both entry points guarantee that **one poisoned file cannot abort the whole
@@ -94,6 +101,13 @@ Three properties it owes its caller, all pinned by `tests/unit/test_scan.py`:
   in that unit's `failed_analyzers`; the summary's
   `file_count == scanned + failed` identity lets a consumer prove every file
   was accounted for.
+* **Locations say where the code really is.** With `copybook_paths`, every
+  report dict's `"location"` counts lines of the expanded text; `scan_one`
+  stamps a sibling `"origin": {"file", "line"}` from the expander's source
+  map (`analysis.lint.stamp_report_origins`), and `CrossFileCloneMember`
+  carries it as `origin_file`/`origin_line` (serialized as `"origin"`).
+  Before 2026-09-27 a paragraph after a `COPY` reported the expanded line,
+  and one inside a member claimed a line of the program file.
 
 A file whose copybook expansion fails is NOT dropped -- it falls back to the
 unexpanded parse, the same degradation `parse_files_with_copybooks` makes

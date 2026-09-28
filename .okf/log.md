@@ -14,6 +14,79 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-28 -- bug hunt round 7: batch .prof collisions, DOT escaping, >>DEFINE arithmetic, nested ALTER in health
+
+[batch.md](batch.md): per-file `.prof` dumps of inputs sharing a stem no
+longer overwrite each other (`<stem>-2.prof`, ...). [generators.md](generators.md):
+DOT edge labels are escaped, node-label line break no longer double-escaped.
+[preprocessing.md](preprocessing.md): `>>DEFINE V AS 2 + 1` evaluates the
+arithmetic expression. [analysis.md](analysis.md): `TechnicalDebtAnalyzer`
+counts only the unit's own ALTERs, not its contained programs'.
+
+## 2026-09-28 -- bug hunt round 6: IMS parmcount, LE FUNCTION words, callee USING order, report origins
+
+[analysis.md](analysis.md): IMSSegmentAnalyzer read CBLTDLI/AIBTDLI's
+optional leading parmcount as the function code (every operand shifted);
+LanguageEnvironmentAnalyzer reported intrinsics out of data names containing
+FUNCTION and missed them in conditions / STRING; the boundary inventory's
+callee-source rung bound arguments to LINKAGE declaration order instead of
+`PROCEDURE DIVISION USING`. [cli.md](cli.md): every analyzer subcommand now
+stamps `origin` under `--copybook-path` (was lint / unused-variables only).
+[parser.md](parser.md): UNSTRING `DELIMITED BY ALL` recorded
+(`delimiter_all`, emitted only when present).
+
+## 2026-09-28 -- bug hunt round 5: STATUS without FILE, CALL USING literals, refmod MOVEs, SQL indicators
+
+[parser.md](parser.md): `SELECT ... STATUS IS x` (IBM's optional FILE) was
+swallowed into `assign_to`; CALL USING stopped at a figurative constant or a
+signed literal, dropping it and every later argument.
+[analysis.md](analysis.md): move-type-check never resolved a glued
+subscripted / reference-modified source (`T-E(2)`, `WS-A(1:3)`) and treated
+a ref-modified receiver as its base category; dclgen-check reported null
+indicators as unchecked host variables. [dialects.md](dialects.md):
+`ExecSQLStatement.null_indicators` missed the `INDICATOR :x` form as parsed
+from source (the rebuilt text has no blank before the colon).
+
+## 2026-09-28 -- bug hunt round 4: linkage arguments, CLOSE REEL, SQL tables, CRUD writes
+
+[analysis.md](analysis.md): linkage-check matched CALL arguments verbatim, so
+subscripted / ref-modified / qualified / `ADDRESS OF` LINKAGE items read as
+unreferenced; io-sequence treated `CLOSE f REEL|UNIT` as closing the file;
+the CRUD matrix marked a write statement's subquery tables with the write
+flag and ignored MERGE. [dialects.md](dialects.md): `ExecSQLStatement.tables`
+no longer lists the column after a function-argument FROM
+(`EXTRACT(YEAR FROM HIRE_DATE)`), and INSERT/UPDATE now also list the tables
+their subqueries read (target still first).
+
+## 2026-09-27 -- bug hunt round 3: INSPECT delimiters, directive comments, section dead code
+
+[parser.md](parser.md): INSPECT `BEFORE INITIAL SPACE` dropped every later
+TALLYING clause; CONVERTING lost subscripted operands and its BEFORE/AFTER.
+[preprocessing.md](preprocessing.md): `*>` comments on `>>` directive lines
+became part of the directive. [analysis.md](analysis.md): dead-code no longer
+treats every paragraph of a referenced section as live past a terminator.
+
+## 2026-09-27 -- bug hunt round 2: expanded-line locations, VB short tail, YAML strictness
+
+[batch.md](batch.md) / [cli.md](cli.md): `scan` and `unused-variables
+--copybook-path` reported expanded-text line numbers; report locations now
+carry an `"origin"` from the expander's source map, as lint findings did.
+[generators.md](generators.md): `variable-bare` decoding reported a short
+trailing partial record as one more (truncated) row instead of `trailing`.
+[cli.md](cli.md): the config YAML reader took `1_000` as an int, `key: a: b`
+as the string `a: b`, `- - x` as the string `- x`, and counted form feeds as
+line breaks.
+
+## 2026-09-27 -- bug hunt: compare-bytes ignore, YAML apostrophes, split PIC repeats
+
+[generators.md](generators.md): `compare_bytes=True` no longer reports an
+ignored field's bytes as `(unmapped bytes)`. [cli.md](cli.md): the config
+YAML reader no longer treats a mid-word apostrophe as opening a quote (it
+swallowed trailing comments); `decode`/`compare` reject negative paging
+flags and a non-positive `--record-length`. [ast-models.md](ast-models.md):
+`PictureClause` sizes unedited pictures with split repeat factors
+(`X(2)X(3)`, `9(2)9(3)`, `NN`) correctly.
+
 ## 2026-09-27 -- audit patch batch: typed VALUE literals, linear COPY scan, REPLACING size
 
 From `AUDIT.md` §8 step 1. `VALUE X"4142"` kept only its content, so

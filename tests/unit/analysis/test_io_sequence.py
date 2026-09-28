@@ -706,3 +706,54 @@ class TestGoToReadLoop:
         assert _goto_loop_violations(
             "           CLOSE IN-F.\n           CLOSE IN-F.\n           STOP RUN.\n"
         ) == ["DOUBLE_CLOSE"]
+
+
+class TestCloseReelUnitKeepsFileOpen:
+    """CLOSE f REEL / UNIT closes the volume, not the file."""
+
+    def test_read_and_close_after_close_reel_are_legal(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT MY-FILE ASSIGN TO TAPEIN.
+       DATA DIVISION.
+       FILE SECTION.
+       FD MY-FILE.
+       01 MY-REC PIC X(80).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           OPEN INPUT MY-FILE
+           CLOSE MY-FILE REEL
+           READ MY-FILE
+           CLOSE MY-FILE UNIT FOR REMOVAL
+           CLOSE MY-FILE
+           STOP RUN.
+"""
+        result = parse_cobol(src)
+        assert result.errors == []
+        assert IOSequenceAnalyzer().analyze(result.ast).violations == []
+
+    def test_close_reel_alone_leaves_file_open_at_stop_run(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT MY-FILE ASSIGN TO TAPEIN.
+       DATA DIVISION.
+       FILE SECTION.
+       FD MY-FILE.
+       01 MY-REC PIC X(80).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           OPEN INPUT MY-FILE
+           CLOSE MY-FILE REEL
+           STOP RUN.
+"""
+        result = parse_cobol(src)
+        kinds = [v.kind for v in IOSequenceAnalyzer().analyze(result.ast).violations]
+        assert kinds == [IOViolationKind.FILE_LEFT_OPEN]

@@ -698,6 +698,26 @@ def _present(spec: FieldSpec, counts: dict[tuple[str, tuple[int, ...]], int]) ->
     return True
 
 
+def _ran_short(view: RecordView, fields: list[DecodedField]) -> bool:
+    """Whether *fields* (decoded through *view* with tables trimmed) ended
+    before the record did: a field cut part-way, or one its counters say is
+    present that came back absent because the bytes ran out."""
+    counts: dict[tuple[str, tuple[int, ...]], int] = {}
+    for placed, item in zip(view.fields, fields, strict=True):
+        spec = placed.spec
+        if item.truncated:
+            return True
+        if not item.present:
+            if _present(spec, counts):
+                return True
+            continue
+        if spec.odo_counter_bounds is not None:
+            counts[(spec.name.upper(), spec.subscripts)] = _counter_value(
+                item.value, spec.odo_counter_bounds
+            )
+    return False
+
+
 def _counter_value(text: str, bounds: tuple[int, int]) -> int:
     """A decoded counter clamped into the table's own bounds."""
     try:
@@ -995,7 +1015,9 @@ class RecordDecoder:
             return data[position:end], (end - position) + len(separator), None
         fields = decode_record(view, data[position:], opts, trim_tables=True)
         consumed = max((item.offset + item.length for item in fields), default=0)
-        if consumed <= 0:
+        if consumed <= 0 or _ran_short(view, fields):
+            # A tail too short for the record its own counters describe is
+            # not a record -- the same verdict RECFM=F gives a short tail.
             return None
         return data[position : position + consumed], consumed, None
 

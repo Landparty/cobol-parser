@@ -293,3 +293,44 @@ class TestReportSerialization:
         comp_dict = report.components[0].to_dict()
         for key in ("name", "score", "weight", "findings"):
             assert key in comp_dict
+
+
+class TestContainedProgramScoping:
+    _SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTER.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL "INNER"
+           STOP RUN.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INNER.
+       PROCEDURE DIVISION.
+       P1.
+           ALTER P2 TO PROCEED TO P3.
+           GO TO P2.
+       P2.
+           GO TO P3.
+       P3.
+           GOBACK.
+       END PROGRAM INNER.
+       END PROGRAM OUTER.
+"""
+
+    def _control_flow(self, unit):
+        report = TechnicalDebtAnalyzer().analyze(unit)
+        return next(c for c in report.components if c.name == "control_flow")
+
+    def test_nested_programs_alter_is_not_charged_to_its_container(self) -> None:
+        result = parse_cobol(self._SOURCE, filename="nested.cbl")
+        assert result.ast is not None and not result.errors
+        outer = self._control_flow(result.ast)
+        assert outer.score == 0.0
+        assert not any("ALTER statement" in f for f in outer.findings)
+
+    def test_nested_program_still_counts_its_own_alter(self) -> None:
+        result = parse_cobol(self._SOURCE, filename="nested.cbl")
+        inner_unit = result.ast.find_program_unit("INNER")
+        assert inner_unit is not None
+        inner = self._control_flow(inner_unit)
+        assert "1 ALTER statement(s) in use" in inner.findings

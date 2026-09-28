@@ -121,6 +121,25 @@ def test_comments_stripped_but_not_inside_quotes_or_mid_token():
     assert doc == {"a": 1, "b": "has # inside", "c": "PIC-X#Y"}
 
 
+def test_apostrophe_inside_a_plain_scalar_does_not_hide_a_comment():
+    # A quote only opens a quoted scalar at the start of a value; mid-word it
+    # is an ordinary character and must not swallow the comment after it.
+    doc = parse_yaml(
+        "owner: Sam's shop  # who runs it\n"
+        "don't: 1\n"
+        "list:\n"
+        "  - it's here  # note\n"
+        "  - 'quoted # kept'\n"
+        "dash: -'x # c\n"
+    )
+    assert doc == {
+        "owner": "Sam's shop",
+        "don't": 1,
+        "list": ["it's here", "quoted # kept"],
+        "dash": "-'x",
+    }
+
+
 def test_leading_document_marker_allowed():
     assert parse_yaml("---\na: 1\n") == {"a": 1}
 
@@ -259,3 +278,45 @@ def test_indentless_sequence_ends_at_the_next_key():
 def test_indentless_sequence_still_rejects_duplicate_key():
     with pytest.raises(YamlError, match="duplicate key"):
         parse_yaml("a:\n- 1\na: 2\n")
+
+
+def test_nested_block_sequence_is_a_list_not_the_string_dash_x():
+    # `- - x` is a sequence inside a sequence; it used to come back as the
+    # string "- x".
+    assert parse_yaml("a:\n  - - x\n    - y\n  - z\n") == {"a": [["x", "y"], "z"]}
+    assert parse_yaml("- - - x\n") == [[["x"]]]
+
+
+@pytest.mark.parametrize("text", ["1_000", "\u0663", "0x1F", "1_0.5"])
+def test_numbers_follow_yaml_core_schema_not_python_int(text):
+    # Python's int()/float() accept underscores and non-ASCII digits; YAML
+    # does not, so these stay strings.
+    assert parse_yaml(f"n: {text}\n") == {"n": text}
+
+
+def test_yaml_core_numbers_still_resolve():
+    assert parse_yaml("a: -7\nb: +3\nc: 1.5\nd: .5\ne: 1e3\n") == {
+        "a": -7,
+        "b": 3,
+        "c": 1.5,
+        "d": 0.5,
+        "e": 1000.0,
+    }
+
+
+@pytest.mark.parametrize("text", ["key: a: b\n", "- k: v: w\n"])
+def test_colon_space_inside_plain_value_rejected(text):
+    with pytest.raises(YamlError, match="quote the value"):
+        parse_yaml(text)
+
+
+def test_colon_space_inside_quoted_value_is_fine():
+    assert parse_yaml('key: "a: b"\n') == {"key": "a: b"}
+
+
+@pytest.mark.parametrize("sep", ["\x0c", "\x85", "\u2028"])
+def test_line_numbers_count_records_not_unicode_line_breaks(sep):
+    # str.splitlines() also split on form feed / NEL / U+2028, pushing every
+    # later line number past the one the editor shows.
+    with pytest.raises(YamlError, match=r"^<config>:2: unterminated flow"):
+        parse_yaml(f"a: x{sep}y\nb: [\n")

@@ -63,6 +63,28 @@ def _get_reusable_parser(
     return _REUSABLE_PARSER
 
 
+def _prof_file_names(path_list: list[str]) -> list[str]:
+    """One ``.prof`` basename per input path, unique within the batch.
+
+    Each file's profile is ``<stem>.prof``; when two inputs share a stem
+    (``a/PROG.cbl`` and ``b/PROG.cbl``, or ``PROG.cbl`` and ``PROG.cob``) the
+    later ones get ``<stem>-2.prof``, ``<stem>-3.prof``, ... instead of all
+    writing -- and silently overwriting -- the same file.
+    """
+    used: set[str] = set()
+    names: list[str] = []
+    for path_str in path_list:
+        stem = Path(path_str).stem
+        name = stem + ".prof"
+        n = 2
+        while name.lower() in used:
+            name = f"{stem}-{n}.prof"
+            n += 1
+        used.add(name.lower())
+        names.append(name)
+    return names
+
+
 def _parse_one(
     path_str: str,
     encoding: str,
@@ -72,6 +94,7 @@ def _parse_one(
     enable_profiling: bool,
     top_n: int,
     prof_output_dir: str | None,
+    prof_name: str | None = None,
 ) -> BatchResult:
     """Read one file and parse it.
 
@@ -99,7 +122,9 @@ def _parse_one(
 
         prof_output: str | None = None
         if prof_output_dir is not None:
-            prof_output = str(Path(prof_output_dir) / (Path(path_str).stem + ".prof"))
+            prof_output = str(
+                Path(prof_output_dir) / (prof_name or Path(path_str).stem + ".prof")
+            )
 
         parse_result, prof = parse_cobol(
             source,
@@ -131,6 +156,7 @@ def _parse_one_reuse(
     enable_profiling: bool,
     top_n: int,
     prof_output_dir: str | None,
+    prof_name: str | None = None,
 ) -> BatchResult:
     """Parse one file reusing a module-level parser (sequential mode only).
 
@@ -153,7 +179,9 @@ def _parse_one_reuse(
 
         prof_output: str | None = None
         if prof_output_dir is not None:
-            prof_output = str(Path(prof_output_dir) / (Path(path_str).stem + ".prof"))
+            prof_output = str(
+                Path(prof_output_dir) / (prof_name or Path(path_str).stem + ".prof")
+            )
 
         parse_result, prof = parser.parse(
             source,
@@ -211,8 +239,9 @@ def parse_files(
         enable_profiling: When True, attach a ProfilingResult to each BatchResult.
         top_n: Number of top functions to include in each ProfilingResult.
         prof_output: Directory path to write per-file .prof binaries. Each file
-            is written as <stem>.prof inside this directory. Must not end with
-            ".prof" (that would be a file path, not a directory).
+            is written as <stem>.prof inside this directory (<stem>-2.prof,
+            ... for a later file sharing a stem). Must not end with ".prof"
+            (that would be a file path, not a directory).
 
     Returns:
         list[BatchResult] in input order.
@@ -247,8 +276,9 @@ def parse_files(
             enable_profiling,
             top_n,
             prof_output,
+            prof_name,
         )
-        for p in path_list
+        for p, prof_name in zip(path_list, _prof_file_names(path_list), strict=True)
     ]
 
     if executor is None and resolved_workers == 1:
@@ -341,7 +371,7 @@ def parse_files_with_copybooks(
     parser = CobolParser(error_recovery=error_recovery, dialect=dialect)
 
     results: list[BatchResult] = []
-    for path_str in path_list:
+    for path_str, prof_name in zip(path_list, _prof_file_names(path_list), strict=True):
         path = Path(path_str)
         try:
             source = path.read_text(encoding=encoding, errors=errors)
@@ -386,7 +416,7 @@ def parse_files_with_copybooks(
             else:
                 prof_file: str | None = None
                 if prof_output is not None:
-                    prof_file = str(Path(prof_output) / (path.stem + ".prof"))
+                    prof_file = str(Path(prof_output) / prof_name)
                 parse_result, prof = parser.parse(
                     expanded_source,
                     filename=path_str,

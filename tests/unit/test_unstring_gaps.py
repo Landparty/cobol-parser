@@ -267,3 +267,32 @@ class TestUnstringPreviouslyWorkingCases:
         assert result.errors == []
         stmts = result.ast.find_statements("UNSTRING")
         assert stmts[0].delimiters == ["SPACE"]
+
+
+class TestUnstringDelimitedByAll:
+    """`DELIMITED BY ALL x` was accepted but the ALL flag was discarded, so
+    `ALL SPACE` read the same as `SPACE` (runs of blanks produce empty
+    fields only without ALL)."""
+
+    def _unstring(self, stmt: str):
+        result = parse_cobol(_prog(stmt))
+        assert not result.errors
+        (node,) = result.ast.find_all_by_type("UnstringStatement")
+        return node
+
+    def test_all_flag_recorded_per_delimiter(self):
+        node = self._unstring(
+            "           UNSTRING WS-SRC DELIMITED BY ',' OR ALL SPACE\n"
+            "               INTO WS-TGT-B WS-TGT-C.\n"
+        )
+        assert node.delimiters == [",", "SPACE"]
+        assert node.delimiter_all == [False, True]
+        assert node.to_dict()["delimiter_all"] == [False, True]
+
+    def test_key_absent_without_all(self):
+        node = self._unstring(
+            "           UNSTRING WS-SRC DELIMITED BY ',' OR SPACE\n"
+            "               INTO WS-TGT-B WS-TGT-C.\n"
+        )
+        assert node.delimiter_all == [False, False]
+        assert "delimiter_all" not in node.to_dict()

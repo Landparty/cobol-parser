@@ -398,6 +398,9 @@ class CallStatementParser(IStatementParser):
                 TokenType.LEVEL_NUMBER,
                 TokenType.VALUE,
                 TokenType.OMITTED,
+                TokenType.FIGURATIVE_CONSTANT,
+                TokenType.MINUS,
+                TokenType.PLUS,
             ):
                 break
 
@@ -422,6 +425,25 @@ class CallStatementParser(IStatementParser):
                         token_stream.consume()
                         skip_whitespace(token_stream)
                         token = token_stream.peek()
+
+            # ``BY CONTENT ZERO`` / ``BY VALUE -7`` -- a figurative constant
+            # or a signed numeric literal is one argument; stopping here
+            # dropped it and every argument after it.
+            if token and token.type == TokenType.FIGURATIVE_CONSTANT:
+                token_stream.consume()
+                stmt.add_using_parameter(token.value.upper(), passing_mode)
+                continue
+            if token and token.type in (TokenType.MINUS, TokenType.PLUS):
+                number = token_stream.peek(1)
+                if number is None or number.type not in (
+                    TokenType.NUMERIC_LITERAL,
+                    TokenType.LEVEL_NUMBER,
+                ):
+                    break
+                token_stream.consume()
+                token_stream.consume()
+                stmt.add_using_parameter(token.value + number.value, passing_mode)
+                continue
 
             # Parse parameter name (OMITTED is a valid USING parameter
             # placeholder per the COBOL grammar, not just a mode modifier).

@@ -41,8 +41,15 @@ if TYPE_CHECKING:
 # Matches FUNCTION followed immediately or with spaces by an identifier name.
 # Handles both concatenated form (MOVE parser) and space-separated form
 # (COMPUTE parser).
+#
+# FUNCTION must be a word of its own: a data name that merely contains it
+# (WS-FUNCTIONAL, DLI-FUNCTIONS, FUNCTIONAL-CODE) is not a function
+# reference, and used to be reported as intrinsic "AL", "S", "AL-CODE".
+# The no-space form is accepted only for a known intrinsic name (see
+# `_check_intrinsic_functions`), which is what tells FUNCTIONLENGTH from
+# FUNCTIONAL-CODE.
 _FUNCTION_RE = re.compile(
-    r"FUNCTION\s*([A-Z][A-Z0-9-]*)",
+    r"(?<![A-Z0-9-])FUNCTION(\s*)([A-Z][A-Z0-9-]*)",
     re.IGNORECASE,
 )
 
@@ -218,9 +225,42 @@ def _collect_text_fields(stmt: CobolStatement) -> list[str]:
         seen.add(text)
         fields.append(text)
 
-    # Base operands list present on every statement
-    for op in stmt.operands:
-        _add(op)
+    # Base operands list present on every statement. Some parsers (STRING)
+    # split `FUNCTION UPPER-CASE(X)` into a bare "FUNCTION" operand and the
+    # call that follows it; rejoin the pair so the reference is not lost.
+    operands = list(stmt.operands)
+    for index, op in enumerate(operands):
+        if (
+            isinstance(op, str)
+            and op.strip().upper() == "FUNCTION"
+            and index + 1 < len(operands)
+        ):
+            _add(f"FUNCTION {operands[index + 1]}")
+        else:
+            _add(op)
+
+    # IF / PERFORM UNTIL conditions: `IF FUNCTION LENGTH(X) > 3` keeps its
+    # operand text on the condition tree, not on the statement's operands.
+    def _add_condition(node: object) -> None:
+        raw = getattr(node, "operands", None)
+        if isinstance(raw, list) and raw:
+            # The whole condition's text (PERFORM UNTIL); its tree below
+            # repeats the same operands, so stop here.
+            for text in raw:
+                if isinstance(text, str):
+                    _add(text)
+            return
+        for attr in ("left_operand", "right_operand"):
+            value = getattr(node, attr, None)
+            if isinstance(value, str):
+                _add(value)
+        for child in getattr(node, "children", None) or []:
+            _add_condition(child)
+
+    for attr in ("condition", "until_condition"):
+        condition = getattr(stmt, attr, None)
+        if condition is not None and not isinstance(condition, str):
+            _add_condition(condition)
 
     # ComputeStatement.expression (stored as space-joined token values)
     _add(getattr(stmt, "expression", None))
@@ -291,7 +331,9 @@ class LanguageEnvironmentAnalyzer:
         texts = _collect_text_fields(stmt)
         for text in texts:
             for match in _FUNCTION_RE.finditer(text):
-                func_name = match.group(1).upper()
+                func_name = match.group(2).upper()
+                if not match.group(1) and func_name not in _IBM_INTRINSIC_FUNCTIONS:
+                    continue
                 result.intrinsic_usages.append(
                     LEFunctionUsage(
                         function_name=func_name,

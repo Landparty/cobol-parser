@@ -11,6 +11,7 @@ Standard deliverable in mainframe modernization engagements.
 import csv
 import io
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -197,6 +198,19 @@ class CRUDMatrix:
         return output.getvalue()
 
 
+#: SQL statements that write one target table (``tables[0]``).
+_WRITE_SQL_TYPES = frozenset(
+    {
+        SQLStatementType.INSERT,
+        SQLStatementType.UPDATE,
+        SQLStatementType.DELETE,
+        SQLStatementType.MERGE,
+    }
+)
+#: ``WHEN [NOT] MATCHED [AND ...] THEN INSERT|UPDATE|DELETE`` in a MERGE.
+_MERGE_ACTION_RE = re.compile(r"\bTHEN\s+(INSERT|UPDATE|DELETE)\b")
+
+
 class CRUDMatrixGenerator:
     """Generates a CRUD matrix for a parsed COBOL program.
 
@@ -212,9 +226,11 @@ class CRUDMatrixGenerator:
 
     SQL table mapping:
         - C (Create)  <- INSERT
-        - R (Read)    <- SELECT, DECLARE CURSOR (implicit read path), FETCH
+        - R (Read)    <- SELECT, DECLARE CURSOR (implicit read path), FETCH,
+                         and any table a write statement's subquery reads
         - U (Update)  <- UPDATE
         - D (Delete)  <- DELETE
+        - MERGE marks its target with the actions its WHEN clauses take
 
     Example:
         ```python
@@ -415,21 +431,31 @@ class CRUDMatrixGenerator:
 
             sql_type = stmt.sql_type
 
-            if sql_type == SQLStatementType.INSERT:
-                for table in stmt.tables:
-                    self._get_or_create_table_entry(table.upper()).crud.create = True
+            if sql_type in _WRITE_SQL_TYPES:
+                # tables[0] is the statement's target; any other table is
+                # one a subquery (``WHERE X IN (SELECT X FROM T2)``,
+                # ``INSERT INTO T SELECT ... FROM S``, ``MERGE ... USING S``)
+                # only reads.
+                if not stmt.tables:
+                    continue
+                target = self._get_or_create_table_entry(stmt.tables[0].upper())
+                if sql_type == SQLStatementType.INSERT:
+                    target.crud.create = True
+                elif sql_type == SQLStatementType.UPDATE:
+                    target.crud.update = True
+                elif sql_type == SQLStatementType.DELETE:
+                    target.crud.delete = True
+                else:  # MERGE: whichever actions its WHEN clauses take
+                    actions = set(_MERGE_ACTION_RE.findall(stmt.sql_text.upper()))
+                    target.crud.create |= "INSERT" in actions
+                    target.crud.update |= "UPDATE" in actions
+                    target.crud.delete |= "DELETE" in actions
+                for table in stmt.tables[1:]:
+                    self._get_or_create_table_entry(table.upper()).crud.read = True
 
             elif sql_type == SQLStatementType.SELECT:
                 for table in stmt.tables:
                     self._get_or_create_table_entry(table.upper()).crud.read = True
-
-            elif sql_type == SQLStatementType.UPDATE:
-                for table in stmt.tables:
-                    self._get_or_create_table_entry(table.upper()).crud.update = True
-
-            elif sql_type == SQLStatementType.DELETE:
-                for table in stmt.tables:
-                    self._get_or_create_table_entry(table.upper()).crud.delete = True
 
             elif sql_type == SQLStatementType.DECLARE_CURSOR:
                 # DECLARE CURSOR implies a read path on the tables it selects from

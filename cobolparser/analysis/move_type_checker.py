@@ -225,6 +225,33 @@ _WARN_MOVES: frozenset[tuple[DataCategory, DataCategory]] = frozenset(
     }
 )
 
+# A reference folded with its subscript / reference-modification group glued
+# on (``T-E(2)``, ``WS-A(1:3)``, ``T-E(IX)(1:2)``) -- the MOVE parser folds a
+# *source* operand this way, while ``base_data_name`` only splits the spaced
+# ``WS-TAB ( 3 )`` form, so a glued source missed the catalog entirely.
+_GLUED_REFERENCE_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9-]*)\s*\(")
+
+
+def _reference_name(name: str) -> str:
+    """The referenced item's own name from a folded operand string."""
+    match = _GLUED_REFERENCE_RE.match(name.strip())
+    if match:
+        return match.group(1)
+    return base_data_name(name)
+
+
+def _is_reference_modified(name: str) -> bool:
+    """Whether a folded reference carries a ``(start:length)`` group.
+
+    A reference-modified operand is an alphanumeric item whatever its base
+    item's category (IBM Language Reference, "Reference modification").
+    """
+    base = _reference_name(name)
+    if base == name.strip():
+        return False
+    return ":" in name.strip()[len(base) :]
+
+
 # USAGE keywords of internal floating-point items: numeric, never integer,
 # and declared without a PICTURE clause of their own.
 _FLOATING_POINT_USAGES = frozenset({"COMP-1", "COMP-2"})
@@ -468,7 +495,7 @@ class MoveTypeChecker:
             if target_cat == DataCategory.UNKNOWN:
                 self._unresolved_count += 1
                 continue  # Cannot validate unknown target
-            if base_data_name(target_name).upper() in self._groups:
+            if _reference_name(target_name).upper() in self._groups:
                 continue  # A group move is legal from any sending item
 
             if figurative is not None:
@@ -586,8 +613,10 @@ class MoveTypeChecker:
         PICTURE clause, so the catalog built from the DATA DIVISION can never
         resolve them on its own.
         """
-        upper = base_data_name(name).upper()
+        upper = _reference_name(name).upper()
         if upper in self._catalog:
+            if _is_reference_modified(name):
+                return DataCategory.ALPHANUMERIC
             return self._catalog[upper]
         if upper in _NUMERIC_SPECIAL_REGISTERS:
             return DataCategory.NUMERIC
@@ -601,7 +630,7 @@ class MoveTypeChecker:
         """Whether a NUMERIC source is a non-integer: a catalogued item with
         decimal digits / leading P scaling / floating-point usage, or a
         numeric literal with a decimal point."""
-        upper = base_data_name(name).upper()
+        upper = _reference_name(name).upper()
         if upper in self._catalog:
             return upper in self._non_integer
         return "." in name.strip()

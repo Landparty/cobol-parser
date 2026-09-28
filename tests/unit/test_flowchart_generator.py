@@ -1566,6 +1566,41 @@ class TestDotLabelFidelity:
         out = self._gen(_gt_condition_report(else_count=0))
         assert "MAIN_LOGIC__IF_1__ELSE" not in out
 
+    def test_statement_count_line_break_is_a_dot_escape(self) -> None:
+        """The node label's line break must reach the DOT source as ``\\n``
+        (Graphviz's newline escape), not ``\\\\n``, which renders as a
+        literal backslash followed by ``n``."""
+        out = DotFlowchartGenerator().generate(
+            _simple_report(), FlowchartOptions(show_statement_counts=True)
+        )
+        assert re.search(r'label="[A-Z0-9-]+\\n\(\d+ stmts\)"', out), out
+        assert "\\\\n" not in out
+
+    def test_edge_label_quote_and_backslash_are_escaped(self) -> None:
+        """A PERFORM UNTIL condition holding a double quote (inside an
+        apostrophe-delimited literal) used to be emitted raw into the edge's
+        ``label="..."``, terminating the DOT string early."""
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. QPROG.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           PERFORM READ-NEXT UNTIL WS-MSG = 'SAY "HI" \\'.
+           STOP RUN.
+       READ-NEXT.
+           CONTINUE.
+"""
+        result = parse_cobol(source, filename="test.cbl")
+        assert result.success, result.errors
+        out = DotFlowchartGenerator().generate(
+            ProgramFlowAnalyzer().analyze(result.ast)
+        )
+        edge = next(line for line in out.splitlines() if "UNTIL" in line)
+        assert 'label="PERFORM UNTIL WS-MSG = \'SAY \\"HI\\" \\\\\' (loop)"' in edge
+        # Every double quote inside the attribute list is either a delimiter
+        # or escaped: an even number of unescaped quotes.
+        assert len(re.findall(r'(?<!\\)"', edge)) % 2 == 0
+
 
 class TestLabelFidelityEndToEnd:
     """Real parse -> analyze -> mermaid, pinning the ACCTPRG-style output the

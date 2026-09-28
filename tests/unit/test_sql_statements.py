@@ -341,6 +341,22 @@ class TestHostVariables:
         assert "WS-SALARY" in stmt.host_variables
         assert "WS-SAL-IND" in stmt.null_indicators
 
+    def test_null_indicator_keyword_as_parsed_from_source(self):
+        """The EXEC SQL parser rebuilds the text as ``INDICATOR:IND`` (no
+        blank before the colon); the keyword form was missed there."""
+        from cobolparser import parse_cobol
+
+        source = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. T.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           EXEC SQL SELECT BAL INTO :BAL INDICATOR :IND-2\n"
+            "                FROM CUST END-EXEC\n"
+            "           STOP RUN.\n"
+        )
+        (stmt,) = parse_cobol(source).ast.find_all_by_type("ExecSQLStatement")
+        assert stmt.null_indicators == ["IND-2"]
+
 
 class TestTransactionControl:
     """Test COMMIT, ROLLBACK, and transaction control statements."""
@@ -828,3 +844,48 @@ class TestTransactionControlStatement:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestFunctionArgumentFromIsNotATable:
+    """``EXTRACT(YEAR FROM col)`` / ``TRIM(... FROM col)`` name a column."""
+
+    @pytest.mark.parametrize(
+        ("sql", "tables"),
+        [
+            ("SELECT EXTRACT(YEAR FROM HIRE_DATE) INTO :WS-Y FROM EMP", ["EMP"]),
+            ("SELECT TRIM(LEADING '0' FROM ACCT_NO) INTO :A FROM ACCT", ["ACCT"]),
+            (
+                "SELECT SUBSTRING(NAME FROM 1 FOR 3) FROM EMP WHERE X IN "
+                "(SELECT X FROM T2 WHERE Y = EXTRACT(DAY FROM Z))",
+                ["EMP", "T2"],
+            ),
+            (
+                "DECLARE C1 CURSOR FOR SELECT EXTRACT(YEAR FROM D) FROM T10",
+                ["T10"],
+            ),
+            ("SELECT A FROM ((SELECT A FROM T1) UNION SELECT A FROM T3) X", None),
+        ],
+    )
+    def test_tables(self, sql, tables):
+        stmt = parse_exec_sql(sql, SourceLocation(1, 1))
+        if tables is None:  # subqueries keep every table they read
+            assert {"T1", "T3"} <= set(stmt.tables)
+        else:
+            assert stmt.tables == tables
+
+
+class TestWriteStatementSubqueryTables:
+    """INSERT/UPDATE keep their target first, then the tables they read."""
+
+    def test_insert_select(self):
+        stmt = parse_exec_sql(
+            "INSERT INTO ARCHIVE SELECT * FROM HISTORY", SourceLocation(1, 1)
+        )
+        assert stmt.tables == ["ARCHIVE", "HISTORY"]
+
+    def test_update_where_subquery(self):
+        stmt = parse_exec_sql(
+            "UPDATE ACCOUNT SET RATE = 1 WHERE TIER = (SELECT MAX(TIER) FROM TIERS)",
+            SourceLocation(1, 1),
+        )
+        assert stmt.tables == ["ACCOUNT", "TIERS"]

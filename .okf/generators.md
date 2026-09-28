@@ -170,6 +170,12 @@ Program Flow webview (Mermaid v11, `htmlLabels:false`,
   is how the COBOL literal read anyway. This supersedes the earlier
   bare `.replace('"', "#quot;")` used since the 2026-08-11 quoted-edge-
   label fix. DOT labels are not escaped — Graphviz has no such mangling.
+- **DOT string escaping (2026-09-28).** Edge attribute values now go
+  through `_dot_str` like node labels: a PERFORM UNTIL / IF condition with
+  a `"` inside an apostrophe literal was emitted raw into `label="..."`,
+  ending the DOT string early. And the node label's `\n (N stmts)` break is
+  appended *after* `_dot_str` -- passed through it, the `\n` became `\\n`,
+  which Graphviz renders as a literal backslash-n.
 - **Arm boxes show statement summaries.** `BranchArm.summary` (see
   [analysis.md](analysis.md)'s statement_text section) renders instead of
   the bare `THEN`/`ELSE`/`WHEN x` keyword, which duplicated the edge label
@@ -830,7 +836,7 @@ module can say (`test_the_wrong_copybook_shows_up_as_a_wall_of_errors`).
 |---|---|
 | `FIXED` | `record_length` override, else `base.length` |
 | `VARIABLE` | the 4-byte RDW; an RDW longer than the file raises `RecordDecodingError` rather than being guessed at |
-| `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. With a `record_separator` set, split on that instead |
+| `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. A tail shorter than the record its own counters describe is `trailing`, not one more truncated row (`_ran_short`, 2026-09-27 — RECFM=F already did this). With a `record_separator` set, split on that instead |
 
 `EncodingOptions.record_separator` is consumed after each record when it is
 actually there. Fields past the end of a short record come back
@@ -873,7 +879,10 @@ adds pairing and field comparison, and decodes nothing itself.
   the same packed number are equal, as they are to the program.
   `compare_bytes=True` compares raw bytes, and additionally reports a
   `(unmapped bytes)` pseudo-field when two records agree field by field but
-  not byte by byte (slack past the layout under `record_length`). A field that
+  not byte by byte (slack past the layout under `record_length`). Bytes of an
+  *ignored* field are blanked on both sides before that image check
+  (2026-09-27: `--compare-bytes --ignore UPD-TS` had reported the ignored
+  timestamp's bytes as `(unmapped bytes)`, so the ignore did nothing). A field that
   did not decode cleanly on *either* side is always compared by bytes: its
   best-effort value is not evidence.
 * **Absent fields** (a shorter VB record, an `OCCURS DEPENDING ON` occurrence

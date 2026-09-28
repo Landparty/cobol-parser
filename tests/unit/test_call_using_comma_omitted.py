@@ -121,3 +121,48 @@ class TestCallUsingCommaOmitted:
             "CONTENT",
             "VALUE",
         ]
+
+
+class TestCallUsingFigurativeAndSignedLiterals:
+    """A figurative constant or a signed numeric literal is one argument.
+
+    Both used to end the USING list, dropping that argument *and every
+    argument after it* (``USING WS-A ZERO WS-B`` reported only ``WS-A``).
+    """
+
+    @staticmethod
+    def _names(using: str) -> list[tuple[str, str]]:
+        source = f"""
+        IDENTIFICATION DIVISION.
+        PROGRAM-ID. TEST.
+        PROCEDURE DIVISION.
+            CALL "X" USING {using}.
+            STOP RUN.
+        """
+        result = parse_cobol(source)
+        assert result.errors == []
+        assert result.warnings == []
+        call_stmt = result.ast.find_statements("CALL")[0]
+        return [(p.name, p.passing_mode) for p in call_stmt.using_parameters]
+
+    def test_figurative_constant_keeps_later_arguments(self):
+        assert self._names("WS-A BY CONTENT ZERO SPACES WS-B") == [
+            ("WS-A", "REFERENCE"),
+            ("ZERO", "CONTENT"),
+            ("SPACES", "CONTENT"),
+            ("WS-B", "CONTENT"),
+        ]
+
+    def test_signed_numeric_literals(self):
+        assert self._names("BY VALUE -7 +3.5 WS-B") == [
+            ("-7", "VALUE"),
+            ("+3.5", "VALUE"),
+            ("WS-B", "VALUE"),
+        ]
+
+    def test_length_of_after_figurative(self):
+        assert self._names("WS-A ZERO LENGTH OF WS-A") == [
+            ("WS-A", "REFERENCE"),
+            ("ZERO", "REFERENCE"),
+            ("LENGTH OF WS-A", "REFERENCE"),
+        ]

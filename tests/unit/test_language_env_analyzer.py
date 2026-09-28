@@ -614,3 +614,41 @@ class TestLazyImports:
 
         analyzer = LanguageEnvironmentAnalyzer()
         assert analyzer is not None
+
+
+class TestIntrinsicReferenceBoundaries:
+    """A data name containing FUNCTION is not a function reference, and a
+    reference in a condition or a STRING sending field is still one."""
+
+    _SRC = (
+        _MINIMAL_HEADER
+        + """\
+       01 WS-FUNCTIONAL PIC X(8).
+       01 DLI-FUNCTIONS PIC X(8).
+       01 FUNCTIONAL-CODE PIC X(8).
+       01 WS-X PIC X(8).
+"""
+        + _PROCEDURE_HEADER
+        + """\
+           MOVE WS-FUNCTIONAL TO WS-X.
+           MOVE DLI-FUNCTIONS TO WS-X.
+           MOVE FUNCTIONAL-CODE TO WS-X.
+           IF FUNCTION LENGTH(WS-X) > 3 AND FUNCTION MAX(1 2) = 2
+              CONTINUE
+           END-IF.
+           PERFORM UNTIL FUNCTION MOD(3 2) = 1 CONTINUE END-PERFORM.
+           STRING FUNCTION UPPER-CASE(WS-X) DELIMITED SIZE INTO WS-X.
+           GOBACK.
+"""
+    )
+
+    def test_only_real_references_reported(self):
+        report = LanguageEnvironmentAnalyzer().analyze(_parse(self._SRC))
+        found = [(u.function_name, u.statement_type) for u in report.intrinsic_usages]
+        assert found == [
+            ("LENGTH", "IF"),
+            ("MAX", "IF"),
+            ("MOD", "PERFORM"),
+            ("UPPER-CASE", "STRING"),
+        ]
+        assert all(u.is_ibm_function for u in report.intrinsic_usages)

@@ -157,6 +157,14 @@ def test_negative_max_differences_exits_two(files):
     assert _run(_args(copybook, expected, expected, "--max-differences", "-1")) == 2
 
 
+@pytest.mark.parametrize("length", ["0", "-4"])
+def test_non_positive_record_length_exits_two(files, capsys, length):
+    tmp, copybook = files
+    expected = _write(tmp / "E.DAT", ROWS)
+    assert _run(_args(copybook, expected, expected, "--record-length", length)) == 2
+    assert "--record-length must be a positive" in capsys.readouterr().err
+
+
 def test_unwritable_output_exits_two_not_one(files, capsys):
     tmp, copybook = files
     expected = _write(tmp / "E.DAT", ROWS)

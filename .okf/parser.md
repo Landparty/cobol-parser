@@ -598,6 +598,11 @@ a `PERIOD` (`previous_meaningful_token` from `_utils.py`, same pattern as
 parameter. Before 2026-07-05 the handler body swallowed following top-level
 statements (e.g. `STOP RUN` after `END-CALL.`) — pinned by
 `tests/regression/test_call_handler_body_termination.py`.
+A figurative constant (`BY CONTENT ZERO`) or a signed numeric literal
+(`BY VALUE -7`) is one USING argument, named by its text (`"ZERO"`, `"-7"`);
+before 2026-09-28 either ended the USING list, dropping it and every later
+argument (mocky-mock's `CAPTURE ARG n` counts depend on this list). Pinned
+by `test_call_using_comma_omitted.py::TestCallUsingFigurativeAndSignedLiterals`.
 
 **Multi-mode OPEN (`open_parser.py`):** one OPEN statement may carry several
 mode groups (`OPEN INPUT FILE-A OUTPUT FILE-B EXTEND FILE-C`). The parser
@@ -882,7 +887,11 @@ is populated for device words and IBM `UT-`/`UR-`/`DA-` prefixed names.
 Unknown SELECT clause tokens produce an "Unparsed token ... in SELECT"
 warning instead of a silent `consume()`. The ASSIGN collector stops at the
 shared `_SELECT_CLAUSE_KEYWORDS` set (previously it swallowed unknown
-following clauses into `assign_to`). `DECIMAL-POINT IS COMMA` in
+following clauses into `assign_to`). The FILE of `FILE STATUS`
+is optional (IBM): a bare `STATUS [IS] x [y]` starts the same clause
+(`STATUS` is in `_SELECT_CLAUSE_KEYWORDS`); before 2026-09-28 it was glued
+onto `assign_to` and `file_status` stayed empty
+(`test_environment_division_parser.py::test_status_clause_without_the_word_file`). `DECIMAL-POINT IS COMMA` in
 SPECIAL-NAMES emits a warning that the clause is recorded but not honored
 by the lexer (H4). All division parsers can reach the host warning channel:
 `BaseDivisionParser.host` is set by the division loop (`parser.py`).
@@ -1775,6 +1784,10 @@ delimiter (`UnstringStatement.delimiters`) instead of keeping only the
 first; `TALLYING IN counter` — documented in the parser's own docstring
 but never implemented — now populates a new
 `UnstringStatement.tallying_variable` field.
+`DELIMITED BY ALL x` (2026-09-28): the `ALL` flag used to be consumed and
+dropped. `UnstringStatement.delimiter_all` is a bool list parallel to
+`delimiters`; `to_dict()` emits it only when some delimiter is `ALL`, so
+every other UNSTRING serializes as before.
 
 **EXEC CICS lost its command verb when written on the line after `EXEC
 CICS`** (`ibm_exec_statements.py`) — the idiomatic, most common layout
@@ -1795,6 +1808,15 @@ order. COBOL allows **both** qualifiers on the same phrase, in **either**
 order (IBM Enterprise COBOL). Refactored into a shared `_parse_before_after`
 helper that loops until neither qualifier matches (each captured at most
 once), used by both `_parse_tallying` and `_parse_replacing`.
+
+2026-09-27 follow-up: `_parse_before_after` now reads its delimiter through
+`_consume_inspect_value`, so `BEFORE INITIAL SPACE` (a figurative constant)
+and `AFTER INITIAL ENT(2)` are taken whole -- previously SPACE was left in
+the stream and every later TALLYING counter clause was silently dropped. A
+subscripted TALLYING counter (`CNT(2) FOR ...`) is folded in too, and
+`CONVERTING` takes subscripted/figurative operands and keeps its
+BEFORE/AFTER phrase as `converting_before` / `converting_after` (emitted in
+`to_dict()` only when present; read by unused-variables and xref).
 
 **`PIC N(n)` (national/DBCS fields) sized as 1 regardless of `n`**
 (`models/data_items.py::PictureClause`): the size-inference cascade had a

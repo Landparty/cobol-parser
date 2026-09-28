@@ -257,13 +257,14 @@ class UnstringStatementParser(IStatementParser):
                     # Optional ALL delimiter [OR [ALL] delimiter ...]
                     while True:
                         nxt = token_stream.peek()
-                        if nxt and _val(nxt) == "ALL":
+                        is_all = bool(nxt and _val(nxt) == "ALL")
+                        if is_all:
                             token_stream.consume()
                             skip_whitespace(token_stream)
                         delimiter = _consume_operand(token_stream)
                         if delimiter is None:
                             break
-                        stmt.add_delimiter(delimiter)
+                        stmt.add_delimiter(delimiter, all_occurrences=is_all)
                         skip_whitespace(token_stream)
                         nxt = token_stream.peek()
                         if nxt and _val(nxt) == "OR":

@@ -299,6 +299,12 @@ def _emit_report(
     The report is prefixed with the standard identification header so the
     output is self-describing (see :func:`_identification`).
     """
+    # With --copybook-path every location counts lines of the expanded
+    # text; stamp each with the file and line it really came from, the way
+    # lint does. Additive: nothing is added without an expansion map.
+    from ..analysis.lint import stamp_report_origins
+
+    data = stamp_report_origins(data, getattr(args, "_expansion_source_map", None))
     output = {**_identification(args, ast), **data}
     if prof is not None:
         output["profiling"] = prof.to_dict()
@@ -488,6 +494,9 @@ def _parse_result_or_fail(args: argparse.Namespace) -> tuple[Any, Any]:
             file=sys.stderr,
         )
     _select_program_unit(args, result)
+    # Remembered for `_emit_report`, which stamps source-map origins onto
+    # every report location (see `stamp_report_origins`).
+    args._expansion_source_map = getattr(result, "expansion_source_map", None)
     return result, prof
 
 
@@ -1493,6 +1502,16 @@ def _cmd_decode(args: argparse.Namespace) -> None:
     )
     from ..generators.data.errors import CopybookLayoutError
 
+    # Checked here rather than left to the decoder: a negative --record-length
+    # surfaced as "the layout is zero bytes long", --record-length 0 was
+    # silently replaced by the layout's own length, and a negative
+    # --max-records decoded nothing without a word.
+    if args.record_length is not None and args.record_length <= 0:
+        _fail("--record-length must be a positive number of bytes")
+    if args.max_records is not None and args.max_records < 0:
+        _fail("--max-records cannot be negative")
+    if args.skip < 0:
+        _fail("--skip cannot be negative")
     encoding = _decode_encoding_options(args)
     try:
         decoder = RecordDecoder.from_copybook_file(
@@ -1674,6 +1693,8 @@ def _cmd_compare(args: argparse.Namespace) -> None:
 
     if args.max_differences is not None and args.max_differences < 0:
         _compare_fail("--max-differences cannot be negative")
+    if args.record_length is not None and args.record_length <= 0:
+        _compare_fail("--record-length must be a positive number of bytes")
     try:
         decoder = RecordDecoder.from_copybook_file(
             args.copybook,
@@ -2069,7 +2090,8 @@ def _cmd_unused_variables(args: argparse.Namespace) -> None:
         collect_declared_items,
     )
 
-    ast, prof = _parse_or_fail(args)
+    result, prof = _parse_result_or_fail(args)
+    ast = result.ast
 
     copybook_paths = getattr(args, "copybook_path", [])
     exclude_copybook = getattr(args, "exclude_copybook_variables", False)
@@ -2110,6 +2132,8 @@ def _cmd_unused_variables(args: argparse.Namespace) -> None:
         copybook_item_names=copybook_item_names,
     )
 
+    # Locations count lines of the copybook-expanded text; _emit_report
+    # stamps where each item really is, the way lint does.
     _emit_report(report.to_dict(), args, prof, ast)
 
 

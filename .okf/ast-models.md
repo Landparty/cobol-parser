@@ -151,6 +151,10 @@ Serialization fidelity notes (2026-07-07):
   pattern also holds characters no PICTURE may contain, which keeps the
   lenient fallback. An edited picture with a `V` (`Z(3)V99`) is sized by the
   edited path, not the 9s-only `V` split (it had sized 2, not 5).
+  Unedited pictures are sized after expanding every repeat factor
+  (`_parse_plain_pattern`, 2026-09-27): `X(2)X(3)` had sized 2, `AAX(2)` 1,
+  `9(2)9(3)` 2 digits, `NN` 2 bytes instead of 4 -- the single-run regexes
+  missed them and the fallback ignored `(n)` and national doubling.
   `scaling_leading: bool | None` (2026-09-10) records the P run's direction
   -- `True` for `PPP9(3)` (leading, a fraction), `False` for `9(3)PPP`
   (trailing, a scaled integer), `None` when not P-scaled at all -- the one

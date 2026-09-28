@@ -305,7 +305,15 @@ class TechnicalDebtAnalyzer:
                 f"GO TO density {complexity_report.goto_density:.1f} per 100 statements"
             )
 
-        alter_count = len(ast.find_all_by_type("AlterStatement"))
+        # This unit's own PROCEDURE DIVISION only: a contained program is a
+        # child of the CobolProgram node (not of its divisions), and every
+        # other component here is scoped to *ast* alone -- counting a nested
+        # program's ALTERs charged them to its container as well as to the
+        # nested unit itself (``health --program``, ``scan``).
+        procedure = ast.get_division("PROCEDURE")
+        alter_count = (
+            len(procedure.find_all_by_type("AlterStatement")) if procedure else 0
+        )
         alter_penalty = min(30.0, alter_count * 15.0)
         if alter_count:
             findings.append(f"{alter_count} ALTER statement(s) in use")

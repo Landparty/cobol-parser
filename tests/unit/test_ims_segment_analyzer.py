@@ -1372,3 +1372,41 @@ class TestRealWorldOrderManagement:
         gu = next(c for c in calls if c.function_code == "GU")
         # Segment name = 'ORDER   '[:8].rstrip() = 'ORDER'
         assert gu.primary_segment == "ORDER"
+
+
+class TestParmcountOperand:
+    """``CALL 'CBLTDLI' USING parmcount, function, pcb, ...`` -- the optional
+    leading count used to be read as the function code, shifting the PCB,
+    I/O area and every SSA one position."""
+
+    _SRC = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. T1.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 PARM-CT PIC S9(9) COMP VALUE +4.
+       01 GU-FUNC PIC X(4) VALUE 'GU  '.
+       01 IO-AREA PIC X(100).
+       01 SSA1 PIC X(9) VALUE 'CUSTOMER '.
+       LINKAGE SECTION.
+       01 DB-PCB PIC X(40).
+       PROCEDURE DIVISION.
+           CALL '{iface}' USING PARM-CT GU-FUNC DB-PCB IO-AREA SSA1.
+           GOBACK.
+"""
+
+    @pytest.mark.parametrize("iface", ["CBLTDLI", "AIBTDLI"])
+    def test_leading_count_is_skipped(self, iface):
+        result = parse_cobol(self._SRC.format(iface=iface))
+        (call,) = IMSSegmentAnalyzer().analyze(result.ast)
+        assert call.function_code == "GU"
+        assert call.function_code_var == "GU-FUNC"
+        assert call.pcb_name == "DB-PCB"
+        assert call.io_area_name == "IO-AREA"
+        assert call.ssa_names == ["SSA1"]
+        assert call.segment_names == ["CUSTOMER"]
+
+    def test_ceetdli_takes_no_count(self):
+        # CEETDLI has no parmcount operand: the positions are left alone.
+        result = parse_cobol(self._SRC.format(iface="CEETDLI"))
+        (call,) = IMSSegmentAnalyzer().analyze(result.ast)
+        assert call.function_code_var == "PARM-CT"

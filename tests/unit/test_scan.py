@@ -543,6 +543,67 @@ class TestCopybookExpansion:
         # The copybook's own fields are counted only once expansion ran.
         assert expanded_total > plain_total
 
+    def test_expanded_locations_carry_their_on_disk_origin(
+        self, tmp_path: Path
+    ) -> None:
+        # The member is spliced in ahead of the paragraph, so the report's
+        # expanded-text line is not the paragraph's line in the file.
+        (tmp_path / "PARAS.cpy").write_text(
+            "       COPY-PARA.\n           DISPLAY 'IN COPY'.\n"
+            "       DEAD-COPY-PARA.\n           DISPLAY 'DEAD'.\n"
+        )
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ORIGINS.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           PERFORM COPY-PARA
+           STOP RUN.
+           COPY PARAS.
+       LAST-DEAD.
+           DISPLAY 'Z'.
+"""
+        path = _write(tmp_path, "ORIGINS.cbl", source)
+        scan = scan_one(
+            path,
+            ScanOptions(analyzers=("dead-code",), copybook_paths=(str(tmp_path),)),
+        )
+        dead = {d["name"]: d for d in scan.units[0].reports["dead-code"]["dead_code"]}
+        assert dead["LAST-DEAD"]["location"]["line"] == 11
+        assert dead["LAST-DEAD"]["origin"] == {"file": path, "line": 8}
+        assert dead["DEAD-COPY-PARA"]["origin"] == {
+            "file": str(tmp_path / "PARAS.cpy"),
+            "line": 3,
+        }
+
+    def test_cross_file_clone_members_keep_the_origin(self, tmp_path: Path) -> None:
+        (tmp_path / "PARAS.cpy").write_text(
+            "       SHARED-PARA.\n           MOVE 1 TO WS-A\n"
+            "           MOVE 2 TO WS-B\n           DISPLAY 'X'.\n"
+        )
+        body = "           PERFORM SHARED-PARA\n           STOP RUN.\n           COPY PARAS.\n"
+        paths = [
+            _write(tmp_path, f"{n}.cbl", _program(n, "MAIN-PARA", body))
+            for n in ("PROGA", "PROGB")
+        ]
+        report = scan_files(
+            paths,
+            ScanOptions(analyzers=("redundancy",), copybook_paths=(str(tmp_path),)),
+            workers=1,
+        )
+        (group,) = cross_file_clone_groups(report)
+        cpy = str(tmp_path / "PARAS.cpy")
+        assert [m.to_dict()["origin"] for m in group.members] == [
+            {"file": cpy, "line": 1},
+            {"file": cpy, "line": 1},
+        ]
+
+    def test_no_origin_without_expansion(self, tmp_path: Path) -> None:
+        path = _write(tmp_path, "A.cbl", _program("PROGA", "ONLY-PARA", _BODY))
+        scan = scan_one(path, ScanOptions(analyzers=("redundancy",)))
+        fingerprints = scan.units[0].reports["redundancy"]["paragraph_fingerprints"]
+        assert fingerprints and all("origin" not in f for f in fingerprints)
+
     def test_an_unresolvable_copybook_falls_back_rather_than_dropping_the_file(
         self, tmp_path: Path
     ) -> None:

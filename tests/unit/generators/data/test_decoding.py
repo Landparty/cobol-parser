@@ -332,6 +332,29 @@ def test_a_short_final_record_is_reported_as_trailing_bytes():
     assert result.trailing == b"\xf1\xf2"
 
 
+@pytest.mark.parametrize(
+    "tail",
+    [
+        b"\xf0\xf0\xf1",  # cut inside ORD-ID
+        # ORD-COUNT says 3 lines but the bytes stop after the first one --
+        # cut exactly on a field boundary, so no field reads as truncated.
+        b"\xf0\xf0\xf0\xf0\xf1\xf0\xf3" + b"\xc1" * 6 + b"\x00\x1c",
+    ],
+)
+def test_a_short_final_variable_bare_record_is_trailing_not_a_row(tail):
+    # RECFM=F already reported a short tail as trailing bytes; the unframed
+    # variable format decoded it into one more row of truncated rubbish.
+    dataset = _dataset(ODO)
+    opts = EncodingOptions(
+        charset=Charset.EBCDIC, record_format=RecordFormat.VARIABLE_BARE
+    )
+    raw = dataset.to_records(opts)
+    result = _decoder(ODO, opts).decode_bytes(raw + tail)
+    assert len(result.records) == len(dataset.rows)
+    assert result.trailing == tail
+    assert result.bytes_read == len(raw)
+
+
 def test_a_record_cut_mid_field_decodes_what_was_there():
     source = "       01  R.\n           05  A PIC X(4).\n           05  B PIC X(4).\n"
     view = build_record_views(parse_copybook_records(source)[0]).base
