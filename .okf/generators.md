@@ -656,7 +656,10 @@ module docstring — that suite is the regression guard):
 **Overflow is not uniform across those rows, deliberately.** The zoned and
 packed encoders run their magnitude through `_digits_string`, which
 high-order-truncates to the PICTURE's digit count the way a COBOL numeric
-MOVE does, so neither can overflow. The binary encoder has no such step: a
+MOVE does, so neither can overflow. Excess *decimal* places are truncated
+too, never rounded (`_scaled_integer` and `edit_numeric` both use
+`ROUND_DOWN`, 2026-09-28): `9.999` into `9V99` stores `999`. It used to round
+half-even to `1000`, which the high-order truncation then turned into `000`. The binary encoder has no such step: a
 value that does not fit the field's *byte width* has no representation at
 all, so it raises `RecordEncodingError` rather than silently reshaping the
 bytes. Nothing this package generates can reach it — `ValueFactory` respects

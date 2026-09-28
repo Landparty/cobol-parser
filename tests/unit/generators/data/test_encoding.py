@@ -183,6 +183,30 @@ class TestZonedDecimal:
         assert encode_field(spec, "", EncodingOptions()) == b"00000"
 
 
+class TestExcessDecimalPlaces:
+    """A value with more decimal places than the PICTURE is truncated, as a
+    COBOL numeric MOVE does -- it used to be rounded half-even, so ``9.999``
+    into ``9V99`` became ``1000``, high-order truncated to ``000``: zero."""
+
+    def test_zoned_truncates_rather_than_rounds(self):
+        spec = one_spec("F PIC 9V99.")
+        assert encode_field(spec, "9.999", EncodingOptions()) == b"999"
+
+    def test_packed_truncates_toward_zero(self):
+        spec = one_spec("F PIC S9V99 COMP-3.")
+        assert encode_field(spec, "-1.239", EncodingOptions()) == bytes.fromhex("123d")
+
+    def test_binary_truncates(self):
+        spec = one_spec("F PIC 9(3)V9 COMP.")
+        assert encode_field(spec, "12.35", EncodingOptions()) == (123).to_bytes(
+            2, "big"
+        )
+
+    def test_numeric_edited_truncates(self):
+        spec = one_spec("F PIC ZZ9.99.")
+        assert encode_field(spec, "9.999", EncodingOptions()) == b"  9.99"
+
+
 class TestAlphanumeric:
     def test_short_value_is_space_padded_on_the_right(self):
         spec = one_spec("F PIC X(6).")

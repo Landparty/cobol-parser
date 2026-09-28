@@ -37,7 +37,7 @@ Editing rules implemented (IBM Enterprise COBOL Language Reference,
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 
 from ...models.data_items import PictureClause
 
@@ -117,7 +117,13 @@ def edit_numeric(
         number = Decimal(0)
     negative = number < 0
     width = layout.integer_positions + layout.fraction_positions
-    scaled = int(abs(number).scaleb(layout.fraction_positions).to_integral_value())
+    # Truncated, not rounded: a MOVE drops the places the picture has no
+    # room for (``9.999`` into ``ZZ9.99`` edits as ``  9.99``).
+    scaled = int(
+        abs(number)
+        .scaleb(layout.fraction_positions)
+        .to_integral_value(rounding=ROUND_DOWN)
+    )
     digits = str(scaled % 10**width).rjust(width, "0") if width else ""
     if scaled == 0:
         negative = False

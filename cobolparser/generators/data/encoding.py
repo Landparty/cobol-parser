@@ -374,7 +374,11 @@ def _scaled_integer(text: str, spec: FieldSpec) -> int:
         # Truncation, not rounding, is what the compiler does with a value
         # that is not a whole multiple (``123456`` -> ``123``).
         return int(units.scaleb(-scaling).to_integral_value(rounding=ROUND_DOWN))
-    return int(units.to_integral_value())
+    # Decimal places beyond the PICTURE's are truncated, not rounded, as a
+    # COBOL numeric MOVE does: ``9.999`` into ``9V99`` stores ``999``.
+    # Rounding (half-even) stored ``1000``, which the high-order truncation
+    # in `_digits_string` then turned into ``000`` -- a zero.
+    return int(units.to_integral_value(rounding=ROUND_DOWN))
 
 
 def _digits_string(magnitude: int, digits: int) -> str:
