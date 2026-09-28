@@ -3068,6 +3068,11 @@ def _build_graph(args: argparse.Namespace) -> Any:
     """
     from ..analysis.codebase import CodebaseGraphBuilder
 
+    # The same guard batch and scan apply: without it parse_files' own
+    # ValueError escaped as a traceback.
+    if args.workers is not None and args.workers < 1:
+        _fail("--workers must be >= 1")
+
     builder = CodebaseGraphBuilder(
         copybook_paths=list(args.copybook_path or []),
         workers=args.workers,
