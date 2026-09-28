@@ -1750,3 +1750,79 @@ def test_multiply_and_divide_forms():
         "N3": [ROLE_WRITE],
         "RM": [ROLE_WRITE],
     }
+
+
+# ---------------------------------------------------------------------------
+# Regressions: 2026-09-28 analyzer bug hunt
+# ---------------------------------------------------------------------------
+
+_SORT_PROCEDURE_SOURCE = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SRTPROC.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT SRT-FILE ASSIGN TO SORTWK.
+       DATA DIVISION.
+       FILE SECTION.
+       SD SRT-FILE.
+       01 SRT-REC.
+          05 SRT-KEY PIC X(10).
+          05 FILLER  PIC X(70).
+       WORKING-STORAGE SECTION.
+       01 WS-IN   PIC X(80).
+       01 WS-OUT  PIC X(80).
+       01 WS-EOF  PIC X.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           SORT SRT-FILE ON ASCENDING KEY SRT-KEY
+                INPUT PROCEDURE IS IN-PROC
+                OUTPUT PROCEDURE IS OUT-PROC
+           STOP RUN.
+       IN-PROC.
+           RELEASE SRT-REC FROM WS-IN.
+       OUT-PROC.
+           RETURN SRT-FILE INTO WS-OUT AT END MOVE 'Y' TO WS-EOF.
+"""
+
+
+def test_release_from_and_return_into_carry_their_roles():
+    """RELEASE ... FROM reads its source and RETURN ... INTO writes its
+    target; both used to be invisible (the FROM/INTO operand never reached
+    ``.operands``), and RETURN's SD file was dropped as a non-data name."""
+    report = _analyze_source(_SORT_PROCEDURE_SOURCE)
+    assert _roles(report, "WS-IN") == [ROLE_READ]
+    assert _roles(report, "WS-OUT") == [ROLE_WRITE]
+    assert _roles(report, "SRT-REC") == [ROLE_READ]
+    srt_file = report.entry_for("SRT-FILE")
+    assert srt_file is not None and srt_file.kind == KIND_FILE
+    assert (ROLE_FILE_OPERATION, "ReturnStatement") in [
+        (ref.role, ref.statement) for ref in srt_file.references
+    ]
+    assert not any(
+        "ReleaseStatement" in caveat or "ReturnStatement" in caveat
+        for caveat in report.caveats
+    )
+
+
+def test_reference_modifier_of_a_receiving_operand_is_read_not_written():
+    """``MOVE X TO WS-B (WS-P:WS-L)`` writes WS-B; WS-P and WS-L only
+    locate the substring and must not be listed as written."""
+    report = _analyze_source("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. REFMODW.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-A   PIC X(10).
+       01  WS-B   PIC X(10).
+       01  WS-P   PIC 9(2).
+       01  WS-L   PIC 9(2).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE WS-A TO WS-B (WS-P:WS-L)
+           STOP RUN.
+""")
+    assert _roles(report, "WS-B") == [ROLE_WRITE]
+    assert _roles(report, "WS-P") == [ROLE_READ]
+    assert _roles(report, "WS-L") == [ROLE_READ]
+    assert _roles(report, "WS-A") == [ROLE_READ]

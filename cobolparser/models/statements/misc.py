@@ -468,6 +468,7 @@ class ReleaseStatement(CobolStatement):
 
     def set_from_source(self, source: str) -> None:
         self.from_source = source
+        self._add_unique_operand(source)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
@@ -493,6 +494,7 @@ class ReturnStatement(CobolStatement):
 
     def set_into_target(self, target: str) -> None:
         self.into_target = target
+        self._add_unique_operand(target)
 
     def set_at_end_clause(self, statements: list["CobolStatement"]) -> None:
         self._set_clause("at_end_clause", statements)

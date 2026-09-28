@@ -946,3 +946,41 @@ class TestExports:
         assert cobolparser.UnusedVariableAnalyzer is UnusedVariableAnalyzer
         assert cobolparser.UnusedVariableReport is UnusedVariableReport
         assert cobolparser.UnusedVariableItem is UnusedVariableItem
+
+
+class TestSortProcedureOperands:
+    """Regression (2026-09-28): RELEASE ... FROM / RETURN ... INTO operands
+    never reached ``.operands``, so an item used only there read as unused."""
+
+    def test_release_from_and_return_into_are_references(self):
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SRTUSE.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT SRT-FILE ASSIGN TO SORTWK.
+       DATA DIVISION.
+       FILE SECTION.
+       SD SRT-FILE.
+       01 SRT-REC.
+          05 SRT-KEY PIC X(10).
+          05 FILLER  PIC X(70).
+       WORKING-STORAGE SECTION.
+       01 WS-IN   PIC X(80).
+       01 WS-OUT  PIC X(80).
+       01 WS-EOF  PIC X.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           SORT SRT-FILE ON ASCENDING KEY SRT-KEY
+                INPUT PROCEDURE IS IN-PROC
+                OUTPUT PROCEDURE IS OUT-PROC
+           STOP RUN.
+       IN-PROC.
+           RELEASE SRT-REC FROM WS-IN.
+       OUT-PROC.
+           RETURN SRT-FILE INTO WS-OUT AT END MOVE 'Y' TO WS-EOF.
+"""
+        unused = _names(_analyze(src))
+        assert "WS-IN" not in unused
+        assert "WS-OUT" not in unused

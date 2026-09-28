@@ -42,6 +42,12 @@ arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
 
+2026-09-28: `tests/unit/analysis/test_xref.py` (+2: RELEASE FROM / RETURN
+INTO roles, reference-modifier offsets on a receiving operand read),
+`test_unused_variables.py::TestSortProcedureOperands` (+1) and
+`test_crud_matrix.py::TestSortMergeFileAccess` (+1: SORT/MERGE USING/GIVING,
+RELEASE/RETURN). See `analysis.md`.
+
 2026-09-27: `tests/unit/analysis/test_xref.py` (+3 tests, one updated:
 `ADD 1 TO WS-COUNT` is now read *and* write) and
 `test_program_signature.py` (+1) pin arithmetic read/write roles and the
