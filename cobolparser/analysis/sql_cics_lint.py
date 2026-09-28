@@ -1068,8 +1068,7 @@ def _status_checked(
     not this one's.
     """
     return (
-        _scan_for_status(block_index, position, blocks, by_name, cache, visited)
-        is True
+        _scan_for_status(block_index, position, blocks, by_name, cache, visited) is True
     )
 
 
@@ -1100,9 +1099,7 @@ def _scan_for_status(
                     if index in visited:
                         continue
                     visited.add(index)
-                    found = _scan_for_status(
-                        index, -1, blocks, by_name, cache, visited
-                    )
+                    found = _scan_for_status(index, -1, blocks, by_name, cache, visited)
                     if found is not None:
                         return found
     return None

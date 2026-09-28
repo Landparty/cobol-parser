@@ -421,6 +421,9 @@ class ConstraintExtractor:
         is_true_form = isinstance(subject, str) and subject.strip().upper() == "TRUE"
 
         any_when_unsupported = False
+        # Each WHEN arm's own selector constraints, before the earlier arms'
+        # negations are conjoined -- what WHEN OTHER and later arms negate.
+        own_arms: dict[str, list[FieldConstraint]] = {}
         for idx, wc in enumerate(statement.when_clauses, start=1):
             arm_id = f"WHEN_{idx}"
             origin = f"EVALUATE@{line}/WHEN#{idx}"
@@ -434,7 +437,16 @@ class ConstraintExtractor:
                 unsupported,
             )
             if constraints is not None:
-                arms[arm_id] = constraints
+                # EVALUATE is first-match: WHEN_n runs only when every earlier
+                # WHEN failed, so its data must also falsify each of them. A
+                # witness solved from WHEN_n's own selector alone could land in
+                # an earlier arm (``WHEN A > 50 / WHEN A > 10`` witnessing 55
+                # for the second) and the scenario named for WHEN_n would never
+                # reach it.
+                arms[arm_id] = constraints + _negate_earlier_whens(
+                    own_arms, any_when_unsupported, origin, unsupported
+                )
+                own_arms[arm_id] = constraints
             else:
                 any_when_unsupported = True
 
@@ -447,7 +459,7 @@ class ConstraintExtractor:
                 arms["WHEN_OTHER"] = []
             else:
                 arms["WHEN_OTHER"] = _negate_prior_arms(
-                    arms, f"EVALUATE@{line}/WHEN_OTHER", unsupported
+                    own_arms, f"EVALUATE@{line}/WHEN_OTHER", unsupported
                 )
 
         if arms or unsupported:
@@ -799,6 +811,55 @@ def _extract_class_or_sign(
         "(DBCS/KANJI double-byte tests are out of v1 scope)"
     )
     return None
+
+
+def _negate_constraint(constraint: FieldConstraint) -> FieldConstraint | None:
+    """The single constraint meaning NOT `constraint`, or ``None``."""
+    op = constraint.op
+    if op in _NEGATED_RELATIONAL:
+        new_op, negated = _NEGATED_RELATIONAL[op], constraint.negated
+    elif op == "in_set" and constraint.exhaustive and not constraint.negated:
+        new_op, negated = "not_in_set", False
+    elif op == "not_in_set" and not constraint.negated:
+        new_op, negated = "in_set", False
+    elif op in ("class_numeric", "class_alphabetic", "figurative"):
+        new_op, negated = op, not constraint.negated
+    else:
+        return None
+    return FieldConstraint(
+        constraint.field, new_op, constraint.values, constraint.origin, negated
+    )
+
+
+def _negate_earlier_whens(
+    arms: dict[str, list[FieldConstraint]],
+    any_earlier_unsupported: bool,
+    origin: str,
+    unsupported: list[str],
+) -> list[FieldConstraint]:
+    """The conjunction NOT(WHEN_1) AND ... AND NOT(WHEN_n-1), as far as it goes.
+
+    Only a single-conjunct earlier arm negates into one FieldConstraint;
+    NOT(a AND b) is a disjunction the vocabulary cannot express. Such an arm,
+    or one that was itself unsupported, is left out and said so in
+    `unsupported` -- the later arm's witness may then still be shadowed.
+    """
+    negations: list[FieldConstraint] = []
+    skipped = any_earlier_unsupported
+    for arm_id, conjuncts in arms.items():
+        if not arm_id.startswith("WHEN_") or arm_id == "WHEN_OTHER":
+            continue
+        negated = _negate_constraint(conjuncts[0]) if len(conjuncts) == 1 else None
+        if negated is None:
+            skipped = True
+            continue
+        negations.append(negated)
+    if skipped:
+        unsupported.append(
+            f"{origin}: not every earlier WHEN arm could be negated, so this "
+            "arm's witness may satisfy an earlier arm and never reach it"
+        )
+    return negations
 
 
 def _negate_prior_arms(

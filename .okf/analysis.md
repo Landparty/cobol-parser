@@ -1736,6 +1736,18 @@ every row of the scenario named for the OTHER arm carried one of the very
 values that arm excludes — the scenario could not reach its own branch,
 deterministically rather than just often.
 
+**Every later `WHEN` arm also negates the earlier ones.** `EVALUATE` is
+first-match, so `WHEN_n` runs only when `WHEN_1..n-1` all failed.
+`_negate_earlier_whens` conjoins onto each later arm the negation of every
+earlier arm that is a single constraint (`gt`<->`le`, `eq`<->`ne`,
+exhaustive `in_set`<->`not_in_set`, class/figurative flip). Without it
+`WHEN A > 50 / WHEN A > 10` witnessed 51 for the second arm — a value that
+takes the first — and a duplicate `WHEN 1 / WHEN 1` reported the unreachable
+second arm as satisfiable (now `Unsatisfiable`). An earlier arm that cannot
+be negated into one constraint (a `THRU` range, a conjunction, an
+unsupported selector) is left out and noted in `unsupported`. `WHEN OTHER`
+still negates only each arm's *own* selector constraints.
+
 **The level-88 enum domain is a preference, not the field's domain.**
 `solve()` tries `EnumDomain(spec.condition_values)` first whenever a set op is
 in play, so `IF NOT TYPE-M` against 88s `"05"`/`"09"` still yields the other

@@ -125,7 +125,11 @@ class TestFinding1SignedLiterals:
             "           STOP RUN.\n"
         )
         assert _arm_values(report, "WHEN_1") == [("eq", ("-5",)), ("lt", ("-3",))]
-        assert _arm_values(report, "WHEN_2") == [("ge", ("-9",)), ("le", ("-6",))]
+        assert _arm_values(report, "WHEN_2") == [
+            ("ge", ("-9",)),
+            ("le", ("-6",)),
+            ("ne", ("-5",)),  # NOT WHEN_1 -- EVALUATE is first-match
+        ]
         for branch in report.branches:
             for constraints in branch.arms.values():
                 witness = solve(constraints[0].field.spec, constraints)
