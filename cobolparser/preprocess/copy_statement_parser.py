@@ -49,6 +49,11 @@ _COMPILER_DIRECTIVE_RE = re.compile(r"^(?:PROCESS|CBL)(?:[ \t].*)?$", re.IGNOREC
 # de-ambiguated; use CopyStatementLexer instead.
 
 
+# Columns 8-72: the width of the program-text area a continued literal runs
+# to the end of.
+_PROGRAM_TEXT_WIDTH = 65
+
+
 def normalize_continuation_lines(
     source: str,
     indicator_position: int = 6,
@@ -96,6 +101,13 @@ def normalize_continuation_lines(
 
     # Text starts after the indicator column
     text_start = indicator_position + 1
+    # Where column 72 ends in this coordinate system: a continued literal
+    # runs through it, blanks and all.
+    text_end = text_start + _PROGRAM_TEXT_WIDTH
+    # Physical width (sans "\r") of the last record merged into each output
+    # line, so a continued literal is padded for *that* record's missing
+    # columns, not the merged line's.
+    tail_width: dict[int, int] = {}
 
     for _i, line in enumerate(lines):
         line_number = _i + 1
@@ -135,22 +147,30 @@ def normalize_continuation_lines(
                     # dropped; the continued line keeps its trailing blanks
                     # up to column 72, which are part of the literal's value
                     # (the M5 rule) -- never rstrip an open literal.
+                    #
+                    # A record shorter than column 72 (its trailing blanks
+                    # stripped by an editor or transfer) is padded back out:
+                    # the columns it lost are blanks inside the literal all
+                    # the same, and normalize_fixed_format pads them too.
                     cont_stripped = continuation_text.lstrip()
                     if cont_stripped.startswith(open_quote):
                         cont_stripped = cont_stripped[1:]
-                    result[target] = prev_line + cont_stripped
+                    pad = " " * max(0, text_end - tail_width.get(target, text_end))
+                    result[target] = prev_line + pad + cont_stripped
                 else:
                     # Non-literal continuation: strip leading spaces
                     # In COBOL, when continuing a non-literal (like an identifier),
                     # the continuation text is concatenated directly to the previous text.
                     # Example: "O005" continued with "F-001" becomes "O005F-001"
                     result[target] = prev_line.rstrip() + continuation_text.lstrip()
+                tail_width[target] = len(line.rstrip("\r"))
             else:
                 # Orphan continuation line - just add the text part
                 result.append(line[text_start:] if len(line) > text_start else "")
                 if line_origins is not None:
                     line_origins.append(line_number)
         else:
+            tail_width[len(result)] = len(line.rstrip("\r"))
             result.append(line)
             if line_origins is not None:
                 line_origins.append(line_number)

@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-09-15T00:00:00Z
+timestamp: 2026-09-28T00:00:00Z
 ---
 
 # Overview
@@ -159,6 +159,23 @@ make them part of the literal's value — e.g. opening line `VALUE "ABC   `
 `VALUE "ABCDEF"` → correctly `"ABC   DEF"`, not the pre-fix `"ABCDEF"`
 (blanks silently dropped). Applies to both the opening-line branch and
 the literal-continuation branch, pure-Python and Cython.
+
+**Short records** (2026-09-28): the M5 rule only kept blanks that were
+*physically present*. A literal open at end of line runs through column 72,
+and a record whose trailing blanks were stripped (editors, file transfers --
+most copies of a deck kept off the mainframe) stops short of it; the columns
+it lost are blanks inside the literal all the same. They were dropped, so
+`DISPLAY 'ERROR: NOT ` + `-    'FOUND'.` read `'ERROR: NOTFOUND'` stripped
+and `'ERROR: NOT FOUND'` unstripped. `_literal_pad()` computes the missing
+columns when a record leaves a literal open; the pad is paid *only when a
+continuation record resumes the literal* (prepended to its chunk), so an
+unterminated literal that nothing continues keeps its historical text.
+Mirrored in `_preprocess_fast.pyx` (`.c` regenerated with Cython 3.3.0) and
+in the expander's `copy_statement_parser.normalize_continuation_lines`, which
+pads per merged record (`tail_width`), so a direct parse and a
+`parse_cobol_with_expansion` parse still agree. Hand-written tests that
+joined short-record pieces with no blanks were updated to the column-72
+rule (or to put the literal's last character in column 72).
 
 **Line numbers survive continuation** (fixed 2026-09-09). A continuation
 record used to vanish from the output — N physical lines became one logical

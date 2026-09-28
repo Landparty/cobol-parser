@@ -25,6 +25,12 @@ _ID_END     = 80  # IDENTIFICATION_END_COL
 _MIN_ID_STAMP_EVIDENCE = 3  # MIN_ID_STAMP_EVIDENCE_LINES
 
 
+cdef str _literal_pad(str text_slice):
+    """Blanks for the columns a short record never had, through column 72.
+    Mirrors the pure-Python `_literal_pad`."""
+    return " " * (_TEXT_END - _TEXT_START - len(text_slice))
+
+
 cdef bint _is_numeric_id_stamp_text(str tail):
     """True when *tail* has the shape of a numeric identification-area
     stamp: at least one digit, and nothing but digits and blanks. Mirrors
@@ -138,6 +144,10 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     # means the literal never closed -- the pair is one doubled quote and
     # the literal carries on.
     cdef str closing_quote_at_72 = None
+    # Mirrors the pure-Python `literal_pad`: blanks owed to a literal left
+    # open on a record shorter than column 72, paid only if a continuation
+    # record resumes it.
+    cdef str literal_pad = ""
     cdef str lead, rest
     # Mirrors the pure-Python one-code-line lookahead (`_continuation_follows`):
     # a comment/blank line followed by a continuation record is deferred
@@ -397,7 +407,9 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 # value when it remains open at end of line (COBOL
                 # fixed-format continuation rule) -- only strip them once
                 # we know no literal is left dangling (M5).
-                parts.append(chunk if pending_literal else chunk.rstrip())
+                parts.append(
+                    literal_pad + (chunk if pending_literal else chunk.rstrip())
+                )
             else:
                 # Non-literal continuation: '-' in column 7 with no
                 # alphanumeric literal open. Per COBOL fixed-format rules the
@@ -490,6 +502,14 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
             closing_quote_at_72 = text_slice[-1]
         else:
             closing_quote_at_72 = None
+
+        # Mirrors the pure-Python rule: a literal still open here runs
+        # through column 72, so a short record owes the next continuation
+        # the blanks it is missing.
+        if merge_continued_literals and pending_literal:
+            literal_pad = _literal_pad(text_slice)
+        else:
+            literal_pad = ""
 
         # Either branch above (continuation or new logical line) always
         # appends to `parts` (even an empty string), so this physical line

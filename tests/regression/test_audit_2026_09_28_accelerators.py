@@ -13,8 +13,9 @@ import json
 import pytest
 
 import cobolparser.parsers.divisions.data_clauses as data_clauses
-from cobolparser import parse_cobol
+from cobolparser import parse_cobol, parse_cobol_with_expansion
 from cobolparser.preprocess import _normalize_fixed_format_pure, normalize_fixed_format
+from cobolparser.preprocess.copy_statement_parser import normalize_continuation_lines
 
 NORMALIZERS = [
     pytest.param(_normalize_fixed_format_pure, id="pure"),
@@ -99,3 +100,98 @@ class TestOccursCountBeyondCInt:
             )
             dumps.append(json.dumps(parse_cobol(self.SRC).ast.to_dict(), default=str))
         assert dumps[0] == dumps[1]
+
+
+# ---------------------------------------------------------------------------
+# 2. A continued literal on a record shorter than column 72
+# ---------------------------------------------------------------------------
+
+
+class TestShortRecordContinuedLiteral:
+    """A literal left open at end of line runs through column 72, blanks
+    included (the M5 rule). A record whose trailing blanks were stripped --
+    by an editor, a file transfer: most copies of a deck kept off the
+    mainframe -- stops short of column 72, but the columns it lost are still
+    blanks inside the literal. They were dropped, so the same program read
+    ``'ERROR: NOTFOUND'`` stripped and ``'ERROR: NOT FOUND'`` unstripped."""
+
+    OPENER = "           DISPLAY 'ERROR: CUSTOMER NOT "
+    CONT = "      -    'FOUND'."
+
+    @pytest.mark.parametrize("normalize", NORMALIZERS)
+    def test_stripped_record_reads_like_the_full_width_one(self, normalize):
+        full = normalize([self.OPENER.ljust(72), self.CONT])
+        stripped = normalize([self.OPENER.rstrip(), self.CONT])
+        assert stripped == full
+        assert "'ERROR: CUSTOMER NOT" + _to_72(self.OPENER.rstrip()) + "FOUND'" in full
+
+    @pytest.mark.parametrize("normalize", NORMALIZERS)
+    def test_every_short_record_of_a_multi_record_literal_is_padded(self, normalize):
+        lines = [
+            '       01  WS-A PIC X(200) VALUE "ABC',
+            '      -    "DEF',
+            '      -    "GHI".',
+        ]
+        want = (
+            '01  WS-A PIC X(200) VALUE "ABC'
+            + _to_72(lines[0])
+            + "DEF"
+            + _to_72(lines[1])
+            + 'GHI".\n\n\n'
+        )
+        assert normalize(lines) == want
+        assert normalize([line.ljust(72) for line in lines[:2]] + lines[2:]) == want
+
+    @pytest.mark.parametrize("normalize", NORMALIZERS)
+    def test_comment_between_the_pieces_still_pays_the_pad(self, normalize):
+        lines = [
+            '       01  WS-A PIC X(80) VALUE "ABC',
+            "      * interrupting comment",
+            '      -    "DEF".',
+        ]
+        assert normalize(lines) == (
+            '01  WS-A PIC X(80) VALUE "ABC' + _to_72(lines[0]) + 'DEF".\n\n\n'
+        )
+
+    @pytest.mark.parametrize("normalize", NORMALIZERS)
+    def test_no_pad_without_a_continuation(self, normalize):
+        # Nothing resumes the literal, so nothing is owed: an unterminated
+        # literal cut off by a comment keeps its historical text.
+        lines = ['           DISPLAY "oops', "      * end of program"]
+        assert normalize(lines) == '    DISPLAY "oops\n\n'
+
+    @pytest.mark.parametrize("normalize", NORMALIZERS)
+    def test_literal_ending_in_column_72_needs_no_pad(self, normalize):
+        opener = ("       01  WS-A PIC X(10) VALUE" + ' "ABCDE'.rjust(41))[:72]
+        assert len(opener) == 72
+        out = normalize([opener, '      -    "FGHIJ".'])
+        assert '"ABCDEFGHIJ"' in out
+
+    def test_parse_and_expansion_agree(self, tmp_path):
+        (tmp_path / "CPY1.cpy").write_text("       01  CPY-ITEM PIC X.\n")
+        opener = "       01  WS-MSG PIC X(60) VALUE 'ERROR: CUSTOMER NOT"
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. T.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       COPY CPY1.",
+            opener,
+            "      -    'FOUND'.",
+            "       PROCEDURE DIVISION.",
+            "           STOP RUN.",
+        ]
+        src = "\n".join(lines) + "\n"
+        want = '"ERROR: CUSTOMER NOT' + _to_72(opener) + 'FOUND"'
+        direct = parse_cobol(src.replace("       COPY CPY1.\n", ""))
+        expanded = parse_cobol_with_expansion(src, "t.cbl", [str(tmp_path)])
+        assert _items(direct)["WS-MSG"]["value_clause"] == want
+        assert _items(expanded)["WS-MSG"]["value_clause"] == want
+
+    def test_expander_pads_each_record_it_merges(self):
+        first = "       01  WS-A PIC X(200) VALUE 'ABC"
+        second = "      -    'DEF"
+        src = first + "\n" + second + "\n      -    'GHI'.\n"
+        assert normalize_continuation_lines(src) == (
+            first + _to_72(first) + "DEF" + _to_72(second) + "GHI'.\n"
+        )
