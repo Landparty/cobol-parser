@@ -518,6 +518,13 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
     # cell is the logical value (`1234.56`), the bytes are the edited form
     # (`$1,234.56`).  A picture `edit_numeric` does not model keeps the
     # cell's text as is.
+    if (
+        spec.blank_when_zero
+        and spec.category in (FieldCategory.NUMERIC, FieldCategory.NUMERIC_EDITED)
+        and _scaled_integer(text, spec) == 0
+    ):
+        # BLANK WHEN ZERO: a zero value is stored as spaces, not digits.
+        return bytes([opts.space]) * width
     if spec.category is FieldCategory.NUMERIC:
         return _encode_zoned(text, spec, opts)
     if spec.category is FieldCategory.NUMERIC_EDITED:
@@ -676,6 +683,22 @@ def encoding_caveats(
         caveats.append(
             "COMP-1/COMP-2 are encoded as IEEE 754, not z/OS hexadecimal "
             f"floating point: {', '.join(floats)}"
+        )
+    national = sorted(
+        {
+            spec.qualified_name
+            for spec in specs
+            if spec.category is FieldCategory.NATIONAL
+            or _normalized_usage(spec) == "NATIONAL"
+        }
+    )
+    if national:
+        caveats.append(
+            "national data (PIC N / USAGE NATIONAL) is written as single-byte "
+            "text in the record's charset, space-padded to the field's width, "
+            "not as the UTF-16 a real compiler stores (and a real file's "
+            "national bytes do not decode back as the same text): "
+            f"{', '.join(national)}"
         )
     fmt = (opts or EncodingOptions()).resolved_format(
         specs, varying=varying is not None

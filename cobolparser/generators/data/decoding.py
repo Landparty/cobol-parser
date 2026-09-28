@@ -577,6 +577,14 @@ def decode_field(
         value, error = _decode_packed(raw, spec)
     elif usage in BINARY_USAGES:
         value, error = _decode_binary(raw, spec, opts)
+    elif (
+        spec.blank_when_zero
+        and spec.category in (FieldCategory.NUMERIC, FieldCategory.NUMERIC_EDITED)
+        and raw
+        and raw == bytes([opts.space]) * len(raw)
+    ):
+        # BLANK WHEN ZERO: all spaces is how the item stores zero.
+        value = _field_number(0, False, spec)
     elif spec.category is FieldCategory.NUMERIC:
         value, error = _decode_zoned(raw, spec, opts)
     elif spec.category is FieldCategory.NUMERIC_EDITED:
@@ -655,7 +663,7 @@ def decode_record(
     short record is a fact about the file, and the fields that *were* there
     are still worth reading.
     """
-    counts: dict[tuple[str, tuple[int, ...]], int] = {}
+    counts: _Counts = {}
     out: list[DecodedField] = []
     # *data* is the whole record, so an overlay starts where the item it
     # redefines does rather than at byte 0 -- switching view re-reads the
@@ -675,18 +683,36 @@ def decode_record(
         out.append(decoded)
         position += len(raw)
         if spec.odo_counter_bounds is not None:
-            counts[(spec.name.upper(), spec.subscripts)] = _counter_value(
-                decoded.value, spec.odo_counter_bounds
+            _store_count(
+                counts, spec, _counter_value(decoded.value, spec.odo_counter_bounds)
             )
     return out
 
 
-def _present(spec: FieldSpec, counts: dict[tuple[str, tuple[int, ...]], int]) -> bool:
+#: Decoded ODO counter values, keyed ``(name, subscripts)`` -- and also
+#: ``(name, None)`` for the latest value read under that name, which is the
+#: fallback :func:`.layout.present_indexes` uses on the writing side.
+_Counts = dict[tuple[str, tuple[int, ...] | None], int]
+
+
+def _store_count(counts: _Counts, spec: FieldSpec, value: int) -> None:
+    name = spec.name.upper()
+    counts[(name, spec.subscripts)] = value
+    counts[(name, None)] = value
+
+
+def _present(spec: FieldSpec, counts: _Counts) -> bool:
     """Whether this occurrence is in a record whose counters read *counts*."""
     for index, control in enumerate(spec.odo_controls):
         if control.subscript_index >= len(spec.subscripts):
             continue
-        key = _counter_key(spec, index)
+        key: tuple[str, tuple[int, ...] | None] = _counter_key(spec, index)
+        if key not in counts:
+            # A counter declared outside an enclosing fixed table
+            # (``05 N. 05 T OCCURS 2. 10 U OCCURS 1 TO 3 DEPENDING ON N``)
+            # carries no subscripts of its own, so the exact key misses;
+            # fall back to the name, exactly as the encoder does.
+            key = (key[0], None)
         if key not in counts:
             # The counter is not part of this record (it may live in
             # WORKING-STORAGE, which COBOL permits) or has not been read
@@ -698,11 +724,38 @@ def _present(spec: FieldSpec, counts: dict[tuple[str, tuple[int, ...]], int]) ->
     return True
 
 
+def _separators_only_in_binary(
+    body: bytes, separator: bytes, fields: list[DecodedField]
+) -> bool:
+    """Whether every *separator* inside *body* lies wholly within the bytes
+    of a binary / packed / float / index / pointer field -- the only places
+    a record-separator byte can legitimately appear inside a record."""
+    binary_spans = [
+        (item.offset, item.offset + item.length)
+        for item in fields
+        if item.present
+        and (
+            item.usage in BINARY_USAGES
+            or item.usage in PACKED_USAGES
+            or item.usage in FLOAT_USAGES
+            or item.usage in POINTER_USAGES
+            or item.usage == "INDEX"
+        )
+    ]
+    at = body.find(separator)
+    while at >= 0:
+        stop = at + len(separator)
+        if not any(start <= at and stop <= end for start, end in binary_spans):
+            return False
+        at = body.find(separator, at + 1)
+    return True
+
+
 def _ran_short(view: RecordView, fields: list[DecodedField]) -> bool:
     """Whether *fields* (decoded through *view* with tables trimmed) ended
     before the record did: a field cut part-way, or one its counters say is
     present that came back absent because the bytes ran out."""
-    counts: dict[tuple[str, tuple[int, ...]], int] = {}
+    counts: _Counts = {}
     for placed, item in zip(view.fields, fields, strict=True):
         spec = placed.spec
         if item.truncated:
@@ -712,8 +765,8 @@ def _ran_short(view: RecordView, fields: list[DecodedField]) -> bool:
                 return True
             continue
         if spec.odo_counter_bounds is not None:
-            counts[(spec.name.upper(), spec.subscripts)] = _counter_value(
-                item.value, spec.odo_counter_bounds
+            _store_count(
+                counts, spec, _counter_value(item.value, spec.odo_counter_bounds)
             )
     return False
 
@@ -1007,15 +1060,39 @@ class RecordDecoder:
         # VARIABLE_BARE: nothing frames the records but the layout itself.
         # Decoding consumes exactly the bytes this record's own counters say
         # it holds, so the next record starts where this one stopped.
+        fields = decode_record(view, data[position:], opts, trim_tables=True)
+        consumed = max((item.offset + item.length for item in fields), default=0)
+        framed = consumed > 0 and not _ran_short(view, fields)
         if separator:
+            # The layout frames first: a separator byte (0x0A) can perfectly
+            # well sit *inside* a record -- in COMP / COMP-3 / float data --
+            # and splitting there cut the record short and misread the rest
+            # of the file.  The layout's own length is trusted when a
+            # separator (or the end of the data) follows it and every
+            # separator inside it falls in binary data, where it is just a
+            # byte value; one inside DISPLAY text means the file is
+            # separator-delimited lines that do not fill the layout, and the
+            # separator is all there is to go on.
+            end_at = position + consumed
+            if (
+                framed
+                and (
+                    end_at == len(data)
+                    or data[end_at : end_at + len(separator)] == separator
+                )
+                and _separators_only_in_binary(data[position:end_at], separator, fields)
+            ):
+                return (
+                    data[position:end_at],
+                    consumed + self._separator_width(data, end_at, separator),
+                    None,
+                )
             end = data.find(separator, position)
             if end < 0:
                 body = data[position:]
                 return body, len(body), None
             return data[position:end], (end - position) + len(separator), None
-        fields = decode_record(view, data[position:], opts, trim_tables=True)
-        consumed = max((item.offset + item.length for item in fields), default=0)
-        if consumed <= 0 or _ran_short(view, fields):
+        if not framed:
             # A tail too short for the record its own counters describe is
             # not a record -- the same verdict RECFM=F gives a short tail.
             return None

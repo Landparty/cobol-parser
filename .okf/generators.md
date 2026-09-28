@@ -455,6 +455,8 @@ Anything else — procedure text, `SELECT` clauses, an empty file — raises
 | `FILLER` | **Excluded** — names nothing a consumer can address |
 | Level 66 / 88 | Not storage; 88 VALUEs feed the parent's value domain |
 | `COMP-1`/`COMP-2` | No picture → `FieldCategory.FLOAT` |
+| Group `USAGE` / `SIGN` | Inherited by every subordinate elementary item with no clause of its own (IBM rule), resolved **in the parser** (`parsers/divisions/data.py` `propagate_group_usage_and_sign`, 2026-09-28) so `layout.py`, `layout_offsets.py` and `calculate_size` all see it. `CobolDataItem.usage_explicit` marks an entry's own USAGE; an explicit child wins for itself and below. A numeric-only group usage (COMP-3, BINARY, ...) is not pushed onto a non-numeric PICTURE; SIGN only lands on signed numeric items |
+| `BLANK WHEN ZERO` | Carried as `FieldSpec.blank_when_zero`; the encoder writes a zero value as all spaces (charset's space), the decoder reads an all-space field as 0 with no error |
 
 `include_redefines` / `include_filler` / `expand_occurs` / `max_occurs`
 override the first four. Occurrence expansion is additionally subject to a
@@ -629,6 +631,7 @@ module docstring — that suite is the regression guard):
 | `COMP-5` | two's complement, **host byte order** — that is what "native binary" means |
 | `COMP-1` / `COMP-2` | IEEE 754 binary32/binary64, byte order as `COMP-5` |
 | `INDEX` / `POINTER` | binary zeros — an occurrence number and an address are not record content |
+| `PIC N` / `USAGE NATIONAL` | **not modelled as UTF-16**: single-byte text in the record charset, space-padded to the (correct, 2-bytes-per-position) width; `encoding_caveats()` says so |
 
 **Overflow is not uniform across those rows, deliberately.** The zoned and
 packed encoders run their magnitude through `_digits_string`, which
@@ -836,7 +839,7 @@ module can say (`test_the_wrong_copybook_shows_up_as_a_wall_of_errors`).
 |---|---|
 | `FIXED` | `record_length` override, else `base.length` |
 | `VARIABLE` | the 4-byte RDW; an RDW longer than the file raises `RecordDecodingError` rather than being guessed at |
-| `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. A tail shorter than the record its own counters describe is `trailing`, not one more truncated row (`_ran_short`, 2026-09-27 — RECFM=F already did this). With a `record_separator` set, split on that instead |
+| `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. A tail shorter than the record its own counters describe is `trailing`, not one more truncated row (`_ran_short`, 2026-09-27 — RECFM=F already did this). With a `record_separator` set, the layout still frames first (2026-09-28: a `0x0A` inside COMP/COMP-3 data used to split the record); the layout's length is taken when a separator or end-of-data follows it and every separator inside it falls in binary/packed/float bytes, else it falls back to `find(separator)` (text lines shorter than the layout) |
 
 `EncodingOptions.record_separator` is consumed after each record when it is
 actually there. Fields past the end of a short record come back
@@ -1000,6 +1003,10 @@ the layout:
    **complex ODO** (a `DEPENDING ON` table nested inside an ordinary
    `OCCURS`, so each outer occurrence carries its own count) come out right
    rather than trimming every outer occurrence to the last one's count.
+   A counter declared *outside* the enclosing fixed table has no subscripts,
+   so the exact `(name, outer)` key misses and the counter is looked up by
+   name; `decoding._present` mirrors that fallback (2026-09-28 — it used to
+   read the table at full length and mis-align the record).
    Dropping an occurrence and concatenating
    what remains is exactly what a real variable-length record looks like:
    anything declared *after* the table shifts up into the space the absent
