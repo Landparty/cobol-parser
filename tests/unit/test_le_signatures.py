@@ -260,6 +260,34 @@ class TestDialectServiceInfoStaysInSync:
         assert IBMEnterpriseCobol().get_le_service_info("CEETERM") is not None
 
 
+class TestServiceOperandsMatchIbm:
+    """Checked against the z/OS LE Programming Reference (SA38-0683)."""
+
+    def test_cee3abd_clean_up_zero_means_no_clean_up(self) -> None:
+        # Was reversed: "0 abends after LE cleanup, 1 abends immediately".
+        sig = le_service_signature("CEE3ABD")
+        assert sig is not None
+        assert [p.name for p in sig.parameters] == ["abcode", "clean_up"]
+        text = sig.parameters[1].description
+        assert text.startswith("0 abends immediately, without clean-up")
+        assert "1 abends after normal enclave termination" in text
+
+    def test_ceeisec_takes_milliseconds(self) -> None:
+        sig = le_service_signature("CEEISEC")
+        assert sig is not None
+        assert [p.name for p in sig.parameters] == [
+            "input_year",
+            "input_month",
+            "input_day",
+            "input_hours",
+            "input_minutes",
+            "input_seconds",
+            "input_milliseconds",
+            "output_seconds",
+            "fc",
+        ]
+
+
 class TestEnterpriseSixIntrinsicSignatures:
     """The post-COBOL-85 intrinsics carry signatures with IBM's arity."""
 

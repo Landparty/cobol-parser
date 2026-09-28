@@ -1222,6 +1222,13 @@ arity (optional trailing operands marked). Pinned by
 `test_le_signatures.py::TestEnterpriseSixIntrinsicSignatures` and
 `test_language_env_analyzer.py::TestEnterpriseSixIntrinsics`.
 
+**Two service signatures were wrong (2026-09-28), both checked against
+SA38-0683:** `CEE3ABD`'s second operand (IBM: `clean-up`) had its values
+reversed -- 0 is the abend *without* clean-up, 1 after normal enclave
+termination -- and `CEEISEC` was missing `input_milliseconds` (9 operands,
+not 8), so a CALL written from `le-info`'s example passed `output_seconds`
+where LE reads milliseconds. `TestServiceOperandsMatchIbm`.
+
 `IBMEnterpriseCobol.IBM_LE_SERVICE_INFO` is **derived** from this catalogue
 (merged over `_UNCATALOGUED_LE_SERVICE_INFO`, the leftovers), so the dialect's
 one-line metadata and the signatures cannot drift. Categories are cross-checked

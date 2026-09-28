@@ -556,6 +556,9 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
             LEParameter("input_minutes", IN, "int32", "Minutes, 0 to 59."),
             LEParameter("input_seconds", IN, "int32", "Seconds, 0 to 59."),
             LEParameter(
+                "input_milliseconds", IN, "int32", "Milliseconds, 0 to 999."
+            ),
+            LEParameter(
                 "output_seconds",
                 OUT,
                 "float64",
@@ -846,12 +849,16 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
         "condition",
         "Terminate the enclave with an abend",
         (
-            LEParameter("abend_code", IN, "int32", "The abend code to issue."),
             LEParameter(
-                "timing",
+                "abcode", IN, "int32", "The abend code to issue, 0 to 4095."
+            ),
+            LEParameter(
+                "clean_up",
                 IN,
                 "int32",
-                "0 abends after LE cleanup, 1 abends immediately.",
+                "0 abends immediately, without clean-up; 1 abends after "
+                "normal enclave termination processing (2 to 5 also run "
+                "termination, choosing which dumps are taken).",
             ),
         ),
         notes=("CEE3ABD does not return, and takes no feedback code.",),
