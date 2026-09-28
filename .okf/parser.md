@@ -1240,6 +1240,19 @@ as `until_condition.operands`). Fixed by adding the same
 `TestPerformUntilConditionNoLongerSwallowsRest` in
 `tests/regression/test_tier7_unsupported_verb_boundary.py`.
 
+*Follow-up (2026-09-28):* neither loop stopped at a **scope terminator** of
+the *enclosing* statement. `IF c PERFORM p UNTIL d END-IF STOP RUN.` read
+`END-IF` into the condition (`"d END-IF"`), so the IF ran on to the period
+and swallowed the top-level `STOP RUN` into its THEN arm; `PERFORM UNTIL x
+... PERFORM p UNTIL y END-PERFORM` likewise stole the inline PERFORM's
+`END-PERFORM`. The flow analyzers then saw a paragraph that only
+*conditionally* stops and invented a fall-through out of it (hiding the
+dead paragraph after it). Both `_parse_until_condition_only` (out-of-line
+`UNTIL` / `WITH TEST ... UNTIL`) and `_collect_until_condition_tokens`
+(`VARYING ... UNTIL`) now stop -- without consuming -- at any
+`SCOPE_TERMINATORS` word: an out-of-line PERFORM owns none. Pinned by
+`tests/unit/test_perform_until_scope_terminator.py`.
+
 **Fourth finding — `EVALUATE` had two independent unguarded loops, one of
 which could annex an entire unrelated later statement.**
 `EvaluateStatementParser._parse_subjects` (the subject-list loop before the

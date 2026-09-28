@@ -168,6 +168,27 @@ def _sanitize_id(name: str) -> str:
     return safe or "N_UNKNOWN"
 
 
+# DOT's reserved words, matched case-independently by Graphviz. A bare
+# keyword can never be a node ID: ``NODE [label=...]`` is read as the
+# default-node attribute statement and ``MAIN -> STRICT;`` is a syntax error.
+_DOT_KEYWORDS: frozenset[str] = frozenset(
+    {"NODE", "EDGE", "GRAPH", "DIGRAPH", "SUBGRAPH", "STRICT"}
+)
+
+
+def _dot_id(safe_id: str) -> str:
+    """Emit a sanitized id as a DOT ID, quoting it when it is a keyword.
+
+    ``_sanitize_id`` already restricts ids to ``[A-Za-z0-9_]``, which is a
+    valid unquoted DOT ID *except* for the six reserved words -- and a COBOL
+    paragraph may well be called ``NODE``, ``EDGE``, ``GRAPH`` or ``STRICT``.
+    A quoted ``"NODE"`` is an ordinary ID naming the same node.
+    """
+    if safe_id.upper() in _DOT_KEYWORDS:
+        return f'"{safe_id}"'
+    return safe_id
+
+
 def _unique_exit_id(nid: str, paragraph_ids: set[str]) -> str:
     """Return a terminal-node id derived from *nid* that cannot collide with
     a real paragraph's sanitized id.
@@ -191,6 +212,44 @@ def _unique_exit_id(nid: str, paragraph_ids: set[str]) -> str:
     while f"{nid}_FLOWEXIT_{suffix}" in paragraph_ids:
         suffix += 1
     return f"{nid}_FLOWEXIT_{suffix}"
+
+
+def _hidden_ids(
+    report: ProgramFlowReport, options: FlowchartOptions, unreachable_set: set[str]
+) -> set[str]:
+    """Sanitized ids of every node ``show_unreachable=False`` leaves out.
+
+    An unreachable paragraph, plus the IF/EVALUATE decision and arm boxes
+    that live inside it. Skipping only the paragraph's own node line was not
+    enough: its outgoing edges (PERFORM / GO TO / CALL / its branch edges)
+    were still emitted, and both Mermaid and Graphviz silently re-create an
+    undeclared edge endpoint -- the hidden paragraph came back as a bare,
+    unstyled box.
+    """
+    if options.show_unreachable:
+        return set()
+    hidden = {_sanitize_id(name) for name in unreachable_set}
+    for bn in report.branch_nodes:
+        if bn.parent_proc in unreachable_set:
+            hidden.add(_sanitize_id(bn.node_id))
+            hidden.update(_sanitize_id(arm.arm_id) for arm in bn.arms)
+    return hidden
+
+
+def _external_targets(report: ProgramFlowReport, hidden: set[str]) -> list[str]:
+    """Distinct called-program names, in first-call order, whose call sits in
+    a paragraph that is drawn (a CALL made only from a hidden paragraph
+    would otherwise leave an orphaned external box behind)."""
+    targets: list[str] = []
+    for ext in report.external_calls:
+        target = _external_call_target(ext)
+        if not target or target in targets:
+            continue
+        caller = ext.get("called_from")
+        if caller and _sanitize_id(caller) in hidden:
+            continue
+        targets.append(target)
+    return targets
 
 
 def _recursion_pairs(report: ProgramFlowReport) -> set[tuple[str, str]]:
@@ -284,6 +343,7 @@ class MermaidFlowchartGenerator:
             return "\n".join(lines)
 
         unreachable_set = set(report.unreachable_nodes)
+        hidden_ids = _hidden_ids(report, options, unreachable_set)
 
         # ---- nodes (paragraphs / sections) ------------------------------------
         for node in report.nodes:
@@ -327,12 +387,7 @@ class MermaidFlowchartGenerator:
 
         # ---- external call nodes ----------------------------------------------
         if options.show_external_calls:
-            seen_ext: set[str] = set()
-            for ext in report.external_calls:
-                target = _external_call_target(ext)
-                if not target or target in seen_ext:
-                    continue
-                seen_ext.add(target)
+            for target in _external_targets(report, hidden_ids):
                 eid = "EXT_" + _sanitize_id(target)
                 lines.append(f'    {eid}(["{target}"])')
                 lines.append(f"    class {eid} external")
@@ -341,6 +396,8 @@ class MermaidFlowchartGenerator:
         skipped_arm_ids: set[str] = set()
         for bn in report.branch_nodes:
             bn_id = _sanitize_id(bn.node_id)
+            if bn_id in hidden_ids:
+                continue
             cond = _escape_mermaid_label(bn.condition_text)
             lines.append(f'    {bn_id}{{"[{bn.branch_type}] {cond}"}}')
             lines.append(f"    class {bn_id} branch")
@@ -380,6 +437,8 @@ class MermaidFlowchartGenerator:
                 continue
 
             src_id = _sanitize_id(edge.source)
+            if src_id in hidden_ids:
+                continue
             # target: external call or internal procedure
             if etype in ("CALL", "CALL_DYNAMIC"):
                 tgt_id = "EXT_" + _sanitize_id(edge.target)
@@ -544,6 +603,7 @@ class DotFlowchartGenerator:
             return "\n".join(lines)
 
         unreachable_set = set(report.unreachable_nodes)
+        hidden_ids = _hidden_ids(report, options, unreachable_set)
 
         # ---- nodes -----------------------------------------------------------
         for node in report.nodes:
@@ -556,7 +616,7 @@ class DotFlowchartGenerator:
             shape = "box" if node.procedure_type == "PARAGRAPH" else "ellipse"
             label = self._node_label_dot(node, options)
             lines.append(
-                f"    {nid} [label={label}, shape={shape},"
+                f"    {_dot_id(nid)} [label={label}, shape={shape},"
                 f' fillcolor="{fill}", fontcolor="{fontcolor}"];'
             )
 
@@ -578,16 +638,11 @@ class DotFlowchartGenerator:
                 f"    {exit_id} [label={label}, shape=doublecircle,"
                 f' fillcolor="#1b1b1b", fontcolor="#c1121f"];'
             )
-            lines.append(f"    {nid} -> {exit_id};")
+            lines.append(f"    {_dot_id(nid)} -> {exit_id};")
 
         # ---- external call nodes ---------------------------------------------
         if options.show_external_calls:
-            seen_ext: set[str] = set()
-            for ext in report.external_calls:
-                target = _external_call_target(ext)
-                if not target or target in seen_ext:
-                    continue
-                seen_ext.add(target)
+            for target in _external_targets(report, hidden_ids):
                 eid = "EXT_" + _sanitize_id(target)
                 fill = _DOT_COLORS["external"]
                 fontcolor = _DOT_FONT_COLOR["external"]
@@ -600,6 +655,8 @@ class DotFlowchartGenerator:
         skipped_arm_ids: set[str] = set()
         for bn in report.branch_nodes:
             bn_id = _sanitize_id(bn.node_id)
+            if bn_id in hidden_ids:
+                continue
             cond_label = self._dot_str(f"[{bn.branch_type}] {bn.condition_text}")
             fill = _DOT_COLORS["branch"]
             fontcolor = _DOT_FONT_COLOR["branch"]
@@ -642,6 +699,8 @@ class DotFlowchartGenerator:
                 continue
 
             src_id = _sanitize_id(edge.source)
+            if src_id in hidden_ids:
+                continue
             if etype in ("CALL", "CALL_DYNAMIC"):
                 tgt_id = "EXT_" + _sanitize_id(edge.target)
                 if not options.show_external_calls:
@@ -677,7 +736,7 @@ class DotFlowchartGenerator:
                 )
             else:
                 attr_str = ""
-            lines.append(f"    {src_id} -> {tgt_id}{attr_str};")
+            lines.append(f"    {_dot_id(src_id)} -> {_dot_id(tgt_id)}{attr_str};")
 
         lines.append("}")
         return "\n".join(lines)

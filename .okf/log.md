@@ -52,6 +52,16 @@ Cython and the expander). [parser.md](parser.md): `*>` floating comments
 are dropped from the parser's `TokenStream`, so a comment between a data
 clause keyword and its operand no longer drops the operand or fabricates a
 level-number item.
+## 2026-09-28 -- control-flow bug hunt: nested-unit references, PERFORM UNTIL scope terminators, DOT keyword ids, hidden unreachable nodes
+
+[analysis.md](analysis.md): `DeadCodeAnalyzer` and the flow scanner's ENTRY
+collection no longer credit a contained program's PERFORM/ENTRY to the
+container's same-named paragraph. [parser.md](parser.md): an out-of-line
+`PERFORM p UNTIL c` nested in IF/EVALUATE/inline PERFORM stops at the
+enclosing `END-xxx` instead of swallowing it (which re-nested a top-level
+`STOP RUN` into the IF arm). [generators.md](generators.md): DOT quotes
+paragraph ids that are DOT keywords; `show_unreachable=False` also drops the
+hidden paragraph's edges, branch boxes and CALL-only external nodes.
 
 ## 2026-09-28 -- bug hunt round 7: batch .prof collisions, DOT escaping, >>DEFINE arithmetic, nested ALTER in health
 
