@@ -8,6 +8,12 @@ timestamp: 2026-09-17T00:00:00Z
 
 # Overview
 
+2026-09-28: `tests/unit/test_exec_sql_literals_comments.py` (6 tests) pins
+EXEC SQL string literals keeping their quotes (no host variable or table read
+out of a literal; `''` doubling; `X'..'` prefix) and `--` comments being
+dropped (but not `A - -1`); `test_sql_cics_lint.py` gains a quoted CONNECT
+credential that spells a declared name.
+
 2026-09-27: `tests/unit/test_exec_sql_merge_cte.py` (6 tests) pins EXEC SQL
 `MERGE` (type `MERGE`, target first, then the `USING` table or the tables a
 `USING (SELECT ...)` subquery reads, none for `USING (VALUES ...)`) and `WITH`

@@ -1800,6 +1800,9 @@ as two adjacent tokens), corrupting WHERE-clause text fidelity.
 The same column-adjacency rule (`_follows_qualifier_period`, 2026-09-23) keeps
 a qualified name together: `BANK.ACCOUNT` used to come back as
 `BANK. ACCOUNT`, while a period written with a space (`T. X`) keeps it.
+2026-09-28: `collect_exec_sql_text(stream, sql=True)` (the EXEC SQL callers
+only) re-quotes string literals and drops `--` line comments -- see
+[dialects.md](dialects.md) "EXEC SQL text: literals and `--` comments".
 
 **`INSPECT` `TALLYING`/`REPLACING` `BEFORE`/`AFTER INITIAL` qualifiers**
 (`initialize_inspect_parsers.py`): the original 2026-07-07 implementation

@@ -2451,9 +2451,11 @@ or for a dynamic-SQL finding the untrusted host variable) and a machine-readable
 
 **It does not guess.** Three things in the parsed form of an EXEC block are
 lossy, and each is answered with an entry in `unchecked` rather than a finding —
-notably that the lexer drops quotes around literals, so inside SQL text
-`USING 'S3CRET'` and `USING WS-PASSWORD` reduce to the same tokens (an operand
-matching a declared DATA DIVISION item is treated accordingly). A quiet report
+e.g. a CONNECT operand with neither colon nor quotes that matches a declared
+DATA DIVISION item. (Since 2026-09-28 EXEC SQL text keeps a literal's quotes,
+so `USING 'S3CRET'` is always a literal and `USING 'WS-KEY'` is no longer
+mistaken for the data item WS-KEY; before that the two reduced to the same
+tokens.) A quiet report
 with a populated `unchecked` is not a clean program, it is an unexamined one.
 
 `DECLARE GLOBAL TEMPORARY TABLE` is executable and is graded;

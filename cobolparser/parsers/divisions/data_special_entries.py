@@ -210,7 +210,7 @@ class SpecialEntryParser:
         if not token_stream.is_empty():
             token_stream.consume()
 
-        sql_text = collect_exec_sql_text(token_stream)
+        sql_text = collect_exec_sql_text(token_stream, sql=True)
         if not sql_text.strip():
             return None
         return parse_exec_sql(sql_text, start_location)

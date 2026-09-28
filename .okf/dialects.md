@@ -41,6 +41,19 @@ strings, never in parsed source. Indicators also appear in `host_variables`
 (the plain `:name` scan). Pinned by
 `test_sql_statements.py::TestHostVariables::test_null_indicator_keyword_as_parsed_from_source`.
 
+## EXEC SQL text: literals and `--` comments (`parsers/statements/_utils.py`)
+
+`collect_exec_sql_text(stream, sql=True)` (EXEC SQL, procedure and data
+division) re-delimits every string literal the lexer handed over unquoted
+(`'...'`, embedded `'` doubled; a typed literal such as `X'C1'` keeps its
+`raw_value`) and drops a `--` comment -- two MINUS tokens in adjacent columns
+-- up to its NEWLINE (never past END-EXEC). Before 2026-09-28 neither reached
+the SQL model's scrubber, so `WHERE B = 'X:FAKE'` reported host variable
+`FAKE`, `'FROM T9'` reported table `T9`, and a comment's `:WS-C` was a host
+variable. EXEC CICS / DLI text is still collected unquoted (option values are
+read bare by the codebase graph and signature extractor). Pinned by
+`tests/unit/test_exec_sql_literals_comments.py`.
+
 ## `ExecSQLStatement.tables` (`models/sql_statements.py`)
 
 Source order, with the statement's **target first** for INSERT / UPDATE /

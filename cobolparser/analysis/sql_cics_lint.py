@@ -50,10 +50,12 @@ What it deliberately does *not* do is guess.  Three things in the parsed
 form of an EXEC block are lossy, and each one is answered with an entry in
 :attr:`SqlCicsReport.unchecked` rather than with a finding:
 
-* The lexer drops the quotes around a literal, so inside SQL text
-  ``USING 'S3CRET'`` and ``USING WS-PASSWORD`` reduce to the same tokens.
-  An operand that matches a declared DATA DIVISION item is therefore
-  reported as unchecked, not as a hardcoded password.
+* A credential operand with neither a colon nor quotes (``USING
+  WS-PASSWORD``) is a data item written without its host-variable colon,
+  or a mistake; one that matches a declared DATA DIVISION item is reported
+  as unchecked, not as a hardcoded password. (EXEC SQL text keeps a
+  literal's quotes -- ``USING 'S3CRET'`` -- since 2026-09-28; before that
+  the two forms reduced to the same tokens.)
 * ``STRING`` operands lose their quotes the same way, so a ``STRING`` whose
   operands name nothing declared cannot be told from a ``STRING`` of pure
   literals.
@@ -716,9 +718,9 @@ def _check_connect(
         if operand.startswith(":"):
             continue  # a host variable: exactly what should be there
         if _normalize_name(operand) in declared_names:
-            # The lexer drops the quotes around a literal, so a bare word here
-            # is either a literal or a data item referenced without its colon.
-            # A name the DATA DIVISION declares is not something to call a
+            # A quoted literal keeps its quotes in EXEC SQL text, so a bare
+            # word here is a data item referenced without its colon. A name
+            # the DATA DIVISION declares is not something to call a
             # hardcoded password.
             report.unchecked.append(
                 f"line {line}: EXEC SQL CONNECT ... {keyword} {operand} names a "

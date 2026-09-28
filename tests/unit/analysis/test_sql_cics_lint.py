@@ -623,9 +623,8 @@ def test_connect_reset_carries_no_credential():
 
 
 def test_a_credential_operand_naming_a_declared_item_is_unchecked():
-    """Quotes are gone by the time the block is text, so ``USING WS-KEY``
-    and ``USING 'WS-KEY'`` look identical. A declared name is not called a
-    hardcoded password on that evidence."""
+    """``USING WS-KEY`` -- no colon, no quotes -- names a declared item
+    written without its colon. It is not called a hardcoded password."""
     report = _analyze("""       MAIN-PARA.
            EXEC SQL
                CONNECT TO DBPROD USER :WS-NAME USING WS-KEY
@@ -637,6 +636,21 @@ def test_a_credential_operand_naming_a_declared_item_is_unchecked():
     assert len(report.unchecked) == 1
     assert "WS-KEY" in report.unchecked[0]
     assert "could not be determined" in report.unchecked[0]
+
+
+def test_a_quoted_credential_spelling_a_declared_name_is_still_a_literal():
+    """EXEC SQL text keeps a literal's quotes: ``USING 'WS-KEY'`` is the
+    password WS-KEY, not the data item. Before the quotes were kept the two
+    spellings collapsed and this was filed as unchecked."""
+    report = _analyze("""       MAIN-PARA.
+           EXEC SQL
+               CONNECT TO DBPROD USER :WS-NAME USING 'WS-KEY'
+           END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+""")
+    assert len(_of_kind(report, KIND_HARDCODED_CREDENTIALS)) == 1
+    assert report.unchecked == []
 
 
 def test_the_word_user_outside_a_connect_is_not_a_credential():
