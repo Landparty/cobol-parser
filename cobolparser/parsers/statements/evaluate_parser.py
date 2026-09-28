@@ -6,6 +6,7 @@ from cobolparser.parsers.statements._utils import (
     LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     get_parse_context,
+    keyword_upper,
     matches_keyword,
     report_parse_error,
     skip_statement_separators,
@@ -260,7 +261,9 @@ class EvaluateStatementParser(IStatementParser):
             if not token:
                 break
 
-            token_val_upper = token.value.upper() if token.value else ""
+            # WHEN / END-EVALUATE / ALSO only as words: ``WHEN "WHEN"`` is a
+            # selector value (the lexer strips the literal's quotes).
+            token_val_upper = keyword_upper(token)
 
             # Stop at WHEN, END-EVALUATE, or statement keywords (a literal
             # spelled like a verb -- ``WHEN "IF"`` -- is a selector value)

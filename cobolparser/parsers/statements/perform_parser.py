@@ -16,6 +16,7 @@ from cobolparser.parsers.statements._utils import (
     consume_value_operand,
     get_parse_context,
     is_statement_boundary,
+    keyword_upper,
     matches_keyword,
     peek_past_noise,
     report_parse_error,
@@ -714,7 +715,9 @@ class PerformStatementParser(IStatementParser):
                 break
             # Any other scope terminator (END-IF, END-EVALUATE, ...) closes
             # the statement this PERFORM is nested in, never the condition.
-            if token.value and token.value.upper() in SCOPE_TERMINATORS:
+            # keyword_upper: UNTIL X = "END-IF" compares against a literal.
+            word = keyword_upper(token)
+            if word in SCOPE_TERMINATORS:
                 break
             # AFTER starts the next dimension of a PERFORM VARYING ... AFTER
             # loop — stop without consuming so the whole AFTER phrase isn't
@@ -723,10 +726,7 @@ class PerformStatementParser(IStatementParser):
             # no AFTER clause of its own, so gating this on for_varying
             # avoids truncating a condition that happens to reference an
             # AFTER-named identifier or reserved word elsewhere.
-            if for_varying and (
-                token.type == TokenType.AFTER
-                or (token.value and token.value.upper() == "AFTER")
-            ):
+            if for_varying and word == "AFTER":
                 break
             if token.type in STATEMENT_TOKEN_TYPES:
                 break
@@ -808,8 +808,9 @@ class PerformStatementParser(IStatementParser):
                 # that IF arm / WHEN / inline PERFORM body -- a top-level
                 # STOP RUN after ``IF c PERFORM p UNTIL d END-IF`` read as
                 # conditional, so the flow graph invented a fall-through out
-                # of a paragraph that always stops.
-                if token.value and token.value.upper() in SCOPE_TERMINATORS:
+                # of a paragraph that always stops. keyword_upper: a literal
+                # spelled like one (UNTIL X = "END-IF") is condition content.
+                if keyword_upper(token) in SCOPE_TERMINATORS:
                     break
                 if (
                     token.type == TokenType.IDENTIFIER

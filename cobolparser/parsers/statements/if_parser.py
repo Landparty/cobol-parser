@@ -13,6 +13,7 @@ from cobolparser.parsers.statements._utils import (
     LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     get_parse_context,
+    keyword_upper,
     matches_keyword,
     report_parse_error,
     skip_statement_separators,
@@ -79,9 +80,12 @@ class IfStatementParser(IStatementParser):
                 continue
 
             token_upper = token.value.upper()
+            # THEN / ELSE / END-IF only as words: IF X = "ELSE" compares
+            # against a literal (the lexer strips its quotes).
+            word = keyword_upper(token)
 
             # Stop at explicit THEN
-            if token_upper == "THEN":
+            if word == "THEN":
                 break
 
             # Stop at statement keywords (implicit THEN) -- but a literal
@@ -92,7 +96,7 @@ class IfStatementParser(IStatementParser):
                 break
 
             # Stop at ELSE or END-IF
-            if token_upper in ("ELSE", "END-IF"):
+            if word in ("ELSE", "END-IF"):
                 break
 
             # Stop at period

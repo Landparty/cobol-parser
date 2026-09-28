@@ -1042,6 +1042,16 @@ Pinned by `tests/unit/test_extended_verb_parsers.py` and
   keyword checks. `is_statement_boundary`, `_looks_like_statement_boundary`,
   `parse_arithmetic_operands` and the IF / EVALUATE / SEARCH / RETURN / USE
   condition-and-operand loops now exempt `LITERAL_TOKEN_TYPES`.
+  That covered the *verbs* only; the clause words those loops also stop
+  on were still compared by value until 2026-09-28: `IF X = "ELSE"`
+  moved the THEN body into ELSE, `IF X = "END-IF"` / `UNTIL X =
+  "END-IF"` / `VARYING ... UNTIL X = "AFTER"` truncated the condition to
+  `X =`, and `SEARCH ... WHEN K = "WHEN"` / `EVALUATE ... WHEN "WHEN"`
+  / `"ALSO"` split one WHEN in two. Those loops now read the token through
+  `_utils.keyword_upper()` (`""` for a literal) -- IF THEN/ELSE/END-IF,
+  SEARCH WHEN/END-SEARCH/AT, PERFORM UNTIL scope terminators and AFTER,
+  EVALUATE WHEN/END-EVALUATE/ALSO.
+  `tests/regression/test_keyword_spelled_literal_conditions.py`.
 * A CALL handler body swallowed the enclosing IF's `ELSE` / `END-IF` or
   PERFORM's `END-PERFORM` (`call_parser._parse_nested_stmts` now stops at
   `CONTROL_FLOW_BOUNDARIES` / `SCOPE_TERMINATORS`).

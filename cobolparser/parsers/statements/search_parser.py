@@ -11,6 +11,7 @@ from ._utils import (
     SEPARATOR_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     bare_end_starts_at_end_clause,
+    keyword_upper,
     matches_keyword,
     skip_statement_separators,
     skip_whitespace,
@@ -116,7 +117,9 @@ class SearchStatementParser(IStatementParser):
                     t = token_stream.peek()
                     if not t:
                         break
-                    tv = _val(t)
+                    # Clause words only as words: WHEN K = "WHEN" compares
+                    # against a literal (the lexer strips its quotes).
+                    tv = keyword_upper(t)
                     if t.type == TokenType.PERIOD or tv in (
                         "WHEN",
                         "END-SEARCH",
