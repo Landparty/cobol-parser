@@ -109,6 +109,11 @@ Three properties it owes its caller, all pinned by `tests/unit/test_scan.py`:
   Before 2026-09-27 a paragraph after a `COPY` reported the expanded line,
   and one inside a member claimed a line of the program file.
 
+`ScanOptions` carries both layout knobs `parse_cobol` takes: `free_form`
+(the lexer hint) and `preprocess_fixed` (`None` auto-detects, `True`/`False`
+force or disable normalization). The second was missing before 2026-09-28,
+so `scan --source-format fixed|free` silently auto-detected.
+
 A file whose copybook expansion fails is NOT dropped -- it falls back to the
 unexpanded parse, the same degradation `parse_files_with_copybooks` makes
 above. Copybook paths matter more here than they look: an unexpanded

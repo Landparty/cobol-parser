@@ -92,6 +92,12 @@ class ScanOptions:
     encoding: str = "utf-8"
     errors: str = "replace"
     free_form: bool = False
+    #: ``parse_cobol``'s layout override: ``None`` auto-detects, ``True``
+    #: forces fixed-format normalization, ``False`` disables it. The CLI's
+    #: ``--source-format fixed|free`` (and ``source_format:`` in cobol.yml)
+    #: land here; ``free_form`` alone is only the lexer-mode hint that
+    #: auto-detection may still override.
+    preprocess_fixed: bool | None = None
 
 
 @dataclass
@@ -316,6 +322,8 @@ def _parse(source: str, path: str, options: ScanOptions) -> Any:
     }
     if options.free_form:
         kwargs["free_form"] = True
+    if options.preprocess_fixed is not None:
+        kwargs["preprocess_fixed"] = options.preprocess_fixed
 
     if options.copybook_paths:
         from cobolparser.preprocess.copybook_expander import parse_cobol_with_expansion

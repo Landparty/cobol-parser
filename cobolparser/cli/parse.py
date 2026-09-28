@@ -2484,6 +2484,7 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         _fail("--workers must be >= 1")
 
     analyzers = parse_analyzer_list(args.analyzer)
+    source_format = _source_format_kwargs(args)
     options = ScanOptions(
         analyzers=analyzers,
         dialect=_DIALECT_MAP[args.dialect],
@@ -2491,7 +2492,11 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         copybook_paths=tuple(getattr(args, "copybook_path", []) or []),
         min_clone_statements=max(1, args.min_clone_statements),
         encoding=args.encoding,
-        free_form=bool(_source_format_kwargs(args).get("free_form", False)),
+        # Both halves of the layout flags: free_form alone dropped
+        # --source-format fixed|free (and cobol.yml's source_format) on the
+        # floor, so a tagged fixed-format member scanned as free-form.
+        free_form=bool(source_format["free_form"]),
+        preprocess_fixed=source_format["preprocess_fixed"],
     )
 
     try:

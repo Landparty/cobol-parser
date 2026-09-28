@@ -912,6 +912,14 @@ other reports intact. Every program unit of a multi-`PROGRAM-ID` file is
 reported, each with its nesting `depth` -- the same argument `lint` makes
 for linting every unit.
 
+`--source-format auto|fixed|free` (and `--free-form`, and cobol.yml's
+`project.source_format`) reach the parse through `ScanOptions.free_form` +
+`ScanOptions.preprocess_fixed`, the same pair `_source_format_kwargs()`
+hands every single-file subcommand. Before 2026-09-28 only `free_form` was
+forwarded, so `--source-format fixed` still auto-detected and a member with
+a spaced tag in columns 1-6 scanned as an `UNKNOWN` program with no
+paragraphs.
+
 ## Cross-reference, signatures, codebase graph, SQL/CICS lint, diff, JCL
 
 Seven subcommands landed together in PR #212 (`_cmd_xref`,
