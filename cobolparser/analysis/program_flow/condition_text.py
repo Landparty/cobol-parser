@@ -22,7 +22,7 @@ from ...models.statements.base import (
 )
 
 # ConditionalExpression.operator values that are genuine binary comparisons
-# (see parsers/statements/_conditions.py's COMPARISON_OPS / _NEGATED_OPS) --
+# (see parsers/statements/_conditions.py's COMPARISON_OPS / _NEGATED_RELATIONAL) --
 # mapped back to the symbol a human would have typed.
 _COMPARISON_SYMBOLS: dict[str, str] = {
     "EQUAL": "=",

@@ -74,3 +74,34 @@ class TestDisplaySubscriptedOperand:
         assert not result.warnings
         stmts = result.ast.find_statements("DISPLAY")
         assert stmts[0].display_items == ["WS-TABLE(WS-IDX WS-IDX)"]
+
+
+class TestDisplayIntrinsicFunction:
+    """``FUNCTION name(args)`` is one DISPLAY item, rendered the way MOVE /
+    CALL render it. It used to split into a bare ``"FUNCTION"`` item and the
+    call that follows it."""
+
+    def test_function_with_arguments_is_one_item(self):
+        result = parse_cobol(
+            _prog("           DISPLAY FUNCTION TRIM(WS-IDX) ' ' WS-IDX.")
+        )
+        assert not result.warnings
+        stmts = result.ast.find_statements("DISPLAY")
+        assert stmts[0].display_items == ["FUNCTION TRIM(WS-IDX)", '" "', "WS-IDX"]
+
+    def test_function_without_arguments_is_one_item(self):
+        result = parse_cobol(_prog("           DISPLAY 'D=' FUNCTION CURRENT-DATE."))
+        assert not result.warnings
+        stmts = result.ast.find_statements("DISPLAY")
+        assert stmts[0].display_items == ['"D="', "FUNCTION CURRENT-DATE"]
+
+    def test_function_text_matches_move_source(self):
+        result = parse_cobol(
+            _prog(
+                "           DISPLAY FUNCTION UPPER-CASE(WS-IDX).\n"
+                "           MOVE FUNCTION UPPER-CASE(WS-IDX) TO WS-IDX."
+            )
+        )
+        display = result.ast.find_statements("DISPLAY")[0]
+        move = result.ast.find_statements("MOVE")[0]
+        assert display.display_items == [move.source]

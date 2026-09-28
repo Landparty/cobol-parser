@@ -226,6 +226,22 @@ class TestStringStatementParser:
         assert stmt is not None
         assert "SIZE" in stmt.delimiters
 
+    def test_string_delimited_without_by(self):
+        """``BY`` is optional: ``DELIMITED SIZE`` / ``DELIMITED ","`` used to
+        lose the delimiter, which was then misread as a sending operand."""
+        src = _make_source(
+            "           STRING WS-SOURCE DELIMITED SIZE\n"
+            "                  WS-SOURCE2 DELIMITED ','\n"
+            "               INTO WS-TARGET.\n"
+        )
+        result = _parse(src)
+        assert not result.warnings
+        stmt = _find_stmt(result, StringStatement)
+        assert stmt is not None
+        assert stmt.delimiters == ["SIZE", ","]
+        assert stmt.operands == ["WS-SOURCE", "WS-SOURCE2"]
+        assert stmt.into_target == "WS-TARGET"
+
 
 # =====================================================================
 # UNSTRING statement tests

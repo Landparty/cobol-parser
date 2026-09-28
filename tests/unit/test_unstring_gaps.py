@@ -296,3 +296,22 @@ class TestUnstringDelimitedByAll:
         )
         assert node.delimiter_all == [False, False]
         assert "delimiter_all" not in node.to_dict()
+
+
+class TestUnstringDelimitedWithoutBy:
+    """``BY`` is optional after ``DELIMITED``; without it every delimiter
+    used to be dropped."""
+
+    def test_delimiters_kept_without_by(self):
+        result = parse_cobol(
+            _prog(
+                "           UNSTRING WS-SRC DELIMITED ',' OR ALL SPACE\n"
+                "               INTO WS-TGT-B WS-TGT-C.\n"
+            )
+        )
+        assert not result.errors
+        assert not result.warnings
+        (node,) = result.ast.find_all_by_type("UnstringStatement")
+        assert node.delimiters == [",", "SPACE"]
+        assert node.delimiter_all == [False, True]
+        assert [t["target"] for t in node.into_targets] == ["WS-TGT-B", "WS-TGT-C"]

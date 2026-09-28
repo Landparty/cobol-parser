@@ -142,6 +142,47 @@ class TestSearchStatement:
         )
         assert len(stmts) >= 1
 
+    def test_search_in_if_leaves_else_and_following_statements(self):
+        """SEARCH without END-SEARCH inside an IF must stop at ELSE: the
+        clause loop used to consume every token up to the period, silently
+        dropping the ELSE branch and the statement after END-IF."""
+        stmts, result = parse_procedure(
+            "       MAIN-PARA.\n"
+            "           IF WS-X = 1\n"
+            "               SEARCH WS-TABLE\n"
+            "                   WHEN WS-ITEM(WS-IDX) = 1\n"
+            '                       DISPLAY "F"\n'
+            "           ELSE\n"
+            '               DISPLAY "E"\n'
+            "           END-IF\n"
+            '           DISPLAY "AFTER".'
+        )
+        assert not result.warnings
+        assert [s.statement_type for s in stmts] == ["IF", "DISPLAY"]
+        if_stmt = stmts[0]
+        assert [s.statement_type for s in if_stmt.then_statements] == ["SEARCH"]
+        search = if_stmt.then_statements[0]
+        assert len(search.when_clauses) == 1
+        assert [s.display_items for s in if_stmt.else_statements] == [['"E"']]
+        assert stmts[1].display_items == ['"AFTER"']
+
+    def test_search_not_at_end_is_not_silently_swallowed(self):
+        """SEARCH has no NOT AT END phrase: it used to be eaten token by
+        token (and its AT END then overwrote the real one). It now ends the
+        SEARCH and surfaces as an unparsed-token warning."""
+        stmts, result = parse_procedure(
+            "       MAIN-PARA.\n"
+            "           SEARCH WS-TABLE\n"
+            '               AT END DISPLAY "N"\n'
+            '               WHEN WS-ITEM(WS-IDX) = 1 DISPLAY "F"\n'
+            '               NOT AT END DISPLAY "Z"\n'
+            "           END-SEARCH."
+        )
+        search = stmts[0]
+        assert search.statement_type == "SEARCH"
+        assert [s.display_items for s in search.at_end_clause] == [['"N"']]
+        assert any("NOT" in w for w in result.warnings)
+
 
 class TestSetStatement:
     """SET statement variants (lines 33-126)."""
