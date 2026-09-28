@@ -643,7 +643,7 @@ module docstring — that suite is the regression guard):
 
 | Storage | Bytes |
 |---------|-------|
-| DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte |
+| DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte. Under `JUSTIFIED RIGHT` (`FieldSpec.justified`, 2026-09-28) the mirror image: right-aligned behind leading spaces, an oversized value losing its *leftmost* characters; the decoder strips that leading pad (it used to write `AB    ` where the MOVE leaves `    AB`) |
 | DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is. Under `DECIMAL-POINT IS COMMA` (`FieldSpec.decimal_point_is_comma`, read off the `PictureClause`) both functions take `decimal_point_is_comma=True` and exchange `,`/`.` in the picture and the edited text: `Z.ZZ9,99` writes `1.234,56` (2026-09-28) |
 | DISPLAY numeric (zoned) | one byte per digit; sign as an overpunch, or a real `+`/`-` byte under `SIGN IS SEPARATE` |
 | `COMP-3` / `PACKED-DECIMAL` | two BCD nibbles per byte, sign nibble `C`/`D` signed, `F` unsigned |
@@ -656,7 +656,14 @@ module docstring — that suite is the regression guard):
 **Overflow is not uniform across those rows, deliberately.** The zoned and
 packed encoders run their magnitude through `_digits_string`, which
 high-order-truncates to the PICTURE's digit count the way a COBOL numeric
-MOVE does, so neither can overflow. The binary encoder has no such step: a
+MOVE does, so neither can overflow. Excess *decimal* places are truncated
+too, never rounded (`_scaled_integer` and `edit_numeric` both use
+`ROUND_DOWN`, 2026-09-28): `9.999` into `9V99` stores `999`. It used to round
+half-even to `1000`, which the high-order truncation then turned into `000`.
+The encoder, `edit_numeric` and the decoder's `_render_number` all scale
+through an **exact** `decimal.Context` rather than the default one, whose 28
+significant digits silently rounded a 31-digit `ARITH(EXTEND)` field
+(`S9(29)V99 COMP-3` holding `...456789.01` decoded as `...456790.00`). The binary encoder has no such step: a
 value that does not fit the field's *byte width* has no representation at
 all, so it raises `RecordEncodingError` rather than silently reshaping the
 bytes. Nothing this package generates can reach it — `ValueFactory` respects
@@ -796,7 +803,7 @@ dispatched on the same `USAGE`-then-category ladder:
 |---|---|
 | DISPLAY text | the charset's characters (ASCII decoded as **latin-1**, so a byte the encoder could not have written is still shown), trailing spaces/NULs stripped |
 | zoned DISPLAY | one digit per byte, sign overpunched or `SIGN IS SEPARATE` |
-| `COMP-3` | two BCD nibbles per byte, sign in the final low nibble |
+| `COMP-3` | two BCD nibbles per byte, sign in the final low nibble. With an even digit count the first byte's high nibble is pad, not a digit: a non-zero pad is an `error` and is left out of the value (2026-09-28: it was read as a digit, so `S9(2)V99` x'12345C' decoded as `123.45`, more digits than the PICTURE holds) |
 | `COMP`/`COMP-4`/`COMP-5` | two's-complement, big-endian except COMP-5 which follows `EncodingOptions.endian` |
 | `COMP-1`/`COMP-2` | IEEE 754, rendered to 7 / 15 significant digits |
 | `INDEX`/`POINTER` | **hex** (`0x00000007`) — a compiler-managed occurrence number and an address mean nothing in a file another run wrote |

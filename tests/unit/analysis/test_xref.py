@@ -465,6 +465,28 @@ def test_call_arguments_from_source():
     assert _roles(report, "WS-COUNT") == [ROLE_CALL_ARGUMENT]
 
 
+def test_by_content_and_by_value_call_arguments_are_reads():
+    # The callee receives a copy, so the caller's item is only read; BY
+    # REFERENCE (the default) stays call-argument, which may write it.
+    report = _analyze_source("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALLER.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-REF   PIC X(10).
+       01  WS-COPY  PIC X(10).
+       01  WS-VAL   PIC S9(9) COMP-5.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL 'SUBPROG' USING WS-REF BY CONTENT WS-COPY
+                                BY VALUE WS-VAL
+           STOP RUN.
+""")
+    assert _roles(report, "WS-REF") == [ROLE_CALL_ARGUMENT]
+    assert _roles(report, "WS-COPY") == [ROLE_READ]
+    assert _roles(report, "WS-VAL") == [ROLE_READ]
+
+
 def test_file_name_gets_the_file_operation_role():
     report = _analyze_source("""
        IDENTIFICATION DIVISION.

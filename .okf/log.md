@@ -14,6 +14,31 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-28 -- bug hunt round 9: JCL overrides, record images, COMPUTE, EVALUATE, config
+
+[jcl.md](jcl.md): `PARM.ps=` / `COND.ps=` (and unqualified PARM/COND) on a
+procedure EXEC are applied to the procedure steps; an in-stream DD override
+replaces a procedure dataset (and vice versa); IF expressions continue to
+THEN and text after THEN/ELSE/ENDIF is a comment; concatenated procedure DDs
+are overridden by position; column 72 is never part of a field.
+[generators.md](generators.md): JUSTIFIED RIGHT honoured in record images;
+excess decimal places truncated (not rounded) on encode and edit; 31-digit
+values keep every digit; a non-zero COMP-3 pad nibble is a decode error.
+[parser.md](parser.md): unary sign binds tighter than `**` (IBM hierarchy);
+string literals spelled like clause words (`"ELSE"`, `"ANY"`, `"THRU"`,
+`"END-IF"`, `"WHEN"`, ...) stay literals in IF/EVALUATE/SEARCH/PERFORM
+conditions; `COMPUTE X EQUAL expr`.
+[analysis.md](analysis.md): ConstantFolder poisons COMPUTEs whose IBM
+intermediate quotient truncation it cannot reproduce (`7 / 2 * 2` is 6, not
+7); `domains.solve()` no longer witnesses LOW-/HIGH-VALUES as blanks; each
+later EVALUATE WHEN arm carries the negation of the earlier ones
+(first-match); xref reads BY CONTENT / BY VALUE CALL arguments as reads;
+ProgramDiffer compares every statement field and matches unnamed data
+entries as FILLER; the SQLCODE-check search stops at the next EXEC SQL.
+[cli.md](cli.md): the `cobol.yml` reader rejects `- ` where a scalar
+belongs, reads every YAML 1.2 double-quoted escape, and names a tab after
+`-`; a list/mapping `project.define` value is a ConfigError.
+
 ## 2026-09-28 -- bug hunt round 8: parsers, preprocessing, generators, analysis, JCL/config
 
 [parser.md](parser.md): SEARCH without END-SEARCH no longer eats an

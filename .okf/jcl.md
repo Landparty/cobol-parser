@@ -114,11 +114,15 @@ statement: continuation already joined, in-stream data already separated.
 |---------|---------|
 | 1–2 | `//` identifier field (`//*` comment, `/*` delimiter) |
 | 3 | first column of the name field; blank means "no name" |
-| 3–72 | name, operation and parameter fields, blank-separated |
+| 3–71 | name, operation and parameter fields, blank-separated |
+| 72 | continuation column (`CONTINUATION_INDICATOR_COLUMN`): never part of a field |
 | 73–80 | identification/sequence field, **discarded before anything reads the card** |
 
-Because columns 73–80 go first, a sequence-numbered deck parses identically to
-an unnumbered one. Card kinds are `KIND_STATEMENT`, `KIND_COMMENT`,
+Because columns 72–80 go first, a sequence-numbered deck parses identically to
+an unnumbered one, and a parameter coded through column 71 is not lengthened
+by a column-72 marker. A nonblank in column 72 on a statement that is not
+otherwise continued continues its **comment field**: the next `//` card with
+a blank column 3 is read as more comment, not as a statement. Card kinds are `KIND_STATEMENT`, `KIND_COMMENT`,
 `KIND_NULL`, `KIND_JES`.
 
 ## Continuation — the rule that is usually got wrong
@@ -144,9 +148,13 @@ swallowed.
 
 The parameter field ends at the first blank outside both quotes and
 parentheses; the rest of the card is a comment. Blanks *inside* parentheses are
-kept — which is what makes `// IF (STEP1.RC = 0) THEN` survive — and
-`IF`/`ELSE`/`ENDIF` are scanned to end-of-card because their operand is a
-relational expression, not a parameter list.
+kept. `IF`/`ELSE`/`ENDIF` follow their own rule because their operand is a
+relational expression, not a parameter list: `IF`'s expression runs, blanks
+included, up to `THEN` — continued onto following cards (text in columns
+4-16, a card opening with an operation word is never a continuation) until
+`THEN` is found — and whatever follows `THEN` is a comment, so a comment
+holding an apostrophe or ending in a comma no longer reads as a continuation.
+`ELSE`/`ENDIF` take no operand; the rest of their card is a comment.
 
 ## In-stream data
 
@@ -185,6 +193,18 @@ that procedure step *parameter by parameter* (and `DCB=` *sub-parameter by
 sub-parameter*: overriding `DCB=(RECFM=FB,LRECL=80)` with `DCB=(LRECL=100)`
 keeps `RECFM=FB`); a DD name the procedure step does not have is an addition. The invocation keeps its own copy of every override
 card, so nothing is moved out of sight.
+
+A concatenation is overridden by position: the unnamed cards following a
+`procstep.ddname` override merge into the procedure's concatenated members in
+order (a parameterless card leaves its member alone), extra cards are
+additions, and members no override reaches stay exactly as coded.
+
+`PARM` and `COND` coded on the invoking `EXEC` follow the z/OS rules too:
+`PARM.procstep=` / `COND.procstep=` override that one procedure step (a
+procstep the procedure does not have is noted in `unresolved`); unqualified
+`COND=` overrides every step, while unqualified `PARM=` goes to the *first*
+step and nullifies `PARM` on every later one. A `keyword.procstep` form of
+any `EXEC_KEYWORDS` entry is never read as a symbolic override.
 
 **Symbolic parameters** (`&SYM`, `&SYM.`) are substituted from `SET` values,
 then procedure defaults, then `EXEC` overrides — increasing precedence. The
@@ -226,10 +246,13 @@ stored exactly as coded and reported in `unresolved`.
 # DUMMY and overrides
 
 `DUMMY` and `DSN=NULLFILE` both mark a DD `is_dummy` with `dataset=None`,
-whatever DSN is also coded. `DSN`/`DSNAME`, `DUMMY` and `SYSOUT` are mutually
-exclusive: an overriding `procstep.ddname` card that codes any of them drops
-whichever the procedure DD coded, so `//S.IN DD DUMMY` really dummies out a
-procedure dataset (it used to leave `IN -> A.B` in `dd_map()`).
+whatever DSN is also coded. `DSN`/`DSNAME`, `DUMMY`, `SYSOUT` and in-stream
+data (`*` / `DATA`) are mutually exclusive: an overriding `procstep.ddname`
+card that codes any of them drops whichever the procedure DD coded, so
+`//S.IN DD DUMMY` really dummies out a procedure dataset (it used to leave
+`IN -> A.B` in `dd_map()`), `//S.SYSIN DD *` replaces a procedure `DSN=`
+(it used to keep it alongside the data), and a `DSN=` override of a
+procedure `DD *` is no longer still flagged in-stream.
 * Datasets are not resolved across *files*: a job that `INCLUDE`s a member or
   `EXEC`s a cataloged procedure from a PROCLIB gets an `unresolved` entry, not
   a lookup.

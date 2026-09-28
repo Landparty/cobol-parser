@@ -347,3 +347,64 @@ def test_escaped_quote_does_not_end_the_quoted_span(text, expected):
 
 def test_utf8_byte_order_mark_is_ignored():
     assert parse_yaml("﻿version: 1\n") == {"version": 1}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "copybook_path: - copybooks\n",
+        "a: -\n",
+        "- a: - x\n",
+        "a: -\tx\n",
+        "a: [- x]\n",
+        "a: {k: - x}\n",
+    ],
+)
+def test_sequence_indicator_in_value_position_rejected(text):
+    # `key: - x` is not a scalar in YAML ("sequence entries are not allowed
+    # here"); it used to come back as the string "- x" -- a copybook
+    # directory literally named "- copybooks".
+    with pytest.raises(YamlError, match="sequence entry"):
+        parse_yaml(text)
+
+
+@pytest.mark.parametrize(
+    ("escape", "expected"),
+    [
+        ("\\x41", "A"),
+        ("\\U0001F600", "\U0001f600"),
+        ("\\e", "\x1b"),
+        ("\\a", "\a"),
+        ("\\v", "\v"),
+        ("\\N", "\x85"),
+        ("\\_", "\xa0"),
+        ("\\L", " "),
+        ("\\P", " "),
+        ("\\\t", "\t"),
+    ],
+)
+def test_every_yaml_double_quoted_escape_is_read(escape, expected):
+    # YAML 1.2 (spec 5.7) defines these; they used to be refused as
+    # "unsupported escape", rejecting a valid file.
+    assert parse_yaml(f'a: "<{escape}>"\n') == {"a": f"<{expected}>"}
+
+
+@pytest.mark.parametrize("escape", ["\\u+0e9", "\\u1_23", "\\x4g", "\\U00110000"])
+def test_hex_escape_takes_exactly_hex_digits(escape):
+    # int(..., 16) had accepted a sign and underscores: "\u+0e9" read as "é".
+    with pytest.raises(YamlError, match="invalid"):
+        parse_yaml(f'a: "{escape}"\n')
+
+
+def test_tab_after_sequence_dash_is_named_as_such():
+    with pytest.raises(YamlError, match=r":2: tab after '-'"):
+        parse_yaml("a:\n-\tk: 1\n")
+
+
+def test_dash_led_plain_scalars_still_read():
+    assert parse_yaml("a: -x\nb: -1\nc: '- x'\nd: [-1, -y]\n") == {
+        "a": "-x",
+        "b": -1,
+        "c": "- x",
+        "d": [-1, "-y"],
+    }

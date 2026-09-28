@@ -113,6 +113,7 @@ Example:
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any
@@ -524,11 +525,53 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
     # block's text, ...) still reports an edit rather than reading as
     # unchanged. The text is a rendering, so this can over-report a
     # cosmetic difference; it can no longer under-report a real one.
+    # The rendered text is a truncated summary that omits most clauses
+    # (STRING's INTO target, READ's INTO/KEY, WRITE's FROM, ...), so the
+    # statement's own serialized fields are compared too.
     return (
         kind,
         tuple(str(operand) for operand in getattr(stmt, "operands", [])),
         _statement_text(stmt),
+        _clause_key(stmt),
     )
+
+
+def _clause_key(stmt: Any) -> str:
+    """The statement's ``to_dict()`` minus locations and nested statements.
+
+    Nested bodies (``AT END``, ``ON SIZE ERROR``, ...) are flattened and
+    compared on their own, so they are dropped here rather than reporting
+    the enclosing statement as changed too.
+    """
+    try:
+        data = stmt.to_dict()
+    except Exception:  # noqa: BLE001 - a rendering, never a failure
+        return ""
+    return _json_key(_strip_positions(data))
+
+
+def _strip_positions(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_positions(item)
+            for key, item in value.items()
+            if key != "location"
+        }
+    if isinstance(value, list):
+        return [
+            _strip_positions(item)
+            for item in value
+            if not (
+                isinstance(item, dict)
+                and item.get("node_type") in _STATEMENT_NODE_TYPES
+            )
+        ]
+    return value
+
+
+#: ``to_dict()`` ``node_type`` values of statement nodes (EXEC CICS / IMS
+#: keep their own).
+_STATEMENT_NODE_TYPES = frozenset({"Statement", "EXEC_CICS", "EXEC_IMS"})
 
 
 def _json_key(value: Any) -> str:
@@ -1192,7 +1235,8 @@ class ProgramDiffer:
                 "(TYPE/LINE/COLUMN/SOURCE/SUM), which this diff does not compare"
             )
 
-        path = f"{prefix}.{item.name}" if prefix else item.name
+        name = _data_name(item)
+        path = f"{prefix}.{name}" if prefix else name
         base = f"{section}:{path.upper()}"
         key = self._unique_key(base, entries, side, caveats)
         entries[key] = _DataEntry(
@@ -1627,6 +1671,25 @@ class ProgramDiffer:
 # ---------------------------------------------------------------------------
 # Rendering helpers
 # ---------------------------------------------------------------------------
+
+
+#: The parser names an entry written without a data-name
+#: ``ANONYMOUS-<level>-<line>``; the line number is not part of its identity.
+_ANONYMOUS_NAME_RE = re.compile(r"ANONYMOUS-\d+-\d+", re.IGNORECASE)
+
+
+def _data_name(item: CobolDataItem) -> str:
+    """The name a data entry is matched on across the two programs.
+
+    An entry with no data-name is an implicit FILLER (``05 PIC X(3).``, a
+    report group's ``01 TYPE IS PAGE HEADING.``); the parser's synthetic
+    name embeds its source line, so keying on it reported every such entry
+    removed and re-added whenever a line above it moved. It is keyed as
+    FILLER instead: positionally, like any other FILLER.
+    """
+    if _ANONYMOUS_NAME_RE.fullmatch(item.name or ""):
+        return "FILLER"
+    return item.name
 
 
 def _disambiguated(path: str, base_key: str, key: str) -> str:

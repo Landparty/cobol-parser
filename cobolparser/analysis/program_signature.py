@@ -368,7 +368,7 @@ class ProgramSignatureExtractor:
         if own == "unknown":
             roles = ", ".join(self._ambiguous_roles.get(key, []))
             signature.unchecked.append(
-                f"{key}: direction not classified (referenced only as {roles}, "
+                f"{key}: direction not classified (referenced as {roles}, "
                 "which may read or write it)"
             )
             return own

@@ -103,7 +103,9 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
 * **The YAML subset** — stdlib only (this package has no runtime
   dependencies). Nested mappings, block/flow sequences (a block sequence
   may sit at its key's own column -- the indentless form), flow mappings,
-  quoted/plain scalars (`''` and `\"` escapes), `#` comments, one optional
+  quoted/plain scalars (`''` in single quotes; YAML 1.2's full double-quoted
+  escape set, `\xXX`/`\uXXXX`/`\UXXXXXXXX` with exactly that many hex digits,
+  `\e`/`\N`/`\_`/`\L`/`\P` included since 2026-09-28), `#` comments, one optional
   leading `---`, an optional trailing `...` (anything significant after it is
   a second document and rejected), a leading UTF-8 BOM (ignored). Anchors,
   aliases, tags, block scalars, merge keys, multiple documents, tabs in
@@ -132,6 +134,12 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   string `"- x"`; and line numbers count `\n`/`\r\n`/`\r` records only
   (`split_source_lines`), not the form feeds / NEL / U+2028 `splitlines()`
   also broke on.
+* **A sequence entry where a scalar belongs is rejected** (2026-09-28):
+  `copybook_path: - copybooks` (and `[- x]`, `{k: - x}`, `key: -`) had come
+  back as the *string* `"- copybooks"` -- a list the user wrote, silently
+  turned into one directory name. YAML rejects it ("sequence entries are not
+  allowed here"); so does `_is_sequence_indicator()` now. `-x` / `-1` are
+  still plain scalars.
 * **Tool sections** — `mockymock:` and `analyzer:` are validated only as
   mappings and carried verbatim on `ProjectConfig.tools`; this package never
   needs to know their schemas.

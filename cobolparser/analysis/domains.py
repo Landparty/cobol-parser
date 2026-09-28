@@ -42,6 +42,15 @@ _FIGURATIVE_VALUES: dict[str, str] = {
     "NULLS": "",
 }
 _ZERO_FIGURATIVES = frozenset({"ZERO", "ZEROS", "ZEROES"})
+#: Figurative constants whose value is a byte no generated field carries:
+#: LOW-VALUE is X'00' and HIGH-VALUE X'FF' in every position, and NULL is
+#: binary zeros. ``ValueFactory`` generates characters, and its own table
+#: maps these words to "" -- which renders as *spaces*. A witness built that
+#: way for ``IF X = LOW-VALUES`` is a field of blanks the branch never
+#: takes, so the positive test is unsatisfiable here, not "satisfied".
+_UNREPRESENTABLE_FIGURATIVES = frozenset(
+    {"LOW-VALUE", "LOW-VALUES", "HIGH-VALUE", "HIGH-VALUES", "NULL", "NULLS"}
+)
 #: A sign token detached from its digits by the lexer: ``- 5`` / ``+ 7``.
 _SIGN_SPACE_RE = re.compile(r"^([+-])\s+")
 
@@ -326,7 +335,11 @@ def _apply_numeric(domain: NumericDomain, c: FieldConstraint) -> str | None:
     if c.op == "figurative":
         fig = c.values[0].upper() if c.values else ""
         if fig not in _ZERO_FIGURATIVES:
-            return None  # SPACES/LOW-VALUES etc. don't narrow a numeric range
+            if c.negated:
+                return None  # no number is SPACES/LOW-VALUES: every one differs
+            # A numeric witness can never *be* SPACES / LOW-VALUES / QUOTES:
+            # the branch that needs one is not reachable with generated data.
+            return f"a numeric field cannot be generated equal to {fig or 'it'}"
         return _apply_numeric(
             domain,
             FieldConstraint(c.field, "ne" if c.negated else "eq", ("0",), c.origin),
@@ -434,6 +447,14 @@ def _numeric_literal_text(raw: str) -> str:
 
 
 def _apply_text(domain: TextDomain, c: FieldConstraint) -> str | None:
+    if c.op == "figurative" and c.values:
+        fig = c.values[0].upper()
+        if fig in _UNREPRESENTABLE_FIGURATIVES:
+            if c.negated:
+                # Every generated (character) value differs from X'00' /
+                # X'FF', so the negated test narrows nothing.
+                return None
+            return f"{fig} is a binary value generated character data never holds"
     if c.op in ("eq", "in_set") or (c.op == "figurative" and not c.negated):
         values = _text_values(c, domain.size)
         domain.allowed = values if domain.allowed is None else (domain.allowed & values)

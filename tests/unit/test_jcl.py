@@ -1570,3 +1570,162 @@ $$
         step = result.jobs[0].steps[0]
         assert step.dd("IN").instream_lines == ["ab\x0ccd"]
         assert step.dd("OUT").line == 6
+
+
+class TestProcedureExecOverrides:
+    PROC = """\
+//J JOB 1
+//P PROC
+//PS1 EXEC PGM=A,PARM='ONE'
+//PS2 EXEC PGM=B,PARM='TWO',COND=(4,LT)
+// PEND
+"""
+
+    def test_qualified_parm_overrides_that_procedure_step(self):
+        result = parse_jcl(self.PROC + "//S EXEC P,PARM.PS2='NEW'\n//\n")
+        assert result.errors == []
+        job = result.jobs[0]
+        assert job.step("S.PS1").parm == "ONE"
+        assert job.step("S.PS2").parm == "NEW"
+        assert "PARM.PS2" not in result.symbols
+
+    def test_unqualified_parm_goes_to_first_step_and_nullifies_the_rest(self):
+        result = parse_jcl(self.PROC + "//S EXEC P,PARM='FIRST'\n//\n")
+        job = result.jobs[0]
+        assert job.step("S.PS1").parm == "FIRST"
+        assert job.step("S.PS2").parm is None
+        assert all(p.keyword != "PARM" for p in job.step("S.PS2").parameters)
+
+    def test_cond_overrides_qualified_and_unqualified(self):
+        result = parse_jcl(
+            self.PROC + "//S EXEC P,COND.PS1=(8,LE)\n//T EXEC P,COND=(0,NE)\n//\n"
+        )
+        job = result.jobs[0]
+        assert job.step("S.PS1").condition == "(8,LE)"
+        assert job.step("S.PS2").condition == "(4,LT)"
+        assert job.step("T.PS1").condition == "(0,NE)"
+        assert job.step("T.PS2").condition == "(0,NE)"
+
+    def test_instream_override_replaces_a_procedure_dataset_and_back(self):
+        result = parse_jcl("""\
+//J JOB 1
+//P PROC
+//PS1 EXEC PGM=A
+//SYSIN DD DSN=A.B,DISP=SHR
+//IN2 DD *
+DATA
+/*
+// PEND
+//S EXEC P
+//PS1.SYSIN DD *
+CARD
+/*
+//PS1.IN2 DD DSN=X.Y,DISP=SHR
+//
+""")
+        assert result.errors == []
+        step = result.jobs[0].step("S.PS1")
+        sysin = step.dd("SYSIN")
+        assert sysin.dataset is None
+        assert sysin.is_instream
+        assert sysin.instream_lines == ["CARD"]
+        in2 = step.dd("IN2")
+        assert in2.dataset == "X.Y"
+        assert not in2.is_instream
+        assert in2.instream_lines == []
+        assert result.dd_map()["SYSIN"] == []
+
+    def test_if_expression_continued_onto_the_next_card(self):
+        result = parse_jcl("""\
+//J JOB 1
+//S1 EXEC PGM=A
+// IF (S1.RC = 0 &
+//     S1.RC < 8) THEN
+//S2 EXEC PGM=B
+// ENDIF
+//
+""")
+        assert result.errors == []
+        step = result.jobs[0].step("S2")
+        assert step.condition == "(S1.RC = 0 & S1.RC < 8)"
+        assert step.line == 5
+
+    def test_comments_on_if_else_endif_are_not_continuations(self):
+        result = parse_jcl("""\
+//J JOB 1
+//S1 EXEC PGM=A
+// IF RC = 0 THEN   RUN IT'S STEP
+//S2 EXEC PGM=B
+// ELSE           OTHERWISE,
+//S3 EXEC PGM=C
+// ENDIF  END OF BLOCK,
+//S4 EXEC PGM=D
+//
+""")
+        assert result.errors == []
+        job = result.jobs[0]
+        assert job.step("S2").condition == "RC = 0"
+        assert job.step("S3").condition == "NOT (RC = 0)"
+        assert job.step("S4").condition is None
+        scan = scan_cards("// IF RC = 0 THEN   RUN IT'S STEP\n")
+        assert scan.cards[0].parameters == "RC = 0 THEN"
+        assert scan.cards[0].comment == "RUN IT'S STEP"
+
+    def test_concatenation_override_is_positional_and_keeps_the_rest(self):
+        result = parse_jcl("""\
+//J JOB 1
+//P PROC
+//PS1 EXEC PGM=A
+//LIB DD DSN=L.ONE,DISP=SHR
+//    DD DSN=L.TWO,DISP=SHR
+//    DD DSN=L.THREE,DISP=SHR
+// PEND
+//S EXEC P
+//PS1.LIB DD
+//    DD DSN=NEW.TWO
+//
+""")
+        assert result.errors == []
+        lib = result.jobs[0].step("S.PS1").dd("LIB")
+        assert [(d.dataset, d.disposition) for d in lib.flatten()] == [
+            ("L.ONE", "SHR"),
+            ("NEW.TWO", "SHR"),
+            ("L.THREE", "SHR"),
+        ]
+
+    def test_column_72_is_not_part_of_the_parameter_field(self):
+        first = (
+            "//IN DD DSN=A.B,DISP=SHR,UNIT=SYSDA,SPACE=(TRK,1),DCB=(RECFM=FB,LR=12),"
+        )
+        assert len(first) == 71
+        text = (
+            "//J JOB 1\n//S1 EXEC PGM=A\n"
+            + first
+            + "X00000300\n//             LRECL=80\n//\n"
+        )
+        result = parse_jcl(text)
+        assert result.errors == []
+        dd = result.jobs[0].steps[0].dd("IN")
+        assert [p.keyword for p in dd.parameters][-2:] == ["DCB", "LRECL"]
+        assert dd.record_length == 80
+
+    def test_nonblank_column_72_continues_the_comment_field(self):
+        first = ("//IN DD DSN=A.B,DISP=SHR".ljust(40) + "FIRST PART").ljust(71)
+        text = (
+            "//J JOB 1\n//S1 EXEC PGM=A\n"
+            + first
+            + "X\n//             SECOND PART\n//OUT DD SYSOUT=*\n//\n"
+        )
+        result = parse_jcl(text)
+        assert result.errors == []
+        step = result.jobs[0].steps[0]
+        assert step.dd("IN").dataset == "A.B"
+        assert step.dd("OUT").line == 5
+        card = scan_cards(text).cards[2]
+        assert card.comment == "FIRST PART SECOND PART"
+        assert card.end_line == 4
+
+    def test_override_naming_a_missing_procedure_step_is_reported(self):
+        result = parse_jcl(self.PROC + "//S EXEC P,PARM.NOPE=X\n//\n")
+        assert result.errors == []
+        assert any("no step named NOPE" in n for n in result.unresolved)

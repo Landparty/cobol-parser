@@ -388,9 +388,14 @@ class TestEvaluate:
         assert branch.arms["WHEN_1"] == [
             c for c in branch.arms["WHEN_1"] if c.op == "eq" and c.values == ("1",)
         ]
-        range_ops = {c.op for c in branch.arms["WHEN_2"]}
-        assert range_ops == {"ge", "le"}
-        assert branch.arms["WHEN_3"] == []
+        # EVALUATE is first-match: each later arm also carries the negation
+        # of every earlier arm it can negate (the THRU range cannot be).
+        assert [(c.op, c.values) for c in branch.arms["WHEN_2"]] == [
+            ("ge", ("2",)),
+            ("le", ("10",)),
+            ("ne", ("1",)),
+        ]
+        assert [(c.op, c.values) for c in branch.arms["WHEN_3"]] == [("ne", ("1",))]
 
 
 class TestSearch:

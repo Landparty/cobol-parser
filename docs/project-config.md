@@ -111,6 +111,9 @@ define:
 define: ["DEBUG=TRUE", "TRACE"]
 ```
 
+In the mapping shape each value is a single string, number or `true`/`false`
+(or empty); a list or mapping as a symbol's value is an error.
+
 ### `data:` — record layout and encoding
 
 Defaults for `gen-data`, `gen-fixtures` and `decode`. An EBCDIC shop states

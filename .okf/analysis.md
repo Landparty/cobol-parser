@@ -1694,7 +1694,14 @@ of an `in_set` over the word itself (which rendered `"SPA"`);
 figurative constants (`SPACES`/`ZEROS`/`LOW-VALUES`/...) become `figurative`
 with the symbolic name preserved in `values`, not its literal expansion (the
 solver fills an alphanumeric field's whole width with it: `ZEROS` on `PIC
-X(3)` is `"000"`, since `"0"` pads to `"0  "`);
+X(3)` is `"000"`, since `"0"` pads to `"0  "`); `LOW-VALUES` / `HIGH-VALUES` / `NULL`
+(binary X'00' / X'FF', which generated character data never holds -- both
+tables map them to `""`, which rendered as *blanks*) make the positive test
+`Unsatisfiable` instead of witnessing spaces, and a numeric field compared
+equal to any non-zero figurative (`SPACES`, `QUOTES`, ...) likewise, rather
+than no-op'ing to an arbitrary number (2026-09-28,
+`tests/regression/test_domains_unrepresentable_figuratives.py`); the negated
+forms narrow nothing;
 class tests (`IS NUMERIC`/`IS ALPHABETIC`) become `class_numeric`/
 `class_alphabetic`; sign/zero tests (`IS POSITIVE`/`NEGATIVE`/`ZERO`) fold
 directly into the relational vocabulary (`gt 0`/`lt 0`/`eq 0`) rather than
@@ -1728,6 +1735,18 @@ drawing from its own `condition_values` (`generators/data/values.py`), so
 every row of the scenario named for the OTHER arm carried one of the very
 values that arm excludes — the scenario could not reach its own branch,
 deterministically rather than just often.
+
+**Every later `WHEN` arm also negates the earlier ones.** `EVALUATE` is
+first-match, so `WHEN_n` runs only when `WHEN_1..n-1` all failed.
+`_negate_earlier_whens` conjoins onto each later arm the negation of every
+earlier arm that is a single constraint (`gt`<->`le`, `eq`<->`ne`,
+exhaustive `in_set`<->`not_in_set`, class/figurative flip). Without it
+`WHEN A > 50 / WHEN A > 10` witnessed 51 for the second arm — a value that
+takes the first — and a duplicate `WHEN 1 / WHEN 1` reported the unreachable
+second arm as satisfiable (now `Unsatisfiable`). An earlier arm that cannot
+be negated into one constraint (a `THRU` range, a conjunction, an
+unsupported selector) is left out and noted in `unsupported`. `WHEN OTHER`
+still negates only each arm's *own* selector constraints.
 
 **The level-88 enum domain is a preference, not the field's domain.**
 `solve()` tries `EnumDomain(spec.condition_values)` first whenever a set op is
@@ -1966,6 +1985,23 @@ internal env) rather than approximating:
   significant digits (a 29–31 digit literal, which IBM Enterprise COBOL
   permits under `ARITH(EXTEND)`); short-literal expressions were already
   safe. Pinned by `tests/regression/test_audit_2026_09_16.py`.
+* **A COMPUTE division is truncated mid-expression the way IBM truncates
+  it** (2026-09-28). IBM carries a fixed-point quotient to only
+  `max(d1 - d2, dmax)` decimal places ("Intermediate results and arithmetic
+  precision"; `dmax` = the most decimal places of any result field or any
+  operand other than a divisor or exponent), so `COMPUTE N = 7 / 2 * 2`
+  into `PIC 99` stores 6 and `COMPUTE PCT = A / B * 100` stores 0 when
+  A < B. The folder divided exactly and emitted 7 / 25. `_dmax_floor`
+  computes a lower bound on `dmax` (every leaf under a `/` or `**`
+  right-hand side left out -- a smaller bound only poisons more), and
+  `_truncation_free_divide` poisons any quotient needing more places.
+  Exponentiation follows IBM's three cases (`_fold_power`): an integer
+  literal exponent is exact (`d1 * n` places); a negative one is
+  `1 / x ** n` under the division rule (`100 * 2 ** -1` into `PIC 9(4)`
+  is 0, not 50); an integral data-name/expression exponent carries only
+  `dmax` places; an exponent with decimal places means floating point,
+  poisoned. Pinned by
+  `tests/regression/test_const_fold_intermediate_precision.py`.
 * `ROUNDED`, `CORRESPONDING`, and any target that does not resolve to an
   elementary field are poisoned rather than approximated. A numeric
   MOVE/arithmetic result is only ever recorded when it fits its target
@@ -2396,8 +2432,12 @@ RETURNING item counts as named, so it is never `unreferenced_linkage`.
 DIVISION uses each parameter, reusing xref's role vocabulary:
 
 * `write` plus any read → `input-output`.
-* A reference only as a CALL argument or SQL host variable (`_AMBIGUOUS_ROLES`)
-  → `unknown`, and listed in `unchecked`. A caller told "input-only" about a
+* A reference as a BY REFERENCE CALL argument or SQL host variable
+  (`_AMBIGUOUS_ROLES`), with no write elsewhere → `unknown`, and listed in
+  `unchecked`. A `BY CONTENT` / `BY VALUE` CALL argument is not ambiguous:
+  the callee gets a copy, so xref records it `read` (2026-09-28; it used to
+  be `call-argument`, which graded a parameter only passed on BY CONTENT
+  `unknown`). A caller told "input-only" about a
   field the callee overwrites has been told something worse than nothing.
   xref files `ENTRY "X" USING p` itself under the CALL-argument role
   (`statement == "EntryStatement"`); those refs are dropped before grading,
@@ -2541,6 +2581,13 @@ mistaken for the data item WS-KEY; before that the two reduced to the same
 tokens.) A quiet report
 with a populated `unchecked` is not a clean program, it is an unexamined one.
 
+The search for a status check after an `EXEC SQL` stops at the next
+executable `EXEC SQL` written directly in a paragraph (also inside a
+PERFORMed one): it resets the SQLCA, so `DELETE` / `COMMIT` / `IF SQLCODE`
+reports the DELETE (2026-09-28; before, the one check was credited to both).
+SQL inside an IF/EVALUATE body may not run and does not end the search;
+neither does a declaration or `WHENEVER`.
+
 `DECLARE GLOBAL TEMPORARY TABLE` is executable and is graded;
 DECLARE CURSOR / TABLE / STATEMENT / VARIABLE are not
 (`_NON_EXECUTABLE_SQL_TYPES`). A `DECLARE TABLE` or `INCLUDE` in the DATA
@@ -2586,7 +2633,10 @@ STATUS, ASSIGN, OPTIONAL, plus the FD's presence, record size, recording mode
 and FD-vs-SD kind); data items keyed by section plus qualified path
 (`WORKING-STORAGE:WS-TAB.WS-ENT` — PICTURE/USAGE/level/VALUE/OCCURS/REDEFINES
 plus the SIGN / JUSTIFIED / SYNCHRONIZED / BLANK WHEN ZERO / EXTERNAL / GLOBAL
-flags and level-88 names and values); procedures (added, removed, renamed,
+flags and level-88 names and values — an entry with no data-name, which the
+parser names `ANONYMOUS-<level>-<line>`, is keyed as a positional `FILLER`
+since 2026-09-28, so a line shift no longer reports it removed and re-added);
+procedures (added, removed, renamed,
 **moved** — reordered without a body change, reported separately so a pure
 reshuffle never reads as a rewrite — and body-changed); and statements within
 matched paragraphs.
@@ -2621,8 +2671,12 @@ following paragraph as moved, and a pure reformat reports nothing at all.
 Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
 IF, EVALUATE, SEARCH, and (review follow-up) OPEN, EXEC SQL, EXEC CICS, COMPUTE,
 INSPECT, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
-operands *and* its rendered text**, so an unmodelled edit over-reports rather
-than reading as unchanged.
+operands, its rendered text *and* its own `to_dict()` fields** (locations and
+nested statement bodies stripped — those are compared on their own), so an
+unmodelled edit over-reports rather than reading as unchanged. (2026-09-28:
+the rendered text is a truncated summary that omits STRING's INTO, READ's
+INTO/KEY, WRITE's FROM, ...; before the `to_dict()` fields were added,
+`STRING ... INTO A` → `INTO B` diffed as no change.)
 
 Determinism: the same pair always produces byte-identical `to_dict()` — changes
 sorted by category, symbol, kind then remaining fields (`_sort_key` is a total

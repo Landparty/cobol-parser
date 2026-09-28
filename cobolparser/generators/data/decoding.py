@@ -62,7 +62,7 @@ import io
 import os
 import struct
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Context, Decimal
 from typing import Any
 
 from ...models.data_items import CobolDataItem
@@ -362,7 +362,10 @@ def _render_number(magnitude: int, negative: bool, decimals: int) -> str:
     that can be tested rather than a hope.
     """
     if decimals:
-        text = f"{Decimal(magnitude).scaleb(-decimals):.{decimals}f}"
+        # An exact context: the default one's 28 digits rounded a 31-digit
+        # ``ARITH(EXTEND)`` field (``...456789.01`` read back ``...456790.00``).
+        exact = Context(prec=max(28, len(str(magnitude)) + decimals))
+        text = f"{Decimal(magnitude).scaleb(-decimals, context=exact):.{decimals}f}"
     else:
         text = str(magnitude)
     return f"-{text}" if negative and magnitude != 0 else text
@@ -396,17 +399,19 @@ def _decode_edited(
     return _render_number(magnitude, negative, spec.decimal_digits), None
 
 
-def _decode_text(raw: bytes, opts: EncodingOptions) -> str:
+def _decode_text(raw: bytes, opts: EncodingOptions, *, justified: bool = False) -> str:
     """DISPLAY text: the charset's characters, trailing pad stripped.
 
     ASCII is read as latin-1 rather than strict ASCII: a byte the encoder
     could not have written is still a byte in the file, and showing it beats
     raising on it.  Trailing spaces and NULs go because they are how COBOL
     pads a short value into a fixed field; leading ones stay, because they
-    may be the value.
+    may be the value -- except under *justified* (``JUSTIFIED RIGHT``),
+    where the pad is on the left and is stripped there too.
     """
     codec = EBCDIC_CODEC if opts.charset is Charset.EBCDIC else "latin-1"
-    return raw.decode(codec, errors="replace").rstrip(" \x00")
+    text = raw.decode(codec, errors="replace").rstrip(" \x00")
+    return text.lstrip(" \x00") if justified else text
 
 
 def _decode_zoned(
@@ -505,8 +510,16 @@ def _decode_packed(raw: bytes, spec: FieldSpec) -> tuple[str, str | None]:
     error: str | None = None
     if sign_nibble not in _SIGN_NIBBLES:
         error = f"sign nibble {nibbles[-1]} is not a valid packed sign"
+    # An even digit count leaves the high nibble of the first byte as pad,
+    # which the compiler writes as zero. It is not a digit of the field: a
+    # PIC S9(2)V99 field holding x'12345C' is not 123.45, a value the
+    # PICTURE cannot hold, so the pad is reported rather than read.
+    pad = max(0, len(nibbles) - 1 - _total_digits(spec))
+    for position, char in enumerate(nibbles[:pad]):
+        if char != "0" and error is None:
+            error = f"pad nibble {position} ({char}) is not zero"
     magnitude = 0
-    for position, char in enumerate(nibbles[:-1]):
+    for position, char in enumerate(nibbles[pad:-1], start=pad):
         digit = int(char, 16)
         if digit > 9:
             if error is None:
@@ -583,7 +596,7 @@ def decode_field(
         value, error = _decode_binary(raw, spec, opts)
     elif usage == "NATIONAL":
         # The encoder writes national data as text (see ``encode_field``).
-        value = _decode_text(raw, opts)
+        value = _decode_text(raw, opts, justified=spec.justified)
     elif (
         spec.blank_when_zero
         and spec.category in (FieldCategory.NUMERIC, FieldCategory.NUMERIC_EDITED)
@@ -597,7 +610,7 @@ def decode_field(
     elif spec.category is FieldCategory.NUMERIC_EDITED:
         value, error = _decode_edited(raw, spec, opts)
     else:
-        value = _decode_text(raw, opts)
+        value = _decode_text(raw, opts, justified=spec.justified)
 
     return DecodedField(
         name=spec.column,

@@ -66,7 +66,21 @@ _DOUBLE_QUOTE_ESCAPES = {
     "/": "/",
     "'": "'",
     " ": " ",
+    # The rest of YAML 1.2's double-quoted escape set (spec 5.7). Rejecting
+    # them refused a valid file with "unsupported escape".
+    "\t": "\t",
+    "a": "\a",
+    "v": "\v",
+    "e": "\x1b",
+    "N": "\x85",
+    "_": "\xa0",
+    "L": " ",
+    "P": " ",
 }
+
+# `\xXX`, `\uXXXX`, `\UXXXXXXXX`: exactly that many hex digits, as YAML says.
+_HEX_ESCAPE_WIDTHS = {"x": 2, "u": 4, "U": 8}
+_HEX_DIGITS_RE = re.compile(r"[0-9A-Fa-f]+", re.ASCII)
 
 
 class _Line:
@@ -134,6 +148,11 @@ class _Parser:
                 raise YamlError(
                     f"{self.filename}:{number}: "
                     f"YAML directives (%YAML, %TAG) are not supported"
+                )
+            if content.startswith("-\t"):
+                raise YamlError(
+                    f"{self.filename}:{number}: tab after '-'; a sequence "
+                    f"entry needs a space after the dash"
                 )
             if content == "?" or content.startswith("? "):
                 raise YamlError(
@@ -337,6 +356,18 @@ class _Parser:
             value, consumed = self._parse_quoted(text, 0, line)
             self._require_flow_end(text, consumed, line)
             return value
+        if _is_sequence_indicator(text):
+            # `key: - x` -- a block sequence cannot start on its key's line
+            # (YAML: "sequence entries are not allowed here"). Read as a plain
+            # scalar it became the string "- x": a list the user wrote,
+            # silently turned into one text value (a copybook directory
+            # literally named "- copybooks").
+            raise self._error(
+                f"a '- ' sequence entry cannot follow 'key:' on the same line "
+                f"({text!r}); put each entry on its own line below the key, "
+                f"or quote the value",
+                line,
+            )
         if _is_mapping_entry(text):
             # `key: a: b` -- YAML rejects a plain scalar holding `: ` ("mapping
             # values are not allowed here"); taking it as the string "a: b"
@@ -376,6 +407,12 @@ class _Parser:
         raw = text[start:end].strip()
         if raw and raw[0] in _REJECTED_VALUE_PREFIXES:
             raise self._error(_REJECTED_VALUE_PREFIXES[raw[0]], line)
+        if _is_sequence_indicator(raw):
+            raise self._error(
+                f"a '- ' sequence entry is not allowed inside a flow collection "
+                f"({raw!r}); quote the value",
+                line,
+            )
         return _plain_scalar(raw), end
 
     def _parse_flow_collection(
@@ -444,17 +481,24 @@ class _Parser:
                 if i >= len(text):
                     break
                 esc = text[i]
-                if esc == "u":
-                    if i + 4 >= len(text):
-                        raise self._error("truncated \\u escape", line)
-                    hex_digits = text[i + 1 : i + 5]
-                    try:
-                        out.append(chr(int(hex_digits, 16)))
-                    except ValueError:
+                width = _HEX_ESCAPE_WIDTHS.get(esc)
+                if width is not None:
+                    if i + width >= len(text):
+                        raise self._error(f"truncated \\{esc} escape", line)
+                    hex_digits = text[i + 1 : i + 1 + width]
+                    # A regex, not bare int(..., 16): that also takes a sign,
+                    # underscores and surrounding spaces (`\u+0e9`, `\u1_23`).
+                    code = (
+                        int(hex_digits, 16)
+                        if _HEX_DIGITS_RE.fullmatch(hex_digits)
+                        else None
+                    )
+                    if code is None or code > 0x10FFFF:
                         raise self._error(
-                            f"invalid \\u escape: \\u{hex_digits}", line
-                        ) from None
-                    i += 5
+                            f"invalid \\{esc} escape: \\{esc}{hex_digits}", line
+                        )
+                    out.append(chr(code))
+                    i += 1 + width
                     continue
                 if esc not in _DOUBLE_QUOTE_ESCAPES:
                     raise self._error(f"unsupported escape: \\{esc}", line)
@@ -482,6 +526,13 @@ def _step_in_quote(text: str, i: int, quote: str) -> tuple[int, str | None]:
             return i + 2, quote
         return i + 1, None
     return i + 1, quote
+
+
+def _is_sequence_indicator(text: str) -> bool:
+    """Whether a plain value starts with the block-sequence indicator: a
+    ``-`` followed by whitespace or nothing. ``-x`` and ``-1`` are ordinary
+    plain scalars; ``-`` and ``- x`` are not scalars at all."""
+    return text == "-" or text.startswith(("- ", "-\t"))
 
 
 def _is_mapping_entry(text: str) -> bool:

@@ -125,7 +125,11 @@ class TestFinding1SignedLiterals:
             "           STOP RUN.\n"
         )
         assert _arm_values(report, "WHEN_1") == [("eq", ("-5",)), ("lt", ("-3",))]
-        assert _arm_values(report, "WHEN_2") == [("ge", ("-9",)), ("le", ("-6",))]
+        assert _arm_values(report, "WHEN_2") == [
+            ("ge", ("-9",)),
+            ("le", ("-6",)),
+            ("ne", ("-5",)),  # NOT WHEN_1 -- EVALUATE is first-match
+        ]
         for branch in report.branches:
             for constraints in branch.arms.values():
                 witness = solve(constraints[0].field.spec, constraints)
@@ -394,11 +398,27 @@ class TestFinding9PowerAssociativity:
             "           DISPLAY WS-A\n"
             "           STOP RUN.\n"
         ) == {"WS-GRP.WS-A": "512"}
+        # A negative exponent is 1 / (2 ** 1) under IBM's *division* rules:
+        # into integral PIC 9(3), dmax is 0, so the intermediate quotient is
+        # truncated to 0 and IBM stores 0, not 50. Poisoned, not folded
+        # (tests/regression/test_const_fold_intermediate_precision.py).
+        assert (
+            _fold(
+                "           COMPUTE WS-A = 100 * 2 ** -1\n"
+                "           DISPLAY WS-A\n"
+                "           STOP RUN.\n"
+            )
+            == {}
+        )
+
+    def test_unary_minus_applies_before_exponentiation(self):
+        # IBM hierarchy: unary sign first, then **: (-2) ** 2 + 10 == 14.
+        # Read as -(2 ** 2) this folded to 6.
         assert _fold(
-            "           COMPUTE WS-A = 100 * 2 ** -1\n"
+            "           COMPUTE WS-A = - 2 ** 2 + 10\n"
             "           DISPLAY WS-A\n"
             "           STOP RUN.\n"
-        ) == {"WS-GRP.WS-A": "50"}
+        ) == {"WS-GRP.WS-A": "14"}
 
 
 class TestFinding10TruncatedTextWitness:

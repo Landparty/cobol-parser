@@ -748,6 +748,27 @@ def test_generic_statement_change_falls_back_to_statement_changed():
     assert "TWO" in (changes[0].new or "")
 
 
+def test_generic_statement_clause_change_is_not_missed():
+    # The rendered summary of STRING / READ omits INTO; the change must
+    # still be reported, while a nested AT END body stays compared apart.
+    report = _statement_diff(
+        "           STRING 'X' DELIMITED BY SIZE INTO WS-B\n           STOP RUN.\n",
+        "           STRING 'X' DELIMITED BY SIZE INTO WS-A\n           STOP RUN.\n",
+    )
+    assert len(_of_kind(report, "statement-changed")) == 1
+
+    report = _statement_diff(
+        "           STRING 'X' DELIMITED BY SIZE INTO WS-B\n"
+        "               ON OVERFLOW DISPLAY 'A'\n"
+        "           END-STRING\n           STOP RUN.\n",
+        "           STRING 'X' DELIMITED BY SIZE INTO WS-B\n"
+        "               ON OVERFLOW DISPLAY 'B'\n"
+        "           END-STRING\n           STOP RUN.\n",
+    )
+    changes = _of_kind(report, "statement-changed")
+    assert [change.old for change in changes] == ['DISPLAY "A"']
+
+
 # ---------------------------------------------------------------------------
 # Data items
 # ---------------------------------------------------------------------------
@@ -1483,6 +1504,31 @@ def test_repeated_filler_entries_are_keyed_by_position_with_a_caveat():
     assert len(changes) == 1
     assert changes[0].symbol == "WS-GRP.FILLER#2"
     assert any("FILLER entries" in caveat for caveat in report.caveats)
+
+
+def test_unnamed_entries_are_implicit_fillers_not_keyed_by_line():
+    # `05 PIC X(3).` has no data-name; the parser's synthetic name carries
+    # its line number, which must not make a line shift read as a change.
+    template = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ANONP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+{extra}       01  WS-GRP.
+           05  PIC X(3) VALUE 'AAA'.
+           05  PIC X(3) VALUE '{value}'.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           STOP RUN.
+"""
+    old = template.format(extra="", value="BBB")
+    shifted = template.format(extra="       01  WS-NEW PIC X.\n", value="BBB")
+    report = _diff(old, shifted)
+    assert [c.symbol for c in report.changes] == ["WS-NEW"]
+
+    report = _diff(old, template.format(extra="", value="CCC"))
+    changes = _of_kind(report, "value-changed")
+    assert [c.symbol for c in changes] == ["WS-GRP.FILLER#2"]
 
 
 def test_level_66_renames_entries_are_caveated():

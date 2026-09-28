@@ -243,6 +243,15 @@ def _defines(value: Any, source: Path) -> tuple[str, ...]:
     if isinstance(value, dict):
         out = []
         for key, raw in value.items():
+            if isinstance(raw, (dict, list)):
+                # A symbol's value is one literal. Stringified, a collection
+                # became Python's repr -- `--define "DEBUG=['a', 'b']"` --
+                # which no >>DEFINE ever meant.
+                raise ConfigError(
+                    f"{source}: 'project.define.{key}' must be a single value "
+                    f"(a string, number or true/false) or empty, not a "
+                    f"{'mapping' if isinstance(raw, dict) else 'list'}"
+                )
             if isinstance(raw, bool):
                 raw = "TRUE" if raw else "FALSE"
             if raw is None:

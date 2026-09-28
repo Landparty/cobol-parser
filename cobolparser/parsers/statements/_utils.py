@@ -296,6 +296,20 @@ def token_value_upper(token: Token | None) -> str:
     return token.value.upper() if token and token.value else ""
 
 
+def keyword_upper(token: Token | None) -> str:
+    """Like :func:`token_value_upper`, but ``""`` for a literal token.
+
+    The lexer strips a string literal's quotes, so ``IF X = "ELSE"`` hands
+    a condition collector a token whose *value* is ``ELSE``. Comparing
+    ``keyword_upper(token)`` against clause keywords (THEN / ELSE / END-IF /
+    WHEN / ALSO / AFTER / scope terminators) keeps such a literal as
+    condition content instead of a clause boundary.
+    """
+    if token is None or token.type in LITERAL_TOKEN_TYPES:
+        return ""
+    return token_value_upper(token)
+
+
 def token_location(token: Token | None) -> SourceLocation:
     """Return the source location of *token*, or a zero location if absent."""
     return token.location if token else SourceLocation(0, 0)

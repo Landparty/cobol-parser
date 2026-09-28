@@ -179,6 +179,18 @@ def test_define_boolean_value_rendered_as_cobol_truth(tmp_path):
     assert load_project_config(tmp_path).define == ("DEBUG=TRUE",)
 
 
+@pytest.mark.parametrize(
+    ("value", "shape"),
+    [("[a, b]", "list"), ("{x: 1}", "mapping"), ("\n      - a", "list")],
+)
+def test_define_collection_value_rejected_not_stringified(tmp_path, value, shape):
+    # Used to become `--define "DEBUG=['a', 'b']"` -- Python's repr of the
+    # list, handed to the preprocessor as the symbol's value.
+    (tmp_path / "cobol.yml").write_text(f"project:\n  define:\n    DEBUG: {value}\n")
+    with pytest.raises(ConfigError, match=f"project.define.DEBUG.*not a {shape}"):
+        load_project_config(tmp_path)
+
+
 def test_empty_file_is_a_config_with_a_source_and_no_settings(tmp_path):
     (tmp_path / "cobol.yml").write_text("# nothing yet\n")
     config = load_project_config(tmp_path)
