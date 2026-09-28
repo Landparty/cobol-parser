@@ -78,7 +78,15 @@ class InitializeStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
                 continue
-            if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
+            if token.type == TokenType.IDENTIFIER:
+                token_stream.consume()
+                # Fold a subscript / OF-IN qualifier chain into the target
+                # (`INITIALIZE TBL (I) B OF C`) instead of stranding it as
+                # unparsed trailing tokens.
+                stmt.add_target(
+                    consume_optional_qualifiers(token_stream, token.value or "")
+                )
+            elif token.type == TokenType.STRING_LITERAL:
                 token_stream.consume()
                 stmt.add_target(token.value or "")
             else:
@@ -132,7 +140,12 @@ class InitializeStatementParser(IStatementParser):
                 nxt = ts.peek()
                 if nxt and nxt.type != TokenType.PERIOD:
                     ts.consume()
-                    stmt.add_replacing_clause(category, nxt.value or "")
+                    by_value = nxt.value or ""
+                    if nxt.type == TokenType.IDENTIFIER:
+                        # `BY WS-X OF GRP` / `BY TBL (I)`: a qualified or
+                        # subscripted sending item is one value.
+                        by_value = consume_optional_qualifiers(ts, by_value)
+                    stmt.add_replacing_clause(category, by_value)
                 skip_whitespace(ts)
             else:
                 break

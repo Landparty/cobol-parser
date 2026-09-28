@@ -14,6 +14,15 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-28 -- bug hunt round 8: SEARCH swallow, INITIALIZE qualifiers, NOT >=, DELIMITED without BY, DISPLAY FUNCTION
+
+[parser.md](parser.md): SEARCH without END-SEARCH no longer eats an
+enclosing ELSE and the rest of the sentence; INITIALIZE targets / REPLACING
+BY values keep subscripts and OF/IN qualifiers; `NOT >=` / `NOT GREATER
+THAN OR EQUAL TO` resolve to LESS (and the `<=` family to GREATER);
+STRING/UNSTRING `DELIMITED` without `BY` keeps its delimiters; `DISPLAY
+FUNCTION TRIM(A)` is one item.
+
 ## 2026-09-28 -- bug hunt round 7: batch .prof collisions, DOT escaping, >>DEFINE arithmetic, nested ALTER in health
 
 [batch.md](batch.md): per-file `.prof` dumps of inputs sharing a stem no

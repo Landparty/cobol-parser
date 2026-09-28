@@ -1789,6 +1789,33 @@ dropped. `UnstringStatement.delimiter_all` is a bool list parallel to
 `delimiters`; `to_dict()` emits it only when some delimiter is `ALL`, so
 every other UNSTRING serializes as before.
 
+**Bug hunt round 8 (2026-09-28), five silent drops in statement parsers:**
+- `search_parser.py`: the AT END / WHEN loop's fallback consumed any other
+  token, so a SEARCH without END-SEARCH nested in an IF ate `ELSE ...
+  END-IF` and every statement up to the period. Any token other than
+  AT/END/WHEN/END-SEARCH/separator now ends the SEARCH. SEARCH has no
+  `NOT AT END`; it is no longer eaten (it used to overwrite the real AT END
+  body) but left for the procedure parser's unparsed-token warning.
+- `initialize_inspect_parsers.py`: INITIALIZE targets and the REPLACING
+  `BY` value fold subscripts / OF-IN qualifiers via
+  `consume_optional_qualifiers` (`"TBL ( 1 )"`, `"B OF C"`, the same text
+  shape MOVE targets use).
+- `_conditions.py`: after `NOT`, the whole relational operator is resolved
+  (`_match_relational_operator`) before negating, so `NOT GREATER THAN OR
+  EQUAL TO` / `NOT >=` / `NOT > =` is LESS and the `<=` family is GREATER.
+  `_NEGATED_OPS` is gone; `_NEGATED_RELATIONAL` does the negation.
+- `string_unstring_parsers.py`: `BY` after `DELIMITED` is optional
+  (`DELIMITED SIZE`, `DELIMITED "," OR ALL SPACE`). A delimiter is only
+  consumed when the next token is operand-shaped (`_next_is_delimiter`), so
+  `DELIMITED INTO X` still leaves INTO for its own clause.
+- `display_parser.py`: `FUNCTION name[(args)][(refmod)]` is one DISPLAY item
+  rendered as MOVE renders it (`"FUNCTION TRIM(A)"`), not a bare
+  `"FUNCTION"` item followed by the call.
+Pinned in `tests/unit/test_start_search_set_coverage.py`,
+`test_initialize_inspect_parsers.py`, `test_if_parser_gaps.py`,
+`test_string_simple_deeper_coverage.py`, `test_unstring_gaps.py`,
+`test_display_parser.py`.
+
 **EXEC CICS lost its command verb when written on the line after `EXEC
 CICS`** (`ibm_exec_statements.py`) — the idiomatic, most common layout
 (and the parser's own docstring example). The command-token lookup ran

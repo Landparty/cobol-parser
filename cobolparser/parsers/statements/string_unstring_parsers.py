@@ -57,6 +57,48 @@ def _consume_operand(token_stream: ITokenStream) -> str | None:
     return value
 
 
+#: Token types a DELIMITED [BY] delimiter may take.
+_DELIMITER_TOKEN_TYPES = frozenset(
+    {
+        TokenType.IDENTIFIER,
+        TokenType.STRING_LITERAL,
+        TokenType.NUMERIC_LITERAL,
+        TokenType.FIGURATIVE_CONSTANT,
+    }
+)
+#: Clause words that can never be a delimiter operand.
+_DELIMITER_STOP_WORDS = frozenset(
+    {
+        "INTO",
+        "WITH",
+        "POINTER",
+        "TALLYING",
+        "ON",
+        "NOT",
+        "OVERFLOW",
+        "DELIMITED",
+        "END-STRING",
+        "END-UNSTRING",
+    }
+)
+
+
+def _next_is_delimiter(token_stream: ITokenStream) -> bool:
+    """True when the next token can be a ``DELIMITED [BY]`` operand.
+
+    ``BY`` is optional, so after ``DELIMITED`` (and after an optional
+    ``BY``) the delimiter is only consumed when it really is an operand --
+    a malformed ``DELIMITED INTO X`` must leave ``INTO`` for its own clause.
+    """
+    token = token_stream.peek()
+    return bool(
+        token
+        and token.type in _DELIMITER_TOKEN_TYPES
+        and _val(token) not in _DELIMITER_STOP_WORDS
+        and not is_statement_boundary(token)
+    )
+
+
 class StringStatementParser(IStatementParser):
     """Parser for STRING statements.
 
@@ -115,10 +157,12 @@ class StringStatementParser(IStatementParser):
             if val == "DELIMITED":
                 token_stream.consume()
                 skip_whitespace(token_stream)
+                # ``BY`` is optional (``DELIMITED SIZE``, ``DELIMITED ","``).
                 nxt = token_stream.peek()
                 if nxt and _val(nxt) == "BY":
                     token_stream.consume()
                     skip_whitespace(token_stream)
+                if _next_is_delimiter(token_stream):
                     delimiter = _consume_operand(token_stream)
                     if delimiter is not None:
                         stmt.add_delimiter(delimiter)
@@ -250,28 +294,31 @@ class UnstringStatementParser(IStatementParser):
             if val == "DELIMITED":
                 token_stream.consume()
                 skip_whitespace(token_stream)
+                # ``BY`` is optional (``DELIMITED "," OR ALL SPACE``).
                 nxt = token_stream.peek()
                 if nxt and _val(nxt) == "BY":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    # Optional ALL delimiter [OR [ALL] delimiter ...]
-                    while True:
-                        nxt = token_stream.peek()
-                        is_all = bool(nxt and _val(nxt) == "ALL")
-                        if is_all:
-                            token_stream.consume()
-                            skip_whitespace(token_stream)
-                        delimiter = _consume_operand(token_stream)
-                        if delimiter is None:
-                            break
-                        stmt.add_delimiter(delimiter, all_occurrences=is_all)
+                # Optional ALL delimiter [OR [ALL] delimiter ...]
+                while True:
+                    nxt = token_stream.peek()
+                    is_all = bool(nxt and _val(nxt) == "ALL")
+                    if is_all:
+                        token_stream.consume()
                         skip_whitespace(token_stream)
-                        nxt = token_stream.peek()
-                        if nxt and _val(nxt) == "OR":
-                            token_stream.consume()
-                            skip_whitespace(token_stream)
-                        else:
-                            break
+                    if not _next_is_delimiter(token_stream):
+                        break
+                    delimiter = _consume_operand(token_stream)
+                    if delimiter is None:
+                        break
+                    stmt.add_delimiter(delimiter, all_occurrences=is_all)
+                    skip_whitespace(token_stream)
+                    nxt = token_stream.peek()
+                    if nxt and _val(nxt) == "OR":
+                        token_stream.consume()
+                        skip_whitespace(token_stream)
+                    else:
+                        break
             elif val == "INTO":
                 token_stream.consume()
                 skip_whitespace(token_stream)

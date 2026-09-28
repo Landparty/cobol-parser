@@ -7,6 +7,8 @@ with period terminator, ELSE with period terminator.
 
 from __future__ import annotations
 
+import pytest
+
 from cobolparser import CobolParser, ErrorRecoveryMode
 from cobolparser.models.statements.control import IfStatement
 
@@ -162,3 +164,53 @@ class TestIfConditionEdgeCases:
         assert result.ast is not None
         ifs = _find_ifs(result)
         assert len(ifs) >= 2
+
+
+class TestIfNegatedCompoundRelationalOperators:
+    """``NOT`` applied to a two-part operator (``>=`` / ``<=`` in any
+    spelling) negates the whole operator. It used to negate only the first
+    word, leaving ``OR EQUAL`` as a bogus OR leg or ``=`` in the right
+    operand."""
+
+    def _condition(self, cond: str):
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. TEST.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-A PIC 9.\n"
+            "       01 WS-B PIC 9.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            f"           IF {cond}\n"
+            "               DISPLAY 'Y'\n"
+            "           END-IF.\n"
+            "           STOP RUN.\n"
+        )
+        result = _parser().parse(src)
+        assert not result.errors
+        (if_stmt,) = _find_ifs(result)
+        return if_stmt.condition
+
+    @pytest.mark.parametrize(
+        ("cond", "operator"),
+        [
+            ("WS-A IS NOT GREATER THAN OR EQUAL TO WS-B", "LESS"),
+            ("WS-A NOT GREATER OR EQUAL WS-B", "LESS"),
+            ("WS-A IS NOT >= WS-B", "LESS"),
+            ("WS-A NOT > = WS-B", "LESS"),
+            ("WS-A NOT LESS THAN OR EQUAL TO WS-B", "GREATER"),
+            ("WS-A NOT LESS OR EQUAL WS-B", "GREATER"),
+            ("WS-A NOT <= WS-B", "GREATER"),
+            ("WS-A NOT < = WS-B", "GREATER"),
+            # Single-word negations keep their existing resolution.
+            ("WS-A NOT GREATER THAN WS-B", "LESS_OR_EQUAL"),
+            ("WS-A NOT < WS-B", "GREATER_OR_EQUAL"),
+            ("WS-A IS NOT EQUAL TO WS-B", "NOT_EQUAL"),
+        ],
+    )
+    def test_negated_operator_resolves_whole(self, cond, operator) -> None:
+        expr = self._condition(cond)
+        assert expr.operator == operator
+        assert expr.left_operand == "WS-A"
+        assert expr.right_operand == "WS-B"
