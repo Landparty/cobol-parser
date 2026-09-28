@@ -224,6 +224,28 @@ def test_an_indicator_variable_is_not_an_unchecked_host_variable(hostvars):
     assert report.unchecked == {}
 
 
+@pytest.mark.parametrize(
+    "hostvars",
+    [":DCLCUSTOMER.CUST-VAL:IND-VAL", ":DCLCUSTOMER.CUST-VAL INDICATOR :IND-VAL"],
+)
+def test_a_structure_qualified_host_variable_is_checked(hostvars):
+    """``:DCLCUSTOMER.CUST-VAL`` is CUST-VAL OF DCLCUSTOMER. The SQL model
+    used to report the structure (DCLCUSTOMER) as the host variable and the
+    indicator as a second one, so neither was checked and both were filed as
+    unchecked."""
+    source = _program(
+        ONE_COLUMN.format(column="CUST_VAL CHAR(10)"),
+        "       01  DCLCUSTOMER.\n           05  CUST-VAL    PIC X(10).\n"
+        "       01  IND-VAL  PIC S9(4) COMP.\n",
+        "CUST_VAL",
+        hostvars,
+    )
+    report = _check(source)
+    assert report.checked == ["CUST-VAL"]
+    assert report.unchecked == {}
+    assert _by_kind(report, "null-indicator") == []
+
+
 def test_a_not_null_column_never_asks_for_an_indicator():
     report = _check(_one("CUST_VAL CHAR(10) NOT NULL", "CUST-VAL PIC X(10)."))
     assert report.violations == []

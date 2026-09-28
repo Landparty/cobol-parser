@@ -89,8 +89,11 @@ _INDICATOR_RE = re.compile(
     # The separator has to carry the whole burden of telling the two forms
     # apart, so the whitespace between name and separator is matched once,
     # before the alternation -- putting it inside the INDICATOR branch would
-    # leave that branch with no space left to match.
-    r":\s*([A-Za-z_][\w-]*)\s*(?::|\bINDICATOR\b\s*:)\s*[A-Za-z_][\w-]*",
+    # leave that branch with no space left to match. A structure-qualified
+    # variable (``:DCLEMP.SAL:IND``) binds its last component, as in the
+    # SQL model's host-variable list.
+    r":\s*(?:[A-Za-z_][\w-]*\.)*([A-Za-z_][\w-]*)\s*(?::|\bINDICATOR\b\s*:)"
+    r"\s*[A-Za-z_][\w-]*",
     re.IGNORECASE,
 )
 

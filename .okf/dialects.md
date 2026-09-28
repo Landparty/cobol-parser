@@ -41,6 +41,55 @@ strings, never in parsed source. Indicators also appear in `host_variables`
 (the plain `:name` scan). Pinned by
 `test_sql_statements.py::TestHostVariables::test_null_indicator_keyword_as_parsed_from_source`.
 
+## EXEC SQL text: literals and `--` comments (`parsers/statements/_utils.py`)
+
+`collect_exec_sql_text(stream, sql=True)` (EXEC SQL, procedure and data
+division) re-delimits every string literal the lexer handed over unquoted
+(`'...'`, embedded `'` doubled; a typed literal such as `X'C1'` keeps its
+`raw_value`) and drops a `--` comment -- two MINUS tokens in adjacent columns
+-- up to its NEWLINE (never past END-EXEC). Before 2026-09-28 neither reached
+the SQL model's scrubber, so `WHERE B = 'X:FAKE'` reported host variable
+`FAKE`, `'FROM T9'` reported table `T9`, and a comment's `:WS-C` was a host
+variable. EXEC CICS / DLI text is still collected unquoted (option values are
+read bare by the codebase graph and signature extractor). Pinned by
+`tests/unit/test_exec_sql_literals_comments.py`.
+
+## Structure-qualified host variables (`models/sql_statements.py`)
+
+`:DCLEMP.EMPNO` is EMPNO OF DCLEMP. `host_variables`, `null_indicators`,
+`into_variables` and `using_variables` carry the **last component**
+(`EMPNO`) -- what a DATA DIVISION or DCLGEN lookup needs; the qualifier is
+dropped (`_SQL_HV_QUALIFIERS`). `dclgen_check._INDICATOR_RE` reads the same
+form. Before 2026-09-28 the structure (`DCLEMP`) was reported instead, the
+indicator of `:DCLEMP.SAL:IND` was not seen as one, and `dclgen-check` filed
+both as unchecked while checking nothing. Pinned by
+`test_exec_sql_host_variable_lists.py` and `test_dclgen_check.py`.
+
+## `into_variables` / `using_variables` (`models/sql_statements.py`)
+
+Every host variable of the `INTO` (SELECT / FETCH) or `USING` (PREPARE /
+EXECUTE) list, in order, **indicators included** (they are written by the
+INTO too). The list regexes (`_SQL_HV_LIST`) take `\s*` after the keyword
+-- the collector writes `INTO:WS-A` -- and an item may carry an indicator
+(`:A:IND`, `:A INDICATOR :IND`) or a qualifier (`:REC.FLD`). Before
+2026-09-28 both lists were empty for every statement parsed from source
+(`INTO\s+:` never matched) and an indicator ended the list; `io_logger` and
+`sql_cics_lint` had grown text-regex fallbacks for it, still in place.
+Pinned by `tests/unit/test_exec_sql_host_variable_lists.py`.
+
+## `FetchStatement` cursor / orientation (`models/sql_statements.py`)
+
+`_parse_fetch_clause()` reads `FETCH [SENSITIVE|INSENSITIVE] [WITH CONTINUE]
+[orientation] [FROM] cursor [FOR n ROWS]` positionally: `cursor_name` is the
+first word none of those may be, `fetch_direction` the orientation word
+(NEXT default; PRIOR/FIRST/LAST/CURRENT/BEFORE/AFTER/ABSOLUTE/RELATIVE, the
+ROWSET forms included) and `fetch_count` the `FOR n ROWS` size. Before
+2026-09-28 `FETCH NEXT ROWSET FROM C1` named cursor `ROWSET` (likewise
+`ABSOLUTE`, `SENSITIVE`), `FETCH PRIOR FROM C1` named none -- so the CRUD
+matrix lost the cursor's read -- and the direction was a substring test
+(`INTO :WS-LAST-NAME` made a FETCH LAST). Pinned by
+`tests/unit/test_exec_sql_fetch_orientation.py`.
+
 ## `ExecSQLStatement.tables` (`models/sql_statements.py`)
 
 Source order, with the statement's **target first** for INSERT / UPDATE /

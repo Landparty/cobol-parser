@@ -1385,6 +1385,9 @@ exactly the bug the first draft had. Program-wide rather than per-statement:
 a variable given an indicator on its FETCH and not on its SELECT INTO is a
 different (and much rarer) bug than never having one, and flagging the second
 statement would bury the finding that matters.
+A structure-qualified variable (`:DCLCUST.CUST-VAL:IND`) pairs by its last
+component, like the SQL model's host-variable list (2026-09-28; before that
+the structure name was the "host variable" and nothing was checked).
 
 **What it declines to check, and says so.** `report.unchecked` is
 `name: reason` for every host variable that could not be compared — no
@@ -2473,7 +2476,7 @@ report.sql_statements / report.cics_statements
 | `SQL_NO_SQLCODE_CHECK` | An executable `EXEC SQL` whose outcome is never looked at: no `SQLCODE`/`SQLSTATE`/`SQLCA` mention in the statements that follow, no `WHENEVER SQLERROR` in effect. DB2 does not raise — it sets a number and returns, and the program commits whatever it was going to commit. The most common real defect in DB2 COBOL and the cheapest to find. |
 | `SQL_DYNAMIC_CONCATENATION` | A host variable handed to `PREPARE` / `EXECUTE IMMEDIATE` whose content was assembled by `STRING` or moved in from another item — SQL injection with a mainframe accent. Parameter markers (`EXECUTE ... USING :HV`) are the fix and are never flagged. |
 | `SQL_HARDCODED_CREDENTIALS` | A literal user id or password in `EXEC SQL CONNECT`. It is in the source, the listing, the load library, and every copy anyone took of any of them. |
-| `SQL_SELECT_WITHOUT_INTO` | A singleton `SELECT` with no `INTO` and no cursor. The precompiler accepts it; the row goes nowhere. |
+| `SQL_SELECT_WITHOUT_INTO` | A singleton `SELECT` with no `INTO` and no cursor. The precompiler accepts it; the row goes nowhere. (`into_variables` is populated from parsed source since 2026-09-28; the `INTO\s*:` text check stays as a backstop.) |
 | `CICS_NO_RESP_HANDLING` | An `EXEC CICS` command with no `RESP`/`RESP2`, no `NOHANDLE`, no `HANDLE CONDITION` in effect. The default action for most CICS conditions is to abend the task, so the failure mode is a dropped transaction mid-update, not a wrong answer. |
 | `CICS_ABEND_WITHOUT_HANDLER` | `EXEC CICS ABEND` with no `HANDLE ABEND`. **Info** — frequently deliberate, worth seeing rather than worth fixing. |
 
@@ -2484,9 +2487,11 @@ or for a dynamic-SQL finding the untrusted host variable) and a machine-readable
 
 **It does not guess.** Three things in the parsed form of an EXEC block are
 lossy, and each is answered with an entry in `unchecked` rather than a finding —
-notably that the lexer drops quotes around literals, so inside SQL text
-`USING 'S3CRET'` and `USING WS-PASSWORD` reduce to the same tokens (an operand
-matching a declared DATA DIVISION item is treated accordingly). A quiet report
+e.g. a CONNECT operand with neither colon nor quotes that matches a declared
+DATA DIVISION item. (Since 2026-09-28 EXEC SQL text keeps a literal's quotes,
+so `USING 'S3CRET'` is always a literal and `USING 'WS-KEY'` is no longer
+mistaken for the data item WS-KEY; before that the two reduced to the same
+tokens.) A quiet report
 with a populated `unchecked` is not a clean program, it is an unexamined one.
 
 `DECLARE GLOBAL TEMPORARY TABLE` is executable and is graded;
