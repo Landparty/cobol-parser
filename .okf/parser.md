@@ -132,7 +132,7 @@ CobolParser.parse(source)
 | `environment.py` | ENVIRONMENT DIVISION — division scan + AST node; section/SELECT parsing delegated to the two `environment_*.py` collaborators below |
 | `environment_sections.py` | `ConfigurationSectionParser` (CONFIGURATION SECTION + SPECIAL-NAMES) and `InputOutputSectionParser` (INPUT-OUTPUT SECTION + FILE-CONTROL) |
 | `environment_select.py` | `SelectClauseParser` — SELECT statement + all clause parsers (ASSIGN/ORGANIZATION/ACCESS/KEY/STATUS/ALTERNATE/PADDING/RESERVE/SHARING/LOCK/PASSWORD) and `SelectStatement` node construction |
-| `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below |
+| `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below. `_build_data_hierarchy` ends with `propagate_group_usage_and_sign()` (2026-09-28): a group's USAGE / SIGN is pushed onto subordinates with none of their own (IBM rule). Explicitness is `CobolDataItem.usage_explicit`, set by `set_usage()` — which both the pure-Python and `_data_fast` clause loops call, so the `.pyx` needed no change |
 | `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses; owns the optional `_data_fast` Cython fast-path invocation |
 | `data_file_description.py` | `FileDescriptionClauseParser` — FD/SD file-description clause capture (BLOCK/RECORD/LABEL/...) |
 | `data_report_description.py` | `ReportDescriptionClauseParser` — REPORT SECTION `RD` clause capture (CODE/CONTROLS/PAGE LIMIT/HEADING/FIRST-LAST DETAIL/FOOTING/GLOBAL), 2026-09-02 |

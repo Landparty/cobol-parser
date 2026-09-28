@@ -653,6 +653,10 @@ class CobolDataItem(ASTNode):
         self.level = level
         self.picture_clause: PictureClause | None = None
         self.usage: str = "DISPLAY"  # Default usage
+        #: True when this entry itself carries a USAGE clause (``set_usage`` /
+        #: ``set_object_reference``); False when ``usage`` is the DISPLAY
+        #: default or was inherited from an enclosing group's USAGE.
+        self.usage_explicit: bool = False
         self.value_clause: str | None = None
         self.occurs_clause: OccursClause | None = None
         self.redefines: str | None = None
@@ -706,11 +710,13 @@ class CobolDataItem(ASTNode):
     def set_object_reference(self, class_name: str | None = None) -> None:
         """Record ``[USAGE] OBJECT REFERENCE [class-name]``."""
         self.usage = "OBJECT REFERENCE"
+        self.usage_explicit = True
         self.object_class = class_name
 
     def set_usage(self, usage: str) -> None:
         """Set the USAGE clause for this data item."""
         self.usage = usage
+        self.usage_explicit = True
 
     def set_value_clause(self, value: str) -> None:
         """Set the VALUE clause for this data item."""

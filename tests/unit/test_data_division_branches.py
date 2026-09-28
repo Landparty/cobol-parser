@@ -454,3 +454,95 @@ class TestPictureClauseVariants:
         result = _assert_parsed(src)
         items = result.ast.find_all_by_type("DataItem")
         assert any(i.name == "WS-N" for i in items)
+
+
+# ---------------------------------------------------------------------------
+# Group USAGE / SIGN inheritance (IBM: a group's clause applies to every
+# subordinate elementary item that does not state its own)
+# ---------------------------------------------------------------------------
+
+
+class TestGroupUsageAndSignInheritance:
+    GROUPED = (
+        "01  R.\n"
+        "    05  G1 COMP-3.\n"
+        "        10  A PIC S9(5).\n"
+        "        10  B PIC S9(3).\n"
+        "    05  G2 SIGN LEADING SEPARATE.\n"
+        "        10  C PIC S9(3).\n"
+        "    05  Z PIC X.\n"
+    )
+
+    @staticmethod
+    def _items(src: str) -> dict:
+        result = _assert_parsed(_wrap(src))
+        return {i.name: i for i in result.ast.find_all_by_type("DataItem")}
+
+    def test_group_usage_and_sign_reach_the_elementary_items(self):
+        items = self._items(self.GROUPED)
+        assert items["A"].usage == "COMP-3"
+        assert items["B"].usage == "COMP-3"
+        assert not items["A"].usage_explicit
+        assert items["G1"].usage_explicit
+        assert items["C"].sign_clause == "LEADING SEPARATE"
+        assert items["Z"].usage == "DISPLAY"
+        assert items["Z"].sign_clause is None
+
+    def test_record_size_counts_the_inherited_storage(self):
+        items = self._items(self.GROUPED)
+        # A packed 3 + B packed 2 + C 3 digits + separate sign 1 + Z 1.
+        assert items["A"].calculate_size() == 3
+        assert items["B"].calculate_size() == 2
+        assert items["C"].calculate_size() == 4
+        assert items["R"].calculate_size() == 10
+        assert items["R"].to_dict()["calculated_size"] == 10
+
+    def test_inheritance_passes_through_nested_groups(self):
+        items = self._items(
+            "01  R.\n"
+            "    05  G1 USAGE IS BINARY.\n"
+            "        10  G2.\n"
+            "            15  G3.\n"
+            "                20  D PIC S9(4).\n"
+        )
+        assert items["G2"].usage == "BINARY"
+        assert items["G3"].usage == "BINARY"
+        assert items["D"].usage == "BINARY"
+        assert items["R"].calculate_size() == 2
+
+    def test_an_explicit_child_usage_wins_and_is_inherited_below_it(self):
+        items = self._items(
+            "01  R.\n"
+            "    05  G1 COMP-3.\n"
+            "        10  E PIC S9(4) COMP.\n"
+            "        10  G2 USAGE DISPLAY.\n"
+            "            15  F PIC 9(3).\n"
+            "        10  H PIC 9(3).\n"
+        )
+        assert items["E"].usage == "COMP"
+        assert items["F"].usage == "DISPLAY"
+        assert items["H"].usage == "COMP-3"
+        assert items["R"].calculate_size() == 2 + 3 + 2
+
+    def test_an_explicit_child_sign_wins(self):
+        items = self._items(
+            "01  R.\n"
+            "    05  G SIGN TRAILING SEPARATE.\n"
+            "        10  A PIC S9(3) SIGN LEADING.\n"
+            "        10  B PIC S9(3).\n"
+            "        10  U PIC 9(3).\n"
+        )
+        assert items["A"].sign_clause == "LEADING"
+        assert items["B"].sign_clause == "TRAILING SEPARATE"
+        # An unsigned item has no sign for the clause to describe.
+        assert items["U"].sign_clause is None
+
+    def test_a_numeric_usage_is_not_pushed_onto_an_alphanumeric_child(self):
+        items = self._items(
+            "01  R.\n"
+            "    05  G COMP-3.\n"
+            "        10  A PIC S9(3).\n"
+            "        10  X PIC X(4).\n"
+        )
+        assert items["A"].usage == "COMP-3"
+        assert items["X"].usage == "DISPLAY"

@@ -506,6 +506,12 @@ pass and the CLI's `--program NAME` (see [cli.md](cli.md)). Pinned by
   `"OBJECT REFERENCE"`) -- each serialized only when set.
   `OccursClause.is_unbounded` (`max_times` None; serialized when True).
   `PictureClause` accepts `U` (UTF-8, one byte per symbol).
+* `CobolDataItem.usage_explicit` (2026-09-28): True when the entry carries
+  its own USAGE (`set_usage` / `set_object_reference`); not serialized.
+  `usage` / `sign_clause` of a subordinate with no clause of its own now
+  reflect the enclosing group's (see parser.md, `data.py`), so
+  `calculate_size()` / `to_dict()["calculated_size"]` count packed/binary
+  children of a `COMP-3`/`BINARY` group correctly.
 * `UseStatement.report_groups` (`USE BEFORE REPORTING`).
 * `SetStatement.targets_are_address_of` (`SET ADDRESS OF x TO p`).
 * `DeclareTableStatement.table_name` is `"SCHEMA.TABLE"` for a qualified

@@ -180,6 +180,9 @@ class FieldSpec:
             :attr:`size`: the sign gets a byte the PICTURE does not count.
         synchronized: Whether the item carries ``SYNCHRONIZED``.  Recorded
             rather than acted on -- see :func:`.encoding.encoding_caveats`.
+        blank_when_zero: Whether the item carries ``BLANK WHEN ZERO``: a
+            numeric DISPLAY / numeric-edited item holding zero is stored as
+            all spaces, which the encoder writes and the decoder reads as 0.
         occurs_depending_on: The controlling data name when this field sits
             inside an ``OCCURS ... DEPENDING ON`` table (the outermost one,
             when several nest), else ``None``.  The table is always
@@ -216,6 +219,7 @@ class FieldSpec:
     is_filler: bool = False
     sign_clause: str | None = None
     synchronized: bool = False
+    blank_when_zero: bool = False
     occurs_depending_on: str | None = None
     odo_controls: tuple[OdoControl, ...] = ()
     odo_counter_bounds: tuple[int, int] | None = None
@@ -604,6 +608,7 @@ def _flatten_into(
                 is_filler=item.is_filler,
                 sign_clause=item.sign_clause,
                 synchronized=item.synchronized,
+                blank_when_zero=item.blank_when_zero,
                 occurs_depending_on=(
                     inherited_controls[0].depending_on if inherited_controls else None
                 ),
