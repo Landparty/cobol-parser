@@ -1170,6 +1170,17 @@ replaced at most once. Literal protection is unchanged: only a clause
 whose search text contains a quote is in the alternation used inside
 string literals.
 
+**COPY ... REPLACING: a separator comma / semicolon is a blank
+(2026-09-28).** IBM: when comparing pseudo-text, "a separator comma or
+separator semicolon ... is considered to be a space". `_build_clause_pattern`
+now joins words with `_SEPARATOR_GAP` (a blank, or `,`/`;` followed by a
+blank) instead of `[ \t]`, so `==X(3) VALUE==` finds `X(3), VALUE`; and
+`_pseudo_text_words` drops a `,`/`;` that ends a non-literal search word
+before a blank or the end, so `==A, B==` finds `A B`. A comma not followed
+by a blank (`A,B`, `1,5`) is not a separator and still compares as text.
+Matching still stays within one source line. Pinned by
+`tests/regression/test_fixes_2026_09_28_preprocessing.py`.
+
 **REPLACE: a parenthesis is a text word (`_tokenize_text_words`).** Only
 space/comma/semicolon/newline/quotes/period ended a word, so `WS-A(1)`
 was the single word `WS-A(1)` and `REPLACE ==WS-A== BY ==WS-B==` never
