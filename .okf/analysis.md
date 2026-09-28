@@ -1666,7 +1666,11 @@ modelled as a `not_in_set` whose witness can sit inside the range
 (`layout.condition_values_exhaustive()` over
 `ProgramLayoutIndex.condition_raw_values()` decides; a non-exhaustive
 positive `in_set` carries `FieldConstraint.exhaustive=False`, not part of
-`to_dict()`). An 88 whose one VALUE is a figurative constant (`VALUE
+`to_dict()`). An 88 `VALUE ALL 'X'` (2026-09-28) is the `in_set` of the one
+value filling the field (`XXX` on `PIC X(3)`, from
+`ProgramLayoutIndex.condition_values`); `VALUE ALL SPACES` counts as the
+figurative `SPACES`; only a bare `ALL` is still reported unsupported. An 88
+whose one VALUE is a figurative constant (`VALUE
 SPACES`) becomes the `figurative` constraint `IF X = SPACES` would, instead
 of an `in_set` over the word itself (which rendered `"SPA"`);
 figurative constants (`SPACES`/`ZEROS`/`LOW-VALUES`/...) become `figurative`

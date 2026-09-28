@@ -9,6 +9,7 @@ for the entries that are not ordinary data-description items:
   (DCLGEN ``DECLARE TABLE``, ``INCLUDE SQLCA``/``SQLDA``)
 """
 
+from cobolparser._literals import quote_literal
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import SourceLocation
@@ -71,7 +72,34 @@ class SpecialEntryParser:
                 break
             if t.type == TokenType.PERIOD:
                 break
-            if t.type in (
+            if t.type == TokenType.FIGURATIVE_CONSTANT and t.value.upper() == "ALL":
+                # ``VALUE ALL 'X'``: one value, the literal repeated to the
+                # field's width. Stored the way a non-88 ``VALUE ALL`` is
+                # (``ALL "X"`` / ``ALL SPACES``, see
+                # ``data_clauses.parse_value_clause``); it was two values,
+                # ``ALL`` and ``X``, and ``X`` read as a one-character value.
+                token_stream.consume()
+                operand = token_stream.peek()
+                if operand is not None and operand.type == TokenType.STRING_LITERAL:
+                    item.add_value(
+                        "ALL "
+                        + (
+                            operand.raw_value
+                            if operand.raw_value
+                            else quote_literal(operand.value)
+                        )
+                    )
+                    token_stream.consume()
+                elif (
+                    operand is not None
+                    and operand.type == TokenType.FIGURATIVE_CONSTANT
+                    and operand.value.upper() != "ALL"
+                ):
+                    item.add_value(f"ALL {operand.value}")
+                    token_stream.consume()
+                else:
+                    item.add_value(t.value)
+            elif t.type in (
                 TokenType.STRING_LITERAL,
                 TokenType.NUMERIC_LITERAL,
                 TokenType.FIGURATIVE_CONSTANT,

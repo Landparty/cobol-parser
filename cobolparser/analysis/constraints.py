@@ -24,7 +24,7 @@ from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 
 from .._literals import unquote_literal
-from ..generators.data.layout import condition_values_exhaustive
+from ..generators.data.layout import all_literal_operand, condition_values_exhaustive
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.statements.base import (
@@ -920,11 +920,18 @@ def _extract_condition_name_value(
 
     upper_raw = [value.strip().upper() for value in raw_values]
     if "ALL" in upper_raw:
+        # A bare ``ALL`` with nothing repeatable after it.
         unsupported.append(
             f"{origin}: condition name {name.strip()} has a VALUE ALL literal, "
             "which is not modeled in v1"
         )
         return None
+    # ``VALUE ALL 'X'`` is the one value that fills the field with X (which
+    # is what ``own_values`` already holds, expanded to the field's width);
+    # ``VALUE ALL SPACES`` is the figurative constant SPACES.
+    upper_raw = [
+        (all_literal_operand(value) or value).strip().upper() for value in raw_values
+    ]
     figuratives = [value for value in upper_raw if value in _FIGURATIVE_NAMES]
     if figuratives and len(upper_raw) == 1:
         # `88 BLANK-NAME VALUE SPACES` is the figurative comparison `IF

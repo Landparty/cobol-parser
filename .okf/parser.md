@@ -284,6 +284,13 @@ string round-trips as legal COBOL — downstream consumers (mockymock's
 working-storage reset) splice it into `MOVE <value> TO <item>`. Regression
 suite: `tests/regression/test_value_all_clause.py`.
 
+A level-88 `VALUE ALL 'X'` (`data_special_entries.py`, 2026-09-28) is one
+value in the same spelling: `values == ['ALL "X"']` (`ALL SPACES` for a
+figurative operand), not `['ALL', 'X']`. Consumers that know the field's
+width fill it -- see `expand_condition_values(raw, width)` in
+[generators.md](generators.md). Pinned by
+`tests/regression/test_level88_value_all.py`.
+
 **Multi-line clauses (`data_clauses.py` + `_data_fast.pyx`):** the lexer
 emits NEWLINE tokens, so any clause reader that peeks for an operand after
 consuming a keyword must skip NEWLINEs first or a line break between keyword
