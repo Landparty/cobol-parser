@@ -37,7 +37,7 @@ Editing rules implemented (IBM Enterprise COBOL Language Reference,
 
 from __future__ import annotations
 
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Context, Decimal, InvalidOperation
 
 from ...models.data_items import PictureClause
 
@@ -50,6 +50,9 @@ _SIMPLE_INSERTION = frozenset({"0", "B", "/", ","})
 #: ``DECIMAL-POINT IS COMMA`` exchanges ``,`` and ``.``; an involution, so the
 #: same table maps a picture to the default spelling and edited text back.
 _SWAP_DECIMAL = str.maketrans({",": ".", ".": ","})
+#: Decimal arithmetic here must be exact: the default context's 28 digits
+#: silently rounded a 31-digit value (``ARITH(EXTEND)``) before it was edited.
+_EXACT = Context(prec=1000)
 
 
 class _Layout:
@@ -120,9 +123,9 @@ def edit_numeric(
     # Truncated, not rounded: a MOVE drops the places the picture has no
     # room for (``9.999`` into ``ZZ9.99`` edits as ``  9.99``).
     scaled = int(
-        abs(number)
-        .scaleb(layout.fraction_positions)
-        .to_integral_value(rounding=ROUND_DOWN)
+        number.copy_abs()
+        .scaleb(layout.fraction_positions, context=_EXACT)
+        .to_integral_value(rounding=ROUND_DOWN, context=_EXACT)
     )
     digits = str(scaled % 10**width).rjust(width, "0") if width else ""
     if scaled == 0:

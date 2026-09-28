@@ -283,6 +283,18 @@ def test_justified_right_round_trips_and_is_right_aligned(charset):
     assert record.errors == []
 
 
+def test_a_thirty_one_digit_packed_field_decodes_exactly():
+    # ARITH(EXTEND): 31 digits, more than Decimal's default 28-digit context,
+    # which used to read this back as ...456790.00.
+    field = _one_field(
+        "       01  R.\n           05  F PIC S9(29)V99 COMP-3.\n",
+        bytes.fromhex("1234567890123456789012345678901d"),
+        EncodingOptions(),
+    )
+    assert field.value == "-12345678901234567890123456789.01"
+    assert field.error is None
+
+
 def test_without_blank_when_zero_spaces_are_still_an_error():
     field = _one_field(
         "       01  R.\n           05  D PIC 9(3).\n", b"   ", EncodingOptions()

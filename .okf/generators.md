@@ -659,7 +659,11 @@ high-order-truncates to the PICTURE's digit count the way a COBOL numeric
 MOVE does, so neither can overflow. Excess *decimal* places are truncated
 too, never rounded (`_scaled_integer` and `edit_numeric` both use
 `ROUND_DOWN`, 2026-09-28): `9.999` into `9V99` stores `999`. It used to round
-half-even to `1000`, which the high-order truncation then turned into `000`. The binary encoder has no such step: a
+half-even to `1000`, which the high-order truncation then turned into `000`.
+The encoder, `edit_numeric` and the decoder's `_render_number` all scale
+through an **exact** `decimal.Context` rather than the default one, whose 28
+significant digits silently rounded a 31-digit `ARITH(EXTEND)` field
+(`S9(29)V99 COMP-3` holding `...456789.01` decoded as `...456790.00`). The binary encoder has no such step: a
 value that does not fit the field's *byte width* has no representation at
 all, so it raises `RecordEncodingError` rather than silently reshaping the
 bytes. Nothing this package generates can reach it — `ValueFactory` respects

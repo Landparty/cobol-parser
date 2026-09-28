@@ -46,7 +46,7 @@ from __future__ import annotations
 import struct
 import sys
 from dataclasses import dataclass
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Context, Decimal, InvalidOperation
 from enum import StrEnum
 
 from .editing import edit_numeric
@@ -347,6 +347,12 @@ def _encode_text(
     return pad + raw if justified else raw + pad
 
 
+#: Exact decimal arithmetic for :func:`_scaled_integer`.  The default context
+#: holds 28 significant digits, and ``scaleb`` rounds to it: a 31-digit
+#: ``ARITH(EXTEND)`` value lost its low-order digits before it was packed.
+_EXACT = Context(prec=1000)
+
+
 def _scaled_integer(text: str, spec: FieldSpec) -> int:
     """The field's value as an integer of its own digit positions.
 
@@ -366,19 +372,23 @@ def _scaled_integer(text: str, spec: FieldSpec) -> int:
         return 0
     # Quantize by shifting the exponent rather than multiplying: exact for
     # every value _format_number can have produced, including PIC 9(18).
-    units = value.scaleb(spec.decimal_digits)
+    units = value.scaleb(spec.decimal_digits, context=_EXACT)
     scaling = spec.scaling_positions
     if scaling > 0:
         # Trailing P: the low `scaling` digits are implied zeros that no
         # byte holds -- ``123000`` in ``9(3)PPP`` is stored as ``123``.
         # Truncation, not rounding, is what the compiler does with a value
         # that is not a whole multiple (``123456`` -> ``123``).
-        return int(units.scaleb(-scaling).to_integral_value(rounding=ROUND_DOWN))
+        return int(
+            units.scaleb(-scaling, context=_EXACT).to_integral_value(
+                rounding=ROUND_DOWN, context=_EXACT
+            )
+        )
     # Decimal places beyond the PICTURE's are truncated, not rounded, as a
     # COBOL numeric MOVE does: ``9.999`` into ``9V99`` stores ``999``.
     # Rounding (half-even) stored ``1000``, which the high-order truncation
     # in `_digits_string` then turned into ``000`` -- a zero.
-    return int(units.to_integral_value(rounding=ROUND_DOWN))
+    return int(units.to_integral_value(rounding=ROUND_DOWN, context=_EXACT))
 
 
 def _digits_string(magnitude: int, digits: int) -> str:

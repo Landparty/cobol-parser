@@ -62,7 +62,7 @@ import io
 import os
 import struct
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Context, Decimal
 from typing import Any
 
 from ...models.data_items import CobolDataItem
@@ -362,7 +362,10 @@ def _render_number(magnitude: int, negative: bool, decimals: int) -> str:
     that can be tested rather than a hope.
     """
     if decimals:
-        text = f"{Decimal(magnitude).scaleb(-decimals):.{decimals}f}"
+        # An exact context: the default one's 28 digits rounded a 31-digit
+        # ``ARITH(EXTEND)`` field (``...456789.01`` read back ``...456790.00``).
+        exact = Context(prec=max(28, len(str(magnitude)) + decimals))
+        text = f"{Decimal(magnitude).scaleb(-decimals, context=exact):.{decimals}f}"
     else:
         text = str(magnitude)
     return f"-{text}" if negative and magnitude != 0 else text

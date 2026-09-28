@@ -207,6 +207,33 @@ class TestExcessDecimalPlaces:
         assert encode_field(spec, "9.999", EncodingOptions()) == b"  9.99"
 
 
+class TestThirtyOneDigits:
+    """``ARITH(EXTEND)`` allows 31 digits; Decimal's default 28-digit context
+    used to round the low-order ones away before they were written."""
+
+    VALUE = "1234567890123456789012345678901"
+
+    def test_packed_keeps_every_digit(self):
+        spec = one_spec("F PIC S9(31) COMP-3.")
+        raw = encode_field(spec, self.VALUE, EncodingOptions())
+        assert raw == bytes.fromhex(self.VALUE + "c")
+
+    def test_packed_with_decimals_keeps_every_digit(self):
+        spec = one_spec("F PIC S9(29)V99 COMP-3.")
+        raw = encode_field(spec, "12345678901234567890123456789.01", EncodingOptions())
+        assert raw == bytes.fromhex(self.VALUE + "c")
+
+    def test_zoned_and_edited_keep_every_digit(self):
+        assert (
+            encode_field(one_spec("F PIC 9(31)."), self.VALUE, EncodingOptions())
+            == self.VALUE.encode()
+        )
+        assert (
+            encode_field(one_spec("F PIC Z(30)9."), self.VALUE, EncodingOptions())
+            == self.VALUE.encode()
+        )
+
+
 class TestAlphanumeric:
     def test_short_value_is_space_padded_on_the_right(self):
         spec = one_spec("F PIC X(6).")
