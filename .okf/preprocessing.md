@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-09-15T00:00:00Z
+timestamp: 2026-09-28T00:00:00Z
 ---
 
 # Overview
@@ -655,7 +655,18 @@ from cobolparser.preprocess.replace_statement import (
   left-to-right word scan (first active pair to match at a position wins);
   the REPLACE statements themselves are blanked. `REPLACE` inside a string
   literal is ignored. A `warnings` list receives a diagnostic if a set is
-  still active at EOF (no closing `REPLACE OFF.`).
+  still active at EOF (no closing `REPLACE OFF.`), and (2026-09-28) one per
+  `REPLACE` keyword that does not start a well-formed statement -- those
+  used to be skipped with no trace, their substitutions silently lost.
+  * `LEADING` / `TRAILING` qualify a pair (2026-09-28; previously the whole
+    statement was silently ignored): pseudo-text-1 must be one non-literal
+    text word, pseudo-text-2 at most one, and it matches the start / end of
+    each non-literal source word (case-insensitively), replacing only that
+    part: `REPLACE LEADING ==XX-== BY ==WS-==.` turns `XX-A` into `WS-A`.
+  * The IBM `==:TAG:==` partial-word form replaces **every** occurrence
+    inside a word (`:P:-A-:P:` -> `XX-A-XX`; it used to stop at the first).
+  Pinned by `tests/unit/test_enterprise_syntax.py::TestReplaceLeadingTrailing`
+  / `TestReplacePartialWord`.
 
 * **`strip_unexpanded_copy_statements(source, warnings=None)`** — blanks
   `COPY` statements the standalone pipeline is not going to expand
@@ -856,6 +867,20 @@ recognizes `:ABC:` pseudo-text and strips the delimiters, so
 no-op — the colons were captured as literal text). No Cython mirror.
 Pinned by `tests/regression/test_open_findings_m13_regression.py`.
 
+**REPLACING matching refinements (2026-09-28).** A line holding a literal
+is no longer matched piece by piece (code vs literal segments): the
+alternation runs over the whole line, so a search text mixing code and a
+literal (`==VALUE 'A'== BY ==VALUE 'B'==`) can match; a match of a clause
+*without* a quote in its search text is rejected when it lies inside a
+literal (and the quote-bearing clauses still get their turn at that
+position) -- `_replace_in_line_with_literals`. The literal words of a search
+text compare **case-sensitively** (`(?-i:...)`; `=='abc'==` no longer
+rewrites `'ABC'`) while its other words stay case-insensitive. Word
+boundaries now count `_` as a word character and treat a decimal point as
+binding (`(?<![0-9]\.)` / `(?!\.[0-9])`), so `==1== BY ==2==` leaves
+`VALUE 1.5` alone. Pinned by
+`tests/unit/test_copy_edge_cases.py::TestReplacingLiteralAndWordBoundaries`.
+
 **Encoding detection + strictness (M15):** `detect_encoding`
 (`copybook_expander.py`) scores ASCII-vs-EBCDIC plausibility over a
 bounded 64 KiB prefix (BOM / strict-UTF-8 checks first, then COBOL-charset
@@ -889,9 +914,22 @@ clause almost always has enough slack, and squeezing keeps the line count
 (and every later line number) unchanged. When squeezing alone cannot fit
 the line, it wraps at the rightmost quote-safe blank onto a fresh Area-B
 continuation line (later line numbers then shift — the cost of not
-corrupting the statement). A line with no safe break at all (one giant
-token or literal) is left untouched so the parse's existing column-72
-warning reports the drop instead of this helper corrupting a literal. The
+corrupting the statement). A line with no safe break outside a literal
+(one giant token) is left untouched so the parse's existing column-72
+warning reports the drop. **A literal open at column 72 is continued**
+(2026-09-28): the expander merges continuation records before splicing, so
+*any* `COPY` in a fixed-format file turned a long continued `VALUE` literal
+back into one >72-column line that the fitter could not break -- the text
+past column 72 was dropped and the parse still reported success.
+`_split_open_literal` now cuts the line at column 72 with the literal left
+open (trailing blanks kept) and resumes it on a `      -    '...` record
+(hyphen in column 7, quote at column 12); it moves the cut one column left
+when column 72 is the first quote of a `''` escape. It is also preferred
+over a blank wrap whose tail would not fit anyway. Wrapped pieces of a line
+merged from continuation records map to those records in the source map
+(`_wrapped_origins`: piece k -> first record + k, capped at the last one
+absorbed); an ordinary wrap still shares its line's origin. Pinned by
+`tests/unit/test_copybook_expander_edge_cases.py::TestContinuedLiteralSurvivesExpansion`. The
 wrap loop anchors its break point *after* the line's first non-blank
 character and bails on any iteration that makes no forward progress — the
 first version broke at any blank past index 7, and a wrapped tail's own

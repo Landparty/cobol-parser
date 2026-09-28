@@ -1014,21 +1014,34 @@ def _build_clause_pattern(clause: ReplacingClause) -> str | None:
         if index:
             beside_paren = word in ("(", ")") or words[index - 1] in ("(", ")")
             body += r"[ \t]*" if beside_paren else r"[ \t]+"
-        body += re.escape(word)
+        if word[0] in ("'", '"'):
+            # Literal content is case-sensitive even though the pattern as a
+            # whole is compiled IGNORECASE (``=='abc'==`` must not rewrite
+            # ``'ABC'``).
+            body += "(?-i:" + re.escape(word) + ")"
+        else:
+            body += re.escape(word)
 
-    is_start_word = find_text[0].isalnum() or find_text[0] == "-"
-    is_end_word = find_text[-1].isalnum() or find_text[-1] == "-"
+    is_start_word = _is_word_char(find_text[0])
+    is_end_word = _is_word_char(find_text[-1])
 
-    start_boundary = r"(?<![A-Za-z0-9-])" if is_start_word else r""
-    end_boundary = r"(?![A-Za-z0-9-])" if is_end_word else r""
+    # A word boundary is "no identifier character beside it"; a numeric
+    # literal's decimal point also binds (``1`` is not a word of ``1.5``).
+    start_boundary = r"(?<![A-Za-z0-9_-])(?<![0-9]\.)" if is_start_word else r""
+    end_boundary = r"(?![A-Za-z0-9_-])(?!\.[0-9])" if is_end_word else r""
 
     if clause.mode == "ALL":
         return start_boundary + body + end_boundary
     if clause.mode == "LEADING":
-        return start_boundary + body + (r"(?=[A-Za-z0-9-])" if is_end_word else r"")
+        return start_boundary + body + (r"(?=[A-Za-z0-9_-])" if is_end_word else r"")
     if clause.mode == "TRAILING":
-        return (r"(?<=[A-Za-z0-9-])" if is_start_word else r"") + body + end_boundary
+        return (r"(?<=[A-Za-z0-9_-])" if is_start_word else r"") + body + end_boundary
     return None
+
+
+def _is_word_char(char: str) -> bool:
+    """True for a character that can be part of a COBOL word."""
+    return char.isalnum() or char in ("-", "_")
 
 
 def _split_literal_segments(line: str) -> list[tuple[str, bool]]:
@@ -1125,6 +1138,7 @@ def apply_replacing_clauses(
     # ``==A== BY ==B== ==B== BY ==A==`` turned every A *and* B into A
     # instead of swapping them.
     replacements: dict[str, str] = {}
+    quoted: set[str] = set()
     code_alternatives: list[str] = []
     literal_alternatives: list[str] = []
     for index, clause in enumerate(sorted_clauses):
@@ -1136,8 +1150,9 @@ def apply_replacing_clauses(
         replacements[name] = clause.replace_text
         code_alternatives.append(alternative)
         # A search text that itself contains a quote deliberately targets
-        # literal text; only such clauses may rewrite inside string literals.
+        # literal text; only such clauses may match inside string literals.
         if '"' in clause.find_text or "'" in clause.find_text:
+            quoted.add(name)
             literal_alternatives.append(alternative)
     if not code_alternatives:
         return content
@@ -1158,22 +1173,72 @@ def apply_replacing_clauses(
         if is_comment[idx]:
             continue
         if '"' in line or "'" in line:
-            lines[idx] = "".join(
-                (
-                    (
-                        literal_pattern.sub(_replacement, segment)
-                        if literal_pattern is not None
-                        else segment
-                    )
-                    if is_literal
-                    else code_pattern.sub(_replacement, segment)
-                )
-                for segment, is_literal in _split_literal_segments(line)
+            lines[idx] = _replace_in_line_with_literals(
+                line, code_pattern, literal_pattern, quoted, replacements
             )
         else:
             lines[idx] = code_pattern.sub(_replacement, line)
 
     return "\n".join(lines)
+
+
+def _replace_in_line_with_literals(
+    line: str,
+    code_pattern: re.Pattern[str],
+    literal_pattern: re.Pattern[str] | None,
+    quoted: set[str],
+    replacements: dict[str, str],
+) -> str:
+    """Apply the REPLACING alternation to one line that holds a literal.
+
+    The pattern runs over the *whole* line, so a search text mixing code and
+    a literal (``==VALUE 'A'==``) can match. A match of a clause whose search
+    text has no quote is rejected when it lies inside a literal (it can only
+    be wholly inside one, having no quote of its own to straddle one with);
+    at a rejected position the quote-bearing clauses still get their turn.
+    """
+    literal_spans = [
+        (start, start + len(segment))
+        for start, segment, is_literal in _segment_offsets(line)
+        if is_literal
+    ]
+
+    def _inside_literal(position: int) -> bool:
+        return any(start <= position < end for start, end in literal_spans)
+
+    out: list[str] = []
+    pos = 0
+    search_from = 0
+    while True:
+        match = code_pattern.search(line, search_from)
+        if match is None:
+            break
+        name = match.lastgroup or ""
+        chosen: re.Match[str] | None = match
+        if name not in quoted and _inside_literal(match.start()):
+            chosen = (
+                literal_pattern.match(line, match.start())
+                if literal_pattern is not None
+                else None
+            )
+        if chosen is None:
+            search_from = match.start() + 1
+            continue
+        out.append(line[pos : chosen.start()])
+        out.append(replacements[chosen.lastgroup or ""])
+        pos = search_from = chosen.end()
+    out.append(line[pos:])
+    return "".join(out)
+
+
+def _segment_offsets(line: str) -> list[tuple[int, str, bool]]:
+    """``_split_literal_segments`` with each segment's start offset."""
+    result: list[tuple[int, str, bool]] = []
+    offset = 0
+    for segment, is_literal in _split_literal_segments(line):
+        result.append((offset, segment, is_literal))
+        offset += len(segment)
+    return result
 
 
 def track_source_location(

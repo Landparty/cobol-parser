@@ -395,6 +395,52 @@ class TestApplyReplacing:
         assert "DATA-DATA" in result
 
 
+class TestReplacingLiteralAndWordBoundaries:
+    """Search texts mixing code and literals, literal case, numeric words."""
+
+    @staticmethod
+    def _apply(content: str, find: str, replace: str, mode: str = "ALL") -> str:
+        return apply_replacing_clauses(
+            content,
+            [ReplacingClause(find_text=find, replace_text=replace, mode=mode)],
+            indicator_position=0,
+        )
+
+    def test_search_text_mixing_code_and_literal_matches(self):
+        content = " 05 F1 PIC X(3) VALUE 'A'.\n 05 F2 PIC X(3) VALUE 'AB'."
+        out = self._apply(content, "VALUE 'A'", "VALUE 'B'")
+        assert out == " 05 F1 PIC X(3) VALUE 'B'.\n 05 F2 PIC X(3) VALUE 'AB'."
+
+    def test_unquoted_search_text_still_never_matches_inside_a_literal(self):
+        out = self._apply(" 05 F1 PIC X(9) VALUE 'VALUE A'.", "VALUE A", "Z")
+        assert out == " 05 F1 PIC X(9) VALUE 'VALUE A'."
+        # ... while the same line's code still matches.
+        out = self._apply(" MOVE A TO B DISPLAY 'A'.", "A", "Q")
+        assert out == " MOVE Q TO B DISPLAY 'A'."
+
+    def test_literal_portion_is_case_sensitive(self):
+        content = " 05 F1 PIC X VALUE 'abc'.\n 05 F2 PIC X VALUE 'ABC'."
+        out = self._apply(content, "'abc'", "'xyz'")
+        assert out == " 05 F1 PIC X VALUE 'xyz'.\n 05 F2 PIC X VALUE 'ABC'."
+        # the word part of a mixed search text stays case-insensitive
+        out = self._apply(content, "value 'ABC'", "VALUE 'Q'")
+        assert out == " 05 F1 PIC X VALUE 'abc'.\n 05 F2 PIC X VALUE 'Q'."
+
+    def test_decimal_numeric_literal_is_one_word(self):
+        assert self._apply(" 05 A PIC 9V9 VALUE 1.5.", "1", "2") == (
+            " 05 A PIC 9V9 VALUE 1.5."
+        )
+        assert self._apply(" 05 A PIC 9V9 VALUE 3.1.", "1", "2") == (
+            " 05 A PIC 9V9 VALUE 3.1."
+        )
+        # a separator period after the number is not a decimal point
+        assert self._apply(" MOVE 1 TO X. ADD 1.", "1", "2") == " MOVE 2 TO X. ADD 2."
+
+    def test_underscore_is_a_word_character(self):
+        assert self._apply(" 05 WS_A PIC X.", "WS", "ZZ") == " 05 WS_A PIC X."
+        assert self._apply(" 05 A_WS PIC X.", "WS", "ZZ") == " 05 A_WS PIC X."
+
+
 class TestFuzzyMatching:
     """Test fuzzy matching for copybook suggestions."""
 
