@@ -892,8 +892,9 @@ is optional (IBM): a bare `STATUS [IS] x [y]` starts the same clause
 (`STATUS` is in `_SELECT_CLAUSE_KEYWORDS`); before 2026-09-28 it was glued
 onto `assign_to` and `file_status` stayed empty
 (`test_environment_division_parser.py::test_status_clause_without_the_word_file`). `DECIMAL-POINT IS COMMA` in
-SPECIAL-NAMES emits a warning that the clause is recorded but not honored
-by the lexer (H4). All division parsers can reach the host warning channel:
+SPECIAL-NAMES used to warn that the lexer ignored it (H4); since 2026-09-28
+it is honoured (comma-decimal literals, `,`/`.` exchanged in PICTURE -- see
+[lexer.md](lexer.md)) and the warning is gone. All division parsers can reach the host warning channel:
 `BaseDivisionParser.host` is set by the division loop (`parser.py`).
 
 **Comment-entries verbatim (`identification.py`, 2026-09-28):**

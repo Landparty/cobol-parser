@@ -381,9 +381,13 @@ def _decode_edited(
     """
     codec = EBCDIC_CODEC if opts.charset is Charset.EBCDIC else "latin-1"
     text = raw.decode(codec, errors="replace")
-    if edit_numeric(spec.picture, "0") is None or len(raw) < spec.storage_size:
+    comma = spec.decimal_point_is_comma
+    if (
+        edit_numeric(spec.picture, "0", decimal_point_is_comma=comma) is None
+        or len(raw) < spec.storage_size
+    ):
         return _decode_text(raw, opts), None
-    parsed = deedit_numeric(spec.picture, text)
+    parsed = deedit_numeric(spec.picture, text, decimal_point_is_comma=comma)
     if parsed is None:
         return text.rstrip(" \x00"), (
             f"{text!r} is not a value PIC {spec.picture} can display"

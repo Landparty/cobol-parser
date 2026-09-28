@@ -66,22 +66,31 @@ class PictureClause(ASTNode):
         pattern: str,
         location: SourceLocation,
         currency_symbols: frozenset[str] | set[str] | None = None,
+        decimal_point_is_comma: bool = False,
     ):
         """*currency_symbols* are the PICTURE currency symbols the program
         declares through ``SPECIAL-NAMES. CURRENCY SIGN IS ...`` (other than
         the default ``$``) that occur in *pattern*. Each is edited exactly
         like ``$`` -- a fixed or floating currency insertion character -- so
         the pattern is sized and validated as if it were written with
-        ``$``, while :attr:`pattern` keeps the characters as written."""
+        ``$``, while :attr:`pattern` keeps the characters as written.
+
+        *decimal_point_is_comma* (``SPECIAL-NAMES. DECIMAL-POINT IS COMMA``)
+        exchanges the roles of ``,`` and ``.``: ``,`` is the editing decimal
+        point and ``.`` a simple insertion character. The pattern is sized
+        and validated through the default spelling (``9(3),99`` as
+        ``9(3).99``) and, like the currency symbols, kept as written."""
         super().__init__("PictureClause", location)
         self.currency_symbols: frozenset[str] = frozenset(currency_symbols or ())
-        # Sized and validated through the ``$`` spelling (see above); the
-        # verbatim pattern is restored once both passes have run.
-        self.pattern = (
-            pattern.translate({ord(sym): "$" for sym in self.currency_symbols})
-            if self.currency_symbols
-            else pattern
-        )
+        self.decimal_point_is_comma: bool = bool(decimal_point_is_comma)
+        # Sized and validated through the ``$`` / default-decimal-point
+        # spelling (see above); the verbatim pattern is restored once both
+        # passes have run.
+        translation: dict[int, str] = {ord(sym): "$" for sym in self.currency_symbols}
+        if self.decimal_point_is_comma:
+            translation[ord(",")] = "."
+            translation[ord(".")] = ","
+        self.pattern = pattern.translate(translation) if translation else pattern
         self.size: int | None = None
         self.integer_digits: int | None = None
         self.decimal_digits: int | None = None
@@ -114,9 +123,12 @@ class PictureClause(ASTNode):
         self.validation_errors: list[str] = []
         self._parse_pattern()
         self._validate_pattern()
-        if self.currency_symbols:
+        if translation:
             self.pattern = pattern
+        if self.currency_symbols:
             self._metadata["currency_symbols"] = sorted(self.currency_symbols)
+        if self.decimal_point_is_comma:
+            self._metadata["decimal_point_is_comma"] = True
 
     def _parse_pattern(self) -> None:
         """Parse the PICTURE pattern to extract size and digit information."""

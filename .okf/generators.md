@@ -641,7 +641,7 @@ module docstring — that suite is the regression guard):
 | Storage | Bytes |
 |---------|-------|
 | DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte |
-| DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is |
+| DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is. Under `DECIMAL-POINT IS COMMA` (`FieldSpec.decimal_point_is_comma`, read off the `PictureClause`) both functions take `decimal_point_is_comma=True` and exchange `,`/`.` in the picture and the edited text: `Z.ZZ9,99` writes `1.234,56` (2026-09-28) |
 | DISPLAY numeric (zoned) | one byte per digit; sign as an overpunch, or a real `+`/`-` byte under `SIGN IS SEPARATE` |
 | `COMP-3` / `PACKED-DECIMAL` | two BCD nibbles per byte, sign nibble `C`/`D` signed, `F` unsigned |
 | `COMP` / `COMP-4` / `BINARY` | two's complement, **always big-endian** |

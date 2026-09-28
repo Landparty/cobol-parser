@@ -7,8 +7,8 @@ same-day C1-C8 remediation:
   CALL, IF, ...), not just DISPLAY and MOVE
 - H2: PERFORM VARYING ... AFTER ... keeps the second (and third) dimension
   in after_clauses instead of garbling it into the UNTIL condition string
-- H4: DECIMAL-POINT IS COMMA produces a ParseResult warning saying the
-  clause is not honored by the lexer
+- H4: DECIMAL-POINT IS COMMA used to warn that the lexer ignored it; it is
+  honoured now, so the warning is gone
 - H5: SELECT clauses ALTERNATE RECORD KEY / PADDING / RESERVE / SHARING /
   LOCK MODE / PASSWORD / RECORD DELIMITER / second FILE STATUS variable are
   captured; unknown SELECT clause tokens warn; assign_device is populated
@@ -236,9 +236,10 @@ class TestH2PerformVaryingAfter:
 
 
 class TestH4DecimalPointIsCommaWarns:
-    """H4: the unhonored SPECIAL-NAMES clause is caller-visible."""
+    """H4: the clause is honoured now (see
+    test_decimal_point_is_comma.py), so no "not honored" warning."""
 
-    def test_decimal_point_is_comma_warns(self):
+    def test_decimal_point_is_comma_no_longer_warns(self):
         result = _parse(
             "       IDENTIFICATION DIVISION.\n"
             "       PROGRAM-ID. EURO.\n"
@@ -250,7 +251,7 @@ class TestH4DecimalPointIsCommaWarns:
             "       PROCEDURE DIVISION.\n"
             "           STOP RUN.\n"
         )
-        assert any("DECIMAL-POINT IS COMMA" in w for w in result.warnings)
+        assert not any("DECIMAL-POINT" in w for w in result.warnings)
 
     def test_no_warning_without_the_clause(self):
         result = _parse_proc("           DISPLAY 'HI'.")

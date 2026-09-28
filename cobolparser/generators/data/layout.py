@@ -235,6 +235,10 @@ class FieldSpec:
     # does with the same `picture.total_digits`.
     total_digits: int | None = None
     scaling_leading: bool | None = None
+    #: ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA``: in :attr:`picture` ``,`` is
+    #: the decimal point and ``.`` an insertion character, so an edited
+    #: field displays ``1.234,56``. Read off the item's own ``PictureClause``.
+    decimal_point_is_comma: bool = False
 
     @property
     def scaling_positions(self) -> int:
@@ -657,6 +661,10 @@ def _flatten_into(
                 decimal_digits=decimal_digits,
                 total_digits=picture.total_digits if picture else None,
                 scaling_leading=picture.scaling_leading if picture else None,
+                decimal_point_is_comma=bool(
+                    picture is not None
+                    and getattr(picture, "decimal_point_is_comma", False)
+                ),
                 is_signed=_is_signed(picture),
                 value_clause=item.value_clause,
                 condition_values=_condition_values(item),

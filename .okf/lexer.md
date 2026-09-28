@@ -191,6 +191,32 @@ its NUL, `N`/`G`/`U` are their content; `None` for anything untyped. Level-88
 `values` still store the decoded content without the prefix -- a known
 follow-up (AUDIT.md). Pinned by `tests/regression/test_audit_2026_09_27.py`.
 
+# DECIMAL-POINT IS COMMA (2026-09-28)
+
+`declares_decimal_point_comma(source)` scans the whole source up front (the
+same way `_declared_currency_symbols` does) for `DECIMAL-POINT [IS] COMMA`;
+the result is `CobolLexer.decimal_point_is_comma` and `_decimal_char`
+(`","` or `"."`). Under it, in **both** `read_number_from_text`s (pure and
+`_lexer_fast.pyx`, which reads `self._decimal_char`):
+
+* a `,` between digits is the decimal point: `2,75` is one
+  `NUMERIC_LITERAL` whose `value` is the canonical `2.75` (every consumer
+  parses it as a number: `Decimal`, const-fold, generators) and whose
+  `raw_value` is the source text `2,75` -- the typed-literal convention;
+* `.` is no longer a decimal point: `1.5` lexes `1` PERIOD `5`;
+* a leading-decimal literal is `,5`, recognised only after a space/tab or
+  at line start -- `A,5` keeps the comma a separator; a comma followed by a
+  space (`MOVE A, B`) is always a separator.
+
+The scope is the whole compilation unit (nested programs inherit the
+containing program's SPECIAL-NAMES; stacked programs that disagree are not
+modelled). `CobolParser` copies the flag onto itself
+(`decimal_point_is_comma`, reset per `parse()`), and the DATA DIVISION
+hands it to `PictureClause` (see [ast-models.md](ast-models.md)). The
+SPECIAL-NAMES parser's old "not honored by the lexer" warning (audit H4) is
+gone. Pinned by `tests/regression/test_decimal_point_is_comma.py`, which
+runs every lexer case against both lexers.
+
 # Errors
 
 `LexerError` — extends `ParseError` (`cobolparser/_errors.py`). Raised for
