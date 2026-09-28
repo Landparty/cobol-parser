@@ -41,6 +41,14 @@ strings, never in parsed source. Indicators also appear in `host_variables`
 (the plain `:name` scan). Pinned by
 `test_sql_statements.py::TestHostVariables::test_null_indicator_keyword_as_parsed_from_source`.
 
+## `ExecSQLStatement.cursor_name` on positioned UPDATE/DELETE
+
+`UPDATE ... WHERE CURRENT OF C1` / `DELETE FROM T WHERE CURRENT OF C1` set
+`cursor_name` to the cursor (`_SQL_CURRENT_OF_RE`); a searched UPDATE/DELETE
+leaves it `None`. Before 2026-09-28 it was `None` for both. `tables[0]` is
+still the target table, so `io_logger`'s `target` is unchanged. Pinned by
+`test_sql_statements.py::TestCursorOperations::test_positioned_update_delete_names_the_cursor`.
+
 ## `ExecSQLStatement.tables` (`models/sql_statements.py`)
 
 Source order, with the statement's **target first** for INSERT / UPDATE /
