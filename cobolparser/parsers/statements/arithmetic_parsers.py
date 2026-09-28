@@ -35,6 +35,7 @@ from ._utils import (
     consume_signed_numeric,
     get_parse_context,
     is_statement_boundary,
+    keyword_upper,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
@@ -867,9 +868,9 @@ class ComputeStatementParser(IStatementParser):
                 break
             stmt.add_target(extra_target)
 
-        # Check for =
+        # Check for = (or its IBM spelling EQUAL: ``COMPUTE X EQUAL A + 1``)
         token = token_stream.peek()
-        if token and token.value == "=":
+        if token and (token.value == "=" or keyword_upper(token) == "EQUAL"):
             token_stream.consume()
         else:
             report_or_raise(ctx, "COMPUTE statement missing '=' operator", start_loc)

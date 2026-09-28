@@ -154,6 +154,16 @@ class TestM12ExpressionTrees:
         assert negate.operator == "NEGATE"
         assert negate.right_operand == "A"
 
+    def test_compute_equal_keyword_in_place_of_equals_sign(self):
+        """COMPUTE X EQUAL expr is IBM syntax; it used to fail with
+        "COMPUTE statement missing '=' operator"."""
+        result = parse_cobol(_program("    COMPUTE X ROUNDED EQUAL A + 1.\n"))
+        assert result.errors == []
+        stmt = _first(result, ComputeStatement)
+        assert stmt.targets == ["X"]
+        assert stmt.expression == "A + 1"
+        assert stmt.expression_tree.operator == "+"
+
     def test_compute_subscripted_operand_folded_into_leaf(self):
         """A(I) stays a single leaf string, mirroring operand style elsewhere."""
         result = parse_cobol(_program("    COMPUTE X = A(I) + 1.\n"))
