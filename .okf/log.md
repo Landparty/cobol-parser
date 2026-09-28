@@ -14,6 +14,17 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-28 -- control-flow bug hunt: nested-unit references, PERFORM UNTIL scope terminators, DOT keyword ids, hidden unreachable nodes
+
+[analysis.md](analysis.md): `DeadCodeAnalyzer` and the flow scanner's ENTRY
+collection no longer credit a contained program's PERFORM/ENTRY to the
+container's same-named paragraph. [parser.md](parser.md): an out-of-line
+`PERFORM p UNTIL c` nested in IF/EVALUATE/inline PERFORM stops at the
+enclosing `END-xxx` instead of swallowing it (which re-nested a top-level
+`STOP RUN` into the IF arm). [generators.md](generators.md): DOT quotes
+paragraph ids that are DOT keywords; `show_unreachable=False` also drops the
+hidden paragraph's edges, branch boxes and CALL-only external nodes.
+
 ## 2026-09-28 -- bug hunt round 7: batch .prof collisions, DOT escaping, >>DEFINE arithmetic, nested ALTER in health
 
 [batch.md](batch.md): per-file `.prof` dumps of inputs sharing a stem no

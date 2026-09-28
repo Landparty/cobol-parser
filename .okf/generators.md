@@ -176,6 +176,23 @@ Program Flow webview (Mermaid v11, `htmlLabels:false`,
   ending the DOT string early. And the node label's `\n (N stmts)` break is
   appended *after* `_dot_str` -- passed through it, the `\n` became `\\n`,
   which Graphviz renders as a literal backslash-n.
+- **DOT keyword ids (2026-09-28).** `_sanitize_id` output is a valid bare
+  DOT ID *except* for the reserved words `node`/`edge`/`graph`/`digraph`/
+  `subgraph`/`strict` (case-independent in Graphviz). A paragraph named
+  `NODE` was emitted as `NODE [label=...]` -- the default-node attribute
+  statement -- and `MAIN -> STRICT;` was a Graphviz syntax error (verified
+  with `@hpcc-js/wasm-graphviz`). `_dot_id()` quotes exactly those ids at
+  every DOT node/edge emission site. Mermaid is unaffected: its flowchart
+  keywords (`end`, `style`, `class`, `click`, ...) only bite in lower case,
+  and every id here is upper case (verified with mermaid 11 `parse()`).
+- **`show_unreachable=False` hides what the paragraph owns (2026-09-28).**
+  Only the paragraph's own node line (and its terminal node) was skipped;
+  its outgoing PERFORM/GO TO/CALL edges, its IF/EVALUATE decision and arm
+  boxes, and external nodes called only from it were still emitted, and
+  both renderers re-create an undeclared edge endpoint as a bare box -- the
+  hidden paragraph came back unstyled. `_hidden_ids()` (paragraph + its
+  branch/arm ids) and `_external_targets()` (drops a CALL made only from a
+  hidden paragraph) are shared by both generators.
 - **Arm boxes show statement summaries.** `BranchArm.summary` (see
   [analysis.md](analysis.md)'s statement_text section) renders instead of
   the bare `THEN`/`ELSE`/`WHEN x` keyword, which duplicated the edge label
