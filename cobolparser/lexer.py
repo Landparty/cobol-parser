@@ -30,6 +30,79 @@ _LEVEL_NUM_RE = re.compile(r"^\d{2}$")
 # First characters of any COBOL division keyword (upper + lower)
 _DIVISION_FIRST = frozenset("IEDPiedp")
 
+# ---------------------------------------------------------------------------
+# IDENTIFICATION DIVISION comment-entries (AUTHOR. / INSTALLATION. / ...)
+# ---------------------------------------------------------------------------
+# A comment-entry is free documentation text, not COBOL words: IBM
+# Enterprise COBOL accepts *any* character in it, up to the next entry that
+# starts in Area A. Tokenizing it like program text read the apostrophe of
+# ``AUTHOR. JOHN O'BRIEN.`` as an unterminated literal (a spurious lexer
+# warning) and split ``DATE-WRITTEN. 01/02/99.`` into ``01 / 02 / 99``. The
+# lexer therefore hands each comment-entry line to the parser verbatim, as a
+# single COMMENT_ENTRY token.
+_COMMENT_ENTRY_KEYWORDS = (
+    "AUTHOR|INSTALLATION|DATE-WRITTEN|DATE-COMPILED|SECURITY|REMARKS"
+)
+_COMMENT_ENTRY_RE = re.compile(
+    r"[ \t]*(?:" + _COMMENT_ENTRY_KEYWORDS + r")[ \t]*\.(?=[ \t]|$)",
+    re.IGNORECASE,
+)
+_COMMENT_ENTRY_ANY_RE = re.compile(
+    r"^[ \t]*(?:" + _COMMENT_ENTRY_KEYWORDS + r")[ \t]*\.",
+    re.IGNORECASE | re.MULTILINE,
+)
+_DIVISION_HEADER_RE = re.compile(
+    r"[ \t]*(IDENTIFICATION|ID|ENVIRONMENT|DATA|PROCEDURE)[ \t]+DIVISION\b",
+    re.IGNORECASE,
+)
+
+
+def _comment_entry_starts(source: str, lines: list[str]) -> dict[int, int]:
+    """Map each free-form line index holding comment-entry text to the
+    offset in that line where the text starts.
+
+    Only IDENTIFICATION DIVISION lines count. A line *starting* with one of
+    the comment-entry paragraph names (``AUTHOR.``) contributes the rest of
+    that line; when that paragraph name sits in Area A (at or left of the
+    ``IDENTIFICATION DIVISION`` header's own indentation -- the fixed-format
+    Area A/B split ``normalize_fixed_format`` preserves) every following
+    line indented into Area B is comment text too, up to the next Area A
+    line. That includes division-header-shaped text: NIST OBNC1M embeds an
+    entire phony program inside a SECURITY comment-entry. A paragraph name
+    indented deeper than the header (a loosely indented free-form source)
+    contributes only its own line, exactly as the IDENTIFICATION DIVISION
+    parser treats it.
+    """
+    if not _COMMENT_ENTRY_ANY_RE.search(source):
+        return {}
+    starts: dict[int, int] = {}
+    in_identification = False
+    header_indent = 0
+    in_area_b_entry = False
+    for index, line in enumerate(lines):
+        body = line.rstrip("\r\n")
+        text = body.lstrip(" \t")
+        if not text.strip():
+            continue
+        indent = len(body) - len(text)
+        if in_area_b_entry:
+            if indent > header_indent:
+                starts[index] = indent
+                continue
+            in_area_b_entry = False
+        header = _DIVISION_HEADER_RE.match(body) if text[0] in _DIVISION_FIRST else None
+        if header is not None:
+            in_identification = header.group(1).upper() in ("IDENTIFICATION", "ID")
+            header_indent = indent
+            continue
+        if not in_identification:
+            continue
+        entry = _COMMENT_ENTRY_RE.match(body)
+        if entry is not None:
+            starts[index] = entry.end()
+            in_area_b_entry = indent <= header_indent
+    return starts
+
 
 class TokenType(IntEnum):
     """Token types for COBOL lexical analysis.
@@ -335,6 +408,10 @@ class TokenType(IntEnum):
 
     # Error tokens
     INVALID_TOKEN = auto()
+
+    # One line of an IDENTIFICATION DIVISION comment-entry (AUTHOR. ...,
+    # REMARKS. ...), verbatim -- free documentation text, not COBOL words.
+    COMMENT_ENTRY = auto()
 
 
 @dataclass(slots=True)
@@ -725,6 +802,31 @@ class _CobolLexerPure:
         self._open_string_quote: str | None = None
         self._open_string_value: list[str] = []
         self._open_string_location: SourceLocation | None = None
+
+    def _comment_entry_line_tokens(
+        self, text: str, line_num: int, start_col: int, entry_start: int
+    ) -> list[Token]:
+        """Tokenize one line holding comment-entry text.
+
+        Whatever precedes *entry_start* (the ``AUTHOR.`` paragraph name, or
+        nothing on a continuation line) is ordinary program text; the rest
+        of the line is one COMMENT_ENTRY token holding the text verbatim.
+        """
+        tokens: list[Token] = self.tokenize_program_text(
+            text[:entry_start], line_num, start_col
+        )
+        rest = text[entry_start:]
+        body = rest.strip()
+        if body:
+            offset = entry_start + (len(rest) - len(rest.lstrip()))
+            tokens.append(
+                Token(
+                    TokenType.COMMENT_ENTRY,
+                    body,
+                    SourceLocation(line_num + 1, start_col + offset, len(body)),
+                )
+            )
+        return tokens
 
     def _is_figurative_constant(self, word: str) -> bool:
         """Check if word is a COBOL figurative constant.
@@ -1824,12 +1926,23 @@ class _CobolLexerPure:
         self.errors = []
         self.warnings = []
 
+        # Comment-entry lines (free-form only: the parser always lexes the
+        # normalized free-form text).
+        comment_entries = (
+            _comment_entry_starts(self.source, self.lines) if self.free_form else {}
+        )
+
         # Process line by line: fixed-format or free-form
         for line_num, line in enumerate(self.lines):
             if self.free_form:
                 # In free-form, treat entire line (minus trailing newline) as program text starting column 1
                 program_text = line.rstrip("\n")
-                tokens = self.tokenize_program_text(program_text, line_num, 1)
+                if comment_entries and line_num in comment_entries:
+                    tokens = self._comment_entry_line_tokens(
+                        program_text, line_num, 1, comment_entries[line_num]
+                    )
+                else:
+                    tokens = self.tokenize_program_text(program_text, line_num, 1)
                 self.tokens.extend(tokens)
                 if tokens:
                     location = SourceLocation(line_num + 1, len(line) + 1, 1)

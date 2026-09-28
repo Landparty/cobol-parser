@@ -896,6 +896,16 @@ SPECIAL-NAMES emits a warning that the clause is recorded but not honored
 by the lexer (H4). All division parsers can reach the host warning channel:
 `BaseDivisionParser.host` is set by the division loop (`parser.py`).
 
+**Comment-entries verbatim (`identification.py`, 2026-09-28):**
+`_parse_clause_value` first takes the consecutive `COMMENT_ENTRY` tokens
+the lexer emits (see [lexer.md](lexer.md)), joins the lines with one space
+and drops only the entry's own closing period (`AUTHOR. J. SMITH, O'NEIL.`
+-> `"J. SMITH, O'NEIL"`). An unterminated entry from a paragraph name that
+is not in Area A falls through to the old token-collection loop, so the
+loosely indented `AUTHOR. SOMEONE` / `DATA DIVISION.` shape still ends at
+the division header. Hand-built token lists (no `COMMENT_ENTRY`) parse
+exactly as before.
+
 **SPECIAL-NAMES clause boundaries (`environment_sections.py`, 2026-09-28):**
 IBM writes SPECIAL-NAMES as *one sentence* with a single closing period, so
 a clause ends where the next one starts. `CLASS` / `ALPHABET` operands used

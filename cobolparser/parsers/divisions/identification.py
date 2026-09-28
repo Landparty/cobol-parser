@@ -18,6 +18,7 @@ from cobolparser.core.exceptions import (
     UnexpectedEndOfInput,
 )
 from cobolparser.core.interfaces import ITokenStream
+from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision
 
@@ -439,9 +440,31 @@ class IdentificationDivisionParser(BaseDivisionParser):
                 ),
             ) from e
 
+        # The lexer hands a comment-entry over verbatim, one COMMENT_ENTRY
+        # token per line (see lexer._comment_entry_starts): free text such
+        # as ``JOHN O'BRIEN`` or ``01/02/99`` is not COBOL words and must not
+        # be re-tokenized. Lines are joined with one space; the entry's own
+        # closing period is dropped (as the token path below always has),
+        # but interior periods (``J. SMITH``) are part of the text.
+        entry_lines: list[str] = []
+        while not token_stream.is_empty():
+            token_stream.skip_whitespace_and_comments()
+            token = token_stream.peek(0)
+            if token is None or token.type != TokenType.COMMENT_ENTRY:
+                break
+            entry_lines.append(token.value)
+            token_stream.consume()
+            last_line = getattr(getattr(token, "location", None), "line", last_line)
+        if entry_lines:
+            text = " ".join(entry_lines)
+            if text.endswith(".") or in_comment_entry:
+                return text[:-1].rstrip() if text.endswith(".") else text
+            # A loosely indented, unterminated entry: fall through and keep
+            # collecting ordinary tokens up to the period, as before.
+
         # Collect value tokens until period
         # Also stop at division boundaries to avoid consuming the next division header
-        value_tokens = []
+        value_tokens = entry_lines[:]
         while not token_stream.is_empty():
             token = token_stream.peek(0)
             if token and token.value == ".":

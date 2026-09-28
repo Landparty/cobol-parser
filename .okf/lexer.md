@@ -1,9 +1,9 @@
 ---
 type: Module
 title: Lexer
-description: Tokenizes COBOL source into Token objects; 243 TokenType values; optional Cython hot-path.
+description: Tokenizes COBOL source into Token objects; 244 TokenType values; optional Cython hot-path.
 tags: [lexer, tokenizer, cython, token-type]
-timestamp: 2026-08-14T23:45:00Z
+timestamp: 2026-09-28T00:00:00Z
 ---
 
 # Overview
@@ -29,7 +29,7 @@ tokens: list[Token] = tokenize_cobol(text)       # convenience wrapper
 
 # TokenType Enum
 
-`TokenType(IntEnum)` — 243 members. Using `IntEnum` rather than plain `Enum`
+`TokenType(IntEnum)` — 244 members (`COMMENT_ENTRY` appended last, 2026-09-28). Using `IntEnum` rather than plain `Enum`
 makes hot-path membership tests and `hash()` lookups significantly cheaper.
 
 Major groups:
@@ -474,3 +474,25 @@ the latter also breaks on form feed / NEL / U+2028 etc., which shifted
 every later token's line number by one. See `preprocessing.md`
 ("Audit 2026-09-17").
 
+# IDENTIFICATION DIVISION comment-entries (2026-09-28)
+
+`AUTHOR.` / `INSTALLATION.` / `DATE-WRITTEN.` / `DATE-COMPILED.` /
+`SECURITY.` / `REMARKS.` take a *comment-entry*: free text (any character)
+up to the next Area A entry. Lexed as program text, `AUTHOR. JOHN O'BRIEN.`
+raised a spurious "Unterminated string literal" warning (the apostrophe) and
+`DATE-WRITTEN. 01/02/99.` split into `01 / 02 / 99`. Now
+`_comment_entry_starts(source, lines)` (module-level, pure Python, called
+once per `tokenize()` on the free-form path by **both** lexers -- the
+Cython `tokenize` mirrors the dispatch) maps each IDENTIFICATION DIVISION
+line holding comment-entry text to the offset where it starts;
+`_comment_entry_line_tokens()` lexes the paragraph name normally and emits
+the rest of the line as one `COMMENT_ENTRY` token, verbatim. Area rules
+match the IDENTIFICATION parser's: a paragraph name at or left of the
+`IDENTIFICATION DIVISION` header's indentation (Area A) also claims every
+following line indented deeper (Area B) -- NIST OBNC1M's phony program
+included -- up to the next Area A line; one indented deeper claims only its
+own line. The whole scan is skipped unless one multiline regex search finds
+a comment-entry paragraph name at a line start. The fixed-format
+(`free_form=False`) path is unchanged; the parser always lexes normalized
+free-form text. `tests/regression/test_comment_entry_verbatim.py` (includes
+a pure/Cython parity check).
