@@ -337,6 +337,18 @@ class _Parser:
             value, consumed = self._parse_quoted(text, 0, line)
             self._require_flow_end(text, consumed, line)
             return value
+        if _is_sequence_indicator(text):
+            # `key: - x` -- a block sequence cannot start on its key's line
+            # (YAML: "sequence entries are not allowed here"). Read as a plain
+            # scalar it became the string "- x": a list the user wrote,
+            # silently turned into one text value (a copybook directory
+            # literally named "- copybooks").
+            raise self._error(
+                f"a '- ' sequence entry cannot follow 'key:' on the same line "
+                f"({text!r}); put each entry on its own line below the key, "
+                f"or quote the value",
+                line,
+            )
         if _is_mapping_entry(text):
             # `key: a: b` -- YAML rejects a plain scalar holding `: ` ("mapping
             # values are not allowed here"); taking it as the string "a: b"
@@ -376,6 +388,12 @@ class _Parser:
         raw = text[start:end].strip()
         if raw and raw[0] in _REJECTED_VALUE_PREFIXES:
             raise self._error(_REJECTED_VALUE_PREFIXES[raw[0]], line)
+        if _is_sequence_indicator(raw):
+            raise self._error(
+                f"a '- ' sequence entry is not allowed inside a flow collection "
+                f"({raw!r}); quote the value",
+                line,
+            )
         return _plain_scalar(raw), end
 
     def _parse_flow_collection(
@@ -482,6 +500,13 @@ def _step_in_quote(text: str, i: int, quote: str) -> tuple[int, str | None]:
             return i + 2, quote
         return i + 1, None
     return i + 1, quote
+
+
+def _is_sequence_indicator(text: str) -> bool:
+    """Whether a plain value starts with the block-sequence indicator: a
+    ``-`` followed by whitespace or nothing. ``-x`` and ``-1`` are ordinary
+    plain scalars; ``-`` and ``- x`` are not scalars at all."""
+    return text == "-" or text.startswith(("- ", "-\t"))
 
 
 def _is_mapping_entry(text: str) -> bool:

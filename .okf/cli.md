@@ -132,6 +132,12 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   string `"- x"`; and line numbers count `\n`/`\r\n`/`\r` records only
   (`split_source_lines`), not the form feeds / NEL / U+2028 `splitlines()`
   also broke on.
+* **A sequence entry where a scalar belongs is rejected** (2026-09-28):
+  `copybook_path: - copybooks` (and `[- x]`, `{k: - x}`, `key: -`) had come
+  back as the *string* `"- copybooks"` -- a list the user wrote, silently
+  turned into one directory name. YAML rejects it ("sequence entries are not
+  allowed here"); so does `_is_sequence_indicator()` now. `-x` / `-1` are
+  still plain scalars.
 * **Tool sections** — `mockymock:` and `analyzer:` are validated only as
   mappings and carried verbatim on `ProjectConfig.tools`; this package never
   needs to know their schemas.

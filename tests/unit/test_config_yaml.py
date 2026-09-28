@@ -347,3 +347,31 @@ def test_escaped_quote_does_not_end_the_quoted_span(text, expected):
 
 def test_utf8_byte_order_mark_is_ignored():
     assert parse_yaml("﻿version: 1\n") == {"version": 1}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "copybook_path: - copybooks\n",
+        "a: -\n",
+        "- a: - x\n",
+        "a: -\tx\n",
+        "a: [- x]\n",
+        "a: {k: - x}\n",
+    ],
+)
+def test_sequence_indicator_in_value_position_rejected(text):
+    # `key: - x` is not a scalar in YAML ("sequence entries are not allowed
+    # here"); it used to come back as the string "- x" -- a copybook
+    # directory literally named "- copybooks".
+    with pytest.raises(YamlError, match="sequence entry"):
+        parse_yaml(text)
+
+
+def test_dash_led_plain_scalars_still_read():
+    assert parse_yaml("a: -x\nb: -1\nc: '- x'\nd: [-1, -y]\n") == {
+        "a": "-x",
+        "b": -1,
+        "c": "- x",
+        "d": [-1, "-y"],
+    }
