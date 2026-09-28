@@ -186,6 +186,13 @@ sub-parameter*: overriding `DCB=(RECFM=FB,LRECL=80)` with `DCB=(LRECL=100)`
 keeps `RECFM=FB`); a DD name the procedure step does not have is an addition. The invocation keeps its own copy of every override
 card, so nothing is moved out of sight.
 
+`PARM` and `COND` coded on the invoking `EXEC` follow the z/OS rules too:
+`PARM.procstep=` / `COND.procstep=` override that one procedure step (a
+procstep the procedure does not have is noted in `unresolved`); unqualified
+`COND=` overrides every step, while unqualified `PARM=` goes to the *first*
+step and nullifies `PARM` on every later one. A `keyword.procstep` form of
+any `EXEC_KEYWORDS` entry is never read as a symbolic override.
+
 **Symbolic parameters** (`&SYM`, `&SYM.`) are substituted from `SET` values,
 then procedure defaults, then `EXEC` overrides — increasing precedence. The
 `SET` values a procedure sees are the ones in effect at its `EXEC` card; a

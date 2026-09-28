@@ -1570,3 +1570,43 @@ $$
         step = result.jobs[0].steps[0]
         assert step.dd("IN").instream_lines == ["ab\x0ccd"]
         assert step.dd("OUT").line == 6
+
+
+class TestProcedureExecOverrides:
+    PROC = """\
+//J JOB 1
+//P PROC
+//PS1 EXEC PGM=A,PARM='ONE'
+//PS2 EXEC PGM=B,PARM='TWO',COND=(4,LT)
+// PEND
+"""
+
+    def test_qualified_parm_overrides_that_procedure_step(self):
+        result = parse_jcl(self.PROC + "//S EXEC P,PARM.PS2='NEW'\n//\n")
+        assert result.errors == []
+        job = result.jobs[0]
+        assert job.step("S.PS1").parm == "ONE"
+        assert job.step("S.PS2").parm == "NEW"
+        assert "PARM.PS2" not in result.symbols
+
+    def test_unqualified_parm_goes_to_first_step_and_nullifies_the_rest(self):
+        result = parse_jcl(self.PROC + "//S EXEC P,PARM='FIRST'\n//\n")
+        job = result.jobs[0]
+        assert job.step("S.PS1").parm == "FIRST"
+        assert job.step("S.PS2").parm is None
+        assert all(p.keyword != "PARM" for p in job.step("S.PS2").parameters)
+
+    def test_cond_overrides_qualified_and_unqualified(self):
+        result = parse_jcl(
+            self.PROC + "//S EXEC P,COND.PS1=(8,LE)\n//T EXEC P,COND=(0,NE)\n//\n"
+        )
+        job = result.jobs[0]
+        assert job.step("S.PS1").condition == "(8,LE)"
+        assert job.step("S.PS2").condition == "(4,LT)"
+        assert job.step("T.PS1").condition == "(0,NE)"
+        assert job.step("T.PS2").condition == "(0,NE)"
+
+    def test_override_naming_a_missing_procedure_step_is_reported(self):
+        result = parse_jcl(self.PROC + "//S EXEC P,PARM.NOPE=X\n//\n")
+        assert result.errors == []
+        assert any("no step named NOPE" in n for n in result.unresolved)

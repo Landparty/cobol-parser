@@ -501,6 +501,10 @@ class _Builder:
                 condition = param.value
             elif keyword in EXEC_KEYWORDS:
                 continue
+            elif "." in keyword and keyword.partition(".")[0] in EXEC_KEYWORDS:
+                # `PARM.procstep=` and friends: a step parameter aimed at
+                # one step of the procedure, applied when it is expanded.
+                continue
             elif param.value is None and keyword:
                 if index == 0 and procedure is None and program is None:
                     procedure = param.keyword
@@ -756,6 +760,7 @@ class _Builder:
         symbols.update(overrides)
         proc_steps = self._parse_procedure_body(key, body, symbols)
         self._apply_dd_overrides(step, coded_name, proc_steps)
+        self._apply_exec_overrides(step, coded_name, proc_steps)
         prefix = f"{step.name}." if step.name else ""
         for proc_step in proc_steps:
             proc_step.name = f"{prefix}{proc_step.name}"
@@ -809,6 +814,54 @@ class _Builder:
                 f"of procedure {coded_name}",
             )
         return sink.steps
+
+    def _apply_exec_overrides(
+        self, invocation: JobStep, proc_name: str, proc_steps: list[JobStep]
+    ) -> None:
+        """Apply ``PARM`` / ``COND`` coded on the EXEC that invoked a procedure.
+
+        ``PARM.procstep=`` and ``COND.procstep=`` override that one procedure
+        step.  Unqualified, ``COND=`` overrides every step of the procedure,
+        while ``PARM=`` applies to the *first* step and nullifies the ``PARM``
+        of every later one -- the z/OS rules for an EXEC calling a procedure.
+        """
+        for param in invocation.parameters:
+            base, _, procstep = param.keyword.upper().partition(".")
+            if base not in ("PARM", "COND"):
+                continue
+            if procstep:
+                targets = [s for s in proc_steps if s.name.upper() == procstep]
+                if not targets:
+                    self._note(
+                        f"{param.keyword} (line {invocation.line}): procedure "
+                        f"{proc_name} has no step named {procstep}, so the "
+                        "override was not applied"
+                    )
+                    continue
+            else:
+                targets = list(proc_steps)
+            for index, target in enumerate(targets):
+                value = param.value
+                if base == "PARM" and not procstep and index > 0:
+                    value = None
+                self._set_step_parameter(target, base, value)
+
+    def _set_step_parameter(
+        self, step: JobStep, keyword: str, value: str | None
+    ) -> None:
+        """Override (or, with an empty value, nullify) one EXEC parameter."""
+        kept = [p for p in step.parameters if p.keyword.upper() != keyword]
+        position = next(
+            (i for i, p in enumerate(step.parameters) if p.keyword.upper() == keyword),
+            len(kept),
+        )
+        if value:
+            kept.insert(position, self._parse_parameter(f"{keyword}={value}"))
+        step.parameters = kept
+        if keyword == "PARM":
+            step.parm = unquote(value) if value else None
+        else:
+            step.condition = value or None
 
     def _apply_dd_overrides(
         self, invocation: JobStep, proc_name: str, proc_steps: list[JobStep]
