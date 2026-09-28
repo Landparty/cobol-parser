@@ -258,3 +258,29 @@ class TestDialectServiceInfoStaysInSync:
 
     def test_uncatalogued_service_still_has_info(self) -> None:
         assert IBMEnterpriseCobol().get_le_service_info("CEETERM") is not None
+
+
+class TestEnterpriseSixIntrinsicSignatures:
+    """The post-COBOL-85 intrinsics carry signatures with IBM's arity."""
+
+    @pytest.mark.parametrize(
+        "name, required, total",
+        [
+            ("TRIM", 1, 2),
+            ("FORMATTED-DATETIME", 3, 4),
+            ("FORMATTED-TIME", 2, 3),
+            ("FORMATTED-DATE", 2, 2),
+            ("NUMVAL-F", 1, 1),
+            ("TEST-NUMVAL-C", 1, 2),
+            ("DISPLAY-OF", 1, 2),
+            ("USUBSTR", 3, 3),
+            ("PI", 0, 0),
+            ("UUID4", 0, 0),
+        ],
+    )
+    def test_arity(self, name: str, required: int, total: int) -> None:
+        sig = intrinsic_signature(name)
+        assert sig is not None
+        assert len(sig.required_arguments) == required
+        assert len(sig.arguments) == total
+        assert IBMEnterpriseCobol().is_intrinsic_function(name)
