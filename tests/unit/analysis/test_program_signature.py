@@ -483,3 +483,62 @@ def test_accumulated_and_giving_operands_get_the_right_direction():
         "LK-A": "input",
         "LK-B": "input",
     }
+
+
+BY_VALUE_ENTRY = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. E1.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC X(4).
+       LINKAGE SECTION.
+       01 LK-A PIC X(4).
+       01 LK-B PIC S9(9) COMP-5.
+       01 LK-C PIC X(4).
+       01 LK-R PIC S9(4) COMP.
+       PROCEDURE DIVISION USING LK-A BY VALUE LK-B BY REFERENCE LK-C
+           RETURNING LK-R.
+       MAIN-PARA.
+           MOVE LK-A TO WS-X
+           MOVE LK-B TO LK-R
+           MOVE WS-X TO LK-C
+           GOBACK.
+       ALT-PARA.
+           ENTRY 'E1ALT' USING LK-A.
+           MOVE LK-A TO WS-X
+           GOBACK.
+"""
+
+
+class TestEntryUsingAndPassingModes:
+    def test_entry_using_is_not_an_ambiguous_call_argument(self):
+        signature = _signature(BY_VALUE_ENTRY)
+
+        alt = signature.entry("E1ALT")
+        assert alt is not None
+        assert [(p.name, p.direction) for p in alt.parameters] == [("LK-A", "input")]
+        assert not any(c.startswith("LK-A:") for c in signature.unchecked)
+
+    def test_by_clause_is_set_and_rendered_where_the_mode_changes(self):
+        signature = _signature(BY_VALUE_ENTRY)
+
+        primary = signature.primary
+        assert primary is not None
+        assert [p.by_clause for p in primary.parameters] == [
+            "REFERENCE",
+            "VALUE",
+            "REFERENCE",
+        ]
+        assert primary.call_example() == (
+            'CALL "E1" USING LK-A, BY VALUE LK-B, BY REFERENCE LK-C RETURNING LK-R'
+        )
+        # ENTRY's own USING phrase carries no mode: rendered bare.
+        alt = signature.entry("E1ALT")
+        assert alt is not None
+        assert alt.parameters[0].by_clause is None
+        assert alt.call_example() == 'CALL "E1ALT" USING LK-A'
+
+    def test_returning_item_is_not_unreferenced_linkage(self):
+        signature = _signature(BY_VALUE_ENTRY)
+
+        assert "LK-R" not in signature.unreferenced_linkage
+        assert signature.unreferenced_linkage == []

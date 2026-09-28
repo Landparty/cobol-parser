@@ -1844,7 +1844,15 @@ internal env) rather than approximating:
   paragraph call, optionally `THRU` a range) is walked inline exactly once,
   including into paragraphs it in turn `PERFORM`s, guarded against a
   non-looping `PERFORM` cycle by tracking which paragraphs are already on
-  the current call stack.
+  the current call stack. The loop's own `VARYING` / every `AFTER` variable
+  is poisoned too (it ends one step past the UNTIL, never at its pre-loop
+  value) -- inline, out-of-line, and nested inside an IF arm / loop body
+  alike, via `_write_targets(PerformStatement)`. `SEARCH ... VARYING x`
+  poisons `x` the same way (`varying_variable`).
+* A write through a level-66 `RENAMES a [THRU b]` alias poisons the leaves
+  it covers (`_LayoutFacts.renames`, the declaration-order run from `a`'s
+  first leaf to `b`'s last; the whole record when that run is ambiguous).
+  The alias is written, never seed-restored, by READ INTO / ACCEPT.
 * An `IF`/`EVALUATE` branches on data this walk does not evaluate (Phase 5's
   `ScenarioPlanner` already owns targeting one specific arm elsewhere), so
   every field either arm could write is poisoned the same way as a loop
@@ -2310,7 +2318,12 @@ sig.unchecked                   # what could not be determined exactly
 `by_clause`, `location`, and a `declaration()` rendering the operand as a
 caller would have to write it (a group item is described by level and length
 rather than a fabricated picture). `EntryPoint.kind` is `"procedure-division"`
-or `"entry-statement"`.
+or `"entry-statement"`. `by_clause` is the callee's declared passing mode
+(`"REFERENCE"` / `"VALUE"`, from the division's `using_parameter_modes`
+metadata) on the primary entry, `None` on an ENTRY statement's operands;
+`call_example()` writes a `BY VALUE` / `BY REFERENCE` phrase only where the
+mode changes (`CALL "E1" USING LK-A, BY VALUE LK-B RETURNING LK-R`). The
+RETURNING item counts as named, so it is never `unreferenced_linkage`.
 
 **Direction is graded, never guessed.** It comes from how the PROCEDURE
 DIVISION uses each parameter, reusing xref's role vocabulary:
@@ -2319,6 +2332,9 @@ DIVISION uses each parameter, reusing xref's role vocabulary:
 * A reference only as a CALL argument or SQL host variable (`_AMBIGUOUS_ROLES`)
   → `unknown`, and listed in `unchecked`. A caller told "input-only" about a
   field the callee overwrites has been told something worse than nothing.
+  xref files `ENTRY "X" USING p` itself under the CALL-argument role
+  (`statement == "EntryStatement"`); those refs are dropped before grading,
+  since naming an entry's own parameter neither reads nor writes it.
 * A group whose fields xref reports as duplicated → `unknown`, rather than
   inferred from a same-named WORKING-STORAGE field.
 
