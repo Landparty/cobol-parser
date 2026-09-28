@@ -250,6 +250,27 @@ def _try_strict_utf8(prefix: bytes, truncated: bool) -> str | None:
         return None
 
 
+def _single_byte_codec(prefix: bytes) -> str:
+    """The codec for ASCII-shaped text that is *not* valid UTF-8.
+
+    Such a file carries bytes >= 0x80 that are not UTF-8 sequences -- in
+    practice a Windows / Micro Focus shop's cp1252 (or ISO-8859-1) copybook,
+    with an accented ``VALUE 'CAFÉ'`` or a ``€`` in a comment. It used to be
+    labelled ``'ascii'``, which cannot represent a single one of those bytes:
+    every accented character was silently turned into U+FFFD (and, under
+    ``encoding_errors="strict"``, the whole expansion failed). cp1252 is a
+    superset of ISO-8859-1's printable range; the five bytes it leaves
+    undefined fall back to latin-1, which maps every byte.
+    """
+    if prefix.isascii():
+        return "ascii"
+    try:
+        prefix.decode("cp1252")
+    except UnicodeDecodeError:
+        return "latin-1"
+    return "cp1252"
+
+
 def detect_encoding(file_path: str) -> str:
     """
     Detect character encoding of a file using pure-Python heuristics.
@@ -284,7 +305,8 @@ def detect_encoding(file_path: str) -> str:
 
     Returns:
         Encoding name string ('utf-8-sig', 'utf-8', 'utf-16', 'cp037' for
-        EBCDIC, or 'ascii')
+        EBCDIC, 'cp1252' / 'latin-1' for 8-bit ASCII-shaped text that is not
+        valid UTF-8, or 'ascii')
 
     Raises:
         EncodingError: If file cannot be read
@@ -343,7 +365,7 @@ def detect_encoding(file_path: str) -> str:
 
     # --- Decisive check 2: ASCII line endings + overwhelmingly printable ---
     if has_ascii_newline and printable_ratio >= 0.95:
-        return "utf-8" if utf8_text is not None else "ascii"
+        return "utf-8" if utf8_text is not None else _single_byte_codec(prefix)
 
     # --- Decisive check 3: valid UTF-8 with real multi-byte characters -----
     if utf8_text is not None and any(ord(ch) > 0x7F for ch in utf8_text):
@@ -370,7 +392,7 @@ def detect_encoding(file_path: str) -> str:
     if ebcdic_score > ascii_score:
         return "cp037"
 
-    return "utf-8" if utf8_text is not None else "ascii"
+    return "utf-8" if utf8_text is not None else _single_byte_codec(prefix)
 
 
 #: U+FFFD REPLACEMENT CHARACTER — emitted by Python's ``errors="replace"``

@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from cobolparser import expand_copybooks
+from cobolparser.preprocess.copybook_expander import (
+    detect_encoding,
+    read_file_with_encoding,
+)
 from cobolparser.preprocess.models import CopybookSearchPath
 from cobolparser.preprocess.path_resolver import PathResolver, find_copybook_file
 
@@ -74,3 +78,42 @@ class TestIndexedLookupHonoursConfiguredExtensions:
         out = expand_copybooks("       COPY MEM.\n", copybook_paths=[str(d)])
         assert "LIVE-REC" in out.expanded_source
         assert "STALE-REC" not in out.expanded_source
+
+
+class TestEightBitCopybookEncoding:
+    """A cp1252 / latin-1 copybook (not valid UTF-8, ASCII-shaped) used to be
+    detected as ``'ascii'``, so every accented character decoded to U+FFFD
+    with a lossy-decode warning -- and failed outright under strict mode."""
+
+    TEXT = "       01  CLIENT-NOM  PIC X(30) VALUE 'CAFÉ QUÉBEC €5'.\n"
+
+    def test_cp1252_detected_and_decoded(self, tmp_path):
+        cpy = tmp_path / "LAT.cpy"
+        cpy.write_bytes(self.TEXT.encode("cp1252"))
+        assert detect_encoding(str(cpy)) == "cp1252"
+        assert read_file_with_encoding(str(cpy)) == self.TEXT
+
+    def test_latin1_bytes_cp1252_leaves_undefined(self, tmp_path):
+        # 0x81 is undefined in cp1252; latin-1 maps every byte.
+        cpy = tmp_path / "RAW.cpy"
+        cpy.write_bytes(b"       01  A PIC X VALUE '\x81\xe9'.\n")
+        assert detect_encoding(str(cpy)) == "latin-1"
+        assert "\xe9" in read_file_with_encoding(str(cpy))
+
+    def test_expansion_keeps_accents_without_warning(self, tmp_path):
+        (tmp_path / "LAT.cpy").write_bytes(self.TEXT.encode("cp1252"))
+        out = expand_copybooks(
+            "       COPY LAT.\n",
+            copybook_paths=[str(tmp_path)],
+            encoding_errors="strict",
+        )
+        assert "CAFÉ QUÉBEC €5" in out.expanded_source
+        assert not any("Lossy" in w for w in out.statistics.warnings)
+
+    def test_plain_ascii_and_utf8_unchanged(self, tmp_path):
+        a = tmp_path / "A.cpy"
+        a.write_bytes(b"       01  A PIC X.\n")
+        assert detect_encoding(str(a)) in ("utf-8", "ascii")
+        u = tmp_path / "U.cpy"
+        u.write_bytes(self.TEXT.encode("utf-8"))
+        assert detect_encoding(str(u)) == "utf-8"

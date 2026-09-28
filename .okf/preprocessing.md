@@ -936,6 +936,14 @@ misdetected. `CopybookSearchPath.encoding_errors` /
 count; `"strict"` raises `EncodingError` with file/offset context. Pinned
 by `tests/regression/test_open_findings_m15_regression.py`.
 
+**8-bit, non-UTF-8 text (2026-09-28):** ASCII-shaped bytes that are not
+valid UTF-8 (a Windows / Micro Focus cp1252 copybook with `VALUE 'CAFÉ'`)
+are detected as `cp1252` -- or `latin-1` when a byte cp1252 leaves
+undefined is present -- by `_single_byte_codec`. They were labelled
+`ascii`, which turned every accented byte into U+FFFD (and failed the
+expansion under `encoding_errors="strict"`). Pinned by
+`tests/regression/test_copybook_resolution_2026_09_28.py::TestEightBitCopybookEncoding`.
+
 # Expansion output: REPLACING width overflow + sequence-area change tags (2026-08-23)
 
 Two `expand_copybooks` *output* defects found in a mainframe corpus retry
