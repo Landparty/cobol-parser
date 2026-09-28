@@ -378,7 +378,7 @@ sibling) and a dedicated anonymous-item case.
 | `rewrite_parser.py` | REWRITE |
 | `search_parser.py` | SEARCH |
 | `set_parser.py` | SET |
-| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE |
+| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE (RELEASE `FROM` / RETURN `INTO` operands go through `consume_optional_qualifiers`, as MOVE's do: `WS-REC OF GRP`, `TBL ( I )`; before 2026-09-28 only the first word was kept) |
 | `sort_merge_parsers.py` | SORT, MERGE |
 | `start_parser.py` | START |
 | `stop_parser.py` | STOP |

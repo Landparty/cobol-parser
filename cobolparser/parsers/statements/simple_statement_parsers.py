@@ -31,6 +31,7 @@ from ._utils import (
     STATEMENT_KEYWORDS,
     bare_end_starts_at_end_clause,
     collect_clause_stmts,
+    consume_optional_qualifiers,
     consume_period,
     consume_procedure_qualifier,
     is_procedure_name_token,
@@ -403,7 +404,13 @@ class ReleaseStatementParser(IStatementParser):
             src = token_stream.peek()
             if src and src.type != TokenType.PERIOD:
                 token_stream.consume()
-                stmt.set_from_source(src.value or "")
+                # ``FROM WS-REC OF GRP`` / ``FROM TBL (I)``: the whole
+                # operand, as MOVE reads it -- only the first word was kept
+                # and the rest dropped as unparsed tokens.
+                source = src.value or ""
+                if src.type == TokenType.IDENTIFIER:
+                    source = consume_optional_qualifiers(token_stream, source)
+                stmt.set_from_source(source)
 
         skip_whitespace(token_stream)
         consume_period(token_stream)
@@ -448,7 +455,11 @@ class ReturnStatementParser(IStatementParser):
             tgt = token_stream.peek()
             if tgt and tgt.type != TokenType.PERIOD:
                 token_stream.consume()
-                stmt.set_into_target(tgt.value or "")
+                # ``INTO TBL OF GRP (I)``: qualifiers and subscript included.
+                target = tgt.value or ""
+                if tgt.type == TokenType.IDENTIFIER:
+                    target = consume_optional_qualifiers(token_stream, target)
+                stmt.set_into_target(target)
 
         skip_whitespace(token_stream)
 
