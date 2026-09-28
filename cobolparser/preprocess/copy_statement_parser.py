@@ -15,6 +15,7 @@ Properly handles:
 import bisect
 import re
 
+from .._source_directive import free_format_flags
 from ._normalize import ALL_COMMENT_INDICATORS
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
@@ -266,11 +267,18 @@ def strip_sequence_area(source: str) -> str:
     # tab-indented member is cut at the same columns the final parse uses.
     lines = source.expandtabs(8).split("\n")
     result = []
+    # Lines after ``>>SOURCE FORMAT IS FREE`` have no sequence area,
+    # indicator column or column-72 limit: kept whole, behind a blank
+    # indicator so the stripped shape (indicator at index 0) still holds.
+    free = free_format_flags(lines) if ">>" in source else None
 
     # Define column boundaries (0-indexed)
     SEQUENCE_NUMBER_END = 6  # Columns 1-6 (indices 0-5)
 
-    for line in lines:
+    for index, line in enumerate(lines):
+        if free is not None and free[index]:
+            result.append(" " + line if line.strip() else "")
+            continue
         if len(line) < 7:
             # Short line: in strict fixed format every character it has
             # lies within columns 1-6, the sequence area this function
@@ -416,9 +424,14 @@ def remove_comment_lines(source: str) -> str:
     # will judge it (a tab-indented line is never a comment in either).
     lines = source.expandtabs(8).split("\n")
     result = []
+    # A free-format line (after ``>>SOURCE FORMAT IS FREE``) has no
+    # indicator column, so column 7 says nothing about it.
+    free = free_format_flags(lines) if ">>" in source else None
 
-    for line in lines:
-        if is_comment_line(line):
+    for index, line in enumerate(lines):
+        if free is not None and free[index]:
+            result.append(line)
+        elif is_comment_line(line):
             result.append(" " * len(line))
         else:
             result.append(line)

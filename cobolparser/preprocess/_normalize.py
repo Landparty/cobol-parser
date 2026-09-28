@@ -16,6 +16,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 
 from .._lines import split_source_lines
+from .._source_directive import source_format_directive
 
 # Pre-compiled regex patterns for preprocessing (avoids re-compilation per call)
 #: ``>>DEFINE name [AS] {literal | PARAMETER | OFF} [OVERRIDE]`` (IBM). The
@@ -539,6 +540,12 @@ def normalize_fixed_format(
 
     This does NOT attempt full column-sensitive semantics (debugging helper).
 
+    **``>>SOURCE FORMAT``.** A ``>>SOURCE [FORMAT] [IS] FREE`` directive
+    (columns 7-72) switches the lines after it to free format: each is
+    passed through whole as its own logical line, with no column slicing.
+    ``>>SOURCE [FORMAT] [IS] FIXED`` (anywhere on a free-format line)
+    switches back. The directive record itself becomes a blank line.
+
     **Column 73+ overflow.** Columns 73-80 are the identification area:
     real fixed-format compilers ignore them regardless of content, and so
     does this slice (``line[TEXT_START_COL - 1 : TEXT_END_COL]`` never
@@ -655,6 +662,12 @@ def normalize_fixed_format(
     # line that would warn about a short all-digit tail asks for it -- the
     # answer is a whole-file property, so it is computed once and reused.
     stamps_identification_area: bool | None = None
+    # ``>>SOURCE FORMAT IS FREE`` switches every later line to free format
+    # (no sequence area, no indicator column, no column-72 limit) until a
+    # ``>>SOURCE FORMAT IS FIXED`` switches back. A free-format line is its
+    # own logical line and is passed through whole; the directive record
+    # itself becomes a blank placeholder, so line numbers are unchanged.
+    free_mode = False
 
     def _is_comment_indicator(ch: str) -> bool:
         return (
@@ -775,7 +788,27 @@ def normalize_fixed_format(
         quote_char = None
 
     for line_no, raw in enumerate(lines, start=1):
+        if free_mode:
+            text = raw.rstrip("\r\n")
+            flush_parts()
+            closing_quote_at_72 = None
+            directive = source_format_directive(text) if ">>" in text else None
+            if directive is not None:
+                free_mode = directive == "FREE"
+                result.append("")
+            else:
+                result.append(text.rstrip())
+            continue
         line = raw.rstrip("\n").expandtabs(8)
+        if ">>" in line:
+            # Columns 7-72: a directive may start in the indicator column.
+            directive = source_format_directive(line[INDICATOR_COL - 1 : TEXT_END_COL])
+            if directive is not None:
+                flush_parts()
+                closing_quote_at_72 = None
+                free_mode = directive == "FREE"
+                result.append("")
+                continue
         if len(line) < TEXT_START_COL - 1:
             # Blank/short line. When a literal is open it may legitimately
             # sit between a continued line and its continuation: keep the
@@ -1517,6 +1550,8 @@ def preprocess_conditional_compilation(
         Mapping[str, str | int | float | bool] | Iterable[str] | None
     ) = None,
     warnings: list[str] | None = None,
+    *,
+    keep_source_format_directives: bool = False,
 ) -> str:
     """
     Process IBM Enterprise COBOL conditional compilation directives.
@@ -1563,6 +1598,11 @@ def preprocess_conditional_compilation(
         warnings: Optional list that receives diagnostics (see the
             degradation rules above); the function never raises for
             malformed directives.
+        keep_source_format_directives: Leave an active ``>>SOURCE FORMAT``
+            directive line in place (unwarned) instead of blanking it, for a
+            caller that runs this *before* ``normalize_fixed_format`` -- the
+            copybook expander -- so the normalizer still sees where the
+            reference format switches.
 
     Returns:
         Source code with conditional sections processed. Directive lines and
@@ -1782,6 +1822,13 @@ def preprocess_conditional_compilation(
                     ">>EVALUATE ignored"
                 )
             result_lines.append("")
+            continue
+
+        elif (
+            keep_source_format_directives
+            and source_format_directive(stripped) is not None
+        ):
+            result_lines.append(line if _active() else "")
             continue
 
         # Any other >> compiler directive (>>CALLINTERFACE, >>INLINE,

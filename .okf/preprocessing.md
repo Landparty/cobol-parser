@@ -1220,6 +1220,27 @@ continuation branch re-opens the literal and keeps one of the pair so the
 joined text reads `'AB''CD'`. Mirrored in `_preprocess_fast.pyx`; the
 `.c` was regenerated with the same Cython 3.3.0.
 
+**`>>SOURCE FORMAT IS FREE` / `FIXED` inside a fixed-format file
+(2026-09-28).** Was not honoured: every line after the directive still had
+columns 1-7 (and 73+) cut off, and conditional compilation blanked the
+directive as "unknown". Now `normalize_fixed_format` (and the Cython
+mirror, which must agree) recognises `>>SOURCE [FORMAT] [IS] {FREE|FIXED}`
+(`cobolparser/_source_directive.py`, dependency-free so the `.pyx` can
+import it) from column 7 to 72 of a fixed record, or anywhere on a free
+line. The directive record becomes a blank line; each free-format line is
+passed through whole as its own logical line (no continuation merging, no
+column-72 warnings) until `>>SOURCE FIXED`. One output line per physical
+line, so line numbers are unchanged. The copybook expander carries it too:
+`free_format_flags()` makes `remove_comment_lines` / `strip_sequence_area`
+keep free lines whole (behind a blank indicator) and the final re-pad skip
+them (no pad, no width wrap), so the source map stays 1:1; the expander's
+conditional-compilation passes use
+`preprocess_conditional_compilation(..., keep_source_format_directives=True)`
+so the directive survives to the final parse. Not handled: a free-format
+literal continuation, and a `>>SOURCE FIXED` in a file the detector calls
+free (that file never goes through the fixed normalizer). Pinned by
+`tests/regression/test_fixes_2026_09_28_preprocessing.py`.
+
 **Regenerating the Cython mirror.** `python setup.py build_ext --inplace`
 re-cythonizes the `.pyx` when Cython is installed and rewrites the
 checked-in `.c`; both files are committed together. Remove the built

@@ -18,6 +18,7 @@ from collections import OrderedDict
 from typing import Any
 
 from .._lines import split_source_lines
+from .._source_directive import free_format_flags
 from . import (
     ALL_COMMENT_INDICATORS,
     CircularReferenceError,
@@ -951,7 +952,10 @@ def expand_copybooks(
     conditional_warnings: list[str] = []
     if process_conditionals:
         source_code = preprocess_conditional_compilation(
-            source_code, defined_symbols or {}, warnings=conditional_warnings
+            source_code,
+            defined_symbols or {},
+            warnings=conditional_warnings,
+            keep_source_format_directives=True,
         )
 
     # Create search configuration
@@ -1021,10 +1025,20 @@ def expand_copybooks(
     if is_normalized:
         final_lines: list[str] = []
         final_origins: list[LineOrigin] = []
+        # A line after ``>>SOURCE FORMAT IS FREE`` is free format: it was
+        # never cut to the code area (strip_sequence_area), so it is not
+        # re-padded or wrapped either -- the final parse reads it whole.
+        free_flags = (
+            free_format_flags(expanded_lines, indicator_position=0)
+            if ">>" in expanded_source
+            else None
+        )
         # Length-matched by _fit_origins just above; see _restore_comment_lines
         # for why this stays non-strict.
-        for line, origin in zip(expanded_lines, line_origins, strict=False):
-            if not line:
+        for index, (line, origin) in enumerate(
+            zip(expanded_lines, line_origins, strict=False)
+        ):
+            if not line or (free_flags is not None and free_flags[index]):
                 final_lines.append(line)
                 final_origins.append(origin)
                 continue
@@ -1342,6 +1356,7 @@ def _expand_source_recursive(
                     copybook_content,
                     context.defined_symbols,
                     warnings=stats.warnings if stats is not None else None,
+                    keep_source_format_directives=True,
                 )
 
             # Track this copybook
