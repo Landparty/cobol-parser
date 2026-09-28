@@ -103,6 +103,11 @@ Serialization fidelity notes (2026-07-07):
   source (previously consumed and discarded). Also added to `operands` via
   `_add_unique_operand`, matching `IOWriteStatement.set_from`, so
   identifier-discovery consumers that read `operands` see it.
+* `ReleaseStatement.set_from_source()` / `ReturnStatement.set_into_target()`
+  (2026-09-28) now also add the operand to `operands` via
+  `_add_unique_operand`, the same as `IOWriteStatement.set_from` /
+  `IOReadStatement.set_into`; an item used only as `RELEASE ... FROM x` or
+  `RETURN ... INTO x` was otherwise reported unused.
 * `IOStartStatement.key_name` (2026-07-09) — the `START f KEY IS ... data-name`
   key (previously discarded; `key_condition` kept only the operator). Also
   tracked in `operands` for the same reason.

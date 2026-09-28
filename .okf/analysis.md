@@ -1213,6 +1213,12 @@ which is what the VS Code extension's LE hover reads.
 
 ## CRUDMatrixGenerator
 
+> 2026-09-28: `SORT`/`MERGE` now mark their files. `USING` files are read
+> (R) and `GIVING` files written (C) -- the sort does the I/O itself, so no
+> READ/WRITE statement ever names them and they used to come out `----`.
+> `RELEASE` marks its SD file C (via the record's FD/SD) and `RETURN` marks
+> it R. Pinned by `test_crud_matrix.py::TestSortMergeFileAccess`.
+
 ```python
 matrix: CRUDMatrix = CRUDMatrixGenerator().analyze(ast)
 # matrix.entries: list[CRUDFlags]
@@ -2209,6 +2215,17 @@ through the corpus program that exposed it.
 
 
 ## XrefAnalyzer (`xref.py`)
+
+> 2026-09-28: two role fixes. (1) `RELEASE rec FROM x` (record and `x`
+> read) and `RETURN sd-file INTO x` (file-operation on the SD, `x` write)
+> have dedicated role mappings; before, `FROM`/`INTO` never reached
+> `.operands` (the model setters now add them, like READ INTO / WRITE
+> FROM), so `x` had no reference at all and `UnusedVariableAnalyzer`
+> reported it unused. (2) A reference modifier's offset/length names are
+> kept apart from the operand (`_split_operand`) and recorded `read` when
+> the operand itself is a `write`: `MOVE A TO WS-B (WS-P:2)` no longer
+> lists WS-P as written. `_partition_operand` still folds them into the
+> base names for its other callers.
 
 The classic mainframe compiler cross-reference: for every symbol a program
 declares — data items, level-88 condition names, files, paragraphs and
