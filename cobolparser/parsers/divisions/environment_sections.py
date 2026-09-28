@@ -5,7 +5,7 @@ Collaborators of
 
 - :class:`ConfigurationSectionParser` — CONFIGURATION SECTION, including the
   SPECIAL-NAMES paragraph (CURRENCY SIGN, DECIMAL-POINT IS COMMA, CLASS,
-  ALPHABET, mnemonic-name clauses)
+  ALPHABET, SYMBOLIC CHARACTERS, mnemonic-name clauses)
 - :class:`InputOutputSectionParser` — INPUT-OUTPUT SECTION with the
   FILE-CONTROL paragraph, delegating each SELECT statement to
   :class:`~.environment_select.SelectClauseParser`
@@ -14,9 +14,31 @@ Collaborators of
 from typing import Any
 
 from cobolparser.core.interfaces import ITokenStream
+from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import SourceLocation
 
 from .environment_select import SelectClauseParser
+
+#: CONFIGURATION SECTION paragraph headers: each one ends SPECIAL-NAMES.
+_CONFIGURATION_PARAGRAPHS: frozenset[str] = frozenset(
+    {"SOURCE-COMPUTER", "OBJECT-COMPUTER", "SPECIAL-NAMES", "REPOSITORY"}
+)
+#: Words that open a SPECIAL-NAMES clause (besides ``name IS mnemonic``).
+_SPECIAL_NAMES_CLAUSES: frozenset[str] = frozenset(
+    {"CURRENCY", "DECIMAL-POINT", "CLASS", "ALPHABET", "SYMBOLIC", "XML-SCHEMA"}
+)
+# Small integers lex as LEVEL_NUMBER tokens.
+_LITERAL_TYPES: frozenset[TokenType] = frozenset(
+    {TokenType.STRING_LITERAL, TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER}
+)
+_NOISE_TYPES: frozenset[TokenType] = frozenset(
+    {
+        TokenType.NEWLINE,
+        TokenType.WHITESPACE,
+        TokenType.COMMENT,
+        TokenType.CONTINUATION,
+    }
+)
 
 
 class ConfigurationSectionParser:
@@ -116,23 +138,74 @@ class ConfigurationSectionParser:
         stop_sections: set[str],
         stop_divs: tuple[str, ...],
     ) -> dict[str, Any]:
-        """Parse clauses inside SPECIAL-NAMES paragraph."""
+        """Parse clauses inside SPECIAL-NAMES paragraph.
+
+        IBM Enterprise COBOL writes the whole paragraph as one sentence --
+        ``C01 IS TOP-OF-PAGE CLASS HEX IS '0' THRU '9' SYMBOLIC CHARACTERS
+        NUL IS 1 ...`` with a single closing period -- so a clause ends where
+        the next clause starts, never merely at a period. Every clause's
+        operand collection therefore stops at :func:`_at_clause_start`, and
+        the paragraph itself ends at the next CONFIGURATION SECTION
+        paragraph header (``REPOSITORY.`` in particular, whose own ``CLASS
+        name IS 'java.class'`` entries are not SPECIAL-NAMES class
+        conditions).
+        """
         currency_sign: str | None = None
+        currency_signs: list[dict[str, Any]] = []
         decimal_point_is_comma: bool = False
         class_definitions: list[dict[str, Any]] = []
         alphabet_definitions: list[dict[str, Any]] = []
+        symbolic_characters: list[dict[str, Any]] = []
         mnemonic_definitions: list[dict[str, Any]] = []
+
+        def _skip_noise() -> None:
+            token_stream.skip_whitespace_and_comments()
+
+        def _word(offset: int = 0) -> str:
+            token = token_stream.peek(offset)
+            return token.value.upper() if token is not None and token.value else ""
 
         def _at_para_end() -> bool:
             token = token_stream.peek(0)
-            if not token:
+            if not token or token.type == TokenType.EOF:
                 return True
             v = token.value.upper()
-            if v in stop_sections:
+            if v in stop_sections or v in _CONFIGURATION_PARAGRAPHS:
                 return True
             return any(v == f"{kw} DIVISION" for kw in stop_divs)
 
-        while not token_stream.is_empty() and not _at_para_end():
+        def _mnemonic_start(offset: int = 0) -> bool:
+            # ``environment-name IS mnemonic-name`` or the name-less
+            # ``UPSI-0 ON STATUS IS condition`` form.
+            token = token_stream.peek(offset)
+            if token is None or token.type in _LITERAL_TYPES or token.value == ".":
+                return False
+            nxt = _word(offset + 1)
+            if nxt == "IS":
+                return True
+            return nxt in ("ON", "OFF") and _word(offset + 2) in ("STATUS", "IS")
+
+        def _at_clause_start() -> bool:
+            if _at_para_end():
+                return True
+            v = _word()
+            return v == "." or v in _SPECIAL_NAMES_CLAUSES or _mnemonic_start()
+
+        def _collect_operands() -> list[str]:
+            values: list[str] = []
+            while True:
+                _skip_noise()
+                if token_stream.is_empty() or _at_clause_start():
+                    return values
+                values.append(token_stream.consume().value)
+
+        def _literal_value(token: Any) -> str:
+            return str(token.value).strip("'\"")
+
+        while True:
+            _skip_noise()
+            if token_stream.is_empty() or _at_para_end():
+                break
             token = token_stream.peek(0)
             if not token:
                 break
@@ -142,22 +215,42 @@ class ConfigurationSectionParser:
                 token_stream.consume()
                 # skip optional SIGN / IS
                 for _kw in ("SIGN", "IS"):
-                    pk = token_stream.peek(0)
-                    if pk and pk.value.upper() == _kw:
+                    _skip_noise()
+                    if _word() == _kw:
                         token_stream.consume()
+                _skip_noise()
                 pk = token_stream.peek(0)
-                if pk and pk.value:
-                    currency_sign = pk.value.strip("'\"")
+                if pk and pk.value and not _at_clause_start():
+                    sign = _literal_value(pk)
                     token_stream.consume()
+                    entry_currency: dict[str, Any] = {
+                        "sign": sign,
+                        "picture_symbol": None,
+                    }
+                    # [WITH] PICTURE SYMBOL literal
+                    _skip_noise()
+                    if _word() == "WITH" and _word(1) == "PICTURE":
+                        token_stream.consume()
+                        _skip_noise()
+                    if _word() == "PICTURE" and _word(1) == "SYMBOL":
+                        token_stream.consume()
+                        token_stream.consume()
+                        _skip_noise()
+                        sym = token_stream.peek(0)
+                        if sym is not None and sym.type in _LITERAL_TYPES:
+                            entry_currency["picture_symbol"] = _literal_value(sym)
+                            token_stream.consume()
+                    currency_sign = sign
+                    currency_signs.append(entry_currency)
 
             elif v == "DECIMAL-POINT":
                 token_stream.consume()
                 # skip optional IS
-                pk = token_stream.peek(0)
-                if pk and pk.value.upper() == "IS":
+                _skip_noise()
+                if _word() == "IS":
                     token_stream.consume()
-                pk = token_stream.peek(0)
-                if pk and pk.value.upper() == "COMMA":
+                _skip_noise()
+                if _word() == "COMMA":
                     decimal_point_is_comma = True
                     token_stream.consume()
                     # The lexer has already tokenized the program with `.` as
@@ -174,101 +267,70 @@ class ConfigurationSectionParser:
                             "comma decimal point (e.g. VALUE 3,14) will misparse"
                         )
 
-            elif v == "CLASS":
+            elif v in ("CLASS", "ALPHABET"):
                 token_stream.consume()
+                _skip_noise()
                 name_tok = token_stream.peek(0)
-                class_name = name_tok.value if name_tok else ""
+                clause_name = name_tok.value if name_tok else ""
                 if name_tok:
                     token_stream.consume()
-                # skip IS
-                pk = token_stream.peek(0)
-                if pk and pk.value.upper() == "IS":
+                # [FOR ALPHANUMERIC | FOR NATIONAL] (IBM) and IS
+                _skip_noise()
+                if _word() == "FOR" and _word(1) in ("ALPHANUMERIC", "NATIONAL"):
                     token_stream.consume()
-                # collect range values until period or next keyword
-                ranges: list[str] = []
-                while not token_stream.is_empty():
-                    pk = token_stream.peek(0)
-                    if (
-                        not pk
-                        or pk.value == "."
-                        or pk.value.upper()
-                        in {
-                            "CURRENCY",
-                            "DECIMAL-POINT",
-                            "CLASS",
-                            "ALPHABET",
-                        }
-                        | stop_sections
-                    ):
-                        break
-                    ranges.append(pk.value)
                     token_stream.consume()
-                class_definitions.append({"name": class_name, "ranges": ranges})
+                    _skip_noise()
+                if _word() == "IS":
+                    token_stream.consume()
+                values = _collect_operands()
+                if v == "CLASS":
+                    class_definitions.append({"name": clause_name, "ranges": values})
+                else:
+                    alphabet_definitions.append({"name": clause_name, "values": values})
 
-            elif v == "ALPHABET":
+            elif v == "SYMBOLIC":
                 token_stream.consume()
-                name_tok = token_stream.peek(0)
-                alpha_name = name_tok.value if name_tok else ""
-                if name_tok:
+                _skip_noise()
+                if _word() in ("CHARACTERS", "CHARACTER"):
                     token_stream.consume()
-                # skip IS
-                pk = token_stream.peek(0)
-                if pk and pk.value.upper() == "IS":
+                    _skip_noise()
+                if _word() == "FOR" and _word(1) in ("ALPHANUMERIC", "NATIONAL"):
                     token_stream.consume()
-                # collect until period or next paragraph keyword
-                values: list[str] = []
-                while not token_stream.is_empty():
-                    pk = token_stream.peek(0)
-                    if (
-                        not pk
-                        or pk.value == "."
-                        or pk.value.upper()
-                        in {
-                            "CURRENCY",
-                            "DECIMAL-POINT",
-                            "CLASS",
-                            "ALPHABET",
-                        }
-                        | stop_sections
-                    ):
-                        break
-                    values.append(pk.value)
                     token_stream.consume()
-                alphabet_definitions.append({"name": alpha_name, "values": values})
+                symbolic_characters.extend(
+                    self._parse_symbolic_characters(token_stream)
+                )
 
-            elif token.value != "." and (
-                (peek1 := token_stream.peek(1)) is not None
-                and peek1.value.upper() == "IS"
-            ):
+            elif token.value != "." and _mnemonic_start():
                 # Mnemonic-name clause: implementor-name-1 IS mnemonic-name-1
                 # [ON STATUS IS condition-1] [OFF STATUS IS condition-2]
                 # e.g. `C01 IS TOP-OF-PAGE`, `CONSOLE IS CRT`,
-                # `UPSI-0 IS SWITCH-1 ON STATUS IS SW1-ON OFF STATUS IS SW1-OFF`.
+                # `UPSI-0 IS SWITCH-1 ON STATUS IS SW1-ON OFF STATUS IS SW1-OFF`,
+                # or, without a mnemonic-name, `UPSI-0 ON STATUS IS SW1-ON`.
                 environment_name = token.value
                 token_stream.consume()  # implementor-name
-                token_stream.consume()  # IS
-                name_tok = token_stream.peek(0)
-                mnemonic_name = name_tok.value if name_tok else ""
-                if name_tok:
-                    token_stream.consume()
-                entry: dict[str, Any] = {
-                    "environment_name": environment_name,
-                    "mnemonic_name": mnemonic_name,
-                }
-                while not token_stream.is_empty():
-                    pk = token_stream.peek(0)
-                    if not pk or pk.value.upper() not in ("ON", "OFF"):
+                entry: dict[str, Any] = {"environment_name": environment_name}
+                _skip_noise()
+                if _word() == "IS":
+                    token_stream.consume()  # IS
+                    _skip_noise()
+                    name_tok = token_stream.peek(0)
+                    entry["mnemonic_name"] = name_tok.value if name_tok else ""
+                    if name_tok:
+                        token_stream.consume()
+                while True:
+                    _skip_noise()
+                    if _word() not in ("ON", "OFF"):
                         break
-                    status_key = (
-                        "on_status" if pk.value.upper() == "ON" else "off_status"
-                    )
+                    status_key = "on_status" if _word() == "ON" else "off_status"
                     token_stream.consume()  # ON / OFF
-                    pk2 = token_stream.peek(0)
-                    if pk2 and pk2.value.upper() == "STATUS":
+                    _skip_noise()
+                    if _word() == "STATUS":
                         token_stream.consume()
-                    pk2 = token_stream.peek(0)
-                    if pk2 and pk2.value.upper() == "IS":
+                        _skip_noise()
+                    if _word() == "IS":
                         token_stream.consume()
+                        _skip_noise()
                     cond_tok = token_stream.peek(0)
                     if cond_tok:
                         entry[status_key] = cond_tok.value
@@ -278,22 +340,95 @@ class ConfigurationSectionParser:
             elif token.value == ".":
                 token_stream.consume()  # clause separator
 
+            elif v == "XML-SCHEMA":
+                # XML-SCHEMA xml-schema-name IS {environment-name | literal}
+                token_stream.consume()
+                for _ in range(3):
+                    _skip_noise()
+                    if token_stream.is_empty() or _word() == "." or _at_para_end():
+                        break
+                    token_stream.consume()
+
             else:
-                # Unknown clause — consume to next period
+                # Unknown clause -- skip its words.
                 token_stream.consume()
 
         result: dict[str, Any] = {}
         if currency_sign is not None:
             result["currency_sign"] = currency_sign
+            result["currency_signs"] = currency_signs
         if decimal_point_is_comma:
             result["decimal_point_is_comma"] = True
         if class_definitions:
             result["class_definitions"] = class_definitions
         if alphabet_definitions:
             result["alphabet_definitions"] = alphabet_definitions
+        if symbolic_characters:
+            result["symbolic_characters"] = symbolic_characters
         if mnemonic_definitions:
             result["mnemonic_definitions"] = mnemonic_definitions
         return result
+
+    @staticmethod
+    def _parse_symbolic_characters(token_stream: ITokenStream) -> list[dict[str, Any]]:
+        """Parse the body of ``SYMBOLIC CHARACTERS``.
+
+        ``{symbolic-character-1 ... {IS|ARE} integer-1 ...}... [IN
+        alphabet-name]`` -- the n-th name takes the n-th ordinal position.
+        A group is only taken when an integer follows its IS/ARE, so a
+        following ``C01 IS TOP-OF-PAGE`` mnemonic clause (also ``word IS
+        ...``) is left for the caller.
+        """
+        entries: list[dict[str, Any]] = []
+        while True:
+            token_stream.skip_whitespace_and_comments()
+            # Look ahead over one group without consuming it.
+            offset = 0
+            names: list[str] = []
+            while True:
+                tok = token_stream.peek(offset)
+                if tok is None or tok.value == "." or tok.type in _LITERAL_TYPES:
+                    break
+                if tok.type in _NOISE_TYPES:
+                    offset += 1
+                    continue
+                if tok.value.upper() in ("IS", "ARE"):
+                    break
+                names.append(tok.value)
+                offset += 1
+            verb = token_stream.peek(offset)
+            if not names or verb is None or verb.value.upper() not in ("IS", "ARE"):
+                break
+            offset += 1
+            ordinals: list[int] = []
+            while True:
+                tok = token_stream.peek(offset)
+                if tok is None:
+                    break
+                if tok.type in _NOISE_TYPES:
+                    offset += 1
+                    continue
+                if tok.type not in _LITERAL_TYPES or not tok.value.isdigit():
+                    break
+                ordinals.append(int(tok.value))
+                offset += 1
+            if not ordinals:
+                break
+            for _ in range(offset):
+                token_stream.consume()
+            for name, ordinal in zip(names, ordinals, strict=False):
+                entries.append({"name": name, "ordinal": ordinal, "alphabet": None})
+        token_stream.skip_whitespace_and_comments()
+        in_tok = token_stream.peek(0)
+        if in_tok is not None and in_tok.value.upper() == "IN":
+            token_stream.consume()
+            token_stream.skip_whitespace_and_comments()
+            alpha = token_stream.peek(0)
+            if alpha is not None and alpha.value != ".":
+                token_stream.consume()
+                for entry in entries:
+                    entry["alphabet"] = alpha.value
+        return entries
 
 
 class InputOutputSectionParser:

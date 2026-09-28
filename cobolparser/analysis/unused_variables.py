@@ -786,7 +786,8 @@ class UnusedVariableAnalyzer:
 
         The runtime stores into a ``FILE STATUS`` item after every I/O
         operation and reads the ``RECORD KEY`` / ``ALTERNATE RECORD KEY`` /
-        ``RELATIVE KEY`` / ``PASSWORD`` items to position the file, whether
+        ``RELATIVE KEY`` / ``PASSWORD`` items to position the file (and the
+        ``ASSIGN USING`` item to name it), whether
         or not the PROCEDURE DIVISION ever names them -- a program that
         only tests its status through a level-88 on the same item, or never
         tests it at all, still uses it. Scanning only the PROCEDURE
@@ -806,6 +807,7 @@ class UnusedVariableAnalyzer:
                 node.record_key_source,
                 node.relative_key,
                 node.password,
+                node.assign_using,
             ):
                 names |= _extract_identifiers(value)
             for alt in node.alternate_keys:

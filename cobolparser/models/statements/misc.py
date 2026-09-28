@@ -35,6 +35,9 @@ class SelectStatement(CobolStatement):
         self.assign_to: str | None = None
         self.assign_device_type: str | None = None  # DISK, TAPE, PRINTER, etc.
         self.assign_external_name: str | None = None
+        # ``ASSIGN USING data-name``: the data item whose value names the
+        # file at run time (then also ``assign_to``); None for ASSIGN TO.
+        self.assign_using: str | None = None
 
         # ORGANIZATION clause
         self.organization: str | None = (
@@ -166,6 +169,7 @@ class SelectStatement(CobolStatement):
                 "assign_to": self.assign_to,
                 "assign_device_type": self.assign_device_type,
                 "assign_external_name": self.assign_external_name,
+                "assign_using": self.assign_using,
                 "organization": self.organization,
                 "access_mode": self.access_mode,
                 "record_key": self.record_key,

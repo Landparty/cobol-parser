@@ -434,6 +434,19 @@ Notes (2026-07-07 audit remediation):
   `record_delimiter`, `password`, `lock_mode`/`lock_on`/
   `lock_with_rollback`, `sharing_mode`, `assign_device_type`) are now
   actually populated by the ENVIRONMENT division parser (H5).
+* `SelectStatement.assign_using` (2026-09-28): the data-name of `ASSIGN
+  USING data-name` (also in `assign_to`), None for `ASSIGN TO`; in
+  `to_dict()` as `assign_using`.
+* `PictureClause(pattern, location, currency_symbols=None)` (2026-09-28):
+  the non-`$` currency symbols a `SPECIAL-NAMES CURRENCY SIGN` declares
+  that occur in the pattern (`PIC £££9.99`). The pattern is sized and
+  validated through its `$` spelling, then `pattern` is restored as
+  written; the set is `currency_symbols` and, when non-empty,
+  `metadata["currency_symbols"]`. The DATA DIVISION passes it through
+  `DataItemClauseParser._picture_clause` (also handed to the `_data_fast`
+  helper in place of the class), from the non-`$` CURRENCY tokens
+  `parse_picture_clause` saw. Previously `£` was an invalid PICTURE
+  character and the floating string was mis-sized.
 * Arithmetic statements' `on_size_error` / `not_on_size_error` lists can
   contain any statement type (registry-dispatched), all registered as AST
   children (H1).

@@ -62,6 +62,16 @@ enclosing `END-xxx` instead of swallowing it (which re-nested a top-level
 `STOP RUN` into the IF arm). [generators.md](generators.md): DOT quotes
 paragraph ids that are DOT keywords; `show_unreachable=False` also drops the
 hidden paragraph's edges, branch boxes and CALL-only external nodes.
+## 2026-09-28 -- bug hunt round 8: comment-entries, currency symbols, SPECIAL-NAMES, SELECT short forms
+
+[lexer.md](lexer.md): IDENTIFICATION DIVISION comment-entries lex as
+verbatim `COMMENT_ENTRY` tokens (244 TokenType values); declared
+SPECIAL-NAMES currency symbols lex as `CURRENCY`. [parser.md](parser.md):
+comment-entry text stored as written; SPECIAL-NAMES clauses end at the next
+clause (`symbolic_characters`, `currency_signs` added); SELECT without
+`ORGANIZATION IS`, `ASSIGN USING`, clause words split across lines.
+[ast-models.md](ast-models.md): `PictureClause.currency_symbols`,
+`SelectStatement.assign_using`.
 
 ## 2026-09-28 -- bug hunt round 7: batch .prof collisions, DOT escaping, >>DEFINE arithmetic, nested ALTER in health
 

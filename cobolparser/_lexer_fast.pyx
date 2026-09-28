@@ -24,6 +24,7 @@ from cobolparser.lexer import (
     _LEVEL_NUMBER_1_2DIGIT_RE,
     _FF_INDICATOR,
     _DIVISION_FIRST,
+    _comment_entry_starts,
 )
 from cobolparser.models.ast_base import SourceLocation
 
@@ -137,6 +138,12 @@ class CobolLexer(_CobolLexerBase):
         # tokenize() call, or repeated calls on one lexer duplicate them.
         self.warnings = []
 
+        # Comment-entry lines (AUTHOR. ...), handed over verbatim; mirrors
+        # lexer.py.
+        cdef dict comment_entries = (
+            _comment_entry_starts(self.source, lines) if free_form else {}
+        )
+
         n_lines = len(lines)
         for line_num in range(n_lines):
             line = lines[line_num]
@@ -145,7 +152,12 @@ class CobolLexer(_CobolLexerBase):
                     program_text = line[:-1]
                 else:
                     program_text = line
-                tokens = self.tokenize_program_text(program_text, line_num, 1)
+                if comment_entries and line_num in comment_entries:
+                    tokens = self._comment_entry_line_tokens(
+                        program_text, line_num, 1, comment_entries[line_num]
+                    )
+                else:
+                    tokens = self.tokenize_program_text(program_text, line_num, 1)
                 if tokens:
                     out_tokens.extend(tokens)
                     out_tokens.append(
@@ -522,6 +534,14 @@ class CobolLexer(_CobolLexerBase):
 
             # ---- ampersand: benign separator -----------------------
             if char == "&":
+                pos += 1
+                continue
+
+            # ---- declared PICTURE currency symbol ------------------
+            # Mirrors lexer.py: a SPECIAL-NAMES ``CURRENCY SIGN IS '£'``
+            # symbol is an editing symbol like ``$``.
+            if char in self._currency_symbols:
+                tokens.append(Token(TokenType.CURRENCY, char, location))
                 pos += 1
                 continue
 

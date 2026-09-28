@@ -896,6 +896,52 @@ SPECIAL-NAMES emits a warning that the clause is recorded but not honored
 by the lexer (H4). All division parsers can reach the host warning channel:
 `BaseDivisionParser.host` is set by the division loop (`parser.py`).
 
+**Comment-entries verbatim (`identification.py`, 2026-09-28):**
+`_parse_clause_value` first takes the consecutive `COMMENT_ENTRY` tokens
+the lexer emits (see [lexer.md](lexer.md)), joins the lines with one space
+and drops only the entry's own closing period (`AUTHOR. J. SMITH, O'NEIL.`
+-> `"J. SMITH, O'NEIL"`). An unterminated entry from a paragraph name that
+is not in Area A falls through to the old token-collection loop, so the
+loosely indented `AUTHOR. SOMEONE` / `DATA DIVISION.` shape still ends at
+the division header. Hand-built token lists (no `COMMENT_ENTRY`) parse
+exactly as before.
+
+**SPECIAL-NAMES clause boundaries (`environment_sections.py`, 2026-09-28):**
+IBM writes SPECIAL-NAMES as *one sentence* with a single closing period, so
+a clause ends where the next one starts. `CLASS` / `ALPHABET` operands used
+to run until the next CURRENCY/DECIMAL-POINT/CLASS/ALPHABET word or a
+period, swallowing a following `SYMBOLIC CHARACTERS` or mnemonic clause
+(`C01 IS TOP-OF-PAGE` vanished from `mnemonic_definitions`) plus the `"\n"`
+NEWLINE tokens; `SYMBOLIC CHARACTERS NUL IS 1` was read as a mnemonic
+clause; and a following `REPOSITORY.` paragraph's `CLASS X IS 'java.X'`
+entries became SPECIAL-NAMES class conditions. Now every operand collection
+stops at `_at_clause_start()` (a clause word in `_SPECIAL_NAMES_CLAUSES`, a
+`name IS` / `name ON|OFF STATUS` mnemonic start, a period) and the
+paragraph ends at any CONFIGURATION SECTION paragraph header
+(`_CONFIGURATION_PARAGRAPHS`). New metadata: `symbolic_characters`
+(`[{name, ordinal, alphabet}]`, a group is only taken when an integer
+follows its IS/ARE) and `currency_signs` (`[{sign, picture_symbol}]`, every
+CURRENCY clause; `currency_sign` keeps its last-wins value). `CLASS`/
+`ALPHABET ... FOR ALPHANUMERIC|NATIONAL` and the name-less `UPSI-0 ON STATUS
+IS x` form are accepted. `tests/regression/test_special_names_clause_boundaries.py`.
+
+**SELECT short forms (`environment_select.py`, 2026-09-28):** `ORGANIZATION
+IS` is optional in IBM's grammar. A bare `INDEXED` / `SEQUENTIAL` / `LINE
+SEQUENTIAL` used to be glued onto `assign_to` (`"F1DD INDEXED"`) with
+`organization` None, and a bare `RELATIVE` went to the RELATIVE KEY parser
+(which took the next word as the key). `SEQUENTIAL`/`INDEXED` are now in
+`_SELECT_CLAUSE_KEYWORDS`, `LINE SEQUENTIAL` ends ASSIGN by lookahead, and
+`RELATIVE` is the key clause only when `KEY` follows (`_next_word`).
+`ASSIGN USING data-name` (dynamic file name) stores the data-name in
+`assign_to` *and* the new `SelectStatement.assign_using`, which
+`UnusedVariableAnalyzer._file_control_references` counts as a use (it was
+`assign_to == "USING WS-DSN"` and the item read as unused). The ORGANIZATION
+/ ACCESS / RECORD KEY / RELATIVE KEY / FILE STATUS sub-parsers skip line
+breaks between their own words (`_try_consume_word`); only one break,
+directly before the value, was tolerated. Still open: a qualified `RECORD
+KEY IS K OF R` keeps only `K` (the rest is warned as unparsed).
+`tests/regression/test_select_optional_organization_word.py`.
+
 # Statement-coverage audit (2026-09-02)
 
 Question asked of the parser: *can a PROCEDURE DIVISION statement leave the

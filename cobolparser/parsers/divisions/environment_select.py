@@ -33,6 +33,10 @@ _SELECT_CLAUSE_KEYWORDS: frozenset[str] = frozenset(
         "SHARING",
         "LOCK",
         "PASSWORD",
+        # ``[ORGANIZATION IS] SEQUENTIAL | INDEXED | RELATIVE | LINE
+        # SEQUENTIAL`` -- the word ORGANIZATION is optional.
+        "SEQUENTIAL",
+        "INDEXED",
         "SELECT",
         "CONFIGURATION",
         "DATA",
@@ -166,6 +170,13 @@ class SelectClauseParser:
             elif token_value == "ORGANIZATION":
                 self._parse_organization_clause(token_stream, select_data)
 
+            # The same clause without its optional ORGANIZATION IS words:
+            # ``SELECT F ASSIGN TO DD INDEXED ACCESS DYNAMIC ...``
+            elif token_value in ("SEQUENTIAL", "INDEXED") or (
+                token_value == "LINE" and self._next_word(token_stream) == "SEQUENTIAL"
+            ):
+                self._parse_organization_value(token_stream, select_data)
+
             # ACCESS MODE clause
             elif token_value == "ACCESS":
                 self._parse_access_mode_clause(token_stream, select_data)
@@ -174,9 +185,13 @@ class SelectClauseParser:
             elif token_value == "RECORD":
                 self._parse_record_key_clause(token_stream, select_data)
 
-            # RELATIVE KEY clause
+            # RELATIVE KEY clause -- or, when KEY does not follow, a bare
+            # ``RELATIVE`` organization (ORGANIZATION IS is optional)
             elif token_value == "RELATIVE":
-                self._parse_relative_key_clause(token_stream, select_data)
+                if self._next_word(token_stream) == "KEY":
+                    self._parse_relative_key_clause(token_stream, select_data)
+                else:
+                    self._parse_organization_value(token_stream, select_data)
 
             # [FILE] STATUS clause -- IBM makes the word FILE optional
             elif token_value in ("FILE", "STATUS"):
@@ -241,6 +256,18 @@ class SelectClauseParser:
             if not token or (token.value and token.value.strip()):
                 break
             token_stream.consume()
+
+    @staticmethod
+    def _next_word(token_stream: ITokenStream) -> str:
+        """Upper-cased value of the first non-blank token after the next."""
+        offset = 1
+        while True:
+            token = token_stream.peek(offset)
+            if token is None:
+                return ""
+            if token.value and token.value.strip():
+                return str(token.value).upper()
+            offset += 1
 
     @staticmethod
     def _try_consume_word(token_stream: ITokenStream, *words: str) -> bool:
@@ -394,15 +421,26 @@ class SelectClauseParser:
         # Skip ASSIGN
         token_stream.consume()
 
-        # Skip optional TO
-        token = token_stream.peek(0)
-        if token and token.value.upper() == "TO":
-            token_stream.consume()
+        # ``ASSIGN USING data-name``: the data item holds the file's name
+        # at run time (IBM Enterprise COBOL dynamic file assignment), so it
+        # is a *reference* to a data item, not an external name.
+        if self._try_consume_word(token_stream, "USING"):
+            self._skip_select_blanks(token_stream)
+            token = token_stream.peek(0)
+            if (
+                token
+                and token.value
+                and token.value != "."
+                and token.value.upper() not in _SELECT_CLAUSE_KEYWORDS
+            ):
+                select_data["assign_to"] = token.value
+                select_data["assign_using"] = token.value
+                token_stream.consume()
+            return
 
-        # Skip whitespace
-        token = token_stream.peek(0)
-        if token and not token.value.strip():
-            token_stream.consume()
+        # Skip optional TO
+        self._try_consume_word(token_stream, "TO")
+        self._skip_select_blanks(token_stream)
 
         # Collect tokens until next keyword or period
         assign_to_parts = []
@@ -419,6 +457,8 @@ class SelectClauseParser:
             # Check for next clause or end
             upper_val = token.value.upper()
             if upper_val == "." or upper_val in _SELECT_CLAUSE_KEYWORDS:
+                break
+            if upper_val == "LINE" and self._next_word(token_stream) == "SEQUENTIAL":
                 break
 
             # Handle string literals - need to reconstruct quotes
@@ -453,16 +493,14 @@ class SelectClauseParser:
         token_stream.consume()
 
         # Skip optional IS
-        token = token_stream.peek(0)
-        if token and token.value.upper() == "IS":
-            token_stream.consume()
+        self._try_consume_word(token_stream, "IS")
+        self._skip_select_blanks(token_stream)
+        self._parse_organization_value(token_stream, select_data)
 
-        # Skip whitespace
-        token = token_stream.peek(0)
-        if token and not token.value.strip():
-            token_stream.consume()
-
-        # Get organization type
+    def _parse_organization_value(
+        self, token_stream: ITokenStream, select_data: dict[str, Any]
+    ) -> None:
+        """Parse SEQUENTIAL | INDEXED | RELATIVE | LINE SEQUENTIAL."""
         token = token_stream.peek(0)
         if token:
             org_val = token.value.upper()
@@ -470,10 +508,8 @@ class SelectClauseParser:
 
             # Check for LINE SEQUENTIAL
             if org_val == "LINE":
-                token = token_stream.peek(0)
-                if token and token.value.upper() == "SEQUENTIAL":
+                if self._try_consume_word(token_stream, "SEQUENTIAL"):
                     select_data["organization"] = "LINE SEQUENTIAL"
-                    token_stream.consume()
                 else:
                     select_data["organization"] = "LINE"
             elif org_val in ("SEQUENTIAL", "INDEXED", "RELATIVE"):
@@ -486,20 +522,10 @@ class SelectClauseParser:
         # Skip ACCESS
         token_stream.consume()
 
-        # Skip optional MODE
-        token = token_stream.peek(0)
-        if token and token.value.upper() == "MODE":
-            token_stream.consume()
-
-        # Skip optional IS
-        token = token_stream.peek(0)
-        if token and token.value.upper() == "IS":
-            token_stream.consume()
-
-        # Skip whitespace
-        token = token_stream.peek(0)
-        if token and not token.value.strip():
-            token_stream.consume()
+        # Skip optional MODE / IS (a clause may break across lines anywhere)
+        self._try_consume_word(token_stream, "MODE")
+        self._try_consume_word(token_stream, "IS")
+        self._skip_select_blanks(token_stream)
 
         # Get access mode
         token = token_stream.peek(0)
@@ -528,20 +554,10 @@ class SelectClauseParser:
                 token_stream.consume()
             return
 
-        # Skip optional KEY
-        token = token_stream.peek(0)
-        if token and token.value.upper() == "KEY":
-            token_stream.consume()
-
-        # Skip optional IS
-        token = token_stream.peek(0)
-        if token and token.value.upper() == "IS":
-            token_stream.consume()
-
-        # Skip whitespace
-        token = token_stream.peek(0)
-        if token and not token.value.strip():
-            token_stream.consume()
+        # Skip optional KEY / IS (a clause may break across lines anywhere)
+        self._try_consume_word(token_stream, "KEY")
+        self._try_consume_word(token_stream, "IS")
+        self._skip_select_blanks(token_stream)
 
         # Get key name
         token = token_stream.peek(0)
@@ -556,20 +572,10 @@ class SelectClauseParser:
         # Skip RELATIVE
         token_stream.consume()
 
-        # Skip optional KEY
-        token = token_stream.peek(0)
-        if token and token.value.upper() == "KEY":
-            token_stream.consume()
-
-        # Skip optional IS
-        token = token_stream.peek(0)
-        if token and token.value.upper() == "IS":
-            token_stream.consume()
-
-        # Skip whitespace
-        token = token_stream.peek(0)
-        if token and not token.value.strip():
-            token_stream.consume()
+        # Skip optional KEY / IS (a clause may break across lines anywhere)
+        self._try_consume_word(token_stream, "KEY")
+        self._try_consume_word(token_stream, "IS")
+        self._skip_select_blanks(token_stream)
 
         # Get key name
         token = token_stream.peek(0)
@@ -584,20 +590,11 @@ class SelectClauseParser:
         # Skip FILE (or STATUS, when the clause is written without FILE)
         first = token_stream.consume()
 
-        # Skip optional STATUS
-        token = token_stream.peek(0)
-        if first.value.upper() == "FILE" and token and token.value.upper() == "STATUS":
-            token_stream.consume()
-
-        # Skip optional IS
-        token = token_stream.peek(0)
-        if token and token.value.upper() == "IS":
-            token_stream.consume()
-
-        # Skip whitespace
-        token = token_stream.peek(0)
-        if token and not token.value.strip():
-            token_stream.consume()
+        # Skip optional STATUS / IS (a clause may break across lines anywhere)
+        if first.value.upper() == "FILE":
+            self._try_consume_word(token_stream, "STATUS")
+        self._try_consume_word(token_stream, "IS")
+        self._skip_select_blanks(token_stream)
 
         # Get status variable(s)
         token = token_stream.peek(0)
@@ -644,6 +641,7 @@ class SelectClauseParser:
         device = select_data.get("assign_device")
         if assign_to:
             select_stmt.set_assign_to(assign_to, device)
+        select_stmt.assign_using = select_data.get("assign_using")
 
         # Set ORGANIZATION clause
         organization = select_data.get("organization")
