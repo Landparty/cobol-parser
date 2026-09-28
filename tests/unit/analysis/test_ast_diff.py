@@ -1506,6 +1506,31 @@ def test_repeated_filler_entries_are_keyed_by_position_with_a_caveat():
     assert any("FILLER entries" in caveat for caveat in report.caveats)
 
 
+def test_unnamed_entries_are_implicit_fillers_not_keyed_by_line():
+    # `05 PIC X(3).` has no data-name; the parser's synthetic name carries
+    # its line number, which must not make a line shift read as a change.
+    template = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ANONP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+{extra}       01  WS-GRP.
+           05  PIC X(3) VALUE 'AAA'.
+           05  PIC X(3) VALUE '{value}'.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           STOP RUN.
+"""
+    old = template.format(extra="", value="BBB")
+    shifted = template.format(extra="       01  WS-NEW PIC X.\n", value="BBB")
+    report = _diff(old, shifted)
+    assert [c.symbol for c in report.changes] == ["WS-NEW"]
+
+    report = _diff(old, template.format(extra="", value="CCC"))
+    changes = _of_kind(report, "value-changed")
+    assert [c.symbol for c in changes] == ["WS-GRP.FILLER#2"]
+
+
 def test_level_66_renames_entries_are_caveated():
     loc = SourceLocation(1, 1)
 

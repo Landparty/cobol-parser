@@ -2590,7 +2590,10 @@ STATUS, ASSIGN, OPTIONAL, plus the FD's presence, record size, recording mode
 and FD-vs-SD kind); data items keyed by section plus qualified path
 (`WORKING-STORAGE:WS-TAB.WS-ENT` — PICTURE/USAGE/level/VALUE/OCCURS/REDEFINES
 plus the SIGN / JUSTIFIED / SYNCHRONIZED / BLANK WHEN ZERO / EXTERNAL / GLOBAL
-flags and level-88 names and values); procedures (added, removed, renamed,
+flags and level-88 names and values — an entry with no data-name, which the
+parser names `ANONYMOUS-<level>-<line>`, is keyed as a positional `FILLER`
+since 2026-09-28, so a line shift no longer reports it removed and re-added);
+procedures (added, removed, renamed,
 **moved** — reordered without a body change, reported separately so a pure
 reshuffle never reads as a rewrite — and body-changed); and statements within
 matched paragraphs.
