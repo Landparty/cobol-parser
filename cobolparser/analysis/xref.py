@@ -1132,6 +1132,13 @@ class XrefAnalyzer:
                 pairs.append((stmt.primary_operand, role, True))
             if stmt.from_item:
                 pairs.append((stmt.from_item, ROLE_READ, True))
+            # COUNT IN and JSON PARSE's INTO receive a value; every other
+            # clause subject (NAME OF / TYPE OF / SUPPRESS / CONVERTING /
+            # NAMESPACE ...) is read.
+            for receiver in (stmt.count_in, stmt.into_item):
+                if receiver:
+                    pairs.append((receiver, ROLE_WRITE, True))
+            pairs += [(name, ROLE_READ, True) for name in stmt.clause_items]
             if stmt.processing_procedure:
                 pairs.append((stmt.processing_procedure, ROLE_PERFORM, True))
             if stmt.processing_procedure_thru:

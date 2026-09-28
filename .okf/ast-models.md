@@ -81,7 +81,15 @@ Serialization fidelity notes (2026-07-07):
   `processing_procedure` / `processing_procedure_thru` (XML PARSE's implicit
   PERFORM target and THRU end), and `on_exception` / `not_on_exception`
   statement lists (the CALL/ACCEPT handler shape; serialized with
-  `omit_empty`).
+  `omit_empty`). Since 2026-09-28 the clause region's data names are
+  structured too: `count_in` (GENERATE's `COUNT [IN]`), `into_item` (JSON
+  PARSE's receiving item) and `clause_items` (every `NAME OF` / `TYPE OF` /
+  `SUPPRESS` / `CONVERTING` subject and `NAMESPACE` / `NAMESPACE-PREFIX` /
+  `VALIDATING WITH` identifier, qualifiers and subscripts folded in), all
+  three also reaching `.operands` -- before, they lived only in
+  `clause_text`, so unused-variables flagged each and xref saw none. xref
+  gives `count_in` / `into_item` role `write`, `clause_items` role `read`.
+  `primary_operand` / `from_item` fold a trailing OF/IN chain or subscript.
 * REPORT SECTION (2026-09-02): report groups are ordinary `CobolDataItem`
   trees under a `CobolSection("REPORT")`. Each 01-level group carries
   `metadata["rd_report_name"]` and `metadata["rd_clauses"]` (the RD's

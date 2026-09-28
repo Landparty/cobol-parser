@@ -416,6 +416,34 @@ class XmlJsonStatement(CobolStatement):
         # from get_all_statements() and every nested-body walk.
         self.on_exception: list[CobolStatement] | None = None
         self.not_on_exception: list[CobolStatement] | None = None
+        # Data items the trailing clauses name. `count_in` (GENERATE's
+        # ``COUNT IN``) and `into_item` (JSON PARSE's ``INTO``) are the
+        # items the statement *writes*; `clause_items` are the ones it
+        # reads or describes (``NAME OF`` / ``TYPE OF`` / ``SUPPRESS`` /
+        # ``CONVERTING`` subjects, a ``NAMESPACE`` / ``NAMESPACE-PREFIX`` /
+        # ``ENCODING`` / ``VALIDATING WITH`` identifier). All three also
+        # reach `.operands`. Before 2026-09-28 they lived only in
+        # `clause_text`, so unused-variables reported every one of them as
+        # never referenced and xref saw none of them.
+        self.count_in: str | None = None
+        self.into_item: str | None = None
+        self.clause_items: list[str] = []
+
+    def set_count_in(self, name: str) -> None:
+        """Record ``COUNT [IN] name`` (XML/JSON GENERATE)."""
+        self.count_in = name
+        self._add_unique_operand(name)
+
+    def set_into_item(self, name: str) -> None:
+        """Record ``INTO name`` (JSON PARSE's receiving item)."""
+        self.into_item = name
+        self._add_unique_operand(name)
+
+    def add_clause_item(self, name: str) -> None:
+        """Record a data item a trailing clause names (read, not written)."""
+        if name not in self.clause_items:
+            self.clause_items.append(name)
+        self._add_unique_operand(name)
 
     def set_primary_operand(self, name: str) -> None:
         self.primary_operand = name
@@ -450,6 +478,9 @@ class XmlJsonStatement(CobolStatement):
                 "clause_text": self.clause_text,
                 "processing_procedure": self.processing_procedure,
                 "processing_procedure_thru": self.processing_procedure_thru,
+                "count_in": self.count_in,
+                "into_item": self.into_item,
+                "clause_items": list(self.clause_items),
             }
         )
         result.update(
