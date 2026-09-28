@@ -411,6 +411,15 @@ class TestFinding9PowerAssociativity:
             == {}
         )
 
+    def test_unary_minus_applies_before_exponentiation(self):
+        # IBM hierarchy: unary sign first, then **: (-2) ** 2 + 10 == 14.
+        # Read as -(2 ** 2) this folded to 6.
+        assert _fold(
+            "           COMPUTE WS-A = - 2 ** 2 + 10\n"
+            "           DISPLAY WS-A\n"
+            "           STOP RUN.\n"
+        ) == {"WS-GRP.WS-A": "14"}
+
 
 class TestFinding10TruncatedTextWitness:
     def test_literal_wider_than_the_field_is_unsatisfiable(self):
