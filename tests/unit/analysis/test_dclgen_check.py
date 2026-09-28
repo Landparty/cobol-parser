@@ -207,6 +207,23 @@ def test_the_indicator_keyword_form_is_recognised_too():
     assert _by_kind(report, "null-indicator") == []
 
 
+@pytest.mark.parametrize(
+    "hostvars", [":CUST-VAL:IND-VAL", ":CUST-VAL INDICATOR :IND-VAL"]
+)
+def test_an_indicator_variable_is_not_an_unchecked_host_variable(hostvars):
+    """An indicator binds to no column; it used to be reported as unchecked
+    ("no DECLARE TABLE declares a column of this name")."""
+    source = _program(
+        ONE_COLUMN.format(column="CUST_VAL CHAR(10)"),
+        "       01  CUST-VAL    PIC X(10).\n       01  IND-VAL  PIC S9(4) COMP.\n",
+        "CUST_VAL",
+        hostvars,
+    )
+    report = _check(source)
+    assert report.checked == ["CUST-VAL"]
+    assert report.unchecked == {}
+
+
 def test_a_not_null_column_never_asks_for_an_indicator():
     report = _check(_one("CUST_VAL CHAR(10) NOT NULL", "CUST-VAL PIC X(10)."))
     assert report.violations == []

@@ -14,6 +14,18 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-28 -- bug hunt round 5: STATUS without FILE, CALL USING literals, refmod MOVEs, SQL indicators
+
+[parser.md](parser.md): `SELECT ... STATUS IS x` (IBM's optional FILE) was
+swallowed into `assign_to`; CALL USING stopped at a figurative constant or a
+signed literal, dropping it and every later argument.
+[analysis.md](analysis.md): move-type-check never resolved a glued
+subscripted / reference-modified source (`T-E(2)`, `WS-A(1:3)`) and treated
+a ref-modified receiver as its base category; dclgen-check reported null
+indicators as unchecked host variables. [dialects.md](dialects.md):
+`ExecSQLStatement.null_indicators` missed the `INDICATOR :x` form as parsed
+from source (the rebuilt text has no blank before the colon).
+
 ## 2026-09-28 -- bug hunt round 4: linkage arguments, CLOSE REEL, SQL tables, CRUD writes
 
 [analysis.md](analysis.md): linkage-check matched CALL arguments verbatim, so

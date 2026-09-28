@@ -1046,6 +1046,16 @@ IBM is stricter than GnuCOBOL's `-std=ibm` (non-integer → alphanumeric) or a
 documented choice here (HIGH/LOW-VALUE, QUOTE → numeric). Pinned by
 `tests/unit/analysis/test_move_type_checker.py::TestGroupReceiverAndZeroToAlphabetic`.
 
+**Glued subscripts and reference modification (2026-09-28):** the MOVE
+parser folds a *source* as `T-E(2)` / `WS-A(1:3)` (no blanks), which
+`base_data_name` does not split, so such a MOVE was silently skipped --
+`_reference_name()` recovers the item name locally (value_tracker keeps the
+old behaviour, so a substring never propagates whole values). A
+reference-modified operand (source or receiver) is ALPHANUMERIC whatever
+its base item is: `MOVE WS-A TO WS-N(2:3)` no longer warns, `MOVE
+WS-D(1:2) TO WS-A` with a `V99` base is legal. Pinned by
+`test_move_type_checker.py::TestSubscriptedAndReferenceModifiedOperands`.
+
 **Picture classification fixes (2026-08-16 audit):** `_PIC_ALPHA_ONLY_RE`
 now matches any concatenation of `A`/`A(n)` parts (`AA(3)`, `A(2)A(3)`) —
 they previously fell through to ALPHANUMERIC, hiding illegal
@@ -1325,6 +1335,12 @@ checker reports that no column matches *any* host variable — i.e. it checks
 nothing while looking like it had. That was the first bug found in
 development, and `test_an_underscored_column_is_matched_to_its_hyphenated_host_variable`
 pins it.
+
+**Null indicators are not host variables here (2026-09-28).** An indicator
+(`:X:IND`, `:X INDICATOR :IND`) is picked up by the `:name` scan like any
+host variable but binds to no column; names in any statement's
+`null_indicators` are dropped from the checked set (unless a column of
+that name exists), instead of each being reported as `unchecked`.
 
 | kind | severity | what it costs at runtime |
 |------|----------|--------------------------|

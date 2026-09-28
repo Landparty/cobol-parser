@@ -341,6 +341,22 @@ class TestHostVariables:
         assert "WS-SALARY" in stmt.host_variables
         assert "WS-SAL-IND" in stmt.null_indicators
 
+    def test_null_indicator_keyword_as_parsed_from_source(self):
+        """The EXEC SQL parser rebuilds the text as ``INDICATOR:IND`` (no
+        blank before the colon); the keyword form was missed there."""
+        from cobolparser import parse_cobol
+
+        source = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. T.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           EXEC SQL SELECT BAL INTO :BAL INDICATOR :IND-2\n"
+            "                FROM CUST END-EXEC\n"
+            "           STOP RUN.\n"
+        )
+        (stmt,) = parse_cobol(source).ast.find_all_by_type("ExecSQLStatement")
+        assert stmt.null_indicators == ["IND-2"]
+
 
 class TestTransactionControl:
     """Test COMMIT, ROLLBACK, and transaction control statements."""

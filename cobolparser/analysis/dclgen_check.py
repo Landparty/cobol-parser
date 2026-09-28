@@ -238,7 +238,16 @@ class DclgenChecker:
             for name, bindings in columns.items()
             if len({table for table, _ in bindings}) > 1
         }
-        names = sorted(set(resolution.resolved) | set(resolution.unresolved))
+        # A null-indicator variable (`:BAL:IND-BAL`, `:BAL INDICATOR
+        # :IND-BAL`) is picked up as a `:name` like any host variable, but it
+        # binds to no column -- reporting it as "unchecked" was a false
+        # caveat on every program that uses indicators.
+        indicator_names = _indicator_variables(ast)
+        names = sorted(
+            name
+            for name in set(resolution.resolved) | set(resolution.unresolved)
+            if not (name.upper() in indicator_names and _normalize(name) not in columns)
+        )
         if not resolution.declare_tables:
             # Nothing to check against. Said as a caveat rather than as a
             # clean bill of health: a program with no DECLARE TABLE has not
@@ -574,6 +583,16 @@ def _indicator_bindings(node: Any) -> set[str]:
             found.add(match.group(1).upper())
     for child in getattr(node, "children", []):
         found |= _indicator_bindings(child)
+    return found
+
+
+def _indicator_variables(node: Any) -> set[str]:
+    """Upper-cased names used as a null indicator anywhere in the program."""
+    found: set[str] = set()
+    if isinstance(node, ExecSQLStatement):
+        found.update(str(name).upper() for name in node.null_indicators or [])
+    for child in getattr(node, "children", []):
+        found |= _indicator_variables(child)
     return found
 
 

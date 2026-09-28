@@ -31,6 +31,16 @@ dialect.get_dialect_info() -> dict[str, Any]
 statements and IBM-specific data items build on: `ExecSQLStatement`,
 `ExecCICSStatement`, `ExecIMSStatement`, `IBMDataItem`, `IBMDataType`.
 
+## `ExecSQLStatement.null_indicators` (`models/sql_statements.py`)
+
+Both indicator forms land here: `:X:IND` and `:X INDICATOR :IND`. The EXEC
+SQL parser rebuilds `sql_text` without a blank before a colon
+(`INDICATOR:IND`), so `_SQL_INDICATOR_KW_RE` takes `\s*`, not `\s+` --
+before 2026-09-28 the keyword form was only recognized in hand-written test
+strings, never in parsed source. Indicators also appear in `host_variables`
+(the plain `:name` scan). Pinned by
+`test_sql_statements.py::TestHostVariables::test_null_indicator_keyword_as_parsed_from_source`.
+
 ## `ExecSQLStatement.tables` (`models/sql_statements.py`)
 
 Source order, with the statement's **target first** for INSERT / UPDATE /

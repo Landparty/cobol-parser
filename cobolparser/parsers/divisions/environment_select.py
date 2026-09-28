@@ -26,6 +26,7 @@ _SELECT_CLAUSE_KEYWORDS: frozenset[str] = frozenset(
         "RECORD",
         "RELATIVE",
         "FILE",
+        "STATUS",
         "ALTERNATE",
         "PADDING",
         "RESERVE",
@@ -177,8 +178,8 @@ class SelectClauseParser:
             elif token_value == "RELATIVE":
                 self._parse_relative_key_clause(token_stream, select_data)
 
-            # FILE STATUS clause
-            elif token_value == "FILE":
+            # [FILE] STATUS clause -- IBM makes the word FILE optional
+            elif token_value in ("FILE", "STATUS"):
                 self._parse_file_status_clause(token_stream, select_data)
 
             # ALTERNATE RECORD KEY clause (secondary indexes — may repeat)
@@ -579,13 +580,13 @@ class SelectClauseParser:
     def _parse_file_status_clause(
         self, token_stream: ITokenStream, select_data: dict[str, Any]
     ) -> None:
-        """Parse FILE STATUS IS clause."""
-        # Skip FILE
-        token_stream.consume()
+        """Parse [FILE] STATUS IS clause (IBM makes the word FILE optional)."""
+        # Skip FILE (or STATUS, when the clause is written without FILE)
+        first = token_stream.consume()
 
         # Skip optional STATUS
         token = token_stream.peek(0)
-        if token and token.value.upper() == "STATUS":
+        if first.value.upper() == "FILE" and token and token.value.upper() == "STATUS":
             token_stream.consume()
 
         # Skip optional IS

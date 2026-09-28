@@ -19,7 +19,7 @@ _SQL_INDICATOR_RE = re.compile(
     r":([A-Za-z][A-Za-z0-9_-]*)\s*:\s*([A-Za-z][A-Za-z0-9_-]*)"
 )
 _SQL_INDICATOR_KW_RE = re.compile(
-    r"INDICATOR\s+:([A-Za-z][A-Za-z0-9-]*)", re.IGNORECASE
+    r"\bINDICATOR\s*:([A-Za-z][A-Za-z0-9_-]*)", re.IGNORECASE
 )
 # A table name may be qualified (schema.table, location.schema.table); matching
 # only the first part used to report the schema itself (BANK) as a table.

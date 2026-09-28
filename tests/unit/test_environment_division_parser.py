@@ -117,6 +117,41 @@ class TestInputOutputSection:
         result = _parse(src)
         assert result.success
 
+    def test_status_clause_without_the_word_file(self):
+        """IBM makes FILE optional: ``STATUS IS WS-FS`` was swallowed into
+        ASSIGN (``assign_to == 'DD1 STATUS IS WS-FS'``) and file_status was
+        left empty."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. TEST-PROG.\n"
+            "       ENVIRONMENT DIVISION.\n"
+            "       INPUT-OUTPUT SECTION.\n"
+            "       FILE-CONTROL.\n"
+            "           SELECT F1 ASSIGN TO DD1\n"
+            "               STATUS IS WS-FS WS-VSAM.\n"
+            "           SELECT F2 ASSIGN TO DD2 STATUS WS-FS\n"
+            "               ORGANIZATION IS SEQUENTIAL.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-FS PIC XX.\n"
+            "       01 WS-VSAM PIC X(6).\n"
+            "       PROCEDURE DIVISION.\n"
+            "           STOP RUN.\n"
+        )
+        result = _parse(src)
+        assert result.warnings == []
+        f1, f2 = result.ast.find_all_by_type("SelectStatement")
+        assert (f1.assign_to, f1.file_status, f1.file_status_vsam) == (
+            "DD1",
+            "WS-FS",
+            "WS-VSAM",
+        )
+        assert (f2.assign_to, f2.file_status, f2.organization) == (
+            "DD2",
+            "WS-FS",
+            "SEQUENTIAL",
+        )
+
     def test_select_indexed(self):
         src = (
             "       IDENTIFICATION DIVISION.\n"
