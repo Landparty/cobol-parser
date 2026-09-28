@@ -1606,6 +1606,35 @@ class TestProcedureExecOverrides:
         assert job.step("T.PS1").condition == "(0,NE)"
         assert job.step("T.PS2").condition == "(0,NE)"
 
+    def test_instream_override_replaces_a_procedure_dataset_and_back(self):
+        result = parse_jcl("""\
+//J JOB 1
+//P PROC
+//PS1 EXEC PGM=A
+//SYSIN DD DSN=A.B,DISP=SHR
+//IN2 DD *
+DATA
+/*
+// PEND
+//S EXEC P
+//PS1.SYSIN DD *
+CARD
+/*
+//PS1.IN2 DD DSN=X.Y,DISP=SHR
+//
+""")
+        assert result.errors == []
+        step = result.jobs[0].step("S.PS1")
+        sysin = step.dd("SYSIN")
+        assert sysin.dataset is None
+        assert sysin.is_instream
+        assert sysin.instream_lines == ["CARD"]
+        in2 = step.dd("IN2")
+        assert in2.dataset == "X.Y"
+        assert not in2.is_instream
+        assert in2.instream_lines == []
+        assert result.dd_map()["SYSIN"] == []
+
     def test_override_naming_a_missing_procedure_step_is_reported(self):
         result = parse_jcl(self.PROC + "//S EXEC P,PARM.NOPE=X\n//\n")
         assert result.errors == []

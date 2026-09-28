@@ -233,10 +233,13 @@ stored exactly as coded and reported in `unresolved`.
 # DUMMY and overrides
 
 `DUMMY` and `DSN=NULLFILE` both mark a DD `is_dummy` with `dataset=None`,
-whatever DSN is also coded. `DSN`/`DSNAME`, `DUMMY` and `SYSOUT` are mutually
-exclusive: an overriding `procstep.ddname` card that codes any of them drops
-whichever the procedure DD coded, so `//S.IN DD DUMMY` really dummies out a
-procedure dataset (it used to leave `IN -> A.B` in `dd_map()`).
+whatever DSN is also coded. `DSN`/`DSNAME`, `DUMMY`, `SYSOUT` and in-stream
+data (`*` / `DATA`) are mutually exclusive: an overriding `procstep.ddname`
+card that codes any of them drops whichever the procedure DD coded, so
+`//S.IN DD DUMMY` really dummies out a procedure dataset (it used to leave
+`IN -> A.B` in `dd_map()`), `//S.SYSIN DD *` replaces a procedure `DSN=`
+(it used to keep it alongside the data), and a `DSN=` override of a
+procedure `DD *` is no longer still flagged in-stream.
 * Datasets are not resolved across *files*: a job that `INCLUDE`s a member or
   `EXEC`s a cataloged procedure from a PROCLIB gets an `unresolved` entry, not
   a lookup.

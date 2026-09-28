@@ -162,6 +162,16 @@ def _merge_dcb(base: JclParameter, override: JclParameter) -> JclParameter:
 
 #: The mutually exclusive parameters that decide what a DD *is*.
 _DD_KIND_KEYWORDS = frozenset({"DSN", "DSNAME", "DUMMY", "SYSOUT"})
+#: The positional ``*`` / ``DATA`` that make a DD in-stream: another kind.
+_DD_INSTREAM_POSITIONALS = frozenset({"*", "DATA"})
+
+
+def _is_dd_kind(param: JclParameter) -> bool:
+    """Whether ``param`` decides what a DD *is* (dataset, dummy, sysout, data)."""
+    keyword = param.keyword.upper()
+    if keyword in _DD_KIND_KEYWORDS:
+        return True
+    return param.value is None and keyword in _DD_INSTREAM_POSITIONALS
 
 
 def _clone_dd(dd: DDStatement, *, procstep: str | None = None) -> DDStatement:
@@ -906,11 +916,15 @@ class _Builder:
             )
             for p in base.parameters
         ]
-        # DSN, DUMMY and SYSOUT are mutually exclusive ways of saying what a
-        # DD is. An override coding one of them replaces whichever the
-        # procedure coded, rather than leaving both in effect.
-        if any(p.keyword.upper() in _DD_KIND_KEYWORDS for p in override.parameters):
-            params = [p for p in params if p.keyword.upper() not in _DD_KIND_KEYWORDS]
+        # DSN, DUMMY, SYSOUT and in-stream data (`*` / `DATA`) are mutually
+        # exclusive ways of saying what a DD is. An override coding one of
+        # them replaces whichever the procedure coded, rather than leaving
+        # both in effect.
+        replaces_kind = override.is_instream or any(
+            _is_dd_kind(p) for p in override.parameters
+        )
+        if replaces_kind:
+            params = [p for p in params if not _is_dd_kind(p)]
         for param in override.parameters:
             keyword = param.keyword.upper()
             replaced = False
@@ -928,7 +942,7 @@ class _Builder:
         if override.is_instream:
             merged.is_instream = True
             merged.instream_lines = list(override.instream_lines)
-        elif base.is_instream:
+        elif base.is_instream and not replaces_kind:
             merged.is_instream = True
             merged.instream_lines = list(base.instream_lines)
         source = override.concatenated or base.concatenated
