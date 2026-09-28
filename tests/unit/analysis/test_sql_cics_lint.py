@@ -273,6 +273,46 @@ def test_a_check_before_the_statement_does_not_count():
     assert len(_of_kind(report, KIND_NO_SQLCODE_CHECK)) == 1
 
 
+def test_a_check_after_the_next_sql_statement_does_not_count():
+    """The next executable EXEC SQL resets the SQLCA, so the one check
+    after two statements only ever sees the second one's outcome."""
+    report = _analyze("""       MAIN-PARA.
+           EXEC SQL DELETE FROM CUSTOMER END-EXEC.
+           EXEC SQL COMMIT END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+""")
+    violations = _of_kind(report, KIND_NO_SQLCODE_CHECK)
+    assert [v.symbol for v in violations] == ["DELETE"]
+
+
+def test_a_performed_paragraph_running_sql_first_does_not_check_this_one():
+    report = _analyze("""       MAIN-PARA.
+           EXEC SQL DELETE FROM CUSTOMER END-EXEC.
+           PERFORM LOG-PARA.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+       LOG-PARA.
+           EXEC SQL INSERT INTO AUDIT VALUES (1) END-EXEC.
+""")
+    violations = _of_kind(report, KIND_NO_SQLCODE_CHECK)
+    assert [v.symbol for v in violations] == ["DELETE", "INSERT"]
+
+
+def test_conditional_sql_and_declarations_do_not_end_the_window():
+    """SQL inside an IF may not run, and a declaration sets nothing."""
+    report = _analyze("""       MAIN-PARA.
+           EXEC SQL DELETE FROM CUSTOMER END-EXEC.
+           EXEC SQL DECLARE C1 CURSOR FOR SELECT NAME FROM T END-EXEC.
+           IF WS-NAME = 'A'
+               EXEC SQL COMMIT END-EXEC
+           END-IF.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+""")
+    assert _of_kind(report, KIND_NO_SQLCODE_CHECK) == []
+
+
 def test_a_statement_nested_in_an_if_is_still_checked():
     report = _analyze("""       MAIN-PARA.
            IF WS-NAME = 'A'

@@ -378,6 +378,9 @@ class _Block:
 
     name: str
     statements: list[ASTNode] = field(default_factory=list)
+    #: ``id()`` of the statements written directly in the paragraph (not
+    #: inside an IF/EVALUATE/AT END body), i.e. the ones that always run.
+    unconditional: set[int] = field(default_factory=set)
 
 
 @dataclass
@@ -525,7 +528,8 @@ class SqlCicsAnalyzer:
                 message=(
                     f"EXEC SQL {_sql_label(statement)} result is never checked: "
                     "nothing after it in this paragraph (or in a paragraph it "
-                    "PERFORMs) references SQLCODE, SQLSTATE or SQLCA, and no "
+                    "PERFORMs) references SQLCODE, SQLSTATE or SQLCA before "
+                    "the next SQL statement overwrites them, and no "
                     "WHENEVER SQLERROR handler is in effect; test SQLCODE "
                     "immediately after the statement"
                 ),
@@ -980,14 +984,18 @@ def _build_blocks(ast: CobolProgram) -> tuple[list[_Block], dict[str, list[int]]
     def add_paragraph(paragraph: CobolParagraph, section: str | None) -> None:
         name = (paragraph.paragraph_name or "").strip().upper()
         statements = list(_iter_statements(paragraph.statements))
+        unconditional = {id(statement) for statement in paragraph.statements}
         if not _is_real_paragraph_name(name) and blocks:
             # A parser-synthesised fragment (statements written before the
             # first paragraph header get one anonymous paragraph each).
             # Merging keeps "the statements that follow it" honest.
             blocks[-1].statements.extend(statements)
+            blocks[-1].unconditional |= unconditional
             return
         index = len(blocks)
-        blocks.append(_Block(name=name, statements=statements))
+        blocks.append(
+            _Block(name=name, statements=statements, unconditional=unconditional)
+        )
         if name:
             by_name.setdefault(name, []).append(index)
         if section:
@@ -1053,25 +1061,59 @@ def _status_checked(
     (or section) reached by a ``PERFORM`` written after it. *cache* memoises
     the per-statement scan, which is otherwise repeated once per SQL
     statement in the same paragraph.
+
+    The search stops at the next executable ``EXEC SQL`` written directly
+    in a paragraph (one inside an IF body may not run): it resets the
+    SQLCA, so a check written after it tests *that* statement's outcome,
+    not this one's.
     """
+    return (
+        _scan_for_status(block_index, position, blocks, by_name, cache, visited)
+        is True
+    )
+
+
+def _scan_for_status(
+    block_index: int,
+    position: int,
+    blocks: list[_Block],
+    by_name: dict[str, list[int]],
+    cache: dict[int, bool],
+    visited: set[int] | None = None,
+) -> bool | None:
+    """``True`` status checked, ``False`` SQLCA overwritten first, else ``None``."""
     if visited is None:
         visited = set()
-    for statement in blocks[block_index].statements[position + 1 :]:
+    block = blocks[block_index]
+    for statement in block.statements[position + 1 :]:
         checked = cache.get(id(statement))
         if checked is None:
             checked = _references_sql_status(statement)
             cache[id(statement)] = checked
         if checked:
             return True
+        if id(statement) in block.unconditional and _resets_sqlca(statement):
+            return False
         if isinstance(statement, PerformStatement):
             for target in _perform_targets(statement):
                 for index in by_name.get(target, []):
                     if index in visited:
                         continue
                     visited.add(index)
-                    if _status_checked(index, -1, blocks, by_name, cache, visited):
-                        return True
-    return False
+                    found = _scan_for_status(
+                        index, -1, blocks, by_name, cache, visited
+                    )
+                    if found is not None:
+                        return found
+    return None
+
+
+def _resets_sqlca(statement: ASTNode) -> bool:
+    """True for an executable ``EXEC SQL`` -- one that sets SQLCODE anew."""
+    if not isinstance(statement, ExecSQLStatement) or _is_whenever(statement):
+        return False
+    upper = " ".join(statement.sql_text.split()).upper()
+    return not _is_non_executable(statement, upper)
 
 
 def _perform_targets(statement: PerformStatement) -> list[str]:

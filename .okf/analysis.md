@@ -2545,6 +2545,13 @@ mistaken for the data item WS-KEY; before that the two reduced to the same
 tokens.) A quiet report
 with a populated `unchecked` is not a clean program, it is an unexamined one.
 
+The search for a status check after an `EXEC SQL` stops at the next
+executable `EXEC SQL` written directly in a paragraph (also inside a
+PERFORMed one): it resets the SQLCA, so `DELETE` / `COMMIT` / `IF SQLCODE`
+reports the DELETE (2026-09-28; before, the one check was credited to both).
+SQL inside an IF/EVALUATE body may not run and does not end the search;
+neither does a declaration or `WHENEVER`.
+
 `DECLARE GLOBAL TEMPORARY TABLE` is executable and is graded;
 DECLARE CURSOR / TABLE / STATEMENT / VARIABLE are not
 (`_NON_EXECUTABLE_SQL_TYPES`). A `DECLARE TABLE` or `INCLUDE` in the DATA
