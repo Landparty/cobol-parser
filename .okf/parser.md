@@ -233,7 +233,18 @@ position-shaped only when followed by `PAGE` (`_report_position`) -- `LINE
 PLUS 1 NEXT GROUP NEXT PAGE` must not fold `NEXT GROUP` into the LINE list.
 `parse_rd_clauses` stops at a LEVEL_NUMBER that begins a group
 (`_level_starts_group`) so a missing RD period cannot swallow the first
-group. Pinned by `tests/unit/test_report_section.py`; the 2026-08-13
+group. **2026-09-28:** `_report_operands` stops at a LEVEL_NUMBER token only
+outside parentheses and not after an operator word
+(`_REPORT_OPERATOR_WORDS`) -- a one-/two-digit integer lexes as LEVEL_NUMBER
+whatever it means, so `SUM WS-AMT (1)` and `PRESENT WHEN WS-I > 1` used to
+end the clause there and the clause loop opened a phantom data item at the
+integer. String literals in these operands are re-quoted (`PRESENT WHEN
+WS-FLAG = 'Y'`), and SUM operands are grouped per operand
+(`_group_report_operands`: `WS-AMT OF WS-GRP ( 3 )` is one entry).
+`_report_position` also reads COBOL-85 `LINE integer ON NEXT PAGE` (recorded
+as `"5 ON NEXT PAGE"`); the `ON` used to be dropped with a warning and
+`NEXT PAGE` misread as an empty NEXT GROUP. Pinned by
+`tests/regression/test_oo_report_xml_operand_drops.py`. Pinned by `tests/unit/test_report_section.py`; the 2026-08-13
 regression file's REPORT tests now pin the parsed shape and the absence of
 any warning, and `tests/samples/report_writer.cbl` is back in
 `test_sample_programs.py`'s parametrized list.
@@ -377,7 +388,7 @@ sibling) and a dedicated anonymous-item case.
 | `stop_parser.py` | STOP |
 | `string_unstring_parsers.py` | STRING, UNSTRING |
 | `unlock_parser.py` | UNLOCK |
-| `xml_json_parser.py` | XML GENERATE, XML PARSE, JSON GENERATE, JSON PARSE |
+| `xml_json_parser.py` | XML GENERATE, XML PARSE, JSON GENERATE, JSON PARSE (clause data names structured into `count_in` / `into_item` / `clause_items` by `_record_clause_items`, 2026-09-28) |
 | `write_parser.py` | WRITE |
 | `_utils.py` | Shared clause-collection utilities |
 
@@ -2940,6 +2951,15 @@ is the last thing before `FACTORY.`), and `ProcedureDivisionParser` (a
 factory's or object's PROCEDURE DIVISION is usually empty and followed by
 `METHOD-ID`; `END METHOD` etc. are in `_OO_UNIT_END_WORDS`). The "N
 program units" warning now counts every unit via `program_units()`.
+
+**INVOKE operand forms (2026-09-28, `invoke_parser.py`).** The USING loop
+now takes the same argument forms CALL's does: a subscript / OF-IN
+qualifier chain folds into the argument (`consume_optional_qualifiers`),
+`LENGTH OF x` / `ADDRESS OF x` are one argument, `OMITTED` and figurative
+constants are arguments. The RETURNING target and the object reference fold
+qualifiers/subscripts too. Before, the loop stopped at the `(` / `OF` /
+`OMITTED` and everything after it -- RETURNING included -- was warned about
+and dropped.
 
 ## PROGRAM-ID attributes and RETURNING
 

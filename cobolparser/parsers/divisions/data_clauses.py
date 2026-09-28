@@ -142,6 +142,33 @@ _REPORT_ANONYMOUS_STARTS: frozenset[str] = _REPORT_CLAUSE_STARTS | frozenset(
 _REPORT_OPERAND_STOPS: frozenset[str] = _PICTURE_TERMINATOR_KEYWORDS | frozenset(
     {"PIC", "PICTURE", "OCCURS", "REDEFINES", "UPON", "RESET"}
 )
+# After one of these a one-/two-digit integer (which lexes as a
+# LEVEL_NUMBER) is an operand -- ``PRESENT WHEN WS-I > 1`` -- not the level
+# number of a following data entry.
+_REPORT_OPERATOR_WORDS: frozenset[str] = frozenset(
+    {
+        "=",
+        ">",
+        "<",
+        ">=",
+        "<=",
+        "+",
+        "-",
+        "*",
+        "/",
+        "**",
+        "AND",
+        "OR",
+        "NOT",
+        "THAN",
+        "TO",
+        "EQUAL",
+        "EQUALS",
+        "GREATER",
+        "LESS",
+        "IS",
+    }
+)
 # ``,`` / ``;`` between data-item clauses are separators, not clauses.
 _CLAUSE_SEPARATOR_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     {TokenType.COMMA, TokenType.SEMICOLON}
@@ -851,29 +878,102 @@ class DataItemClauseParser:
         token = token_stream.peek()
         if token and token.type in (TokenType.LEVEL_NUMBER, TokenType.NUMERIC_LITERAL):
             token_stream.consume()
-            return f"PLUS {token.value}" if plus else str(token.value)
+            if plus:
+                return f"PLUS {token.value}"
+            # ``LINE [NUMBER IS] integer ON NEXT PAGE`` (COBOL-85): an
+            # absolute line on a fresh page. Before 2026-09-28 the ``ON``
+            # was warned about and dropped, and ``NEXT PAGE`` was misread
+            # as a ``NEXT GROUP`` clause with no operand.
+            if self._at_on_next_page(token_stream):
+                for _ in range(3):  # ON NEXT PAGE
+                    self._skip_newlines(token_stream)
+                    token_stream.consume()
+                return f"{token.value} ON NEXT PAGE"
+            return str(token.value)
         return "PLUS" if plus else None
+
+    def _at_on_next_page(self, token_stream: ITokenStream) -> bool:
+        """True when the next three meaningful tokens are ``ON NEXT PAGE``
+        (nothing consumed)."""
+        words: list[str] = []
+        offset = 0
+        while len(words) < 3:
+            token = token_stream.peek(offset)
+            if token is None:
+                return False
+            offset += 1
+            if token.type == TokenType.NEWLINE:
+                continue
+            words.append((token.value or "").upper())
+        return words == ["ON", "NEXT", "PAGE"]
 
     def _report_operands(self, token_stream: ITokenStream) -> list[str]:
         """Free-text operands up to the next clause word, period, level
         number or division header (TYPE ..., SUM ..., PRESENT WHEN ...)."""
         words: list[str] = []
+        depth = 0
         while not token_stream.is_empty():
             self._skip_newlines(token_stream)
             token = token_stream.peek()
-            if token is None or token.type in (
-                TokenType.PERIOD,
-                TokenType.LEVEL_NUMBER,
+            if token is None or token.type == TokenType.PERIOD:
+                break
+            # A one-/two-digit integer lexes as LEVEL_NUMBER whatever it
+            # means. Inside a subscript (``SUM WS-AMT (1)``) or after an
+            # operator (``PRESENT WHEN WS-I > 1``) it is an operand; only
+            # elsewhere is it the level number of the next entry (a
+            # missing period). Before 2026-09-28 every such integer ended
+            # the clause, and the clause loop then opened a phantom data
+            # item at it, dropping the rest of the entry.
+            if (
+                token.type == TokenType.LEVEL_NUMBER
+                and depth == 0
+                and not (words and words[-1].upper() in _REPORT_OPERATOR_WORDS)
             ):
                 break
             if token.type in _DIVISION_TOKEN_TYPES:
                 break
             upper = (token.value or "").upper()
-            if upper in _REPORT_CLAUSE_STARTS or upper in _REPORT_OPERAND_STOPS:
+            if depth == 0 and (
+                upper in _REPORT_CLAUSE_STARTS or upper in _REPORT_OPERAND_STOPS
+            ):
                 break
-            words.append(token.value)
+            if token.type == TokenType.LEFT_PAREN:
+                depth += 1
+            elif token.type == TokenType.RIGHT_PAREN:
+                depth = max(0, depth - 1)
+            value = token.value or ""
+            if token.type == TokenType.STRING_LITERAL:
+                # Keep a literal distinguishable from a data name
+                # (``PRESENT WHEN WS-FLAG = 'Y'``, not ``= Y``).
+                value = "'" + value.replace("'", "''") + "'"
+            words.append(value)
             token_stream.consume()
         return words
+
+    @staticmethod
+    def _group_report_operands(words: list[str]) -> list[str]:
+        """Fold each operand's subscript and ``OF``/``IN`` qualifiers into
+        one string, so ``SUM WS-AMT (1) WS-AMT (2)`` lists two operands
+        (``WS-AMT ( 1 )``, ``WS-AMT ( 2 )``), not eight words."""
+        grouped: list[str] = []
+        depth = 0
+        glue_next = False
+        for word in words:
+            upper = word.upper()
+            if grouped and (depth > 0 or glue_next or word == "("):
+                grouped[-1] = f"{grouped[-1]} {word}"
+            elif grouped and upper in ("OF", "IN"):
+                grouped[-1] = f"{grouped[-1]} {word}"
+                glue_next = True
+                continue
+            else:
+                grouped.append(word)
+            glue_next = False
+            if word == "(":
+                depth += 1
+            elif word == ")":
+                depth = max(0, depth - 1)
+        return grouped
 
     def _parse_report_clause(
         self, token_stream: ITokenStream, data_item: CobolDataItem, word: str
@@ -909,7 +1009,7 @@ class DataItemClauseParser:
             self._consume_if(token_stream, "IS")
             clauses["source"] = " ".join(self._report_operands(token_stream))
         elif word == "SUM":
-            operands = self._report_operands(token_stream)
+            operands = self._group_report_operands(self._report_operands(token_stream))
             entry: dict[str, Any] = {"operands": operands}
             if self._consume_if(token_stream, "UPON"):
                 entry["upon"] = self._report_operands(token_stream)
