@@ -57,6 +57,15 @@ class ParseResult:
 object, which the next `parse()` call `reset()`s in place — previously
 reusing one `CobolParser` clobbered earlier results' statistics.
 
+Every return path fills the statistics (2026-09-28): `lines_parsed` /
+`lines_processed` are set before lexing, `tokens_processed` right after it,
+and `_create_result` stops the clock -- a FAIL_FAST lexer error, a
+propagated `ParseError` or the safety net used to return `0` lines and
+`parse_time_seconds == 0`. `_begin_parse()` holds the per-parse reset, and
+`parse_file()` runs it before recording a `File error`, which previously
+came back alongside the errors, warnings and statistics of whatever the
+instance had parsed last.
+
 `CobolParser(..., initial_warnings=[...])` (2026-08-14, consumption fixed
 2026-08-15 per Copilot review on PR #153) seeds `self.warnings` with
 caller-supplied diagnostics at the top of the *first* `parse()` call, after

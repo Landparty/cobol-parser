@@ -8,6 +8,7 @@ JSON serialization support.
 
 import fnmatch
 import json
+import re
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 from ..plugins import SerializationConfig
@@ -237,6 +238,30 @@ def _strip_locations(node: Any) -> None:
     elif isinstance(node, list):
         for value in node:
             _strip_locations(value)
+
+
+#: A quoted COBOL literal (a doubled quote inside is part of it).
+_QUOTED_LITERAL_RE = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
+
+
+def _exec_kind(stmt: Any) -> str | None:
+    """``"SQL"`` / ``"CICS"`` / ``"IMS"`` for an EXEC block, else None.
+
+    The statement parser builds ``ExecCicsStatement`` / ``ExecImsStatement``
+    with ``statement_type`` ``"EXEC CICS"`` / ``"EXEC IMS"`` (blank), the
+    dialect module's hand-built nodes use ``"EXEC-CICS"`` / ``"EXEC-IMS"``
+    (hyphen), and the typed EXEC SQL subclasses (``FetchStatement``, ...)
+    carry the SQL verb (``"FETCH"``) -- so a plain ``statement_type ==
+    "EXEC-CICS"`` test matched none of the statements a real parse builds.
+    """
+    from .sql_statements import ExecSQLStatement
+
+    if isinstance(stmt, ExecSQLStatement):
+        return "SQL"
+    kind = str(getattr(stmt, "statement_type", "") or "").upper().replace(" ", "-")
+    if kind in ("EXEC-SQL", "EXEC-CICS", "EXEC-IMS"):
+        return kind[5:]
+    return None
 
 
 class CobolProgram(ASTNode):
@@ -523,14 +548,26 @@ class CobolProgram(ASTNode):
     def find_statements_using_variable(
         self, variable_name: str
     ) -> list["CobolStatement"]:
-        """Find statements that use a specific variable."""
-        all_statements = self.get_all_statements()
+        """Find statements that use a specific variable.
+
+        An operand uses *variable_name* when it holds that name as a whole
+        COBOL word (case-insensitively), outside any quoted literal -- so
+        ``WS-A`` matches ``WS-A``, ``WS-A(IX)`` and ``WS-A OF GRP``, but not
+        ``WS-AMOUNT``, ``TOTAL-WS-A`` or ``'WS-A'``. A plain substring test
+        used to report every statement touching a longer name that merely
+        contained this one.
+        """
+        name = variable_name.strip()
+        if not name:
+            return []
+        pattern = re.compile(
+            rf"(?<![A-Za-z0-9_-]){re.escape(name)}(?![A-Za-z0-9_-])", re.IGNORECASE
+        )
         using_variable = []
 
-        for stmt in all_statements:
-            # Check operands for variable usage
+        for stmt in self.get_all_statements():
             for operand in stmt.operands:
-                if variable_name in operand:
+                if pattern.search(_QUOTED_LITERAL_RE.sub(" ", operand)):
                     using_variable.append(stmt)
                     break
 
@@ -549,42 +586,32 @@ class CobolProgram(ASTNode):
 
     def has_sql(self) -> bool:
         """Check if program uses EXEC SQL statements."""
-        all_statements = self.get_all_statements()
-        for stmt in all_statements:
-            if stmt.statement_type == "EXEC-SQL":
-                return True
-        return False
+        return bool(self.get_sql_statements())
 
     def has_cics(self) -> bool:
         """Check if program uses EXEC CICS statements."""
-        all_statements = self.get_all_statements()
-        for stmt in all_statements:
-            if stmt.statement_type == "EXEC-CICS":
-                return True
-        return False
+        return bool(self.get_cics_statements())
 
     def has_ims(self) -> bool:
         """Check if program uses EXEC IMS statements or declares ENTRY 'DLITCBL'."""
-        all_statements = self.get_all_statements()
-        for stmt in all_statements:
-            if stmt.statement_type == "EXEC-IMS":
-                return True
-        return self.is_ims_dlitcbl_program()
+        return bool(self.get_ims_statements()) or self.is_ims_dlitcbl_program()
 
     def get_sql_statements(self) -> list["CobolStatement"]:
-        """Get all EXEC SQL statements in the program."""
-        all_statements = self.get_all_statements()
-        return [stmt for stmt in all_statements if stmt.statement_type == "EXEC-SQL"]
+        """Get all EXEC SQL statements in the program.
+
+        Includes the typed EXEC SQL subclasses (``FETCH``, ``DECLARE CURSOR``,
+        ``COMMIT``/``ROLLBACK``, dynamic SQL), whose ``statement_type`` names
+        the SQL verb rather than ``"EXEC-SQL"``.
+        """
+        return [s for s in self.get_all_statements() if _exec_kind(s) == "SQL"]
 
     def get_cics_statements(self) -> list["CobolStatement"]:
         """Get all EXEC CICS statements in the program."""
-        all_statements = self.get_all_statements()
-        return [stmt for stmt in all_statements if stmt.statement_type == "EXEC-CICS"]
+        return [s for s in self.get_all_statements() if _exec_kind(s) == "CICS"]
 
     def get_ims_statements(self) -> list["CobolStatement"]:
-        """Get all EXEC IMS statements in the program."""
-        all_statements = self.get_all_statements()
-        return [stmt for stmt in all_statements if stmt.statement_type == "EXEC-IMS"]
+        """Get all EXEC IMS / EXEC DLI statements in the program."""
+        return [s for s in self.get_all_statements() if _exec_kind(s) == "IMS"]
 
     def uses_ims_interface(self) -> bool:
         """Check if program uses IMS language interface (CBLTDLI, AIBTDLI, CEETDLI)."""
@@ -666,34 +693,18 @@ class CobolProgram(ASTNode):
     def get_intrinsic_function_usages(self) -> list[str]:
         """Return a list of intrinsic function names referenced by the program.
 
-        Scans all statement operand and expression strings for the ``FUNCTION``
-        keyword followed by an identifier, returning each matched function name
-        in the order it appears (duplicates included).
+        Each ``FUNCTION <name>`` reference in the program's statements, in
+        the order it appears (duplicates included). Delegates to
+        :class:`~cobolparser.analysis.language_env_analyzer.LanguageEnvironmentAnalyzer`,
+        the one detector: this method used to run its own looser regex,
+        which took ``FUNCTION`` inside a data name (``DLI-FUNCTION OF REC``
+        -> ``OF``) or inside a quoted literal (``DISPLAY 'NO FUNCTION
+        HERE'`` -> ``HERE``) for an intrinsic-function call.
         """
-        import re
+        from ..analysis.language_env_analyzer import LanguageEnvironmentAnalyzer
 
-        pattern = re.compile(r"FUNCTION\s*([A-Z][A-Z0-9-]*)", re.IGNORECASE)
-        found: list[str] = []
-        for stmt in self.get_all_statements():
-            seen_texts: set[str] = set()
-            texts: list[str] = []
-            for op in stmt.operands:
-                if op and op not in seen_texts:
-                    seen_texts.add(op)
-                    texts.append(op)
-            expr = getattr(stmt, "expression", None)
-            if isinstance(expr, str) and expr not in seen_texts:
-                seen_texts.add(expr)
-                texts.append(expr)
-            # MoveStatement.source is inserted into operands by set_source(),
-            # so only scan it when it is not already covered above.
-            source = getattr(stmt, "source", None)
-            if isinstance(source, str) and source not in seen_texts:
-                texts.append(source)
-            for text in texts:
-                for m in pattern.finditer(text):
-                    found.append(m.group(1).upper())
-        return found
+        report = LanguageEnvironmentAnalyzer().analyze(self)
+        return [usage.function_name for usage in report.intrinsic_usages]
 
     def uses_intrinsic_functions(self) -> bool:
         """Return True if the program uses any COBOL intrinsic functions."""
@@ -818,6 +829,7 @@ class CobolProgram(ASTNode):
     def _calculate_statistics(self) -> None:
         """Calculate program statistics in a single depth-first traversal."""
         from .data_items import CobolDataItem  # avoid circular at module level
+        from .statements import CobolStatement
 
         total_lines = 0
         data_item_count = 0
@@ -827,12 +839,14 @@ class CobolProgram(ASTNode):
         for node in self.traverse_depth_first():
             if hasattr(node, "location") and node.location:
                 total_lines = max(total_lines, node.location.line)
-            nt = getattr(node, "node_type", "")
             if isinstance(node, CobolDataItem):
                 data_item_count += 1
             elif isinstance(node, (CobolParagraph, CobolSection)):
                 procedure_count += 1
-            elif nt == "Statement":
+            elif isinstance(node, CobolStatement):
+                # By class, not ``node_type == "Statement"``: EXEC CICS /
+                # EXEC IMS keep their historical ``EXEC_CICS`` / ``EXEC_IMS``
+                # node_type and were left out of the count.
                 statement_count += 1
 
         self._statistics = {

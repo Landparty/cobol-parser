@@ -228,11 +228,13 @@ class CobolParser:
             self.free_form,
         )
 
-        self.statistics.reset()
-        self.statistics.start_timing()
-        self.errors.clear()
-        self.warnings.clear()
-        self._error_limit_reached = False
+        self._begin_parse()
+        # Set up front, not only on the success path: a FAIL_FAST lexer
+        # error or a propagated ParseError returns early, and its result
+        # used to report ``lines_parsed == 0`` for a non-empty source.
+        self.statistics.lines_parsed = len(split_source_lines(source))
+        # The CLI's --stats reports lines_processed; keep both counters in step.
+        self.statistics.lines_processed = self.statistics.lines_parsed
         for _initial_warning in self._initial_warnings:
             self.add_warning(_initial_warning)
         # Consume once: these describe the source passed to the *first*
@@ -288,7 +290,6 @@ class CobolParser:
                             )
                         )
                         if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
-                            self.statistics.end_timing()
                             return self._create_result(None)
                         # The raise happened partway through the line scan,
                         # so `preprocess_warnings` may already hold entries
@@ -350,6 +351,7 @@ class CobolParser:
                 cleaned_source, filename, self.dialect, free_form=actual_free_form
             )
             self.tokens = lexer.tokenize()
+            self.statistics.tokens_processed = len(self.tokens)
             logger.debug("Lexer produced %d tokens for %s", len(self.tokens), filename)
 
             if lexer.has_errors():
@@ -388,12 +390,6 @@ class CobolParser:
             if program is not None:
                 for unit in program.program_units():
                     unit.serialization_config = self.serialization_config
-
-            self.statistics.end_timing()
-            self.statistics.lines_parsed = len(split_source_lines(source))
-            # The CLI's --stats reports lines_processed; keep both counters in step.
-            self.statistics.lines_processed = self.statistics.lines_parsed
-            self.statistics.tokens_processed = len(self.tokens)
 
             logger.info(
                 "Finished parsing %s: success=%s, errors=%d, warnings=%d, "
@@ -502,6 +498,9 @@ class CobolParser:
                 source = file.read()
             return self.parse(source, filepath)
         except OSError as e:
+            # A fresh result: without the reset, this one carried the errors,
+            # warnings and statistics of whatever this instance parsed last.
+            self._begin_parse()
             self.add_error(ParseError(f"File error: {str(e)}", line_number=1, column=1))
             return self._create_result(None)
 
@@ -871,8 +870,20 @@ class CobolParser:
         self.warnings.append(message)
         self.statistics.warning_count += 1
 
+    def _begin_parse(self) -> None:
+        """Reset the per-parse state (errors, warnings, statistics, timer)."""
+        self.statistics.reset()
+        self.statistics.start_timing()
+        self.errors.clear()
+        self.warnings.clear()
+        self._error_limit_reached = False
+
     def _create_result(self, ast: CobolProgram | None) -> ParseResult:
         """Create parse result with current state."""
+        # Every return path stops the clock here -- the early ones (a
+        # FAIL_FAST lexer error, a propagated ParseError, the safety net)
+        # used to hand back ``parse_time_seconds == 0``.
+        self.statistics.end_timing()
         return ParseResult(
             ast=ast,
             errors=self.errors.copy(),
