@@ -16,12 +16,15 @@ Columns       Meaning
 ============  ==========================================================
 1-2           ``//`` identifier field (``//*`` comment, ``/*`` delimiter)
 3             first column of the name field; blank means "no name"
-3-72          name, operation and parameter fields, blank-separated
+3-71          name, operation and parameter fields, blank-separated
+72            continuation column, never part of a field
 73-80         identification/sequence field, ignored
 ============  ==========================================================
 
-Columns 73-80 are discarded before anything else looks at the card, so a
-sequence-numbered deck parses the same as an unnumbered one.
+Columns 72-80 are discarded before anything else looks at the card, so a
+sequence-numbered deck parses the same as an unnumbered one.  A nonblank in
+column 72 of a statement not otherwise continued continues its comment field
+onto the next ``//`` card with a blank column 3.
 
 Continuation -- the rule that is usually got wrong
 --------------------------------------------------
@@ -44,9 +47,12 @@ rather than swallowed.
 
 The parameter field ends at the first blank that is outside both quotes and
 parentheses; the remainder of the card is a comment.  Blanks *inside*
-parentheses are kept, which is what makes ``// IF (STEP1.RC = 0) THEN``
-survive, and ``IF``/``ELSE``/``ENDIF`` are scanned to end-of-card because
-their operand is a relational expression rather than a parameter list.
+parentheses are kept.  ``IF``/``ELSE``/``ENDIF`` follow their own rule
+because their operand is a relational expression rather than a parameter
+list: ``IF``'s expression runs, blanks included, up to ``THEN`` -- continued
+onto following cards (text in columns 4-16) until ``THEN`` is found -- and
+whatever follows ``THEN`` is a comment; ``ELSE`` and ``ENDIF`` take no
+operand, so the rest of their card is a comment.
 
 In-stream data
 --------------
@@ -61,6 +67,7 @@ and are kept exactly as written, full width, not truncated at column 72.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -68,6 +75,10 @@ from .._lines import split_source_lines
 
 #: Columns 73-80 are the identification field and are discarded.
 CARD_WIDTH = 72
+
+#: Column 72 is not part of any field: a nonblank there continues a
+#: statement's comment onto the next card.
+CONTINUATION_INDICATOR_COLUMN = 72
 
 #: A continued parameter field must resume within these columns (1-based).
 CONTINUATION_MIN_COLUMN = 4
@@ -83,6 +94,32 @@ DEFAULT_DELIMITER = "/*"
 
 #: Operations whose operand is a relational expression, not a parameter list.
 _EXPRESSION_OPERATIONS = frozenset({"IF", "ELSE", "ENDIF"})
+
+#: Operation words: a card opening with one of these starts a new statement,
+#: so it never continues an ``IF`` relational expression.
+_OPERATION_WORDS = frozenset(
+    {
+        "JOB",
+        "EXEC",
+        "DD",
+        "PROC",
+        "PEND",
+        "SET",
+        "IF",
+        "ELSE",
+        "ENDIF",
+        "INCLUDE",
+        "JCLLIB",
+        "OUTPUT",
+        "CNTL",
+        "ENDCNTL",
+        "COMMAND",
+        "XMIT",
+        "NOTIFY",
+    }
+)
+
+_THEN_RE = re.compile(r"\bTHEN\b", re.IGNORECASE)
 
 #: ``JclCard.kind`` values.
 KIND_STATEMENT = "statement"
@@ -262,8 +299,18 @@ def _scan_parameter_segment(
 
 
 def _card_text(line: str) -> str:
-    """Columns 1-72 of a card image, trailing blanks removed."""
-    return line.rstrip()[:CARD_WIDTH]
+    """Columns 1-71 of a card image, trailing blanks removed.
+
+    Column 72 is the continuation column, never part of a field: a
+    parameter coded through column 71 followed by a marker in column 72
+    must not read as one character longer.
+    """
+    return line[: CONTINUATION_INDICATOR_COLUMN - 1].rstrip()
+
+
+def _marks_comment_continuation(line: str) -> bool:
+    """Whether ``line`` has a nonblank in column 72, continuing its comment."""
+    return line[CONTINUATION_INDICATOR_COLUMN - 1 : CARD_WIDTH].strip() != ""
 
 
 def _open_quote_padding(card_text: str, in_quote: bool) -> str:
@@ -385,7 +432,10 @@ class _Scanner:
         operation = body[position:operation_end].upper()
         position = _skip_blanks(body, operation_end)
 
-        stop_on_blank = operation not in _EXPRESSION_OPERATIONS
+        if operation in _EXPRESSION_OPERATIONS:
+            self._read_expression_statement(name, operation, body[position:])
+            return
+        stop_on_blank = True
         segment, comment, in_quote, _depth = _scan_parameter_segment(
             body, position, in_quote=False, stop_on_blank=stop_on_blank
         )
@@ -402,6 +452,18 @@ class _Scanner:
             elif joined.endswith(","):
                 continuation = "parameter"
             else:
+                # A nonblank in column 72 continues the comment field onto
+                # a following `//` card with a blank column 3.
+                if (
+                    _marks_comment_continuation(self.lines[cursor])
+                    and cursor + 1 < len(self.lines)
+                    and _is_continuation_card(_card_text(self.lines[cursor + 1]))
+                    and self.lines[cursor + 1][2:3] != "*"
+                ):
+                    cursor += 1
+                    raw_lines.append(self.lines[cursor])
+                    comments.append(_card_text(self.lines[cursor])[2:].strip())
+                    continue
                 break
 
             if cursor + 1 >= len(self.lines):
@@ -472,6 +534,67 @@ class _Scanner:
         self.index = cursor + 1
         if operation == "DD":
             self._maybe_read_instream(card)
+
+    # -- IF / ELSE / ENDIF -------------------------------------------------
+    def _read_expression_statement(self, name: str, operation: str, rest: str) -> None:
+        """Read an ``IF``/``ELSE``/``ENDIF`` statement.
+
+        ``ELSE`` and ``ENDIF`` take no operand, so everything after the
+        operation is a comment.  ``IF``'s relational expression runs up to
+        ``THEN`` -- blanks and all, and continued onto following cards
+        (``//``, blank column 3, text in columns 4-16) until ``THEN`` is
+        found; whatever follows ``THEN`` is a comment.
+        """
+        start = self.index
+        lineno = start + 1
+        raw_lines = [self.lines[start]]
+        cursor = start
+        if operation != "IF":
+            parameters, comment = "", rest.strip()
+        else:
+            pieces = [rest.strip()]
+            while _THEN_RE.search(" ".join(pieces)) is None:
+                if cursor + 1 >= len(self.lines):
+                    break
+                next_raw = self.lines[cursor + 1]
+                next_text = _card_text(next_raw)
+                if not _is_continuation_card(next_text) or next_text[2:3] == "*":
+                    break
+                begin = _skip_blanks(next_text, 2)
+                word = next_text[begin : _token_end(next_text, begin)].upper()
+                if word in _OPERATION_WORDS:
+                    break
+                cursor += 1
+                raw_lines.append(next_raw)
+                column = begin + 1
+                if column < CONTINUATION_MIN_COLUMN or column > CONTINUATION_MAX_COLUMN:
+                    self._error(
+                        cursor + 1,
+                        "continued text must begin in columns "
+                        f"{CONTINUATION_MIN_COLUMN}-{CONTINUATION_MAX_COLUMN}; "
+                        f"found column {column}",
+                    )
+                pieces.append(next_text[begin:].strip())
+            joined = " ".join(piece for piece in pieces if piece)
+            match = _THEN_RE.search(joined)
+            if match is None:
+                parameters, comment = joined, ""
+            else:
+                parameters = joined[: match.end()]
+                comment = joined[match.end() :].strip()
+        self.cards.append(
+            JclCard(
+                kind=KIND_STATEMENT,
+                name=name,
+                operation=operation,
+                parameters=parameters,
+                comment=comment,
+                line=lineno,
+                end_line=cursor + 1,
+                raw=raw_lines,
+            )
+        )
+        self.index = cursor + 1
 
     # -- in-stream data ---------------------------------------------------
     def _maybe_read_instream(self, card: JclCard) -> None:

@@ -162,6 +162,16 @@ def _merge_dcb(base: JclParameter, override: JclParameter) -> JclParameter:
 
 #: The mutually exclusive parameters that decide what a DD *is*.
 _DD_KIND_KEYWORDS = frozenset({"DSN", "DSNAME", "DUMMY", "SYSOUT"})
+#: The positional ``*`` / ``DATA`` that make a DD in-stream: another kind.
+_DD_INSTREAM_POSITIONALS = frozenset({"*", "DATA"})
+
+
+def _is_dd_kind(param: JclParameter) -> bool:
+    """Whether ``param`` decides what a DD *is* (dataset, dummy, sysout, data)."""
+    keyword = param.keyword.upper()
+    if keyword in _DD_KIND_KEYWORDS:
+        return True
+    return param.value is None and keyword in _DD_INSTREAM_POSITIONALS
 
 
 def _clone_dd(dd: DDStatement, *, procstep: str | None = None) -> DDStatement:
@@ -501,6 +511,10 @@ class _Builder:
                 condition = param.value
             elif keyword in EXEC_KEYWORDS:
                 continue
+            elif "." in keyword and keyword.partition(".")[0] in EXEC_KEYWORDS:
+                # `PARM.procstep=` and friends: a step parameter aimed at
+                # one step of the procedure, applied when it is expanded.
+                continue
             elif param.value is None and keyword:
                 if index == 0 and procedure is None and program is None:
                     procedure = param.keyword
@@ -756,6 +770,7 @@ class _Builder:
         symbols.update(overrides)
         proc_steps = self._parse_procedure_body(key, body, symbols)
         self._apply_dd_overrides(step, coded_name, proc_steps)
+        self._apply_exec_overrides(step, coded_name, proc_steps)
         prefix = f"{step.name}." if step.name else ""
         for proc_step in proc_steps:
             proc_step.name = f"{prefix}{proc_step.name}"
@@ -810,6 +825,54 @@ class _Builder:
             )
         return sink.steps
 
+    def _apply_exec_overrides(
+        self, invocation: JobStep, proc_name: str, proc_steps: list[JobStep]
+    ) -> None:
+        """Apply ``PARM`` / ``COND`` coded on the EXEC that invoked a procedure.
+
+        ``PARM.procstep=`` and ``COND.procstep=`` override that one procedure
+        step.  Unqualified, ``COND=`` overrides every step of the procedure,
+        while ``PARM=`` applies to the *first* step and nullifies the ``PARM``
+        of every later one -- the z/OS rules for an EXEC calling a procedure.
+        """
+        for param in invocation.parameters:
+            base, _, procstep = param.keyword.upper().partition(".")
+            if base not in ("PARM", "COND"):
+                continue
+            if procstep:
+                targets = [s for s in proc_steps if s.name.upper() == procstep]
+                if not targets:
+                    self._note(
+                        f"{param.keyword} (line {invocation.line}): procedure "
+                        f"{proc_name} has no step named {procstep}, so the "
+                        "override was not applied"
+                    )
+                    continue
+            else:
+                targets = list(proc_steps)
+            for index, target in enumerate(targets):
+                value = param.value
+                if base == "PARM" and not procstep and index > 0:
+                    value = None
+                self._set_step_parameter(target, base, value)
+
+    def _set_step_parameter(
+        self, step: JobStep, keyword: str, value: str | None
+    ) -> None:
+        """Override (or, with an empty value, nullify) one EXEC parameter."""
+        kept = [p for p in step.parameters if p.keyword.upper() != keyword]
+        position = next(
+            (i for i, p in enumerate(step.parameters) if p.keyword.upper() == keyword),
+            len(kept),
+        )
+        if value:
+            kept.insert(position, self._parse_parameter(f"{keyword}={value}"))
+        step.parameters = kept
+        if keyword == "PARM":
+            step.parm = unquote(value) if value else None
+        else:
+            step.condition = value or None
+
     def _apply_dd_overrides(
         self, invocation: JobStep, proc_name: str, proc_steps: list[JobStep]
     ) -> None:
@@ -853,11 +916,15 @@ class _Builder:
             )
             for p in base.parameters
         ]
-        # DSN, DUMMY and SYSOUT are mutually exclusive ways of saying what a
-        # DD is. An override coding one of them replaces whichever the
-        # procedure coded, rather than leaving both in effect.
-        if any(p.keyword.upper() in _DD_KIND_KEYWORDS for p in override.parameters):
-            params = [p for p in params if p.keyword.upper() not in _DD_KIND_KEYWORDS]
+        # DSN, DUMMY, SYSOUT and in-stream data (`*` / `DATA`) are mutually
+        # exclusive ways of saying what a DD is. An override coding one of
+        # them replaces whichever the procedure coded, rather than leaving
+        # both in effect.
+        replaces_kind = override.is_instream or any(
+            _is_dd_kind(p) for p in override.parameters
+        )
+        if replaces_kind:
+            params = [p for p in params if not _is_dd_kind(p)]
         for param in override.parameters:
             keyword = param.keyword.upper()
             replaced = False
@@ -875,11 +942,30 @@ class _Builder:
         if override.is_instream:
             merged.is_instream = True
             merged.instream_lines = list(override.instream_lines)
-        elif base.is_instream:
+        elif base.is_instream and not replaces_kind:
             merged.is_instream = True
             merged.instream_lines = list(base.instream_lines)
-        source = override.concatenated or base.concatenated
-        merged.concatenated = [_clone_dd(member) for member in source]
+        # Unnamed override cards override the procedure's concatenated
+        # members by position, parameter by parameter; a member no override
+        # reaches is left exactly as the procedure coded it.
+        members: list[DDStatement] = []
+        for index in range(max(len(base.concatenated), len(override.concatenated))):
+            base_member = (
+                base.concatenated[index] if index < len(base.concatenated) else None
+            )
+            override_member = (
+                override.concatenated[index]
+                if index < len(override.concatenated)
+                else None
+            )
+            if base_member is None:
+                assert override_member is not None
+                members.append(_clone_dd(override_member))
+            elif override_member is None or not override_member.parameters:
+                members.append(_clone_dd(base_member))
+            else:
+                members.append(self._merge_dd(base_member, override_member))
+        merged.concatenated = members
         for member in merged.concatenated:
             member.name = merged.name
         return merged
