@@ -73,10 +73,15 @@ class TestStorageSize:
         assert storage_size("INDEX", picture_size=None, total_digits=None) == 4
 
     @pytest.mark.parametrize(
-        "usage", ["POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER"]
+        "usage", ["POINTER", "FUNCTION-POINTER", "OBJECT REFERENCE"]
     )
     def test_pointers_occupy_a_fullword(self, usage):
         assert storage_size(usage, picture_size=None, total_digits=None) == 4
+
+    def test_procedure_pointer_occupies_a_doubleword(self):
+        assert (
+            storage_size("PROCEDURE-POINTER", picture_size=None, total_digits=None) == 8
+        )
 
     def test_sign_separate_spends_a_byte_the_picture_does_not_count(self):
         assert (

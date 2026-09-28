@@ -631,7 +631,7 @@ module docstring — that suite is the regression guard):
 | `COMP-5` | two's complement, **host byte order** — that is what "native binary" means |
 | `COMP-1` / `COMP-2` | IEEE 754 binary32/binary64, byte order as `COMP-5` |
 | `INDEX` / `POINTER` | binary zeros — an occurrence number and an address are not record content |
-| `PIC N` / `USAGE NATIONAL` | **not modelled as UTF-16**: single-byte text in the record charset, space-padded to the (correct, 2-bytes-per-position) width; `encoding_caveats()` says so |
+| `PIC N` / `USAGE NATIONAL` | **not modelled as UTF-16**: single-byte text in the record charset, space-padded to the (correct, 2-bytes-per-position) width; `encoding_caveats()` says so. A numeric national field (`PIC 9(5) USAGE NATIONAL`, 10 bytes since 2026-09-28) goes the same way -- `encode_field`/`decode_field` route `usage == "NATIONAL"` to text before the zoned branch |
 
 **Overflow is not uniform across those rows, deliberately.** The zoned and
 packed encoders run their magnitude through `_digits_string`, which

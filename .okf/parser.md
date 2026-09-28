@@ -2978,3 +2978,28 @@ level number* (a phantom `ANONYMOUS-10-n` item). Both clause loops did it,
 so no fast/pure differential could see it. Filtering once at the stream
 fixes every reader, pure and compiled, without touching `_data_fast`'s
 arity. Pinned by `tests/regression/test_audit_2026_09_28_accelerators.py`.
+
+# DATA DIVISION: bare national usages, GROUP-USAGE, qualified ODO counters (2026-09-28)
+
+`data_clauses.py` (+ `_data_fast.pyx` for the OCCURS part):
+
+* **Bare `NATIONAL` / `DISPLAY-1` / `UTF-8`** (`_BARE_USAGE_WORDS`) are the
+  item's usage when written without the USAGE keyword, with or without a
+  leading `IS`. `NATIONAL` and `UTF-8` lex as IDENTIFIERs, so they joined
+  `_PICTURE_TERMINATOR_KEYWORDS`: `PIC N(5) NATIONAL` used to be pattern
+  `N(5)NATIONAL` (sized 3 bytes, usage DISPLAY); `DISPLAY-1` / `IS NATIONAL`
+  were dropped with "Unparsed token" warnings. The Cython loop hands these
+  words back to the Python loop (no fast-path change).
+* **`GROUP-USAGE [IS] NATIONAL | UTF-8`** sets `CobolDataItem.group_usage`;
+  `data.propagate_group_usage_and_sign` relabels the group and pushes the
+  usage onto every subordinate without a USAGE of its own. Previously
+  dropped with two warnings (`test_tier6_silent_drop_audit` used it as its
+  "unsupported clause" example; it now uses a made-up word).
+* **`OCCURS ... DEPENDING ON CNT OF CTL [IN ...]`**: `_consume_qualifiers`
+  (Cython: `_consume_qualifiers`) reads the chain into
+  `OccursClause.depending_on_qualifiers`; `depending_on` stays the bare name
+  (every generator matches counters by bare name). Before, the qualifier
+  stopped the OCCURS walk and every KEY / INDEXED BY after it was dropped as
+  unparsed tokens. Qualified KEY names (`KEY IS K1 OF T`) keep the bare name.
+
+Pinned by `tests/regression/test_data_division_national_occurs_2026_09_28.py`.
