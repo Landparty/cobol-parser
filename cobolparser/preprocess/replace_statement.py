@@ -125,12 +125,20 @@ class _ReplacePair:
     ``COPY ... REPLACING ==:TAG:==`` does. ``find_tokens`` is then empty.
     """
 
-    __slots__ = ("find_tokens", "partial_word", "replace_text")
+    __slots__ = ("find_tokens", "partial_word", "replace_text", "mode")
 
-    def __init__(self, find_text: str, replace_text: str) -> None:
+    def __init__(self, find_text: str, replace_text: str, mode: str = "ALL") -> None:
         self.find_tokens: list[str] = [w[0] for w in _tokenize_text_words(find_text)]
         self.partial_word: str | None = None
-        if (
+        # ``ALL`` (whole text words), ``LEADING`` or ``TRAILING``. For the
+        # latter two ``partial_word`` holds the (upper-cased) single text word
+        # compared against the leftmost / rightmost characters of each
+        # non-literal source word.
+        self.mode = mode
+        if mode in ("LEADING", "TRAILING"):
+            self.partial_word = self.find_tokens[0].upper()
+            self.find_tokens = []
+        elif (
             len(self.find_tokens) == 1
             and len(self.find_tokens[0]) > 2
             and self.find_tokens[0][0] == ":"
@@ -245,6 +253,14 @@ class _ReplaceScanner:
 
         pairs: list[_ReplacePair] = []
         while True:
+            # ``LEADING`` / ``TRAILING`` (IBM, COBOL 2002) qualify one pair:
+            # its pseudo-text-1 is then a single text word matched against
+            # the start / end of each source word.
+            mode = "ALL"
+            if self._match_word("LEADING"):
+                mode = "LEADING"
+            elif self._match_word("TRAILING"):
+                mode = "TRAILING"
             find_text = self._read_pseudo_text()
             if find_text is None:
                 return None
@@ -253,17 +269,28 @@ class _ReplaceScanner:
             replace_text = self._read_pseudo_text()
             if replace_text is None:
                 return None
-            pairs.append(_ReplacePair(find_text, replace_text))
+            if mode != "ALL" and not _is_partial_operand(find_text, replace_text):
+                return None
+            pairs.append(_ReplacePair(find_text, replace_text, mode))
 
             self._skip_separators()
             if self._peek() == ".":
                 self.pos += 1
                 return _ReplaceStatement(start, self.pos, pairs, is_off=False)
-            # Otherwise another operand pair must follow (its opening ``==``).
+            # Otherwise another operand pair must follow (its opening ``==``,
+            # possibly qualified by LEADING / TRAILING).
             if not (self._peek() == "=" and self._peek(1) == "="):
-                return None
+                save = self.pos
+                qualified = self._match_word("LEADING") or self._match_word("TRAILING")
+                self.pos = save
+                if not qualified:
+                    return None
 
-    def scan(self) -> list[_ReplaceStatement]:
+    def scan(self, warnings: list[str] | None = None) -> list[_ReplaceStatement]:
+        """Return every well-formed REPLACE statement in the source. A
+        ``REPLACE`` keyword that does not start a well-formed statement is
+        reported on *warnings* (its substitutions would otherwise silently
+        never happen) and otherwise left in place."""
         statements: list[_ReplaceStatement] = []
         while self.pos < self.length:
             ch = self.source[self.pos]
@@ -305,10 +332,62 @@ class _ReplaceScanner:
                     continue
                 # Not a well-formed REPLACE — rewind past the keyword only,
                 # so the text _parse_replace_at consumed is re-scanned.
+                if warnings is not None:
+                    line = self.source.count("\n", 0, after_keyword) + 1
+                    snippet = " ".join(
+                        self.source[after_keyword - 7 : after_keyword + 50].split()
+                    )
+                    warnings.append(
+                        f"Line {line}: REPLACE statement could not be parsed and "
+                        f"was ignored -- its substitutions are NOT applied: "
+                        f"{snippet!r}"
+                    )
                 self.pos = after_keyword
                 continue
             self.pos += 1
         return statements
+
+
+def _is_partial_operand(find_text: str, replace_text: str) -> bool:
+    """A LEADING / TRAILING pair needs pseudo-text-1 to be exactly one
+    non-literal text word, and pseudo-text-2 to be at most one."""
+    find_words = [w[0] for w in _tokenize_text_words(find_text)]
+    replace_words = [w[0] for w in _tokenize_text_words(replace_text)]
+    return (
+        len(find_words) == 1
+        and find_words[0][:1] not in _QUOTES
+        and len(replace_words) <= 1
+    )
+
+
+def _partial_replace(word: str, pair: _ReplacePair) -> str | None:
+    """Return *word* rewritten by the partial-word *pair*, or ``None`` when the
+    pair does not apply to it. A literal is never partially replaced."""
+    pattern = pair.partial_word
+    if pattern is None or word[:1] in _QUOTES:
+        return None
+    upper = word.upper()
+    if pair.mode == "LEADING":
+        if not upper.startswith(pattern):
+            return None
+        return pair.replace_text + word[len(pattern) :]
+    if pair.mode == "TRAILING":
+        if not upper.endswith(pattern):
+            return None
+        return word[: len(word) - len(pattern)] + pair.replace_text
+    # ``==:TAG:==``: every occurrence inside the word (``:P:-A-:P:``).
+    hit = upper.find(pattern)
+    if hit < 0:
+        return None
+    pieces: list[str] = []
+    pos = 0
+    while hit >= 0:
+        pieces.append(word[pos:hit])
+        pieces.append(pair.replace_text)
+        pos = hit + len(pattern)
+        hit = upper.find(pattern, pos)
+    pieces.append(word[pos:])
+    return "".join(pieces)
 
 
 def _blank_span(text: str) -> str:
@@ -335,18 +414,10 @@ def _apply_pairs_to_segment(segment: str, pairs: list[_ReplacePair]) -> str:
         partial_text: str | None = None
         for pair in active:
             if pair.partial_word is not None:
-                word = words[wi][0]
-                if word[:1] in _QUOTES:
-                    continue  # a literal is never partially replaced
-                hit = word.upper().find(pair.partial_word)
-                if hit < 0:
+                partial_text = _partial_replace(words[wi][0], pair)
+                if partial_text is None:
                     continue
                 matched = pair
-                partial_text = (
-                    word[:hit]
-                    + pair.replace_text
-                    + word[hit + len(pair.partial_word) :]
-                )
                 break
             flen = len(pair.find_tokens)
             if wi + flen > n_words:
@@ -390,7 +461,8 @@ def apply_replace_statements(source: str, warnings: list[str] | None = None) -> 
     Args:
         source: Free-form COBOL source (post ``normalize_fixed_format``).
         warnings: Optional list; receives a diagnostic if a ``REPLACE`` set is
-            still active at end of input (no closing ``REPLACE OFF.``).
+            still active at end of input (no closing ``REPLACE OFF.``), and
+            one per ``REPLACE`` keyword that is not a well-formed statement.
 
     Returns:
         Source with all REPLACE substitutions applied and the statements removed.
@@ -398,7 +470,7 @@ def apply_replace_statements(source: str, warnings: list[str] | None = None) -> 
     if "REPLACE" not in source.upper():
         return source
 
-    statements = _ReplaceScanner(source).scan()
+    statements = _ReplaceScanner(source).scan(warnings)
     if not statements:
         return source
 

@@ -31,6 +31,7 @@ from . import (
 )
 from .copy_statement_parser import (
     CopyStatementLexer,
+    _open_literal_quote,
     apply_replacing_clauses,
     is_comment_line,
     normalize_continuation_lines,
@@ -660,10 +661,18 @@ def _fit_fixed_format_width(line: str) -> list[str]:
        Area-B line (a new physical line, so later line numbers shift by
        one -- the cost of not corrupting the statement).
 
-    A line with no safe break point at all (a single 65+-character token,
-    or one long literal) is returned unchanged; the final parse's existing
-    column-72 overflow warning then reports the drop rather than this
-    helper corrupting the literal to avoid it.
+    3. **Continue a literal** -- when the only way to fit is inside an
+       alphanumeric literal still open at column 72 (a long ``VALUE`` that
+       arrived as one logical line, since the expander merges continuation
+       records before splicing), the literal is split the way it would be
+       written by hand: the head runs to column 72 with the literal left
+       open, and the rest resumes on a continuation line (``-`` in column 7)
+       whose Area-B text starts with the literal's quote. The wrap in pass 2
+       is skipped in favour of this when its tail would not fit anyway.
+
+    A line with no break point at all (a single 65+-character token outside
+    any literal) is returned unchanged; the final parse's existing column-72
+    overflow warning then reports the drop.
     """
     stripped = line.rstrip()
     if len(stripped) <= _CODE_AREA_WIDTH:
@@ -705,7 +714,12 @@ def _fit_fixed_format_width(line: str) -> list[str]:
         break_at = _rightmost_safe_blank(
             stripped, _CONTENT_START_IDX, content_start, _CODE_AREA_WIDTH
         )
+        literal_split = _split_open_literal(stripped, content_start)
         if break_at is None:
+            if literal_split is not None:
+                out.append(literal_split[0])
+                stripped = literal_split[1]
+                continue
             # No safe break point: emit as-is and let the final parse's
             # column-overflow warning report the drop.
             out.append(stripped)
@@ -717,6 +731,12 @@ def _fit_fixed_format_width(line: str) -> list[str]:
         # (head is never empty: the content_start filter above guarantees
         # the break lands after the first non-blank character.)
         next_line = " " * 11 + tail
+        if literal_split is not None and len(next_line) > _CODE_AREA_WIDTH:
+            # The wrapped tail would still need its literal continued, so
+            # continue it here instead and spend one line fewer.
+            out.append(literal_split[0])
+            stripped = literal_split[1]
+            continue
         if len(next_line) >= len(stripped):
             # No forward progress possible (e.g. the tail is a single
             # unbreakable 62+-character token): emit as-is rather than
@@ -727,6 +747,35 @@ def _fit_fixed_format_width(line: str) -> list[str]:
         stripped = next_line
     out.append(stripped)
     return out
+
+
+#: Sequence area, ``-`` continuation indicator and a 4-blank indent: the
+#: continued literal resumes at column 12, inside Area B.
+_LITERAL_CONTINUATION_PREFIX = " " * 6 + "-" + " " * 4
+
+
+def _split_open_literal(line: str, content_start: int) -> tuple[str, str] | None:
+    """Split *line* inside the alphanumeric literal open at column 72.
+
+    Returns ``(head, continuation)``: *head* is the line through column 72
+    with the literal left open (its trailing blanks are literal content and
+    are kept), *continuation* a ``-`` continuation record resuming the
+    literal with its opening quote. ``None`` when no literal is open at
+    column 72.
+
+    The split point moves one column left when column 72 holds the first
+    quote of a doubled-quote escape: cutting there would read as the
+    literal's close. Splitting *between* the two quotes is fine -- the
+    continuation's leading quote is dropped when the lines are merged, so
+    the second quote of the pair survives.
+    """
+    for cut in (_CODE_AREA_WIDTH, _CODE_AREA_WIDTH - 1):
+        if cut <= content_start:
+            return None
+        quote = _open_literal_quote(line[_CONTENT_START_IDX:cut])
+        if quote is not None:
+            return line[:cut], _LITERAL_CONTINUATION_PREFIX + quote + line[cut:]
+    return None
 
 
 # --- Source map -------------------------------------------------------------
@@ -797,6 +846,24 @@ def _fit_origins(
         return origins[:line_count]
     tail = origins[-1] if origins else fallback
     return origins + [tail] * (line_count - len(origins))
+
+
+def _wrapped_origins(
+    origin: LineOrigin, next_origin: LineOrigin | None, count: int
+) -> list[LineOrigin]:
+    """Origins for the *count* pieces one expanded line was wrapped into.
+
+    A logical line merged from continuation records starts at *origin* and
+    absorbed every physical line before the next line's origin (comment and
+    blank lines are blanked in place, never removed, so they keep origins of
+    their own). Piece k is attributed to record ``origin + k``, capped at the
+    last absorbed one; with nothing absorbed every piece shares *origin*.
+    """
+    file_name, first = origin
+    last = first
+    if next_origin is not None and next_origin[0] == file_name:
+        last = max(first, next_origin[1] - 1)
+    return [(file_name, min(first + k, last)) for k in range(count)]
 
 
 def _restore_comment_lines(
@@ -1023,7 +1090,9 @@ def expand_copybooks(
         final_origins: list[LineOrigin] = []
         # Length-matched by _fit_origins just above; see _restore_comment_lines
         # for why this stays non-strict.
-        for line, origin in zip(expanded_lines, line_origins, strict=False):
+        for index, (line, origin) in enumerate(
+            zip(expanded_lines, line_origins, strict=False)
+        ):
             if not line:
                 final_lines.append(line)
                 final_origins.append(origin)
@@ -1044,10 +1113,22 @@ def expand_copybooks(
                 final_origins.append(origin)
             else:
                 # A wrap turns one line into several; every piece came from the
-                # same place, so they share its origin.
+                # same place, so they share its origin -- unless the line was
+                # merged from continuation records, in which case piece k
+                # maps to the k-th of those records (never past the last).
                 wrapped = _fit_fixed_format_width(padded)
                 final_lines.extend(wrapped)
-                final_origins.extend([origin] * len(wrapped))
+                final_origins.extend(
+                    _wrapped_origins(
+                        origin,
+                        (
+                            line_origins[index + 1]
+                            if index + 1 < len(line_origins)
+                            else None
+                        ),
+                        len(wrapped),
+                    )
+                )
         line_origins = final_origins
         if preserve_comments:
             final_lines = _restore_comment_lines(
