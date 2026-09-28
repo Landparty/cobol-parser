@@ -1422,7 +1422,8 @@ def _fold_compute(
     if stmt.rounded or stmt.expression_tree is None:
         _poison_names(stmt.targets, index, env)
         return
-    value = _eval_expr(stmt.expression_tree, index, env)
+    dmax = _dmax_floor(stmt.expression_tree, stmt.targets, index)
+    value = _eval_expr(stmt.expression_tree, index, env, dmax)
     if value is None:
         _poison_names(stmt.targets, index, env)
         return
@@ -1430,10 +1431,172 @@ def _fold_compute(
         _write_numeric(target, value, index, env)
 
 
+def _operand_decimals(token: str, index: ProgramLayoutIndex) -> int:
+    """Decimal places an operand is *defined* with: a literal's written
+    digits after the point, a numeric field's PICTURE ``V`` digits, else 0."""
+    if _NUMERIC_LITERAL_RE.match(token):
+        _, _, fraction = token.partition(".")
+        return len(fraction)
+    base, _ = _base_name(token)
+    resolved = _safe_resolve(index, base)
+    if resolved is not None and resolved.spec.category is FieldCategory.NUMERIC:
+        return max(int(resolved.spec.decimal_digits), 0)
+    return 0
+
+
+def _dmax_floor(
+    tree: CobolExpression, targets: list[str], index: ProgramLayoutIndex
+) -> int:
+    """A lower bound on IBM's ``dmax`` for one COMPUTE: the most decimal
+    places of any result field or of any operand other than a divisor or an
+    exponent.
+
+    IBM Enterprise COBOL carries a fixed-point division's intermediate
+    quotient to only ``max(d1 - d2, dmax)`` decimal places, *truncating*
+    the rest ("Intermediate results and arithmetic precision"), so
+    ``COMPUTE N = 7 / 2 * 2`` into ``PIC 99`` stores 6, not 7, and the
+    classic ``COMPUTE PCT = A / B * 100`` stores 0 whenever A < B. Every
+    leaf under the right-hand side of a ``/`` or ``**`` is left out, which
+    can only make the bound smaller than the real ``dmax`` -- a smaller
+    bound poisons more, never less, so a quotient with no more decimal
+    places than it is one whose truncation was a no-op."""
+    floor = 0
+    for target in targets:
+        base, _ = _base_name(target)
+        resolved = _safe_resolve(index, base)
+        if resolved is not None:
+            floor = max(floor, resolved.spec.decimal_digits)
+
+    stack: list[str | CobolExpression | None] = [tree]
+    while stack:
+        node = stack.pop()
+        if node is None or isinstance(node, FunctionCall):
+            continue
+        if isinstance(node, str):
+            floor = max(floor, _operand_decimals(node, index))
+            continue
+        if isinstance(node, ArithmeticExpression):
+            stack.append(node.left_operand)
+            if node.operator not in ("/", "**"):
+                stack.append(node.right_operand)
+            continue
+        if node.expression_type == "OPERAND" and node.operands:
+            stack.append(node.operands[0])
+    return floor
+
+
+def _decimal_places(value: Decimal) -> int:
+    exponent = value.normalize().as_tuple().exponent
+    return -exponent if isinstance(exponent, int) and exponent < 0 else 0
+
+
+def _truncation_free_divide(
+    dividend: Decimal, divisor: Decimal, dmax: int
+) -> Decimal | None:
+    """``_exact_divide``, further gated on IBM's intermediate-quotient
+    precision: a quotient needing more than *dmax* decimal places would be
+    truncated mid-expression, so it poisons (see ``_dmax_floor``)."""
+    quotient = _exact_divide(dividend, divisor)
+    if quotient is None or _decimal_places(quotient) > dmax:
+        return None
+    return quotient
+
+
+_INTEGER_LITERAL_RE = re.compile(r"^[+-]?\d+$")
+
+
+def _exponent_kind(
+    node: str | CobolExpression | None, index: ProgramLayoutIndex
+) -> str:
+    """How IBM evaluates ``x ** node`` in fixed point: ``"literal"`` for an
+    integer literal (optionally signed), ``"field"`` for a bare integral
+    numeric data item, ``"other"`` for anything else (a literal or field with
+    decimal places -- evaluated in *floating point* -- or a subexpression)."""
+    if isinstance(node, ArithmeticExpression) and node.operator == "NEGATE":
+        node = node.right_operand
+    if isinstance(node, CobolExpression) and node.expression_type == "OPERAND":
+        node = node.operands[0] if node.operands else None
+    if isinstance(node, str) and _INTEGER_LITERAL_RE.match(node):
+        return "literal"
+    return "field" if _is_integral_expression(node, index) else "other"
+
+
+def _is_integral_expression(
+    node: str | CobolExpression | None, index: ProgramLayoutIndex
+) -> bool:
+    """True when *node* is an integer literal, an integral numeric data item,
+    or a ``+ - *`` / non-negative-literal ``**`` combination of those -- an
+    exponent IBM evaluates with zero decimal places, so in fixed point."""
+    if isinstance(node, str):
+        if _INTEGER_LITERAL_RE.match(node):
+            return True
+        base, _ = _base_name(node)
+        resolved = _safe_resolve(index, base)
+        return bool(
+            resolved is not None
+            and resolved.spec.category is FieldCategory.NUMERIC
+            and resolved.spec.decimal_digits == 0
+            and not resolved.spec.scaling_positions
+        )
+    if isinstance(node, ArithmeticExpression):
+        if node.operator == "NEGATE":
+            return _is_integral_expression(node.right_operand, index)
+        if node.operator in ("+", "-", "*"):
+            return _is_integral_expression(
+                node.left_operand, index
+            ) and _is_integral_expression(node.right_operand, index)
+        if node.operator == "**":
+            exponent = node.right_operand
+            return (
+                isinstance(exponent, str)
+                and exponent.isdigit()
+                and _is_integral_expression(node.left_operand, index)
+            )
+        return False
+    if isinstance(node, CobolExpression) and node.expression_type == "OPERAND":
+        return bool(node.operands) and _is_integral_expression(node.operands[0], index)
+    return False
+
+
+def _fold_power(
+    base: Decimal,
+    exponent_value: Decimal,
+    exponent_node: str | CobolExpression | None,
+    index: ProgramLayoutIndex,
+    dmax: int,
+) -> Decimal | None:
+    """``base ** exponent`` under IBM's fixed-point exponentiation rules
+    ("Fixed-point data and intermediate results"):
+
+    * an integer-literal exponent n >= 0 carries ``d1 * n`` decimal places
+      -- the exact power;
+    * a negative one is ``1 / (base ** |n|)`` evaluated under the *division*
+      rules, so the quotient is truncated to ``dmax`` places;
+    * an integral data-name exponent carries only ``dmax`` decimal places;
+    * an exponent with decimal places switches the whole evaluation to
+      floating point, which this module does not model -- poisoned.
+
+    Every truncating case poisons unless the exact value already fits in
+    ``dmax`` places (the truncation was a no-op)."""
+    if exponent_value != exponent_value.to_integral_value():
+        return None
+    kind = _exponent_kind(exponent_node, index)
+    if kind == "other":
+        return None
+    exponent = int(exponent_value)
+    if exponent < 0:
+        return _truncation_free_divide(Decimal(1), base**-exponent, dmax)
+    power = base**exponent
+    if kind == "field" and _decimal_places(power) > dmax:
+        return None
+    return power
+
+
 def _eval_expr(
     node: str | CobolExpression | None,
     index: ProgramLayoutIndex,
     env: dict[str, Decimal | str],
+    dmax: int = 0,
 ) -> Decimal | None:
     if node is None:
         return None
@@ -1443,10 +1606,10 @@ def _eval_expr(
         return None  # intrinsic functions are not folded in v1
     if isinstance(node, ArithmeticExpression):
         if node.operator == "NEGATE":
-            right = _eval_expr(node.right_operand, index, env)
+            right = _eval_expr(node.right_operand, index, env, dmax)
             return -right if right is not None else None
-        left = _eval_expr(node.left_operand, index, env)
-        right = _eval_expr(node.right_operand, index, env)
+        left = _eval_expr(node.left_operand, index, env, dmax)
+        right = _eval_expr(node.right_operand, index, env, dmax)
         if left is None or right is None:
             return None
         try:
@@ -1468,11 +1631,11 @@ def _eval_expr(
                 # multiply-back check inside `_exact_divide` (already used by
                 # `_fold_divide`) rejects exactly that case, so every DIVIDE
                 # shape and every `/` in a COMPUTE now hold the same contract.
-                return _exact_divide(left, right)
+                # ...and a quotient IBM truncates to `dmax` decimal places
+                # before the rest of the expression sees it poisons too.
+                return _truncation_free_divide(left, right, dmax)
             if node.operator == "**":
-                if right == right.to_integral_value():
-                    return left ** int(right)
-                return None
+                return _fold_power(left, right, node.right_operand, index, dmax)
         except (ArithmeticError, ValueError):
             # ArithmeticError covers decimal's own exception hierarchy
             # (InvalidOperation, DivisionByZero, Overflow, ...) as well as

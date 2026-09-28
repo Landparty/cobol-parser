@@ -394,11 +394,18 @@ class TestFinding9PowerAssociativity:
             "           DISPLAY WS-A\n"
             "           STOP RUN.\n"
         ) == {"WS-GRP.WS-A": "512"}
-        assert _fold(
-            "           COMPUTE WS-A = 100 * 2 ** -1\n"
-            "           DISPLAY WS-A\n"
-            "           STOP RUN.\n"
-        ) == {"WS-GRP.WS-A": "50"}
+        # A negative exponent is 1 / (2 ** 1) under IBM's *division* rules:
+        # into integral PIC 9(3), dmax is 0, so the intermediate quotient is
+        # truncated to 0 and IBM stores 0, not 50. Poisoned, not folded
+        # (tests/regression/test_const_fold_intermediate_precision.py).
+        assert (
+            _fold(
+                "           COMPUTE WS-A = 100 * 2 ** -1\n"
+                "           DISPLAY WS-A\n"
+                "           STOP RUN.\n"
+            )
+            == {}
+        )
 
 
 class TestFinding10TruncatedTextWitness:

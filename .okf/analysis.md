@@ -1966,6 +1966,23 @@ internal env) rather than approximating:
   significant digits (a 29–31 digit literal, which IBM Enterprise COBOL
   permits under `ARITH(EXTEND)`); short-literal expressions were already
   safe. Pinned by `tests/regression/test_audit_2026_09_16.py`.
+* **A COMPUTE division is truncated mid-expression the way IBM truncates
+  it** (2026-09-28). IBM carries a fixed-point quotient to only
+  `max(d1 - d2, dmax)` decimal places ("Intermediate results and arithmetic
+  precision"; `dmax` = the most decimal places of any result field or any
+  operand other than a divisor or exponent), so `COMPUTE N = 7 / 2 * 2`
+  into `PIC 99` stores 6 and `COMPUTE PCT = A / B * 100` stores 0 when
+  A < B. The folder divided exactly and emitted 7 / 25. `_dmax_floor`
+  computes a lower bound on `dmax` (every leaf under a `/` or `**`
+  right-hand side left out -- a smaller bound only poisons more), and
+  `_truncation_free_divide` poisons any quotient needing more places.
+  Exponentiation follows IBM's three cases (`_fold_power`): an integer
+  literal exponent is exact (`d1 * n` places); a negative one is
+  `1 / x ** n` under the division rule (`100 * 2 ** -1` into `PIC 9(4)`
+  is 0, not 50); an integral data-name/expression exponent carries only
+  `dmax` places; an exponent with decimal places means floating point,
+  poisoned. Pinned by
+  `tests/regression/test_const_fold_intermediate_precision.py`.
 * `ROUNDED`, `CORRESPONDING`, and any target that does not resolve to an
   elementary field are poisoned rather than approximated. A numeric
   MOVE/arithmetic result is only ever recorded when it fits its target

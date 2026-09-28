@@ -2234,7 +2234,9 @@ right-hand-side call, threaded through the sign-recursion so a chain of
 signs (`- - -3`) keeps the same fallback throughout. Behavior unchanged —
 `tests/regression/test_review_2026_09_09_generators.py::TestFinding9PowerAssociativity`
 (`2 ** 3 ** 2 == 64`, `2 ** (3 ** 2) == 512`, `100 * 2 ** -1 == 50`) still
-passes unmodified.
+passes unmodified. (2026-09-28: that last case now folds to nothing -- IBM
+truncates `2 ** -1` to 0 decimal places into an integral target; see
+analysis.md's ConstantFolder section.)
 
 ## `PROCEDURE DIVISION USING` now captures each parameter's passing mode (2026-09-10)
 
