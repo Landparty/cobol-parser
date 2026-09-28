@@ -329,14 +329,22 @@ def field_storage_size(spec: FieldSpec) -> int:
     return spec.storage_size
 
 
-def _encode_text(text: str, size: int, opts: EncodingOptions) -> bytes:
+def _encode_text(
+    text: str, size: int, opts: EncodingOptions, *, justified: bool = False
+) -> bytes:
     """Left-justified, space-padded, truncated to *size* -- COBOL's own
-    alphanumeric MOVE semantics, applied at the byte level."""
+    alphanumeric MOVE semantics, applied at the byte level.
+
+    *justified* (``JUSTIFIED RIGHT``) mirrors it: the value is right-aligned
+    behind leading spaces, and an oversized one loses its leftmost
+    characters rather than its rightmost.
+    """
     codec = EBCDIC_CODEC if opts.charset is Charset.EBCDIC else "ascii"
     raw = text.encode(codec, errors="replace")
     if len(raw) >= size:
-        return raw[:size]
-    return raw + bytes([opts.space]) * (size - len(raw))
+        return raw[len(raw) - size :] if justified else raw[:size]
+    pad = bytes([opts.space]) * (size - len(raw))
+    return pad + raw if justified else raw + pad
 
 
 def _scaled_integer(text: str, spec: FieldSpec) -> int:
@@ -519,7 +527,7 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         # (see ``encoding_caveats``), so -- like a ``PIC N`` field -- the
         # value is written as text padded to the field's full width rather
         # than as five zoned bytes in a ten-byte slot.
-        return _encode_text(text, width, opts)
+        return _encode_text(text, width, opts, justified=spec.justified)
     # DISPLAY from here down.  An unedited numeric picture is zoned decimal.
     # A numeric-edited one holds what a MOVE into it would leave: the CSV
     # cell is the logical value (`1234.56`), the bytes are the edited form
@@ -542,7 +550,7 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         )
         if edited is not None and len(edited) == width:
             return _encode_text(edited, width, opts)
-    return _encode_text(text, width, opts)
+    return _encode_text(text, width, opts, justified=spec.justified)
 
 
 def encode_record(

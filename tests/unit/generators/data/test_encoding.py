@@ -205,6 +205,27 @@ class TestAlphanumeric:
         assert raw == b"- 12.34"
 
 
+class TestJustifiedRight:
+    """``JUSTIFIED RIGHT`` reverses the alphanumeric MOVE: pad on the left,
+    truncate on the left.  The encoder used to ignore the clause and write
+    ``AB    `` where a COBOL MOVE leaves ``    AB``."""
+
+    def test_short_value_is_space_padded_on_the_left(self):
+        spec = one_spec("F PIC X(6) JUSTIFIED RIGHT.")
+        assert spec.justified
+        assert encode_field(spec, "AB", EncodingOptions()) == b"    AB"
+        assert encode_field(spec, "AB", EBCDIC) == b"\x40" * 4 + bytes.fromhex("c1c2")
+
+    def test_oversized_value_loses_its_leftmost_characters(self):
+        spec = one_spec("F PIC X(3) JUST.")
+        assert encode_field(spec, "ABCDEF", EncodingOptions()) == b"DEF"
+
+    def test_without_the_clause_nothing_changes(self):
+        spec = one_spec("F PIC X(6).")
+        assert not spec.justified
+        assert encode_field(spec, "AB", EncodingOptions()) == b"AB    "
+
+
 class TestStorageOnlyUsages:
     def test_index_writes_binary_zeros(self):
         spec = one_spec("F USAGE INDEX.")

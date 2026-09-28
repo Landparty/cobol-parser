@@ -183,6 +183,10 @@ class FieldSpec:
         blank_when_zero: Whether the item carries ``BLANK WHEN ZERO``: a
             numeric DISPLAY / numeric-edited item holding zero is stored as
             all spaces, which the encoder writes and the decoder reads as 0.
+        justified: Whether the item carries ``JUSTIFIED RIGHT``: a value
+            shorter than the field is right-aligned with leading spaces, and
+            one longer loses its *leftmost* characters -- the reverse of an
+            ordinary alphanumeric MOVE.
         occurs_depending_on: The controlling data name when this field sits
             inside an ``OCCURS ... DEPENDING ON`` table (the outermost one,
             when several nest), else ``None``.  The table is always
@@ -220,6 +224,7 @@ class FieldSpec:
     sign_clause: str | None = None
     synchronized: bool = False
     blank_when_zero: bool = False
+    justified: bool = False
     occurs_depending_on: str | None = None
     odo_controls: tuple[OdoControl, ...] = ()
     odo_counter_bounds: tuple[int, int] | None = None
@@ -734,6 +739,7 @@ def _flatten_into(
                 sign_clause=item.sign_clause,
                 synchronized=item.synchronized,
                 blank_when_zero=item.blank_when_zero,
+                justified=bool(getattr(item, "justified", False)),
                 occurs_depending_on=(
                     inherited_controls[0].depending_on if inherited_controls else None
                 ),

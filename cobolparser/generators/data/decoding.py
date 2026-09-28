@@ -396,17 +396,19 @@ def _decode_edited(
     return _render_number(magnitude, negative, spec.decimal_digits), None
 
 
-def _decode_text(raw: bytes, opts: EncodingOptions) -> str:
+def _decode_text(raw: bytes, opts: EncodingOptions, *, justified: bool = False) -> str:
     """DISPLAY text: the charset's characters, trailing pad stripped.
 
     ASCII is read as latin-1 rather than strict ASCII: a byte the encoder
     could not have written is still a byte in the file, and showing it beats
     raising on it.  Trailing spaces and NULs go because they are how COBOL
     pads a short value into a fixed field; leading ones stay, because they
-    may be the value.
+    may be the value -- except under *justified* (``JUSTIFIED RIGHT``),
+    where the pad is on the left and is stripped there too.
     """
     codec = EBCDIC_CODEC if opts.charset is Charset.EBCDIC else "latin-1"
-    return raw.decode(codec, errors="replace").rstrip(" \x00")
+    text = raw.decode(codec, errors="replace").rstrip(" \x00")
+    return text.lstrip(" \x00") if justified else text
 
 
 def _decode_zoned(
@@ -583,7 +585,7 @@ def decode_field(
         value, error = _decode_binary(raw, spec, opts)
     elif usage == "NATIONAL":
         # The encoder writes national data as text (see ``encode_field``).
-        value = _decode_text(raw, opts)
+        value = _decode_text(raw, opts, justified=spec.justified)
     elif (
         spec.blank_when_zero
         and spec.category in (FieldCategory.NUMERIC, FieldCategory.NUMERIC_EDITED)
@@ -597,7 +599,7 @@ def decode_field(
     elif spec.category is FieldCategory.NUMERIC_EDITED:
         value, error = _decode_edited(raw, spec, opts)
     else:
-        value = _decode_text(raw, opts)
+        value = _decode_text(raw, opts, justified=spec.justified)
 
     return DecodedField(
         name=spec.column,

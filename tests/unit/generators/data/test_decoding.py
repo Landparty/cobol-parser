@@ -263,6 +263,26 @@ def test_blank_when_zero_reads_spaces_as_zero(charset):
         assert record.errors == []
 
 
+@pytest.mark.parametrize("charset", [Charset.ASCII, Charset.EBCDIC])
+def test_justified_right_round_trips_and_is_right_aligned(charset):
+    source = (
+        "       01  R.\n"
+        "           05  J PIC X(8) JUSTIFIED RIGHT.\n"
+        "           05  K PIC X(4).\n"
+    )
+    opts = EncodingOptions(charset=charset)
+    decoder = _decoder(source, opts)
+    specs = [placed.spec for placed in decoder.views.base.fields]
+    data = encode_record(specs, ["AB", "CD"], opts)
+    space = bytes([opts.space])
+    assert data[:8] == space * 6 + "AB".encode(
+        "cp037" if opts.space == 0x40 else "ascii"
+    )
+    record = decoder.decode_bytes(data).records[0]
+    assert [f.value for f in record.fields] == ["AB", "CD"]
+    assert record.errors == []
+
+
 def test_without_blank_when_zero_spaces_are_still_an_error():
     field = _one_field(
         "       01  R.\n           05  D PIC 9(3).\n", b"   ", EncodingOptions()
