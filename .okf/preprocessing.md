@@ -724,8 +724,12 @@ These two passes are what let NIST `SM208A` (30x `REPLACE`) and `SM206A`
 1. **Tier 1** — a resolution cache keyed by `member_name` (exact repeat
    lookups are O(1) with no filesystem access).
 2. **Tier 2** — a per-directory index (`_dir_index`, built once via
-   `os.scandir()`) keyed by uppercased basename-without-extension AND full
-   filename, for O(1) lookup against every directory without re-scanning.
+   `os.scandir()`) keyed by full filename (uppercased when
+   case-insensitive), for O(1) lookup against every directory without
+   re-scanning. `resolve` probes the member name, then the name plus each
+   configured extension in order, and takes the hit from the
+   first-configured directory (then the first probe) -- exactly Tier 3's
+   order.
 3. **Tier 3** — a full filesystem search (`find_copybook_file`) as the
    fallback when the index misses.
 
@@ -738,6 +742,14 @@ unconditional `index[name_upper] = abs_path` instead of `setdefault`), so
 `resolve("SHARED.cpy")` and `resolve("SHARED")` could return files from
 different directories. Pinned by
 `tests/regression/test_audit_2026_08_12_core.py::TestPB6FirstDirectoryWins`.
+
+**Tier-2 stem key removed (2026-09-28):** the index used to carry a
+bare-stem key too (`MEM` for `MEM.bak`), so `COPY MEM` resolved to a file
+of *any* extension -- `MEM.bak`, `NOTES.txt`, `ZZ.exe`, or the program's
+own `SUB.cbl` over `SUB.cpy` -- whichever `os.scandir()` listed first,
+ignoring `CopybookSearchPath.extensions` and disagreeing with Tier 3.
+Pinned by `tests/regression/test_copybook_resolution_2026_09_28.py::
+TestIndexedLookupHonoursConfiguredExtensions`.
 
 All three tiers funnel through `validate_path_within_directory(path,
 search_dir)`, which resolves symlinks (`Path.resolve()`) and confirms the
