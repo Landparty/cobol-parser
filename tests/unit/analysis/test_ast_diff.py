@@ -748,6 +748,27 @@ def test_generic_statement_change_falls_back_to_statement_changed():
     assert "TWO" in (changes[0].new or "")
 
 
+def test_generic_statement_clause_change_is_not_missed():
+    # The rendered summary of STRING / READ omits INTO; the change must
+    # still be reported, while a nested AT END body stays compared apart.
+    report = _statement_diff(
+        "           STRING 'X' DELIMITED BY SIZE INTO WS-B\n           STOP RUN.\n",
+        "           STRING 'X' DELIMITED BY SIZE INTO WS-A\n           STOP RUN.\n",
+    )
+    assert len(_of_kind(report, "statement-changed")) == 1
+
+    report = _statement_diff(
+        "           STRING 'X' DELIMITED BY SIZE INTO WS-B\n"
+        "               ON OVERFLOW DISPLAY 'A'\n"
+        "           END-STRING\n           STOP RUN.\n",
+        "           STRING 'X' DELIMITED BY SIZE INTO WS-B\n"
+        "               ON OVERFLOW DISPLAY 'B'\n"
+        "           END-STRING\n           STOP RUN.\n",
+    )
+    changes = _of_kind(report, "statement-changed")
+    assert [change.old for change in changes] == ['DISPLAY "A"']
+
+
 # ---------------------------------------------------------------------------
 # Data items
 # ---------------------------------------------------------------------------

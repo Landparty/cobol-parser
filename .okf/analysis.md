@@ -2625,8 +2625,12 @@ following paragraph as moved, and a pure reformat reports nothing at all.
 Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
 IF, EVALUATE, SEARCH, and (review follow-up) OPEN, EXEC SQL, EXEC CICS, COMPUTE,
 INSPECT, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
-operands *and* its rendered text**, so an unmodelled edit over-reports rather
-than reading as unchanged.
+operands, its rendered text *and* its own `to_dict()` fields** (locations and
+nested statement bodies stripped — those are compared on their own), so an
+unmodelled edit over-reports rather than reading as unchanged. (2026-09-28:
+the rendered text is a truncated summary that omits STRING's INTO, READ's
+INTO/KEY, WRITE's FROM, ...; before the `to_dict()` fields were added,
+`STRING ... INTO A` → `INTO B` diffed as no change.)
 
 Determinism: the same pair always produces byte-identical `to_dict()` — changes
 sorted by category, symbol, kind then remaining fields (`_sort_key` is a total

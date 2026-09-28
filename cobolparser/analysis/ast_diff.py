@@ -524,11 +524,53 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
     # block's text, ...) still reports an edit rather than reading as
     # unchanged. The text is a rendering, so this can over-report a
     # cosmetic difference; it can no longer under-report a real one.
+    # The rendered text is a truncated summary that omits most clauses
+    # (STRING's INTO target, READ's INTO/KEY, WRITE's FROM, ...), so the
+    # statement's own serialized fields are compared too.
     return (
         kind,
         tuple(str(operand) for operand in getattr(stmt, "operands", [])),
         _statement_text(stmt),
+        _clause_key(stmt),
     )
+
+
+def _clause_key(stmt: Any) -> str:
+    """The statement's ``to_dict()`` minus locations and nested statements.
+
+    Nested bodies (``AT END``, ``ON SIZE ERROR``, ...) are flattened and
+    compared on their own, so they are dropped here rather than reporting
+    the enclosing statement as changed too.
+    """
+    try:
+        data = stmt.to_dict()
+    except Exception:  # noqa: BLE001 - a rendering, never a failure
+        return ""
+    return _json_key(_strip_positions(data))
+
+
+def _strip_positions(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_positions(item)
+            for key, item in value.items()
+            if key != "location"
+        }
+    if isinstance(value, list):
+        return [
+            _strip_positions(item)
+            for item in value
+            if not (
+                isinstance(item, dict)
+                and item.get("node_type") in _STATEMENT_NODE_TYPES
+            )
+        ]
+    return value
+
+
+#: ``to_dict()`` ``node_type`` values of statement nodes (EXEC CICS / IMS
+#: keep their own).
+_STATEMENT_NODE_TYPES = frozenset({"Statement", "EXEC_CICS", "EXEC_IMS"})
 
 
 def _json_key(value: Any) -> str:
