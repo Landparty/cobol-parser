@@ -945,8 +945,27 @@ class _Builder:
         elif base.is_instream and not replaces_kind:
             merged.is_instream = True
             merged.instream_lines = list(base.instream_lines)
-        source = override.concatenated or base.concatenated
-        merged.concatenated = [_clone_dd(member) for member in source]
+        # Unnamed override cards override the procedure's concatenated
+        # members by position, parameter by parameter; a member no override
+        # reaches is left exactly as the procedure coded it.
+        members: list[DDStatement] = []
+        for index in range(max(len(base.concatenated), len(override.concatenated))):
+            base_member = (
+                base.concatenated[index] if index < len(base.concatenated) else None
+            )
+            override_member = (
+                override.concatenated[index]
+                if index < len(override.concatenated)
+                else None
+            )
+            if base_member is None:
+                assert override_member is not None
+                members.append(_clone_dd(override_member))
+            elif override_member is None or not override_member.parameters:
+                members.append(_clone_dd(base_member))
+            else:
+                members.append(self._merge_dd(base_member, override_member))
+        merged.concatenated = members
         for member in merged.concatenated:
             member.name = merged.name
         return merged

@@ -190,6 +190,11 @@ sub-parameter*: overriding `DCB=(RECFM=FB,LRECL=80)` with `DCB=(LRECL=100)`
 keeps `RECFM=FB`); a DD name the procedure step does not have is an addition. The invocation keeps its own copy of every override
 card, so nothing is moved out of sight.
 
+A concatenation is overridden by position: the unnamed cards following a
+`procstep.ddname` override merge into the procedure's concatenated members in
+order (a parameterless card leaves its member alone), extra cards are
+additions, and members no override reaches stay exactly as coded.
+
 `PARM` and `COND` coded on the invoking `EXEC` follow the z/OS rules too:
 `PARM.procstep=` / `COND.procstep=` override that one procedure step (a
 procstep the procedure does not have is noted in `unresolved`); unqualified

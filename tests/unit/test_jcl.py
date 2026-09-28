@@ -1671,6 +1671,28 @@ CARD
         assert scan.cards[0].parameters == "RC = 0 THEN"
         assert scan.cards[0].comment == "RUN IT'S STEP"
 
+    def test_concatenation_override_is_positional_and_keeps_the_rest(self):
+        result = parse_jcl("""\
+//J JOB 1
+//P PROC
+//PS1 EXEC PGM=A
+//LIB DD DSN=L.ONE,DISP=SHR
+//    DD DSN=L.TWO,DISP=SHR
+//    DD DSN=L.THREE,DISP=SHR
+// PEND
+//S EXEC P
+//PS1.LIB DD
+//    DD DSN=NEW.TWO
+//
+""")
+        assert result.errors == []
+        lib = result.jobs[0].step("S.PS1").dd("LIB")
+        assert [(d.dataset, d.disposition) for d in lib.flatten()] == [
+            ("L.ONE", "SHR"),
+            ("NEW.TWO", "SHR"),
+            ("L.THREE", "SHR"),
+        ]
+
     def test_override_naming_a_missing_procedure_step_is_reported(self):
         result = parse_jcl(self.PROC + "//S EXEC P,PARM.NOPE=X\n//\n")
         assert result.errors == []
