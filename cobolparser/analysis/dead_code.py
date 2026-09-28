@@ -341,8 +341,22 @@ class DeadCodeAnalyzer:
                 self._referenced_names.update(sec_names)
 
     def _collect_references(self, ast: CobolProgram) -> None:
-        """Collect all procedure name references from control flow statements."""
+        """Collect all procedure name references from control flow statements.
+
+        Only *ast*'s own statements: ``get_all_statements()`` also returns
+        every contained program's, and a nested program's ``PERFORM 100-DO``
+        names *its own* ``100-DO`` -- procedure names are local to a program
+        unit -- so crediting it here kept a same-named dead paragraph of the
+        container alive.
+        """
         all_statements = ast.get_all_statements()
+        if ast.contained_programs:
+            inner = {
+                id(stmt)
+                for contained in ast.contained_programs
+                for stmt in contained.get_all_statements()
+            }
+            all_statements = [s for s in all_statements if id(s) not in inner]
 
         # THRU range ends must be known before any GO TO is classified, so a
         # jump onto one is not mistaken for a jump that keeps running.

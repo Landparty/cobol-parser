@@ -50,6 +50,14 @@ from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 > after `STOP RUN`, or one jumped over by `GO TO`, in a PERFORMed or
 > fallen-into section is now reported dead.
 
+> 2026-09-28: references are collected from the unit's **own** statements
+> only. `get_all_statements()` also returns every contained program's, and
+> procedure names are local to a program unit, so a nested program's
+> `PERFORM HELPER` kept the container's same-named, never-referenced
+> `HELPER` alive. `ProcedureScanner.collect_entry_points` had the same leak
+> (a nested `ENTRY` made the container's same-named paragraph an entry
+> point). Pinned by `TestContainedProgramScope` in `test_dead_code.py`.
+
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]
@@ -1203,6 +1211,24 @@ catalogued" rather than guess a parameter list or show nothing. The intrinsic
 half *is* complete, pinned by
 `tests/unit/test_le_signatures.py::TestIntrinsicSignatures::test_every_ibm_intrinsic_has_a_signature`.
 
+**The intrinsic set is Enterprise COBOL 6.4's, not COBOL-85's
+(2026-09-28).** `IBM_INTRINSIC_FUNCTIONS` and the catalogue used to stop at
+the 1989 amendment's 42 functions, so `FUNCTION TRIM`, `NUMVAL-F`,
+`FORMATTED-DATETIME`, `BYTE-LENGTH`, `DISPLAY-OF`, `ULENGTH`, `UUID4`, ...
+were reported `is_ibm_function: false` by `language-env` and unknown by
+`le-info`. The 37 later functions (3.x/4.x Unicode, 6.1 date-time / TEST-* /
+E / PI / TRIM, 6.3 BIT-/HEX-, 6.4 UUID4) now carry signatures with IBM's
+arity (optional trailing operands marked). Pinned by
+`test_le_signatures.py::TestEnterpriseSixIntrinsicSignatures` and
+`test_language_env_analyzer.py::TestEnterpriseSixIntrinsics`.
+
+**Two service signatures were wrong (2026-09-28), both checked against
+SA38-0683:** `CEE3ABD`'s second operand (IBM: `clean-up`) had its values
+reversed -- 0 is the abend *without* clean-up, 1 after normal enclave
+termination -- and `CEEISEC` was missing `input_milliseconds` (9 operands,
+not 8), so a CALL written from `le-info`'s example passed `output_seconds`
+where LE reads milliseconds. `TestServiceOperandsMatchIbm`.
+
 `IBMEnterpriseCobol.IBM_LE_SERVICE_INFO` is **derived** from this catalogue
 (merged over `_UNCATALOGUED_LE_SERVICE_INFO`, the leftovers), so the dialect's
 one-line metadata and the signatures cannot drift. Categories are cross-checked
@@ -1212,6 +1238,12 @@ Exposed to non-Python consumers as `cobol-parser le-info` (see `.okf/cli.md`),
 which is what the VS Code extension's LE hover reads.
 
 ## CRUDMatrixGenerator
+
+> 2026-09-28: `SORT`/`MERGE` now mark their files. `USING` files are read
+> (R) and `GIVING` files written (C) -- the sort does the I/O itself, so no
+> READ/WRITE statement ever names them and they used to come out `----`.
+> `RELEASE` marks its SD file C (via the record's FD/SD) and `RETURN` marks
+> it R. Pinned by `test_crud_matrix.py::TestSortMergeFileAccess`.
 
 ```python
 matrix: CRUDMatrix = CRUDMatrixGenerator().analyze(ast)
@@ -1385,6 +1417,9 @@ exactly the bug the first draft had. Program-wide rather than per-statement:
 a variable given an indicator on its FETCH and not on its SELECT INTO is a
 different (and much rarer) bug than never having one, and flagging the second
 statement would bury the finding that matters.
+A structure-qualified variable (`:DCLCUST.CUST-VAL:IND`) pairs by its last
+component, like the SQL model's host-variable list (2026-09-28; before that
+the structure name was the "host variable" and nothing was checked).
 
 **What it declines to check, and says so.** `report.unchecked` is
 `name: reason` for every host variable that could not be compared — no
@@ -1639,9 +1674,27 @@ arm of an `EVALUATE TRUE / WHEN <88>` chain produce a byte-identical
 constraint, so the solver picked the first 88's value for all of them and the
 scenario named for the second arm was seeded with the first arm's value and
 never reached the branch it was named for. Both lookups stay available
-because they answer different questions;
+because they answer different questions. **A negated 88 needs the whole
+set** (2026-09-28): `condition_values()` is only a *sample* when a `THRU`
+range could not be enumerated (a non-integer range lists its endpoints, an
+integer one is capped at 65 values, and any range over a field with
+decimals admits values in between). `NOT <88>` over such a name, and the
+`WHEN OTHER` after `WHEN <88>`, are reported in `unsupported` rather than
+modelled as a `not_in_set` whose witness can sit inside the range
+(`layout.condition_values_exhaustive()` over
+`ProgramLayoutIndex.condition_raw_values()` decides; a non-exhaustive
+positive `in_set` carries `FieldConstraint.exhaustive=False`, not part of
+`to_dict()`). An 88 `VALUE ALL 'X'` (2026-09-28) is the `in_set` of the one
+value filling the field (`XXX` on `PIC X(3)`, from
+`ProgramLayoutIndex.condition_values`); `VALUE ALL SPACES` counts as the
+figurative `SPACES`; only a bare `ALL` is still reported unsupported. An 88
+whose one VALUE is a figurative constant (`VALUE
+SPACES`) becomes the `figurative` constraint `IF X = SPACES` would, instead
+of an `in_set` over the word itself (which rendered `"SPA"`);
 figurative constants (`SPACES`/`ZEROS`/`LOW-VALUES`/...) become `figurative`
-with the symbolic name preserved in `values`, not its literal expansion;
+with the symbolic name preserved in `values`, not its literal expansion (the
+solver fills an alphanumeric field's whole width with it: `ZEROS` on `PIC
+X(3)` is `"000"`, since `"0"` pads to `"0  "`);
 class tests (`IS NUMERIC`/`IS ALPHABETIC`) become `class_numeric`/
 `class_alphabetic`; sign/zero tests (`IS POSITIVE`/`NEGATIVE`/`ZERO`) fold
 directly into the relational vocabulary (`gt 0`/`lt 0`/`eq 0`) rather than
@@ -1692,11 +1745,14 @@ solved against. A genuine contradiction (`in_set ("A")` AND
 `not_in_set ("A")`) is still `Unsatisfiable`.
 
 **AND/OR/NOT via De Morgan.** `IfStatement.condition` is walked once for the
-THEN arm (`negate=False`) and once more for the ELSE arm (`negate=True`) --
-there is no structural "NOT" node in this parser to walk instead (confirmed
-against `_conditions.py`: negation is baked directly into concrete operator
-strings like `NOT_EQUAL`/`IS NOT NUMERIC`, or resolved by the caller passing
-`negate=True`). An AND stays a single conjunct list; a negated AND becomes a
+THEN arm (`negate=False`) and once more for the ELSE arm (`negate=True`).
+Most negation is baked into concrete operator strings (`NOT_EQUAL`/`IS NOT
+NUMERIC`), but `_conditions.py` wraps a negation it cannot fold -- `NOT
+FLAG-ON`, `NOT (A = 1 AND B = 2)` -- in a unary `LogicalExpression("NOT")`
+whose operand is `left_condition`; `_extract_expr` walks that operand with
+`negate` flipped (2026-09-28: it used to reject the wrapper as an
+"unsupported logical operator", leaving both arms of `IF NOT <88>`
+unmodeled). An AND stays a single conjunct list; a negated AND becomes a
 disjunction (`NOT(A AND B) = NOT A OR NOT B`) and vice versa for OR --
 implemented as one `(operator == "AND") != negate` boolean flip, not two
 separate code paths. A conjunction drops the *whole* variant if either side
@@ -1844,7 +1900,15 @@ internal env) rather than approximating:
   paragraph call, optionally `THRU` a range) is walked inline exactly once,
   including into paragraphs it in turn `PERFORM`s, guarded against a
   non-looping `PERFORM` cycle by tracking which paragraphs are already on
-  the current call stack.
+  the current call stack. The loop's own `VARYING` / every `AFTER` variable
+  is poisoned too (it ends one step past the UNTIL, never at its pre-loop
+  value) -- inline, out-of-line, and nested inside an IF arm / loop body
+  alike, via `_write_targets(PerformStatement)`. `SEARCH ... VARYING x`
+  poisons `x` the same way (`varying_variable`).
+* A write through a level-66 `RENAMES a [THRU b]` alias poisons the leaves
+  it covers (`_LayoutFacts.renames`, the declaration-order run from `a`'s
+  first leaf to `b`'s last; the whole record when that run is ambiguous).
+  The alias is written, never seed-restored, by READ INTO / ACCEPT.
 * An `IF`/`EVALUATE` branches on data this walk does not evaluate (Phase 5's
   `ScenarioPlanner` already owns targeting one specific arm elsewhere), so
   every field either arm could write is poisoned the same way as a loop
@@ -2182,6 +2246,17 @@ through the corpus program that exposed it.
 
 ## XrefAnalyzer (`xref.py`)
 
+> 2026-09-28: two role fixes. (1) `RELEASE rec FROM x` (record and `x`
+> read) and `RETURN sd-file INTO x` (file-operation on the SD, `x` write)
+> have dedicated role mappings; before, `FROM`/`INTO` never reached
+> `.operands` (the model setters now add them, like READ INTO / WRITE
+> FROM), so `x` had no reference at all and `UnusedVariableAnalyzer`
+> reported it unused. (2) A reference modifier's offset/length names are
+> kept apart from the operand (`_split_operand`) and recorded `read` when
+> the operand itself is a `write`: `MOVE A TO WS-B (WS-P:2)` no longer
+> lists WS-P as written. `_partition_operand` still folds them into the
+> base names for its other callers.
+
 The classic mainframe compiler cross-reference: for every symbol a program
 declares — data items, level-88 condition names, files, paragraphs and
 sections — where it is *defined* and every place it is *referenced*, each
@@ -2310,7 +2385,12 @@ sig.unchecked                   # what could not be determined exactly
 `by_clause`, `location`, and a `declaration()` rendering the operand as a
 caller would have to write it (a group item is described by level and length
 rather than a fabricated picture). `EntryPoint.kind` is `"procedure-division"`
-or `"entry-statement"`.
+or `"entry-statement"`. `by_clause` is the callee's declared passing mode
+(`"REFERENCE"` / `"VALUE"`, from the division's `using_parameter_modes`
+metadata) on the primary entry, `None` on an ENTRY statement's operands;
+`call_example()` writes a `BY VALUE` / `BY REFERENCE` phrase only where the
+mode changes (`CALL "E1" USING LK-A, BY VALUE LK-B RETURNING LK-R`). The
+RETURNING item counts as named, so it is never `unreferenced_linkage`.
 
 **Direction is graded, never guessed.** It comes from how the PROCEDURE
 DIVISION uses each parameter, reusing xref's role vocabulary:
@@ -2319,6 +2399,9 @@ DIVISION uses each parameter, reusing xref's role vocabulary:
 * A reference only as a CALL argument or SQL host variable (`_AMBIGUOUS_ROLES`)
   → `unknown`, and listed in `unchecked`. A caller told "input-only" about a
   field the callee overwrites has been told something worse than nothing.
+  xref files `ENTRY "X" USING p` itself under the CALL-argument role
+  (`statement == "EntryStatement"`); those refs are dropped before grading,
+  since naming an entry's own parameter neither reads nor writes it.
 * A group whose fields xref reports as duplicated → `unknown`, rather than
   inferred from a same-named WORKING-STORAGE field.
 
@@ -2440,7 +2523,7 @@ report.sql_statements / report.cics_statements
 | `SQL_NO_SQLCODE_CHECK` | An executable `EXEC SQL` whose outcome is never looked at: no `SQLCODE`/`SQLSTATE`/`SQLCA` mention in the statements that follow, no `WHENEVER SQLERROR` in effect. DB2 does not raise — it sets a number and returns, and the program commits whatever it was going to commit. The most common real defect in DB2 COBOL and the cheapest to find. |
 | `SQL_DYNAMIC_CONCATENATION` | A host variable handed to `PREPARE` / `EXECUTE IMMEDIATE` whose content was assembled by `STRING` or moved in from another item — SQL injection with a mainframe accent. Parameter markers (`EXECUTE ... USING :HV`) are the fix and are never flagged. |
 | `SQL_HARDCODED_CREDENTIALS` | A literal user id or password in `EXEC SQL CONNECT`. It is in the source, the listing, the load library, and every copy anyone took of any of them. |
-| `SQL_SELECT_WITHOUT_INTO` | A singleton `SELECT` with no `INTO` and no cursor. The precompiler accepts it; the row goes nowhere. |
+| `SQL_SELECT_WITHOUT_INTO` | A singleton `SELECT` with no `INTO` and no cursor. The precompiler accepts it; the row goes nowhere. (`into_variables` is populated from parsed source since 2026-09-28; the `INTO\s*:` text check stays as a backstop.) |
 | `CICS_NO_RESP_HANDLING` | An `EXEC CICS` command with no `RESP`/`RESP2`, no `NOHANDLE`, no `HANDLE CONDITION` in effect. The default action for most CICS conditions is to abend the task, so the failure mode is a dropped transaction mid-update, not a wrong answer. |
 | `CICS_ABEND_WITHOUT_HANDLER` | `EXEC CICS ABEND` with no `HANDLE ABEND`. **Info** — frequently deliberate, worth seeing rather than worth fixing. |
 
@@ -2451,9 +2534,11 @@ or for a dynamic-SQL finding the untrusted host variable) and a machine-readable
 
 **It does not guess.** Three things in the parsed form of an EXEC block are
 lossy, and each is answered with an entry in `unchecked` rather than a finding —
-notably that the lexer drops quotes around literals, so inside SQL text
-`USING 'S3CRET'` and `USING WS-PASSWORD` reduce to the same tokens (an operand
-matching a declared DATA DIVISION item is treated accordingly). A quiet report
+e.g. a CONNECT operand with neither colon nor quotes that matches a declared
+DATA DIVISION item. (Since 2026-09-28 EXEC SQL text keeps a literal's quotes,
+so `USING 'S3CRET'` is always a literal and `USING 'WS-KEY'` is no longer
+mistaken for the data item WS-KEY; before that the two reduced to the same
+tokens.) A quiet report
 with a populated `unchecked` is not a clean program, it is an unexamined one.
 
 `DECLARE GLOBAL TEMPORARY TABLE` is executable and is graded;

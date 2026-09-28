@@ -16,6 +16,7 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     collect_clause_stmts,
     consume_end_keyword_and_period,
+    consume_optional_qualifiers,
     get_parse_context,
     is_statement_boundary,
     peek_past_noise,
@@ -26,7 +27,7 @@ from cobolparser.parsers.statements._utils import (
 )
 
 from ...core.interfaces import IStatementParser, ITokenStream
-from ...lexer import TokenType
+from ...lexer import Token, TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import XmlJsonStatement
 
@@ -38,6 +39,63 @@ from ...models.statements import XmlJsonStatement
 #: ZERO``); elsewhere it still closes an enclosing EVALUATE arm.
 _CLAUSE_CONTINUATION_WORDS = frozenset({"SUPPRESS", "NOT", "ON"})
 _SUPPRESS_CONTINUATION_WORDS = frozenset({"WHEN"})
+
+#: The fixed vocabulary of the XML/JSON GENERATE/PARSE clauses. Any other
+#: identifier in the clause region is a data name the statement references
+#: (see :meth:`XmlJsonStatementParser._record_clause_items`).
+_CLAUSE_VOCABULARY = frozenset(
+    {
+        "ALSO",
+        "AND",
+        "ARE",
+        "ATTRIBUTE",
+        "ATTRIBUTES",
+        "BOOLEAN",
+        "CONTENT",
+        "CONVERTING",
+        "COUNT",
+        "DECIMAL",
+        "DETAIL",
+        "ELEMENT",
+        "ENCODING",
+        "EVERY",
+        "EXCEPTION",
+        "FILE",
+        "HIGH-VALUE",
+        "HIGH-VALUES",
+        "IN",
+        "INTO",
+        "IS",
+        "JSON",
+        "LOW-VALUE",
+        "LOW-VALUES",
+        "NAME",
+        "NAMESPACE",
+        "NAMESPACE-PREFIX",
+        "NATIONAL",
+        "NONNUMERIC",
+        "NOT",
+        "NUMERIC",
+        "OF",
+        "OMITTED",
+        "ON",
+        "OR",
+        "RETURNING",
+        "SPACE",
+        "SPACES",
+        "SUPPRESS",
+        "TO",
+        "TYPE",
+        "USING",
+        "VALIDATING",
+        "WHEN",
+        "WITH",
+        "XML-DECLARATION",
+        "ZERO",
+        "ZEROES",
+        "ZEROS",
+    }
+)
 
 
 class XmlJsonStatementParser(IStatementParser):
@@ -104,8 +162,10 @@ class XmlJsonStatementParser(IStatementParser):
         skip_whitespace(token_stream)
         primary = peek_token(token_stream)
         if primary and primary.value and not is_statement_boundary(primary):
-            stmt.set_primary_operand(primary.value)
             token_stream.consume()
+            stmt.set_primary_operand(
+                consume_optional_qualifiers(token_stream, primary.value)
+            )
         else:
             report_parse_error(
                 context,
@@ -122,8 +182,8 @@ class XmlJsonStatementParser(IStatementParser):
             skip_whitespace(token_stream)
             src = peek_token(token_stream)
             if src and src.value and not is_statement_boundary(src):
-                stmt.set_from_item(src.value)
                 token_stream.consume()
+                stmt.set_from_item(consume_optional_qualifiers(token_stream, src.value))
             else:
                 report_parse_error(
                     context,
@@ -136,6 +196,7 @@ class XmlJsonStatementParser(IStatementParser):
         # (which is parsed structurally below, not kept as text).
         terminator = f"END-{verb}"
         clause_parts: list[str] = []
+        clause_tokens: list[Token] = []
         seen_suppress = False
         while not token_stream.is_empty():
             token = peek_token(token_stream)
@@ -175,14 +236,75 @@ class XmlJsonStatementParser(IStatementParser):
             if upper == "SUPPRESS":
                 seen_suppress = True
             clause_parts.append(value)
+            clause_tokens.append(token)
             token_stream.consume()
 
         if clause_parts:
             stmt.set_clause_text(" ".join(clause_parts))
+        self._record_clause_items(clause_tokens, stmt)
 
         self._parse_exception_clauses(token_stream, stmt, terminator)
         consume_end_keyword_and_period(token_stream, terminator)
         return stmt
+
+    @staticmethod
+    def _record_clause_items(tokens: list[Token], stmt: XmlJsonStatement) -> None:
+        """Record every data name the clause region references.
+
+        ``COUNT [IN] x`` and JSON PARSE's ``INTO x`` are the items written;
+        every other identifier outside :data:`_CLAUSE_VOCABULARY` -- a
+        ``NAME OF`` / ``TYPE OF`` / ``SUPPRESS`` / ``CONVERTING`` subject, a
+        ``NAMESPACE [IS] x`` -- is read. ``VALIDATING WITH FILE schema``
+        names an XML-SCHEMA from SPECIAL-NAMES, not a data item, and is
+        skipped. A trailing ``OF``/``IN`` qualifier chain or subscript folds
+        into the name before it (``NAME OF CUST-ID OF ORDER-CUSTOMER``).
+        Before 2026-09-28 none of these names left ``clause_text``, so
+        unused-variables reported each of them as never referenced."""
+        words = [(t.value or "") for t in tokens]
+        uppers = [w.upper() for w in words]
+        i = 0
+        while i < len(tokens):
+            upper = uppers[i]
+            if tokens[i].type != TokenType.IDENTIFIER or upper in _CLAUSE_VOCABULARY:
+                i += 1
+                continue
+            prev = uppers[i - 1] if i >= 1 else ""
+            prev2 = uppers[i - 2] if i >= 2 else ""
+            parts = [words[i]]
+            j = i + 1
+            while j < len(tokens):
+                if (
+                    uppers[j] in ("OF", "IN")
+                    and j + 1 < len(tokens)
+                    and tokens[j + 1].type == TokenType.IDENTIFIER
+                    and uppers[j + 1] not in _CLAUSE_VOCABULARY
+                ):
+                    parts += [words[j], words[j + 1]]
+                    j += 2
+                    continue
+                if tokens[j].type == TokenType.LEFT_PAREN:
+                    depth = 0
+                    while j < len(tokens):
+                        if tokens[j].type == TokenType.LEFT_PAREN:
+                            depth += 1
+                        elif tokens[j].type == TokenType.RIGHT_PAREN:
+                            depth -= 1
+                        parts.append(words[j])
+                        j += 1
+                        if depth == 0:
+                            break
+                    continue
+                break
+            name = " ".join(parts)
+            if prev == "FILE" and prev2 == "WITH":
+                pass  # VALIDATING WITH FILE xml-schema-name: not a data item
+            elif prev == "COUNT" or (prev == "IN" and prev2 == "COUNT"):
+                stmt.set_count_in(name)
+            elif prev == "INTO":
+                stmt.set_into_item(name)
+            else:
+                stmt.add_clause_item(name)
+            i = j
 
     @staticmethod
     def _at_exception_handler(token_stream: ITokenStream) -> bool:

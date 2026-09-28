@@ -426,3 +426,60 @@ class TestReplacePartialWord:
         assert result.warnings == []
         move = result.ast.find_all_by_type("MoveStatement")[0]
         assert move.targets == ["WS-X"]
+
+    def test_tag_is_replaced_every_time_it_appears_in_a_word(self):
+        # Only the first occurrence used to be replaced: XX-A-:P:.
+        src = "       REPLACE ==:P:== BY ==XX==.\n           MOVE :P:-A-:P: TO B.\n"
+        out = apply_replace_statements(src)
+        assert "MOVE XX-A-XX TO B." in out
+
+
+class TestReplaceLeadingTrailing:
+    """``REPLACE LEADING/TRAILING`` used to be skipped silently."""
+
+    def test_leading_rewrites_the_start_of_each_word(self):
+        src = (
+            "       REPLACE LEADING ==XX-== BY ==WS-==.\n"
+            "       01 XX-A PIC 9.\n"
+            "           MOVE XX-A TO XX-B 'XX-LIT' AXX-C.\n"
+        )
+        warnings: list[str] = []
+        out = apply_replace_statements(src, warnings)
+        assert "01 WS-A PIC 9." in out
+        assert "MOVE WS-A TO WS-B 'XX-LIT' AXX-C." in out
+        assert out.count("\n") == src.count("\n")
+
+    def test_trailing_and_plain_pairs_in_one_statement(self):
+        src = (
+            "       REPLACE TRAILING ==-IN== BY ==-OUT== ==FOO== BY ==BAR==.\n"
+            "           MOVE REC-IN TO FOO IN-X.\n"
+            "       REPLACE OFF.\n"
+        )
+        out = apply_replace_statements(src)
+        assert "MOVE REC-OUT TO BAR IN-X." in out
+
+    def test_leading_through_the_parser(self):
+        data = (
+            "       REPLACE LEADING ==XX-== BY ==WS-==.\n"
+            "       01 XX-A PIC 9.\n"
+            "       01 XX-B PIC 9.\n"
+        )
+        proc = (
+            "           MOVE XX-A TO XX-B.\n       REPLACE OFF.\n           GOBACK.\n"
+        )
+        result = _parse(_program(data, proc))
+        assert result.warnings == []
+        assert {i.name for i in result.ast.get_data_items()} >= {"WS-A", "WS-B"}
+        move = result.ast.find_all_by_type("MoveStatement")[0]
+        assert move.targets == ["WS-B"]
+
+    def test_unparseable_replace_warns_instead_of_vanishing(self):
+        # LEADING takes a single text word, so this REPLACE is malformed.
+        src = "       REPLACE LEADING ==A B== BY ==C==.\n           MOVE A B TO C.\n"
+        warnings: list[str] = []
+        out = apply_replace_statements(src, warnings)
+        assert "MOVE A B TO C." in out
+        assert any(
+            "REPLACE statement could not be parsed" in w and "Line 1" in w
+            for w in warnings
+        ), warnings

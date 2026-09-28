@@ -61,9 +61,36 @@ _PIC_REPEAT_RE = re.compile(r"\(([^()]*)\)")
 class PictureClause(ASTNode):
     """AST node for COBOL PICTURE clauses."""
 
-    def __init__(self, pattern: str, location: SourceLocation):
+    def __init__(
+        self,
+        pattern: str,
+        location: SourceLocation,
+        currency_symbols: frozenset[str] | set[str] | None = None,
+        decimal_point_is_comma: bool = False,
+    ):
+        """*currency_symbols* are the PICTURE currency symbols the program
+        declares through ``SPECIAL-NAMES. CURRENCY SIGN IS ...`` (other than
+        the default ``$``) that occur in *pattern*. Each is edited exactly
+        like ``$`` -- a fixed or floating currency insertion character -- so
+        the pattern is sized and validated as if it were written with
+        ``$``, while :attr:`pattern` keeps the characters as written.
+
+        *decimal_point_is_comma* (``SPECIAL-NAMES. DECIMAL-POINT IS COMMA``)
+        exchanges the roles of ``,`` and ``.``: ``,`` is the editing decimal
+        point and ``.`` a simple insertion character. The pattern is sized
+        and validated through the default spelling (``9(3),99`` as
+        ``9(3).99``) and, like the currency symbols, kept as written."""
         super().__init__("PictureClause", location)
-        self.pattern = pattern
+        self.currency_symbols: frozenset[str] = frozenset(currency_symbols or ())
+        self.decimal_point_is_comma: bool = bool(decimal_point_is_comma)
+        # Sized and validated through the ``$`` / default-decimal-point
+        # spelling (see above); the verbatim pattern is restored once both
+        # passes have run.
+        translation: dict[int, str] = {ord(sym): "$" for sym in self.currency_symbols}
+        if self.decimal_point_is_comma:
+            translation[ord(",")] = "."
+            translation[ord(".")] = ","
+        self.pattern = pattern.translate(translation) if translation else pattern
         self.size: int | None = None
         self.integer_digits: int | None = None
         self.decimal_digits: int | None = None
@@ -82,6 +109,12 @@ class PictureClause(ASTNode):
         self.is_edited: bool = False
         self.is_numeric_edited: bool = False
         self.is_alphanumeric_edited: bool = False
+        #: National (``N``) or national-edited (``N`` with ``B``/``0``/``/``)
+        #: picture: every character position is a two-byte UTF-16 unit, and
+        #: ``size`` already counts the bytes.
+        self.is_national: bool = False
+        #: National-edited: ``N`` with ``B``/``0``/``/`` insertion characters.
+        self.is_national_edited: bool = False
         # Populated by ``_validate_pattern``: ``is_valid`` is False when the
         # pattern violates a PICTURE syntax rule, with human-readable reasons
         # in ``validation_errors``. Parsing stays lenient regardless so a bad
@@ -90,6 +123,12 @@ class PictureClause(ASTNode):
         self.validation_errors: list[str] = []
         self._parse_pattern()
         self._validate_pattern()
+        if translation:
+            self.pattern = pattern
+        if self.currency_symbols:
+            self._metadata["currency_symbols"] = sorted(self.currency_symbols)
+        if self.decimal_point_is_comma:
+            self._metadata["decimal_point_is_comma"] = True
 
     def _parse_pattern(self) -> None:
         """Parse the PICTURE pattern to extract size and digit information."""
@@ -123,6 +162,14 @@ class PictureClause(ASTNode):
         if self._parse_plain_pattern(pattern):
             return
 
+        # 0b. National-edited pictures (``N(2)BN``, ``NN/NN``): N with the
+        # simple insertion characters B, 0 and /.  Each position -- insertion
+        # characters included -- is a two-byte national character.  These
+        # used to fall into the numeric-edited path, which sized
+        # ``N(2)BN`` at four bytes (not eight) and called it numeric.
+        if self._parse_national_edited_pattern(pattern):
+            return
+
         # Use the first character as a cheap guard for the simple
         # alphanumeric/national branches below, so we avoid those regexes
         # when the pattern cannot be X/A/N-based.
@@ -152,6 +199,7 @@ class PictureClause(ASTNode):
             if wide_match:
                 count_str = wide_match.group(2)
                 self.size = 2 * (int(count_str) if count_str else 1)
+                self.is_national = first == "N"
                 return
 
         # 1c. UTF-8 (PIC U) patterns: U, U(n). ``PIC U(n)`` reserves n
@@ -438,8 +486,30 @@ class PictureClause(ASTNode):
             return True
         if kinds in ({"N"}, {"G"}):
             self.size = 2 * len(symbols)
+            self.is_national = kinds == {"N"}
             return True
         return False
+
+    def _parse_national_edited_pattern(self, pattern: str) -> bool:
+        """Populate the fields for a national-edited picture (``N(2)BN``).
+
+        Returns False unless *pattern* is made of ``N`` and at least one of
+        the national insertion characters ``B``/``0``/``/``.
+        """
+        if "(" in pattern and not all(
+            inner.isdigit() and int(inner) > 0
+            for inner in _PIC_REPEAT_RE.findall(pattern)
+        ):
+            return False
+        symbols = [s.upper() for s in self._expand_symbols(pattern)]
+        kinds = set(symbols)
+        if "N" not in kinds or not kinds <= {"N", "B", "0", "/"} or kinds == {"N"}:
+            return False
+        self.is_edited = True
+        self.is_national = True
+        self.is_national_edited = True
+        self.size = 2 * len(symbols)
+        return True
 
     def _parse_scaled_pattern(self, pattern: str) -> bool:
         """Populate the fields for a ``P``-scaled numeric picture.
@@ -562,6 +632,8 @@ class PictureClause(ASTNode):
             "is_edited": self.is_edited,
             "is_numeric_edited": self.is_numeric_edited,
             "is_alphanumeric_edited": self.is_alphanumeric_edited,
+            "is_national": self.is_national,
+            "is_national_edited": self.is_national_edited,
             "is_valid": self.is_valid,
             "validation_errors": self.validation_errors,
             "location": self.location.to_dict(),
@@ -577,6 +649,10 @@ class OccursClause(ASTNode):
         self.min_times: int | None = None
         self.max_times: int | None = None
         self.depending_on: str | None = None
+        #: ``DEPENDING ON CNT OF CTL [IN ...]``: the qualifiers that locate a
+        #: counter whose name is not unique, innermost first.
+        #: ``depending_on`` stays the bare data-name every consumer matches.
+        self.depending_on_qualifiers: list[str] = []
         #: ``OCCURS UNBOUNDED DEPENDING ON`` (Enterprise COBOL 5+): the table
         #: has no declared maximum, so ``max_times`` stays None. Only legal
         #: in the LINKAGE SECTION, where the caller supplies the storage.
@@ -641,7 +717,20 @@ class OccursClause(ASTNode):
             result["key_clauses"] = [dict(kc) for kc in self.key_clauses]
         if self.is_unbounded:
             result["is_unbounded"] = True
+        if self.depending_on_qualifiers:
+            result["depending_on_qualifiers"] = list(self.depending_on_qualifiers)
         return result
+
+
+def _implied_picture_usage(picture: PictureClause) -> str | None:
+    """The USAGE a PICTURE implies on its own: ``NATIONAL`` for ``N``
+    pictures, ``DISPLAY-1`` for ``G`` (DBCS) ones, else None."""
+    if picture.is_national:
+        return "NATIONAL"
+    body = _PIC_PAREN_COUNT_RE.sub("", picture.pattern.upper())
+    if body and set(body) <= {"G", "B"} and "G" in body:
+        return "DISPLAY-1"
+    return None
 
 
 class CobolDataItem(ASTNode):
@@ -653,6 +742,10 @@ class CobolDataItem(ASTNode):
         self.level = level
         self.picture_clause: PictureClause | None = None
         self.usage: str = "DISPLAY"  # Default usage
+        #: True when this entry itself carries a USAGE clause (``set_usage`` /
+        #: ``set_object_reference``); False when ``usage`` is the DISPLAY
+        #: default or was inherited from an enclosing group's USAGE.
+        self.usage_explicit: bool = False
         self.value_clause: str | None = None
         self.occurs_clause: OccursClause | None = None
         self.redefines: str | None = None
@@ -676,6 +769,9 @@ class CobolDataItem(ASTNode):
         #: ``USAGE OBJECT REFERENCE [class-name]`` (OO COBOL): the class the
         #: reference is typed with, or None for a universal reference.
         self.object_class: str | None = None
+        #: ``GROUP-USAGE [IS] NATIONAL|UTF-8`` on a group: every subordinate
+        #: elementary item is implicitly of that usage.
+        self.group_usage: str | None = None
 
     @property
     def initial_value(self) -> str | None:
@@ -688,9 +784,19 @@ class CobolDataItem(ASTNode):
         self.value_clause = value
 
     def set_picture_clause(self, picture: PictureClause) -> None:
-        """Set the PICTURE clause for this data item."""
+        """Set the PICTURE clause for this data item.
+
+        A picture of ``N`` symbols implies ``USAGE NATIONAL`` and one of
+        ``G`` symbols ``USAGE DISPLAY-1`` (IBM Enterprise COBOL, default
+        ``NSYMBOL(NATIONAL)``); ``usage`` says so unless the entry states a
+        USAGE of its own, which a later ``set_usage`` still overrides.
+        """
         self.picture_clause = picture
         self.add_child(picture)
+        if not self.usage_explicit:
+            implied = _implied_picture_usage(picture)
+            if implied is not None:
+                self.usage = implied
 
     def set_byte_length(self, byte_length: int) -> None:
         """Record ``BYTE-LENGTH n`` and size the PICTURE accordingly."""
@@ -706,11 +812,13 @@ class CobolDataItem(ASTNode):
     def set_object_reference(self, class_name: str | None = None) -> None:
         """Record ``[USAGE] OBJECT REFERENCE [class-name]``."""
         self.usage = "OBJECT REFERENCE"
+        self.usage_explicit = True
         self.object_class = class_name
 
     def set_usage(self, usage: str) -> None:
         """Set the USAGE clause for this data item."""
         self.usage = usage
+        self.usage_explicit = True
 
     def set_value_clause(self, value: str) -> None:
         """Set the VALUE clause for this data item."""
@@ -817,6 +925,7 @@ class CobolDataItem(ASTNode):
                 total_digits=picture.total_digits if picture else None,
                 sign_clause=self.sign_clause,
                 is_signed=bool(picture and picture.is_signed),
+                national_picture=bool(picture and picture.is_national),
             )
 
         # A group is the sum of its REDEFINES *slots*, not of its children.
@@ -896,6 +1005,8 @@ class CobolDataItem(ASTNode):
             result["dynamic_length_limit"] = self.dynamic_length_limit
         if self.object_class is not None:
             result["object_class"] = self.object_class
+        if self.group_usage is not None:
+            result["group_usage"] = self.group_usage
 
         if self.redefines:
             result["redefines"] = self.redefines
@@ -942,6 +1053,10 @@ class ConditionNameItem(ASTNode):
         super().__init__("ConditionNameItem", location)
         self.name = name
         self.values: list[str] = []
+        #: ``VALUE ... WHEN SET TO FALSE [IS] literal`` (IBM): the value
+        #: ``SET condition-name TO FALSE`` moves into the conditional
+        #: variable; ``None`` when the entry has no such phrase.
+        self.false_value: str | None = None
 
     def add_value(self, value: str) -> None:
         """Add a VALUE entry for this condition name."""
@@ -952,6 +1067,7 @@ class ConditionNameItem(ASTNode):
             "node_type": self.node_type,
             "name": self.name,
             "values": self.values,
+            "false_value": self.false_value,
             "location": self.location.to_dict(),
             "metadata": self._metadata or {},
         }

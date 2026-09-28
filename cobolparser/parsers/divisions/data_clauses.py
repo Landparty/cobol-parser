@@ -68,6 +68,11 @@ _POINTER_KEYWORDS: frozenset[str] = frozenset(
     }
 )
 
+# USAGE values with no token type of their own that may be written without
+# the USAGE keyword. ``DISPLAY-1`` is a token type of its own
+# (``TokenType.DISPLAY_1``) and is matched on that as well.
+_BARE_USAGE_WORDS: frozenset[str] = frozenset({"NATIONAL", "UTF-8", "DISPLAY-1"})
+
 # Hoisted out of _parse_picture_clause -- the union was being rebuilt on
 # every iteration of that method's inner loop.
 _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
@@ -100,6 +105,13 @@ _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
         "BYTE-LENGTH",
         "DYNAMIC",
         "OBJECT",
+        # The USAGE word is optional, so ``PIC N(5) NATIONAL`` / ``PIC U(4)
+        # UTF-8`` name their usage straight after the picture. Both lex as
+        # IDENTIFIERs, which the picture scan collects: ``NATIONAL`` was
+        # glued onto the pattern (``N(5)NATIONAL``, sized 3 bytes).
+        # (DISPLAY / DISPLAY-1 have token types of their own and already
+        # stopped the scan.)
+        *_BARE_USAGE_WORDS,
         # Report-group clause words (REPORT SECTION, 2026-09-02): ``PIC ZZ9
         # SOURCE WS-X`` must stop the picture scan at SOURCE. None of these
         # is a valid picture string, so they are safe terminators everywhere.
@@ -129,6 +141,33 @@ _REPORT_ANONYMOUS_STARTS: frozenset[str] = _REPORT_CLAUSE_STARTS | frozenset(
 # PRESENT WHEN ...) ends.
 _REPORT_OPERAND_STOPS: frozenset[str] = _PICTURE_TERMINATOR_KEYWORDS | frozenset(
     {"PIC", "PICTURE", "OCCURS", "REDEFINES", "UPON", "RESET"}
+)
+# After one of these a one-/two-digit integer (which lexes as a
+# LEVEL_NUMBER) is an operand -- ``PRESENT WHEN WS-I > 1`` -- not the level
+# number of a following data entry.
+_REPORT_OPERATOR_WORDS: frozenset[str] = frozenset(
+    {
+        "=",
+        ">",
+        "<",
+        ">=",
+        "<=",
+        "+",
+        "-",
+        "*",
+        "/",
+        "**",
+        "AND",
+        "OR",
+        "NOT",
+        "THAN",
+        "TO",
+        "EQUAL",
+        "EQUALS",
+        "GREATER",
+        "LESS",
+        "IS",
+    }
 )
 # ``,`` / ``;`` between data-item clauses are separators, not clauses.
 _CLAUSE_SEPARATOR_TOKEN_TYPES: frozenset[TokenType] = frozenset(
@@ -273,6 +312,22 @@ class DataItemClauseParser:
             parser: The ``DataDivisionParser`` this collaborator belongs to.
         """
         self._parser = parser
+        # Non-``$`` currency symbols (``CURRENCY SIGN IS '£'``) the most
+        # recent parse_picture_clause() collected; read by
+        # _picture_clause() right after, on both the pure-Python and the
+        # Cython data-item paths.
+        self._picture_currency_symbols: frozenset[str] = frozenset()
+
+    def _picture_clause(self, pattern: str, location: SourceLocation) -> PictureClause:
+        """Build the PictureClause for the pattern parse_picture_clause()
+        just returned, with the declared currency symbols it contains."""
+        host = getattr(self._parser, "host", None)
+        return PictureClause(
+            pattern,
+            location,
+            currency_symbols=self._picture_currency_symbols,
+            decimal_point_is_comma=bool(getattr(host, "decimal_point_is_comma", False)),
+        )
 
     def parse_data_item(
         self, token_stream: ITokenStream, report_group: bool = False
@@ -367,7 +422,7 @@ class DataItemClauseParser:
                     _COMP_KEYWORDS,
                     _COMP_TOKEN_TYPES,
                     _DIVISION_TOKEN_TYPES,
-                    PictureClause,
+                    self._picture_clause,
                     OccursClause,
                     TokenType.PERIOD,
                     TokenType.LEVEL_NUMBER,
@@ -452,7 +507,7 @@ class DataItemClauseParser:
                 picture_pattern = self.parse_picture_clause(token_stream)
                 if picture_pattern:
                     data_item.set_picture_clause(
-                        PictureClause(picture_pattern, location)
+                        self._picture_clause(picture_pattern, location)
                     )
 
             # VALUE clause
@@ -540,6 +595,29 @@ class DataItemClauseParser:
             # and was dropped with an "Unparsed token 'INDEX'" warning.
             elif value_upper == "INDEX":
                 data_item.set_usage("INDEX")
+                token_stream.consume()
+
+            # GROUP-USAGE [IS] NATIONAL | UTF-8 (a national / UTF-8 group:
+            # every subordinate elementary item takes that usage -- applied
+            # by ``propagate_group_usage_and_sign`` once the hierarchy is
+            # built). It used to be dropped with two "Unparsed token"
+            # warnings, leaving ``PIC 9`` children sized as DISPLAY.
+            elif value_upper == "GROUP-USAGE":
+                token_stream.consume()  # GROUP-USAGE
+                self._consume_if(token_stream, "IS")
+                group_usage = self._consume_if(token_stream, "NATIONAL", "UTF-8")
+                if group_usage is None:
+                    self._warn_dropped_data_token(token, data_item)
+                else:
+                    data_item.group_usage = group_usage
+
+            # NATIONAL / DISPLAY-1 / UTF-8 without the USAGE keyword
+            # (``05 X PIC N(5) NATIONAL.``, ``05 X PIC G(4) DISPLAY-1.``).
+            # None can name a data item, so in clause position each is the
+            # usage; before, NATIONAL was glued onto the PICTURE and
+            # DISPLAY-1 dropped with an "Unparsed token" warning.
+            elif value_upper in _BARE_USAGE_WORDS or tok_type == TokenType.DISPLAY_1:
+                data_item.set_usage(value_upper)
                 token_stream.consume()
 
             # SIGN clause: SIGN [IS] LEADING|TRAILING [SEPARATE [CHARACTER]]
@@ -635,10 +713,10 @@ class DataItemClauseParser:
             elif value_upper == "IS":
                 nxt = self._peek_next_meaningful(token_stream)
                 nxt_upper = nxt.value.upper() if nxt and nxt.value else ""
-                if nxt_upper in _POINTER_KEYWORDS or nxt_upper in (
-                    "EXTERNAL",
-                    "GLOBAL",
-                    "INDEX",
+                if (
+                    nxt_upper in _POINTER_KEYWORDS
+                    or nxt_upper in _BARE_USAGE_WORDS
+                    or nxt_upper in ("EXTERNAL", "GLOBAL", "INDEX")
                 ):
                     token_stream.consume()  # Consume the optional IS
                 else:
@@ -804,29 +882,102 @@ class DataItemClauseParser:
         token = token_stream.peek()
         if token and token.type in (TokenType.LEVEL_NUMBER, TokenType.NUMERIC_LITERAL):
             token_stream.consume()
-            return f"PLUS {token.value}" if plus else str(token.value)
+            if plus:
+                return f"PLUS {token.value}"
+            # ``LINE [NUMBER IS] integer ON NEXT PAGE`` (COBOL-85): an
+            # absolute line on a fresh page. Before 2026-09-28 the ``ON``
+            # was warned about and dropped, and ``NEXT PAGE`` was misread
+            # as a ``NEXT GROUP`` clause with no operand.
+            if self._at_on_next_page(token_stream):
+                for _ in range(3):  # ON NEXT PAGE
+                    self._skip_newlines(token_stream)
+                    token_stream.consume()
+                return f"{token.value} ON NEXT PAGE"
+            return str(token.value)
         return "PLUS" if plus else None
+
+    def _at_on_next_page(self, token_stream: ITokenStream) -> bool:
+        """True when the next three meaningful tokens are ``ON NEXT PAGE``
+        (nothing consumed)."""
+        words: list[str] = []
+        offset = 0
+        while len(words) < 3:
+            token = token_stream.peek(offset)
+            if token is None:
+                return False
+            offset += 1
+            if token.type == TokenType.NEWLINE:
+                continue
+            words.append((token.value or "").upper())
+        return words == ["ON", "NEXT", "PAGE"]
 
     def _report_operands(self, token_stream: ITokenStream) -> list[str]:
         """Free-text operands up to the next clause word, period, level
         number or division header (TYPE ..., SUM ..., PRESENT WHEN ...)."""
         words: list[str] = []
+        depth = 0
         while not token_stream.is_empty():
             self._skip_newlines(token_stream)
             token = token_stream.peek()
-            if token is None or token.type in (
-                TokenType.PERIOD,
-                TokenType.LEVEL_NUMBER,
+            if token is None or token.type == TokenType.PERIOD:
+                break
+            # A one-/two-digit integer lexes as LEVEL_NUMBER whatever it
+            # means. Inside a subscript (``SUM WS-AMT (1)``) or after an
+            # operator (``PRESENT WHEN WS-I > 1``) it is an operand; only
+            # elsewhere is it the level number of the next entry (a
+            # missing period). Before 2026-09-28 every such integer ended
+            # the clause, and the clause loop then opened a phantom data
+            # item at it, dropping the rest of the entry.
+            if (
+                token.type == TokenType.LEVEL_NUMBER
+                and depth == 0
+                and not (words and words[-1].upper() in _REPORT_OPERATOR_WORDS)
             ):
                 break
             if token.type in _DIVISION_TOKEN_TYPES:
                 break
             upper = (token.value or "").upper()
-            if upper in _REPORT_CLAUSE_STARTS or upper in _REPORT_OPERAND_STOPS:
+            if depth == 0 and (
+                upper in _REPORT_CLAUSE_STARTS or upper in _REPORT_OPERAND_STOPS
+            ):
                 break
-            words.append(token.value)
+            if token.type == TokenType.LEFT_PAREN:
+                depth += 1
+            elif token.type == TokenType.RIGHT_PAREN:
+                depth = max(0, depth - 1)
+            value = token.value or ""
+            if token.type == TokenType.STRING_LITERAL:
+                # Keep a literal distinguishable from a data name
+                # (``PRESENT WHEN WS-FLAG = 'Y'``, not ``= Y``).
+                value = "'" + value.replace("'", "''") + "'"
+            words.append(value)
             token_stream.consume()
         return words
+
+    @staticmethod
+    def _group_report_operands(words: list[str]) -> list[str]:
+        """Fold each operand's subscript and ``OF``/``IN`` qualifiers into
+        one string, so ``SUM WS-AMT (1) WS-AMT (2)`` lists two operands
+        (``WS-AMT ( 1 )``, ``WS-AMT ( 2 )``), not eight words."""
+        grouped: list[str] = []
+        depth = 0
+        glue_next = False
+        for word in words:
+            upper = word.upper()
+            if grouped and (depth > 0 or glue_next or word == "("):
+                grouped[-1] = f"{grouped[-1]} {word}"
+            elif grouped and upper in ("OF", "IN"):
+                grouped[-1] = f"{grouped[-1]} {word}"
+                glue_next = True
+                continue
+            else:
+                grouped.append(word)
+            glue_next = False
+            if word == "(":
+                depth += 1
+            elif word == ")":
+                depth = max(0, depth - 1)
+        return grouped
 
     def _parse_report_clause(
         self, token_stream: ITokenStream, data_item: CobolDataItem, word: str
@@ -862,7 +1013,7 @@ class DataItemClauseParser:
             self._consume_if(token_stream, "IS")
             clauses["source"] = " ".join(self._report_operands(token_stream))
         elif word == "SUM":
-            operands = self._report_operands(token_stream)
+            operands = self._group_report_operands(self._report_operands(token_stream))
             entry: dict[str, Any] = {"operands": operands}
             if self._consume_if(token_stream, "UPON"):
                 entry["upon"] = self._report_operands(token_stream)
@@ -973,6 +1124,10 @@ class DataItemClauseParser:
             if dep_token and dep_token.type == TokenType.IDENTIFIER:
                 depending_var = dep_token.value
                 token_stream.consume()
+                # ``DEPENDING ON CNT OF CTL``: the qualifiers used to stop
+                # the walk, so every KEY / INDEXED BY after them was
+                # dropped as an unparsed token.
+                occurs.depending_on_qualifiers = self._consume_qualifiers(token_stream)
 
         # ASCENDING / DESCENDING KEY IS key-1 [key-2 ...] clauses
         # (may repeat). These sit between DEPENDING ON and INDEXED BY
@@ -1019,6 +1174,9 @@ class DataItemClauseParser:
                 ):
                     keys.append(key_token.value)
                     token_stream.consume()
+                    # A key may be qualified (``KEY IS K1 OF ENTRY``); the
+                    # key is the bare name, the qualifier only locates it.
+                    self._consume_qualifiers(token_stream)
                 else:
                     break
             if keys:
@@ -1129,6 +1287,30 @@ class DataItemClauseParser:
             else:
                 break
 
+    def _consume_qualifiers(self, token_stream: ITokenStream) -> list[str]:
+        """Consume an ``OF|IN data-name`` qualifier chain; return the names.
+
+        ``OCCURS ... DEPENDING ON CNT OF CTL`` is how a counter whose name
+        is not unique is written.  ``OF``/``IN`` is only taken when a name
+        follows it, so a malformed clause cannot swallow anything else.
+        """
+        qualifiers: list[str] = []
+        while True:
+            keyword = self._peek_next_meaningful(token_stream, offset=0)
+            if not (
+                keyword and keyword.value and keyword.value.upper() in ("OF", "IN")
+            ):
+                break
+            self._skip_newlines(token_stream)
+            name = self._peek_next_meaningful(token_stream, offset=1)
+            if name is None or name.type != TokenType.IDENTIFIER:
+                break
+            token_stream.consume()  # OF / IN
+            self._skip_newlines(token_stream)
+            qualifiers.append(name.value)
+            token_stream.consume()
+        return qualifiers
+
     @staticmethod
     def _peek_count_token(token_stream: ITokenStream) -> tuple[Any, int]:
         """Locate an OCCURS count/max token without consuming anything.
@@ -1227,6 +1409,7 @@ class DataItemClauseParser:
 
         pattern_parts = []
         paren_depth = 0  # Track parenthesis nesting
+        currency_symbols: set[str] = set()
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -1263,6 +1446,10 @@ class DataItemClauseParser:
             # Editing symbols emitted as their own token types ($ + - * /)
             elif token.type in _PICTURE_SYMBOL_TOKEN_TYPES:
                 pattern_parts.append(token.value)
+                if token.type == TokenType.CURRENCY and token.value != "$":
+                    # A SPECIAL-NAMES CURRENCY SIGN symbol (the lexer only
+                    # emits a non-``$`` CURRENCY token for a declared one).
+                    currency_symbols.add(token.value)
                 token_stream.consume()
             elif token.value == "(":
                 pattern_parts.append(token.value)
@@ -1296,6 +1483,7 @@ class DataItemClauseParser:
             else:
                 break
 
+        self._picture_currency_symbols = frozenset(currency_symbols)
         result = "".join(pattern_parts) if pattern_parts else None
         return result
 

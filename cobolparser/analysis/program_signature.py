@@ -89,6 +89,10 @@ class SignatureParameter:
     is_group: bool = False
     occurs: int | None = None
     direction: str = "unknown"
+    #: Passing mode the callee declares for this operand -- ``"REFERENCE"``
+    #: or ``"VALUE"`` -- from ``PROCEDURE DIVISION USING [BY VALUE] ...``.
+    #: ``None`` for an ENTRY statement's operands, whose USING phrase the
+    #: parser records no mode for.
     by_clause: str | None = None
     location: SourceLocation | None = None
 
@@ -157,8 +161,21 @@ class EntryPoint:
         """
         text = f'CALL "{self.name}"'
         if self.parameters:
-            operands = ", ".join(p.name for p in self.parameters)
-            text = f"{text} USING {operands}"
+            # A BY phrase governs every following operand until the next
+            # one, so it is written only where the mode changes from the
+            # one in force (COBOL's default, BY REFERENCE, at the start). A
+            # BY VALUE parameter passed without the phrase would be passed
+            # by reference -- the callee would read an address as a value.
+            pieces: list[str] = []
+            mode = "REFERENCE"
+            for parameter in self.parameters:
+                wanted = (parameter.by_clause or mode).upper()
+                piece = parameter.name
+                if wanted != mode:
+                    piece = f"BY {wanted} {piece}"
+                    mode = wanted
+                pieces.append(piece)
+            text = f"{text} USING {', '.join(pieces)}"
         if self.returning:
             text = f"{text} RETURNING {self.returning}"
         return text
@@ -295,6 +312,10 @@ class ProgramSignatureExtractor:
 
         named: set[str] = set()
         for entry in self._entry_points(ast, signature):
+            if entry.returning:
+                # The RETURNING item is part of the calling interface too,
+                # not an unreferenced LINKAGE record.
+                named.add(entry.returning.upper())
             for parameter in entry.parameters:
                 key = parameter.name.upper()
                 named.add(key)
@@ -441,13 +462,23 @@ class ProgramSignatureExtractor:
                 rest = names[at + 1 :]
                 returning = rest[0].upper() if rest else None
                 names = names[:at]
+            raw_modes = proc_div.get_metadata("using_parameter_modes") or {}
+            modes = (
+                {str(k).upper(): str(v).upper() for k, v in raw_modes.items()}
+                if isinstance(raw_modes, dict)
+                else {}
+            )
             if names or returning:
                 entries.append(
                     EntryPoint(
                         name=ast.program_name or "",
                         kind="procedure-division",
                         parameters=[
-                            SignatureParameter(name=n.upper(), position=i)
+                            SignatureParameter(
+                                name=n.upper(),
+                                position=i,
+                                by_clause=modes.get(n.upper()),
+                            )
                             for i, n in enumerate(names, start=1)
                         ],
                         returning=returning,
@@ -520,7 +551,17 @@ class ProgramSignatureExtractor:
         directions: dict[str, str] = {}
         self._ambiguous_roles = {}
         for entry in report.entries:
-            roles = {ref.role for ref in entry.references}
+            # ``ENTRY "ALT" USING X`` names X as the entry's own parameter;
+            # xref files that under the CALL-argument role, but it neither
+            # reads nor writes X, and counting it as a (possibly-writing)
+            # CALL argument graded every ENTRY parameter ``unknown``.
+            roles = {
+                ref.role
+                for ref in entry.references
+                if not (
+                    ref.role == ROLE_CALL_ARGUMENT and ref.statement == "EntryStatement"
+                )
+            }
             if not roles:
                 continue
             # Handed to a sub-CALL (BY REFERENCE by default) or to SQL as a

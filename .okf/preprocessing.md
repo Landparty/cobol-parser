@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-09-15T00:00:00Z
+timestamp: 2026-09-28T00:00:00Z
 ---
 
 # Overview
@@ -159,6 +159,23 @@ make them part of the literal's value — e.g. opening line `VALUE "ABC   `
 `VALUE "ABCDEF"` → correctly `"ABC   DEF"`, not the pre-fix `"ABCDEF"`
 (blanks silently dropped). Applies to both the opening-line branch and
 the literal-continuation branch, pure-Python and Cython.
+
+**Short records** (2026-09-28): the M5 rule only kept blanks that were
+*physically present*. A literal open at end of line runs through column 72,
+and a record whose trailing blanks were stripped (editors, file transfers --
+most copies of a deck kept off the mainframe) stops short of it; the columns
+it lost are blanks inside the literal all the same. They were dropped, so
+`DISPLAY 'ERROR: NOT ` + `-    'FOUND'.` read `'ERROR: NOTFOUND'` stripped
+and `'ERROR: NOT FOUND'` unstripped. `_literal_pad()` computes the missing
+columns when a record leaves a literal open; the pad is paid *only when a
+continuation record resumes the literal* (prepended to its chunk), so an
+unterminated literal that nothing continues keeps its historical text.
+Mirrored in `_preprocess_fast.pyx` (`.c` regenerated with Cython 3.3.0) and
+in the expander's `copy_statement_parser.normalize_continuation_lines`, which
+pads per merged record (`tail_width`), so a direct parse and a
+`parse_cobol_with_expansion` parse still agree. Hand-written tests that
+joined short-record pieces with no blanks were updated to the column-72
+rule (or to put the literal's last character in column 72).
 
 **Line numbers survive continuation** (fixed 2026-09-09). A continuation
 record used to vanish from the output — N physical lines became one logical
@@ -602,10 +619,48 @@ unknown `>>` directives (passed through to the lexer), and unclosed
 blanked in place so line numbers stay stable. The copybook expansion path
 (`process_conditionals=True`) routes warnings into
 `ExpansionStatistics.warnings`; the CLI (`--define`) prints them to
-stderr. Pinned by
+stderr (without `--copybook-path`; with it -- and always for `expand` --
+they land in the JSON's `warnings`). Pinned by
 `tests/regression/test_tier4_audit_remediations.py::TestH6CopybookSilentChannels`
 / `::TestH7ConditionalCompilationWarnings` (updated to the new semantics)
 and `tests/regression/test_open_findings_m10_regression.py`.
+
+**`>>DEFINE` reaches the copybooks below it (2026-09-28):** with
+`process_conditionals=True` each COPY's member is processed with the
+symbols in effect *on the COPY's own line* -- the caller's
+`defined_symbols` plus every active `>>DEFINE` above it, in the program or
+in an enclosing member. `preprocess_conditional_compilation(...,
+define_log=[...])` records `(line, symbols)` after each `>>DEFINE`
+(`(0, initial)` first); `_expand_source_recursive(define_log=...)` looks
+the COPY's line up through its origin (`_symbols_at_line`), and those
+symbols join the expansion-cache key, so one member COPYd before and after
+a `>>DEFINE` expands both ways. Before, every member saw only the caller's
+initial symbols. The CLI pre-pass had the same effect from the outside:
+`expand --define` and `parse`/analyzers `--define X --copybook-path`
+ran the program through `preprocess_conditional_compilation` *before*
+expansion, consuming its `>>DEFINE` lines -- and for `parse`, `--define`
+itself never reached a member either (neither the expander nor the
+parser's own directive pass over the expanded text received it), so
+`>>IF DBG DEFINED` in a copybook took the `>>ELSE` branch under
+`--define DBG`. With copybook paths the CLI now leaves conditionals to the
+expander (`parse_cobol_with_expansion(process_conditionals=True,
+defined_symbols=...)`). A `>>DEFINE` *inside* a member still does not
+reach the parent's text after the COPY. Pinned by
+`tests/regression/test_copybook_resolution_2026_09_28.py::TestDefinedSymbolsReachCopybooks`.
+
+**COPY in an excluded `>>IF` block is not resolved (2026-09-28):**
+`parse_cobol_with_expansion(process_conditionals=...)` now defaults to
+**True**, and `parse_files_with_copybooks` and the CLI's
+`--copybook-path` parse path pass it. Expansion used to run before any
+directive was evaluated (the parser's own pass came after), so `COPY
+DFHAID` under `>>IF CICS DEFINED` was resolved even with CICS undefined,
+and a member that exists only for the other branch failed the whole parse
+(CLI exit 1; batch/scan silently fell back to the unexpanded parse).
+The parser runs the same directive pass anyway, so only the *order*
+changes. `expand_copybooks` itself keeps `process_conditionals=False` by
+default (and `expand` processes directives only with `--define`), since
+its output is the text as written. Pinned by
+`tests/regression/test_copybook_resolution_2026_09_28.py::TestCopyInExcludedConditionalBlock`.
 
 A `*>` floating comment on a `>>` directive line (outside a literal) is
 stripped before the directive is read (`_strip_directive_comment`, 2026-09-27):
@@ -620,6 +675,20 @@ making `>>IF V = 3` silently false. An expression that cannot be evaluated
 exactly (undefined / non-integer operand, division by zero, inexact
 division) keeps the raw text as before. Arithmetic inside an `>>IF`
 comparison is still unsupported (warns, FALSE).
+
+**Literal contents are case-sensitive; `-1` and `'O''BRIEN'` are operands
+(2026-09-28).** The directive line used to be `line.strip().upper()`-ed as a
+whole, so `>>DEFINE X AS 'abc'` then `>>IF X = 'ABC'` was TRUE.
+`_upper_outside_literals` now folds only keywords / symbol names (text
+outside quotes); `_compare` / `_values_equal` compare non-numeric values
+exactly. A caller-supplied `defined_symbols` value that is *quoted* keeps
+its case; an *unquoted* one is a word and is upper-cased (so
+`{"ENV": "prod"}` still matches `'PROD'`, as before). `_COND_TOKEN_RE`
+accepts a signed number (`[-+]?\d+...`) and literals with a doubled
+delimiter; `_strip_quotes` un-doubles it (`'O''BRIEN'` -> `O'BRIEN`), for
+both `>>DEFINE` values and `>>IF` / `>>WHEN` operands. Both used to make the
+condition unparseable (FALSE + warning). Pinned by
+`tests/regression/test_conditional_compilation_literals.py`.
 
 # Source-Text Manipulation: REPLACE + un-expanded COPY (2026-07-14)
 
@@ -655,7 +724,18 @@ from cobolparser.preprocess.replace_statement import (
   left-to-right word scan (first active pair to match at a position wins);
   the REPLACE statements themselves are blanked. `REPLACE` inside a string
   literal is ignored. A `warnings` list receives a diagnostic if a set is
-  still active at EOF (no closing `REPLACE OFF.`).
+  still active at EOF (no closing `REPLACE OFF.`), and (2026-09-28) one per
+  `REPLACE` keyword that does not start a well-formed statement -- those
+  used to be skipped with no trace, their substitutions silently lost.
+  * `LEADING` / `TRAILING` qualify a pair (2026-09-28; previously the whole
+    statement was silently ignored): pseudo-text-1 must be one non-literal
+    text word, pseudo-text-2 at most one, and it matches the start / end of
+    each non-literal source word (case-insensitively), replacing only that
+    part: `REPLACE LEADING ==XX-== BY ==WS-==.` turns `XX-A` into `WS-A`.
+  * The IBM `==:TAG:==` partial-word form replaces **every** occurrence
+    inside a word (`:P:-A-:P:` -> `XX-A-XX`; it used to stop at the first).
+  Pinned by `tests/unit/test_enterprise_syntax.py::TestReplaceLeadingTrailing`
+  / `TestReplacePartialWord`.
 
 * **`strip_unexpanded_copy_statements(source, warnings=None)`** — blanks
   `COPY` statements the standalone pipeline is not going to expand
@@ -682,8 +762,12 @@ These two passes are what let NIST `SM208A` (30x `REPLACE`) and `SM206A`
 1. **Tier 1** — a resolution cache keyed by `member_name` (exact repeat
    lookups are O(1) with no filesystem access).
 2. **Tier 2** — a per-directory index (`_dir_index`, built once via
-   `os.scandir()`) keyed by uppercased basename-without-extension AND full
-   filename, for O(1) lookup against every directory without re-scanning.
+   `os.scandir()`) keyed by full filename (uppercased when
+   case-insensitive), for O(1) lookup against every directory without
+   re-scanning. `resolve` probes the member name, then the name plus each
+   configured extension in order, and takes the hit from the
+   first-configured directory (then the first probe) -- exactly Tier 3's
+   order.
 3. **Tier 3** — a full filesystem search (`find_copybook_file`) as the
    fallback when the index misses.
 
@@ -696,6 +780,14 @@ unconditional `index[name_upper] = abs_path` instead of `setdefault`), so
 `resolve("SHARED.cpy")` and `resolve("SHARED")` could return files from
 different directories. Pinned by
 `tests/regression/test_audit_2026_08_12_core.py::TestPB6FirstDirectoryWins`.
+
+**Tier-2 stem key removed (2026-09-28):** the index used to carry a
+bare-stem key too (`MEM` for `MEM.bak`), so `COPY MEM` resolved to a file
+of *any* extension -- `MEM.bak`, `NOTES.txt`, `ZZ.exe`, or the program's
+own `SUB.cbl` over `SUB.cpy` -- whichever `os.scandir()` listed first,
+ignoring `CopybookSearchPath.extensions` and disagreeing with Tier 3.
+Pinned by `tests/regression/test_copybook_resolution_2026_09_28.py::
+TestIndexedLookupHonoursConfiguredExtensions`.
 
 All three tiers funnel through `validate_path_within_directory(path,
 search_dir)`, which resolves symlinks (`Path.resolve()`) and confirms the
@@ -856,6 +948,20 @@ recognizes `:ABC:` pseudo-text and strips the delimiters, so
 no-op — the colons were captured as literal text). No Cython mirror.
 Pinned by `tests/regression/test_open_findings_m13_regression.py`.
 
+**REPLACING matching refinements (2026-09-28).** A line holding a literal
+is no longer matched piece by piece (code vs literal segments): the
+alternation runs over the whole line, so a search text mixing code and a
+literal (`==VALUE 'A'== BY ==VALUE 'B'==`) can match; a match of a clause
+*without* a quote in its search text is rejected when it lies inside a
+literal (and the quote-bearing clauses still get their turn at that
+position) -- `_replace_in_line_with_literals`. The literal words of a search
+text compare **case-sensitively** (`(?-i:...)`; `=='abc'==` no longer
+rewrites `'ABC'`) while its other words stay case-insensitive. Word
+boundaries now count `_` as a word character and treat a decimal point as
+binding (`(?<![0-9]\.)` / `(?!\.[0-9])`), so `==1== BY ==2==` leaves
+`VALUE 1.5` alone. Pinned by
+`tests/unit/test_copy_edge_cases.py::TestReplacingLiteralAndWordBoundaries`.
+
 **Encoding detection + strictness (M15):** `detect_encoding`
 (`copybook_expander.py`) scores ASCII-vs-EBCDIC plausibility over a
 bounded 64 KiB prefix (BOM / strict-UTF-8 checks first, then COBOL-charset
@@ -867,6 +973,14 @@ misdetected. `CopybookSearchPath.encoding_errors` /
 `"replace"` (default) substitutes U+FFFD and warns with a replacement
 count; `"strict"` raises `EncodingError` with file/offset context. Pinned
 by `tests/regression/test_open_findings_m15_regression.py`.
+
+**8-bit, non-UTF-8 text (2026-09-28):** ASCII-shaped bytes that are not
+valid UTF-8 (a Windows / Micro Focus cp1252 copybook with `VALUE 'CAFÉ'`)
+are detected as `cp1252` -- or `latin-1` when a byte cp1252 leaves
+undefined is present -- by `_single_byte_codec`. They were labelled
+`ascii`, which turned every accented byte into U+FFFD (and failed the
+expansion under `encoding_errors="strict"`). Pinned by
+`tests/regression/test_copybook_resolution_2026_09_28.py::TestEightBitCopybookEncoding`.
 
 # Expansion output: REPLACING width overflow + sequence-area change tags (2026-08-23)
 
@@ -889,9 +1003,22 @@ clause almost always has enough slack, and squeezing keeps the line count
 (and every later line number) unchanged. When squeezing alone cannot fit
 the line, it wraps at the rightmost quote-safe blank onto a fresh Area-B
 continuation line (later line numbers then shift — the cost of not
-corrupting the statement). A line with no safe break at all (one giant
-token or literal) is left untouched so the parse's existing column-72
-warning reports the drop instead of this helper corrupting a literal. The
+corrupting the statement). A line with no safe break outside a literal
+(one giant token) is left untouched so the parse's existing column-72
+warning reports the drop. **A literal open at column 72 is continued**
+(2026-09-28): the expander merges continuation records before splicing, so
+*any* `COPY` in a fixed-format file turned a long continued `VALUE` literal
+back into one >72-column line that the fitter could not break -- the text
+past column 72 was dropped and the parse still reported success.
+`_split_open_literal` now cuts the line at column 72 with the literal left
+open (trailing blanks kept) and resumes it on a `      -    '...` record
+(hyphen in column 7, quote at column 12); it moves the cut one column left
+when column 72 is the first quote of a `''` escape. It is also preferred
+over a blank wrap whose tail would not fit anyway. Wrapped pieces of a line
+merged from continuation records map to those records in the source map
+(`_wrapped_origins`: piece k -> first record + k, capped at the last one
+absorbed); an ordinary wrap still shares its line's origin. Pinned by
+`tests/unit/test_copybook_expander_edge_cases.py::TestContinuedLiteralSurvivesExpansion`. The
 wrap loop anchors its break point *after* the line's first non-blank
 character and bails on any iteration that makes no forward progress — the
 first version broke at any blank past index 7, and a wrapped tail's own
@@ -1170,6 +1297,17 @@ replaced at most once. Literal protection is unchanged: only a clause
 whose search text contains a quote is in the alternation used inside
 string literals.
 
+**COPY ... REPLACING: a separator comma / semicolon is a blank
+(2026-09-28).** IBM: when comparing pseudo-text, "a separator comma or
+separator semicolon ... is considered to be a space". `_build_clause_pattern`
+now joins words with `_SEPARATOR_GAP` (a blank, or `,`/`;` followed by a
+blank) instead of `[ \t]`, so `==X(3) VALUE==` finds `X(3), VALUE`; and
+`_pseudo_text_words` drops a `,`/`;` that ends a non-literal search word
+before a blank or the end, so `==A, B==` finds `A B`. A comma not followed
+by a blank (`A,B`, `1,5`) is not a separator and still compares as text.
+Matching still stays within one source line. Pinned by
+`tests/regression/test_fixes_2026_09_28_preprocessing.py`.
+
 **REPLACE: a parenthesis is a text word (`_tokenize_text_words`).** Only
 space/comma/semicolon/newline/quotes/period ended a word, so `WS-A(1)`
 was the single word `WS-A(1)` and `REPLACE ==WS-A== BY ==WS-B==` never
@@ -1208,6 +1346,27 @@ there with no literal left open can only be a closing one); the
 continuation branch re-opens the literal and keeps one of the pair so the
 joined text reads `'AB''CD'`. Mirrored in `_preprocess_fast.pyx`; the
 `.c` was regenerated with the same Cython 3.3.0.
+
+**`>>SOURCE FORMAT IS FREE` / `FIXED` inside a fixed-format file
+(2026-09-28).** Was not honoured: every line after the directive still had
+columns 1-7 (and 73+) cut off, and conditional compilation blanked the
+directive as "unknown". Now `normalize_fixed_format` (and the Cython
+mirror, which must agree) recognises `>>SOURCE [FORMAT] [IS] {FREE|FIXED}`
+(`cobolparser/_source_directive.py`, dependency-free so the `.pyx` can
+import it) from column 7 to 72 of a fixed record, or anywhere on a free
+line. The directive record becomes a blank line; each free-format line is
+passed through whole as its own logical line (no continuation merging, no
+column-72 warnings) until `>>SOURCE FIXED`. One output line per physical
+line, so line numbers are unchanged. The copybook expander carries it too:
+`free_format_flags()` makes `remove_comment_lines` / `strip_sequence_area`
+keep free lines whole (behind a blank indicator) and the final re-pad skip
+them (no pad, no width wrap), so the source map stays 1:1; the expander's
+conditional-compilation passes use
+`preprocess_conditional_compilation(..., keep_source_format_directives=True)`
+so the directive survives to the final parse. Not handled: a free-format
+literal continuation, and a `>>SOURCE FIXED` in a file the detector calls
+free (that file never goes through the fixed normalizer). Pinned by
+`tests/regression/test_fixes_2026_09_28_preprocessing.py`.
 
 **Regenerating the Cython mirror.** `python setup.py build_ext --inplace`
 re-cythonizes the `.pyx` when Cython is installed and rewrites the

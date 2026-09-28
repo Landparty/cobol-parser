@@ -429,7 +429,13 @@ with `"1244"` computed from whatever value that scenario's own mocked
 * **Scenario slugging** (`_slugify` in `bundle.py`): lowercase, everything
   that isn't alphanumeric collapses to a single `-`, leading/trailing `-`
   stripped. `"CHECK-QTY: THEN"` → `check-qty-then`. Deterministic and
-  filesystem-safe by construction.
+  filesystem-safe by construction. Scenario names are not unique (two IFs in
+  one paragraph both plan a `"CHECK-QTY: THEN"`), so a repeated slug gets
+  `-2`, `-3`, ... in bundle order (compared case-insensitively); the first
+  keeps the plain slug. Likewise a `<KEY>.csv` two fixtures of one scenario
+  would both write with *different* rows becomes `<KEY>-2.csv` for the
+  later one -- same-key fixtures with identical rows still share one file.
+  Always read the path from the manifest's `csv_path`.
 * **Which fixtures get a CSV**: only those with both a non-empty `layout` and
   a non-empty `sequence` — `STATUS_ONLY` fixtures and OUT-direction
   expectation-only boundaries produce nothing to write (there are no rows).

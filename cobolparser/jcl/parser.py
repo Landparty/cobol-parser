@@ -132,8 +132,32 @@ class _Sink:
     context: str
     current_step: JobStep | None = None
     current_overrides: dict[str, str] = field(default_factory=dict)
+    #: The symbol values in effect at the current step's EXEC card: a SET
+    #: coded after it must not reach back into the procedure it invoked.
+    current_symbols: dict[str, str] = field(default_factory=dict)
     last_dd: DDStatement | None = None
     if_stack: list[_IfFrame] = field(default_factory=list)
+
+
+def _merge_dcb(base: JclParameter, override: JclParameter) -> JclParameter:
+    """Merge a ``DCB=`` override into the procedure's ``DCB=``.
+
+    A DCB override changes only the sub-parameters it codes: overriding
+    ``DCB=(RECFM=FB,LRECL=80)`` with ``DCB=(LRECL=100)`` leaves ``RECFM=FB``
+    in effect.  A positional (a model DSCB or ``*.ddname`` reference) coded on
+    the override replaces the procedure's.
+    """
+    if not override.subparameters and not override.positional:
+        return override
+    positional = list(override.positional or base.positional)
+    subparameters = {**base.subparameters, **override.subparameters}
+    items = positional + [f"{key}={value}" for key, value in subparameters.items()]
+    return JclParameter(
+        keyword=override.keyword,
+        value="(" + ",".join(items) + ")",
+        subparameters=subparameters,
+        positional=positional,
+    )
 
 
 #: The mutually exclusive parameters that decide what a DD *is*.
@@ -513,6 +537,7 @@ class _Builder:
         sink.steps.append(step)
         sink.current_step = step
         sink.current_overrides = overrides
+        sink.current_symbols = dict(sink.symbols)
         sink.last_dd = None
 
     def _finish_step(self, sink: _Sink) -> None:
@@ -521,10 +546,12 @@ class _Builder:
         sink.last_dd = None
         overrides = sink.current_overrides
         sink.current_overrides = {}
+        exec_symbols = sink.current_symbols
+        sink.current_symbols = {}
         if step is None:
             return
         if step.procedure and sink.expand_procs:
-            self._expand_procedure(sink, step, overrides)
+            self._expand_procedure(sink, step, overrides, exec_symbols)
         elif step.procedure:
             self._note(
                 f"EXEC {step.procedure} (line {step.line}): a procedure invoked "
@@ -708,7 +735,11 @@ class _Builder:
 
     # -- procedures -------------------------------------------------------
     def _expand_procedure(
-        self, sink: _Sink, step: JobStep, overrides: dict[str, str]
+        self,
+        sink: _Sink,
+        step: JobStep,
+        overrides: dict[str, str],
+        exec_symbols: dict[str, str],
     ) -> None:
         key = (step.procedure or "").upper()
         entry = self.proc_bodies.get(key)
@@ -720,7 +751,7 @@ class _Builder:
             )
             return
         coded_name, body, defaults = entry
-        symbols = dict(self.symbols)
+        symbols = dict(exec_symbols)
         symbols.update(defaults)
         symbols.update(overrides)
         proc_steps = self._parse_procedure_body(key, body, symbols)
@@ -833,6 +864,8 @@ class _Builder:
             if keyword:
                 for index, existing in enumerate(params):
                     if existing.keyword.upper() == keyword:
+                        if keyword == "DCB":
+                            param = _merge_dcb(existing, param)
                         params[index] = param
                         replaced = True
                         break

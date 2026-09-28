@@ -249,7 +249,7 @@ class ExecSqlStatementParser(IStatementParser):
         if not token_stream.is_empty():
             token_stream.consume()
 
-        sql_text = collect_exec_sql_text(token_stream)
+        sql_text = collect_exec_sql_text(token_stream, sql=True)
         return parse_exec_sql(sql_text, start_location)
 
 

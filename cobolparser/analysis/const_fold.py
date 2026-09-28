@@ -60,7 +60,7 @@ from fractions import Fraction
 from typing import TYPE_CHECKING, Any
 
 from .._literals import unquote_literal
-from ..models.data_items import CobolDataItem
+from ..models.data_items import CobolDataItem, RenamesItem
 from ..models.program import CobolParagraph, CobolProgram
 from ..models.statements.arithmetic import (
     AddStatement,
@@ -188,7 +188,7 @@ class _LayoutFacts:
     share bytes through a REDEFINES chain, and which are JUSTIFIED. Built
     once per index from the raw `CobolDataItem` trees and cached weakly."""
 
-    __slots__ = ("groups", "leaves", "aliases", "justified")
+    __slots__ = ("groups", "leaves", "aliases", "justified", "renames")
 
     def __init__(self) -> None:
         #: UPPERCASED bare group/record name -> qualified paths of every
@@ -200,6 +200,10 @@ class _LayoutFacts:
         self.aliases: dict[str, set[str]] = {}
         #: Leaves declared JUSTIFIED (RIGHT).
         self.justified: set[str] = set()
+        #: UPPERCASED level-66 RENAMES name -> every leaf whose bytes it
+        #: covers. A 66 is not a `CobolDataItem` (the index never resolves
+        #: it), so without this a write through the alias poisoned nothing.
+        self.renames: dict[str, list[str]] = {}
 
     def leaves_under(self, qpath: str) -> list[str]:
         prefix = qpath + "."
@@ -229,11 +233,82 @@ def _facts(index: ProgramLayoutIndex) -> _LayoutFacts:
     # sibling list; every section is pooled here, which can only widen the
     # alias set (an over-approximation that poisons more, never less).
     _link_redefines(top_level, (), facts)
+    _collect_renames(index, facts)
     try:
         _FACTS_CACHE[index] = facts
     except TypeError:
         pass
     return facts
+
+
+def _collect_renames(index: ProgramLayoutIndex, facts: _LayoutFacts) -> None:
+    """Map every level-66 ``RENAMES a [THRU b]`` to the leaves it covers:
+    the declaration-order run from *a*'s first leaf to *b*'s last. When the
+    run cannot be pinned down exactly (an ambiguous or cross-record span),
+    every leaf of the record(s) involved is taken instead -- poisoning more,
+    never less."""
+    ast = getattr(index, "ast", None)
+    get_division = getattr(ast, "get_division", None)
+    data_div = get_division("DATA") if callable(get_division) else None
+    if data_div is None:
+        return
+    for section in getattr(data_div, "children", None) or []:
+        for node in getattr(section, "children", None) or []:
+            if isinstance(node, RenamesItem) and node.name:
+                covered = _renames_leaves(node, index, facts)
+                if covered:
+                    facts.renames.setdefault(node.name.upper(), []).extend(covered)
+
+
+def _renames_leaves(
+    item: RenamesItem, index: ProgramLayoutIndex, facts: _LayoutFacts
+) -> list[str]:
+    first, first_exact = _span_leaves(item.renames_from, index, facts)
+    last, last_exact = _span_leaves(
+        item.renames_through or item.renames_from, index, facts
+    )
+    if first and last and first_exact and last_exact:
+        start, end = first[0], last[-1]
+        if (
+            start in facts.leaves
+            and end in facts.leaves
+            and start.split(".")[0] == end.split(".")[0]
+        ):
+            i, j = facts.leaves.index(start), facts.leaves.index(end)
+            if i <= j:
+                return facts.leaves[i : j + 1]
+    records = {leaf.split(".")[0] for leaf in [*first, *last]}
+    return [leaf for record in sorted(records) for leaf in facts.leaves_under(record)]
+
+
+def _span_leaves(
+    name: str | None, index: ProgramLayoutIndex, facts: _LayoutFacts
+) -> tuple[list[str], bool]:
+    """Leaves a RENAMES operand names, in declaration order -- the
+    elementary field itself, or every leaf under the group item -- and
+    whether that answer is unambiguous (a group name declared more than
+    once returns every candidate's leaves, flagged inexact, so the caller
+    widens to the whole record)."""
+    if not name or not name.strip(" ."):
+        return [], False
+    resolved = _safe_resolve(index, name)
+    if resolved is not None:
+        return [resolved.spec.qualified_name], True
+    wanted = name.strip().upper()
+    paths = facts.groups.get(wanted, [])
+    if not paths:
+        # An ambiguous elementary name (`resolve()` refuses to pick one):
+        # every leaf of that name, flagged inexact.
+        return [
+            leaf for leaf in facts.leaves if leaf.rsplit(".", 1)[-1].upper() == wanted
+        ], False
+    leaves = [leaf for qpath in paths for leaf in facts.leaves_under(qpath)]
+    return leaves, len(paths) == 1
+
+
+def _renames_paths(index: ProgramLayoutIndex, name: str) -> list[str]:
+    """Leaves covered by *name* when it is a level-66 RENAMES alias."""
+    return list(_facts(index).renames.get(name.strip().upper(), []))
 
 
 def _data_children(item: CobolDataItem) -> list[CobolDataItem]:
@@ -722,7 +797,11 @@ def _target_paths(name: str, index: ProgramLayoutIndex) -> list[tuple[str, bool]
     resolved = _safe_resolve(index, base)
     if resolved is not None:
         return [(resolved.spec.qualified_name, not has_suffix)]
-    return [(qpath, not has_suffix) for qpath in _group_paths(index, base)]
+    paths = [(qpath, not has_suffix) for qpath in _group_paths(index, base)]
+    # A level-66 RENAMES alias: its leaves are written, never restored to a
+    # seed (the scenario's mocked value is for the alias, not the leaves).
+    paths.extend((leaf, False) for leaf in _renames_paths(index, base))
+    return paths
 
 
 def _reset_under(
@@ -790,6 +869,9 @@ def _walk_perform(
         # The body is either inline (`PERFORM ... UNTIL ... <stmts> END-
         # PERFORM`) or an out-of-line paragraph/THRU-range target -- never
         # both.
+        # The VARYING / AFTER variables are left at whatever value ended the
+        # loop (one BY step past the UNTIL), never at their pre-loop value.
+        _poison_names(_write_targets(stmt), index, state.env)
         body = stmt.inline_statements or _perform_body_statements(
             stmt, by_name, ordered_names
         )
@@ -849,6 +931,15 @@ def _write_targets(stmt: Any) -> list[str]:
         return list(stmt.targets)
     if isinstance(stmt, IOReadStatement) and stmt.into_target:
         return [stmt.into_target]
+    if isinstance(stmt, PerformStatement):
+        # Only the PERFORM's own writes -- its VARYING / AFTER loop
+        # variables -- not its body's (callers walk the body separately).
+        clauses = [stmt.varying_clause, *stmt.after_clauses]
+        return [
+            clause["variable"]
+            for clause in clauses
+            if isinstance(clause, dict) and isinstance(clause.get("variable"), str)
+        ]
     if isinstance(stmt, CallStatement):
         names = [p.name for p in stmt.using_parameters]
         if stmt.returning_parameter:
@@ -865,7 +956,13 @@ def _write_targets(stmt: Any) -> list[str]:
     names = list(getattr(stmt, "operands", None) or [])
     for attr in ("targets", "givings", "host_variables"):
         names.extend(getattr(stmt, attr, None) or [])
-    for attr in ("target", "into_target", "pointer_variable", "tallying_variable"):
+    for attr in (
+        "target",
+        "into_target",
+        "pointer_variable",
+        "tallying_variable",
+        "varying_variable",  # SEARCH ... VARYING: stepped with the index
+    ):
         value = getattr(stmt, attr, None)
         if isinstance(value, str) and value:
             names.append(value)
@@ -928,6 +1025,7 @@ def _poison_written_names(
                 visiting.discard(entered)
             continue
         if isinstance(stmt, PerformStatement):
+            _poison_names(_write_targets(stmt), index, env)
             if stmt.inline_statements:
                 frames.append((iter(stmt.inline_statements), None))
                 continue
@@ -1073,6 +1171,8 @@ def _poison_names(
             continue
         for qpath in _group_paths(index, base):
             _drop_under(qpath, index, env)
+        for leaf in _renames_paths(index, base):
+            _drop(leaf, index, env)
 
 
 def _write_numeric(

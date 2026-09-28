@@ -513,15 +513,33 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         return _encode_packed(text, spec)
     if usage in BINARY_USAGES:
         return _encode_binary(text, spec, opts)
+    if usage == "NATIONAL":
+        # Numeric / numeric-edited national (``PIC 9(5) USAGE NATIONAL``):
+        # two bytes per position.  National data is not modelled as UTF-16
+        # (see ``encoding_caveats``), so -- like a ``PIC N`` field -- the
+        # value is written as text padded to the field's full width rather
+        # than as five zoned bytes in a ten-byte slot.
+        return _encode_text(text, width, opts)
     # DISPLAY from here down.  An unedited numeric picture is zoned decimal.
     # A numeric-edited one holds what a MOVE into it would leave: the CSV
     # cell is the logical value (`1234.56`), the bytes are the edited form
     # (`$1,234.56`).  A picture `edit_numeric` does not model keeps the
     # cell's text as is.
+    if (
+        spec.blank_when_zero
+        and spec.category in (FieldCategory.NUMERIC, FieldCategory.NUMERIC_EDITED)
+        and _scaled_integer(text, spec) == 0
+    ):
+        # BLANK WHEN ZERO: a zero value is stored as spaces, not digits.
+        return bytes([opts.space]) * width
     if spec.category is FieldCategory.NUMERIC:
         return _encode_zoned(text, spec, opts)
     if spec.category is FieldCategory.NUMERIC_EDITED:
-        edited = edit_numeric(spec.picture, text)
+        edited = edit_numeric(
+            spec.picture,
+            text,
+            decimal_point_is_comma=spec.decimal_point_is_comma,
+        )
         if edited is not None and len(edited) == width:
             return _encode_text(edited, width, opts)
     return _encode_text(text, width, opts)
@@ -676,6 +694,22 @@ def encoding_caveats(
         caveats.append(
             "COMP-1/COMP-2 are encoded as IEEE 754, not z/OS hexadecimal "
             f"floating point: {', '.join(floats)}"
+        )
+    national = sorted(
+        {
+            spec.qualified_name
+            for spec in specs
+            if spec.category is FieldCategory.NATIONAL
+            or _normalized_usage(spec) == "NATIONAL"
+        }
+    )
+    if national:
+        caveats.append(
+            "national data (PIC N / USAGE NATIONAL) is written as single-byte "
+            "text in the record's charset, space-padded to the field's width, "
+            "not as the UTF-16 a real compiler stores (and a real file's "
+            "national bytes do not decode back as the same text): "
+            f"{', '.join(national)}"
         )
     fmt = (opts or EncodingOptions()).resolved_format(
         specs, varying=varying is not None

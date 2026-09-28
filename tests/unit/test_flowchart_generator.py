@@ -1634,3 +1634,109 @@ class TestLabelFidelityEndToEnd:
 
     def test_output_ascii_only(self) -> None:
         self._mermaid().encode("ascii")
+
+
+class TestDotKeywordIds:
+    """A paragraph named after a DOT keyword (node/edge/graph/digraph/
+    subgraph/strict, case-independent) must be emitted as a quoted ID: a
+    bare ``NODE [label=...]`` is the default-node attribute statement and
+    ``MAIN -> STRICT;`` does not parse at all."""
+
+    _SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. KWPROG.
+       PROCEDURE DIVISION.
+       MAIN.
+           PERFORM NODE
+           PERFORM EDGE
+           PERFORM GRAPH THRU STRICT
+           STOP RUN.
+       NODE.
+           DISPLAY 'N'.
+       EDGE.
+           DISPLAY 'E'.
+       GRAPH.
+           DISPLAY 'G'.
+       STRICT.
+           DISPLAY 'S'
+           GOBACK.
+"""
+
+    def _dot(self) -> str:
+        result = parse_cobol(self._SOURCE)
+        assert result.ast is not None
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        return DotFlowchartGenerator().generate(report)
+
+    def test_keyword_node_statements_are_quoted(self) -> None:
+        out = self._dot()
+        for name in ("NODE", "EDGE", "GRAPH", "STRICT"):
+            assert f'    "{name}" [label="{name}' in out
+            assert not re.search(rf"^\s+{name} \[", out, re.MULTILINE)
+
+    def test_keyword_edge_endpoints_are_quoted(self) -> None:
+        out = self._dot()
+        assert 'MAIN -> "NODE";' in out
+        assert 'MAIN -> "EDGE";' in out
+        assert 'MAIN -> "GRAPH" [label="[THRU 2]"];' in out
+        assert '"STRICT" -> STRICT_EXIT;' in out
+
+    def test_ordinary_ids_stay_bare(self) -> None:
+        out = self._dot()
+        assert "    MAIN [label=" in out
+        assert "    STRICT_EXIT [label=" in out
+
+
+class TestHiddenUnreachableStaysHidden:
+    """``show_unreachable=False`` must drop an unreachable paragraph's
+    outgoing edges, branch boxes and CALL-only external nodes too: an edge
+    out of an undeclared node makes Mermaid and Graphviz re-create it as a
+    bare, unstyled box."""
+
+    _SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. HIDEPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 B PIC 9.
+       PROCEDURE DIVISION.
+       MAIN.
+           PERFORM WORK
+           STOP RUN.
+       WORK.
+           DISPLAY 'W'
+           GOBACK.
+       DEAD-ONE.
+           IF B = 1 PERFORM WORK END-IF
+           CALL 'DEADSUB'
+           GO TO MAIN.
+"""
+
+    def _report(self) -> ProgramFlowReport:
+        result = parse_cobol(self._SOURCE)
+        assert result.ast is not None
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        assert report.unreachable_nodes == ["DEAD-ONE"]
+        return report
+
+    def test_mermaid_hides_everything_owned_by_the_dead_paragraph(self) -> None:
+        opts = FlowchartOptions(show_unreachable=False)
+        out = MermaidFlowchartGenerator().generate(self._report(), opts)
+        assert "DEAD_ONE" not in out
+        assert "DEADSUB" not in out
+        assert "MAIN --> WORK" in out
+        # The dead GO TO link is gone, so no linkStyle points at it.
+        assert "linkStyle" not in out
+
+    def test_dot_hides_everything_owned_by_the_dead_paragraph(self) -> None:
+        opts = FlowchartOptions(show_unreachable=False)
+        out = DotFlowchartGenerator().generate(self._report(), opts)
+        assert "DEAD_ONE" not in out
+        assert "DEADSUB" not in out
+        assert "MAIN -> WORK;" in out
+
+    def test_shown_by_default(self) -> None:
+        out = MermaidFlowchartGenerator().generate(self._report())
+        assert "DEAD_ONE__IF_1" in out
+        assert "EXT_DEADSUB" in out
+        assert "DEAD_ONE ==>" in out

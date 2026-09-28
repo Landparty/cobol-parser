@@ -116,6 +116,7 @@ def _elementary_byte_length(item: CobolDataItem) -> int:
         total_digits=picture.total_digits if picture else None,
         sign_clause=item.sign_clause,
         is_signed=bool(picture and picture.is_signed),
+        national_picture=bool(picture and picture.is_national),
     )
 
 

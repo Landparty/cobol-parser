@@ -314,6 +314,25 @@ class TestCodebaseGraph:
         assert payload["programs"][0]["parse_failed"] is True
 
 
+class TestGraphWorkersValidation:
+    """`--workers 0` used to escape as a ValueError traceback out of
+    parse_files; batch and scan reject it with a one-line error."""
+
+    @pytest.mark.parametrize("workers", [0, -1])
+    def test_codebase_graph_rejects_non_positive_workers(self, tree, capsys, workers):
+        with pytest.raises(SystemExit) as exit_info:
+            _cmd_codebase_graph(_graph_args([str(tree)], workers=workers))
+        assert exit_info.value.code == 1
+        assert "--workers must be >= 1" in capsys.readouterr().err
+
+    def test_copybook_impact_rejects_non_positive_workers(self, tree, capsys):
+        args = _graph_args([str(tree)], workers=0, member="CUSTREC")
+        with pytest.raises(SystemExit) as exit_info:
+            _cmd_copybook_impact(args)
+        assert exit_info.value.code == 1
+        assert "--workers must be >= 1" in capsys.readouterr().err
+
+
 class TestCopybookImpact:
     def test_it_takes_a_member_and_paths(self):
         parsed = _build_parser().parse_args(["copybook-impact", "CUSTREC", "./src"])

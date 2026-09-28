@@ -81,3 +81,35 @@ class TestFieldSpecScalingPositions:
             spec = self._by_name()["A-PPP" if not expected_leading else "A-VPP"]
             count = spec.integer_digits + spec.decimal_digits - picture.total_digits
             assert spec.scaling_positions == (-count if expected_leading else count)
+
+
+def test_group_usage_and_sign_are_inherited_by_elementary_fields():
+    copybook = (
+        "       01 R.\n"
+        "          05 G1 COMP-3.\n"
+        "             10 A PIC S9(5).\n"
+        "             10 B PIC S9(3).\n"
+        "          05 G2 SIGN LEADING SEPARATE.\n"
+        "             10 C PIC S9(3).\n"
+        "          05 Z PIC X.\n"
+    )
+    record = parse_copybook_records(copybook)[0]
+    specs = flatten_record(record, DataGeneratorOptions().for_record_image())
+    got = {s.column: (s.usage, s.sign_clause, s.storage_size) for s in specs}
+    assert got == {
+        "A": ("COMP-3", None, 3),
+        "B": ("COMP-3", None, 2),
+        "C": ("DISPLAY", "LEADING SEPARATE", 4),
+        "Z": ("DISPLAY", None, 1),
+    }
+    assert sum(s.storage_size for s in specs) == 10
+
+
+def test_blank_when_zero_is_carried_on_the_field_spec():
+    record = parse_copybook_records(
+        "       01 R.\n"
+        "          05 D PIC 9(3) BLANK WHEN ZERO.\n"
+        "          05 E PIC 9(3).\n"
+    )[0]
+    specs = flatten_record(record, DataGeneratorOptions())
+    assert [s.blank_when_zero for s in specs] == [True, False]

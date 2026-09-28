@@ -8,6 +8,7 @@ from ...models.statements import SearchStatement
 from ._conditions import condition_token_text
 from ._utils import (
     LITERAL_TOKEN_TYPES,
+    SEPARATOR_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     bare_end_starts_at_end_clause,
     matches_keyword,
@@ -132,8 +133,14 @@ class SearchStatementParser(IStatementParser):
                 # Parse nested statements after condition
                 when_stmts = self._parse_nested_statements(token_stream)
                 stmt.add_when_clause(" ".join(cond_parts), when_stmts)
-            else:
+            elif token.type in SEPARATOR_TOKEN_TYPES:
                 token_stream.consume()
+            else:
+                # Anything else ends the SEARCH: an enclosing ELSE / END-IF /
+                # WHEN (SEARCH nested in IF or EVALUATE without END-SEARCH),
+                # or a following statement. Consuming it here used to eat
+                # every token up to the period, silently.
+                break
             skip_whitespace(token_stream)
 
         return stmt

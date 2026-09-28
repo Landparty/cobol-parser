@@ -397,3 +397,80 @@ class TestNestedCopybooks:
             result = expand_copybooks(source, copybook_paths=[tmpdir])
             # Main file + 2 copybooks = 3
             assert result.statistics.file_count == 3
+
+
+# ---------------------------------------------------------------------------
+# A long continued literal in a file that also has a COPY
+# ---------------------------------------------------------------------------
+
+
+class TestContinuedLiteralSurvivesExpansion:
+    """Any COPY used to truncate a >61-char continued literal in the file.
+
+    The expander merges continuation records before splicing, and the
+    re-pad's width fitter could not break inside a literal, so the text
+    past column 72 was dropped (the parse still reported success, with a
+    column-72 warning).
+    """
+
+    _LIT = "ABCDEFGHIJ" * 6 + "XYZ" * 10  # 90 characters
+
+    def _source(self) -> str:
+        lines = [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. T.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       COPY CB.",
+            "       01 WS-MSG PIC X(100) VALUE '" + self._LIT[:37],
+            "      -    '" + self._LIT[37:] + "'.",
+            "       PROCEDURE DIVISION.",
+            "           DISPLAY WS-MSG.",
+            "           STOP RUN.",
+        ]
+        assert all(len(line) <= 72 for line in lines)
+        return "\n".join(lines) + "\n"
+
+    def test_literal_is_continued_not_truncated(self):
+        from cobolparser.preprocess import parse_cobol_with_expansion
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _write(tmpdir, "CB.cpy", "       01 CB-REC PIC X.\n")
+            result = parse_cobol_with_expansion(
+                self._source(), "t.cbl", copybook_paths=[tmpdir]
+            )
+        assert result.warnings == []
+        msg = next(i for i in result.ast.get_data_items() if i.name == "WS-MSG")
+        assert msg.value_clause is not None
+        assert msg.value_clause.strip("'\"") == self._LIT
+
+    def test_expanded_lines_fit_and_source_map_tracks_each_record(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _write(tmpdir, "CB.cpy", "       01 CB-REC PIC X.\n")
+            result = expand_copybooks(
+                self._source(),
+                copybook_paths=[tmpdir],
+                preserve_source_locations=True,
+            )
+        lines = result.expanded_source.split("\n")[:-1]
+        assert all(len(line) <= 72 for line in lines)
+        # Head keeps the literal open to column 72; the rest resumes on a
+        # continuation record whose Area-B text starts with the quote.
+        assert len(lines[5]) == 72
+        assert lines[6].startswith("      -    '")
+        # One map entry per output line, each pointing at its own record.
+        smap = result.source_location_map
+        assert len(smap) == len(lines)
+        assert [smap[n][1] for n in (6, 7, 8)] == [6, 7, 8]
+        assert smap[5][0].endswith("CB.cpy")
+
+    def test_split_avoids_cutting_a_doubled_quote_escape(self):
+        from cobolparser.preprocess.copybook_expander import _fit_fixed_format_width
+
+        # Column 72 holds the first quote of a '' escape: cutting there
+        # would read as the literal's close, so the cut moves left by one.
+        line = "       01 X PIC X(90) VALUE '" + "A" * 42 + "''" + "B" * 30 + "'."
+        assert line[71] == "'" and line[72] == "'"
+        head, cont = _fit_fixed_format_width(line)
+        assert head == line[:71]
+        assert cont == "      -    '" + line[71:]

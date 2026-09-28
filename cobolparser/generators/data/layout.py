@@ -180,6 +180,9 @@ class FieldSpec:
             :attr:`size`: the sign gets a byte the PICTURE does not count.
         synchronized: Whether the item carries ``SYNCHRONIZED``.  Recorded
             rather than acted on -- see :func:`.encoding.encoding_caveats`.
+        blank_when_zero: Whether the item carries ``BLANK WHEN ZERO``: a
+            numeric DISPLAY / numeric-edited item holding zero is stored as
+            all spaces, which the encoder writes and the decoder reads as 0.
         occurs_depending_on: The controlling data name when this field sits
             inside an ``OCCURS ... DEPENDING ON`` table (the outermost one,
             when several nest), else ``None``.  The table is always
@@ -216,6 +219,7 @@ class FieldSpec:
     is_filler: bool = False
     sign_clause: str | None = None
     synchronized: bool = False
+    blank_when_zero: bool = False
     occurs_depending_on: str | None = None
     odo_controls: tuple[OdoControl, ...] = ()
     odo_counter_bounds: tuple[int, int] | None = None
@@ -231,6 +235,10 @@ class FieldSpec:
     # does with the same `picture.total_digits`.
     total_digits: int | None = None
     scaling_leading: bool | None = None
+    #: ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA``: in :attr:`picture` ``,`` is
+    #: the decimal point and ``.`` an insertion character, so an edited
+    #: field displays ``1.234,56``. Read off the item's own ``PictureClause``.
+    decimal_point_is_comma: bool = False
 
     @property
     def scaling_positions(self) -> int:
@@ -270,6 +278,7 @@ class FieldSpec:
             total_digits=self.stored_digits,
             sign_clause=self.sign_clause,
             is_signed=self.is_signed,
+            national_picture=self.category is FieldCategory.NATIONAL,
         )
 
     @property
@@ -320,25 +329,75 @@ _THROUGH_RE = re.compile(r"^THROUGH:(.*)$", re.IGNORECASE)
 # ``THRU`` range can be expanded. Both endpoints are tested the same way: the
 # sign has to be accepted on either side, not just the first.
 _INTEGER_LITERAL_RE = re.compile(r"^[+-]?\d+$")
+#: A ``VALUE ALL`` entry as the parser stores it, for a level-88 value and a
+#: VALUE clause alike: ``ALL "X"`` (the literal as COBOL source) or
+#: ``ALL SPACES`` (a figurative constant).
+_ALL_OPERAND_RE = re.compile(r"^ALL\s+(\S.*)$", re.IGNORECASE | re.DOTALL)
+
+
+def all_literal_operand(value: str) -> str | None:
+    """The operand of a ``VALUE ALL`` entry, or ``None`` for any other value.
+
+    ``ALL "X"`` gives ``"X"`` (still quoted) and ``ALL SPACES`` gives
+    ``SPACES``. A bare ``ALL`` (nothing repeatable after it) is not one.
+    """
+    match = _ALL_OPERAND_RE.match(value.strip())
+    return match.group(1).strip() if match else None
+
+
+def fill_all_literal(value: str, width: int) -> str | None:
+    """``ALL "AB"`` as the field of *width* characters it fills: ``ABABA``.
+
+    ``None`` when *value* is not ``ALL`` followed by a quoted literal (a
+    figurative operand is the figurative constant itself, not text), when
+    the literal is empty, or when *width* is not positive.
+    """
+    operand = all_literal_operand(value)
+    if operand is None or width <= 0 or operand[-1:] not in ("'", '"'):
+        return None
+    unit = _strip_literal_quotes(operand)
+    if not unit:
+        return None
+    return (unit * (width // len(unit) + 1))[:width]
 
 
 def _child_items(item: CobolDataItem) -> list[CobolDataItem]:
     return [c for c in item.children if isinstance(c, CobolDataItem)]
 
 
-def expand_condition_values(raw_values: list[str]) -> list[str]:
+def expand_condition_values(
+    raw_values: list[str], width: int | None = None
+) -> list[str]:
     """Expand one condition name's raw VALUE literals, THRU ranges included.
 
     The parser records ``VALUE 2 THRU 4`` as ``["2", "THROUGH:4"]`` -- the
     range end is marked rather than expanded. Numeric ranges are expanded
     here (bounded, so ``VALUE 1 THRU 999999`` cannot blow up memory); a
     non-numeric range contributes only its endpoints.
+
+    ``VALUE ALL 'X'`` (recorded as ``ALL "X"``) denotes the literal repeated
+    to the field's *width*: with a *width* it expands to that one value
+    (``XXX``), and ``ALL SPACES`` to the figurative word ``SPACES``; without
+    one it is kept as written (an entry whose width is unknown is dropped
+    rather than guessed when a *width* of 0 or less is given).
     """
     values: list[str] = []
     previous: str | None = None
     for raw in raw_values:
         match = _THROUGH_RE.match(raw)
         if match is None:
+            operand = all_literal_operand(raw)
+            if operand is not None:
+                previous = None
+                if width is None:
+                    values.append(raw.strip())
+                elif operand.upper() in _FIGURATIVE_WORDS:
+                    values.append(operand.upper())
+                else:
+                    filled = fill_all_literal(raw, width)
+                    if filled is not None:
+                        values.append(filled)
+                continue
             cleaned = _strip_literal_quotes(raw)
             values.append(cleaned)
             previous = cleaned
@@ -369,6 +428,70 @@ def expand_condition_values(raw_values: list[str]) -> list[str]:
     return list(dict.fromkeys(v for v in values if v != ""))
 
 
+def condition_values_exhaustive(raw_values: list[str], decimal_digits: int) -> bool:
+    """Whether :func:`expand_condition_values` lists *every* value the
+    condition name admits, for a field with *decimal_digits* decimals.
+
+    A positive test (``IF COND``) only ever needs one member, so a partial
+    list is still sound for it. A *negated* one (``IF NOT COND``, or the
+    ``WHEN OTHER`` after ``WHEN COND``) is modelled as ``not_in_set`` over the
+    listed values, which is only sound when nothing else satisfies ``COND``.
+    That fails for a ``THRU`` range the expansion cannot enumerate: a
+    non-integer range (only its endpoints are listed), one wider than the
+    expansion cap, or any range over a field with decimal places (``VALUE 1
+    THRU 2`` on ``PIC 9V9`` also admits 1.5). A figurative constant
+    (``VALUE SPACES``) is not a literal value at all.
+    """
+    previous: str | None = None
+    for raw in raw_values:
+        match = _THROUGH_RE.match(raw)
+        if match is None:
+            operand = all_literal_operand(raw)
+            if operand is not None:
+                # ``ALL "X"`` is one exact value (the literal filled to the
+                # field); ``ALL SPACES`` is a figurative constant.
+                if operand.upper() in _FIGURATIVE_WORDS:
+                    return False
+                previous = None
+                continue
+            cleaned = _strip_literal_quotes(raw)
+            if raw.strip().upper() in _FIGURATIVE_WORDS or raw.strip().upper() == "ALL":
+                return False
+            previous = cleaned
+            continue
+        end = _strip_literal_quotes(match.group(1))
+        if (
+            decimal_digits > 0
+            or previous is None
+            or not _INTEGER_LITERAL_RE.match(previous)
+            or not _INTEGER_LITERAL_RE.match(end)
+            or abs(int(end) - int(previous)) > _MAX_RANGE_EXPANSION
+        ):
+            return False
+        previous = end
+    return True
+
+
+#: Figurative constants as they can appear in a level-88 VALUE clause.
+_FIGURATIVE_WORDS = frozenset(
+    {
+        "SPACE",
+        "SPACES",
+        "ZERO",
+        "ZEROS",
+        "ZEROES",
+        "LOW-VALUE",
+        "LOW-VALUES",
+        "HIGH-VALUE",
+        "HIGH-VALUES",
+        "QUOTE",
+        "QUOTES",
+        "NULL",
+        "NULLS",
+    }
+)
+
+
 def _condition_values(item: CobolDataItem) -> list[str]:
     """Collect level-88 VALUEs under *item*, merged across all its
     level-88 children -- FieldSpec.condition_values needs "any value that
@@ -377,10 +500,12 @@ def _condition_values(item: CobolDataItem) -> list[str]:
     this delegates to.
     """
     values: list[str] = []
+    picture = item.picture_clause
+    width = picture.size if picture is not None and picture.size else 0
     for child in item.children:
         if not isinstance(child, ConditionNameItem):
             continue
-        values.extend(expand_condition_values(child.values))
+        values.extend(expand_condition_values(child.values, width))
     # Preserve first-seen order while removing duplicates.
     return list(dict.fromkeys(v for v in values if v != ""))
 
@@ -596,6 +721,10 @@ def _flatten_into(
                 decimal_digits=decimal_digits,
                 total_digits=picture.total_digits if picture else None,
                 scaling_leading=picture.scaling_leading if picture else None,
+                decimal_point_is_comma=bool(
+                    picture is not None
+                    and getattr(picture, "decimal_point_is_comma", False)
+                ),
                 is_signed=_is_signed(picture),
                 value_clause=item.value_clause,
                 condition_values=_condition_values(item),
@@ -604,6 +733,7 @@ def _flatten_into(
                 is_filler=item.is_filler,
                 sign_clause=item.sign_clause,
                 synchronized=item.synchronized,
+                blank_when_zero=item.blank_when_zero,
                 occurs_depending_on=(
                     inherited_controls[0].depending_on if inherited_controls else None
                 ),

@@ -197,7 +197,12 @@ def solve(
     witness: str | None = None
     domain: Domain
     if enum_first:
-        domain = EnumDomain(list(spec.condition_values))
+        # A figurative word among the 88 VALUEs (`VALUE SPACES`) is not a
+        # literal the field can hold as written: picked here it rendered as
+        # "SPA" into a PIC X(3). Leave it out of the preference list.
+        domain = EnumDomain(
+            [v for v in spec.condition_values if v.upper() not in _FIGURATIVE_VALUES]
+        )
         if all(_apply(domain, c) is None for c in constraints):
             witness = domain.pick()
 
@@ -430,11 +435,11 @@ def _numeric_literal_text(raw: str) -> str:
 
 def _apply_text(domain: TextDomain, c: FieldConstraint) -> str | None:
     if c.op in ("eq", "in_set") or (c.op == "figurative" and not c.negated):
-        values = _text_values(c)
+        values = _text_values(c, domain.size)
         domain.allowed = values if domain.allowed is None else (domain.allowed & values)
         return None if domain.allowed else _EMPTY
     if c.op in ("ne", "not_in_set") or (c.op == "figurative" and c.negated):
-        values = _text_values(c)
+        values = _text_values(c, domain.size)
         domain.forbidden |= values
         if domain.allowed is not None:
             domain.allowed -= domain.forbidden
@@ -466,9 +471,17 @@ def _apply_text(domain: TextDomain, c: FieldConstraint) -> str | None:
     return f"{c.op} on an alphanumeric domain is not modeled in v1"
 
 
-def _text_values(c: FieldConstraint) -> set[str]:
+def _text_values(c: FieldConstraint, size: int) -> set[str]:
     if c.op == "figurative":
-        return {_FIGURATIVE_VALUES.get(c.values[0].upper(), "")} if c.values else {""}
+        if not c.values:
+            return {""}
+        unit = _FIGURATIVE_VALUES.get(c.values[0].upper(), "")
+        # A figurative constant compared with an alphanumeric field stands
+        # for its character repeated to the field's whole width: `IF X =
+        # ZEROS` on a PIC X(3) is true only for "000". A bare "0" renders
+        # (left-justified, space-padded) as "0  ", which the branch never
+        # takes. SPACES stays "" -- the padding IS the repetition.
+        return {unit * max(1, size)} if unit else {""}
     return set(c.values)
 
 

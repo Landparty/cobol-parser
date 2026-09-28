@@ -57,7 +57,11 @@ entry instead of an exception propagating out of the batch call:
 * Copybook expansion (`expand_copybooks` raising) — this one degrades rather
   than failing: it falls back to parsing the raw, unexpanded source, and
   logs a warning (`"Copybook expansion failed for %s..."`) so the
-  degradation is observable rather than silent.
+  degradation is observable rather than silent. Expansion runs with
+  `process_conditionals=True` (2026-09-28), so a COPY inside an excluded
+  `>>IF` block is never resolved -- before, a member that only exists for
+  the other branch (`COPY DFHAID` under `>>IF CICS DEFINED`) pushed the
+  whole file onto this unexpanded fallback.
 
 **Audit fix (2026-07-08):** `parse_files_with_copybooks` used to only catch
 `OSError` on the file-read step (missing the `ValueError`/
@@ -109,9 +113,18 @@ Three properties it owes its caller, all pinned by `tests/unit/test_scan.py`:
   Before 2026-09-27 a paragraph after a `COPY` reported the expanded line,
   and one inside a member claimed a line of the program file.
 
+`ScanOptions` carries both layout knobs `parse_cobol` takes: `free_form`
+(the lexer hint) and `preprocess_fixed` (`None` auto-detects, `True`/`False`
+force or disable normalization). The second was missing before 2026-09-28,
+so `scan --source-format fixed|free` silently auto-detected.
+
 A file whose copybook expansion fails is NOT dropped -- it falls back to the
 unexpanded parse, the same degradation `parse_files_with_copybooks` makes
-above. Copybook paths matter more here than they look: an unexpanded
+above. The reason is kept as the file's `copybook_error`
+(`FileScan.copybook_error`, serialized only when set): the unexpanded parse
+is usually error-free -- a COPY statement parses without its member -- so
+before 2026-09-28, when the fallback was a bare `pass`, such a file's
+reports were indistinguishable from an expanded scan's. Copybook paths matter more here than they look: an unexpanded
 program's WORKING-STORAGE is missing whatever its COPY members declare, so
 `unused-variables` (and therefore `health`'s redundancy component, and
 therefore the grade a portfolio table sorts on) would grade a program

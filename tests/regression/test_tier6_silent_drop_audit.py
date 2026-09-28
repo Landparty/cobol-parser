@@ -206,10 +206,10 @@ class TestStopReturning:
 
 class TestDataDivisionDropWarning:
     def test_unrecognized_clause_token_warns(self):
-        result = _parse_data(
-            "       01 G GROUP-USAGE IS NATIONAL.\n          05 X PIC X."
-        )
-        assert any("GROUP-USAGE" in w for w in result.warnings)
+        # GROUP-USAGE was the example here until it was parsed (2026-09-28);
+        # a made-up clause word keeps the warn-on-drop contract covered.
+        result = _parse_data("       01 G MADE-UP-CLAUSE.\n          05 X PIC X.")
+        assert any("MADE-UP-CLAUSE" in w for w in result.warnings)
 
     def test_supported_item_stays_warning_free(self):
         result = _parse_data("       01 WS-N PIC 9(4) COMP-3 VALUE 5.")

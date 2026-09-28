@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-08-28T00:00:00Z
+timestamp: 2026-09-28T00:00:00Z
 ---
 
 # Overview
@@ -57,6 +57,15 @@ class ParseResult:
 object, which the next `parse()` call `reset()`s in place — previously
 reusing one `CobolParser` clobbered earlier results' statistics.
 
+Every return path fills the statistics (2026-09-28): `lines_parsed` /
+`lines_processed` are set before lexing, `tokens_processed` right after it,
+and `_create_result` stops the clock -- a FAIL_FAST lexer error, a
+propagated `ParseError` or the safety net used to return `0` lines and
+`parse_time_seconds == 0`. `_begin_parse()` holds the per-parse reset, and
+`parse_file()` runs it before recording a `File error`, which previously
+came back alongside the errors, warnings and statistics of whatever the
+instance had parsed last.
+
 `CobolParser(..., initial_warnings=[...])` (2026-08-14, consumption fixed
 2026-08-15 per Copilot review on PR #153) seeds `self.warnings` with
 caller-supplied diagnostics at the top of the *first* `parse()` call, after
@@ -101,7 +110,7 @@ CobolParser.parse(source)
   ├─ normalize_fixed_format()          # fixed-format → free-form
   ├─ strip_compiler_directives()       # remove compiler control statements
   ├─ CobolLexer.tokenize()             # → List[Token]
-  ├─ TokenStream(tokens)               # lookahead abstraction
+  ├─ TokenStream(tokens - COMMENT)     # lookahead abstraction; `*>` comments dropped
   └─ DivisionParserFactory
        ├─ IdentificationDivisionParser
        ├─ EnvironmentDivisionParser
@@ -132,7 +141,7 @@ CobolParser.parse(source)
 | `environment.py` | ENVIRONMENT DIVISION — division scan + AST node; section/SELECT parsing delegated to the two `environment_*.py` collaborators below |
 | `environment_sections.py` | `ConfigurationSectionParser` (CONFIGURATION SECTION + SPECIAL-NAMES) and `InputOutputSectionParser` (INPUT-OUTPUT SECTION + FILE-CONTROL) |
 | `environment_select.py` | `SelectClauseParser` — SELECT statement + all clause parsers (ASSIGN/ORGANIZATION/ACCESS/KEY/STATUS/ALTERNATE/PADDING/RESERVE/SHARING/LOCK/PASSWORD) and `SelectStatement` node construction |
-| `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below |
+| `data.py` | DATA DIVISION — section scan, level-number hierarchy, AST node; entry parsing delegated to the three `data_*.py` collaborators below. `_build_data_hierarchy` ends with `propagate_group_usage_and_sign()` (2026-09-28): a group's USAGE / SIGN is pushed onto subordinates with none of their own (IBM rule). Explicitness is `CobolDataItem.usage_explicit`, set by `set_usage()` — which both the pure-Python and `_data_fast` clause loops call, so the `.pyx` needed no change |
 | `data_clauses.py` | `DataItemClauseParser` — data-item entries + PICTURE/VALUE/USAGE/OCCURS/... clauses; owns the optional `_data_fast` Cython fast-path invocation |
 | `data_file_description.py` | `FileDescriptionClauseParser` — FD/SD file-description clause capture (BLOCK/RECORD/LABEL/...) |
 | `data_report_description.py` | `ReportDescriptionClauseParser` — REPORT SECTION `RD` clause capture (CODE/CONTROLS/PAGE LIMIT/HEADING/FIRST-LAST DETAIL/FOOTING/GLOBAL), 2026-09-02 |
@@ -233,7 +242,18 @@ position-shaped only when followed by `PAGE` (`_report_position`) -- `LINE
 PLUS 1 NEXT GROUP NEXT PAGE` must not fold `NEXT GROUP` into the LINE list.
 `parse_rd_clauses` stops at a LEVEL_NUMBER that begins a group
 (`_level_starts_group`) so a missing RD period cannot swallow the first
-group. Pinned by `tests/unit/test_report_section.py`; the 2026-08-13
+group. **2026-09-28:** `_report_operands` stops at a LEVEL_NUMBER token only
+outside parentheses and not after an operator word
+(`_REPORT_OPERATOR_WORDS`) -- a one-/two-digit integer lexes as LEVEL_NUMBER
+whatever it means, so `SUM WS-AMT (1)` and `PRESENT WHEN WS-I > 1` used to
+end the clause there and the clause loop opened a phantom data item at the
+integer. String literals in these operands are re-quoted (`PRESENT WHEN
+WS-FLAG = 'Y'`), and SUM operands are grouped per operand
+(`_group_report_operands`: `WS-AMT OF WS-GRP ( 3 )` is one entry).
+`_report_position` also reads COBOL-85 `LINE integer ON NEXT PAGE` (recorded
+as `"5 ON NEXT PAGE"`); the `ON` used to be dropped with a warning and
+`NEXT PAGE` misread as an empty NEXT GROUP. Pinned by
+`tests/regression/test_oo_report_xml_operand_drops.py`. Pinned by `tests/unit/test_report_section.py`; the 2026-08-13
 regression file's REPORT tests now pin the parsed shape and the absence of
 any warning, and `tests/samples/report_writer.cbl` is back in
 `test_sample_programs.py`'s parametrized list.
@@ -283,6 +303,13 @@ suite: `tests/regression/test_numeric_value_clause.py`.
 string round-trips as legal COBOL — downstream consumers (mockymock's
 working-storage reset) splice it into `MOVE <value> TO <item>`. Regression
 suite: `tests/regression/test_value_all_clause.py`.
+
+A level-88 `VALUE ALL 'X'` (`data_special_entries.py`, 2026-09-28) is one
+value in the same spelling: `values == ['ALL "X"']` (`ALL SPACES` for a
+figurative operand), not `['ALL', 'X']`. Consumers that know the field's
+width fill it -- see `expand_condition_values(raw, width)` in
+[generators.md](generators.md). Pinned by
+`tests/regression/test_level88_value_all.py`.
 
 **Multi-line clauses (`data_clauses.py` + `_data_fast.pyx`):** the lexer
 emits NEWLINE tokens, so any clause reader that peeks for an operand after
@@ -371,13 +398,13 @@ sibling) and a dedicated anonymous-item case.
 | `rewrite_parser.py` | REWRITE |
 | `search_parser.py` | SEARCH |
 | `set_parser.py` | SET |
-| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE |
+| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE (RELEASE `FROM` / RETURN `INTO` operands go through `consume_optional_qualifiers`, as MOVE's do: `WS-REC OF GRP`, `TBL ( I )`; before 2026-09-28 only the first word was kept) |
 | `sort_merge_parsers.py` | SORT, MERGE |
 | `start_parser.py` | START |
 | `stop_parser.py` | STOP |
 | `string_unstring_parsers.py` | STRING, UNSTRING |
 | `unlock_parser.py` | UNLOCK |
-| `xml_json_parser.py` | XML GENERATE, XML PARSE, JSON GENERATE, JSON PARSE |
+| `xml_json_parser.py` | XML GENERATE, XML PARSE, JSON GENERATE, JSON PARSE (clause data names structured into `count_in` / `into_item` / `clause_items` by `_record_clause_items`, 2026-09-28) |
 | `write_parser.py` | WRITE |
 | `_utils.py` | Shared clause-collection utilities |
 
@@ -892,9 +919,61 @@ is optional (IBM): a bare `STATUS [IS] x [y]` starts the same clause
 (`STATUS` is in `_SELECT_CLAUSE_KEYWORDS`); before 2026-09-28 it was glued
 onto `assign_to` and `file_status` stayed empty
 (`test_environment_division_parser.py::test_status_clause_without_the_word_file`). `DECIMAL-POINT IS COMMA` in
-SPECIAL-NAMES emits a warning that the clause is recorded but not honored
-by the lexer (H4). All division parsers can reach the host warning channel:
+SPECIAL-NAMES used to warn that the lexer ignored it (H4); since 2026-09-28
+it is honoured (comma-decimal literals, `,`/`.` exchanged in PICTURE -- see
+[lexer.md](lexer.md)) and the warning is gone. `RECORD KEY IS K6 OF R6` and
+`ALTERNATE RECORD KEY IS A6 IN R6` (2026-09-28): `_consume_qualifiers`
+reads the `OF`/`IN` chain after the key name into `record_key_qualifiers`
+/ the alternate key's `qualifiers` (innermost first; the key stays the bare
+name); the qualifier used to be warned "Unparsed token" and knocked out a
+following `WITH DUPLICATES`. All division parsers can reach the host warning channel:
 `BaseDivisionParser.host` is set by the division loop (`parser.py`).
+
+**Comment-entries verbatim (`identification.py`, 2026-09-28):**
+`_parse_clause_value` first takes the consecutive `COMMENT_ENTRY` tokens
+the lexer emits (see [lexer.md](lexer.md)), joins the lines with one space
+and drops only the entry's own closing period (`AUTHOR. J. SMITH, O'NEIL.`
+-> `"J. SMITH, O'NEIL"`). An unterminated entry from a paragraph name that
+is not in Area A falls through to the old token-collection loop, so the
+loosely indented `AUTHOR. SOMEONE` / `DATA DIVISION.` shape still ends at
+the division header. Hand-built token lists (no `COMMENT_ENTRY`) parse
+exactly as before.
+
+**SPECIAL-NAMES clause boundaries (`environment_sections.py`, 2026-09-28):**
+IBM writes SPECIAL-NAMES as *one sentence* with a single closing period, so
+a clause ends where the next one starts. `CLASS` / `ALPHABET` operands used
+to run until the next CURRENCY/DECIMAL-POINT/CLASS/ALPHABET word or a
+period, swallowing a following `SYMBOLIC CHARACTERS` or mnemonic clause
+(`C01 IS TOP-OF-PAGE` vanished from `mnemonic_definitions`) plus the `"\n"`
+NEWLINE tokens; `SYMBOLIC CHARACTERS NUL IS 1` was read as a mnemonic
+clause; and a following `REPOSITORY.` paragraph's `CLASS X IS 'java.X'`
+entries became SPECIAL-NAMES class conditions. Now every operand collection
+stops at `_at_clause_start()` (a clause word in `_SPECIAL_NAMES_CLAUSES`, a
+`name IS` / `name ON|OFF STATUS` mnemonic start, a period) and the
+paragraph ends at any CONFIGURATION SECTION paragraph header
+(`_CONFIGURATION_PARAGRAPHS`). New metadata: `symbolic_characters`
+(`[{name, ordinal, alphabet}]`, a group is only taken when an integer
+follows its IS/ARE) and `currency_signs` (`[{sign, picture_symbol}]`, every
+CURRENCY clause; `currency_sign` keeps its last-wins value). `CLASS`/
+`ALPHABET ... FOR ALPHANUMERIC|NATIONAL` and the name-less `UPSI-0 ON STATUS
+IS x` form are accepted. `tests/regression/test_special_names_clause_boundaries.py`.
+
+**SELECT short forms (`environment_select.py`, 2026-09-28):** `ORGANIZATION
+IS` is optional in IBM's grammar. A bare `INDEXED` / `SEQUENTIAL` / `LINE
+SEQUENTIAL` used to be glued onto `assign_to` (`"F1DD INDEXED"`) with
+`organization` None, and a bare `RELATIVE` went to the RELATIVE KEY parser
+(which took the next word as the key). `SEQUENTIAL`/`INDEXED` are now in
+`_SELECT_CLAUSE_KEYWORDS`, `LINE SEQUENTIAL` ends ASSIGN by lookahead, and
+`RELATIVE` is the key clause only when `KEY` follows (`_next_word`).
+`ASSIGN USING data-name` (dynamic file name) stores the data-name in
+`assign_to` *and* the new `SelectStatement.assign_using`, which
+`UnusedVariableAnalyzer._file_control_references` counts as a use (it was
+`assign_to == "USING WS-DSN"` and the item read as unused). The ORGANIZATION
+/ ACCESS / RECORD KEY / RELATIVE KEY / FILE STATUS sub-parsers skip line
+breaks between their own words (`_try_consume_word`); only one break,
+directly before the value, was tolerated. Still open: a qualified `RECORD
+KEY IS K OF R` keeps only `K` (the rest is warned as unparsed).
+`tests/regression/test_select_optional_organization_word.py`.
 
 # Statement-coverage audit (2026-09-02)
 
@@ -1239,6 +1318,19 @@ as `until_condition.operands`). Fixed by adding the same
 `_collect_until_condition_tokens` already used. Pinned by
 `TestPerformUntilConditionNoLongerSwallowsRest` in
 `tests/regression/test_tier7_unsupported_verb_boundary.py`.
+
+*Follow-up (2026-09-28):* neither loop stopped at a **scope terminator** of
+the *enclosing* statement. `IF c PERFORM p UNTIL d END-IF STOP RUN.` read
+`END-IF` into the condition (`"d END-IF"`), so the IF ran on to the period
+and swallowed the top-level `STOP RUN` into its THEN arm; `PERFORM UNTIL x
+... PERFORM p UNTIL y END-PERFORM` likewise stole the inline PERFORM's
+`END-PERFORM`. The flow analyzers then saw a paragraph that only
+*conditionally* stops and invented a fall-through out of it (hiding the
+dead paragraph after it). Both `_parse_until_condition_only` (out-of-line
+`UNTIL` / `WITH TEST ... UNTIL`) and `_collect_until_condition_tokens`
+(`VARYING ... UNTIL`) now stop -- without consuming -- at any
+`SCOPE_TERMINATORS` word: an out-of-line PERFORM owns none. Pinned by
+`tests/unit/test_perform_until_scope_terminator.py`.
 
 **Fourth finding — `EVALUATE` had two independent unguarded loops, one of
 which could annex an entire unrelated later statement.**
@@ -1789,6 +1881,33 @@ dropped. `UnstringStatement.delimiter_all` is a bool list parallel to
 `delimiters`; `to_dict()` emits it only when some delimiter is `ALL`, so
 every other UNSTRING serializes as before.
 
+**Bug hunt round 8 (2026-09-28), five silent drops in statement parsers:**
+- `search_parser.py`: the AT END / WHEN loop's fallback consumed any other
+  token, so a SEARCH without END-SEARCH nested in an IF ate `ELSE ...
+  END-IF` and every statement up to the period. Any token other than
+  AT/END/WHEN/END-SEARCH/separator now ends the SEARCH. SEARCH has no
+  `NOT AT END`; it is no longer eaten (it used to overwrite the real AT END
+  body) but left for the procedure parser's unparsed-token warning.
+- `initialize_inspect_parsers.py`: INITIALIZE targets and the REPLACING
+  `BY` value fold subscripts / OF-IN qualifiers via
+  `consume_optional_qualifiers` (`"TBL ( 1 )"`, `"B OF C"`, the same text
+  shape MOVE targets use).
+- `_conditions.py`: after `NOT`, the whole relational operator is resolved
+  (`_match_relational_operator`) before negating, so `NOT GREATER THAN OR
+  EQUAL TO` / `NOT >=` / `NOT > =` is LESS and the `<=` family is GREATER.
+  `_NEGATED_OPS` is gone; `_NEGATED_RELATIONAL` does the negation.
+- `string_unstring_parsers.py`: `BY` after `DELIMITED` is optional
+  (`DELIMITED SIZE`, `DELIMITED "," OR ALL SPACE`). A delimiter is only
+  consumed when the next token is operand-shaped (`_next_is_delimiter`), so
+  `DELIMITED INTO X` still leaves INTO for its own clause.
+- `display_parser.py`: `FUNCTION name[(args)][(refmod)]` is one DISPLAY item
+  rendered as MOVE renders it (`"FUNCTION TRIM(A)"`), not a bare
+  `"FUNCTION"` item followed by the call.
+Pinned in `tests/unit/test_start_search_set_coverage.py`,
+`test_initialize_inspect_parsers.py`, `test_if_parser_gaps.py`,
+`test_string_simple_deeper_coverage.py`, `test_unstring_gaps.py`,
+`test_display_parser.py`.
+
 **EXEC CICS lost its command verb when written on the line after `EXEC
 CICS`** (`ibm_exec_statements.py`) — the idiomatic, most common layout
 (and the parser's own docstring example). The command-token lookup ran
@@ -1800,6 +1919,9 @@ as two adjacent tokens), corrupting WHERE-clause text fidelity.
 The same column-adjacency rule (`_follows_qualifier_period`, 2026-09-23) keeps
 a qualified name together: `BANK.ACCOUNT` used to come back as
 `BANK. ACCOUNT`, while a period written with a space (`T. X`) keeps it.
+2026-09-28: `collect_exec_sql_text(stream, sql=True)` (the EXEC SQL callers
+only) re-quotes string literals and drops `--` line comments -- see
+[dialects.md](dialects.md) "EXEC SQL text: literals and `--` comments".
 
 **`INSPECT` `TALLYING`/`REPLACING` `BEFORE`/`AFTER INITIAL` qualifiers**
 (`initialize_inspect_parsers.py`): the original 2026-07-07 implementation
@@ -2852,6 +2974,15 @@ factory's or object's PROCEDURE DIVISION is usually empty and followed by
 `METHOD-ID`; `END METHOD` etc. are in `_OO_UNIT_END_WORDS`). The "N
 program units" warning now counts every unit via `program_units()`.
 
+**INVOKE operand forms (2026-09-28, `invoke_parser.py`).** The USING loop
+now takes the same argument forms CALL's does: a subscript / OF-IN
+qualifier chain folds into the argument (`consume_optional_qualifiers`),
+`LENGTH OF x` / `ADDRESS OF x` are one argument, `OMITTED` and figurative
+constants are arguments. The RETURNING target and the object reference fold
+qualifiers/subscripts too. Before, the loop stopped at the `(` / `OF` /
+`OMITTED` and everything after it -- RETURNING included -- was warned about
+and dropped.
+
 ## PROGRAM-ID attributes and RETURNING
 
 `_parse_program_id` consumes `[IS] INITIAL | COMMON | RECURSIVE`
@@ -2912,3 +3043,64 @@ step.
 latter also breaks on form feed / NEL / U+2028, which put every later
 `location.line` off by one against the editor and the listing. See
 `preprocessing.md` ("Audit 2026-09-17").
+
+# Level-88 `WHEN SET TO FALSE`, INITIALIZE `TO VALUE` / `TO DEFAULT` (2026-09-28)
+
+* **`88 name VALUE ... WHEN SET TO FALSE [IS] literal`** (IBM): the value
+  loop in `SpecialEntryParser.parse_condition_name_item` stopped at `WHEN`
+  and the rest of the entry was skipped to the period with no warning.
+  `_parse_when_set_to_false` accepts `WHEN [SET] [TO] FALSE [IS]` + a
+  (signed) literal or figurative constant and records it as
+  `ConditionNameItem.false_value`; anything else after `WHEN` is left for
+  the old skip.
+* **`INITIALIZE id ... [WITH FILLER] [{ALL | category} TO VALUE] [THEN
+  REPLACING ...] [THEN TO DEFAULT]`** (Enterprise COBOL 6): the
+  `TO VALUE` / `TO DEFAULT` phrases warned "Unparsed tokens" and were
+  dropped. The target loop now also stops at `ALL` / `THEN` / `TO` / a
+  category word (`_INITIALIZE_PHRASE_STARTS`); the phrases are recorded as
+  `InitializeStatement.to_value_category` / `.to_default`. `THEN` is
+  optional before `REPLACING` / `TO DEFAULT` (`_match_then`).
+
+Pinned by `tests/regression/test_level88_false_and_initialize_phrases.py`.
+# `*>` floating comments never reach the division parsers (2026-09-28)
+
+`CobolParser._parse_core` builds its `TokenStream` from the lexer's tokens
+*minus* `COMMENT` tokens (`self.tokens` itself, and the `tokens_processed`
+statistic, keep them). A `*>` floating comment (Enterprise COBOL 6.x) is
+layout wherever it sits, and it can end any line -- including one that breaks
+a data description entry between a clause keyword and its operand. Every
+DATA DIVISION sub-clause reader (`_skip_clause_separators`,
+`_peek_count_token`, `_skip_newlines`, the picture/value readers, and their
+`_data_fast` mirrors `_skip_layout` / `_peek_count_pos`) skipped NEWLINE but
+not COMMENT, so `OCCURS 10 TIMES *> note` / `INDEXED BY IX.` dropped the
+INDEXED BY clause as unparsed tokens, `PIC *> note` / `X(10)` lost the
+picture, and `OCCURS *> note` / `10 TIMES ...` read `10` as a *new item's
+level number* (a phantom `ANONYMOUS-10-n` item). Both clause loops did it,
+so no fast/pure differential could see it. Filtering once at the stream
+fixes every reader, pure and compiled, without touching `_data_fast`'s
+arity. Pinned by `tests/regression/test_audit_2026_09_28_accelerators.py`.
+
+# DATA DIVISION: bare national usages, GROUP-USAGE, qualified ODO counters (2026-09-28)
+
+`data_clauses.py` (+ `_data_fast.pyx` for the OCCURS part):
+
+* **Bare `NATIONAL` / `DISPLAY-1` / `UTF-8`** (`_BARE_USAGE_WORDS`) are the
+  item's usage when written without the USAGE keyword, with or without a
+  leading `IS`. `NATIONAL` and `UTF-8` lex as IDENTIFIERs, so they joined
+  `_PICTURE_TERMINATOR_KEYWORDS`: `PIC N(5) NATIONAL` used to be pattern
+  `N(5)NATIONAL` (sized 3 bytes, usage DISPLAY); `DISPLAY-1` / `IS NATIONAL`
+  were dropped with "Unparsed token" warnings. The Cython loop hands these
+  words back to the Python loop (no fast-path change).
+* **`GROUP-USAGE [IS] NATIONAL | UTF-8`** sets `CobolDataItem.group_usage`;
+  `data.propagate_group_usage_and_sign` relabels the group and pushes the
+  usage onto every subordinate without a USAGE of its own. Previously
+  dropped with two warnings (`test_tier6_silent_drop_audit` used it as its
+  "unsupported clause" example; it now uses a made-up word).
+* **`OCCURS ... DEPENDING ON CNT OF CTL [IN ...]`**: `_consume_qualifiers`
+  (Cython: `_consume_qualifiers`) reads the chain into
+  `OccursClause.depending_on_qualifiers`; `depending_on` stays the bare name
+  (every generator matches counters by bare name). Before, the qualifier
+  stopped the OCCURS walk and every KEY / INDEXED BY after it was dropped as
+  unparsed tokens. Qualified KEY names (`KEY IS K1 OF T`) keep the bare name.
+
+Pinned by `tests/regression/test_data_division_national_occurs_2026_09_28.py`.

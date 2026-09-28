@@ -258,3 +258,57 @@ class TestDialectServiceInfoStaysInSync:
 
     def test_uncatalogued_service_still_has_info(self) -> None:
         assert IBMEnterpriseCobol().get_le_service_info("CEETERM") is not None
+
+
+class TestServiceOperandsMatchIbm:
+    """Checked against the z/OS LE Programming Reference (SA38-0683)."""
+
+    def test_cee3abd_clean_up_zero_means_no_clean_up(self) -> None:
+        # Was reversed: "0 abends after LE cleanup, 1 abends immediately".
+        sig = le_service_signature("CEE3ABD")
+        assert sig is not None
+        assert [p.name for p in sig.parameters] == ["abcode", "clean_up"]
+        text = sig.parameters[1].description
+        assert text.startswith("0 abends immediately, without clean-up")
+        assert "1 abends after normal enclave termination" in text
+
+    def test_ceeisec_takes_milliseconds(self) -> None:
+        sig = le_service_signature("CEEISEC")
+        assert sig is not None
+        assert [p.name for p in sig.parameters] == [
+            "input_year",
+            "input_month",
+            "input_day",
+            "input_hours",
+            "input_minutes",
+            "input_seconds",
+            "input_milliseconds",
+            "output_seconds",
+            "fc",
+        ]
+
+
+class TestEnterpriseSixIntrinsicSignatures:
+    """The post-COBOL-85 intrinsics carry signatures with IBM's arity."""
+
+    @pytest.mark.parametrize(
+        "name, required, total",
+        [
+            ("TRIM", 1, 2),
+            ("FORMATTED-DATETIME", 3, 4),
+            ("FORMATTED-TIME", 2, 3),
+            ("FORMATTED-DATE", 2, 2),
+            ("NUMVAL-F", 1, 1),
+            ("TEST-NUMVAL-C", 1, 2),
+            ("DISPLAY-OF", 1, 2),
+            ("USUBSTR", 3, 3),
+            ("PI", 0, 0),
+            ("UUID4", 0, 0),
+        ],
+    )
+    def test_arity(self, name: str, required: int, total: int) -> None:
+        sig = intrinsic_signature(name)
+        assert sig is not None
+        assert len(sig.required_arguments) == required
+        assert len(sig.arguments) == total
+        assert IBMEnterpriseCobol().is_intrinsic_function(name)

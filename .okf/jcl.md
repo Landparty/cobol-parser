@@ -132,7 +132,10 @@ situations:
 2. **An apostrophe-quoted string is still open** when the card ends. The next
    card must have `//`, blanks through column 15, and the string resumes at
    column 16 (`STRING_CONTINUATION_COLUMN`) **verbatim, blanks included** —
-   those blanks are inside the quoted string.
+   those blanks are inside the quoted string. The same holds on the card
+   being continued: a continued string is coded through column 71
+   (`STRING_LAST_COLUMN`), so blanks between the last character and column 71
+   are part of the value even when the file has had trailing blanks stripped.
 
 Anything else ends the statement. A card that promises continuation but is not
 followed by a valid continuation card is reported as an error and the statement
@@ -149,8 +152,9 @@ relational expression, not a parameter list.
 
 `DD *` and `DD DATA` are followed by data, not JCL, and the scanner switches
 modes so data is never parsed as JCL. `DD *` data ends at a delimiter card or
-at the first card starting with `//`; `DD DATA` data ends **only** at the
-delimiter, which is `/*` (`DEFAULT_DELIMITER`) unless the DD coded `DLM=xx`.
+at the first card starting with `//` — unless it coded `DLM=`, in which case,
+as on z/OS, only that delimiter ends it and `//` / `/*` cards are data;
+`DD DATA` data ends **only** at the delimiter, which is `/*` (`DEFAULT_DELIMITER`) unless the DD coded `DLM=xx`.
 Data lines attach to the DD that introduced them and are kept exactly as
 written — full width, **not** truncated at column 72.
 
@@ -177,12 +181,15 @@ program run out of a procedure. Such a step has **both** `program` and
 `procedure` set.
 
 `procstep.ddname` DD cards coded on the invocation override the matching DD of
-that procedure step *parameter by parameter*; a DD name the procedure step does
-not have is an addition. The invocation keeps its own copy of every override
+that procedure step *parameter by parameter* (and `DCB=` *sub-parameter by
+sub-parameter*: overriding `DCB=(RECFM=FB,LRECL=80)` with `DCB=(LRECL=100)`
+keeps `RECFM=FB`); a DD name the procedure step does not have is an addition. The invocation keeps its own copy of every override
 card, so nothing is moved out of sight.
 
 **Symbolic parameters** (`&SYM`, `&SYM.`) are substituted from `SET` values,
-then procedure defaults, then `EXEC` overrides — increasing precedence.
+then procedure defaults, then `EXEC` overrides — increasing precedence. The
+`SET` values a procedure sees are the ones in effect at its `EXEC` card; a
+`SET` coded after it does not reach back into it.
 `&&` is left alone (a temporary dataset name, not a symbol). Substitution is
 deliberately **not** performed on the `JOB` card, matching z/OS, so
 `NOTIFY=&SYSUID` does not read as an unresolved user symbol.

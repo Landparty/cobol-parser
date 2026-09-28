@@ -15,6 +15,7 @@ cimport cython
 from collections.abc import Iterable
 
 from cobolparser._lines import split_source_lines
+from cobolparser._source_directive import source_format_directive
 
 # Cannot import from preprocess/__init__.py (circular import); values must mirror it.
 _SEQ_END    = 6   # DEFAULT_SEQ_COL_END
@@ -23,6 +24,12 @@ _TEXT_START = 7   # TEXT_START_COL - 1
 _TEXT_END   = 72  # TEXT_END_COL
 _ID_END     = 80  # IDENTIFICATION_END_COL
 _MIN_ID_STAMP_EVIDENCE = 3  # MIN_ID_STAMP_EVIDENCE_LINES
+
+
+cdef str _literal_pad(str text_slice):
+    """Blanks for the columns a short record never had, through column 72.
+    Mirrors the pure-Python `_literal_pad`."""
+    return " " * (_TEXT_END - _TEXT_START - len(text_slice))
 
 
 cdef bint _is_numeric_id_stamp_text(str tail):
@@ -138,6 +145,10 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     # means the literal never closed -- the pair is one doubled quote and
     # the literal carries on.
     cdef str closing_quote_at_72 = None
+    # Mirrors the pure-Python `literal_pad`: blanks owed to a literal left
+    # open on a record shorter than column 72, paid only if a continuation
+    # record resumes it.
+    cdef str literal_pad = ""
     cdef str lead, rest
     # Mirrors the pure-Python one-code-line lookahead (`_continuation_follows`):
     # a comment/blank line followed by a continuation record is deferred
@@ -151,6 +162,12 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     # asked yet", 0/1 the cached answer.
     cdef int stamps_identification_area = -1
     cdef bint is_short_id_stamp
+    # Mirrors the pure-Python `free_mode`: after ``>>SOURCE FORMAT IS FREE``
+    # every line is passed through whole as its own logical line until a
+    # ``>>SOURCE FORMAT IS FIXED``; the directive record becomes a blank line.
+    cdef bint free_mode = False
+    cdef str free_text
+    cdef object directive
 
     if isinstance(lines, str):
         lines = split_source_lines(lines)
@@ -160,6 +177,37 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
     parts  = []
 
     for line_no, raw in enumerate(lines, start=1):
+        if free_mode or ">>" in raw:
+            if free_mode:
+                free_text = raw.rstrip("\r\n")
+                directive = (
+                    source_format_directive(free_text) if ">>" in free_text else None
+                )
+            else:
+                directive = source_format_directive(
+                    raw.rstrip("\n").expandtabs(8)[_IND_IDX : _TEXT_END]
+                )
+            if free_mode or directive is not None:
+                # Flush the logical line in progress (mirrors flush_parts).
+                if has_line:
+                    result.append("".join(parts))
+                if deferred:
+                    result.extend([""] * deferred)
+                    deferred = 0
+                parts         = []
+                has_line      = False
+                literal_suspended = False
+                quote_open    = False
+                quote_ch      = None
+                pending_literal = False
+                closing_quote_at_72 = None
+                if directive is not None:
+                    free_mode = directive == "FREE"
+                    result.append("")
+                else:
+                    result.append(free_text.rstrip())
+                continue
+
         line = raw.rstrip("\n").expandtabs(8)
 
         if len(line) < _TEXT_START:
@@ -397,7 +445,9 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
                 # value when it remains open at end of line (COBOL
                 # fixed-format continuation rule) -- only strip them once
                 # we know no literal is left dangling (M5).
-                parts.append(chunk if pending_literal else chunk.rstrip())
+                parts.append(
+                    literal_pad + (chunk if pending_literal else chunk.rstrip())
+                )
             else:
                 # Non-literal continuation: '-' in column 7 with no
                 # alphanumeric literal open. Per COBOL fixed-format rules the
@@ -490,6 +540,14 @@ def normalize_fixed_format(lines, *, merge_continued_literals=True, debug_lines_
             closing_quote_at_72 = text_slice[-1]
         else:
             closing_quote_at_72 = None
+
+        # Mirrors the pure-Python rule: a literal still open here runs
+        # through column 72, so a short record owes the next continuation
+        # the blanks it is missing.
+        if merge_continued_literals and pending_literal:
+            literal_pad = _literal_pad(text_slice)
+        else:
+            literal_pad = ""
 
         # Either branch above (continuation or new logical line) always
         # appends to `parts` (even an empty string), so this physical line

@@ -48,7 +48,8 @@ ALPHA_CONT_LINES = [
     "000200 PROGRAM-ID. CONTALPHA.",
     "000300 DATA DIVISION.",
     "000400 WORKING-STORAGE SECTION.",
-    '000500 01  MSG PIC X(10) VALUE "ABCDE',
+    # The literal runs to column 72 exactly, so no blanks join the pieces.
+    ("000500 01  MSG PIC X(10) VALUE" + ' "ABCDE'.rjust(72 - 30)),
     '000600-    "FGHIJ".',
     "000700 PROCEDURE DIVISION.",
     "000800     DISPLAY MSG.",

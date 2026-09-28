@@ -176,6 +176,23 @@ Program Flow webview (Mermaid v11, `htmlLabels:false`,
   ending the DOT string early. And the node label's `\n (N stmts)` break is
   appended *after* `_dot_str` -- passed through it, the `\n` became `\\n`,
   which Graphviz renders as a literal backslash-n.
+- **DOT keyword ids (2026-09-28).** `_sanitize_id` output is a valid bare
+  DOT ID *except* for the reserved words `node`/`edge`/`graph`/`digraph`/
+  `subgraph`/`strict` (case-independent in Graphviz). A paragraph named
+  `NODE` was emitted as `NODE [label=...]` -- the default-node attribute
+  statement -- and `MAIN -> STRICT;` was a Graphviz syntax error (verified
+  with `@hpcc-js/wasm-graphviz`). `_dot_id()` quotes exactly those ids at
+  every DOT node/edge emission site. Mermaid is unaffected: its flowchart
+  keywords (`end`, `style`, `class`, `click`, ...) only bite in lower case,
+  and every id here is upper case (verified with mermaid 11 `parse()`).
+- **`show_unreachable=False` hides what the paragraph owns (2026-09-28).**
+  Only the paragraph's own node line (and its terminal node) was skipped;
+  its outgoing PERFORM/GO TO/CALL edges, its IF/EVALUATE decision and arm
+  boxes, and external nodes called only from it were still emitted, and
+  both renderers re-create an undeclared edge endpoint as a bare box -- the
+  hidden paragraph came back unstyled. `_hidden_ids()` (paragraph + its
+  branch/arm ids) and `_external_targets()` (drops a CALL made only from a
+  hidden paragraph) are shared by both generators.
 - **Arm boxes show statement summaries.** `BranchArm.summary` (see
   [analysis.md](analysis.md)'s statement_text section) renders instead of
   the bare `THEN`/`ELSE`/`WHEN x` keyword, which duplicated the edge label
@@ -455,6 +472,8 @@ Anything else — procedure text, `SELECT` clauses, an empty file — raises
 | `FILLER` | **Excluded** — names nothing a consumer can address |
 | Level 66 / 88 | Not storage; 88 VALUEs feed the parent's value domain |
 | `COMP-1`/`COMP-2` | No picture → `FieldCategory.FLOAT` |
+| Group `USAGE` / `SIGN` | Inherited by every subordinate elementary item with no clause of its own (IBM rule), resolved **in the parser** (`parsers/divisions/data.py` `propagate_group_usage_and_sign`, 2026-09-28) so `layout.py`, `layout_offsets.py` and `calculate_size` all see it. `CobolDataItem.usage_explicit` marks an entry's own USAGE; an explicit child wins for itself and below. A numeric-only group usage (COMP-3, BINARY, ...) is not pushed onto a non-numeric PICTURE; SIGN only lands on signed numeric items |
+| `BLANK WHEN ZERO` | Carried as `FieldSpec.blank_when_zero`; the encoder writes a zero value as all spaces (charset's space), the decoder reads an all-space field as 0 with no error |
 
 `include_redefines` / `include_filler` / `expand_occurs` / `max_occurs`
 override the first four. Occurrence expansion is additionally subject to a
@@ -569,7 +588,10 @@ hold the CSV's logical value left-justified, e.g. `9516.07 ` for
 IBM's editing rules -- Z/`*` suppression, floating `$`/`+`/`-` strings,
 fixed `+`/`-`/`CR`/`DB`/`$`, `B`/`0`/`/`/`,` insertion, the all-`Z`/all-`*`
 zero case -- and every case in `tests/unit/generators/data/test_editing.py`
-was checked byte for byte against GnuCOBOL 3.
+was checked byte for byte against GnuCOBOL 3. A floating `+`/`-` can land on
+an insertion position inside its own string (`PIC +++,+++` edits -514 as
+`   -514`, the sign where the comma would be); `deedit_numeric` reads the sign
+there too (2026-09-28: it skipped insertion positions and decoded +514).
 
 **Line terminator.** `to_csv()` and `write_csv()` share
 `_DEFAULT_LINE_TERMINATOR = "\n"`, deliberately *not* the `csv` module's
@@ -622,13 +644,14 @@ module docstring — that suite is the regression guard):
 | Storage | Bytes |
 |---------|-------|
 | DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte |
-| DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is |
+| DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is. Under `DECIMAL-POINT IS COMMA` (`FieldSpec.decimal_point_is_comma`, read off the `PictureClause`) both functions take `decimal_point_is_comma=True` and exchange `,`/`.` in the picture and the edited text: `Z.ZZ9,99` writes `1.234,56` (2026-09-28) |
 | DISPLAY numeric (zoned) | one byte per digit; sign as an overpunch, or a real `+`/`-` byte under `SIGN IS SEPARATE` |
 | `COMP-3` / `PACKED-DECIMAL` | two BCD nibbles per byte, sign nibble `C`/`D` signed, `F` unsigned |
 | `COMP` / `COMP-4` / `BINARY` | two's complement, **always big-endian** |
 | `COMP-5` | two's complement, **host byte order** — that is what "native binary" means |
 | `COMP-1` / `COMP-2` | IEEE 754 binary32/binary64, byte order as `COMP-5` |
 | `INDEX` / `POINTER` | binary zeros — an occurrence number and an address are not record content |
+| `PIC N` / `USAGE NATIONAL` | **not modelled as UTF-16**: single-byte text in the record charset, space-padded to the (correct, 2-bytes-per-position) width; `encoding_caveats()` says so. A numeric national field (`PIC 9(5) USAGE NATIONAL`, 10 bytes since 2026-09-28) goes the same way -- `encode_field`/`decode_field` route `usage == "NATIONAL"` to text before the zoned branch |
 
 **Overflow is not uniform across those rows, deliberately.** The zoned and
 packed encoders run their magnitude through `_digits_string`, which
@@ -836,7 +859,7 @@ module can say (`test_the_wrong_copybook_shows_up_as_a_wall_of_errors`).
 |---|---|
 | `FIXED` | `record_length` override, else `base.length` |
 | `VARIABLE` | the 4-byte RDW; an RDW longer than the file raises `RecordDecodingError` rather than being guessed at |
-| `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. A tail shorter than the record its own counters describe is `trailing`, not one more truncated row (`_ran_short`, 2026-09-27 — RECFM=F already did this). With a `record_separator` set, split on that instead |
+| `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. A tail shorter than the record its own counters describe is `trailing`, not one more truncated row (`_ran_short`, 2026-09-27 — RECFM=F already did this). With a `record_separator` set, the layout still frames first (2026-09-28: a `0x0A` inside COMP/COMP-3 data used to split the record); the layout's length is taken when a separator or end-of-data follows it and every separator inside it falls in binary/packed/float bytes, else it falls back to `find(separator)` (text lines shorter than the layout) |
 
 `EncodingOptions.record_separator` is consumed after each record when it is
 actually there. Fields past the end of a short record come back
@@ -1000,6 +1023,10 @@ the layout:
    **complex ODO** (a `DEPENDING ON` table nested inside an ordinary
    `OCCURS`, so each outer occurrence carries its own count) come out right
    rather than trimming every outer occurrence to the last one's count.
+   A counter declared *outside* the enclosing fixed table has no subscripts,
+   so the exact `(name, outer)` key misses and the counter is looked up by
+   name; `decoding._present` mirrors that fallback (2026-09-28 — it used to
+   read the table at full length and mis-align the record).
    Dropping an occurrence and concatenating
    what remains is exactly what a real variable-length record looks like:
    anything declared *after* the table shifts up into the space the absent
@@ -1062,6 +1089,13 @@ bytes each *record* carries.
 * **The `DEPENDING ON` item is filled in when it *is* in the record.** Usually
   it isn't. When a copybook does put it there, leaving the generated value
   would contradict the record's own length.
+* **Decoding agrees.** `RecordDecoder.from_record()` finds the range the same
+  way (explicit `options.record_varying` first, else `fd_clauses`) and keeps
+  it as `RecordDecoder.varying`; both `resolved_format()` calls in
+  `decoding.py` pass `varying=`, so `decode --record-format auto` reads the
+  RDW-framed file `gen-data --record-format auto` wrote (2026-09-28; it used
+  to frame it fixed-length). Pinned by
+  `test_variable_length.py::TestFdRecordVarying::test_decode_auto_reads_what_gen_data_auto_wrote`.
 * **Both mechanisms at once**: the table decides, the FD range is not applied
   on top of it, and a caveat says so. Enforced in *two* places, because a
   caveat that the code contradicts is worse than no caveat: the generator
@@ -1494,7 +1528,15 @@ deserializer as a real bundle would silently iterate a string character-
 by-character instead of hitting a type error) plus a new `csv_path` key
 (the relative CSV path, or `null` if this fixture got no CSV), so a
 consumer can discover what scenarios/fixtures exist — and where each one's
-CSV lives — without walking the directory tree first. See
+CSV lives — without walking the directory tree first. **Names are made
+unique** (2026-09-28): scenario names repeat (two IFs in one paragraph both
+plan `"<PARA>: THEN"`), and both used to slug to one directory, the later
+scenario's CSV overwriting the earlier one's with both manifest entries
+pointing at the survivor. `_unique_names` suffixes a repeated slug `-2`,
+`-3`, ... (first keeps its plain slug, case-insensitive), and `_csv_names`
+does the same for a `<KEY>.csv` two fixtures would write with *different*
+rows (identical same-key fixtures still share one file). Both passes use the
+one precomputed name list, so `csv_path` always names the file written. See
 `docs/fixture-bundle-schema.md`'s own "write_csv_dir" section for the full
 manifest shape.
 
@@ -1695,3 +1737,16 @@ an actual `BoundaryFixture`-populated `bundle.Scenario`, and
 * `docs/plans/2026-08-02-program-data-generation-design.md` and
   `docs/plans/2026-08-02-program-data-generation-implementation.md` — the
   full 9-phase plan this file documents Phases 1, 3, 5, and 6 of
+
+# Level-88 `VALUE ALL` (2026-09-28)
+
+The parser stores a level-88 `VALUE ALL 'X'` as the one value `ALL "X"`
+(`ALL SPACES` for a figurative operand). `layout.all_literal_operand()`
+recognises the form and `layout.fill_all_literal(value, width)` fills it
+(`ALL "AB"` at width 5 is `ABABA`). `expand_condition_values(raw, width)`
+expands it with a width -- `layout._condition_values` passes the item's
+PICTURE size (so `FieldSpec.condition_values` holds `XXX`, which the value
+factory and the solver's enum domain use as is) and `ProgramLayoutIndex`
+passes the owner field's `spec.size`; without a width (`data-items`) it is
+kept as written. `condition_values_exhaustive` counts `ALL "X"` as one exact
+value and `ALL <figurative>` as non-exhaustive.

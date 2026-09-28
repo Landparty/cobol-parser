@@ -15,6 +15,7 @@ Properly handles:
 import bisect
 import re
 
+from .._source_directive import free_format_flags
 from ._normalize import ALL_COMMENT_INDICATORS
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
@@ -47,6 +48,11 @@ _COMPILER_DIRECTIVE_RE = re.compile(r"^(?:PROCESS|CBL)(?:[ \t].*)?$", re.IGNOREC
 # exponential backtracking on unterminated input such as
 # "COPY X REPLACING BY BY BY ... BY %". It has been removed rather than
 # de-ambiguated; use CopyStatementLexer instead.
+
+
+# Columns 8-72: the width of the program-text area a continued literal runs
+# to the end of.
+_PROGRAM_TEXT_WIDTH = 65
 
 
 def normalize_continuation_lines(
@@ -96,6 +102,13 @@ def normalize_continuation_lines(
 
     # Text starts after the indicator column
     text_start = indicator_position + 1
+    # Where column 72 ends in this coordinate system: a continued literal
+    # runs through it, blanks and all.
+    text_end = text_start + _PROGRAM_TEXT_WIDTH
+    # Physical width (sans "\r") of the last record merged into each output
+    # line, so a continued literal is padded for *that* record's missing
+    # columns, not the merged line's.
+    tail_width: dict[int, int] = {}
 
     for _i, line in enumerate(lines):
         line_number = _i + 1
@@ -135,22 +148,30 @@ def normalize_continuation_lines(
                     # dropped; the continued line keeps its trailing blanks
                     # up to column 72, which are part of the literal's value
                     # (the M5 rule) -- never rstrip an open literal.
+                    #
+                    # A record shorter than column 72 (its trailing blanks
+                    # stripped by an editor or transfer) is padded back out:
+                    # the columns it lost are blanks inside the literal all
+                    # the same, and normalize_fixed_format pads them too.
                     cont_stripped = continuation_text.lstrip()
                     if cont_stripped.startswith(open_quote):
                         cont_stripped = cont_stripped[1:]
-                    result[target] = prev_line + cont_stripped
+                    pad = " " * max(0, text_end - tail_width.get(target, text_end))
+                    result[target] = prev_line + pad + cont_stripped
                 else:
                     # Non-literal continuation: strip leading spaces
                     # In COBOL, when continuing a non-literal (like an identifier),
                     # the continuation text is concatenated directly to the previous text.
                     # Example: "O005" continued with "F-001" becomes "O005F-001"
                     result[target] = prev_line.rstrip() + continuation_text.lstrip()
+                tail_width[target] = len(line.rstrip("\r"))
             else:
                 # Orphan continuation line - just add the text part
                 result.append(line[text_start:] if len(line) > text_start else "")
                 if line_origins is not None:
                     line_origins.append(line_number)
         else:
+            tail_width[len(result)] = len(line.rstrip("\r"))
             result.append(line)
             if line_origins is not None:
                 line_origins.append(line_number)
@@ -266,11 +287,18 @@ def strip_sequence_area(source: str) -> str:
     # tab-indented member is cut at the same columns the final parse uses.
     lines = source.expandtabs(8).split("\n")
     result = []
+    # Lines after ``>>SOURCE FORMAT IS FREE`` have no sequence area,
+    # indicator column or column-72 limit: kept whole, behind a blank
+    # indicator so the stripped shape (indicator at index 0) still holds.
+    free = free_format_flags(lines) if ">>" in source else None
 
     # Define column boundaries (0-indexed)
     SEQUENCE_NUMBER_END = 6  # Columns 1-6 (indices 0-5)
 
-    for line in lines:
+    for index, line in enumerate(lines):
+        if free is not None and free[index]:
+            result.append(" " + line if line.strip() else "")
+            continue
         if len(line) < 7:
             # Short line: in strict fixed format every character it has
             # lies within columns 1-6, the sequence area this function
@@ -416,9 +444,14 @@ def remove_comment_lines(source: str) -> str:
     # will judge it (a tab-indented line is never a comment in either).
     lines = source.expandtabs(8).split("\n")
     result = []
+    # A free-format line (after ``>>SOURCE FORMAT IS FREE``) has no
+    # indicator column, so column 7 says nothing about it.
+    free = free_format_flags(lines) if ">>" in source else None
 
-    for line in lines:
-        if is_comment_line(line):
+    for index, line in enumerate(lines):
+        if free is not None and free[index]:
+            result.append(line)
+        elif is_comment_line(line):
             result.append(" " * len(line))
         else:
             result.append(line)
@@ -981,6 +1014,38 @@ _PSEUDO_TEXT_WORD_RE = re.compile(
 )
 
 
+#: One separator between two text words of the source: a blank, or a
+#: separator comma / semicolon (one followed by a blank).  IBM: "a separator
+#: comma or separator semicolon ... is considered to be a space" when
+#: comparing pseudo-text, so ``==X(3) VALUE==`` finds ``X(3), VALUE``.
+_SEPARATOR_GAP = r"(?:[ \t]|[,;](?=[ \t]))"
+
+#: A separator comma / semicolon at the end of a pseudo-text word.
+_TRAILING_SEPARATOR_RE = re.compile(r"[,;]+$")
+
+
+def _pseudo_text_words(text: str) -> list[str]:
+    """The text words of pseudo-text *text*, separator commas dropped.
+
+    A comma or semicolon ending a (non-literal) word is a separator, not
+    part of the word, so it is dropped rather than compared -- the other
+    half of the rule :data:`_SEPARATOR_GAP` applies to the source side.
+    Only one at the very end of *text* or followed by a blank counts: a
+    comma inside a word (``1,5`` under DECIMAL-POINT IS COMMA) is kept.
+    """
+    words: list[str] = []
+    for match in _PSEUDO_TEXT_WORD_RE.finditer(text):
+        word = match.group(0)
+        if word[0] not in "'\"":
+            after = text[match.end() : match.end() + 1]
+            if after in ("", " ", "\t", "\n", "\r"):
+                word = _TRAILING_SEPARATOR_RE.sub("", word)
+            if not word:
+                continue
+        words.append(word)
+    return words
+
+
 def _build_clause_pattern(clause: ReplacingClause) -> str | None:
     """
     Build the regex *source* for a single REPLACING clause.
@@ -989,8 +1054,10 @@ def _build_clause_pattern(clause: ReplacingClause) -> str | None:
     the blanks between two words of the search text match any run of
     blanks in the source (``==PIC X(10)==`` finds ``PIC  X(10)``), and a
     parenthesis is a text word of its own, so the blank beside it is
-    optional (``X (10)`` too). Leading/trailing blanks of the pseudo-text
-    are not part of it. Comparison stays within one source line.
+    optional (``X (10)`` too). A separator comma or semicolon counts as a
+    blank on both sides (``==X(3) VALUE==`` finds ``X(3), VALUE``).
+    Leading/trailing blanks of the pseudo-text are not part of it.
+    Comparison stays within one source line.
 
     Uses identifier-safe boundaries to avoid partial word collisions: regex
     ``\\b`` is unsuitable because COBOL identifiers can contain hyphens, so a
@@ -1005,7 +1072,7 @@ def _build_clause_pattern(clause: ReplacingClause) -> str | None:
     find_text = clause.find_text.strip()
     if not find_text:
         return None
-    words = _PSEUDO_TEXT_WORD_RE.findall(find_text)
+    words = _pseudo_text_words(find_text)
     if not words:
         return None
 
@@ -1013,22 +1080,35 @@ def _build_clause_pattern(clause: ReplacingClause) -> str | None:
     for index, word in enumerate(words):
         if index:
             beside_paren = word in ("(", ")") or words[index - 1] in ("(", ")")
-            body += r"[ \t]*" if beside_paren else r"[ \t]+"
-        body += re.escape(word)
+            body += _SEPARATOR_GAP + ("*" if beside_paren else "+")
+        if word[0] in ("'", '"'):
+            # Literal content is case-sensitive even though the pattern as a
+            # whole is compiled IGNORECASE (``=='abc'==`` must not rewrite
+            # ``'ABC'``).
+            body += "(?-i:" + re.escape(word) + ")"
+        else:
+            body += re.escape(word)
 
-    is_start_word = find_text[0].isalnum() or find_text[0] == "-"
-    is_end_word = find_text[-1].isalnum() or find_text[-1] == "-"
+    is_start_word = _is_word_char(find_text[0])
+    is_end_word = _is_word_char(find_text[-1])
 
-    start_boundary = r"(?<![A-Za-z0-9-])" if is_start_word else r""
-    end_boundary = r"(?![A-Za-z0-9-])" if is_end_word else r""
+    # A word boundary is "no identifier character beside it"; a numeric
+    # literal's decimal point also binds (``1`` is not a word of ``1.5``).
+    start_boundary = r"(?<![A-Za-z0-9_-])(?<![0-9]\.)" if is_start_word else r""
+    end_boundary = r"(?![A-Za-z0-9_-])(?!\.[0-9])" if is_end_word else r""
 
     if clause.mode == "ALL":
         return start_boundary + body + end_boundary
     if clause.mode == "LEADING":
-        return start_boundary + body + (r"(?=[A-Za-z0-9-])" if is_end_word else r"")
+        return start_boundary + body + (r"(?=[A-Za-z0-9_-])" if is_end_word else r"")
     if clause.mode == "TRAILING":
-        return (r"(?<=[A-Za-z0-9-])" if is_start_word else r"") + body + end_boundary
+        return (r"(?<=[A-Za-z0-9_-])" if is_start_word else r"") + body + end_boundary
     return None
+
+
+def _is_word_char(char: str) -> bool:
+    """True for a character that can be part of a COBOL word."""
+    return char.isalnum() or char in ("-", "_")
 
 
 def _split_literal_segments(line: str) -> list[tuple[str, bool]]:
@@ -1125,6 +1205,7 @@ def apply_replacing_clauses(
     # ``==A== BY ==B== ==B== BY ==A==`` turned every A *and* B into A
     # instead of swapping them.
     replacements: dict[str, str] = {}
+    quoted: set[str] = set()
     code_alternatives: list[str] = []
     literal_alternatives: list[str] = []
     for index, clause in enumerate(sorted_clauses):
@@ -1136,8 +1217,9 @@ def apply_replacing_clauses(
         replacements[name] = clause.replace_text
         code_alternatives.append(alternative)
         # A search text that itself contains a quote deliberately targets
-        # literal text; only such clauses may rewrite inside string literals.
+        # literal text; only such clauses may match inside string literals.
         if '"' in clause.find_text or "'" in clause.find_text:
+            quoted.add(name)
             literal_alternatives.append(alternative)
     if not code_alternatives:
         return content
@@ -1158,22 +1240,72 @@ def apply_replacing_clauses(
         if is_comment[idx]:
             continue
         if '"' in line or "'" in line:
-            lines[idx] = "".join(
-                (
-                    (
-                        literal_pattern.sub(_replacement, segment)
-                        if literal_pattern is not None
-                        else segment
-                    )
-                    if is_literal
-                    else code_pattern.sub(_replacement, segment)
-                )
-                for segment, is_literal in _split_literal_segments(line)
+            lines[idx] = _replace_in_line_with_literals(
+                line, code_pattern, literal_pattern, quoted, replacements
             )
         else:
             lines[idx] = code_pattern.sub(_replacement, line)
 
     return "\n".join(lines)
+
+
+def _replace_in_line_with_literals(
+    line: str,
+    code_pattern: re.Pattern[str],
+    literal_pattern: re.Pattern[str] | None,
+    quoted: set[str],
+    replacements: dict[str, str],
+) -> str:
+    """Apply the REPLACING alternation to one line that holds a literal.
+
+    The pattern runs over the *whole* line, so a search text mixing code and
+    a literal (``==VALUE 'A'==``) can match. A match of a clause whose search
+    text has no quote is rejected when it lies inside a literal (it can only
+    be wholly inside one, having no quote of its own to straddle one with);
+    at a rejected position the quote-bearing clauses still get their turn.
+    """
+    literal_spans = [
+        (start, start + len(segment))
+        for start, segment, is_literal in _segment_offsets(line)
+        if is_literal
+    ]
+
+    def _inside_literal(position: int) -> bool:
+        return any(start <= position < end for start, end in literal_spans)
+
+    out: list[str] = []
+    pos = 0
+    search_from = 0
+    while True:
+        match = code_pattern.search(line, search_from)
+        if match is None:
+            break
+        name = match.lastgroup or ""
+        chosen: re.Match[str] | None = match
+        if name not in quoted and _inside_literal(match.start()):
+            chosen = (
+                literal_pattern.match(line, match.start())
+                if literal_pattern is not None
+                else None
+            )
+        if chosen is None:
+            search_from = match.start() + 1
+            continue
+        out.append(line[pos : chosen.start()])
+        out.append(replacements[chosen.lastgroup or ""])
+        pos = search_from = chosen.end()
+    out.append(line[pos:])
+    return "".join(out)
+
+
+def _segment_offsets(line: str) -> list[tuple[int, str, bool]]:
+    """``_split_literal_segments`` with each segment's start offset."""
+    result: list[tuple[int, str, bool]] = []
+    offset = 0
+    for segment, is_literal in _split_literal_segments(line):
+        result.append((offset, segment, is_literal))
+        offset += len(segment)
+    return result
 
 
 def track_source_location(

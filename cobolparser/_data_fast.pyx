@@ -173,6 +173,42 @@ cdef int _skip_layout(
     return pos
 
 
+cdef int _skip_newline_tokens(list tokens, int pos, int n, object newline_type):
+    while pos < n and tokens[pos] is not None and tokens[pos].type is newline_type:
+        pos += 1
+    return pos
+
+
+cdef int _consume_qualifiers(
+    list tokens, int pos, int n, object newline_type, object identifier_type, list out
+):
+    """Consume an ``OF|IN data-name`` qualifier chain, appending each name to
+    *out*; return the new position. Mirrors ``_consume_qualifiers`` in the
+    pure-Python ``_parse_occurs_clause``: ``OF``/``IN`` is only taken when a
+    name follows it."""
+    cdef int look
+    cdef int name_pos
+    while True:
+        look = _skip_newline_tokens(tokens, pos, n, newline_type)
+        if not (
+            look < n
+            and tokens[look] is not None
+            and tokens[look].value
+            and tokens[look].value.upper() in ("OF", "IN")
+        ):
+            break
+        name_pos = _skip_newline_tokens(tokens, look + 1, n, newline_type)
+        if not (
+            name_pos < n
+            and tokens[name_pos] is not None
+            and tokens[name_pos].type is identifier_type
+        ):
+            break
+        out.append(tokens[name_pos].value)
+        pos = name_pos + 1
+    return pos
+
+
 def parse_data_item_clauses_fast(
     list tokens,
     int pos,
@@ -212,8 +248,12 @@ def parse_data_item_clauses_fast(
     cdef object tok_type
     cdef str tok_value
     cdef str value_upper
-    cdef int min_count
-    cdef int max_count
+    # Python ints, not C ints: the pure-Python walker reads the OCCURS counts
+    # with int() and keeps whatever it gets, so a count past INT_MAX must
+    # not raise OverflowError here (which escaped the TypeError/ValueError
+    # guards below and cost the whole DATA DIVISION).
+    cdef object min_count
+    cdef object max_count
     cdef object occurs
     cdef object nxt
     cdef object count_token
@@ -415,6 +455,14 @@ def parse_data_item_clauses_fast(
                             depending_var = dep_token.value
                             has_depending = True
                             pos += 1
+                            # ``DEPENDING ON CNT OF CTL``: the qualifiers
+                            # used to stop the walk, dropping every KEY /
+                            # INDEXED BY after them.
+                            qualifiers = []
+                            pos = _consume_qualifiers(
+                                tokens, pos, n, newline_type, identifier_type, qualifiers
+                            )
+                            occurs.depending_on_qualifiers = qualifiers
 
             # ASCENDING / DESCENDING KEY IS key-1 [key-2 ...] clauses (may
             # repeat). These sit between DEPENDING ON and INDEXED BY and are
@@ -452,6 +500,10 @@ def parse_data_item_clauses_fast(
                     ):
                         keys.append(tokens[pos].value)
                         pos += 1
+                        # A qualified key (``K1 OF ENTRY``): keep the bare name.
+                        pos = _consume_qualifiers(
+                            tokens, pos, n, newline_type, identifier_type, []
+                        )
                     else:
                         break
                 if keys:

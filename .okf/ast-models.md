@@ -81,7 +81,15 @@ Serialization fidelity notes (2026-07-07):
   `processing_procedure` / `processing_procedure_thru` (XML PARSE's implicit
   PERFORM target and THRU end), and `on_exception` / `not_on_exception`
   statement lists (the CALL/ACCEPT handler shape; serialized with
-  `omit_empty`).
+  `omit_empty`). Since 2026-09-28 the clause region's data names are
+  structured too: `count_in` (GENERATE's `COUNT [IN]`), `into_item` (JSON
+  PARSE's receiving item) and `clause_items` (every `NAME OF` / `TYPE OF` /
+  `SUPPRESS` / `CONVERTING` subject and `NAMESPACE` / `NAMESPACE-PREFIX` /
+  `VALIDATING WITH` identifier, qualifiers and subscripts folded in), all
+  three also reaching `.operands` -- before, they lived only in
+  `clause_text`, so unused-variables flagged each and xref saw none. xref
+  gives `count_in` / `into_item` role `write`, `clause_items` role `read`.
+  `primary_operand` / `from_item` fold a trailing OF/IN chain or subscript.
 * REPORT SECTION (2026-09-02): report groups are ordinary `CobolDataItem`
   trees under a `CobolSection("REPORT")`. Each 01-level group carries
   `metadata["rd_report_name"]` and `metadata["rd_clauses"]` (the RD's
@@ -103,6 +111,11 @@ Serialization fidelity notes (2026-07-07):
   source (previously consumed and discarded). Also added to `operands` via
   `_add_unique_operand`, matching `IOWriteStatement.set_from`, so
   identifier-discovery consumers that read `operands` see it.
+* `ReleaseStatement.set_from_source()` / `ReturnStatement.set_into_target()`
+  (2026-09-28) now also add the operand to `operands` via
+  `_add_unique_operand`, the same as `IOWriteStatement.set_from` /
+  `IOReadStatement.set_into`; an item used only as `RELEASE ... FROM x` or
+  `RETURN ... INTO x` was otherwise reported unused.
 * `IOStartStatement.key_name` (2026-07-09) — the `START f KEY IS ... data-name`
   key (previously discarded; `key_condition` kept only the operator). Also
   tracked in `operands` for the same reason.
@@ -295,13 +308,28 @@ Two shapes here regularly surprise consumers (both confirmed against source
   `THROUGH:` prefix, and the intermediate values are not enumerated. A
   consumer wanting the field's full domain has to expand the range itself
   (and bound the expansion — `VALUE 1 THRU 999999` is legal COBOL).
-  Worse, the marker is emitted **only when the range end is unsigned**:
-  `88 X VALUE -5 THRU -1.` arrives as `["-5", "-1"]` with no `THROUGH:` at
-  all, which is indistinguishable from two discrete values `VALUE -5, -1`.
-  A signed *start* is fine (`VALUE -2 THRU 2` → `["-2", "THROUGH:2"]`), so
-  the loss is specific to a signed endpoint. Confirmed 2026-08-02 against
-  the DATA DIVISION parser; not fixed here, since correcting it changes an
-  established `ConditionNameItem.values` shape that other consumers read.
+  A signed range end keeps its marker too (`88 X VALUE -5 THRU -1.` →
+  `["-5", "THROUGH:-1"]`, distinct from `VALUE -5, -1` → `["-5", "-1"]`);
+  re-checked 2026-09-28 -- an earlier note here said a signed end lost the
+  marker, which is no longer true.
+
+**National data and address usages (2026-09-28).**
+`PictureClause.is_national` (an `N` or national-edited picture; `size`
+already counts bytes) and `is_national_edited` (`N` with `B`/`0`/`/`:
+`N(2)BN` is 8 bytes, not 4, and no longer numeric-edited).
+`CobolDataItem.set_picture_clause` gives an entry with no USAGE clause the
+usage its picture implies -- `NATIONAL` for `N`, `DISPLAY-1` for `G`
+(IBM default `NSYMBOL(NATIONAL)`); `usage_explicit` stays False and a
+later USAGE clause still wins. `CobolDataItem.group_usage` records
+`GROUP-USAGE NATIONAL|UTF-8` (serialized as `group_usage`).
+`OccursClause.depending_on_qualifiers` (serialized only when non-empty).
+`_storage.storage_size(..., national_picture=)`: `USAGE NATIONAL` on a
+numeric / numeric-edited picture is 2 bytes per position (`PIC 9(5)
+NATIONAL` = 10, a separate sign is one more national character);
+`PROCEDURE-POINTER` is 8 bytes (IBM: two words; was 4) and
+`OBJECT REFERENCE` joined `POINTER_USAGES` (4 bytes; was 0). The encoder /
+decoder write and read a numeric national field as text padded to its
+width, like `PIC N` (see generators.md).
 
 `index_names` and `key_clauses` are serialized only when non-empty. Before
 2026-07-09 `ASCENDING/DESCENDING KEY` was dropped and `INDEXED BY` kept only
@@ -326,6 +354,18 @@ takes the type of its main verb, and `tables` lists the base tables the CTE
 bodies and main statement read -- never the CTE names themselves
 (`_split_common_table_expressions()`). Before 2026-09-27 both were
 `"UNKNOWN"` with no tables.
+
+`into_variables` / `DynamicSQLStatement.using_variables` list every host
+variable of the INTO / USING list, indicators included; before 2026-09-28
+both were empty for any statement parsed from source. See
+[dialects.md](dialects.md).
+
+A structure-qualified host variable (`:DCLEMP.EMPNO`) is listed by its last
+component (`EMPNO`) since 2026-09-28 (see [dialects.md](dialects.md)).
+
+`FetchStatement.cursor_name` / `fetch_direction` / `fetch_count` are read
+positionally for DB2 scroll and rowset FETCHes (2026-09-28; see
+[dialects.md](dialects.md)).
 
 # Statement Models (`models/statements/`)
 
@@ -399,6 +439,34 @@ Notes (2026-07-07 audit remediation):
   `record_delimiter`, `password`, `lock_mode`/`lock_on`/
   `lock_with_rollback`, `sharing_mode`, `assign_device_type`) are now
   actually populated by the ENVIRONMENT division parser (H5).
+* `SelectStatement.assign_using` (2026-09-28): the data-name of `ASSIGN
+  USING data-name` (also in `assign_to`), None for `ASSIGN TO`; in
+  `to_dict()` as `assign_using`.
+* `PictureClause(pattern, location, currency_symbols=None)` (2026-09-28):
+  the non-`$` currency symbols a `SPECIAL-NAMES CURRENCY SIGN` declares
+  that occur in the pattern (`PIC £££9.99`). The pattern is sized and
+  validated through its `$` spelling, then `pattern` is restored as
+  written; the set is `currency_symbols` and, when non-empty,
+  `metadata["currency_symbols"]`. The DATA DIVISION passes it through
+  `DataItemClauseParser._picture_clause` (also handed to the `_data_fast`
+  helper in place of the class), from the non-`$` CURRENCY tokens
+  `parse_picture_clause` saw. Previously `£` was an invalid PICTURE
+  character and the floating string was mis-sized.
+* `PictureClause(..., decimal_point_is_comma=False)` (2026-09-28):
+  `SPECIAL-NAMES. DECIMAL-POINT IS COMMA` -- `,` is the decimal point and
+  `.` a simple insertion character. Sized and validated through the
+  default spelling (`,`/`.` exchanged, alongside the currency `$`
+  translation), then `pattern` is restored as written: `9(3),99` is size 6,
+  3 integer + 2 decimal digits; `Z.ZZ9,99` is 4 + 2. Kept as
+  `decimal_point_is_comma` and `metadata["decimal_point_is_comma"]`.
+  `DataItemClauseParser._picture_clause` reads it off the host
+  (`CobolParser.decimal_point_is_comma`, set from the lexer).
+* `SelectStatement.record_key_qualifiers` and each `alternate_keys` entry's
+  `qualifiers` (2026-09-28): the `OF`/`IN` names of `RECORD KEY IS K6 OF
+  R6`, innermost first; `record_key` / `key` stay the bare data-name.
+  `set_record_key(key, source=None, qualifiers=None)`,
+  `add_alternate_key(..., qualifiers=None)`; `to_dict()` gains
+  `record_key_qualifiers`.
 * Arithmetic statements' `on_size_error` / `not_on_size_error` lists can
   contain any statement type (registry-dispatched), all registered as AST
   children (H1).
@@ -411,10 +479,16 @@ from cobolparser.core.ast_factory import get_factory, create_node
 factory = get_factory()
 # create_node takes the node CLASS (not a string) and the node's own
 # constructor kwargs; location is passed positionally to the node.
-node = create_node(MoveStatement, loc, source="WS-A", targets=["WS-B"])
+node = create_node(MoveStatement, loc)   # MoveStatement.__init__(location)
+node.set_source("WS-A"); node.add_target("WS-B")
 ```
 
-Raises `NodeTypeError` for unknown node types, `FieldValidationError` for bad fields.
+Raises `TypeError` for a class that is not an `ASTNode` subclass or whose
+`__init__` does not take `location` first (`CobolDataItem`, `CobolSection`,
+...: construct those directly), `ValidationError` when the created node has
+no location / node_type, and `FieldValidationError` from a validator
+registered with `register_validator()`. Keyword arguments go to the node's
+constructor, so they must be parameters it actually takes.
 
 # Traversal
 
@@ -431,6 +505,22 @@ class name (`"MoveStatement"`, `"CallStatement"`, `"ExecSQLStatement"`,
 `statement_type`), so the class name is the only way to select a specific
 statement kind — this is what the CLI `analyze` and `parse --find-type`
 subcommands rely on.
+
+**Query helpers (2026-09-28).** `has_sql()` / `has_cics()` / `has_ims()`
+and `get_sql_statements()` / `get_cics_statements()` /
+`get_ims_statements()` classify through `program._exec_kind()`: any
+`sql_statements.ExecSQLStatement` (so `FetchStatement`,
+`DeclareCursorStatement`, `TransactionControlStatement`, ... too) is SQL, and
+`statement_type` `"EXEC CICS"` (parser) or `"EXEC-CICS"` (dialect nodes) is
+CICS, likewise IMS. They used to test `statement_type == "EXEC-CICS"` alone,
+a spelling no parsed statement carries, so every real CICS / EXEC DLI
+program answered False. `get_statistics()["statement_count"]` counts
+`CobolStatement` instances (it had skipped `EXEC_CICS` / `EXEC_IMS`
+node_types). `find_statements_using_variable(name)` matches a whole COBOL
+word, case-insensitively, outside quoted literals (was a substring test:
+`WS-A` matched `WS-AMOUNT`). `get_intrinsic_function_usages()` delegates to
+`LanguageEnvironmentAnalyzer` (its own regex had reported `OF` for
+`DLI-FUNCTION OF REC` and words inside literals).
 
 `find_all_by_type()` results are cached per `node_type` on the node, but
 each call returns a fresh copy of that cache — mutating the returned list
@@ -506,9 +596,26 @@ pass and the CLI's `--program NAME` (see [cli.md](cli.md)). Pinned by
   `"OBJECT REFERENCE"`) -- each serialized only when set.
   `OccursClause.is_unbounded` (`max_times` None; serialized when True).
   `PictureClause` accepts `U` (UTF-8, one byte per symbol).
+* `CobolDataItem.usage_explicit` (2026-09-28): True when the entry carries
+  its own USAGE (`set_usage` / `set_object_reference`); not serialized.
+  `usage` / `sign_clause` of a subordinate with no clause of its own now
+  reflect the enclosing group's (see parser.md, `data.py`), so
+  `calculate_size()` / `to_dict()["calculated_size"]` count packed/binary
+  children of a `COMP-3`/`BINARY` group correctly.
 * `UseStatement.report_groups` (`USE BEFORE REPORTING`).
 * `SetStatement.targets_are_address_of` (`SET ADDRESS OF x TO p`).
 * `DeclareTableStatement.table_name` is `"SCHEMA.TABLE"` for a qualified
   declaration.
 * Flow model: `FlowEdgeType.XML_PROCESSING_PROCEDURE[_THRU]`,
   `FlowEdgeType.CICS_HANDLE`; `FlowNode.is_declarative`.
+
+# `ConditionNameItem.false_value`, `InitializeStatement.to_value_category` / `.to_default` (2026-09-28)
+
+* `ConditionNameItem.false_value: str | None` -- the literal of a level-88
+  `WHEN SET TO FALSE [IS] literal` phrase (a sign folded into a numeric
+  literal as in `values`: `"-0"`; a figurative constant by name: `"SPACE"`),
+  `None` when absent. Always present in `to_dict()`.
+* `InitializeStatement.to_value_category: str | None` (`"ALL"` or a category
+  name such as `"NUMERIC"`, from Enterprise COBOL 6's `{ALL | category} TO
+  VALUE`) and `.to_default: bool` (`[THEN] TO DEFAULT`). Both always present
+  in `to_dict()`.

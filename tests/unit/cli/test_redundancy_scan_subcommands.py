@@ -425,3 +425,66 @@ class TestScanFilesFrom:
                 main()
         assert exit_info.value.code != 0
         assert "--files-from" in capsys.readouterr().err
+
+
+class TestScanSourceFormat:
+    """`scan --source-format fixed|free` used to be dropped on the floor.
+
+    `_cmd_scan` forwarded only the `free_form` lexer hint, never
+    `preprocess_fixed`, so `--source-format fixed` (and a cobol.yml
+    `source_format: fixed`) still auto-detected -- and a member whose
+    columns 1-6 carry a tag with an internal space, exactly the case the
+    flag exists for, scanned as free-form into an UNKNOWN program with no
+    paragraphs, while `dead-code --source-format fixed` on the same file
+    reported both.
+    """
+
+    @staticmethod
+    def _tagged(tmp_path: Path) -> str:
+        body = _program("TAGGED", "MAIN-PARA", "           PERFORM SUB-PARA.\n")
+        body += "       SUB-PARA.\n           DISPLAY WS-A.\n"
+        lines = [
+            "AB 12 " + line[6:] if line.strip() else line for line in body.splitlines()
+        ]
+        return _write(tmp_path, "TAGGED.cbl", "\n".join(lines) + "\n")
+
+    def _scan(self, path: str, capsys, *extra: str) -> dict:
+        argv = ["cobol-parser", "scan", path, "--analyzer", "dead-code"]
+        argv += ["--compact", "--workers", "1", *extra]
+        with patch("sys.argv", argv):
+            main()
+        return json.loads(capsys.readouterr().out)
+
+    def test_source_format_fixed_forces_normalization(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        data = self._scan(self._tagged(tmp_path), capsys, "--source-format", "fixed")
+        unit = data["files"][0]["units"][0]
+        assert unit["program_name"] == "TAGGED"
+        assert unit["reports"]["dead-code"]["summary"]["total_procedures"] == 2
+        assert "parse_error_count" not in data["files"][0]
+
+    def test_config_source_format_reaches_scan(
+        self, tmp_path: Path, capsys, monkeypatch
+    ) -> None:
+        path = self._tagged(tmp_path)
+        (tmp_path / "cobol.yml").write_text("project:\n  source_format: fixed\n")
+        monkeypatch.chdir(tmp_path)
+        data = self._scan(path, capsys)
+        assert data["files"][0]["units"][0]["program_name"] == "TAGGED"
+
+    def test_source_format_free_reaches_the_parser(self, tmp_path: Path) -> None:
+        from cobolparser.scan import ScanOptions, _parse
+
+        with patch("cobolparser.parser.parse_cobol") as parse_cobol:
+            _parse("x", "A.cbl", ScanOptions(free_form=True, preprocess_fixed=False))
+        kwargs = parse_cobol.call_args.kwargs
+        assert kwargs["free_form"] is True
+        assert kwargs["preprocess_fixed"] is False
+
+    def test_auto_leaves_detection_to_the_parser(self) -> None:
+        from cobolparser.scan import ScanOptions, _parse
+
+        with patch("cobolparser.parser.parse_cobol") as parse_cobol:
+            _parse("x", "A.cbl", ScanOptions())
+        assert "preprocess_fixed" not in parse_cobol.call_args.kwargs

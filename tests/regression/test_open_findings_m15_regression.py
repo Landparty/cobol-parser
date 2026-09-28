@@ -80,7 +80,10 @@ class TestM15EncodingDetection:
 
         cpy = tmp_path / "ATSIGNS.cpy"
         cpy.write_bytes(content)
-        assert detect_encoding(str(cpy)) == "ascii"
+        # ASCII-shaped, not valid UTF-8 (the lone 0xFF): an 8-bit ASCII
+        # superset, never EBCDIC. It was labelled "ascii" before 2026-09-28,
+        # which turned every byte >= 0x80 into U+FFFD.
+        assert detect_encoding(str(cpy)) == "cp1252"
 
     def test_pure_valid_utf8_with_many_at_signs_stays_utf8(self, tmp_path):
         """Fully valid ASCII/UTF-8 text with '@' runs is never demoted to EBCDIC."""

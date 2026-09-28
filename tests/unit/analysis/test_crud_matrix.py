@@ -1303,3 +1303,70 @@ class TestSQLWriteSubqueryTables:
             "DAILY_TXN": "-R--",
             "EMP": "-R--",
         }
+
+
+# ---------------------------------------------------------------------------
+# Regression (2026-09-28): SORT/MERGE USING/GIVING and RELEASE/RETURN
+# ---------------------------------------------------------------------------
+
+_SORT_USING_GIVING_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SRTUG.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-FILE  ASSIGN TO INFILE.
+           SELECT OUT-FILE ASSIGN TO OUTFILE.
+           SELECT M2-FILE  ASSIGN TO M2FILE.
+           SELECT SRT-FILE ASSIGN TO SORTWK.
+           SELECT WRK-FILE ASSIGN TO SORTWK2.
+       DATA DIVISION.
+       FILE SECTION.
+       FD IN-FILE.
+       01 IN-REC  PIC X(80).
+       FD OUT-FILE.
+       01 OUT-REC PIC X(80).
+       FD M2-FILE.
+       01 M2-REC  PIC X(80).
+       SD SRT-FILE.
+       01 SRT-REC.
+          05 SRT-KEY PIC X(10).
+          05 FILLER  PIC X(70).
+       SD WRK-FILE.
+       01 WRK-REC.
+          05 WRK-KEY PIC X(10).
+          05 FILLER  PIC X(70).
+       WORKING-STORAGE SECTION.
+       01 WS-EOF PIC X.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           SORT SRT-FILE ON ASCENDING KEY SRT-KEY
+                USING IN-FILE GIVING OUT-FILE
+           MERGE SRT-FILE ON ASCENDING KEY SRT-KEY
+                USING IN-FILE M2-FILE GIVING OUT-FILE
+           SORT WRK-FILE ON ASCENDING KEY WRK-KEY
+                INPUT PROCEDURE IS IN-PROC
+                OUTPUT PROCEDURE IS OUT-PROC
+           STOP RUN.
+       IN-PROC.
+           RELEASE WRK-REC.
+       OUT-PROC.
+           RETURN WRK-FILE AT END MOVE 'Y' TO WS-EOF.
+"""
+
+
+class TestSortMergeFileAccess:
+    """A SORT/MERGE reads its USING files and writes its GIVING files
+    itself -- no READ/WRITE statement of the program names them -- so they
+    used to come out of the matrix as ``----``."""
+
+    def test_crud_per_file(self):
+        result = parse_cobol(_SORT_USING_GIVING_SOURCE)
+        assert result.ast is not None
+        m = CRUDMatrixGenerator().analyze(result.ast)
+        crud = {e.file_name: e.crud.as_string() for e in m.file_entries}
+        assert crud["IN-FILE"] == "-R--"
+        assert crud["M2-FILE"] == "-R--"
+        assert crud["OUT-FILE"] == "C---"
+        # RELEASE writes the SD work file, RETURN reads it back.
+        assert crud["WRK-FILE"] == "CR--"

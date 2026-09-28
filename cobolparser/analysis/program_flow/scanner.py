@@ -173,7 +173,16 @@ class ProcedureScanner:
         the alternate entry point is called.
         """
         all_statements = ast.get_all_statements()
+        # A contained program's ENTRY names a paragraph of *that* unit, not
+        # of this one (procedure names are local to a program unit).
+        inner = {
+            id(stmt)
+            for contained in ast.contained_programs
+            for stmt in contained.get_all_statements()
+        }
         for stmt in all_statements:
+            if id(stmt) in inner:
+                continue
             if not isinstance(stmt, EntryStatement) or not stmt.entry_name:
                 continue
             # An ENTRY statement with a blank/whitespace-only literal name

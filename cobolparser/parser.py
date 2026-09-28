@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 # Core parsing infrastructure
 from ._lines import split_source_lines
 from .core.token_stream import TokenStream
-from .lexer import CobolLexer, Token
+from .lexer import CobolLexer, Token, TokenType
 from .models.ast_base import SourceLocation
 from .models.program import CobolDivision, CobolProgram
 from .parsers.divisions.data import DataDivisionParser
@@ -148,6 +148,9 @@ class CobolParser:
         self.current_program: CobolProgram | None = None
         self.stream: TokenStream | None = None
         self._error_limit_reached: bool = False
+        #: ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA`` (decided by the lexer
+        #: from the whole source): PICTURE strings exchange ``,`` and ``.``.
+        self.decimal_point_is_comma: bool = False
 
         # Initialize division parser factory
         self._division_factory = DivisionParserFactory()
@@ -228,11 +231,14 @@ class CobolParser:
             self.free_form,
         )
 
-        self.statistics.reset()
-        self.statistics.start_timing()
-        self.errors.clear()
-        self.warnings.clear()
-        self._error_limit_reached = False
+        self._begin_parse()
+        self.decimal_point_is_comma = False
+        # Set up front, not only on the success path: a FAIL_FAST lexer
+        # error or a propagated ParseError returns early, and its result
+        # used to report ``lines_parsed == 0`` for a non-empty source.
+        self.statistics.lines_parsed = len(split_source_lines(source))
+        # The CLI's --stats reports lines_processed; keep both counters in step.
+        self.statistics.lines_processed = self.statistics.lines_parsed
         for _initial_warning in self._initial_warnings:
             self.add_warning(_initial_warning)
         # Consume once: these describe the source passed to the *first*
@@ -288,7 +294,6 @@ class CobolParser:
                             )
                         )
                         if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
-                            self.statistics.end_timing()
                             return self._create_result(None)
                         # The raise happened partway through the line scan,
                         # so `preprocess_warnings` may already hold entries
@@ -350,6 +355,10 @@ class CobolParser:
                 cleaned_source, filename, self.dialect, free_form=actual_free_form
             )
             self.tokens = lexer.tokenize()
+            self.statistics.tokens_processed = len(self.tokens)
+            self.decimal_point_is_comma = bool(
+                getattr(lexer, "decimal_point_is_comma", False)
+            )
             logger.debug("Lexer produced %d tokens for %s", len(self.tokens), filename)
 
             if lexer.has_errors():
@@ -372,18 +381,22 @@ class CobolParser:
                 for warning in lexer.get_warnings():
                     self.add_warning(f"Lexer warning: {warning}")
 
-            # Initialize TokenStream and parse program
-            self.stream = TokenStream(self.tokens)
+            # Initialize TokenStream and parse program. A `*>` floating
+            # comment (IBM Enterprise COBOL 6.x) is layout wherever it sits:
+            # it may end any line, including one that stops between a clause
+            # keyword and its operand (``OCCURS 10 *> rows`` / ``INDEXED BY
+            # IX``). Every sub-clause reader that skips line breaks would
+            # otherwise have to skip COMMENT tokens too, and most did not --
+            # the operand after the comment was dropped as an "unparsed
+            # token", or (``OCCURS *> n`` / ``10 TIMES``) read as a new
+            # item's level number. The lexer's own token list keeps them.
+            self.stream = TokenStream(
+                [t for t in self.tokens if t.type is not TokenType.COMMENT]
+            )
             program = self.parse_program()
             if program is not None:
                 for unit in program.program_units():
                     unit.serialization_config = self.serialization_config
-
-            self.statistics.end_timing()
-            self.statistics.lines_parsed = len(split_source_lines(source))
-            # The CLI's --stats reports lines_processed; keep both counters in step.
-            self.statistics.lines_processed = self.statistics.lines_parsed
-            self.statistics.tokens_processed = len(self.tokens)
 
             logger.info(
                 "Finished parsing %s: success=%s, errors=%d, warnings=%d, "
@@ -492,6 +505,9 @@ class CobolParser:
                 source = file.read()
             return self.parse(source, filepath)
         except OSError as e:
+            # A fresh result: without the reset, this one carried the errors,
+            # warnings and statistics of whatever this instance parsed last.
+            self._begin_parse()
             self.add_error(ParseError(f"File error: {str(e)}", line_number=1, column=1))
             return self._create_result(None)
 
@@ -861,8 +877,20 @@ class CobolParser:
         self.warnings.append(message)
         self.statistics.warning_count += 1
 
+    def _begin_parse(self) -> None:
+        """Reset the per-parse state (errors, warnings, statistics, timer)."""
+        self.statistics.reset()
+        self.statistics.start_timing()
+        self.errors.clear()
+        self.warnings.clear()
+        self._error_limit_reached = False
+
     def _create_result(self, ast: CobolProgram | None) -> ParseResult:
         """Create parse result with current state."""
+        # Every return path stops the clock here -- the early ones (a
+        # FAIL_FAST lexer error, a propagated ParseError, the safety net)
+        # used to hand back ``parse_time_seconds == 0``.
+        self.statistics.end_timing()
         return ParseResult(
             ast=ast,
             errors=self.errors.copy(),

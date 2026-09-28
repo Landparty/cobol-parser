@@ -35,6 +35,9 @@ class SelectStatement(CobolStatement):
         self.assign_to: str | None = None
         self.assign_device_type: str | None = None  # DISK, TAPE, PRINTER, etc.
         self.assign_external_name: str | None = None
+        # ``ASSIGN USING data-name``: the data item whose value names the
+        # file at run time (then also ``assign_to``); None for ASSIGN TO.
+        self.assign_using: str | None = None
 
         # ORGANIZATION clause
         self.organization: str | None = (
@@ -47,11 +50,16 @@ class SelectStatement(CobolStatement):
         # RECORD KEY clause
         self.record_key: str | None = None
         self.record_key_source: str | None = None  # SOURCE IS data-name (IBM extension)
+        #: ``RECORD KEY IS K OF R [IN ...]``: the qualifiers that locate a key
+        #: whose name is not unique, innermost first. ``record_key`` stays the
+        #: bare data-name every consumer matches (as ``OccursClause``'s
+        #: ``depending_on`` / ``depending_on_qualifiers`` do).
+        self.record_key_qualifiers: list[str] = []
 
         # ALTERNATE RECORD KEY clause(s)
         self.alternate_keys: list[dict[str, Any]] = (
             []
-        )  # [{key, duplicates_allowed, password}]
+        )  # [{key, duplicates_allowed, password, qualifiers}]
 
         # FILE STATUS clause
         self.file_status: str | None = None
@@ -106,17 +114,34 @@ class SelectStatement(CobolStatement):
         """Set the ACCESS MODE clause."""
         self.access_mode = mode.upper()
 
-    def set_record_key(self, key: str, source: str | None = None) -> None:
-        """Set the RECORD KEY clause."""
+    def set_record_key(
+        self,
+        key: str,
+        source: str | None = None,
+        qualifiers: list[str] | None = None,
+    ) -> None:
+        """Set the RECORD KEY clause (*qualifiers*: ``OF``/``IN`` names,
+        innermost first)."""
         self.record_key = key
         self.record_key_source = source
+        self.record_key_qualifiers = list(qualifiers or [])
 
     def add_alternate_key(
-        self, key: str, duplicates_allowed: bool = False, password: str | None = None
+        self,
+        key: str,
+        duplicates_allowed: bool = False,
+        password: str | None = None,
+        qualifiers: list[str] | None = None,
     ) -> None:
-        """Add an ALTERNATE RECORD KEY clause."""
+        """Add an ALTERNATE RECORD KEY clause (*qualifiers* as for
+        :meth:`set_record_key`)."""
         self.alternate_keys.append(
-            {"key": key, "duplicates_allowed": duplicates_allowed, "password": password}
+            {
+                "key": key,
+                "duplicates_allowed": duplicates_allowed,
+                "password": password,
+                "qualifiers": list(qualifiers or []),
+            }
         )
 
     def set_file_status(self, status: str, vsam_status: str | None = None) -> None:
@@ -166,10 +191,12 @@ class SelectStatement(CobolStatement):
                 "assign_to": self.assign_to,
                 "assign_device_type": self.assign_device_type,
                 "assign_external_name": self.assign_external_name,
+                "assign_using": self.assign_using,
                 "organization": self.organization,
                 "access_mode": self.access_mode,
                 "record_key": self.record_key,
                 "record_key_source": self.record_key_source,
+                "record_key_qualifiers": list(self.record_key_qualifiers),
                 "alternate_keys": self.alternate_keys,
                 "file_status": self.file_status,
                 "file_status_vsam": self.file_status_vsam,
@@ -412,6 +439,34 @@ class XmlJsonStatement(CobolStatement):
         # from get_all_statements() and every nested-body walk.
         self.on_exception: list[CobolStatement] | None = None
         self.not_on_exception: list[CobolStatement] | None = None
+        # Data items the trailing clauses name. `count_in` (GENERATE's
+        # ``COUNT IN``) and `into_item` (JSON PARSE's ``INTO``) are the
+        # items the statement *writes*; `clause_items` are the ones it
+        # reads or describes (``NAME OF`` / ``TYPE OF`` / ``SUPPRESS`` /
+        # ``CONVERTING`` subjects, a ``NAMESPACE`` / ``NAMESPACE-PREFIX`` /
+        # ``ENCODING`` / ``VALIDATING WITH`` identifier). All three also
+        # reach `.operands`. Before 2026-09-28 they lived only in
+        # `clause_text`, so unused-variables reported every one of them as
+        # never referenced and xref saw none of them.
+        self.count_in: str | None = None
+        self.into_item: str | None = None
+        self.clause_items: list[str] = []
+
+    def set_count_in(self, name: str) -> None:
+        """Record ``COUNT [IN] name`` (XML/JSON GENERATE)."""
+        self.count_in = name
+        self._add_unique_operand(name)
+
+    def set_into_item(self, name: str) -> None:
+        """Record ``INTO name`` (JSON PARSE's receiving item)."""
+        self.into_item = name
+        self._add_unique_operand(name)
+
+    def add_clause_item(self, name: str) -> None:
+        """Record a data item a trailing clause names (read, not written)."""
+        if name not in self.clause_items:
+            self.clause_items.append(name)
+        self._add_unique_operand(name)
 
     def set_primary_operand(self, name: str) -> None:
         self.primary_operand = name
@@ -446,6 +501,9 @@ class XmlJsonStatement(CobolStatement):
                 "clause_text": self.clause_text,
                 "processing_procedure": self.processing_procedure,
                 "processing_procedure_thru": self.processing_procedure_thru,
+                "count_in": self.count_in,
+                "into_item": self.into_item,
+                "clause_items": list(self.clause_items),
             }
         )
         result.update(
@@ -468,6 +526,7 @@ class ReleaseStatement(CobolStatement):
 
     def set_from_source(self, source: str) -> None:
         self.from_source = source
+        self._add_unique_operand(source)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
@@ -493,6 +552,7 @@ class ReturnStatement(CobolStatement):
 
     def set_into_target(self, target: str) -> None:
         self.into_target = target
+        self._add_unique_operand(target)
 
     def set_at_end_clause(self, statements: list["CobolStatement"]) -> None:
         self._set_clause("at_end_clause", statements)

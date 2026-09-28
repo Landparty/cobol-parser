@@ -8,6 +8,22 @@ timestamp: 2026-09-17T00:00:00Z
 
 # Overview
 
+2026-09-28: `tests/unit/test_exec_sql_fetch_orientation.py` (10 tests) pins
+FETCH cursor name / orientation / rowset size for scroll, sensitive and
+rowset forms, and a rowset FETCH's cursor in the CRUD matrix.
+
+2026-09-28: `tests/unit/test_exec_sql_host_variable_lists.py` (6 tests)
+pins `into_variables` / `using_variables` read from parsed source (no blank
+after INTO/USING), indicators kept in the list rather than ending it; a
+later commit adds structure-qualified host variables (`:REC.FLD` -> `FLD`),
+with a matching `test_dclgen_check.py` case.
+
+2026-09-28: `tests/unit/test_exec_sql_literals_comments.py` (6 tests) pins
+EXEC SQL string literals keeping their quotes (no host variable or table read
+out of a literal; `''` doubling; `X'..'` prefix) and `--` comments being
+dropped (but not `A - -1`); `test_sql_cics_lint.py` gains a quoted CONNECT
+credential that spells a declared name.
+
 2026-09-27: `tests/unit/test_exec_sql_merge_cte.py` (6 tests) pins EXEC SQL
 `MERGE` (type `MERGE`, target first, then the `USING` table or the tables a
 `USING (SELECT ...)` subquery reads, none for `USING (VALUES ...)`) and `WITH`
@@ -41,6 +57,12 @@ ambient 28-digit context (so an over-precise value was rounded by the very
 arithmetic testing it). Both now decide over `Fraction`. Three cover
 `config/_yaml.py`'s comment stripper, which advanced one character past a
 backslash escape instead of two. See `analysis.md` and `cli.md`.
+
+2026-09-28: `tests/unit/analysis/test_xref.py` (+2: RELEASE FROM / RETURN
+INTO roles, reference-modifier offsets on a receiving operand read),
+`test_unused_variables.py::TestSortProcedureOperands` (+1) and
+`test_crud_matrix.py::TestSortMergeFileAccess` (+1: SORT/MERGE USING/GIVING,
+RELEASE/RETURN). See `analysis.md`.
 
 2026-09-27: `tests/unit/analysis/test_xref.py` (+3 tests, one updated:
 `ADD 1 TO WS-COUNT` is now read *and* write) and
@@ -996,6 +1018,15 @@ too (see commands above).
   `["any"]`, not the stale hand-written `numeric`/`["string"]`) now that the
   override table only supplies `CURRENT-DATE`'s byte length, a fact the
   `le_signatures` catalogue has no structured field for at all.
+* `tests/regression/test_conditional_compilation_literals.py` (2026-09-28)
+  — `>>DEFINE`/`>>IF`/`>>WHEN` literal contents compare case-sensitively;
+  `-1` and doubled-delimiter literals (`'O''BRIEN'`) are operands.
+* `tests/regression/test_literal_concatenation.py` (2026-09-28) — `lit & lit`
+  merged into one STRING_LITERAL by both lexers (VALUE clause, MOVE source,
+  across lines, fixed-format columns); unlike kinds / `Z` literals kept apart.
+* `tests/regression/test_level88_false_and_initialize_phrases.py`
+  (2026-09-28) — `ConditionNameItem.false_value`; INITIALIZE
+  `to_value_category` / `to_default`.
 
 # Copybook missing-period check, per entry (2026-09-12)
 

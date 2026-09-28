@@ -300,6 +300,60 @@ class TestWriteCsvDir:
                 slug = _slugify(scenario.name)
                 assert os.path.isdir(os.path.join(tmp, slug)), scenario.name
 
+    def test_same_named_scenarios_do_not_overwrite_each_others_csvs(self):
+        """Two IFs in one paragraph both plan a "MAIN-PARA: THEN" scenario.
+        Both used to slug to one directory: the later scenario's CSV
+        overwrote the earlier one's and both manifest entries pointed at
+        the survivor."""
+        source = _SCENARIO_MODE_HEADER.replace(
+            "           IF F1-QTY > 100\n"
+            "               DISPLAY 'HIGH'\n"
+            "           END-IF.\n",
+            "           IF F1-QTY > 100\n"
+            "               DISPLAY 'HIGH'\n"
+            "           END-IF\n"
+            "           IF F1-QTY > 900\n"
+            "               DISPLAY 'HIGHER'\n"
+            "           END-IF.\n",
+        )
+        result = parse_cobol(source, filename="t.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        bundle = ProgramFixtureGenerator().generate_with_scenarios(
+            result.ast, index, report, mode="branches", seed=1
+        )
+        names = [s.name for s in bundle.scenarios]
+        assert len(set(names)) < len(names)  # the collision this test is about
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle.write_csv_dir(tmp)
+            with open(os.path.join(tmp, "MANIFEST.json")) as handle:
+                manifest = json.load(handle)
+            paths = [
+                fixture_dict["csv_path"]
+                for scenario_dict in manifest["scenarios"]
+                for fixture_dict in scenario_dict["fixtures"]
+                if fixture_dict["csv_path"] is not None
+            ]
+            assert len(paths) == len(set(paths)) == len(bundle.scenarios)
+            # Each manifest path holds ITS OWN scenario's rows.
+            for scenario, scenario_dict in zip(
+                bundle.scenarios, manifest["scenarios"], strict=True
+            ):
+                for fixture, fixture_dict in zip(
+                    scenario.fixtures, scenario_dict["fixtures"], strict=True
+                ):
+                    if fixture_dict["csv_path"] is None:
+                        continue
+                    with open(
+                        os.path.join(tmp, fixture_dict["csv_path"]), newline=""
+                    ) as handle:
+                        rows = list(csv.DictReader(handle))
+                    assert rows == fixture.sequence
+            # The first of each name keeps its plain slug.
+            assert os.path.isfile(os.path.join(tmp, "main-para-then", "F1.csv"))
+            assert os.path.isfile(os.path.join(tmp, "main-para-then-2", "F1.csv"))
+
     def _call_literal_bundle(self, literal: str):
         """A program whose only fixture-worthy boundary is a static CALL
         with an attacker-controlled literal as its program name -- the

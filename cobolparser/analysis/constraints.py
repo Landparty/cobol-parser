@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 
 from .._literals import unquote_literal
+from ..generators.data.layout import all_literal_operand, condition_values_exhaustive
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.statements.base import (
@@ -175,6 +177,13 @@ class FieldConstraint:
     values: tuple[str, ...]
     origin: str
     negated: bool = False
+    #: ``False`` when an ``in_set``'s `values` are only a *sample* of what
+    #: the condition admits -- a level-88 ``THRU`` range the layout could not
+    #: enumerate in full. Still sound for the positive test (any listed value
+    #: satisfies it) but not negatable into a ``not_in_set``: a value outside
+    #: the sample can still be inside the range. Not part of `to_dict()` or
+    #: equality; it only steers what may be derived from this constraint.
+    exhaustive: bool = dataclass_field(default=True, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -627,6 +636,17 @@ def _extract_expr(
         return []
 
     if isinstance(expr, LogicalExpression):
+        if expr.operator == "NOT":
+            # The parser's unary wrapper (see LogicalExpression): what it
+            # builds for a negation it cannot fold into the operand itself --
+            # `NOT FLAG-ON`, `NOT (A = 1 AND B = 2)`. The negated condition is
+            # `left_condition`; negating it is just flipping `negate` for the
+            # subtree, which De Morgan then carries through any AND/OR below.
+            # Rejecting it left the commonest negated-88 idiom (`IF NOT
+            # EOF-REACHED`) with both arms unmodeled.
+            return _extract_expr(
+                expr.left_condition, not negate, index, fed_names, origin, unsupported
+            )
         if expr.operator not in ("AND", "OR"):
             unsupported.append(
                 f"{origin}: unsupported logical operator: {expr.operator}"
@@ -821,6 +841,14 @@ def _negate_prior_arms(
             )
             return []
         constraint = conjuncts[0]
+        if not constraint.exhaustive:
+            unsupported.append(
+                f"{origin}: not modeled -- a prior arm tests a condition name "
+                f"whose values on {constraint.field.spec.qualified_name} cannot "
+                "be listed exhaustively (a THRU range or figurative constant), "
+                "so its negation is not a not_in_set"
+            )
+            return []
         if constraint.op not in ("eq", "in_set") or constraint.negated:
             unsupported.append(
                 f"{origin}: not modeled -- a prior arm uses {constraint.op}, "
@@ -884,11 +912,57 @@ def _extract_condition_name_value(
     # the condition index at all (a plain field that happens to own 88s),
     # preserving the previous behavior for that path.
     own_values = index.condition_values(name.strip())
-    values = (
-        own_values if own_values is not None else tuple(resolved.spec.condition_values)
+    raw_values = index.condition_raw_values(name.strip())
+    if own_values is None or raw_values is None:
+        values = tuple(resolved.spec.condition_values)
+        op = "not_in_set" if negate else "in_set"
+        return FieldConstraint(resolved, op, values, origin, False)
+
+    upper_raw = [value.strip().upper() for value in raw_values]
+    if "ALL" in upper_raw:
+        # A bare ``ALL`` with nothing repeatable after it.
+        unsupported.append(
+            f"{origin}: condition name {name.strip()} has a VALUE ALL literal, "
+            "which is not modeled in v1"
+        )
+        return None
+    # ``VALUE ALL 'X'`` is the one value that fills the field with X (which
+    # is what ``own_values`` already holds, expanded to the field's width);
+    # ``VALUE ALL SPACES`` is the figurative constant SPACES.
+    upper_raw = [
+        (all_literal_operand(value) or value).strip().upper() for value in raw_values
+    ]
+    figuratives = [value for value in upper_raw if value in _FIGURATIVE_NAMES]
+    if figuratives and len(upper_raw) == 1:
+        # `88 BLANK-NAME VALUE SPACES` is the figurative comparison `IF
+        # NAME = SPACES`, and gets exactly that constraint. Read as an
+        # in_set, the word itself became the witness ("SPACES", rendered
+        # "SPA" into a PIC X(3)), which satisfies neither arm.
+        return FieldConstraint(
+            resolved, "figurative", (figuratives[0],), origin, negated=negate
+        )
+    exhaustive = condition_values_exhaustive(
+        list(raw_values), resolved.spec.decimal_digits
     )
+    if negate and not exhaustive:
+        # `NOT <88>` as a not_in_set over the listed values is only sound
+        # when the list is the whole condition. For `VALUE 1 THRU 999999` it
+        # is the first 65 values, and the solver's midpoint (499999) sat
+        # squarely inside the range the arm excludes.
+        unsupported.append(
+            f"{origin}: NOT {name.strip()} is not modeled -- its values on "
+            f"{resolved.spec.qualified_name} (a THRU range or figurative "
+            "constant) cannot be listed exhaustively"
+        )
+        return None
+    values = tuple(v for v in own_values if v.upper() not in _FIGURATIVE_NAMES)
+    if not values:
+        unsupported.append(
+            f"{origin}: condition name {name.strip()} has no literal VALUE to " "model"
+        )
+        return None
     op = "not_in_set" if negate else "in_set"
-    return FieldConstraint(resolved, op, values, origin, False)
+    return FieldConstraint(resolved, op, values, origin, False, exhaustive=exhaustive)
 
 
 def _build_relational_constraint(

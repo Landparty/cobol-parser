@@ -14,6 +14,65 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-28 -- bug hunt round 8: parsers, preprocessing, generators, analysis, JCL/config
+
+[parser.md](parser.md): SEARCH without END-SEARCH no longer eats an
+enclosing ELSE and the rest of the sentence; INITIALIZE targets / REPLACING
+BY values keep subscripts and OF/IN qualifiers; `NOT >=` / `NOT GREATER
+THAN OR EQUAL TO` resolve to LESS (and the `<=` family to GREATER);
+STRING/UNSTRING `DELIMITED` without `BY` keeps its delimiters; `DISPLAY
+FUNCTION TRIM(A)` is one item; group USAGE / SIGN are inherited by
+subordinate elementary items (`usage_explicit`).
+[preprocessing.md](preprocessing.md): a long continued literal survives
+copybook expansion (re-continued, not truncated); REPLACE LEADING/TRAILING;
+a malformed REPLACE warns; `:TAG:` replaced every time in a word; COPY
+REPLACING matches code+literal search text, compares literals
+case-sensitively, and no longer splits `1.5` or `WS_A`.
+[generators.md](generators.md): complex-ODO counter lookup falls back by
+name in the decoder; variable-bare framing by layout before separator;
+BLANK WHEN ZERO; national-content caveat.
+[analysis.md](analysis.md): ConstantFolder forgets PERFORM VARYING/AFTER and
+SEARCH VARYING variables and writes through level-66 RENAMES; program
+signatures grade ENTRY parameters, carry BY VALUE, and count the RETURNING
+item as named. [jcl.md](jcl.md): SET values are taken at the EXEC card;
+DCB overrides merge; `DD *,DLM=` keeps `//` cards as data; continued
+strings keep blanks through column 71; CR/LF-only line splitting.
+[cli.md](cli.md): `cobol.yml` reader handles `''` / `\"` escapes, rejects
+content after `...`, ignores a UTF-8 BOM.
+## 2026-09-28 -- accelerator audit: OCCURS count overflow, short-record literals, `*>` in data entries
+
+Differential run (Cython vs forced pure-Python) over tests/samples,
+examples/cobol and ~35k generated fixed/free-form inputs: tokens, normalized
+text and ASTs agreed everywhere except one. [lexer.md](lexer.md):
+`_data_fast` OCCURS counts past INT_MAX raised `OverflowError` and cost the
+whole DATA DIVISION (`cdef int` -> `cdef object`).
+[preprocessing.md](preprocessing.md): a continued literal on a record whose
+trailing blanks were stripped lost the blanks through column 72 (pure,
+Cython and the expander). [parser.md](parser.md): `*>` floating comments
+are dropped from the parser's `TokenStream`, so a comment between a data
+clause keyword and its operand no longer drops the operand or fabricates a
+level-number item.
+## 2026-09-28 -- control-flow bug hunt: nested-unit references, PERFORM UNTIL scope terminators, DOT keyword ids, hidden unreachable nodes
+
+[analysis.md](analysis.md): `DeadCodeAnalyzer` and the flow scanner's ENTRY
+collection no longer credit a contained program's PERFORM/ENTRY to the
+container's same-named paragraph. [parser.md](parser.md): an out-of-line
+`PERFORM p UNTIL c` nested in IF/EVALUATE/inline PERFORM stops at the
+enclosing `END-xxx` instead of swallowing it (which re-nested a top-level
+`STOP RUN` into the IF arm). [generators.md](generators.md): DOT quotes
+paragraph ids that are DOT keywords; `show_unreachable=False` also drops the
+hidden paragraph's edges, branch boxes and CALL-only external nodes.
+## 2026-09-28 -- bug hunt round 8: comment-entries, currency symbols, SPECIAL-NAMES, SELECT short forms
+
+[lexer.md](lexer.md): IDENTIFICATION DIVISION comment-entries lex as
+verbatim `COMMENT_ENTRY` tokens (244 TokenType values); declared
+SPECIAL-NAMES currency symbols lex as `CURRENCY`. [parser.md](parser.md):
+comment-entry text stored as written; SPECIAL-NAMES clauses end at the next
+clause (`symbolic_characters`, `currency_signs` added); SELECT without
+`ORGANIZATION IS`, `ASSIGN USING`, clause words split across lines.
+[ast-models.md](ast-models.md): `PictureClause.currency_symbols`,
+`SelectStatement.assign_using`.
+
 ## 2026-09-28 -- bug hunt round 7: batch .prof collisions, DOT escaping, >>DEFINE arithmetic, nested ALTER in health
 
 [batch.md](batch.md): per-file `.prof` dumps of inputs sharing a stem no

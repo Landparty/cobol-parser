@@ -29,6 +29,7 @@ from cobolparser.generators.data.encoding import (
     EncodingOptions,
     Endian,
     RecordFormat,
+    encode_record,
 )
 from cobolparser.generators.data.layout import present_indexes
 from cobolparser.generators.data.options import DataGeneratorOptions
@@ -181,6 +182,98 @@ def test_a_record_separator_is_consumed_between_records():
     result = _decoder(SMALL, opts).decode_bytes(dataset.to_records(opts))
     assert len(result.records) == len(dataset.rows)
     assert result.trailing == b""
+
+
+BINARY_ODO = """
+       01  R.
+           05  N PIC S9(4) COMP.
+           05  T OCCURS 0 TO 3 DEPENDING ON N.
+               10  X PIC X(2).
+           05  K PIC S9(4) COMP.
+"""
+
+
+def test_variable_bare_newline_frames_by_layout_not_by_a_0a_in_the_data():
+    # K = 10 is 0x000A: a newline byte *inside* the record.  Splitting on the
+    # first separator cut the first record there and misread the rest.
+    opts = EncodingOptions(
+        record_format=RecordFormat.VARIABLE_BARE, record_separator=b"\n"
+    )
+    decoder = _decoder(BINARY_ODO, opts)
+    specs = [placed.spec for placed in decoder.views.base.fields]
+    rows = [["1", "ab", "", "", "10"], ["2", "cd", "ef", "", "266"]]
+    data = b"".join(encode_record(specs, row, opts) + b"\n" for row in rows)
+    result = decoder.decode_bytes(data)
+    assert result.trailing == b""
+    present = [
+        {f.name: f.value for f in record.fields if f.present}
+        for record in result.records
+    ]
+    assert present == [
+        {"N": "1", "X(1)": "ab", "K": "10"},
+        {"N": "2", "X(1)": "cd", "X(2)": "ef", "K": "266"},
+    ]
+    assert all(not r.errors for r in result.records)
+
+
+def test_variable_bare_newline_falls_back_to_the_separator_for_short_lines():
+    # Text lines that do not fill the layout: the separator is all there is.
+    opts = EncodingOptions(
+        record_format=RecordFormat.VARIABLE_BARE, record_separator=b"\n"
+    )
+    source = "       01  R.\n           05  A PIC X(5).\n"
+    result = _decoder(source, opts).decode_bytes(b"ab\ncd\n")
+    assert [r.fields[0].value for r in result.records] == ["ab", "cd"]
+
+
+def test_an_odo_counter_outside_an_enclosing_fixed_table_is_found_by_name():
+    source = """
+       01  R.
+           05  N PIC 9.
+           05  T OCCURS 2.
+               10  U OCCURS 1 TO 3 DEPENDING ON N.
+                   15  Z PIC X.
+"""
+    opts = EncodingOptions(record_format=RecordFormat.VARIABLE)
+    decoder = _decoder(source, opts)
+    specs = [placed.spec for placed in decoder.views.base.fields]
+    row = ["1", "a", "b", "c", "d", "e", "f"]
+    data = encode_record(specs, row, opts)
+    record = decoder.decode_bytes(data).records[0]
+    present = {f.name: f.value for f in record.fields if f.present}
+    # One occurrence of U under each of T's two: what the encoder wrote.
+    assert present == {"N": "1", "Z(1,1)": "a", "Z(2,1)": "d"}
+    assert record.errors == []
+
+
+@pytest.mark.parametrize("charset", [Charset.ASCII, Charset.EBCDIC])
+def test_blank_when_zero_reads_spaces_as_zero(charset):
+    source = (
+        "       01  R.\n"
+        "           05  D PIC 9(3) BLANK WHEN ZERO.\n"
+        "           05  E PIC ZZ9.99 BLANK WHEN ZERO.\n"
+    )
+    opts = EncodingOptions(charset=charset)
+    decoder = _decoder(source, opts)
+    specs = [placed.spec for placed in decoder.views.base.fields]
+    for row in (["0", "0.00"], ["12", "3.50"]):
+        data = encode_record(specs, row, opts)
+        record = decoder.decode_bytes(data).records[0]
+        assert [f.value for f in record.fields] == row
+        assert record.errors == []
+
+
+def test_without_blank_when_zero_spaces_are_still_an_error():
+    field = _one_field(
+        "       01  R.\n           05  D PIC 9(3).\n", b"   ", EncodingOptions()
+    )
+    assert field.error is not None
+
+
+def test_national_data_is_caveated_on_decode():
+    source = "       01  R.\n           05  N1 PIC N(2).\n"
+    result = _decoder(source, EncodingOptions()).decode_bytes(b"ab  ")
+    assert any("UTF-16" in caveat for caveat in result.caveats)
 
 
 # ---------------------------------------------------------------------------

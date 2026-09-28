@@ -33,14 +33,26 @@ _REPLACING_CATEGORIES = frozenset(
         "EGCS",
     }
 )
+#: Words that end INITIALIZE's target list and start one of its phrases.
+_INITIALIZE_PHRASE_STARTS = _REPLACING_CATEGORIES | {
+    "REPLACING",
+    "WITH",
+    "ALL",
+    "THEN",
+    "TO",
+}
 
 
 class InitializeStatementParser(IStatementParser):
     """Parser for INITIALIZE statements.
 
-    Syntax:
+    Syntax (IBM Enterprise COBOL 6)::
+
         INITIALIZE identifier-1 [identifier-2 ...]
-            [REPLACING {category} [DATA] BY {value} ...]
+            [WITH FILLER]
+            [{ALL | category} TO VALUE]
+            [THEN REPLACING {category [DATA] BY {value}} ...]
+            [THEN TO DEFAULT]
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
@@ -62,7 +74,7 @@ class InitializeStatementParser(IStatementParser):
             if token.type == TokenType.PERIOD:
                 token_stream.consume()
                 return stmt
-            if val in ("REPLACING", "WITH"):
+            if val in _INITIALIZE_PHRASE_STARTS:
                 break
             # A following statement's verb that lexes as a plain IDENTIFIER
             # (e.g. PURGE/RAISE/RESUME have no dedicated TokenType) must not
@@ -78,7 +90,15 @@ class InitializeStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
                 continue
-            if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
+            if token.type == TokenType.IDENTIFIER:
+                token_stream.consume()
+                # Fold a subscript / OF-IN qualifier chain into the target
+                # (`INITIALIZE TBL (I) B OF C`) instead of stranding it as
+                # unparsed trailing tokens.
+                stmt.add_target(
+                    consume_optional_qualifiers(token_stream, token.value or "")
+                )
+            elif token.type == TokenType.STRING_LITERAL:
                 token_stream.consume()
                 stmt.add_target(token.value or "")
             else:
@@ -96,15 +116,48 @@ class InitializeStatementParser(IStatementParser):
                 stmt.with_filler = True
                 skip_whitespace(token_stream)
 
-        # Optional REPLACING clauses
+        # Optional ``{ALL | category} TO VALUE`` phrase
         token = token_stream.peek()
-        if token and _val(token) == "REPLACING":
+        if token and _val(token) in _REPLACING_CATEGORIES | {"ALL"}:
+            nxt = token_stream.peek(1)
+            after = token_stream.peek(2)
+            if nxt and _val(nxt) == "TO" and after and _val(after) == "VALUE":
+                stmt.to_value_category = _val(token)
+                for _ in range(3):
+                    token_stream.consume()
+                skip_whitespace(token_stream)
+
+        # Optional [THEN] REPLACING clauses
+        if self._match_then(token_stream, "REPLACING"):
             token_stream.consume()
             skip_whitespace(token_stream)
             self._parse_replacing(token_stream, stmt)
 
+        # Optional [THEN] TO DEFAULT
+        if self._match_then(token_stream, "TO"):
+            nxt = token_stream.peek(1)
+            if nxt and _val(nxt) == "DEFAULT":
+                token_stream.consume()
+                token_stream.consume()
+                stmt.to_default = True
+                skip_whitespace(token_stream)
+
         consume_period(token_stream)
         return stmt
+
+    @staticmethod
+    def _match_then(ts: ITokenStream, keyword: str) -> bool:
+        """Consume an optional ``THEN`` when *keyword* follows it; report
+        whether *keyword* is now the next token (left unconsumed)."""
+        token = ts.peek()
+        if token and _val(token) == "THEN":
+            nxt = ts.peek(1)
+            if not nxt or _val(nxt) != keyword:
+                return False
+            ts.consume()
+            skip_whitespace(ts)
+            token = ts.peek()
+        return bool(token and _val(token) == keyword)
 
     def _parse_replacing(self, ts: ITokenStream, stmt: InitializeStatement) -> None:
         while not ts.is_empty():
@@ -132,7 +185,12 @@ class InitializeStatementParser(IStatementParser):
                 nxt = ts.peek()
                 if nxt and nxt.type != TokenType.PERIOD:
                     ts.consume()
-                    stmt.add_replacing_clause(category, nxt.value or "")
+                    by_value = nxt.value or ""
+                    if nxt.type == TokenType.IDENTIFIER:
+                        # `BY WS-X OF GRP` / `BY TBL (I)`: a qualified or
+                        # subscripted sending item is one value.
+                        by_value = consume_optional_qualifiers(ts, by_value)
+                    stmt.add_replacing_clause(category, by_value)
                 skip_whitespace(ts)
             else:
                 break

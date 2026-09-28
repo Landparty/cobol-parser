@@ -377,3 +377,44 @@ class TestHexDump:
         specs = specs_for("       01  R.\n           05  A PIC X(2).\n")
         text = hex_dump(specs, [["AB"], ["CD"]], EncodingOptions())
         assert "record 1 of 2" in text and "record 2 of 2" in text
+
+
+class TestBlankWhenZero:
+    def test_zero_is_written_as_spaces(self):
+        spec = one_spec("D PIC 9(3) BLANK WHEN ZERO.")
+        assert spec.blank_when_zero
+        assert encode_field(spec, "0", EncodingOptions()) == b"   "
+        assert encode_field(spec, "", EncodingOptions()) == b"   "
+        assert encode_field(spec, "0", EBCDIC) == b"\x40\x40\x40"
+
+    def test_non_zero_is_written_as_digits(self):
+        spec = one_spec("D PIC 9(3) BLANK WHEN ZERO.")
+        assert encode_field(spec, "12", EncodingOptions()) == b"012"
+
+    def test_numeric_edited_zero_is_blank(self):
+        spec = one_spec("E PIC ZZ9.99 BLANK WHEN ZERO.")
+        assert encode_field(spec, "0.00", EncodingOptions()) == b"      "
+        assert encode_field(spec, "3.50", EncodingOptions()) == b"  3.50"
+
+    def test_without_the_clause_zero_is_digits(self):
+        spec = one_spec("D PIC 9(3).")
+        assert encode_field(spec, "0", EncodingOptions()) == b"000"
+
+
+class TestNationalCaveat:
+    def test_pic_n_is_flagged_as_single_byte_text(self):
+        specs = specs_for(
+            "       01  R.\n"
+            "           05  N1 PIC N(3).\n"
+            "           05  N2 PIC N(2) USAGE NATIONAL.\n"
+            "           05  X1 PIC X(2).\n"
+        )
+        caveats = [c for c in encoding_caveats(specs) if "national" in c]
+        assert len(caveats) == 1
+        assert "UTF-16" in caveats[0]
+        assert "R.N1" in caveats[0] and "R.N2" in caveats[0]
+        assert "X1" not in caveats[0]
+
+    def test_no_national_data_no_caveat(self):
+        specs = specs_for("       01  R.\n           05  X1 PIC X(2).\n")
+        assert not any("national" in c for c in encoding_caveats(specs))

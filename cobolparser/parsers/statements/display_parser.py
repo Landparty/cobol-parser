@@ -200,7 +200,24 @@ class DisplayStatementParser(IStatementParser):
                 # leaving it for the next iteration, where a bare
                 # LEFT_PAREN would fall into the "unknown token" branch
                 # below and abort the whole DISPLAY item list.
-                if token.type == TokenType.IDENTIFIER:
+                function_name = (
+                    self._consume_function_name(token_stream)
+                    if token.type == TokenType.IDENTIFIER
+                    and item_value.upper() == "FUNCTION"
+                    else None
+                )
+                if function_name is not None:
+                    # ``DISPLAY FUNCTION TRIM(A)`` is one item, rendered the
+                    # way MOVE/CALL render it (``FUNCTION TRIM(A)``), with
+                    # the argument list and any reference modification
+                    # (``FUNCTION CURRENT-DATE(1:8)``) folded in.
+                    item_value = f"{item_value} {function_name}"
+                    while True:
+                        group = self._consume_subscript(token_stream)
+                        if not group:
+                            break
+                        item_value += group
+                elif token.type == TokenType.IDENTIFIER:
                     item_value += self._consume_subscript(token_stream)
                     # ``DISPLAY ELEM-1 OF GRP-1`` -- fold a qualifier chain
                     # (and any subscript that follows it) into the item
@@ -285,6 +302,20 @@ class DisplayStatementParser(IStatementParser):
 
         if line is not None or column is not None:
             stmt.set_position(line, column)
+
+    @staticmethod
+    def _consume_function_name(token_stream: ITokenStream) -> str | None:
+        """After a consumed ``FUNCTION`` word, consume the intrinsic name.
+
+        Returns the name, or ``None`` (consuming nothing) when no identifier
+        follows -- then ``FUNCTION`` stays an ordinary item, as before.
+        """
+        token, _ = peek_past_noise(token_stream, 0)
+        if not token or token.type != TokenType.IDENTIFIER or not token.value:
+            return None
+        skip_whitespace(token_stream)
+        token_stream.consume()
+        return token.value
 
     @staticmethod
     def _consume_subscript(token_stream: ITokenStream) -> str:

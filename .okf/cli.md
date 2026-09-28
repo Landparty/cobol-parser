@@ -103,7 +103,9 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
 * **The YAML subset** — stdlib only (this package has no runtime
   dependencies). Nested mappings, block/flow sequences (a block sequence
   may sit at its key's own column -- the indentless form), flow mappings,
-  quoted/plain scalars, `#` comments, one optional leading `---`. Anchors,
+  quoted/plain scalars (`''` and `\"` escapes), `#` comments, one optional
+  leading `---`, an optional trailing `...` (anything significant after it is
+  a second document and rejected), a leading UTF-8 BOM (ignored). Anchors,
   aliases, tags, block scalars, merge keys, multiple documents, tabs in
   indentation and duplicate keys are **rejected with a line number**. Two
   deliberate YAML 1.2-core departures from 1.1: `yes`/`no`/`on`/`off` stay
@@ -196,6 +198,10 @@ Under `auto` (the default) normalisation runs only when `_detect_fixed_format`
 classifies the source as fixed (it used to run unconditionally, silently
 slicing columns off genuine free-form input); `--source-format=fixed` forces
 it; `--source-format=free` skips it entirely.
+Records are split with `_lines.split_source_lines` (\n / \r\n / \r only),
+the same splitter the parser uses. Before 2026-09-28 `preprocess` used
+`str.splitlines()`, so a form feed / NEL / U+2028 inside a comment record
+split it in two and the comment's tail came out as code.
 
 ## Source layout (`--source-format`)
 
@@ -785,6 +791,13 @@ compiled against them. Implementation:
   the bad ones.
 * **`--charset`/`--endian`/`--record-format`/`--record-separator`** mean
   exactly what they mean on `gen-data`, and are the same `EncodingOptions`.
+  `--record-format auto` resolves the same way on both sides for the same
+  source: variable when the layout has a DEPENDING ON table **or** the
+  `--copybook` is a whole program whose FD declares `RECORD VARYING`
+  (`RecordDecoder.varying`, read off `fd_clauses` in `from_record()`).
+  Before 2026-09-28 decode's auto only looked at the layout, so the
+  RDW-framed file `gen-data v.cbl --record-format auto` wrote was read back
+  fixed-length and garbled, exit 0.
   `--record-length` is decode-only: an LRECL to cut fixed-length records at
   when the file's records are longer than the copybook describes (trailing
   slack, or a copybook covering only a prefix).
@@ -822,7 +835,11 @@ of a batch run against the actual one. Implementation:
   layout error, unwritable `-o`). `_cmd_compare` therefore uses its own
   `_compare_fail()` (exit 2) and its own output writer rather than `_fail()` /
   `_verbatim_out()`, both of which exit 1 -- which here would read as "the
-  files differ".
+  files differ". Two failures happen before `_cmd_compare` runs or outside
+  its expected exceptions and used to exit 1 (2026-09-28): a `--config` /
+  `cobol.yml` error (`main()` now routes it through `_config_fail()`, which
+  exits 2 when the subcommand is `compare`), and a copybook that is not text
+  (a `UnicodeDecodeError` traceback; now caught).
 * **`--key`** (repeatable) pairs records by key; **`--ignore`** (repeatable)
   drops a column, a field name (every occurrence) or a group. Both are checked
   against the layout; a typo is exit 2 with the valid column names.
@@ -908,9 +925,19 @@ Output carries `scan_version` (read it before trusting any other key), an
 construction, `files[]` and `failures[]`. A file that cannot be read or
 parsed is a `failures` entry and costs the scan nothing else; an analyzer
 that raises on one unit is named in that unit's `failed_analyzers` with its
-other reports intact. Every program unit of a multi-`PROGRAM-ID` file is
+other reports intact. A file whose copybook expansion failed is still
+scanned (unexpanded) and carries `copybook_error` naming why. Every program
+unit of a multi-`PROGRAM-ID` file is
 reported, each with its nesting `depth` -- the same argument `lint` makes
 for linting every unit.
+
+`--source-format auto|fixed|free` (and `--free-form`, and cobol.yml's
+`project.source_format`) reach the parse through `ScanOptions.free_form` +
+`ScanOptions.preprocess_fixed`, the same pair `_source_format_kwargs()`
+hands every single-file subcommand. Before 2026-09-28 only `free_form` was
+forwarded, so `--source-format fixed` still auto-detected and a member with
+a spaced tag in columns 1-6 scanned as an `UNKNOWN` program with no
+paragraphs.
 
 ## Cross-reference, signatures, codebase graph, SQL/CICS lint, diff, JCL
 

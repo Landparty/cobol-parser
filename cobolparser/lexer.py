@@ -30,6 +30,137 @@ _LEVEL_NUM_RE = re.compile(r"^\d{2}$")
 # First characters of any COBOL division keyword (upper + lower)
 _DIVISION_FIRST = frozenset("IEDPiedp")
 
+# ---------------------------------------------------------------------------
+# IDENTIFICATION DIVISION comment-entries (AUTHOR. / INSTALLATION. / ...)
+# ---------------------------------------------------------------------------
+# A comment-entry is free documentation text, not COBOL words: IBM
+# Enterprise COBOL accepts *any* character in it, up to the next entry that
+# starts in Area A. Tokenizing it like program text read the apostrophe of
+# ``AUTHOR. JOHN O'BRIEN.`` as an unterminated literal (a spurious lexer
+# warning) and split ``DATE-WRITTEN. 01/02/99.`` into ``01 / 02 / 99``. The
+# lexer therefore hands each comment-entry line to the parser verbatim, as a
+# single COMMENT_ENTRY token.
+_COMMENT_ENTRY_KEYWORDS = (
+    "AUTHOR|INSTALLATION|DATE-WRITTEN|DATE-COMPILED|SECURITY|REMARKS"
+)
+_COMMENT_ENTRY_RE = re.compile(
+    r"[ \t]*(?:" + _COMMENT_ENTRY_KEYWORDS + r")[ \t]*\.(?=[ \t]|$)",
+    re.IGNORECASE,
+)
+_COMMENT_ENTRY_ANY_RE = re.compile(
+    r"^[ \t]*(?:" + _COMMENT_ENTRY_KEYWORDS + r")[ \t]*\.",
+    re.IGNORECASE | re.MULTILINE,
+)
+_DIVISION_HEADER_RE = re.compile(
+    r"[ \t]*(IDENTIFICATION|ID|ENVIRONMENT|DATA|PROCEDURE)[ \t]+DIVISION\b",
+    re.IGNORECASE,
+)
+
+
+def _comment_entry_starts(source: str, lines: list[str]) -> dict[int, int]:
+    """Map each free-form line index holding comment-entry text to the
+    offset in that line where the text starts.
+
+    Only IDENTIFICATION DIVISION lines count. A line *starting* with one of
+    the comment-entry paragraph names (``AUTHOR.``) contributes the rest of
+    that line; when that paragraph name sits in Area A (at or left of the
+    ``IDENTIFICATION DIVISION`` header's own indentation -- the fixed-format
+    Area A/B split ``normalize_fixed_format`` preserves) every following
+    line indented into Area B is comment text too, up to the next Area A
+    line. That includes division-header-shaped text: NIST OBNC1M embeds an
+    entire phony program inside a SECURITY comment-entry. A paragraph name
+    indented deeper than the header (a loosely indented free-form source)
+    contributes only its own line, exactly as the IDENTIFICATION DIVISION
+    parser treats it.
+    """
+    if not _COMMENT_ENTRY_ANY_RE.search(source):
+        return {}
+    starts: dict[int, int] = {}
+    in_identification = False
+    header_indent = 0
+    in_area_b_entry = False
+    for index, line in enumerate(lines):
+        body = line.rstrip("\r\n")
+        text = body.lstrip(" \t")
+        if not text.strip():
+            continue
+        indent = len(body) - len(text)
+        if in_area_b_entry:
+            if indent > header_indent:
+                starts[index] = indent
+                continue
+            in_area_b_entry = False
+        header = _DIVISION_HEADER_RE.match(body) if text[0] in _DIVISION_FIRST else None
+        if header is not None:
+            in_identification = header.group(1).upper() in ("IDENTIFICATION", "ID")
+            header_indent = indent
+            continue
+        if not in_identification:
+            continue
+        entry = _COMMENT_ENTRY_RE.match(body)
+        if entry is not None:
+            starts[index] = entry.end()
+            in_area_b_entry = indent <= header_indent
+    return starts
+
+
+# ---------------------------------------------------------------------------
+# SPECIAL-NAMES CURRENCY SIGN: the PICTURE symbols a program declares
+# ---------------------------------------------------------------------------
+# ``CURRENCY SIGN IS '£'`` (or ``CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL
+# '#'``) makes that character a PICTURE editing symbol exactly like ``$``.
+# Characters that are otherwise not COBOL characters at all (``£``, ``€``,
+# ``#``, ``@``, ...) would hit the lexer's "Invalid character" error inside
+# the PICTURE string, so the declared symbols are collected up front and
+# lexed as CURRENCY tokens.
+_CURRENCY_CLAUSE_RE = re.compile(
+    r"\bCURRENCY(?:[ \t\r\n]+SIGN)?(?:[ \t\r\n]+IS)?[ \t\r\n]+"
+    r"(?:\"([^\"\r\n]+)\"|'([^'\r\n]+)')"
+    r"(?:[ \t\r\n]+(?:WITH[ \t\r\n]+)?PICTURE[ \t\r\n]+SYMBOL[ \t\r\n]+"
+    r"(?:\"([^\"\r\n])\"|'([^'\r\n])'))?",
+    re.IGNORECASE,
+)
+
+
+def _declared_currency_symbols(source: str) -> frozenset[str]:
+    """The PICTURE currency symbols a SPECIAL-NAMES paragraph declares.
+
+    A clause without ``PICTURE SYMBOL`` declares its sign as the symbol, so
+    only a one-character sign counts there. Alphanumeric symbols are left
+    out -- they already lex as (part of) a word.
+    """
+    symbols: set[str] = set()
+    for match in _CURRENCY_CLAUSE_RE.finditer(source):
+        sign = match.group(1) or match.group(2) or ""
+        symbol = match.group(3) or match.group(4)
+        if symbol is None and len(sign) == 1:
+            symbol = sign
+        if symbol and not symbol.isalnum() and not symbol.isspace():
+            symbols.add(symbol)
+    return frozenset(symbols)
+
+
+# ---------------------------------------------------------------------------
+# SPECIAL-NAMES DECIMAL-POINT IS COMMA: which character is the decimal point
+# ---------------------------------------------------------------------------
+# ``DECIMAL-POINT IS COMMA`` exchanges the roles of ``,`` and ``.`` in numeric
+# literals and PICTURE character-strings. Like the currency symbols above it
+# is decided from the whole source up front, before any literal is read: the
+# clause sits in the ENVIRONMENT DIVISION, ahead of every literal it governs.
+# The scope is the whole compilation unit (a nested program inherits its
+# container's SPECIAL-NAMES; stacked programs that disagree are not modelled).
+_DECIMAL_POINT_COMMA_RE = re.compile(
+    r"(?<![A-Za-z0-9-])DECIMAL-POINT(?:[ \t\r\n]+IS)?[ \t\r\n]+COMMA(?![A-Za-z0-9-])",
+    re.IGNORECASE,
+)
+
+
+def declares_decimal_point_comma(source: str) -> bool:
+    """True when *source* declares ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA``."""
+    if "DECIMAL-POINT" not in source.upper():
+        return False
+    return _DECIMAL_POINT_COMMA_RE.search(source) is not None
+
 
 class TokenType(IntEnum):
     """Token types for COBOL lexical analysis.
@@ -335,6 +466,10 @@ class TokenType(IntEnum):
 
     # Error tokens
     INVALID_TOKEN = auto()
+
+    # One line of an IDENTIFICATION DIVISION comment-entry (AUTHOR. ...,
+    # REMARKS. ...), verbatim -- free documentation text, not COBOL words.
+    COMMENT_ENTRY = auto()
 
 
 @dataclass(slots=True)
@@ -725,6 +860,41 @@ class _CobolLexerPure:
         self._open_string_quote: str | None = None
         self._open_string_value: list[str] = []
         self._open_string_location: SourceLocation | None = None
+        # PICTURE currency symbols declared by SPECIAL-NAMES CURRENCY SIGN
+        # clauses (lexed as CURRENCY tokens, like ``$``).
+        self._currency_symbols: frozenset[str] = _declared_currency_symbols(source)
+        # ``DECIMAL-POINT IS COMMA``: ``,`` between digits is the decimal
+        # point of a numeric literal and ``.`` is not. A decimal literal's
+        # token keeps the canonical ``.`` spelling in ``value`` (every
+        # consumer reads it as a number) and the source text in
+        # ``raw_value``.
+        self.decimal_point_is_comma: bool = declares_decimal_point_comma(source)
+        self._decimal_char: str = "," if self.decimal_point_is_comma else "."
+
+    def _comment_entry_line_tokens(
+        self, text: str, line_num: int, start_col: int, entry_start: int
+    ) -> list[Token]:
+        """Tokenize one line holding comment-entry text.
+
+        Whatever precedes *entry_start* (the ``AUTHOR.`` paragraph name, or
+        nothing on a continuation line) is ordinary program text; the rest
+        of the line is one COMMENT_ENTRY token holding the text verbatim.
+        """
+        tokens: list[Token] = self.tokenize_program_text(
+            text[:entry_start], line_num, start_col
+        )
+        rest = text[entry_start:]
+        body = rest.strip()
+        if body:
+            offset = entry_start + (len(rest) - len(rest.lstrip()))
+            tokens.append(
+                Token(
+                    TokenType.COMMENT_ENTRY,
+                    body,
+                    SourceLocation(line_num + 1, start_col + offset, len(body)),
+                )
+            )
+        return tokens
 
     def _is_figurative_constant(self, word: str) -> bool:
         """Check if word is a COBOL figurative constant.
@@ -1353,7 +1523,15 @@ class _CobolLexerPure:
                 # A period followed immediately by a digit is a number, not a
                 # statement terminator (terminators are always trailed by whitespace
                 # or end-of-line in normalised free-form text).
-                if char == "." and pos + 1 < length and text[pos + 1].isdigit():
+                # Under DECIMAL-POINT IS COMMA the leading decimal is ``,5``
+                # -- written after a space (``VALUE ,5``); a comma glued to
+                # the word before it (``A,5``) stays a separator.
+                if (
+                    char == self._decimal_char
+                    and pos + 1 < length
+                    and text[pos + 1].isdigit()
+                    and (char == "." or pos == 0 or text[pos - 1] in " \t")
+                ):
                     token, new_pos = self.read_number_from_text(
                         text, pos, line_num, start_col
                     )
@@ -1370,6 +1548,13 @@ class _CobolLexerPure:
                 # concatenations in vendor extensions. We treat it as an ignorable separator so
                 # it doesn't raise a hard lexer error. If future semantics are needed we can
                 # introduce a specific token type.
+                pos += 1
+                continue
+
+            # A PICTURE currency symbol declared by SPECIAL-NAMES
+            # (``CURRENCY SIGN IS '£'``) -- an editing symbol like ``$``.
+            if char in self._currency_symbols:
+                tokens.append(Token(TokenType.CURRENCY, char, location))
                 pos += 1
                 continue
 
@@ -1718,13 +1903,15 @@ class _CobolLexerPure:
         pos = start_pos
         has_decimal = False
         has_exponent = False
+        # ``,`` under DECIMAL-POINT IS COMMA, ``.`` otherwise.
+        decimal_char = self._decimal_char
 
         while pos < len(text):
             char = text[pos]
             if char.isdigit():
                 pos += 1
             elif (
-                char == "."
+                char == decimal_char
                 and not has_decimal
                 and not has_exponent
                 and pos + 1 < len(text)
@@ -1758,6 +1945,17 @@ class _CobolLexerPure:
             # Only treat as level number if it's a valid COBOL level number
             return Token(TokenType.LEVEL_NUMBER, value, location), pos
 
+        if has_decimal and decimal_char == ",":
+            # DECIMAL-POINT IS COMMA: canonical ``.`` value, source in raw_value.
+            return (
+                Token(
+                    TokenType.NUMERIC_LITERAL,
+                    value.replace(",", "."),
+                    location,
+                    value,
+                ),
+                pos,
+            )
         return Token(TokenType.NUMERIC_LITERAL, value, location), pos
 
     def check_division_header(
@@ -1824,12 +2022,23 @@ class _CobolLexerPure:
         self.errors = []
         self.warnings = []
 
+        # Comment-entry lines (free-form only: the parser always lexes the
+        # normalized free-form text).
+        comment_entries = (
+            _comment_entry_starts(self.source, self.lines) if self.free_form else {}
+        )
+
         # Process line by line: fixed-format or free-form
         for line_num, line in enumerate(self.lines):
             if self.free_form:
                 # In free-form, treat entire line (minus trailing newline) as program text starting column 1
                 program_text = line.rstrip("\n")
-                tokens = self.tokenize_program_text(program_text, line_num, 1)
+                if comment_entries and line_num in comment_entries:
+                    tokens = self._comment_entry_line_tokens(
+                        program_text, line_num, 1, comment_entries[line_num]
+                    )
+                else:
+                    tokens = self.tokenize_program_text(program_text, line_num, 1)
                 self.tokens.extend(tokens)
                 if tokens:
                     location = SourceLocation(line_num + 1, len(line) + 1, 1)
@@ -1845,8 +2054,118 @@ class _CobolLexerPure:
         final_location = SourceLocation(len(self.lines) + 1, 1, 1)
         self.tokens.append(Token(TokenType.EOF, "", final_location))
 
-        self._flag_stray_sql_chars()
+        self._post_tokenize()
         return self.tokens
+
+    def _post_tokenize(self) -> None:
+        """Token-list post-passes shared by the pure-Python and Cython paths.
+
+        Both ``tokenize()`` implementations call this once, after the EOF
+        token is appended; it rewrites ``self.tokens`` in place (the Cython
+        path returns the same list object).
+        """
+        self._merge_concatenated_literals()
+        self._flag_stray_sql_chars()
+
+    #: Literal prefixes whose literals may be joined with ``&`` (IBM:
+    #: alphanumeric, national and DBCS literals). ``Z`` (null-terminated) and
+    #: ``B`` (boolean) literals may not be concatenated.
+    _CONCATENABLE_PREFIXES = frozenset({"", "X", "N", "NX", "G", "U"})
+
+    @staticmethod
+    def _literal_prefix(token: Token) -> str:
+        raw = token.raw_value
+        if not raw:
+            return ""
+        for index, ch in enumerate(raw):
+            if ch in "\"'":
+                return raw[:index].upper()
+        return raw.upper()
+
+    def _ampersand_joins(self, prev: Token, token: Token) -> bool:
+        """Whether the source between two literal tokens is ``&`` alone.
+
+        ``&`` never becomes a token (the lexer skips it), so the source text
+        is read back: scanning left from *token*'s first character, only
+        whitespace, exactly one ``&``, more whitespace, then the closing
+        quote of *prev* may appear. A fixed-format line is read in columns
+        8-72 only, so a sequence number never reads as program text.
+        """
+        lines = self.lines
+        lo = 0 if self.free_form else _FF_AREA_A
+        prev_line = prev.location.line - 1
+        prev_col = prev.location.column - 1
+        line_idx = token.location.line - 1
+        if line_idx >= len(lines):
+            return False
+        pos = token.location.column - 2
+        seen_amp = False
+        while True:
+            line = lines[line_idx].rstrip("\n")
+            pos = min(pos, len(line) - 1)
+            while pos >= lo:
+                ch = line[pos]
+                if ch.isspace():
+                    pos -= 1
+                elif ch == "&" and not seen_amp:
+                    seen_amp = True
+                    pos -= 1
+                else:
+                    return (
+                        seen_amp
+                        and ch in "\"'"
+                        and (line_idx, pos) > (prev_line, prev_col)
+                    )
+            line_idx -= 1
+            if line_idx < prev_line:
+                return False
+            pos = len(lines[line_idx]) if self.free_form else _FF_LINE_END - 1
+
+    def _merge_concatenated_literals(self) -> None:
+        """Join ``lit-1 & lit-2 [& ...]`` into one STRING_LITERAL token.
+
+        IBM Enterprise COBOL allows alphanumeric / national / DBCS literals
+        of one kind to be concatenated with ``&``: ``"AB" & "CD"`` is the
+        literal ``"ABCD"`` wherever a literal may appear (a VALUE clause, a
+        MOVE source, ...). The lexer drops ``&`` as a separator, so before
+        this every consumer saw two literals -- a data item kept only the
+        first and warned, a MOVE source read ``"AB" "CD"``. Merging here
+        means every consumer sees the one literal the compiler does.
+        Literals of different kinds are left as they are.
+        """
+        tokens = self.tokens
+        if not any("&" in line for line in self.lines):
+            return
+        merged: list[Token] = []
+        last_index = -1  # index in *merged* of the last non-NEWLINE token
+        for token in tokens:
+            prev = merged[last_index] if last_index >= 0 else None
+            if (
+                token.type == TokenType.STRING_LITERAL
+                and prev is not None
+                and prev.type == TokenType.STRING_LITERAL
+            ):
+                prefix = self._literal_prefix(token)
+                if (
+                    prefix == self._literal_prefix(prev)
+                    and prefix in self._CONCATENABLE_PREFIXES
+                    and self._ampersand_joins(prev, token)
+                ):
+                    value = prev.value + token.value
+                    raw_value: str | None = None
+                    if prefix:
+                        quote = prev.raw_value[len(prefix)]  # type: ignore[index]
+                        raw_value = (
+                            prefix + quote + value.replace(quote, quote * 2) + quote
+                        )
+                    merged[last_index] = Token(
+                        TokenType.STRING_LITERAL, value, prev.location, raw_value
+                    )
+                    continue
+            merged.append(token)
+            if token.type != TokenType.NEWLINE:
+                last_index = len(merged) - 1
+        tokens[:] = merged
 
     def _flag_stray_sql_chars(self) -> None:
         """Record an "Invalid character" error for '!' / '|' / '¬' tokens

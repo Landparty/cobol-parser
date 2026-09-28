@@ -10,8 +10,10 @@ form ``$1,234.56``.  :func:`edit_numeric` produces that form and
 other storage class.
 
 Supported symbols are the ones IBM Enterprise COBOL defines for a
-numeric-edited item under the default ``DECIMAL-POINT`` and ``CURRENCY SIGN``:
-``9 Z * 0 B / , . V + - CR DB $``.  A picture using anything else (a ``P``
+numeric-edited item under the default ``CURRENCY SIGN``:
+``9 Z * 0 B / , . V + - CR DB $``.  Under ``DECIMAL-POINT IS COMMA``
+(``decimal_point_is_comma=True``) ``,`` and ``.`` exchange roles, in the
+picture and in the edited text alike (``Z.ZZ9,99`` shows ``1.234,56``).  A picture using anything else (a ``P``
 scaling position, a non-default currency symbol) returns ``None`` and the
 caller keeps its previous behaviour rather than writing a guessed form.
 
@@ -45,6 +47,9 @@ _SUPPORTED = frozenset({"9", "Z", "*", "0", "B", "/", ",", ".", "V", "+", "-"})
 _SUPPORTED |= {"CR", "DB", "$"}
 _FLOATING = ("$", "+", "-")
 _SIMPLE_INSERTION = frozenset({"0", "B", "/", ","})
+#: ``DECIMAL-POINT IS COMMA`` exchanges ``,`` and ``.``; an involution, so the
+#: same table maps a picture to the default spelling and edited text back.
+_SWAP_DECIMAL = str.maketrans({",": ".", ".": ","})
 
 
 class _Layout:
@@ -84,13 +89,23 @@ def _layout(picture: str | None) -> _Layout | None:
     return _Layout(symbols, floating[0] if floating else None)
 
 
-def edit_numeric(picture: str | None, value: str) -> str | None:
+def edit_numeric(
+    picture: str | None, value: str, *, decimal_point_is_comma: bool = False
+) -> str | None:
     """*value* (a logical number, ``-1234.56``) as *picture* displays it.
 
     Returns ``None`` when the picture uses a symbol this module does not
     model.  A blank or non-numeric *value* edits as zero, the same way the
     other encoders treat it: a generated record must always be writable.
+    *decimal_point_is_comma* reads *picture* under ``DECIMAL-POINT IS
+    COMMA`` and writes the edited text the same way; *value* is always a
+    logical number with a ``.`` decimal point.
     """
+    if decimal_point_is_comma:
+        if picture is None:
+            return None
+        edited = edit_numeric(picture.translate(_SWAP_DECIMAL), value)
+        return None if edited is None else edited.translate(_SWAP_DECIMAL)
     layout = _layout(picture)
     if layout is None:
         return None
@@ -199,7 +214,9 @@ def _floating_char(symbol: str, negative: bool) -> str:
     return "-" if negative else " "
 
 
-def deedit_numeric(picture: str | None, text: str) -> tuple[int, bool] | None:
+def deedit_numeric(
+    picture: str | None, text: str, *, decimal_point_is_comma: bool = False
+) -> tuple[int, bool] | None:
     """The digits and sign *text* holds under *picture*.
 
     Returns ``(magnitude, negative)`` -- the value as an integer of the
@@ -208,8 +225,15 @@ def deedit_numeric(picture: str | None, text: str) -> tuple[int, bool] | None:
     *text* is not the picture's width, or a digit position holds a character
     no edit could have put there.  A digit position holding anything
     but a digit (a space, ``*``, the floating symbol) reads as zero, which is
-    exactly what the edit put there.
+    exactly what the edit put there.  *decimal_point_is_comma* as for
+    :func:`edit_numeric`.
     """
+    if decimal_point_is_comma:
+        if picture is None:
+            return None
+        return deedit_numeric(
+            picture.translate(_SWAP_DECIMAL), text.translate(_SWAP_DECIMAL)
+        )
     layout = _layout(picture)
     if layout is None:
         return None
@@ -236,5 +260,15 @@ def deedit_numeric(picture: str | None, text: str) -> tuple[int, bool] | None:
             negative = negative or chunk == "-"
         elif sym in ("CR", "DB"):
             negative = negative or chunk.upper() == sym
+        elif (
+            sym in _SIMPLE_INSERTION
+            and layout.float_first < i < layout.float_last
+            and layout.floating in ("+", "-")
+        ):
+            # A floating sign lands immediately left of the first digit
+            # kept, which may be an insertion position inside the floating
+            # string: ``PIC +++,+++`` edits -514 as ``   -514``, the ``-``
+            # sitting where the comma would be.
+            negative = negative or chunk == "-"
     magnitude = int("".join(digits)) if digits else 0
     return magnitude, negative and magnitude != 0

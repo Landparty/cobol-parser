@@ -339,9 +339,19 @@ class PathResolver:
     def _build_directory_index(self) -> dict[str, str]:
         """Build an index of all copybook files across search directories.
 
-        Returns a dict mapping normalized (uppercased, no-extension) names
-        AND full filenames to their absolute paths. This turns per-lookup
-        filesystem traversal into a one-time scan + O(1) dict lookups.
+        Returns a dict mapping each file's full filename (uppercased when
+        the search is case-insensitive) to its absolute path. This turns
+        per-lookup filesystem traversal into a one-time scan + O(1) dict
+        lookups.
+
+        Only the *full* filename is a key. The index used to carry a
+        bare-stem key as well (``MEM`` for ``MEM.bak``), which let
+        ``COPY MEM`` resolve to a file of ANY extension -- ``MEM.bak``,
+        ``MEM.txt``, the program's own ``MEM.cbl`` -- picked by whichever
+        one ``os.scandir()`` happened to list first, instead of walking
+        ``CopybookSearchPath.extensions`` in order the way Tier 3 does.
+        The member name plus each configured extension is looked up
+        explicitly in :meth:`resolve` instead.
         """
         index: dict[str, str] = {}
         for search_dir in self.search_config.directories:
@@ -351,26 +361,29 @@ class PathResolver:
                 entries = os.scandir(search_dir)
             except OSError:
                 continue
-            for entry in entries:
-                if not entry.is_file():
-                    continue
-                abs_path = os.path.abspath(entry.path)
-                name = entry.name
-                # First-configured-directory wins for BOTH the full-filename
-                # key and the stem key, matching Tier-3's
-                # ``find_copybook_file`` directory-order semantics. The
-                # full-filename key used to be last-wins (unconditional
-                # assignment) while the stem key was first-wins, so the two
-                # lookup shapes could resolve the same member to files in
-                # different directories.
-                if self.search_config.case_sensitive:
-                    index.setdefault(name, abs_path)
-                    # Also index by stem (without extension)
-                    index.setdefault(Path(name).stem, abs_path)
-                else:
-                    index.setdefault(name.upper(), abs_path)
-                    index.setdefault(Path(name).stem.upper(), abs_path)
+            with entries:
+                for entry in entries:
+                    if not entry.is_file():
+                        continue
+                    abs_path = os.path.abspath(entry.path)
+                    # First-configured-directory wins, matching Tier-3's
+                    # ``find_copybook_file`` directory-order semantics.
+                    key = (
+                        entry.name
+                        if self.search_config.case_sensitive
+                        else entry.name.upper()
+                    )
+                    index.setdefault(key, abs_path)
         return index
+
+    def _directory_rank(self, path: str) -> int:
+        """Position of *path*'s directory in the configured search order
+        (``len(directories)`` when it is in none of them)."""
+        parent = os.path.dirname(path)
+        for rank, search_dir in enumerate(self.search_config.directories):
+            if os.path.abspath(search_dir) == parent:
+                return rank
+        return len(self.search_config.directories)
 
     def _validate_indexed_result(self, result: str) -> None:
         """Containment check for a Tier-2 (directory-index) resolution.
@@ -434,10 +447,29 @@ class PathResolver:
                 if self.search_config.case_sensitive
                 else member_name.upper()
             )
-            if lookup_key in self._dir_index:
-                result = self._dir_index[lookup_key]
+            # Candidates in Tier-3 probe order: the name as written, then
+            # the name plus each configured extension in order. The winner
+            # is the first *directory* that holds any candidate (directory
+            # order is the SYSLIB concatenation order), and within that
+            # directory the first candidate in probe order.
+            candidates = [lookup_key]
+            for ext in self.search_config.extensions:
+                if ext:
+                    candidates.append(
+                        f"{lookup_key}"
+                        f"{ext if self.search_config.case_sensitive else ext.upper()}"
+                    )
+            best: tuple[int, int, str] | None = None
+            for order, key in enumerate(candidates):
+                hit = self._dir_index.get(key)
+                if hit is None:
+                    continue
+                ranked = (self._directory_rank(hit), order, hit)
+                if best is None or ranked < best:
+                    best = ranked
+            if best is not None:
+                result = best[2]
                 self._validate_indexed_result(result)
-                # Validate size
                 file_size = os.path.getsize(result)
                 if file_size > self.search_config.max_file_size:
                     raise CopybookSizeExceededError(
@@ -445,21 +477,6 @@ class PathResolver:
                     )
                 self._resolution_cache[cache_key] = result
                 return result
-
-            # Try with common extensions
-            for ext in self.search_config.extensions:
-                if ext:
-                    ext_key = f"{lookup_key}{ext.upper() if not self.search_config.case_sensitive else ext}"
-                    if ext_key in self._dir_index:
-                        result = self._dir_index[ext_key]
-                        self._validate_indexed_result(result)
-                        file_size = os.path.getsize(result)
-                        if file_size > self.search_config.max_file_size:
-                            raise CopybookSizeExceededError(
-                                result, file_size, self.search_config.max_file_size
-                            )
-                        self._resolution_cache[cache_key] = result
-                        return result
 
         # Tier 3: Full filesystem search (handles library qualifiers and edge cases)
         result = find_copybook_file(member_name, self.search_config, library_qualifier)

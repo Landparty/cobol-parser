@@ -1605,11 +1605,56 @@ def _follows_qualifier_period(prev_token: Token | None, token: Token) -> bool:
     return cur_loc.column == prev_loc.column + len(prev_token.value or "")
 
 
-def collect_exec_sql_text(stream: ITokenStream) -> str:
+def _sql_literal_text(token: Token) -> str:
+    """Render a STRING_LITERAL token back as SQL source text.
+
+    The lexer hands a literal over with its delimiters stripped, so without
+    this ``WHERE B = 'X:Y'`` reached the SQL model as ``WHERE B = X:Y`` and
+    ``:Y`` was reported as a host variable (``'FROM T9'`` likewise became a
+    table). A typed literal (``X'C1'``) keeps its original text; any other is
+    re-delimited with the SQL string delimiter, embedded quotes doubled.
+    """
+    if token.raw_value:
+        return token.raw_value
+    return "'" + (token.value or "").replace("'", "''") + "'"
+
+
+def _starts_sql_comment(token: Token, next_token: Token | None) -> bool:
+    """True when *token* and *next_token* are the two abutting ``-`` of ``--``.
+
+    The lexer has no token for an SQL line comment; it hands ``--`` over as
+    two MINUS tokens in adjacent columns (a real subtraction of a negative,
+    ``A - -1``, is written with a blank between them).
+    """
+    if next_token is None:
+        return False
+    if token.type != TokenType.MINUS or next_token.type != TokenType.MINUS:
+        return False
+    loc, next_loc = token.location, next_token.location
+    if loc is None or next_loc is None or loc.line != next_loc.line:
+        return False
+    return next_loc.column == loc.column + 1
+
+
+def _is_end_exec(token: Token) -> bool:
+    return token.type == TokenType.END_EXEC or bool(
+        token.type == TokenType.IDENTIFIER
+        and token.value
+        and token.value.upper() == "END-EXEC"
+    )
+
+
+def collect_exec_sql_text(stream: ITokenStream, sql: bool = False) -> str:
     """Collect the raw SQL text from a token stream up to (and consuming) END-EXEC.
 
     The stream must be positioned **after** the ``EXEC SQL`` keyword pair has
     already been consumed by the caller.
+
+    With *sql* true (EXEC SQL blocks), string literals keep their quotes
+    (:func:`_sql_literal_text`) and ``--`` line comments are dropped up to the
+    end of their line, so neither text inside a literal nor text inside a
+    comment can be read as a host variable or a table. EXEC CICS / EXEC DLI
+    text is collected as before (their option values are read unquoted).
 
     Host-variable colons (e.g. ``:WS-NAME``) are preserved by attaching the
     identifier directly to the preceding colon token (no space inserted).
@@ -1644,17 +1689,30 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
         if not token:
             break
 
-        is_end_exec = token.type == TokenType.END_EXEC or (
-            token.type == TokenType.IDENTIFIER
-            and token.value
-            and token.value.upper() == "END-EXEC"
-        )
-        if is_end_exec:
+        if _is_end_exec(token):
             stream.consume()
             terminated = True
             break
 
-        if token.value:
+        if sql and _starts_sql_comment(token, peek_token(stream, 1)):
+            # Drop the comment, but not the newline ending it nor an END-EXEC.
+            while not stream.is_empty():
+                pending = stream.peek(0)
+                if (
+                    pending is None
+                    or pending.type == TokenType.NEWLINE
+                    or _is_end_exec(pending)
+                ):
+                    break
+                stream.consume()
+            continue
+
+        if token.value or (sql and token.type == TokenType.STRING_LITERAL):
+            text = (
+                _sql_literal_text(token)
+                if sql and token.type == TokenType.STRING_LITERAL
+                else token.value
+            )
             no_space_before = (
                 prev_was_colon
                 or token.type in _EXEC_SQL_NO_SPACE_BEFORE
@@ -1663,11 +1721,11 @@ def collect_exec_sql_text(stream: ITokenStream) -> str:
             )
             if no_space_before:
                 if sql_parts:
-                    sql_parts[-1] = sql_parts[-1] + token.value
+                    sql_parts[-1] = sql_parts[-1] + text
                 else:
-                    sql_parts.append(token.value)
+                    sql_parts.append(text)
             else:
-                sql_parts.append(token.value)
+                sql_parts.append(text)
             prev_was_colon = token.type == TokenType.COLON
             prev_token = token
         stream.consume()

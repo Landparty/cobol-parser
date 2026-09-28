@@ -92,6 +92,12 @@ class ScanOptions:
     encoding: str = "utf-8"
     errors: str = "replace"
     free_form: bool = False
+    #: ``parse_cobol``'s layout override: ``None`` auto-detects, ``True``
+    #: forces fixed-format normalization, ``False`` disables it. The CLI's
+    #: ``--source-format fixed|free`` (and ``source_format:`` in cobol.yml)
+    #: land here; ``free_form`` alone is only the lexer-mode hint that
+    #: auto-detection may still override.
+    preprocess_fixed: bool | None = None
 
 
 @dataclass
@@ -133,6 +139,11 @@ class FileScan:
     #: A unit analyzed out of a partially-recovered AST is worth grading but
     #: worth labelling, so a low score is not read as certain.
     parse_error_count: int = 0
+    #: Why copybook expansion failed, when the file fell back to its
+    #: unexpanded parse. That parse can be error-free -- a COPY statement
+    #: parses fine without its member -- so without this the report would be
+    #: graded against a record layout it never saw, with nothing to say so.
+    copybook_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"path": self.path}
@@ -142,6 +153,8 @@ class FileScan:
         out["units"] = [unit.to_dict() for unit in self.units]
         if self.parse_error_count:
             out["parse_error_count"] = self.parse_error_count
+        if self.copybook_error is not None:
+            out["copybook_error"] = self.copybook_error
         return out
 
 
@@ -270,8 +283,9 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
     except OSError as exc:
         return FileScan(path=path, error=f"could not read: {exc}")
 
+    expansion_failures: list[str] = []
     try:
-        result = _parse(source, path, options)
+        result = _parse(source, path, options, expansion_failures)
     except Exception as exc:  # noqa: BLE001
         return FileScan(path=path, error=f"{type(exc).__name__}: {exc}")
 
@@ -282,7 +296,11 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
             error=f"could not be parsed: {first}" if first else "could not be parsed",
         )
 
-    scan = FileScan(path=path, parse_error_count=len(result.errors))
+    scan = FileScan(
+        path=path,
+        parse_error_count=len(result.errors),
+        copybook_error=expansion_failures[0] if expansion_failures else None,
+    )
     source_map = getattr(result, "expansion_source_map", None)
     for unit, depth in _units_with_depth(result.ast):
         unit_scan = _scan_unit(unit, depth, options)
@@ -298,7 +316,12 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
     return scan
 
 
-def _parse(source: str, path: str, options: ScanOptions) -> Any:
+def _parse(
+    source: str,
+    path: str,
+    options: ScanOptions,
+    expansion_failures: list[str] | None = None,
+) -> Any:
     """Parse *source*, expanding copybooks when the caller supplied paths.
 
     Copybook expansion is not merely a nicety for a scan: an unexpanded
@@ -307,8 +330,10 @@ def _parse(source: str, path: str, options: ScanOptions) -> Any:
     redundancy component, and therefore the grade a portfolio table sorts
     on) would grade a program against a record layout it cannot see. When
     expansion fails the file is NOT dropped -- the unexpanded parse still
-    grades the procedure division correctly -- but that is a caveat the
-    caller can see in ``parse_error_count``.
+    grades the procedure division correctly -- but the reason is appended
+    to *expansion_failures*, which ``scan_one`` reports as the file's
+    ``copybook_error``. (``parse_error_count`` cannot carry it: the
+    unexpanded parse is usually error-free.)
     """
     kwargs: dict[str, Any] = {
         "dialect": options.dialect,
@@ -316,6 +341,8 @@ def _parse(source: str, path: str, options: ScanOptions) -> Any:
     }
     if options.free_form:
         kwargs["free_form"] = True
+    if options.preprocess_fixed is not None:
+        kwargs["preprocess_fixed"] = options.preprocess_fixed
 
     if options.copybook_paths:
         from cobolparser.preprocess.copybook_expander import parse_cobol_with_expansion
@@ -327,11 +354,14 @@ def _parse(source: str, path: str, options: ScanOptions) -> Any:
                 copybook_paths=list(options.copybook_paths),
                 **kwargs,
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             # A missing or circular member must not cost the whole file its
             # report -- fall back to the unexpanded parse, which is exactly
             # what a scan with no copybook paths at all would have produced.
-            pass
+            # But say so: before 2026-09-28 this was a bare `pass`, and the
+            # file's reports were indistinguishable from an expanded scan.
+            if expansion_failures is not None:
+                expansion_failures.append(f"{type(exc).__name__}: {exc}")
 
     from cobolparser.parser import parse_cobol
 

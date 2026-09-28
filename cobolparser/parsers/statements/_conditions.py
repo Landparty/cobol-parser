@@ -53,16 +53,6 @@ _RELATIONAL_WORDS = frozenset(
     }
 )
 
-# Multi-word NOT-prefixed operators normalised during the cleaning pass.
-_NEGATED_OPS = {
-    "NOT EQUAL": "NOT_EQUAL",
-    "NOT =": "NOT_EQUAL",
-    "NOT LESS": "GREATER_OR_EQUAL",
-    "NOT <": "GREATER_OR_EQUAL",
-    "NOT GREATER": "LESS_OR_EQUAL",
-    "NOT >": "LESS_OR_EQUAL",
-}
-
 # Class-condition and sign-condition keywords (IBM Enterprise COBOL).
 # ``A IS [NOT] <word>`` conditions on these get a structured node instead
 # of only a metadata raw_condition string (M12).
@@ -182,11 +172,15 @@ def build_condition_expression(
                 i += 1
             continue
         if tok == "NOT" and i + 1 < len(tokens):
-            nxt = tokens[i + 1].upper()
-            combined = _NEGATED_OPS.get(f"NOT {nxt}")
-            if combined:
-                cleaned.append(combined)
-                i += 2
+            # Resolve the whole operator after NOT before negating it:
+            # ``NOT GREATER THAN OR EQUAL TO`` / ``NOT >=`` / ``NOT < =`` is
+            # the negation of GREATER_OR_EQUAL / LESS_OR_EQUAL (i.e. LESS /
+            # GREATER), not ``NOT GREATER`` followed by an OR or a stray
+            # ``=`` in the right-hand operand.
+            matched = _match_relational_operator(tokens, i + 1)
+            if matched is not None:
+                op, i = matched
+                cleaned.append(_NEGATED_RELATIONAL[op])
                 continue
         if i + 1 < len(tokens):
             pair = tok + tokens[i + 1].upper()
@@ -274,6 +268,48 @@ def build_condition_expression(
         expr._metadata["raw_condition"] = " ".join(cleaned)
         return expr
 
+    return None
+
+
+def _match_relational_operator(tokens: list[str], start: int) -> tuple[str, int] | None:
+    """Match one relational operator at ``tokens[start]``.
+
+    Returns ``(resolved_operator, index_after_operator)`` or ``None``.
+    Recognises ``GREATER|LESS [THAN] [OR EQUAL [TO]]``, ``EQUAL[S] [TO]``,
+    and the symbols ``>``, ``<``, ``=``, ``>=``, ``<=`` -- the two-character
+    ones also when the lexer split them (or the source spaced them) into
+    two tokens (``> =``). Trailing ``THAN``/``TO`` noise words are consumed.
+    """
+    n = len(tokens)
+    if start >= n:
+        return None
+    tok = tokens[start].upper()
+    j = start + 1
+    if tok in ("GREATER", "LESS"):
+        if j < n and tokens[j].upper() == "THAN":
+            j += 1
+        if (
+            j + 1 < n
+            and tokens[j].upper() == "OR"
+            and tokens[j + 1].upper() in ("EQUAL", "EQUALS")
+        ):
+            j += 2
+            if j < n and tokens[j].upper() == "TO":
+                j += 1
+            return ("GREATER_OR_EQUAL" if tok == "GREATER" else "LESS_OR_EQUAL"), j
+        return ("GREATER" if tok == "GREATER" else "LESS"), j
+    if tok in ("EQUAL", "EQUALS"):
+        if j < n and tokens[j].upper() == "TO":
+            j += 1
+        return "EQUAL", j
+    if tok in (">", "<"):
+        if j < n and tokens[j] == "=":
+            return ("GREATER_OR_EQUAL" if tok == ">" else "LESS_OR_EQUAL"), j + 1
+        return ("GREATER" if tok == ">" else "LESS"), j
+    if tok in (">=", "<="):
+        return ("GREATER_OR_EQUAL" if tok == ">=" else "LESS_OR_EQUAL"), j
+    if tok == "=":
+        return "EQUAL", j
     return None
 
 

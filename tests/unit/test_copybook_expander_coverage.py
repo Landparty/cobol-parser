@@ -103,8 +103,8 @@ class TestDetectEncoding:
 
         try:
             encoding = detect_encoding(temp_path)
-            # Should fallback to ASCII
-            assert encoding in ["ascii", "cp037"]
+            # Should fall back to an 8-bit ASCII superset (or EBCDIC)
+            assert encoding in ["cp1252", "latin-1", "cp037"]
         finally:
             os.unlink(temp_path)
 

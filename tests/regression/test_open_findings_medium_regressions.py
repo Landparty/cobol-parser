@@ -272,7 +272,9 @@ class TestM5ContinuedLiteralTrailingBlanks:
             self._line("-", '           "DEF".'),
         ]
         out = normalize_fixed_format(lines)
-        assert '"ABC   DEF"' in out, out
+        # The three written blanks, then the ones the record stops short of
+        # column 72 by: all of them lie inside the literal.
+        assert '"ABC' + " " * (72 - len(lines[0]) + 3) + 'DEF"' in out, out
 
     def test_trailing_blanks_still_stripped_when_not_continued(self):
         lines = [

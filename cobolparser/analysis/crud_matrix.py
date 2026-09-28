@@ -29,6 +29,12 @@ from ..models.statements import (
     IORewriteStatement,
     IOWriteStatement,
 )
+from ..models.statements.misc import (
+    MergeStatement,
+    ReleaseStatement,
+    ReturnStatement,
+    SortStatement,
+)
 from ._files import record_to_file_map, resolve_file_name
 
 
@@ -222,6 +228,9 @@ class CRUDMatrixGenerator:
         - R (Read)    <- READ statement
         - U (Update)  <- REWRITE statement
         - D (Delete)  <- DELETE statement
+        - SORT/MERGE ``USING`` files are read (R) and ``GIVING`` files are
+          written (C); ``RELEASE`` writes (C) and ``RETURN`` reads (R) the
+          SD work file
         OPEN modes (INPUT/OUTPUT/I-O/EXTEND) are recorded as metadata.
 
     SQL table mapping:
@@ -418,6 +427,29 @@ class CRUDMatrixGenerator:
                 fn = self._resolve_file_name(stmt.file_name, None)
                 if fn:
                     self._get_or_create_file_entry(fn).crud.delete = True
+
+            elif isinstance(stmt, (SortStatement, MergeStatement)):
+                # `SORT ... USING a GIVING b` opens, reads every record of
+                # `a` and writes every record of `b` itself -- no READ or
+                # WRITE statement of the program's own ever names them.
+                for name in stmt.using_files:
+                    fn = self._resolve_file_name(name, None)
+                    if fn:
+                        self._get_or_create_file_entry(fn).crud.read = True
+                for name in stmt.giving_files:
+                    fn = self._resolve_file_name(name, None)
+                    if fn:
+                        self._get_or_create_file_entry(fn).crud.create = True
+
+            elif isinstance(stmt, ReleaseStatement):
+                fn = self._resolve_file_name(None, stmt.record_name)
+                if fn:
+                    self._get_or_create_file_entry(fn).crud.create = True
+
+            elif isinstance(stmt, ReturnStatement):
+                fn = self._resolve_file_name(stmt.file_name, None)
+                if fn:
+                    self._get_or_create_file_entry(fn).crud.read = True
 
     # ------------------------------------------------------------------
     # SQL CRUD marking

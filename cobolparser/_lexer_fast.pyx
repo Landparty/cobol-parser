@@ -24,6 +24,7 @@ from cobolparser.lexer import (
     _LEVEL_NUMBER_1_2DIGIT_RE,
     _FF_INDICATOR,
     _DIVISION_FIRST,
+    _comment_entry_starts,
 )
 from cobolparser.models.ast_base import SourceLocation
 
@@ -137,6 +138,12 @@ class CobolLexer(_CobolLexerBase):
         # tokenize() call, or repeated calls on one lexer duplicate them.
         self.warnings = []
 
+        # Comment-entry lines (AUTHOR. ...), handed over verbatim; mirrors
+        # lexer.py.
+        cdef dict comment_entries = (
+            _comment_entry_starts(self.source, lines) if free_form else {}
+        )
+
         n_lines = len(lines)
         for line_num in range(n_lines):
             line = lines[line_num]
@@ -145,7 +152,12 @@ class CobolLexer(_CobolLexerBase):
                     program_text = line[:-1]
                 else:
                     program_text = line
-                tokens = self.tokenize_program_text(program_text, line_num, 1)
+                if comment_entries and line_num in comment_entries:
+                    tokens = self._comment_entry_line_tokens(
+                        program_text, line_num, 1, comment_entries[line_num]
+                    )
+                else:
+                    tokens = self.tokenize_program_text(program_text, line_num, 1)
                 if tokens:
                     out_tokens.extend(tokens)
                     out_tokens.append(
@@ -171,10 +183,12 @@ class CobolLexer(_CobolLexerBase):
         out_tokens.append(
             Token(TokenType.EOF, "", SourceLocation(n_lines + 1, 1, 1))
         )
-        # Inherited pure-Python post-pass (lexer.py): flags '!'/'|'/'¬'
-        # tokens outside EXEC ... END-EXEC as the invalid characters they
-        # are. One linear scan; not worth a C-typed mirror.
-        self._flag_stray_sql_chars()
+        # Inherited pure-Python post-passes (lexer.py ``_post_tokenize``):
+        # joins ``lit & lit`` into one literal and flags '!'/'|'/'¬' tokens
+        # outside EXEC ... END-EXEC as the invalid characters they are.
+        # Both rewrite ``out_tokens`` in place; linear scans, not worth a
+        # C-typed mirror.
+        self._post_tokenize()
         return out_tokens
 
     # ------------------------------------------------------------------
@@ -228,6 +242,8 @@ class CobolLexer(_CobolLexerBase):
         cdef bint has_decimal = False
         cdef bint has_exponent = False
         cdef str char
+        # ``,`` under DECIMAL-POINT IS COMMA, ``.`` otherwise (lexer.py).
+        cdef str decimal_char = self._decimal_char
 
         location = SourceLocation(line_num + 1, start_col + start_pos, 1)
 
@@ -236,7 +252,7 @@ class CobolLexer(_CobolLexerBase):
             if char.isdigit():
                 pos += 1
             elif (
-                char == "."
+                char == decimal_char
                 and not has_decimal
                 and not has_exponent
                 and pos + 1 < length
@@ -267,6 +283,17 @@ class CobolLexer(_CobolLexerBase):
         ):
             return Token(TokenType.LEVEL_NUMBER, value, location), pos
 
+        if has_decimal and decimal_char == ",":
+            # DECIMAL-POINT IS COMMA: canonical ``.`` value, source in raw_value.
+            return (
+                Token(
+                    TokenType.NUMERIC_LITERAL,
+                    value.replace(",", "."),
+                    location,
+                    value,
+                ),
+                pos,
+            )
         return Token(TokenType.NUMERIC_LITERAL, value, location), pos
 
     # ------------------------------------------------------------------
@@ -509,7 +536,19 @@ class CobolLexer(_CobolLexerBase):
             # ---- single-character tokens ---------------------------
             if char in self.SINGLE_CHAR_TOKENS:
                 # Leading-decimal numeric literals: .7  .25  .003 — valid COBOL.
-                if char == "." and pos + 1 < length and text[pos + 1].isdigit():
+                # ``,5`` under DECIMAL-POINT IS COMMA, after a space only
+                # (``A,5`` keeps the comma a separator); mirrors lexer.py.
+                if (
+                    char == self._decimal_char
+                    and pos + 1 < length
+                    and text[pos + 1].isdigit()
+                    and (
+                        char == "."
+                        or pos == 0
+                        or text[pos - 1] == " "
+                        or text[pos - 1] == "\t"
+                    )
+                ):
                     token, new_pos = self.read_number_from_text(text, pos, line_num, start_col)
                     tokens.append(token)
                     pos = new_pos
@@ -520,6 +559,14 @@ class CobolLexer(_CobolLexerBase):
 
             # ---- ampersand: benign separator -----------------------
             if char == "&":
+                pos += 1
+                continue
+
+            # ---- declared PICTURE currency symbol ------------------
+            # Mirrors lexer.py: a SPECIAL-NAMES ``CURRENCY SIGN IS '£'``
+            # symbol is an editing symbol like ``$``.
+            if char in self._currency_symbols:
+                tokens.append(Token(TokenType.CURRENCY, char, location))
                 pos += 1
                 continue
 

@@ -406,7 +406,13 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     top_n = getattr(args, "profile_top_n", 20)
     prof_output = getattr(args, "profile_output", None)
 
-    if defines:
+    # With copybook paths, conditional compilation is left to the expander
+    # (process_conditionals below): run here first, it consumed the program's
+    # >>DEFINE lines and the --define symbols never reached the copybooks --
+    # the parser's own directive pass over the expanded text sees neither --
+    # so a member's `>>IF DBG DEFINED` took the wrong branch under
+    # `--define DBG`.
+    if defines and not copybook_paths:
         from ..preprocess import preprocess_conditional_compilation
 
         conditional_warnings: list[str] = []
@@ -432,6 +438,8 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
                     source,
                     filename=args.file,
                     copybook_paths=copybook_paths,
+                    process_conditionals=True,
+                    defined_symbols=defines,
                     **parse_kwargs,
                 )
             except PreprocessingError as exc:
@@ -857,9 +865,15 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
     if source_format == "fixed" or (
         source_format == "auto" and _detect_fixed_format(source)
     ):
+        from .._lines import split_source_lines
+
         normalize_warnings: list[str] = []
+        # split_source_lines, not str.splitlines(): the latter also breaks on
+        # a form feed (a page eject inside a comment record), NEL, U+2028...
+        # which split one record in two and emitted the tail of a comment
+        # as code -- output `parse` itself never sees.
         source = normalize_fixed_format(
-            source.splitlines(), warnings=normalize_warnings
+            split_source_lines(source), warnings=normalize_warnings
         )
         for nw in normalize_warnings:
             print(f"warning: {nw}", file=sys.stderr)
@@ -916,19 +930,16 @@ def _build_expand_parser(
 
 
 def _cmd_expand(args: argparse.Namespace) -> None:
-    from ..preprocess import preprocess_conditional_compilation
     from ..preprocess.copybook_expander import expand_copybooks
 
     source = _read_source(args.file)
 
+    # Conditional compilation is left to expand_copybooks (process_conditionals
+    # below): it must see the program's own >>DEFINE lines to hand them to the
+    # copybooks COPYd beneath them. Running it here first consumed those
+    # lines, so every copybook saw only the --define symbols. Its diagnostics
+    # land in the JSON's statistics.warnings.
     defines = _parse_defines(args.define)
-    if defines:
-        conditional_warnings: list[str] = []
-        source = preprocess_conditional_compilation(
-            source, defines, warnings=conditional_warnings
-        )
-        for cw in conditional_warnings:
-            print(f"warning: {cw}", file=sys.stderr)
 
     result = expand_copybooks(
         source,
@@ -1358,7 +1369,9 @@ def _add_record_file_args(p: argparse.ArgumentParser) -> None:
             "variable reads the 4-byte RDW in front of each record, as "
             "RECFM=V/VB writes it; variable-bare has no RDW and is framed by "
             "the layout's own OCCURS DEPENDING ON counters; auto picks "
-            "variable when the layout has a DEPENDING ON table"
+            "variable when the layout has a DEPENDING ON table or --copybook "
+            "is a whole program whose FD declares RECORD VARYING -- the same "
+            "choice gen-data's auto makes for the same source"
         ),
     )
     p.add_argument(
@@ -1716,6 +1729,10 @@ def _cmd_compare(args: argparse.Namespace) -> None:
         _compare_fail(str(exc))
     except OSError as exc:
         _compare_fail(f"Cannot read file: {exc}")
+    except UnicodeDecodeError as exc:
+        # A copybook that is not text (a record file passed as --copybook).
+        # Uncaught, the traceback exits 1 -- "the files differ".
+        _compare_fail(f"Cannot read copybook {args.copybook}: {exc}")
 
     if args.output_format == "json":
         text = (
@@ -2484,6 +2501,7 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         _fail("--workers must be >= 1")
 
     analyzers = parse_analyzer_list(args.analyzer)
+    source_format = _source_format_kwargs(args)
     options = ScanOptions(
         analyzers=analyzers,
         dialect=_DIALECT_MAP[args.dialect],
@@ -2491,7 +2509,11 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         copybook_paths=tuple(getattr(args, "copybook_path", []) or []),
         min_clone_statements=max(1, args.min_clone_statements),
         encoding=args.encoding,
-        free_form=bool(_source_format_kwargs(args).get("free_form", False)),
+        # Both halves of the layout flags: free_form alone dropped
+        # --source-format fixed|free (and cobol.yml's source_format) on the
+        # floor, so a tagged fixed-format member scanned as free-form.
+        free_form=bool(source_format["free_form"]),
+        preprocess_fixed=source_format["preprocess_fixed"],
     )
 
     try:
@@ -3062,6 +3084,11 @@ def _build_graph(args: argparse.Namespace) -> Any:
     right answer and guessing one would hide a typo.
     """
     from ..analysis.codebase import CodebaseGraphBuilder
+
+    # The same guard batch and scan apply: without it parse_files' own
+    # ValueError escaped as a traceback.
+    if args.workers is not None and args.workers < 1:
+        _fail("--workers must be >= 1")
 
     builder = CodebaseGraphBuilder(
         copybook_paths=list(args.copybook_path or []),
@@ -3763,6 +3790,19 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _config_fail(message: str, argv: list[str]) -> NoReturn:
+    """A config error before the subcommand ran.
+
+    Exit 1 like every other failure -- except for ``compare``, whose exit 1
+    means "the files differ": a CI gate reading that status would report a
+    missing or malformed ``cobol.yml`` as a data regression.
+    """
+    subcommand = next((arg for arg in argv if not arg.startswith("-")), None)
+    if subcommand == "compare":
+        _compare_fail(message)
+    _fail(message)
+
+
 def main() -> None:
     argv = sys.argv[1:]
 
@@ -3772,7 +3812,7 @@ def main() -> None:
     try:
         argv, config_path, config_disabled = _project_config.extract_config_flags(argv)
     except ConfigError as exc:
-        _fail(str(exc))
+        _config_fail(str(exc), argv)
 
     # Backward compatibility: if the first non-flag argument is not a known
     # subcommand, assume the user is using the legacy syntax and prepend "parse".
@@ -3799,7 +3839,7 @@ def main() -> None:
         try:
             config = load_project_config(path=config_path)
         except ConfigError as exc:
-            _fail(str(exc))
+            _config_fail(str(exc), argv)
     args._project_config = config
 
     if config.source is not None:

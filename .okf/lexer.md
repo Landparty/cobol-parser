@@ -1,9 +1,9 @@
 ---
 type: Module
 title: Lexer
-description: Tokenizes COBOL source into Token objects; 243 TokenType values; optional Cython hot-path.
+description: Tokenizes COBOL source into Token objects; 244 TokenType values; optional Cython hot-path.
 tags: [lexer, tokenizer, cython, token-type]
-timestamp: 2026-08-14T23:45:00Z
+timestamp: 2026-09-28T00:00:00Z
 ---
 
 # Overview
@@ -29,7 +29,7 @@ tokens: list[Token] = tokenize_cobol(text)       # convenience wrapper
 
 # TokenType Enum
 
-`TokenType(IntEnum)` — 243 members. Using `IntEnum` rather than plain `Enum`
+`TokenType(IntEnum)` — 244 members (`COMMENT_ENTRY` appended last, 2026-09-28). Using `IntEnum` rather than plain `Enum`
 makes hot-path membership tests and `hash()` lookups significantly cheaper.
 
 Major groups:
@@ -86,12 +86,22 @@ except ImportError:
 The same pattern applies in `preprocess/__init__.py` (for `normalize_fixed_format`)
 and `parsers/divisions/data_clauses.py` (for `parse_data_item_clauses_fast`).
 
+**Typed locals must not narrow what the pure path accepts (2026-09-28).**
+`parse_data_item_clauses_fast` held the OCCURS min/max counts in `cdef int`s.
+`int()` of a count past 2**31-1 then raised `OverflowError`, which escaped the
+`(TypeError, ValueError)` guards mirrored from the pure walker; the division
+loop recovered by abandoning the DATA DIVISION (every item gone, one "value
+too large to convert to int" error at line 1) where the pure path kept the
+count. They are `cdef object` now. When C-typing a mirror, only type values
+whose range the pure path also bounds (loop indexes, positions) -- never a
+value read out of the source.
+
 **Signature-drift guard (`_data_fast`, added 2026-09-05):** `ImportError` is not
 the only way the fast path can be wrong. The extension is compiled separately
 from its caller, so the binary can be *older* than the Python module that calls
 it — a stale in-place `.so`, a cached `build/` tree, or an installed wheel
 shadowing the source tree. `data_clauses.parse_data_item` calls
-`parse_data_item_clauses_fast` with `_DATA_FAST_ARG_COUNT` (19) positional
+`parse_data_item_clauses_fast` with `_DATA_FAST_ARG_COUNT` (20) positional
 arguments and no guard, so that drift raised a `TypeError` from the middle of
 *every* data-description entry; the division loop recorded it as a generic
 error and recovered by abandoning the division, so a build problem degraded
@@ -180,6 +190,32 @@ clause (`data_clauses.literal_source()`) now does too. The reading side is
 its NUL, `N`/`G`/`U` are their content; `None` for anything untyped. Level-88
 `values` still store the decoded content without the prefix -- a known
 follow-up (AUDIT.md). Pinned by `tests/regression/test_audit_2026_09_27.py`.
+
+# DECIMAL-POINT IS COMMA (2026-09-28)
+
+`declares_decimal_point_comma(source)` scans the whole source up front (the
+same way `_declared_currency_symbols` does) for `DECIMAL-POINT [IS] COMMA`;
+the result is `CobolLexer.decimal_point_is_comma` and `_decimal_char`
+(`","` or `"."`). Under it, in **both** `read_number_from_text`s (pure and
+`_lexer_fast.pyx`, which reads `self._decimal_char`):
+
+* a `,` between digits is the decimal point: `2,75` is one
+  `NUMERIC_LITERAL` whose `value` is the canonical `2.75` (every consumer
+  parses it as a number: `Decimal`, const-fold, generators) and whose
+  `raw_value` is the source text `2,75` -- the typed-literal convention;
+* `.` is no longer a decimal point: `1.5` lexes `1` PERIOD `5`;
+* a leading-decimal literal is `,5`, recognised only after a space/tab or
+  at line start -- `A,5` keeps the comma a separator; a comma followed by a
+  space (`MOVE A, B`) is always a separator.
+
+The scope is the whole compilation unit (nested programs inherit the
+containing program's SPECIAL-NAMES; stacked programs that disagree are not
+modelled). `CobolParser` copies the flag onto itself
+(`decimal_point_is_comma`, reset per `parse()`), and the DATA DIVISION
+hands it to `PictureClause` (see [ast-models.md](ast-models.md)). The
+SPECIAL-NAMES parser's old "not honored by the lexer" warning (audit H4) is
+gone. Pinned by `tests/regression/test_decimal_point_is_comma.py`, which
+runs every lexer case against both lexers.
 
 # Errors
 
@@ -473,4 +509,61 @@ with `cobolparser._lines.split_source_lines`, never `str.splitlines()`:
 the latter also breaks on form feed / NEL / U+2028 etc., which shifted
 every later token's line number by one. See `preprocessing.md`
 ("Audit 2026-09-17").
+
+
+# `&` literal concatenation merged post-tokenize (2026-09-28)
+
+`&` is still never a token (both lexers skip it as a separator), but
+`tokenize()` -- pure-Python and `_lexer_fast.pyx` alike -- now ends with
+`CobolLexer._post_tokenize()`, which runs `_merge_concatenated_literals()`
+then `_flag_stray_sql_chars()` and rewrites `self.tokens` in place (the
+Cython path returns the same list). Two consecutive STRING_LITERAL tokens
+(NEWLINEs between them allowed) are joined into one when the source text
+between them is whitespace + exactly one `&` + whitespace
+(`_ampersand_joins` reads `self.lines` back from the second literal's
+location; a fixed-format line is read in columns 8-72 only). IBM:
+`"AB" & "CD"` is the literal `"ABCD"` anywhere a literal may appear;
+before this a VALUE clause kept only `"AB"` (and warned about the rest) and
+a MOVE source read `"AB" "CD"`. Only literals of one kind are joined
+(plain, or the same `X` / `N` / `NX` / `G` / `U` prefix; `Z` and `B`
+literals never); a typed result's `raw_value` is rebuilt (`X"C1C2"`). The
+merged token keeps the first literal's location; NEWLINEs between the
+parts follow it. Fast path: no `&` in any line -> no work. The
+`_lexer_fast.c` was regenerated with Cython 3.3.0. Pinned by
+`tests/regression/test_literal_concatenation.py`.
+# IDENTIFICATION DIVISION comment-entries (2026-09-28)
+
+`AUTHOR.` / `INSTALLATION.` / `DATE-WRITTEN.` / `DATE-COMPILED.` /
+`SECURITY.` / `REMARKS.` take a *comment-entry*: free text (any character)
+up to the next Area A entry. Lexed as program text, `AUTHOR. JOHN O'BRIEN.`
+raised a spurious "Unterminated string literal" warning (the apostrophe) and
+`DATE-WRITTEN. 01/02/99.` split into `01 / 02 / 99`. Now
+`_comment_entry_starts(source, lines)` (module-level, pure Python, called
+once per `tokenize()` on the free-form path by **both** lexers -- the
+Cython `tokenize` mirrors the dispatch) maps each IDENTIFICATION DIVISION
+line holding comment-entry text to the offset where it starts;
+`_comment_entry_line_tokens()` lexes the paragraph name normally and emits
+the rest of the line as one `COMMENT_ENTRY` token, verbatim. Area rules
+match the IDENTIFICATION parser's: a paragraph name at or left of the
+`IDENTIFICATION DIVISION` header's indentation (Area A) also claims every
+following line indented deeper (Area B) -- NIST OBNC1M's phony program
+included -- up to the next Area A line; one indented deeper claims only its
+own line. The whole scan is skipped unless one multiline regex search finds
+a comment-entry paragraph name at a line start. The fixed-format
+(`free_form=False`) path is unchanged; the parser always lexes normalized
+free-form text. `tests/regression/test_comment_entry_verbatim.py` (includes
+a pure/Cython parity check).
+
+# Declared currency symbols (2026-09-28)
+
+`CURRENCY SIGN IS '£'` / `CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL '#'`
+makes the symbol a PICTURE editing character like `$`. `__init__` now
+collects the declared non-alphanumeric symbols
+(`_declared_currency_symbols(source)`, one regex scan) into
+`self._currency_symbols`; in `tokenize_program_text` (both lexers) a
+character that would otherwise be an "Invalid character" error is emitted
+as a `CURRENCY` token when it is declared. Characters that already lex as
+something (`& ! | < > :`, letters) are not rerouted. Before, every `£` in
+`PIC £££9.99` was a lexer error. See [ast-models.md](ast-models.md) for
+how the PictureClause sizes it. `tests/regression/test_currency_sign_picture_symbol.py`.
 

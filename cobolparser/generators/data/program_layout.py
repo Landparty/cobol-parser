@@ -147,6 +147,11 @@ class ProgramLayoutIndex:
         #: *specific* condition name requires needs this one instead; see
         #: :meth:`condition_values`.
         self._condition_values: dict[str, list[list[str]]] = {}
+        #: The same condition names' VALUE entries exactly as parsed (range
+        #: ends still ``THROUGH:``-marked, figuratives still words) -- what
+        #: :meth:`condition_raw_values` hands a caller that must know whether
+        #: the expanded list above is the whole set or only a sample of it.
+        self._condition_raw_values: dict[str, list[list[str]]] = {}
         self._records_by_name: dict[str, list[tuple[str, CobolDataItem]]] = {}
         self._section_records: dict[str, list[CobolDataItem]] = {
             attr: [] for attr in _SECTION_NAMES.values()
@@ -280,6 +285,21 @@ class ProgramLayoutIndex:
         if not values:
             return None
         return tuple(values[0])
+
+    def condition_raw_values(self, name: str) -> tuple[str, ...] | None:
+        """The level-88 condition name *name*'s VALUE entries as parsed.
+
+        Same lookup and ambiguity policy as :meth:`condition_values`, but
+        unexpanded: a ``THRU`` range end is still ``"THROUGH:<end>"`` and a
+        figurative constant is still its word. :meth:`condition_values` is a
+        *sample* of the condition's values whenever a range could not be
+        enumerated in full, and only this form can tell a caller so (see
+        :func:`~.layout.condition_values_exhaustive`).
+        """
+        if self.condition_values(name) is None:
+            return None
+        values = self._condition_raw_values.get(name.strip().upper()) or []
+        return tuple(values[0]) if values else None
 
     def resolve(self, name: str) -> ResolvedField | None:
         """Resolve a data-name (bare, ``A OF B``, or dotted ``B.A``) to a field.
@@ -448,7 +468,10 @@ class ProgramLayoutIndex:
                     key = child.name.upper()
                     self._condition_index.setdefault(key, []).append(owners[0])
                     self._condition_values.setdefault(key, []).append(
-                        expand_condition_values(child.values)
+                        expand_condition_values(child.values, owners[0].spec.size)
+                    )
+                    self._condition_raw_values.setdefault(key, []).append(
+                        list(child.values)
                     )
             elif isinstance(child, CobolDataItem):
                 self._index_condition_names(child, item_path, qualified_index)

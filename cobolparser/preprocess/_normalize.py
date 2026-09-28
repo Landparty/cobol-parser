@@ -16,6 +16,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 
 from .._lines import split_source_lines
+from .._source_directive import source_format_directive
 
 # Pre-compiled regex patterns for preprocessing (avoids re-compilation per call)
 #: ``>>DEFINE name [AS] {literal | PARAMETER | OFF} [OVERRIDE]`` (IBM). The
@@ -317,6 +318,22 @@ ALL_COMMENT_INDICATORS = COMMENT_INDICATORS | DEBUG_INDICATORS | VERSION_TAG_IND
 MIN_ID_STAMP_EVIDENCE_LINES = 3
 
 
+def _literal_pad(text_slice: str) -> str:
+    """Blanks standing in for the columns a *short* record never had.
+
+    A literal left open at the end of a fixed-format line runs through
+    column 72: the blanks between its last written character and column 72
+    are part of its value (the M5 rule). Source whose trailing blanks were
+    stripped -- by an editor, a file transfer, a commit filter; i.e. most
+    copies of a deck kept off the mainframe -- ends such a line early, but
+    the columns it lost are blanks to the compiler all the same. Without
+    this pad ``VALUE 'ERROR: NOT `` + ``-    'FOUND'.`` read
+    ``'ERROR: NOTFOUND'`` once its trailing blank was stripped, and
+    ``'ERROR: NOT FOUND'`` while it was still there: one program, two values.
+    """
+    return " " * (TEXT_END_COL - TEXT_START_COL + 1 - len(text_slice))
+
+
 def _is_numeric_id_stamp_text(tail: str) -> bool:
     """True when *tail* has the shape of a numeric identification-area stamp:
     at least one digit, and nothing but digits and blanks.
@@ -539,6 +556,12 @@ def normalize_fixed_format(
 
     This does NOT attempt full column-sensitive semantics (debugging helper).
 
+    **``>>SOURCE FORMAT``.** A ``>>SOURCE [FORMAT] [IS] FREE`` directive
+    (columns 7-72) switches the lines after it to free format: each is
+    passed through whole as its own logical line, with no column slicing.
+    ``>>SOURCE [FORMAT] [IS] FIXED`` (anywhere on a free-format line)
+    switches back. The directive record itself becomes a blank line.
+
     **Column 73+ overflow.** Columns 73-80 are the identification area:
     real fixed-format compilers ignore them regardless of content, and so
     does this slice (``line[TEXT_START_COL - 1 : TEXT_END_COL]`` never
@@ -642,6 +665,9 @@ def normalize_fixed_format(
     # the first of the pair are one doubled (escaped) quote, the value gets
     # a single quotation mark, and the literal carries on.
     closing_quote_at_72: str | None = None
+    # Blanks owed to a literal left open on a line shorter than column 72
+    # (see _literal_pad); paid only if a continuation record resumes it.
+    literal_pad = ""
     # One-code-line lookahead for the comment/blank branches: the index of
     # the next program-text line after the one being examined, and whether
     # it is a continuation record. IBM: a continuation line is "the next
@@ -655,6 +681,12 @@ def normalize_fixed_format(
     # line that would warn about a short all-digit tail asks for it -- the
     # answer is a whole-file property, so it is computed once and reused.
     stamps_identification_area: bool | None = None
+    # ``>>SOURCE FORMAT IS FREE`` switches every later line to free format
+    # (no sequence area, no indicator column, no column-72 limit) until a
+    # ``>>SOURCE FORMAT IS FIXED`` switches back. A free-format line is its
+    # own logical line and is passed through whole; the directive record
+    # itself becomes a blank placeholder, so line numbers are unchanged.
+    free_mode = False
 
     def _is_comment_indicator(ch: str) -> bool:
         return (
@@ -775,7 +807,27 @@ def normalize_fixed_format(
         quote_char = None
 
     for line_no, raw in enumerate(lines, start=1):
+        if free_mode:
+            text = raw.rstrip("\r\n")
+            flush_parts()
+            closing_quote_at_72 = None
+            directive = source_format_directive(text) if ">>" in text else None
+            if directive is not None:
+                free_mode = directive == "FREE"
+                result.append("")
+            else:
+                result.append(text.rstrip())
+            continue
         line = raw.rstrip("\n").expandtabs(8)
+        if ">>" in line:
+            # Columns 7-72: a directive may start in the indicator column.
+            directive = source_format_directive(line[INDICATOR_COL - 1 : TEXT_END_COL])
+            if directive is not None:
+                flush_parts()
+                closing_quote_at_72 = None
+                free_mode = directive == "FREE"
+                result.append("")
+                continue
         if len(line) < TEXT_START_COL - 1:
             # Blank/short line. When a literal is open it may legitimately
             # sit between a continued line and its continuation: keep the
@@ -949,7 +1001,9 @@ def normalize_fixed_format(
                 # fixed-format continuation rule) -- only strip them once
                 # we know no literal is left dangling (M5).
                 out_chunk = chunk if pending_literal else chunk.rstrip()
-                parts.append(out_chunk)
+                # The continued record's missing columns first: they sit
+                # inside the literal, ahead of the resumed text.
+                parts.append(literal_pad + out_chunk)
             else:
                 # Non-literal continuation: '-' in column 7 with no
                 # alphanumeric literal currently open. Per COBOL fixed-format
@@ -990,6 +1044,15 @@ def normalize_fixed_format(
                 and text_slice[-1] in ("'", '"')
             )
             else None
+        )
+
+        # A literal still open here runs through column 72; if this record
+        # stops short of it (trailing blanks stripped), the next
+        # continuation owes the literal those blanks.
+        literal_pad = (
+            _literal_pad(text_slice)
+            if merge_continued_literals and pending_literal
+            else ""
         )
 
         # Either branch above always appends to `parts` (even an empty
@@ -1036,8 +1099,8 @@ _COND_TOKEN_RE = re.compile(
     | (?P<rparen>\))
     | (?P<op>>=|<=|<>|=|>|<)
     | (?P<boollit>B'[01]'|B"[01]")
-    | (?P<string>'[^']*'|"[^"]*")
-    | (?P<number>\d+(?:\.\d+)?)
+    | (?P<string>'(?:[^']|'')*'|"(?:[^"]|"")*")
+    | (?P<number>[-+]?\d+(?:\.\d+)?)
     | (?P<word>[A-Z_][A-Z0-9_-]*)
     """,
     re.VERBOSE,
@@ -1072,11 +1135,44 @@ def _strip_directive_comment(text: str) -> str:
 
 
 def _strip_quotes(text: str) -> str:
-    """Strip one pair of matching surrounding quotes, if present."""
+    """Strip one pair of matching surrounding quotes, if present.
+
+    A doubled delimiter inside the literal stands for one occurrence of it
+    (``'O''BRIEN'`` is ``O'BRIEN``), as in any COBOL literal.
+    """
     text = text.strip()
     if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
-        return text[1:-1]
+        quote = text[0]
+        return text[1:-1].replace(quote * 2, quote)
     return text
+
+
+def _upper_outside_literals(text: str) -> str:
+    """Upper-case *text* except the contents of quoted literals.
+
+    Directive keywords and compilation-variable names are case-insensitive,
+    but a literal's contents are not: ``>>DEFINE X AS 'abc'`` then ``>>IF X
+    = 'ABC'`` is FALSE. Upper-casing the whole directive line made it TRUE.
+    A doubled delimiter inside a literal is kept as literal text.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    start = 0
+    for i, ch in enumerate(text):
+        if quote is None:
+            if ch in ("'", '"'):
+                out.append(text[start:i].upper())
+                quote = ch
+                start = i
+        elif ch == quote:
+            # A doubled delimiter closes and immediately reopens: the
+            # contents between are still literal text either way.
+            out.append(text[start : i + 1])
+            quote = None
+            start = i + 1
+    tail = text[start:]
+    out.append(tail if quote is not None else tail.upper())
+    return "".join(out)
 
 
 _DEFINE_ARITH_TOKEN_RE = re.compile(r"\s*(?:([A-Za-z0-9][\w-]*)|([-+*/()]))")
@@ -1175,11 +1271,13 @@ def _try_number(text: str) -> float | None:
 
 def _values_equal(left: str, right: str) -> bool:
     """Compare two resolved values: numerically when both are numeric,
-    otherwise as case-insensitive strings."""
+    otherwise as strings. Case matters -- a literal's contents are never
+    folded (keywords and symbol names already are, before this is reached).
+    """
     ln, rn = _try_number(left), _try_number(right)
     if ln is not None and rn is not None:
         return ln == rn
-    return left.upper() == right.upper()
+    return left == right
 
 
 def _tokenize_condition(text: str) -> list[tuple[str, str]]:
@@ -1368,7 +1466,7 @@ class _ConditionParser:
         if ln is not None and rn is not None:
             lc, rc = ln, rn
         else:
-            lc, rc = lv.upper(), rv.upper()
+            lc, rc = lv, rv
         if op == "=":
             return lc == rc
         if op == "<>":
@@ -1431,12 +1529,21 @@ def _evaluate_condition(
 
 
 def _coerce_symbol_value(value: str | int | float | bool) -> str:
-    """Normalize a caller-supplied symbol value to its string form."""
+    """Normalize a caller-supplied symbol value to its string form.
+
+    A quoted value is an alphanumeric literal and keeps its case
+    (``"'prod'"`` is ``prod``); an unquoted one is taken as a word, which --
+    like a word on a directive line -- is case-insensitive and so folded
+    (``"prod"`` is ``PROD``).
+    """
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
     if isinstance(value, (int, float)):
         return str(value)
-    return _strip_quotes(value)
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in "'\"":
+        return _strip_quotes(stripped)
+    return stripped.upper()
 
 
 def _normalize_defined_symbols(
@@ -1507,7 +1614,7 @@ def _fixed_format_directive_text(line: str) -> str | None:
 
     if not _sequence_area_is_fixed_like(expanded[:DEFAULT_SEQ_COL_END])[0]:
         return None
-    text = expanded[TEXT_START_COL - 1 : TEXT_END_COL].strip().upper()
+    text = _upper_outside_literals(expanded[TEXT_START_COL - 1 : TEXT_END_COL].strip())
     return text if text.startswith(">>") else None
 
 
@@ -1517,6 +1624,9 @@ def preprocess_conditional_compilation(
         Mapping[str, str | int | float | bool] | Iterable[str] | None
     ) = None,
     warnings: list[str] | None = None,
+    *,
+    keep_source_format_directives: bool = False,
+    define_log: list[tuple[int, dict[str, str]]] | None = None,
 ) -> str:
     """
     Process IBM Enterprise COBOL conditional compilation directives.
@@ -1537,7 +1647,8 @@ def preprocess_conditional_compilation(
     - ``symbol IS [NOT] DEFINED`` and ``DEFINED(symbol)``
     - comparisons ``=``, ``<>``, ``>``, ``<``, ``>=``, ``<=`` between
       symbols and numeric/string literals (numeric when both sides are
-      numeric, otherwise case-insensitive string comparison)
+      numeric, otherwise a case-sensitive comparison of literal contents;
+      keywords and symbol names are case-insensitive)
     - boolean literals ``B'0'``/``B'1'``, ``TRUE``, ``FALSE``
     - ``AND`` / ``OR`` / ``NOT`` with parentheses
 
@@ -1563,6 +1674,17 @@ def preprocess_conditional_compilation(
         warnings: Optional list that receives diagnostics (see the
             degradation rules above); the function never raises for
             malformed directives.
+        define_log: When a list is given, it receives ``(0, symbols)`` for
+            the symbols in effect before line 1 and then ``(line, symbols)``
+            after every active ``>>DEFINE`` -- the symbol table as it stands
+            from that line on. The copybook expander reads it to hand each
+            ``COPY`` the symbols defined *above* it, so a ``>>DEFINE`` in a
+            program is in effect inside the copybooks it copies afterwards.
+        keep_source_format_directives: Leave an active ``>>SOURCE FORMAT``
+            directive line in place (unwarned) instead of blanking it, for a
+            caller that runs this *before* ``normalize_fixed_format`` -- the
+            copybook expander -- so the normalizer still sees where the
+            reference format switches.
 
     Returns:
         Source code with conditional sections processed. Directive lines and
@@ -1576,6 +1698,8 @@ def preprocess_conditional_compilation(
         '\\n\\n       DISPLAY "Debug mode".\\n'
     """
     defined = _normalize_defined_symbols(defined_symbols)
+    if define_log is not None:
+        define_log.append((0, dict(defined)))
     result_lines: list[str] = []
     frames: list[_CondFrame] = []
 
@@ -1587,7 +1711,7 @@ def preprocess_conditional_compilation(
         return all(frame.active for frame in frames)
 
     for line_no, line in enumerate(split_source_lines(source), start=1):
-        stripped = line.strip().upper()
+        stripped = _upper_outside_literals(line.strip())
         if not stripped.startswith(">>"):
             # A directive in a sequence-numbered fixed-format line
             # (``000400     >>IF ...``) starts at column 8, not column 1.
@@ -1636,6 +1760,8 @@ def preprocess_conditional_compilation(
                             if arith_value is not None
                             else _strip_quotes(raw_value)
                         )
+                    if define_log is not None:
+                        define_log.append((line_no, dict(defined)))
             else:
                 _warn(
                     f"Line {line_no}: malformed >>DEFINE directive "
@@ -1782,6 +1908,13 @@ def preprocess_conditional_compilation(
                     ">>EVALUATE ignored"
                 )
             result_lines.append("")
+            continue
+
+        elif (
+            keep_source_format_directives
+            and source_format_directive(stripped) is not None
+        ):
+            result_lines.append(line if _active() else "")
             continue
 
         # Any other >> compiler directive (>>CALLINTERFACE, >>INLINE,

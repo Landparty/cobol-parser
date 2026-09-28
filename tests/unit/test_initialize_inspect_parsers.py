@@ -164,6 +164,48 @@ class TestInitializeStatementParserParse:
         stmt = InitializeStatementParser().parse(_stream(*tokens))
         assert len(stmt.replacing_clauses) == 2
 
+    def test_subscripted_and_qualified_targets_kept_whole(self):
+        """`INITIALIZE TBL(1) B OF C` used to yield targets ["TBL"], the
+        subscript and the second (qualified) target dropped as unparsed."""
+        tokens = [
+            _tok(TokenType.INITIALIZE, "INITIALIZE"),
+            _ident("TBL"),
+            _tok(TokenType.LEFT_PAREN, "("),
+            _tok(TokenType.NUMERIC_LITERAL, "1"),
+            _tok(TokenType.RIGHT_PAREN, ")"),
+            _ident("B"),
+            _tok(TokenType.OF, "OF"),
+            _ident("C"),
+            _period(),
+            _eof(),
+        ]
+        stream = _stream(*tokens)
+        stmt = InitializeStatementParser().parse(stream)
+        assert stmt.targets == ["TBL ( 1 )", "B OF C"]
+        assert stream.is_empty() or stream.peek().type == TokenType.EOF
+
+    def test_replacing_by_qualified_value(self):
+        """`REPLACING NUMERIC BY WS-X OF GRP` -- the BY value is one
+        qualified item, not `WS-X` with `OF GRP` stranded."""
+        tokens = [
+            _tok(TokenType.INITIALIZE, "INITIALIZE"),
+            _ident("WS-REC"),
+            _ident("REPLACING"),
+            _ident("NUMERIC"),
+            _ident("BY"),
+            _ident("WS-X"),
+            _tok(TokenType.OF, "OF"),
+            _ident("GRP"),
+            _period(),
+            _eof(),
+        ]
+        stream = _stream(*tokens)
+        stmt = InitializeStatementParser().parse(stream)
+        assert stmt.replacing_clauses == [
+            {"category": "NUMERIC", "by_value": "WS-X OF GRP"}
+        ]
+        assert stream.is_empty() or stream.peek().type == TokenType.EOF
+
     def test_no_targets_no_crash(self):
         tokens = [
             _tok(TokenType.INITIALIZE, "INITIALIZE"),

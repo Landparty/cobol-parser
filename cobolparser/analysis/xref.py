@@ -77,6 +77,8 @@ from ..models.statements.io import (
 from ..models.statements.misc import (
     AlterStatement,
     MergeStatement,
+    ReleaseStatement,
+    ReturnStatement,
     SelectStatement,
     SortStatement,
     XmlJsonStatement,
@@ -365,13 +367,26 @@ def _partition_operand(text: str) -> tuple[set[str], set[str], bool]:
       the result is flagged *inexact* (third element False) -- inexact names
       never contribute to ``report.undefined``.
     """
+    base, refmod, subscripts, exact = _split_operand(text)
+    return base | refmod, subscripts, exact
+
+
+def _split_operand(text: str) -> tuple[set[str], set[str], set[str], bool]:
+    """Like ``_partition_operand``, keeping reference-modifier names apart.
+
+    Returns (base names, reference-modification names, subscript names,
+    exact). The offset and length of ``WS-X (WS-OFF:WS-LEN)`` are *read* to
+    locate the substring whatever the operand's own role is, so a caller
+    recording a receiving operand must not stamp them ``write``.
+    """
     if not text:
-        return set(), set(), True
+        return set(), set(), set(), True
 
     if _FUNCTION_RE.search(text):
-        return _extract_identifiers(text), set(), False
+        return _extract_identifiers(text), set(), set(), False
 
     subscripts: set[str] = set()
+    refmod: set[str] = set()
     remaining = text
     while True:
         match = _PAREN_RE.search(remaining)
@@ -380,15 +395,14 @@ def _partition_operand(text: str) -> tuple[set[str], set[str], bool]:
         inner = match.group(1)
         if ":" in inner:
             # Reference modification: offsets/lengths, not subscripts.
-            remaining = (
-                f"{remaining[: match.start()]} {inner} {remaining[match.end():]}"
-            )
+            refmod |= _extract_identifiers(inner)
         else:
             subscripts |= _extract_identifiers(inner)
-            remaining = f"{remaining[: match.start()]} {remaining[match.end():]}"
+        remaining = f"{remaining[: match.start()]} {remaining[match.end():]}"
 
     base = _extract_identifiers(remaining)
-    return base - subscripts, subscripts, True
+    refmod -= subscripts
+    return base - subscripts, refmod, subscripts, True
 
 
 def _contained_node_ids(ast: CobolProgram) -> set[int]:
@@ -875,8 +889,12 @@ class XrefAnalyzer:
                 "arguments into one operand string; its identifiers are extracted "
                 "best-effort, are not classified as subscripts, and are not exact"
             )
-        base, subscripts, exact = _partition_operand(value)
+        base, refmod, subscripts, exact = _split_operand(value)
+        # A reference modifier's offset/length is only ever read, even on a
+        # receiving operand: `MOVE X TO WS-B (WS-P:2)` writes WS-B, not WS-P.
+        refmod_role = ROLE_READ if role == ROLE_WRITE else role
         triples = [(name, role, exact) for name in sorted(base)]
+        triples += [(name, refmod_role, exact) for name in sorted(refmod)]
         triples += [(name, ROLE_SUBSCRIPT, exact) for name in sorted(subscripts)]
         return triples
 
@@ -1114,6 +1132,13 @@ class XrefAnalyzer:
                 pairs.append((stmt.primary_operand, role, True))
             if stmt.from_item:
                 pairs.append((stmt.from_item, ROLE_READ, True))
+            # COUNT IN and JSON PARSE's INTO receive a value; every other
+            # clause subject (NAME OF / TYPE OF / SUPPRESS / CONVERTING /
+            # NAMESPACE ...) is read.
+            for receiver in (stmt.count_in, stmt.into_item):
+                if receiver:
+                    pairs.append((receiver, ROLE_WRITE, True))
+            pairs += [(name, ROLE_READ, True) for name in stmt.clause_items]
             if stmt.processing_procedure:
                 pairs.append((stmt.processing_procedure, ROLE_PERFORM, True))
             if stmt.processing_procedure_thru:
@@ -1290,6 +1315,20 @@ class XrefAnalyzer:
         elif isinstance(stmt, IOAcceptStatement):
             if stmt.target:
                 pairs.append((stmt.target, ROLE_WRITE, True))
+        elif isinstance(stmt, ReleaseStatement):
+            # The sort-side twin of WRITE: `RELEASE rec FROM x` reads x (and
+            # hands rec's contents to the sort).
+            if stmt.record_name:
+                pairs.append((stmt.record_name, ROLE_READ, True))
+            if stmt.from_source:
+                pairs.append((stmt.from_source, ROLE_READ, True))
+        elif isinstance(stmt, ReturnStatement):
+            # The sort-side twin of READ: `RETURN sd-file INTO x` names the
+            # SD file and writes x.
+            if stmt.file_name:
+                pairs.append((stmt.file_name, ROLE_FILE_OPERATION, True))
+            if stmt.into_target:
+                pairs.append((stmt.into_target, ROLE_WRITE, True))
         return pairs
 
     def _exec_statement_roles(
@@ -1359,6 +1398,8 @@ _ROLE_MAPPED_STATEMENTS: tuple[type, ...] = (
     MergeStatement,
     MoveStatement,
     PerformStatement,
+    ReleaseStatement,
+    ReturnStatement,
     SearchStatement,
     SetStatement,
     SortStatement,
