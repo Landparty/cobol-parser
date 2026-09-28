@@ -140,6 +140,28 @@ def _declared_currency_symbols(source: str) -> frozenset[str]:
     return frozenset(symbols)
 
 
+# ---------------------------------------------------------------------------
+# SPECIAL-NAMES DECIMAL-POINT IS COMMA: which character is the decimal point
+# ---------------------------------------------------------------------------
+# ``DECIMAL-POINT IS COMMA`` exchanges the roles of ``,`` and ``.`` in numeric
+# literals and PICTURE character-strings. Like the currency symbols above it
+# is decided from the whole source up front, before any literal is read: the
+# clause sits in the ENVIRONMENT DIVISION, ahead of every literal it governs.
+# The scope is the whole compilation unit (a nested program inherits its
+# container's SPECIAL-NAMES; stacked programs that disagree are not modelled).
+_DECIMAL_POINT_COMMA_RE = re.compile(
+    r"(?<![A-Za-z0-9-])DECIMAL-POINT(?:[ \t\r\n]+IS)?[ \t\r\n]+COMMA(?![A-Za-z0-9-])",
+    re.IGNORECASE,
+)
+
+
+def declares_decimal_point_comma(source: str) -> bool:
+    """True when *source* declares ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA``."""
+    if "DECIMAL-POINT" not in source.upper():
+        return False
+    return _DECIMAL_POINT_COMMA_RE.search(source) is not None
+
+
 class TokenType(IntEnum):
     """Token types for COBOL lexical analysis.
 
@@ -841,6 +863,13 @@ class _CobolLexerPure:
         # PICTURE currency symbols declared by SPECIAL-NAMES CURRENCY SIGN
         # clauses (lexed as CURRENCY tokens, like ``$``).
         self._currency_symbols: frozenset[str] = _declared_currency_symbols(source)
+        # ``DECIMAL-POINT IS COMMA``: ``,`` between digits is the decimal
+        # point of a numeric literal and ``.`` is not. A decimal literal's
+        # token keeps the canonical ``.`` spelling in ``value`` (every
+        # consumer reads it as a number) and the source text in
+        # ``raw_value``.
+        self.decimal_point_is_comma: bool = declares_decimal_point_comma(source)
+        self._decimal_char: str = "," if self.decimal_point_is_comma else "."
 
     def _comment_entry_line_tokens(
         self, text: str, line_num: int, start_col: int, entry_start: int
@@ -1494,7 +1523,15 @@ class _CobolLexerPure:
                 # A period followed immediately by a digit is a number, not a
                 # statement terminator (terminators are always trailed by whitespace
                 # or end-of-line in normalised free-form text).
-                if char == "." and pos + 1 < length and text[pos + 1].isdigit():
+                # Under DECIMAL-POINT IS COMMA the leading decimal is ``,5``
+                # -- written after a space (``VALUE ,5``); a comma glued to
+                # the word before it (``A,5``) stays a separator.
+                if (
+                    char == self._decimal_char
+                    and pos + 1 < length
+                    and text[pos + 1].isdigit()
+                    and (char == "." or pos == 0 or text[pos - 1] in " \t")
+                ):
                     token, new_pos = self.read_number_from_text(
                         text, pos, line_num, start_col
                     )
@@ -1866,13 +1903,15 @@ class _CobolLexerPure:
         pos = start_pos
         has_decimal = False
         has_exponent = False
+        # ``,`` under DECIMAL-POINT IS COMMA, ``.`` otherwise.
+        decimal_char = self._decimal_char
 
         while pos < len(text):
             char = text[pos]
             if char.isdigit():
                 pos += 1
             elif (
-                char == "."
+                char == decimal_char
                 and not has_decimal
                 and not has_exponent
                 and pos + 1 < len(text)
@@ -1906,6 +1945,17 @@ class _CobolLexerPure:
             # Only treat as level number if it's a valid COBOL level number
             return Token(TokenType.LEVEL_NUMBER, value, location), pos
 
+        if has_decimal and decimal_char == ",":
+            # DECIMAL-POINT IS COMMA: canonical ``.`` value, source in raw_value.
+            return (
+                Token(
+                    TokenType.NUMERIC_LITERAL,
+                    value.replace(",", "."),
+                    location,
+                    value,
+                ),
+                pos,
+            )
         return Token(TokenType.NUMERIC_LITERAL, value, location), pos
 
     def check_division_header(

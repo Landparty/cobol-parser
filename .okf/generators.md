@@ -644,7 +644,7 @@ module docstring — that suite is the regression guard):
 | Storage | Bytes |
 |---------|-------|
 | DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte |
-| DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is |
+| DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is. Under `DECIMAL-POINT IS COMMA` (`FieldSpec.decimal_point_is_comma`, read off the `PictureClause`) both functions take `decimal_point_is_comma=True` and exchange `,`/`.` in the picture and the edited text: `Z.ZZ9,99` writes `1.234,56` (2026-09-28) |
 | DISPLAY numeric (zoned) | one byte per digit; sign as an overpunch, or a real `+`/`-` byte under `SIGN IS SEPARATE` |
 | `COMP-3` / `PACKED-DECIMAL` | two BCD nibbles per byte, sign nibble `C`/`D` signed, `F` unsigned |
 | `COMP` / `COMP-4` / `BINARY` | two's complement, **always big-endian** |
@@ -1737,3 +1737,16 @@ an actual `BoundaryFixture`-populated `bundle.Scenario`, and
 * `docs/plans/2026-08-02-program-data-generation-design.md` and
   `docs/plans/2026-08-02-program-data-generation-implementation.md` — the
   full 9-phase plan this file documents Phases 1, 3, 5, and 6 of
+
+# Level-88 `VALUE ALL` (2026-09-28)
+
+The parser stores a level-88 `VALUE ALL 'X'` as the one value `ALL "X"`
+(`ALL SPACES` for a figurative operand). `layout.all_literal_operand()`
+recognises the form and `layout.fill_all_literal(value, width)` fills it
+(`ALL "AB"` at width 5 is `ABABA`). `expand_condition_values(raw, width)`
+expands it with a width -- `layout._condition_values` passes the item's
+PICTURE size (so `FieldSpec.condition_values` holds `XXX`, which the value
+factory and the solver's enum domain use as is) and `ProgramLayoutIndex`
+passes the owner field's `spec.size`; without a width (`data-items`) it is
+kept as written. `condition_values_exhaustive` counts `ALL "X"` as one exact
+value and `ALL <figurative>` as non-exhaustive.

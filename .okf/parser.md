@@ -304,6 +304,13 @@ string round-trips as legal COBOL — downstream consumers (mockymock's
 working-storage reset) splice it into `MOVE <value> TO <item>`. Regression
 suite: `tests/regression/test_value_all_clause.py`.
 
+A level-88 `VALUE ALL 'X'` (`data_special_entries.py`, 2026-09-28) is one
+value in the same spelling: `values == ['ALL "X"']` (`ALL SPACES` for a
+figurative operand), not `['ALL', 'X']`. Consumers that know the field's
+width fill it -- see `expand_condition_values(raw, width)` in
+[generators.md](generators.md). Pinned by
+`tests/regression/test_level88_value_all.py`.
+
 **Multi-line clauses (`data_clauses.py` + `_data_fast.pyx`):** the lexer
 emits NEWLINE tokens, so any clause reader that peeks for an operand after
 consuming a keyword must skip NEWLINEs first or a line break between keyword
@@ -391,7 +398,7 @@ sibling) and a dedicated anonymous-item case.
 | `rewrite_parser.py` | REWRITE |
 | `search_parser.py` | SEARCH |
 | `set_parser.py` | SET |
-| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE |
+| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE (RELEASE `FROM` / RETURN `INTO` operands go through `consume_optional_qualifiers`, as MOVE's do: `WS-REC OF GRP`, `TBL ( I )`; before 2026-09-28 only the first word was kept) |
 | `sort_merge_parsers.py` | SORT, MERGE |
 | `start_parser.py` | START |
 | `stop_parser.py` | STOP |
@@ -912,8 +919,14 @@ is optional (IBM): a bare `STATUS [IS] x [y]` starts the same clause
 (`STATUS` is in `_SELECT_CLAUSE_KEYWORDS`); before 2026-09-28 it was glued
 onto `assign_to` and `file_status` stayed empty
 (`test_environment_division_parser.py::test_status_clause_without_the_word_file`). `DECIMAL-POINT IS COMMA` in
-SPECIAL-NAMES emits a warning that the clause is recorded but not honored
-by the lexer (H4). All division parsers can reach the host warning channel:
+SPECIAL-NAMES used to warn that the lexer ignored it (H4); since 2026-09-28
+it is honoured (comma-decimal literals, `,`/`.` exchanged in PICTURE -- see
+[lexer.md](lexer.md)) and the warning is gone. `RECORD KEY IS K6 OF R6` and
+`ALTERNATE RECORD KEY IS A6 IN R6` (2026-09-28): `_consume_qualifiers`
+reads the `OF`/`IN` chain after the key name into `record_key_qualifiers`
+/ the alternate key's `qualifiers` (innermost first; the key stays the bare
+name); the qualifier used to be warned "Unparsed token" and knocked out a
+following `WITH DUPLICATES`. All division parsers can reach the host warning channel:
 `BaseDivisionParser.host` is set by the division loop (`parser.py`).
 
 **Comment-entries verbatim (`identification.py`, 2026-09-28):**

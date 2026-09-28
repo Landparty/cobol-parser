@@ -535,7 +535,11 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
     if spec.category is FieldCategory.NUMERIC:
         return _encode_zoned(text, spec, opts)
     if spec.category is FieldCategory.NUMERIC_EDITED:
-        edited = edit_numeric(spec.picture, text)
+        edited = edit_numeric(
+            spec.picture,
+            text,
+            decimal_point_is_comma=spec.decimal_point_is_comma,
+        )
         if edited is not None and len(edited) == width:
             return _encode_text(edited, width, opts)
     return _encode_text(text, width, opts)

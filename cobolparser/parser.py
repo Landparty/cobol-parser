@@ -148,6 +148,9 @@ class CobolParser:
         self.current_program: CobolProgram | None = None
         self.stream: TokenStream | None = None
         self._error_limit_reached: bool = False
+        #: ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA`` (decided by the lexer
+        #: from the whole source): PICTURE strings exchange ``,`` and ``.``.
+        self.decimal_point_is_comma: bool = False
 
         # Initialize division parser factory
         self._division_factory = DivisionParserFactory()
@@ -229,6 +232,7 @@ class CobolParser:
         )
 
         self._begin_parse()
+        self.decimal_point_is_comma = False
         # Set up front, not only on the success path: a FAIL_FAST lexer
         # error or a propagated ParseError returns early, and its result
         # used to report ``lines_parsed == 0`` for a non-empty source.
@@ -352,6 +356,9 @@ class CobolParser:
             )
             self.tokens = lexer.tokenize()
             self.statistics.tokens_processed = len(self.tokens)
+            self.decimal_point_is_comma = bool(
+                getattr(lexer, "decimal_point_is_comma", False)
+            )
             logger.debug("Lexer produced %d tokens for %s", len(self.tokens), filename)
 
             if lexer.has_errors():

@@ -50,11 +50,16 @@ class SelectStatement(CobolStatement):
         # RECORD KEY clause
         self.record_key: str | None = None
         self.record_key_source: str | None = None  # SOURCE IS data-name (IBM extension)
+        #: ``RECORD KEY IS K OF R [IN ...]``: the qualifiers that locate a key
+        #: whose name is not unique, innermost first. ``record_key`` stays the
+        #: bare data-name every consumer matches (as ``OccursClause``'s
+        #: ``depending_on`` / ``depending_on_qualifiers`` do).
+        self.record_key_qualifiers: list[str] = []
 
         # ALTERNATE RECORD KEY clause(s)
         self.alternate_keys: list[dict[str, Any]] = (
             []
-        )  # [{key, duplicates_allowed, password}]
+        )  # [{key, duplicates_allowed, password, qualifiers}]
 
         # FILE STATUS clause
         self.file_status: str | None = None
@@ -109,17 +114,34 @@ class SelectStatement(CobolStatement):
         """Set the ACCESS MODE clause."""
         self.access_mode = mode.upper()
 
-    def set_record_key(self, key: str, source: str | None = None) -> None:
-        """Set the RECORD KEY clause."""
+    def set_record_key(
+        self,
+        key: str,
+        source: str | None = None,
+        qualifiers: list[str] | None = None,
+    ) -> None:
+        """Set the RECORD KEY clause (*qualifiers*: ``OF``/``IN`` names,
+        innermost first)."""
         self.record_key = key
         self.record_key_source = source
+        self.record_key_qualifiers = list(qualifiers or [])
 
     def add_alternate_key(
-        self, key: str, duplicates_allowed: bool = False, password: str | None = None
+        self,
+        key: str,
+        duplicates_allowed: bool = False,
+        password: str | None = None,
+        qualifiers: list[str] | None = None,
     ) -> None:
-        """Add an ALTERNATE RECORD KEY clause."""
+        """Add an ALTERNATE RECORD KEY clause (*qualifiers* as for
+        :meth:`set_record_key`)."""
         self.alternate_keys.append(
-            {"key": key, "duplicates_allowed": duplicates_allowed, "password": password}
+            {
+                "key": key,
+                "duplicates_allowed": duplicates_allowed,
+                "password": password,
+                "qualifiers": list(qualifiers or []),
+            }
         )
 
     def set_file_status(self, status: str, vsam_status: str | None = None) -> None:
@@ -174,6 +196,7 @@ class SelectStatement(CobolStatement):
                 "access_mode": self.access_mode,
                 "record_key": self.record_key,
                 "record_key_source": self.record_key_source,
+                "record_key_qualifiers": list(self.record_key_qualifiers),
                 "alternate_keys": self.alternate_keys,
                 "file_status": self.file_status,
                 "file_status_vsam": self.file_status_vsam,

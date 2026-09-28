@@ -279,6 +279,22 @@ class SelectClauseParser:
             return True
         return False
 
+    @staticmethod
+    def _consume_qualifiers(token_stream: ITokenStream) -> list[str]:
+        """``{OF | IN} name`` qualifiers after a key's data-name, innermost
+        first (``K6 OF R6`` gives ``["R6"]``). They were left behind as
+        "Unparsed token" warnings and could derail the rest of the clause
+        (``WITH DUPLICATES`` after a qualified alternate key was dropped)."""
+        qualifiers: list[str] = []
+        while SelectClauseParser._try_consume_word(token_stream, "OF", "IN"):
+            SelectClauseParser._skip_select_blanks(token_stream)
+            token = token_stream.peek(0)
+            if not token or not token.value or not token.value.strip():
+                break
+            qualifiers.append(token.value)
+            token_stream.consume()
+        return qualifiers
+
     def _parse_alternate_key_clause(
         self, token_stream: ITokenStream, select_data: dict[str, Any]
     ) -> None:
@@ -294,6 +310,7 @@ class SelectClauseParser:
             return
         key_name = token.value
         token_stream.consume()
+        qualifiers = self._consume_qualifiers(token_stream)
 
         duplicates = False
         if self._try_consume_word(token_stream, "WITH"):
@@ -303,7 +320,12 @@ class SelectClauseParser:
             duplicates = True
 
         select_data.setdefault("alternate_keys", []).append(
-            {"key": key_name, "duplicates_allowed": duplicates, "password": None}
+            {
+                "key": key_name,
+                "duplicates_allowed": duplicates,
+                "password": None,
+                "qualifiers": qualifiers,
+            }
         )
 
     def _parse_padding_clause(
@@ -559,11 +581,14 @@ class SelectClauseParser:
         self._try_consume_word(token_stream, "IS")
         self._skip_select_blanks(token_stream)
 
-        # Get key name
+        # Get key name, and any OF/IN qualifiers (``K6 OF R6``)
         token = token_stream.peek(0)
         if token:
             select_data["record_key"] = token.value
             token_stream.consume()
+            select_data["record_key_qualifiers"] = self._consume_qualifiers(
+                token_stream
+            )
 
     def _parse_relative_key_clause(
         self, token_stream: ITokenStream, select_data: dict[str, Any]
@@ -656,7 +681,9 @@ class SelectClauseParser:
         # Set RECORD KEY clause
         record_key = select_data.get("record_key")
         if record_key:
-            select_stmt.set_record_key(record_key)
+            select_stmt.set_record_key(
+                record_key, qualifiers=select_data.get("record_key_qualifiers")
+            )
 
         # Set RELATIVE KEY clause
         relative_key = select_data.get("relative_key")
@@ -676,6 +703,7 @@ class SelectClauseParser:
                 alt["key"],
                 duplicates_allowed=alt.get("duplicates_allowed", False),
                 password=alt.get("password"),
+                qualifiers=alt.get("qualifiers"),
             )
 
         # RESERVE / PADDING / RECORD DELIMITER / SHARING / LOCK / PASSWORD

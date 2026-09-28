@@ -356,25 +356,29 @@ class ValueFactory:
             return None
         all_match = _VALUE_ALL_RE.match(raw)
         if all_match:
-            # ``VALUE ALL '='`` fills the whole field with the literal
-            # repeated -- the report-separator idiom.  Rendering the keyword
-            # itself (``ALL ``) was the previous, wrong, answer.
-            raw = all_match.group(1)
-            figurative = _FIGURATIVE_CONSTANTS.get(raw.upper())
-            if figurative is not None:
-                return figurative if figurative else None
-            unit = _strip_literal_quotes(raw)
-            if not unit:
-                return None
-            width = spec.size if spec.size > 0 else len(unit)
-            repeated = (unit * (width // len(unit) + 1))[:width]
-            return self._fit_domain_value(repeated, spec)
+            return self._fill_all(all_match, spec)
         figurative = _FIGURATIVE_CONSTANTS.get(raw.upper())
         if figurative is not None:
             # SPACES/LOW-VALUES mean "no meaningful initial content"; generate
             # a real value instead of filling the column with blanks.
             return figurative if figurative else None
         return self._fit_domain_value(_strip_literal_quotes(raw), spec)
+
+    def _fill_all(self, all_match: re.Match[str], spec: FieldSpec) -> str | None:
+        """``ALL '='`` fills the whole field with the literal repeated -- the
+        report-separator idiom. Rendering the keyword itself (``ALL ``) was
+        the previous, wrong, answer. ``None`` for a figurative operand that
+        means "no meaningful content" (``ALL SPACES``) or an empty literal."""
+        raw = all_match.group(1)
+        figurative = _FIGURATIVE_CONSTANTS.get(raw.upper())
+        if figurative is not None:
+            return figurative if figurative else None
+        unit = _strip_literal_quotes(raw)
+        if not unit:
+            return None
+        width = spec.size if spec.size > 0 else len(unit)
+        repeated = (unit * (width // len(unit) + 1))[:width]
+        return self._fit_domain_value(repeated, spec)
 
     def _fit_domain_value(self, value: str, spec: FieldSpec) -> str:
         """Coerce a copybook-declared literal into the field's shape.

@@ -468,7 +468,7 @@ class ProgramLayoutIndex:
                     key = child.name.upper()
                     self._condition_index.setdefault(key, []).append(owners[0])
                     self._condition_values.setdefault(key, []).append(
-                        expand_condition_values(child.values)
+                        expand_condition_values(child.values, owners[0].spec.size)
                     )
                     self._condition_raw_values.setdefault(key, []).append(
                         list(child.values)

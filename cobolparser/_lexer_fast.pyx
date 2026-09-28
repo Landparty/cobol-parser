@@ -242,6 +242,8 @@ class CobolLexer(_CobolLexerBase):
         cdef bint has_decimal = False
         cdef bint has_exponent = False
         cdef str char
+        # ``,`` under DECIMAL-POINT IS COMMA, ``.`` otherwise (lexer.py).
+        cdef str decimal_char = self._decimal_char
 
         location = SourceLocation(line_num + 1, start_col + start_pos, 1)
 
@@ -250,7 +252,7 @@ class CobolLexer(_CobolLexerBase):
             if char.isdigit():
                 pos += 1
             elif (
-                char == "."
+                char == decimal_char
                 and not has_decimal
                 and not has_exponent
                 and pos + 1 < length
@@ -281,6 +283,17 @@ class CobolLexer(_CobolLexerBase):
         ):
             return Token(TokenType.LEVEL_NUMBER, value, location), pos
 
+        if has_decimal and decimal_char == ",":
+            # DECIMAL-POINT IS COMMA: canonical ``.`` value, source in raw_value.
+            return (
+                Token(
+                    TokenType.NUMERIC_LITERAL,
+                    value.replace(",", "."),
+                    location,
+                    value,
+                ),
+                pos,
+            )
         return Token(TokenType.NUMERIC_LITERAL, value, location), pos
 
     # ------------------------------------------------------------------
@@ -523,7 +536,19 @@ class CobolLexer(_CobolLexerBase):
             # ---- single-character tokens ---------------------------
             if char in self.SINGLE_CHAR_TOKENS:
                 # Leading-decimal numeric literals: .7  .25  .003 — valid COBOL.
-                if char == "." and pos + 1 < length and text[pos + 1].isdigit():
+                # ``,5`` under DECIMAL-POINT IS COMMA, after a space only
+                # (``A,5`` keeps the comma a separator); mirrors lexer.py.
+                if (
+                    char == self._decimal_char
+                    and pos + 1 < length
+                    and text[pos + 1].isdigit()
+                    and (
+                        char == "."
+                        or pos == 0
+                        or text[pos - 1] == " "
+                        or text[pos - 1] == "\t"
+                    )
+                ):
                     token, new_pos = self.read_number_from_text(text, pos, line_num, start_col)
                     tokens.append(token)
                     pos = new_pos

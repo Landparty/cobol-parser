@@ -253,19 +253,9 @@ class ConfigurationSectionParser:
                 if _word() == "COMMA":
                     decimal_point_is_comma = True
                     token_stream.consume()
-                    # The lexer has already tokenized the program with `.` as
-                    # the decimal point and `,` as a separator, so this clause
-                    # is recorded but NOT honored (audit 2026-07-07 H4):
-                    # `VALUE 3,14` / `COMPUTE X = 3,14` misparse. Make the
-                    # degradation caller-visible instead of silent.
-                    host = getattr(self._parser, "host", None)
-                    add_warning = getattr(host, "add_warning", None)
-                    if callable(add_warning):
-                        add_warning(
-                            "DECIMAL-POINT IS COMMA is recorded in metadata but "
-                            "not honored by the lexer: numeric literals using a "
-                            "comma decimal point (e.g. VALUE 3,14) will misparse"
-                        )
+                    # Honoured by the lexer (comma-decimal numeric literals)
+                    # and by PictureClause (``,``/``.`` exchanged), both of
+                    # which read the clause from the source up front.
 
             elif v in ("CLASS", "ALPHABET"):
                 token_stream.consume()

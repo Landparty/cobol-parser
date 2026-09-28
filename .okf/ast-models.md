@@ -452,6 +452,21 @@ Notes (2026-07-07 audit remediation):
   helper in place of the class), from the non-`$` CURRENCY tokens
   `parse_picture_clause` saw. Previously `£` was an invalid PICTURE
   character and the floating string was mis-sized.
+* `PictureClause(..., decimal_point_is_comma=False)` (2026-09-28):
+  `SPECIAL-NAMES. DECIMAL-POINT IS COMMA` -- `,` is the decimal point and
+  `.` a simple insertion character. Sized and validated through the
+  default spelling (`,`/`.` exchanged, alongside the currency `$`
+  translation), then `pattern` is restored as written: `9(3),99` is size 6,
+  3 integer + 2 decimal digits; `Z.ZZ9,99` is 4 + 2. Kept as
+  `decimal_point_is_comma` and `metadata["decimal_point_is_comma"]`.
+  `DataItemClauseParser._picture_clause` reads it off the host
+  (`CobolParser.decimal_point_is_comma`, set from the lexer).
+* `SelectStatement.record_key_qualifiers` and each `alternate_keys` entry's
+  `qualifiers` (2026-09-28): the `OF`/`IN` names of `RECORD KEY IS K6 OF
+  R6`, innermost first; `record_key` / `key` stay the bare data-name.
+  `set_record_key(key, source=None, qualifiers=None)`,
+  `add_alternate_key(..., qualifiers=None)`; `to_dict()` gains
+  `record_key_qualifiers`.
 * Arithmetic statements' `on_size_error` / `not_on_size_error` lists can
   contain any statement type (registry-dispatched), all registered as AST
   children (H1).
