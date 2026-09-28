@@ -619,10 +619,34 @@ unknown `>>` directives (passed through to the lexer), and unclosed
 blanked in place so line numbers stay stable. The copybook expansion path
 (`process_conditionals=True`) routes warnings into
 `ExpansionStatistics.warnings`; the CLI (`--define`) prints them to
-stderr. Pinned by
+stderr (without `--copybook-path`; with it -- and always for `expand` --
+they land in the JSON's `warnings`). Pinned by
 `tests/regression/test_tier4_audit_remediations.py::TestH6CopybookSilentChannels`
 / `::TestH7ConditionalCompilationWarnings` (updated to the new semantics)
 and `tests/regression/test_open_findings_m10_regression.py`.
+
+**`>>DEFINE` reaches the copybooks below it (2026-09-28):** with
+`process_conditionals=True` each COPY's member is processed with the
+symbols in effect *on the COPY's own line* -- the caller's
+`defined_symbols` plus every active `>>DEFINE` above it, in the program or
+in an enclosing member. `preprocess_conditional_compilation(...,
+define_log=[...])` records `(line, symbols)` after each `>>DEFINE`
+(`(0, initial)` first); `_expand_source_recursive(define_log=...)` looks
+the COPY's line up through its origin (`_symbols_at_line`), and those
+symbols join the expansion-cache key, so one member COPYd before and after
+a `>>DEFINE` expands both ways. Before, every member saw only the caller's
+initial symbols. The CLI pre-pass had the same effect from the outside:
+`expand --define` and `parse`/analyzers `--define X --copybook-path`
+ran the program through `preprocess_conditional_compilation` *before*
+expansion, consuming its `>>DEFINE` lines -- and for `parse`, `--define`
+itself never reached a member either (neither the expander nor the
+parser's own directive pass over the expanded text received it), so
+`>>IF DBG DEFINED` in a copybook took the `>>ELSE` branch under
+`--define DBG`. With copybook paths the CLI now leaves conditionals to the
+expander (`parse_cobol_with_expansion(process_conditionals=True,
+defined_symbols=...)`). A `>>DEFINE` *inside* a member still does not
+reach the parent's text after the COPY. Pinned by
+`tests/regression/test_copybook_resolution_2026_09_28.py::TestDefinedSymbolsReachCopybooks`.
 
 A `*>` floating comment on a `>>` directive line (outside a literal) is
 stripped before the directive is read (`_strip_directive_comment`, 2026-09-27):

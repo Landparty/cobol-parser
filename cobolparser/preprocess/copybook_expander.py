@@ -1039,12 +1039,17 @@ def expand_copybooks(
 
     # Pre-process conditional compilation if requested
     conditional_warnings: list[str] = []
+    # The symbol table after each >>DEFINE in the program, so every COPY is
+    # expanded with the symbols defined above it (see _symbols_at_line).
+    define_log: list[tuple[int, dict[str, str]]] | None = None
     if process_conditionals:
+        define_log = []
         source_code = preprocess_conditional_compilation(
             source_code,
             defined_symbols or {},
             warnings=conditional_warnings,
             keep_source_format_directives=True,
+            define_log=define_log,
         )
 
     # Create search configuration
@@ -1095,6 +1100,7 @@ def expand_copybooks(
         validate_levels,
         process_conditionals,
         stats,
+        define_log=define_log,
     )
 
     # Calculate statistics
@@ -1201,6 +1207,20 @@ def expand_copybooks(
     )
 
 
+def _symbols_at_line(
+    define_log: list[tuple[int, dict[str, str]]], line: int
+) -> dict[str, str]:
+    """The conditional-compilation symbols in effect on *line*: the last
+    ``define_log`` snapshot taken on an earlier line (see
+    ``preprocess_conditional_compilation(define_log=...)``)."""
+    current = define_log[0][1]
+    for logged_line, symbols in define_log:
+        if logged_line >= line:
+            break
+        current = symbols
+    return current
+
+
 def _expand_source_recursive(
     source_code: str,
     source_file: str,
@@ -1214,6 +1234,7 @@ def _expand_source_recursive(
     stats: ExpansionStatistics | None = None,
     already_stripped: bool = False,
     free_form: bool | None = None,
+    define_log: list[tuple[int, dict[str, str]]] | None = None,
 ) -> tuple[str, int, bool, list[LineOrigin]]:
     """
     Recursively expand COPY statements in source code.
@@ -1241,6 +1262,10 @@ def _expand_source_recursive(
             merged, and the result is never re-padded. None (the default)
             detects it from the text; the copybook branch passes each
             member's own verdict down.
+        define_log: The ``define_log`` that conditional-compilation
+            processing of *source_code* produced (``process_conditionals``
+            only): each COPY's member is processed with the symbols in effect
+            on the COPY's own line, not the ones the caller started with.
 
     Returns:
         Tuple of (expanded_source, max_depth_reached, is_normalized, origins)
@@ -1348,11 +1373,26 @@ def _expand_source_recursive(
                 continue
             raise
 
+        # A >>DEFINE above this COPY is in effect inside the member (IBM
+        # processes compiler directives and COPY in one sequential pass).
+        # The member's conditional compilation therefore depends on where
+        # the COPY sits, so those symbols are part of the cache key.
+        member_symbols: dict[str, str] | None = None
+        if process_conditionals:
+            member_symbols = context.defined_symbols
+            if define_log:
+                copy_line = expanded_source.count("\n", 0, statement.start_index)
+                if copy_line < len(origins):
+                    member_symbols = _symbols_at_line(define_log, origins[copy_line][1])
+
         # Check if we have a cached expansion (without nested COPY processing)
         # Note: We can only use cache for the same file + same replacements
+        # (and, under conditional compilation, the same symbols).
         full_cache_key = context.get_cache_key(
             copybook_path, statement.replacing_clauses
         )
+        if member_symbols is not None:
+            full_cache_key += "::" + repr(sorted(member_symbols.items()))
 
         expanded_copybook = context.cache_get(full_cache_key)
         if expanded_copybook is not None:
@@ -1452,12 +1492,19 @@ def _expand_source_recursive(
                         stats.warnings.extend(level_warnings)
 
             # Process conditional compilation directives if requested
+            member_define_log: list[tuple[int, dict[str, str]]] | None = None
             if process_conditionals:
+                member_define_log = []
                 copybook_content = preprocess_conditional_compilation(
                     copybook_content,
-                    context.defined_symbols,
+                    (
+                        member_symbols
+                        if member_symbols is not None
+                        else context.defined_symbols
+                    ),
                     warnings=stats.warnings if stats is not None else None,
                     keep_source_format_directives=True,
+                    define_log=member_define_log,
                 )
 
             # Track this copybook
@@ -1513,6 +1560,7 @@ def _expand_source_recursive(
                     # A free-form member under a fixed-format parent was
                     # just given the stripped fixed shape above.
                     free_form=member_free_form and free_form,
+                    define_log=member_define_log,
                 )
             )
 

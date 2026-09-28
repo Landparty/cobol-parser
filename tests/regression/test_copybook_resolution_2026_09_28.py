@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from unittest.mock import patch
+
 from cobolparser import expand_copybooks
+from cobolparser.cli.parse import main
 from cobolparser.preprocess.copybook_expander import (
     detect_encoding,
     read_file_with_encoding,
@@ -117,3 +121,124 @@ class TestEightBitCopybookEncoding:
         u = tmp_path / "U.cpy"
         u.write_bytes(self.TEXT.encode("utf-8"))
         assert detect_encoding(str(u)) == "utf-8"
+
+
+_DBG_MEMBER = (
+    "       >>IF DBG DEFINED\n"
+    "       01  DBG-REC PIC X.\n"
+    "       >>ELSE\n"
+    "       01  NODBG-REC PIC X.\n"
+    "       >>END-IF\n"
+)
+_HEADER = (
+    "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n"
+    "       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n"
+)
+
+
+def _records(text: str) -> list[str]:
+    """The DBG-REC / NODBG-REC entries present in *text*, in line order."""
+    found = []
+    for line in text.split("\n"):
+        words = line.split()
+        found += [w for w in words if w in ("DBG-REC", "NODBG-REC")]
+    return found
+
+
+class TestDefinedSymbolsReachCopybooks:
+    """A ``>>DEFINE`` in the program was invisible inside the copybooks it
+    COPYs afterwards (the expander handed every member only the caller's
+    initial symbols), and ``parse --define X --copybook-path`` / ``expand
+    --define X`` pre-processed the program before expansion, so neither the
+    program's own ``>>DEFINE`` lines nor (for ``parse``) ``--define`` itself
+    reached a member's ``>>IF``."""
+
+    def test_program_define_is_in_effect_in_member(self, tmp_path):
+        (tmp_path / "MEM.cpy").write_text(_DBG_MEMBER)
+        src = "       >>DEFINE DBG\n" + _HEADER + "       COPY MEM.\n"
+        out = expand_copybooks(
+            src, copybook_paths=[str(tmp_path)], process_conditionals=True
+        )
+        assert _records(out.expanded_source) == ["DBG-REC"]
+
+    def test_define_is_positional_and_not_served_from_cache(self, tmp_path):
+        # The same member before, after, and after undefining takes the
+        # matching branch each time: the symbols in effect are part of the
+        # expansion-cache key.
+        (tmp_path / "MEM.cpy").write_text(_DBG_MEMBER)
+        src = (
+            _HEADER
+            + "       COPY MEM.\n"
+            + "       >>DEFINE DBG\n"
+            + "       COPY MEM.\n"
+            + "       >>DEFINE DBG OFF\n"
+            + "       COPY MEM.\n"
+        )
+        out = expand_copybooks(
+            src, copybook_paths=[str(tmp_path)], process_conditionals=True
+        )
+        assert _records(out.expanded_source) == ["NODBG-REC", "DBG-REC", "NODBG-REC"]
+
+    def test_member_define_reaches_its_nested_copy(self, tmp_path):
+        (tmp_path / "MEM.cpy").write_text(_DBG_MEMBER)
+        (tmp_path / "OUTER.cpy").write_text("       >>DEFINE DBG\n       COPY MEM.\n")
+        out = expand_copybooks(
+            _HEADER + "       COPY OUTER.\n",
+            copybook_paths=[str(tmp_path)],
+            process_conditionals=True,
+        )
+        assert _records(out.expanded_source) == ["DBG-REC"]
+
+    def test_caller_symbols_still_apply(self, tmp_path):
+        (tmp_path / "MEM.cpy").write_text(_DBG_MEMBER)
+        out = expand_copybooks(
+            _HEADER + "       COPY MEM.\n",
+            copybook_paths=[str(tmp_path)],
+            process_conditionals=True,
+            defined_symbols={"DBG": "TRUE"},
+        )
+        assert _records(out.expanded_source) == ["DBG-REC"]
+
+    def _run_cli(self, capsys, *argv):
+        with patch("sys.argv", ["cobol-parser", "--no-config", *argv]):
+            try:
+                main()
+            except SystemExit as exc:
+                assert not exc.code
+        return capsys.readouterr().out
+
+    def test_cli_parse_define_reaches_member(self, tmp_path, capsys):
+        (tmp_path / "MEM.cpy").write_text(_DBG_MEMBER)
+        prog = tmp_path / "P.cbl"
+        prog.write_text(
+            _HEADER
+            + "       COPY MEM.\n       PROCEDURE DIVISION.\n           STOP RUN.\n"
+        )
+        out = self._run_cli(
+            capsys,
+            "parse",
+            str(prog),
+            "--copybook-path",
+            str(tmp_path),
+            "--define",
+            "DBG",
+            "--compact",
+        )
+        assert '"DBG-REC"' in out
+        assert '"NODBG-REC"' not in out
+
+    def test_cli_expand_program_define_reaches_member(self, tmp_path, capsys):
+        (tmp_path / "MEM.cpy").write_text(_DBG_MEMBER)
+        prog = tmp_path / "P.cbl"
+        prog.write_text("       >>DEFINE DBG\n" + _HEADER + "       COPY MEM.\n")
+        out = self._run_cli(
+            capsys,
+            "expand",
+            str(prog),
+            "--copybook-path",
+            str(tmp_path),
+            "--define",
+            "OTHER",
+            "--compact",
+        )
+        assert _records(json.loads(out)["expanded_source"]) == ["DBG-REC"]
