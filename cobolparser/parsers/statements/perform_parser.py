@@ -8,6 +8,7 @@ from cobolparser.parsers.statements._conditions import (
     condition_token_text,
 )
 from cobolparser.parsers.statements._utils import (
+    SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
     consume_optional_qualifiers,
@@ -711,6 +712,10 @@ class PerformStatementParser(IStatementParser):
                 break
             if token.type == TokenType.END_PERFORM:
                 break
+            # Any other scope terminator (END-IF, END-EVALUATE, ...) closes
+            # the statement this PERFORM is nested in, never the condition.
+            if token.value and token.value.upper() in SCOPE_TERMINATORS:
+                break
             # AFTER starts the next dimension of a PERFORM VARYING ... AFTER
             # loop — stop without consuming so the whole AFTER phrase isn't
             # absorbed into the condition string. Only applies in the
@@ -795,6 +800,16 @@ class PerformStatementParser(IStatementParser):
                     break
                 if token.type == TokenType.PERIOD:
                     stream.consume()
+                    break
+                # An out-of-line PERFORM owns no scope terminator: END-IF /
+                # END-EVALUATE / END-PERFORM / ... here closes the statement
+                # this PERFORM is nested in. Swallowing it into the condition
+                # text re-nested every statement up to the next period into
+                # that IF arm / WHEN / inline PERFORM body -- a top-level
+                # STOP RUN after ``IF c PERFORM p UNTIL d END-IF`` read as
+                # conditional, so the flow graph invented a fall-through out
+                # of a paragraph that always stops.
+                if token.value and token.value.upper() in SCOPE_TERMINATORS:
                     break
                 if (
                     token.type == TokenType.IDENTIFIER
