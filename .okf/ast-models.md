@@ -399,6 +399,9 @@ Notes (2026-07-07 audit remediation):
   `record_delimiter`, `password`, `lock_mode`/`lock_on`/
   `lock_with_rollback`, `sharing_mode`, `assign_device_type`) are now
   actually populated by the ENVIRONMENT division parser (H5).
+* `SelectStatement.assign_using` (2026-09-28): the data-name of `ASSIGN
+  USING data-name` (also in `assign_to`), None for `ASSIGN TO`; in
+  `to_dict()` as `assign_using`.
 * Arithmetic statements' `on_size_error` / `not_on_size_error` lists can
   contain any statement type (registry-dispatched), all registered as AST
   children (H1).

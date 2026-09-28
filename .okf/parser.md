@@ -915,6 +915,23 @@ CURRENCY clause; `currency_sign` keeps its last-wins value). `CLASS`/
 `ALPHABET ... FOR ALPHANUMERIC|NATIONAL` and the name-less `UPSI-0 ON STATUS
 IS x` form are accepted. `tests/regression/test_special_names_clause_boundaries.py`.
 
+**SELECT short forms (`environment_select.py`, 2026-09-28):** `ORGANIZATION
+IS` is optional in IBM's grammar. A bare `INDEXED` / `SEQUENTIAL` / `LINE
+SEQUENTIAL` used to be glued onto `assign_to` (`"F1DD INDEXED"`) with
+`organization` None, and a bare `RELATIVE` went to the RELATIVE KEY parser
+(which took the next word as the key). `SEQUENTIAL`/`INDEXED` are now in
+`_SELECT_CLAUSE_KEYWORDS`, `LINE SEQUENTIAL` ends ASSIGN by lookahead, and
+`RELATIVE` is the key clause only when `KEY` follows (`_next_word`).
+`ASSIGN USING data-name` (dynamic file name) stores the data-name in
+`assign_to` *and* the new `SelectStatement.assign_using`, which
+`UnusedVariableAnalyzer._file_control_references` counts as a use (it was
+`assign_to == "USING WS-DSN"` and the item read as unused). The ORGANIZATION
+/ ACCESS / RECORD KEY / RELATIVE KEY / FILE STATUS sub-parsers skip line
+breaks between their own words (`_try_consume_word`); only one break,
+directly before the value, was tolerated. Still open: a qualified `RECORD
+KEY IS K OF R` keeps only `K` (the rest is warned as unparsed).
+`tests/regression/test_select_optional_organization_word.py`.
+
 # Statement-coverage audit (2026-09-02)
 
 Question asked of the parser: *can a PROCEDURE DIVISION statement leave the
