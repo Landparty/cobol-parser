@@ -172,3 +172,32 @@ class TestOtherSubcommands:
     def test_tokenize_strips_tags_by_default(self, capsys, tagged):
         out = _run(capsys, "tokenize", tagged, "--compact")
         assert "SAPR24" not in [t["value"] for t in out["tokens"]]
+
+
+class TestPreprocessRecordBoundaries:
+    """`preprocess` split the source with ``str.splitlines()``, which also
+    breaks on a form feed (a page eject inside a comment record), NEL and
+    U+2028. One record became two, and the tail of a comment was emitted as
+    code -- output `parse` itself, which splits on \\n/\\r\\n/\\r only, never
+    sees."""
+
+    @pytest.mark.parametrize("breaker", ["\x0c", "\x85", " "])
+    def test_a_unicode_line_boundary_inside_a_comment_stays_a_comment(
+        self, capsys, tmp_path, breaker
+    ):
+        path = tmp_path / "ff.cbl"
+        path.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. FFTEST.\n"
+            f"      *{breaker}PAGE EJECT COMMENT TEXT HERE\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           STOP RUN.\n",
+            encoding="utf-8",
+        )
+        _run_main(["preprocess", str(path)])
+        out = capsys.readouterr().out
+        assert "COMMENT" not in out
+        # One output line per input record: PROCEDURE DIVISION is still
+        # the fourth.
+        assert out.split("\n")[3] == "PROCEDURE DIVISION."

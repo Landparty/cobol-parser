@@ -198,6 +198,10 @@ Under `auto` (the default) normalisation runs only when `_detect_fixed_format`
 classifies the source as fixed (it used to run unconditionally, silently
 slicing columns off genuine free-form input); `--source-format=fixed` forces
 it; `--source-format=free` skips it entirely.
+Records are split with `_lines.split_source_lines` (\n / \r\n / \r only),
+the same splitter the parser uses. Before 2026-09-28 `preprocess` used
+`str.splitlines()`, so a form feed / NEL / U+2028 inside a comment record
+split it in two and the comment's tail came out as code.
 
 ## Source layout (`--source-format`)
 
@@ -910,9 +914,19 @@ Output carries `scan_version` (read it before trusting any other key), an
 construction, `files[]` and `failures[]`. A file that cannot be read or
 parsed is a `failures` entry and costs the scan nothing else; an analyzer
 that raises on one unit is named in that unit's `failed_analyzers` with its
-other reports intact. Every program unit of a multi-`PROGRAM-ID` file is
+other reports intact. A file whose copybook expansion failed is still
+scanned (unexpanded) and carries `copybook_error` naming why. Every program
+unit of a multi-`PROGRAM-ID` file is
 reported, each with its nesting `depth` -- the same argument `lint` makes
 for linting every unit.
+
+`--source-format auto|fixed|free` (and `--free-form`, and cobol.yml's
+`project.source_format`) reach the parse through `ScanOptions.free_form` +
+`ScanOptions.preprocess_fixed`, the same pair `_source_format_kwargs()`
+hands every single-file subcommand. Before 2026-09-28 only `free_form` was
+forwarded, so `--source-format fixed` still auto-detected and a member with
+a spaced tag in columns 1-6 scanned as an `UNKNOWN` program with no
+paragraphs.
 
 ## Cross-reference, signatures, codebase graph, SQL/CICS lint, diff, JCL
 

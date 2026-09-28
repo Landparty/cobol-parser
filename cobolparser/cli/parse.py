@@ -857,9 +857,15 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
     if source_format == "fixed" or (
         source_format == "auto" and _detect_fixed_format(source)
     ):
+        from .._lines import split_source_lines
+
         normalize_warnings: list[str] = []
+        # split_source_lines, not str.splitlines(): the latter also breaks on
+        # a form feed (a page eject inside a comment record), NEL, U+2028...
+        # which split one record in two and emitted the tail of a comment
+        # as code -- output `parse` itself never sees.
         source = normalize_fixed_format(
-            source.splitlines(), warnings=normalize_warnings
+            split_source_lines(source), warnings=normalize_warnings
         )
         for nw in normalize_warnings:
             print(f"warning: {nw}", file=sys.stderr)
@@ -2484,6 +2490,7 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         _fail("--workers must be >= 1")
 
     analyzers = parse_analyzer_list(args.analyzer)
+    source_format = _source_format_kwargs(args)
     options = ScanOptions(
         analyzers=analyzers,
         dialect=_DIALECT_MAP[args.dialect],
@@ -2491,7 +2498,11 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         copybook_paths=tuple(getattr(args, "copybook_path", []) or []),
         min_clone_statements=max(1, args.min_clone_statements),
         encoding=args.encoding,
-        free_form=bool(_source_format_kwargs(args).get("free_form", False)),
+        # Both halves of the layout flags: free_form alone dropped
+        # --source-format fixed|free (and cobol.yml's source_format) on the
+        # floor, so a tagged fixed-format member scanned as free-form.
+        free_form=bool(source_format["free_form"]),
+        preprocess_fixed=source_format["preprocess_fixed"],
     )
 
     try:
@@ -3062,6 +3073,11 @@ def _build_graph(args: argparse.Namespace) -> Any:
     right answer and guessing one would hide a typo.
     """
     from ..analysis.codebase import CodebaseGraphBuilder
+
+    # The same guard batch and scan apply: without it parse_files' own
+    # ValueError escaped as a traceback.
+    if args.workers is not None and args.workers < 1:
+        _fail("--workers must be >= 1")
 
     builder = CodebaseGraphBuilder(
         copybook_paths=list(args.copybook_path or []),

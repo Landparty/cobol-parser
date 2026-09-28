@@ -451,7 +451,9 @@ class TestParseFailures:
         monkeypatch.setattr(
             scan_module,
             "_parse",
-            lambda source, path, options: (_ for _ in ()).throw(RuntimeError("kaboom")),
+            lambda source, path, options, *_: (_ for _ in ()).throw(
+                RuntimeError("kaboom")
+            ),
         )
         paths = [
             _write(tmp_path, "A.cbl", _program("PROGA", "ONLY-PARA", _BODY)),
@@ -481,7 +483,7 @@ class TestParseFailures:
         import cobolparser.scan as scan_module
         from cobolparser.parser import parse_cobol
 
-        def recovered(src, p, options):
+        def recovered(src, p, options, *_):
             result = parse_cobol(src, filename=p)
             result.errors = ["e1", "e2"]
             return result
@@ -613,6 +615,24 @@ class TestCopybookExpansion:
         assert scan.error is None
         assert len(scan.units) == 1
         assert scan.units[0].reports
+
+    def test_the_fallback_says_why_expansion_failed(self, tmp_path: Path) -> None:
+        """The fallback used to be a bare `pass`: the unexpanded parse is
+        error-free (a COPY statement parses without its member), so the
+        file's reports were indistinguishable from an expanded scan's while
+        grading a record layout the scan never saw."""
+        path = _write(tmp_path, "COPYUSER.cbl", self.PROGRAM)
+        scan = scan_one(path, ScanOptions(copybook_paths=(str(tmp_path / "nowhere"),)))
+        assert scan.copybook_error is not None
+        assert "TESTCPY" in scan.copybook_error
+        assert scan.to_dict()["copybook_error"] == scan.copybook_error
+
+    def test_no_copybook_error_when_expansion_succeeds(self, tmp_path: Path) -> None:
+        (tmp_path / "TESTCPY.cpy").write_text(self.COPYBOOK)
+        path = _write(tmp_path, "COPYUSER.cbl", self.PROGRAM)
+        scan = scan_one(path, ScanOptions(copybook_paths=(str(tmp_path),)))
+        assert scan.copybook_error is None
+        assert "copybook_error" not in scan.to_dict()
 
     def test_free_form_is_passed_through(self, tmp_path: Path) -> None:
         source = """\
