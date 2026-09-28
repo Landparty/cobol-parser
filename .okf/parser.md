@@ -575,6 +575,15 @@ their unquoted representation. Pinned by
 `'X'` — since no contract pins the unquoted form there; the flow scanner's
 `WHEN <value>` edge labels follow the selector (unquoted) shape.
 
+Because non-blank literals arrive unquoted, `_build_selector` classifies on
+`(token, TokenType)` pairs, not on the joined text (2026-09-28): `ANY`,
+`THRU`/`THROUGH` and the condition words (`AND OR NOT = < > <= >= <>`) are
+keywords only when they are not a `STRING_LITERAL`. Before, `WHEN "ANY"`
+became the `Any` wildcard, `WHEN "THRU"` an end-less `Range` (a spurious
+"THRU/THROUGH range is incomplete" error on valid code), and `WHEN "AND"` /
+`"<"` / `"A OR B"` a `Condition` -- exactly how a COBOL tokenizer spells its
+operator table. Pinned by `tests/regression/test_evaluate_keyword_literal_when.py`.
+
 **EVALUATE subjects reach `.operands` (`evaluate_parser.py`, 2026-08-17
 review follow-up):** `_parse_subjects` routes each parsed subject through
 `EvaluateStatement.add_subject()` instead of appending straight to

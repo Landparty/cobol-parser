@@ -335,11 +335,19 @@ class EvaluateStatementParser(IStatementParser):
         condition-name selectors on it, so an additive marker is the
         backward-compatible way to make the distinction visible.
         """
-        normalized_tokens = [
-            token for token in selector_tokens if token and token.strip()
+        types: list[TokenType | None] = (
+            list(token_types)
+            if token_types and len(token_types) == len(selector_tokens)
+            else [None] * len(selector_tokens)
+        )
+        pairs = [
+            (token, token_type)
+            for token, token_type in zip(selector_tokens, types, strict=True)
+            if token and token.strip()
         ]
-        if not normalized_tokens:
+        if not pairs:
             return None
+        normalized_tokens = [token for token, _ in pairs]
         is_identifier = bool(
             token_types
             and len(token_types) == len(selector_tokens) == 1
@@ -347,16 +355,25 @@ class EvaluateStatementParser(IStatementParser):
         )
 
         selector_text = " ".join(normalized_tokens).strip()
-        selector_upper = selector_text.upper()
 
-        if selector_upper == "ANY":
+        # Keywords and operators are recognized only as *words*: the lexer
+        # strips a string literal's quotes, so WHEN "ANY" / "THRU" / "AND"
+        # / "<" -- a COBOL tokenizer's operator table -- would otherwise
+        # read as a wildcard, a broken range (a spurious error) or a
+        # condition. A STRING_LITERAL token is always a value.
+        words = [
+            [] if token_type == TokenType.STRING_LITERAL else token.upper().split()
+            for token, token_type in pairs
+        ]
+        flat_words = [word for token_words in words for word in token_words]
+
+        if len(pairs) == 1 and words[0] == ["ANY"]:
             return {"type": "Any"}
 
-        parts = selector_text.split()
-        for index, part in enumerate(parts):
-            if part.upper() in ("THRU", "THROUGH"):
-                start_value = " ".join(parts[:index]).strip()
-                end_value = " ".join(parts[index + 1 :]).strip()
+        for index, token_words in enumerate(words):
+            if token_words[:1] in (["THRU"], ["THROUGH"]):
+                start_value = " ".join(normalized_tokens[:index]).strip()
+                end_value = " ".join(normalized_tokens[index + 1 :]).strip()
                 return {
                     "type": "Range",
                     "start": start_value,
@@ -364,13 +381,13 @@ class EvaluateStatementParser(IStatementParser):
                 }
 
         if any(
-            part.upper() in ("AND", "OR", "NOT", "=", "<", ">", "<=", ">=", "<>")
-            for part in parts
+            word in ("AND", "OR", "NOT", "=", "<", ">", "<=", ">=", "<>")
+            for word in flat_words
         ):
-            selector = {"type": "Condition", "text": selector_text}
-            if " OR " in f" {selector_upper} ":
+            selector: dict[str, Any] = {"type": "Condition", "text": selector_text}
+            if "OR" in flat_words:
                 selector["operator"] = "OR"
-            elif " AND " in f" {selector_upper} ":
+            elif "AND" in flat_words:
                 selector["operator"] = "AND"
             return selector
 
