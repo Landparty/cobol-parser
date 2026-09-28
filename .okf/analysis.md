@@ -1385,6 +1385,9 @@ exactly the bug the first draft had. Program-wide rather than per-statement:
 a variable given an indicator on its FETCH and not on its SELECT INTO is a
 different (and much rarer) bug than never having one, and flagging the second
 statement would bury the finding that matters.
+A structure-qualified variable (`:DCLCUST.CUST-VAL:IND`) pairs by its last
+component, like the SQL model's host-variable list (2026-09-28; before that
+the structure name was the "host variable" and nothing was checked).
 
 **What it declines to check, and says so.** `report.unchecked` is
 `name: reason` for every host variable that could not be compared — no

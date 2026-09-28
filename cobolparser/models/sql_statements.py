@@ -14,12 +14,19 @@ from .ast_base import SourceLocation
 from .statements import CobolStatement
 
 # Pre-compiled regex patterns for SQL statement parsing (avoids re-compilation per statement)
-_SQL_HOST_VAR_RE = re.compile(r":([A-Za-z][A-Za-z0-9_-]*)")
+# A host variable may be qualified by its host structure (``:DCLEMP.EMPNO``
+# is EMPNO OF DCLEMP); the captured name is the variable itself -- the last
+# component -- which is what a DATA DIVISION or DCLGEN lookup needs. Taking
+# the first component reported the structure (DCLEMP) and hid the field.
+_SQL_HV_QUALIFIERS = r"(?:[A-Za-z][A-Za-z0-9_-]*\.)*"
+_SQL_HOST_VAR_RE = re.compile(r":" + _SQL_HV_QUALIFIERS + r"([A-Za-z][A-Za-z0-9_-]*)")
 _SQL_INDICATOR_RE = re.compile(
-    r":([A-Za-z][A-Za-z0-9_-]*)\s*:\s*([A-Za-z][A-Za-z0-9_-]*)"
+    r":" + _SQL_HV_QUALIFIERS + r"([A-Za-z][A-Za-z0-9_-]*)\s*:\s*"
+    r"" + _SQL_HV_QUALIFIERS + r"([A-Za-z][A-Za-z0-9_-]*)"
 )
 _SQL_INDICATOR_KW_RE = re.compile(
-    r"\bINDICATOR\s*:([A-Za-z][A-Za-z0-9_-]*)", re.IGNORECASE
+    r"\bINDICATOR\s*:" + _SQL_HV_QUALIFIERS + r"([A-Za-z][A-Za-z0-9_-]*)",
+    re.IGNORECASE,
 )
 # A table name may be qualified (schema.table, location.schema.table); matching
 # only the first part used to report the schema itself (BANK) as a table.

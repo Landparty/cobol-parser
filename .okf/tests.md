@@ -14,7 +14,9 @@ rowset forms, and a rowset FETCH's cursor in the CRUD matrix.
 
 2026-09-28: `tests/unit/test_exec_sql_host_variable_lists.py` (6 tests)
 pins `into_variables` / `using_variables` read from parsed source (no blank
-after INTO/USING), indicators kept in the list rather than ending it.
+after INTO/USING), indicators kept in the list rather than ending it; a
+later commit adds structure-qualified host variables (`:REC.FLD` -> `FLD`),
+with a matching `test_dclgen_check.py` case.
 
 2026-09-28: `tests/unit/test_exec_sql_literals_comments.py` (6 tests) pins
 EXEC SQL string literals keeping their quotes (no host variable or table read

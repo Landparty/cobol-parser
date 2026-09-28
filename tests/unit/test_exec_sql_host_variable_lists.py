@@ -58,3 +58,15 @@ def test_execute_using_from_source():
 def test_insert_into_table_has_no_into_variables():
     stmt = _sql("INSERT INTO T1 (A) VALUES (:WS-A)")
     assert stmt.into_variables == []
+
+
+def test_structure_qualified_host_variables_name_the_field():
+    """``:REC.FLD`` is FLD OF REC: the field is the host variable, not the
+    structure (which used to be reported, hiding the field)."""
+    stmt = _sql(
+        "SELECT SAL INTO :DCLEMP.SAL:IND-SAL",
+        "FROM EMP WHERE EMPNO = :DCLEMP.EMPNO",
+    )
+    assert stmt.host_variables == ["SAL", "IND-SAL", "EMPNO"]
+    assert stmt.null_indicators == ["IND-SAL"]
+    assert stmt.into_variables == ["SAL", "IND-SAL"]

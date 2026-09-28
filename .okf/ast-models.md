@@ -332,6 +332,9 @@ variable of the INTO / USING list, indicators included; before 2026-09-28
 both were empty for any statement parsed from source. See
 [dialects.md](dialects.md).
 
+A structure-qualified host variable (`:DCLEMP.EMPNO`) is listed by its last
+component (`EMPNO`) since 2026-09-28 (see [dialects.md](dialects.md)).
+
 `FetchStatement.cursor_name` / `fetch_direction` / `fetch_count` are read
 positionally for DB2 scroll and rowset FETCHes (2026-09-28; see
 [dialects.md](dialects.md)).

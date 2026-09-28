@@ -54,6 +54,17 @@ variable. EXEC CICS / DLI text is still collected unquoted (option values are
 read bare by the codebase graph and signature extractor). Pinned by
 `tests/unit/test_exec_sql_literals_comments.py`.
 
+## Structure-qualified host variables (`models/sql_statements.py`)
+
+`:DCLEMP.EMPNO` is EMPNO OF DCLEMP. `host_variables`, `null_indicators`,
+`into_variables` and `using_variables` carry the **last component**
+(`EMPNO`) -- what a DATA DIVISION or DCLGEN lookup needs; the qualifier is
+dropped (`_SQL_HV_QUALIFIERS`). `dclgen_check._INDICATOR_RE` reads the same
+form. Before 2026-09-28 the structure (`DCLEMP`) was reported instead, the
+indicator of `:DCLEMP.SAL:IND` was not seen as one, and `dclgen-check` filed
+both as unchecked while checking nothing. Pinned by
+`test_exec_sql_host_variable_lists.py` and `test_dclgen_check.py`.
+
 ## `into_variables` / `using_variables` (`models/sql_statements.py`)
 
 Every host variable of the `INTO` (SELECT / FETCH) or `USING` (PREPARE /
