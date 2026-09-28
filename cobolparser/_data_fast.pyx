@@ -212,8 +212,12 @@ def parse_data_item_clauses_fast(
     cdef object tok_type
     cdef str tok_value
     cdef str value_upper
-    cdef int min_count
-    cdef int max_count
+    # Python ints, not C ints: the pure-Python walker reads the OCCURS counts
+    # with int() and keeps whatever it gets, so a count past INT_MAX must
+    # not raise OverflowError here (which escaped the TypeError/ValueError
+    # guards below and cost the whole DATA DIVISION).
+    cdef object min_count
+    cdef object max_count
     cdef object occurs
     cdef object nxt
     cdef object count_token
