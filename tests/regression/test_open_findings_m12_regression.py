@@ -133,6 +133,27 @@ class TestM12ExpressionTrees:
         assert negate.right_operand == "A"
         assert tree.right_operand == "5"
 
+    def test_compute_unary_minus_binds_tighter_than_exponentiation(self):
+        """-A ** 2 is (-A) ** 2 in COBOL: unary operators come first in
+        IBM's evaluation hierarchy, ahead of ``**`` (unlike mathematics).
+        The tree used to read NEGATE(A ** 2)."""
+        result = parse_cobol(_program("    COMPUTE X = - A ** 2 * B.\n"))
+        assert result.errors == []
+        stmt = _first(result, ComputeStatement)
+
+        tree = stmt.expression_tree
+        assert isinstance(tree, ArithmeticExpression)
+        assert tree.operator == "*"
+        assert tree.right_operand == "B"
+        power = tree.left_operand
+        assert isinstance(power, ArithmeticExpression)
+        assert power.operator == "**"
+        assert power.right_operand == "2"
+        negate = power.left_operand
+        assert isinstance(negate, ArithmeticExpression)
+        assert negate.operator == "NEGATE"
+        assert negate.right_operand == "A"
+
     def test_compute_subscripted_operand_folded_into_leaf(self):
         """A(I) stays a single leaf string, mirroring operand style elsewhere."""
         result = parse_cobol(_program("    COMPUTE X = A(I) + 1.\n"))

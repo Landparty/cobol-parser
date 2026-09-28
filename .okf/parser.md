@@ -2215,26 +2215,24 @@ lines rather than changing any parser code — a reminder that this
 column-72 gotcha applies to test fixtures using this repo's usual
 7-space/Area-B indentation, not just to real-world source.
 
-## COMPUTE expression precedence: `_parse_unary` merged with `_parse_signed_primary` (2026-09-10)
+## COMPUTE expression precedence (2026-09-10; unary fixed 2026-09-28)
 
 `arithmetic_parsers.py`'s expression grammar, tightest-binding first:
 `_parse_primary` (literal/identifier/parenthesized/FUNCTION) →
-`_parse_power` (`**`, left-associative — `2 ** 3 ** 2` is `(2 ** 3) ** 2 ==
-64`, not `2 ** 9`) → `_parse_unary` (leading `+`/`-`) → `_parse_term`
-(`*`/`/`) → `_parse_additive` (`+`/`-`). The exponent on the right of `**`
-may itself carry a sign (`2 ** -3`), but must not itself absorb a further
-`**` — that would make `2 ** -3 ** 2` group as `2 ** (-(3 ** 2))` instead of
-the correct `2 ** (-3)`, since a repeated `**` is `_parse_power`'s own loop,
-not `_parse_unary`'s concern. This used to be a second, hand-copied method
-(`_parse_signed_primary`, identical to `_parse_unary` except its
-non-sign fallback called `_parse_primary` directly instead of descending
-through `_parse_power`) — now one method, `_parse_unary(fallback=None)`:
-`fallback` is `_parse_power` by default and `_parse_primary` for the `**`
-right-hand-side call, threaded through the sign-recursion so a chain of
-signs (`- - -3`) keeps the same fallback throughout. Behavior unchanged —
-`tests/regression/test_review_2026_09_09_generators.py::TestFinding9PowerAssociativity`
-(`2 ** 3 ** 2 == 64`, `2 ** (3 ** 2) == 512`, `100 * 2 ** -1 == 50`) still
-passes unmodified.
+`_parse_unary` (leading `+`/`-`) → `_parse_power` (`**`, left-associative —
+`2 ** 3 ** 2` is `(2 ** 3) ** 2 == 64`, not `2 ** 9`) → `_parse_term`
+(`*`/`/`) → `_parse_expression` (`+`/`-`). This is IBM's evaluation
+hierarchy (Language Reference, "Arithmetic expressions": unary, then
+exponentiation, then multiply/divide, then add/subtract), which differs
+from the mathematical convention: `- A ** 2` is `(-A) ** 2`. Until
+2026-09-28 the sign sat *below* `**` (`unary := sign* power`), so the tree
+read `NEGATE(A ** 2)` and `ConstantFolder` folded `COMPUTE X = - 2 ** 2 + 10`
+to 6 instead of 14. The sign now applies to the primary alone, so the old
+`fallback` parameter (which kept a signed `**` exponent from absorbing a
+further `**`) is gone: every `**` operand is a `_parse_unary`, and
+`2 ** -3 ** 2` still groups as `(2 ** -3) ** 2`. Pinned by
+`tests/regression/test_open_findings_m12_regression.py::...test_compute_unary_minus_binds_tighter_than_exponentiation`
+and `tests/regression/test_review_2026_09_09_generators.py::TestFinding9PowerAssociativity`.
 
 ## `PROCEDURE DIVISION USING` now captures each parameter's passing mode (2026-09-10)
 
