@@ -66,7 +66,21 @@ _DOUBLE_QUOTE_ESCAPES = {
     "/": "/",
     "'": "'",
     " ": " ",
+    # The rest of YAML 1.2's double-quoted escape set (spec 5.7). Rejecting
+    # them refused a valid file with "unsupported escape".
+    "\t": "\t",
+    "a": "\a",
+    "v": "\v",
+    "e": "\x1b",
+    "N": "\x85",
+    "_": "\xa0",
+    "L": " ",
+    "P": " ",
 }
+
+# `\xXX`, `\uXXXX`, `\UXXXXXXXX`: exactly that many hex digits, as YAML says.
+_HEX_ESCAPE_WIDTHS = {"x": 2, "u": 4, "U": 8}
+_HEX_DIGITS_RE = re.compile(r"[0-9A-Fa-f]+", re.ASCII)
 
 
 class _Line:
@@ -462,17 +476,24 @@ class _Parser:
                 if i >= len(text):
                     break
                 esc = text[i]
-                if esc == "u":
-                    if i + 4 >= len(text):
-                        raise self._error("truncated \\u escape", line)
-                    hex_digits = text[i + 1 : i + 5]
-                    try:
-                        out.append(chr(int(hex_digits, 16)))
-                    except ValueError:
+                width = _HEX_ESCAPE_WIDTHS.get(esc)
+                if width is not None:
+                    if i + width >= len(text):
+                        raise self._error(f"truncated \\{esc} escape", line)
+                    hex_digits = text[i + 1 : i + 1 + width]
+                    # A regex, not bare int(..., 16): that also takes a sign,
+                    # underscores and surrounding spaces (`\u+0e9`, `\u1_23`).
+                    code = (
+                        int(hex_digits, 16)
+                        if _HEX_DIGITS_RE.fullmatch(hex_digits)
+                        else None
+                    )
+                    if code is None or code > 0x10FFFF:
                         raise self._error(
-                            f"invalid \\u escape: \\u{hex_digits}", line
-                        ) from None
-                    i += 5
+                            f"invalid \\{esc} escape: \\{esc}{hex_digits}", line
+                        )
+                    out.append(chr(code))
+                    i += 1 + width
                     continue
                 if esc not in _DOUBLE_QUOTE_ESCAPES:
                     raise self._error(f"unsupported escape: \\{esc}", line)

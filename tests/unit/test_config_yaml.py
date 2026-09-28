@@ -368,6 +368,34 @@ def test_sequence_indicator_in_value_position_rejected(text):
         parse_yaml(text)
 
 
+@pytest.mark.parametrize(
+    ("escape", "expected"),
+    [
+        ("\\x41", "A"),
+        ("\\U0001F600", "\U0001f600"),
+        ("\\e", "\x1b"),
+        ("\\a", "\a"),
+        ("\\v", "\v"),
+        ("\\N", "\x85"),
+        ("\\_", "\xa0"),
+        ("\\L", " "),
+        ("\\P", " "),
+        ("\\\t", "\t"),
+    ],
+)
+def test_every_yaml_double_quoted_escape_is_read(escape, expected):
+    # YAML 1.2 (spec 5.7) defines these; they used to be refused as
+    # "unsupported escape", rejecting a valid file.
+    assert parse_yaml(f'a: "<{escape}>"\n') == {"a": f"<{expected}>"}
+
+
+@pytest.mark.parametrize("escape", ["\\u+0e9", "\\u1_23", "\\x4g", "\\U00110000"])
+def test_hex_escape_takes_exactly_hex_digits(escape):
+    # int(..., 16) had accepted a sign and underscores: "\u+0e9" read as "é".
+    with pytest.raises(YamlError, match="invalid"):
+        parse_yaml(f'a: "{escape}"\n')
+
+
 def test_dash_led_plain_scalars_still_read():
     assert parse_yaml("a: -x\nb: -1\nc: '- x'\nd: [-1, -y]\n") == {
         "a": "-x",
