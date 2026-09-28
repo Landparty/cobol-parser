@@ -149,6 +149,11 @@ class _Parser:
                     f"{self.filename}:{number}: "
                     f"YAML directives (%YAML, %TAG) are not supported"
                 )
+            if content.startswith("-\t"):
+                raise YamlError(
+                    f"{self.filename}:{number}: tab after '-'; a sequence "
+                    f"entry needs a space after the dash"
+                )
             if content == "?" or content.startswith("? "):
                 raise YamlError(
                     f"{self.filename}:{number}: "

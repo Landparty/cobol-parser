@@ -396,6 +396,11 @@ def test_hex_escape_takes_exactly_hex_digits(escape):
         parse_yaml(f'a: "{escape}"\n')
 
 
+def test_tab_after_sequence_dash_is_named_as_such():
+    with pytest.raises(YamlError, match=r":2: tab after '-'"):
+        parse_yaml("a:\n-\tk: 1\n")
+
+
 def test_dash_led_plain_scalars_still_read():
     assert parse_yaml("a: -x\nb: -1\nc: '- x'\nd: [-1, -y]\n") == {
         "a": "-x",
