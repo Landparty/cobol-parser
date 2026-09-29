@@ -1261,12 +1261,19 @@ def _eval_define_arithmetic(text: str, defined: Mapping[str, str]) -> int | None
     return result if index == len(tokens) else None
 
 
+#: A COBOL numeric literal (what a directive compares numerically). Plain
+#: ``float()`` also accepts ``nan`` / ``inf`` / ``Infinity`` / ``1_000`` / ``1e3``,
+#: so ``>>DEFINE X AS 'nan'`` made ``>>IF X = 'nan'`` FALSE (NaN never equals
+#: itself) and ``'INF' = 'Infinity'`` TRUE.
+_DIRECTIVE_NUMBER_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)")
+
+
 def _try_number(text: str) -> float | None:
     """Return the numeric value of *text*, or None if it is not numeric."""
-    try:
-        return float(text)
-    except ValueError:
+    stripped = text.strip()
+    if _DIRECTIVE_NUMBER_RE.fullmatch(stripped) is None:
         return None
+    return float(stripped)
 
 
 def _values_equal(left: str, right: str) -> bool:
@@ -1570,6 +1577,35 @@ def _normalize_defined_symbols(
     return result
 
 
+def _when_value_matches(
+    subject: str, tokens: list[tuple[str, str]], defined: dict[str, str]
+) -> bool:
+    """Whether a ``>>WHEN`` selection object selects *subject*.
+
+    The object is one literal or symbol, or a range ``low THRU high``
+    (``THROUGH``), inclusive -- compared numerically when every value is
+    numeric, else as text. A range used to be rejected as "not a single
+    literal", so ``>>WHEN 1 THRU 5`` never matched and ``>>WHEN OTHER`` was
+    compiled instead.
+    """
+    resolver = _ConditionParser([], defined)
+    if len(tokens) == 1 and tokens[0][0] in _OPERAND_KINDS:
+        return _values_equal(subject, resolver._resolve(tokens[0]))
+    if (
+        len(tokens) == 3
+        and tokens[0][0] in _OPERAND_KINDS
+        and tokens[1] in (("word", "THRU"), ("word", "THROUGH"))
+        and tokens[2][0] in _OPERAND_KINDS
+    ):
+        low, high = resolver._resolve(tokens[0]), resolver._resolve(tokens[2])
+        numbers = [_try_number(v) for v in (subject, low, high)]
+        if all(n is not None for n in numbers):
+            value, lo, hi = numbers
+            return lo <= value <= hi  # type: ignore[operator]
+        return low <= subject <= high
+    raise _ConditionSyntaxError("expected a literal, a symbol, or a THRU range")
+
+
 class _CondFrame:
     """One nesting level of >>IF or >>EVALUATE processing."""
 
@@ -1579,6 +1615,7 @@ class _CondFrame:
         "active",
         "branch_taken",
         "eval_cond_mode",
+        "eval_cond_negate",
         "eval_subject",
         "eval_subject_valid",
     )
@@ -1590,7 +1627,8 @@ class _CondFrame:
         self.parent_active = parent_active
         self.active = active
         self.branch_taken = branch_taken
-        self.eval_cond_mode = False  # True for >>EVALUATE TRUE
+        self.eval_cond_mode = False  # True for >>EVALUATE TRUE / FALSE
+        self.eval_cond_negate = False  # True for >>EVALUATE FALSE
         self.eval_subject: str | None = None  # resolved subject value
         self.eval_subject_valid = True  # False -> only >>WHEN OTHER matches
 
@@ -1822,8 +1860,13 @@ def preprocess_conditional_compilation(
                 active=False,  # lines before the first >>WHEN are blanked
                 branch_taken=not parent_active,
             )
-            if rest == "TRUE":
+            if rest in ("TRUE", "FALSE"):
+                # ``>>EVALUATE FALSE`` selects the first ``>>WHEN`` whose
+                # condition is false. It used to be taken as the subject
+                # value FALSE, so every conditional ``>>WHEN`` was rejected
+                # as "not a single literal" and only OTHER could match.
                 frame.eval_cond_mode = True
+                frame.eval_cond_negate = rest == "FALSE"
             elif parent_active:
                 try:
                     tokens = _tokenize_condition(rest)
@@ -1861,24 +1904,37 @@ def preprocess_conditional_compilation(
                 else:
                     matched = False
                     if frame.parent_active and not frame.branch_taken:
-                        if frame.eval_cond_mode:
+                        if frame.eval_cond_mode and not frame.eval_cond_negate:
                             matched = _evaluate_condition(
                                 rest, defined, _warn, line_no, ">>WHEN"
                             )
+                        elif frame.eval_cond_mode:
+                            # Not _evaluate_condition: its "treated as
+                            # FALSE" fallback would *select* the branch here.
+                            try:
+                                tokens = _tokenize_condition(rest)
+                                matched = (
+                                    _ConditionParser(tokens, defined).parse()
+                                    != frame.eval_cond_negate
+                                )
+                            except _UndefinedSymbolError as exc:
+                                _warn(
+                                    f"Line {line_no}: >>WHEN condition '{rest}' "
+                                    f"references undefined symbol '{exc.name}' "
+                                    "— branch not selected"
+                                )
+                            except _ConditionSyntaxError as exc:
+                                _warn(
+                                    f"Line {line_no}: unsupported >>WHEN "
+                                    f"condition '{rest}' ({exc}) — branch not "
+                                    "selected"
+                                )
                         elif frame.eval_subject_valid:
                             try:
                                 tokens = _tokenize_condition(rest)
-                                if (
-                                    len(tokens) != 1
-                                    or tokens[0][0] not in _OPERAND_KINDS
-                                ):
-                                    raise _ConditionSyntaxError(
-                                        "expected a single literal or symbol"
-                                    )
-                                value = _ConditionParser([], defined)._resolve(
-                                    tokens[0]
+                                matched = _when_value_matches(
+                                    frame.eval_subject or "", tokens, defined
                                 )
-                                matched = _values_equal(frame.eval_subject or "", value)
                             except _UndefinedSymbolError as exc:
                                 _warn(
                                     f"Line {line_no}: >>WHEN value references "

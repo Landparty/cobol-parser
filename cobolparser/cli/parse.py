@@ -416,8 +416,16 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
         from ..preprocess import preprocess_conditional_compilation
 
         conditional_warnings: list[str] = []
+        # keep_source_format_directives: this runs on the raw source, before
+        # the parser's own fixed-format normalization, which still has to
+        # see where ``>>SOURCE FORMAT IS FREE`` switches the reference
+        # format. Blanked here, every free-format line after it was column-
+        # sliced as fixed format (``DISPLAY "X".`` read as `` "X".``).
         source = preprocess_conditional_compilation(
-            source, defines, warnings=conditional_warnings
+            source,
+            defines,
+            warnings=conditional_warnings,
+            keep_source_format_directives=True,
         )
         for cw in conditional_warnings:
             print(f"warning: {cw}", file=sys.stderr)
@@ -851,8 +859,12 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
     defines = _parse_defines(args.define)
     if defines:
         conditional_warnings: list[str] = []
+        # Kept for normalize_fixed_format below (see _do_parse).
         source = preprocess_conditional_compilation(
-            source, defines, warnings=conditional_warnings
+            source,
+            defines,
+            warnings=conditional_warnings,
+            keep_source_format_directives=True,
         )
         for cw in conditional_warnings:
             print(f"warning: {cw}", file=sys.stderr)
@@ -2091,7 +2103,9 @@ def _parse_without_copybook_expansion(args: argparse.Namespace) -> Any:
     if defines:
         from ..preprocess import preprocess_conditional_compilation
 
-        source = preprocess_conditional_compilation(source, defines, warnings=[])
+        source = preprocess_conditional_compilation(
+            source, defines, warnings=[], keep_source_format_directives=True
+        )
 
     parse_kwargs: dict[str, Any] = {
         "dialect": dialect,

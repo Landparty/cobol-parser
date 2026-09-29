@@ -122,15 +122,62 @@ _CURRENCY_CLAUSE_RE = re.compile(
 )
 
 
-def _declared_currency_symbols(source: str) -> frozenset[str]:
+def _code_text(source: str, *, blank_literals: bool, fixed_format: bool) -> str:
+    """*source* with everything that is not program text blanked out.
+
+    The SPECIAL-NAMES scans below run over the whole source up front, so a
+    clause that only appears in a comment must not count: a commented-out
+    ``*> DECIMAL-POINT IS COMMA.`` made ``MOVE 2.5 TO X`` lex as ``2`` PERIOD
+    ``5`` and cost the statement. Drops a ``*>`` floating comment (outside a
+    literal) to end of line, a whole fixed-format comment line when
+    *fixed_format* (the raw-layout lexer), and -- when *blank_literals* --
+    the text of every literal (``DISPLAY "DECIMAL-POINT IS COMMA"``). Line
+    breaks are kept, so a clause split across lines still matches.
+    """
+    out: list[str] = []
+    for line in split_source_lines(source):
+        if fixed_format and len(line) > _FF_INDICATOR and line[_FF_INDICATOR] in "*/":
+            out.append("")
+            continue
+        if "*>" not in line and not (blank_literals and ("'" in line or '"' in line)):
+            out.append(line)
+            continue
+        chars: list[str] = []
+        quote: str | None = None
+        index = 0
+        while index < len(line):
+            ch = line[index]
+            if quote is not None:
+                if ch == quote:
+                    quote = None  # a doubled quote reopens on the next char
+                chars.append(" " if blank_literals else ch)
+            elif ch in "'\"":
+                quote = ch
+                chars.append(" " if blank_literals else ch)
+            elif line.startswith("*>", index):
+                break
+            else:
+                chars.append(ch)
+            index += 1
+        out.append("".join(chars))
+    return "\n".join(out)
+
+
+def _declared_currency_symbols(
+    source: str, fixed_format: bool = False
+) -> frozenset[str]:
     """The PICTURE currency symbols a SPECIAL-NAMES paragraph declares.
 
     A clause without ``PICTURE SYMBOL`` declares its sign as the symbol, so
     only a one-character sign counts there. Alphanumeric symbols are left
-    out -- they already lex as (part of) a word.
+    out -- they already lex as (part of) a word. A clause inside a comment
+    declares nothing.
     """
     symbols: set[str] = set()
-    for match in _CURRENCY_CLAUSE_RE.finditer(source):
+    if "CURRENCY" not in source.upper():
+        return frozenset()
+    code = _code_text(source, blank_literals=False, fixed_format=fixed_format)
+    for match in _CURRENCY_CLAUSE_RE.finditer(code):
         sign = match.group(1) or match.group(2) or ""
         symbol = match.group(3) or match.group(4)
         if symbol is None and len(sign) == 1:
@@ -155,11 +202,16 @@ _DECIMAL_POINT_COMMA_RE = re.compile(
 )
 
 
-def declares_decimal_point_comma(source: str) -> bool:
-    """True when *source* declares ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA``."""
+def declares_decimal_point_comma(source: str, fixed_format: bool = False) -> bool:
+    """True when *source* declares ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA``.
+
+    Only program text counts: the clause in a comment or inside a literal
+    declares nothing (see :func:`_code_text`).
+    """
     if "DECIMAL-POINT" not in source.upper():
         return False
-    return _DECIMAL_POINT_COMMA_RE.search(source) is not None
+    code = _code_text(source, blank_literals=True, fixed_format=fixed_format)
+    return _DECIMAL_POINT_COMMA_RE.search(code) is not None
 
 
 class TokenType(IntEnum):
@@ -862,13 +914,17 @@ class _CobolLexerPure:
         self._open_string_location: SourceLocation | None = None
         # PICTURE currency symbols declared by SPECIAL-NAMES CURRENCY SIGN
         # clauses (lexed as CURRENCY tokens, like ``$``).
-        self._currency_symbols: frozenset[str] = _declared_currency_symbols(source)
+        self._currency_symbols: frozenset[str] = _declared_currency_symbols(
+            source, fixed_format=not free_form
+        )
         # ``DECIMAL-POINT IS COMMA``: ``,`` between digits is the decimal
         # point of a numeric literal and ``.`` is not. A decimal literal's
         # token keeps the canonical ``.`` spelling in ``value`` (every
         # consumer reads it as a number) and the source text in
         # ``raw_value``.
-        self.decimal_point_is_comma: bool = declares_decimal_point_comma(source)
+        self.decimal_point_is_comma: bool = declares_decimal_point_comma(
+            source, fixed_format=not free_form
+        )
         self._decimal_char: str = "," if self.decimal_point_is_comma else "."
 
     def _comment_entry_line_tokens(
@@ -1589,12 +1645,14 @@ class _CobolLexerPure:
         if first.upper() not in self.LITERAL_PREFIXES:
             return None
 
-        # Determine prefix length: the two-letter ``NX`` national-hex form, or
-        # a single-letter prefix. The prefix must be immediately followed by a
-        # quote character with no intervening whitespace.
+        # Determine prefix length: the two-letter ``NX`` national-hex or
+        # ``UX`` UTF-8-hex form, or a single-letter prefix. The prefix must be
+        # immediately followed by a quote character with no intervening
+        # whitespace. ``UX`` used to fall through to the identifier path, so
+        # ``UX"C3A9"`` lexed as the word ``UX`` plus the text literal "C3A9".
         prefix_len = 1
         if (
-            first.upper() == "N"
+            first.upper() in ("N", "U")
             and start_pos + 1 < length
             and text[start_pos + 1].upper() == "X"
         ):
@@ -1640,9 +1698,7 @@ class _CobolLexerPure:
         # (G'..'/N'..' have different, codepage-dependent validity rules
         # that this parser does not attempt to decode -- M7 scopes this
         # fix to the unambiguous hex case).
-        is_hex_prefix = (first.upper() == "X" and prefix_len == 1) or (
-            first.upper() == "N" and prefix_len == 2
-        )
+        is_hex_prefix = (first.upper() == "X" and prefix_len == 1) or prefix_len == 2
         if is_hex_prefix and not unterminated:
             hex_content = token.value or ""
             if hex_content:
@@ -2070,7 +2126,7 @@ class _CobolLexerPure:
     #: Literal prefixes whose literals may be joined with ``&`` (IBM:
     #: alphanumeric, national and DBCS literals). ``Z`` (null-terminated) and
     #: ``B`` (boolean) literals may not be concatenated.
-    _CONCATENABLE_PREFIXES = frozenset({"", "X", "N", "NX", "G", "U"})
+    _CONCATENABLE_PREFIXES = frozenset({"", "X", "N", "NX", "G", "U", "UX"})
 
     @staticmethod
     def _literal_prefix(token: Token) -> str:
@@ -2238,9 +2294,16 @@ def _fixed_format_comment_tokens(
     # Deferred import: keeping preprocess out of module scope avoids import
     # cycles (same rationale as the tokenize helper below). The constant is
     # the shared home for the comment-indicator set — see _normalize.py.
+    from ._source_directive import free_format_flags
     from .preprocess import ALL_COMMENT_INDICATORS
 
     physical = [raw.rstrip("\n").expandtabs(8) for raw in physical_lines]
+    # Lines after ``>>SOURCE FORMAT IS FREE`` have no indicator column: a
+    # ``D``/``*``/``/`` that merely happens to sit in column 7 of a free line
+    # (``    ADD A TO B``) is code, which the normalizer passed through whole.
+    # Reading it as an indicator fabricated a COMMENT token beside the
+    # line's real tokens.
+    free = free_format_flags(physical) if any(">>" in ln for ln in physical) else None
 
     def _comment_text(line: str) -> str | None:
         if len(line) < _FF_AREA_A:
@@ -2262,6 +2325,8 @@ def _fixed_format_comment_tokens(
         # or blank record merged into or deferred behind it. A comment
         # line's normalized number is therefore its own physical number.
         for idx, line in enumerate(physical):
+            if free is not None and free[idx]:
+                continue
             text = _comment_text(line)
             if text is not None:
                 location = SourceLocation(idx + 1, _FF_INDICATOR + 1, 1)
@@ -2276,7 +2341,13 @@ def _fixed_format_comment_tokens(
     # continuation record (merged into its logical line, its placeholder
     # deferred behind it), or a full-width blank code line.
     placeholders: list[str | None] = []
-    for line in physical:
+    for idx, line in enumerate(physical):
+        if free is not None and free[idx]:
+            # The normalizer passes a free line through whole: only a blank
+            # one comes out as an empty line.
+            if not line.strip():
+                placeholders.append(None)
+            continue
         text = _comment_text(line)
         if text is not None:
             placeholders.append(text)
