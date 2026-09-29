@@ -470,8 +470,44 @@ def _consume_optional_rounded(stream: ITokenStream) -> bool:
     _skip_newlines(stream)
     if peek_value_upper(stream) == "ROUNDED":
         stream.consume()
+        _consume_optional_rounded_mode(stream)
         return True
     return False
+
+
+#: The rounding modes of ``ROUNDED MODE IS mode`` (IBM Enterprise COBOL 6.x,
+#: COBOL 2002). Matched by value so a data item that merely follows ROUNDED
+#: (``ADD A TO B ROUNDED C``) is never taken for a mode.
+_ROUNDED_MODES: frozenset[str] = frozenset(
+    {
+        "AWAY-FROM-ZERO",
+        "NEAREST-AWAY-FROM-ZERO",
+        "NEAREST-EVEN",
+        "NEAREST-TOWARD-ZERO",
+        "PROHIBITED",
+        "TOWARD-GREATER",
+        "TOWARD-LESSER",
+        "TRUNCATION",
+    }
+)
+
+
+def _consume_optional_rounded_mode(stream: ITokenStream) -> None:
+    """Consume ``MODE [IS] mode-name`` right after ROUNDED, if present.
+
+    Left in the stream, ``MODE`` ended the target list: every later target,
+    the SIZE ERROR handlers and (for COMPUTE) the ``=`` itself were lost.
+    """
+    _skip_newlines(stream)
+    if peek_value_upper(stream) != "MODE":
+        return
+    stream.consume()
+    _skip_newlines(stream)
+    if peek_value_upper(stream) == "IS":
+        stream.consume()
+        _skip_newlines(stream)
+    if peek_value_upper(stream) in _ROUNDED_MODES:
+        stream.consume()
 
 
 #: GIVING/REMAINDER have no dedicated TokenType (see e.g.

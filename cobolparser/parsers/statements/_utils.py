@@ -771,6 +771,48 @@ def bare_end_starts_at_end_clause(stream: ITokenStream) -> bool:
     )
 
 
+#: Words that, after ``NOT``, open a conditional statement's negative handler
+#: phrase: ``NOT [AT] END``, ``NOT INVALID [KEY]``, ``NOT [ON] EXCEPTION`` /
+#: ``OVERFLOW`` / ``SIZE ERROR``, ``NOT [AT] END-OF-PAGE``. All reserved, so
+#: ``NOT`` in front of one is never a condition's negation.
+_NEGATIVE_HANDLER_WORDS = frozenset(
+    {
+        "AT",
+        "END",
+        "INVALID",
+        "ON",
+        "EXCEPTION",
+        "OVERFLOW",
+        "SIZE",
+        "END-OF-PAGE",
+        "EOP",
+    }
+)
+
+
+def starts_negative_handler_phrase(stream: ITokenStream) -> bool:
+    """True if the stream is at ``NOT`` opening a handler phrase.
+
+    A statement with no such phrase of its own (INSPECT, SORT, a PERFORM
+    UNTIL condition, ...) nested in another statement's handler is followed
+    by the enclosing statement's ``NOT AT END`` / ``NOT INVALID KEY`` / ``NOT
+    ON EXCEPTION`` / ``NOT ON SIZE ERROR``. Its clause loop must stop there:
+    consuming the phrase lost the enclosing handler and folded its
+    statements into the wrong branch, silently.
+    """
+    token = stream.peek()
+    if token is None or token.type in LITERAL_TOKEN_TYPES:
+        return False
+    if token_value_upper(token) != "NOT":
+        return False
+    following, _ = peek_past_noise(stream, 1)
+    return (
+        following is not None
+        and following.type not in LITERAL_TOKEN_TYPES
+        and token_value_upper(following) in _NEGATIVE_HANDLER_WORDS
+    )
+
+
 def consume_period(stream: ITokenStream) -> None:
     """Consume a period token if it is the next non-empty token."""
     if not stream.is_empty():
@@ -920,9 +962,19 @@ def parse_invalid_key_clauses(
         clause_stmts = collect_clause_stmts(stream, {end_keyword})
         stmt.set_invalid_key_clause(clause_stmts)
 
-    # NOT INVALID KEY
+    # NOT INVALID KEY. The NOT is only this clause's when INVALID follows:
+    # ``READ ... INVALID KEY DELETE F2 NOT INVALID KEY`` is fine, but a
+    # nested statement's ``NOT`` in front of an enclosing CALL's ``ON
+    # EXCEPTION`` / READ's ``AT END`` was consumed and discarded here, so the
+    # enclosing handler could no longer be recognized.
     token = stream.peek()
-    if token and token.type == TokenType.NOT:
+    following, _ = peek_past_noise(stream, 1)
+    if (
+        token
+        and token.type == TokenType.NOT
+        and following is not None
+        and following.type == TokenType.INVALID
+    ):
         stream.consume()
         skip_whitespace(stream)
         token = stream.peek()
@@ -1395,6 +1447,50 @@ def consume_value_operand(stream: ITokenStream) -> str | None:
     if token.type == TokenType.IDENTIFIER:
         value = consume_optional_qualifiers(stream, value)
     return value
+
+
+def consume_from_operand(stream: ITokenStream) -> str | None:
+    """Consume the sending operand of ``WRITE``/``REWRITE ... FROM``.
+
+    ``FROM identifier-1 | literal-1``: a data name (subscript / OF-IN chain
+    folded in), or any literal -- a quoted one kept quoted (a typed literal
+    such as ``X"41"`` in its original spelling), a numeric one (``1``-``49``
+    lex as LEVEL_NUMBER, a sign is its own token), or a figurative constant
+    with an optional ``ALL`` (``FROM SPACES``, ``FROM ALL "*"``). Returns the
+    operand text, or ``None`` (consuming nothing) when no operand follows.
+    """
+    from cobolparser._literals import quote_literal
+
+    signed = consume_signed_numeric(stream)
+    if signed is not None:
+        return signed
+    token = stream.peek()
+    if not token or not token.value:
+        return None
+    if token.type == TokenType.IDENTIFIER:
+        stream.consume()
+        return consume_optional_qualifiers(stream, token.value)
+    prefix = ""
+    if token.type == TokenType.FIGURATIVE_CONSTANT and token.value.upper() == "ALL":
+        following = peek_token(stream, 1)
+        if following is not None and following.type in (
+            TokenType.STRING_LITERAL,
+            TokenType.FIGURATIVE_CONSTANT,
+        ):
+            stream.consume()
+            prefix = "ALL "
+            token = following
+    if token.type == TokenType.STRING_LITERAL:
+        stream.consume()
+        return prefix + (token.raw_value or quote_literal(token.value))
+    if token.type in (
+        TokenType.NUMERIC_LITERAL,
+        TokenType.LEVEL_NUMBER,
+        TokenType.FIGURATIVE_CONSTANT,
+    ):
+        stream.consume()
+        return prefix + token.value
+    return None
 
 
 def consume_keyword_and_operand(

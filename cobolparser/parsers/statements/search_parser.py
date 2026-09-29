@@ -11,8 +11,10 @@ from ._utils import (
     SEPARATOR_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     bare_end_starts_at_end_clause,
+    consume_optional_qualifiers,
     keyword_upper,
     matches_keyword,
+    previous_meaningful_token,
     skip_statement_separators,
     skip_whitespace,
     token_location,
@@ -60,7 +62,12 @@ class SearchStatementParser(IStatementParser):
         token = token_stream.peek()
         if token and token.type != TokenType.PERIOD:
             token_stream.consume()
-            stmt.set_table_name(token.value or "")
+            # ``SEARCH T OF G`` -- a qualified table name. Left in the
+            # stream, ``OF`` ended the SEARCH: its AT END and WHEN bodies
+            # were parsed as free-standing statements of the paragraph.
+            stmt.set_table_name(
+                consume_optional_qualifiers(token_stream, token.value or "")
+            )
         skip_whitespace(token_stream)
 
         # Optional VARYING
@@ -71,7 +78,9 @@ class SearchStatementParser(IStatementParser):
             var_token = token_stream.peek()
             if var_token and var_token.type != TokenType.PERIOD:
                 token_stream.consume()
-                stmt.set_varying_variable(var_token.value or "")
+                stmt.set_varying_variable(
+                    consume_optional_qualifiers(token_stream, var_token.value or "")
+                )
             skip_whitespace(token_stream)
 
         # Parse AT END and WHEN clauses
@@ -101,6 +110,8 @@ class SearchStatementParser(IStatementParser):
                     at_end_stmts = self._parse_nested_statements(token_stream)
                     if at_end_stmts:
                         stmt.set_at_end_clause(at_end_stmts)
+                        if _sentence_period_consumed(token_stream):
+                            break
             elif bare_end_starts_at_end_clause(token_stream):
                 # ``SEARCH T END stmts WHEN ...`` -- AT is optional.
                 token_stream.consume()  # END
@@ -108,6 +119,8 @@ class SearchStatementParser(IStatementParser):
                 at_end_stmts = self._parse_nested_statements(token_stream)
                 if at_end_stmts:
                     stmt.set_at_end_clause(at_end_stmts)
+                    if _sentence_period_consumed(token_stream):
+                        break
             elif val == "WHEN":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -136,6 +149,8 @@ class SearchStatementParser(IStatementParser):
                 # Parse nested statements after condition
                 when_stmts = self._parse_nested_statements(token_stream)
                 stmt.add_when_clause(" ".join(cond_parts), when_stmts)
+                if when_stmts and _sentence_period_consumed(token_stream):
+                    break
             elif token.type in SEPARATOR_TOKEN_TYPES:
                 token_stream.consume()
             else:
@@ -169,4 +184,16 @@ class SearchStatementParser(IStatementParser):
                 stmts.append(nested)
             else:
                 break
+            if _sentence_period_consumed(token_stream):
+                # ``WHEN c DISPLAY X.`` -- the nested statement took the
+                # sentence period, which ends the SEARCH too. Without this
+                # check every later statement of the paragraph was parsed
+                # into this WHEN (or AT END) body.
+                break
         return stmts
+
+
+def _sentence_period_consumed(token_stream: ITokenStream) -> bool:
+    """True when the last meaningful token consumed was the sentence period."""
+    prev = previous_meaningful_token(token_stream)
+    return prev is not None and prev.type == TokenType.PERIOD

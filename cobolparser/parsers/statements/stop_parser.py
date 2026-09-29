@@ -41,6 +41,8 @@ class StopStatementParser(IStatementParser):
                 elif next_token.type.name in (
                     "STRING_LITERAL",
                     "NUMERIC_LITERAL",
+                    # 1-49 lex as LEVEL_NUMBER: ``STOP 12`` is a literal too.
+                    "LEVEL_NUMBER",
                     "FIGURATIVE_CONSTANT",  # STOP ZERO / STOP QUOTE (OBNC1M)
                 ):
                     stmt.stop_type = next_token.value
@@ -58,7 +60,14 @@ class StopStatementParser(IStatementParser):
                         val
                         and val.value
                         and val.type
-                        in (TokenType.IDENTIFIER, TokenType.NUMERIC_LITERAL)
+                        in (
+                            TokenType.IDENTIFIER,
+                            TokenType.NUMERIC_LITERAL,
+                            # ``RETURNING 8``: 1-49 lex as LEVEL_NUMBER. Left
+                            # in the stream, ``8.`` became a phantom paragraph
+                            # that took the rest of the real one with it.
+                            TokenType.LEVEL_NUMBER,
+                        )
                     ):
                         stmt.returning = val.value
                         token_stream.consume()

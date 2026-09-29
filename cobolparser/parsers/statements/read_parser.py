@@ -12,8 +12,10 @@ from cobolparser.parsers.statements._utils import (
     is_statement_boundary,
     matches_keyword,
     parse_invalid_key_clauses,
+    peek_past_noise,
     skip_statement_separators,
     skip_whitespace,
+    token_value_upper,
     try_consume_keyword,
 )
 
@@ -168,9 +170,23 @@ class ReadStatementParser(IStatementParser):
             )
             stmt.set_at_end_clause(clause_stmts)
 
-        # Optional NOT AT END clause
+        # Optional NOT AT END clause. The NOT is consumed only when READ's
+        # own phrase follows it (``NOT [AT] END`` / ``NOT INVALID KEY``): a
+        # READ nested in a CALL's ``ON EXCEPTION`` is followed by the CALL's
+        # ``NOT ON EXCEPTION``, and swallowing its NOT lost that handler and
+        # the READ itself (the CALL re-read ``ON EXCEPTION`` over it).
         token = token_stream.peek()
-        if token and token.type == TokenType.NOT:
+        following, following_at = peek_past_noise(token_stream, 1)
+        following_val = token_value_upper(following)
+        if following_val == "END":
+            after_end, _ = peek_past_noise(token_stream, following_at + 1)
+            owns_not = token_value_upper(after_end) not in ("PROGRAM", "DIVISION")
+        else:
+            owns_not = following is not None and following.type in (
+                TokenType.AT,
+                TokenType.INVALID,
+            )
+        if token and token.type == TokenType.NOT and owns_not:
             token_stream.consume()
             skip_whitespace(token_stream)
             next_tok = token_stream.peek()

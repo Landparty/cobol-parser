@@ -319,7 +319,8 @@ class EvaluateStatementParser(IStatementParser):
             issues.append("Consecutive ALSO keywords without selector")
 
         for selector in selectors:
-            if selector.get("type") == "Range" and not selector.get("end"):
+            is_range = selector.get("type") == "Range" or "end" in selector
+            if is_range and not selector.get("end"):
                 issues.append("THRU/THROUGH range is incomplete - missing end value")
 
         return selectors, selector_count, issues
@@ -375,8 +376,23 @@ class EvaluateStatementParser(IStatementParser):
 
         for index, token_words in enumerate(words):
             if token_words[:1] in (["THRU"], ["THROUGH"]):
-                start_value = " ".join(normalized_tokens[:index]).strip()
+                negated = words[0] == ["NOT"] and index > 1
+                first = 1 if negated else 0
+                start_value = " ".join(normalized_tokens[first:index]).strip()
                 end_value = " ".join(normalized_tokens[index + 1 :]).strip()
+                if negated:
+                    # ``WHEN NOT 1 THRU 5`` selects everything *outside* the
+                    # range. As a plain Range it read as ``start="NOT 1"``,
+                    # which a consumer takes for the range itself -- the
+                    # opposite arm. A negated selector is a Condition, as
+                    # ``WHEN NOT 'Y'`` already is; the bounds stay readable.
+                    return {
+                        "type": "Condition",
+                        "text": selector_text,
+                        "negated": True,
+                        "start": start_value,
+                        "end": end_value,
+                    }
                 return {
                     "type": "Range",
                     "start": start_value,

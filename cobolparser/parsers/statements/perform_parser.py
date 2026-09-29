@@ -22,6 +22,7 @@ from cobolparser.parsers.statements._utils import (
     report_parse_error,
     skip_statement_separators,
     skip_whitespace,
+    starts_negative_handler_phrase,
     try_parse_nested_statement,
 )
 from cobolparser.parsers.statements._utils import (
@@ -120,26 +121,42 @@ def _warn_incomplete_varying_clause(
 
 
 def _peek_past_optional_subscript(stream: ITokenStream, offset: int) -> Any:
-    """Peek at the first meaningful token at/after *offset*, skipping one
-    parenthesised subscript group if that is what comes first.
+    """Peek at the first meaningful token at/after *offset*, skipping the
+    rest of a data reference: parenthesised subscript groups and ``OF`` /
+    ``IN`` qualifiers.
 
-    ``PERFORM P TABLE5-NUM (INDEX5) TIMES`` (NIST NC121M): the TIMES lookahead
-    must see past the count's subscript, or the subscripted count is taken
-    for a stray identifier and ``(INDEX5) TIMES`` falls out as unparsed.
+    ``PERFORM P TABLE5-NUM (INDEX5) TIMES`` (NIST NC121M) and ``PERFORM P
+    WS-CNT OF WS-CTL TIMES``: the TIMES lookahead must see past the count's
+    subscript and qualifier chain, or the count is taken for a stray
+    identifier (or, inline, for a paragraph name) and TIMES falls out as
+    unparsed.
     """
     token, idx = peek_past_noise(stream, offset)
-    if token is None or token.type != TokenType.LEFT_PAREN:
-        return token
-    depth = 0
     while token is not None:
         if token.type == TokenType.LEFT_PAREN:
-            depth += 1
-        elif token.type == TokenType.RIGHT_PAREN:
-            depth -= 1
-            if depth == 0:
-                return peek_past_noise(stream, idx + 1)[0]
-        idx += 1
-        token = stream.peek(idx)
+            depth = 0
+            while token is not None:
+                if token.type == TokenType.LEFT_PAREN:
+                    depth += 1
+                elif token.type == TokenType.RIGHT_PAREN:
+                    depth -= 1
+                    if depth == 0:
+                        break
+                idx += 1
+                token = stream.peek(idx)
+            if token is None:
+                return None
+            token, idx = peek_past_noise(stream, idx + 1)
+        elif token.type in (TokenType.OF, TokenType.IN) or keyword_upper(token) in (
+            "OF",
+            "IN",
+        ):
+            _name, idx = peek_past_noise(stream, idx + 1)
+            if _name is None:
+                return None
+            token, idx = peek_past_noise(stream, idx + 1)
+        else:
+            return token
     return None
 
 
@@ -286,7 +303,7 @@ class PerformStatementParser(IStatementParser):
             # ``PERFORM counter-name TIMES`` -- an identifier count is as
             # standard as a literal one; previously the identifier was taken
             # as a paragraph name and TIMES fell out as an unparsed token.
-            lookahead = peek_past_noise(token_stream, 1)[0]
+            lookahead = _peek_past_optional_subscript(token_stream, 1)
             if (
                 token.type == TokenType.IDENTIFIER
                 and lookahead
@@ -299,8 +316,12 @@ class PerformStatementParser(IStatementParser):
                     )
                 )
             ):
-                count_name = token.value
                 token_stream.consume()  # the count identifier
+                # ``PERFORM WS-CNT OF WS-CTL TIMES`` / ``PERFORM TBL-N (I)
+                # TIMES``: the count is the whole data reference.
+                count_name = consume_optional_qualifiers(
+                    token_stream, token.value or ""
+                )
                 skip_whitespace(token_stream)
                 token_stream.consume()  # TIMES keyword
                 stmt.set_times_clause(count_name)
@@ -730,6 +751,10 @@ class PerformStatementParser(IStatementParser):
                 break
             if token.type in STATEMENT_TOKEN_TYPES:
                 break
+            if starts_negative_handler_phrase(stream):
+                # An enclosing READ's ``NOT AT END`` (CALL's ``NOT ON
+                # EXCEPTION``, ...) ends this PERFORM, not the condition.
+                break
             if for_varying and (
                 token.type == TokenType.IDENTIFIER
                 and token.value
@@ -833,6 +858,11 @@ class PerformStatementParser(IStatementParser):
                     and token.value
                     and token.value.upper() in STATEMENT_KEYWORDS
                 ):
+                    break
+                if starts_negative_handler_phrase(stream):
+                    # ``READ ... AT END PERFORM p UNTIL c NOT AT END ...``:
+                    # the READ's handler phrase, not more condition. It was
+                    # read into the condition text and the handler was lost.
                     break
 
                 condition_tokens.append(condition_token_text(token))

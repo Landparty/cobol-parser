@@ -156,8 +156,13 @@ class CallStatementParser(IStatementParser):
                     skip_whitespace(token_stream)
                     token = token_stream.peek()
                     if token and token.type == TokenType.IDENTIFIER:
-                        stmt.set_returning_parameter(token.value)
                         token_stream.consume()
+                        # ``RETURNING WS-RC OF WS-CTL`` / ``RETURNING T (I)``:
+                        # the item is the whole data reference (the
+                        # qualifier was dropped as unparsed tokens).
+                        stmt.set_returning_parameter(
+                            consume_optional_qualifiers(token_stream, token.value)
+                        )
                 elif (
                     token.type == TokenType.IDENTIFIER
                     and token.value
@@ -167,8 +172,10 @@ class CallStatementParser(IStatementParser):
                     skip_whitespace(token_stream)
                     token = token_stream.peek()
                     if token and token.type == TokenType.IDENTIFIER:
-                        stmt.set_giving_parameter(token.value)
                         token_stream.consume()
+                        stmt.set_giving_parameter(
+                            consume_optional_qualifiers(token_stream, token.value)
+                        )
                 elif token_value_upper(token) in ("EXCEPTION", "OVERFLOW"):
                     # ``ON`` is optional: ``CALL ... EXCEPTION stmts`` and
                     # ``CALL ... OVERFLOW stmts`` are standard COBOL. Without

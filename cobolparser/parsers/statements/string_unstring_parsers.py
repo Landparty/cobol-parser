@@ -13,6 +13,7 @@ from ._utils import (
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
+    peek_past_noise,
     skip_whitespace,
     token_column,
     token_location,
@@ -38,6 +39,24 @@ def _parse_overflow_stmts(token_stream: ITokenStream) -> list:
     this codebase recovers from an unrecognized token.
     """
     return collect_clause_stmts(token_stream, _OVERFLOW_CLAUSE_STOP)
+
+
+def _starts_overflow_phrase(token_stream: ITokenStream) -> bool:
+    """Whether the stream is at ``[NOT] [ON] OVERFLOW`` -- this statement's
+    own handler phrase.
+
+    Any other ``ON`` / ``NOT`` belongs to an enclosing statement: a STRING in
+    a READ's ``AT END`` is followed by the READ's ``NOT AT END``, one in a
+    CALL's ``ON EXCEPTION`` by ``NOT ON EXCEPTION``. Consuming that word here
+    left ``AT END`` / ``EXCEPTION`` to be read as operands, and the enclosing
+    handler's statements were folded into the wrong branch.
+    """
+    token, offset = peek_past_noise(token_stream, 0)
+    if token is not None and _val(token) == "NOT":
+        token, offset = peek_past_noise(token_stream, offset + 1)
+    if token is not None and _val(token) == "ON":
+        token, offset = peek_past_noise(token_stream, offset + 1)
+    return token is not None and _val(token) == "OVERFLOW"
 
 
 def _consume_operand(token_stream: ITokenStream) -> str | None:
@@ -185,6 +204,10 @@ class StringStatementParser(IStatementParser):
                     pointer = _consume_operand(token_stream)
                     if pointer is not None:
                         stmt.set_pointer_variable(pointer)
+            elif val in ("ON", "NOT") and not _starts_overflow_phrase(token_stream):
+                # An enclosing statement's phrase (``NOT AT END``, ``NOT ON
+                # EXCEPTION``, ...): this statement ends here.
+                break
             elif val == "ON":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -345,6 +368,10 @@ class UnstringStatementParser(IStatementParser):
                     tally = _consume_operand(token_stream)
                     if tally is not None:
                         stmt.set_tallying_variable(tally)
+            elif val in ("ON", "NOT") and not _starts_overflow_phrase(token_stream):
+                # An enclosing statement's phrase (``NOT AT END``, ``NOT ON
+                # EXCEPTION``, ...): this statement ends here.
+                break
             elif val == "ON":
                 token_stream.consume()
                 skip_whitespace(token_stream)

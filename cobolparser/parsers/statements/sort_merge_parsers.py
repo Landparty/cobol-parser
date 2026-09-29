@@ -11,6 +11,7 @@ from ._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     skip_whitespace,
+    starts_negative_handler_phrase,
     token_column,
     token_location,
     warn_paragraph_boundary_swallowed,
@@ -205,6 +206,10 @@ class SortStatementParser(IStatementParser):
                 # No period before the next statement: stop rather than
                 # swallow it as a bogus SORT clause token.
                 break
+            if starts_negative_handler_phrase(token_stream):
+                # An enclosing handler's ``NOT AT END`` / ``NOT INVALID
+                # KEY`` / ``NOT ON EXCEPTION``: not a clause of this verb.
+                break
             if (
                 token.type == TokenType.IDENTIFIER
                 and looks_like_paragraph_boundary(token_stream)
@@ -362,6 +367,10 @@ class MergeStatementParser(IStatementParser):
             if is_statement_boundary(token):
                 # No period before the next statement: stop rather than
                 # swallow it as a bogus MERGE clause token.
+                break
+            if starts_negative_handler_phrase(token_stream):
+                # An enclosing handler's ``NOT AT END`` / ``NOT INVALID
+                # KEY`` / ``NOT ON EXCEPTION``: not a clause of this verb.
                 break
             if (
                 token.type == TokenType.IDENTIFIER
