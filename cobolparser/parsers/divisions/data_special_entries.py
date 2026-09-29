@@ -9,6 +9,8 @@ for the entries that are not ordinary data-description items:
   (DCLGEN ``DECLARE TABLE``, ``INCLUDE SQLCA``/``SQLDA``)
 """
 
+from typing import Any
+
 from cobolparser._literals import quote_literal
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import TokenType
@@ -16,6 +18,31 @@ from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import ConditionNameItem, RenamesItem
 from cobolparser.models.sql_statements import ExecSQLStatement, parse_exec_sql
 from cobolparser.parsers.statements._utils import collect_exec_sql_text
+
+
+def _condition_literal(token: Any) -> str:
+    """A level-88 VALUE operand as recorded in ``ConditionNameItem.values``.
+
+    Plain literals keep their decoded content (``'B1'`` is ``B1``). A typed
+    literal keeps its prefixed source text (``X'C1'``), which
+    ``generators.data.layout`` decodes: recording the content alone turned
+    the one-byte hex literal ``X'C1'`` into the two-character value ``C1``.
+    Same rule as the VALUE clause of an ordinary entry
+    (``data_clauses.literal_source``).
+    """
+    if token.type == TokenType.STRING_LITERAL and token.raw_value:
+        return str(token.raw_value)
+    return str(token.value)
+
+
+def _skip_newlines(token_stream: ITokenStream) -> None:
+    """Consume any NEWLINE tokens at the current position."""
+    while not token_stream.is_empty():
+        t = token_stream.peek()
+        if t and t.type == TokenType.NEWLINE:
+            token_stream.consume()
+        else:
+            break
 
 
 class SpecialEntryParser:
@@ -105,7 +132,7 @@ class SpecialEntryParser:
                 TokenType.FIGURATIVE_CONSTANT,
                 TokenType.LEVEL_NUMBER,
             ):
-                item.add_value(t.value)
+                item.add_value(_condition_literal(t))
                 token_stream.consume()
             elif t.type in (TokenType.MINUS, TokenType.PLUS):
                 sign_value = t.value
@@ -125,13 +152,17 @@ class SpecialEntryParser:
                 token_stream.consume()
             elif t.value and t.value.upper() in ("THROUGH", "THRU"):
                 token_stream.consume()
+                # The range end may start the next line (``VALUE 1 THRU`` /
+                # ``5.``); peeking straight at the NEWLINE dropped the
+                # THROUGH marker and degraded the range to its endpoints.
+                _skip_newlines(token_stream)
                 end_token = token_stream.peek()
                 if end_token and end_token.type in (
                     TokenType.STRING_LITERAL,
                     TokenType.NUMERIC_LITERAL,
                     TokenType.LEVEL_NUMBER,
                 ):
-                    item.add_value(f"THROUGH:{end_token.value}")
+                    item.add_value(f"THROUGH:{_condition_literal(end_token)}")
                     token_stream.consume()
                 elif end_token and end_token.type in (TokenType.MINUS, TokenType.PLUS):
                     # A signed range end (``VALUE -9 THRU -1``): the sign is
@@ -170,22 +201,33 @@ class SpecialEntryParser:
         the period with no trace. Recorded as ``item.false_value``; a sign
         token before a numeric literal is folded in as in the value list.
         """
-        t = token_stream.peek()
+
+        # Every word of the phrase may start a continuation line, so each
+        # peek steps over NEWLINE tokens; a fixed-offset peek missed the
+        # phrase (and the false value) whenever it was split across lines.
+        def meaningful(offset: int) -> tuple[Any, int]:
+            tok = token_stream.peek(offset)
+            while tok is not None and tok.type == TokenType.NEWLINE:
+                offset += 1
+                tok = token_stream.peek(offset)
+            return tok, offset
+
+        t, offset = meaningful(0)
         if not t or not t.value or t.value.upper() != "WHEN":
             return
-        offset = 1
+        offset += 1
         for keyword in ("SET", "TO"):
-            nxt = token_stream.peek(offset)
+            nxt, at = meaningful(offset)
             if nxt and nxt.value and nxt.value.upper() == keyword:
-                offset += 1
-        nxt = token_stream.peek(offset)
+                offset = at + 1
+        nxt, offset = meaningful(offset)
         if not nxt or not nxt.value or nxt.value.upper() != "FALSE":
             return
         offset += 1
-        nxt = token_stream.peek(offset)
+        nxt, at = meaningful(offset)
         if nxt and nxt.value and nxt.value.upper() == "IS":
-            offset += 1
-        literal = token_stream.peek(offset)
+            offset = at + 1
+        literal, offset = meaningful(offset)
         sign = ""
         if literal and literal.type in (TokenType.MINUS, TokenType.PLUS):
             after = token_stream.peek(offset + 1)
@@ -204,7 +246,7 @@ class SpecialEntryParser:
             TokenType.LEVEL_NUMBER,
         ):
             return
-        item.false_value = f"{sign}{literal.value}"
+        item.false_value = f"{sign}{_condition_literal(literal)}"
         for _ in range(offset + 1):
             token_stream.consume()
 
@@ -224,7 +266,8 @@ class SpecialEntryParser:
         name = name_token.value
         token_stream.consume()
 
-        # Expect RENAMES keyword
+        # Expect RENAMES keyword (possibly on the next line)
+        _skip_newlines(token_stream)
         renames_kw = token_stream.peek()
         if (
             not renames_kw
@@ -240,28 +283,74 @@ class SpecialEntryParser:
             return None
         token_stream.consume()  # consume RENAMES
 
+        # Each operand may start a continuation line and may be qualified
+        # (``RENAMES A OF REC THRU C OF REC``). Neither was allowed for: a
+        # line break after RENAMES recorded the NEWLINE token's "\n" as the
+        # renamed item, and a break or an ``OF`` qualifier before THRU lost
+        # the THRU operand -- silently, the rest of the entry was discarded
+        # by the section scan -- turning a range into a single item.
+        _skip_newlines(token_stream)
         from_token = token_stream.peek()
-        if not from_token or not from_token.value:
+        if (
+            not from_token
+            or not from_token.value
+            or from_token.type == TokenType.PERIOD
+        ):
             return None
         renames_from = from_token.value
         token_stream.consume()
+        from_qualifiers = self._consume_qualifiers(token_stream)
 
         renames_through = None
+        through_qualifiers: list[str] = []
+        _skip_newlines(token_stream)
         nxt = token_stream.peek()
         if nxt and nxt.value and nxt.value.upper() in ("THROUGH", "THRU"):
             token_stream.consume()
+            _skip_newlines(token_stream)
             thru_token = token_stream.peek()
-            if thru_token and thru_token.value:
+            if thru_token and thru_token.value and thru_token.type != TokenType.PERIOD:
                 renames_through = thru_token.value
                 token_stream.consume()
+                through_qualifiers = self._consume_qualifiers(token_stream)
 
+        _skip_newlines(token_stream)
         # Consume trailing period
         if not token_stream.is_empty():
             t = token_stream.peek()
             if t and t.type == TokenType.PERIOD:
                 token_stream.consume()
 
-        return RenamesItem(name, renames_from, location, renames_through)
+        item = RenamesItem(name, renames_from, location, renames_through)
+        item.renames_from_qualifiers = from_qualifiers
+        item.renames_through_qualifiers = through_qualifiers
+        return item
+
+    def _consume_qualifiers(self, token_stream: ITokenStream) -> list[str]:
+        """Consume an ``OF|IN data-name`` chain (line breaks allowed) and
+        return the qualifier names, innermost first. ``OF``/``IN`` is only
+        taken when a data-name follows it."""
+        qualifiers: list[str] = []
+        while True:
+            offset = 0
+            keyword = token_stream.peek(offset)
+            while keyword is not None and keyword.type == TokenType.NEWLINE:
+                offset += 1
+                keyword = token_stream.peek(offset)
+            if not (
+                keyword and keyword.value and keyword.value.upper() in ("OF", "IN")
+            ):
+                return qualifiers
+            offset += 1
+            qualifier = token_stream.peek(offset)
+            while qualifier is not None and qualifier.type == TokenType.NEWLINE:
+                offset += 1
+                qualifier = token_stream.peek(offset)
+            if qualifier is None or qualifier.type != TokenType.IDENTIFIER:
+                return qualifiers
+            for _ in range(offset + 1):
+                token_stream.consume()
+            qualifiers.append(qualifier.value)
 
     def parse_exec_sql_in_data(
         self, token_stream: ITokenStream

@@ -34,12 +34,24 @@ POINTER_BYTES = 4
 #: entry address plus a second word the runtime uses), so 8 bytes -- sizing
 #: it as a fullword shifted every offset after it by four.
 PROCEDURE_POINTER_BYTES = 8
+#: ``USAGE POINTER-64`` (Enterprise COBOL 6.x): a 64-bit address, a
+#: doubleword.  ``POINTER-32`` is the explicitly 31-bit form, a fullword.
+#: Neither spelling was known here, so both were sized from their (absent)
+#: PICTURE as zero bytes and every later offset in the record collapsed.
+POINTER_64_BYTES = 8
 
 #: Usages that hold an address rather than data.  ``OBJECT REFERENCE`` (OO
 #: COBOL) is one too; with no PICTURE it used to be sized as zero bytes,
 #: collapsing every following offset in the record.
 POINTER_USAGES = frozenset(
-    {"POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER", "OBJECT REFERENCE"}
+    {
+        "POINTER",
+        "POINTER-32",
+        "POINTER-64",
+        "PROCEDURE-POINTER",
+        "FUNCTION-POINTER",
+        "OBJECT REFERENCE",
+    }
 )
 PACKED_USAGES = frozenset({"COMP-3", "COMPUTATIONAL-3", "PACKED-DECIMAL"})
 #: Binary usages whose byte order is fixed big-endian, per IBM Enterprise
@@ -108,6 +120,8 @@ def storage_size(
     normalized = (usage or "DISPLAY").upper()
     if normalized == "PROCEDURE-POINTER":
         return PROCEDURE_POINTER_BYTES
+    if normalized == "POINTER-64":
+        return POINTER_64_BYTES
     if normalized in POINTER_USAGES:
         return POINTER_BYTES
     if normalized == "INDEX":

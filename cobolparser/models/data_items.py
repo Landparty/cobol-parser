@@ -132,7 +132,15 @@ class PictureClause(ASTNode):
 
     def _parse_pattern(self) -> None:
         """Parse the PICTURE pattern to extract size and digit information."""
-        pattern = self.pattern
+        # PICTURE symbols are case-insensitive (``pic s9(5)v99`` is
+        # ``PIC S9(5)V99``). The checks below test for ``S`` and ``P`` and
+        # match regexes spelled in upper case, so a lower-case picture was
+        # read as unsigned (``SIGN SEPARATE`` then lost its byte) and a
+        # lower-case ``p`` scaled picture fell to the digit-counting
+        # fallback (``9(3)ppp`` sized as one digit). Declared currency
+        # symbols were already translated to ``$`` above, so upper-casing
+        # cannot change what they mean.
+        pattern = self.pattern.upper()
 
         # Cheap membership tests before regex work -- the regexes below
         # were being invoked even when they could not possibly match.
@@ -214,7 +222,7 @@ class PictureClause(ASTNode):
                 return
 
         # 2. Basic numeric patterns: 9, 9(n)
-        basic_numeric = _PIC_BASIC_NUMERIC_RE.match(self.pattern)
+        basic_numeric = _PIC_BASIC_NUMERIC_RE.match(pattern)
         if basic_numeric:
             count_str = basic_numeric.group(2)
             digit_count = int(count_str) if count_str else 1
@@ -225,7 +233,7 @@ class PictureClause(ASTNode):
             return
 
         # 3. Signed patterns: S9(n), S999, etc.
-        signed_match = _PIC_SIGNED_RE.match(self.pattern)
+        signed_match = _PIC_SIGNED_RE.match(pattern)
         if signed_match:
             if signed_match.group(2):  # S(n) format
                 digit_count = int(signed_match.group(2))
@@ -244,8 +252,8 @@ class PictureClause(ASTNode):
         # picture with a V (``Z(3)V99``) is left to step 7, which counts its
         # Z/*/insertion positions; the split here only understands 9s and
         # would size ``Z(3)V99`` as two bytes.
-        if "V" in self.pattern and not self._is_edited_pattern(pattern):
-            parts = self.pattern.split("V")
+        if "V" in pattern and not self._is_edited_pattern(pattern):
+            parts = pattern.split("V")
             if len(parts) == 2:
                 left_part = parts[0]
                 right_part = parts[1]
@@ -294,7 +302,7 @@ class PictureClause(ASTNode):
             return
 
         # 8. Complex patterns with repetition: S999V999, etc.
-        complex_match = _PIC_COMPLEX_RE.match(self.pattern)
+        complex_match = _PIC_COMPLEX_RE.match(pattern)
         if complex_match:
             integer_part = len(complex_match.group(1))
             decimal_part = len(complex_match.group(2))
@@ -307,16 +315,16 @@ class PictureClause(ASTNode):
 
         # 8. Fallback for unrecognized patterns
         # Count all 9s and Xs to estimate size
-        digit_count = len(_PIC_DIGIT_X_RE.findall(self.pattern))
+        digit_count = len(_PIC_DIGIT_X_RE.findall(pattern))
         if digit_count > 0:
             self.size = digit_count
-            if "9" in self.pattern:
+            if "9" in pattern:
                 self.total_digits = digit_count
                 # Estimate integer vs decimal based on V
-                if "V" in self.pattern:
-                    v_pos = self.pattern.find("V")
-                    integer_nines = len(_PIC_NINE_RE.findall(self.pattern[:v_pos]))
-                    decimal_nines = len(_PIC_NINE_RE.findall(self.pattern[v_pos:]))
+                if "V" in pattern:
+                    v_pos = pattern.find("V")
+                    integer_nines = len(_PIC_NINE_RE.findall(pattern[:v_pos]))
+                    decimal_nines = len(_PIC_NINE_RE.findall(pattern[v_pos:]))
                     self.integer_digits = integer_nines
                     self.decimal_digits = decimal_nines
                 else:
@@ -491,10 +499,12 @@ class PictureClause(ASTNode):
         return False
 
     def _parse_national_edited_pattern(self, pattern: str) -> bool:
-        """Populate the fields for a national-edited picture (``N(2)BN``).
+        """Populate the fields for a national-edited picture (``N(2)BN``),
+        or a DBCS picture with ``B`` insertion (``GGBGG``).
 
         Returns False unless *pattern* is made of ``N`` and at least one of
-        the national insertion characters ``B``/``0``/``/``.
+        the national insertion characters ``B``/``0``/``/``, or of ``G`` and
+        ``B``.
         """
         if "(" in pattern and not all(
             inner.isdigit() and int(inner) > 0
@@ -503,6 +513,14 @@ class PictureClause(ASTNode):
             return False
         symbols = [s.upper() for s in self._expand_symbols(pattern)]
         kinds = set(symbols)
+        if kinds == {"G", "B"}:
+            # DBCS (``USAGE DISPLAY-1``) with ``B`` insertion: ``GGBGG``.
+            # A DBCS ``B`` is a double-byte space, so every position is two
+            # bytes. These fell into the numeric-edited path, which sized
+            # ``GGBGG`` at five bytes (not ten) and called it numeric.
+            self.is_edited = True
+            self.size = 2 * len(symbols)
+            return True
         if "N" not in kinds or not kinds <= {"N", "B", "0", "/"} or kinds == {"N"}:
             return False
         self.is_edited = True
@@ -1091,9 +1109,14 @@ class RenamesItem(ASTNode):
         self.name = name
         self.renames_from = renames_from
         self.renames_through = renames_through
+        #: ``RENAMES A OF REC THRU C OF REC``: the qualifiers that locate
+        #: each operand, innermost first. ``renames_from`` /
+        #: ``renames_through`` stay the bare data-names.
+        self.renames_from_qualifiers: list[str] = []
+        self.renames_through_qualifiers: list[str] = []
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "node_type": self.node_type,
             "name": self.name,
             "renames_from": self.renames_from,
@@ -1101,6 +1124,11 @@ class RenamesItem(ASTNode):
             "location": self.location.to_dict(),
             "metadata": self._metadata or {},
         }
+        if self.renames_from_qualifiers:
+            result["renames_from_qualifiers"] = list(self.renames_from_qualifiers)
+        if self.renames_through_qualifiers:
+            result["renames_through_qualifiers"] = list(self.renames_through_qualifiers)
+        return result
 
 
 # Module exports
