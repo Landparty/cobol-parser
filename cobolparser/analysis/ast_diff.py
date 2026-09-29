@@ -463,7 +463,14 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
     if isinstance(stmt, EvaluateStatement):
         return (kind, tuple(_text_of(subject) for subject in stmt.subjects))
     if isinstance(stmt, SearchStatement):
-        return (kind, stmt.table_name or "", stmt.varying_variable or "")
+        return (
+            kind,
+            stmt.table_name or "",
+            stmt.varying_variable or "",
+            # SEARCH vs SEARCH ALL (serial vs binary search) lives only in
+            # the metadata; it changes which element is found.
+            bool(stmt.get_metadata("is_search_all")),
+        )
     if isinstance(stmt, IOOpenStatement):
         return (
             kind,
@@ -495,6 +502,8 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
             _json_key(stmt.replacing_clauses),
             stmt.converting_from or "",
             stmt.converting_to or "",
+            stmt.converting_before or "",
+            stmt.converting_after or "",
         )
     if isinstance(stmt, UnstringStatement):
         return (

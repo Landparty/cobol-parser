@@ -25,6 +25,7 @@ from ..models.program import CobolProgram, CobolSection
 from ..models.statements.base import (
     ArithmeticExpression,
     CobolExpression,
+    CobolStatement,
     ConditionalExpression,
     FunctionCall,
     LogicalExpression,
@@ -449,6 +450,16 @@ class UnusedVariableAnalyzer:
 
         referenced = self._collect_referenced_names(ast)
         referenced |= self._collect_data_division_references(ast)
+        # A contained program sees only the container's GLOBAL items, so its
+        # references count for those alone (``get_all_statements()`` walks
+        # into contained programs, and crediting every one of their
+        # references here hid the container's genuinely unused items).
+        nested_referenced = self._nested_referenced_names(ast)
+        global_ids: set[int] = set()
+        for item in declared_items:
+            if getattr(item, "is_global", False):
+                global_ids.add(id(item))
+                global_ids.update(id(child) for child in item.get_all_children())
 
         by_name: dict[str, list[CobolDataItem]] = {}
         for item in declared_items:
@@ -461,11 +472,14 @@ class UnusedVariableAnalyzer:
             if key in group_used:
                 return group_used[key]
             group_used[key] = False  # cycle guard
-            result = item.name.upper() in referenced
+            visible = (
+                referenced | nested_referenced if key in global_ids else referenced
+            )
+            result = item.name.upper() in visible
             if not result:
                 for child in item.children:
                     if isinstance(child, ConditionNameItem) and (
-                        child.name.upper() in referenced
+                        child.name.upper() in visible
                     ):
                         result = True
                         break
@@ -560,6 +574,33 @@ class UnusedVariableAnalyzer:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _own_statements(ast: CobolProgram) -> list[CobolStatement]:
+        """*ast*'s statements, without those of the programs it contains.
+
+        ``get_all_statements()`` walks children, and a contained program is
+        a child, so its statements would otherwise read as *ast*'s own.
+        """
+        statements = ast.get_all_statements()
+        if not ast.contained_programs:
+            return statements
+        inner = {
+            id(node)
+            for contained in ast.contained_programs
+            for node in contained.traverse_depth_first()
+        }
+        return [stmt for stmt in statements if id(stmt) not in inner]
+
+    def _nested_referenced_names(self, ast: CobolProgram) -> set[str]:
+        """Every name referenced by a program contained in *ast*, at any
+        depth -- the references that may reach *ast*'s GLOBAL items."""
+        names: set[str] = set()
+        for contained in ast.contained_programs:
+            names |= self._collect_referenced_names(contained)
+            names |= self._call_argument_names(contained)
+            names |= self._nested_referenced_names(contained)
+        return names
+
+    @staticmethod
     def _call_argument_names(ast: CobolProgram) -> set[str]:
         """Every data name handed to a ``CALL ... USING``, upper-cased.
 
@@ -567,7 +608,7 @@ class UnusedVariableAnalyzer:
         BY CONTENT / BY VALUE both read it to make the copy.
         """
         names: set[str] = set()
-        for stmt in ast.get_all_statements():
+        for stmt in UnusedVariableAnalyzer._own_statements(ast):
             if not isinstance(stmt, CallStatement):
                 continue
             for parameter in stmt.using_parameters:
@@ -584,7 +625,7 @@ class UnusedVariableAnalyzer:
         """
         names: set[str] = set()
 
-        for stmt in ast.get_all_statements():
+        for stmt in self._own_statements(ast):
             for operand in stmt.operands:
                 names |= _extract_identifiers(operand)
 
@@ -678,7 +719,14 @@ class UnusedVariableAnalyzer:
         # One shared traversal for both node types (find_all_by_type would
         # walk the whole AST once per type -- two extra full walks on every
         # analysis run, for nodes most programs don't contain at all).
+        inner = {
+            id(node)
+            for contained in ast.contained_programs
+            for node in contained.traverse_depth_first()
+        }
         for node in ast.traverse_depth_first():
+            if id(node) in inner:
+                continue
             type_name = type(node).__name__
             if type_name == "ExecCicsStatement":
                 options = getattr(node, "options", None) or {}

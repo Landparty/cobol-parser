@@ -54,7 +54,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..models.ast_base import SourceLocation
-from ..models.data_items import CobolDataItem
+from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.call import EntryStatement
 from .xref import ROLE_CALL_ARGUMENT, ROLE_HOST_VARIABLE
@@ -279,6 +279,19 @@ def _flatten(item: CobolDataItem) -> list[CobolDataItem]:
     return out
 
 
+def _subordinate_names(item: CobolDataItem) -> list[str]:
+    """Upper-cased names of every data item and level-88 condition name
+    beneath *item*, plus *item*'s own level-88s (not *item* itself)."""
+    names: list[str] = []
+    for index, node in enumerate(_flatten(item)):
+        if index and node.name and not node.is_filler:
+            names.append(node.name.upper())
+        for child in getattr(node, "children", None) or []:
+            if isinstance(child, ConditionNameItem) and child.name:
+                names.append(child.name.upper())
+    return names
+
+
 class ProgramSignatureExtractor:
     """Extracts the calling interface of a program from the callee's source.
 
@@ -372,14 +385,18 @@ class ProgramSignatureExtractor:
                 "which may read or write it)"
             )
             return own
-        if own is not None:
+        if own == "input-output":
             return own
 
+        # The operand's own references are not the whole story: ``DISPLAY
+        # LK-REC`` plus ``MOVE 1 TO LK-FIELD`` reads the record *and* writes
+        # into it, and a level-88 under the operand (``SET LK-OK TO TRUE``,
+        # ``IF LK-OK``) writes / reads the operand itself.
         child_names = [
-            node.name.upper()
-            for node in _flatten(declaration)[1:]
-            if node.name and node.name.upper() in directions
+            name for name in _subordinate_names(declaration) if name in directions
         ]
+        if own is not None and not child_names:
+            return own
         duplicated = sorted(
             name for name in child_names if name in self._duplicate_declarations
         )
@@ -395,6 +412,8 @@ class ProgramSignatureExtractor:
             )
             return "unknown"
         child_directions = {directions[name] for name in child_names}
+        if own is not None:
+            child_directions.add(own)
         if "unknown" in child_directions:
             signature.unchecked.append(
                 f"{key}: direction not classified (a field under it is "
