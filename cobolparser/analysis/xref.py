@@ -405,6 +405,30 @@ def _split_operand(text: str) -> tuple[set[str], set[str], set[str], bool]:
     return base - subscripts, refmod, subscripts, True
 
 
+#: ``OF`` / ``IN`` as a qualifier connective, not part of a hyphenated name.
+_QUALIFIER_CONNECTIVE_RE = re.compile(r"(?<![\w-])(?:OF|IN)(?![\w-])", re.IGNORECASE)
+
+
+def _qualifier_names(text: str) -> set[str]:
+    """Names that only qualify the operand: ``WS-GRP`` in ``WS-A OF WS-GRP``.
+
+    Subscript and reference-modifier groups are removed first, so a
+    qualified subscript does not count.
+    """
+    remaining = text
+    while True:
+        match = _PAREN_RE.search(remaining)
+        if match is None:
+            break
+        remaining = f"{remaining[: match.start()]} {remaining[match.end():]}"
+    connective = _QUALIFIER_CONNECTIVE_RE.search(remaining)
+    if connective is None:
+        return set()
+    return _extract_identifiers(remaining[connective.end() :]) - _extract_identifiers(
+        remaining[: connective.start()]
+    )
+
+
 def _contained_node_ids(ast: CobolProgram) -> set[int]:
     """``id()`` of every node under a program contained in *ast*.
 
@@ -959,7 +983,13 @@ class XrefAnalyzer:
         # A reference modifier's offset/length is only ever read, even on a
         # receiving operand: `MOVE X TO WS-B (WS-P:2)` writes WS-B, not WS-P.
         refmod_role = ROLE_READ if role == ROLE_WRITE else role
-        triples = [(name, role, exact) for name in sorted(base)]
+        # A qualifier is not written: `MOVE X TO WS-A OF WS-GRP` writes WS-A
+        # and only names WS-GRP to locate it.
+        qualifiers = _qualifier_names(value) if role == ROLE_WRITE else set()
+        triples = [
+            (name, ROLE_REFERENCE if name in qualifiers else role, exact)
+            for name in sorted(base)
+        ]
         triples += [(name, refmod_role, exact) for name in sorted(refmod)]
         triples += [(name, ROLE_SUBSCRIPT, exact) for name in sorted(subscripts)]
         return triples

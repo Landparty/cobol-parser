@@ -24,6 +24,7 @@ Typical usage::
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -34,6 +35,13 @@ from ..models.sql_statements import (
     DB2ColumnDefinition,
     DeclareTableStatement,
     ExecSQLStatement,
+    _strip_sql_literals_and_comments,
+)
+
+#: ``:NAME`` or structure-qualified ``:STRUCT.NAME`` -- the qualifiers and
+#: the variable itself.
+_QUALIFIED_HOST_VAR_RE = re.compile(
+    r":((?:[A-Za-z][A-Za-z0-9_-]*\.)*)([A-Za-z][A-Za-z0-9_-]*)"
 )
 
 # ---------------------------------------------------------------------------
@@ -141,6 +149,9 @@ class HostVariableResolver:
     def __init__(self) -> None:
         # Upper-cased data-item name → CobolDataItem
         self._symbol_table: dict[str, CobolDataItem] = {}
+        # Upper-cased data-item name → every item of that name, each with the
+        # upper-cased names of its enclosing groups (for ``:STRUCT.NAME``).
+        self._all_items: dict[str, list[tuple[CobolDataItem, list[str]]]] = {}
         # Upper-cased table name → DeclareTableStatement
         self._declare_tables: dict[str, DeclareTableStatement] = {}
         # Upper-cased column name → DB2ColumnDefinition (first occurrence wins)
@@ -163,6 +174,7 @@ class HostVariableResolver:
             host variables and the DECLARE TABLE index.
         """
         self._symbol_table = {}
+        self._all_items = {}
         self._declare_tables = {}
         self._column_index = {}
         self._column_table_map = {}
@@ -187,17 +199,35 @@ class HostVariableResolver:
     # Pass 1: symbol table from DATA DIVISION
     # ------------------------------------------------------------------
 
-    def _build_symbol_table(self, node: ASTNode) -> None:
+    def _build_symbol_table(
+        self, node: ASTNode, ancestors: list[str] | None = None
+    ) -> None:
         """Recursively collect CobolDataItem nodes into the symbol table."""
+        ancestors = ancestors or []
+        child_ancestors = ancestors
         if isinstance(node, CobolDataItem):
             name = (node.name or "").strip().upper()
             if name and name != "FILLER":
                 # First occurrence wins (outer declaration takes precedence)
                 self._symbol_table.setdefault(name, node)
+                self._all_items.setdefault(name, []).append((node, ancestors))
+            child_ancestors = [*ancestors, name] if name else ancestors
 
         if hasattr(node, "children"):
             for child in node.children:
-                self._build_symbol_table(child)
+                self._build_symbol_table(child, child_ancestors)
+
+    def _lookup_item(self, upper: str, qualifiers: list[str]) -> CobolDataItem | None:
+        """The data item *upper* names, honouring ``:STRUCT.NAME`` qualifiers.
+
+        ``:DCLEMP.SALARY`` is the SALARY under DCLEMP, not whichever SALARY
+        was declared first.
+        """
+        if qualifiers:
+            for item, ancestors in self._all_items.get(upper, []):
+                if all(q in ancestors for q in qualifiers):
+                    return item
+        return self._symbol_table.get(upper)
 
     # ------------------------------------------------------------------
     # Pass 2: collect DECLARE TABLE blocks
@@ -236,8 +266,18 @@ class HostVariableResolver:
         if isinstance(node, ExecSQLStatement) and not isinstance(
             node, DeclareTableStatement
         ):
+            qualifiers: dict[str, list[str]] = {}
+            scrubbed = _strip_sql_literals_and_comments(node.sql_text or "")
+            for match in _QUALIFIED_HOST_VAR_RE.finditer(scrubbed):
+                if match.group(1):
+                    qualifiers.setdefault(
+                        match.group(2).upper(),
+                        [q.upper() for q in match.group(1).split(".") if q],
+                    )
             for var_name in node.host_variables:
-                self._resolve_one(var_name, node, report)
+                self._resolve_one(
+                    var_name, node, report, qualifiers.get(var_name.upper(), [])
+                )
 
         if hasattr(node, "children"):
             for child in node.children:
@@ -248,6 +288,7 @@ class HostVariableResolver:
         var_name: str,
         stmt: ExecSQLStatement,
         report: HostVarResolutionReport,
+        qualifiers: list[str] | None = None,
     ) -> None:
         """Resolve a single host variable name and update the report."""
         upper = var_name.upper()
@@ -258,7 +299,7 @@ class HostVariableResolver:
                 report.resolved[upper].sql_statements.append(stmt)
             return
 
-        data_item = self._symbol_table.get(upper)
+        data_item = self._lookup_item(upper, qualifiers or [])
         db2_col = self._column_index.get(upper)
 
         if data_item is None and db2_col is None:
