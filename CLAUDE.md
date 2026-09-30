@@ -112,6 +112,7 @@ cobol-parser program-flow <file.cbl>
 cobol-parser recursion-check <file.cbl>
 cobol-parser complexity <file.cbl>
 cobol-parser health <file.cbl>
+cobol-parser business-rules <file.cbl> [--format json|text] [--include-technical]
 cobol-parser redundancy <file.cbl> [--min-clone-statements N]
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
 cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR]
@@ -185,7 +186,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/le_signatures.py`** -- Call signatures for IBM Language Environment callable services and COBOL intrinsic functions: per operand, its direction, its exact COBOL declaration, whether it may be omitted, and whether it repeats. Coverage of the LE services is partial *and reported* (`services_without_signature()`), so "no signature catalogued" is never mistaken for "not an LE service"; the intrinsic half is complete and pinned by a test. `IBM_LE_SERVICE_INFO` is derived from it. Backs the `le-info` CLI subcommand and the COBOL Analyzer extension's LE hover. See `.okf/analysis.md`
 
-**`cobolparser/analysis/`** -- 28 static analysis modules (plus the `program_flow/` package and two private helpers, `_files.py` / `_names.py`). The list below covers the ones with their own entry here; `.okf/analysis.md` is the complete and current index:
+**`cobolparser/analysis/`** -- 29 static analysis modules (plus the `program_flow/` package and two private helpers, `_files.py` / `_names.py`). The list below covers the ones with their own entry here; `.okf/analysis.md` is the complete and current index:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -207,6 +208,7 @@ COBOL source (.cbl/.cob)
 - `technical_debt.py` -- `TechnicalDebtAnalyzer` composite 0-100 technical-debt score (A-F grade) combining complexity, redundancy, control-flow smells (GO TO density, ALTER usage, no-escape recursion cycles, unreachable nodes), and size, as a `DebtWeights`-weighted, fully explainable rollup with a `top_offenders` list. Backs the `health` CLI subcommand. See `.okf/analysis.md`
 - `boundary_inventory.py` -- `BoundaryInventoryAnalyzer` (Phase 2 of the `gen-fixtures` program-scoped test-data initiative): walks PROCEDURE DIVISION and inventories every mockable boundary (CALL/DYNCALL with a 4-rung argument-direction ladder, the eight file-op verbs, SQL/CICS/DLI, console ACCEPT), keyed the same way mockymock's `mock_surface` keys them. Takes a Phase 1 `ProgramLayoutIndex` to resolve each boundary's record/field layout. See `.okf/analysis.md`
 - `constraints.py` / `domains.py` -- `ConstraintExtractor` + `domains.solve()` (Phase 4 of the `gen-fixtures` initiative): walks IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards into `FieldConstraint`s (relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan) and `SequenceConstraint`s (the READ/AT-END/loop-flag EOF idiom); `domains.py` is a small zero-dependency domain-propagation solver (numeric interval / text allow-deny / level-88 enum) that picks a deterministic witness always rendered through `ValueFactory.render()`. Takes a Phase 1 `ProgramLayoutIndex` and a Phase 2 `BoundaryReport`. See `.okf/analysis.md`
+- `business_rules.py` -- `BusinessRuleExtractor` extracts the program's business rules: every IF/EVALUATE/SEARCH as a decision table (one `RuleBranch` per arm: condition + actions), promoted to `validation` when an arm rejects (error literal, reject/abend path, class test), and paragraph-level arithmetic as `calculation` rules with a normalized formula. Level-88 names spelled out in a glossary, `guards` (enclosing arm conditions), `reached_via` (the arm elsewhere that PERFORMs the rule's paragraph), inputs/outputs via xref's role mapping, and a `data_lineage` inversion. Technical rules (file status, READ AT END flags, SQLCODE/EIB*) are detected from the program and excluded by default but counted. Backs the `business-rules` CLI subcommand. See `.okf/analysis.md`
 - `lint.py` -- `LintAnalyzer` runs several of the analyzers above over **one** parse and flattens their differently-shaped reports into a single severity-graded `LintFinding` stream (`rule`, `severity`, `message`, `location`, `symbol`, `kind`), ordered by source position. Rule ids are the analyzer subcommand names (`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`, `dclgen-check`); severity is per finding where the underlying analyzer grades itself. Lints **every program unit** in the file (a contained program left unexamined would read as a clean one), and `apply_source_map()` stamps each finding with the file and line it really came from when copybooks were expanded. Re-implements no analysis -- every rule is a mapping from an existing report. `LintReport` also carries `caveats` (what could not be checked, e.g. MOVE operands whose category never resolved) and `failed_rules` (a rule that raised costs only its own findings), so a quiet report is never mistaken for a clean program. Backs the `lint` CLI subcommand. See `.okf/analysis.md`
 - `const_fold.py` -- `ConstantFolder` (Phase 7 of the `gen-fixtures` initiative): a single forward walk of a program's entry paragraph chain, seeded by one scenario's own mock-supplied inputs, tracking which data items hold a knowable literal value after a MOVE or a simple arithmetic/COMPUTE statement -- "exact by construction, or absent" throughout (a loop/branch poisons every field its body could write rather than guess which arm runs; DIVIDE is poisoned unconditionally since the AST does not record BY vs INTO; a numeric result is only kept when it fits its target field's PICTURE with no rounding/truncation/sign coercion). Wired into `ProgramFixtureGenerator` as `Expectation(kind="field_equals")` for every field still knowable at a DISPLAY/WRITE. See `.okf/analysis.md`
 
@@ -370,6 +372,15 @@ sig.parameters[0].direction # "input" | "output" | "input/output"
 sig.parameters[0].data_type.declaration      # 'halfword length + PIC X(n) text'
 sig.parameters[0].data_type.snippet          # a full WORKING-STORAGE entry
 intrinsic_signature("NUMVAL-C").returns      # "numeric"
+
+# Business rules: decisions (as decision tables), validations, calculations
+from cobolparser import BusinessRuleExtractor
+rules = BusinessRuleExtractor().analyze(parse_result.ast)  # include_technical=False
+rules.rules[0].branches     # list[RuleBranch]: label / condition / actions
+rules.condition_names       # POL-AUTO -> "POL-TYPE = 'A'"
+rules.data_lineage          # {"WS-RATE": {"read_by": [...], "written_by": [...]}}
+rules.technical_rules_excluded
+print(rules.to_text())
 
 # One pass, every rule, one severity-graded list of findings
 from cobolparser import LintAnalyzer

@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-09-15T00:00:00Z
+timestamp: 2026-09-30T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,20 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-09-30 -- business rule extraction (`business_rules.py`, `business-rules` subcommand)
+
+New analyzer [analysis.md](analysis.md) `BusinessRuleExtractor`: every IF /
+EVALUATE / SEARCH as a decision table (one branch per arm, condition +
+actions), promoted to `validation` on an error signal, and paragraph-level
+arithmetic as `calculation` rules with normalized formulas. Technical rules
+(file status, READ AT END flags, SQLCODE/EIB*) are found from the program
+and excluded by default but counted. Rules carry `guards`, `reached_via`,
+inputs/outputs (via xref's role mapping), level-88 names spelled out in a
+report glossary, `in_dead_code`, and a `data_lineage` inversion. New
+[cli.md](cli.md) `business-rules` subcommand (`--format json|text`,
+`--include-technical`). Ships feature idea #21; deliberately not built on
+`constraints.py` (boundary-fed fields only -- see analysis.md).
 
 ## 2026-09-30 -- bug hunt round 11: operator currency signs, JCL job scoping, float/P-scaled pictures, leading-sentence dead code
 

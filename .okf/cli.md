@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-09-15T00:00:00Z
+timestamp: 2026-09-30T00:00:00Z
 ---
 
 # Overview
@@ -946,6 +946,30 @@ hands every single-file subcommand. Before 2026-09-28 only `free_form` was
 forwarded, so `--source-format fixed` still auto-detected and a member with
 a spaced tag in columns 1-6 scanned as an `UNKNOWN` program with no
 paragraphs.
+
+## Business-Rules (2026-09-30)
+
+```bash
+cobol-parser business-rules <file.cbl> [--format json|text] [--include-technical]
+    [--program NAME] [--copybook-path DIR] [--profile ...] [-o out]
+```
+
+Runs `BusinessRuleExtractor` (see `.okf/analysis.md`) and reports the
+program's decision / validation / calculation rules, the level-88 glossary
+the rules use, and a rule-to-data lineage table.
+
+| Flag | Meaning |
+|------|---------|
+| `--format json\|text` | `text` renders `BusinessRuleReport.to_text()` (one IF/THEN/ELSE-shaped block per rule, then the condition-name glossary and caveats); default `json` (`BusinessRuleReport.to_dict()` behind the usual identification header) |
+| `--include-technical` | Keep file-status / EOF / SQLCODE / EIBRESP rules, flagged `technical`; by default they are left out and only counted in `summary.technical_rules_excluded` |
+
+Builds its own parser (`_build_business_rules_parser`) only because of those
+two flags; otherwise it takes exactly the shared analyzer flags
+(`--program`, `--copybook-path`, `--source-format`, `--dialect`, `--define`,
+`--compact`, `-o`, `--profile`). `--profile` only reaches `--format json`
+output (a warning says so under `text`), as with `program-flow`. With
+`--copybook-path`, JSON locations are origin-stamped by `_emit_report` like
+every other analyzer; the text format prints expanded-listing line numbers.
 
 ## Cross-reference, signatures, codebase graph, SQL/CICS lint, diff, JCL
 

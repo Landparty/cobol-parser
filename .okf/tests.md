@@ -3,10 +3,22 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-09-17T00:00:00Z
+timestamp: 2026-09-30T00:00:00Z
 ---
 
 # Overview
+
+2026-09-30: `tests/unit/analysis/test_business_rules.py` (73 tests) pins
+`BusinessRuleExtractor` against real parses: IF / EVALUATE (subject, TRUE,
+FALSE, ALSO, THRU, OTHER) / SEARCH decision tables with unquoted selector
+literals re-quoted; nested-rule guards and `rule_id` links; `reached_via`;
+`in_dead_code`; validation signals; technical exclusion (FILE STATUS, READ
+AT END flag, SQLCODE) and dropped links to excluded rules; arithmetic
+formulas incl. GIVING / REMAINDER / INTO; counters skipped; level-88
+glossary quoting by PICTURE; report shape; and a smoke run over every
+`tests/samples/enterprise/` program. `tests/unit/cli/test_business_rules_cli.py`
+(5 tests) pins the `business-rules` subcommand's JSON, text and
+`--include-technical` output.
 
 2026-09-28: `tests/unit/test_exec_sql_fetch_orientation.py` (10 tests) pins
 FETCH cursor name / orientation / rowset size for scroll, sensitive and

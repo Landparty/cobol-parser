@@ -1,14 +1,14 @@
 ---
 type: Module
 title: Static Analysis
-description: 28 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, DCLGEN/host-variable, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, cross-reference, program signatures, whole-codebase call/copy graph, SQL/CICS lint and structural program diff.
-tags: [analysis, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk, xref, program-signature, codebase-graph, sql-cics-lint, ast-diff]
-timestamp: 2026-09-15T00:00:00Z
+description: 29 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, DCLGEN/host-variable, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, cross-reference, program signatures, whole-codebase call/copy graph, SQL/CICS lint, structural program diff and business rule extraction.
+tags: [analysis, business-rules, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk, xref, program-signature, codebase-graph, sql-cics-lint, ast-diff]
+timestamp: 2026-09-30T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 24 static-analysis modules. All follow the same
+`cobolparser/analysis/` — 29 static-analysis modules. All follow the same
 `<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
 which uses `.resolve(ast)`; `BoundaryInventoryAnalyzer`, which additionally
 takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`); and
@@ -2144,6 +2144,7 @@ programs without sections is unchanged. Pinned by
 | `complexity.py` | `ComplexityAnalyzer` |
 | `redundancy.py` | `RedundancyAnalyzer` |
 | `technical_debt.py` | `TechnicalDebtAnalyzer` |
+| `business_rules.py` | `BusinessRuleExtractor` — decision / validation / calculation rule catalogue |
 
 # Silent-Failure Audit (2026-07-08)
 
@@ -2600,6 +2601,96 @@ convention. Tests: `tests/unit/analysis/test_sql_cics_lint.py`.
 written through its subordinate `49` item is not traced to `PREPARE ... FROM
 :hv`; SQLCODE checked in a `PERFORM UNTIL` guard, or in the calling paragraph
 rather than after the statement, is not seen.
+
+
+## BusinessRuleExtractor (`business_rules.py`, 2026-09-30)
+
+Answers "what are the rules in this program?" -- the question a
+modernization or documentation engagement asks first -- as a catalogue of
+`BusinessRule`s. Backs `cobol-parser business-rules` ([cli.md](cli.md)).
+Feature idea #21 in `docs/feature-ideas.md`.
+
+```python
+from cobolparser import BusinessRuleExtractor
+
+report = BusinessRuleExtractor().analyze(ast)      # include_technical=False
+report.rules                 # list[BusinessRule], BR-001.. in source order
+report.rules[0].branches     # list[RuleBranch]: label, condition, actions
+report.condition_names       # level-88 glossary: POL-AUTO -> POL-TYPE = 'A'
+report.data_lineage          # {item: {"read_by": [...], "written_by": [...]}}
+report.technical_rules_excluded
+print(report.to_text())      # IF/THEN/ELSE-shaped catalogue
+```
+
+**Rule kinds.** Every IF / EVALUATE / SEARCH is a `decision`, shaped as a
+decision table: one `RuleBranch` per arm (THEN, ELSE, each WHEN, WHEN OTHER,
+SEARCH AT END) with the condition selecting that arm and its actions. It is
+promoted to `validation` when an arm signals rejection (moves or DISPLAYs an
+error-like literal, writes/SETs an item whose name has an ERR / ERROR /
+INVALID / REJECT / ABEND word, PERFORMs or GOes TO such a procedure, CALLs
+CEE3ABD / ILBOABN0) or the condition is a class test. COMPUTE / ADD /
+SUBTRACT / MULTIPLY / DIVIDE at paragraph level (not inside an arm) is a
+`calculation` with `formula` normalized to `target = expression` (`DIVIDE A
+INTO B GIVING C` -> `C = B / A`); inside an arm it is an action of that
+decision only, never counted twice. Counters (`ADD 1 TO X`, `COMPUTE X = X +
+1`) are not rules at all.
+
+**Technical vs business.** A decision whose *own* condition reads only
+technical items, or a calculation that writes only technical items, is
+`technical` and excluded by default (counted in `technical_rules_excluded`;
+`include_technical=True` keeps it). Technical items are found from the
+program, not only from names: every SELECT `FILE STATUS` item; everything a
+READ / RETURN `AT END` clause writes (the EOF flag, whatever it is called);
+the level-88s of those items and the items of those 88s; the xref special
+registers (SQLCODE, SQLSTATE, EIB*, RETURN-CODE, ...); plus a narrow name
+pattern (`EOF`, `EOJ`, `FS`, `END-OF-FILE`, `FILE-STAT`, `EIB*`, `DFH*`). A
+SEARCH is never technical (it is a table lookup). CICS `RESP` fields compared
+to `DFHRESP(...)` are deliberately *not* technical: "NOTFND -> CUSTOMER NOT
+FOUND" is a business rule.
+
+**Context on every rule.** `guards` are the conditions of the arms the rule
+is nested in, within its paragraph (ELSE contributes `NOT (cond)`, WHEN
+OTHER the conjunction of the negated WHENs, an exception clause `AT END
+(READ ...)` / `ON SIZE ERROR (COMPUTE ...)`). `reached_via` links across
+paragraphs: every arm elsewhere that PERFORMs or GOes TO the rule's paragraph
+or section, as `"BR-001 ELSE"` / `"BR-004 WHEN POL-TYPE = 'A'"`. A nested
+decision is its own rule; the parent arm lists it as an action whose
+`rule_id` points at it (dropped to `None` if the nested rule was excluded as
+technical, never left dangling). `in_dead_code` comes from
+`DeadCodeAnalyzer`.
+
+**Inputs / outputs** reuse `XrefAnalyzer`'s per-statement role mapping
+(`_role_assignments` / `_names_for` / `_residual_names`), filtered to
+declared names (+ INDEXED BY names, + data-bearing special registers; not
+`DFHRESP` / `LENGTH` / `ADDRESS`). A decision's are its condition plus its
+*direct* actions (a nested rule's reads/writes are its own). Testing or
+SETting a condition name also counts its item.
+
+**Rendering notes.** Conditions come from `program_flow/condition_text.py`
+then `_tidy()` (`T-K ( IX )` -> `T-K(IX)`, `NOT =` reads `<>`). EVALUATE
+selector literals arrive **unquoted** from the parser, so a non-identifier,
+non-numeric, non-figurative selector is re-quoted -- except the space-joined
+call shape `DFHRESP ( NORMAL )`, which is an expression. Level-88 values are
+also stored unquoted with `THRU` as `"THROUGH:end"`; `_condition_values`
+quotes them unless the item's PICTURE / USAGE is numeric. STRING sources are
+unquoted too, so one naming no declared item is re-quoted. Actions are
+rendered in full here rather than via `program_flow/statement_text.py`
+(flowchart summaries, truncated to 48 chars).
+
+**Why not `constraints.py`** (as idea #21 proposed): `ConstraintExtractor`
+only models conditions on fields that trace to a mocked boundary (it takes a
+`ProgramLayoutIndex` and a `BoundaryReport`), so a rule on a computed
+WORKING-STORAGE field -- most rating/pricing logic -- would be missing.
+
+**Known limits** (the always-present caveat says the kinds are heuristic;
+`classification` on each rule names the signal that decided it):
+single-program scope (like `xref`, contained programs are not walked --
+`--program` picks one); `reached_via` matches a PERFORM's first target only,
+not every paragraph of a `THRU` range; an arithmetic statement inside an
+inline PERFORM *within an arm* is neither a rule nor an action of that arm.
+
+Tests: `tests/unit/analysis/test_business_rules.py`,
+`tests/unit/cli/test_business_rules_cli.py`.
 
 
 ## ProgramDiffer (`ast_diff.py`)

@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **`cobol-parser business-rules`: business rule extraction**
+  (`analysis/business_rules.py`, `BusinessRuleExtractor`): the program's
+  rules as a catalogue a reader can check. Every IF / EVALUATE / SEARCH is a
+  decision table (one branch per arm, each with the condition selecting it
+  and the actions it runs); one that rejects input (error message, reject /
+  abend path, class test) is a *validation*; paragraph-level arithmetic is a
+  *calculation* with its formula normalized to `target = expression`.
+  Level-88 names are spelled out (`POL-AUTO` means `POL-TYPE = 'A'`), nested
+  rules carry the conditions they sit under, `reached_via` names the arm in
+  another paragraph that PERFORMs them, and every rule lists the data it
+  reads and writes (also inverted into a per-item lineage table). File
+  status, EOF and SQLCODE / EIBRESP checks are recognised from the program
+  itself and left out by default but counted, so a short catalogue is never
+  mistaken for a complete one (`--include-technical` keeps them).
+  `--format text` prints an IF/THEN/ELSE-shaped listing.
+
 * **`cobol-parser compare`: field-level compare of two record files through a
   copybook** (`generators/data/compare.py`, `compare_records()` /
   `compare_files()`): the expected output of a batch run against the actual

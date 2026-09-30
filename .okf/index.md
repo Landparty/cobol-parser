@@ -18,7 +18,7 @@ mirrored here.)
 | Parser, `DivisionParserFactory`, statement parsers, `ParseResult` | [parser.md](parser.md) |
 | `normalize_fixed_format`, copybook expansion, source maps | [preprocessing.md](preprocessing.md) |
 | `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | [ast-models.md](ast-models.md) |
-| Any analyzer, `LintAnalyzer`, xref, program signatures, codebase graph, SQL/CICS lint, semantic diff | [analysis.md](analysis.md) |
+| Any analyzer, `LintAnalyzer`, xref, program signatures, codebase graph, SQL/CICS lint, semantic diff, business rule extraction | [analysis.md](analysis.md) |
 | Dialects, EXEC SQL/CICS/IMS nodes, LE/intrinsic signatures | [dialects.md](dialects.md) |
 | Flowcharts, copybook → CSV/record data, `gen-fixtures` bundles, scenarios | [generators.md](generators.md) |
 | `parse_files`, `scan_files`, batch fault isolation | [batch.md](batch.md) |
@@ -36,12 +36,12 @@ mirrored here.)
 
 ## Analysis & Generation
 
-* [Analysis](analysis.md) — 28 static-analysis modules plus the `program_flow/`
+* [Analysis](analysis.md) — 29 static-analysis modules plus the `program_flow/`
   package. Program-scoped: `DeadCodeAnalyzer`, `UnusedVariableAnalyzer`,
   `ProgramFlowAnalyzer`, `RecursionRiskAnalyzer`, `ComplexityAnalyzer`,
   `RedundancyAnalyzer`, `TechnicalDebtAnalyzer`, `XrefAnalyzer`,
   `ProgramSignatureExtractor`, `SqlCicsAnalyzer`, `DclgenChecker`,
-  `LintAnalyzer`, … Cross-program: `CodebaseGraphBuilder` /
+  `LintAnalyzer`, `BusinessRuleExtractor`, … Cross-program: `CodebaseGraphBuilder` /
   `CopybookImpactAnalyzer`. Two-program: `ProgramDiffer`.
 * [Dialects](dialects.md) — `IBMEnterpriseCobol`, EXEC SQL/CICS/IMS AST node types, intrinsic-function/LE-service lookups (`le_signatures.py` details live in `analysis.md`)
 * [Generators](generators.md) — flowcharts (Mermaid/DOT), copybook → CSV/record-image data, the `gen-fixtures` bundle/scenario stack

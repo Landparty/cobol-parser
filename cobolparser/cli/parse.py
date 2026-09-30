@@ -49,6 +49,7 @@ _SUBCOMMANDS = frozenset(
         "codebase-graph",
         "copybook-impact",
         "sql-cics-check",
+        "business-rules",
         "jcl",
         "config",
     }
@@ -2954,6 +2955,71 @@ def _cmd_xref(args: argparse.Namespace) -> None:
     _emit_report(report.to_dict(), args, prof, ast)
 
 
+# -- Subcommand: business-rules -------------------------------------------------
+
+
+def _build_business_rules_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "business-rules",
+        help="Extract the program's business rules: decisions (IF / EVALUATE / "
+        "SEARCH as decision tables), validations and calculations, with the "
+        "data each one reads and writes",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser business-rules program.cbl\n"
+            "  cobol-parser business-rules program.cbl --format text\n"
+            "  cobol-parser business-rules program.cbl --include-technical"
+        ),
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    p.add_argument(
+        "--format",
+        choices=["json", "text"],
+        default="json",
+        dest="output_format",
+        help="Output format (default: json)",
+    )
+    p.add_argument(
+        "--include-technical",
+        action="store_true",
+        help="Also report technical rules (file status, EOF, SQLCODE / "
+        "EIBRESP checks, ...), which are counted but left out by default",
+    )
+    _add_compact_arg(p)
+    _add_source_format_args(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_program_arg(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    _add_profiling_args(p)
+    p.set_defaults(func=_cmd_business_rules)
+
+
+def _cmd_business_rules(args: argparse.Namespace) -> None:
+    from ..analysis.business_rules import BusinessRuleExtractor
+
+    ast, prof = _parse_or_fail(args)
+
+    report = BusinessRuleExtractor(
+        include_technical=getattr(args, "include_technical", False)
+    ).analyze(ast)
+
+    if getattr(args, "output_format", "json") == "text":
+        if prof is not None:
+            print(
+                "warning: --profile metrics are only included in --format json "
+                "output; ignoring for --format text",
+                file=sys.stderr,
+            )
+        _text_out(report.to_text(), getattr(args, "output", None))
+        return
+
+    _emit_report(report.to_dict(), args, prof, ast)
+
+
 # -- Subcommand: diff ---------------------------------------------------------
 
 
@@ -3812,6 +3878,7 @@ def _build_parser() -> argparse.ArgumentParser:
         profiling=True,
         examples="  cobol-parser sql-cics-check program.cbl",
     )
+    _build_business_rules_parser(subparsers)
     _build_jcl_parser(subparsers)
     _build_le_info_parser(subparsers)
     _build_config_parser(subparsers)
