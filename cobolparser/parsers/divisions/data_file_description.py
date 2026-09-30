@@ -32,6 +32,19 @@ _FD_CLAUSE_STARTS: frozenset[str] = frozenset(
 )
 
 
+def _keyword_int(tokens: list[str], upper: list[str], keyword: str) -> int | None:
+    """The integer right after *keyword* in a clause's tokens, or None."""
+    if keyword not in upper:
+        return None
+    idx = upper.index(keyword)
+    if idx + 1 < len(tokens):
+        try:
+            return int(tokens[idx + 1])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 class FileDescriptionClauseParser:
     """Parses the clause list of an FD/SD file description entry."""
 
@@ -151,6 +164,19 @@ class FileDescriptionClauseParser:
             elif key == "RECORD":
                 if "VARYING" in upper:
                     nums = _ints(tokens)
+                    low: int | None = nums[0] if nums else None
+                    high: int | None = (
+                        nums[1] if len(nums) > 1 else (nums[0] if nums else None)
+                    )
+                    if "FROM" in upper or "TO" in upper:
+                        # ``FROM integer`` and ``TO integer`` are each
+                        # optional (an omitted bound is the smallest /
+                        # largest record description's size), so each is
+                        # read after its own keyword. Taking the numbers by
+                        # position made ``VARYING IN SIZE TO 80`` report a
+                        # minimum of 80, and ``FROM 20`` a maximum of 20.
+                        low = _keyword_int(tokens, upper, "FROM")
+                        high = _keyword_int(tokens, upper, "TO")
                     depending = None
                     if "DEPENDING" in upper:
                         # data-name follows DEPENDING [ON]
@@ -159,10 +185,8 @@ class FileDescriptionClauseParser:
                         depending = rest[0] if rest else None
                     clauses["record"] = {
                         "varying": True,
-                        "min": nums[0] if nums else None,
-                        "max": (
-                            nums[1] if len(nums) > 1 else (nums[0] if nums else None)
-                        ),
+                        "min": low,
+                        "max": high,
                         "depending_on": depending,
                     }
                 else:

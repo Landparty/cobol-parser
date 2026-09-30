@@ -1094,14 +1094,13 @@ def _scan_for_status(
         if id(statement) in block.unconditional and _resets_sqlca(statement):
             return False
         if isinstance(statement, PerformStatement):
-            for target in _perform_targets(statement):
-                for index in by_name.get(target, []):
-                    if index in visited:
-                        continue
-                    visited.add(index)
-                    found = _scan_for_status(index, -1, blocks, by_name, cache, visited)
-                    if found is not None:
-                        return found
+            for index in _perform_block_indexes(statement, by_name):
+                if index in visited:
+                    continue
+                visited.add(index)
+                found = _scan_for_status(index, -1, blocks, by_name, cache, visited)
+                if found is not None:
+                    return found
     return None
 
 
@@ -1113,14 +1112,33 @@ def _resets_sqlca(statement: ASTNode) -> bool:
     return not _is_non_executable(statement, upper)
 
 
-def _perform_targets(statement: PerformStatement) -> list[str]:
-    """The paragraph/section names one PERFORM transfers control to."""
-    names: list[str] = []
-    for attribute in ("target_paragraph", "thru_paragraph"):
-        value = getattr(statement, attribute, None)
-        if isinstance(value, str) and value.strip():
-            names.append(value.strip().upper())
-    return names
+def _perform_block_indexes(
+    statement: PerformStatement, by_name: dict[str, list[int]]
+) -> list[int]:
+    """The blocks one PERFORM runs, in source order.
+
+    ``PERFORM A THRU C`` runs every paragraph from A through C, not just the
+    two named ends: a status check in a paragraph between them is reached.
+    """
+    target = _procedure_name(getattr(statement, "target_paragraph", None))
+    if not target:
+        return []
+    starts = by_name.get(target, [])
+    thru = _procedure_name(getattr(statement, "thru_paragraph", None))
+    if not thru or not starts:
+        return list(starts)
+    first = min(starts)
+    ends = [index for index in by_name.get(thru, []) if index >= first]
+    if not ends:
+        # The range end is unknown or precedes its start; credit only the
+        # two named procedures, as before.
+        return sorted(set(starts) | set(by_name.get(thru, [])))
+    return list(range(first, max(ends) + 1))
+
+
+def _procedure_name(value: Any) -> str:
+    """An upper-cased PERFORM operand, or "" when absent."""
+    return value.strip().upper() if isinstance(value, str) else ""
 
 
 def _references_sql_status(node: ASTNode) -> bool:

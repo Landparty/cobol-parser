@@ -34,6 +34,7 @@ procedure reports the trivial complexity of 1.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -78,6 +79,16 @@ _CLAUSE_ATTRS: tuple[str, ...] = (
 )
 
 _LOOP_PERFORM_TYPES = frozenset({"TIMES", "UNTIL", "VARYING"})
+
+_QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+_BOOL_WORD_RE = re.compile(r"(?<![A-Za-z0-9_-])(?:AND|OR)(?![A-Za-z0-9_-])", re.I)
+
+
+def _text_bool_ops(text: Any) -> int:
+    """AND/OR operators in raw condition text, quoted literals skipped."""
+    if not isinstance(text, str) or not text:
+        return 0
+    return len(_BOOL_WORD_RE.findall(_QUOTED_RE.sub(" ", text)))
 
 
 @dataclass
@@ -354,10 +365,23 @@ class ComplexityAnalyzer:
                 counts["decisions"] += len(node.when_clauses)
                 counts["max_depth"] = max(counts["max_depth"], depth + 1)
                 child_depth = depth + 1
+                # ``EVALUATE TRUE WHEN A = 1 AND B = 2`` keeps its condition
+                # as raw text on the selector, never as a LogicalExpression
+                # the child walk below could count.
+                for when_clause in node.when_clauses:
+                    for selector in when_clause.selectors:
+                        if (
+                            isinstance(selector, dict)
+                            and selector.get("type") == "Condition"
+                        ):
+                            counts["bool_ops"] += _text_bool_ops(selector.get("text"))
             elif isinstance(node, SearchStatement):
                 counts["decisions"] += len(node.when_clauses)
                 counts["max_depth"] = max(counts["max_depth"], depth + 1)
                 child_depth = depth + 1
+                # SEARCH WHEN conditions are raw text too.
+                for search_clause in node.when_clauses:
+                    counts["bool_ops"] += _text_bool_ops(search_clause.get("condition"))
             elif (
                 isinstance(node, PerformStatement)
                 and node.perform_type in _LOOP_PERFORM_TYPES
@@ -365,7 +389,10 @@ class ComplexityAnalyzer:
                 counts["decisions"] += 1
                 counts["max_depth"] = max(counts["max_depth"], depth + 1)
                 child_depth = depth + 1
-            elif isinstance(node, LogicalExpression):
+            elif isinstance(node, LogicalExpression) and (
+                str(node.operator).upper() in ("AND", "OR")
+            ):
+                # A unary NOT adds no path; only AND/OR do.
                 counts["bool_ops"] += 1
 
             if isinstance(node, CobolStatement):

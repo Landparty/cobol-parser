@@ -14,6 +14,36 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-29 -- bug hunt round 10: SEARCH sentence end, nested NOT phrases, POINTER-64, UX literals, xref declarations
+
+Each reproduced first and pinned by `tests/unit/**/test_bug_hunt_r10_*.py`.
+[parser.md](parser.md): a SEARCH WHEN/AT END body ends at the sentence
+period (it swallowed the rest of the paragraph); `STOP RUN RETURNING 8` /
+`STOP 12` accept a LEVEL_NUMBER-lexed integer; `ROUNDED MODE IS x` consumed;
+WRITE/REWRITE `FROM` a literal or figurative; a nested READ/WRITE/DELETE/
+START/REWRITE/STRING/UNSTRING/INSPECT/SORT/MERGE/XML/JSON/RETURN and a
+PERFORM UNTIL condition no longer eat the enclosing statement's `NOT ...`
+phrase; `WHEN NOT 1 THRU 5` is a negated Condition, not a range; qualified
+PERFORM TIMES counts, CALL RETURNING items and SEARCH tables/VARYING indexes.
+DATA DIVISION: POINTER-32/POINTER-64 sizes (4/8), lower-case PICTURE `s`/`p`,
+DBCS `GGBGG` (2 bytes/position), level-66 RENAMES across lines and qualified
+(`renames_*_qualifiers`), level-88 THRU across lines, typed (hex) 88 values,
+FD RECORD VARYING bounds read by keyword (an omitted bound is None).
+[lexer.md](lexer.md): `UX"..."` is one literal; commented-out
+DECIMAL-POINT IS COMMA / CURRENCY SIGN no longer take effect; `tokenize`
+invents no column-7 COMMENT tokens in free-format regions.
+[preprocessing.md](preprocessing.md): `>>EVALUATE FALSE` and `>>WHEN a THRU b`;
+directive number comparison only for COBOL-shaped numerals (not `nan`/`inf`).
+[cli.md](cli.md): `--define` keeps `>>SOURCE FORMAT` directives.
+[analysis.md](analysis.md): xref no longer double-declares INDEXED BY names
+and records SELECT (FILE STATUS, PASSWORD, ASSIGN USING) and DATA DIVISION
+(FD DEPENDING ON, ODO counter) references; program signatures merge a
+group's own and subordinate directions and see level-88 uses; unused-variables
+ignores contained programs' references except to GLOBAL items; ProgramDiffer
+sees SEARCH ALL and INSPECT CONVERTING BEFORE/AFTER; the SQLCODE-check search
+scans every paragraph of a PERFORM THRU range; `extended_complexity` counts
+AND/OR in EVALUATE/SEARCH WHEN text and not unary NOT.
+
 ## 2026-09-28 -- bug hunt round 9: JCL overrides, record images, COMPUTE, EVALUATE, config
 
 [jcl.md](jcl.md): `PARM.ps=` / `COND.ps=` (and unqualified PARM/COND) on a

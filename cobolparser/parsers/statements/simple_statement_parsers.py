@@ -487,6 +487,15 @@ class ReturnStatementParser(IStatementParser):
                     if self._sentence_period_consumed(token_stream):
                         break
             elif val == "NOT":
+                # Only ``NOT [AT] END`` is RETURN's own: an enclosing
+                # statement's ``NOT INVALID KEY`` / ``NOT ON EXCEPTION`` /
+                # ``NOT ON SIZE ERROR`` ends the RETURN (it was consumed and
+                # the enclosing handler lost).
+                following, at = peek_past_noise(token_stream, 1)
+                if _token_value_upper(following) == "AT":
+                    following, _ = peek_past_noise(token_stream, at + 1)
+                if _token_value_upper(following) != "END":
+                    break
                 token_stream.consume()
                 skip_whitespace(token_stream)
                 nxt = token_stream.peek()

@@ -4,7 +4,7 @@ from typing import Any
 
 from cobolparser.parsers.statements._utils import (
     consume_end_keyword_and_period,
-    consume_optional_qualifiers,
+    consume_from_operand,
     create_statement,
     matches_keyword,
     parse_invalid_key_clauses,
@@ -50,18 +50,13 @@ class RewriteStatementParser(IStatementParser):
         if token and token.type == TokenType.FROM:
             token_stream.consume()
             skip_whitespace(token_stream)
-            token = token_stream.peek()
-            if token and token.type in (
-                TokenType.IDENTIFIER,
-                TokenType.STRING_LITERAL,
-                TokenType.NUMERIC_LITERAL,
-            ):
-                source = token.value or ""
-                token_stream.consume()
-                if token.type == TokenType.IDENTIFIER:
-                    # ``REWRITE rec FROM TABLE-ITEM (2)`` (NIST SQ116A): fold
-                    # a subscript / qualifier chain into the source.
-                    source = consume_optional_qualifiers(token_stream, source)
+            # Shared with WRITE: a subscript / qualifier chain is folded in
+            # (``FROM TABLE-ITEM (2)``, NIST SQ116A); a string literal keeps
+            # its quotes (it read as a data name without them); ``FROM
+            # SPACES`` / ``FROM ALL "*"`` / ``FROM 12`` are no longer
+            # stranded in the stream.
+            source = consume_from_operand(token_stream)
+            if source is not None:
                 stmt.set_from(source)
                 skip_whitespace(token_stream)
 

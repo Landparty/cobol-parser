@@ -24,6 +24,7 @@ from cobolparser.parsers.statements._utils import (
     peek_value_upper,
     report_parse_error,
     skip_whitespace,
+    starts_negative_handler_phrase,
 )
 
 from ...core.interfaces import IStatementParser, ITokenStream
@@ -211,6 +212,11 @@ class XmlJsonStatementParser(IStatementParser):
                 token_stream.consume()
                 continue
             if self._at_exception_handler(token_stream):
+                break
+            if starts_negative_handler_phrase(token_stream):
+                # An enclosing READ's ``NOT AT END`` / ``NOT INVALID KEY``
+                # / arithmetic ``NOT ON SIZE ERROR``: not this statement's
+                # clause text -- keeping it lost the enclosing handler.
                 break
             if upper == "PROCESSING" and self._consume_processing_procedure(
                 token_stream, stmt, clause_parts

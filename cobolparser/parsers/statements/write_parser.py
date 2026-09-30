@@ -5,16 +5,17 @@ from typing import Any
 from cobolparser.parsers.statements._utils import (
     collect_clause_stmts,
     consume_end_keyword_and_period,
+    consume_from_operand,
     consume_optional_qualifiers,
     create_statement,
     matches_keyword,
     parse_invalid_key_clauses,
+    peek_past_noise,
     skip_statement_separators,
     skip_whitespace,
     try_consume_keyword,
 )
 
-from ..._literals import quote_literal
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import IOWriteStatement
@@ -71,15 +72,13 @@ class WriteStatementParser(IStatementParser):
             # `WRITE rec FROM 'some text'` is a real IBM/GnuCOBOL extension
             # seen in production batch programs (e.g. writing a fixed
             # exception-message record).
-            token = token_stream.peek()
-            if token and token.type == TokenType.IDENTIFIER:
-                source = token.value or ""
-                token_stream.consume()
-                source = consume_optional_qualifiers(token_stream, source)
+            # A numeric literal or figurative constant (``FROM SPACES``,
+            # ``FROM ALL "*"``, ``FROM 12``) was left in the stream: the rest
+            # of the statement was dropped, and a trailing ``12.`` became a
+            # phantom paragraph that took the following statements with it.
+            source = consume_from_operand(token_stream)
+            if source is not None:
                 stmt.set_from(source)
-            elif token and token.type == TokenType.STRING_LITERAL:
-                stmt.set_from(quote_literal(token.value))
-                token_stream.consume()
 
             skip_whitespace(token_stream)
 
@@ -203,9 +202,20 @@ class WriteStatementParser(IStatementParser):
             )
             stmt.set_at_eop_clause(clause_stmts)
 
-        # Optional NOT AT END-OF-PAGE clause
+        # Optional NOT AT END-OF-PAGE clause. The NOT is WRITE's only when
+        # ``[AT] END-OF-PAGE`` or ``INVALID`` follows: a WRITE in a READ's
+        # ``AT END`` is followed by the READ's ``NOT AT END``, which was
+        # taken for NOT AT END-OF-PAGE (the READ lost its handler), and one in
+        # a CALL's ``ON EXCEPTION`` lost the CALL's ``NOT ON EXCEPTION``.
         token = token_stream.peek()
-        if token and token.type == TokenType.NOT:
+        following, following_at = peek_past_noise(token_stream, 1)
+        if following is not None and following.type == TokenType.AT:
+            following, _ = peek_past_noise(token_stream, following_at + 1)
+        owns_not = following is not None and following.type in (
+            TokenType.END_OF_PAGE,
+            TokenType.INVALID,
+        )
+        if token and token.type == TokenType.NOT and owns_not:
             token_stream.consume()
             skip_whitespace(token_stream)
             next_tok = token_stream.peek()

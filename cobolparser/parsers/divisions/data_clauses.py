@@ -63,6 +63,8 @@ _COMP_TOKEN_TYPES: frozenset[TokenType] = frozenset(
 _POINTER_KEYWORDS: frozenset[str] = frozenset(
     {
         "POINTER",
+        "POINTER-32",
+        "POINTER-64",
         "PROCEDURE-POINTER",
         "FUNCTION-POINTER",
     }

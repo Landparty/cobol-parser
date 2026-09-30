@@ -14,6 +14,7 @@ from ._utils import (
     matches_keyword,
     peek_past_noise,
     skip_whitespace,
+    starts_negative_handler_phrase,
     token_column,
     token_location,
     warn_paragraph_boundary_swallowed,
@@ -299,6 +300,11 @@ class InspectStatementParser(IStatementParser):
             # swallow it (audit 2026-07-06 H2). Without this, the loop ran to
             # the next period and ate every intervening statement.
             if is_statement_boundary(t):
+                break
+            # An enclosing statement's ``NOT AT END`` / ``NOT INVALID KEY``
+            # / ``NOT ON EXCEPTION``: INSPECT has no such phrase, and eating
+            # it here lost the enclosing handler.
+            if starts_negative_handler_phrase(token_stream):
                 break
             # A missing period on this INSPECT followed by what looks like
             # the next paragraph/section header (H9): stop instead of

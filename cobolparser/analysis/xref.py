@@ -652,8 +652,13 @@ class XrefAnalyzer:
             occurs = item.occurs_clause
             if occurs is None:
                 continue
+            # ``indexed_by`` is the first of ``index_names`` (kept for
+            # backward compatibility), not another index: declaring it again
+            # listed every INDEXED BY name in ``duplicate_declarations``.
             index_names = list(occurs.index_names)
-            if occurs.indexed_by:
+            if occurs.indexed_by and occurs.indexed_by.upper() not in {
+                name.upper() for name in index_names
+            }:
                 index_names.append(occurs.indexed_by)
             for index_name in index_names:
                 if index_name:
@@ -772,9 +777,70 @@ class XrefAnalyzer:
             if isinstance(node, CobolStatement) and id(node) not in visited:
                 visited.add(id(node))
                 if isinstance(node, SelectStatement):
-                    # The SELECT *is* the file's declaration, not a use of it.
+                    # The SELECT *is* the file's declaration, not a use of
+                    # it -- but the data items its clauses name are used.
+                    self._visit_select_clauses(node)
                     continue
                 self._visit_statement(node, context=None, fallback=None)
+
+        self._visit_data_division_references(ast)
+
+    def _visit_select_clauses(self, select: SelectStatement) -> None:
+        """Data items a ``SELECT`` names: FILE STATUS, PASSWORD, ASSIGN USING.
+
+        The runtime stores into the FILE STATUS item after every I/O whether
+        or not the PROCEDURE DIVISION ever names it (a program that tests
+        its status only through a level-88 never does) --
+        ``UnusedVariableAnalyzer._file_control_references`` counts it as
+        used, and listing it unreferenced here contradicted that. Recorded
+        with role ``"reference"``. The RECORD / ALTERNATE / RELATIVE KEY
+        items are not recorded here (yet): their roles on READ / START are
+        pinned by the existing role tests.
+        """
+        values: list[str | None] = [
+            select.file_status,
+            select.file_status_vsam,
+            select.password,
+            select.assign_using,
+        ]
+        for alternate in select.alternate_keys:
+            values.append(alternate.get("password"))
+        self._record_structural(
+            [value for value in values if value], select.location, "SelectStatement"
+        )
+
+    def _visit_data_division_references(self, ast: CobolProgram) -> None:
+        """References that live in the DATA DIVISION itself.
+
+        ``OCCURS ... DEPENDING ON`` counters and the data items an FD's own
+        clauses name (``RECORD VARYING ... DEPENDING ON``, ``LINAGE``):
+        ``UnusedVariableAnalyzer`` counts them as used, so a cross-reference
+        that listed them unreferenced contradicted it. Recorded with role
+        ``"reference"`` at the declaring entry's location.
+        """
+        for item in collect_declared_items(ast):
+            fd_names = UnusedVariableAnalyzer._fd_clause_references(item)
+            if fd_names:
+                self._record_structural(sorted(fd_names), item.location, "FD")
+            occurs = item.occurs_clause
+            if occurs is not None and occurs.depending_on:
+                self._record_structural(
+                    [occurs.depending_on], item.location, "OCCURS DEPENDING ON"
+                )
+
+    def _record_structural(
+        self, values: list[str], location: SourceLocation, statement: str
+    ) -> None:
+        """Record DATA/ENVIRONMENT DIVISION clause operands as references."""
+        emitted: set[str] = set()
+        for value in values:
+            for name in sorted(_extract_identifiers(value)):
+                if name in emitted:
+                    continue
+                emitted.add(name)
+                self._record(
+                    name, ROLE_REFERENCE, location, statement, None, exact=True
+                )
 
     def _visit_paragraph(self, para: CobolParagraph, visited: set[int]) -> None:
         context = para.paragraph_name
