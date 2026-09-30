@@ -384,6 +384,10 @@ class ConfigurationSectionParser:
                     continue
                 if tok.value.upper() in ("IS", "ARE"):
                     break
+                if tok.value.upper() in _SPECIAL_NAMES_CLAUSES:
+                    # The next clause (``... TAB IS 10 CLASS HEX IS "0"
+                    # THRU "9"``) is not a symbolic-character name.
+                    break
                 names.append(tok.value)
                 offset += 1
             verb = token_stream.peek(offset)
@@ -398,7 +402,13 @@ class ConfigurationSectionParser:
                 if tok.type in _NOISE_TYPES:
                     offset += 1
                     continue
-                if tok.type not in _LITERAL_TYPES or not tok.value.isdigit():
+                if (
+                    tok.type not in _LITERAL_TYPES
+                    or tok.type == TokenType.STRING_LITERAL
+                    or not tok.value.isdigit()
+                ):
+                    # An ordinal is an integer, never the string literal
+                    # ``"0"`` of a following CLASS clause.
                     break
                 ordinals.append(int(tok.value))
                 offset += 1

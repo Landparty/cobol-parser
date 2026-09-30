@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 # Core parsing infrastructure
 from ._lines import split_source_lines
+from ._source_directive import free_format_flags
 from .core.token_stream import TokenStream
 from .lexer import CobolLexer, Token, TokenType
 from .models.ast_base import SourceLocation
@@ -1012,6 +1013,21 @@ def _detect_fixed_format(source: str) -> bool:
 
     if len(non_empty_lines) < 3:
         return False
+
+    if any(">>" in line for line in lines):
+        # Only lines written in fixed format count: after an early
+        # ``>>SOURCE FORMAT IS FREE`` the free-format lines filled the sample
+        # and a sequence-numbered fixed file was misclassified as free-form.
+        flags = free_format_flags(lines)
+        non_empty_lines = [
+            line
+            for line, free in zip(lines, flags, strict=True)
+            if line.strip() and not free
+        ]
+        if all(line.lstrip().startswith(">>") for line in non_empty_lines):
+            # Nothing but the directive itself precedes the switch: a
+            # free-format file that opens with ``>>SOURCE FORMAT IS FREE``.
+            return False
 
     sample_size = min(10, len(non_empty_lines))
     strict_hits = 0

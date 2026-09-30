@@ -14,6 +14,7 @@ from ._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     peek_past_noise,
+    previous_meaningful_token,
     skip_whitespace,
     token_column,
     token_location,
@@ -39,6 +40,15 @@ def _parse_overflow_stmts(token_stream: ITokenStream) -> list:
     this codebase recovers from an unrecognized token.
     """
     return collect_clause_stmts(token_stream, _OVERFLOW_CLAUSE_STOP)
+
+
+def _handler_ended_sentence(token_stream: ITokenStream) -> bool:
+    """Whether a nested handler statement just consumed the sentence's
+    period (``ON OVERFLOW GO TO P3.``): the STRING/UNSTRING ends there too.
+    Without this the loop ran on into the next paragraph header and
+    reported it as a missing-period statement."""
+    prev = previous_meaningful_token(token_stream)
+    return prev is not None and prev.type == TokenType.PERIOD
 
 
 def _starts_overflow_phrase(token_stream: ITokenStream) -> bool:
@@ -252,6 +262,8 @@ class StringStatementParser(IStatementParser):
                 token_stream.consume()
 
             skip_whitespace(token_stream)
+            if _handler_ended_sentence(token_stream):
+                break
 
         return stmt
 
@@ -400,6 +412,8 @@ class UnstringStatementParser(IStatementParser):
                 token_stream.consume()
 
             skip_whitespace(token_stream)
+            if _handler_ended_sentence(token_stream):
+                break
 
         return stmt
 

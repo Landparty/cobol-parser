@@ -268,7 +268,13 @@ class CancelStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
                 continue
-            if token.type in (TokenType.IDENTIFIER, TokenType.STRING_LITERAL):
+            if token.type == TokenType.IDENTIFIER:
+                token_stream.consume()
+                # ``CANCEL X OF G``: a data name may be qualified.
+                stmt.add_program_name(
+                    consume_optional_qualifiers(token_stream, token.value or "")
+                )
+            elif token.type == TokenType.STRING_LITERAL:
                 token_stream.consume()
                 stmt.add_program_name(token.value or "")
             else:

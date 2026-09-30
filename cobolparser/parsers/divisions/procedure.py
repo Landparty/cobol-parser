@@ -268,6 +268,18 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 if not token_stream.is_empty():
                     token_stream.consume()  # consume SECTION
 
+                # ``S1 SECTION 50.``: a COBOL-85 segment-number (priority).
+                # It was left in the stream and became a paragraph named
+                # ``50`` (NIST SG101A).
+                _seg = token_stream.peek(0)
+                if (
+                    _seg is not None
+                    and _seg.type in (TokenType.LEVEL_NUMBER, TokenType.NUMERIC_LITERAL)
+                    and (_seg.value or "").isdigit()
+                    and self._next_is_period(token_stream, offset=1)
+                ):
+                    token_stream.consume()
+
                 _pp = token_stream.peek(0)
                 if not token_stream.is_empty() and _pp and _pp.value == ".":
                     token_stream.consume()  # consume period

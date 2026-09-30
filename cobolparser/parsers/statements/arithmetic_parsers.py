@@ -773,14 +773,27 @@ class _ExpressionTreeParser:
         if tok in _EXPR_BINARY_OPS or tok in (")", ","):
             raise _ExpressionSyntaxError(f"unexpected token {tok!r}")
         self._advance()
+        if not tok[:1].isalpha():
+            return tok
+        parts = [tok]
+        # ``A OF G`` / ``LENGTH OF A``: fold an OF/IN qualifier chain into
+        # the leaf, as _consume_arithmetic_operand does (it was a "trailing
+        # token" and the whole tree was lost).
+        while (self._peek() or "").upper() in ("OF", "IN"):
+            nxt = (
+                self._tokens[self._pos + 1] if self._pos + 1 < len(self._tokens) else ""
+            )
+            if not nxt[:1].isalpha():
+                break
+            parts.append(self._advance())
+            parts.append(self._advance())
         # Subscripted identifier: fold "NAME ( I [, J] )" into the leaf
         # string, mirroring _consume_arithmetic_operand's "TABLE1 ( INDEX1 )"
         # shape (COBOL has no implicit multiplication, so IDENTIFIER "("
         # can only be a subscript/reference-modification group here).
-        if tok[:1].isalpha() and self._peek() == "(":
-            group = self._consume_balanced_group()
-            return " ".join([tok, *group])
-        return tok
+        if self._peek() == "(":
+            parts.extend(self._consume_balanced_group())
+        return " ".join(parts)
 
     def _consume_balanced_group(self) -> list[str]:
         """Consume a balanced ``( ... )`` group, parens included."""

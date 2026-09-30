@@ -169,7 +169,7 @@ class DataDivisionParser(BaseDivisionParser):
         self._clause_parser = DataItemClauseParser(self)
         self._fd_parser = FileDescriptionClauseParser()
         self._rd_parser = ReportDescriptionClauseParser()
-        self._special_entries = SpecialEntryParser()
+        self._special_entries = SpecialEntryParser(self)
 
     def parse_division(self, token_stream: ITokenStream) -> dict[str, Any]:
         """Parse Data Division content.

@@ -54,5 +54,5 @@ def test_keywords_as_words_still_classify():
     assert selectors == [
         [{"type": "Any"}],
         [{"type": "Range", "start": "A", "end": "C"}],
-        [{"type": "Condition", "text": "NOT THRU"}],
+        [{"type": "Condition", "text": "NOT 'THRU'"}],
     ]

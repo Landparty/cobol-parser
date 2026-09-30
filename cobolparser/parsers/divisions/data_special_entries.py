@@ -48,6 +48,43 @@ def _skip_newlines(token_stream: ITokenStream) -> None:
 class SpecialEntryParser:
     """Parses level-88/level-66 entries and data-division EXEC SQL blocks."""
 
+    def __init__(self, parser: Any = None) -> None:
+        """*parser*: the owning division parser, whose host receives
+        warnings for dropped entry content."""
+        self._parser = parser
+
+    def _warn_dropped_condition_tokens(
+        self, token_stream: ITokenStream, item: ConditionNameItem
+    ) -> None:
+        """Warn when a level-88 entry has content after its VALUE list that
+        nothing parsed (``88 V VALUE 'A' FOO.``): the caller's scan skips it,
+        and it used to vanish without a trace."""
+        offset = 0
+        token = token_stream.peek(offset)
+        while token is not None and token.type == TokenType.NEWLINE:
+            offset += 1
+            token = token_stream.peek(offset)
+        if token is None or token.type in (
+            TokenType.PERIOD,
+            TokenType.EOF,
+            TokenType.LEVEL_NUMBER,
+        ):
+            return
+        if offset and token.type == TokenType.IDENTIFIER:
+            # A missing period followed by a new line: a section header or
+            # the next entry, not content of this one.
+            return
+        host = getattr(self._parser, "host", None)
+        add_warning = getattr(host, "add_warning", None)
+        if callable(add_warning):
+            line = getattr(getattr(token, "location", None), "line", None)
+            where = f" at line {line}" if line else ""
+            add_warning(
+                f"Unparsed token '{token.value}'{where} in condition-name "
+                f"'{item.name}' skipped: clause not fully supported; content "
+                "dropped from the AST"
+            )
+
     def parse_condition_name_item(
         self, token_stream: ITokenStream
     ) -> ConditionNameItem | None:
@@ -181,6 +218,7 @@ class SpecialEntryParser:
                 break
 
         self._parse_when_set_to_false(token_stream, item)
+        self._warn_dropped_condition_tokens(token_stream, item)
 
         # Consume trailing period
         if not token_stream.is_empty():
@@ -213,9 +251,12 @@ class SpecialEntryParser:
             return tok, offset
 
         t, offset = meaningful(0)
-        if not t or not t.value or t.value.upper() != "WHEN":
+        if not t or not t.value or t.value.upper() not in ("WHEN", "FALSE"):
             return
-        offset += 1
+        # ``WHEN SET TO`` are optional words (ISO 2002 / GnuCOBOL: ``88 V
+        # VALUE 'Y' FALSE 'N'``); a bare FALSE phrase was dropped silently.
+        if t.value.upper() == "WHEN":
+            offset += 1
         for keyword in ("SET", "TO"):
             nxt, at = meaningful(offset)
             if nxt and nxt.value and nxt.value.upper() == keyword:
