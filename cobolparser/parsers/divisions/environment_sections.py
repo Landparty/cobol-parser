@@ -39,6 +39,56 @@ _NOISE_TYPES: frozenset[TokenType] = frozenset(
         TokenType.CONTINUATION,
     }
 )
+#: Words that open an I-O-CONTROL entry (IBM, plus COBOL-85's MULTIPLE FILE).
+_IO_CONTROL_CLAUSES: frozenset[str] = frozenset(
+    {"RERUN", "SAME", "MULTIPLE", "APPLY", "COMMITMENT"}
+)
+
+
+def _entry_text(tokens: list[Any]) -> str:
+    """The words of a paragraph entry joined back into one line of text,
+    string literals keeping their quotes."""
+    words: list[str] = []
+    for token in tokens:
+        value = str(token.value)
+        if token.type == TokenType.STRING_LITERAL and not value.startswith(("'", '"')):
+            value = f"'{value}'"
+        words.append(value)
+    return " ".join(words)
+
+
+def _computer_paragraph(name: str, tokens: list[Any]) -> dict[str, Any]:
+    """SOURCE-COMPUTER / OBJECT-COMPUTER entry as metadata.
+
+    Neither changes how this parser reads the program, but both carry
+    meaning a consumer may need -- ``WITH DEBUGGING MODE`` switches on the
+    D-lines, and ``PROGRAM COLLATING SEQUENCE IS alphabet`` changes the
+    result of every nonnumeric comparison -- so the entry is recorded rather
+    than consumed without a trace.
+    """
+    words = [str(t.value).upper() for t in tokens]
+    entry: dict[str, Any] = {
+        "computer_name": (
+            str(tokens[0].value)
+            if tokens and words[0] not in ("WITH", "DEBUGGING", "MEMORY", "PROGRAM")
+            else None
+        ),
+        "text": _entry_text(tokens),
+    }
+    if name == "SOURCE-COMPUTER":
+        entry["debugging_mode"] = "DEBUGGING" in words
+    else:
+        collating: str | None = None
+        if "COLLATING" in words:
+            i = words.index("COLLATING") + 1
+            if i < len(words) and words[i] == "SEQUENCE":
+                i += 1
+            if i < len(words) and words[i] == "IS":
+                i += 1
+            if i < len(words):
+                collating = str(tokens[i].value)
+        entry["collating_sequence"] = collating
+    return entry
 
 
 class ConfigurationSectionParser:
@@ -88,6 +138,7 @@ class ConfigurationSectionParser:
             token_stream.consume()
 
         special_names: dict[str, Any] = {}
+        computers: dict[str, dict[str, Any]] = {}
 
         def _at_stop() -> bool:
             token = token_stream.peek(0)
@@ -122,6 +173,27 @@ class ConfigurationSectionParser:
                 special_names = self._parse_special_names_paragraph(
                     token_stream, _body_stop, _stop_divs
                 )
+            elif v in ("SOURCE-COMPUTER", "OBJECT-COMPUTER"):
+                token_stream.consume()
+                pk = token_stream.peek(0)
+                if pk and pk.value == ".":
+                    token_stream.consume()
+                # The entry is one sentence; it ends at its period (or at
+                # the next paragraph header when the period is missing).
+                entry_tokens: list[Any] = []
+                while not token_stream.is_empty() and not _at_stop():
+                    tok = token_stream.peek(0)
+                    if tok is None or tok.type == TokenType.EOF:
+                        break
+                    if tok.value == ".":
+                        token_stream.consume()
+                        break
+                    if tok.value.upper() in _CONFIGURATION_PARAGRAPHS:
+                        break
+                    token_stream.consume()
+                    if tok.type not in _NOISE_TYPES:
+                        entry_tokens.append(tok)
+                computers[v] = _computer_paragraph(v, entry_tokens)
             else:
                 token_stream.consume()
 
@@ -130,6 +202,10 @@ class ConfigurationSectionParser:
             result["location"] = config_location
         if special_names:
             result["special_names"] = special_names
+        if "SOURCE-COMPUTER" in computers:
+            result["source_computer"] = computers["SOURCE-COMPUTER"]
+        if "OBJECT-COMPUTER" in computers:
+            result["object_computer"] = computers["OBJECT-COMPUTER"]
         return result
 
     def _parse_special_names_paragraph(
@@ -474,6 +550,7 @@ class InputOutputSectionParser:
         # Parse FILE-CONTROL and other paragraphs
         select_statements: list[dict[str, Any]] = []
         file_control_location: SourceLocation | None = None
+        io_control: list[dict[str, Any]] | None = None
 
         while not token_stream.is_empty():
             token = token_stream.peek(0)
@@ -492,6 +569,13 @@ class InputOutputSectionParser:
             ):
                 break
 
+            if token_value == "I-O-CONTROL":
+                # Its RERUN / SAME AREA / MULTIPLE FILE / APPLY entries were
+                # read as a second FILE-CONTROL paragraph (the check below
+                # matches any word ending in CONTROL) and dropped unseen.
+                io_control = self._parse_io_control_paragraph(token_stream)
+                continue
+
             # Parse FILE-CONTROL paragraph (may appear as "NTROL" due to tokenizer)
             if token_value == "FILE-CONTROL" or token_value.endswith("CONTROL"):
                 file_control_data = self._parse_file_control_paragraph(token_stream)
@@ -509,7 +593,69 @@ class InputOutputSectionParser:
             result["location"] = io_location
         if file_control_location is not None:
             result["file_control_location"] = file_control_location
+        if io_control is not None:
+            result["io_control"] = io_control
         return result
+
+    @staticmethod
+    def _parse_io_control_paragraph(token_stream: ITokenStream) -> list[dict[str, Any]]:
+        """Parse the I-O-CONTROL paragraph into one record per entry.
+
+        Each entry (``RERUN ...``, ``SAME [RECORD|SORT|SORT-MERGE] AREA
+        ...``, ``MULTIPLE FILE ...``, ``APPLY ...``) is kept as its clause
+        word, its text and its line; an entry starts at a clause word and
+        runs to the next one or to a period. The paragraph ends at the next
+        section, division or FILE-CONTROL header.
+        """
+        token_stream.consume()  # I-O-CONTROL
+        pk = token_stream.peek(0)
+        if pk and pk.value == ".":
+            token_stream.consume()
+
+        entries: list[dict[str, Any]] = []
+        current: list[Any] = []
+
+        def _flush() -> None:
+            if current:
+                first = current[0]
+                entries.append(
+                    {
+                        "clause": str(first.value).upper(),
+                        "text": _entry_text(current),
+                        "line": first.location.line if first.location else None,
+                    }
+                )
+                current.clear()
+
+        stop_words = {
+            "CONFIGURATION",
+            "INPUT-OUTPUT",
+            "DATA",
+            "PROCEDURE",
+            "IDENTIFICATION",
+            "FILE-CONTROL",
+        }
+        while not token_stream.is_empty():
+            token = token_stream.peek(0)
+            if token is None or token.type == TokenType.EOF:
+                break
+            value = token.value.upper()
+            if value in stop_words or any(
+                value == f"{kw} DIVISION"
+                for kw in ("DATA", "PROCEDURE", "IDENTIFICATION")
+            ):
+                break
+            token_stream.consume()
+            if token.type in _NOISE_TYPES or value in (";", ","):
+                continue
+            if value == ".":
+                _flush()
+                continue
+            if value in _IO_CONTROL_CLAUSES and current:
+                _flush()
+            current.append(token)
+        _flush()
+        return entries
 
     def _parse_file_control_paragraph(
         self, token_stream: ITokenStream
@@ -555,6 +701,7 @@ class InputOutputSectionParser:
                 "PROCEDURE",
                 "IDENTIFICATION",
                 "FILE-CONTROL",
+                "I-O-CONTROL",
             }
             if token_value in section_keywords:
                 break

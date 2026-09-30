@@ -173,6 +173,10 @@ class EnvironmentDivisionParser(BaseDivisionParser):
                 config_section.set_metadata(
                     "special_names", config_data["special_names"]
                 )
+            if isinstance(config_data, dict):
+                for key in ("source_computer", "object_computer"):
+                    if key in config_data:
+                        config_section.set_metadata(key, config_data[key])
             division_node.add_section(config_section)
 
         # Create INPUT-OUTPUT SECTION if present
@@ -180,6 +184,8 @@ class EnvironmentDivisionParser(BaseDivisionParser):
             io_content = division_content["input_output"]
             io_location = io_content.get("location", start_location)
             io_section = CobolSection("INPUT-OUTPUT", io_location)
+            if "io_control" in io_content:
+                io_section.set_metadata("io_control", io_content["io_control"])
 
             # Add FILE-CONTROL paragraph with SELECT statements
             select_statements = io_content.get("select_statements", [])
