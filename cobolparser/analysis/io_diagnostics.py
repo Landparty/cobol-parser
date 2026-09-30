@@ -45,7 +45,7 @@ class IOErrorCode(Enum):
     )
 
     # REWRITE statement errors
-    IO_REWRITE_INVALID_ORG = "IO_REWRITE_INVALID_ORG"  # REWRITE on sequential file
+    IO_REWRITE_INVALID_ORG = "IO_REWRITE_INVALID_ORG"  # REWRITE on line-sequential file
     IO_REWRITE_INVALID_KEY_ORDER = (
         "IO_REWRITE_INVALID_KEY_ORDER"  # Invalid INVALID KEY clause
     )
@@ -94,7 +94,7 @@ class IODiagnosticHelper:
         IOErrorCode.IO_OPEN_REEL_ON_DISK: "REEL clause is only valid for tape files (ORGANIZATION IS SEQUENTIAL)",
         IOErrorCode.IO_CLOSE_NO_REWIND_INVALID: "NO REWIND clause is only valid for tape files",
         IOErrorCode.IO_CLOSE_WITH_LOCK_INVALID: "WITH LOCK on CLOSE is not valid for sequential files",
-        IOErrorCode.IO_REWRITE_INVALID_ORG: "REWRITE is only valid for indexed or relative files, not sequential",
+        IOErrorCode.IO_REWRITE_INVALID_ORG: "REWRITE is not valid for LINE SEQUENTIAL files",
         IOErrorCode.IO_REWRITE_INVALID_KEY_ORDER: "INVALID KEY clause in REWRITE must follow proper syntax",
         IOErrorCode.IO_DELETE_INVALID_ORG: "DELETE is only valid for indexed or relative files, not sequential",
         IOErrorCode.IO_DELETE_INVALID_KEY_ORDER: "INVALID KEY clause in DELETE must follow proper syntax",
@@ -141,15 +141,18 @@ class IODiagnosticHelper:
         org_upper = file_organization.upper()
         stmt_upper = statement_type.upper()
 
-        # START, REWRITE, DELETE only valid on indexed/relative
-        if stmt_upper in ("START", "REWRITE", "DELETE"):
+        # START, DELETE only valid on indexed/relative
+        if stmt_upper in ("START", "DELETE"):
             if org_upper not in ("INDEXED", "RELATIVE"):
                 if stmt_upper == "START":
                     return IOErrorCode.IO_START_INVALID_ORG
-                elif stmt_upper == "REWRITE":
-                    return IOErrorCode.IO_REWRITE_INVALID_ORG
-                elif stmt_upper == "DELETE":
-                    return IOErrorCode.IO_DELETE_INVALID_ORG
+                return IOErrorCode.IO_DELETE_INVALID_ORG
+
+        # REWRITE replaces the record last read, which a record-sequential
+        # file opened I-O supports as well as indexed/relative ones; only a
+        # LINE SEQUENTIAL (text) file has no fixed record to replace.
+        if stmt_upper == "REWRITE" and " ".join(org_upper.split()) == "LINE SEQUENTIAL":
+            return IOErrorCode.IO_REWRITE_INVALID_ORG
 
         # UNLOCK only valid on indexed
         if stmt_upper == "UNLOCK":

@@ -70,6 +70,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .._storage import (
+    BINARY_FIXED_USAGES,
+    DOUBLE_FLOAT_USAGES,
+    PACKED_USAGES,
+    SINGLE_FLOAT_USAGES,
+)
 from ..models.data_items import CobolDataItem, PictureClause
 from ..models.program import CobolProgram
 from ..models.sql_statements import DB2ColumnDefinition, ExecSQLStatement
@@ -321,7 +327,7 @@ def _compare(
         # first is how VARCHAR binds and is filtered out earlier; anything
         # else reaching here has no PICTURE to compare, so only the usage
         # check applies.
-        if actual_usage != expected_usage:
+        if _canonical_usage(actual_usage) != _canonical_usage(expected_usage):
             out.append(
                 DclgenViolation(
                     kind="usage",
@@ -366,7 +372,7 @@ def _compare(
     else:
         out.extend(_compare_character(name, picture, column, common))
 
-    if actual_usage != expected_usage:
+    if _canonical_usage(actual_usage) != _canonical_usage(expected_usage):
         out.append(
             DclgenViolation(
                 kind="usage",
@@ -498,6 +504,23 @@ def _compare_character(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _canonical_usage(usage: str) -> str:
+    """One spelling per storage format: ``BINARY`` / ``COMP-4`` /
+    ``COMPUTATIONAL`` are all ``COMP``, ``PACKED-DECIMAL`` is ``COMP-3``, and
+    so on -- IBM synonyms, so a host variable spelled differently from what
+    DCLGEN writes is stored identically and DB2 converts nothing."""
+    upper = usage.upper()
+    for spellings, canonical in (
+        (BINARY_FIXED_USAGES, "COMP"),
+        (PACKED_USAGES, "COMP-3"),
+        (SINGLE_FLOAT_USAGES, "COMP-1"),
+        (DOUBLE_FLOAT_USAGES, "COMP-2"),
+    ):
+        if upper in spellings:
+            return canonical
+    return upper.replace("COMPUTATIONAL", "COMP")
 
 
 def _is_numeric(picture: PictureClause) -> bool:

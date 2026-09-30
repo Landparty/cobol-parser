@@ -193,8 +193,10 @@ class TestIODiagnosticHelperValidate:
         result = IODiagnosticHelper.validate_io_statement_type("START", "RELATIVE")
         assert result is None
 
-    def test_rewrite_on_sequential_returns_rewrite_error(self):
-        result = IODiagnosticHelper.validate_io_statement_type("REWRITE", "SEQUENTIAL")
+    def test_rewrite_on_line_sequential_returns_rewrite_error(self):
+        result = IODiagnosticHelper.validate_io_statement_type(
+            "REWRITE", "LINE SEQUENTIAL"
+        )
         assert result == IOErrorCode.IO_REWRITE_INVALID_ORG
 
     def test_rewrite_on_indexed_returns_none(self):

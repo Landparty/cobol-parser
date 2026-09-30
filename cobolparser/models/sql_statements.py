@@ -63,6 +63,7 @@ _SQL_COLUMN_DEF_RE = re.compile(
     r"(?:\s+(NOT\s+NULL))?",  # optional NOT NULL
     re.IGNORECASE,
 )
+_SQL_NOT_NULL_RE = re.compile(r"\bNOT\s+NULL\b", re.IGNORECASE)
 _SQL_FETCH_WORD_RE = re.compile(r":?[A-Za-z_][A-Za-z0-9_-]*|[+-]?\d+")
 _SQL_FETCH_ROWS_RE = re.compile(r"\bFOR\s+(\d+)\s+ROWS?\b", re.IGNORECASE)
 #: Words that may stand between FETCH and the cursor name (DB2 for z/OS:
@@ -1196,7 +1197,12 @@ class DeclareTableStatement(ExecSQLStatement):
                 scale = int(raw_scale) if raw_scale else None
             # For integer/float types length/precision/scale stay None
 
-            nullable = not_null_flag is None or "NOT" not in not_null_flag.upper()
+            # NOT NULL need not follow the type directly: DOUBLE PRECISION,
+            # FOR BIT DATA, CCSID EBCDIC, ... may stand between them, and the
+            # regex's optional group then simply matches nothing.
+            nullable = not (
+                not_null_flag is not None or _SQL_NOT_NULL_RE.search(col_text)
+            )
 
             self.columns.append(
                 DB2ColumnDefinition(
