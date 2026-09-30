@@ -476,14 +476,20 @@ class ValueFactory:
             exponent = scaling if scaling > 0 else -spec.decimal_digits
             return self._format_number(Decimal(mantissa).scaleb(exponent), spec)
 
+        # A date/time is drawn as a digit string (``055132``) but rendered
+        # like every other number (``55132``): the decoder renders numbers
+        # without leading zeros, so a zero-led cell here broke
+        # decode(encode(row)) == row for about 40% of TIME fields. The
+        # stored bytes are identical either way. No random sign: a date is
+        # never negative.
         if tokens & _DATE_TOKENS and spec.decimal_digits == 0:
             dated = self._date_digits(digits)
             if dated is not None:
-                return dated
+                return self._format_number(int(dated), spec, allow_random_sign=False)
         if tokens & _TIME_TOKENS and spec.decimal_digits == 0:
             timed = self._time_digits(digits)
             if timed is not None:
-                return timed
+                return self._format_number(int(timed), spec, allow_random_sign=False)
         if tokens & _ID_TOKENS:
             return self._format_number(self._sequential_number(spec, row), spec)
         if tokens & _MONEY_TOKENS:
