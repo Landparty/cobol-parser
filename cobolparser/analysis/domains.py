@@ -241,7 +241,8 @@ def solve(
         # never match. A literal the field cannot hold whole is a branch
         # this field's data cannot reach.
         return Unsatisfiable(
-            f"literal {witness!r} does not fit the {spec.size}-character field "
+            f"literal {witness!r} does not fit the "
+            f"{spec.character_positions}-character field "
             f"{spec.qualified_name} (rendered {rendered!r})"
         )
     if isinstance(domain, TextDomain) and not domain._matches_classes(rendered):
@@ -282,7 +283,9 @@ def _picture_domain(spec: FieldSpec) -> Domain:
         FieldCategory.FLOAT,
     ):
         return _initial_numeric_domain(spec)
-    return TextDomain(allowed=None, forbidden=set(), size=max(1, spec.size))
+    return TextDomain(
+        allowed=None, forbidden=set(), size=max(1, spec.character_positions)
+    )
 
 
 def _initial_numeric_domain(spec: FieldSpec) -> NumericDomain:
