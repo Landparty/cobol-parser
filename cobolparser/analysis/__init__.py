@@ -247,6 +247,32 @@ def __getattr__(name: str) -> object:
         }
         return _map[name]
     if name in (
+        "BusinessRuleExtractor",
+        "BusinessRuleReport",
+        "BusinessRule",
+        "RuleBranch",
+        "RuleAction",
+        "ConditionNameDefinition",
+    ):
+        from .business_rules import (
+            BusinessRule,
+            BusinessRuleExtractor,
+            BusinessRuleReport,
+            ConditionNameDefinition,
+            RuleAction,
+            RuleBranch,
+        )
+
+        _map = {
+            "BusinessRuleExtractor": BusinessRuleExtractor,
+            "BusinessRuleReport": BusinessRuleReport,
+            "BusinessRule": BusinessRule,
+            "RuleBranch": RuleBranch,
+            "RuleAction": RuleAction,
+            "ConditionNameDefinition": ConditionNameDefinition,
+        }
+        return _map[name]
+    if name in (
         "RedundancyAnalyzer",
         "RedundancyReport",
         "CloneGroup",
@@ -371,6 +397,12 @@ __all__ = [
     "ComplexityReport",
     "ComplexityThresholds",
     "ProcedureComplexity",
+    "BusinessRuleExtractor",
+    "BusinessRuleReport",
+    "BusinessRule",
+    "RuleBranch",
+    "RuleAction",
+    "ConditionNameDefinition",
     "RedundancyAnalyzer",
     "RedundancyReport",
     "CloneGroup",

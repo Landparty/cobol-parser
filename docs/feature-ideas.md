@@ -282,6 +282,11 @@ webview.
 
 ### 21. Business-rule extraction as decision tables (M)
 
+> **Shipped** as `analysis/business_rules.py` (`BusinessRuleExtractor`) and
+> `cobol-parser business-rules`. Built on the AST directly rather than on
+> `constraints.py`, which only models conditions on boundary-fed fields and
+> would miss rules on computed WORKING-STORAGE items. See `.okf/analysis.md`.
+
 `constraints.py` already parses IF / EVALUATE / SEARCH conditions into a
 structured model for scenario planning. Rendering them per paragraph as a
 condition × outcome decision table answers the question analysts actually ask
