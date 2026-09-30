@@ -389,7 +389,10 @@ class _Scanner:
     def _handle_non_jcl_card(self, text: str, raw: str, lineno: int) -> None:
         if text.startswith("/*"):
             rest = text[2:].strip()
-            if rest:
+            # A JES2 control statement's verb starts in column 3
+            # (`/*JOBPARM`); `/*` then a blank is a delimiter whose
+            # remainder is a comment, not a statement named by that comment.
+            if rest and text[2:3] != " ":
                 self.cards.append(
                     JclCard(
                         kind=KIND_JES,
@@ -629,6 +632,12 @@ class _Scanner:
                 break
             data.append(line)
             self.index += 1
+        else:
+            # `DD *` data with no DLM= ends at the next `//` card or at the
+            # end of the input stream: a member whose last DD is `SYSIN DD *`
+            # followed by its control cards, with no `/*`, is complete.
+            # Only a coded (or `DD DATA`'s required) delimiter can be missing.
+            terminated = terminated or stop_on_jcl
         if not terminated:
             self._error(
                 card.line,
