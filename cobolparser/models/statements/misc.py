@@ -64,9 +64,13 @@ class SelectStatement(CobolStatement):
         # FILE STATUS clause
         self.file_status: str | None = None
         self.file_status_vsam: str | None = None  # Second status variable for VSAM
+        #: ``FILE STATUS IS S IN G``: OF/IN qualifiers, as for record keys.
+        self.file_status_qualifiers: list[str] = []
+        self.file_status_vsam_qualifiers: list[str] = []
 
         # RELATIVE KEY clause
         self.relative_key: str | None = None
+        self.relative_key_qualifiers: list[str] = []
 
         # RESERVE clause
         self.reserve_areas: int | None = None
@@ -144,10 +148,19 @@ class SelectStatement(CobolStatement):
             }
         )
 
-    def set_file_status(self, status: str, vsam_status: str | None = None) -> None:
-        """Set the FILE STATUS clause."""
+    def set_file_status(
+        self,
+        status: str,
+        vsam_status: str | None = None,
+        *,
+        qualifiers: list[str] | None = None,
+        vsam_qualifiers: list[str] | None = None,
+    ) -> None:
+        """Set the FILE STATUS clause (*qualifiers*: ``OF``/``IN`` names)."""
         self.file_status = status
         self.file_status_vsam = vsam_status
+        self.file_status_qualifiers = list(qualifiers or [])
+        self.file_status_vsam_qualifiers = list(vsam_qualifiers or [])
 
     def set_relative_key(self, key: str) -> None:
         """Set the RELATIVE KEY clause."""
@@ -200,7 +213,10 @@ class SelectStatement(CobolStatement):
                 "alternate_keys": self.alternate_keys,
                 "file_status": self.file_status,
                 "file_status_vsam": self.file_status_vsam,
+                "file_status_qualifiers": list(self.file_status_qualifiers),
+                "file_status_vsam_qualifiers": list(self.file_status_vsam_qualifiers),
                 "relative_key": self.relative_key,
+                "relative_key_qualifiers": list(self.relative_key_qualifiers),
                 "reserve_areas": self.reserve_areas,
                 "padding_character": self.padding_character,
                 "record_delimiter": self.record_delimiter,

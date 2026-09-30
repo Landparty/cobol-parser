@@ -78,7 +78,9 @@ def test_deedit_inverts_edit(picture, value, expected):
 
 
 def test_unmodelled_picture_is_left_alone():
-    assert edit_numeric("9(3)PPP", "1000") is None
+    # A P run between digit positions is no picture this module edits (an
+    # end-of-picture P run is: see test_bug_hunt_r11_generators.py).
+    assert edit_numeric("Z9P9", "1000") is None
 
 
 def test_deedit_rejects_text_no_edit_could_produce():

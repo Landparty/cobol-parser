@@ -41,12 +41,14 @@ from decimal import ROUND_DOWN, Context, Decimal, InvalidOperation
 
 from ...models.data_items import PictureClause
 
-__all__ = ["deedit_numeric", "edit_numeric"]
+__all__ = ["deedit_float", "deedit_numeric", "edit_numeric", "is_float_picture"]
 
 _SUPPORTED = frozenset({"9", "Z", "*", "0", "B", "/", ",", ".", "V", "+", "-"})
 _SUPPORTED |= {"CR", "DB", "$"}
 _FLOATING = ("$", "+", "-")
 _SIMPLE_INSERTION = frozenset({"0", "B", "/", ","})
+#: Symbols that can stand for a digit position (a floating string's too).
+_DIGIT_SYMBOLS = frozenset({"9", "Z", "*", "$", "+", "-"})
 #: ``DECIMAL-POINT IS COMMA`` exchanges ``,`` and ``.``; an involution, so the
 #: same table maps a picture to the default spelling and edited text back.
 _SWAP_DECIMAL = str.maketrans({",": ".", ".": ","})
@@ -56,10 +58,25 @@ _EXACT = Context(prec=1000)
 
 
 class _Layout:
-    """One picture's symbols, with each one's role decided once."""
+    """One picture's symbols, with each one's role decided once.
 
-    def __init__(self, symbols: list[str], floating: str | None) -> None:
+    *scaling* is the number of ``P`` scaling positions the picture had
+    (already removed from *symbols*: a ``P`` holds no character), and
+    *scaling_leading* whether they sat left of every digit (``PPZZ``, a
+    fraction) rather than right of them (``ZZPPP``, a multiple of 1000).
+    """
+
+    def __init__(
+        self,
+        symbols: list[str],
+        floating: str | None,
+        *,
+        scaling: int = 0,
+        scaling_leading: bool = False,
+    ) -> None:
         self.symbols = symbols
+        self.scaling = scaling
+        self.scaling_leading = scaling_leading
         self.floating = floating
         first = last = -1
         if floating is not None:
@@ -84,12 +101,158 @@ def _layout(picture: str | None) -> _Layout | None:
     if not picture:
         return None
     symbols = [s.upper() for s in PictureClause._expand_symbols(picture)]
+    scaling = symbols.count("P")
+    scaling_leading = False
+    if scaling:
+        # One contiguous run of P at one end of the digit positions: left of
+        # every digit (a fraction) or right of every one (a large integer).
+        # A P anywhere else is not a picture this module can edit.
+        first = symbols.index("P")
+        if symbols[first : first + scaling] != ["P"] * scaling:
+            return None
+        digits_before = any(s in _DIGIT_SYMBOLS for s in symbols[:first])
+        digits_after = any(s in _DIGIT_SYMBOLS for s in symbols[first + scaling :])
+        if digits_before == digits_after:
+            return None
+        scaling_leading = digits_after
+        symbols = [s for s in symbols if s != "P"]
     if not symbols or any(s not in _SUPPORTED for s in symbols):
         return None
     floating = [f for f in _FLOATING if symbols.count(f) >= 2]
     if len(floating) > 1:
         return None
-    return _Layout(symbols, floating[0] if floating else None)
+    return _Layout(
+        symbols,
+        floating[0] if floating else None,
+        scaling=scaling,
+        scaling_leading=scaling_leading,
+    )
+
+
+def _float_layout(picture: str | None) -> tuple[str, int, int, bool, str] | None:
+    """An external floating-point picture (``-9.9(5)E-99``), or ``None``.
+
+    Returns ``(mantissa_sign, integer_positions, fraction_positions,
+    has_point, exponent_sign)``.  The shape IBM defines: a ``+`` or ``-``,
+    a mantissa of ``9``s with exactly one ``.`` or ``V``, ``E``, a ``+`` or
+    ``-``, and exactly two exponent ``9``s.
+    """
+    if not picture:
+        return None
+    symbols = [s.upper() for s in PictureClause._expand_symbols(picture)]
+    if "E" not in symbols:
+        return None
+    at = symbols.index("E")
+    mantissa, exponent = symbols[:at], symbols[at + 1 :]
+    if len(mantissa) < 2 or mantissa[0] not in ("+", "-"):
+        return None
+    if exponent not in (["+", "9", "9"], ["-", "9", "9"]):
+        return None
+    body = mantissa[1:]
+    points = [i for i, s in enumerate(body) if s in (".", "V")]
+    if len(points) != 1 or any(s not in ("9", ".", "V") for s in body):
+        return None
+    split = points[0]
+    integer_positions, fraction_positions = split, len(body) - split - 1
+    if integer_positions + fraction_positions == 0:
+        return None
+    return (
+        mantissa[0],
+        integer_positions,
+        fraction_positions,
+        body[split] == ".",
+        exponent[0],
+    )
+
+
+def _sign_char(symbol: str, negative: bool) -> str:
+    """A fixed ``+`` shows ``+``/``-``; a fixed ``-`` shows a space/``-``."""
+    if negative:
+        return "-"
+    return "+" if symbol == "+" else " "
+
+
+def _edit_float(layout: tuple[str, int, int, bool, str], number: Decimal) -> str | None:
+    """*number* in an external floating-point picture, normalized so the
+    mantissa's leading digit is significant (``+1.23450E+02``)."""
+    mantissa_sign, integer_positions, fraction_positions, has_point, exp_sign = layout
+    width = integer_positions + fraction_positions
+    magnitude = number.copy_abs()
+    exponent = 0
+    if magnitude:
+        exponent = magnitude.adjusted() - (integer_positions - 1)
+    scaled = int(
+        magnitude.scaleb(
+            fraction_positions - exponent, context=_EXACT
+        ).to_integral_value(rounding=ROUND_DOWN, context=_EXACT)
+    )
+    if scaled == 0:
+        exponent = 0
+    if abs(exponent) > 99:
+        return None
+    digits = str(scaled).rjust(width, "0")
+    point = "." if has_point else ""
+    return (
+        _sign_char(mantissa_sign, number < 0 and scaled != 0)
+        + digits[:integer_positions]
+        + point
+        + digits[integer_positions:]
+        + "E"
+        + _sign_char(exp_sign, exponent < 0)
+        + f"{abs(exponent):02d}"
+    )
+
+
+def is_float_picture(
+    picture: str | None, *, decimal_point_is_comma: bool = False
+) -> bool:
+    """Whether *picture* is an external floating-point picture."""
+    if decimal_point_is_comma and picture is not None:
+        picture = picture.translate(_SWAP_DECIMAL)
+    return _float_layout(picture) is not None
+
+
+def deedit_float(
+    picture: str | None, text: str, *, decimal_point_is_comma: bool = False
+) -> Decimal | None:
+    """The value *text* holds under an external floating-point *picture*.
+
+    ``None`` when *picture* is not external floating-point, or *text* is not
+    a value it can display.  *decimal_point_is_comma* as for
+    :func:`edit_numeric`.
+    """
+    if decimal_point_is_comma:
+        if picture is None:
+            return None
+        return deedit_float(
+            picture.translate(_SWAP_DECIMAL), text.translate(_SWAP_DECIMAL)
+        )
+    layout = _float_layout(picture)
+    if layout is None:
+        return None
+    mantissa_sign, integer_positions, fraction_positions, has_point, exp_sign = layout
+    width = 1 + integer_positions + int(has_point) + fraction_positions + 4
+    if len(text) != width:
+        return None
+    signs = ("+", "-") if mantissa_sign == "+" else (" ", "-")
+    exp_signs = ("+", "-") if exp_sign == "+" else (" ", "-")
+    body = text[1 : 1 + integer_positions + int(has_point) + fraction_positions]
+    tail = text[len(text) - 4 :]
+    digits = (
+        body[:integer_positions] + body[integer_positions + 1 :] if has_point else body
+    )
+    if (
+        text[0] not in signs
+        or (has_point and body[integer_positions] != ".")
+        or not digits.isdigit()
+        or tail[0] != "E"
+        or tail[1] not in exp_signs
+        or not tail[2:].isdigit()
+    ):
+        return None
+    exponent = int(tail[2:]) * (-1 if tail[1] == "-" else 1)
+    value = Decimal(int(digits)).scaleb(exponent - fraction_positions, context=_EXACT)
+    return -value if text[0] == "-" and value else value
 
 
 def edit_numeric(
@@ -109,8 +272,9 @@ def edit_numeric(
             return None
         edited = edit_numeric(picture.translate(_SWAP_DECIMAL), value)
         return None if edited is None else edited.translate(_SWAP_DECIMAL)
-    layout = _layout(picture)
-    if layout is None:
+    float_layout = _float_layout(picture)
+    layout = _layout(picture) if float_layout is None else None
+    if layout is None and float_layout is None:
         return None
     try:
         number = Decimal((value or "").strip() or "0")
@@ -118,6 +282,20 @@ def edit_numeric(
         number = Decimal(0)
     if not number.is_finite():
         number = Decimal(0)
+    if float_layout is not None:
+        return _edit_float(float_layout, number)
+    assert layout is not None
+    if layout.scaling:
+        # A P position holds no character: ``57000`` in ``ZZPPP`` shows
+        # ``57``, and ``0.0012`` in ``PPZZ`` shows ``12``.
+        number = number.scaleb(
+            (
+                (layout.scaling + layout.integer_positions)
+                if layout.scaling_leading
+                else -layout.scaling
+            ),
+            context=_EXACT,
+        )
     negative = number < 0
     width = layout.integer_positions + layout.fraction_positions
     # Truncated, not rounded: a MOVE drops the places the picture has no

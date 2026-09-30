@@ -8,7 +8,7 @@ and initial VALUE clauses in data definitions.
 
 from ..models.ast_base import ASTNode
 from ..models.data_items import CobolDataItem
-from ..models.program import CobolProgram
+from ..models.program import CobolDivision, CobolProgram
 from ..models.statements import CallStatement, MoveStatement
 from ._names import base_data_name
 
@@ -68,6 +68,12 @@ class DynamicCallAnalyzer:
         # Second pass: track MOVE statements
         self._track_move_statements(ast)
 
+        # Every other way a CALL variable's storage can change (ACCEPT,
+        # STRING/UNSTRING INTO, INITIALIZE, READ INTO, CALL ... USING, a
+        # MOVE to its group or a subordinate item) supplies a value this
+        # analyzer cannot know -- the value set is incomplete, not exact.
+        self._mark_untracked_writes(ast)
+
         # Third pass: find dynamic CALL statements and populate values
         self._populate_dynamic_calls(ast)
 
@@ -102,6 +108,14 @@ class DynamicCallAnalyzer:
             # Get source and target(s)
             source = node.source
             targets = node.targets
+
+            # A reference-modified receiver (``WS-PROG(1:4)``) only
+            # overwrites part of the item: the MOVE's value is not the
+            # item's value, and what the rest holds is not known here.
+            partial = [t for t in targets if ":" in t]
+            for target in partial:
+                self._incomplete_variables.add(base_data_name(target).upper())
+            targets = [t for t in targets if ":" not in t]
 
             if source and targets:
                 # A qualified/subscripted reference string ("WS-PROG OF
@@ -148,6 +162,91 @@ class DynamicCallAnalyzer:
         if hasattr(node, "children"):
             for child in node.children:
                 self._track_move_statements(child)
+
+    def _mark_untracked_writes(self, ast: CobolProgram) -> None:
+        """Mark a dynamic CALL variable incomplete when anything but a MOVE
+        to the item itself writes its storage."""
+        nodes = self._walk(ast)
+        call_vars = {
+            call.called_program.upper()
+            for call in nodes
+            if isinstance(call, CallStatement)
+            and call.is_dynamic
+            and call.called_program
+        }
+        if not call_vars:
+            return
+        # Imported here: xref imports the analysis package's siblings.
+        from .xref import ROLE_CALL_ARGUMENT, ROLE_WRITE, XrefAnalyzer
+
+        overlapping = self._overlapping_names(
+            [node for node in nodes if isinstance(node, CobolDataItem)]
+        )
+        # The cross-reference needs a parsed PROCEDURE DIVISION to walk; a
+        # hand-built node tree without one has only the MOVEs below.
+        has_procedure = isinstance(
+            getattr(ast, "procedure_division", None), CobolDivision
+        )
+        report = XrefAnalyzer().analyze(ast) if has_procedure else None
+        for var in call_vars:
+            for name in {var} | overlapping.get(var, set()):
+                entry = report.entry_for(name) if report is not None else None
+                if entry is None:
+                    continue
+                for ref in entry.references:
+                    if ref.role not in (ROLE_WRITE, ROLE_CALL_ARGUMENT):
+                        continue
+                    if ref.statement == "MoveStatement":
+                        # Read off the MOVE itself below: xref also records
+                        # an OF/IN qualifier as written, which is not a
+                        # write to the group.
+                        continue
+                    self._incomplete_variables.add(var)
+        for move in nodes:
+            if not isinstance(move, MoveStatement):
+                continue
+            for target in move.targets:
+                written = base_data_name(target).upper()
+                for var in call_vars:
+                    if written in overlapping.get(var, ()):
+                        self._incomplete_variables.add(var)
+
+    @staticmethod
+    def _walk(root: ASTNode) -> list[ASTNode]:
+        """Every node under *root* (the same ``children`` walk the other
+        passes make)."""
+        found: list[ASTNode] = []
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            found.append(node)
+            stack.extend(reversed(list(getattr(node, "children", None) or [])))
+        return found
+
+    @staticmethod
+    def _overlapping_names(items: list[CobolDataItem]) -> dict[str, set[str]]:
+        """Item name -> names of the items sharing its storage: its group
+        ancestors and subordinate items."""
+        overlapping: dict[str, set[str]] = {}
+
+        def walk(item: CobolDataItem, ancestors: list[str]) -> None:
+            name = (item.name or "").upper()
+            for child in item.children:
+                if isinstance(child, CobolDataItem):
+                    walk(child, [*ancestors, name] if name else ancestors)
+            if not name:
+                return
+            related = overlapping.setdefault(name, set())
+            related.update(ancestors)
+            for ancestor in ancestors:
+                overlapping.setdefault(ancestor, set()).add(name)
+
+        for item in items:
+            if item.level in (1, 77):
+                walk(item, [])
+        for name, related in overlapping.items():
+            related.discard(name)
+        return overlapping
 
     def _populate_dynamic_calls(self, node: ASTNode) -> None:
         """Find dynamic CALL statements and populate their possible values."""

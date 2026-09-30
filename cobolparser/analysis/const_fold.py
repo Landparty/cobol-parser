@@ -545,6 +545,10 @@ def _entry_paragraph(ast: CobolProgram) -> CobolParagraph | None:
     if procedure.paragraphs:
         return procedure.paragraphs[0]
     for section in procedure.sections:
+        if getattr(section, "is_declarative", False):
+            # A USE procedure the runtime invokes on an I/O error; control
+            # enters at the first section after END DECLARATIVES.
+            continue
         section_paragraphs: list[CobolParagraph] | None = getattr(
             section, "paragraphs", None
         )

@@ -188,12 +188,12 @@ class CallStatementParser(IStatementParser):
                         nested = self._parse_nested_stmts(
                             token_stream, stop_at={"ON", "NOT", "END-CALL"}
                         )
-                        stmt.on_exception = nested if nested else None
+                        self._set_handler(token_stream, stmt, "on_exception", nested)
                     else:
                         nested = self._parse_nested_stmts(
                             token_stream, stop_at={"ON", "NOT", "END-CALL"}
                         )
-                        stmt.on_overflow = nested if nested else []
+                        self._set_handler(token_stream, stmt, "on_overflow", nested)
                     for _nested_stmt in nested or []:
                         stmt.add_child(_nested_stmt)
                 elif token.type == TokenType.ON or (
@@ -211,7 +211,7 @@ class CallStatementParser(IStatementParser):
                         nested = self._parse_nested_stmts(
                             token_stream, stop_at={"ON", "NOT", "END-CALL"}
                         )
-                        stmt.on_exception = nested if nested else None
+                        self._set_handler(token_stream, stmt, "on_exception", nested)
                         for _nested_stmt in nested or []:
                             stmt.add_child(_nested_stmt)
                     elif next_val == "OVERFLOW":
@@ -220,7 +220,7 @@ class CallStatementParser(IStatementParser):
                         nested = self._parse_nested_stmts(
                             token_stream, stop_at={"ON", "NOT", "END-CALL"}
                         )
-                        stmt.on_overflow = nested if nested else []
+                        self._set_handler(token_stream, stmt, "on_overflow", nested)
                         for _nested_stmt in nested or []:
                             stmt.add_child(_nested_stmt)
                     else:
@@ -246,7 +246,9 @@ class CallStatementParser(IStatementParser):
                         nested = self._parse_nested_stmts(
                             token_stream, stop_at={"ON", "NOT", "END-CALL"}
                         )
-                        stmt.not_on_exception = nested if nested else None
+                        self._set_handler(
+                            token_stream, stmt, "not_on_exception", nested
+                        )
                         for _nested_stmt in nested or []:
                             stmt.add_child(_nested_stmt)
                     else:
@@ -265,6 +267,40 @@ class CallStatementParser(IStatementParser):
             pass
 
         return stmt
+
+    _HANDLER_PHRASES = {
+        "on_exception": "ON EXCEPTION",
+        "on_overflow": "ON OVERFLOW",
+        "not_on_exception": "NOT ON EXCEPTION",
+    }
+
+    def _set_handler(
+        self, token_stream: ITokenStream, stmt: Any, attr: str, nested: list
+    ) -> None:
+        """Store a handler body on *stmt*; a repeated phrase is merged.
+
+        ``CALL ... ON EXCEPTION A ON EXCEPTION B`` repeats a phrase (invalid
+        COBOL); the second body used to overwrite the first silently. Both
+        bodies are kept, in order, and the repeat is reported.
+        """
+        existing = getattr(stmt, attr)
+        if existing is None:
+            if attr == "on_overflow":
+                setattr(stmt, attr, nested if nested else [])
+            else:
+                setattr(stmt, attr, nested if nested else None)
+            return
+        existing.extend(nested or [])
+        context = get_parse_context(token_stream)
+        host = getattr(context, "host", None) if context is not None else None
+        add_warning = getattr(host, "add_warning", None)
+        if callable(add_warning):
+            line = getattr(stmt.location, "line", None)
+            where = f" (CALL at line {line})" if line else ""
+            add_warning(
+                f"Duplicate {self._HANDLER_PHRASES[attr]} phrase{where}: its "
+                "statements were appended to the first handler"
+            )
 
     def _parse_nested_stmts(self, token_stream: ITokenStream, stop_at: set) -> list:
         """Parse statements until a stop keyword is found.

@@ -66,7 +66,7 @@ from decimal import Context, Decimal
 from typing import Any
 
 from ...models.data_items import CobolDataItem
-from .editing import deedit_numeric, edit_numeric
+from .editing import deedit_float, deedit_numeric, edit_numeric, is_float_picture
 from .encoding import (
     EBCDIC_CODEC,
     RDW_SIZE,
@@ -386,6 +386,18 @@ def _decode_edited(
     text = raw.decode(codec, errors="replace")
     comma = spec.decimal_point_is_comma
     if (
+        is_float_picture(spec.picture, decimal_point_is_comma=comma)
+        and len(raw) >= spec.storage_size
+    ):
+        # External floating-point (``-9.9(5)E-99``): mantissa times a power
+        # of ten, rendered back at the field's own mantissa scale.
+        number = deedit_float(spec.picture, text, decimal_point_is_comma=comma)
+        if number is None:
+            return text.rstrip(" \x00"), (
+                f"{text!r} is not a value PIC {spec.picture} can display"
+            )
+        return _render_decimal(number, spec.decimal_digits), None
+    if (
         edit_numeric(spec.picture, "0", decimal_point_is_comma=comma) is None
         or len(raw) < spec.storage_size
     ):
@@ -396,7 +408,21 @@ def _decode_edited(
             f"{text!r} is not a value PIC {spec.picture} can display"
         )
     magnitude, negative = parsed
-    return _render_number(magnitude, negative, spec.decimal_digits), None
+    # ``_field_number``: a P-scaled edited picture (``ZZPPP``) shows only
+    # its stored digits, and the scale goes back on here.
+    return _field_number(magnitude, negative, spec), None
+
+
+def _render_decimal(number: Decimal, decimals: int) -> str:
+    """*number* at *decimals* places when that loses nothing (the shape
+    :func:`_render_number` gives), else every digit it has."""
+    exact = Context(prec=max(28, len(number.as_tuple().digits) + decimals + 2))
+    if number == 0:
+        number = Decimal(0)
+    quantized = number.quantize(Decimal(1).scaleb(-decimals), context=exact)
+    if quantized == number:
+        number = quantized
+    return f"{number:f}"
 
 
 def _decode_text(raw: bytes, opts: EncodingOptions, *, justified: bool = False) -> str:

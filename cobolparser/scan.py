@@ -280,7 +280,10 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
     """Parse and analyze one file. Never raises -- see the module docstring."""
     try:
         source = Path(path).read_text(encoding=options.encoding, errors=options.errors)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
+        # ValueError covers UnicodeDecodeError under ``errors="strict"``: one
+        # undecodable file must cost its own entry, not abort the whole scan
+        # (the same guard batch.py's workers have).
         return FileScan(path=path, error=f"could not read: {exc}")
 
     expansion_failures: list[str] = []

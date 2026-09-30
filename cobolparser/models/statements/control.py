@@ -386,11 +386,15 @@ class GoStatement(CobolStatement):
         self._add_unique_operand(name)
 
     def add_target_paragraph(self, name: str) -> None:
-        """Append an additional target for computed GO TO ... DEPENDING ON."""
+        """Append an additional target for computed GO TO ... DEPENDING ON.
+
+        Targets are positional (the Nth is taken when the variable is N), so
+        a repeated name is kept: ``GO TO A B A DEPENDING ON X`` has three
+        targets, and deduplicating shifted every later one.
+        """
         if self.target_paragraph is None:
             self.target_paragraph = name
-        if name not in self.target_paragraphs:
-            self.target_paragraphs.append(name)
+        self.target_paragraphs.append(name)
         self._add_unique_operand(name)
 
     def set_depending_on_variable(self, var_name: str) -> None:

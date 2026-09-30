@@ -1288,11 +1288,12 @@ class TestProcedureBodyEdgeCases:
 """)
         messages = [e["message"] for e in result.errors]
         assert any("null statement inside procedure P1" in m for m in messages)
-        assert any(
-            "JOB statement is not allowed inside procedure P1" in m for m in messages
-        )
+        # A JOB card always starts a new job: it ends the unterminated PROC
+        # rather than being swallowed into it (bug hunt round 11).
+        assert any("PROC P1 is never ended by a PEND" in m for m in messages)
         assert any("JOBPARM" in n for n in result.unresolved)
-        assert result.jobs[0].step("RUN.S1").program == "A"
+        assert [job.name for job in result.jobs] == ["J", "NESTED"]
+        assert result.jobs[1].step("S1").program == "A"
 
     def test_override_keeps_the_procedure_dd_concatenation(self):
         result = parse_jcl("""\

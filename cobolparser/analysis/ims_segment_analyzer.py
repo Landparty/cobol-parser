@@ -29,6 +29,7 @@ from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram
 from ..models.statements import CallStatement, MoveStatement
+from ._names import base_data_name
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -65,6 +66,8 @@ _SSA_SEGMENT_NAME_LEN = 8
 # Interfaces that accept an optional leading parameter-count operand
 # (`CALL 'CBLTDLI' USING parmcount, function, ...`). CEETDLI takes none.
 _PARMCOUNT_INTERFACES: frozenset[str] = frozenset({"CBLTDLI", "AIBTDLI"})
+#: The group names an ``OF``/``IN`` qualifier chain names in a MOVE target.
+_QUALIFIER_RE = re.compile(r"\b(?:OF|IN)\s+([A-Za-z0-9][A-Za-z0-9-]*)", re.IGNORECASE)
 _NUMERIC_PICTURE_RE = re.compile(r"^S?[9()0-9]+$")
 
 
@@ -159,6 +162,11 @@ class IMSSegmentAnalyzer:
         # contaminate each other's static values if merged from
         # _variable_values.
         self._moved_values: dict[str, set[str]] = {}
+        # ``MOVE 'ORDER' TO SEG-NAME OF SSA2``: bare target name -> (its
+        # OF/IN qualifiers, the values moved), so the move lands on the SSA
+        # it names rather than on no SSA at all (the qualified text never
+        # matched a child's bare name) or on every same-named child.
+        self._qualified_moves: dict[str, list[tuple[frozenset[str], set[str]]]] = {}
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -174,6 +182,7 @@ class IMSSegmentAnalyzer:
         self._data_items = {}
         self._variable_values = {}
         self._moved_values = {}
+        self._qualified_moves = {}
 
         self._collect_data_items(ast)
         self._track_move_statements(ast)
@@ -244,14 +253,10 @@ class IMSSegmentAnalyzer:
     def _track_move_statements(self, node: ASTNode) -> None:
         if isinstance(node, MoveStatement) and node.source and node.targets:
             src_key = node.source.upper()
+            values: set[str] = set()
             if src_key in self._variable_values:
                 # Propagate known values from source variable to targets
-                src_values = self._variable_values[src_key]
-                for tgt in node.targets:
-                    self._variable_values.setdefault(tgt.upper(), set()).update(
-                        src_values
-                    )
-                    self._moved_values.setdefault(tgt.upper(), set()).update(src_values)
+                values = set(self._variable_values[src_key])
             else:
                 # Only propagate when source is a genuine literal (quoted string,
                 # numeric, or figurative constant).  Bare identifiers that are not
@@ -260,11 +265,20 @@ class IMSSegmentAnalyzer:
                 # false segment-name resolution (e.g. "WS-SEG" → segment "WS-SEG").
                 literal = _extract_literal(node.source)
                 if literal is not None:
-                    for tgt in node.targets:
-                        self._variable_values.setdefault(tgt.upper(), set()).add(
-                            literal
+                    values = {literal}
+            if values:
+                for tgt in node.targets:
+                    self._variable_values.setdefault(tgt.upper(), set()).update(values)
+                    qualifiers = frozenset(
+                        q.upper() for q in _QUALIFIER_RE.findall(tgt)
+                    )
+                    if qualifiers:
+                        base = base_data_name(tgt).upper()
+                        self._qualified_moves.setdefault(base, []).append(
+                            (qualifiers, values)
                         )
-                        self._moved_values.setdefault(tgt.upper(), set()).add(literal)
+                    else:
+                        self._moved_values.setdefault(tgt.upper(), set()).update(values)
 
         if hasattr(node, "children"):
             for child in node.children:
@@ -428,7 +442,11 @@ class IMSSegmentAnalyzer:
                     if name:
                         candidates.add(name)
                 child_name = (child.name or "").upper()
-                for v in self._moved_values.get(child_name, []):
+                moved_in = set(self._moved_values.get(child_name, ()))
+                for qualifiers, values in self._qualified_moves.get(child_name, []):
+                    if qualifiers <= {var}:
+                        moved_in |= values
+                for v in moved_in:
                     name = v[:_SSA_SEGMENT_NAME_LEN].rstrip()
                     if name:
                         candidates.add(name)

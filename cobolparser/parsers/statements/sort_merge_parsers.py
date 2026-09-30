@@ -6,6 +6,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import MergeStatement, SortStatement
 from ._utils import (
+    consume_optional_qualifiers,
     is_statement_boundary,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
@@ -96,7 +97,10 @@ def _parse_keys(
                         warn_paragraph_boundary_swallowed(ts)
                         break
                     ts.consume()
-                    keys.append({"field": f.value or "", "order": order})
+                    # ``KEY K OF SR``: keep the qualifier (it was dropped,
+                    # and ended the KEY list, losing every later key).
+                    field = consume_optional_qualifiers(ts, f.value or "")
+                    keys.append({"field": field, "order": order})
                 else:
                     break
                 skip_whitespace(ts)

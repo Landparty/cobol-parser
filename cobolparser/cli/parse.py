@@ -3277,8 +3277,23 @@ def _cmd_jcl(args: argparse.Namespace) -> None:
     if args.bindings:
         bindings = resolve_dd_bindings(result)
         if args.program:
-            wanted = {s.name for s in result.steps_running(args.program)}
-            bindings = [b for b in bindings if b.step in wanted]
+            # Keyed by job as well as step name: in a deck of several jobs,
+            # `S1` of another job runs another program, and its DDs are not
+            # this program's.
+            running = {id(s) for s in result.steps_running(args.program)}
+            wanted = {
+                (id(job), step.name)
+                for job in result.jobs
+                for step in job.steps
+                if id(step) in running
+            }
+            bindings = [
+                binding
+                for binding, (job, _step, _dd) in zip(
+                    bindings, result.all_dd_statements(), strict=True
+                )
+                if (id(job), binding.step) in wanted
+            ]
         payload = {"bindings": [b.to_dict() for b in bindings]}
     elif args.dd_map:
         payload = {"dd_map": result.dd_map()}

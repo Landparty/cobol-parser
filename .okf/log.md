@@ -14,6 +14,42 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-09-30 -- bug hunt round 11: operator currency signs, JCL job scoping, float/P-scaled pictures, leading-sentence dead code
+
+Each reproduced first and pinned by `tests/unit/**/test_bug_hunt_r11_*.py`.
+[lexer.md](lexer.md): a declared currency sign shaped like an operator
+(`<`, `>`, `=`) lexes as CURRENCY inside a picture string (NC108M parses
+clean). [parser.md](parser.md): `_detect_fixed_format` samples only
+fixed-format regions around `>>SOURCE FORMAT IS FREE`; EVALUATE Condition
+selector text keeps string-literal quotes (`NOT 'THRU'`); SORT/MERGE KEY,
+CANCEL and WRITE ADVANCING keep OF/IN qualifiers; a repeated CALL
+exception phrase is merged with a warning; SELECT FILE STATUS/RELATIVE KEY
+qualifiers (`*_qualifiers` fields), RELATIVE without KEY, `;` separators;
+STRING/UNSTRING stop at a handler's period; level-88 bare `FALSE lit` and
+unparsed-tail warning; GO TO DEPENDING keeps repeated targets; COMPUTE
+expression trees fold qualified operands; `S1 SECTION 50.` segment numbers;
+SYMBOLIC CHARACTERS stops at CLASS.
+[generators.md](generators.md): external floating-point pictures edit and
+de-edit a normalized mantissa/exponent; P positions in edited pictures count
+as value digits (`scaling_leading`); level-88 figurative values are never
+written as words; alphanumeric-edited values keep their insertion
+characters; a qualified ODO counter names only its own item; free-form
+copybooks split lines with `split_source_lines`.
+[jcl.md](jcl.md): a JOB card ends an unterminated PROC; in-stream PROCs and
+SET symbols are local to their job; `/* comment` is a delimiter; `DD *` data
+may end at end of input; `jcl --bindings --program` matches per job.
+[preprocessing.md](preprocessing.md): a `..` in a configured copybook
+directory is not a traversal; COPY OF/IN library directories match
+case-insensitively when the search does. [batch.md](batch.md): scan
+isolates a file that fails strict decoding.
+[analysis.md](analysis.md): dead-code and program-flow account for
+sentences before a section's (or the division's) first paragraph; dynamic
+CALL value sets are marked incomplete after ACCEPT/STRING/INITIALIZE/group or
+slice writes; move-type-check resolves qualified duplicate names; dclgen
+treats usage synonyms as equal and finds NOT NULL anywhere in a column;
+REWRITE is valid on record-sequential files; const-fold skips DECLARATIVES;
+IMS tracks qualified MOVEs into SSA segment names.
+
 ## 2026-09-29 -- bug hunt round 10: SEARCH sentence end, nested NOT phrases, POINTER-64, UX literals, xref declarations
 
 Each reproduced first and pinned by `tests/unit/**/test_bug_hunt_r10_*.py`.
