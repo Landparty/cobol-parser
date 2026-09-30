@@ -1746,6 +1746,18 @@ def _starts_sql_comment(token: Token, next_token: Token | None) -> bool:
     return next_loc.column == loc.column + 1
 
 
+def _abutting_pair(
+    token: Token, next_token: Token | None, first: TokenType, second: TokenType
+) -> bool:
+    """True when *token* / *next_token* are *first* / *second* in adjacent columns."""
+    if next_token is None or token.type != first or next_token.type != second:
+        return False
+    loc, next_loc = token.location, next_token.location
+    if loc is None or next_loc is None or loc.line != next_loc.line:
+        return False
+    return next_loc.column == loc.column + len(token.value or "")
+
+
 def _is_end_exec(token: Token) -> bool:
     return token.type == TokenType.END_EXEC or bool(
         token.type == TokenType.IDENTIFIER
@@ -1813,6 +1825,31 @@ def collect_exec_sql_text(stream: ITokenStream, sql: bool = False) -> str:
                     or pending.type == TokenType.NEWLINE
                     or _is_end_exec(pending)
                 ):
+                    break
+                stream.consume()
+            continue
+
+        if sql and _abutting_pair(
+            token, peek_token(stream, 1), TokenType.DIVIDE_OP, TokenType.MULTIPLY_OP
+        ):
+            # A bracketed ``/* ... */`` comment: dropped like ``--``, since
+            # the token-joined text (``/ *``) is no longer recognisable as
+            # one and its words read as host variables and tables. It may
+            # span lines; it never swallows END-EXEC.
+            stream.consume()
+            stream.consume()
+            while not stream.is_empty():
+                pending = stream.peek(0)
+                if pending is None or _is_end_exec(pending):
+                    break
+                if _abutting_pair(
+                    pending,
+                    peek_token(stream, 1),
+                    TokenType.MULTIPLY_OP,
+                    TokenType.DIVIDE_OP,
+                ):
+                    stream.consume()
+                    stream.consume()
                     break
                 stream.consume()
             continue

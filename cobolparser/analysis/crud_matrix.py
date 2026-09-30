@@ -463,6 +463,22 @@ class CRUDMatrixGenerator:
 
             sql_type = stmt.sql_type
 
+            # ``SELECT ... FROM FINAL TABLE (INSERT INTO T ...)``: the nested
+            # data-change statement writes its table.
+            for verb, table in getattr(stmt, "data_change_tables", []):
+                entry = self._get_or_create_table_entry(table.upper())
+                if verb == "INSERT":
+                    entry.crud.create = True
+                elif verb == "UPDATE":
+                    entry.crud.update = True
+                elif verb == "DELETE":
+                    entry.crud.delete = True
+                else:  # MERGE
+                    actions = set(_MERGE_ACTION_RE.findall(stmt.sql_text.upper()))
+                    entry.crud.create |= "INSERT" in actions
+                    entry.crud.update |= "UPDATE" in actions
+                    entry.crud.delete |= "DELETE" in actions
+
             if sql_type in _WRITE_SQL_TYPES:
                 # tables[0] is the statement's target; any other table is
                 # one a subquery (``WHERE X IN (SELECT X FROM T2)``,
