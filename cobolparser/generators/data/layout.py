@@ -59,6 +59,9 @@ class OdoControl:
     subscript_index: int
     min_times: int
     max_times: int
+    #: ``DEPENDING ON CNT OF HDR``: the ``OF``/``IN`` qualifiers, upper-cased
+    #: -- which of several same-named items is the counter.
+    qualifiers: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise the control (used by the CLI's ``--describe`` output)."""
@@ -685,6 +688,9 @@ def _flatten_into(
                 # occurrence 50 of a table flattened to 10 would describe
                 # bytes no FieldSpec covers.
                 max_times=len(indexes),
+                qualifiers=tuple(
+                    q.upper() for q in getattr(occurs, "depending_on_qualifiers", ())
+                ),
             ),
         )
 
@@ -820,10 +826,10 @@ def _link_odo_counters(specs: list[FieldSpec]) -> None:
     that exist, while one above its maximum names bytes the record does
     not have.
     """
-    bounds: dict[str, tuple[int, int]] = {}
+    bounds: dict[tuple[str, tuple[str, ...]], tuple[int, int]] = {}
     for spec in specs:
         for control in spec.odo_controls:
-            key = control.depending_on.upper()
+            key = (control.depending_on.upper(), control.qualifiers)
             existing = bounds.get(key)
             if existing is None:
                 bounds[key] = (control.min_times, control.max_times)
@@ -843,7 +849,21 @@ def _link_odo_counters(specs: list[FieldSpec]) -> None:
     if not bounds:
         return
     for spec in specs:
-        found = bounds.get(spec.name.upper())
+        # ``DEPENDING ON CNT OF HDR`` names HDR's CNT only: a same-named item
+        # elsewhere in the record (``TRL.CNT``) is ordinary data, and
+        # stamping it too made the encoder and decoder size the table from
+        # whichever CNT came last.
+        name = spec.name.upper()
+        ancestors = {part.upper() for part in spec.path[:-1]}
+        found: tuple[int, int] | None = None
+        for (counter, qualifiers), (low, high) in bounds.items():
+            if counter != name or not set(qualifiers) <= ancestors:
+                continue
+            if found is not None:
+                low, high = max(found[0], low), min(found[1], high)
+                if low > high:
+                    low = high
+            found = (low, high)
         if found is not None:
             spec.odo_counter_bounds = found
 

@@ -593,18 +593,43 @@ class PictureClause(ASTNode):
         # such symbol as a digit -- the previous rule for ``$`` -- made
         # ``$$$,$$9`` a six-digit field, and the value generator then
         # produced numbers the edited picture cannot display.
+        #
+        # An external floating-point picture (``-9.9(5)E-99``) describes its
+        # value with the mantissa only: the ``E``, the exponent's sign and
+        # its two digits are display positions, not digits of the value.
+        # Counting them made ``-9.9(5)E-99`` an eight-place fraction (the
+        # exponent sign read as a second floating ``-``), and generated
+        # values no longer fitted the picture.
+        upper_symbols = [s.upper() for s in symbols]
+        mantissa_end = (
+            upper_symbols.index("E")
+            if "E" in upper_symbols and not {"X", "A"} & set(upper_symbols)
+            else len(symbols)
+        )
         floating_counts = {
-            sym: sum(1 for s in symbols if s.upper() == sym)
+            sym: sum(1 for s in upper_symbols[:mantissa_end] if s == sym)
             for sym in _PIC_FLOATING_SYMBOLS
         }
         floating_seen: set[str] = set()
+        # ``P`` scaling positions in an edited picture (``ZZPPP``) hold no
+        # character but are digits of the *value*, exactly as in an
+        # unedited scaled picture (see ``_parse_scaled_pattern``).
+        scaling_count = 0
+        scaling_leading = False
 
-        for sym in symbols:
+        for index, sym in enumerate(symbols):
             upper = sym.upper()
+            if index >= mantissa_end:
+                size += 1
+                continue
             if upper in ("S", "V", "P"):
                 # Non-printing description symbols; V marks the decimal split.
                 if upper == "V":
                     seen_decimal = True
+                elif upper == "P":
+                    if scaling_count == 0:
+                        scaling_leading = integer_digits + decimal_digits == 0
+                    scaling_count += 1
                 continue
             if upper in ("CR", "DB"):
                 size += 2
@@ -631,9 +656,16 @@ class PictureClause(ASTNode):
             self.is_alphanumeric_edited = True
         else:
             self.is_numeric_edited = True
+            self.total_digits = integer_digits + decimal_digits
+            if scaling_count and self.total_digits:
+                self.scaling_leading = scaling_leading
+                if scaling_leading:
+                    decimal_digits += integer_digits + scaling_count
+                    integer_digits = 0
+                else:
+                    integer_digits += scaling_count
             self.integer_digits = integer_digits
             self.decimal_digits = decimal_digits
-            self.total_digits = integer_digits + decimal_digits
 
     def to_dict(self) -> dict[str, Any]:
         """Convert PICTURE clause to dictionary representation."""

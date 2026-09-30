@@ -8,6 +8,7 @@ import string
 import struct
 from decimal import Decimal, InvalidOperation
 
+from ...models.data_items import PictureClause
 from .layout import FieldCategory, FieldSpec, _strip_literal_quotes
 from .options import DataGeneratorOptions
 from .storage import POINTER_USAGES, SINGLE_FLOAT_USAGES
@@ -223,6 +224,11 @@ _WORD_SPLIT_RE = re.compile(r"[-_]+")
 #: (or figurative constant) that fills the field.
 _VALUE_ALL_RE = re.compile(r"^ALL\s+(.+)$", re.IGNORECASE | re.DOTALL)
 
+#: Figurative constants whose value is a byte no CSV text cell can carry.
+_UNWRITABLE_FIGURATIVES = frozenset(
+    {"LOW-VALUE", "LOW-VALUES", "HIGH-VALUE", "HIGH-VALUES", "NULL", "NULLS"}
+)
+
 #: Usages that name storage rather than data.  See :meth:`ValueFactory._make`.
 _NON_DATA_USAGES = POINTER_USAGES | {"INDEX"}
 
@@ -317,10 +323,40 @@ class ValueFactory:
         nothing and the field is generated from its PICTURE.
         """
         if self._opts.use_condition_values and spec.condition_values:
-            return self._fit_domain_value(self._rng.choice(spec.condition_values), spec)
+            # A level-88 figurative constant (``VALUE SPACES``, ``VALUE
+            # ZERO``) arrives here as the bare word; fitting it as a literal
+            # wrote the text ``SPACES`` / ``ZER`` / ``HI`` into the field.
+            # LOW-/HIGH-VALUES and NULL are bytes no text cell can carry, so
+            # they are not drawn at all -- writing them as blanks would
+            # satisfy a different condition than the one named.
+            candidates = [
+                value
+                for value in spec.condition_values
+                if value.upper() not in _UNWRITABLE_FIGURATIVES
+            ]
+            if candidates:
+                choice = self._rng.choice(candidates)
+                figurative = _FIGURATIVE_CONSTANTS.get(choice.upper())
+                if figurative is not None:
+                    return self._fill_figurative(figurative, spec)
+                return self._fit_domain_value(choice, spec)
         if self._opts.respect_values and spec.value_clause:
             return self._from_value_clause(spec)
         return None
+
+    def _fill_figurative(self, character: str, spec: FieldSpec) -> str:
+        """A figurative constant as the value it gives *spec*: every
+        character position holds it (``ZERO`` in ``PIC X(3)`` is ``000``),
+        and ``SPACE`` is the empty cell the encoder pads with spaces."""
+        if not character:
+            return ""
+        if spec.category in (
+            FieldCategory.NUMERIC,
+            FieldCategory.NUMERIC_EDITED,
+            FieldCategory.FLOAT,
+        ):
+            return self._fit_domain_value(character, spec)
+        return self._fit_text(character * max(1, spec.size), spec)
 
     def _odo_counter_value(self, spec: FieldSpec) -> str:
         """A count for an ``OCCURS ... DEPENDING ON`` counter field.
@@ -360,8 +396,10 @@ class ValueFactory:
         figurative = _FIGURATIVE_CONSTANTS.get(raw.upper())
         if figurative is not None:
             # SPACES/LOW-VALUES mean "no meaningful initial content"; generate
-            # a real value instead of filling the column with blanks.
-            return figurative if figurative else None
+            # a real value instead of filling the column with blanks.  ZERO
+            # and QUOTE fill every position (``VALUE ZERO`` on ``PIC X(3)``
+            # is ``000``, not ``0`` padded with spaces).
+            return self._fill_figurative(figurative, spec) if figurative else None
         return self._fit_domain_value(_strip_literal_quotes(raw), spec)
 
     def _fill_all(self, all_match: re.Match[str], spec: FieldSpec) -> str | None:
@@ -372,7 +410,7 @@ class ValueFactory:
         raw = all_match.group(1)
         figurative = _FIGURATIVE_CONSTANTS.get(raw.upper())
         if figurative is not None:
-            return figurative if figurative else None
+            return self._fill_figurative(figurative, spec) if figurative else None
         unit = _strip_literal_quotes(raw)
         if not unit:
             return None
@@ -603,6 +641,11 @@ class ValueFactory:
         noise.  The value is still valid -- shorter than the field, which
         COBOL pads on the MOVE.  Semantic and declared values are unaffected.
         """
+        if spec.category is FieldCategory.ALPHANUMERIC_EDITED:
+            edited = self._edited_text(spec)
+            if edited is not None:
+                return edited
+
         tokens = _name_tokens(spec.name) if self._opts.semantic_hints else set()
         size = spec.size
 
@@ -619,6 +662,36 @@ class ValueFactory:
             alphabet = string.ascii_uppercase + string.digits
         length = min(size, _MAX_RANDOM_TEXT)
         return "".join(self._rng.choice(alphabet) for _ in range(max(1, length)))
+
+    def _edited_text(self, spec: FieldSpec) -> str | None:
+        """A value an alphanumeric-edited picture can hold, position by
+        position: ``PIC XX/XX`` holds ``AB/CD``, never ``ABCDE`` -- the
+        ``/``, ``B`` and ``0`` positions are insertion characters a MOVE
+        always writes, ``A`` a letter and ``9`` a digit.  ``None`` for a
+        picture holding a symbol this does not model.
+
+        Trailing blanks are dropped: a CSV cell is not padded (see
+        :meth:`_fit_text`), and the field pads it back on the MOVE.
+        """
+        symbols = [
+            symbol.upper()
+            for symbol in PictureClause._expand_symbols(spec.picture or "")
+        ]
+        out: list[str] = []
+        for symbol in symbols:
+            if symbol == "X":
+                out.append(self._rng.choice(string.ascii_uppercase + string.digits))
+            elif symbol == "A":
+                out.append(self._rng.choice(string.ascii_uppercase))
+            elif symbol == "9":
+                out.append(self._rng.choice(string.digits))
+            elif symbol == "B":
+                out.append(" ")
+            elif symbol in ("0", "/"):
+                out.append(symbol)
+            else:
+                return None
+        return "".join(out).rstrip() if out else None
 
     def _semantic_text(self, tokens: set[str], spec: FieldSpec, row: int) -> str | None:
         """Pick a readable value from the field name, or ``None`` for random."""
