@@ -143,8 +143,11 @@ class WriteStatementParser(IStatementParser):
                 # SPECIAL-NAMES mnemonic-name for a printer channel, which
                 # takes no LINE/LINES suffix (e.g. `ADVANCING TOP-OF-PAGE`,
                 # a mnemonic defined via `SPECIAL-NAMES. C01 IS TOP-OF-PAGE`).
-                name = token.value
                 token_stream.consume()
+                # ``ADVANCING N OF G LINES``: a qualified (or subscripted)
+                # line-count item; the qualifier was dropped with a warning
+                # and LINES went with it.
+                name = consume_optional_qualifiers(token_stream, token.value)
                 skip_whitespace(token_stream)
                 next_token = token_stream.peek()
                 if next_token and next_token.type in (

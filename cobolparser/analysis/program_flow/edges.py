@@ -168,11 +168,13 @@ class EdgeCollector:
             # Computed GO TO: use the AST's own target list. Reconstructing
             # targets by filtering operands would collapse a target that
             # happens to share its name with the DEPENDING ON variable.
-            for target in stmt.target_paragraphs:
+            # One edge per distinct target: a computed GO TO may list a
+            # paragraph more than once (the list is positional).
+            for target in dict.fromkeys(t.upper() for t in stmt.target_paragraphs):
                 self._edges.append(
                     FlowEdge(
                         source=source,
-                        target=target.upper(),
+                        target=target,
                         edge_type=FlowEdgeType.GOTO_DEPENDING,
                         location=stmt.location,
                         condition=f"DEPENDING ON {stmt.depending_on_variable}",

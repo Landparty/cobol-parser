@@ -2122,6 +2122,58 @@ class _CobolLexerPure:
         """
         self._merge_concatenated_literals()
         self._flag_stray_sql_chars()
+        self._retype_operator_currency_symbols()
+
+    #: Single-character operator tokens a SPECIAL-NAMES ``CURRENCY SIGN``
+    #: clause can declare as a PICTURE symbol (``CURRENCY SIGN IS "<"``).
+    _OPERATOR_CURRENCY_TYPES = frozenset(
+        {TokenType.LESS, TokenType.GREATER, TokenType.ASSIGN}
+    )
+
+    def _retype_operator_currency_symbols(self) -> None:
+        """Lex a declared operator-shaped currency symbol as CURRENCY
+        inside a PICTURE character-string.
+
+        ``CURRENCY SIGN IS "<"`` makes ``<`` a PICTURE editing symbol, but
+        the character-level lexer emits it as the ``LESS`` operator (it is
+        one everywhere else), so ``PIC <(3),<<<.99`` lost its picture and
+        spawned bogus ANONYMOUS items (NIST NC108M). A picture string is the
+        run of abutting tokens right after ``PIC``/``PICTURE`` [``IS``]; only
+        operator tokens inside that run are retyped, so ``IF A < B`` keeps
+        its operator.
+        """
+        symbols = self._currency_symbols & {"<", ">", "="}
+        if not symbols:
+            return
+        tokens = self.tokens
+        count = len(tokens)
+        index = 0
+        while index < count:
+            token = tokens[index]
+            index += 1
+            if token.type not in (TokenType.PICTURE, TokenType.PIC):
+                continue
+            nxt = tokens[index] if index < count else None
+            if nxt is not None and nxt.type == TokenType.IS:
+                index += 1
+            # The picture string: abutting tokens on one line.
+            prev: Token | None = None
+            while index < count:
+                cur = tokens[index]
+                if cur.type in (TokenType.NEWLINE, TokenType.EOF):
+                    break
+                if prev is not None and (
+                    cur.location.line != prev.location.line
+                    or cur.location.column
+                    != prev.location.column + len(prev.raw_value or prev.value)
+                ):
+                    break
+                if cur.type in self._OPERATOR_CURRENCY_TYPES and cur.value in symbols:
+                    tokens[index] = Token(
+                        TokenType.CURRENCY, cur.value, cur.location, cur.raw_value
+                    )
+                prev = cur
+                index += 1
 
     #: Literal prefixes whose literals may be joined with ``&`` (IBM:
     #: alphanumeric, national and DBCS literals). ``Z`` (null-terminated) and

@@ -160,6 +160,12 @@ class SelectClauseParser:
                 token_stream.consume()
                 break
 
+            # ``;`` / ``,`` between clauses are separators (NIST IX202A:
+            # ``; ORGANIZATION INDEXED``), not dropped content.
+            if token.value in (";", ","):
+                token_stream.consume()
+                continue
+
             token_value = token.value.upper()
 
             # ASSIGN TO clause
@@ -188,7 +194,12 @@ class SelectClauseParser:
             # RELATIVE KEY clause -- or, when KEY does not follow, a bare
             # ``RELATIVE`` organization (ORGANIZATION IS is optional)
             elif token_value == "RELATIVE":
-                if self._next_word(token_stream) == "KEY":
+                if self._next_word(token_stream) in ("KEY", "IS") or (
+                    self._next_word_is_data_name(token_stream)
+                ):
+                    # ``RELATIVE [KEY] [IS] data-name`` (NIST RL112A omits
+                    # KEY); a bare RELATIVE organization is followed by the
+                    # next clause or the period, never a data-name.
                     self._parse_relative_key_clause(token_stream, select_data)
                 else:
                     self._parse_organization_value(token_stream, select_data)
@@ -268,6 +279,18 @@ class SelectClauseParser:
             if token.value and token.value.strip():
                 return str(token.value).upper()
             offset += 1
+
+    @staticmethod
+    def _next_word_is_data_name(token_stream: ITokenStream) -> bool:
+        """Whether the next non-blank word after the current token is a
+        data-name rather than a clause keyword or the period."""
+        word = SelectClauseParser._next_word(token_stream)
+        return bool(
+            word
+            and (word[0].isalpha() or word[0].isdigit())
+            and word not in _SELECT_CLAUSE_KEYWORDS
+            and word not in ("LINE", "IS", "KEY", "MODE")
+        )
 
     @staticmethod
     def _try_consume_word(token_stream: ITokenStream, *words: str) -> bool:
@@ -602,11 +625,14 @@ class SelectClauseParser:
         self._try_consume_word(token_stream, "IS")
         self._skip_select_blanks(token_stream)
 
-        # Get key name
+        # Get key name, and any OF/IN qualifiers
         token = token_stream.peek(0)
         if token:
             select_data["relative_key"] = token.value
             token_stream.consume()
+            select_data["relative_key_qualifiers"] = self._consume_qualifiers(
+                token_stream
+            )
 
     def _parse_file_status_clause(
         self, token_stream: ITokenStream, select_data: dict[str, Any]
@@ -626,6 +652,11 @@ class SelectClauseParser:
         if token:
             select_data["file_status"] = token.value
             token_stream.consume()
+            # ``FILE STATUS IS S IN G``: the qualifier was taken for the VSAM
+            # second status variable (``IN``) and its name dropped.
+            select_data["file_status_qualifiers"] = self._consume_qualifiers(
+                token_stream
+            )
 
         # Optional second status variable (VSAM return code, IBM extension):
         # FILE STATUS IS ws-status ws-vsam-status
@@ -640,6 +671,9 @@ class SelectClauseParser:
         ):
             select_data["file_status_vsam"] = token.value
             token_stream.consume()
+            select_data["file_status_vsam_qualifiers"] = self._consume_qualifiers(
+                token_stream
+            )
 
     def create_select_statement_node(
         self, select_data: dict[str, Any]
@@ -689,12 +723,18 @@ class SelectClauseParser:
         relative_key = select_data.get("relative_key")
         if relative_key:
             select_stmt.relative_key = relative_key
+            select_stmt.relative_key_qualifiers = list(
+                select_data.get("relative_key_qualifiers") or []
+            )
 
         # Set FILE STATUS clause (with optional VSAM second status variable)
         file_status = select_data.get("file_status")
         if file_status:
             select_stmt.set_file_status(
-                file_status, select_data.get("file_status_vsam")
+                file_status,
+                select_data.get("file_status_vsam"),
+                qualifiers=select_data.get("file_status_qualifiers"),
+                vsam_qualifiers=select_data.get("file_status_vsam_qualifiers"),
             )
 
         # ALTERNATE RECORD KEY clauses (secondary indexes)

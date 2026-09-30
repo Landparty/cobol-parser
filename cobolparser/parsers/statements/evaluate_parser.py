@@ -251,6 +251,9 @@ class EvaluateStatementParser(IStatementParser):
         selectors = []
         current_selector: list[str] = []
         current_types: list[TokenType] = []
+        # The same tokens as written (string literals re-quoted), for a
+        # Condition selector's ``text``.
+        current_texts: list[str] = []
         issues = []
         selector_count = 0
         expecting_selector = True
@@ -280,12 +283,15 @@ class EvaluateStatementParser(IStatementParser):
                 if expecting_selector:
                     issues.append("Consecutive ALSO keywords without selector")
                 elif current_selector:
-                    selector = self._build_selector(current_selector, current_types)
+                    selector = self._build_selector(
+                        current_selector, current_types, current_texts
+                    )
                     if selector:
                         selectors.append(selector)
                         selector_count += 1
                     current_selector = []
                     current_types = []
+                    current_texts = []
                 expecting_selector = True
                 saw_separator = True
                 token_stream.consume()
@@ -305,13 +311,20 @@ class EvaluateStatementParser(IStatementParser):
                     value = f"'{value}'"
                 current_selector.append(value)
                 current_types.append(token.type)
+                current_texts.append(
+                    condition_token_text(token)
+                    if token.type == TokenType.STRING_LITERAL
+                    else value
+                )
                 expecting_selector = False
                 saw_separator = False
             token_stream.consume()
 
         # Save final selector if any
         if current_selector:
-            selector = self._build_selector(current_selector, current_types)
+            selector = self._build_selector(
+                current_selector, current_types, current_texts
+            )
             if selector:
                 selectors.append(selector)
                 selector_count += 1
@@ -326,7 +339,10 @@ class EvaluateStatementParser(IStatementParser):
         return selectors, selector_count, issues
 
     def _build_selector(
-        self, selector_tokens: list[str], token_types: list[TokenType] | None = None
+        self,
+        selector_tokens: list[str],
+        token_types: list[TokenType] | None = None,
+        token_texts: list[str] | None = None,
     ) -> dict | None:
         """Convert raw selector tokens into a selector dictionary.
 
@@ -344,13 +360,24 @@ class EvaluateStatementParser(IStatementParser):
             if token_types and len(token_types) == len(selector_tokens)
             else [None] * len(selector_tokens)
         )
-        pairs = [
-            (token, token_type)
-            for token, token_type in zip(selector_tokens, types, strict=True)
+        texts: list[str] = (
+            list(token_texts)
+            if token_texts and len(token_texts) == len(selector_tokens)
+            else list(selector_tokens)
+        )
+        kept = [
+            (token, token_type, text)
+            for token, token_type, text in zip(
+                selector_tokens, types, texts, strict=True
+            )
             if token and token.strip()
         ]
-        if not pairs:
+        if not kept:
             return None
+        pairs = [(token, token_type) for token, token_type, _ in kept]
+        # A Condition's text keeps string literals quoted: ``WHEN A = "B"``
+        # stored as ``A = B`` read the literal as the data name ``B``.
+        condition_text = " ".join(text for _, _, text in kept).strip()
         normalized_tokens = [token for token, _ in pairs]
         is_identifier = bool(
             token_types
@@ -388,7 +415,7 @@ class EvaluateStatementParser(IStatementParser):
                     # ``WHEN NOT 'Y'`` already is; the bounds stay readable.
                     return {
                         "type": "Condition",
-                        "text": selector_text,
+                        "text": condition_text,
                         "negated": True,
                         "start": start_value,
                         "end": end_value,
@@ -403,7 +430,7 @@ class EvaluateStatementParser(IStatementParser):
             word in ("AND", "OR", "NOT", "=", "<", ">", "<=", ">=", "<>")
             for word in flat_words
         ):
-            selector: dict[str, Any] = {"type": "Condition", "text": selector_text}
+            selector: dict[str, Any] = {"type": "Condition", "text": condition_text}
             if "OR" in flat_words:
                 selector["operator"] = "OR"
             elif "AND" in flat_words:
