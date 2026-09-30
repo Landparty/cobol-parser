@@ -179,15 +179,39 @@ def satisfies(constraint: FieldConstraint, value: str) -> bool | None:
         kind = _FIGURATIVE_TESTS.get(constraint.values[0].upper())
         if kind == "space":
             result = value.strip() == ""
-        elif kind == "zero":
+        elif kind == "zero" and _is_numeric_field(constraint):
             parsed = _decimal(value)
             result = parsed is not None and parsed == 0
+        elif kind == "zero":
+            # Compared with a non-numeric field a figurative constant is its
+            # character repeated to the field's whole width: `IF X = ZEROS`
+            # on PIC X(3) is true only for "000", never for "0  ".
+            result = _fills(value, "0", constraint)
         elif kind == "quote":
-            result = value.strip() == '"'
+            result = _fills(value, '"', constraint)
         else:
             return None  # LOW-VALUE/HIGH-VALUE: not representable as text here
         return not result if constraint.negated else result
     return None
+
+
+def _is_numeric_field(constraint: FieldConstraint) -> bool:
+    """Whether the constrained field is numeric (a constraint built with
+    no field at all is read the numeric way, as before)."""
+    field_ = getattr(constraint, "field", None)
+    if field_ is None:
+        return True
+    # The same split `domains._picture_domain` makes.
+    return field_.spec.category.value in ("numeric", "numeric-edited", "float")
+
+
+def _fills(value: str, char: str, constraint: FieldConstraint) -> bool:
+    """Whether *value* is *char* in every position of the field (of the
+    value itself when the constraint carries no field)."""
+    field_ = getattr(constraint, "field", None)
+    size = field_.spec.character_positions if field_ is not None else 0
+    width = size if size > 0 else len(value)
+    return bool(value) and value == char * width
 
 
 def _values_for(field_name: str, fixtures: list[BoundaryFixture]) -> list[str]:

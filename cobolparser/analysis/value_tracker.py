@@ -50,6 +50,13 @@ class DynamicCallAnalyzer:
         # polluted the value set with a data-name that is not a value at all.
         self._incomplete_variables: set[str] = set()
         self._dynamic_calls: list[CallStatement] = []
+        # The program unit being analysed: the walks stop at any other
+        # (contained) CobolProgram node.
+        self._unit: CobolProgram | None = None
+        self._declared_names: set[str] | None = None
+
+    def _is_other_unit(self, node: ASTNode) -> bool:
+        return isinstance(node, CobolProgram) and node is not self._unit
 
     def analyze(self, ast: CobolProgram) -> None:
         """Analyze AST and populate possible values for dynamic CALL statements.
@@ -57,10 +64,36 @@ class DynamicCallAnalyzer:
         Args:
             ast: The parsed COBOL program AST
         """
+        # Procedure and data names are local to a program unit: each
+        # contained program is tracked on its own data and MOVEs, never on
+        # its container's (and vice versa). Innermost first, so the tracked
+        # state left behind (``get_variable_values``) is *ast*'s own.
+        units = ast.program_units() if isinstance(ast, CobolProgram) else [ast]
+        if not isinstance(units, list) or not units:
+            units = [ast]  # a hand-built node tree
+        for unit in reversed(units):
+            self._analyze_unit(unit)
+
+    def _analyze_unit(self, ast: CobolProgram) -> None:
+        """Track values and populate the dynamic CALLs of one program unit."""
         # Reset state
         self._variable_values = {}
         self._incomplete_variables = set()
         self._dynamic_calls = []
+        self._unit = ast
+        # In a contained unit (analysed on its own or as part of its
+        # container), a CALL variable it does not declare itself is a
+        # container's GLOBAL item, whose writes are not tracked here.
+        contained = isinstance(getattr(ast, "parent", None), CobolProgram)
+        self._declared_names = (
+            {
+                node.name.upper()
+                for node in self._walk(ast)
+                if isinstance(node, CobolDataItem) and node.name
+            }
+            if contained
+            else None
+        )
 
         # First pass: collect initial values from data definitions
         self._collect_initial_values(ast)
@@ -79,6 +112,8 @@ class DynamicCallAnalyzer:
 
     def _collect_initial_values(self, node: ASTNode) -> None:
         """Collect initial values from VALUE clauses in data items."""
+        if self._is_other_unit(node):
+            return
         if isinstance(node, CobolDataItem):
             # Check if this data item has an initial value
             if node.value_clause is not None:
@@ -104,6 +139,8 @@ class DynamicCallAnalyzer:
 
     def _track_move_statements(self, node: ASTNode) -> None:
         """Track MOVE statements to collect possible values for variables."""
+        if self._is_other_unit(node):
+            return
         if isinstance(node, MoveStatement):
             # Get source and target(s)
             source = node.source
@@ -219,6 +256,9 @@ class DynamicCallAnalyzer:
         stack = [root]
         while stack:
             node = stack.pop()
+            if isinstance(node, CobolProgram) and node is not root:
+                # A contained program: its names are its own.
+                continue
             found.append(node)
             stack.extend(reversed(list(getattr(node, "children", None) or [])))
         return found
@@ -250,19 +290,30 @@ class DynamicCallAnalyzer:
 
     def _populate_dynamic_calls(self, node: ASTNode) -> None:
         """Find dynamic CALL statements and populate their possible values."""
+        if self._is_other_unit(node):
+            return
         if isinstance(node, CallStatement):
             if node.is_dynamic and node.called_program:
                 # Look up the variable name in our tracked values
                 var_name = node.called_program.upper()
-                if var_name in self._variable_values:
-                    # Populate the possible values
-                    values = sorted(self._variable_values[var_name])
-                    node.set_possible_values(values)
-                if var_name in self._incomplete_variables:
+                # Always (re)set: an earlier analysis of an enclosing unit,
+                # or of this one, must not leave its values or its
+                # incomplete flag behind.
+                node.set_possible_values(
+                    sorted(self._variable_values.get(var_name, ()))
+                )
+                if var_name in self._incomplete_variables or (
+                    self._declared_names is not None
+                    and var_name not in self._declared_names
+                ):
                     # The variable also received at least one value this
-                    # analyzer could not resolve, so possible_values (even
-                    # when populated) is not exhaustive.
+                    # analyzer could not resolve (or is not declared in
+                    # this unit at all -- a container's GLOBAL item), so
+                    # possible_values (even when populated) is not
+                    # exhaustive.
                     node.set_metadata("possible_values_incomplete", True)
+                else:
+                    node.metadata.pop("possible_values_incomplete", None)
 
         # Recursively process children
         if hasattr(node, "children"):

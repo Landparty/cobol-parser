@@ -542,7 +542,12 @@ def _integer_digits(
     A column's own ``precision`` wins where it has one: ``DECIMAL(9,2)`` is
     nine digits total whatever PICTURE the mapping chose to express it with.
     """
-    if column is not None and column.precision is not None:
+    if (
+        column is not None
+        and column.precision is not None
+        # FLOAT(n)'s precision counts binary digits, not decimal ones.
+        and column.db2_type.upper() != "FLOAT"
+    ):
         return max(0, column.precision - scale)
     if picture.integer_digits is not None:
         return max(0, picture.integer_digits)

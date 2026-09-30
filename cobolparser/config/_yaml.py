@@ -7,7 +7,8 @@ subset a config file actually needs:
 
 * block mappings (``key: value``) nested by indentation
 * block sequences (``- item``), including sequences of mappings
-* flow sequences (``[a, b]``) and flow mappings (``{a: 1}``)
+* flow sequences (``[a, b]``) and flow mappings (``{a: 1}``), either of
+  which may continue onto following lines until its brackets close
 * scalars: single/double-quoted strings, integers, floats, booleans, null
 * ``#`` comments, blank lines, and one optional leading ``---``
 
@@ -344,6 +345,8 @@ class _Parser:
             # A quoted string starting with one of these is fine; only a
             # bare one is the unsupported construct.
             raise self._error(_REJECTED_VALUE_PREFIXES[text[0]], line)
+        if text.startswith(("[", "{")):
+            text = self._join_flow_lines(text, line)
         if text.startswith("["):
             value, consumed = self._parse_flow(text, 0, line)
             self._require_flow_end(text, consumed, line)
@@ -377,6 +380,21 @@ class _Parser:
                 line,
             )
         return _plain_scalar(text)
+
+    def _join_flow_lines(self, text: str, line: _Line) -> str:
+        """A flow collection may span lines (``rules: [a,`` then ``  b]``):
+        while its brackets are still open at the end of ``line``, append the
+        following lines (comments already stripped) to it. A continuation
+        line may not sit left of the line that opened the collection; one
+        that does -- like running out of lines -- leaves the collection
+        unterminated, which ``_parse_flow`` then reports on ``line``."""
+        while _open_flow_depth(text) > 0:
+            nxt = self._peek()
+            if nxt is None or nxt.indent < line.indent:
+                break
+            text = f"{text} {nxt.text}"
+            self.index += 1
+        return text
 
     def _require_flow_end(self, text: str, consumed: int, line: _Line) -> None:
         if text[consumed:].strip():
@@ -526,6 +544,28 @@ def _step_in_quote(text: str, i: int, quote: str) -> tuple[int, str | None]:
             return i + 2, quote
         return i + 1, None
     return i + 1, quote
+
+
+def _open_flow_depth(text: str) -> int:
+    """How many ``[``/``{`` are still unclosed at the end of *text*, quoted
+    spans skipped. An unterminated quote counts as closed (0): a quoted
+    scalar never continues onto the next line in this subset."""
+    quote: str | None = None
+    depth = 0
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if quote:
+            i, quote = _step_in_quote(text, i, quote)
+            continue
+        if char in "\"'" and _opens_quote(text, i):
+            quote = char
+        elif char in "[{":
+            depth += 1
+        elif char in "]}":
+            depth -= 1
+        i += 1
+    return 0 if quote else depth
 
 
 def _is_sequence_indicator(text: str) -> bool:

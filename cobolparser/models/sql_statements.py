@@ -45,8 +45,14 @@ _SQL_HV = r":[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*"
 _SQL_HV_ITEM = rf"{_SQL_HV}(?:\s*(?:INDICATOR\s*)?{_SQL_HV})?"
 _SQL_HV_LIST = rf"({_SQL_HV_ITEM}(?:\s*,\s*{_SQL_HV_ITEM})*)"
 _SQL_INTO_VARS_RE = re.compile(r"\bINTO\s*" + _SQL_HV_LIST, re.IGNORECASE)
+# ``DECLARE C1 [ASENSITIVE|INSENSITIVE|SENSITIVE {STATIC|DYNAMIC}]
+# [NO SCROLL|SCROLL] CURSOR``: the sensitivity / scrollability words stand
+# between the name and CURSOR.
 _SQL_DECLARE_CURSOR_RE = re.compile(
-    r"DECLARE\s+([A-Za-z_][A-Za-z0-9_-]*)\s+CURSOR", re.IGNORECASE
+    r"DECLARE\s+([A-Za-z_][A-Za-z0-9_-]*)\s+"
+    r"(?:(?:ASENSITIVE|INSENSITIVE|SENSITIVE|STATIC|DYNAMIC|NO|SCROLL)\s+)*"
+    r"CURSOR\b",
+    re.IGNORECASE,
 )
 # The table may be qualified (``DECLARE SCHEMA.TABLE TABLE`` -- every DCLGEN
 # member is), and the token-joined SQL text may carry spaces around the
@@ -152,6 +158,10 @@ _SQL_KEYWORDS = frozenset(
         "NOT",
         "IN",
         "LIKE",
+        # ``FROM TABLE(func(...))`` / ``FROM LATERAL (...)``: reserved words
+        # that open a table-function or nested-table reference.
+        "TABLE",
+        "LATERAL",
     ]
 )
 
@@ -244,6 +254,62 @@ def _strip_sql_literals_and_comments(sql: str) -> str:
 
 _SQL_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
+#: ``FROM FINAL TABLE (INSERT INTO T ...)`` / ``OLD TABLE (DELETE FROM T ...)``
+#: / ``NEW TABLE (UPDATE T ...)``: a data-change-table-reference. ``FINAL``
+#: is not a table, and the table the nested statement changes is.
+_SQL_DATA_CHANGE_MARKER_RE = re.compile(
+    r"(?<![\w:.-])(?:FINAL|NEW|OLD)\s+TABLE\s*(?=\()", re.IGNORECASE
+)
+_SQL_DATA_CHANGE_VERBS = frozenset({"INSERT", "UPDATE", "DELETE", "MERGE"})
+
+
+def _blank_data_change_markers(sql: str) -> str:
+    """Blank every ``FINAL|NEW|OLD TABLE`` before a data-change statement.
+
+    What is left, ``FROM (INSERT INTO T ...)``, reads like a subquery: the
+    FROM no longer names ``FINAL`` as a table.
+    """
+    return _SQL_DATA_CHANGE_MARKER_RE.sub(lambda m: " " * len(m.group(0)), sql)
+
+
+def _extract_data_change_tables(
+    tokens: list[tuple[str, int]],
+) -> list[tuple[str, str]]:
+    """``(verb, table)`` for every data-change statement nested in parentheses.
+
+    ``SELECT ... FROM FINAL TABLE (INSERT INTO T8 ...)`` inserts into T8;
+    only a data-change-table-reference can open a parenthesised group with
+    INSERT/UPDATE/DELETE/MERGE.
+    """
+    found: list[tuple[str, str]] = []
+    n = len(tokens)
+    for i in range(n - 1):
+        if tokens[i][0] != "(":
+            continue
+        verb, depth = tokens[i + 1]
+        verb = verb.upper()
+        if verb not in _SQL_DATA_CHANGE_VERBS:
+            continue
+        j = i + 2
+        if verb in ("INSERT", "MERGE"):
+            while j < n and tokens[j][1] >= depth and tokens[j][0].upper() != "INTO":
+                j += 1
+            j += 1
+        elif verb == "DELETE" and j < n and tokens[j][0].upper() == "FROM":
+            j += 1
+        if j >= n or tokens[j][1] != depth or not _is_sql_word(tokens[j][0]):
+            continue
+        parts: list[str] = []
+        while j < n and tokens[j][1] == depth and _is_sql_word(tokens[j][0]):
+            parts.append(tokens[j][0])
+            j += 1
+            if not parts[-1].endswith("."):
+                break
+        name = "".join(parts)
+        if name and name.upper() not in _SQL_TABLE_STOP_KEYWORDS:
+            found.append((verb, name))
+    return found
+
 
 def _blank_function_argument_froms(sql: str) -> str:
     """Blank every ``FROM`` that separates a function's arguments.
@@ -284,7 +350,11 @@ def _blank_function_argument_froms(sql: str) -> str:
         word = match.group(0).upper()
         if groups:
             if groups[-1] is None:
-                groups[-1] = word in ("SELECT", "WITH")
+                # A data-change statement (``FINAL TABLE (INSERT ...
+                # SELECT ... FROM S)``) keeps its FROMs too.
+                groups[-1] = word in ("SELECT", "WITH") or (
+                    word in _SQL_DATA_CHANGE_VERBS
+                )
             elif word == "FROM" and groups[-1] is False:
                 out[i : match.end()] = " " * (match.end() - i)
         i = match.end()
@@ -516,6 +586,18 @@ def _extract_tables_tokenized(
                 add(name)
                 i = max(j, i + 1)
                 continue
+            if (
+                upper == "DELETE"
+                and sql_type == SQLStatementType.DELETE
+                and i == 0
+                and i + 1 < n
+                and tokens[i + 1][0].upper() != "FROM"
+            ):
+                # ``DELETE T WHERE ...``: DB2 makes FROM optional.
+                name, j = _read_qualified_name(tokens, i + 1)
+                add(name)
+                i = max(j, i + 1)
+                continue
         i += 1
     return tables
 
@@ -587,7 +669,8 @@ def _db2_pic_bigint(_l: int | None, _p: int | None, _s: int | None) -> str:
 
 
 def _db2_pic_decimal(_l: int | None, precision: int | None, scale: int | None) -> str:
-    p = precision or 9
+    # A bare DB2 DECIMAL is DECIMAL(5,0).
+    p = precision or 5
     s = scale or 0
     if p <= 0:
         raise ValueError(f"Invalid DECIMAL precision: {p}")
@@ -603,8 +686,24 @@ def _db2_pic_decimal(_l: int | None, precision: int | None, scale: int | None) -
     return f"S9({p})"
 
 
-def _db2_pic_float(_l: int | None, _p: int | None, _s: int | None) -> str:
-    return "COMP-1"  # single-precision — not a PIC, but conventional usage annotation
+#: DB2 ``FLOAT(n)`` is single precision (REAL) for n in 1..21 and double
+#: precision for 22..53; a bare ``FLOAT`` is ``FLOAT(53)`` -- double.
+_DB2_FLOAT_SINGLE_MAX_PRECISION = 21
+
+
+def _db2_float_usage(precision: int | None) -> str:
+    if precision is not None and precision <= _DB2_FLOAT_SINGLE_MAX_PRECISION:
+        return "COMP-1"
+    return "COMP-2"
+
+
+def _db2_pic_float(_l: int | None, precision: int | None, _s: int | None) -> str:
+    # Not a PIC, but the conventional usage annotation.
+    return _db2_float_usage(precision)
+
+
+def _db2_pic_real(_l: int | None, _p: int | None, _s: int | None) -> str:
+    return "COMP-1"  # single-precision
 
 
 def _db2_pic_double(_l: int | None, _p: int | None, _s: int | None) -> str:
@@ -619,8 +718,15 @@ def _db2_pic_time(_l: int | None, _p: int | None, _s: int | None) -> str:
     return "X(8)"
 
 
-def _db2_pic_timestamp(_l: int | None, _p: int | None, _s: int | None) -> str:
-    return "X(26)"
+def _db2_pic_timestamp(length: int | None, _p: int | None, _s: int | None) -> str:
+    # *length* is the string length of TIMESTAMP(p) (see _timestamp_length);
+    # the default TIMESTAMP(6) is 26 characters.
+    return f"X({length or 26})"
+
+
+def _timestamp_length(fraction_digits: int) -> int:
+    """String length of ``TIMESTAMP(p)``: ``yyyy-mm-dd-hh.mm.ss[.f...]``."""
+    return 19 if fraction_digits == 0 else 20 + fraction_digits
 
 
 def _db2_pic_clob(length: int | None, _p: int | None, _s: int | None) -> str:
@@ -643,7 +749,7 @@ _DB2_TYPE_MAP: dict[str, _Db2PicFn] = {
     "NUMERIC": _db2_pic_decimal,
     "NUM": _db2_pic_decimal,
     "FLOAT": _db2_pic_float,
-    "REAL": _db2_pic_float,
+    "REAL": _db2_pic_real,
     "DOUBLE": _db2_pic_double,
     "DATE": _db2_pic_date,
     "TIME": _db2_pic_time,
@@ -687,18 +793,22 @@ def db2_type_to_cobol_pic(
     return fn(length, precision, scale)
 
 
-def db2_type_to_cobol_usage(db2_type: str) -> str:
+def db2_type_to_cobol_usage(db2_type: str, precision: int | None = None) -> str:
     """Return the COBOL USAGE clause string for a DB2 column type.
 
     Returns ``"DISPLAY"`` for character types, ``"COMP-3"`` for packed decimal,
     ``"COMP"`` for binary integer types, ``"COMP-1"`` / ``"COMP-2"`` for floats.
+    *precision* is ``n`` of ``FLOAT(n)``: 1..21 is single precision, 22..53
+    (and a bare ``FLOAT``, which is ``FLOAT(53)``) double.
     """
     upper = db2_type.upper()
     if upper in _DB2_COMP3_TYPES:
         return "COMP-3"
     if upper in _DB2_COMP_TYPES:
         return "COMP"
-    if upper == "FLOAT" or upper == "REAL":
+    if upper == "FLOAT":
+        return _db2_float_usage(precision)
+    if upper == "REAL":
         return "COMP-1"
     if upper == "DOUBLE":
         return "COMP-2"
@@ -712,8 +822,10 @@ class DB2ColumnDefinition:
     Attributes:
         name: Column name as it appears in the DB2 catalog.
         db2_type: DB2 data type keyword (upper-cased), e.g. ``"CHAR"``.
-        length: Length for CHAR / VARCHAR columns; ``None`` otherwise.
-        precision: Total digits for DECIMAL / NUMERIC; ``None`` otherwise.
+        length: Length for CHAR / VARCHAR columns, and the string length of
+            a ``TIMESTAMP(p)`` column (19, or 20 + p); ``None`` otherwise.
+        precision: Total digits for DECIMAL / NUMERIC, binary digits for
+            ``FLOAT(n)``; ``None`` otherwise.
         scale: Decimal places for DECIMAL / NUMERIC; ``None`` otherwise.
         nullable: ``True`` if the column accepts NULL (default); ``False``
             when ``NOT NULL`` is declared.
@@ -735,7 +847,7 @@ class DB2ColumnDefinition:
         self.cobol_picture = db2_type_to_cobol_pic(
             self.db2_type, self.length, self.precision, self.scale
         )
-        self.cobol_usage = db2_type_to_cobol_usage(self.db2_type)
+        self.cobol_usage = db2_type_to_cobol_usage(self.db2_type, self.precision)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dictionary."""
@@ -772,6 +884,10 @@ class ExecSQLStatement(CobolStatement):
         self.select_columns: list[str] = []
         #: True when a top-level WHERE clause is present.
         self.where_present: bool = False
+        #: ``(verb, table)`` for every data-change statement nested in a
+        #: data-change-table-reference (``FROM FINAL TABLE (INSERT INTO T
+        #: ...)``): tables the statement writes although it is a SELECT.
+        self.data_change_tables: list[tuple[str, str]] = []
 
     @property
     def sql_type(self) -> str:
@@ -801,7 +917,10 @@ class ExecSQLStatement(CobolStatement):
         # Extract host variables (:variable_name)
         self._extract_host_variables(scrubbed)
 
-        tokens = _scan_sql_tokens(scrubbed)
+        # ``FROM FINAL TABLE (INSERT INTO T ...)``: FINAL is not a table.
+        table_sql = _blank_data_change_markers(scrubbed)
+        tokens = _scan_sql_tokens(table_sql)
+        self.data_change_tables = _extract_data_change_tables(tokens)
 
         # ``WITH cte AS (...) SELECT ...``: the statement is its main verb,
         # and the CTE names are not tables.
@@ -810,9 +929,16 @@ class ExecSQLStatement(CobolStatement):
             main = tokens[main_start][0].upper() if main_start < len(tokens) else ""
             self._sql_type = self._determine_sql_type(main)
         main_tokens = tokens[main_start:]
+        if self._sql_type == SQLStatementType.DECLARE_CURSOR:
+            # ``DECLARE C1 CURSOR FOR WITH cte AS (...) SELECT ...``: the
+            # cursor's CTE names are not tables either.
+            for k in range(len(tokens) - 1):
+                if tokens[k][1] == 0 and tokens[k][0].upper() == "FOR":
+                    cte_names = _split_common_table_expressions(tokens[k + 1 :])[0]
+                    break
 
         # Extract table names (regex pass — preserved for compatibility)
-        self._extract_tables(_blank_function_argument_froms(scrubbed))
+        self._extract_tables(_blank_function_argument_froms(table_sql))
 
         # Tokenizer pass: adds structure the regexes miss (multi-table FROM
         # lists, JOIN chains, SELECT columns, WHERE presence).
@@ -823,11 +949,18 @@ class ExecSQLStatement(CobolStatement):
         if cte_names:
             ctes = {name.upper() for name in cte_names}
             self.tables = [t for t in self.tables if t.upper() not in ctes]
-        if self._sql_type == SQLStatementType.MERGE and tokenized:
-            # The MERGE target (read by the tokenizer from ``MERGE INTO``)
-            # leads, ahead of the tables its USING subquery reads.
+        if (
+            self._sql_type in (SQLStatementType.MERGE, SQLStatementType.DELETE)
+            and tokenized
+        ):
+            # The MERGE target (read by the tokenizer from ``MERGE INTO``),
+            # or the DELETE target (``DELETE [FROM] T``), leads, ahead of
+            # the tables its subqueries read.
             target = tokenized[0]
             self.tables = [target] + [t for t in self.tables if t != target]
+        for _verb, table in self.data_change_tables:
+            if table not in self.tables:
+                self.tables.append(table)
         self.select_columns = (
             _extract_select_columns(main_tokens)
             if self._sql_type == SQLStatementType.SELECT
@@ -1079,7 +1212,9 @@ class DeclareCursorStatement(ExecSQLStatement):
     def _extract_tables_from_select(self, sql: str) -> None:
         """Extract tables from the cursor's SELECT statement."""
         compiled_patterns = [_SQL_FROM_TABLE_RE, _SQL_JOIN_TABLE_RE]
-        sql = _blank_function_argument_froms(_strip_sql_literals_and_comments(sql))
+        sql = _blank_function_argument_froms(
+            _blank_data_change_markers(_strip_sql_literals_and_comments(sql))
+        )
         for pattern in compiled_patterns:
             matches = pattern.findall(sql)
             for table in matches:
@@ -1190,12 +1325,18 @@ class DeclareTableStatement(ExecSQLStatement):
             scale: int | None = None
 
             upper_type = db2_type
-            if upper_type in _DB2_CHAR_TYPES:
+            if upper_type == "TIMESTAMP":
+                # TIMESTAMP(p): p is fractional-second digits, not a length.
+                length = _timestamp_length(int(raw_len)) if raw_len else None
+            elif upper_type in _DB2_CHAR_TYPES:
                 length = int(raw_len) if raw_len else None
             elif upper_type in _DB2_COMP3_TYPES:
                 precision = int(raw_len) if raw_len else None
                 scale = int(raw_scale) if raw_scale else None
-            # For integer/float types length/precision/scale stay None
+            elif upper_type == "FLOAT":
+                # FLOAT(n): n decides single (<= 21) vs double precision.
+                precision = int(raw_len) if raw_len else None
+            # For integer/other float types length/precision/scale stay None
 
             # NOT NULL need not follow the type directly: DOUBLE PRECISION,
             # FOR BIT DATA, CCSID EBCDIC, ... may stand between them, and the

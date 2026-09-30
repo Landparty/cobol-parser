@@ -107,6 +107,14 @@ class GoStatementParser(IStatementParser):
             )
             return stmt
 
+        if next_token.type == TokenType.PERIOD:
+            # ``GO TO.`` -- the COBOL-85 alterable GO, whose destination
+            # is set at run time by an ALTER (NIST NC303M). It names no
+            # procedure: taking the period as the target put a GOTO edge
+            # to a node called "." in the flow graph.
+            token_stream.consume()
+            return stmt
+
         target_name = next_token.value
 
         stmt.set_target_paragraph(target_name)

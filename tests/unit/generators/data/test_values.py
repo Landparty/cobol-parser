@@ -208,7 +208,10 @@ class TestNumericSemanticHints:
             "WS-EVENT-TIME", category=FieldCategory.NUMERIC, size=6, integer_digits=6
         )
         value = factory.value_for(spec, 0)
-        assert re.match(r"^\d{6}$", value), value
+        # Rendered like every other number (no leading zeros), so the
+        # decoder reads the same cell back; the stored digits are HHMMSS.
+        assert re.match(r"^\d{1,6}$", value), value
+        value = value.zfill(6)
         hh, mm, ss = int(value[:2]), int(value[2:4]), int(value[4:6])
         assert 0 <= hh <= 23 and 0 <= mm <= 59 and 0 <= ss <= 59
 
@@ -218,7 +221,9 @@ class TestNumericSemanticHints:
             "WS-EVENT-TIME", category=FieldCategory.NUMERIC, size=4, integer_digits=4
         )
         value = factory.value_for(spec, 0)
-        assert re.match(r"^\d{4}$", value), value
+        assert re.match(r"^\d{1,4}$", value), value
+        hh, mm = int(value.zfill(4)[:2]), int(value.zfill(4)[2:])
+        assert 0 <= hh <= 23 and 0 <= mm <= 59
 
     def test_time_token_numeric_field_too_narrow_falls_back_to_random(self):
         factory = _factory()

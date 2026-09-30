@@ -49,6 +49,7 @@ from ..models.statements.control import (
 )
 from .program_flow import ProgramFlowAnalyzer, ProgramFlowReport
 from .program_flow.edges import GOTO_EDGE_TYPES, PERFORM_EDGE_TYPES
+from .program_flow.scanner import LEADING_SENTENCES_NODE, leading_sentences
 
 # Clause-list attributes that hold nested statements executed only when the
 # clause's condition (an exception, an EOF, an overflow) actually fires --
@@ -248,24 +249,21 @@ class ComplexityAnalyzer:
 
         procedures: list[ProcedureComplexity] = []
         for node in flow_report.nodes:
-            if node.procedure_type == "SECTION":
-                cyclomatic = 1
-                extended = 1
-                max_depth = 0
-            else:
-                decisions = extra_bool_ops = max_depth = 0
-                # A flow node is name-keyed, so two same-named paragraphs
-                # (legal COBOL when they live in different sections) share
-                # one node whose statement_count already merges both bodies
-                # — aggregate the decision counts the same way instead of
-                # silently analyzing only the first body.
-                for para in paragraph_map.get(node.name, []):
-                    d, b, m = self._analyze_paragraph(para)
-                    decisions += d
-                    extra_bool_ops += b
-                    max_depth = max(max_depth, m)
-                cyclomatic = 1 + decisions
-                extended = 1 + decisions + extra_bool_ops
+            decisions = extra_bool_ops = max_depth = 0
+            # A flow node is name-keyed, so two same-named paragraphs
+            # (legal COBOL when they live in different sections) share
+            # one node whose statement_count already merges both bodies
+            # — aggregate the decision counts the same way instead of
+            # silently analyzing only the first body. A SECTION node's
+            # body is the sentences before its first paragraph header
+            # (none for a bare header: complexity 1).
+            for para in paragraph_map.get(node.name, []):
+                d, b, m = self._analyze_paragraph(para)
+                decisions += d
+                extra_bool_ops += b
+                max_depth = max(max_depth, m)
+            cyclomatic = 1 + decisions
+            extended = 1 + decisions + extra_bool_ops
 
             procedures.append(
                 ProcedureComplexity(
@@ -307,9 +305,18 @@ class ComplexityAnalyzer:
             for para in section.paragraphs:
                 if para.paragraph_name:
                     result.setdefault(para.paragraph_name.upper(), []).append(para)
+                elif section.section_name:
+                    # Sentences between the SECTION header and its first
+                    # paragraph: the section node's own statements (the
+                    # flow scanner counts them there too).
+                    result.setdefault(section.section_name.upper(), []).append(para)
         for para in proc_division.paragraphs:
             if para.paragraph_name:
                 result.setdefault(para.paragraph_name.upper(), []).append(para)
+        # The division's leading sentences are a flow node of their own.
+        leading = leading_sentences(proc_division)
+        if leading is not None:
+            result[LEADING_SENTENCES_NODE] = [leading]
         return result
 
     @staticmethod

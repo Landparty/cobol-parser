@@ -28,6 +28,41 @@ report glossary, `in_dead_code`, and a `data_lineage` inversion. New
 `--include-technical`). Ships feature idea #21; deliberately not built on
 `constraints.py` (boundary-fed fields only -- see analysis.md).
 
+## 2026-09-30 -- bug hunt round 12: DB2 types and tables, leading-sentence flow node, cross-unit CALL values, corpus sweep
+
+Each reproduced first and pinned by `tests/unit/**/test_bug_hunt_r12_*.py`.
+[dialects.md](dialects.md): bare `FLOAT` / `FLOAT(22..53)` is COMP-2 (was
+COMP-1; `FLOAT(n)` keeps `precision`), bare `DECIMAL` is (5,0),
+`TIMESTAMP(p)` is `20+p` characters; `FROM FINAL|NEW|OLD TABLE (INSERT ...)`
+records the nested target (`ExecSQLStatement.data_change_tables`) and
+`DELETE T WHERE` records `T`; scrollable cursors keep their name; cursor CTE
+names, `TABLE(...)` and `LATERAL` are not tables; `/* */` comments inside
+EXEC SQL are dropped.
+[analysis.md](analysis.md): program flow has a `PROCEDURE DIVISION` node for
+sentences before the first paragraph (it becomes the entry point);
+complexity counts a section's leading sentences; DynamicCallAnalyzer
+analyses each program unit on its own data and resets stale values;
+xref records an OF/IN qualifier of a receiver as a reference, not a write;
+host-variable resolution honours `:S.X`; `EXEC SQL SET :X = ...` is OUTPUT;
+the SELECT-without-INTO lint ignores literals; CRUD marks FINAL TABLE
+targets; scenario reachability uses the flow graph's parent procedure.
+[generators.md](generators.md): `ProgramLayoutIndex.resolve` records no
+bogus ambiguity for table elements; figurative QUOTE/ZERO must fill the
+field; N/G values are sized in character positions; a truncated last RECFM=V
+record is `trailing`; DATE/TIME numeric cells are written without leading
+zeros so `decode(encode(row)) == row`.
+[parser.md](parser.md): DECIMAL-POINT IS COMMA pictures keep their comma
+(`-9,9(5)E-99`, `9,99`); lower-case relational words (`greater than or
+equal to`); `GO TO.` has no target; `EQUALS`; subscripted/qualified
+condition-names; INSPECT REPLACING CHARACTERS has no `from_value`;
+I-O-CONTROL / SOURCE-/OBJECT-COMPUTER entries are recorded as metadata;
+`from_json` keeps `unit_kind` and contained programs.
+[cli.md](cli.md): `expand` reports a missing/circular COPY cleanly; a closed
+stdout pipe exits 141 quietly; `cobol.yml` flow collections may span lines.
+`ProfilerContext` reports the call's own peak (`peak_memory_exact`).
+A corpus sweep (19,213 analyzer/generator runs over 640 files; 10,062
+parser mutants) found no remaining crashes.
+
 ## 2026-09-30 -- bug hunt round 11: operator currency signs, JCL job scoping, float/P-scaled pictures, leading-sentence dead code
 
 Each reproduced first and pinned by `tests/unit/**/test_bug_hunt_r11_*.py`.

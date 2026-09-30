@@ -79,8 +79,9 @@ class TestDb2TypeMappingFunctions:
     def test_timestamp(self):
         assert db2_type_to_cobol_pic("TIMESTAMP") == "X(26)"
 
-    def test_float_returns_comp1_annotation(self):
-        assert db2_type_to_cobol_pic("FLOAT") == "COMP-1"
+    def test_float_returns_comp2_annotation(self):
+        # A bare DB2 FLOAT is FLOAT(53): double precision.
+        assert db2_type_to_cobol_pic("FLOAT") == "COMP-2"
 
     def test_double_returns_comp2_annotation(self):
         assert db2_type_to_cobol_pic("DOUBLE") == "COMP-2"
@@ -105,7 +106,8 @@ class TestDb2TypeMappingFunctions:
         assert db2_type_to_cobol_usage("SMALLINT") == "COMP"
 
     def test_usage_float(self):
-        assert db2_type_to_cobol_usage("FLOAT") == "COMP-1"
+        # A bare DB2 FLOAT is FLOAT(53): double precision.
+        assert db2_type_to_cobol_usage("FLOAT") == "COMP-2"
 
     def test_usage_double(self):
         assert db2_type_to_cobol_usage("DOUBLE") == "COMP-2"

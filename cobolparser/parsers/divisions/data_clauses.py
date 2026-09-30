@@ -1437,8 +1437,15 @@ class DataItemClauseParser:
 
             # Collect picture pattern tokens
             if token.type in _PICTURE_PATTERN_TOKEN_TYPES:
-                # All these token types can be part of a picture pattern
-                token_value = token.value
+                # All these token types can be part of a picture pattern.
+                # A numeric literal's value is canonical (``9,9`` under
+                # DECIMAL-POINT IS COMMA reads ``9.9``); the picture wants
+                # the characters as written.
+                token_value = (
+                    token.raw_value
+                    if token.type == TokenType.NUMERIC_LITERAL and token.raw_value
+                    else token.value
+                )
                 if paren_depth == 0 and token_value.endswith("."):
                     pattern_parts.append(token_value[:-1])
                     token_stream.consume()

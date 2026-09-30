@@ -422,10 +422,11 @@ class InspectStatementParser(IStatementParser):
                 ts.consume()
                 skip_whitespace(ts)
 
-                from_value = ""
-                if replace_type == "CHARACTERS":
-                    from_value = "CHARACTERS"
-                else:
+                # ``CHARACTERS BY x`` has no search operand; recording the
+                # keyword as one read it as a (nonexistent) data item. None,
+                # like TALLYING ``FOR CHARACTERS``'s ``value``.
+                from_value: str | None = None
+                if replace_type != "CHARACTERS":
                     from_value = self._consume_inspect_value(ts) or ""
 
                 # Expect BY
