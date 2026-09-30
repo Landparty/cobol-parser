@@ -52,6 +52,29 @@ _CLAUSE_BODY_ATTRS: tuple[str, ...] = (
 )
 
 
+# The flow node standing for sentences written before the PROCEDURE
+# DIVISION's first paragraph/section header (the parser keeps them as an
+# unnamed top-level paragraph). They are what runs first, so they are the
+# program's entry; the name holds a blank, so no COBOL procedure name can
+# ever collide with it.
+LEADING_SENTENCES_NODE = "PROCEDURE DIVISION"
+
+
+def leading_sentences(proc_division: CobolDivision) -> CobolParagraph | None:
+    """The unnamed paragraph holding the division's leading sentences, if
+    it comes before every named paragraph and section and has statements."""
+    items: list[Any] = sorted(
+        [*proc_division._sections.values(), *proc_division.paragraphs],
+        key=lambda item: item.location.line,
+    )
+    if not items or isinstance(items[0], CobolSection):
+        return None
+    first = items[0]
+    if first.paragraph_name or not first.statements:
+        return None
+    return cast(CobolParagraph, first)
+
+
 def is_valid_procedure_name(name: str) -> bool:
     """Check whether name looks like a real COBOL procedure name."""
     return bool(name) and name not in (".",)
@@ -106,6 +129,15 @@ class ProcedureScanner:
             [*proc_division._sections.values(), *proc_division.paragraphs],
             key=lambda item: item.location.line,
         )
+
+        leading = leading_sentences(proc_division)
+        if leading is not None:
+            self._nodes[LEADING_SENTENCES_NODE] = FlowNode(
+                name=LEADING_SENTENCES_NODE,
+                procedure_type="PARAGRAPH",
+                location=leading.location,
+            )
+            self._ordered_procedures.append(LEADING_SENTENCES_NODE)
 
         for item in top_level_items:
             if isinstance(item, CobolSection):
@@ -162,8 +194,11 @@ class ProcedureScanner:
                     self._scan_paragraph_statements(para)
 
         # Scan top-level paragraphs
+        leading = leading_sentences(proc_division)
         for para in proc_division.paragraphs:
             pname = para.paragraph_name
+            if para is leading:
+                pname = LEADING_SENTENCES_NODE
             if pname and is_valid_procedure_name(pname):
                 self._current_procedure = pname.upper()
                 self._scan_paragraph_statements(para)

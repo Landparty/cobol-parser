@@ -942,6 +942,7 @@ def _build_expand_parser(
 
 
 def _cmd_expand(args: argparse.Namespace) -> None:
+    from ..preprocess import PreprocessingError
     from ..preprocess.copybook_expander import expand_copybooks
 
     source = _read_source(args.file)
@@ -953,16 +954,22 @@ def _cmd_expand(args: argparse.Namespace) -> None:
     # land in the JSON's statistics.warnings.
     defines = _parse_defines(args.define)
 
-    result = expand_copybooks(
-        source,
-        copybook_paths=args.copybook_path,
-        max_nesting_depth=args.max_depth,
-        process_conditionals=bool(defines),
-        defined_symbols=defines,
-        preserve_source_locations=getattr(args, "source_map", False),
-        source_file=args.file,
-        preserve_comments=getattr(args, "keep_comments", False),
-    )
+    try:
+        result = expand_copybooks(
+            source,
+            copybook_paths=args.copybook_path,
+            max_nesting_depth=args.max_depth,
+            process_conditionals=bool(defines),
+            defined_symbols=defines,
+            preserve_source_locations=getattr(args, "source_map", False),
+            source_file=args.file,
+            preserve_comments=getattr(args, "keep_comments", False),
+        )
+    except PreprocessingError as exc:
+        # The same one-line error and exit status `parse --copybook-path`
+        # gives: a missing / circular / traversing COPY is a configuration
+        # error, not a crash, and a traceback hid the one line that says so.
+        _fail(f"Copybook expansion failed for {args.file}: {exc}")
 
     _json_out(
         {"source_file": args.file, **result.to_dict()},
@@ -3882,4 +3889,16 @@ def main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    args.func(args)
+    try:
+        args.func(args)
+    except BrokenPipeError:
+        # The reader went away (`cobol-parser parse x.cbl | head`): stop
+        # quietly, the way a shell tool killed by SIGPIPE does, instead of a
+        # traceback -- and point stdout at devnull so the interpreter's own
+        # final flush cannot raise the same error again at exit.
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        except (OSError, ValueError):
+            pass
+        sys.exit(141)  # 128 + SIGPIPE, what the shell reports for `yes | head`

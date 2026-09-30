@@ -96,7 +96,11 @@ from typing import Any
 
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.program import CobolParagraph, CobolProgram, CobolSection
-from ..models.sql_statements import DeclareCursorStatement, ExecSQLStatement
+from ..models.sql_statements import (
+    DeclareCursorStatement,
+    ExecSQLStatement,
+    _strip_sql_literals_and_comments,
+)
 from ..models.statements import MoveStatement, PerformStatement, StringStatement
 from ..models.statements.base import CobolStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
@@ -640,8 +644,10 @@ def _sql_label(statement: ExecSQLStatement) -> str:
     sql_type = (statement.sql_type or "").upper()
     if sql_type and sql_type != "UNKNOWN":
         return sql_type
-    words = statement.sql_text.split()
-    return words[0].upper() if words else "EXEC SQL"
+    # The first *word*: the EXEC text collector glues a host variable's
+    # colon to the word before it (``SET:WS-X = ...``).
+    word = re.match(r"\s*([A-Za-z][A-Za-z0-9_-]*)", statement.sql_text)
+    return word.group(1).upper() if word else "EXEC SQL"
 
 
 def _is_whenever(statement: ExecSQLStatement) -> bool:
@@ -696,7 +702,8 @@ def _is_singleton_select_without_into(statement: ExecSQLStatement, upper: str) -
         return False
     # ``into_variables`` reads ``INTO:WS-NAME`` as written by the EXEC text
     # collector since 2026-09-28; the direct text check stays as a backstop.
-    return _INTO_HOST_VAR_RE.search(upper) is None
+    # Scrubbed: ``WHERE B = 'INTO :Z'`` is a literal, not an INTO clause.
+    return _INTO_HOST_VAR_RE.search(_strip_sql_literals_and_comments(upper)) is None
 
 
 def _is_dynamic_text_statement(statement: ExecSQLStatement, upper: str) -> bool:

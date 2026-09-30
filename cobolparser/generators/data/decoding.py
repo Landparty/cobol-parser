@@ -1093,6 +1093,12 @@ class RecordDecoder:
                 return None
             rdw = data[position : position + RDW_SIZE]
             total = int.from_bytes(rdw[:2], "big")
+            if RDW_SIZE <= total and total > remaining and position > 0:
+                # A well-formed RDW after at least one whole record, cut
+                # short by the end of the file: a truncated last record,
+                # reported as trailing bytes exactly as the fixed and
+                # variable-bare framings report a short tail.
+                return None
             if total < RDW_SIZE or total > remaining:
                 raise RecordDecodingError(
                     f"record {position}: RDW claims {total} bytes but only "

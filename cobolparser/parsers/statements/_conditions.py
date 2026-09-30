@@ -23,6 +23,10 @@ from ...models.statements.base import (
 COMPARISON_OPS = {
     "=": "EQUAL",
     "EQUAL": "EQUAL",
+    # MF / GnuCOBOL spell it EQUALS too; every multi-word form below
+    # (`NOT EQUALS`, `GREATER OR EQUALS`) already accepted it, the bare
+    # relation did not and fell back to an operand-less COMPARISON node.
+    "EQUALS": "EQUAL",
     ">": "GREATER",
     "GREATER": "GREATER",
     "<": "LESS",
@@ -152,7 +156,14 @@ def build_condition_expression(
         # ``EQUAL TO`` / ``GREATER THAN`` / ``LESS THAN``: the connective is
         # noise that otherwise leaks into the right-hand operand text
         # (``IF A EQUAL TO B`` used to record right_operand ``"TO B"``).
-        if tok in ("TO", "THAN") and cleaned and cleaned[-1] in _RELATIONAL_WORDS:
+        # ``cleaned`` keeps the source's case, so compare upper-cased:
+        # lower-case source (``if a equal to b``) otherwise kept ``to b``
+        # as the right operand and split ``greater or equal`` into an OR.
+        if (
+            tok in ("TO", "THAN")
+            and cleaned
+            and cleaned[-1].upper() in _RELATIONAL_WORDS
+        ):
             i += 1
             continue
         # ``GREATER [THAN] OR EQUAL [TO]`` / ``LESS [THAN] OR EQUAL [TO]`` is
@@ -160,12 +171,14 @@ def build_condition_expression(
         if (
             tok == "OR"
             and cleaned
-            and cleaned[-1] in ("GREATER", "LESS")
+            and cleaned[-1].upper() in ("GREATER", "LESS")
             and i + 1 < len(tokens)
             and tokens[i + 1].upper() in ("EQUAL", "EQUALS")
         ):
             cleaned[-1] = (
-                "GREATER_OR_EQUAL" if cleaned[-1] == "GREATER" else "LESS_OR_EQUAL"
+                "GREATER_OR_EQUAL"
+                if cleaned[-1].upper() == "GREATER"
+                else "LESS_OR_EQUAL"
             )
             i += 2
             if i < len(tokens) and tokens[i].upper() == "TO":
@@ -436,16 +449,45 @@ def _build_unary_condition(
         return None
 
     if (
-        len(cleaned) == 1
-        and _IDENTIFIER_RE.match(cleaned[0])
+        _is_condition_name_reference(cleaned, upper)
         and upper[0] != "NOT"
         and upper[0] not in _CLASS_SIGN_WORDS
     ):
+        # A qualified / subscripted condition-name (``CN1 (1)``, ``EOF-SW OF
+        # IN-REC``) is as much a condition-name as a bare one; only the
+        # single-token form was recognised, the rest fell back to an
+        # operand-less COMPARISON node.
         expr = ConditionalExpression("CONDITION_NAME", location)
-        expr.set_left_operand(cleaned[0])
+        expr.set_left_operand(" ".join(cleaned))
         return expr
 
     return None
+
+
+def _is_condition_name_reference(cleaned: list[str], upper: list[str]) -> bool:
+    """``name [{OF|IN} name]... [( subscripts )]`` and nothing else."""
+    if not cleaned or not _IDENTIFIER_RE.match(cleaned[0]):
+        return False
+    i = 1
+    while (
+        i + 1 < len(cleaned)
+        and upper[i] in ("OF", "IN")
+        and _IDENTIFIER_RE.match(cleaned[i + 1])
+    ):
+        i += 2
+    if i == len(cleaned):
+        return True
+    if cleaned[i] != "(" or cleaned[-1] != ")":
+        return False
+    depth = 0
+    for j in range(i, len(cleaned)):
+        if cleaned[j] == "(":
+            depth += 1
+        elif cleaned[j] == ")":
+            depth -= 1
+            if depth == 0 and j != len(cleaned) - 1:
+                return False
+    return depth == 0
 
 
 def strip_enclosing_parens(tokens: list[str]) -> list[str]:

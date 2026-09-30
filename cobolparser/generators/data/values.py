@@ -356,7 +356,7 @@ class ValueFactory:
             FieldCategory.FLOAT,
         ):
             return self._fit_domain_value(character, spec)
-        return self._fit_text(character * max(1, spec.size), spec)
+        return self._fit_text(character * max(1, spec.character_positions), spec)
 
     def _odo_counter_value(self, spec: FieldSpec) -> str:
         """A count for an ``OCCURS ... DEPENDING ON`` counter field.
@@ -414,7 +414,7 @@ class ValueFactory:
         unit = _strip_literal_quotes(raw)
         if not unit:
             return None
-        width = spec.size if spec.size > 0 else len(unit)
+        width = spec.character_positions if spec.character_positions > 0 else len(unit)
         repeated = (unit * (width // len(unit) + 1))[:width]
         return self._fit_domain_value(repeated, spec)
 
@@ -476,14 +476,20 @@ class ValueFactory:
             exponent = scaling if scaling > 0 else -spec.decimal_digits
             return self._format_number(Decimal(mantissa).scaleb(exponent), spec)
 
+        # A date/time is drawn as a digit string (``055132``) but rendered
+        # like every other number (``55132``): the decoder renders numbers
+        # without leading zeros, so a zero-led cell here broke
+        # decode(encode(row)) == row for about 40% of TIME fields. The
+        # stored bytes are identical either way. No random sign: a date is
+        # never negative.
         if tokens & _DATE_TOKENS and spec.decimal_digits == 0:
             dated = self._date_digits(digits)
             if dated is not None:
-                return dated
+                return self._format_number(int(dated), spec, allow_random_sign=False)
         if tokens & _TIME_TOKENS and spec.decimal_digits == 0:
             timed = self._time_digits(digits)
             if timed is not None:
-                return timed
+                return self._format_number(int(timed), spec, allow_random_sign=False)
         if tokens & _ID_TOKENS:
             return self._format_number(self._sequential_number(spec, row), spec)
         if tokens & _MONEY_TOKENS:
@@ -647,7 +653,7 @@ class ValueFactory:
                 return edited
 
         tokens = _name_tokens(spec.name) if self._opts.semantic_hints else set()
-        size = spec.size
+        size = spec.character_positions
 
         if tokens & _FLAG_TOKENS and size <= 2:
             return self._rng.choice(("Y", "N"))
@@ -723,10 +729,10 @@ class ValueFactory:
             words = [rng.choice(_WORDS) for _ in range(3)]
             return " ".join(words)
         if "CODE" in tokens or "CD" in tokens or "TYPE" in tokens:
-            length = max(1, min(spec.size, 4))
+            length = max(1, min(spec.character_positions, 4))
             return "".join(rng.choice(string.ascii_uppercase) for _ in range(length))
         if tokens & _ID_TOKENS:
-            return f"{spec.name.split('-')[0][:3]}{row + 1:0{max(1, spec.size - 3)}d}"
+            return f"{spec.name.split('-')[0][:3]}{row + 1:0{max(1, spec.character_positions - 3)}d}"
         return None
 
     def _fit_text(self, value: str, spec: FieldSpec) -> str:
@@ -736,5 +742,6 @@ class ValueFactory:
         COBOL program pads on the MOVE.  Trailing blanks in a CSV are lost or
         misread by most consumers anyway.
         """
-        size = spec.size if spec.size > 0 else len(value)
+        size = spec.character_positions
+        size = size if size > 0 else len(value)
         return value[:size]

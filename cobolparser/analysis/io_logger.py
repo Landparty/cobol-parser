@@ -145,6 +145,12 @@ _SQL_INTO_HOST_VARS_RE = re.compile(
     r"INTO\s*(:[\w-]+(?:\s*,?\s*:[\w-]+)*)", re.IGNORECASE
 )
 _SQL_HOST_VAR_RE = re.compile(r":([A-Za-z][A-Za-z0-9-]*)")
+# ``SET :hv = expr`` / ``SET (:a, :b) = (...)``: the SQL assignment statement
+# writes the host variables left of the ``=``.
+_SQL_SET_TARGETS_RE = re.compile(r"^\s*SET\s*(\(?\s*:[^=]*)=", re.IGNORECASE)
+_SQL_QUALIFIED_HOST_VAR_RE = re.compile(
+    r":(?:[A-Za-z][A-Za-z0-9_-]*\.)*([A-Za-z][A-Za-z0-9_-]*)"
+)
 
 
 class IOLogger:
@@ -358,6 +364,12 @@ class IOLogger:
                 into_match = _SQL_INTO_HOST_VARS_RE.search(scrubbed_sql)
                 if into_match:
                     into_vars = _SQL_HOST_VAR_RE.findall(into_match.group(1))
+                else:
+                    set_match = _SQL_SET_TARGETS_RE.match(scrubbed_sql)
+                    if set_match:
+                        into_vars = _SQL_QUALIFIED_HOST_VAR_RE.findall(
+                            set_match.group(1)
+                        )
 
             into_set = set(into_vars)
             if into_vars:
