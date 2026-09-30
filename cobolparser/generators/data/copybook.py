@@ -6,6 +6,7 @@ import os
 import random
 import re
 
+from ..._lines import split_source_lines
 from ...models.data_items import CobolDataItem
 from ...models.program import CobolProgram
 from ...parser import parse_cobol
@@ -71,7 +72,7 @@ def _looks_fixed_format(source: str) -> bool:
     """
     fixed = 0
     free = 0
-    for raw in source.splitlines():
+    for raw in split_source_lines(source):
         line = raw.expandtabs(8)
         if not line.strip():
             continue
@@ -93,7 +94,8 @@ def _wrap_fragment(source: str) -> str:
         # Free-form fragment: shift into Area B so the fixed-format wrapper and
         # the fragment agree on a single column convention.
         body = "\n".join(
-            "       " + line if line.strip() else "" for line in source.splitlines()
+            "       " + line if line.strip() else ""
+            for line in split_source_lines(source)
         )
     if not body.endswith("\n"):
         body += "\n"
