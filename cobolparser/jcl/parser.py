@@ -130,6 +130,9 @@ class _Sink:
     symbols: dict[str, str]
     expand_procs: bool
     context: str
+    #: Which JOB of the deck this sink belongs to (0 before the first one).
+    #: In-stream procedures are local to the job that defines them.
+    job_ordinal: int = 0
     current_step: JobStep | None = None
     current_overrides: dict[str, str] = field(default_factory=dict)
     #: The symbol values in effect at the current step's EXEC card: a SET
@@ -210,7 +213,12 @@ class _Builder:
         self.symbols: dict[str, str] = {}
         self.errors: list[dict[str, Any]] = []
         self.unresolved: list[str] = []
-        self.proc_bodies: dict[str, tuple[str, list[JclCard], dict[str, str]]] = {}
+        # Keyed by (job ordinal, procedure name): an in-stream procedure is
+        # local to the job that defines it, so two jobs in one deck may each
+        # define their own `P` and neither sees the other's.
+        self.proc_bodies: dict[
+            tuple[int, str], tuple[str, list[JclCard], dict[str, str]]
+        ] = {}
         self._seen_errors: set[tuple[int, str]] = set()
         self._seen_unresolved: set[str] = set()
         self._implicit_job_reported = False
@@ -258,8 +266,25 @@ class _Builder:
         body: list[JclCard] = []
         defaults: dict[str, str] = {}
         start_line = 0
+        job_ordinal = 0
         for card in cards:
             is_statement = card.kind == KIND_STATEMENT
+            if is_statement and card.operation == "JOB":
+                if name is not None:
+                    # A JOB card starts a new job: the procedure left open
+                    # before it can extend no further, and the job -- with
+                    # every step after it -- must not be swallowed into it.
+                    self._error(
+                        start_line,
+                        f"PROC {coded_name} is never ended by a PEND statement",
+                    )
+                    self._store_procedure(
+                        (job_ordinal, name), coded_name, body, defaults, start_line
+                    )
+                    name = None
+                job_ordinal += 1
+                top_level.append(card)
+                continue
             if is_statement and card.operation == "PROC":
                 if name is not None:
                     self._error(
@@ -287,7 +312,9 @@ class _Builder:
                 if name is None:
                     top_level.append(card)
                     continue
-                self._store_procedure(name, coded_name, body, defaults, start_line)
+                self._store_procedure(
+                    (job_ordinal, name), coded_name, body, defaults, start_line
+                )
                 name = None
                 continue
             if name is not None:
@@ -299,12 +326,14 @@ class _Builder:
                 start_line,
                 f"PROC {coded_name} is never ended by a PEND statement",
             )
-            self._store_procedure(name, coded_name, body, defaults, start_line)
+            self._store_procedure(
+                (job_ordinal, name), coded_name, body, defaults, start_line
+            )
         return top_level
 
     def _store_procedure(
         self,
-        key: str,
+        key: tuple[int, str],
         coded_name: str,
         body: list[JclCard],
         defaults: dict[str, str],
@@ -336,6 +365,11 @@ class _Builder:
         """Parse each in-stream procedure body once, with its own defaults."""
         procedures: dict[str, list[JobStep]] = {}
         for key, (coded_name, body, defaults) in self.proc_bodies.items():
+            if coded_name in procedures:
+                # The same name defined in-stream by a later job of the deck:
+                # a separate procedure, but `procedures` has one slot per
+                # name, and it keeps the first.
+                continue
             symbols = dict(self.symbols)
             symbols.update(defaults)
             procedures[coded_name] = self._parse_procedure_body(key, body, symbols)
@@ -345,6 +379,7 @@ class _Builder:
     def _process_top_level(self, cards: list[JclCard]) -> None:
         sink: _Sink | None = None
         job: JclJob | None = None
+        job_ordinal = 0
         for card in cards:
             if card.kind == KIND_COMMENT:
                 continue
@@ -356,7 +391,7 @@ class _Builder:
                 continue
             if card.kind == KIND_NULL:
                 if sink is not None:
-                    self._close_sink(sink)
+                    self._close_top_level_sink(sink)
                 sink = None
                 job = None
                 continue
@@ -364,15 +399,21 @@ class _Builder:
                 continue
             if card.operation == "JOB":
                 if sink is not None:
-                    self._close_sink(sink)
+                    self._close_top_level_sink(sink)
+                job_ordinal += 1
                 job = self._make_job(card)
                 self.jobs.append(job)
+                # SET values are local to the job that codes them: a new
+                # JOB starts from an empty symbol table -- apart from any SET
+                # coded ahead of the deck's first JOB card.
+                preamble = sink is not None and sink.job_ordinal == 0
                 sink = _Sink(
                     steps=job.steps,
                     job_dds=job.dd_statements,
-                    symbols=self.symbols,
+                    symbols=dict(sink.symbols) if sink and preamble else {},
                     expand_procs=True,
                     context=f"job {job.name or '(unnamed)'}",
+                    job_ordinal=job_ordinal,
                 )
                 continue
             if card.operation == "PEND":
@@ -386,22 +427,33 @@ class _Builder:
                 sink = _Sink(
                     steps=job.steps,
                     job_dds=job.dd_statements,
-                    symbols=self.symbols,
+                    # A cataloged procedure's `// PROC` defaults were read
+                    # into the sink before this first EXEC; keep them.
+                    symbols=sink.symbols if sink is not None else {},
                     expand_procs=True,
                     context="implicit job",
+                    job_ordinal=job_ordinal,
                     if_stack=sink.if_stack if sink is not None else [],
                 )
             elif sink is None:
                 sink = _Sink(
                     steps=[],
                     job_dds=[],
-                    symbols=self.symbols,
+                    symbols={},
                     expand_procs=False,
                     context="before the first JOB statement",
+                    job_ordinal=job_ordinal,
                 )
             self._dispatch(card, sink)
         if sink is not None:
-            self._close_sink(sink)
+            self._close_top_level_sink(sink)
+
+    def _close_top_level_sink(self, sink: _Sink) -> None:
+        self._close_sink(sink)
+        # `JclParseResult.symbols` summarises every SET value the deck
+        # established (a later job's value for the same name wins there);
+        # substitution itself only ever sees the job's own table.
+        self.symbols.update(sink.symbols)
 
     def _make_job(self, card: JclCard) -> JclJob:
         # Symbolic substitution is not performed on the JOB statement, so its
@@ -755,7 +807,12 @@ class _Builder:
         overrides: dict[str, str],
         exec_symbols: dict[str, str],
     ) -> None:
-        key = (step.procedure or "").upper()
+        name = (step.procedure or "").upper()
+        key = (sink.job_ordinal, name)
+        if key not in self.proc_bodies:
+            # A procedure defined ahead of the deck's first JOB card belongs
+            # to no job; like a SET coded there, it carries into the jobs.
+            key = (0, name)
         entry = self.proc_bodies.get(key)
         if entry is None:
             self._note(
@@ -783,9 +840,9 @@ class _Builder:
             sink.steps.append(proc_step)
 
     def _parse_procedure_body(
-        self, key: str, body: list[JclCard], symbols: dict[str, str]
+        self, key: tuple[int, str], body: list[JclCard], symbols: dict[str, str]
     ) -> list[JobStep]:
-        coded_name = self.proc_bodies[key][0] if key in self.proc_bodies else key
+        coded_name = self.proc_bodies[key][0] if key in self.proc_bodies else key[1]
         sink = _Sink(
             steps=[],
             job_dds=[],

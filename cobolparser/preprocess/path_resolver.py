@@ -215,6 +215,29 @@ def _on_disk_casing(file_path: str) -> str:
     return file_path
 
 
+def _library_directory(search_dir: str, library: str, case_sensitive: bool) -> str:
+    """The subdirectory of *search_dir* that ``COPY member OF library`` names.
+
+    Matched the way the member name itself is: exactly when the search is
+    case-sensitive, and otherwise in any casing (``OF MYLIB`` finds
+    ``mylib/``), so a case-insensitive search does not find ``MEM.cpy`` but
+    miss the library directory holding it.
+    """
+    exact = os.path.join(search_dir, library)
+    if case_sensitive or os.path.isdir(exact):
+        return exact
+    try:
+        with os.scandir(search_dir) as entries:
+            matches = sorted(
+                entry.name
+                for entry in entries
+                if entry.is_dir() and entry.name.casefold() == library.casefold()
+            )
+    except OSError:
+        return exact
+    return os.path.join(search_dir, matches[0]) if matches else exact
+
+
 def find_copybook_file(
     member_name: str,
     search_config: CopybookSearchPath,
@@ -271,14 +294,26 @@ def find_copybook_file(
                         possible_names.append(name_with_ext)
 
     # Search in each directory
-    for search_dir in search_dirs:
+    for configured_dir in search_dirs:
+        # Joined and validated in absolute form: a *configured* directory
+        # may legitimately be spelled with ".." (`--copybook-path
+        # ../copybooks`, or a cobol.yml entry resolved against the config
+        # file's own directory), and the traversal check below must judge
+        # only what the COPY statement contributed -- the member and library
+        # names -- not the search directory the user chose.
+        search_dir = os.path.abspath(configured_dir)
         # A library qualifier (COPY member OF library) maps to a
         # subdirectory named after the library, but falls back to the plain
         # search directory when no such subdirectory layout exists — on a
         # filesystem the qualifier often has no directory equivalent.
         candidate_dirs = [search_dir]
         if library_qualifier:
-            candidate_dirs.insert(0, os.path.join(search_dir, library_qualifier))
+            candidate_dirs.insert(
+                0,
+                _library_directory(
+                    search_dir, library_qualifier, search_config.case_sensitive
+                ),
+            )
 
         for actual_search_dir in candidate_dirs:
             # Try each possible filename
