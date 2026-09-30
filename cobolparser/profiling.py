@@ -53,6 +53,11 @@ class ProfilingResult:
     peak_memory_mb: float  # tracemalloc peak allocation within the profiled call
     top_functions: list[FunctionProfile]
     prof_file: str | None  # path to .prof binary, or None
+    # False only when an outer tracemalloc session was already running and
+    # the profiled call never rose above that session's earlier peak: the
+    # call's own peak is then unknowable without resetting the outer
+    # session's peak, so peak_memory_mb is an upper bound (see __exit__).
+    peak_memory_exact: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +65,7 @@ class ProfilingResult:
             "cpu_user_s": self.cpu_user_s,
             "cpu_system_s": self.cpu_system_s,
             "peak_memory_mb": self.peak_memory_mb,
+            "peak_memory_exact": self.peak_memory_exact,
             "prof_file": self.prof_file,
             "top_functions": [f.to_dict() for f in self.top_functions],
         }
@@ -78,6 +84,7 @@ class ProfilerContext:
         self._wall_start: float = 0.0
         self._cpu_before: Any = None
         self._was_tracing: bool = False
+        self._traced_before: tuple[int, int] = (0, 0)
         self.result: ProfilingResult | None = None
 
     def __enter__(self) -> ProfilerContext:
@@ -85,6 +92,9 @@ class ProfilerContext:
         self._was_tracing = tracemalloc.is_tracing()
         if not self._was_tracing:
             tracemalloc.start()
+        # (current, peak) at entry. A fresh session starts at (0, 0); an
+        # outer one already holds memory and a peak that are not this call's.
+        self._traced_before = tracemalloc.get_traced_memory()
 
         self._wall_start = time.perf_counter()
 
@@ -98,11 +108,20 @@ class ProfilerContext:
         self._profiler.disable()
         wall_clock_s = time.perf_counter() - self._wall_start
 
-        # Memory peak within this call
+        # Memory peak within this call, above what was traced at entry.
+        # tracemalloc's peak is process-wide since the session started (or
+        # was last reset); under an outer session it is that session's
+        # all-time peak, which is not this call's. reset_peak() would make
+        # it exact but destroy the outer session's peak, so it is not used:
+        # a peak that rose during the call was set by the call (exact);
+        # one that did not means the call stayed at or under the earlier
+        # peak, which is then reported as an upper bound.
         _current, peak_bytes = tracemalloc.get_traced_memory()
         if not self._was_tracing:
             tracemalloc.stop()
-        peak_memory_mb = peak_bytes / (1024 * 1024)
+        current_before, peak_before = self._traced_before
+        peak_memory_exact = peak_bytes > peak_before or not self._was_tracing
+        peak_memory_mb = max(0, peak_bytes - current_before) / (1024 * 1024)
 
         # CPU user + system delta via psutil
         cpu_user_s: float | None = None
@@ -150,4 +169,5 @@ class ProfilerContext:
             peak_memory_mb=peak_memory_mb,
             top_functions=top_functions,
             prof_file=self._prof_output,
+            peak_memory_exact=peak_memory_exact,
         )

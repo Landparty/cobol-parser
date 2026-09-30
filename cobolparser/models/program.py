@@ -921,8 +921,12 @@ class CobolProgram(ASTNode):
     @classmethod
     def from_json(cls, json_str: str) -> "CobolProgram":
         """Create a CobolProgram instance from JSON representation."""
-        data = json.loads(json_str)
+        return cls._from_dict(json.loads(json_str))
 
+    @classmethod
+    def _from_dict(cls, data: dict[str, Any]) -> "CobolProgram":
+        """Rebuild one program unit (and, recursively, the units it contains)
+        from its ``to_dict()`` form."""
         # Extract basic program information
         program_name = data.get("program_name", "")
 
@@ -954,6 +958,13 @@ class CobolProgram(ASTNode):
                     "source_locations",
                 ]:
                     program.set_metadata(key, value)
+
+        # The unit structure: a CLASS-ID came back as a PROGRAM and every
+        # nested / stacked / method unit was dropped, so program_units() of
+        # the restored program no longer matched the one serialized.
+        program.unit_kind = data.get("unit_kind", "PROGRAM")
+        for contained in data.get("contained_programs", []):
+            program.add_contained_program(cls._from_dict(contained))
 
         return program
 

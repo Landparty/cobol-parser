@@ -23,6 +23,10 @@ from ...models.statements.base import (
 COMPARISON_OPS = {
     "=": "EQUAL",
     "EQUAL": "EQUAL",
+    # MF / GnuCOBOL spell it EQUALS too; every multi-word form below
+    # (`NOT EQUALS`, `GREATER OR EQUALS`) already accepted it, the bare
+    # relation did not and fell back to an operand-less COMPARISON node.
+    "EQUALS": "EQUAL",
     ">": "GREATER",
     "GREATER": "GREATER",
     "<": "LESS",
@@ -436,16 +440,45 @@ def _build_unary_condition(
         return None
 
     if (
-        len(cleaned) == 1
-        and _IDENTIFIER_RE.match(cleaned[0])
+        _is_condition_name_reference(cleaned, upper)
         and upper[0] != "NOT"
         and upper[0] not in _CLASS_SIGN_WORDS
     ):
+        # A qualified / subscripted condition-name (``CN1 (1)``, ``EOF-SW OF
+        # IN-REC``) is as much a condition-name as a bare one; only the
+        # single-token form was recognised, the rest fell back to an
+        # operand-less COMPARISON node.
         expr = ConditionalExpression("CONDITION_NAME", location)
-        expr.set_left_operand(cleaned[0])
+        expr.set_left_operand(" ".join(cleaned))
         return expr
 
     return None
+
+
+def _is_condition_name_reference(cleaned: list[str], upper: list[str]) -> bool:
+    """``name [{OF|IN} name]... [( subscripts )]`` and nothing else."""
+    if not cleaned or not _IDENTIFIER_RE.match(cleaned[0]):
+        return False
+    i = 1
+    while (
+        i + 1 < len(cleaned)
+        and upper[i] in ("OF", "IN")
+        and _IDENTIFIER_RE.match(cleaned[i + 1])
+    ):
+        i += 2
+    if i == len(cleaned):
+        return True
+    if cleaned[i] != "(" or cleaned[-1] != ")":
+        return False
+    depth = 0
+    for j in range(i, len(cleaned)):
+        if cleaned[j] == "(":
+            depth += 1
+        elif cleaned[j] == ")":
+            depth -= 1
+            if depth == 0 and j != len(cleaned) - 1:
+                return False
+    return depth == 0
 
 
 def strip_enclosing_parens(tokens: list[str]) -> list[str]:

@@ -369,7 +369,7 @@ class InspectStatement(CobolStatement):
     def add_replacing_clause(
         self,
         replace_type: str,
-        from_value: str,
+        from_value: str | None,
         to_value: str,
         before: str | None = None,
         after: str | None = None,
