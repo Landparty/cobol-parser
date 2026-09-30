@@ -148,10 +148,15 @@ class ProcedureScanner:
         """Scan all statements to build edges and compute node metrics."""
         # Scan sections. A bare SECTION header owns no statements of its own
         # (CobolSection carries only paragraphs/data_items), so an empty
-        # section has nothing to scan.
+        # section has nothing to scan. Sentences written between the header
+        # and the first paragraph header land in an unnamed paragraph: they
+        # are the section node's own statements (its PERFORMs, its STOP RUN
+        # suppressing the section's fall-through), not something to skip.
         for section in proc_division._sections.values():
             for para in section.paragraphs:
                 pname = para.paragraph_name
+                if not pname and section.section_name:
+                    pname = section.section_name
                 if pname and is_valid_procedure_name(pname):
                     self._current_procedure = pname.upper()
                     self._scan_paragraph_statements(para)

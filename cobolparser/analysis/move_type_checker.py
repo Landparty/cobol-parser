@@ -231,6 +231,9 @@ _WARN_MOVES: frozenset[tuple[DataCategory, DataCategory]] = frozenset(
 # ``WS-TAB ( 3 )`` form, so a glued source missed the catalog entirely.
 _GLUED_REFERENCE_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9-]*)\s*\(")
 
+# The group names an ``OF``/``IN`` qualifier chain names in a folded operand.
+_QUALIFIER_RE = re.compile(r"\b(?:OF|IN)\s+([A-Za-z0-9][A-Za-z0-9-]*)", re.IGNORECASE)
+
 
 def _reference_name(name: str) -> str:
     """The referenced item's own name from a folded operand string."""
@@ -370,6 +373,11 @@ class MoveTypeChecker:
         # alphanumeric, legal whatever the sender's category -- so no
         # elementary MOVE rule applies to a group receiver.
         self._groups: set[str] = set()
+        # Every declaration of each data name: (group ancestors, (category,
+        # non-integer, is-group)).
+        self._declarations: dict[
+            str, list[tuple[frozenset[str], tuple[DataCategory, bool, bool]]]
+        ] = {}
         self._unresolved_count = 0
 
     def check(self, ast: CobolProgram) -> MoveTypeReport:
@@ -384,11 +392,13 @@ class MoveTypeChecker:
         self._catalog = {}
         self._non_integer = set()
         self._groups = set()
+        self._declarations = {}
         self._unresolved_count = 0
         violations: list[MoveTypeViolation] = []
 
         # Phase 1: build catalog from DATA DIVISION
         self._build_catalog(ast)
+        self._index_catalog()
 
         # Phase 2: check every MOVE statement
         self._check_moves(ast, violations)
@@ -401,7 +411,7 @@ class MoveTypeChecker:
     # Catalog building
     # ------------------------------------------------------------------
 
-    def _build_catalog(self, node: ASTNode) -> None:
+    def _build_catalog(self, node: ASTNode, ancestors: tuple[str, ...] = ()) -> None:
         """Recursively collect PIC clauses from CobolDataItem nodes.
 
         A group item (e.g. an 01/05-level header with no PICTURE of its own,
@@ -411,32 +421,72 @@ class MoveTypeChecker:
         contain. Without this, every group-level MOVE target/source (a very
         common pattern -- e.g. `MOVE FUNCTION CURRENT-DATE TO` a date/time
         group) was silently counted as unresolved rather than checked.
+
+        A name declared more than once (``WS-A`` under both ``GRP1`` and
+        ``GRP2``) is only catalogued by bare name when every declaration
+        agrees; otherwise its declarations are kept with their group
+        ancestors and a reference is resolved by its ``OF``/``IN``
+        qualifiers (see ``_qualified_entry``) -- last-declaration-wins gave
+        ``WS-A OF GRP1`` the category of ``GRP2``'s ``WS-A``.
         """
+        child_ancestors = ancestors
         if isinstance(node, CobolDataItem):
             name = (node.name or "").upper().strip()
+            entry: tuple[DataCategory, bool, bool] | None = None
             pic = node.picture_clause
             if name and pic is not None:
                 category = _classify_picture(pic)
-                self._catalog[name] = category
-                if category == DataCategory.NUMERIC and (
-                    _is_non_integer_picture(pic)
-                    or _is_floating_point_usage(getattr(node, "usage", None))
-                ):
-                    self._non_integer.add(name)
+                entry = (
+                    category,
+                    category == DataCategory.NUMERIC
+                    and (
+                        _is_non_integer_picture(pic)
+                        or _is_floating_point_usage(getattr(node, "usage", None))
+                    ),
+                    False,
+                )
             elif name and _is_floating_point_usage(getattr(node, "usage", None)):
                 # COMP-1/COMP-2 carry no PICTURE: numeric, non-integer.
-                self._catalog[name] = DataCategory.NUMERIC
-                self._non_integer.add(name)
+                entry = (DataCategory.NUMERIC, True, False)
             elif name and any(
                 isinstance(child, CobolDataItem)
                 for child in getattr(node, "children", ())
             ):
-                self._catalog[name] = DataCategory.ALPHANUMERIC
-                self._groups.add(name)
+                entry = (DataCategory.ALPHANUMERIC, False, True)
+            if entry is not None:
+                self._declarations.setdefault(name, []).append(
+                    (frozenset(ancestors), entry)
+                )
+            if name:
+                child_ancestors = (*ancestors, name)
 
         if hasattr(node, "children"):
             for child in node.children:
-                self._build_catalog(child)
+                self._build_catalog(child, child_ancestors)
+
+    def _index_catalog(self) -> None:
+        """Fill the bare-name catalog from the collected declarations."""
+        for name, declarations in self._declarations.items():
+            if len({entry for _, entry in declarations}) != 1:
+                continue  # differs by qualification: see _qualified_entry
+            category, non_integer, is_group = declarations[0][1]
+            self._catalog[name] = category
+            if non_integer:
+                self._non_integer.add(name)
+            if is_group:
+                self._groups.add(name)
+
+    def _qualified_entry(self, name: str) -> tuple[DataCategory, bool, bool] | None:
+        """The declaration a qualified reference (``WS-A OF GRP1``) names,
+        for a data name whose declarations disagree."""
+        declarations = self._declarations.get(_reference_name(name).upper())
+        if not declarations:
+            return None
+        qualifiers = {q.upper() for q in _QUALIFIER_RE.findall(name)}
+        entries = {
+            entry for ancestors, entry in declarations if qualifiers <= ancestors
+        }
+        return entries.pop() if len(entries) == 1 else None
 
     # ------------------------------------------------------------------
     # MOVE checking
@@ -495,7 +545,7 @@ class MoveTypeChecker:
             if target_cat == DataCategory.UNKNOWN:
                 self._unresolved_count += 1
                 continue  # Cannot validate unknown target
-            if _reference_name(target_name).upper() in self._groups:
+            if self._is_group(target_name):
                 continue  # A group move is legal from any sending item
 
             if figurative is not None:
@@ -614,10 +664,15 @@ class MoveTypeChecker:
         resolve them on its own.
         """
         upper = _reference_name(name).upper()
-        if upper in self._catalog:
+        qualified = None if upper in self._catalog else self._qualified_entry(name)
+        if upper in self._catalog or qualified is not None:
             if _is_reference_modified(name):
                 return DataCategory.ALPHANUMERIC
+            if qualified is not None:
+                return qualified[0]
             return self._catalog[upper]
+        if upper in self._declarations:
+            return DataCategory.UNKNOWN  # ambiguous without its qualifiers
         if upper in _NUMERIC_SPECIAL_REGISTERS:
             return DataCategory.NUMERIC
         if upper.startswith("FUNCTION "):
@@ -633,7 +688,17 @@ class MoveTypeChecker:
         upper = _reference_name(name).upper()
         if upper in self._catalog:
             return upper in self._non_integer
+        qualified = self._qualified_entry(name)
+        if qualified is not None:
+            return qualified[1]
         return "." in name.strip()
+
+    def _is_group(self, name: str) -> bool:
+        upper = _reference_name(name).upper()
+        if upper in self._catalog:
+            return upper in self._groups
+        qualified = self._qualified_entry(name)
+        return qualified is not None and qualified[2]
 
     def get_catalog(self) -> dict[str, str]:
         """Return the data item category catalog (name → category name).

@@ -142,8 +142,9 @@ class DeadCodeAnalyzer:
         # follows the range in source order.
         self._range_ends: set[str] = set()
         # Maps paragraph name -> its CobolParagraph node, for fall-through
-        # termination checks. Sections have no entry here -- a bare SECTION
-        # header has no statements of its own and never blocks fall-through.
+        # termination checks. A section has an entry only when sentences sit
+        # between its header and its first paragraph (the parser's unnamed
+        # paragraph); a bare SECTION header never blocks fall-through.
         self._paragraph_nodes: dict[str, CobolParagraph] = {}
         # Procedures control can arrive at and then *keep running from*, so
         # that reaching the end of one falls into the next in source order.
@@ -155,6 +156,11 @@ class DeadCodeAnalyzer:
         # they are live without any PERFORM naming them, and they are never
         # the program's entry point.
         self._declarative_procs: set[str] = set()
+        # Sentences written before the first paragraph header of the
+        # PROCEDURE DIVISION: the parser keeps them as an unnamed paragraph.
+        # They are what runs first, so a STOP RUN / GOBACK among them means
+        # the first *named* procedure is not entered by fall-through.
+        self._leading_body: CobolParagraph | None = None
 
     def analyze(self, ast: CobolProgram) -> DeadCodeReport:
         """Analyze a COBOL program for dead code.
@@ -192,7 +198,10 @@ class DeadCodeAnalyzer:
             (p for p in self._ordered_procedures if p not in self._declarative_procs),
             None,
         )
-        if entry is not None:
+        leading_stops = self._leading_body is not None and any(
+            self._is_terminator(stmt) for stmt in self._leading_body.statements
+        )
+        if entry is not None and not leading_stops:
             self._referenced_names.add(entry)
             self._fallthrough_sources.add(entry)
         self._referenced_names.update(self._declarative_procs)
@@ -224,6 +233,7 @@ class DeadCodeAnalyzer:
         physical order (entry-point detection and fall-through edges both
         depend on ``_ordered_procedures`` matching source order).
         """
+        self._leading_body = None
         top_level_items: list[Any] = sorted(
             [*proc_division._sections.values(), *proc_division.paragraphs],
             key=lambda item: item.location.line,
@@ -248,6 +258,13 @@ class DeadCodeAnalyzer:
                 # Collect paragraphs within the section
                 for para in item.paragraphs:
                     pname = para.paragraph_name
+                    if not pname and name:
+                        # Sentences between the SECTION header and its first
+                        # paragraph header: the section's own body, whose
+                        # terminators decide whether the section falls
+                        # through (see ``_terminates``).
+                        self._paragraph_nodes.setdefault(name.upper(), para)
+                        continue
                     if pname and self._is_valid_procedure_name(pname):
                         upper_pname = pname.upper()
                         if upper_pname not in self._procedure_names:
@@ -266,6 +283,8 @@ class DeadCodeAnalyzer:
             else:
                 # Top-level paragraph (not inside a section)
                 pname = item.paragraph_name
+                if not pname and not self._ordered_procedures:
+                    self._leading_body = item
                 if pname and self._is_valid_procedure_name(pname):
                     upper_pname = pname.upper()
                     if upper_pname not in self._procedure_names:
@@ -323,7 +342,8 @@ class DeadCodeAnalyzer:
         # paragraph of a referenced section hid exactly that dead code.
         for sec_name, para_names in self._section_paragraphs.items():
             if sec_name in self._referenced_names:
-                live = True
+                # The section's own leading sentences run first.
+                live = not self._terminates(sec_name)
                 for pname in para_names:
                     reached = live or pname in self._fallthrough_sources
                     if reached:
@@ -542,9 +562,10 @@ class DeadCodeAnalyzer:
         """
         para = self._paragraph_nodes.get(name)
         if para is None:
-            # Sections (and paragraphs with no statements) have no control
-            # flow of their own -- execution always falls into whatever
-            # comes next.
+            # A bare section header (and a paragraph with no statements) has
+            # no control flow of its own -- execution always falls into
+            # whatever comes next. A section with sentences before its first
+            # paragraph is keyed here to that unnamed body.
             return False
         return any(self._is_terminator(stmt) for stmt in para.statements)
 

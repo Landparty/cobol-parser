@@ -587,6 +587,8 @@ class ProgramFixtureGenerator:
         if procedure.paragraphs:
             return str(procedure.paragraphs[0].paragraph_name)
         for section in procedure.sections:
+            if getattr(section, "is_declarative", False):
+                continue  # USE procedures: control enters after END DECLARATIVES
             paragraphs = getattr(section, "paragraphs", None)
             if paragraphs:
                 return str(paragraphs[0].paragraph_name)
