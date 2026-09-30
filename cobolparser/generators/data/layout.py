@@ -272,6 +272,28 @@ class FieldSpec:
         return max(0, self.integer_digits + self.decimal_digits)
 
     @property
+    def character_positions(self) -> int:
+        """Characters a text value of this field holds.
+
+        :attr:`size` counts bytes for a national (``PIC N``) or DBCS
+        (``PIC G`` / ``USAGE DISPLAY-1``) picture -- two per character -- so
+        a ``PIC N(2)`` value is two characters long, not four.  Every other
+        field holds :attr:`size` characters.
+        """
+        double_byte = self.category is FieldCategory.NATIONAL or (
+            self.usage == "DISPLAY-1"
+            and self.category
+            not in (
+                FieldCategory.NUMERIC,
+                FieldCategory.NUMERIC_EDITED,
+                FieldCategory.FLOAT,
+            )
+        )
+        if double_byte and self.size > 1:
+            return self.size // 2
+        return self.size
+
+    @property
     def storage_size(self) -> int:
         """Bytes one occurrence of this field really occupies.
 

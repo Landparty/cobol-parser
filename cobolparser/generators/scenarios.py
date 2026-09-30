@@ -217,9 +217,16 @@ class ScenarioPlanner:
                 else None
             )
             arm_types = _arm_type_map(branch_node) if branch_node else {}
-            is_unreachable = bool(
-                branch.parent_proc and branch.parent_proc.upper() in unreachable
+            # The CFG's own owner of this branch when it has one: sentences
+            # before a section's (or the division's) first paragraph carry
+            # no paragraph name in the constraint report, but the flow
+            # graph attributes them to the section (or the division node).
+            owner = (
+                branch_node.parent_proc
+                if branch_node is not None
+                else branch.parent_proc
             )
+            is_unreachable = bool(owner and owner.upper() in unreachable)
 
             # Every arm-id actually present in branch.arms -- this includes
             # OR-split variants ("ELSE#1"/"ELSE#2"), which represent full

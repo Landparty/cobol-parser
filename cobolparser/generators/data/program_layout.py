@@ -324,6 +324,11 @@ class ProgramLayoutIndex:
             if conditions:
                 parents = sorted({c.spec.qualified_name for c in conditions})
                 if len(parents) == 1:
+                    if conditions[0].spec.subscripts:
+                        # Under an OCCURS table: the bare name tests every
+                        # occurrence, not the first one; only a subscripted
+                        # reference names a single field.
+                        return None
                     return conditions[0]
                 # The same 88 name is declared under more than one distinct
                 # parent field (e.g. in two different records): refuse to
@@ -343,7 +348,7 @@ class ProgramLayoutIndex:
             ]
             if len(filtered) == 1:
                 return filtered[0]
-            if len(filtered) > 1:
+            if len(filtered) > 1 and not self._one_table_element(filtered):
                 self.ambiguities[text] = sorted(
                     {c.spec.qualified_name for c in filtered}
                 )
@@ -352,8 +357,19 @@ class ProgramLayoutIndex:
         if len(candidates) == 1:
             return candidates[0]
 
-        self.ambiguities[base] = sorted({c.spec.qualified_name for c in candidates})
+        if not self._one_table_element(candidates):
+            self.ambiguities[base] = sorted({c.spec.qualified_name for c in candidates})
         return None
+
+    @staticmethod
+    def _one_table_element(candidates: list[ResolvedField]) -> bool:
+        """Whether *candidates* are the occurrences of ONE declared item
+        inside an OCCURS table: an unsubscripted name there resolves to no
+        single field (only ``NAME(n)`` does), but it is not ambiguous
+        either -- there is exactly one path."""
+        return len({c.spec.qualified_name for c in candidates}) == 1 and all(
+            c.spec.subscripts for c in candidates
+        )
 
     def section_of(self, name: str) -> str | None:
         """Which DATA DIVISION section *name* lives in, or ``None`` if unresolved."""
