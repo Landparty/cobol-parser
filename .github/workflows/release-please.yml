@@ -145,8 +145,9 @@ jobs:
   # pypi.org registering this repo/workflow as a trusted publisher for the
   # "cobol-parser" project (must match [project].name in pyproject.toml
   # exactly -- PyPI does not treat "cobolparser" and "cobol-parser" as the
-  # same name); see
-  # docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
+  # same name). The `target: testpypi` rehearsal needs the same registration
+  # on test.pypi.org, with environment "pypi" (the name used below); without
+  # it the publish step fails with `invalid-publisher`.
   publish-pypi:
     needs: [release-please, build-binary-wheels, build-sdist]
     if: ${{ needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}

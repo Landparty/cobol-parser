@@ -5,11 +5,9 @@ not copybook expansion: fixed-format normalization, compiler-directive
 stripping, the ``>>IF``/``>>EVALUATE`` conditional-compilation evaluator, the
 copybook content/level validators, and the preprocessing exception hierarchy.
 
-This lives in a private module rather than in ``preprocess/__init__.py`` so
-that the closed-source release build can compile it (see ``setup.py``, which
-deliberately ships every ``__init__.py`` as plain source on the premise that
-they are thin re-export stubs). Import these names from
-:mod:`cobolparser.preprocess` -- the package re-exports all of them.
+This lives in a private module so that ``preprocess/__init__.py`` stays a
+thin re-export stub. Import these names from :mod:`cobolparser.preprocess`
+-- the package re-exports all of them.
 """
 
 import re
