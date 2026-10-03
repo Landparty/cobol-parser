@@ -3,11 +3,31 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - ".okf/**"
+      - "reports/**"
+      - "**/*.md"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - ".okf/**"
+      - "reports/**"
+      - "**/*.md"
+  # Nightly full matrix: PRs run the full suite on 3.13 only (see `build`),
+  # so this is what catches a 3.11/3.12-only break that slipped through.
+  schedule:
+    - cron: "17 4 * * *"
   # Manual dispatch: lets CI be run on a branch when an event-triggered run
   # is unavailable (e.g. app-actor pushes/PRs that org policy doesn't run).
   workflow_dispatch:
+
+# A new push to a PR supersedes the run in flight. Never cancel runs on main:
+# every merge should get its full-matrix result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -33,10 +53,10 @@ jobs:
       - run: pip install "mypy==1.20.0"
       - run: mypy cobolparser/
 
-  # Runs on PRs (and manual dispatch) only -- not on every push to main,
-  # since a push to main is already-reviewed code landing post-merge.
+  # Full suite on every Python version for pushes to main, the nightly run and
+  # manual dispatch. On a PR only 3.13 runs the full suite; 3.11/3.12 run a
+  # fast smoke subset (lexer, all samples, fixture generation).
   build:
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -63,7 +83,12 @@ jobs:
       # extensions built, 91.76% without. Gating here would fail on the build
       # step rather than on the code. Same reasoning as the cibuildwheel
       # test-command's --no-cov in pyproject.toml.
-      - run: python -m pytest tests/ -q -p no:randomly -n auto --no-cov
+      - run: >-
+          python -m pytest
+          ${{ (github.event_name == 'pull_request' && matrix.python-version != '3.13')
+          && 'tests/unit/test_lexer.py tests/test_all_samples.py tests/unit/test_program_fixtures.py'
+          || 'tests/' }}
+          -q -p no:randomly -n auto --no-cov
 
   # Where the 90% floor is actually enforced: one pure-Python build, so
   # coverage.py can see every line the extensions would otherwise hide.
