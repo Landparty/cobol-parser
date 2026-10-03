@@ -44,7 +44,7 @@ This library is **vendored** into `backend/_vendor/cobol-parser/` — the `backe
 cp -r cobolparser/ ../backend/_vendor/cobol-parser/cobolparser/
 ```
 
-There is a *separate* PyPI package, `cobol-parser` (`pip install cobol-parser`), published as closed-source compiled wheels only (see "Release & Distribution" below) — it exists for the sibling `mocky-mock` repo and other external consumers, and does not change or replace the backend's vendoring flow.
+There is a *separate* PyPI package, `cobol-parser` (`pip install cobol-parser`), published as compiled wheels plus an sdist (see "Release & Distribution" below) — it exists for the sibling `mocky-mock` repo and other external consumers, and does not change or replace the backend's vendoring flow.
 
 **Interface contract:** [`interface-contract.md`](interface-contract.md) — documents exactly what two external consumers call: (1) the backend adapter (`backend/src/parsers/cobol/parser.py`) — which functions/classes it calls, what attributes it reads off the AST, and what `program_structure` dict shape it expects back; (2) `mocky-mock`'s generators surface (`mockymock generate --with-data` / `mockymock fixtures`) — which calls `ProgramFixtureGenerator` directly and gates on `FixtureBundle`'s `bundle_version`. Read this before changing public API shapes; a breaking change to either surface means bumping the relevant version field.
 
@@ -627,15 +627,13 @@ The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather
 
 ## Release & Distribution
 
-`release-please` (`.github/workflows/release-please.yml`, driven by Conventional Commits, config in `release-please-config.json` / `.release-please-manifest.json`) automates versioning and `CHANGELOG.md` on every push to `main`. When it cuts a release, the same workflow also builds and publishes **closed-source binary wheels** to PyPI as `cobol-parser` (`pip install cobol-parser`):
+`release-please` (`.github/workflows/release-please.yml`, driven by Conventional Commits, config in `release-please-config.json` / `.release-please-manifest.json`) automates versioning and `CHANGELOG.md` on every push to `main`. When it cuts a release, the same workflow also builds and publishes **binary wheels and an sdist** to PyPI as `cobol-parser` (`pip install cobol-parser`):
 
-- `setup.py` (`COBOLPARSER_CLOSED_SOURCE=1`, set only by this CI job -- never by local dev or `pip install -e .`) Cythonizes every `cobolparser/**/*.py` module, not just the 3 hot-path accelerators, so the built wheel contains no readable `.py` source (only thin `__init__.py` re-export stubs, which only leak the public API surface already documented in this file). `_ClosedSourceBuildPy` in `setup.py` handles the *module*-copy path; `[tool.setuptools.exclude-package-data]` in `pyproject.toml` (`"*.py"`, alongside `*.c`/`*.pyx`/`*.h`) is equally load-bearing -- `include_package_data=True` drives a separate build_py *data-files* path (`build_package_data` -> `find_data_files` -> `manifest_files`) that independently re-adds every git-tracked `.py` file unless excluded there too. This bit the project once already: every module's source leaked back into the wheel via that second path before `"*.py"` was added to the exclusion list, even though the module-copy override was working correctly all along. Don't "simplify" that exclude-package-data entry back down to `["*.c", "*.pyx", "*.h"]`.
-- `cibuildwheel` (`[tool.cibuildwheel]` in `pyproject.toml`) builds one wheel each for manylinux x86_64, macOS arm64, and Windows AMD64, across Python 3.11-3.13 (9 wheels total). Its `test-command` runs against *every* one of those 9 wheels in CI: `scripts/check_installed_no_leaked_source.py` (no `.py`/`.c`/`.pyx`/`.h`/`.pyi` leaked, extension modules present) followed by a closed-source-build import smoke test and a fast pytest subset -- all against the installed wheel, not the source tree.
-- No sdist and no pure-Python fallback wheel are published anywhere -- both would ship full source.
-- `scripts/verify_closed_source_wheel.py` builds a wheel locally with the same env var and asserts no `.py` source leaked in (via the same `scripts/_closed_source_checks.py` assertion the CI check uses), then smoke-installs it into a throwaway venv, for manual verification outside CI. Its wheel glob is `*.whl`, not `cobolparser-*.whl` -- the PyPI distribution name `cobol-parser` normalizes to `cobol_parser-*.whl` in the actual filename, which does not start with `cobolparser`.
+- Source is **not** hidden: only the 3 hot-path accelerators (`_lexer_fast`, `_preprocess_fast`, `_data_fast`) are Cython-compiled; every other module ships as plain `.py`. `[tool.setuptools.exclude-package-data]` in `pyproject.toml` keeps only the generated `.c`/`.pyx`/`.h` out of wheels.
+- `cibuildwheel` (`[tool.cibuildwheel]` in `pyproject.toml`) builds one wheel each for manylinux x86_64, macOS arm64, and Windows AMD64, across Python 3.11-3.13 (9 wheels total); its `test-command` imports the three accelerators and runs a fast pytest subset against the installed wheel. A `build-sdist` job publishes the sdist alongside them.
 - Use `workflow_dispatch` with `target: testpypi` on `.github/workflows/release-please.yml` to rehearse the whole build-all-9-wheels-and-publish pipeline against test.pypi.org (one-time Trusted Publisher registration required there first) before trusting a real release.
 - This is a wholly separate release artifact from the backend's vendoring flow (see "Backend Integration" above) -- publishing to PyPI does not change how `backend/` consumes this library.
-- Design/implementation history: `docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md` and `docs/superpowers/plans/2026-08-14-pypi-closed-source-release.md`.
+- Design history (superseded: the closed-source approach was dropped): `docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md` and `docs/superpowers/plans/2026-08-14-pypi-closed-source-release.md`.
 
 ## Code Style and Conventions
 
@@ -670,11 +668,8 @@ The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather
   - `metrics/io_ticket_tracker.py` -- Tracks IO-related work items
   - `perf/io_threshold_guard.py` -- Guards IO performance against thresholds
 - `scripts/validate_io_coverage.py` -- Standalone IO coverage validator
-- `scripts/verify_closed_source_wheel.py` -- Builds a closed-source wheel locally (`COBOLPARSER_CLOSED_SOURCE=1`) and verifies no `.py` source leaked in, then smoke-installs it; see "Release & Distribution" above
-- `scripts/check_installed_no_leaked_source.py` -- The same no-leaked-source assertion, but against an already-installed package rather than a wheel zip; this is what `cibuildwheel`'s `test-command` runs against every one of the 9 release wheels in CI, since cibuildwheel's test phase has no access to the wheel path itself
-- `scripts/_closed_source_checks.py` -- Shared `assert_no_leaked_source()` helper used by both of the above
 - `benchmarks/` -- Performance benchmark programs
 - `reports/` -- Audit reports
-- `setup.py` -- Builds the optional Cython extension modules (`_lexer_fast`, `_preprocess_fast`, `_data_fast`). Compile in place with `python setup.py build_ext --inplace`; both `.pyx` and pre-generated `.c` files are checked into the repo so the build does not require Cython at install time. Set `COBOLPARSER_SKIP_EXT=1` to opt out of the C build entirely. Also implements the closed-source build mode (`COBOLPARSER_CLOSED_SOURCE=1`) used only by the release CI job — see "Release & Distribution" above.
+- `setup.py` -- Builds the optional Cython extension modules (`_lexer_fast`, `_preprocess_fast`, `_data_fast`). Compile in place with `python setup.py build_ext --inplace`; both `.pyx` and pre-generated `.c` files are checked into the repo so the build does not require Cython at install time. Set `COBOLPARSER_SKIP_EXT=1` to opt out of the C build entirely.
 - `.pre-commit-config.yaml` -- Hooks for `ruff` (with `--fix`), `ruff-format`, `black`, and `mypy cobolparser/` (with `--ignore-missing-imports`). The CI lint/typecheck jobs duplicate these checks, so running `pre-commit run --all-files` locally catches the same issues.
 - `CHANGELOG.md` -- Keep-a-Changelog history. The Unreleased section is the source of truth for which analyzers and CLI subcommands are wired up beyond the 1.0.0 baseline.
