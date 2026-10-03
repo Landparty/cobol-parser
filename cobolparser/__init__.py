@@ -233,7 +233,7 @@ CobolParseError = ParseError
 # Version info
 __version__ = "1.9.0"  # x-release-please-version
 __author__ = "Samuel Dion"
-__license__ = "Proprietary"
+__license__ = "AGPL-3.0-or-later"
 
 # Public API - controls what gets imported with "from cobolparser import *"
 __all__ = [

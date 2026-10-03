@@ -35,7 +35,7 @@ The OKF is more specific and more current than this file for the above topics. W
 
 ## Project Overview
 
-**cobolparser** is a comprehensive COBOL parser for Python with IBM Enterprise COBOL focus. It converts COBOL source code into a traversable AST with JSON export, error recovery, and batch multi-file parsing support. See `pyproject.toml` for the current version (release-please keeps it current); authored by Samuel Dion. License is proprietary ("All rights reserved" — see `LICENSE`), not open source.
+**cobolparser** is a comprehensive COBOL parser for Python with IBM Enterprise COBOL focus. It converts COBOL source code into a traversable AST with JSON export, error recovery, and batch multi-file parsing support. See `pyproject.toml` for the current version (release-please keeps it current); authored by Samuel Dion. License is AGPL-3.0-or-later (see `LICENSE`).
 
 ## Backend Integration
 
