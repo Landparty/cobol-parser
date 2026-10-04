@@ -160,6 +160,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`DynamicCallAnalyzer` ignored REDEFINES** (#257): a MOVE through a
+  `REDEFINES` overlay (or to the group it redefines) writes the bytes a
+  dynamic `CALL` reads, but `possible_values` was still reported as complete.
+  Such a CALL is now flagged `possible_values_incomplete`, so consumers no
+  longer treat its target list as exhaustive.
 * **`business-rules` rendered `WHEN NOT 0 THRU 17` as `AGE <> 0 THRU 17`**
   (#260): a negated range selector now reads
   `NOT (AGE >= 0 AND AGE <= 17)`, and the derived `WHEN OTHER` condition is

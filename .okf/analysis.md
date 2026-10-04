@@ -1318,6 +1318,18 @@ randomization. The `analyze` CLI also emits the
 `possible_values_incomplete` flag now (see cli.md). Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA2PossibleValuesDeterministic`.
 
+**A write through a REDEFINES overlay is a write to the CALL variable
+(#257).** `_overlapping_names()` -- which decides what counts as "writing
+the CALL variable's storage" for `_mark_untracked_writes()` -- follows
+`REDEFINES` as well as the group hierarchy: the redefining item, the item it
+redefines (matched by name at the same level number) and every subordinate
+on either side form one storage cluster (union-find, so several
+redefinitions of one area join). `MOVE 'PGMZ' TO WS-AREA` therefore marks a
+`CALL WS-PGMN` (`WS-PGMN REDEFINES WS-AREA`) incomplete, as does a group
+`MOVE ... TO WS-REC` for a `CALL WS-NM2` inside `WS-REC2 REDEFINES WS-REC`.
+No byte-range precision: like the hierarchy rule, any write to the overlay
+counts. Pinned by `tests/unit/test_value_tracker.py::TestRedefinesOverlap`.
+
 ## IMSSegmentAnalyzer
 
 ```python
