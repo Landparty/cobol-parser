@@ -2677,7 +2677,11 @@ SETting a condition name also counts its item.
 then `_tidy()` (`T-K ( IX )` -> `T-K(IX)`, `NOT =` reads `<>`). EVALUATE
 selector literals arrive **unquoted** from the parser, so a non-identifier,
 non-numeric, non-figurative selector is re-quoted -- except the space-joined
-call shape `DFHRESP ( NORMAL )`, which is an expression. Level-88 values are
+call shape `DFHRESP ( NORMAL )`, which is an expression. A negated range
+selector (`WHEN NOT 0 THRU 17`, a `Condition` dict with `negated` plus
+`start`/`end`) reads `NOT (AGE >= 0 AND AGE <= 17)` from those bounds, not
+from its raw `THRU` text; only a single negated value reads `AGE <> 6`
+(#260). Level-88 values are
 also stored unquoted with `THRU` as `"THROUGH:end"`; `_condition_values`
 quotes them unless the item's PICTURE / USAGE is numeric. STRING sources are
 unquoted too, so one naming no declared item is re-quoted. Actions are

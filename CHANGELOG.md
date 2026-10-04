@@ -160,6 +160,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`business-rules` rendered `WHEN NOT 0 THRU 17` as `AGE <> 0 THRU 17`**
+  (#260): a negated range selector now reads
+  `NOT (AGE >= 0 AND AGE <= 17)`, and the derived `WHEN OTHER` condition is
+  built from that.
 * **`dclgen-check` warned on `COMP-5` integer host variables** (#259): `COMP-5`
   is now treated as the same storage as `COMP` (it is, on big-endian z/OS),
   so IBM's recommended spelling for an INTEGER / SMALLINT / BIGINT host
