@@ -439,7 +439,8 @@ class CobolParser:
             return self._create_result(None)
 
     # The @overload stubs below are for static type checkers only and must
-    # never be compiled: Cython's whole-module closed-source build evaluates
+    # never be compiled: a whole-module Cython build (the retired closed-source
+    # release build compiled this file) evaluates
     # each stub's `param: T = ...` default against its annotation at class-
     # body execution time (CPython never does this), and under the release
     # build's optimization flags that mismatch doesn't raise a clean error --

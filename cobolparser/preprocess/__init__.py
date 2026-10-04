@@ -45,10 +45,7 @@ Usage Example:
     print(result.expanded_source)
 """
 
-# NOTE: keep this file a thin re-export stub. The closed-source release build
-# (COBOLPARSER_CLOSED_SOURCE=1, see setup.py) compiles every module in the
-# package EXCEPT __init__.py/__main__.py, so anything defined here ships as
-# readable .py source in the published wheel. Implementation belongs in
+# NOTE: keep this file a thin re-export stub. Implementation belongs in
 # _normalize.py (or another private sibling), not here.
 from ._normalize import (
     ALL_COMMENT_INDICATORS,
