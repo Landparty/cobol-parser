@@ -160,6 +160,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`complexity` scored a computed GO TO as straight-line code** (#263):
+  `GO TO A B C DEPENDING ON X` now adds one decision point per target, as an
+  EVALUATE with one WHEN per target does, so dispatcher paragraphs are no
+  longer under-graded by `complexity`, its lint rule and `health`.
 * **`VALUE X"..."` generated the wrong data** (audit 2026-09-27, 2.1): a
   typed literal in a VALUE clause lost its prefix, so `value_clause` read
   `"4142"` for `X"4142"` and `gen-data` wrote `41` instead of `AB`. The
