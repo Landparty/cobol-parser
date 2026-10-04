@@ -3138,3 +3138,15 @@ only the inner program. `strip_compiler_directives` had the same blind spot:
 its directive section never closed, so `PROCESS SECTION.` in the PROCEDURE
 DIVISION was blanked as a PROCESS card. A comment record (`*`/`/` in column
 7) never matches. Pinned by `tests/regression/test_sequence_area_tag_header.py`.
+
+# REPLACE ahead of the IDENTIFICATION DIVISION (#254, 2026-10-04)
+
+`_skip_to_identification_division` now also keeps every line a well-formed
+`REPLACE` statement spans (`replace_statement.find_replace_statement_spans`
+over the pre-header text, via `_replace_statement_lines`). It runs before
+`apply_replace_statements`, so a leading `REPLACE ==WS-X== BY ==WS-Y==.` --
+legal as the first statement of a compilation unit -- used to be blanked
+with no warning. Other pre-header junk is still dropped; line count is
+unchanged. Covers `parse_cobol`, `CobolParser.parse` and
+`parse_cobol_with_expansion`. Pinned by
+`tests/regression/test_replace_before_identification_division.py`.

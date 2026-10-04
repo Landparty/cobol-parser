@@ -1409,3 +1409,9 @@ qualification, so `REPLACING X BY WS-FLD OF WS-GRP` no longer sets the
 library qualifier to `WS-GRP` and drops `OF WS-GRP`, and `WS-TBL (2)` no
 longer loses `(2)`. NIST SM202A / SM206A now expand every COPY. Pinned by
 `tests/regression/test_copy_replacing_identifier_operand.py`.
+
+**`find_replace_statement_spans(source)` (#254).** New helper in
+`replace_statement.py`: the `(start, end)` offsets of every well-formed
+REPLACE statement, from the same `_ReplaceScanner` `apply_replace_statements`
+uses. `CobolParser._skip_to_identification_division` uses it to keep a
+REPLACE written ahead of the IDENTIFICATION DIVISION header.

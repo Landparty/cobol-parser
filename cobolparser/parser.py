@@ -44,6 +44,7 @@ from .preprocess import (
 from .preprocess._normalize import ID_DIVISION_HEADER_RE
 from .preprocess.replace_statement import (
     apply_replace_statements,
+    find_replace_statement_spans,
     strip_unexpanded_copy_statements,
 )
 from .profiling import ProfilerContext, ProfilingResult
@@ -183,24 +184,47 @@ class CobolParser:
         that runs later must still see it, or every ``>>IF`` on the symbol
         evaluates to FALSE. (``CBL`` / ``PROCESS`` option lines are removed
         by ``strip_compiler_directives`` right after this step.)
+
+        A ``REPLACE`` statement is kept too: COBOL-85 and IBM allow it as
+        the first statement of a compilation unit, ahead of the header, and
+        ``apply_replace_statements`` only runs later (#254). Every line a
+        well-formed REPLACE statement touches is kept whole.
         """
         lines = split_source_lines(content, keepends=True)
 
         for i, line in enumerate(lines):
             if _ID_DIV_RE.search(line):
+                replace_lines = CobolParser._replace_statement_lines(lines[:i])
                 kept = [
                     (
                         preceding
-                        if preceding.strip().startswith(">>")
+                        if index in replace_lines
+                        or preceding.strip().startswith(">>")
                         or preceding.strip()[6:8].strip().startswith(">>")
                         or preceding.strip().upper().startswith(("CBL", "PROCESS"))
                         else "\n"
                     )
-                    for preceding in lines[:i]
+                    for index, preceding in enumerate(lines[:i])
                 ]
                 return "".join(kept + lines[i:])
 
         return content
+
+    @staticmethod
+    def _replace_statement_lines(lines: list[str]) -> set[int]:
+        """Indexes of the *lines* a well-formed REPLACE statement spans."""
+        prefix = "".join(lines)
+        if "REPLACE" not in prefix.upper():
+            return set()
+        spans = find_replace_statement_spans(prefix)
+        if not spans:
+            return set()
+        indexes: set[int] = set()
+        for start, end in spans:
+            first = prefix.count("\n", 0, start)
+            last = prefix.count("\n", 0, max(start, end - 1))
+            indexes.update(range(first, last + 1))
+        return indexes
 
     def _parse_core(
         self,

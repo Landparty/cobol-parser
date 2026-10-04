@@ -504,6 +504,12 @@ def apply_replace_statements(source: str, warnings: list[str] | None = None) -> 
     return "".join(out)
 
 
+def find_replace_statement_spans(source: str) -> list[tuple[int, int]]:
+    """``(start, end)`` offsets of every well-formed REPLACE statement in
+    *source* (``REPLACE OFF.`` included), in source order."""
+    return [(stmt.start, stmt.end) for stmt in _ReplaceScanner(source).scan()]
+
+
 def strip_unexpanded_copy_statements(
     source: str, warnings: list[str] | None = None
 ) -> str:
@@ -569,5 +575,6 @@ def strip_unexpanded_copy_statements(
 
 __all__ = [
     "apply_replace_statements",
+    "find_replace_statement_spans",
     "strip_unexpanded_copy_statements",
 ]
