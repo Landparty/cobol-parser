@@ -8,6 +8,8 @@ Unsatisfiable with a reason, never a value.
 
 from __future__ import annotations
 
+import pytest
+
 from cobolparser.analysis.constraints import FieldConstraint
 from cobolparser.analysis.domains import Unsatisfiable, Witness, solve
 from cobolparser.generators.data.layout import FieldCategory, FieldSpec
@@ -290,5 +292,91 @@ class TestWitnessSatisfiesConstraints:
         spec = _numeric_spec(integer_digits=1)  # max 9
         result = solve(
             spec, [_constraint(spec, "ge", ("5",)), _constraint(spec, "le", ("2",))]
+        )
+        assert isinstance(result, Unsatisfiable)
+
+
+class TestEnumDomainHonoursRelationalConjuncts:
+    """Issue #244: a level-88 field with a relational conjunct alongside a set
+    op. `IF NOT HIGH-V AND WS-C > 5` (88s LOW-V=1, HIGH-V=9 on PIC 99) used
+    to pick the enum's first surviving value, 1 -- which satisfies
+    `not_in_set ("9")` and fails `gt 5`, because the enum path treated every
+    relational op as a no-op and never re-checked its pick."""
+
+    @staticmethod
+    def _spec() -> FieldSpec:
+        return _numeric_spec(name="WS-C", integer_digits=2, condition_values=("1", "9"))
+
+    @pytest.mark.parametrize(
+        ("op", "admits"),
+        [
+            ("gt", lambda n: n > 5),
+            ("ge", lambda n: n >= 5),
+            ("lt", lambda n: n < 5),
+            ("le", lambda n: n <= 5),
+        ],
+    )
+    def test_then_arm_witness_satisfies_the_relational_conjunct(self, op, admits):
+        spec = self._spec()
+        result = solve(
+            spec,
+            [
+                _constraint(spec, "not_in_set", ("9",)),
+                _constraint(spec, op, ("5",)),
+            ],
+        )
+        assert isinstance(result, Witness)
+        assert int(result.value) != 9
+        assert admits(int(result.value))
+
+    def test_gt_witness_is_inside_the_open_interval(self):
+        spec = self._spec()
+        result = solve(
+            spec,
+            [
+                _constraint(spec, "not_in_set", ("9",)),
+                _constraint(spec, "gt", ("5",)),
+            ],
+        )
+        assert isinstance(result, Witness)
+        assert int(result.value) in (6, 7, 8) or int(result.value) > 9
+
+    def test_else_1_arm_still_picks_the_declared_value(self):
+        spec = self._spec()
+        result = solve(spec, [_constraint(spec, "in_set", ("9",))])
+        assert isinstance(result, Witness)
+        assert int(result.value) == 9
+
+    def test_else_2_arm_satisfies_le(self):
+        spec = self._spec()
+        result = solve(spec, [_constraint(spec, "le", ("5",))])
+        assert isinstance(result, Witness)
+        assert int(result.value) <= 5
+
+    def test_enum_value_that_satisfies_the_relational_op_is_still_preferred(self):
+        """The re-check must not cost the useful witness: with `lt 5`, the
+        declared value 1 satisfies both conjuncts and stays the answer."""
+        spec = self._spec()
+        result = solve(
+            spec,
+            [
+                _constraint(spec, "not_in_set", ("9",)),
+                _constraint(spec, "lt", ("5",)),
+            ],
+        )
+        assert isinstance(result, Witness)
+        assert int(result.value) == 1
+
+    def test_in_set_contradicted_by_a_relational_op_is_unsatisfiable(self):
+        """`HIGH-V AND WS-C < 5` has no witness anywhere: the enum's only
+        candidate fails `lt 5`, and the picture-domain fallback must still
+        report the contradiction rather than hand back 9."""
+        spec = self._spec()
+        result = solve(
+            spec,
+            [
+                _constraint(spec, "in_set", ("9",)),
+                _constraint(spec, "lt", ("5",)),
+            ],
         )
         assert isinstance(result, Unsatisfiable)

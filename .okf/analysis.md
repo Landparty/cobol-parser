@@ -1808,6 +1808,17 @@ no-op'ing them, so a witness can never silently violate a set op it was
 solved against. A genuine contradiction (`in_set ("A")` AND
 `not_in_set ("A")`) is still `Unsatisfiable`.
 
+**An enum pick is re-checked against every conjunct** (2026-10-04, #244).
+`EnumDomain` narrows only by set ops; a relational or class conjunct beside
+one is a no-op there. `IF NOT HIGH-V AND WS-C > 5` (88s `1`/`9`) used to
+return `1` -- it survives `not_in_set ("9")` and fails `> 5`. Now each
+surviving declared value is pinned (`eq`) into a fresh `_picture_domain()`
+and every conjunct is applied (`_pinned_picture_domain`); the first value
+that holds is the witness, rendered through the same post-checks as any
+other. None holding falls back to the picture domain, which solves the
+relational part itself (`52` for the example) or reports the contradiction
+(`HIGH-V AND WS-C < 5` is `Unsatisfiable`).
+
 **AND/OR/NOT via De Morgan.** `IfStatement.condition` is walked once for the
 THEN arm (`negate=False`) and once more for the ELSE arm (`negate=True`).
 Most negation is baked into concrete operator strings (`NOT_EQUAL`/`IS NOT

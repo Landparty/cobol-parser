@@ -257,8 +257,11 @@ parent_proc   the enclosing paragraph name, or null
 status        "targeted" | "merged" | "missed"
 merged_into   the scenario name it was folded into, when status == "merged"
 reason        why, when status == "missed" -- e.g. "unreachable",
-              "unsatisfiable: <domain reason>", or an extraction gap
-              carried over from Phase 4's ConstraintReport.unsupported
+              "unsatisfiable: <domain reason>", an extraction gap
+              carried over from Phase 4's ConstraintReport.unsupported, or
+              "witness failed verification: ..." when the scenario's own
+              generated data violates the arm (the arm is also listed in
+              the bundle's `unresolved`)
 ```
 
 A `reason` is **never** blank when `status == "missed"` — a silent miss with

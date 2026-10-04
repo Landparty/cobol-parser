@@ -213,7 +213,18 @@ def solve(
             [v for v in spec.condition_values if v.upper() not in _FIGURATIVE_VALUES]
         )
         if all(_apply(domain, c) is None for c in constraints):
-            witness = domain.pick()
+            # The enum narrows only by set ops; a relational conjunct
+            # alongside one (`IF NOT HIGH-V AND WS-C > 5`) is a no-op there.
+            # So each surviving declared value is re-checked against EVERY
+            # conjunct in the field's real (picture) domain, and the first
+            # that holds is the witness. None holding falls through to the
+            # picture domain, which solves the relational part itself.
+            for candidate in domain.values:
+                pinned = _pinned_picture_domain(spec, candidate, constraints)
+                if pinned is not None:
+                    domain = pinned
+                    witness = pinned.pick()
+                    break
 
     if witness is None:
         domain = _picture_domain(spec)
@@ -261,6 +272,21 @@ def solve(
             f"rendered witness {rendered!r} violates the constraint set"
         )
     return Witness(rendered)
+
+
+def _pinned_picture_domain(
+    spec: FieldSpec, candidate: str, constraints: list[FieldConstraint]
+) -> Domain | None:
+    """*spec*'s picture domain narrowed to *candidate* and then by every
+    conjunct, or ``None`` when *candidate* violates any of them."""
+    domain = _picture_domain(spec)
+    pin = FieldConstraint(
+        constraints[0].field, "eq", (candidate,), "level-88 candidate"
+    )
+    for constraint in (pin, *constraints):
+        if _apply(domain, constraint) is not None:
+            return None
+    return domain
 
 
 def _rendered_numeric_ok(rendered: str, domain: NumericDomain) -> bool:

@@ -1388,6 +1388,15 @@ integer-like, so answering it lexically would stamp "verified" on a
 comparison nobody can evaluate). Equality survives the mixed case: a value
 that is not a number cannot equal a numeric literal either way.
 
+**A `violated` verdict demotes the scenario's arms to `missed`** (2026-10-04,
+#244). `generate_with_scenarios` passes each verdict to
+`_demote_violated_arms`: every `targeted`/`merged` arm of a scenario with a
+`violated` field is re-counted as `missed` in `scenario_coverage` (reason
+`"witness failed verification: ..."`, counts kept exact) and gets one
+`bundle.unresolved` entry, so `gen-fixtures --strict` exits 2 instead of
+passing a coverage claim its own data contradicts. `absent`/`unknown` do
+not demote -- they are "could not tell", which `unverified` already says.
+
 `cli/parse.py`'s `gen-fixtures` prints an unverified summary on **stderr**
 (stdout stays JSON-only — mockymock's `fixtures` contract), and mockymock's
 `generate --with-data` renders the same reasons as a `*> UNVERIFIED:` comment

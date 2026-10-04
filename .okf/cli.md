@@ -467,7 +467,8 @@ CICS, DLI, console ACCEPT) — not just one record's CSV rows.
   against a downstream consumer's own boundary walk.
 * `--strict` exits **2** (not 1 -- that stays "could not run at all") when
   `bundle.unresolved` is non-empty: anything Phase 1's index, Phase 2's
-  inventory, or Phase 3's own field resolution could not pin down. The
+  inventory, or Phase 3's own field resolution could not pin down -- and
+  (since #244) any branch arm whose scenario's own data *violates* it. The
   CI-friendly "no silent gaps" switch.
 
 ## Selecting a program unit (`--program`)
