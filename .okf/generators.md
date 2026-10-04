@@ -48,7 +48,10 @@ what resolves on attribute access.
 `ProgramFlowReport` (see [analysis.md](analysis.md)) and emit a diagram
 string. `FlowchartOptions` controls statement counts, edge labels,
 fall-through edges, unreachable nodes, and synthetic external-CALL nodes.
-Driven by `cobol-parser program-flow --format mermaid|dot`.
+Driven by `cobol-parser program-flow --format mermaid|dot`. Node ids and
+labels come from `FlowNode.key` (the `qualified_name` when two paragraphs
+share a name, issue #258), so `X1 OF S1` and `X1 OF S2` are drawn as two
+nodes (`X1_OF_S1`, `X1_OF_S2`) and edges, which name nodes by key, attach.
 
 **Black reformat (2026-08-13, no behavior change):** `_escape_mermaid_label`
 and `_is_empty_if_arm` were reformatted to match the CI-pinned

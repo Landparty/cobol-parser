@@ -31,6 +31,7 @@ from ...models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from .._procedures import ProcedureIndex, enclosing_section
 from .condition_text import render_condition_text
 from .edges import EdgeCollector
 from .models import BranchArm, BranchNode, FlowEdge, FlowEdgeType, FlowNode
@@ -116,6 +117,14 @@ class ProcedureScanner:
         # Current procedure context for statement scanning
         self._current_procedure: str | None = None
         self._branch_seq: int = 0
+        # Procedure identities (unique keys for same-named paragraphs);
+        # rebuilt by collect_procedures().
+        self._index = ProcedureIndex([])
+
+    @property
+    def index(self) -> ProcedureIndex:
+        """The procedure identities :meth:`collect_procedures` built."""
+        return self._index
 
     def collect_procedures(self, proc_division: CobolDivision) -> None:
         """Collect all paragraphs and sections as flow nodes.
@@ -125,11 +134,6 @@ class ProcedureScanner:
         physical order (entry-point detection and fall-through edges both
         depend on ``_ordered_procedures`` matching source order).
         """
-        top_level_items: list[Any] = sorted(
-            [*proc_division._sections.values(), *proc_division.paragraphs],
-            key=lambda item: item.location.line,
-        )
-
         leading = leading_sentences(proc_division)
         if leading is not None:
             self._nodes[LEADING_SENTENCES_NODE] = FlowNode(
@@ -139,42 +143,18 @@ class ProcedureScanner:
             )
             self._ordered_procedures.append(LEADING_SENTENCES_NODE)
 
-        for item in top_level_items:
-            if isinstance(item, CobolSection):
-                name = item.section_name
-                if name:
-                    upper_name = name.upper()
-                    if upper_name not in self._nodes:
-                        self._nodes[upper_name] = FlowNode(
-                            name=upper_name,
-                            procedure_type="SECTION",
-                            location=item.location,
-                        )
-                        self._ordered_procedures.append(upper_name)
-
-                for para in item.paragraphs:
-                    pname = para.paragraph_name
-                    if pname and is_valid_procedure_name(pname):
-                        upper_pname = pname.upper()
-                        if upper_pname not in self._nodes:
-                            self._nodes[upper_pname] = FlowNode(
-                                name=upper_pname,
-                                procedure_type="PARAGRAPH",
-                                location=para.location,
-                            )
-                            self._ordered_procedures.append(upper_pname)
-            else:
-                # Top-level paragraph (not inside a section)
-                pname = item.paragraph_name
-                if pname and is_valid_procedure_name(pname):
-                    upper_pname = pname.upper()
-                    if upper_pname not in self._nodes:
-                        self._nodes[upper_pname] = FlowNode(
-                            name=upper_pname,
-                            procedure_type="PARAGRAPH",
-                            location=item.location,
-                        )
-                        self._ordered_procedures.append(upper_pname)
+        self._index = ProcedureIndex.build(proc_division)
+        self._collector.set_index(self._index)
+        for entry in self._index.entries:
+            if entry.key in self._nodes:
+                continue
+            self._nodes[entry.key] = FlowNode(
+                name=entry.name,
+                procedure_type=entry.procedure_type,
+                location=entry.location,
+                qualified_name=entry.qualified_name,
+            )
+            self._ordered_procedures.append(entry.key)
 
     def scan_statements(self, proc_division: CobolDivision) -> None:
         """Scan all statements to build edges and compute node metrics."""
@@ -184,13 +164,18 @@ class ProcedureScanner:
         # and the first paragraph header land in an unnamed paragraph: they
         # are the section node's own statements (its PERFORMs, its STOP RUN
         # suppressing the section's fall-through), not something to skip.
+        keys = {id(entry.node): entry.key for entry in self._index.entries}
         for section in proc_division._sections.values():
             for para in section.paragraphs:
-                pname = para.paragraph_name
-                if not pname and section.section_name:
-                    pname = section.section_name
-                if pname and is_valid_procedure_name(pname):
-                    self._current_procedure = pname.upper()
+                pname = para.paragraph_name or section.section_name
+                body = section if not para.paragraph_name else para
+                # A procedure the index dropped as a duplicate key (which
+                # the compiler rejects) still merges into its namesake.
+                key = keys.get(id(body)) or (
+                    pname.upper() if pname and is_valid_procedure_name(pname) else None
+                )
+                if key is not None:
+                    self._current_procedure = key
                     self._scan_paragraph_statements(para)
 
         # Scan top-level paragraphs
@@ -231,11 +216,13 @@ class ProcedureScanner:
             if not stmt.entry_name.strip("'\"").strip():
                 continue
             para_name = stmt.section_name
-            if not para_name:
+            if not para_name or not para_name.strip():
                 continue
-            upper_para_name = para_name.strip().upper()
-            if upper_para_name and upper_para_name not in self._entry_points:
-                self._entry_points.append(upper_para_name)
+            for key in self._index.resolve(
+                para_name, from_section=enclosing_section(stmt)
+            ):
+                if key not in self._entry_points:
+                    self._entry_points.append(key)
 
     @staticmethod
     def _record_exit_statement(node: FlowNode, kind: str, location: Any) -> None:
@@ -316,19 +303,23 @@ class ProcedureScanner:
                 # IF/EVALUATE arm the PERFORM lives in.
                 self._collector.process_perform(stmt, proc_name)
                 # Record perform target in current arm for swimlane data.
-                if arm is not None and stmt.target_paragraph:
-                    target = stmt.target_paragraph.upper()
-                    if target not in arm.nested_call_targets:
-                        arm.nested_call_targets.append(target)
+                if arm is not None:
+                    for target in self._collector.resolve(
+                        stmt, stmt.target_paragraph, "target_qualifier"
+                    ):
+                        if target not in arm.nested_call_targets:
+                            arm.nested_call_targets.append(target)
                 # Queue inline PERFORM blocks
                 push_many(stmt.inline_statements, source_id, arm)
             elif isinstance(stmt, GoStatement):
                 node.goto_count += 1
                 self._collector.process_goto(stmt, proc_name)
-                if arm is not None and stmt.target_paragraph:
-                    target = stmt.target_paragraph.upper()
-                    if target not in arm.nested_call_targets:
-                        arm.nested_call_targets.append(target)
+                if arm is not None:
+                    for target in self._collector.resolve(
+                        stmt, stmt.target_paragraph, "target_qualifier"
+                    ):
+                        if target not in arm.nested_call_targets:
+                            arm.nested_call_targets.append(target)
             elif isinstance(stmt, CallStatement):
                 node.call_count += 1
                 self._collector.process_call(stmt, proc_name)

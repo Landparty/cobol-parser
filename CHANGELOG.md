@@ -160,6 +160,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Same-named fields and paragraphs were merged by name** (#258): two
+  records carrying the same field names (the `MOVE CORRESPONDING` shape)
+  and paragraph names reused across sections (`X1` in `S1` and in `S2`)
+  each collapsed into one entry, so `unused-variables` missed the unused
+  field of the pair, `dead-code` missed the shadowed paragraph, `xref` mixed
+  both fields' references, and `program-flow` dropped the second paragraph
+  and pointed `PERFORM X1 OF S2` at S1's. References now resolve by the
+  COBOL rule (the `OF`/`IN` qualifier, else the referencing statement's own
+  section, else the unique name; an ambiguous reference keeps every
+  candidate alive). Non-breaking: `name` is unchanged and a node, dead or
+  unused item, complexity row or xref entry whose name is shared also
+  carries `qualified_name` (`"X1 OF S2"`, `"AMT OF OUT-REC"`); a program
+  with no shared names produces the same output as before. In
+  `program-flow`, edges, entry/exit points, cycles and `unreachable_nodes`
+  name such a node by its `qualified_name`. `complexity` now measures each
+  same-named paragraph on its own body instead of summing them.
 * **`redundancy` / `scan --clones` / `health` reported paragraphs that
   behave differently as exact clones** (#262): a statement's fingerprint
   covered only its type and operand list, so a different COMPUTE formula,

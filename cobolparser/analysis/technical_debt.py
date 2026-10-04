@@ -372,7 +372,10 @@ class TechnicalDebtAnalyzer:
         recursion_report: RecursionRiskReport,
         top_n: int,
     ) -> list[OffenderProcedure]:
-        dead_names = {item.name for item in redundancy_report.dead_items}
+        dead_names = {
+            getattr(item, "qualified_name", None) or item.name
+            for item in redundancy_report.dead_items
+        }
         cloned_names = {
             member.name
             for group in redundancy_report.clone_groups
@@ -391,6 +394,8 @@ class TechnicalDebtAnalyzer:
         for proc in complexity_report.procedures:
             severity = 0.0
             reasons: list[str] = []
+            # Flow keys: "X1 OF S2" for a paragraph sharing its name.
+            key = proc.qualified_name or proc.name
 
             if proc.rating == "HIGH":
                 severity += 30
@@ -403,7 +408,7 @@ class TechnicalDebtAnalyzer:
                 severity += proc.goto_count * 3
                 reasons.append(f"{proc.goto_count} GO TO(s)")
 
-            if proc.name in dead_names:
+            if key in dead_names:
                 severity += 20
                 reasons.append("dead code (unreferenced)")
 
@@ -411,11 +416,11 @@ class TechnicalDebtAnalyzer:
                 severity += 15
                 reasons.append("member of a duplicate-paragraph clone group")
 
-            if proc.name in unreachable_names:
+            if key in unreachable_names:
                 severity += 20
                 reasons.append("unreachable from any entry point")
 
-            if proc.name in recursive_names:
+            if key in recursive_names:
                 severity += 25
                 reasons.append("member of a no-escape recursion cycle")
 

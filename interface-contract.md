@@ -59,6 +59,12 @@ flow_dict = flow_report.to_dict()    # must return dict
 ```
 - Result is stored in `metadata["program_flow_data"]`.
 - Wrapped in try/except — failure returns None without blocking.
+- Node `name` is the bare procedure name. When two paragraphs share a name
+  (different sections), each node also has `qualified_name` (`"X1 OF S2"`),
+  and edges, `entry_points`, `exit_points`, `cycles`, `unreachable_nodes`
+  and branch `parent_proc` refer to it by that `qualified_name`. Join edges
+  to nodes on `qualified_name ?? name`. Absent for every node whose name is
+  unique, so such programs serialize exactly as before (issue #258).
 
 ### 5. Exception type
 ```python

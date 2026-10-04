@@ -311,7 +311,7 @@ class TestA7GradeMatchesSerializedScore:
 
 
 class TestA8SameNamedParagraphs:
-    def test_same_named_paragraphs_aggregate_complexity(self):
+    def test_same_named_paragraphs_measured_separately(self):
         ast = _parse("""       IDENTIFICATION DIVISION.
        PROGRAM-ID. SAMENAME.
        DATA DIVISION.
@@ -333,10 +333,13 @@ class TestA8SameNamedParagraphs:
            STOP RUN.
 """)
         report = ComplexityAnalyzer().analyze(ast)
-        (do_work,) = [p for p in report.procedures if p.name == "DO-WORK"]
-        # Both bodies contribute: 1 + 3 IF decisions.
-        assert do_work.cyclomatic_complexity == 4
-        assert do_work.max_nesting_depth == 3
+        by_key = {p.qualified_name: p for p in report.procedures if p.name == "DO-WORK"}
+        # Issue #258: each same-named paragraph is its own flow node now, so
+        # each is measured on its own body rather than both summed into one.
+        assert set(by_key) == {"DO-WORK OF SEC-ONE", "DO-WORK OF SEC-TWO"}
+        assert by_key["DO-WORK OF SEC-ONE"].cyclomatic_complexity == 1
+        assert by_key["DO-WORK OF SEC-TWO"].cyclomatic_complexity == 4
+        assert by_key["DO-WORK OF SEC-TWO"].max_nesting_depth == 3
 
 
 class TestA9UsageOnlyRootDataItem:

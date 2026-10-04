@@ -347,9 +347,9 @@ class MermaidFlowchartGenerator:
 
         # ---- nodes (paragraphs / sections) ------------------------------------
         for node in report.nodes:
-            if not options.show_unreachable and node.name in unreachable_set:
+            if not options.show_unreachable and node.key in unreachable_set:
                 continue
-            nid = _sanitize_id(node.name)
+            nid = _sanitize_id(node.key)
             label = self._node_label(node, options)
             # paragraph → rectangle; section → rounded rectangle
             if node.procedure_type == "SECTION":
@@ -364,18 +364,18 @@ class MermaidFlowchartGenerator:
                 lines.append(f"    class {nid} entry")
             elif node.is_exit_point:
                 lines.append(f"    class {nid} exit")
-            elif node.name in unreachable_set:
+            elif node.key in unreachable_set:
                 lines.append(f"    class {nid} unreachable")
 
         # ---- exit-statement terminal nodes -------------------------------------
-        paragraph_ids = {_sanitize_id(n.name) for n in report.nodes}
+        paragraph_ids = {_sanitize_id(n.key) for n in report.nodes}
         terminal_link_count = 0
         for node in report.nodes:
             if not node.exit_statement_kind or not node.exit_statement_location:
                 continue
-            if not options.show_unreachable and node.name in unreachable_set:
+            if not options.show_unreachable and node.key in unreachable_set:
                 continue
-            nid = _sanitize_id(node.name)
+            nid = _sanitize_id(node.key)
             exit_id = _unique_exit_id(nid, paragraph_ids)
             # "@" (not a middle dot) -- emitted labels must stay ASCII, see
             # the encoding note on _short_edge_label's map.
@@ -497,7 +497,7 @@ class MermaidFlowchartGenerator:
         """Build the display label for a node, escaping Mermaid special chars."""
         # Mermaid labels inside [] / () don't need quoting but some chars must
         # be escaped.  We keep it simple: wrap in double-quotes when needed.
-        name = node.name
+        name = node.key
         if options.show_statement_counts and node.statement_count > 0:
             label = f'"{name}\\n({node.statement_count} stmts)"'
         else:
@@ -607,9 +607,9 @@ class DotFlowchartGenerator:
 
         # ---- nodes -----------------------------------------------------------
         for node in report.nodes:
-            if not options.show_unreachable and node.name in unreachable_set:
+            if not options.show_unreachable and node.key in unreachable_set:
                 continue
-            nid = _sanitize_id(node.name)
+            nid = _sanitize_id(node.key)
             role = self._node_role(node, unreachable_set)
             fill = _DOT_COLORS[role]
             fontcolor = _DOT_FONT_COLOR[role]
@@ -621,13 +621,13 @@ class DotFlowchartGenerator:
             )
 
         # ---- exit-statement terminal nodes -------------------------------------
-        paragraph_ids = {_sanitize_id(n.name) for n in report.nodes}
+        paragraph_ids = {_sanitize_id(n.key) for n in report.nodes}
         for node in report.nodes:
             if not node.exit_statement_kind or not node.exit_statement_location:
                 continue
-            if not options.show_unreachable and node.name in unreachable_set:
+            if not options.show_unreachable and node.key in unreachable_set:
                 continue
-            nid = _sanitize_id(node.name)
+            nid = _sanitize_id(node.key)
             exit_id = _unique_exit_id(nid, paragraph_ids)
             # "@" (not a middle dot): keep emitted labels ASCII, matching the
             # Mermaid generator (see the encoding note on _short_edge_label).
@@ -751,7 +751,7 @@ class DotFlowchartGenerator:
             return "entry"
         if node.is_exit_point:
             return "exit"
-        if node.name in unreachable_set:
+        if node.key in unreachable_set:
             return "unreachable"
         return "default"
 
@@ -762,7 +762,7 @@ class DotFlowchartGenerator:
         return f'"{escaped}"'
 
     def _node_label_dot(self, node: FlowNode, options: FlowchartOptions) -> str:
-        label = self._dot_str(node.name)
+        label = self._dot_str(node.key)
         if options.show_statement_counts and node.statement_count > 0:
             # The "\n" line break is DOT escape syntax and must reach the
             # output as-is: passed through _dot_str it became "\\n", which

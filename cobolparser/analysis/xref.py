@@ -83,13 +83,16 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ._names import QUALIFIER_SEPARATOR
 from .unused_variables import (
     _DICT_LIST_EXTRAS,
     _STR_ATTR_EXTRAS,
     _STR_LIST_EXTRAS,
     UnusedVariableAnalyzer,
+    _ancestor_names,
     _extract_identifiers,
     _names_from_value,
+    _qualifiers_match,
     _walk_expression_operands,
     collect_declared_items,
 )
@@ -274,6 +277,11 @@ class XrefEntry:
     references: list[XrefReference] = field(default_factory=list)
     level: int | None = None
     section: str | None = None
+    #: ``"AMT OF OUT-REC"`` when another declared data item or condition
+    #: name shares this one's name in a different record (issue #258); each
+    #: such item then has an entry of its own, and ``name`` alone no longer
+    #: identifies it.
+    qualified_name: str | None = None
 
     @property
     def reference_count(self) -> int:
@@ -290,6 +298,7 @@ class XrefEntry:
             "definition": self.definition.to_dict() if self.definition else None,
             "level": self.level,
             "section": self.section,
+            **({"qualified_name": self.qualified_name} if self.qualified_name else {}),
             "reference_count": self.reference_count,
             "references": [ref.to_dict() for ref in self.references],
         }
@@ -317,11 +326,12 @@ class XrefReport:
 
         When a name is both declared and, say, PERFORMed as a paragraph, the
         first matching entry in ``entries`` order (data items first -- see
-        ``_KIND_ORDER``) is returned.
+        ``_KIND_ORDER``) is returned. A qualified name (``"AMT OF OUT-REC"``)
+        picks out one of several same-named data items.
         """
-        upper = name.upper()
+        upper = " ".join(name.upper().split())
         for entry in self.entries:
-            if entry.name == upper:
+            if entry.name == upper or entry.qualified_name == upper:
                 return entry
         return None
 
@@ -505,6 +515,9 @@ class XrefAnalyzer:
     def __init__(self) -> None:
         self._entries: list[XrefEntry] = []
         self._data: dict[str, XrefEntry] = {}
+        # Every declared data item of a name, with its entry: two records
+        # holding a same-named field get one entry each (issue #258).
+        self._data_items: dict[str, list[tuple[XrefEntry, Any]]] = {}
         self._procedures: dict[str, XrefEntry] = {}
         self._files: dict[str, XrefEntry] = {}
         self._undefined: dict[tuple[str, str], XrefEntry] = {}
@@ -530,6 +543,7 @@ class XrefAnalyzer:
         """
         self._entries = []
         self._data = {}
+        self._data_items = {}
         self._procedures = {}
         self._files = {}
         self._undefined = {}
@@ -618,11 +632,39 @@ class XrefAnalyzer:
         *,
         level: int | None = None,
         section: str | None = None,
+        item: Any = None,
     ) -> XrefEntry:
-        """Register a declared symbol, or return the existing entry."""
+        """Register a declared symbol, or return the existing entry.
+
+        A data item (*item* given) whose name is already declared gets an
+        entry of its own when it sits in a different record (a different
+        chain of enclosing items): both are then qualified. The same chain
+        declared twice (a copybook COPYed into two sections) is a duplicate.
+        """
         upper = name.upper()
         table = self._table_for_kind(kind)
         existing = table.get(upper)
+        if item is not None:
+            path = _ancestor_names(item)
+            namesakes = self._data_items.setdefault(upper, [])
+            if existing is not None and all(
+                _ancestor_names(other) != path for _, other in namesakes
+            ):
+                entry = XrefEntry(
+                    name=upper,
+                    kind=kind,
+                    definition=location,
+                    references=[],
+                    level=level,
+                    section=section,
+                )
+                namesakes.append((entry, item))
+                self._entries.append(entry)
+                for named, named_item in namesakes:
+                    named.qualified_name = QUALIFIER_SEPARATOR.join(
+                        [upper, *_ancestor_names(named_item)]
+                    )
+                return entry
         if existing is not None:
             self._duplicates.add(upper)
             self._caveat(
@@ -640,6 +682,8 @@ class XrefAnalyzer:
         )
         table[upper] = entry
         self._entries.append(entry)
+        if item is not None:
+            self._data_items.setdefault(upper, []).append((entry, item))
         return entry
 
     def _table_for_kind(self, kind: str) -> dict[str, XrefEntry]:
@@ -659,6 +703,7 @@ class XrefAnalyzer:
                 item.location,
                 level=item.level,
                 section=section,
+                item=item,
             )
             for child in item.children:
                 if isinstance(child, ConditionNameItem):
@@ -668,6 +713,7 @@ class XrefAnalyzer:
                         child.location,
                         level=88,
                         section=section,
+                        item=child,
                     )
             # `OCCURS ... INDEXED BY ix` declares `ix` as a name in its own
             # right -- it is not a data item of its own (no level number, no
@@ -1011,8 +1057,22 @@ class XrefAnalyzer:
         never invents an undeclared symbol -- it would report intrinsic
         function names and stray keywords as undefined data items.
         """
-        upper = name.upper()
-        entry = self._lookup(upper, role)
+        upper, *qualifiers = name.upper().split(QUALIFIER_SEPARATOR)
+        entries = self._lookup_all(upper, role, qualifiers)
+        if len(entries) > 1:
+            # Every same-named item the reference can mean, as
+            # UnusedVariableAnalyzer counts it.
+            for candidate in entries:
+                candidate.references.append(
+                    XrefReference(
+                        location=location,
+                        role=role,
+                        statement=statement,
+                        context=context,
+                    )
+                )
+            return
+        entry = entries[0] if entries else None
         if entry is None and upper in _SPECIAL_REGISTERS:
             self._special_registers.add(upper)
             return
@@ -1035,6 +1095,27 @@ class XrefAnalyzer:
                 location=location, role=role, statement=statement, context=context
             )
         )
+
+    def _lookup_all(
+        self, upper: str, role: str, qualifiers: list[str]
+    ) -> list[XrefEntry]:
+        """The entries a reference resolves to: one, unless an unqualified
+        (or unresolvable) reference names a data item several records
+        declare, which counts for each of them."""
+        if role not in _PROCEDURE_ROLES and role != ROLE_FILE_OPERATION:
+            namesakes = self._data_items.get(upper, [])
+            if len(namesakes) > 1:
+                if qualifiers:
+                    matched = [
+                        entry
+                        for entry, item in namesakes
+                        if _qualifiers_match(item, qualifiers)
+                    ]
+                    if matched:
+                        return matched
+                return [entry for entry, _ in namesakes]
+        entry = self._lookup(upper, role)
+        return [entry] if entry is not None else []
 
     def _lookup(self, upper: str, role: str) -> XrefEntry | None:
         if role in _PROCEDURE_ROLES:

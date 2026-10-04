@@ -1702,6 +1702,29 @@ def test_special_registers_are_excluded_from_undefined_with_a_caveat():
 
 
 def test_duplicate_declarations_are_reported_on_the_report():
+    # The same record declared twice (a copybook COPYed into both sections):
+    # no qualifier can tell the two apart.
+    report = _analyze_source("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 CUST-REC.
+          05 CUST-ID PIC X(5).
+       LINKAGE SECTION.
+       01 CUST-REC.
+          05 CUST-ID PIC X(5).
+       PROCEDURE DIVISION.
+       MAIN.
+           MOVE 'A' TO CUST-ID
+           GOBACK.
+""")
+    assert report.duplicate_declarations == ["CUST-ID", "CUST-REC"]
+    assert "duplicate_declarations" in report.to_dict()
+
+
+def test_same_named_fields_in_different_records_get_their_own_entries():
+    # Issue #258: CUST-ID OF WS-REC and CUST-ID OF LK-REC are two fields,
+    # each with its own entry and only its own references.
     report = _analyze_source("""       IDENTIFICATION DIVISION.
        PROGRAM-ID. DUPS.
        DATA DIVISION.
@@ -1716,8 +1739,33 @@ def test_duplicate_declarations_are_reported_on_the_report():
            MOVE 'A' TO CUST-ID OF WS-REC
            GOBACK.
 """)
-    assert report.duplicate_declarations == ["CUST-ID"]
-    assert "duplicate_declarations" in report.to_dict()
+    assert report.duplicate_declarations == []
+    ws = report.entry_for("CUST-ID OF WS-REC")
+    lk = report.entry_for("CUST-ID OF LK-REC")
+    assert ws is not None and lk is not None and ws is not lk
+    assert [ref.role for ref in ws.references] == ["write"]
+    assert lk.references == []
+    assert ws.to_dict()["qualified_name"] == "CUST-ID OF WS-REC"
+
+
+def test_unqualified_reference_to_a_shared_name_counts_for_each_record():
+    report = _analyze_source("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DUPS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 IN-REC.
+          05 AMT PIC 9(4).
+       01 OUT-REC.
+          05 AMT PIC 9(4).
+       PROCEDURE DIVISION.
+       MAIN.
+           DISPLAY AMT
+           GOBACK.
+""")
+    for qualified in ("AMT OF IN-REC", "AMT OF OUT-REC"):
+        entry = report.entry_for(qualified)
+        assert entry is not None
+        assert [ref.role for ref in entry.references] == ["read"]
 
 
 _ARITH_HEADER = """

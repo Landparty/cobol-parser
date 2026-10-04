@@ -644,8 +644,9 @@ class TestDeadCodeIntegration:
         self,
     ) -> None:
         """A name reused both as a top-level paragraph and a section-owned
-        paragraph must be recorded once in ``_ordered_procedures``, whichever
-        occurrence comes first in source order.
+        paragraph is two procedures (issue #258), each recorded once in
+        ``_ordered_procedures`` in source order, the section-owned one
+        qualified.
 
         Regression test: interleaving top-level paragraphs and section-owned
         paragraphs by source line (the fix for the mixed-order bug above)
@@ -672,8 +673,12 @@ class TestDeadCodeIntegration:
         analyzer = DeadCodeAnalyzer()
         report = analyzer.analyze(result.ast)
 
-        assert analyzer._ordered_procedures == ["DUP-NAME", "MAIN-SECTION"]
-        assert report.total_procedures == 2
+        assert analyzer._ordered_procedures == [
+            "DUP-NAME",
+            "MAIN-SECTION",
+            "DUP-NAME OF MAIN-SECTION",
+        ]
+        assert report.total_procedures == 3
 
     def test_duplicate_name_across_top_level_paragraph_and_section_header(
         self,

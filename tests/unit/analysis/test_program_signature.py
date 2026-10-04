@@ -437,7 +437,9 @@ class TestReviewFollowUps:
         assert any("LK-NAME" in note for note in signature.unchecked)
         assert any("LK-REC" in note for note in signature.unchecked)
 
-    def test_group_with_fields_declared_twice_is_unknown(self):
+    def test_field_shared_with_another_record_is_told_apart(self):
+        # Issue #258: CUST-ID OF WS-CUST is a different field from CUST-ID
+        # OF LK-CUST, so writing the first says nothing about the parameter.
         signature = _signature("""       IDENTIFICATION DIVISION.
        PROGRAM-ID. DUPG.
        DATA DIVISION.
@@ -454,7 +456,9 @@ class TestReviewFollowUps:
 """)
         parameter = signature.entry_points[0].parameters[0]
         assert parameter.direction == "unknown"
-        assert any("declared more than once" in note for note in signature.unchecked)
+        assert any(
+            "LK-CUST" in note and "unreferenced" in note for note in signature.unchecked
+        )
 
 
 def test_accumulated_and_giving_operands_get_the_right_direction():

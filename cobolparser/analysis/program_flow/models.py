@@ -48,7 +48,14 @@ class FlowEdgeType(Enum):
 
 @dataclass
 class FlowNode:
-    """A paragraph or section in the program flow graph."""
+    """A paragraph or section in the program flow graph.
+
+    ``name`` is the bare procedure name. When two paragraphs share a name
+    (legal COBOL when they sit in different sections), each also carries a
+    ``qualified_name`` (``"X1 OF S2"``), and that is the string every edge,
+    entry/exit point, cycle and ``unreachable_nodes`` entry uses for it:
+    :attr:`key` is the one to match those against.
+    """
 
     name: str
     procedure_type: str  # "PARAGRAPH" or "SECTION"
@@ -76,6 +83,13 @@ class FlowNode:
     call_count: int = 0
     statement_types: dict[str, int] = field(default_factory=dict)
     decisions: list[dict[str, Any]] = field(default_factory=list)
+    qualified_name: str | None = None
+
+    @property
+    def key(self) -> str:
+        """The node's identity in the graph: ``qualified_name`` when the
+        bare name is shared, else ``name``."""
+        return self.qualified_name or self.name
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -83,6 +97,8 @@ class FlowNode:
             "type": self.procedure_type,
             "location": self.location.to_dict(),
         }
+        if self.qualified_name:
+            result["qualified_name"] = self.qualified_name
         if self.is_entry_point:
             result["is_entry_point"] = True
         if self.is_exit_point:
