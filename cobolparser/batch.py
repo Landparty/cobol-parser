@@ -43,6 +43,10 @@ class BatchResult:
     result: ParseResult | None
     read_error: str | None  # str(exc) — always pickle-safe on Windows spawn
     profiling: ProfilingResult | None = None
+    #: ``parse_files_with_copybooks`` only: why copybook expansion failed for
+    #: this file, which was then parsed unexpanded (``"<ExcType>: <message>"``).
+    #: ``None`` when expansion succeeded or was never attempted.
+    copybook_error: str | None = None
 
 
 # Module-level reusable parser for sequential fast-path
@@ -297,6 +301,22 @@ def parse_files(
     return results
 
 
+def _attach_expansion(
+    result: ParseResult,
+    warnings: list[str],
+    source_map: dict[int, tuple[str, int]] | None,
+) -> None:
+    """Carry an expansion's warnings and source map onto its ParseResult.
+
+    The same two things ``parse_cobol_with_expansion`` attaches, so a batch
+    result and a single-file one cannot disagree about where a line came from.
+    """
+    for warning in warnings:
+        if warning not in result.warnings:
+            result.warnings.append(warning)
+    result.expansion_source_map = source_map
+
+
 def parse_files_with_copybooks(
     paths: Iterable[str | Path],
     copybook_paths: list[str],
@@ -380,7 +400,12 @@ def parse_files_with_copybooks(
             results.append(BatchResult(path=path, result=None, read_error=str(exc)))
             continue
 
-        # Expand copybooks with shared cache
+        # Expand copybooks with shared cache, the way parse_cobol_with_expansion
+        # does (#255): the source map and the expansion warnings reach the
+        # result, so the two entry points cannot disagree about a line.
+        expansion_warnings: list[str] = []
+        source_map: dict[int, tuple[str, int]] | None = None
+        copybook_error: str | None = None
         try:
             expansion = expand_copybooks(
                 source_code=source,
@@ -393,19 +418,33 @@ def parse_files_with_copybooks(
                 # does the same). The parser's own directive pass would
                 # otherwise run only after the fact.
                 process_conditionals=True,
+                preserve_source_locations=True,
+                source_file=path_str,
             )
             expanded_source = expansion.expanded_source
+            expansion_warnings = list(
+                getattr(expansion.statistics, "warnings", []) or []
+            )
+            source_map = getattr(expansion, "source_location_map", None)
         except Exception as exc:
             # Copybook expansion is best-effort in batch mode: a single bad
             # COPY must not abort the whole run, so we fall back to parsing the
-            # raw source. Log the failure so the silent degradation is at least
-            # observable rather than swallowed entirely.
+            # raw source (codebase-graph relies on the unexpanded parse for a
+            # file's CALL edges). Every COPY in the file goes unexpanded, not
+            # just the bad one, so the reason must reach the caller: it is kept
+            # as BatchResult.copybook_error and as a warning on the result,
+            # not only logged (#255).
             logger.warning(
                 "Copybook expansion failed for %s; parsing without expansion: %r",
                 path_str,
                 exc,
                 exc_info=True,
             )
+            copybook_error = f"{type(exc).__name__}: {exc}"
+            expansion_warnings = [
+                f"copybook expansion failed ({copybook_error}); "
+                "the file was parsed without expanding any COPY statement"
+            ]
             expanded_source = source
 
         # Parse expanded source reusing the parser instance. Guarded the same
@@ -417,7 +456,15 @@ def parse_files_with_copybooks(
                 result = parser.parse(
                     expanded_source, filename=path_str, error_recovery=error_recovery
                 )
-                results.append(BatchResult(path=path, result=result, read_error=None))
+                _attach_expansion(result, expansion_warnings, source_map)
+                results.append(
+                    BatchResult(
+                        path=path,
+                        result=result,
+                        read_error=None,
+                        copybook_error=copybook_error,
+                    )
+                )
             else:
                 prof_file: str | None = None
                 if prof_output is not None:
@@ -430,9 +477,14 @@ def parse_files_with_copybooks(
                     top_n=top_n,
                     prof_output=prof_file,
                 )
+                _attach_expansion(parse_result, expansion_warnings, source_map)
                 results.append(
                     BatchResult(
-                        path=path, result=parse_result, read_error=None, profiling=prof
+                        path=path,
+                        result=parse_result,
+                        read_error=None,
+                        profiling=prof,
+                        copybook_error=copybook_error,
                     )
                 )
         except Exception as exc:  # noqa: BLE001 — record per-file, don't abort batch

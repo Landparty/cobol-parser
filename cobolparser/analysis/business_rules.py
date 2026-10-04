@@ -1007,6 +1007,16 @@ class BusinessRuleExtractor:
                 return text
             if subject_upper == "FALSE":
                 return _negate(text)
+            # ``WHEN NOT 0 THRU 17``: the parser supplies the bounds, so
+            # render the negated range rather than the raw ``THRU`` text.
+            if (
+                selector.get("negated")
+                and selector.get("start") is not None
+                and selector.get("end") is not None
+            ):
+                low = self._literal(selector.get("start"), False)
+                high = self._literal(selector.get("end"), False)
+                return f"NOT ({subject} >= {low} AND {subject} <= {high})"
             # ``WHEN NOT 6`` against a data subject.
             if text.upper().startswith("NOT "):
                 return f"{subject} <> {text[4:].strip()}"

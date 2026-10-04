@@ -14,7 +14,10 @@ Two complexity numbers are reported per procedure:
 - ``cyclomatic_complexity`` -- classic McCabe: 1 plus one decision point per
   IF, per WHEN arm (EVALUATE/SEARCH, excluding WHEN OTHER/the default), per
   loop-form PERFORM (TIMES/UNTIL/VARYING -- a bare ``PERFORM target`` is not
-  a decision point, it always runs exactly once), and per present
+  a decision point, it always runs exactly once), per target of a computed
+  ``GO TO ... DEPENDING ON`` (an N-target computed GO TO is an N-way branch
+  plus the out-of-range fall-through, scored like an N-arm EVALUATE), and
+  per present
   exception-handling clause (AT END, INVALID KEY, AT EOP, ON SIZE ERROR, ON
   OVERFLOW, ON EXCEPTION, and their NOT- counterparts) -- each such clause is
   itself a branch, independent of what a solver's cyclomatic count over a
@@ -43,6 +46,7 @@ from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.statements.base import CobolStatement, LogicalExpression
 from ..models.statements.control import (
     EvaluateStatement,
+    GoStatement,
     IfStatement,
     PerformStatement,
     SearchStatement,
@@ -396,6 +400,12 @@ class ComplexityAnalyzer:
                 counts["decisions"] += 1
                 counts["max_depth"] = max(counts["max_depth"], depth + 1)
                 child_depth = depth + 1
+            elif isinstance(node, GoStatement) and node.depending_on_variable:
+                # A computed GO TO is an N-way branch (plus fall-through when
+                # the variable is out of range): one decision per target, the
+                # same count a WHEN-per-target EVALUATE gets. GO TO opens no
+                # block, so nesting depth is unchanged.
+                counts["decisions"] += len(node.target_paragraphs)
             elif isinstance(node, LogicalExpression) and (
                 str(node.operator).upper() in ("AND", "OR")
             ):

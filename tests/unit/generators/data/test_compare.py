@@ -387,6 +387,58 @@ def test_trailing_bytes_are_a_caveat():
     assert any("the actual file ends with 2 bytes" in c for c in result.caveats)
 
 
+def _trailing_compare(expected_tail: bytes, actual_tail: bytes, **kwargs):
+    decoder = RecordDecoder.from_copybook_source(CUSTOMER, opts=EBCDIC)
+    image = _image(CUSTOMER, [ALICE], EBCDIC)
+    return compare_records(
+        decoder.decode_bytes(image + expected_tail),
+        decoder.decode_bytes(image + actual_tail),
+        view=decoder.views.base,
+        **kwargs,
+    )
+
+
+def test_different_trailing_bytes_on_both_sides_are_not_equal():
+    # Issue #250: both files ended in a partial record, the partial records
+    # differed, and the result still said "files are equal".
+    result = _trailing_compare(b"XYZ", b"QQQ")
+    assert result.trailing_differs
+    assert not result.equal
+    assert result.matched_count == 1
+    assert result.to_dict()["equal"] is False
+    assert result.to_dict()["trailing_differs"] is True
+    assert "trailing bytes differ" in result.to_text()
+    assert "files are equal" not in result.to_text()
+
+
+def test_different_trailing_bytes_are_not_equal_by_bytes_either():
+    result = _trailing_compare(b"XYZ", b"QQQ", compare_bytes=True)
+    assert result.trailing_differs
+    assert not result.equal
+
+
+def test_identical_trailing_bytes_stay_equal():
+    result = _trailing_compare(b"XYZ", b"XYZ", compare_bytes=True)
+    assert not result.trailing_differs
+    assert result.equal
+    # Still not compared as a record: the caveat says so on each side.
+    assert any("the expected file ends with 3 bytes" in c for c in result.caveats)
+
+
+def test_one_sided_trailing_bytes_differ_under_compare_bytes():
+    # Option (b) of #250: a byte compare is about the exact image, so a tail
+    # only one file has is a difference there.
+    result = _trailing_compare(b"", b"\x40\x40", compare_bytes=True)
+    assert result.trailing_differs
+    assert not result.equal
+
+
+def test_one_sided_trailing_bytes_stay_a_caveat_comparing_values():
+    result = _trailing_compare(b"", b"\x40\x40")
+    assert not result.trailing_differs
+    assert result.equal
+
+
 def test_to_dict_round_trips_the_counts_and_differences():
     result = _compare([ALICE, BOB], [ALICE], key=["CUST-ID"])
     data = result.to_dict()

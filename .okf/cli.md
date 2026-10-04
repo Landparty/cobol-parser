@@ -467,7 +467,8 @@ CICS, DLI, console ACCEPT) — not just one record's CSV rows.
   against a downstream consumer's own boundary walk.
 * `--strict` exits **2** (not 1 -- that stays "could not run at all") when
   `bundle.unresolved` is non-empty: anything Phase 1's index, Phase 2's
-  inventory, or Phase 3's own field resolution could not pin down. The
+  inventory, or Phase 3's own field resolution could not pin down -- and
+  (since #244) any branch arm whose scenario's own data *violates* it. The
   CI-friendly "no silent gaps" switch.
 
 ## Selecting a program unit (`--program`)
@@ -642,14 +643,26 @@ A finding with no location (a recursion cycle spans procedures) prints as
 `file: severity ...`; the column is omitted rather than faked as 0.
 
 **Exit codes.** `0` ran to completion (findings alone never change it); `1`
-the file could not be read or parsed, or its output could not be written
-(`_fail`); `2` argparse rejected the arguments — an unknown `--rule` or flag,
+the file could not be read, produced no AST at all, or its output could not
+be written (`_fail`); `2` argparse rejected the arguments — an unknown `--rule` or flag,
 which argparse exits on itself before `_cmd_lint` ever runs (pinned by
 `test_lint_subcommand.py::test_unknown_rule_is_rejected_by_argparse`); `3`
 `--fail-on` was given and a finding at or above that severity was reported.
 `3` rather than the conventional `1` on purpose: a CI gate must be able to
 tell "this program has problems" from "lint never ran", and `1`/`2` already
 mean something else across this CLI (see *Exit codes* above).
+
+**Parse errors are findings** (2026-10-04, #249). A file that parses *with
+errors* still yields a partial AST, and a partial AST lints quietly: a file
+that was not COBOL at all used to print `0 finding(s)` and exit `0` even
+under `--fail-on info`. `_cmd_lint` now runs `add_parse_errors()` (in
+`analysis/lint.py`) over `result.errors` before the source map and the
+severity filter: each becomes a `rule: "parse"`, `severity: "error"` finding
+at the error's line/column (`kind` = the error's code or class name). So
+`--fail-on` (any level) exits `3` on such a file, and the JSON and text
+report say why; without `--fail-on` the run still exits `0` and the partial
+findings stay usable -- option (b) of the issue, rather than a hard exit
+`1`. `parse` is not in `RULES`, so `--rule` neither selects nor drops it.
 
 `--copybook-path` does triple duty here: it expands COPY members so MOVE
 operands resolve, it lets lint tell a copybook-sourced unused item (info)
@@ -851,7 +864,9 @@ of a batch run against the actual one. Implementation:
 `generators/data/compare.py`, documented in [generators.md](generators.md)'s
 "Record compare".
 
-* **Exit status follows `cmp`/`diff`**: 0 equal, 1 different, 2 the
+* **Exit status follows `cmp`/`diff`**: 0 equal, 1 different (including
+  differing trailing partial records -- `CompareResult.trailing_differs`,
+  see generators.md, #250), 2 the
   comparison could not be made (unknown key/ignore name, unreadable file,
   layout error, unwritable `-o`). `_cmd_compare` therefore uses its own
   `_compare_fail()` (exit 2) and its own output writer rather than `_fail()` /

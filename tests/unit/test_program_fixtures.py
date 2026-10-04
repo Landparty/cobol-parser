@@ -825,3 +825,84 @@ class TestCalleeResolution:
         ]
         assert call_fixtures
         assert any("WS-VAL" in fixture.sequence[0] for fixture in call_fixtures)
+
+
+_ENUM_RELATIONAL_PROGRAM = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ENUMREL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-C PIC 99.
+          88 LOW-V  VALUE 1.
+          88 HIGH-V VALUE 9.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           ACCEPT WS-C.
+           IF NOT HIGH-V AND WS-C > 5
+              DISPLAY 'X'
+           END-IF.
+           STOP RUN.
+"""
+
+
+def _enum_relational_bundle():
+    result = parse_cobol(_ENUM_RELATIONAL_PROGRAM, filename="enumrel.cbl")
+    assert result.ast is not None, result.errors
+    index = ProgramLayoutIndex.build(result.ast)
+    report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+    return ProgramFixtureGenerator().generate_with_scenarios(
+        result.ast, index, report, mode="branches", seed=1
+    )
+
+
+class TestTargetedArmsAreVerified:
+    """Issue #244: an arm counted `targeted` must have a scenario whose own
+    generated data reaches it. `IF NOT HIGH-V AND WS-C > 5` used to get a
+    THEN witness of 1 (fails `> 5`), while coverage still said targeted 3 /
+    missed 0 and `--strict` passed."""
+
+    def test_every_scenario_verifies_against_its_own_data(self):
+        bundle = _enum_relational_bundle()
+        statuses = {s.name: s.verification["status"] for s in bundle.scenarios}
+        assert all(v == "verified" for v in statuses.values()), statuses
+
+    def test_then_arm_value_is_greater_than_five_and_not_nine(self):
+        bundle = _enum_relational_bundle()
+        values = [
+            int(row["WS-C"])
+            for s in bundle.scenarios
+            for f in s.fixtures
+            for row in f.sequence
+            if "WS-C" in row
+        ]
+        assert any(v > 5 and v != 9 for v in values), values
+
+    def test_arm_whose_witness_fails_verification_is_counted_missed(self):
+        """Belt and braces: whatever the solver does, a scenario whose data
+        is *violated* against its own conjuncts must not leave its arms
+        `targeted`. Simulated by forcing every verdict to `violated`."""
+        from cobolparser.generators.verification import (
+            FieldVerdict,
+            ScenarioVerification,
+        )
+
+        def _violated(planned, scenario):
+            return ScenarioVerification(
+                status="unverified",
+                fields=[FieldVerdict(field="WS-C", status="violated", detail="forced")],
+                gaps=[],
+            )
+
+        with patch(
+            "cobolparser.generators.program_fixtures.verify_scenario", _violated
+        ):
+            bundle = _enum_relational_bundle()
+        c = bundle.scenario_coverage
+        assert c["targeted"] == 0
+        assert c["missed"] == c["total_arms"] == 3
+        assert c["targeted"] + c["merged"] + c["missed"] == c["total_arms"]
+        for detail in c["details"]:
+            assert detail["status"] == "missed"
+            assert "verification" in detail["reason"]
+        # ...and it is a gap `--strict` refuses to pass over.
+        assert any("verification" in item for item in bundle.unresolved)

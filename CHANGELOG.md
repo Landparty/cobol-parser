@@ -160,6 +160,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`redundancy` / `scan --clones` / `health` reported paragraphs that
+  behave differently as exact clones** (#262): a statement's fingerprint
+  covered only its type and operand list, so a different COMPUTE formula,
+  ROUNDED, AT END / INVALID KEY / ON SIZE ERROR / ON EXCEPTION body, inline
+  PERFORM TIMES count, `UPON`, `CORRESPONDING`, STRING delimiter or INSPECT
+  phrase still made a TYPE_1 clone. The fingerprint now covers every clause
+  body and the statement's remaining fields (reserved words are never
+  renamed under Type-2). **The `type1` / `type2` digests in
+  `paragraph_fingerprints` change in place, with no version field: digests
+  saved by earlier scans no longer match new ones.**
+* **`DynamicCallAnalyzer` ignored REDEFINES** (#257): a MOVE through a
+  `REDEFINES` overlay (or to the group it redefines) writes the bytes a
+  dynamic `CALL` reads, but `possible_values` was still reported as complete.
+  Such a CALL is now flagged `possible_values_incomplete`, so consumers no
+  longer treat its target list as exhaustive.
+* **`business-rules` rendered `WHEN NOT 0 THRU 17` as `AGE <> 0 THRU 17`**
+  (#260): a negated range selector now reads
+  `NOT (AGE >= 0 AND AGE <= 17)`, and the derived `WHEN OTHER` condition is
+  built from that.
+* **`dclgen-check` warned on `COMP-5` integer host variables** (#259): `COMP-5`
+  is now treated as the same storage as `COMP` (it is, on big-endian z/OS),
+  so IBM's recommended spelling for an INTEGER / SMALLINT / BIGINT host
+  variable no longer draws a `usage` warning claiming DB2 converts every row.
+* **`complexity` scored a computed GO TO as straight-line code** (#263):
+  `GO TO A B C DEPENDING ON X` now adds one decision point per target, as an
+  EVALUATE with one WHEN per target does, so dispatcher paragraphs are no
+  longer under-graded by `complexity`, its lint rule and `health`.
 * **`VALUE X"..."` generated the wrong data** (audit 2026-09-27, 2.1): a
   typed literal in a VALUE clause lost its prefix, so `value_clause` read
   `"4142"` for `X"4142"` and `gen-data` wrote `41` instead of `AB`. The

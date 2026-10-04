@@ -24,6 +24,10 @@ pytestmark = pytest.mark.integration
 SHAMRICE_DIR = Path(__file__).parent.parent.parent / "examples" / "cobol" / "shamrice"
 
 _ALL_CBL = sorted(SHAMRICE_DIR.glob("*.cbl"))
+_EXTRA_SAMPLES = [
+    Path(__file__).parent.parent / "samples" / "file_operations.cbl",
+    Path(__file__).parent.parent / "samples" / "enterprise" / "COMPDIR.cbl",
+]
 
 
 def _fold(cbl_path: Path):
@@ -61,5 +65,12 @@ class TestConstFoldCorpus:
         assert len(_ALL_CBL) >= 20
 
     def test_at_least_one_program_yields_a_known_value(self) -> None:
-        totals = [len(result.known) for _, result in (_fold(p) for p in _ALL_CBL)]
+        # The shamrice programs used to contribute here (`sub.cbl`,
+        # `unstring.cbl`), but only through the end-of-walk reading #246
+        # fixed: each displays its field at several sites with different
+        # values, so no single `field_equals` is right for it. The
+        # non-triviality check therefore also covers the repo's own
+        # samples, where a field is shown with one value.
+        paths = [*_ALL_CBL, *_EXTRA_SAMPLES]
+        totals = [len(result.known) for _, result in (_fold(p) for p in paths)]
         assert sum(totals) > 0

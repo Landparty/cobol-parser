@@ -311,6 +311,41 @@ class TestGotoAndDensity:
         assert report.goto_density > 0
 
 
+class TestGotoDependingOn:
+    """Regression for #263: GO TO ... DEPENDING ON is a multi-way branch."""
+
+    def test_goto_depending_on_adds_one_decision_per_target(self) -> None:
+        source = HEADER + """\
+       PROCEDURE DIVISION.
+       P-GOD.
+           GO TO P-ONE P-TWO P-THREE DEPENDING ON WS-A.
+           GOBACK.
+       P-ONE.
+           DISPLAY "1".
+       P-TWO.
+           DISPLAY "2".
+       P-THREE.
+           DISPLAY "3".
+"""
+        report = _analyze(source)
+        proc = _proc(report, "P-GOD")
+        assert proc.cyclomatic_complexity == 4
+        assert proc.extended_complexity == 4
+        # GO TO opens no block: nesting depth is unchanged.
+        assert proc.max_nesting_depth == 0
+
+    def test_plain_goto_adds_no_decision(self) -> None:
+        source = HEADER + """\
+       PROCEDURE DIVISION.
+       P-GO.
+           GO TO P-ONE.
+       P-ONE.
+           DISPLAY "1".
+"""
+        report = _analyze(source)
+        assert _proc(report, "P-GO").cyclomatic_complexity == 1
+
+
 class TestFanInOut:
     def test_fan_in_and_fan_out_from_perform_edges(self) -> None:
         source = HEADER + """\

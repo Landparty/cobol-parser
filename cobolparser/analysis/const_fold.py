@@ -6,8 +6,9 @@ Phase 7 tier 2 of the `gen-fixtures` program-scoped test-data initiative (see
 walk of the entry paragraph's statement chain -- following non-looping
 PERFORMs inline, exactly like a subroutine call executed once -- tracking
 which data items hold a knowable literal value after a MOVE or a simple
-arithmetic/COMPUTE statement. Any field the walked chain DISPLAYs or WRITEs
-that is *still* knowable at the end of the walk becomes a
+arithmetic/COMPUTE statement. The walk falls through from the entry
+paragraph into each following paragraph until it stops. Any field the walked
+chain DISPLAYs or WRITEs with the same known value at every such site becomes a
 ``kind="field_equals"`` :class:`~cobolparser.generators.data.bundle.Expectation`
 (built by ``program_fixtures.py``, not this module -- this module only
 answers "what is knowable").
@@ -103,6 +104,14 @@ _QUOTED_LITERAL_RE = re.compile(r'^(["\'])(.*)\1$', re.DOTALL)
 _ZERO_FIGURATIVES = frozenset({"ZERO", "ZEROS", "ZEROES"})
 #: A subscript or reference-modification suffix: ``WS-T ( 1 )``, ``WS-B(1:1)``.
 _SUFFIX_RE = re.compile(r"\s*\(.*$", re.DOTALL)
+
+#: Statement visits the main walk may make before giving up. Fall-through
+#: makes the walk follow real control flow, which re-walks a PERFORMed
+#: paragraph each time control reaches it -- quadratic for a chain of
+#: paragraphs that each PERFORM the next and never STOP RUN. Past this
+#: budget the fold reports nothing rather than a partial (possibly wrong)
+#: answer.
+_MAX_WALK_STEPS = 50_000
 
 _TEXT_CATEGORIES = frozenset(
     {FieldCategory.ALPHANUMERIC, FieldCategory.ALPHABETIC, FieldCategory.NATIONAL}
@@ -233,6 +242,7 @@ def _facts(index: ProgramLayoutIndex) -> _LayoutFacts:
     # sibling list; every section is pooled here, which can only widen the
     # alias set (an over-approximation that poisons more, never less).
     _link_redefines(top_level, (), facts)
+    _link_file_records(index, facts)
     _collect_renames(index, facts)
     try:
         _FACTS_CACHE[index] = facts
@@ -397,6 +407,29 @@ def _link_redefines(
             facts.aliases.setdefault(leaf, set()).update(members - {leaf})
 
 
+def _link_file_records(index: ProgramLayoutIndex, facts: _LayoutFacts) -> None:
+    """Union every leaf of every 01 record under one FD/SD into one alias
+    class: the records of a file all implicitly redefine the same record
+    area, so writing a field of one changes the bytes the others read --
+    with no ``REDEFINES`` clause for `_link_redefines` to see."""
+    file_names = getattr(index, "file_names", None)
+    if not callable(file_names):
+        return
+    for file_name in file_names():
+        records = index.records_for_file(file_name)
+        if len(records) < 2:
+            continue
+        members: set[str] = set()
+        for record in records:
+            members.update(facts.leaves_under(record.name))
+        for leaf in list(members):
+            members |= facts.aliases.get(leaf, set())
+        if len(members) < 2:
+            continue
+        for leaf in members:
+            facts.aliases.setdefault(leaf, set()).update(members - {leaf})
+
+
 def _group_paths(index: ProgramLayoutIndex, name: str) -> list[str]:
     """Qualified paths of the group item(s) *name* denotes -- bare, ``A OF
     B``, or dotted ``B.A``. Every match is returned: when a bare name is
@@ -449,7 +482,8 @@ def _drop_under(
 
 @dataclass
 class ConstantFoldResult:
-    """Fields still knowable at a DISPLAY/WRITE site by the end of the walk."""
+    """Fields whose value at every DISPLAY/WRITE site that observed them was
+    the same known value -- what the program emitted there."""
 
     known: dict[str, str] = field(default_factory=dict)
 
@@ -483,32 +517,74 @@ class ConstantFolder:
 
         ordered_names, by_name = _ordered_paragraphs(ast)
         state = _WalkState(env=env, seed_env=dict(env))
-        _walk_statements(
-            entry.statements,
-            index,
-            by_name,
-            ordered_names,
-            state,
-            {entry.paragraph_name.upper()} if entry.paragraph_name else set(),
-        )
+        # The entry paragraph, then -- unless the walk stopped (STOP RUN,
+        # GOBACK, EXIT PROGRAM, GO TO) -- every following paragraph in
+        # source order: control falls through a paragraph's end into the
+        # next one, so a walk that stopped at the entry paragraph's last
+        # statement missed every write and observation after it.
+        for paragraph in _fall_through_chain(entry, ordered_names, by_name):
+            if state.stopped:
+                break
+            _walk_statements(
+                paragraph.statements,
+                index,
+                by_name,
+                ordered_names,
+                state,
+                (
+                    {paragraph.paragraph_name.upper()}
+                    if paragraph.paragraph_name
+                    else set()
+                ),
+            )
 
+        if state.exhausted:
+            # The walk was cut short, so sites past the cut were never
+            # observed: no reported value could be shown to be the only one.
+            return ConstantFoldResult(known={})
+
+        # A field is reported only when every DISPLAY/WRITE site that
+        # observed it saw the same known value -- the value the program
+        # actually emitted there, not whatever it held when the walk ended.
         known: dict[str, str] = {}
-        for qname in state.observed:
-            value = state.env.get(qname)
-            if value is None:
+        for qname, values in state.observed.items():
+            first = values[0]
+            if first is None or any(value != first for value in values[1:]):
                 continue
             resolved = _safe_resolve(index, qname)
             if resolved is None:
                 continue
-            known[qname] = _render(value, resolved.spec)
+            known[qname] = _render(first, resolved.spec)
         return ConstantFoldResult(known=known)
+
+
+def _fall_through_chain(
+    entry: CobolParagraph,
+    ordered_names: list[str],
+    by_name: dict[str, CobolParagraph],
+) -> list[CobolParagraph]:
+    """*entry* followed by every paragraph after it in source order."""
+    name = (entry.paragraph_name or "").upper()
+    if name not in by_name or by_name[name] is not entry:
+        return [entry]
+    start = ordered_names.index(name)
+    return [by_name[following] for following in ordered_names[start:]]
 
 
 # -- walk state ---------------------------------------------------------------
 
 
 class _WalkState:
-    __slots__ = ("env", "seed_env", "observed", "stopped", "read_files", "accepted")
+    __slots__ = (
+        "env",
+        "seed_env",
+        "observed",
+        "stopped",
+        "read_files",
+        "accepted",
+        "steps",
+        "exhausted",
+    )
 
     def __init__(
         self,
@@ -520,7 +596,9 @@ class _WalkState:
         #: what the FIRST READ of a file / ACCEPT of a target puts back into
         #: `env`, whatever the chain MOVEd there beforehand.
         self.seed_env: dict[str, Decimal | str] = seed_env if seed_env else {}
-        self.observed: set[str] = set()
+        #: Qualified name -> the env value at each DISPLAY/WRITE site that
+        #: observed it, in walk order (``None`` where it was unknown).
+        self.observed: dict[str, list[Decimal | str | None]] = {}
         self.stopped = False
         #: UPPERCASED file names already READ on the walked path (loop and
         #: branch bodies included), so a later READ is known to be past the
@@ -528,6 +606,10 @@ class _WalkState:
         self.read_files: set[str] = set()
         #: UPPERCASED ACCEPT targets already ACCEPTed, same idea.
         self.accepted: set[str] = set()
+        #: Statements visited by the main walk, against `_MAX_WALK_STEPS`.
+        self.steps = 0
+        #: Set when the budget ran out; `fold()` then reports nothing.
+        self.exhausted = False
 
 
 # -- entry point / paragraph ordering -----------------------------------------
@@ -630,6 +712,10 @@ def _walk_statements(
             if entered is not None:
                 visiting.discard(entered)
             continue
+        state.steps += 1
+        if state.steps > _MAX_WALK_STEPS:
+            state.exhausted = state.stopped = True
+            return
         jump = _walk_one(stmt, index, by_name, ordered_names, state)
         if jump is not None:
             target, body = jump
@@ -691,6 +777,17 @@ def _dispatch_one(
         for item in stmt.display_items:
             _mark_observed(item, index, state)
     elif isinstance(stmt, IOWriteStatement):
+        if stmt.record_name and stmt.from_clause:
+            # `WRITE rec FROM id` is `MOVE id TO rec` and then the WRITE. A
+            # group record target is poisoned whole by `_apply_move_target`.
+            source = _resolve_move_source(stmt.from_clause, index, state.env)
+            _apply_move_target(
+                stmt.record_name,
+                source,
+                index,
+                state.env,
+                source_width=_text_width(stmt.from_clause, index),
+            )
         if stmt.record_name:
             _mark_observed(stmt.record_name, index, state)
     elif isinstance(stmt, IOReadStatement):
@@ -851,7 +948,8 @@ def _poison_statement_writes(
 def _mark_observed(operand: str, index: ProgramLayoutIndex, state: _WalkState) -> None:
     resolved = _safe_resolve(index, operand)
     if resolved is not None:
-        state.observed.add(resolved.spec.qualified_name)
+        qname = resolved.spec.qualified_name
+        state.observed.setdefault(qname, []).append(state.env.get(qname))
 
 
 def _walk_perform(
@@ -1057,8 +1155,25 @@ def _fold_move(
         _poison_names(stmt.targets, index, env)
         return
     source = _resolve_move_source(stmt.source, index, env) if stmt.source else None
+    width = _text_width(stmt.source, index) if stmt.source else None
     for target in stmt.targets:
-        _apply_move_target(target, source, index, env)
+        _apply_move_target(target, source, index, env, source_width=width)
+
+
+def _text_width(source: str, index: ProgramLayoutIndex) -> int | None:
+    """Character width of *source* when it is an alphanumeric-class field,
+    else ``None``. `env` stores a text value unpadded, but a MOVE sends the
+    source's whole field -- trailing spaces included -- which is what a
+    JUSTIFIED RIGHT receiver truncates on the left."""
+    if _NUMERIC_LITERAL_RE.match(source) or _QUOTED_LITERAL_RE.match(source):
+        return None
+    resolved = _safe_resolve(index, source)
+    if resolved is None or resolved.spec.category not in _TEXT_CATEGORIES:
+        return None
+    size = resolved.spec.size
+    if resolved.spec.category is FieldCategory.NATIONAL:
+        size //= 2
+    return size if size > 0 else None
 
 
 def _resolve_move_source(
@@ -1088,6 +1203,8 @@ def _apply_move_target(
     source: tuple[str, Decimal | str] | None,
     index: ProgramLayoutIndex,
     env: dict[str, Decimal | str],
+    *,
+    source_width: int | None = None,
 ) -> None:
     base, has_suffix = _base_name(target_name)
     resolved = _safe_resolve(index, base) if not has_suffix else None
@@ -1132,7 +1249,10 @@ def _apply_move_target(
                 # JUSTIFIED RIGHT keeps the RIGHTMOST characters of an
                 # oversized value; a shorter one is padded on the left,
                 # a rendering this module's unpadded env does not model,
-                # so only the exact/oversized case is knowable.
+                # so only the exact/oversized case is knowable. A field
+                # source sends its whole width, trailing spaces included.
+                if source_width is not None:
+                    value = value.ljust(source_width)
                 if len(value) >= size:
                     env[qname] = value[-size:]
             else:
