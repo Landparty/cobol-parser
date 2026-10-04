@@ -3150,3 +3150,13 @@ with no warning. Other pre-header junk is still dropped; line count is
 unchanged. Covers `parse_cobol`, `CobolParser.parse` and
 `parse_cobol_with_expansion`. Pinned by
 `tests/regression/test_replace_before_identification_division.py`.
+
+# Tagged copybooks in format detection (2026-10-04)
+
+`_detect_fixed_format`'s tagged-sequence-area rule is corroborated by
+`_has_area_a_division_header` **or** `_has_tagged_line_anchor` (a tagged
+line with a column-7 comment indicator, or a tagged data-description
+entry). The second anchor exists for copybooks, which have no division
+header; without it a tagged member's comment lines reached the lexer and a
+`#` in them failed the parse. Details in `preprocessing.md` (tagged
+sequence area section).

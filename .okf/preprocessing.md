@@ -115,7 +115,7 @@ non-blank lines, the misclassification could also flip as copybook
 expansion changed which lines those were, making it look intermittent.
 
 Detection now applies a second rule: a *tag-like* sequence area (a single
-unbroken `[A-Za-z0-9][A-Za-z0-9_/#$.-]*` token — the "no internal
+unbroken `[A-Za-z0-9#@$][A-Za-z0-9_/#@$.-]*` token — the "no internal
 whitespace" property is what excludes ordinary free-form statement text
 like `MOVE A`) also counts, but only when corroborated by an Area A
 division header, i.e. a line whose columns 8+ start with
@@ -134,6 +134,18 @@ and is unchanged, so this only ever *adds* detections. Pinned by
 `tests/regression/test_tagged_sequence_area_detection.py`; the
 `--source-format` escape hatch for layouts neither rule infers is in
 [cli.md](cli.md).
+
+A copybook has no division header, so a tagged member (`BNC#01`, `CHG001`
+in columns 1-6) used to fall through to free-form: its column-7 comment
+lines were spliced in raw and the first `#` in a comment banner surfaced as
+`Lexer error: Invalid character: #` (reported on a nested COPY, 2026-10-04).
+`_has_tagged_line_anchor()` now corroborates rule 2 as well: a tagged line
+with a column-7 comment indicator (`CHG001*...`), or a tagged line whose code
+area is a data-description entry (level number + name + period or clause
+keyword, `_TAGGED_DATA_ENTRY_RE`; the period/clause requirement keeps
+`DIVIDE 10 INTO X` out). `copybook_expander._looks_fixed_format()`'s
+short-member path (< 3 lines) accepts a tagged line on the same anchor.
+Pinned by `tests/regression/test_tagged_copybook_comment_hash.py`.
 
 Continuation-line joining follows the COBOL rule that a continuation line's
 first non-blank character is the successor of the continued line's last
