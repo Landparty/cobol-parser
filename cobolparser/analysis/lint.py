@@ -298,6 +298,51 @@ def filter_by_severity(
     return [f for f in findings if _SEVERITY_RANK[f.severity] <= limit]
 
 
+#: Rule id of the findings :func:`add_parse_errors` makes from parse errors.
+#: Not in :data:`RULES`: it is not an analyzer that ``--rule`` can select or
+#: drop, it is the parse every rule ran on.
+PARSE_RULE = "parse"
+
+
+def add_parse_errors(report: LintReport, errors: list[Any]) -> LintReport:
+    """Turn each parse error into an error-severity ``parse`` finding.
+
+    A file that parsed with errors still hands the analyzers a (partial)
+    AST, and a partial AST is usually a quiet one: a file that is not COBOL
+    at all used to lint as "0 finding(s)" and pass ``--fail-on info``
+    (#249). As findings, the parse errors show up in the JSON and the text
+    report, and ``--fail-on`` decides what they cost -- a file that mostly
+    parses keeps its other findings usable instead of failing outright.
+
+    *errors* is ``ParseResult.errors``. Each finding sits at the error's
+    line and column when it has one (so :func:`apply_source_map`, run
+    afterwards, maps it like any other finding); the findings are merged
+    into the report in source order. Modified in place and returned.
+    """
+    added: list[LintFinding] = []
+    for error in errors:
+        line = getattr(error, "line_number", None)
+        column = getattr(error, "column", None)
+        location = (
+            SourceLocation(line=line, column=column or 1)
+            if isinstance(line, int) and line > 0
+            else None
+        )
+        message = getattr(error, "message", None) or str(error)
+        added.append(
+            LintFinding(
+                rule=PARSE_RULE,
+                severity="error",
+                message=message,
+                location=location,
+                kind=getattr(error, "code", None) or type(error).__name__,
+            )
+        )
+    if added:
+        report.findings = _deduplicate(sorted(report.findings + added, key=_sort_key))
+    return report
+
+
 def apply_source_map(
     report: LintReport, source_map: dict[int, tuple[str, int]] | None
 ) -> LintReport:
@@ -755,7 +800,12 @@ class LintAnalyzer:
         # be established is not a clean one -- it is an unexamined one. Said
         # once with a count, like dclgen-check above, rather than as a finding
         # per block, since "could not check" is not a defect in the program.
-        if result.unchecked:
+        if ast.procedure_division is None and result.unchecked:
+            # Nothing was examined at all -- say so, rather than counting the
+            # unit's one reason as an "EXEC block" a file may not even have
+            # (a file that did not parse lints with no PROCEDURE DIVISION, #249).
+            report.caveats.append(f"sql-cics-check: {result.unchecked[0]}")
+        elif result.unchecked:
             report.caveats.append(
                 f"sql-cics-check: {len(result.unchecked)} EXEC block(s) or host "
                 "variable(s) could not be checked -- run "

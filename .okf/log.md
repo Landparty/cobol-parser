@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-04 -- lint: parse errors become `parse` findings (#249)
+
+[cli.md](cli.md) / [analysis.md](analysis.md): `lint` turns each
+`ParseResult.errors` entry into an error-severity `rule: "parse"` finding
+(`add_parse_errors`), so `--fail-on` trips on a file that did not parse
+(option (b): findings, not a hard exit 1). The sql-cics-check caveat for a unit
+with no PROCEDURE DIVISION no longer claims an unchecked EXEC block.
+
 ## 2026-10-04 -- `parse_files_with_copybooks` source map, warnings, expansion failure reason (#255)
 
 [batch.md](batch.md): the copybook-aware batch path now attaches

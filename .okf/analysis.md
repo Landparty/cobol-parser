@@ -909,7 +909,11 @@ lint output with no change here.
 `recursion-check`, `complexity`, `dclgen-check`) rather than a second private
 vocabulary, so
 `lint --rule dead-code` and `cobol-parser dead-code` are visibly the same
-analyzer. A rule selection is deduplicated and normalized to `RULES` order, so
+analyzer. One more id appears in output but not in `RULES`: `parse`, the
+error-severity findings `add_parse_errors()` makes from `ParseResult.errors`
+(the `lint` CLI adds them; see cli.md, #249). The `sql-cics-check` caveat on a
+unit with no PROCEDURE DIVISION says exactly that, instead of counting the
+unit's one reason as an "EXEC block" that could not be checked. A rule selection is deduplicated and normalized to `RULES` order, so
 flag ordering cannot change the report.
 
 **Severity is per finding, not per rule.** An analyzer that grades itself
