@@ -233,6 +233,7 @@ def _facts(index: ProgramLayoutIndex) -> _LayoutFacts:
     # sibling list; every section is pooled here, which can only widen the
     # alias set (an over-approximation that poisons more, never less).
     _link_redefines(top_level, (), facts)
+    _link_file_records(index, facts)
     _collect_renames(index, facts)
     try:
         _FACTS_CACHE[index] = facts
@@ -391,6 +392,29 @@ def _link_redefines(
         qname = ".".join((*path, sibling.name))
         classes.setdefault(find(position), set()).update(facts.leaves_under(qname))
     for members in classes.values():
+        if len(members) < 2:
+            continue
+        for leaf in members:
+            facts.aliases.setdefault(leaf, set()).update(members - {leaf})
+
+
+def _link_file_records(index: ProgramLayoutIndex, facts: _LayoutFacts) -> None:
+    """Union every leaf of every 01 record under one FD/SD into one alias
+    class: the records of a file all implicitly redefine the same record
+    area, so writing a field of one changes the bytes the others read --
+    with no ``REDEFINES`` clause for `_link_redefines` to see."""
+    file_names = getattr(index, "file_names", None)
+    if not callable(file_names):
+        return
+    for file_name in file_names():
+        records = index.records_for_file(file_name)
+        if len(records) < 2:
+            continue
+        members: set[str] = set()
+        for record in records:
+            members.update(facts.leaves_under(record.name))
+        for leaf in list(members):
+            members |= facts.aliases.get(leaf, set())
         if len(members) < 2:
             continue
         for leaf in members:
@@ -691,6 +715,17 @@ def _dispatch_one(
         for item in stmt.display_items:
             _mark_observed(item, index, state)
     elif isinstance(stmt, IOWriteStatement):
+        if stmt.record_name and stmt.from_clause:
+            # `WRITE rec FROM id` is `MOVE id TO rec` and then the WRITE. A
+            # group record target is poisoned whole by `_apply_move_target`.
+            source = _resolve_move_source(stmt.from_clause, index, state.env)
+            _apply_move_target(
+                stmt.record_name,
+                source,
+                index,
+                state.env,
+                source_width=_text_width(stmt.from_clause, index),
+            )
         if stmt.record_name:
             _mark_observed(stmt.record_name, index, state)
     elif isinstance(stmt, IOReadStatement):
@@ -1057,8 +1092,25 @@ def _fold_move(
         _poison_names(stmt.targets, index, env)
         return
     source = _resolve_move_source(stmt.source, index, env) if stmt.source else None
+    width = _text_width(stmt.source, index) if stmt.source else None
     for target in stmt.targets:
-        _apply_move_target(target, source, index, env)
+        _apply_move_target(target, source, index, env, source_width=width)
+
+
+def _text_width(source: str, index: ProgramLayoutIndex) -> int | None:
+    """Character width of *source* when it is an alphanumeric-class field,
+    else ``None``. `env` stores a text value unpadded, but a MOVE sends the
+    source's whole field -- trailing spaces included -- which is what a
+    JUSTIFIED RIGHT receiver truncates on the left."""
+    if _NUMERIC_LITERAL_RE.match(source) or _QUOTED_LITERAL_RE.match(source):
+        return None
+    resolved = _safe_resolve(index, source)
+    if resolved is None or resolved.spec.category not in _TEXT_CATEGORIES:
+        return None
+    size = resolved.spec.size
+    if resolved.spec.category is FieldCategory.NATIONAL:
+        size //= 2
+    return size if size > 0 else None
 
 
 def _resolve_move_source(
@@ -1088,6 +1140,8 @@ def _apply_move_target(
     source: tuple[str, Decimal | str] | None,
     index: ProgramLayoutIndex,
     env: dict[str, Decimal | str],
+    *,
+    source_width: int | None = None,
 ) -> None:
     base, has_suffix = _base_name(target_name)
     resolved = _safe_resolve(index, base) if not has_suffix else None
@@ -1132,7 +1186,10 @@ def _apply_move_target(
                 # JUSTIFIED RIGHT keeps the RIGHTMOST characters of an
                 # oversized value; a shorter one is padded on the left,
                 # a rendering this module's unpadded env does not model,
-                # so only the exact/oversized case is knowable.
+                # so only the exact/oversized case is knowable. A field
+                # source sends its whole width, trailing spaces included.
+                if source_width is not None:
+                    value = value.ljust(source_width)
                 if len(value) >= size:
                     env[qname] = value[-size:]
             else:

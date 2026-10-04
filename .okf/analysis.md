@@ -2106,6 +2106,19 @@ internal env) rather than approximating:
   value for. `_target_paths()` now returns `(qpath, exact)` pairs; a
   suffixed target's `_reset_under` call always passes `restore=False`
   regardless of whether this is the file/target's first occurrence.
+* **Storage shared without a REDEFINES clause** (2026-10-04, #245).
+  Every 01 under one FD/SD implicitly redefines the same record area, so
+  `_link_file_records` unions the leaves of every
+  `index.records_for_file(f)` (`ProgramLayoutIndex.file_names()`) into one
+  alias class: `MOVE 1234 TO B. MOVE 'ABCD' TO A. DISPLAY B.` (B in R2, A in
+  R1, both under `FD F`) leaves B unknown -- it used to claim `1234`.
+  `WRITE rec FROM id` is folded as `MOVE id TO rec` before the WRITE is
+  observed (a group record is poisoned whole); `REWRITE ... FROM` takes the
+  generic poison path, which already covers the record. A field source
+  MOVEd into a `JUSTIFIED RIGHT` receiver is space-padded to its own width
+  first (`_text_width`), because `env` stores text unpadded and COBOL sends
+  the whole field: `X5 = 'ABCD'` into `PIC X(3) JUST RIGHT` is `'CD '`,
+  not `'BCD'`.
 * Any other statement type this module has no specific rule for
   (`INITIALIZE`, `SET`, `STRING`/`UNSTRING`, `INSPECT`, and the CALL/SQL/
   CICS/DLI cases above) conservatively poisons every name in its `.operands`

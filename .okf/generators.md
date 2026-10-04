@@ -1164,6 +1164,7 @@ index = ProgramLayoutIndex.from_file("PROG.cbl")   # parses for you
 
 index.record_for_file("INV-FILE")      -> CobolDataItem | None
 index.records_for_file("INV-FILE")     -> list[CobolDataItem]   # multi-01 FDs
+index.file_names()                     -> list[str]   # every FD/SD file owning a record
 index.file_facts("INV-FILE")           -> FileFacts | None
 index.resolve("INV-QTY")               -> ResolvedField | None
 index.resolve("INV-QTY OF INV-REC")    -> ResolvedField | None  # qualified

@@ -817,3 +817,91 @@ class TestLoopVariablesAndAliases:
             ),
         )
         assert fold.known == {}
+
+
+_ALIASING_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ALIASES.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT F ASSIGN TO 'F.DAT'.
+       DATA DIVISION.
+       FILE SECTION.
+       FD F.
+       01 R1.
+          05 A PIC X(4).
+       01 R2.
+          05 B PIC 9(4).
+       WORKING-STORAGE SECTION.
+       01 X5 PIC X(5).
+       01 J3 PIC X(3) JUSTIFIED RIGHT.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+"""
+
+
+def _fold_aliasing(procedure_body: str):
+    result = parse_cobol(_ALIASING_SOURCE + procedure_body, filename="t.cbl")
+    assert result.ast is not None, result.errors
+    assert result.errors == [], result.errors
+    index = ProgramLayoutIndex.build(result.ast)
+    return ConstantFolder().fold(result.ast, index, seed_values={})
+
+
+class TestStorageAliasing:
+    """Issue #245: three ways two names share storage that the folder used
+    to miss, each producing a `field_equals` value the program never held."""
+
+    def test_sibling_fd_records_share_one_record_area(self):
+        # Every 01 under one FD implicitly redefines the same area: writing
+        # A overwrites B's bytes.
+        fold = _fold_aliasing(
+            "           MOVE 1234 TO B.\n"
+            "           MOVE 'ABCD' TO A.\n"
+            "           DISPLAY B.\n"
+        )
+        assert "R2.B" not in fold.known
+
+    def test_sibling_fd_record_alias_does_not_poison_unrelated_storage(self):
+        fold = _fold_aliasing(
+            "           MOVE 'ABCDE' TO X5.\n"
+            "           MOVE 'ABCD' TO A.\n"
+            "           DISPLAY X5.\n"
+        )
+        assert fold.known == {"X5": "ABCDE"}
+
+    def test_write_from_moves_the_source_into_the_record_first(self):
+        fold = _fold_aliasing(
+            "           MOVE 'AB' TO A.\n"
+            "           MOVE 'ZZZZZ' TO X5.\n"
+            "           WRITE R1 FROM X5.\n"
+            "           DISPLAY A.\n"
+        )
+        assert "R1.A" not in fold.known
+
+    def test_rewrite_from_also_overwrites_the_record(self):
+        fold = _fold_aliasing(
+            "           MOVE 'AB' TO A.\n"
+            "           MOVE 'ZZZZZ' TO X5.\n"
+            "           REWRITE R1 FROM X5.\n"
+            "           DISPLAY A.\n"
+        )
+        assert "R1.A" not in fold.known
+
+    def test_justified_right_keeps_the_rightmost_of_the_padded_source(self):
+        # X5 holds "ABCD " (space-padded to five), so J3 receives "CD ".
+        fold = _fold_aliasing(
+            "           MOVE 'ABCD' TO X5.\n"
+            "           MOVE X5 TO J3.\n"
+            "           DISPLAY J3.\n"
+        )
+        assert fold.known.get("J3") == "CD "
+
+    def test_justified_right_from_a_full_width_source_is_unchanged(self):
+        fold = _fold_aliasing(
+            "           MOVE 'ABCDE' TO X5.\n"
+            "           MOVE X5 TO J3.\n"
+            "           DISPLAY J3.\n"
+        )
+        assert fold.known.get("J3") == "CDE"

@@ -240,6 +240,11 @@ class ProgramLayoutIndex:
         """All 01/77 records owned by *file_name*'s FD/SD, in source order."""
         return list(self._records_by_file.get(file_name.upper(), []))
 
+    def file_names(self) -> list[str]:
+        """Every (UPPERCASED) file name that owns at least one FD/SD record,
+        in the order its first record was seen."""
+        return list(self._records_by_file)
+
     def record_for_file(self, file_name: str) -> CobolDataItem | None:
         """The first record owned by *file_name*'s FD/SD, if any."""
         records = self._records_by_file.get(file_name.upper())
