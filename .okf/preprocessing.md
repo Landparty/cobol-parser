@@ -1399,3 +1399,13 @@ digits only), so `CHG001 IDENTIFICATION DIVISION.` never closed its
 `ID_DIVISION_HEADER_RE` (any six characters, then a blank column 7), the
 regex `CobolParser._skip_to_identification_division` uses too. Pinned by
 `tests/regression/test_sequence_area_tag_header.py`.
+
+**REPLACING operands may be qualified / subscripted identifiers (#253).**
+`CopyStatementLexer._read_replacing_operand` reads each REPLACING operand:
+pseudo-text and literals as before, but a word operand is extended greedily
+with `(OF|IN) word` pairs and parenthesised groups (blank before `(` or not,
+commas inside kept). Once REPLACING has started, `OF`/`IN` can only be
+qualification, so `REPLACING X BY WS-FLD OF WS-GRP` no longer sets the
+library qualifier to `WS-GRP` and drops `OF WS-GRP`, and `WS-TBL (2)` no
+longer loses `(2)`. NIST SM202A / SM206A now expand every COPY. Pinned by
+`tests/regression/test_copy_replacing_identifier_operand.py`.

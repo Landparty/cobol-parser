@@ -639,6 +639,52 @@ class CopyStatementLexer:
 
         return self.source[start_pos : self.pos] if self.pos > start_pos else None
 
+    def _read_replacing_operand(self) -> str | None:
+        """Read one REPLACING operand (pseudo-text, literal, word or identifier).
+
+        An identifier operand may be qualified and subscripted (IBM:
+        ``identifier`` includes ``OF``/``IN`` qualification, subscripts and
+        reference modification). Once REPLACING has started, ``OF``/``IN`` can
+        only be qualification -- the library name comes before REPLACING -- so
+        a word operand is extended greedily with ``(OF|IN) word`` pairs and
+        with parenthesised groups, with or without a blank before the ``(``:
+        ``WS-FLD OF WS-GRP`` and ``WS-TBL (2)`` used to come back as
+        ``WS-FLD`` / ``WS-TBL``, the rest dropped without a warning (#253).
+        """
+        self._skip_separators()
+        start = self.pos
+        first = self._peek()
+        operand = self._read_operand(keep_literal_quotes=True)
+        if operand is None or first in ('"', "'", "=", ":"):
+            return operand
+        while True:
+            save = self.pos
+            self._skip_separators()
+            if self._peek() == "(":
+                depth = 0
+                while not self._is_at_end():
+                    c = self._peek()
+                    self._advance()
+                    if c == "(":
+                        depth += 1
+                    elif c == ")":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                if depth != 0:
+                    self.pos = save
+                    break
+                continue
+            if self._match_keyword("OF") or self._match_keyword("IN"):
+                self._skip_separators()
+                if self._peek() not in ('"', "'", "=", ":", "."):
+                    qualifier = self._read_operand()
+                    if qualifier:
+                        continue
+            self.pos = save
+            break
+        return self.source[start : self.pos]
+
     def tokenize_copy_statements(self) -> list[CopyStatement]:
         newline_positions = [m.end() - 1 for m in _EOL_RE.finditer(self.source)]
         statements: list[CopyStatement] = []
@@ -797,7 +843,7 @@ class CopyStatementLexer:
                         elif self._match_keyword("TRAILING"):
                             mode = "TRAILING"
 
-                        search = self._read_operand(keep_literal_quotes=True)
+                        search = self._read_replacing_operand()
                         if not search:
                             # If no operand, break REPLACING loop
                             break
@@ -809,7 +855,7 @@ class CopyStatementLexer:
                             # We break and let the outer loop handle the next token
                             break
 
-                        replace = self._read_operand(keep_literal_quotes=True)
+                        replace = self._read_replacing_operand()
                         if replace is None:
                             break
 

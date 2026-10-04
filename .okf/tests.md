@@ -8,6 +8,11 @@ timestamp: 2026-10-04T00:00:00Z
 
 # Overview
 
+2026-10-04: `tests/regression/test_copy_replacing_identifier_operand.py`
+(13 tests, #253) pins qualified (`OF`/`IN`) and subscripted (`WS-TBL (2)`,
+reference modification) COPY REPLACING operands, end to end against a
+directly written MOVE, plus NIST SM202A / SM206A expanding every COPY.
+
 2026-10-04: `tests/regression/test_comment_entry_copy_replace_scan.py`
 (12 tests, #251) pins comment-entry text as opaque to the COPY / REPLACE
 scanners (an apostrophe in AUTHOR no longer hides a later COPY or REPLACE or
