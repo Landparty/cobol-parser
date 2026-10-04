@@ -124,7 +124,7 @@ CobolParser.parse(source)
 
 | File | Class / Purpose |
 |------|----------------|
-| `interfaces.py` | `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParserHost` protocol; `ParseContext` |
+| `interfaces.py` | `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParseContext` |
 | `token_stream.py` | `TokenStream` — `peek()`, `consume()`, `expect()`, configurable lookahead |
 | `registry.py` | `StatementParserRegistry` — first-match dispatch |
 | `exceptions.py` | `TokenMismatch`, `UnexpectedEndOfInput`, `DivisionNotFoundError`, `UnknownStatementError`, `ValidationError` |
@@ -1156,8 +1156,8 @@ Pinned by `tests/regression/test_tier5_silent_drip_audit.py`.
 
 Further instances found by re-auditing the DATA division and the
 statement parsers prior sweeps had not covered in depth. All pinned by
-`tests/regression/test_tier6_silent_drop_audit.py`; full report
-`reports/audit-2026-07-09.md`.
+`tests/regression/test_tier6_silent_drop_audit.py` (no standalone report
+under `reports/` was ever committed for this sweep).
 
 * **OCCURS `ASCENDING/DESCENDING KEY` (`data.py` + `_data_fast.pyx`):** the
   OCCURS parser jumped from the DEPENDING check straight to `INDEXED`, so a

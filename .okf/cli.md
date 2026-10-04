@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-09-30T00:00:00Z
+timestamp: 2026-10-04T00:00:00Z
 ---
 
 # Overview
@@ -166,8 +166,17 @@ no file found anywhere, says so and suggests creating one.
 cobol-parser parse <file.cbl> [json-path] [--compact] \
     [--source-format auto|fixed|free] [--free-form] \
     [--dialect ibm-enterprise] [--errors] [--stats] [--find-type NODE_TYPE] \
+    [--error-recovery fail-fast|collect-all] \
     [--profile] [--profile-top-n N] [--profile-output PATH]
 ```
+
+`--error-recovery` (default `collect-all`) maps to `ErrorRecoveryMode`
+(`_add_error_recovery_arg()` / `_get_error_recovery()`). It is not
+`parse`-only: `batch`, `scan`, `lint`, `data-items`, `business-rules` and
+every per-file analyzer subcommand (`analyze`, `dead-code`, ..., `xref`,
+`program-signature`, `sql-cics-check`, `diff`) take it too (`gen-data`, `gen-fixtures`, `decode`, `compare`, `expand`, `tokenize`,
+`preprocess`, `codebase-graph`, `copybook-impact`, `jcl`, `le-info` and
+`config` do not). `cobol.yml` can bind it (`error_recovery`).
 
 Parses a COBOL file and prints the AST as JSON. `json-path` (dotted) extracts
 a specific subtree. `--errors` shows parse errors only. `--stats` appends
@@ -197,11 +206,13 @@ Prints the token stream as JSON:
 ## Preprocess
 
 ```bash
-cobol-parser preprocess <file.cbl> [--define DEBUG]
+cobol-parser preprocess <file.cbl> [--define DEBUG] [--strip-directives]
 ```
 
 Runs fixed-format normalisation and conditional compilation; prints the resulting
 free-form text. `--define` sets compiler flags for conditional blocks.
+`--strip-directives` runs `strip_compiler_directives()` (PROCESS/CBL cards)
+before anything else.
 Under `auto` (the default) normalisation runs only when `_detect_fixed_format`
 classifies the source as fixed (it used to run unconditionally, silently
 slicing columns off genuine free-form input); `--source-format=fixed` forces
@@ -261,11 +272,13 @@ non-object pytest-results JSON file raised uncaught inside
 ## Expand
 
 ```bash
-cobol-parser expand <file.cbl> --copybook-path ./copybooks [--keep-comments] [--source-map]
+cobol-parser expand <file.cbl> --copybook-path ./copybooks [--keep-comments] [--source-map] \
+    [--max-depth N] [--define NAME] [-o out]
 ```
 
 Runs copybook expansion and prints the expanded source. `--copybook-path` may be
-specified multiple times for multiple search directories.
+specified multiple times for multiple search directories. `--max-depth`
+(default 100) caps COPY nesting (`max_nesting_depth`).
 
 `--keep-comments` (2026-09-07) puts every comment line's original text back
 into the listing, in the program and in each inlined member. Expansion always

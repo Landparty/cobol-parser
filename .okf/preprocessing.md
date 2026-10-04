@@ -222,7 +222,7 @@ Columns 73–80 are the identification area, and real fixed-format compilers
 ignore them regardless of content — traditional 80-column source
 legitimately puts non-blank sequence/identification text there (e.g. NIST
 CCVS85's `IC1014.2`, repeated on every line of the vendored
-`examples/nist-cobol85` corpus). Flagging every such line would be noise. So
+`examples/cobol/` NIST corpus). Flagging every such line would be noise. So
 `normalize_fixed_format` flags a line under either of two rules:
 
 1. **Mid-token split** — column 72 (the last kept character) **and**

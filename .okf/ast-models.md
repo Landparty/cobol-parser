@@ -3,7 +3,7 @@ type: Module
 title: AST Models
 description: ASTNode hierarchy — CobolProgram, data items, statement nodes, to_dict()/to_json() serialisation.
 tags: [ast, models, cobol-program, data-items, statements]
-timestamp: 2026-07-24T00:00:00Z
+timestamp: 2026-10-04T00:00:00Z
 ---
 
 # Overview
@@ -34,8 +34,10 @@ class ASTValidator: ...
 
 ```python
 class CobolProgram(ASTNode):
-    program_id: str
+    program_name: str        # the PROGRAM-ID (CLI/JSON reports call it program_id)
     divisions: list[CobolDivision]
+    contained_programs: list[CobolProgram]
+    unit_kind: str           # "PROGRAM" | "CLASS" | "FACTORY" | "OBJECT" | "METHOD"
     # ...
 
 class CobolDivision(ASTNode):
@@ -212,8 +214,12 @@ class CobolDataItem(ASTNode):
     # REDEFINES, VALUE, USAGE, …
 
 class PictureClause(ASTNode):
-    picture_string: str      # e.g. "9(5)V99"
-    category: DataCategory
+    pattern: str             # e.g. "9(5)V99" (DECIMAL-POINT IS COMMA normalized)
+    size: int | None
+    integer_digits / decimal_digits / total_digits: int | None
+    is_signed, is_edited, is_numeric_edited, is_alphanumeric_edited,
+    is_national, is_national_edited: bool
+    scaling_factor: int; scaling_leading: bool | None
 
 class OccursClause(ASTNode):
     min_times: int
@@ -335,6 +341,12 @@ width, like `PIC N` (see generators.md).
 2026-07-09 `ASCENDING/DESCENDING KEY` was dropped and `INDEXED BY` kept only
 its last name (and was lost entirely when a KEY clause preceded it). See
 [parser.md](parser.md) Silent-Drop Audit (2026-07-09).
+
+Level-66 entries are `RenamesItem` (`name`, `renames_from`,
+`renames_through`), not `CobolDataItem`s. FD/SD entries are
+`CobolFileDescription` (`models/program.py`: `file_name`, `record_type`
+FD|SD, `data_records`, BLOCK/RECORD CONTAINS, `record_varying_depending_on`,
+LABEL/VALUE OF/LINAGE/CODE-SET clauses).
 
 # SQL Statement Nodes (`models/sql_statements.py`)
 

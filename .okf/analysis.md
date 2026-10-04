@@ -283,7 +283,7 @@ extras.** Every `CobolStatement` already accumulates most of its own
 identifier/literal tokens into `.operands` via `_add_unique_operand`/
 `add_operand`, but an empirical audit (grepping every statement model's
 setters) found real gaps where a setter never reaches `.operands` at all:
-`ExecSqlStatement.host_variables`/`.null_indicators` (SQL statements don't
+`ExecSQLStatement.host_variables`/`.null_indicators` (SQL statements don't
 touch `.operands` at all), `UnstringStatement.source_operand`/
 `.into_targets`/`.pointer_variable`/`.tallying_variable`,
 `StringStatement.into_target`/`.pointer_variable`,

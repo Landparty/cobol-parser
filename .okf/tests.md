@@ -3,7 +3,7 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-09-30T00:00:00Z
+timestamp: 2026-10-04T00:00:00Z
 ---
 
 # Overview
@@ -923,27 +923,50 @@ addopts = [
 ```
 
 Branch coverage is also enabled (`[tool.coverage.run] branch = true`).
-Stored baselines live in `baselines/` (`current-coverage.json`, `final.json`).
+No coverage baselines are stored in the repo (there is no `baselines/`
+directory); the floor above is the only gate.
 
 # CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`:
+GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`, a nightly
+`schedule` (`17 4 * * *`) and manual `workflow_dispatch`. Push and PR
+triggers carry `paths-ignore` for `docs/**`, `.okf/**`, `reports/**` and
+`**/*.md`, so a docs-only change runs no CI at all. A new push to a PR
+cancels the run in flight (`concurrency`); runs on `main` are never
+cancelled. (Reshaped 2026-10-03, commit `5fd5b8e` "ci: cut PR build cost".)
 
-1. **lint** — `ruff check .` + `black --check .` (Python 3.13)
-2. **typecheck** — `mypy cobolparser/` (Python 3.13)
+1. **lint** — `ruff check .` + `black --check .` (Python 3.13, `ruff==0.15.0`
+   / `black==26.3.0`, pinned to match `.pre-commit-config.yaml`)
+2. **typecheck** — `mypy cobolparser/` (Python 3.13, `mypy==1.20.0`)
 3. **build** — `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace`
-   + `python -m pytest tests/ -q -p no:randomly -n auto --no-cov` on matrix:
-   Python 3.11, 3.12, 3.13 (install, Cython extension build, and the full
-   suite). PRs and `workflow_dispatch` only — a push to `main` runs lint and
-   typecheck alone.
+   + `python -m pytest <targets> -q -p no:randomly -n auto --no-cov` on matrix
+   Python 3.11, 3.12, 3.13, on **every** trigger. The full `tests/` suite
+   runs on all three for a push to `main`, the nightly run and a dispatch; on
+   a **PR** only 3.13 runs the full suite, and 3.11/3.12 run a smoke subset
+   (`tests/unit/test_lexer.py tests/test_all_samples.py
+   tests/unit/test_program_fixtures.py`). The nightly full matrix is what
+   catches a 3.11/3.12-only break that slipped through a PR.
 4. **coverage** — `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` +
-   `python -m pytest tests/ -q -p no:randomly -n auto` on Python 3.13. Where
+   `python -m pytest tests/ -q -p no:randomly -n auto` on Python 3.13
+   (`if: github.event_name != 'push'`: PRs, nightly and dispatch). Where
    the 90% floor is actually enforced, and why it is a job of its own:
    coverage.py cannot see into a compiled Cython extension, so once
    `build_ext` has run the pure-Python bodies it shadows read as unexecuted.
    Same suite, same commit, measured 2026-09-07: **54.32%** with the
    extensions built, **91.76%** without. Gating inside `build` would fail on
    the build step rather than on the code.
+
+Release builds are a separate workflow,
+`.github/workflows/release-please.yml`: release-please cuts the release from
+Conventional Commits, then `cibuildwheel` builds wheels (manylinux x86_64,
+macOS arm64, Windows AMD64 × CPython 3.11–3.13; only the three Cython
+accelerators are compiled, every other module ships as `.py`) and a
+`build-sdist` job builds the sdist; both are attached to the GitHub Release
+and published to PyPI as `cobol-parser` via Trusted Publishing.
+`[tool.cibuildwheel]`'s `test-command` runs a fast pytest subset against the
+installed wheel (`--no-cov`). The former closed-source release mode
+(`COBOLPARSER_CLOSED_SOURCE=1`) was removed 2026-10-03 (`1d6078e`); the
+package is AGPL-3.0-or-later (`fdd1199`).
 
 **Timing assertions and coverage.** `tests/performance/test_factory_performance.py`
 guards its two absolute nodes/sec floors with `requires_untraced`
@@ -956,8 +979,9 @@ Pythons, so the guard is not in force there; only the `coverage` job skips
 them. The ratio-based overhead assertion is unaffected. Surfaced the moment
 the suite was first wired into CI.
 
-The full suite (~9,400 tests) **does** run on every PR, as of the
-2026-09-07 audit. It previously ran nowhere: this file used to describe a
+The full suite (~12,300 tests across 439 `test_*.py` files as of
+2026-10-04; ~9,400 at the time) **does** run on every PR, as of the
+2026-09-07 audit (on 3.13 only since 2026-10-03 -- see `build` above). It previously ran nowhere: this file used to describe a
 `test` job gated on `if: github.event_name == 'workflow_dispatch'`, and no
 such job was ever in `ci.yml` — the suite and the `--cov-fail-under=90`
 floor went unenforced on every push and PR alike.
