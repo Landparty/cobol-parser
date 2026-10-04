@@ -8,6 +8,11 @@ timestamp: 2026-10-04T00:00:00Z
 
 # Overview
 
+2026-10-04: `tests/regression/test_copy_diagnostic_line_numbers.py`
+(3 tests, #256) pins COPY diagnostics after continuation records naming the
+original file line, from the expander and from `parse_cobol_with_expansion`
+(one diagnostic, not two in different coordinates).
+
 2026-10-04: `tests/regression/test_replace_before_identification_division.py`
 (9 tests, #254) pins a REPLACE ahead of the IDENTIFICATION DIVISION header
 being applied (free and fixed layout; `parse_cobol`, `CobolParser.parse`,

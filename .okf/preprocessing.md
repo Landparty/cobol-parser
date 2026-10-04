@@ -1415,3 +1415,15 @@ longer loses `(2)`. NIST SM202A / SM206A now expand every COPY. Pinned by
 REPLACE statement, from the same `_ReplaceScanner` `apply_replace_statements`
 uses. `CobolParser._skip_to_identification_division` uses it to keep a
 REPLACE written ahead of the IDENTIFICATION DIVISION header.
+
+**COPY diagnostics name the original line (#256).** `_expand_source_recursive`
+scans for COPY statements after merging continuation records; it now passes
+its `merged_from` origin list to `CopyStatementLexer(line_origins=...)`, and
+the lexer's `_report_line` maps each warning's line through it (two continued
+literals above a broken COPY at file line 12 used to report line 10).
+`parse_cobol_with_expansion` also re-states the parser's own strip-pass COPY
+warnings (`<main>: COPY X at line N`, counted in the expanded text) through
+the expansion source map (`_locate_strip_pass_warning`), so they name the
+file and its line and collapse into the expander's identical diagnostic.
+`CopyStatement.source_location` is unchanged (still merged-text lines).
+Pinned by `tests/regression/test_copy_diagnostic_line_numbers.py`.

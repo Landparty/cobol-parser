@@ -13,6 +13,7 @@ Performance features for large batch scenarios (3000+ programs, 50+ copybooks):
 """
 
 import os
+import re
 import time
 from collections import OrderedDict
 from typing import Any
@@ -1326,7 +1327,9 @@ def _expand_source_recursive(
         )
 
     # Extract COPY statements using the robust lexer on normalized source
-    lexer = CopyStatementLexer(normalized_source, source_file, sql_include=True)
+    lexer = CopyStatementLexer(
+        normalized_source, source_file, sql_include=True, line_origins=merged_from
+    )
     copy_statements = lexer.tokenize_copy_statements()
     # Surface COPY statements the lexer recognized but had to drop (missing
     # terminating period, unterminated pseudo-text) — they are never expanded
@@ -1689,6 +1692,34 @@ __all__ = [
 ]
 
 
+#: A COPY diagnostic from the parser's own un-expanded-COPY strip pass
+#: (``CopyStatementLexer(source, "<main>")`` over the EXPANDED text).
+_STRIP_PASS_COPY_WARNING_RE = re.compile(
+    r"<main>: ((?:COPY|EXEC SQL INCLUDE)\b.*?\bline )(\d+)\b"
+)
+
+
+def _locate_strip_pass_warning(
+    warning: str, source_map: dict[int, tuple[str, int]] | None
+) -> str:
+    """*warning* re-stated in the coordinates of the file a human edits.
+
+    The parser's strip pass runs over the expanded text, so its COPY
+    diagnostics count expanded lines and are labelled ``<main>``; the
+    expander reports the same COPY in the original file's lines (#256).
+    Translating through the expansion source map makes the two agree, so
+    the caller sees one diagnostic, at the right line.
+    """
+    match = _STRIP_PASS_COPY_WARNING_RE.match(warning) if source_map else None
+    if match is None or source_map is None:
+        return warning
+    origin = source_map.get(int(match.group(2)))
+    if origin is None:
+        return warning
+    origin_file, origin_line = origin
+    return f"{origin_file}: {match.group(1)}{origin_line}{warning[match.end():]}"
+
+
 def parse_cobol_with_expansion(
     source_code: str,
     filename: str,
@@ -1769,6 +1800,13 @@ def parse_cobol_with_expansion(
     # validation, level-number mismatches). They lived only on the discarded
     # CopybookExpansion object before, so callers of this convenience entry
     # point never saw them.
+    source_map = getattr(expansion, "source_location_map", None)
+    located: list[str] = []
+    for warning in result_obj.warnings:
+        moved = _locate_strip_pass_warning(warning, source_map)
+        if moved is warning or moved not in located:
+            located.append(moved)
+    result_obj.warnings[:] = located
     expansion_warnings = list(getattr(expansion.statistics, "warnings", []) or [])
     for warning in expansion_warnings:
         if warning not in result_obj.warnings:
@@ -1777,6 +1815,6 @@ def parse_cobol_with_expansion(
     # getattr, not attribute access: callers monkeypatch `expand_copybooks`
     # with stand-ins that carry only the fields they care about, and a map
     # that is merely absent must not take the whole parse down.
-    result_obj.expansion_source_map = getattr(expansion, "source_location_map", None)
+    result_obj.expansion_source_map = source_map
 
     return parse_result

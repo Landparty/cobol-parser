@@ -482,7 +482,12 @@ class CopyStatementLexer:
     """
 
     def __init__(
-        self, source: str, source_file: str = "<main>", *, sql_include: bool = False
+        self,
+        source: str,
+        source_file: str = "<main>",
+        *,
+        sql_include: bool = False,
+        line_origins: list[int] | None = None,
     ):
         # Comment-entry text (``AUTHOR. JOHN O'BRIEN.``) is blanked: it is
         # opaque documentation, never literals or COPY statements (#251).
@@ -502,6 +507,12 @@ class CopyStatementLexer:
         #: ParseResult.warnings so the drop is not silent (audit 2026-07-07
         #: H6a/H6c).
         self.warnings: list[str] = []
+        #: Per line of *source*, the 1-based line of the caller's original
+        #: text it came from -- set when *source* had continuation records
+        #: merged (``normalize_continuation_lines(line_origins=...)``), so
+        #: :attr:`warnings` name the line a human edits rather than a line of
+        #: the merged text (#256).
+        self.line_origins = line_origins
 
     def _peek(self, offset: int = 0) -> str:
         idx = self.pos + offset
@@ -741,7 +752,7 @@ class CopyStatementLexer:
                 self.warnings.append(
                     f"{self.source_file}: {'EXEC SQL INCLUDE' if is_include else 'COPY'} "
                     f"statement at line "
-                    f"{self._line_of(match_start, newline_positions)} has no "
+                    f"{self._report_line(match_start, newline_positions)} has no "
                     "member name and was ignored"
                 )
                 continue
@@ -754,7 +765,7 @@ class CopyStatementLexer:
                 if not self._match_keyword("END-EXEC"):
                     self.warnings.append(
                         f"{self.source_file}: EXEC SQL INCLUDE {member_name} at "
-                        f"line {self._line_of(match_start, newline_positions)} "
+                        f"line {self._report_line(match_start, newline_positions)} "
                         "has no END-EXEC and was ignored"
                     )
                     continue
@@ -881,7 +892,7 @@ class CopyStatementLexer:
             if len(statements) == stmt_count_before:
                 self.warnings.append(
                     f"{self.source_file}: COPY {member_name.strip()} at line "
-                    f"{self._line_of(match_start, newline_positions)} has no "
+                    f"{self._report_line(match_start, newline_positions)} has no "
                     "terminating period (or is followed by unexpected tokens) "
                     "and was NOT expanded — its content is missing from the "
                     "parsed program"
@@ -896,6 +907,14 @@ class CopyStatementLexer:
         prev_nl_idx = nl_idx - 1
         col = index - (newline_positions[prev_nl_idx] if prev_nl_idx >= 0 else -1)
         return nl_idx + 1, col
+
+    def _report_line(self, index: int, newline_positions: list[int]) -> int:
+        """Line of *index* for a diagnostic: in the original text when
+        :attr:`line_origins` maps it, else in *source*."""
+        line = self._line_of(index, newline_positions)
+        if self.line_origins and 0 < line <= len(self.line_origins):
+            return self.line_origins[line - 1]
+        return line
 
     @staticmethod
     def _line_of(index: int, newline_positions: list[int]) -> int:
