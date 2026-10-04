@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-09-30T00:00:00Z
+timestamp: 2026-10-04T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,36 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-10-04 -- audit: bundle checked against the current code, CI and release
+
+Every `.okf/*.md` checked against the tree (backticked paths and class
+names resolved in bulk, counts re-measured, CLI flags diffed against
+`cli/parse.py`'s argparse). Counts that held: 244 `TokenType` members, 72
+registered statement parsers, 29 analysis modules; no file still claims a
+non-AGPL licence. Fixed:
+[tests.md](tests.md): the CI section described the pre-2026-10-03 shape
+(`build` PR/dispatch-only) -- now nightly `schedule`, `paths-ignore` for
+docs-only changes, `build` on every trigger with a 3.11/3.12 smoke subset
+on PRs, `coverage` on everything but push; release-please + cibuildwheel +
+sdist summarized, closed-source mode noted as removed; the nonexistent
+`baselines/` directory dropped; suite size updated (~12,340 tests, 439
+files). [cli.md](cli.md): `--error-recovery` (and which subcommands take
+it), `preprocess --strip-directives`, `expand --max-depth` were
+undocumented. [jcl.md](jcl.md): round-11 behaviour (per-job PROC/SET scope,
+JOB card closing an open PROC, `/* comment` as delimiter, `DD *` to EOF,
+`--program` per job) existed only in this log; `jcl/bindings.py` section;
+a Known-gaps bullet that had drifted under "DUMMY and overrides" moved back.
+[ast-models.md](ast-models.md): `CobolProgram.program_name` (not
+`program_id`), `contained_programs` / `unit_kind`; `PictureClause` field
+names (`pattern`, `size`, ... -- there is no `picture_string`/`category`);
+`RenamesItem` and `CobolFileDescription` named. [parser.md](parser.md) and
+`CLAUDE.md`: the removed `ParserHost` protocol; a report path
+(`reports/audit-2026-07-09.md`) that never existed. [analysis.md](analysis.md):
+`ExecSQLStatement` spelling. [preprocessing.md](preprocessing.md): the NIST
+corpus lives in `examples/cobol/`, not `examples/nist-cobol85`. `CLAUDE.md`:
+33 statement parser files (not 34), test counts, CI triggers, and the seven
+subcommands missing from its command list.
 
 ## 2026-09-30 -- business rule extraction (`business_rules.py`, `business-rules` subcommand)
 

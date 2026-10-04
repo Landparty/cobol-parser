@@ -63,7 +63,7 @@ python setup.py build_ext --inplace
 # Skip the C extension build entirely (no compiler / no Cython available)
 COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
 
-# Run all tests with coverage (90% minimum; ~11,140 tests across 389 files).
+# Run all tests with coverage (90% minimum; ~12,340 tests across 439 files).
 # Measure coverage on a pure-Python build -- see "Coverage Requirement".
 python -m pytest tests/ -v
 
@@ -123,6 +123,14 @@ cobol-parser language-env <file.cbl>
 cobol-parser le-info [NAME...] [--kind service|function|all] [--compact] [-o out.json]
 cobol-parser ims-dli <file.cbl>
 cobol-parser data-items <file.cbl>
+cobol-parser program-signature <file.cbl>
+cobol-parser xref <file.cbl>
+cobol-parser sql-cics-check <file.cbl>
+cobol-parser diff <old.cbl> <new.cbl> [--format json|text] [--rename-threshold RATIO]
+cobol-parser codebase-graph PATH... [--format json|dot|mermaid] [--extension EXT] [--workers N] [--copybook-path DIR]
+cobol-parser copybook-impact <member> PATH... [--extension EXT] [--workers N] [--copybook-path DIR]
+cobol-parser jcl <job.jcl> [--dd-map] [--bindings] [--program NAME] [--strict]
+# Parsing subcommands also take [--error-recovery fail-fast|collect-all] (default collect-all)
 ```
 
 ## Architecture
@@ -153,7 +161,7 @@ COBOL source (.cbl/.cob)
 **`cobolparser/parser.py`** -- `CobolParser` orchestrates parsing via `DivisionParserFactory`. Returns `ParseResult(ast, errors, warnings, statistics)`. Multi-unit compilation units (nested/stacked `PROGRAM-ID`s, and IBM object-oriented `CLASS-ID` units with their `FACTORY` / `OBJECT` / `METHOD-ID` units, `CobolProgram.unit_kind`) parse into `contained_programs`; `program_units()` enumerates them all. Conditional compilation (`>>DEFINE` / `>>IF` / `>>EVALUATE`) and `REPLACE` (including IBM `==:TAG:==` partial words) are applied before lexing.
 
 **`cobolparser/core/`** -- Infrastructure:
-- `interfaces.py` -- `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParserHost` protocol; `ParseContext` for nested statement parsing
+- `interfaces.py` -- `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParseContext` for nested statement parsing
 - `token_stream.py` -- `TokenStream` wraps `List[Token]` with `peek()`, `consume()`, `expect()`, configurable lookahead
 - `registry.py` -- `StatementParserRegistry` with first-match dispatch strategy
 - `exceptions.py` -- `TokenMismatch`, `UnexpectedEndOfInput`, `DivisionNotFoundError`, `UnknownStatementError`, `ValidationError` (all extend `ParseError`)
@@ -170,7 +178,7 @@ COBOL source (.cbl/.cob)
 - `divisions/environment.py` -- ENVIRONMENT DIVISION parser
 - `divisions/data.py` -- DATA DIVISION parser (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE / REPORT sections; SCREEN and COMMUNICATION are recognized and skipped with a warning). `data_clauses.py` (data-item clauses incl. REPORT SECTION report-group clauses), `data_file_description.py` (FD/SD clauses), `data_report_description.py` (RD clauses), `data_special_entries.py` (level-88/66, data-division EXEC SQL) are its collaborators
 - `divisions/procedure.py` -- PROCEDURE DIVISION parser with `StatementParserRegistry`
-- `statements/` -- 34 statement parser files (see "Statement Parsers" section below)
+- `statements/` -- 33 statement parser files (plus the `_utils.py` / `_conditions.py` helpers) (see "Statement Parsers" section below)
 - `statements/_utils.py` -- Shared clause collection utilities
 
 **`cobolparser/models/`** -- AST node classes. Every node extends `ASTNode` (from `ast_base.py`) and must implement `to_dict()`:
@@ -562,7 +570,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~11,140 tests across 389 files in 5 directories:
+~12,340 tests across 439 files in 5 directories:
 
 ```
 tests/
@@ -616,14 +624,14 @@ When running only a subset of tests, expect the check to fail -- that is normal 
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main` (and manual `workflow_dispatch`):
+GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`, nightly (`schedule`), and manual `workflow_dispatch`; push/PR skip docs-only changes (`paths-ignore`: `docs/**`, `.okf/**`, `reports/**`, `**/*.md`):
 
 1. **lint** -- `ruff check .` + `black --check .` (Python 3.13, pinned versions matching `.pre-commit-config.yaml`)
 2. **typecheck** -- `mypy cobolparser/` (Python 3.13, pinned version)
-3. **build** -- `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` + `python -m pytest tests/ -q -p no:randomly -n auto --no-cov` on matrix: Python 3.11, 3.12, 3.13 (verifies install, the Cython extension build, and the full suite against those extensions; runs only on PRs/dispatch, not on push to `main`)
-4. **coverage** -- `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` + the full suite on Python 3.13, enforcing `--cov-fail-under=90` (PRs/dispatch only)
+3. **build** -- `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` + `python -m pytest tests/ -q -p no:randomly -n auto --no-cov` on matrix: Python 3.11, 3.12, 3.13 (verifies install, the Cython extension build, and the suite against those extensions). Full suite on all three for pushes to `main`, nightly and dispatch; on a PR only 3.13 runs the full suite and 3.11/3.12 run a smoke subset (`tests/unit/test_lexer.py tests/test_all_samples.py tests/unit/test_program_fixtures.py`)
+4. **coverage** -- `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` + the full suite on Python 3.13, enforcing `--cov-fail-under=90` (PRs, nightly and dispatch; not on push to `main`)
 
-The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather than the pure-Python fallback -- with `--no-cov`, because coverage.py cannot see into a compiled extension (54.32% with them built vs 91.76% without, measured together on 2026-09-07). The `coverage` job is where `--cov-fail-under=90` is enforced, on a pure-Python install. A push to `main` runs lint and typecheck only. Run the suite locally during development too (`python -m pytest tests/ -v`).
+The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather than the pure-Python fallback -- with `--no-cov`, because coverage.py cannot see into a compiled extension (54.32% with them built vs 91.76% without, measured together on 2026-09-07). The `coverage` job is where `--cov-fail-under=90` is enforced, on a pure-Python install. A push to `main` runs lint, typecheck and the full `build` matrix (no coverage gate). Run the suite locally during development too (`python -m pytest tests/ -v`).
 
 ## Release & Distribution
 

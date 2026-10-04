@@ -3,7 +3,7 @@ type: Module
 title: JCL
 description: z/OS Job Control Language front end — cards, jobs, steps, DD statements, in-stream procedures, and the ddname → dataset binding a COBOL SELECT resolves through.
 tags: [jcl, zos, dd, dataset, job, step, proc, symbolic-parameters, bindings]
-timestamp: 2026-09-15T00:00:00Z
+timestamp: 2026-10-04T00:00:00Z
 ---
 
 # Overview
@@ -164,7 +164,14 @@ at the first card starting with `//` — unless it coded `DLM=`, in which case,
 as on z/OS, only that delimiter ends it and `//` / `/*` cards are data;
 `DD DATA` data ends **only** at the delimiter, which is `/*` (`DEFAULT_DELIMITER`) unless the DD coded `DLM=xx`.
 Data lines attach to the DD that introduced them and are kept exactly as
-written — full width, **not** truncated at column 72.
+written — full width, **not** truncated at column 72. `DD *` data with no
+`DLM=` may simply run to end of input (no error); only a coded delimiter, or
+`DD DATA`'s required one, can be reported missing.
+
+`/*` followed by a blank is a **delimiter** whose remainder is a comment;
+only `/*` with a verb starting in column 3 (`/*JOBPARM`) is a JES control
+card (`KIND_JES`). Before 2026-09-30 (bug hunt round 11) `/* comment` was
+read as a JES statement named by its comment.
 
 Helpers `split_top_level()` and `find_top_level_equals()` split a parameter
 field without breaking inside quotes or parentheses.
@@ -221,6 +228,13 @@ procedure being invoked.
 enclosing `IF`/`ELSE` (`NOT (...)` inside an `ELSE`, nested conditions joined
 with `AND`), otherwise `None`.
 
+**Scope is per job.** An in-stream procedure is visible only within the job
+that defines it (two jobs may each define `P`; a later job never runs an
+earlier job's `P` — a PROC coded before the first JOB card is still found),
+and `SET` values do not leak into the next `JOB`. A `JOB` card also ends an
+in-stream `PROC` left open without a `PEND` (reported as an error), so the
+next job is not swallowed into the procedure body. (Round 11, 2026-09-30.)
+
 An unnamed `// PROC` header marks a **cataloged** procedure: its keywords seed
 the symbolic defaults, and the JOB-less body is a note in `unresolved`, not an
 error.
@@ -242,6 +256,9 @@ stored exactly as coded and reported in `unresolved`.
   body is still stored and usable).
 * **`DSN=*.step.ddname` backward references are not resolved** — the text is
   kept as coded and reported.
+* Datasets are not resolved across *files*: a job that `INCLUDE`s a member or
+  `EXEC`s a cataloged procedure from a PROCLIB gets an `unresolved` entry, not
+  a lookup.
 
 # DUMMY and overrides
 
@@ -253,9 +270,6 @@ card that codes any of them drops whichever the procedure DD coded, so
 `IN -> A.B` in `dd_map()`), `//S.SYSIN DD *` replaces a procedure `DSN=`
 (it used to keep it alongside the data), and a `DSN=` override of a
 procedure `DD *` is no longer still flagged in-stream.
-* Datasets are not resolved across *files*: a job that `INCLUDE`s a member or
-  `EXEC`s a cataloged procedure from a PROCLIB gets an `unresolved` entry, not
-  a lookup.
 
 # CLI
 
@@ -263,7 +277,7 @@ procedure `DD *` is no longer still flagged in-stream.
 cobol-parser jcl JOB.jcl                  # the whole job structure as JSON
 cobol-parser jcl JOB.jcl --dd-map         # only ddname -> datasets
 cobol-parser jcl JOB.jcl --bindings       # one row per DD binding
-cobol-parser jcl JOB.jcl --program INVUPDT  # only steps running that program
+cobol-parser jcl JOB.jcl --program INVUPDT  # only steps running that program (matched per job)
 cobol-parser jcl JOB.jcl --strict         # exit 3 when any card failed to parse
 ```
 
@@ -281,6 +295,13 @@ does this program's `INVFILE` resolve to" is answerable, but "which job
 populates the dataset this program reads" is not — the two halves exist and are
 simply not wired together. See [analysis.md](analysis.md).
 
+# Bindings (`jcl/bindings.py`)
+
+`resolve_dd_bindings(result) -> list[DatasetBinding]` flattens every job's
+steps into one row per DD (concatenation members included);
+`bindings_for_ddname(result, ddname)` filters that list case-insensitively.
+
 # Tests
 
-`tests/unit/test_jcl.py`.
+`tests/unit/test_jcl.py`, `tests/unit/cli/test_jcl_cli.py`, and the
+round-pinned `tests/unit/test_bug_hunt_r11_jcl_config.py`.
