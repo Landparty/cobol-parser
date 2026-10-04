@@ -1373,3 +1373,20 @@ re-cythonizes the `.pyx` when Cython is installed and rewrites the
 checked-in `.c`; both files are committed together. Remove the built
 `*.so` afterwards before measuring coverage.
 
+
+# Preprocessing fixes 2026-10-04 (issues #251-#256)
+
+**Comment-entries are opaque to the COPY/REPLACE scanners (#251).** A quote
+in `AUTHOR. JOHN O'BRIEN.` used to open a "literal" in `CopyStatementLexer`
+and `_ReplaceScanner` that ran to the next quote anywhere in the file: a
+later COPY was silently not expanded, a later REPLACE not applied, and the
+quote parity flipped so `VALUE 'COPY NO. 1 OF 2'` was read as a COPY
+statement. Two changes, both scanners: (1) a literal ends at the end of its
+line at the latest (they run after continuation records are merged, so no
+real literal spans a newline); (2) both scan `lexer.mask_comment_entries(source)`
+-- the source with every comment-entry's text blanked (same length, same
+line breaks, so offsets stay valid), using the lexer's own
+`_comment_entry_starts` so the two agree on what a comment-entry is. A
+`COPY` written inside a comment-entry (`REMARKS. SEE COPY PAYREC.`) is
+prose and is never expanded (the option #251 recommends). Pinned by
+`tests/regression/test_comment_entry_copy_replace_scan.py`.

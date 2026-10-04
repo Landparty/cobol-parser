@@ -104,6 +104,33 @@ def _comment_entry_starts(source: str, lines: list[str]) -> dict[int, int]:
     return starts
 
 
+def mask_comment_entries(source: str) -> str:
+    """*source* with every comment-entry's text blanked to spaces.
+
+    Same length, same line breaks, so offsets and line numbers into the
+    result are offsets and line numbers into *source*. The COPY and REPLACE
+    text scanners run over this: a comment-entry is opaque documentation
+    text, so a quote in ``AUTHOR. JOHN O'BRIEN.`` must not open a literal
+    there, and a ``COPY`` in ``REMARKS. SEE COPY PAYREC.`` is prose (#251).
+    The paragraph names themselves (``AUTHOR.``) are kept.
+    """
+    if not _COMMENT_ENTRY_ANY_RE.search(source):
+        return source
+    lines = split_source_lines(source, keepends=True)
+    starts = _comment_entry_starts(source, lines)
+    if not starts:
+        return source
+    out: list[str] = []
+    for index, line in enumerate(lines):
+        start = starts.get(index)
+        if start is None:
+            out.append(line)
+            continue
+        body = line.rstrip("\r\n")
+        out.append(body[:start] + " " * (len(body) - start) + line[len(body) :])
+    return "".join(out)
+
+
 # ---------------------------------------------------------------------------
 # SPECIAL-NAMES CURRENCY SIGN: the PICTURE symbols a program declares
 # ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ import bisect
 import re
 
 from .._source_directive import free_format_flags
+from ..lexer import mask_comment_entries
 from ._normalize import ALL_COMMENT_INDICATORS
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
@@ -483,7 +484,9 @@ class CopyStatementLexer:
     def __init__(
         self, source: str, source_file: str = "<main>", *, sql_include: bool = False
     ):
-        self.source = source
+        # Comment-entry text (``AUTHOR. JOHN O'BRIEN.``) is blanked: it is
+        # opaque documentation, never literals or COPY statements (#251).
+        self.source = mask_comment_entries(source)
         self.source_file = source_file
         self.pos = 0
         self.length = len(source)
@@ -589,11 +592,16 @@ class CopyStatementLexer:
                 self.pos = scan + 1
                 return text
 
-        # 2. String literal "..." or '...'
+        # 2. String literal "..." or '...'. A literal ends at the end of its
+        # line at the latest: this scan runs after continuation records are
+        # merged, so no real literal spans a newline, and an unmatched quote
+        # must not swallow the rest of the file (#251).
         if char in ('"', "'"):
             quote = char
             self._advance()
             while not self._is_at_end():
+                if self._peek() in ("\n", "\r"):
+                    return None
                 if self._peek() == quote and self._peek(1) == quote:
                     self._advance(2)
                 elif self._peek() == quote:
