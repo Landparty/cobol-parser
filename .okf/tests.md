@@ -31,6 +31,9 @@ SG104A has no phantom `COPY NOT` warning).
 `tests/regression/test_sequence_area_tag_header.py` (10 tests, #252) pins a
 change tag (`CHG001`) in columns 1-6 of the IDENTIFICATION DIVISION record
 through `CobolParser.parse`, `parse_cobol` and `parse_files(workers=1|2)`.
+`tests/regression/test_tagged_copybook_comment_hash.py` (14 tests) pins a
+`#` in comment lines of a change-tagged copybook (nested COPY, short members,
+direct source, free-form `*>`) and the `DIVIDE 10 INTO X` non-anchor.
 
 2026-09-30: `tests/unit/analysis/test_business_rules.py` (73 tests) pins
 `BusinessRuleExtractor` against real parses: IF / EVALUATE (subject, TRUE,

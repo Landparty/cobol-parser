@@ -826,12 +826,17 @@ def _looks_fixed_format(text: str) -> bool:
     Defers to the parser's :func:`_detect_fixed_format` (the same verdict the
     final parse will reach), which declines to judge fewer than three
     non-blank lines; a short member is then judged directly -- fixed when
-    every non-blank line carries a blank/numeric sequence area and a valid
-    indicator column, and by default when it has no lines at all (nothing
+    every non-blank line carries a valid indicator column and a blank/numeric
+    sequence area (or a change tag that a comment line or data entry after a
+    tag corroborates, see :func:`_has_tagged_line_anchor`), and by default when it has no lines at all (nothing
     to strip either way).
     """
     # Deferred: parser imports this package at module scope.
-    from ..parser import _detect_fixed_format, _sequence_area_is_fixed_like
+    from ..parser import (
+        _detect_fixed_format,
+        _has_tagged_line_anchor,
+        _sequence_area_is_fixed_like,
+    )
 
     # Tabs are expanded first, as every column-sensitive step here does.
     text = text.expandtabs(8)
@@ -844,7 +849,8 @@ def _looks_fixed_format(text: str) -> bool:
         indicator = line[6]
         if indicator not in (" ", "-") and indicator not in ALL_COMMENT_INDICATORS:
             return False
-        if not _sequence_area_is_fixed_like(line[:6])[0]:
+        strict, relaxed = _sequence_area_is_fixed_like(line[:6])
+        if not strict and not (relaxed and _has_tagged_line_anchor(non_blank)):
             return False
     return True
 
