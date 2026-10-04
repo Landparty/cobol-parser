@@ -247,7 +247,7 @@ class RecursionRiskAnalyzer:
         branch to a paragraph outside the cycle -- i.e. the loop is not
         unconditionally trapped once entered."""
         cycle_set = set(cycle)
-        nodes_by_name = {n.name: n for n in flow_report.nodes}
+        nodes_by_name = {n.key: n for n in flow_report.nodes}
         for name in cycle:
             node = nodes_by_name.get(name)
             if node is not None and (

@@ -40,6 +40,47 @@ from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 
 # Analyzer Reference
 
+## Same-named procedures and data items (issue #258)
+
+Two paragraphs may share a name when they sit in different sections
+(`X1` in `S1` and `S2`), and two records routinely carry the same field
+names (`CUST-ID OF IN-REC` / `CUST-ID OF OUT-REC`). Analyzers must not key
+either by bare name.
+
+- **Procedures** — `analysis/_procedures.py`: `ProcedureIndex.build(proc_div)`
+  gives every section/paragraph a unique *key*: the bare name when unique,
+  `"X1 OF S2"` when the name is shared. `resolve(name, qualifier,
+  from_section)` applies the COBOL rule: the `OF`/`IN` qualifier (parser
+  metadata `target_qualifier` / `thru_qualifier` on PERFORM and GO TO),
+  else the paragraph of that name in the referencing statement's own
+  section (`enclosing_section(stmt)` walks `.parent`), else the unique
+  name; an ambiguous reference resolves to *every* candidate (keeps code
+  alive, never hides it). Used by `program_flow` (scanner + `EdgeCollector`),
+  `DeadCodeAnalyzer` and `ComplexityAnalyzer`.
+- **Flow output contract** — `FlowNode.name` stays the bare name;
+  `FlowNode.qualified_name` is set (and emitted by `to_dict`) only for a
+  shared name; `FlowNode.key` is the one every edge `source`/`target`,
+  `thru_target`, `range_members`, entry/exit point, cycle,
+  `unreachable_nodes` entry and branch `parent_proc` uses. Consumers that
+  join edges to nodes must join on `qualified_name ?? name`. Same
+  `qualified_name` field on `DeadCodeItem` and `ProcedureComplexity`.
+- **Data items** — `_extract_identifiers` (unused_variables.py) returns
+  references with their qualifiers, spelled `"AMT OF IN-REC"` (`IN` is
+  normalized to `OF`), plus each qualifier as its own reference
+  (`_names.qualified_references`; `_names.bare_names` recovers plain
+  tokens). `_NameMatcher` resolves them: qualifiers must name enclosing
+  items in ascending order (levels may be skipped); an unqualified
+  reference to a shared name, or qualifiers matching no candidate (a
+  file-name qualifier), count for every candidate. REDEFINES resolves to
+  the same-named *sibling* first. `UnusedVariableItem.qualified_name`
+  (`"AMT OF OUT-REC"`, full enclosing chain) is set for shared names.
+  `XrefAnalyzer` gives each same-named item in a *different* record its
+  own `XrefEntry` with `qualified_name` (`entry_for` accepts it); the same
+  chain declared twice (a copybook COPYed into two sections) is still a
+  `duplicate_declarations` entry. `ProgramSignatureExtractor` keys field
+  directions by `qualified_name` where xref set one. Procedure xref
+  entries are still name-keyed.
+
 ## DeadCodeAnalyzer
 
 > 2026-09-27: a referenced section no longer marks *every* paragraph in it
@@ -445,7 +486,7 @@ SECTION out of scope), the `SearchStatement` branch and
 `_selector_identifiers`'s `"Condition"` case (SEARCH WHEN / EVALUATE TRUE
 regex-only fallback), and the `redefines_edges` comment in `analyze()`
 (REDEFINES/OCCURS-DEPENDING-ON/RENAMES resolved by name, not structural
-identity). No behavior change — purely so a `TODO`/`grep` sweep of the
+identity; since issue #258 REDEFINES prefers the same-named sibling). No behavior change — purely so a `TODO`/`grep` sweep of the
 codebase surfaces these instead of only living in prose here and in the
 docstring.
 
@@ -739,12 +780,11 @@ counting on statement types where the attribute *is* already wired to
 header holds no statements of its own (same observation `dead_code.py` and
 `program_flow/scanner.py` make), so there is nothing to walk.
 
-**Same-named paragraphs aggregate (2026-08-16 audit fix):** the flow node
-is name-keyed, so two same-named paragraphs in different sections (legal
-COBOL) share one node whose `statement_count` merges both bodies —
-`_collect_paragraph_map` now maps a name to *all* its paragraph nodes and
-`analyze()` sums decisions/boolean operators and maxes nesting depth
-across them, instead of silently analyzing only the first body. Pinned by
+**Same-named paragraphs are measured separately (issue #258):** the
+2026-08-16 audit fix summed same-named paragraphs into one row because the
+flow node was name-keyed. Flow nodes are now keyed by `ProcedureIndex`
+(`"DO-WORK OF SEC-TWO"`), so `_collect_paragraph_map` maps each key to its
+own body and each row carries `qualified_name`. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA8SameNamedParagraphs`.
 
 CLI: `cobol-parser complexity <file.cbl>` (see cli.md).

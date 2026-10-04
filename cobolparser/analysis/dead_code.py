@@ -28,6 +28,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ._procedures import ProcedureIndex, enclosing_section, statement_qualifier
 
 
 @dataclass
@@ -37,13 +38,19 @@ class DeadCodeItem:
     name: str
     procedure_type: str  # "PARAGRAPH" or "SECTION"
     location: SourceLocation
+    #: ``"X1 OF S2"`` when another paragraph shares this one's name, so the
+    #: two can be told apart; ``None`` otherwise.
+    qualified_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "name": self.name,
             "type": self.procedure_type,
             "location": self.location.to_dict(),
         }
+        if self.qualified_name:
+            result["qualified_name"] = self.qualified_name
+        return result
 
 
 @dataclass
@@ -161,6 +168,7 @@ class DeadCodeAnalyzer:
         # They are what runs first, so a STOP RUN / GOBACK among them means
         # the first *named* procedure is not entered by fall-through.
         self._leading_body: CobolParagraph | None = None
+        self._index = ProcedureIndex([])
 
     def analyze(self, ast: CobolProgram) -> DeadCodeReport:
         """Analyze a COBOL program for dead code.
@@ -218,93 +226,80 @@ class DeadCodeAnalyzer:
             self._referenced_names & set(self._procedure_names.keys())
         )
 
-        for name in self._ordered_procedures:
-            if name not in self._referenced_names:
-                proc_type, location = self._procedure_names[name]
-                report.dead_items.append(DeadCodeItem(name, proc_type, location))
+        for key in self._ordered_procedures:
+            if key not in self._referenced_names:
+                proc = self._index.by_key[key]
+                report.dead_items.append(
+                    DeadCodeItem(
+                        proc.name,
+                        proc.procedure_type,
+                        proc.location,
+                        proc.qualified_name,
+                    )
+                )
 
         return report
 
     def _collect_procedures(self, proc_division: CobolDivision) -> None:
-        """Collect all paragraph and section names from the PROCEDURE DIVISION.
+        """Collect every paragraph and section of the PROCEDURE DIVISION.
 
-        COBOL allows paragraphs before the first SECTION header, so sections
-        and top-level paragraphs are interleaved by source line to preserve
-        physical order (entry-point detection and fall-through edges both
-        depend on ``_ordered_procedures`` matching source order).
+        Keyed by :class:`~._procedures.ProcedureIndex` identity: the bare
+        name, or ``"X1 OF S2"`` for a paragraph whose name another section
+        also uses (issue #258), in physical source order (entry-point
+        detection and fall-through both depend on ``_ordered_procedures``
+        matching it).
         """
-        self._leading_body = None
-        top_level_items: list[Any] = sorted(
+        self._index = ProcedureIndex.build(proc_division)
+        top_level: list[Any] = sorted(
             [*proc_division._sections.values(), *proc_division.paragraphs],
             key=lambda item: item.location.line,
         )
+        self._leading_body = None
+        if (
+            top_level
+            and isinstance(top_level[0], CobolParagraph)
+            and not top_level[0].paragraph_name
+        ):
+            self._leading_body = top_level[0]
 
-        for item in top_level_items:
-            if isinstance(item, CobolSection):
-                name = item.section_name
-                if name:
-                    upper_name = name.upper()
-                    if upper_name not in self._procedure_names:
-                        self._procedure_names[upper_name] = (
-                            "SECTION",
-                            item.location,
-                        )
-                        self._ordered_procedures.append(upper_name)
-                    # Always ensure a paragraph bucket exists for this section
-                    # name, even when the SECTION registration above was
-                    # skipped due to a name collision, so the paragraph loop
-                    # below can unconditionally .append() into it.
-                    self._section_paragraphs.setdefault(upper_name, [])
-                # Collect paragraphs within the section
-                for para in item.paragraphs:
-                    pname = para.paragraph_name
-                    if not pname and name:
-                        # Sentences between the SECTION header and its first
-                        # paragraph header: the section's own body, whose
-                        # terminators decide whether the section falls
-                        # through (see ``_terminates``).
-                        self._paragraph_nodes.setdefault(name.upper(), para)
-                        continue
-                    if pname and self._is_valid_procedure_name(pname):
-                        upper_pname = pname.upper()
-                        if upper_pname not in self._procedure_names:
-                            self._procedure_names[upper_pname] = (
-                                "PARAGRAPH",
-                                para.location,
-                            )
-                            self._ordered_procedures.append(upper_pname)
-                            self._paragraph_nodes[upper_pname] = para
-                        if name:
-                            sec_upper = name.upper()
-                            self._section_paragraphs[sec_upper].append(upper_pname)
-                            self._paragraph_sections.setdefault(upper_pname, set()).add(
-                                sec_upper
-                            )
+        for entry in self._index.entries:
+            self._procedure_names[entry.key] = (entry.procedure_type, entry.location)
+            self._ordered_procedures.append(entry.key)
+            if entry.procedure_type == "SECTION":
+                self._section_paragraphs.setdefault(entry.key, [])
+                # Sentences between the SECTION header and its first
+                # paragraph header: the section's own body, whose
+                # terminators decide whether the section falls through
+                # (see ``_terminates``).
+                section = entry.node
+                assert isinstance(section, CobolSection)
+                for para in section.paragraphs:
+                    if not para.paragraph_name:
+                        self._paragraph_nodes.setdefault(entry.key, para)
+                        break
             else:
-                # Top-level paragraph (not inside a section)
-                pname = item.paragraph_name
-                if not pname and not self._ordered_procedures:
-                    self._leading_body = item
-                if pname and self._is_valid_procedure_name(pname):
-                    upper_pname = pname.upper()
-                    if upper_pname not in self._procedure_names:
-                        self._procedure_names[upper_pname] = (
-                            "PARAGRAPH",
-                            item.location,
-                        )
-                        self._ordered_procedures.append(upper_pname)
-                        self._paragraph_nodes[upper_pname] = item
+                assert isinstance(entry.node, CobolParagraph)
+                self._paragraph_nodes[entry.key] = entry.node
+                if entry.section is not None:
+                    self._section_paragraphs.setdefault(entry.section, []).append(
+                        entry.key
+                    )
+                    self._paragraph_sections.setdefault(entry.key, set()).add(
+                        entry.section
+                    )
 
     def _collect_declaratives(self, proc_division: CobolDivision) -> None:
         """Record every DECLARATIVES section and its paragraphs."""
-        for item in proc_division._sections.values():
-            if not isinstance(item, CobolSection) or not item.is_declarative:
-                continue
-            if item.section_name:
-                self._declarative_procs.add(item.section_name.upper())
-            for para in item.paragraphs:
-                if para.paragraph_name:
-                    self._declarative_procs.add(para.paragraph_name.upper())
+        declarative = {
+            e.key
+            for e in self._index.entries
+            if isinstance(e.node, CobolSection) and e.node.is_declarative
+        }
+        self._declarative_procs.update(
+            e.key
+            for e in self._index.entries
+            if e.key in declarative or e.section in declarative
+        )
 
     def _propagate_section_references(self) -> None:
         """Propagate section references in both directions.
@@ -404,13 +399,9 @@ class DeadCodeAnalyzer:
     def _collect_xml_refs(self, stmt: XmlJsonStatement) -> None:
         """``XML PARSE ... PROCESSING PROCEDURE p [THRU q]`` runs p (through
         q) once per XML event -- an out-of-line PERFORM the parser invokes."""
-        if stmt.processing_procedure:
-            self._add_ref(stmt.processing_procedure)
-        if stmt.processing_procedure_thru:
-            self._add_ref(stmt.processing_procedure_thru)
-            self._mark_thru_range(
-                stmt.processing_procedure, stmt.processing_procedure_thru
-            )
+        self._collect_range_refs(
+            stmt, stmt.processing_procedure, stmt.processing_procedure_thru
+        )
 
     def _collect_cics_handle_refs(self, stmt: Any) -> None:
         """``EXEC CICS HANDLE AID|CONDITION|ABEND`` names paragraphs CICS
@@ -420,7 +411,8 @@ class DeadCodeAnalyzer:
             return
         for value in (getattr(stmt, "options", None) or {}).values():
             if value and self._is_valid_procedure_name(value):
-                self._add_goto_ref(value)
+                for key in self._keys(stmt, value):
+                    self._add_goto_ref(key)
 
     def _collect_range_end(self, stmt: Any) -> None:
         """Record the closing paragraph of a PERFORM/SORT/MERGE THRU range.
@@ -439,23 +431,27 @@ class DeadCodeAnalyzer:
         """
         ends: list[str | None] = []
         if isinstance(stmt, PerformStatement):
-            ends.append(stmt.thru_paragraph)
+            ends.extend(self._keys(stmt, stmt.thru_paragraph, "thru_qualifier"))
         elif isinstance(stmt, SortStatement):
-            ends.extend([stmt.input_procedure_thru, stmt.output_procedure_thru])
+            for end in (stmt.input_procedure_thru, stmt.output_procedure_thru):
+                ends.extend(self._keys(stmt, end))
         elif isinstance(stmt, MergeStatement):
-            ends.append(stmt.output_procedure_thru)
+            ends.extend(self._keys(stmt, stmt.output_procedure_thru))
+        elif isinstance(stmt, XmlJsonStatement):
+            ends.extend(self._keys(stmt, stmt.processing_procedure_thru))
         for end in ends:
             if end:
-                self._range_ends.add(end.upper())
+                self._range_ends.add(end)
 
     def _collect_perform_refs(self, stmt: PerformStatement) -> None:
         """Collect references from a PERFORM statement."""
-        if stmt.target_paragraph:
-            self._add_ref(stmt.target_paragraph)
-        if stmt.thru_paragraph:
-            self._add_ref(stmt.thru_paragraph)
-            # Mark all procedures between target and thru as referenced
-            self._mark_thru_range(stmt.target_paragraph, stmt.thru_paragraph)
+        self._collect_range_refs(
+            stmt,
+            stmt.target_paragraph,
+            stmt.thru_paragraph,
+            "target_qualifier",
+            "thru_qualifier",
+        )
 
     def _collect_goto_refs(self, stmt: GoStatement) -> None:
         """Collect references from a GO TO statement."""
@@ -464,28 +460,24 @@ class DeadCodeAnalyzer:
         # filtering operands would collapse a target that happens to share
         # its name with the DEPENDING ON variable.
         for target in stmt.target_paragraphs:
-            self._add_goto_ref(target)
+            qualifier_key = (
+                "target_qualifier" if not stmt.depending_on_variable else None
+            )
+            for key in self._keys(stmt, target, qualifier_key):
+                self._add_goto_ref(key)
 
     def _collect_sort_refs(self, stmt: SortStatement) -> None:
         """Collect references from a SORT statement's procedures."""
-        if stmt.input_procedure:
-            self._add_ref(stmt.input_procedure)
-        if stmt.input_procedure_thru:
-            self._add_ref(stmt.input_procedure_thru)
-            self._mark_thru_range(stmt.input_procedure, stmt.input_procedure_thru)
-        if stmt.output_procedure:
-            self._add_ref(stmt.output_procedure)
-        if stmt.output_procedure_thru:
-            self._add_ref(stmt.output_procedure_thru)
-            self._mark_thru_range(stmt.output_procedure, stmt.output_procedure_thru)
+        self._collect_range_refs(stmt, stmt.input_procedure, stmt.input_procedure_thru)
+        self._collect_range_refs(
+            stmt, stmt.output_procedure, stmt.output_procedure_thru
+        )
 
     def _collect_merge_refs(self, stmt: MergeStatement) -> None:
         """Collect references from a MERGE statement's procedures."""
-        if stmt.output_procedure:
-            self._add_ref(stmt.output_procedure)
-        if stmt.output_procedure_thru:
-            self._add_ref(stmt.output_procedure_thru)
-            self._mark_thru_range(stmt.output_procedure, stmt.output_procedure_thru)
+        self._collect_range_refs(
+            stmt, stmt.output_procedure, stmt.output_procedure_thru
+        )
 
     def _collect_alter_refs(self, stmt: AlterStatement) -> None:
         """Collect references from an ALTER statement.
@@ -496,7 +488,8 @@ class DeadCodeAnalyzer:
         is not itself a reference to that paragraph.
         """
         for alteration in stmt.alterations:
-            self._add_goto_ref(alteration["to_paragraph"])
+            for key in self._keys(stmt, alteration["to_paragraph"]):
+                self._add_goto_ref(key)
 
     def _collect_entry_refs(self, stmt: EntryStatement) -> None:
         """Mark the paragraph containing an ENTRY statement as referenced.
@@ -512,9 +505,8 @@ class DeadCodeAnalyzer:
         """
         if not stmt.entry_name or not stmt.entry_name.strip("'\"").strip():
             return
-        para_name = stmt.section_name
-        if para_name:
-            self._add_jump_ref(para_name)
+        for key in self._keys(stmt, stmt.section_name):
+            self._add_jump_ref(key)
 
     def _collect_fallthrough_refs(self) -> None:
         """Mark a procedure as referenced when the one immediately before it
@@ -595,12 +587,42 @@ class DeadCodeAnalyzer:
         """
         return bool(name) and name not in (".",)
 
-    def _add_ref(self, name: str | None) -> None:
-        """Add a procedure name as referenced."""
-        if name:
-            self._referenced_names.add(name.upper())
+    def _keys(
+        self, stmt: Any, name: str | None, qualifier_key: str | None = None
+    ) -> list[str]:
+        """The procedure key(s) *name*, referenced from *stmt*, means.
 
-    def _add_jump_ref(self, name: str | None) -> None:
+        The ``OF``/``IN`` qualifier when the parser recorded one, else the
+        same-named paragraph in *stmt*'s own section, else the name when it
+        is unique; an ambiguous reference keeps every candidate alive.
+        """
+        qualifier = statement_qualifier(stmt, qualifier_key) if qualifier_key else None
+        return self._index.resolve(name, qualifier, enclosing_section(stmt))
+
+    def _collect_range_refs(
+        self,
+        stmt: Any,
+        start: str | None,
+        end: str | None,
+        start_qualifier: str | None = None,
+        end_qualifier: str | None = None,
+    ) -> None:
+        """References from a ``p [THRU q]`` phrase: both ends and, for a
+        range, every procedure between them."""
+        starts = self._keys(stmt, start, start_qualifier)
+        ends = self._keys(stmt, end, end_qualifier)
+        for key in [*starts, *ends]:
+            self._add_ref(key)
+        for s_key in starts:
+            for e_key in ends:
+                self._mark_thru_range(s_key, e_key)
+
+    def _add_ref(self, key: str | None) -> None:
+        """Add a procedure key as referenced."""
+        if key:
+            self._referenced_names.add(key)
+
+    def _add_jump_ref(self, key: str | None) -> None:
         """Add a procedure reached by a transfer that does *not* return.
 
         A GO TO (or an ALTERed one), and an ENTRY paragraph reached by an
@@ -609,11 +631,11 @@ class DeadCodeAnalyzer:
         source order. That makes the target a fall-through source as well
         as a reference, unlike a PERFORM target.
         """
-        if name:
-            self._add_ref(name)
-            self._fallthrough_sources.add(name.upper())
+        if key:
+            self._add_ref(key)
+            self._fallthrough_sources.add(key)
 
-    def _add_goto_ref(self, name: str | None) -> None:
+    def _add_goto_ref(self, key: str | None) -> None:
         """Add a GO TO (or ALTER ... TO PROCEED TO) target.
 
         A jump lands in the target and carries on -- unless the target is
@@ -628,26 +650,25 @@ class DeadCodeAnalyzer:
         be reached by a path that never PERFORMed it, and reporting live
         code dead is the worse error.
         """
-        if not name:
+        if not key:
             return
-        if name.upper() in self._range_ends:
-            self._add_ref(name)
+        if key in self._range_ends:
+            self._add_ref(key)
         else:
-            self._add_jump_ref(name)
+            self._add_jump_ref(key)
 
     def _mark_thru_range(self, start: str | None, end: str | None) -> None:
-        """Mark all procedures between start and end (inclusive) as referenced.
+        """Mark all procedures between keys start and end (inclusive) as
+        referenced.
 
         Uses index-based lookup so that a missing or inverted range does not
         accidentally mark procedures all the way to the end of the list.
         """
         if not start or not end:
             return
-        upper_start = start.upper()
-        upper_end = end.upper()
         try:
-            start_index = self._ordered_procedures.index(upper_start)
-            end_index = self._ordered_procedures.index(upper_end)
+            start_index = self._ordered_procedures.index(start)
+            end_index = self._ordered_procedures.index(end)
         except ValueError:
             return
 

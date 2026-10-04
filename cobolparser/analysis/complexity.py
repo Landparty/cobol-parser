@@ -47,6 +47,7 @@ from ..models.statements.control import (
     PerformStatement,
     SearchStatement,
 )
+from ._procedures import ProcedureIndex
 from .program_flow import ProgramFlowAnalyzer, ProgramFlowReport
 from .program_flow.edges import GOTO_EDGE_TYPES, PERFORM_EDGE_TYPES
 from .program_flow.scanner import LEADING_SENTENCES_NODE, leading_sentences
@@ -127,12 +128,19 @@ class ProcedureComplexity:
     fan_in: int
     fan_out: int
     rating: str
+    #: ``"X1 OF S2"`` when another paragraph shares this one's name (see
+    #: ``FlowNode.qualified_name``), else ``None``.
+    qualified_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "name": self.name,
             "type": self.procedure_type,
             "location": self.location.to_dict(),
+        }
+        if self.qualified_name:
+            result["qualified_name"] = self.qualified_name
+        result |= {
             "cyclomatic_complexity": self.cyclomatic_complexity,
             "extended_complexity": self.extended_complexity,
             "max_nesting_depth": self.max_nesting_depth,
@@ -142,6 +150,7 @@ class ProcedureComplexity:
             "fan_out": self.fan_out,
             "rating": self.rating,
         }
+        return result
 
 
 @dataclass
@@ -250,14 +259,13 @@ class ComplexityAnalyzer:
         procedures: list[ProcedureComplexity] = []
         for node in flow_report.nodes:
             decisions = extra_bool_ops = max_depth = 0
-            # A flow node is name-keyed, so two same-named paragraphs
-            # (legal COBOL when they live in different sections) share
-            # one node whose statement_count already merges both bodies
-            # — aggregate the decision counts the same way instead of
-            # silently analyzing only the first body. A SECTION node's
-            # body is the sentences before its first paragraph header
-            # (none for a bare header: complexity 1).
-            for para in paragraph_map.get(node.name, []):
+            # Same-named paragraphs in different sections are separate
+            # nodes (keyed "X1 OF S2"), each measured on its own body. A
+            # list only because a duplicate the compiler would reject still
+            # merges into its namesake. A SECTION node's body is the
+            # sentences before its first paragraph header (none for a bare
+            # header: complexity 1).
+            for para in paragraph_map.get(node.key, []):
                 d, b, m = self._analyze_paragraph(para)
                 decisions += d
                 extra_bool_ops += b
@@ -275,9 +283,10 @@ class ComplexityAnalyzer:
                     max_nesting_depth=max_depth,
                     statement_count=node.statement_count,
                     goto_count=node.goto_count,
-                    fan_in=len(fan_in.get(node.name, set())),
-                    fan_out=len(fan_out.get(node.name, set())),
+                    fan_in=len(fan_in.get(node.key, set())),
+                    fan_out=len(fan_out.get(node.key, set())),
                     rating=self._thresholds.rating(cyclomatic),
+                    qualified_name=node.qualified_name,
                 )
             )
 
@@ -291,28 +300,32 @@ class ComplexityAnalyzer:
     def _collect_paragraph_map(
         proc_division: CobolDivision,
     ) -> dict[str, list[CobolParagraph]]:
-        """Map every paragraph name (upper-cased) to all its AST nodes.
+        """Map every flow node key to the paragraph bodies it stands for.
 
-        Mirrors ``dead_code.py``'s/``scanner.py``'s own procedure collection
-        -- section-owned paragraphs first, then top-level ones -- but source
-        order does not matter here (only name-keyed lookup does), so no
-        interleave-by-line step is needed. The value is a *list* because two
-        same-named paragraphs in different sections are legal COBOL and the
-        (name-keyed) flow node merges both bodies.
+        Keys come from :class:`~._procedures.ProcedureIndex`, the identity
+        the flow scanner gives each node, so two same-named paragraphs in
+        different sections map to their own bodies. A section maps to the
+        sentences between its header and its first paragraph (the flow
+        scanner counts them there too).
         """
+        index = ProcedureIndex.build(proc_division)
+        keys = {id(entry.node): entry.key for entry in index.entries}
         result: dict[str, list[CobolParagraph]] = {}
+
+        def add(body: Any, para: CobolParagraph, name: str | None) -> None:
+            key = keys.get(id(body)) or (name.upper() if name else None)
+            if key:
+                result.setdefault(key, []).append(para)
+
         for section in proc_division._sections.values():
             for para in section.paragraphs:
                 if para.paragraph_name:
-                    result.setdefault(para.paragraph_name.upper(), []).append(para)
+                    add(para, para, para.paragraph_name)
                 elif section.section_name:
-                    # Sentences between the SECTION header and its first
-                    # paragraph: the section node's own statements (the
-                    # flow scanner counts them there too).
-                    result.setdefault(section.section_name.upper(), []).append(para)
+                    add(section, para, section.section_name)
         for para in proc_division.paragraphs:
             if para.paragraph_name:
-                result.setdefault(para.paragraph_name.upper(), []).append(para)
+                add(para, para, para.paragraph_name)
         # The division's leading sentences are a flow node of their own.
         leading = leading_sentences(proc_division)
         if leading is not None:

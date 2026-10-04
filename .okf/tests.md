@@ -47,6 +47,16 @@ schema-qualified DB2 names in EXEC SQL: one table per qualified name (no bare
 schema), JOINs, three-part names, and the rebuilt `sql_text` keeping
 `SCHEMA.TABLE` intact while preserving a space the source really has.
 
+2026-10-04: `tests/regression/test_issue_258_same_named_items.py` (17
+tests) pins issue #258: same-named fields in two records and same-named
+paragraphs in two sections are kept apart by unused-variables, xref,
+dead-code, program-flow, complexity and the flowchart, with
+`qualified_name` set only where a name is shared. Tests that had pinned the
+old name-merged behaviour (`TestA8SameNamedParagraphs`, the dead-code /
+program-flow "duplicate name across top level and section" tests,
+program-signature's declared-twice test, xref's duplicate-declarations
+test) were updated to the qualified behaviour.
+
 2026-09-17: `tests/regression/test_audit_2026_09_17_preprocessing.py` (42
 tests) pins the nine preprocessing defects of that date's audit: record-only
 line splitting (`cobolparser/_lines.py`), EBCDIC NL (0x15) copybook

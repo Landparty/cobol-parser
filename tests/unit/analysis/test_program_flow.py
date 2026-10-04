@@ -4547,8 +4547,8 @@ class TestProgramFlowRealCobolIntegration:
         self,
     ) -> None:
         """A name reused both as a top-level paragraph and a section-owned
-        paragraph must be recorded once in ``report.nodes``, whichever
-        occurrence comes first in source order.
+        paragraph is two procedures (issue #258): each gets its own node,
+        once, in source order, the section-owned one qualified.
 
         Regression test: interleaving top-level paragraphs and section-owned
         paragraphs by source line (the fix for the mixed-order bug above)
@@ -4571,7 +4571,16 @@ class TestProgramFlowRealCobolIntegration:
 """
         report = self._analyze(source)
 
-        assert [n.name for n in report.nodes] == ["DUP-NAME", "MAIN-SECTION"]
+        assert [n.name for n in report.nodes] == [
+            "DUP-NAME",
+            "MAIN-SECTION",
+            "DUP-NAME",
+        ]
+        assert [n.key for n in report.nodes] == [
+            "DUP-NAME",
+            "MAIN-SECTION",
+            "DUP-NAME OF MAIN-SECTION",
+        ]
 
     def test_duplicate_name_across_top_level_paragraph_and_section_header(
         self,

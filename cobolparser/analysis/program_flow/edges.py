@@ -18,6 +18,12 @@ from ...models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from .._procedures import (
+    ProcedureIndex,
+    enclosing_section,
+    statement_qualifier,
+    unique,
+)
 from .condition_text import render_condition_text
 from .models import FlowEdge, FlowEdgeType
 
@@ -88,11 +94,40 @@ class EdgeCollector:
         ordered_procedures: list[str],
         external_calls: list[dict[str, Any]],
         program_cancellations: list[dict[str, Any]],
+        index: ProcedureIndex | None = None,
     ) -> None:
         self._edges = edges
         self._ordered_procedures = ordered_procedures
         self._external_calls = external_calls
         self._program_cancellations = program_cancellations
+        self._index = index
+
+    def set_index(self, index: ProcedureIndex) -> None:
+        """Resolve procedure references through *index* (see
+        :mod:`cobolparser.analysis._procedures`)."""
+        self._index = index
+
+    def resolve(
+        self, stmt: Any, name: str | None, qualifier_key: str | None = None
+    ) -> list[str]:
+        """The node key(s) *name*, referenced from *stmt*, means.
+
+        Without an index (a collector built on its own) a reference is its
+        upper-cased bare name, as before procedures were qualified.
+        """
+        if not name:
+            return []
+        if self._index is None:
+            return [name.upper()]
+        qualifier = statement_qualifier(stmt, qualifier_key) if qualifier_key else None
+        return self._index.resolve(name, qualifier, enclosing_section(stmt))
+
+    def resolve_one(
+        self, stmt: Any, name: str | None, qualifier_key: str | None = None
+    ) -> str | None:
+        """The first key :meth:`resolve` gives (a THRU range has one end)."""
+        keys = self.resolve(stmt, name, qualifier_key)
+        return keys[0] if keys else None
 
     def range_members(self, start: str, end: str) -> list[str]:
         """Return the procedures spanned by a THRU range, in source order.
@@ -123,15 +158,16 @@ class EdgeCollector:
 
     def process_perform(self, stmt: PerformStatement, source: str) -> None:
         """Create edges for a PERFORM statement."""
-        if stmt.target_paragraph:
-            target = stmt.target_paragraph.upper()
-            is_loop = stmt.perform_type in ("TIMES", "UNTIL", "VARYING")
+        if not stmt.target_paragraph:
+            return
+        is_loop = stmt.perform_type in ("TIMES", "UNTIL", "VARYING")
 
-            condition = None
-            if stmt.until_condition:
-                condition = render_condition_text(stmt.until_condition)
+        condition = None
+        if stmt.until_condition:
+            condition = render_condition_text(stmt.until_condition)
 
-            thru_target = stmt.thru_paragraph.upper() if stmt.thru_paragraph else None
+        thru_target = self.resolve_one(stmt, stmt.thru_paragraph, "thru_qualifier")
+        for target in self.resolve(stmt, stmt.target_paragraph, "target_qualifier"):
             members = self.range_members(target, thru_target) if thru_target else []
 
             self._edges.append(
@@ -170,7 +206,9 @@ class EdgeCollector:
             # happens to share its name with the DEPENDING ON variable.
             # One edge per distinct target: a computed GO TO may list a
             # paragraph more than once (the list is positional).
-            for target in dict.fromkeys(t.upper() for t in stmt.target_paragraphs):
+            for target in unique(
+                key for t in stmt.target_paragraphs for key in self.resolve(stmt, t)
+            ):
                 self._edges.append(
                     FlowEdge(
                         source=source,
@@ -181,14 +219,15 @@ class EdgeCollector:
                     )
                 )
         elif stmt.target_paragraph:
-            self._edges.append(
-                FlowEdge(
-                    source=source,
-                    target=stmt.target_paragraph.upper(),
-                    edge_type=FlowEdgeType.GOTO,
-                    location=stmt.location,
+            for target in self.resolve(stmt, stmt.target_paragraph, "target_qualifier"):
+                self._edges.append(
+                    FlowEdge(
+                        source=source,
+                        target=target,
+                        edge_type=FlowEdgeType.GOTO,
+                        location=stmt.location,
+                    )
                 )
-            )
 
     def process_call(self, stmt: CallStatement, source: str) -> None:
         """Create edges for a CALL statement and record external calls."""
@@ -227,17 +266,43 @@ class EdgeCollector:
         flowchart generators badge the base edge instead of drawing a
         second, redundant arrow) don't lose the range information.
         """
-        if stmt.input_procedure:
-            target = stmt.input_procedure.upper()
-            thru = (
-                stmt.input_procedure_thru.upper() if stmt.input_procedure_thru else None
-            )
+        self._procedure_range_edges(
+            stmt,
+            source,
+            stmt.input_procedure,
+            stmt.input_procedure_thru,
+            FlowEdgeType.SORT_INPUT_PROCEDURE,
+            FlowEdgeType.SORT_INPUT_PROCEDURE_THRU,
+        )
+        self._procedure_range_edges(
+            stmt,
+            source,
+            stmt.output_procedure,
+            stmt.output_procedure_thru,
+            FlowEdgeType.SORT_OUTPUT_PROCEDURE,
+            FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
+        )
+
+    def _procedure_range_edges(
+        self,
+        stmt: Any,
+        source: str,
+        name: str | None,
+        thru_name: str | None,
+        edge_type: FlowEdgeType,
+        thru_edge_type: FlowEdgeType,
+    ) -> None:
+        """Edges for a ``PROCEDURE p [THRU q]`` phrase (SORT/MERGE/XML)."""
+        if not name:
+            return
+        thru = self.resolve_one(stmt, thru_name)
+        for target in self.resolve(stmt, name):
             members = self.range_members(target, thru) if thru else []
             self._edges.append(
                 FlowEdge(
                     source=source,
                     target=target,
-                    edge_type=FlowEdgeType.SORT_INPUT_PROCEDURE,
+                    edge_type=edge_type,
                     location=stmt.location,
                     thru_target=thru,
                     range_members=list(members),
@@ -248,36 +313,7 @@ class EdgeCollector:
                     FlowEdge(
                         source=source,
                         target=thru,
-                        edge_type=FlowEdgeType.SORT_INPUT_PROCEDURE_THRU,
-                        location=stmt.location,
-                        thru_target=thru,
-                        range_members=list(members),
-                    )
-                )
-        if stmt.output_procedure:
-            target = stmt.output_procedure.upper()
-            thru = (
-                stmt.output_procedure_thru.upper()
-                if stmt.output_procedure_thru
-                else None
-            )
-            members = self.range_members(target, thru) if thru else []
-            self._edges.append(
-                FlowEdge(
-                    source=source,
-                    target=target,
-                    edge_type=FlowEdgeType.SORT_OUTPUT_PROCEDURE,
-                    location=stmt.location,
-                    thru_target=thru,
-                    range_members=list(members),
-                )
-            )
-            if thru:
-                self._edges.append(
-                    FlowEdge(
-                        source=source,
-                        target=thru,
-                        edge_type=FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
+                        edge_type=thru_edge_type,
                         location=stmt.location,
                         thru_target=thru,
                         range_members=list(members),
@@ -291,36 +327,14 @@ class EdgeCollector:
         PERFORM-shaped (it returns), carrying the THRU range like
         :meth:`process_sort` does.
         """
-        if not stmt.processing_procedure:
-            return
-        target = stmt.processing_procedure.upper()
-        thru = (
-            stmt.processing_procedure_thru.upper()
-            if stmt.processing_procedure_thru
-            else None
+        self._procedure_range_edges(
+            stmt,
+            source,
+            stmt.processing_procedure,
+            stmt.processing_procedure_thru,
+            FlowEdgeType.XML_PROCESSING_PROCEDURE,
+            FlowEdgeType.XML_PROCESSING_PROCEDURE_THRU,
         )
-        members = self.range_members(target, thru) if thru else []
-        self._edges.append(
-            FlowEdge(
-                source=source,
-                target=target,
-                edge_type=FlowEdgeType.XML_PROCESSING_PROCEDURE,
-                location=stmt.location,
-                thru_target=thru,
-                range_members=list(members),
-            )
-        )
-        if thru:
-            self._edges.append(
-                FlowEdge(
-                    source=source,
-                    target=thru,
-                    edge_type=FlowEdgeType.XML_PROCESSING_PROCEDURE_THRU,
-                    location=stmt.location,
-                    thru_target=thru,
-                    range_members=list(members),
-                )
-            )
 
     def process_cics_handle(self, stmt: Any, source: str) -> None:
         """Create edges for ``EXEC CICS HANDLE AID|CONDITION|ABEND``.
@@ -332,12 +346,13 @@ class EdgeCollector:
         """
         if (getattr(stmt, "cics_command", "") or "").upper() != "HANDLE":
             return
-        known = {name.upper() for name in self._ordered_procedures}
+        known = set(self._ordered_procedures)
         for value in (getattr(stmt, "options", None) or {}).values():
             if not value:
                 continue
-            target = value.strip().upper()
-            if target in known:
+            for target in self.resolve(stmt, value.strip()):
+                if target not in known:
+                    continue
                 self._edges.append(
                     FlowEdge(
                         source=source,
@@ -353,35 +368,14 @@ class EdgeCollector:
         See :meth:`process_sort` -- the base edge carries ``thru_target`` /
         ``range_members`` too, not just the ``*_THRU`` edge.
         """
-        if stmt.output_procedure:
-            target = stmt.output_procedure.upper()
-            thru = (
-                stmt.output_procedure_thru.upper()
-                if stmt.output_procedure_thru
-                else None
-            )
-            members = self.range_members(target, thru) if thru else []
-            self._edges.append(
-                FlowEdge(
-                    source=source,
-                    target=target,
-                    edge_type=FlowEdgeType.MERGE_OUTPUT_PROCEDURE,
-                    location=stmt.location,
-                    thru_target=thru,
-                    range_members=list(members),
-                )
-            )
-            if thru:
-                self._edges.append(
-                    FlowEdge(
-                        source=source,
-                        target=thru,
-                        edge_type=FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
-                        location=stmt.location,
-                        thru_target=thru,
-                        range_members=list(members),
-                    )
-                )
+        self._procedure_range_edges(
+            stmt,
+            source,
+            stmt.output_procedure,
+            stmt.output_procedure_thru,
+            FlowEdgeType.MERGE_OUTPUT_PROCEDURE,
+            FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
+        )
 
     def process_cancel(self, stmt: CancelStatement, source: str) -> None:
         """Record CANCEL statements as program cancellation events."""
@@ -399,11 +393,13 @@ class EdgeCollector:
     def process_alter(self, stmt: AlterStatement, source: str) -> None:
         """Create edges for ALTER statement procedure redirections."""
         for alteration in stmt.alterations:
-            self._edges.append(
-                FlowEdge(
-                    source=alteration["from_paragraph"].upper(),
-                    target=alteration["to_paragraph"].upper(),
-                    edge_type=FlowEdgeType.ALTER,
-                    location=stmt.location,
-                )
-            )
+            for altered in self.resolve(stmt, alteration["from_paragraph"]):
+                for target in self.resolve(stmt, alteration["to_paragraph"]):
+                    self._edges.append(
+                        FlowEdge(
+                            source=altered,
+                            target=target,
+                            edge_type=FlowEdgeType.ALTER,
+                            location=stmt.location,
+                        )
+                    )

@@ -57,6 +57,8 @@ from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.call import EntryStatement
+from ._names import QUALIFIER_SEPARATOR
+from .unused_variables import _ancestor_names
 from .xref import ROLE_CALL_ARGUMENT, ROLE_HOST_VARIABLE
 
 #: Roles that may read *or* write the operand: graded ``unknown``.
@@ -279,17 +281,25 @@ def _flatten(item: CobolDataItem) -> list[CobolDataItem]:
     return out
 
 
-def _subordinate_names(item: CobolDataItem) -> list[str]:
-    """Upper-cased names of every data item and level-88 condition name
-    beneath *item*, plus *item*'s own level-88s (not *item* itself)."""
-    names: list[str] = []
+def _subordinate_names(item: CobolDataItem) -> list[tuple[str, str]]:
+    """``(name, qualified name)`` of every data item and level-88 condition
+    name beneath *item*, plus *item*'s own level-88s (not *item* itself).
+
+    The qualified name (``"CUST-ID OF LK-CUST"``) is how xref names an item
+    whose name another record also declares (``XrefEntry.qualified_name``).
+    """
+    names: list[tuple[str, str]] = []
     for index, node in enumerate(_flatten(item)):
         if index and node.name and not node.is_filler:
-            names.append(node.name.upper())
+            names.append((node.name.upper(), _qualified(node)))
         for child in getattr(node, "children", None) or []:
             if isinstance(child, ConditionNameItem) and child.name:
-                names.append(child.name.upper())
+                names.append((child.name.upper(), _qualified(child)))
     return names
+
+
+def _qualified(node: Any) -> str:
+    return QUALIFIER_SEPARATOR.join([node.name.upper(), *_ancestor_names(node)])
 
 
 class ProgramSignatureExtractor:
@@ -306,6 +316,8 @@ class ProgramSignatureExtractor:
         # declared more than once.
         self._ambiguous_roles: dict[str, list[str]] = {}
         self._duplicate_declarations: set[str] = set()
+        # Bare names xref split into one qualified entry per record.
+        self._qualified_names: set[str] = set()
 
     def analyze(self, ast: CobolProgram) -> ProgramSignature:
         signature = ProgramSignature(program_id=ast.program_name or "")
@@ -392,9 +404,13 @@ class ProgramSignatureExtractor:
         # LK-REC`` plus ``MOVE 1 TO LK-FIELD`` reads the record *and* writes
         # into it, and a level-88 under the operand (``SET LK-OK TO TRUE``,
         # ``IF LK-OK``) writes / reads the operand itself.
+        # A field another record also declares has a direction of its own,
+        # under its qualified name; anything else is keyed by bare name.
         child_names = [
-            name for name in _subordinate_names(declaration) if name in directions
+            qualified if name in self._qualified_names else name
+            for name, qualified in _subordinate_names(declaration)
         ]
+        child_names = [name for name in child_names if name in directions]
         if own is not None and not child_names:
             return own
         duplicated = sorted(
@@ -569,6 +585,9 @@ class ProgramSignatureExtractor:
 
         directions: dict[str, str] = {}
         self._ambiguous_roles = {}
+        self._qualified_names = {
+            entry.name for entry in report.entries if entry.qualified_name
+        }
         for entry in report.entries:
             # ``ENTRY "ALT" USING X`` names X as the entry's own parameter;
             # xref files that under the CALL-argument role, but it neither
@@ -590,15 +609,16 @@ class ProgramSignatureExtractor:
             ambiguous = roles & _AMBIGUOUS_ROLES
             writes = "write" in roles
             reads = bool(roles - {"write"} - ambiguous)
+            key = (entry.qualified_name or entry.name).upper()
             if writes and reads:
-                directions[entry.name.upper()] = "input-output"
+                directions[key] = "input-output"
             elif ambiguous:
-                directions[entry.name.upper()] = "unknown"
-                self._ambiguous_roles[entry.name.upper()] = sorted(ambiguous)
+                directions[key] = "unknown"
+                self._ambiguous_roles[key] = sorted(ambiguous)
             elif writes:
-                directions[entry.name.upper()] = "output"
+                directions[key] = "output"
             elif reads:
-                directions[entry.name.upper()] = "input"
+                directions[key] = "input"
         self._duplicate_declarations = set(report.duplicate_declarations)
         return directions
 

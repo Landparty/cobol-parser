@@ -9,7 +9,8 @@ for the whole-graph post-passes — and assembles the final
 
 from typing import Any
 
-from ...models.program import CobolDivision, CobolProgram, CobolSection
+from ...models.program import CobolProgram, CobolSection
+from .._procedures import ProcedureIndex
 from .cycles import classify_cycles, detect_cycles
 from .edges import (
     GOTO_EDGE_TYPES,
@@ -124,7 +125,7 @@ class ProgramFlowAnalyzer:
 
         # Pass 1: Collect all procedures as nodes
         scanner.collect_procedures(proc_division)
-        declaratives = self._declarative_procedures(proc_division)
+        declaratives = self._declarative_procedures(scanner.index)
         for name in declaratives:
             if name in self._nodes:
                 self._nodes[name].is_declarative = True
@@ -199,18 +200,18 @@ class ProgramFlowAnalyzer:
         return report
 
     @staticmethod
-    def _declarative_procedures(proc_division: CobolDivision) -> set[str]:
-        """Every DECLARATIVES section name and paragraph name, upper-cased."""
-        names: set[str] = set()
-        for section in proc_division._sections.values():
-            if not isinstance(section, CobolSection) or not section.is_declarative:
-                continue
-            if section.section_name:
-                names.add(section.section_name.upper())
-            for para in section.paragraphs:
-                if para.paragraph_name:
-                    names.add(para.paragraph_name.upper())
-        return names
+    def _declarative_procedures(index: ProcedureIndex) -> set[str]:
+        """The node key of every DECLARATIVES section and its paragraphs."""
+        declarative = {
+            e.key
+            for e in index.entries
+            if isinstance(e.node, CobolSection) and e.node.is_declarative
+        }
+        return {
+            e.key
+            for e in index.entries
+            if e.key in declarative or e.section in declarative
+        }
 
     def _detect_unreachable_nodes(self) -> None:
         """Find nodes not reachable from any entry point via internal edges."""

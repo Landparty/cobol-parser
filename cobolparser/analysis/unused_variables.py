@@ -43,7 +43,7 @@ from ..models.statements.data import (
     UnstringStatement,
 )
 from ..models.statements.misc import MergeStatement, SelectStatement, SortStatement
-from ._names import IDENTIFIER_TOKEN_RE
+from ._names import QUALIFIER_SEPARATOR, qualified_references
 
 # DATA DIVISION section names whose data items are in scope for this
 # analysis. Matches the exact names the DATA DIVISION parser assigns (see
@@ -171,15 +171,21 @@ class UnusedVariableItem:
     section: str
     location: SourceLocation
     from_copybook: bool = False
+    #: ``"AMT OF OUT-REC"`` (every enclosing item, innermost first) when
+    #: another declared item shares this one's name, else ``None``.
+    qualified_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "name": self.name,
             "level": self.level,
             "section": self.section,
             "location": self.location.to_dict(),
             "from_copybook": self.from_copybook,
         }
+        if self.qualified_name:
+            result["qualified_name"] = self.qualified_name
+        return result
 
 
 @dataclass
@@ -273,6 +279,12 @@ def _extract_identifiers(operand: Any) -> set[str]:
     raw condition-text keywords). A bare numeric literal (``"12345"``)
     never matches at all, since a token must start with a letter.
 
+    A qualified reference keeps its qualifiers (see
+    ``_names.qualified_references``): ``"WS-A OF WS-GRP"`` yields
+    ``"WS-A OF WS-GRP"`` and ``"WS-GRP"``, so two same-named fields in
+    different records can be told apart (issue #258). ``_names.bare_names``
+    recovers the plain token set.
+
     Deliberately over-inclusive: a token that isn't really a data-name
     (e.g. an intrinsic function name like ``UPPER-CASE``) only risks
     coincidentally matching an unrelated declared item and marking it
@@ -283,13 +295,7 @@ def _extract_identifiers(operand: Any) -> set[str]:
         return set()
 
     stripped = _QUOTED_TEXT_RE.sub(" ", operand)
-    tokens: set[str] = set()
-    for match in IDENTIFIER_TOKEN_RE.findall(stripped):
-        upper = match.upper()
-        if upper in _NON_IDENTIFIER_WORDS:
-            continue
-        tokens.add(upper)
-    return tokens
+    return qualified_references(stripped, _NON_IDENTIFIER_WORDS)
 
 
 def _mark_subtree_used(item: CobolDataItem, group_used: dict[int, bool]) -> None:
@@ -355,6 +361,94 @@ def _walk_expression_operands(expr: CobolExpression | None) -> set[str]:
     return names
 
 
+def _ancestor_names(item: Any) -> list[str]:
+    """Upper-cased names of *item*'s enclosing data items, innermost first."""
+    names: list[str] = []
+    node = getattr(item, "parent", None)
+    while isinstance(node, CobolDataItem):
+        names.append(node.name.upper())
+        node = getattr(node, "parent", None)
+    return names
+
+
+def qualified_data_name(item: Any, by_name: dict[str, list[Any]]) -> str | None:
+    """``"AMT OF OUT-REC"`` for an item whose name another declared item
+    shares, else ``None``."""
+    name = item.name.upper()
+    if len(by_name.get(name, [])) <= 1:
+        return None
+    return QUALIFIER_SEPARATOR.join([name, *_ancestor_names(item)])
+
+
+def _qualifiers_match(item: Any, qualifiers: list[str]) -> bool:
+    """Whether *qualifiers* (as written, innermost first) name enclosing
+    items of *item* in ascending order -- the COBOL rule: each qualifier
+    must be a containing item, but intermediate levels may be skipped."""
+    ancestors = iter(_ancestor_names(item))
+    return all(q in ancestors for q in qualifiers)
+
+
+def _redefines_targets(item: CobolDataItem, by_name: dict[str, list[Any]]) -> list[Any]:
+    """The item(s) *item* REDEFINES: its same-named sibling when it has one,
+    else every item of that name."""
+    name = (item.redefines or "").upper()
+    candidates = [c for c in by_name.get(name, []) if isinstance(c, CobolDataItem)]
+    parent = getattr(item, "parent", None)
+    siblings = [c for c in candidates if getattr(c, "parent", None) is parent]
+    return siblings or candidates
+
+
+class _NameMatcher:
+    """Resolves references (as ``_extract_identifiers`` spells them, with
+    ``" OF "`` qualifiers) to the declared items they can mean.
+
+    The standard COBOL rule (issue #258): a qualified reference means the
+    item of that name whose enclosing items match the qualifiers; an
+    unqualified one means the item of that name, which the compiler requires
+    to be unique. Where that cannot pick one item -- an unqualified
+    reference to a shared name, or qualifiers that match no candidate (a
+    file-name qualifier, say) -- every candidate counts, so a reference can
+    only ever keep an item alive, never hide one.
+    """
+
+    def __init__(self, refs: set[str], by_name: dict[str, list[Any]]) -> None:
+        self._by_name = by_name
+        self._bare: set[str] = set()
+        self._qualified: dict[str, list[list[str]]] = {}
+        for ref in refs:
+            name, *qualifiers = ref.split(QUALIFIER_SEPARATOR)
+            if qualifiers:
+                self._qualified.setdefault(name, []).append(qualifiers)
+            else:
+                self._bare.add(name)
+
+    def names(self, item: Any) -> bool:
+        """Whether any reference resolves to *item*."""
+        name = item.name.upper()
+        if name in self._bare:
+            return True
+        chains = self._qualified.get(name)
+        if not chains:
+            return False
+        candidates = self._by_name.get(name, [])
+        if len(candidates) <= 1:
+            return True
+        return any(
+            _qualifiers_match(item, qualifiers)
+            or not any(_qualifiers_match(c, qualifiers) for c in candidates)
+            for qualifiers in chains
+        )
+
+    def resolve(self, ref: str) -> list[Any]:
+        """The declared items one reference means."""
+        name, *qualifiers = ref.split(QUALIFIER_SEPARATOR)
+        candidates = self._by_name.get(name, [])
+        if not qualifiers or len(candidates) <= 1:
+            return list(candidates)
+        matched = [c for c in candidates if _qualifiers_match(c, qualifiers)]
+        return matched or list(candidates)
+
+
 class UnusedVariableAnalyzer:
     """Analyzer for detecting unused (never-referenced) DATA DIVISION items.
 
@@ -388,10 +482,12 @@ class UnusedVariableAnalyzer:
       raw joined text (never a structural tree -- confirmed against
       ``search_parser.py``/``evaluate_parser.py``); identifier extraction
       there is a best-effort regex, not exact.
-    - REDEFINES/OCCURS DEPENDING ON/RENAMES cross-references are resolved
-      by name, not by structural item identity -- two same-named items at
-      different qualification scopes (legal but rare in COBOL) are not
-      distinguished.
+    - Same-named items in different records (the input/output record
+      pair ``MOVE CORRESPONDING`` relies on) are told apart by the
+      qualifiers of each reference (``AMT OF OUT-REC``) and by REDEFINES
+      siblinghood. An unqualified reference to a shared name, and the
+      OCCURS DEPENDING ON / RENAMES name lookups, still count for every
+      item of that name.
     - SCREEN SECTION, REPORT SECTION, and COMMUNICATION SECTION headers
       are now recognized by the DATA DIVISION parser and their content
       discarded into distinctly-named, always-empty ``SCREEN``/``REPORT``/
@@ -461,9 +557,15 @@ class UnusedVariableAnalyzer:
                 global_ids.add(id(item))
                 global_ids.update(id(child) for child in item.get_all_children())
 
-        by_name: dict[str, list[CobolDataItem]] = {}
+        by_name: dict[str, list[Any]] = {}
         for item in declared_items:
             by_name.setdefault(item.name.upper(), []).append(item)
+            for child in item.children:
+                if isinstance(child, ConditionNameItem):
+                    by_name.setdefault(child.name.upper(), []).append(child)
+
+        own_refs = _NameMatcher(referenced, by_name)
+        global_refs = _NameMatcher(referenced | nested_referenced, by_name)
 
         group_used: dict[int, bool] = {}
 
@@ -472,15 +574,11 @@ class UnusedVariableAnalyzer:
             if key in group_used:
                 return group_used[key]
             group_used[key] = False  # cycle guard
-            visible = (
-                referenced | nested_referenced if key in global_ids else referenced
-            )
-            result = item.name.upper() in visible
+            refs = global_refs if key in global_ids else own_refs
+            result = refs.names(item)
             if not result:
                 for child in item.children:
-                    if isinstance(child, ConditionNameItem) and (
-                        child.name.upper() in visible
-                    ):
+                    if isinstance(child, ConditionNameItem) and refs.names(child):
                         result = True
                         break
             if not result:
@@ -503,9 +601,10 @@ class UnusedVariableAnalyzer:
         # any group reference: `MOVE SPACES TO WS-GRP` really does leave its
         # fields never individually referenced, which is a finding worth
         # keeping.
-        for name in self._call_argument_names(ast):
-            for item in by_name.get(name, []):
-                _mark_subtree_used(item, group_used)
+        for ref in self._call_argument_names(ast):
+            for item in own_refs.resolve(ref):
+                if isinstance(item, CobolDataItem):
+                    _mark_subtree_used(item, group_used)
 
         # The CICS translator's own LINKAGE items. DFHEIBLK is the EXEC
         # interface block: the translator declares every EIB field and the
@@ -521,23 +620,23 @@ class UnusedVariableAnalyzer:
 
         # REDEFINES: when the redefining item is used, its target shares
         # the same physical storage and counts as used too. Iterated to a
-        # fixpoint for REDEFINES chains (A REDEFINES B REDEFINES C).
-        # TODO(known limitation): resolved by uppercased *name* via
-        # `by_name` below, not structural item identity -- two same-named
-        # items at different qualification scopes (legal but rare in
-        # COBOL) are not distinguished. Same caveat applies to the
-        # OCCURS-DEPENDING-ON/RENAMES name lookups in
-        # `_collect_data_division_references`.
+        # fixpoint for REDEFINES chains (A REDEFINES B REDEFINES C). The
+        # target is a sibling of the redefining item (COBOL requires it to
+        # be the preceding entry at the same level), which tells two
+        # same-named targets in different records apart; a name with no
+        # such sibling falls back to every item of that name.
         redefines_edges = [
-            (item, item.redefines.upper()) for item in declared_items if item.redefines
+            (item, _redefines_targets(item, by_name))
+            for item in declared_items
+            if item.redefines
         ]
         changed = True
         while changed:
             changed = False
-            for redefining_item, redefined_name in redefines_edges:
+            for redefining_item, targets in redefines_edges:
                 if not group_used.get(id(redefining_item)):
                     continue
-                for target in by_name.get(redefined_name, []):
+                for target in targets:
                     if not group_used.get(id(target)):
                         group_used[id(target)] = True
                         changed = True
@@ -564,6 +663,7 @@ class UnusedVariableAnalyzer:
                     section=self._section_of(item),
                     location=item.location,
                     from_copybook=from_copybook,
+                    qualified_name=qualified_data_name(item, by_name),
                 )
             )
 
@@ -612,8 +712,15 @@ class UnusedVariableAnalyzer:
             if not isinstance(stmt, CallStatement):
                 continue
             for parameter in stmt.using_parameters:
-                if parameter.name:
-                    names.add(parameter.name.strip().upper())
+                if not parameter.name:
+                    continue
+                # The argument itself, qualifiers kept, not its subscripts.
+                head = parameter.name.split()[0].split("(")[0].upper()
+                names |= {
+                    ref
+                    for ref in _extract_identifiers(parameter.name)
+                    if ref.split(QUALIFIER_SEPARATOR, 1)[0] == head
+                }
         return names
 
     def _collect_referenced_names(self, ast: CobolProgram) -> set[str]:
