@@ -8,11 +8,12 @@ version = "1.9.0"
 description = "A comprehensive COBOL parser for Python with IBM Enterprise COBOL focus"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {file = "LICENSE"}
+license = {text = "AGPL-3.0-or-later"}
 authors = [
     {name = "Samuel Dion"},
 ]
 classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
@@ -54,26 +55,10 @@ Repository = "https://github.com/Landparty/cobol-parser"
 [tool.setuptools.packages.find]
 include = ["cobolparser*"]
 
-# `include_package_data` defaults to True for pyproject.toml-configured
-# setuptools projects, and cythonize() writes each generated .c file next to
-# its .py/.pyx source *inside* the package tree. Cython embeds the original
-# source verbatim in C comments, so without this exclusion every closed-source
-# wheel would ship a fully readable copy of every module it just compiled.
-# Excluding by pattern (rather than setting include-package-data = false)
-# keeps cobolparser/py.typed shipping without having to redeclare it.
-#
-# "*.py" belongs in this same list even though setup.py's _ClosedSourceBuildPy
-# already restricts build_py's *module* copy (find_package_modules) to just
-# __init__.py/__main__.py: include_package_data=True drives a SEPARATE build_py
-# code path (build_package_data -> find_data_files -> manifest_files) that
-# independently re-adds every .py file tracked in the sdist manifest as
-# "package data", regardless of what find_package_modules already excluded.
-# Without "*.py" here, that second path silently ships every stripped module's
-# source right back into the wheel next to its compiled .pyd/.so twin.
-# __init__.py/__main__.py are unaffected -- they still ship via the module
-# path, which this setting does not touch.
+# cythonize() writes each generated .c file next to its .pyx source inside the
+# package tree; keep the generated C and Cython sources out of built wheels.
 [tool.setuptools.exclude-package-data]
-"*" = ["*.c", "*.pyx", "*.h", "*.py"]
+"*" = ["*.c", "*.pyx", "*.h"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -167,41 +152,17 @@ extend-exclude = '''
 [tool.cibuildwheel]
 # Build CPython 3.11–3.13 only (matches requires-python)
 build = "cp311-* cp312-* cp313-*"
-# Skip musllinux (Alpine) -- niche target for this library, and there's no
-# sdist published for it to fall back to source-build from anyway.
+# Skip musllinux (Alpine) -- niche target for this library; it can build from
+# the published sdist.
 skip = "*-musllinux*"
-# Full closed-source build: every cobolparser module compiles, not just the
-# 3 hot-path accelerators. See setup.py and
-# docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
-environment = { COBOLPARSER_CLOSED_SOURCE = "1" }
 test-requires = "pytest pytest-cov"
-# Smoke-test against the INSTALLED wheel (not the source tree): verify
-# ordinary modules loaded as compiled extensions (no .py source backing
-# them), then run a fast subset of the suite. test_program_fixtures.py is
-# in this subset deliberately, not just for speed (42 tests, ~0.5s): it's
-# the fastest test file that actually calls into the generators package
-# (ProgramFixtureGenerator -> BoundaryInventoryAnalyzer), which
-# test_lexer.py/test_all_samples.py never touch. That gap is exactly how
-# a closed-source-only TypeError in BoundaryInventoryAnalyzer._classify()
-# (see CHANGELOG's Unreleased -> Fixed) shipped undetected -- Cython's
-# closed-source build enforces module-level PEP 526 variable annotations
-# as runtime C-level type checks, which plain pure-Python test runs can
-# never exercise. --no-cov disables this repo's default
-# --cov-fail-under=90 gate (see [tool.pytest.ini_options] addopts), which
-# coverage.py can't evaluate meaningfully against compiled extensions.
-#
-# --import-mode=importlib is load-bearing, not cosmetic: tests/__init__.py
-# exists, so under pytest's default "prepend" mode {project} lands at
-# sys.path[0] and the SOURCE tree shadows the wheel installed in the test
-# venv -- silently testing the wrong thing. importlib mode leaves sys.path
-# alone, so `import cobolparser` resolves to the installed extensions.
-#
-# check_installed_no_leaked_source.py runs the same no-leaked-.py/.c/.pyx/.h/
-# .pyi assertion as scripts/verify_closed_source_wheel.py, but against the
-# installed package rather than the wheel zip -- cibuildwheel's test-command
-# has no access to the wheel path itself. It runs on every one of this
-# matrix's built wheels, not just a local/manual one.
-test-command = "python {project}/scripts/check_installed_no_leaked_source.py && python -c \"import cobolparser.lexer, cobolparser.parser; assert not cobolparser.lexer.__file__.endswith('.py'); assert not cobolparser.parser.__file__.endswith('.py'); from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; print('closed-source build OK')\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py {project}/tests/unit/test_program_fixtures.py --no-cov -q --import-mode=importlib"
+# Smoke-test against the INSTALLED wheel (not the source tree): confirm the
+# Cython accelerators loaded, then run a fast subset of the suite. --no-cov
+# disables the repo's --cov-fail-under gate (coverage.py cannot see into
+# compiled extensions). --import-mode=importlib keeps the source tree from
+# shadowing the installed wheel (tests/__init__.py exists, so the default
+# "prepend" mode would put {project} first on sys.path).
+test-command = "python -c \"from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py {project}/tests/unit/test_program_fixtures.py --no-cov -q --import-mode=importlib"
 
 # NOTE: release CI overrides these per job via CIBW_ARCHS (see
 # .github/workflows/release-please.yml). These values still apply to local

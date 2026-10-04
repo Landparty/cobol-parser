@@ -51,13 +51,10 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # Build binary wheels for Linux, macOS, Windows. cibuildwheel compiles
-  # EVERY cobolparser module (COBOLPARSER_CLOSED_SOURCE=1, set in
-  # pyproject.toml's [tool.cibuildwheel.environment]) into .so/.pyd files, so
-  # the resulting wheels never contain readable .py source (only thin
-  # __init__.py re-export stubs and the __main__.py runpy shim). No sdist and
-  # no pure-Python fallback wheel are built anywhere -- both would ship full
-  # source.
+  # Build binary wheels for Linux, macOS, Windows. cibuildwheel compiles the
+  # three optional Cython accelerators (_lexer_fast, _preprocess_fast,
+  # _data_fast); everything else ships as ordinary .py source. The sdist job
+  # below covers every other platform.
   build-binary-wheels:
     needs: release-please
     if: ${{ needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
@@ -99,11 +96,30 @@ jobs:
           name: dist-wheels-${{ matrix.artifact }}
           path: wheelhouse/
 
-  # Attach the closed-source wheels to the GitHub Release for traceability /
+  # Source distribution: pure source plus the checked-in .c files, so it
+  # builds anywhere with a C compiler (or with COBOLPARSER_SKIP_EXT=1 without).
+  build-sdist:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install build && python -m build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-wheels-sdist
+          path: dist/
+
+  # Attach the distributions to the GitHub Release for traceability /
   # manual download. Deliberately NOT run on workflow_dispatch: a manual
   # dispatch cuts no release, so there is no tag to upload to.
   publish:
-    needs: [release-please, build-binary-wheels]
+    needs: [release-please, build-binary-wheels, build-sdist]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -124,15 +140,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ steps.tag.outputs.tag }}" dist/* --clobber
 
-  # Publish the same closed-source wheels to PyPI via Trusted Publishing
+  # Publish the same distributions to PyPI via Trusted Publishing
   # (OIDC) -- no stored API token/secret. Requires a one-time manual step on
   # pypi.org registering this repo/workflow as a trusted publisher for the
   # "cobol-parser" project (must match [project].name in pyproject.toml
   # exactly -- PyPI does not treat "cobolparser" and "cobol-parser" as the
-  # same name); see
-  # docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
+  # same name). The `target: testpypi` rehearsal needs the same registration
+  # on test.pypi.org, with environment "pypi" (the name used below); without
+  # it the publish step fails with `invalid-publisher`.
   publish-pypi:
-    needs: [release-please, build-binary-wheels]
+    needs: [release-please, build-binary-wheels, build-sdist]
     if: ${{ needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     # NOTE: the environment stays "pypi" even for a testpypi dry run -- the

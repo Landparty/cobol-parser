@@ -5,7 +5,7 @@ Python library for parsing IBM Enterprise COBOL source into an AST. Supports dep
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-8000%2B%20passing-green.svg)](#commands)
 [![Coverage](https://img.shields.io/badge/coverage-81%25%2B%20enforced-green.svg)](#commands)
-[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 ## Install
 
@@ -129,4 +129,4 @@ Full reference: [`.okf/index.md`](.okf/index.md)
 
 ## License
 
-Proprietary — Copyright © 2026 Samuel Dion. All rights reserved. See [LICENSE](LICENSE).
+GNU Affero General Public License v3.0 or later — Copyright © 2026 Samuel Dion. See [LICENSE](LICENSE).
