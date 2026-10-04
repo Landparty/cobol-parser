@@ -351,3 +351,41 @@ def test_what_dclgen_itself_would_generate_is_always_clean(db2_type, picture, us
         _one(f"CUST_VAL {db2_type} NOT NULL", f"CUST-VAL PIC {picture}{clause}.")
     )
     assert report.violations == [], [v.message for v in report.violations]
+
+
+@pytest.mark.parametrize(
+    ("db2_type", "picture"),
+    [("SMALLINT", "S9(4)"), ("INTEGER", "S9(9)"), ("BIGINT", "S9(18)")],
+)
+@pytest.mark.parametrize("usage", ["COMP-5", "COMPUTATIONAL-5"])
+def test_a_comp5_integer_host_variable_is_not_a_usage_warning(db2_type, picture, usage):
+    """Regression for #259: on z/OS ``COMP-5`` is a big-endian binary integer,
+    byte for byte the storage of ``COMP``, and is IBM's recommended spelling
+    for an integer host variable -- DB2 converts nothing."""
+    report = _check(
+        _one(f"CUST_VAL {db2_type} NOT NULL", f"CUST-VAL PIC {picture} {usage}.")
+    )
+    assert _by_kind(report, "usage") == []
+    assert report.violations == [], [v.message for v in report.violations]
+
+
+def test_the_issue_259_program_reports_no_violation():
+    source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DCL1.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+           EXEC SQL DECLARE CUST TABLE
+           ( CUST_ID     INTEGER NOT NULL,
+             CNT         SMALLINT NOT NULL
+           ) END-EXEC.
+       01 DCLCUST.
+          10 CUST-ID      PIC S9(9) USAGE COMP-5.
+          10 CNT          PIC S9(4) USAGE BINARY.
+       PROCEDURE DIVISION.
+           EXEC SQL SELECT CUST_ID, CNT INTO :CUST-ID, :CNT
+                FROM CUST END-EXEC
+           STOP RUN.
+"""
+    report = _check(source)
+    assert sorted(report.checked) == ["CNT", "CUST-ID"]
+    assert report.violations == [], [v.message for v in report.violations]

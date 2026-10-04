@@ -1406,7 +1406,7 @@ that name exists), instead of each being reported as `unchecked`.
 | `scale` | error | `DECIMAL(9,2)` into `PIC S9(7)V9` — the cents are silently rounded away on every fetch, and no status code says so |
 | `precision` | error | too few integer digits; SQLCODE -304, but only once a row actually exceeds it |
 | `length` | error / info | `CHAR(30)` into `PIC X(20)` truncates every fetch (error); the reverse only wastes space (info) |
-| `usage` | warning | DISPLAY where DCLGEN generates COMP-3; DB2 converts every row rather than moving it |
+| `usage` | warning | DISPLAY where DCLGEN generates COMP-3; DB2 converts every row rather than moving it (IBM synonyms are folded first: `BINARY`/`COMP-4`/`COMP-5` all count as `COMP`, since on z/OS `COMP-5` is the same big-endian storage and is IBM's recommended integer host variable -- #259) |
 | `sign` | warning | unsigned host variable; a negative value arrives as its absolute value |
 | `null-indicator` | warning | nullable column with no indicator variable; SQLCODE -305 the first time the column is actually null |
 

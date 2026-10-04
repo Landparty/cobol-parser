@@ -160,6 +160,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`dclgen-check` warned on `COMP-5` integer host variables** (#259): `COMP-5`
+  is now treated as the same storage as `COMP` (it is, on big-endian z/OS),
+  so IBM's recommended spelling for an INTEGER / SMALLINT / BIGINT host
+  variable no longer draws a `usage` warning claiming DB2 converts every row.
 * **`complexity` scored a computed GO TO as straight-line code** (#263):
   `GO TO A B C DEPENDING ON X` now adds one decision point per target, as an
   EVALUATE with one WHEN per target does, so dispatcher paragraphs are no
