@@ -664,3 +664,70 @@ def test_a_generated_comp_1_survives_binary32():
         value = float(row[single])
         stored = struct.unpack("<f", struct.pack("<f", value))[0]
         assert f"{stored:.7g}" == row[single]
+
+
+# ---------------------------------------------------------------------------
+# Issue #248: invalid records that used to decode with error_count 0
+# ---------------------------------------------------------------------------
+
+ODO_248 = """
+       01  REC2.
+           05  N    PIC 9.
+           05  T    OCCURS 2 TO 5 DEPENDING ON N.
+               10  TT  PIC XX.
+           05  AFT  PIC X(3).
+"""
+
+_VB_ASCII = EncodingOptions(charset=Charset.ASCII, record_format=RecordFormat.VARIABLE)
+
+
+def _vb(body: bytes) -> bytes:
+    return (len(body) + 4).to_bytes(2, "big") + b"\0\0" + body
+
+
+def test_an_odo_counter_below_its_minimum_is_flagged_on_the_counter():
+    result = _decoder(ODO_248, _VB_ASCII).decode_bytes(_vb(b"1AAXYZ"))
+    record = result.records[0]
+    counter = next(item for item in record.fields if item.name == "N")
+    assert counter.error is not None
+    assert "1 outside 2..5" in counter.error
+    assert result.error_count >= 1
+
+
+def test_an_odo_counter_above_its_maximum_and_leftover_bytes_are_flagged():
+    result = _decoder(ODO_248, _VB_ASCII).decode_bytes(_vb(b"7AABBCCDDEEFFGGXYZ"))
+    record = result.records[0]
+    counter = next(item for item in record.fields if item.name == "N")
+    assert counter.error is not None and "7 outside 2..5" in counter.error
+    # The four body bytes no field accounts for are a record-level error.
+    assert any("4 byte" in error for error in record.errors)
+    assert result.error_count == 2
+    assert record.to_dict()["errors"] == record.errors
+    assert "! record: 4 byte(s)" in decoded_hex_dump(result, _VB_ASCII)
+
+
+def test_a_well_formed_variable_record_still_decodes_clean():
+    result = _decoder(ODO_248, _VB_ASCII).decode_bytes(_vb(b"3AABBCCXYZ"))
+    assert result.error_count == 0
+    assert result.records[0].value("AFT") == "XYZ"
+
+
+def test_a_negative_sign_nibble_on_an_unsigned_packed_field_is_an_error():
+    source = "       01  R.\n           05  P PIC 9(3) COMP-3.\n"
+    for raw in (b"\x12\x3d", b"\x12\x3b"):
+        field = _one_field(source, raw, EncodingOptions())
+        assert field.value == "123"  # not "-123": the field cannot hold it
+        assert field.error is not None and "unsigned" in field.error
+    clean = _one_field(source, b"\x12\x3f", EncodingOptions())
+    assert (clean.value, clean.error) == ("123", None)
+
+
+def test_a_binary_value_wider_than_its_picture_is_a_caveat_not_an_error():
+    # Legal under TRUNC(BIN), invalid under TRUNC(STD): flagged, not failed.
+    source = "       01  R.\n           05  B PIC 9(4) COMP.\n"
+    result = _decoder(source, EncodingOptions()).decode_bytes(b"\xff\xff")
+    assert result.records[0].value("B") == "65535"
+    assert result.error_count == 0
+    assert any("TRUNC" in caveat and "B" in caveat for caveat in result.caveats)
+    fits = _decoder(source, EncodingOptions()).decode_bytes(b"\x27\x0f")
+    assert not any("TRUNC" in caveat for caveat in fits.caveats)

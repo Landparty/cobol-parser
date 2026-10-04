@@ -2842,7 +2842,12 @@ def _severity_at_least(severity: str, threshold: str) -> bool:
 
 
 def _cmd_lint(args: argparse.Namespace) -> None:
-    from ..analysis.lint import LintAnalyzer, apply_source_map, filter_by_severity
+    from ..analysis.lint import (
+        LintAnalyzer,
+        add_parse_errors,
+        apply_source_map,
+        filter_by_severity,
+    )
 
     result, prof = _parse_result_or_fail(args)
     ast = result.ast
@@ -2857,6 +2862,9 @@ def _cmd_lint(args: argparse.Namespace) -> None:
     report = analyzer.analyze(
         ast, copybook_item_names=_lint_copybook_item_names(args, ast)
     )
+    # A partial AST lints quietly, so the errors it was recovered from are
+    # findings of their own: --fail-on then sees them (#249).
+    add_parse_errors(report, list(result.errors))
     # With --copybook-path the analyzers ran over expanded text, so every
     # location counts expanded lines. The expander's own map turns each one
     # back into the file and line a reader can open.

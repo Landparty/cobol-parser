@@ -744,7 +744,10 @@ below always does this.
 **Two numbers per procedure**: `cyclomatic_complexity` (1 plus one decision
 point per IF, per WHEN arm on EVALUATE/SEARCH excluding WHEN OTHER/default,
 per loop-form PERFORM -- TIMES/UNTIL/VARYING, a bare `PERFORM target` is not
-a decision point since it always runs exactly once -- and per *present*
+a decision point since it always runs exactly once -- per target of a
+computed `GO TO ... DEPENDING ON` (an N-way branch plus the out-of-range
+fall-through, scored like an N-arm EVALUATE; a plain GO TO adds nothing and
+neither changes nesting depth) -- and per *present*
 exception-handling clause: AT END, INVALID KEY, AT EOP, ON SIZE ERROR, ON
 OVERFLOW, ON EXCEPTION, and their NOT- counterparts, each independently);
 `extended_complexity` adds one per boolean AND/OR operator in every
@@ -809,7 +812,7 @@ window, no near-miss/type-3 similarity scoring, matching the design goal of
 kinds:
 
 - **Type-1 (exact)**: identical statement types, operands, and condition
-  text, verbatim.
+  text, verbatim -- and everything else each statement does (#262, below).
 - **Type-2 (renamed)**: identical statement-type/control-flow shape with
   identifier-shaped tokens (data-names, paragraph-names) consistently
   substituted with per-paragraph positional placeholders (`ID1`, `ID2`,
@@ -827,6 +830,32 @@ in a Type-1 group of size >= 2 is excluded from the Type-2 pass, so a
 paragraph is only ever reported in one clone group. Groups below
 `min_clone_statements` (default 3 -- two bare `EXIT.` paragraphs matching
 each other isn't meaningful redundancy) are dropped.
+
+**A leaf statement's fingerprint is its whole behaviour, not its operand
+list (#262, 2026-10-04).** It used to be `(type, operands)` only, and
+`operands` is often just the identifier list (COMPUTE's is `['A']`; the
+formula lives in `expression`), so paragraphs differing only in a COMPUTE
+formula, ROUNDED, an AT END / INVALID KEY / ON SIZE ERROR / ON EXCEPTION
+body, `UPON`, `CORRESPONDING`, a STRING delimiter or the INSPECT phrase were
+reported as TYPE_1 clones. A leaf is now `(type, operands, clauses,
+details)`: `clauses` fingerprints every present clause body (the
+`_CLAUSE_ATTRS` set `complexity.py` uses, recursively through `_fp`, so their
+statements also count towards `statement_count`), and `details` is the
+statement's `to_dict()` minus `_DETAIL_SKIP_KEYS` (position, node
+bookkeeping, what the tuple already holds, and `possible_values` -- a
+`DynamicCallAnalyzer` annotation that would make a digest depend on analyzer
+order). SEARCH adds its details (table, VARYING) and an inline PERFORM its
+TIMES count / VARYING / TEST phrase the same way. Under Type-2, detail
+strings are renamed like operands **except reserved words** (`_DETAIL_KEYWORDS`:
+`_NON_IDENTIFIER_WORDS` + the lexer's keyword table + enum-like values the
+models store, e.g. `LEADING`, `SIZE`, `TIMES`, `INPUT`), so `FOR ALL` vs
+`FOR LEADING` is never a "consistent rename"; a dict keyed by data-names
+(OPEN's file -> mode map) has its keys renamed too. **No digest version**:
+by owner decision the `type1`/`type2` digests changed in place, and digests
+stored by earlier scans simply stop matching new ones. Known residual: the
+parser stores some literals unquoted (an INSPECT `'X'`, a STRING
+`DELIMITED BY 'X'`), so under Type-2 only, two such literals still read as a
+consistent rename; Type-1 tells them apart.
 
 **Reuses `unused_variables.py`'s `_NON_IDENTIFIER_WORDS`/quoted-text
 handling verbatim** rather than re-deriving a second reserved-word list --
@@ -949,7 +978,11 @@ lint output with no change here.
 `recursion-check`, `complexity`, `dclgen-check`) rather than a second private
 vocabulary, so
 `lint --rule dead-code` and `cobol-parser dead-code` are visibly the same
-analyzer. A rule selection is deduplicated and normalized to `RULES` order, so
+analyzer. One more id appears in output but not in `RULES`: `parse`, the
+error-severity findings `add_parse_errors()` makes from `ParseResult.errors`
+(the `lint` CLI adds them; see cli.md, #249). The `sql-cics-check` caveat on a
+unit with no PROCEDURE DIVISION says exactly that, instead of counting the
+unit's one reason as an "EXEC block" that could not be checked. A rule selection is deduplicated and normalized to `RULES` order, so
 flag ordering cannot change the report.
 
 **Severity is per finding, not per rule.** An analyzer that grades itself
@@ -1351,6 +1384,18 @@ randomization. The `analyze` CLI also emits the
 `possible_values_incomplete` flag now (see cli.md). Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA2PossibleValuesDeterministic`.
 
+**A write through a REDEFINES overlay is a write to the CALL variable
+(#257).** `_overlapping_names()` -- which decides what counts as "writing
+the CALL variable's storage" for `_mark_untracked_writes()` -- follows
+`REDEFINES` as well as the group hierarchy: the redefining item, the item it
+redefines (matched by name at the same level number) and every subordinate
+on either side form one storage cluster (union-find, so several
+redefinitions of one area join). `MOVE 'PGMZ' TO WS-AREA` therefore marks a
+`CALL WS-PGMN` (`WS-PGMN REDEFINES WS-AREA`) incomplete, as does a group
+`MOVE ... TO WS-REC` for a `CALL WS-NM2` inside `WS-REC2 REDEFINES WS-REC`.
+No byte-range precision: like the hierarchy rule, any write to the overlay
+counts. Pinned by `tests/unit/test_value_tracker.py::TestRedefinesOverlap`.
+
 ## IMSSegmentAnalyzer
 
 ```python
@@ -1439,7 +1484,7 @@ that name exists), instead of each being reported as `unchecked`.
 | `scale` | error | `DECIMAL(9,2)` into `PIC S9(7)V9` — the cents are silently rounded away on every fetch, and no status code says so |
 | `precision` | error | too few integer digits; SQLCODE -304, but only once a row actually exceeds it |
 | `length` | error / info | `CHAR(30)` into `PIC X(20)` truncates every fetch (error); the reverse only wastes space (info) |
-| `usage` | warning | DISPLAY where DCLGEN generates COMP-3; DB2 converts every row rather than moving it |
+| `usage` | warning | DISPLAY where DCLGEN generates COMP-3; DB2 converts every row rather than moving it (IBM synonyms are folded first: `BINARY`/`COMP-4`/`COMP-5` all count as `COMP`, since on z/OS `COMP-5` is the same big-endian storage and is IBM's recommended integer host variable -- #259) |
 | `sign` | warning | unsigned host variable; a negative value arrives as its absolute value |
 | `null-indicator` | warning | nullable column with no indicator variable; SQLCODE -305 the first time the column is actually null |
 
@@ -1803,6 +1848,17 @@ no-op'ing them, so a witness can never silently violate a set op it was
 solved against. A genuine contradiction (`in_set ("A")` AND
 `not_in_set ("A")`) is still `Unsatisfiable`.
 
+**An enum pick is re-checked against every conjunct** (2026-10-04, #244).
+`EnumDomain` narrows only by set ops; a relational or class conjunct beside
+one is a no-op there. `IF NOT HIGH-V AND WS-C > 5` (88s `1`/`9`) used to
+return `1` -- it survives `not_in_set ("9")` and fails `> 5`. Now each
+surviving declared value is pinned (`eq`) into a fresh `_picture_domain()`
+and every conjunct is applied (`_pinned_picture_domain`); the first value
+that holds is the witness, rendered through the same post-checks as any
+other. None holding falls back to the picture domain, which solves the
+relational part itself (`52` for the example) or reports the contradiction
+(`HIGH-V AND WS-C < 5` is `Unsatisfiable`).
+
 **AND/OR/NOT via De Morgan.** `IfStatement.condition` is walked once for the
 THEN arm (`negate=False`) and once more for the ELSE arm (`negate=True`).
 Most negation is baked into concrete operator strings (`NOT_EQUAL`/`IS NOT
@@ -1943,9 +1999,30 @@ from cobolparser.analysis.const_fold import ConstantFolder
 
 folder = ConstantFolder()
 result = folder.fold(ast, index, seed_values={"WS-QTY": "622"})
-result.known   # dict[qualified_name, str]: fields still knowable at a
-               # DISPLAY/WRITE, by the end of the walk
+result.known   # dict[qualified_name, str]: the value each field held at
+               # the DISPLAY/WRITE sites that observed it
 ```
+
+**`known` is the value at the observation point** (2026-10-04, #246,
+decision (a) from the issue). `_WalkState.observed` records the env value at
+every `DISPLAY`/`WRITE` site; a field is reported only when every site saw
+the same known value. It used to report the env as it stood at the end of
+the walk, so `MOVE 1 TO N3. DISPLAY N3. MOVE 2 TO N3.` claimed `2`. The walk
+also **falls through**: after the entry paragraph it continues into every
+following paragraph in source order (`_fall_through_chain`) until the walk
+stops (`STOP RUN`/`GOBACK`/`EXIT PROGRAM`/`GO TO`), so a program displaying
+`1` in `MAIN-PARA` and `2` in the next paragraph gets no `N3` expectation
+rather than `1`. Following real control flow re-walks a PERFORMed
+paragraph each time control reaches it -- quadratic for a chain of
+paragraphs that each PERFORM the next with no STOP RUN -- so the main walk
+has a `_MAX_WALK_STEPS` (50,000 statement visits) budget; past it the fold
+reports nothing (`_WalkState.exhausted`), never a partial answer. No program
+in the first 150 NIST files comes near it. The shamrice corpus's two former
+`known` values (`sub.cbl`, `unstring.cbl`) were both multi-site
+disagreements and are gone; `test_const_fold_corpus.py`'s non-triviality
+check now also folds `tests/samples/file_operations.cbl` and
+`enterprise/COMPDIR.cbl`. `bundle_version` is unchanged: only which
+expectations are emitted changes, not their shape.
 
 **"Exact by construction, or absent" -- never a guess.** Every ambiguity
 below resolves by leaving a field unknown (poisoned: removed from the
@@ -2090,6 +2167,19 @@ internal env) rather than approximating:
   value for. `_target_paths()` now returns `(qpath, exact)` pairs; a
   suffixed target's `_reset_under` call always passes `restore=False`
   regardless of whether this is the file/target's first occurrence.
+* **Storage shared without a REDEFINES clause** (2026-10-04, #245).
+  Every 01 under one FD/SD implicitly redefines the same record area, so
+  `_link_file_records` unions the leaves of every
+  `index.records_for_file(f)` (`ProgramLayoutIndex.file_names()`) into one
+  alias class: `MOVE 1234 TO B. MOVE 'ABCD' TO A. DISPLAY B.` (B in R2, A in
+  R1, both under `FD F`) leaves B unknown -- it used to claim `1234`.
+  `WRITE rec FROM id` is folded as `MOVE id TO rec` before the WRITE is
+  observed (a group record is poisoned whole); `REWRITE ... FROM` takes the
+  generic poison path, which already covers the record. A field source
+  MOVEd into a `JUSTIFIED RIGHT` receiver is space-padded to its own width
+  first (`_text_width`), because `env` stores text unpadded and COBOL sends
+  the whole field: `X5 = 'ABCD'` into `PIC X(3) JUST RIGHT` is `'CD '`,
+  not `'BCD'`.
 * Any other statement type this module has no specific rule for
   (`INITIALIZE`, `SET`, `STRING`/`UNSTRING`, `INSPECT`, and the CALL/SQL/
   CICS/DLI cases above) conservatively poisons every name in its `.operands`
@@ -2100,7 +2190,8 @@ internal env) rather than approximating:
   opportunities are silently not offered. Never wrong, sometimes just
   quieter than it could be. `GO TO`, `STOP RUN`, `GOBACK`, and `EXIT
   PROGRAM` all stop the walk outright (unreachable code after them is never
-  folded or observed).
+  folded or observed). A paragraph's end is not a stop: control falls
+  through into the next paragraph (#246).
 
 **Bug found via a NIST-corpus smoke sweep, fixed at the root (not worked
 around): `ProgramLayoutIndex.resolve()` crashed (`IndexError`) on an
@@ -2710,7 +2801,11 @@ SETting a condition name also counts its item.
 then `_tidy()` (`T-K ( IX )` -> `T-K(IX)`, `NOT =` reads `<>`). EVALUATE
 selector literals arrive **unquoted** from the parser, so a non-identifier,
 non-numeric, non-figurative selector is re-quoted -- except the space-joined
-call shape `DFHRESP ( NORMAL )`, which is an expression. Level-88 values are
+call shape `DFHRESP ( NORMAL )`, which is an expression. A negated range
+selector (`WHEN NOT 0 THRU 17`, a `Condition` dict with `negated` plus
+`start`/`end`) reads `NOT (AGE >= 0 AND AGE <= 17)` from those bounds, not
+from its raw `THRU` text; only a single negated value reads `AGE <> 6`
+(#260). Level-88 values are
 also stored unquoted with `THRU` as `"THROUGH:end"`; `_condition_values`
 quotes them unless the item's PICTURE / USAGE is numeric. STRING sources are
 unquoted too, so one naming no declared item is re-quoted. Actions are

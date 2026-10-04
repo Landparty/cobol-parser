@@ -72,6 +72,7 @@ from typing import Any
 
 from .._storage import (
     BINARY_FIXED_USAGES,
+    BINARY_NATIVE_USAGES,
     DOUBLE_FLOAT_USAGES,
     PACKED_USAGES,
     SINGLE_FLOAT_USAGES,
@@ -510,10 +511,16 @@ def _canonical_usage(usage: str) -> str:
     """One spelling per storage format: ``BINARY`` / ``COMP-4`` /
     ``COMPUTATIONAL`` are all ``COMP``, ``PACKED-DECIMAL`` is ``COMP-3``, and
     so on -- IBM synonyms, so a host variable spelled differently from what
-    DCLGEN writes is stored identically and DB2 converts nothing."""
+    DCLGEN writes is stored identically and DB2 converts nothing.
+
+    ``COMP-5`` folds to ``COMP`` too: on z/OS (big-endian) it is byte for byte
+    the storage of ``COMP``, the Db2 precompiler treats both as the same
+    integer host variable, and IBM recommends ``COMP-5`` for one (no
+    ``TRUNC(STD)`` truncation of a value Db2 returns)."""
     upper = usage.upper()
     for spellings, canonical in (
         (BINARY_FIXED_USAGES, "COMP"),
+        (BINARY_NATIVE_USAGES, "COMP"),
         (PACKED_USAGES, "COMP-3"),
         (SINGLE_FLOAT_USAGES, "COMP-1"),
         (DOUBLE_FLOAT_USAGES, "COMP-2"),

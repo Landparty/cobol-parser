@@ -41,8 +41,10 @@ from .preprocess import (
     preprocess_conditional_compilation,
     strip_compiler_directives,
 )
+from .preprocess._normalize import ID_DIVISION_HEADER_RE
 from .preprocess.replace_statement import (
     apply_replace_statements,
+    find_replace_statement_spans,
     strip_unexpanded_copy_statements,
 )
 from .profiling import ProfilerContext, ProfilingResult
@@ -56,13 +58,12 @@ _OO_CONTAINER_KINDS: frozenset[str] = frozenset({"CLASS", "FACTORY", "OBJECT"})
 
 # Pre-compiled regex for ID division detection (avoids re-compilation per parse call).
 # Fixed-format source may carry a sequence area in columns 1-6, so an optional
-# exactly-6-character digits/spaces prefix is allowed before the usual leading
-# whitespace ("000100 IDENTIFICATION DIVISION."). Requiring exactly 6 such
-# characters (not "up to 6 of anything digit-shaped") keeps random text that
-# merely starts with digits from matching.
-_ID_DIV_RE = re.compile(
-    r"^(?:[0-9 ]{6})?\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECASE
-)
+# exactly-6-character prefix followed by a blank column 7 is allowed before the
+# usual leading whitespace ("000100 IDENTIFICATION DIVISION."). The prefix may
+# be any six characters -- a change tag ("CHG001") included: accepting only
+# digits/blanks there skipped a tagged outer header and blanked the whole
+# outer program up to a nested program's header (#252).
+_ID_DIV_RE = ID_DIVISION_HEADER_RE
 
 
 @dataclass
@@ -183,24 +184,47 @@ class CobolParser:
         that runs later must still see it, or every ``>>IF`` on the symbol
         evaluates to FALSE. (``CBL`` / ``PROCESS`` option lines are removed
         by ``strip_compiler_directives`` right after this step.)
+
+        A ``REPLACE`` statement is kept too: COBOL-85 and IBM allow it as
+        the first statement of a compilation unit, ahead of the header, and
+        ``apply_replace_statements`` only runs later (#254). Every line a
+        well-formed REPLACE statement touches is kept whole.
         """
         lines = split_source_lines(content, keepends=True)
 
         for i, line in enumerate(lines):
             if _ID_DIV_RE.search(line):
+                replace_lines = CobolParser._replace_statement_lines(lines[:i])
                 kept = [
                     (
                         preceding
-                        if preceding.strip().startswith(">>")
+                        if index in replace_lines
+                        or preceding.strip().startswith(">>")
                         or preceding.strip()[6:8].strip().startswith(">>")
                         or preceding.strip().upper().startswith(("CBL", "PROCESS"))
                         else "\n"
                     )
-                    for preceding in lines[:i]
+                    for index, preceding in enumerate(lines[:i])
                 ]
                 return "".join(kept + lines[i:])
 
         return content
+
+    @staticmethod
+    def _replace_statement_lines(lines: list[str]) -> set[int]:
+        """Indexes of the *lines* a well-formed REPLACE statement spans."""
+        prefix = "".join(lines)
+        if "REPLACE" not in prefix.upper():
+            return set()
+        spans = find_replace_statement_spans(prefix)
+        if not spans:
+            return set()
+        indexes: set[int] = set()
+        for start, end in spans:
+            first = prefix.count("\n", 0, start)
+            last = prefix.count("\n", 0, max(start, end - 1))
+            indexes.update(range(first, last + 1))
+        return indexes
 
     def _parse_core(
         self,
@@ -906,10 +930,12 @@ class CobolParser:
 #: A change-tracking tag as shops stamp it into the sequence area (columns
 #: 1-6): a single unbroken token of letters/digits and the punctuation that
 #: turns up in ticket ids (``SAPR24``, ``28486``, ``GART``, ``JSINT``,
-#: ``ABC-12``). The "no internal whitespace" property is what keeps ordinary
-#: free-form statement text (``MOVE A``, ``IF A =``) out -- see
+#: ``ABC-12``, ``#00100``). It may open with one of the z/OS national
+#: characters ``#``/``@``/``$``, which no free-form line can start with. The
+#: "no internal whitespace" property is what keeps ordinary free-form
+#: statement text (``MOVE A``, ``IF A =``) out -- see
 #: :func:`_sequence_area_is_fixed_like`.
-_CHANGE_TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_/#$.-]*$")
+_CHANGE_TAG_RE = re.compile(r"^[A-Za-z0-9#@$][A-Za-z0-9_/#@$.-]*$")
 
 #: Area A headers used to corroborate a *tagged* sequence area. Anchored at
 #: the start of the code area (column 8+), which is exactly where free-form
@@ -921,6 +947,20 @@ _AREA_A_HEADERS = (
     "DATA DIVISION",
     "PROCEDURE DIVISION",
     "PROGRAM-ID",
+)
+
+#: A data-description entry in the code area: a level number, a data name
+#: (or FILLER), then either the closing period of a group item or a clause
+#: keyword. Corroborates a *tagged* sequence area in a copybook, which has no
+#: division header to offer. The trailing period/clause requirement is what
+#: keeps free-form statements that open with a six-letter verb and a number
+#: (``DIVIDE 10 INTO X``) from matching.
+_TAGGED_DATA_ENTRY_RE = re.compile(
+    r"^(?:0?[1-9]|[1-4][0-9]|66|77|88)\s+[A-Za-z0-9][A-Za-z0-9-]*"
+    r"(?:\s*\.|\s+(?:PIC|PICTURE|VALUE|VALUES|OCCURS|REDEFINES|RENAMES|USAGE"
+    r"|COMP(?:UTATIONAL)?(?:-[1-5])?|BINARY|PACKED-DECIMAL|DISPLAY|INDEX"
+    r"|POINTER|SIGN|JUST|JUSTIFIED|SYNC|SYNCHRONIZED|BLANK|EXTERNAL|GLOBAL)\b)",
+    re.IGNORECASE,
 )
 
 #: How far into the file to look for the Area A anchor above. Division headers
@@ -989,6 +1029,46 @@ def _has_area_a_division_header(non_empty_lines: list[str]) -> bool:
     return False
 
 
+def _has_tagged_line_anchor(non_empty_lines: list[str]) -> bool:
+    """True when a change-tagged line can only be fixed-format.
+
+    The division-header anchor of :func:`_has_area_a_division_header` never
+    fires for a copybook, which has no divisions. So a member whose columns
+    1-6 carry change tags (``BNC#01``, ``CHG001``) was judged free-form, its
+    column-7 comment lines were spliced in raw, and the first ``#`` in a
+    comment banner surfaced as ``Lexer error: Invalid character: #``.
+
+    Two shapes corroborate a tagged sequence area instead, both impossible in
+    free-form source:
+
+    * a column-7 comment indicator right after the tag (``CHG001*...``) --
+      free-form never puts ``*`` or ``/`` straight after a six-character
+      word;
+    * a data-description entry in the code area (``CHG001     05  WS-A  PIC
+      X.``), see :data:`_TAGGED_DATA_ENTRY_RE`.
+
+    Only lines whose sequence area is a non-blank *tag* count: a blank or
+    numeric one already decides through the strict rule.
+    """
+    scanned = 0
+    for line in non_empty_lines:
+        if scanned >= _HEADER_SCAN_LIMIT:
+            break
+        if len(line) < 8:
+            continue
+        strict, relaxed = _sequence_area_is_fixed_like(line[:6])
+        if strict or not relaxed:
+            continue
+        scanned += 1
+        if line[6] in ALL_COMMENT_INDICATORS:
+            return True
+        if line[6] == " " and _TAGGED_DATA_ENTRY_RE.match(
+            line[TEXT_START_COL - 1 : TEXT_END_COL].lstrip()
+        ):
+            return True
+    return False
+
+
 def _detect_fixed_format(source: str) -> bool:
     """Detect if source appears to be in fixed-format COBOL.
 
@@ -1007,7 +1087,10 @@ def _detect_fixed_format(source: str) -> bool:
        skipped, and the tag text lexed as code -- surfacing as stray
        identifier/number tokens before the first division. The corroborating
        anchor is what keeps genuine free-form source (which never puts a
-       division header at column 8) from being dragged in by rule 2.
+       division header at column 8) from being dragged in by rule 2. A
+       copybook has no division header, so a comment indicator or a
+       data-description entry right after a tag corroborates instead (see
+       :func:`_has_tagged_line_anchor`).
     """
     lines = split_source_lines(source)
     non_empty_lines = [line for line in lines if line.strip()]
@@ -1052,7 +1135,10 @@ def _detect_fixed_format(source: str) -> bool:
     threshold = sample_size * 0.6
     if strict_hits >= threshold:
         return True
-    return relaxed_hits >= threshold and _has_area_a_division_header(non_empty_lines)
+    return relaxed_hits >= threshold and (
+        _has_area_a_division_header(non_empty_lines)
+        or _has_tagged_line_anchor(non_empty_lines)
+    )
 
 
 # See the matching comment on CobolParser.parse -- same reason these stubs

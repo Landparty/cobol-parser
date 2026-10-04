@@ -266,7 +266,8 @@ class DynamicCallAnalyzer:
     @staticmethod
     def _overlapping_names(items: list[CobolDataItem]) -> dict[str, set[str]]:
         """Item name -> names of the items sharing its storage: its group
-        ancestors and subordinate items."""
+        ancestors and subordinate items, and every item on either side of a
+        ``REDEFINES`` it (or an ancestor) takes part in."""
         overlapping: dict[str, set[str]] = {}
 
         def walk(item: CobolDataItem, ancestors: list[str]) -> None:
@@ -284,6 +285,49 @@ class DynamicCallAnalyzer:
         for item in items:
             if item.level in (1, 77):
                 walk(item, [])
+
+        # REDEFINES: the redefining item and the item it redefines share
+        # bytes, and so does every subordinate on either side. Byte-range
+        # precision is not attempted -- like the hierarchy rule above, any
+        # write to the overlay counts as a write to every item in it.
+        def subtree(item: CobolDataItem) -> set[str]:
+            names: set[str] = set()
+            stack = [item]
+            while stack:
+                node = stack.pop()
+                if node.name:
+                    names.add(node.name.upper())
+                stack.extend(c for c in node.children if isinstance(c, CobolDataItem))
+            return names
+
+        by_name: dict[tuple[str, int], list[CobolDataItem]] = {}
+        for item in items:
+            if item.name:
+                by_name.setdefault((item.name.upper(), item.level), []).append(item)
+        # Union-find over items, so every redefinition of one area (and a
+        # REDEFINES of a REDEFINES) lands in a single storage cluster.
+        parent: dict[int, int] = {}
+
+        def find(key: int) -> int:
+            while parent.get(key, key) != key:
+                key = parent[key]
+            return key
+
+        members: dict[int, CobolDataItem] = {}
+        for item in items:
+            if not item.redefines:
+                continue
+            for target in by_name.get((item.redefines.upper(), item.level), []):
+                members[id(item)] = item
+                members[id(target)] = target
+                parent[find(id(item))] = find(id(target))
+        clusters: dict[int, set[str]] = {}
+        for key, item in members.items():
+            clusters.setdefault(find(key), set()).update(subtree(item))
+        for names in clusters.values():
+            for name in names:
+                overlapping.setdefault(name, set()).update(names)
+
         for name, related in overlapping.items():
             related.discard(name)
         return overlapping

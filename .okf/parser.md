@@ -3124,3 +3124,39 @@ arity. Pinned by `tests/regression/test_audit_2026_09_28_accelerators.py`.
   unparsed tokens. Qualified KEY names (`KEY IS K1 OF T`) keep the bare name.
 
 Pinned by `tests/regression/test_data_division_national_occurs_2026_09_28.py`.
+
+# Change tag in columns 1-6 of the header record (#252, 2026-10-04)
+
+`_ID_DIV_RE` (now `preprocess._normalize.ID_DIVISION_HEADER_RE`, shared with
+`strip_compiler_directives`) accepts *any* six characters in columns 1-6 as
+long as column 7 is blank: `^(?:[^\r\n]{6}(?=[ \t]))?\s*(IDENTIFICATION|ID)\s+
+(DIVISION|DIV)`. It used to allow only digits/blanks there (P-B4 above), so a
+change tag on the outer header (`CHG001 IDENTIFICATION DIVISION.`) was missed
+and `_skip_to_identification_division` blanked everything up to a *nested*
+program's header -- `CobolParser.parse` / `parse_files(workers=1)` returned
+only the inner program. `strip_compiler_directives` had the same blind spot:
+its directive section never closed, so `PROCESS SECTION.` in the PROCEDURE
+DIVISION was blanked as a PROCESS card. A comment record (`*`/`/` in column
+7) never matches. Pinned by `tests/regression/test_sequence_area_tag_header.py`.
+
+# REPLACE ahead of the IDENTIFICATION DIVISION (#254, 2026-10-04)
+
+`_skip_to_identification_division` now also keeps every line a well-formed
+`REPLACE` statement spans (`replace_statement.find_replace_statement_spans`
+over the pre-header text, via `_replace_statement_lines`). It runs before
+`apply_replace_statements`, so a leading `REPLACE ==WS-X== BY ==WS-Y==.` --
+legal as the first statement of a compilation unit -- used to be blanked
+with no warning. Other pre-header junk is still dropped; line count is
+unchanged. Covers `parse_cobol`, `CobolParser.parse` and
+`parse_cobol_with_expansion`. Pinned by
+`tests/regression/test_replace_before_identification_division.py`.
+
+# Tagged copybooks in format detection (2026-10-04)
+
+`_detect_fixed_format`'s tagged-sequence-area rule is corroborated by
+`_has_area_a_division_header` **or** `_has_tagged_line_anchor` (a tagged
+line with a column-7 comment indicator, or a tagged data-description
+entry). The second anchor exists for copybooks, which have no division
+header; without it a tagged member's comment lines reached the lexer and a
+`#` in them failed the parse. Details in `preprocessing.md` (tagged
+sequence area section).

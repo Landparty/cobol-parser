@@ -8,6 +8,33 @@ timestamp: 2026-10-04T00:00:00Z
 
 # Overview
 
+2026-10-04: `tests/regression/test_copy_diagnostic_line_numbers.py`
+(3 tests, #256) pins COPY diagnostics after continuation records naming the
+original file line, from the expander and from `parse_cobol_with_expansion`
+(one diagnostic, not two in different coordinates).
+
+2026-10-04: `tests/regression/test_replace_before_identification_division.py`
+(9 tests, #254) pins a REPLACE ahead of the IDENTIFICATION DIVISION header
+being applied (free and fixed layout; `parse_cobol`, `CobolParser.parse`,
+`parse_cobol_with_expansion`), pre-header junk still dropped, line count kept.
+
+2026-10-04: `tests/regression/test_copy_replacing_identifier_operand.py`
+(13 tests, #253) pins qualified (`OF`/`IN`) and subscripted (`WS-TBL (2)`,
+reference modification) COPY REPLACING operands, end to end against a
+directly written MOVE, plus NIST SM202A / SM206A expanding every COPY.
+
+2026-10-04: `tests/regression/test_comment_entry_copy_replace_scan.py`
+(12 tests, #251) pins comment-entry text as opaque to the COPY / REPLACE
+scanners (an apostrophe in AUTHOR no longer hides a later COPY or REPLACE or
+flips quote parity onto a VALUE literal; a COPY inside REMARKS is prose; NIST
+SG104A has no phantom `COPY NOT` warning).
+`tests/regression/test_sequence_area_tag_header.py` (10 tests, #252) pins a
+change tag (`CHG001`) in columns 1-6 of the IDENTIFICATION DIVISION record
+through `CobolParser.parse`, `parse_cobol` and `parse_files(workers=1|2)`.
+`tests/regression/test_tagged_copybook_comment_hash.py` (14 tests) pins a
+`#` in comment lines of a change-tagged copybook (nested COPY, short members,
+direct source, free-form `*>`) and the `DIVIDE 10 INTO X` non-anchor.
+
 2026-09-30: `tests/unit/analysis/test_business_rules.py` (73 tests) pins
 `BusinessRuleExtractor` against real parses: IF / EVALUATE (subject, TRUE,
 FALSE, ALSO, THRU, OTHER) / SEARCH decision tables with unquoted selector
@@ -546,6 +573,8 @@ the existing `TestNewSubcommandsRegistered` and
 same registration/`-o`-silences-stdout coverage the other five analyzer
 subcommands already get.
 
+2026-10-04 (issues #247, #248): +3 in `tests/unit/generators/data/test_layout_offsets.py`'s `TestOccursDependingOn` (`test_group_holding_an_odo_table_reports_its_maximum_length`, `test_direct_odo_child_counts_its_maximum_in_the_record_length`, `test_odo_record_length_agrees_with_the_encoder` -- an ODO table's footprint is its maximum, so group/record `byte_length` equals `GeneratedDataset.record_length()`), and +5 at the end of `tests/unit/generators/data/test_decoding.py` (an ODO counter below/above its range is a field error, leftover RDW body bytes are a record-level error, a well-formed VB record stays clean, a `B`/`D` sign nibble on unsigned COMP-3 is an error and does not negate, a COMP value wider than its PICTURE is a TRUNC caveat). All failed before the fixes.
+
 2026-08-14 (Task 8): +1 in `tests/unit/generators/data/test_layout_offsets.py` (new `TestComputeProgramDataItems` class) and +2 new test classes in new `tests/integration/test_data_item_layout_corpus.py`, for the new `compute_program_data_items()` program-wide entry point (see [generators.md](generators.md)'s `layout_offsets.py` entry). The unit test walks a two-record WORKING-STORAGE section and confirms both records' items land in `output["items"]` with independently 0-based offsets, plus the always-present `unresolved` key. The integration test's `TestRedefinesFixture` corrects a wrong assumption in this task's own brief: the brief guessed `tests/samples/redefines_test.cbl` contained a 3-way REDEFINES chain (`WS-REDEF-2 REDEFINES WS-REDEF-1 REDEFINES WS-BASE-AREA`); the real fixture (lines 16-21) is a fan-out — `WS-REDEF-1` and `WS-REDEF-2` both redefine `WS-BASE-AREA` directly — so the test asserts `redefines_chain == ["WS-BASE-AREA"]` for both, all three at `byte_offset == 0`. This also exercises the Task 8 top-level-REDEFINES fix: without it, `WS-REDEF-1`/`WS-REDEF-2` would report an empty `redefines_chain` despite genuinely redefining a section sibling (`compute_record_layout()`'s record-root `LayoutItem` hardcodes `redefines_chain=[]` since it has no visibility into section-level siblings). `TestShamriceCorpusDoesNotRaise` sweeps `examples/cobol/shamrice/*.cbl` for crash-free coverage only. The brief's Step 5 code sample also had a bare `ErrorRecoveryMode.RECOVER`, which does not exist on the enum (`FAIL_FAST`/`COLLECT_ALL` are the only members) — corrected to `COLLECT_ALL` to match every other corpus-sweep test in this suite.
 
 2026-08-14 (Task 7): +2 in `tests/unit/generators/data/test_layout_offsets.py` — new `TestLevel88` class pinning per-condition-name level-88 value expansion: `test_each_condition_name_gets_its_own_entry_with_its_own_values` verifies that each level-88 condition name gets its own `LayoutItem` entry with its own `condition_values` list (no merging/leaking across conditions), and `test_thru_range_expands_on_a_level_88_entry` verifies THRU ranges expand (VALUE 2 THRU 4 → ["2", "3", "4"]) on level-88 entries. Both tests pass against existing behavior: Task 2's `_layout_item()` already emits a `LayoutItem` per `ConditionNameItem` child using `expand_condition_values(cond.values)`, so no production changes needed. Confirms the per-condition-name value semantics are distinct from `layout.py`'s merged `_condition_values` approach.
@@ -778,9 +807,9 @@ tests/
     test_copybook_data_generator.py  # copybook -> CSV: flattening, categories, value constraints, options, dataset surface
     generators/data/
       test_views.py  # build_record_views(): running-offset placement checked against real encoded bytes, REDEFINES overlays at the redefined item's offset, an overlay not moving the fields after it, two redefinitions of one item, short-name lookup, ODO ambiguity flagging, and a parametrised contiguity property over every view (see generators.md)
-      test_decoding.py  # RecordDecoder: decode(encode(row)) == row for every storage class and both charsets, ODO under every RecordFormat, RDW framing, overlay switching reading identical bytes, the sign conventions the decoder reads but never writes, bad bytes reported per field, short/truncated records, paging, and the hex pane (see generators.md)
+      test_decoding.py  # RecordDecoder: decode(encode(row)) == row for every storage class and both charsets, ODO under every RecordFormat, RDW framing, overlay switching reading identical bytes, the sign conventions the decoder reads but never writes, bad bytes reported per field (ODO counters out of range, leftover RDW body bytes, negative sign on unsigned COMP-3 included), short/truncated records, paging, and the hex pane (see generators.md)
     test_program_layout_index.py  # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, record_named(), multi-program units, from_file errors (see generators.md)
-    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end (see generators.md)
+    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md)
     test_scenario_planner.py  # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable-arm handling, fixed families (empty-input/error-status/boundary-values), exact coverage accounting (see generators.md)
     io_statements/             # IO parser unit tests
     test_extended_verb_parsers.py  # 2026-09-02 statement-coverage audit: INITIATE/TERMINATE/SUPPRESS, SEND/RECEIVE/ENABLE/DISABLE/PURGE, EXHIBIT/EXAMINE/TRANSFORM/ENTER/NOTE/CHAIN, READY/RESET TRACE, SERVICE, TITLE, RAISE/RESUME/VALIDATE -- node, operands, no warnings; UNSUPPORTED_VERBS == {EXECUTE, GOTO, RECOVER}; every STATEMENT_KEYWORDS verb dispatches (see parser.md)
@@ -790,9 +819,9 @@ tests/
     analysis/
       test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability (IF/EVALUATE/SEARCH), CALL argument-direction ladder, ACCEPT filtering, IOLogger cross-check (see analysis.md)
       test_constraints.py  # ConstraintExtractor: relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan, EVALUATE TRUE + 88s, WHEN OTHER, SEARCH WHEN, PERFORM-UNTIL SequenceConstraint (see analysis.md)
-      test_domains.py  # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value (see analysis.md)
+      test_domains.py  # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value, TestEnumDomainHonoursRelationalConjuncts: a level-88 pick re-checked against gt/ge/lt/le (#244) (see analysis.md)
       test_dclgen_check.py  # DclgenChecker: DCLGEN column <-> host-variable pairing (the CUST_ID/CUST-VAL underscore-hyphen normalization), every violation kind and its severity, both null-indicator syntaxes, what it declines to check (VARCHAR group binding, BLOB), source ordering, ambiguous columns, and a parametrised "what DCLGEN itself would generate is always clean" table (see analysis.md)
-      test_const_fold.py  # ConstantFolder: MOVE/ADD/SUBTRACT/MULTIPLY/COMPUTE folding, GIVING forms, loop/branch write-poisoning, DIVIDE's unconditional poison, the ADD-X-TO-X self-reference gap, PERFORM (inline/paragraph/THRU) chaining, GO TO/STOP RUN stopping the walk, ACCEPT/READ preserving a seeded value, DISPLAY/WRITE as the only observation points (see analysis.md)
+      test_const_fold.py  # ConstantFolder: MOVE/ADD/SUBTRACT/MULTIPLY/COMPUTE folding, GIVING forms, loop/branch write-poisoning, DIVIDE's unconditional poison, the ADD-X-TO-X self-reference gap, PERFORM (inline/paragraph/THRU) chaining, GO TO/STOP RUN stopping the walk, ACCEPT/READ preserving a seeded value, DISPLAY/WRITE as the only observation points, TestStorageAliasing: sibling FD records / WRITE FROM / JUSTIFIED RIGHT padding (#245), TestValueAtObservationPoint: value at each DISPLAY/WRITE site + paragraph fall-through (#246), TestWalkBudget: the step budget on a quadratic fall-through chain (see analysis.md)
   integration/                 # end-to-end parsing
     test_shamrice_examples.py  # parametrised: all *.cbl in examples/cobol/shamrice/ must parse error-free
     test_nist_cobol85_support.py  # parametrised: all 459 NIST *.CBL must parse error-free (strict-xfail KNOWN_ISSUES ratchet); copybook validation

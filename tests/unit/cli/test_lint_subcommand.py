@@ -224,3 +224,64 @@ class TestFailedRules:
             {"rule": "dead-code", "error": "RuntimeError: boom"}
         ]
         assert "lint rule dead-code did not run" in captured.err
+
+
+class TestParseErrorsAreFindings:
+    """Issue #249: a file that parsed with errors linted as "0 finding(s)" and
+    exited 0 even under ``--fail-on info``. Each parse error is now an
+    error-severity finding of rule ``parse``, so ``--fail-on`` decides."""
+
+    JUNK = "THIS IS NOT COBOL AT ALL\nfoo bar baz.\n"
+
+    @pytest.fixture
+    def junk(self, tmp_path: Path) -> str:
+        path = tmp_path / "junk.cbl"
+        path.write_text(self.JUNK, encoding="utf-8")
+        return str(path)
+
+    def test_fail_on_info_trips_on_a_file_that_did_not_parse(self, junk: str) -> None:
+        with pytest.raises(SystemExit) as exc:
+            _run(junk, "--compact", "--fail-on", "info")
+        assert exc.value.code == 3
+
+    def test_fail_on_error_trips_too(self, junk: str) -> None:
+        with pytest.raises(SystemExit) as exc:
+            _run(junk, "--compact", "--fail-on", "error")
+        assert exc.value.code == 3
+
+    def test_parse_errors_appear_in_the_json(self, junk: str, capsys) -> None:
+        _run(junk, "--compact")
+        data = json.loads(capsys.readouterr().out)
+        parse_findings = [f for f in data["findings"] if f["rule"] == "parse"]
+        assert parse_findings
+        assert all(f["severity"] == "error" for f in parse_findings)
+        assert data["summary"]["by_rule"]["parse"] == len(parse_findings)
+        assert data["summary"]["error"] >= len(parse_findings)
+
+    def test_text_report_counts_the_parse_errors(self, junk: str, capsys) -> None:
+        _run(junk, "--format", "text")
+        out = capsys.readouterr().out
+        assert "error [parse]" in out
+        assert "0 finding(s)" not in out
+
+    def test_sql_cics_caveat_does_not_invent_an_exec_block(
+        self, junk: str, capsys
+    ) -> None:
+        # The junk file has no EXEC block; the caveat used to claim one
+        # could not be checked when the unit simply had no PROCEDURE DIVISION.
+        _run(junk, "--format", "text")
+        out = capsys.readouterr().out
+        assert "EXEC block(s)" not in out
+        assert "sql-cics-check: this program unit has no PROCEDURE DIVISION" in out
+
+    def test_without_fail_on_the_partial_parse_still_exits_zero(
+        self, junk: str
+    ) -> None:
+        # Option (b) of #249: findings, not a hard exit -- a file that mostly
+        # parses keeps its partial results usable.
+        _run(junk, "--compact")
+
+    def test_clean_program_has_no_parse_findings(self, program: str, capsys) -> None:
+        _run(program, "--compact")
+        data = json.loads(capsys.readouterr().out)
+        assert not [f for f in data["findings"] if f["rule"] == "parse"]

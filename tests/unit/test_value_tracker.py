@@ -302,3 +302,82 @@ class TestExtractLiteralValue:
         assert len(calls) == 1
         assert " " in calls[0].possible_values
         assert "SPACES" not in calls[0].possible_values
+
+
+class TestRedefinesOverlap:
+    """Regression for #257: a write through a REDEFINES overlay changes the
+    bytes a dynamic CALL reads, so its possible_values are not exhaustive."""
+
+    ISSUE_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ANA7.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-AREA     PIC X(8).
+       01 WS-PGMN REDEFINES WS-AREA PIC X(8).
+       01 WS-REC.
+          05 WS-HDR   PIC X(2).
+          05 WS-NM    PIC X(8).
+       01 WS-REC2 REDEFINES WS-REC.
+          05 FILLER   PIC X(2).
+          05 WS-NM2   PIC X(8).
+       PROCEDURE DIVISION.
+           MOVE 'PGMY' TO WS-PGMN
+           MOVE 'PGMZ' TO WS-AREA
+           CALL WS-PGMN
+           MOVE 'PGMA' TO WS-NM2
+           MOVE 'XXPGMB' TO WS-REC
+           CALL WS-NM2
+           STOP RUN.
+"""
+
+    @staticmethod
+    def _calls(source: str) -> dict:
+        ast = _parse(source)
+        DynamicCallAnalyzer().analyze(ast)
+        return {
+            c.called_program: c
+            for c in ast.find_all_by_type("CallStatement")
+            if c.is_dynamic
+        }
+
+    def test_move_to_the_redefined_item_marks_the_redefiner_incomplete(self):
+        call = self._calls(self.ISSUE_SOURCE)["WS-PGMN"]
+        assert call.possible_values == ["PGMY"]
+        assert call.get_metadata("possible_values_incomplete") is True
+
+    def test_move_to_a_redefined_group_marks_an_overlay_child_incomplete(self):
+        call = self._calls(self.ISSUE_SOURCE)["WS-NM2"]
+        assert call.possible_values == ["PGMA"]
+        assert call.get_metadata("possible_values_incomplete") is True
+
+    def test_move_to_the_redefiner_marks_the_redefined_item_incomplete(self):
+        source = (
+            BOILERPLATE_HEADER
+            + "       01 WS-AREA     PIC X(8) VALUE 'PGMA'.\n"
+            + "       01 WS-ALT REDEFINES WS-AREA.\n"
+            + "          05 WS-ALT-1 PIC X(4).\n"
+            + "          05 WS-ALT-2 PIC X(4).\n"
+            + BOILERPLATE_PROC
+            + "           MOVE 'ZZZZ' TO WS-ALT-2\n"
+            + "           CALL WS-AREA\n"
+            + "           STOP RUN.\n"
+        )
+        call = self._calls(source)["WS-AREA"]
+        assert call.possible_values == ["PGMA"]
+        assert call.get_metadata("possible_values_incomplete") is True
+
+    def test_unrelated_redefines_leaves_the_call_complete(self):
+        source = (
+            BOILERPLATE_HEADER
+            + "       01 WS-PROG     PIC X(8) VALUE 'PGMA'.\n"
+            + "       01 WS-AREA     PIC X(8).\n"
+            + "       01 WS-ALT REDEFINES WS-AREA PIC X(8).\n"
+            + BOILERPLATE_PROC
+            + "           MOVE 'ZZZZ' TO WS-ALT\n"
+            + "           CALL WS-PROG\n"
+            + "           STOP RUN.\n"
+        )
+        call = self._calls(source)["WS-PROG"]
+        assert call.possible_values == ["PGMA"]
+        assert not call.get_metadata("possible_values_incomplete")

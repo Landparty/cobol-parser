@@ -276,6 +276,59 @@ class TestOccursDependingOn:
         assert by_name["AFTER-OUTER"].offset_ambiguous is True
         assert by_name["AFTER-OUTER"].byte_offset is None
 
+    # Issue #247: an ODO table's footprint is its MAXIMUM occurrence count
+    # (what IBM Enterprise COBOL allocates and what the encoder writes),
+    # never one occurrence -- and that footprint rolls up into every
+    # enclosing group and the record.
+    _ISSUE_247_REC = (
+        "       01  REC2.\n"
+        "           05  N                PIC 9.\n"
+        "           05  G.\n"
+        "               10  T            OCCURS 2 TO 5\n"
+        "                   DEPENDING ON N.\n"
+        "                   15  TT       PIC XX.\n"
+        "           05  AFT              PIC X(3).\n"
+    )
+
+    def test_group_holding_an_odo_table_reports_its_maximum_length(self):
+        layout = compute_record_layout(_parse_record(self._ISSUE_247_REC))
+        by_name = {item.name: item for item in layout}
+
+        # T itself keeps reporting one occurrence (the documented
+        # "OCCURS multiplies footprint, never byte_length" contract).
+        assert by_name["T"].byte_length == 2
+        assert by_name["G"].byte_offset == 1
+        assert by_name["G"].byte_length == 10
+        assert by_name["REC2"].byte_length == 14
+        assert by_name["AFT"].byte_offset is None
+        assert by_name["AFT"].offset_ambiguous is True
+
+    def test_direct_odo_child_counts_its_maximum_in_the_record_length(self):
+        record = _parse_record(
+            "       01  WS-REC.\n"
+            "           05  WS-COUNT         PIC 9(3).\n"
+            "           05  WS-TABLE         PIC X(2) OCCURS 1 TO 10 TIMES\n"
+            "               DEPENDING ON WS-COUNT.\n"
+            "           05  WS-AFTER         PIC X(4).\n"
+        )
+        by_name = {item.name: item for item in compute_record_layout(record)}
+        assert by_name["WS-REC"].byte_length == 3 + 2 * 10 + 4
+
+    def test_odo_record_length_agrees_with_the_encoder(self):
+        from cobolparser.generators.data import (
+            CopybookDataGenerator,
+            DataGeneratorOptions,
+        )
+
+        source = self._ISSUE_247_REC
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(rows=1, seed=7).for_record_image()
+        ).generate_from_source(source)
+        by_name = {
+            item.name: item for item in compute_record_layout(_parse_record(source))
+        }
+        assert by_name["REC2"].byte_length == dataset.record_length() == 14
+
 
 class TestLevel88:
     def test_each_condition_name_gets_its_own_entry_with_its_own_values(self):

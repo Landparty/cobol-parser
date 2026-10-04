@@ -155,6 +155,62 @@ class TestDecisions:
             ),
         ]
 
+    def test_a_negated_thru_range_is_rendered_as_a_negated_range(self) -> None:
+        """Regression for #260: ``WHEN NOT 0 THRU 17`` read ``AGE <> 0 THRU
+        17`` (not a condition at all), which also garbled WHEN OTHER."""
+        report = _report("""\
+       MAIN-PARA.
+           EVALUATE TRUE ALSO POL-AGE
+               WHEN POL-AUTO ALSO 16 THRU 25
+                   MOVE .250 TO WS-RATE
+               WHEN POL-HOME ALSO NOT 0 THRU 17
+                   MOVE .100 TO WS-RATE
+               WHEN OTHER
+                   MOVE 'INVALID POLICY' TO WS-MSG
+           END-EVALUATE
+           STOP RUN.
+""")
+        rule = _only(report, "EVALUATE")
+        assert [(b.label, b.condition) for b in rule.branches] == [
+            ("WHEN", "POL-AUTO AND (POL-AGE >= 16 AND POL-AGE <= 25)"),
+            ("WHEN", "POL-HOME AND (NOT (POL-AGE >= 0 AND POL-AGE <= 17))"),
+            (
+                "WHEN OTHER",
+                "NOT (POL-AUTO AND (POL-AGE >= 16 AND POL-AGE <= 25)) AND "
+                "NOT (POL-HOME AND (NOT (POL-AGE >= 0 AND POL-AGE <= 17)))",
+            ),
+        ]
+        assert all("THRU" not in b.condition for b in rule.branches)
+
+    def test_a_single_subject_negated_range_and_its_when_other(self) -> None:
+        report = _report("""\
+       MAIN-PARA.
+           EVALUATE POL-TYPE
+               WHEN NOT 'A' THRU 'C'
+                   MOVE 'OUT' TO WS-CLASS
+               WHEN OTHER
+                   MOVE 'IN' TO WS-CLASS
+           END-EVALUATE
+           STOP RUN.
+""")
+        rule = _only(report, "EVALUATE")
+        assert [(b.label, b.condition) for b in rule.branches] == [
+            ("WHEN", "NOT (POL-TYPE >= 'A' AND POL-TYPE <= 'C')"),
+            ("WHEN OTHER", "POL-TYPE >= 'A' AND POL-TYPE <= 'C'"),
+        ]
+
+    def test_a_negated_single_value_still_reads_not_equal(self) -> None:
+        report = _report("""\
+       MAIN-PARA.
+           EVALUATE POL-CLAIMS
+               WHEN NOT 6
+                   MOVE 'X' TO WS-CLASS
+           END-EVALUATE
+           STOP RUN.
+""")
+        rule = _only(report, "EVALUATE")
+        assert rule.branches[0].condition == "POL-CLAIMS <> 6"
+
     def test_an_unquoted_selector_literal_is_quoted_back(self) -> None:
         # Selector values arrive from the parser with their quotes stripped;
         # the rule must not read 'A' as a data name A.

@@ -24,6 +24,7 @@ removed/replaced span is re-emitted) so downstream error line numbers stay
 aligned with the normalized source.
 """
 
+from ..lexer import mask_comment_entries
 from .copy_statement_parser import CopyStatementLexer
 
 # COBOL separators that are equivalent to a space when matching text words: the
@@ -181,7 +182,9 @@ class _ReplaceScanner:
     """Locates ``REPLACE`` statements in a source string, skipping literals."""
 
     def __init__(self, source: str) -> None:
-        self.source = source
+        # Comment-entry text is opaque: never a literal, never a REPLACE
+        # (#251). Same length, so offsets are offsets into *source*.
+        self.source = mask_comment_entries(source)
         self.pos = 0
         self.length = len(source)
 
@@ -295,10 +298,15 @@ class _ReplaceScanner:
         while self.pos < self.length:
             ch = self.source[self.pos]
             # Skip over literals so a REPLACE inside a string is not matched.
+            # A literal ends at the end of its line at the latest (this runs
+            # after continuation records are merged): an unmatched quote
+            # must not swallow the rest of the file (#251).
             if ch in _QUOTES:
                 quote = ch
                 self.pos += 1
                 while self.pos < self.length:
+                    if self.source[self.pos] in "\r\n":
+                        break
                     if self.source[self.pos] == quote:
                         if (
                             self.pos + 1 < self.length
@@ -496,6 +504,12 @@ def apply_replace_statements(source: str, warnings: list[str] | None = None) -> 
     return "".join(out)
 
 
+def find_replace_statement_spans(source: str) -> list[tuple[int, int]]:
+    """``(start, end)`` offsets of every well-formed REPLACE statement in
+    *source* (``REPLACE OFF.`` included), in source order."""
+    return [(stmt.start, stmt.end) for stmt in _ReplaceScanner(source).scan()]
+
+
 def strip_unexpanded_copy_statements(
     source: str, warnings: list[str] | None = None
 ) -> str:
@@ -561,5 +575,6 @@ def strip_unexpanded_copy_statements(
 
 __all__ = [
     "apply_replace_statements",
+    "find_replace_statement_spans",
     "strip_unexpanded_copy_statements",
 ]

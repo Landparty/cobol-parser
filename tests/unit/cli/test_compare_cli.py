@@ -197,3 +197,32 @@ def test_binary_copybook_exits_two_not_one(files, capsys):
     bad.write_bytes(b"\xff\xfe\x00\x81")
     assert _run(_args(str(bad), expected, expected)) == 2
     assert "Cannot read copybook" in capsys.readouterr().err
+
+
+def test_different_trailing_partial_records_exit_one(files, capsys):
+    # Issue #250: 'files are equal' and exit 0 although the tails differ.
+    tmp, copybook = files
+    expected = _write(tmp / "E.DAT", ROWS)
+    actual = _write(tmp / "A.DAT", ROWS)
+    with open(expected, "ab") as handle:
+        handle.write(b"XYZ")
+    with open(actual, "ab") as handle:
+        handle.write(b"QQQ")
+
+    for extra in ([], ["--compare-bytes"]):
+        assert _run(_args(copybook, expected, actual, *extra)) == 1
+        out = capsys.readouterr().out
+        assert "files are equal" not in out
+        assert "trailing bytes differ" in out
+
+
+def test_one_sided_trailing_partial_record_exits_one_only_by_bytes(files, capsys):
+    tmp, copybook = files
+    expected = _write(tmp / "E.DAT", ROWS)
+    actual = _write(tmp / "A.DAT", ROWS)
+    with open(actual, "ab") as handle:
+        handle.write(b"QQQ")
+
+    assert _run(_args(copybook, expected, actual)) == 0
+    assert "files are equal" in capsys.readouterr().out
+    assert _run(_args(copybook, expected, actual, "--compare-bytes")) == 1

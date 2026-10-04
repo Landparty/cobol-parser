@@ -16,6 +16,7 @@ import bisect
 import re
 
 from .._source_directive import free_format_flags
+from ..lexer import mask_comment_entries
 from ._normalize import ALL_COMMENT_INDICATORS
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
@@ -481,9 +482,16 @@ class CopyStatementLexer:
     """
 
     def __init__(
-        self, source: str, source_file: str = "<main>", *, sql_include: bool = False
+        self,
+        source: str,
+        source_file: str = "<main>",
+        *,
+        sql_include: bool = False,
+        line_origins: list[int] | None = None,
     ):
-        self.source = source
+        # Comment-entry text (``AUTHOR. JOHN O'BRIEN.``) is blanked: it is
+        # opaque documentation, never literals or COPY statements (#251).
+        self.source = mask_comment_entries(source)
         self.source_file = source_file
         self.pos = 0
         self.length = len(source)
@@ -499,6 +507,12 @@ class CopyStatementLexer:
         #: ParseResult.warnings so the drop is not silent (audit 2026-07-07
         #: H6a/H6c).
         self.warnings: list[str] = []
+        #: Per line of *source*, the 1-based line of the caller's original
+        #: text it came from -- set when *source* had continuation records
+        #: merged (``normalize_continuation_lines(line_origins=...)``), so
+        #: :attr:`warnings` name the line a human edits rather than a line of
+        #: the merged text (#256).
+        self.line_origins = line_origins
 
     def _peek(self, offset: int = 0) -> str:
         idx = self.pos + offset
@@ -589,11 +603,16 @@ class CopyStatementLexer:
                 self.pos = scan + 1
                 return text
 
-        # 2. String literal "..." or '...'
+        # 2. String literal "..." or '...'. A literal ends at the end of its
+        # line at the latest: this scan runs after continuation records are
+        # merged, so no real literal spans a newline, and an unmatched quote
+        # must not swallow the rest of the file (#251).
         if char in ('"', "'"):
             quote = char
             self._advance()
             while not self._is_at_end():
+                if self._peek() in ("\n", "\r"):
+                    return None
                 if self._peek() == quote and self._peek(1) == quote:
                     self._advance(2)
                 elif self._peek() == quote:
@@ -630,6 +649,52 @@ class CopyStatementLexer:
             self._advance()
 
         return self.source[start_pos : self.pos] if self.pos > start_pos else None
+
+    def _read_replacing_operand(self) -> str | None:
+        """Read one REPLACING operand (pseudo-text, literal, word or identifier).
+
+        An identifier operand may be qualified and subscripted (IBM:
+        ``identifier`` includes ``OF``/``IN`` qualification, subscripts and
+        reference modification). Once REPLACING has started, ``OF``/``IN`` can
+        only be qualification -- the library name comes before REPLACING -- so
+        a word operand is extended greedily with ``(OF|IN) word`` pairs and
+        with parenthesised groups, with or without a blank before the ``(``:
+        ``WS-FLD OF WS-GRP`` and ``WS-TBL (2)`` used to come back as
+        ``WS-FLD`` / ``WS-TBL``, the rest dropped without a warning (#253).
+        """
+        self._skip_separators()
+        start = self.pos
+        first = self._peek()
+        operand = self._read_operand(keep_literal_quotes=True)
+        if operand is None or first in ('"', "'", "=", ":"):
+            return operand
+        while True:
+            save = self.pos
+            self._skip_separators()
+            if self._peek() == "(":
+                depth = 0
+                while not self._is_at_end():
+                    c = self._peek()
+                    self._advance()
+                    if c == "(":
+                        depth += 1
+                    elif c == ")":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                if depth != 0:
+                    self.pos = save
+                    break
+                continue
+            if self._match_keyword("OF") or self._match_keyword("IN"):
+                self._skip_separators()
+                if self._peek() not in ('"', "'", "=", ":", "."):
+                    qualifier = self._read_operand()
+                    if qualifier:
+                        continue
+            self.pos = save
+            break
+        return self.source[start : self.pos]
 
     def tokenize_copy_statements(self) -> list[CopyStatement]:
         newline_positions = [m.end() - 1 for m in _EOL_RE.finditer(self.source)]
@@ -687,7 +752,7 @@ class CopyStatementLexer:
                 self.warnings.append(
                     f"{self.source_file}: {'EXEC SQL INCLUDE' if is_include else 'COPY'} "
                     f"statement at line "
-                    f"{self._line_of(match_start, newline_positions)} has no "
+                    f"{self._report_line(match_start, newline_positions)} has no "
                     "member name and was ignored"
                 )
                 continue
@@ -700,7 +765,7 @@ class CopyStatementLexer:
                 if not self._match_keyword("END-EXEC"):
                     self.warnings.append(
                         f"{self.source_file}: EXEC SQL INCLUDE {member_name} at "
-                        f"line {self._line_of(match_start, newline_positions)} "
+                        f"line {self._report_line(match_start, newline_positions)} "
                         "has no END-EXEC and was ignored"
                     )
                     continue
@@ -789,7 +854,7 @@ class CopyStatementLexer:
                         elif self._match_keyword("TRAILING"):
                             mode = "TRAILING"
 
-                        search = self._read_operand(keep_literal_quotes=True)
+                        search = self._read_replacing_operand()
                         if not search:
                             # If no operand, break REPLACING loop
                             break
@@ -801,7 +866,7 @@ class CopyStatementLexer:
                             # We break and let the outer loop handle the next token
                             break
 
-                        replace = self._read_operand(keep_literal_quotes=True)
+                        replace = self._read_replacing_operand()
                         if replace is None:
                             break
 
@@ -827,7 +892,7 @@ class CopyStatementLexer:
             if len(statements) == stmt_count_before:
                 self.warnings.append(
                     f"{self.source_file}: COPY {member_name.strip()} at line "
-                    f"{self._line_of(match_start, newline_positions)} has no "
+                    f"{self._report_line(match_start, newline_positions)} has no "
                     "terminating period (or is followed by unexpected tokens) "
                     "and was NOT expanded — its content is missing from the "
                     "parsed program"
@@ -842,6 +907,14 @@ class CopyStatementLexer:
         prev_nl_idx = nl_idx - 1
         col = index - (newline_positions[prev_nl_idx] if prev_nl_idx >= 0 else -1)
         return nl_idx + 1, col
+
+    def _report_line(self, index: int, newline_positions: list[int]) -> int:
+        """Line of *index* for a diagnostic: in the original text when
+        :attr:`line_origins` maps it, else in *source*."""
+        line = self._line_of(index, newline_positions)
+        if self.line_origins and 0 < line <= len(self.line_origins):
+            return self.line_origins[line - 1]
+        return line
 
     @staticmethod
     def _line_of(index: int, newline_positions: list[int]) -> int:

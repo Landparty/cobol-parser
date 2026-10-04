@@ -247,7 +247,7 @@ into focused, reusable modules:
 - **`options.py`** — `DataGeneratorOptions` configuration (rows, seed, include/exclude flags, value hints).
 - **`errors.py`** — `CopybookLayoutError` exception for layout validation failures.
 - **`layout.py`** — `FieldCategory` enum, `FieldSpec` dataclass, `flatten_record()` function; the record flattening rules that turn a nested `CobolDataItem` tree into a flat list of columns. Also exports `expand_condition_values()` for condition-name value expansion.
-- **`layout_offsets.py`** — `LayoutItem` dataclass, `compute_record_layout()` function; byte-offset and byte-length computation for individual records, used by data-item hover details and offset-based lookups (Task 2-6: initial implementation + nested group recursion + REDEFINES-chain slot sharing + OCCURS footprint multiplication + cross-level OCCURS DEPENDING ON ambiguity propagation). Sibling layout (record root and every group) runs through a shared `_layout_siblings()` helper: a "slot" is a contiguous run of `[base item, redefine 1, redefine 2, ...]` — COBOL requires a REDEFINES entry to immediately follow what it redefines — every slot member starts at the same offset, the slot's footprint (`slot_footprint`) is the max footprint across its members, and the running offset advances past the slot once. `_walk_redefines_chain()` resolves a possibly multi-hop REDEFINES chain (A redefines B redefines C) within one sibling list, cycle-guarded. A childless record root (bare 77-level or elementary 01-level) is still special-cased to report its own elementary byte length rather than 0. **Task 5: OCCURS multiplies footprint, never `byte_length`.** `_layout_item()`'s return value (`one_occurrence_length`) is always exactly one occurrence's size and is what gets stored as the emitted `LayoutItem.byte_length` — this fixes a real gap in `CobolDataItem.calculate_size()`, which never applies a *group* item's own OCCURS multiplier. `_layout_siblings()` separately computes each member's `member_footprint` (`one_occurrence_length * (occurs.max_times or occurs.min_times or 1)` for a fixed OCCURS; just `one_occurrence_length` — one occurrence only, multiplier unknown at compile time — when `occurs.depending_on` is set, which is also what flips `is_ambiguous = True` for every sibling laid out after it) and folds *that* into `slot_footprint`/`total`/`offset`, so a later sibling's offset correctly advances past every occurrence. `_occurs_dict()` populates the `occurs` field (`{"min": ..., "max": ...}` or `None`) on every non-level-88 `LayoutItem`, elementary or group.
+- **`layout_offsets.py`** — `LayoutItem` dataclass, `compute_record_layout()` function; byte-offset and byte-length computation for individual records, used by data-item hover details and offset-based lookups (Task 2-6: initial implementation + nested group recursion + REDEFINES-chain slot sharing + OCCURS footprint multiplication + cross-level OCCURS DEPENDING ON ambiguity propagation). Sibling layout (record root and every group) runs through a shared `_layout_siblings()` helper: a "slot" is a contiguous run of `[base item, redefine 1, redefine 2, ...]` — COBOL requires a REDEFINES entry to immediately follow what it redefines — every slot member starts at the same offset, the slot's footprint (`slot_footprint`) is the max footprint across its members, and the running offset advances past the slot once. `_walk_redefines_chain()` resolves a possibly multi-hop REDEFINES chain (A redefines B redefines C) within one sibling list, cycle-guarded. A childless record root (bare 77-level or elementary 01-level) is still special-cased to report its own elementary byte length rather than 0. **Task 5: OCCURS multiplies footprint, never `byte_length`.** `_layout_item()`'s return value (`one_occurrence_length`) is always exactly one occurrence's size and is what gets stored as the emitted `LayoutItem.byte_length` — this fixes a real gap in `CobolDataItem.calculate_size()`, which never applies a *group* item's own OCCURS multiplier. `_layout_siblings()` separately computes each member's `member_footprint` (`one_occurrence_length * (occurs.max_times or occurs.min_times or 1)` for every OCCURS, fixed or `DEPENDING ON` — an ODO table reserves its **maximum**, the storage IBM Enterprise COBOL allocates and the width `encoding.py` writes, so an enclosing group's and the record's `byte_length` equal `GeneratedDataset.record_length()`; until issue #247 (2026-10-04) an ODO table reserved one occurrence only, so a group holding `OCCURS 2 TO 5` reported less than its own minimum. `occurs.depending_on` is also what flips `is_ambiguous = True` for every sibling laid out after it: those offsets move with the counter, the maximum is only the allocation) and folds *that* into `slot_footprint`/`total`/`offset`, so a later sibling's offset correctly advances past every occurrence. `_occurs_dict()` populates the `occurs` field (`{"min": ..., "max": ...}` or `None`) on every non-level-88 `LayoutItem`, elementary or group.
 
   **Task 8: `compute_program_data_items(ast: CobolProgram) -> dict[str, Any]`** —
   the program-wide entry point, returning `{"items": [...], "unresolved":
@@ -849,6 +849,23 @@ problem and the value is best-effort; `DecodedRecord.errors` and
 shows up as a wall of these, which is the single most useful thing the
 module can say (`test_the_wrong_copybook_shows_up_as_a_wall_of_errors`).
 
+Invalid data that is still *readable* counts too (issue #248, 2026-10-04):
+
+* an `OCCURS ... DEPENDING ON` counter outside its table's `min..max` is an
+  error on the counter (`DEPENDING ON value 7 outside 2..5`); the table is
+  still read at the clamped count (`_counter_value`), the best guess at where
+  the following fields are;
+* an RDW-framed record whose body holds bytes past the last field the base
+  view reads gets a record-level error in `DecodedRecord.record_errors`
+  (rolled into `errors`, `to_dict()["errors"]`, `error_count`, and a `!` line
+  in the hex pane) -- previously those bytes vanished with `trailing == b""`;
+* a `B`/`D` sign nibble on an **unsigned** packed field is an error and does
+  not negate, mirroring the zoned decoder's sign-zone rule;
+* a `COMP`/`COMP-4`/`BINARY` value with more digits than its PICTURE (65535
+  in `PIC 9(4) COMP`) is a **caveat**, not an error: legal under
+  `TRUNC(BIN)`, invalid under `TRUNC(STD)`, and the decoder has no TRUNC
+  option. `COMP-5` is exempt (native binary, its whole width is legal).
+
 ### Framing, and the two things that decide it
 
 * **Framing always uses the `base` view**, whichever view the caller reads
@@ -936,6 +953,15 @@ adds pairing and field comparison, and decodes nothing itself.
 * **Everything the decode was unsure of carries over**: decode caveats from
   both sides (de-duplicated), per-side decode-error counts, per-side trailing
   bytes.
+* **Trailing partial records can make files unequal** (2026-10-04, #250).
+  `CompareResult.trailing_differs` (in `to_dict()`, and a `trailing bytes
+  differ` line in `to_text()`) is set, and `equal` is False, when both files
+  end in a partial record and the two tails differ -- or, under
+  `compare_bytes`, when only one file has a tail (the image is longer).
+  Comparing values, a one-sided tail stays a caveat only. Before, `equal`
+  ignored `trailing` entirely, so `XYZ` vs `QQQ` tails reported "files are
+  equal" and `compare` exited 0 even with `--compare-bytes`. Option (b) of
+  the issue; `_trailing_differs()` is the whole policy.
 * **Memory.** The first cut decodes both files fully and builds an in-memory
   key index. A streaming, key-sorted merge for files that do not fit is a
   planned follow-up (design doc, Risks).
@@ -1141,6 +1167,7 @@ index = ProgramLayoutIndex.from_file("PROG.cbl")   # parses for you
 
 index.record_for_file("INV-FILE")      -> CobolDataItem | None
 index.records_for_file("INV-FILE")     -> list[CobolDataItem]   # multi-01 FDs
+index.file_names()                     -> list[str]   # every FD/SD file owning a record
 index.file_facts("INV-FILE")           -> FileFacts | None
 index.resolve("INV-QTY")               -> ResolvedField | None
 index.resolve("INV-QTY OF INV-REC")    -> ResolvedField | None  # qualified
@@ -1364,6 +1391,15 @@ alphanumeric-to-numeric ordering comparison when the alphanumeric operand is
 integer-like, so answering it lexically would stamp "verified" on a
 comparison nobody can evaluate). Equality survives the mixed case: a value
 that is not a number cannot equal a numeric literal either way.
+
+**A `violated` verdict demotes the scenario's arms to `missed`** (2026-10-04,
+#244). `generate_with_scenarios` passes each verdict to
+`_demote_violated_arms`: every `targeted`/`merged` arm of a scenario with a
+`violated` field is re-counted as `missed` in `scenario_coverage` (reason
+`"witness failed verification: ..."`, counts kept exact) and gets one
+`bundle.unresolved` entry, so `gen-fixtures --strict` exits 2 instead of
+passing a coverage claim its own data contradicts. `absent`/`unknown` do
+not demote -- they are "could not tell", which `unverified` already says.
 
 `cli/parse.py`'s `gen-fixtures` prints an unverified summary on **stderr**
 (stdout stays JSON-only — mockymock's `fixtures` contract), and mockymock's

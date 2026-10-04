@@ -61,7 +61,7 @@ import csv
 import io
 import os
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Context, Decimal
 from typing import Any
 
@@ -202,6 +202,9 @@ class DecodedRecord:
         raw: The record's data bytes, RDW excluded.
         rdw: The 4-byte record descriptor word, or ``None`` under a format
             that has none.
+        record_errors: Problems with the record as a whole rather than with
+            one field's bytes -- body bytes an RDW-framed record holds that
+            no field accounts for.
     """
 
     index: int
@@ -211,11 +214,15 @@ class DecodedRecord:
     fields: list[DecodedField]
     raw: bytes
     rdw: bytes | None = None
+    record_errors: list[str] = field(default_factory=list)
 
     @property
     def errors(self) -> list[str]:
-        """``field: problem`` for every field whose bytes were not readable."""
-        return [f"{item.name}: {item.error}" for item in self.fields if item.error]
+        """``field: problem`` for every field whose bytes were not readable,
+        then every record-level problem."""
+        return [
+            f"{item.name}: {item.error}" for item in self.fields if item.error
+        ] + list(self.record_errors)
 
     @property
     def truncated(self) -> bool:
@@ -553,6 +560,12 @@ def _decode_packed(raw: bytes, spec: FieldSpec) -> tuple[str, str | None]:
             digit = 0
         magnitude = magnitude * 10 + digit
     negative = sign_nibble in _NEGATIVE_NIBBLES
+    if negative and not spec.is_signed:
+        # An unsigned field cannot hold a negative value; the zoned decoder
+        # reports the same thing for a sign zone, and neither negates.
+        negative = False
+        if error is None:
+            error = f"sign nibble {nibbles[-1]} is negative on an unsigned field"
     return _field_number(magnitude, negative, spec), error
 
 
@@ -726,6 +739,21 @@ def decode_record(
             continue
         raw = data[position : position + spec.storage_size]
         decoded = decode_field(placed, raw, opts, offset=position)
+        if spec.odo_counter_bounds is not None:
+            low, high = spec.odo_counter_bounds
+            declared = _counter_number(decoded.value)
+            if (
+                declared is not None
+                and not low <= declared <= high
+                and decoded.error is None
+            ):
+                # The table is still read at the clamped count (the best
+                # guess at where the following fields are), but the counter
+                # itself is invalid data and must not decode clean.
+                decoded = replace(
+                    decoded,
+                    error=f"DEPENDING ON value {declared} outside {low}..{high}",
+                )
         out.append(decoded)
         position += len(raw)
         if spec.odo_counter_bounds is not None:
@@ -817,13 +845,46 @@ def _ran_short(view: RecordView, fields: list[DecodedField]) -> bool:
     return False
 
 
+def _counter_number(text: str) -> int | None:
+    """A decoded counter's value as read, or ``None`` when it is no number."""
+    try:
+        return int(Decimal(text.strip() or "0"))
+    except (ArithmeticError, ValueError):
+        return None
+
+
 def _counter_value(text: str, bounds: tuple[int, int]) -> int:
     """A decoded counter clamped into the table's own bounds."""
-    try:
-        count = int(Decimal(text.strip() or "0"))
-    except (ArithmeticError, ValueError):
+    count = _counter_number(text)
+    if count is None:
         return bounds[1]
     return max(bounds[0], min(bounds[1], count))
+
+
+def _consumed(fields: list[DecodedField]) -> int:
+    """Bytes of the record the decoded *fields* account for."""
+    return max((item.offset + item.length for item in fields), default=0)
+
+
+def _binary_over_picture(
+    fields: list[DecodedField], specs: list[FieldSpec]
+) -> list[str]:
+    """Names of COMP/COMP-4/BINARY fields holding more digits than their
+    PICTURE -- legal under ``TRUNC(BIN)``, not under ``TRUNC(STD)``.
+    COMP-5 is native binary and may use its whole width under any option."""
+    over = []
+    for item, spec in zip(fields, specs, strict=True):
+        if (
+            not item.present
+            or item.error
+            or item.usage not in BINARY_USAGES
+            or item.usage in BINARY_NATIVE_USAGES
+        ):
+            continue
+        digits = item.value.lstrip("-").replace(".", "").lstrip("0")
+        if len(digits) > _total_digits(spec) + max(0, spec.scaling_positions):
+            over.append(item.name)
+    return over
 
 
 # ---------------------------------------------------------------------------
@@ -1006,6 +1067,8 @@ class RecordDecoder:
             [placed.spec for placed in self.views.base.fields],
             varying=self.varying is not None,
         ).is_variable
+        specs = [placed.spec for placed in chosen.fields]
+        over_picture: list[str] = []
         position = 0
         index = 0
         stopped_early = False
@@ -1021,21 +1084,48 @@ class RecordDecoder:
                 break
             body, consumed, rdw = frame
             if index >= skip:
+                fields = decode_record(chosen, body, options, trim_tables=trim_tables)
+                record_errors: list[str] = []
+                if rdw is not None:
+                    # Where an RDW-framed record ends is the RDW's word, so
+                    # body bytes past the last field are bytes the layout
+                    # does not describe -- framed by the base view, like
+                    # the record itself, whichever overlay is being read.
+                    base = self.views.base
+                    used = _consumed(
+                        fields
+                        if chosen is base
+                        else decode_record(base, body, options, trim_tables=trim_tables)
+                    )
+                    if used < len(body):
+                        extra = len(body) - used
+                        record_errors.append(
+                            f"record: {extra} byte(s) after the last field "
+                            f"(RDW body is {len(body)}, the layout reads {used})"
+                        )
+                for name in _binary_over_picture(fields, specs):
+                    if name not in over_picture:
+                        over_picture.append(name)
                 result.records.append(
                     DecodedRecord(
                         index=index,
                         file_offset=position,
                         length=consumed,
                         view=chosen.name,
-                        fields=decode_record(
-                            chosen, body, options, trim_tables=trim_tables
-                        ),
+                        fields=fields,
                         raw=body,
                         rdw=rdw,
+                        record_errors=record_errors,
                     )
                 )
             position += consumed
             index += 1
+        if over_picture:
+            result.caveats.append(
+                "binary value wider than its PICTURE in "
+                + ", ".join(over_picture)
+                + ": legal under TRUNC(BIN), invalid under TRUNC(STD)"
+            )
         result.bytes_read = position
         result.trailing = b"" if stopped_early else data[position:]
         return result
@@ -1248,6 +1338,8 @@ def decoded_hex_dump(result: DecodeResult, opts: EncodingOptions) -> str:
             out.extend(_dump_field_lines(item, opts))
             if item.error:
                 out.append(f"{'':<6}  {'':>4}  ! {item.name}: {item.error}")
+        for problem in record.record_errors:
+            out.append(f"{'':<6}  {'':>4}  ! {problem}")
     if result.trailing:
         out.append(
             f"\n* --- {len(result.trailing)} trailing bytes, not a whole " "record ---"

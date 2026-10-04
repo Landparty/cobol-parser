@@ -115,7 +115,7 @@ non-blank lines, the misclassification could also flip as copybook
 expansion changed which lines those were, making it look intermittent.
 
 Detection now applies a second rule: a *tag-like* sequence area (a single
-unbroken `[A-Za-z0-9][A-Za-z0-9_/#$.-]*` token — the "no internal
+unbroken `[A-Za-z0-9#@$][A-Za-z0-9_/#@$.-]*` token — the "no internal
 whitespace" property is what excludes ordinary free-form statement text
 like `MOVE A`) also counts, but only when corroborated by an Area A
 division header, i.e. a line whose columns 8+ start with
@@ -134,6 +134,18 @@ and is unchanged, so this only ever *adds* detections. Pinned by
 `tests/regression/test_tagged_sequence_area_detection.py`; the
 `--source-format` escape hatch for layouts neither rule infers is in
 [cli.md](cli.md).
+
+A copybook has no division header, so a tagged member (`BNC#01`, `CHG001`
+in columns 1-6) used to fall through to free-form: its column-7 comment
+lines were spliced in raw and the first `#` in a comment banner surfaced as
+`Lexer error: Invalid character: #` (reported on a nested COPY, 2026-10-04).
+`_has_tagged_line_anchor()` now corroborates rule 2 as well: a tagged line
+with a column-7 comment indicator (`CHG001*...`), or a tagged line whose code
+area is a data-description entry (level number + name + period or clause
+keyword, `_TAGGED_DATA_ENTRY_RE`; the period/clause requirement keeps
+`DIVIDE 10 INTO X` out). `copybook_expander._looks_fixed_format()`'s
+short-member path (< 3 lines) accepts a tagged line on the same anchor.
+Pinned by `tests/regression/test_tagged_copybook_comment_hash.py`.
 
 Continuation-line joining follows the COBOL rule that a continuation line's
 first non-blank character is the successor of the continued line's last
@@ -1373,3 +1385,57 @@ re-cythonizes the `.pyx` when Cython is installed and rewrites the
 checked-in `.c`; both files are committed together. Remove the built
 `*.so` afterwards before measuring coverage.
 
+
+# Preprocessing fixes 2026-10-04 (issues #251-#256)
+
+**Comment-entries are opaque to the COPY/REPLACE scanners (#251).** A quote
+in `AUTHOR. JOHN O'BRIEN.` used to open a "literal" in `CopyStatementLexer`
+and `_ReplaceScanner` that ran to the next quote anywhere in the file: a
+later COPY was silently not expanded, a later REPLACE not applied, and the
+quote parity flipped so `VALUE 'COPY NO. 1 OF 2'` was read as a COPY
+statement. Two changes, both scanners: (1) a literal ends at the end of its
+line at the latest (they run after continuation records are merged, so no
+real literal spans a newline); (2) both scan `lexer.mask_comment_entries(source)`
+-- the source with every comment-entry's text blanked (same length, same
+line breaks, so offsets stay valid), using the lexer's own
+`_comment_entry_starts` so the two agree on what a comment-entry is. A
+`COPY` written inside a comment-entry (`REMARKS. SEE COPY PAYREC.`) is
+prose and is never expanded (the option #251 recommends). Pinned by
+`tests/regression/test_comment_entry_copy_replace_scan.py`.
+
+**Change tag on the header record (#252).** `strip_compiler_directives`
+decided whether a record has a sequence area from columns 1-6 (blank or
+digits only), so `CHG001 IDENTIFICATION DIVISION.` never closed its
+"directive section" and every later code line starting `PROCESS ` / `CBL `
+(`PROCESS SECTION.`) was blanked. It now also ends the section on
+`ID_DIVISION_HEADER_RE` (any six characters, then a blank column 7), the
+regex `CobolParser._skip_to_identification_division` uses too. Pinned by
+`tests/regression/test_sequence_area_tag_header.py`.
+
+**REPLACING operands may be qualified / subscripted identifiers (#253).**
+`CopyStatementLexer._read_replacing_operand` reads each REPLACING operand:
+pseudo-text and literals as before, but a word operand is extended greedily
+with `(OF|IN) word` pairs and parenthesised groups (blank before `(` or not,
+commas inside kept). Once REPLACING has started, `OF`/`IN` can only be
+qualification, so `REPLACING X BY WS-FLD OF WS-GRP` no longer sets the
+library qualifier to `WS-GRP` and drops `OF WS-GRP`, and `WS-TBL (2)` no
+longer loses `(2)`. NIST SM202A / SM206A now expand every COPY. Pinned by
+`tests/regression/test_copy_replacing_identifier_operand.py`.
+
+**`find_replace_statement_spans(source)` (#254).** New helper in
+`replace_statement.py`: the `(start, end)` offsets of every well-formed
+REPLACE statement, from the same `_ReplaceScanner` `apply_replace_statements`
+uses. `CobolParser._skip_to_identification_division` uses it to keep a
+REPLACE written ahead of the IDENTIFICATION DIVISION header.
+
+**COPY diagnostics name the original line (#256).** `_expand_source_recursive`
+scans for COPY statements after merging continuation records; it now passes
+its `merged_from` origin list to `CopyStatementLexer(line_origins=...)`, and
+the lexer's `_report_line` maps each warning's line through it (two continued
+literals above a broken COPY at file line 12 used to report line 10).
+`parse_cobol_with_expansion` also re-states the parser's own strip-pass COPY
+warnings (`<main>: COPY X at line N`, counted in the expanded text) through
+the expansion source map (`_locate_strip_pass_warning`), so they name the
+file and its line and collapse into the expander's identical diagnostic.
+`CopyStatement.source_location` is unchanged (still merged-text lines).
+Pinned by `tests/regression/test_copy_diagnostic_line_numbers.py`.

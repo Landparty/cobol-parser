@@ -540,8 +540,12 @@ class TestPerformChaining:
         # was enough to raise an uncaught RecursionError. 2000 paragraphs
         # exercises the fix (an explicit frame stack) well past that.
         n = 2000
+        # STOP RUN after the PERFORM: without it, control falls through
+        # into PARA-1 and re-walks the chain from every paragraph (#246),
+        # which is TestWalkBudget's case, not this one.
         paras = [
             "       MAIN-PARA.\n           MOVE 1 TO WS-A.\n           PERFORM PARA-1.\n"
+            "           STOP RUN.\n"
         ]
         for i in range(1, n):
             nxt = i + 1
@@ -562,6 +566,7 @@ class TestPerformChaining:
             "           PERFORM UNTIL WS-FLAG = 'Y'\n"
             "               PERFORM PARA-1\n"
             "           END-PERFORM.\n"
+            "           STOP RUN.\n"
         ]
         for i in range(1, n):
             nxt = i + 1
@@ -816,4 +821,205 @@ class TestLoopVariablesAndAliases:
                 "       66  WS-RN RENAMES WS-H.\n"
             ),
         )
+        assert fold.known == {}
+
+
+_ALIASING_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ALIASES.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT F ASSIGN TO 'F.DAT'.
+       DATA DIVISION.
+       FILE SECTION.
+       FD F.
+       01 R1.
+          05 A PIC X(4).
+       01 R2.
+          05 B PIC 9(4).
+       WORKING-STORAGE SECTION.
+       01 X5 PIC X(5).
+       01 J3 PIC X(3) JUSTIFIED RIGHT.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+"""
+
+
+def _fold_aliasing(procedure_body: str):
+    result = parse_cobol(_ALIASING_SOURCE + procedure_body, filename="t.cbl")
+    assert result.ast is not None, result.errors
+    assert result.errors == [], result.errors
+    index = ProgramLayoutIndex.build(result.ast)
+    return ConstantFolder().fold(result.ast, index, seed_values={})
+
+
+class TestStorageAliasing:
+    """Issue #245: three ways two names share storage that the folder used
+    to miss, each producing a `field_equals` value the program never held."""
+
+    def test_sibling_fd_records_share_one_record_area(self):
+        # Every 01 under one FD implicitly redefines the same area: writing
+        # A overwrites B's bytes.
+        fold = _fold_aliasing(
+            "           MOVE 1234 TO B.\n"
+            "           MOVE 'ABCD' TO A.\n"
+            "           DISPLAY B.\n"
+        )
+        assert "R2.B" not in fold.known
+
+    def test_sibling_fd_record_alias_does_not_poison_unrelated_storage(self):
+        fold = _fold_aliasing(
+            "           MOVE 'ABCDE' TO X5.\n"
+            "           MOVE 'ABCD' TO A.\n"
+            "           DISPLAY X5.\n"
+        )
+        assert fold.known == {"X5": "ABCDE"}
+
+    def test_write_from_moves_the_source_into_the_record_first(self):
+        fold = _fold_aliasing(
+            "           MOVE 'AB' TO A.\n"
+            "           MOVE 'ZZZZZ' TO X5.\n"
+            "           WRITE R1 FROM X5.\n"
+            "           DISPLAY A.\n"
+        )
+        assert "R1.A" not in fold.known
+
+    def test_rewrite_from_also_overwrites_the_record(self):
+        fold = _fold_aliasing(
+            "           MOVE 'AB' TO A.\n"
+            "           MOVE 'ZZZZZ' TO X5.\n"
+            "           REWRITE R1 FROM X5.\n"
+            "           DISPLAY A.\n"
+        )
+        assert "R1.A" not in fold.known
+
+    def test_justified_right_keeps_the_rightmost_of_the_padded_source(self):
+        # X5 holds "ABCD " (space-padded to five), so J3 receives "CD ".
+        fold = _fold_aliasing(
+            "           MOVE 'ABCD' TO X5.\n"
+            "           MOVE X5 TO J3.\n"
+            "           DISPLAY J3.\n"
+        )
+        assert fold.known.get("J3") == "CD "
+
+    def test_justified_right_from_a_full_width_source_is_unchanged(self):
+        fold = _fold_aliasing(
+            "           MOVE 'ABCDE' TO X5.\n"
+            "           MOVE X5 TO J3.\n"
+            "           DISPLAY J3.\n"
+        )
+        assert fold.known.get("J3") == "CDE"
+
+
+class TestValueAtObservationPoint:
+    """Issue #246: a `field_equals` value is what the DISPLAY/WRITE emitted
+    (decision (a) in the issue), and the walk follows control as it falls
+    through from the entry paragraph into the next one."""
+
+    _DATA = "       01  N3                  PIC S9(3).\n"
+
+    def test_value_is_taken_at_the_display_not_at_the_end_of_the_walk(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           MOVE 2 TO N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"N3": "1"}
+
+    def test_two_sites_observing_different_values_drop_the_field(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           MOVE 2 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert "N3" not in fold.known
+
+    def test_two_sites_observing_the_same_value_keep_it(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"N3": "1"}
+
+    def test_a_site_where_the_value_is_unknown_drops_the_field(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           MOVE WS-UNKNOWN TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert "N3" not in fold.known
+
+    def test_control_falls_through_into_the_next_paragraph(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "       NEXT-PARA.\n"
+            "           MOVE 2 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        # The program displays 1 then 2: no single value is right.
+        assert "N3" not in fold.known
+
+    def test_fall_through_reaches_a_display_only_the_next_paragraph_makes(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO N3.\n"
+            "       NEXT-PARA.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"N3": "7"}
+
+    def test_stop_run_in_the_entry_paragraph_ends_the_walk(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n"
+            "       NEXT-PARA.\n"
+            "           MOVE 2 TO N3.\n"
+            "           DISPLAY N3.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"N3": "1"}
+
+
+class TestWalkBudget:
+    """Fall-through (#246) follows real control flow, so a chain of
+    paragraphs that each PERFORM the next and never STOP RUN is re-walked
+    from every paragraph -- quadratic. Past `_MAX_WALK_STEPS` the fold
+    gives up and reports nothing, quickly, instead of a partial answer."""
+
+    def test_quadratic_fall_through_chain_reports_nothing(self):
+        n = 2000
+        paras = [
+            "       MAIN-PARA.\n           MOVE 1 TO WS-A.\n           PERFORM PARA-1.\n"
+        ]
+        for i in range(1, n):
+            nxt = i + 1
+            if nxt < n:
+                paras.append(f"       PARA-{i}.\n           PERFORM PARA-{nxt}.\n")
+            else:
+                paras.append(f"       PARA-{i}.\n           DISPLAY WS-A.\n")
+        fold = _fold("".join(paras))
         assert fold.known == {}

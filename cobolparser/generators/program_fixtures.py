@@ -11,6 +11,7 @@ no parallel value engine.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import random
 import zlib
@@ -38,8 +39,8 @@ from .data.layout import FieldSpec, flatten_record
 from .data.options import DataGeneratorOptions
 from .data.program_layout import ProgramLayoutIndex
 from .data.values import ValueFactory
-from .scenarios import PlannedScenario, ScenarioPlanner
-from .verification import verify_scenario
+from .scenarios import PlannedScenario, ScenarioCoverage, ScenarioPlanner
+from .verification import ScenarioVerification, verify_scenario
 
 _SCENARIO_NAME = "happy path"
 _SCENARIO_MODES = ("happy", "branches", "all")
@@ -83,6 +84,45 @@ def _call_count_expectation(ref: BoundaryRef, times: int) -> Expectation:
         value=times,
         note="derived from this scenario's own generated sequence length",
     )
+
+
+def _demote_violated_arms(
+    coverage: ScenarioCoverage,
+    planned: PlannedScenario,
+    verification: ScenarioVerification,
+) -> list[str]:
+    """Re-count *planned*'s arms as missed when its own data violates them.
+
+    The planner counts an arm `targeted` (or `merged`) once its conjuncts
+    solve; verification then re-reads the data actually emitted. A field
+    verdict of `violated` means the scenario named for the arm provably does
+    not reach it, so leaving the arm `targeted` would be a coverage claim
+    the bundle contradicts. Only `violated` demotes: `absent`/`unknown` are
+    "could not tell", which the scenario's own `unverified` status already
+    says. Returns one `unresolved` entry per demoted arm, so `--strict`
+    refuses the bundle rather than passing over a gap it reports.
+    """
+    violated = [v for v in verification.fields if v.status == "violated"]
+    if not violated:
+        return []
+    reason = "witness failed verification: " + "; ".join(
+        f"{v.field}: {v.detail}" for v in violated
+    )
+    keys = set(planned.arm_keys)
+    gaps: list[str] = []
+    for position, outcome in enumerate(coverage.details):
+        if outcome.arm_key not in keys or outcome.status == "missed":
+            continue
+        if outcome.status == "targeted":
+            coverage.targeted -= 1
+        else:
+            coverage.merged -= 1
+        coverage.missed += 1
+        coverage.details[position] = dataclasses.replace(
+            outcome, status="missed", merged_into=None, reason=reason
+        )
+        gaps.append(f"scenario {planned.name!r}: arm {outcome.arm_key} {reason}")
+    return gaps
 
 
 class ProgramFixtureGenerator:
@@ -205,8 +245,12 @@ class ProgramFixtureGenerator:
             # conditions that motivated it. Without this the scenario's name
             # is a claim the bundle cannot support, and the only way to check
             # it was to run the suite under a tracer, per scenario.
-            scenario.verification = verify_scenario(planned, scenario).to_dict()
+            verification = verify_scenario(planned, scenario)
+            scenario.verification = verification.to_dict()
             scenarios.append(scenario)
+            unresolved.extend(
+                _demote_violated_arms(scenario_plan.coverage, planned, verification)
+            )
 
         unresolved_count = sum(1 for b in report.boundaries if b.unresolved)
         coverage = CoverageSummary(
