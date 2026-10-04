@@ -45,6 +45,17 @@ _DATA_DEF_RE = re.compile(
 #: A line that is not part of the entry above it even though it does not start
 #: one either -- an in-line ``EXEC SQL`` block being the copybook case.
 _NON_ENTRY_LINE_RE = re.compile(r"^[ \t]*EXEC\b", re.IGNORECASE)
+
+#: An IDENTIFICATION (or ID) DIVISION header line, raw or normalized. A
+#: fixed-format record's columns 1-6 may hold *anything* -- sequence digits,
+#: blanks, or a change tag such as ``CHG001`` -- so whether the line has a
+#: sequence area is decided by column 7 (blank) rather than by what columns
+#: 1-6 contain (#252). A comment record (``*`` / ``/`` in column 7) never
+#: matches.
+ID_DIVISION_HEADER_RE = re.compile(
+    r"^(?:[^\r\n]{6}(?=[ \t]))?\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)",
+    re.IGNORECASE,
+)
 _LEVEL_NUMBER_RE = re.compile(r"^\s*(\d{2})\s+[A-Za-z]", re.MULTILINE)
 
 
@@ -462,9 +473,17 @@ def strip_compiler_directives(
 
         # Check if we've reached IDENTIFICATION DIVISION
         # This marks the end of the directive section
+        # The header test does not rely on has_sequence_area: a change tag
+        # in columns 1-6 of the header record (``CHG001``) used to keep the
+        # directive section open for the whole file, blanking every later
+        # ``PROCESS SECTION.`` as an option card (#252).
         if in_directive_section and text_area:
             text_upper = text_area.upper()
-            if text_upper.startswith("IDENTIFICATION") or text_upper.startswith("ID "):
+            if (
+                text_upper.startswith("IDENTIFICATION")
+                or text_upper.startswith("ID ")
+                or ID_DIVISION_HEADER_RE.match(line_content)
+            ):
                 in_directive_section = False
                 in_continuation = False
                 result_lines.append(line)

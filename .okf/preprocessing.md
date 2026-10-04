@@ -1390,3 +1390,12 @@ line breaks, so offsets stay valid), using the lexer's own
 `COPY` written inside a comment-entry (`REMARKS. SEE COPY PAYREC.`) is
 prose and is never expanded (the option #251 recommends). Pinned by
 `tests/regression/test_comment_entry_copy_replace_scan.py`.
+
+**Change tag on the header record (#252).** `strip_compiler_directives`
+decided whether a record has a sequence area from columns 1-6 (blank or
+digits only), so `CHG001 IDENTIFICATION DIVISION.` never closed its
+"directive section" and every later code line starting `PROCESS ` / `CBL `
+(`PROCESS SECTION.`) was blanked. It now also ends the section on
+`ID_DIVISION_HEADER_RE` (any six characters, then a blank column 7), the
+regex `CobolParser._skip_to_identification_division` uses too. Pinned by
+`tests/regression/test_sequence_area_tag_header.py`.

@@ -8,6 +8,15 @@ timestamp: 2026-10-04T00:00:00Z
 
 # Overview
 
+2026-10-04: `tests/regression/test_comment_entry_copy_replace_scan.py`
+(12 tests, #251) pins comment-entry text as opaque to the COPY / REPLACE
+scanners (an apostrophe in AUTHOR no longer hides a later COPY or REPLACE or
+flips quote parity onto a VALUE literal; a COPY inside REMARKS is prose; NIST
+SG104A has no phantom `COPY NOT` warning).
+`tests/regression/test_sequence_area_tag_header.py` (10 tests, #252) pins a
+change tag (`CHG001`) in columns 1-6 of the IDENTIFICATION DIVISION record
+through `CobolParser.parse`, `parse_cobol` and `parse_files(workers=1|2)`.
+
 2026-09-30: `tests/unit/analysis/test_business_rules.py` (73 tests) pins
 `BusinessRuleExtractor` against real parses: IF / EVALUATE (subject, TRUE,
 FALSE, ALSO, THRU, OTHER) / SEARCH decision tables with unquoted selector

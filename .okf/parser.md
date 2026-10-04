@@ -3124,3 +3124,17 @@ arity. Pinned by `tests/regression/test_audit_2026_09_28_accelerators.py`.
   unparsed tokens. Qualified KEY names (`KEY IS K1 OF T`) keep the bare name.
 
 Pinned by `tests/regression/test_data_division_national_occurs_2026_09_28.py`.
+
+# Change tag in columns 1-6 of the header record (#252, 2026-10-04)
+
+`_ID_DIV_RE` (now `preprocess._normalize.ID_DIVISION_HEADER_RE`, shared with
+`strip_compiler_directives`) accepts *any* six characters in columns 1-6 as
+long as column 7 is blank: `^(?:[^\r\n]{6}(?=[ \t]))?\s*(IDENTIFICATION|ID)\s+
+(DIVISION|DIV)`. It used to allow only digits/blanks there (P-B4 above), so a
+change tag on the outer header (`CHG001 IDENTIFICATION DIVISION.`) was missed
+and `_skip_to_identification_division` blanked everything up to a *nested*
+program's header -- `CobolParser.parse` / `parse_files(workers=1)` returned
+only the inner program. `strip_compiler_directives` had the same blind spot:
+its directive section never closed, so `PROCESS SECTION.` in the PROCEDURE
+DIVISION was blanked as a PROCESS card. A comment record (`*`/`/` in column
+7) never matches. Pinned by `tests/regression/test_sequence_area_tag_header.py`.

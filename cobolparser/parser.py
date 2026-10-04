@@ -41,6 +41,7 @@ from .preprocess import (
     preprocess_conditional_compilation,
     strip_compiler_directives,
 )
+from .preprocess._normalize import ID_DIVISION_HEADER_RE
 from .preprocess.replace_statement import (
     apply_replace_statements,
     strip_unexpanded_copy_statements,
@@ -56,13 +57,12 @@ _OO_CONTAINER_KINDS: frozenset[str] = frozenset({"CLASS", "FACTORY", "OBJECT"})
 
 # Pre-compiled regex for ID division detection (avoids re-compilation per parse call).
 # Fixed-format source may carry a sequence area in columns 1-6, so an optional
-# exactly-6-character digits/spaces prefix is allowed before the usual leading
-# whitespace ("000100 IDENTIFICATION DIVISION."). Requiring exactly 6 such
-# characters (not "up to 6 of anything digit-shaped") keeps random text that
-# merely starts with digits from matching.
-_ID_DIV_RE = re.compile(
-    r"^(?:[0-9 ]{6})?\s*(IDENTIFICATION|ID)\s+(DIVISION|DIV)", re.IGNORECASE
-)
+# exactly-6-character prefix followed by a blank column 7 is allowed before the
+# usual leading whitespace ("000100 IDENTIFICATION DIVISION."). The prefix may
+# be any six characters -- a change tag ("CHG001") included: accepting only
+# digits/blanks there skipped a tagged outer header and blanked the whole
+# outer program up to a nested program's header (#252).
+_ID_DIV_RE = ID_DIVISION_HEADER_RE
 
 
 @dataclass
