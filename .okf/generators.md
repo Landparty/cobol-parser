@@ -846,6 +846,23 @@ problem and the value is best-effort; `DecodedRecord.errors` and
 shows up as a wall of these, which is the single most useful thing the
 module can say (`test_the_wrong_copybook_shows_up_as_a_wall_of_errors`).
 
+Invalid data that is still *readable* counts too (issue #248, 2026-10-04):
+
+* an `OCCURS ... DEPENDING ON` counter outside its table's `min..max` is an
+  error on the counter (`DEPENDING ON value 7 outside 2..5`); the table is
+  still read at the clamped count (`_counter_value`), the best guess at where
+  the following fields are;
+* an RDW-framed record whose body holds bytes past the last field the base
+  view reads gets a record-level error in `DecodedRecord.record_errors`
+  (rolled into `errors`, `to_dict()["errors"]`, `error_count`, and a `!` line
+  in the hex pane) -- previously those bytes vanished with `trailing == b""`;
+* a `B`/`D` sign nibble on an **unsigned** packed field is an error and does
+  not negate, mirroring the zoned decoder's sign-zone rule;
+* a `COMP`/`COMP-4`/`BINARY` value with more digits than its PICTURE (65535
+  in `PIC 9(4) COMP`) is a **caveat**, not an error: legal under
+  `TRUNC(BIN)`, invalid under `TRUNC(STD)`, and the decoder has no TRUNC
+  option. `COMP-5` is exempt (native binary, its whole width is legal).
+
 ### Framing, and the two things that decide it
 
 * **Framing always uses the `base` view**, whichever view the caller reads
