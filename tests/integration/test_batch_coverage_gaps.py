@@ -203,6 +203,9 @@ class TestParseFilesWithCopybooksExpansionFallback:
             "Copybook expansion failed" in rec.message and "boom" in rec.message
             for rec in caplog.records
         )
+        # ... and on the result itself, not only in the log (#255).
+        assert results[0].copybook_error == "RuntimeError: boom"
+        assert any("boom" in w for w in results[0].result.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -283,3 +286,111 @@ class TestParseFilesWithCopybooks_Samples:
         assert len(results) == len(files)
         for r in results:
             assert r.read_error is None
+
+
+# ---------------------------------------------------------------------------
+# parse_files_with_copybooks() agrees with parse_cobol_with_expansion (#255)
+# ---------------------------------------------------------------------------
+
+_THREE_CPY = """\
+       01 T1 PIC X(5) VALUE 'A'.
+       01 T2 PIC X(5).
+       01 T3 PIC X(5).
+"""
+
+_PROG_WITH_COPY = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY THREE.
+{extra}       PROCEDURE DIVISION.
+       MAIN-PARA.
+           DISPLAY T1.
+           STOP RUN.
+"""
+
+
+class TestParseFilesWithCopybooksMatchesSingleFile:
+    """Issue #255: the batch path dropped the source map and the expansion
+    warnings, and one missing member silently un-expanded every COPY."""
+
+    @pytest.fixture
+    def cpy_dir(self, tmp_path):
+        d = tmp_path / "vcb"
+        d.mkdir()
+        (d / "THREE.cpy").write_text(_THREE_CPY)
+        return d
+
+    def test_source_map_translates_expanded_line_back_to_file(self, tmp_path, cpy_dir):
+        from cobolparser import parse_cobol_with_expansion
+
+        prog = tmp_path / "prog.cbl"
+        source = _PROG_WITH_COPY.format(extra="")
+        prog.write_text(source)
+
+        [br] = parse_files_with_copybooks([prog], copybook_paths=[str(cpy_dir)])
+        result = br.result
+        assert br.read_error is None and result is not None
+
+        display = result.ast.find_all_by_type("DisplayStatement")[0]
+        line = display.location.line
+        assert result.expansion_source_map is not None
+        file_name, orig_line = result.expansion_source_map[line]
+        assert Path(file_name).name == "prog.cbl"
+        assert orig_line == 8
+
+        single = parse_cobol_with_expansion(source, str(prog), [str(cpy_dir)])
+        assert single.expansion_source_map == result.expansion_source_map
+
+    def test_expansion_warnings_are_kept(self, tmp_path, cpy_dir):
+        from cobolparser.preprocess.models import ExpansionStatistics
+
+        prog = tmp_path / "prog.cbl"
+        prog.write_text(_PROG_WITH_COPY.format(extra=""))
+
+        from cobolparser.preprocess import copybook_expander
+
+        real_expand = copybook_expander.expand_copybooks
+
+        def expand_with_warning(*args, **kwargs):
+            expansion = real_expand(*args, **kwargs)
+            stats = expansion.statistics or ExpansionStatistics()
+            stats.warnings.append("lossy decode in THREE")
+            expansion.statistics = stats
+            return expansion
+
+        with patch(
+            "cobolparser.preprocess.copybook_expander.expand_copybooks",
+            side_effect=expand_with_warning,
+        ):
+            [br] = parse_files_with_copybooks([prog], copybook_paths=[str(cpy_dir)])
+
+        assert br.result is not None
+        assert "lossy decode in THREE" in br.result.warnings
+
+    def test_missing_member_reason_reaches_the_result(self, tmp_path, cpy_dir):
+        good = tmp_path / "good.cbl"
+        good.write_text(_PROG_WITH_COPY.format(extra=""))
+        prog = tmp_path / "prog.cbl"
+        prog.write_text(_PROG_WITH_COPY.format(extra="       COPY MISSING.\n"))
+
+        results = parse_files_with_copybooks(
+            [prog, good], copybook_paths=[str(cpy_dir)]
+        )
+
+        # The file still parses (unexpanded, for codebase-graph's sake), but
+        # the real exception is no longer only on the logger.
+        bad = results[0]
+        assert bad.result is not None
+        assert bad.copybook_error is not None
+        assert bad.copybook_error.startswith("CopybookNotFoundError:")
+        assert "MISSING" in bad.copybook_error
+        assert any(
+            "CopybookNotFoundError" in w and "MISSING" in w for w in bad.result.warnings
+        )
+        assert bad.result.expansion_source_map is None
+        # ... and the rest of the batch is unaffected.
+        assert results[1].copybook_error is None
+        assert results[1].result is not None
+        assert results[1].result.expansion_source_map is not None

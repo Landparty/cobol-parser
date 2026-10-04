@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-04 -- `parse_files_with_copybooks` source map, warnings, expansion failure reason (#255)
+
+[batch.md](batch.md): the copybook-aware batch path now attaches
+`expansion_source_map` and the expansion's warnings, as
+`parse_cobol_with_expansion` does; when expansion raises, the
+whole-file unexpanded fallback is kept (codebase-graph depends on it) but the
+reason reaches `BatchResult.copybook_error` and `result.warnings`.
+
 ## 2026-10-04 -- audit: bundle checked against the current code, CI and release
 
 Every `.okf/*.md` checked against the tree (backticked paths and class

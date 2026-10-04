@@ -35,7 +35,16 @@ results = parse_files_with_copybooks(files, copybook_paths=["/path/to/cpy"])
 
 `BatchResult` — `path`, `result: ParseResult | None`, `read_error: str | None`
 (always a plain `str`, pickle-safe on Windows spawn), `profiling:
-ProfilingResult | None`.
+ProfilingResult | None`, `copybook_error: str | None` (copybook-aware path
+only: `"<ExcType>: <message>"` when expansion failed and the file was parsed
+unexpanded).
+
+`parse_files_with_copybooks` attaches what `parse_cobol_with_expansion`
+attaches (2026-10-04, #255): `result.expansion_source_map` (expanded line ->
+`(file, original line)`; expansion runs with `preserve_source_locations=True,
+source_file=<path>`) and the expansion's `statistics.warnings`, merged into
+`result.warnings`. Before, a batch result had no map at all and its
+locations could not be put back on the file a human edits.
 
 With `enable_profiling=True, prof_output=DIR`, each file's cProfile dump is
 `DIR/<stem>.prof`; inputs sharing a stem (`a/PROG.cbl` + `b/PROG.cbl`, or
@@ -56,8 +65,15 @@ entry instead of an exception propagating out of the batch call:
 * Parsing itself (`parser.parse(...)` / `parse_cobol(...)` raising).
 * Copybook expansion (`expand_copybooks` raising) — this one degrades rather
   than failing: it falls back to parsing the raw, unexpanded source, and
-  logs a warning (`"Copybook expansion failed for %s..."`) so the
-  degradation is observable rather than silent. Expansion runs with
+  logs a warning (`"Copybook expansion failed for %s..."`). The reason also
+  reaches the result (#255): `BatchResult.copybook_error` and a
+  `copybook expansion failed (...)` entry in `result.warnings`. That matters
+  because the fallback un-expands *every* COPY in the file, not just the bad
+  one, and the unexpanded parse is usually error-free. The fallback is kept
+  (rather than failing the file the way `parse_cobol_with_expansion`
+  raises) because `codebase-graph` / `copybook-impact` read a file's CALL
+  edges and program id off the unexpanded parse; failing the file made it a
+  `parse_failed` node named after its file. Expansion runs with
   `process_conditionals=True` (2026-09-28), so a COPY inside an excluded
   `>>IF` block is never resolved -- before, a member that only exists for
   the other branch (`COPY DFHAID` under `>>IF CICS DEFINED`) pushed the
