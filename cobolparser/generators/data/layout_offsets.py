@@ -202,9 +202,13 @@ def _layout_siblings(
 
         occurs = child.occurs_clause
         if occurs is not None and occurs.depending_on:
+            # Everything after the table moves with its counter, but its
+            # own footprint is the MAXIMUM: what IBM Enterprise COBOL
+            # allocates for an ODO group and what ``encoding.py`` writes
+            # (``storage.py``'s widths times every occurrence), so a
+            # group's and a record's byte_length agree with the encoder.
             is_ambiguous = True
-            member_footprint = one_occurrence_length  # unknown multiplier -- reserve one occurrence only
-        elif occurs is not None:
+        if occurs is not None:
             member_footprint = one_occurrence_length * (
                 occurs.max_times or occurs.min_times or 1
             )
