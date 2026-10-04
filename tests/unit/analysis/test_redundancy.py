@@ -600,3 +600,181 @@ class TestFingerprintSerialization:
         assert _canonical(3) != _canonical("3")
         assert _canonical(("PERFORM_INLINE", 3)) == _canonical(("PERFORM_INLINE", 3))
         assert _canonical(("PERFORM_INLINE", 3)) != _canonical(("PERFORM_INLINE", 4))
+
+
+# ---------------------------------------------------------------------------
+# #262: a leaf statement's fingerprint covers everything it does, not just
+# its operand list (COMPUTE formula, clause bodies, ROUNDED, UPON, ...).
+# ---------------------------------------------------------------------------
+
+BEHAVIOUR_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BEHAVE.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT F ASSIGN TO FF.
+           SELECT G ASSIGN TO GG ORGANIZATION INDEXED
+               ACCESS RANDOM RECORD KEY GK.
+       DATA DIVISION.
+       FILE SECTION.
+       FD F.
+       01 FR PIC X(10).
+       FD G.
+       01 GR.
+          05 GK PIC X(4).
+       WORKING-STORAGE SECTION.
+       01 A PIC 9(4).
+       01 B PIC 9(4).
+       01 E PIC 9(4).
+       01 H PIC 9(4).
+       01 C PIC X(4).
+       01 D PIC X(20).
+       01 T.
+          05 T1 PIC X.
+       01 T2.
+          05 T1 PIC X.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           STOP RUN.
+"""
+
+
+def _pair(x0: str, x1: str) -> str:
+    return BEHAVIOUR_HEADER + f"""\
+       Q0.
+           DISPLAY 'START'
+           {x0}
+           DISPLAY 'END'.
+       Q1.
+           DISPLAY 'START'
+           {x1}
+           DISPLAY 'END'.
+"""
+
+
+_BEHAVIOUR_PAIRS = [
+    ("COMPUTE A = B / 3", "COMPUTE A = B * 7 + 100"),
+    ("COMPUTE A ROUNDED = B / 3", "COMPUTE A = B / 3"),
+    ("READ F AT END MOVE 1 TO A END-READ", "READ F AT END MOVE 9 TO A END-READ"),
+    (
+        "READ G INVALID KEY MOVE 1 TO A END-READ",
+        "READ G INVALID KEY MOVE 2 TO A END-READ",
+    ),
+    (
+        "ADD 1 TO A ON SIZE ERROR MOVE 'X' TO C END-ADD",
+        "ADD 1 TO A ON SIZE ERROR MOVE 'Y' TO C END-ADD",
+    ),
+    (
+        "CALL 'S' ON EXCEPTION MOVE 1 TO A END-CALL",
+        "CALL 'S' ON EXCEPTION MOVE 2 TO A END-CALL",
+    ),
+    (
+        "PERFORM 3 TIMES DISPLAY 'Z' END-PERFORM",
+        "PERFORM 5 TIMES DISPLAY 'Z' END-PERFORM",
+    ),
+    ("DISPLAY 'A' UPON CONSOLE", "DISPLAY 'A'"),
+    ("MOVE CORRESPONDING T TO T2", "MOVE T TO T2"),
+    (
+        "STRING C DELIMITED BY SIZE INTO D",
+        "STRING C DELIMITED BY SPACE INTO D",
+    ),
+    (
+        "INSPECT C TALLYING A FOR ALL 'X'",
+        "INSPECT C TALLYING A FOR LEADING 'X'",
+    ),
+]
+
+
+class TestBehaviourDifferingParagraphsAreNotClones:
+    """Regression for #262: every pair below differs in behaviour, so it is
+    neither an exact (Type-1) clone nor a renamed (Type-2) one."""
+
+    @staticmethod
+    def _assert_not_clones(x0: str, x1: str) -> None:
+        _, report = _analyze(_pair(x0, x1))
+        assert _group_with(report, "Q0") is None, [
+            g.to_dict() for g in report.clone_groups
+        ]
+        q0, q1 = (
+            next(f for f in report.paragraph_fingerprints if f.name == name)
+            for name in ("Q0", "Q1")
+        )
+        assert q0.type1 != q1.type1
+        assert q0.type2 != q1.type2
+
+    def test_compute_formula(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[0])
+
+    def test_compute_rounded(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[1])
+
+    def test_read_at_end_body(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[2])
+
+    def test_read_invalid_key_body(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[3])
+
+    def test_add_on_size_error_body(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[4])
+
+    def test_call_on_exception_body(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[5])
+
+    def test_inline_perform_times_count(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[6])
+
+    def test_display_upon(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[7])
+
+    def test_move_corresponding(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[8])
+
+    def test_string_delimiter(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[9])
+
+    def test_inspect_tallying_phrase(self) -> None:
+        self._assert_not_clones(*_BEHAVIOUR_PAIRS[10])
+
+
+class TestBehaviourBearingClonesStillMatch:
+    """The fix must not lose real clones: identical statements stay Type-1,
+    consistently renamed ones stay Type-2."""
+
+    def test_every_statement_identical_is_still_type1(self) -> None:
+        for x0, _ in _BEHAVIOUR_PAIRS:
+            _, report = _analyze(_pair(x0, x0))
+            group = _group_with(report, "Q0")
+            assert group is not None, x0
+            assert group.clone_type == "TYPE_1", x0
+            assert {m.name for m in group.members} == {"Q0", "Q1"}
+
+    def test_renamed_compute_is_still_type2(self) -> None:
+        _, report = _analyze(
+            _pair("COMPUTE A ROUNDED = B / 3", "COMPUTE E ROUNDED = H / 3")
+        )
+        group = _group_with(report, "Q0")
+        assert group is not None
+        assert group.clone_type == "TYPE_2"
+
+    def test_renamed_clause_body_is_still_type2(self) -> None:
+        _, report = _analyze(
+            _pair(
+                "READ F AT END MOVE 1 TO A END-READ",
+                "READ F AT END MOVE 1 TO B END-READ",
+            )
+        )
+        group = _group_with(report, "Q0")
+        assert group is not None
+        assert group.clone_type == "TYPE_2"
+
+    def test_renamed_string_target_is_still_type2(self) -> None:
+        _, report = _analyze(
+            _pair(
+                "STRING C DELIMITED BY SIZE INTO D",
+                "STRING D DELIMITED BY SIZE INTO C",
+            )
+        )
+        group = _group_with(report, "Q0")
+        assert group is not None
+        assert group.clone_type == "TYPE_2"

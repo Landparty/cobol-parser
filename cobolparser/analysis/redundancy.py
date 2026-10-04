@@ -11,7 +11,9 @@ Combines two kinds of "this code is redundant weight, not real work":
   clone pair when their statement trees are structurally identical:
 
   - **Type-1 (exact)**: same statement types, same operands/conditions,
-    verbatim.
+    verbatim -- and the same everything else each statement does: its
+    clause bodies (AT END, ON SIZE ERROR, ...) and the rest of its fields
+    (a COMPUTE formula, ROUNDED, UPON, a TIMES count, ...).
   - **Type-2 (renamed)**: same statement types and same control-flow shape,
     but with data-names/paragraph-names consistently substituted (``MOVE
     WS-A TO WS-B`` and ``MOVE WS-X TO WS-Y`` match; a changed *literal*
@@ -32,6 +34,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..lexer import CobolLexer
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.statements.control import (
@@ -60,8 +63,118 @@ from .unused_variables import (
 
 _QUOTED_TEXT_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
 
+# Clause-list attributes holding statements that run only when the clause
+# fires. Each present body is part of what its statement *does*, so it is
+# fingerprinted (#262). The same set ``complexity.py``'s ``_CLAUSE_ATTRS``
+# names, re-derived here per the analysis package's convention (one walker's
+# needs never silently change another's).
+_CLAUSE_ATTRS: tuple[str, ...] = (
+    "at_end_clause",
+    "not_at_end_clause",
+    "invalid_key_clause",
+    "not_invalid_key_clause",
+    "at_eop_clause",
+    "not_at_eop_clause",
+    "on_size_error",
+    "not_on_size_error",
+    "on_overflow",
+    "not_on_overflow",
+    "on_exception",
+    "not_on_exception",
+)
 
-def _normalize_text(text: str, type2: bool, id_map: dict[str, str]) -> str:
+# ``to_dict()`` keys that are not behaviour: where the statement sits, the
+# node bookkeeping, what the fingerprint already holds (type, operands,
+# clause bodies), and ``possible_values`` -- an annotation
+# ``DynamicCallAnalyzer`` writes onto the AST, which would otherwise make a
+# digest depend on which analyzers happened to run first.
+_DETAIL_SKIP_KEYS = frozenset(
+    {
+        "node_type",
+        "location",
+        "metadata",
+        "children",
+        "statement_type",
+        "operands",
+        "possible_values",
+        *_CLAUSE_ATTRS,
+    }
+)
+
+# A ``to_dict()`` field name (``file_name``, ``times_count``) as opposed to a
+# dict keyed by data-names (OPEN's file -> mode map).
+_FIELD_KEY_RE = re.compile(r"[a-z][a-z0-9_]*")
+
+# Words a statement's detail fields hold as *keywords* (``FOR LEADING``,
+# ``DELIMITED BY SIZE``, ``PERFORM ... TIMES``, an OPEN mode, a comparison
+# operator). A reserved word is never a data-name, so Type-2 renaming must
+# leave it alone: ``FOR ALL`` and ``FOR LEADING`` are different behaviour,
+# not a consistent rename. The lexer's keyword table plus the reserved words
+# the statement models store as enum-like values that it does not tokenise
+# as keywords.
+_DETAIL_KEYWORDS = (
+    _NON_IDENTIFIER_WORDS
+    | frozenset(CobolLexer.KEYWORDS)
+    | frozenset(
+        {
+            "ADVANCING",
+            "AFTER",
+            "ALL",
+            "ARITHMETIC",
+            "ASCENDING",
+            "BEFORE",
+            "BY",
+            "CHANNEL",
+            "CHARACTERS",
+            "COMPARISON",
+            "CONDITION",
+            "CONDITION_NAME",
+            "CONVERTING",
+            "DEBUGGING",
+            "DESCENDING",
+            "DOWN",
+            "EQUAL",
+            "ERROR",
+            "EXCEPTION",
+            "EXTEND",
+            "FIRST",
+            "GREATER",
+            "I-O",
+            "INLINE",
+            "INPUT",
+            "LEADING",
+            "LESS",
+            "LINE",
+            "LINES",
+            "LOGICAL",
+            "MESSAGE",
+            "NEXT",
+            "OUTPUT",
+            "PAGE",
+            "REPLACING",
+            "REPORTING",
+            "RUN",
+            "SEGMENT",
+            "SIMPLE",
+            "SIZE",
+            "TALLYING",
+            "THAN",
+            "TIMES",
+            "TO",
+            "UNTIL",
+            "UP",
+            "VARYING",
+        }
+    )
+)
+
+
+def _normalize_text(
+    text: str,
+    type2: bool,
+    id_map: dict[str, str],
+    keywords: frozenset[str] = _NON_IDENTIFIER_WORDS,
+) -> str:
     """Normalize one operand/condition-text string for fingerprinting.
 
     Type-1 (``type2=False``) returns *text* verbatim. Type-2 replaces every
@@ -71,6 +184,10 @@ def _normalize_text(text: str, type2: bool, id_map: dict[str, str]) -> str:
     ``MOVE WS-A TO WS-B`` and ``MOVE WS-X TO WS-Y`` both normalize to ``MOVE
     ID1 TO ID2``, but a paragraph that references the same name twice keeps
     that repetition visible (``ID1 ... ID1``, not two different IDs).
+
+    *keywords* is the set of words never substituted: the default suits
+    operand and condition text; a statement's detail fields pass the wider
+    ``_DETAIL_KEYWORDS`` since they hold reserved words as values.
     """
     if not text or not type2:
         return text
@@ -87,7 +204,7 @@ def _normalize_text(text: str, type2: bool, id_map: dict[str, str]) -> str:
 
     def repl(m: re.Match[str]) -> str:
         tok = m.group(0)
-        if tok.upper() in _NON_IDENTIFIER_WORDS:
+        if tok.upper() in keywords:
             return tok
         return id_map.setdefault(tok.upper(), f"ID{len(id_map) + 1}")
 
@@ -172,7 +289,8 @@ class _Fingerprinter:
                 for wc in stmt.when_clauses
             )
             at_end = tuple(self._fp(s) for s in (stmt.at_end_clause or []))
-            return ("SEARCH", search_whens, at_end)
+            details = self._details(stmt, frozenset({"when_clauses", "at_end_clause"}))
+            return ("SEARCH", search_whens, at_end, details)
 
         if isinstance(stmt, PerformStatement) and stmt.inline_statements:
             body = tuple(self._fp(s) for s in stmt.inline_statements)
@@ -181,12 +299,65 @@ class _Fingerprinter:
                 if stmt.until_condition
                 else ""
             )
-            return ("PERFORM_INLINE", stmt.perform_type, until, body)
+            # The TIMES count, VARYING clause and TEST BEFORE/AFTER.
+            details = self._details(
+                stmt,
+                frozenset({"inline_statements", "until_condition", "perform_type"}),
+            )
+            return ("PERFORM_INLINE", stmt.perform_type, until, body, details)
 
-        # Leaf statement: type + normalized operands.
+        # Leaf statement: type + normalized operands, then what the operand
+        # list does not carry (#262) -- every present clause body (AT END,
+        # ON SIZE ERROR, ...) and the rest of the statement's fields (a
+        # COMPUTE formula, ROUNDED, UPON, CORRESPONDING, delimiters, the
+        # INSPECT phrase).
         self.leaf_count += 1
         operands = tuple(self._norm(op) for op in getattr(stmt, "operands", []))
-        return (stype, operands)
+        return (stype, operands, self._clauses(stmt), self._details(stmt))
+
+    def _clauses(self, stmt: Any) -> tuple[Any, ...]:
+        return tuple(
+            (attr, tuple(self._fp(s) for s in body))
+            for attr in _CLAUSE_ATTRS
+            if (body := getattr(stmt, attr, None))
+        )
+
+    def _details(self, stmt: Any, skip: frozenset[str] = frozenset()) -> Any:
+        """The statement's ``to_dict()`` fields, minus position/bookkeeping
+        and whatever the caller fingerprints itself (*skip*)."""
+        to_dict = getattr(stmt, "to_dict", None)
+        if to_dict is None:
+            return None
+        data = to_dict()
+        return self._detail_value(
+            {key: value for key, value in data.items() if key not in skip}
+        )
+
+    def _detail_value(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            out = []
+            for key, item in value.items():
+                key = str(key)
+                if _FIELD_KEY_RE.fullmatch(key):
+                    if key in _DETAIL_SKIP_KEYS:
+                        continue
+                else:
+                    # A data-name used as a key (OPEN's file -> mode map).
+                    key = self._detail_norm(key)
+                out.append((key, self._detail_value(item)))
+            return tuple(out)
+        if isinstance(value, (list, tuple)):
+            return tuple(self._detail_value(item) for item in value)
+        if isinstance(value, str):
+            return self._detail_norm(value)
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return self._detail_norm(str(value))
+
+    def _detail_norm(self, text: str) -> str:
+        return _normalize_text(
+            text, self._type2, self._id_map, keywords=_DETAIL_KEYWORDS
+        )
 
 
 def _canonical(fingerprint: Any) -> str:

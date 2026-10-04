@@ -772,7 +772,7 @@ window, no near-miss/type-3 similarity scoring, matching the design goal of
 kinds:
 
 - **Type-1 (exact)**: identical statement types, operands, and condition
-  text, verbatim.
+  text, verbatim -- and everything else each statement does (#262, below).
 - **Type-2 (renamed)**: identical statement-type/control-flow shape with
   identifier-shaped tokens (data-names, paragraph-names) consistently
   substituted with per-paragraph positional placeholders (`ID1`, `ID2`,
@@ -790,6 +790,32 @@ in a Type-1 group of size >= 2 is excluded from the Type-2 pass, so a
 paragraph is only ever reported in one clone group. Groups below
 `min_clone_statements` (default 3 -- two bare `EXIT.` paragraphs matching
 each other isn't meaningful redundancy) are dropped.
+
+**A leaf statement's fingerprint is its whole behaviour, not its operand
+list (#262, 2026-10-04).** It used to be `(type, operands)` only, and
+`operands` is often just the identifier list (COMPUTE's is `['A']`; the
+formula lives in `expression`), so paragraphs differing only in a COMPUTE
+formula, ROUNDED, an AT END / INVALID KEY / ON SIZE ERROR / ON EXCEPTION
+body, `UPON`, `CORRESPONDING`, a STRING delimiter or the INSPECT phrase were
+reported as TYPE_1 clones. A leaf is now `(type, operands, clauses,
+details)`: `clauses` fingerprints every present clause body (the
+`_CLAUSE_ATTRS` set `complexity.py` uses, recursively through `_fp`, so their
+statements also count towards `statement_count`), and `details` is the
+statement's `to_dict()` minus `_DETAIL_SKIP_KEYS` (position, node
+bookkeeping, what the tuple already holds, and `possible_values` -- a
+`DynamicCallAnalyzer` annotation that would make a digest depend on analyzer
+order). SEARCH adds its details (table, VARYING) and an inline PERFORM its
+TIMES count / VARYING / TEST phrase the same way. Under Type-2, detail
+strings are renamed like operands **except reserved words** (`_DETAIL_KEYWORDS`:
+`_NON_IDENTIFIER_WORDS` + the lexer's keyword table + enum-like values the
+models store, e.g. `LEADING`, `SIZE`, `TIMES`, `INPUT`), so `FOR ALL` vs
+`FOR LEADING` is never a "consistent rename"; a dict keyed by data-names
+(OPEN's file -> mode map) has its keys renamed too. **No digest version**:
+by owner decision the `type1`/`type2` digests changed in place, and digests
+stored by earlier scans simply stop matching new ones. Known residual: the
+parser stores some literals unquoted (an INSPECT `'X'`, a STRING
+`DELIMITED BY 'X'`), so under Type-2 only, two such literals still read as a
+consistent rename; Type-1 tells them apart.
 
 **Reuses `unused_variables.py`'s `_NON_IDENTIFIER_WORDS`/quoted-text
 handling verbatim** rather than re-deriving a second reserved-word list --

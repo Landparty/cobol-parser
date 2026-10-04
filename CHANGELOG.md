@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`redundancy` / `scan --clones` / `health` reported paragraphs that
+  behave differently as exact clones** (#262): a statement's fingerprint
+  covered only its type and operand list, so a different COMPUTE formula,
+  ROUNDED, AT END / INVALID KEY / ON SIZE ERROR / ON EXCEPTION body, inline
+  PERFORM TIMES count, `UPON`, `CORRESPONDING`, STRING delimiter or INSPECT
+  phrase still made a TYPE_1 clone. The fingerprint now covers every clause
+  body and the statement's remaining fields (reserved words are never
+  renamed under Type-2). **The `type1` / `type2` digests in
+  `paragraph_fingerprints` change in place, with no version field: digests
+  saved by earlier scans no longer match new ones.**
 * **`DynamicCallAnalyzer` ignored REDEFINES** (#257): a MOVE through a
   `REDEFINES` overlay (or to the group it redefines) writes the bytes a
   dynamic `CALL` reads, but `possible_values` was still reported as complete.
