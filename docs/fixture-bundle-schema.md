@@ -207,15 +207,20 @@ carries all three kinds that apply):
    sequence has no single representative value to seed with, and in
    practice a READ's own fields are usually written inside the very
    `PERFORM UNTIL`/`VARYING` loop the folder already refuses to see inside
-   of. The walk starts at the program's entry paragraph and follows
-   non-looping `PERFORM`s (including `THRU` ranges) inline; a looping
+   of. The walk starts at the program's entry paragraph, follows
+   non-looping `PERFORM`s (including `THRU` ranges) inline, and falls
+   through into each following paragraph until `STOP RUN`/`GOBACK`/`EXIT
+   PROGRAM`/`GO TO`; a looping
    `PERFORM`, an `IF`/`EVALUATE`, `DIVIDE` (the AST does not record `BY` vs
    `INTO`, and the two invert dividend/divisor order), `ROUNDED`,
    `CORRESPONDING`, and any numeric result that would need rounding or
    truncation to fit its target field's PICTURE all leave the affected
    field(s) unknown rather than guess. Only a `DISPLAY`/`WRITE` operand that
    resolves directly to an elementary field is an observation point — never
-   wrong, just narrower than a full interpreter would be. `ref` is the
+   wrong, just narrower than a full interpreter would be. `value` is what
+   the field held **at the `DISPLAY`/`WRITE`** -- what the program emitted
+   there, not its value at program end; a field observed at several sites
+   is offered only when every site saw the same known value. `ref` is the
    field's qualified name (not a `"CATEGORY:KEY"` pair).
 3. `"stub"` — everything else: a placeholder note (e.g. "value produced by
    the program under test"), never a live assertion. This is what a

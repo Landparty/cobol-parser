@@ -540,8 +540,12 @@ class TestPerformChaining:
         # was enough to raise an uncaught RecursionError. 2000 paragraphs
         # exercises the fix (an explicit frame stack) well past that.
         n = 2000
+        # STOP RUN after the PERFORM: without it, control falls through
+        # into PARA-1 and re-walks the chain from every paragraph (#246),
+        # which is TestWalkBudget's case, not this one.
         paras = [
             "       MAIN-PARA.\n           MOVE 1 TO WS-A.\n           PERFORM PARA-1.\n"
+            "           STOP RUN.\n"
         ]
         for i in range(1, n):
             nxt = i + 1
@@ -562,6 +566,7 @@ class TestPerformChaining:
             "           PERFORM UNTIL WS-FLAG = 'Y'\n"
             "               PERFORM PARA-1\n"
             "           END-PERFORM.\n"
+            "           STOP RUN.\n"
         ]
         for i in range(1, n):
             nxt = i + 1
@@ -905,3 +910,116 @@ class TestStorageAliasing:
             "           DISPLAY J3.\n"
         )
         assert fold.known.get("J3") == "CDE"
+
+
+class TestValueAtObservationPoint:
+    """Issue #246: a `field_equals` value is what the DISPLAY/WRITE emitted
+    (decision (a) in the issue), and the walk follows control as it falls
+    through from the entry paragraph into the next one."""
+
+    _DATA = "       01  N3                  PIC S9(3).\n"
+
+    def test_value_is_taken_at_the_display_not_at_the_end_of_the_walk(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           MOVE 2 TO N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"N3": "1"}
+
+    def test_two_sites_observing_different_values_drop_the_field(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           MOVE 2 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert "N3" not in fold.known
+
+    def test_two_sites_observing_the_same_value_keep_it(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"N3": "1"}
+
+    def test_a_site_where_the_value_is_unknown_drops_the_field(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           MOVE WS-UNKNOWN TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert "N3" not in fold.known
+
+    def test_control_falls_through_into_the_next_paragraph(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "       NEXT-PARA.\n"
+            "           MOVE 2 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        # The program displays 1 then 2: no single value is right.
+        assert "N3" not in fold.known
+
+    def test_fall_through_reaches_a_display_only_the_next_paragraph_makes(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO N3.\n"
+            "       NEXT-PARA.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"N3": "7"}
+
+    def test_stop_run_in_the_entry_paragraph_ends_the_walk(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO N3.\n"
+            "           DISPLAY N3.\n"
+            "           STOP RUN.\n"
+            "       NEXT-PARA.\n"
+            "           MOVE 2 TO N3.\n"
+            "           DISPLAY N3.\n",
+            extra_data=self._DATA,
+        )
+        assert fold.known == {"N3": "1"}
+
+
+class TestWalkBudget:
+    """Fall-through (#246) follows real control flow, so a chain of
+    paragraphs that each PERFORM the next and never STOP RUN is re-walked
+    from every paragraph -- quadratic. Past `_MAX_WALK_STEPS` the fold
+    gives up and reports nothing, quickly, instead of a partial answer."""
+
+    def test_quadratic_fall_through_chain_reports_nothing(self):
+        n = 2000
+        paras = [
+            "       MAIN-PARA.\n           MOVE 1 TO WS-A.\n           PERFORM PARA-1.\n"
+        ]
+        for i in range(1, n):
+            nxt = i + 1
+            if nxt < n:
+                paras.append(f"       PARA-{i}.\n           PERFORM PARA-{nxt}.\n")
+            else:
+                paras.append(f"       PARA-{i}.\n           DISPLAY WS-A.\n")
+        fold = _fold("".join(paras))
+        assert fold.known == {}

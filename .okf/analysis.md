@@ -1959,9 +1959,30 @@ from cobolparser.analysis.const_fold import ConstantFolder
 
 folder = ConstantFolder()
 result = folder.fold(ast, index, seed_values={"WS-QTY": "622"})
-result.known   # dict[qualified_name, str]: fields still knowable at a
-               # DISPLAY/WRITE, by the end of the walk
+result.known   # dict[qualified_name, str]: the value each field held at
+               # the DISPLAY/WRITE sites that observed it
 ```
+
+**`known` is the value at the observation point** (2026-10-04, #246,
+decision (a) from the issue). `_WalkState.observed` records the env value at
+every `DISPLAY`/`WRITE` site; a field is reported only when every site saw
+the same known value. It used to report the env as it stood at the end of
+the walk, so `MOVE 1 TO N3. DISPLAY N3. MOVE 2 TO N3.` claimed `2`. The walk
+also **falls through**: after the entry paragraph it continues into every
+following paragraph in source order (`_fall_through_chain`) until the walk
+stops (`STOP RUN`/`GOBACK`/`EXIT PROGRAM`/`GO TO`), so a program displaying
+`1` in `MAIN-PARA` and `2` in the next paragraph gets no `N3` expectation
+rather than `1`. Following real control flow re-walks a PERFORMed
+paragraph each time control reaches it -- quadratic for a chain of
+paragraphs that each PERFORM the next with no STOP RUN -- so the main walk
+has a `_MAX_WALK_STEPS` (50,000 statement visits) budget; past it the fold
+reports nothing (`_WalkState.exhausted`), never a partial answer. No program
+in the first 150 NIST files comes near it. The shamrice corpus's two former
+`known` values (`sub.cbl`, `unstring.cbl`) were both multi-site
+disagreements and are gone; `test_const_fold_corpus.py`'s non-triviality
+check now also folds `tests/samples/file_operations.cbl` and
+`enterprise/COMPDIR.cbl`. `bundle_version` is unchanged: only which
+expectations are emitted changes, not their shape.
 
 **"Exact by construction, or absent" -- never a guess.** Every ambiguity
 below resolves by leaving a field unknown (poisoned: removed from the
@@ -2129,7 +2150,8 @@ internal env) rather than approximating:
   opportunities are silently not offered. Never wrong, sometimes just
   quieter than it could be. `GO TO`, `STOP RUN`, `GOBACK`, and `EXIT
   PROGRAM` all stop the walk outright (unreachable code after them is never
-  folded or observed).
+  folded or observed). A paragraph's end is not a stop: control falls
+  through into the next paragraph (#246).
 
 **Bug found via a NIST-corpus smoke sweep, fixed at the root (not worked
 around): `ProgramLayoutIndex.resolve()` crashed (`IndexError`) on an
