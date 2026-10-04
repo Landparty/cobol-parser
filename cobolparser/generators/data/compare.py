@@ -164,6 +164,11 @@ class CompareResult:
         differences: The differing records, expected-file order first, then
             the extras in actual-file order.
         truncated: True when :attr:`differences` stops short of the counts.
+        trailing_differs: The bytes after the last whole record (a partial
+            record, :attr:`DecodeResult.trailing`) differ: both files have
+            such a tail and the tails are not the same, or -- under
+            ``compare_bytes`` -- only one file has one.  Never decoded, so
+            no field can be named; it still makes the files unequal.
         caveats: Reasons the answer may not be the whole story.
     """
 
@@ -180,12 +185,19 @@ class CompareResult:
     extra_count: int = 0
     differences: list[RecordDifference] = field(default_factory=list)
     truncated: bool = False
+    trailing_differs: bool = False
     caveats: list[str] = field(default_factory=list)
 
     @property
     def equal(self) -> bool:
-        """True when every record paired and no paired record differs."""
-        return not (self.changed_count or self.missing_count or self.extra_count)
+        """True when every record paired, no paired record differs, and the
+        trailing partial records (if any) do not differ."""
+        return not (
+            self.changed_count
+            or self.missing_count
+            or self.extra_count
+            or self.trailing_differs
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise the whole comparison."""
@@ -203,6 +215,7 @@ class CompareResult:
             "missing_count": self.missing_count,
             "extra_count": self.extra_count,
             "truncated": self.truncated,
+            "trailing_differs": self.trailing_differs,
             "caveats": list(self.caveats),
             "differences": [item.to_dict() for item in self.differences],
         }
@@ -230,6 +243,11 @@ class CompareResult:
                 f"matched {self.matched_count}, changed {self.changed_count}, "
                 f"missing {self.missing_count}, extra {self.extra_count}"
             )
+            if self.trailing_differs:
+                lines.append(
+                    "trailing bytes differ (the partial records after the last "
+                    "whole record are not the same)"
+                )
         for caveat in self.caveats:
             lines.append(f"note: {caveat}")
         for item in self.differences:
@@ -408,6 +426,7 @@ def compare_records(
         expected_count=len(expected.records),
         actual_count=len(actual.records),
         caveats=_decode_caveats(expected, actual),
+        trailing_differs=_trailing_differs(expected, actual, compare_bytes),
     )
     skip = frozenset(ignored)
 
@@ -602,6 +621,21 @@ def _unmapped(
         expected_hex=" ".join(f"{byte:02X}" for byte in exp.raw[start:]),
         actual_hex=" ".join(f"{byte:02X}" for byte in act.raw[start:]),
     )
+
+
+def _trailing_differs(
+    expected: DecodeResult, actual: DecodeResult, compare_bytes: bool
+) -> bool:
+    """Whether the bytes after each file's last whole record differ (#250).
+
+    Two different tails always differ.  A tail only one file has differs only
+    under ``compare_bytes``: comparing values, a stray partial record is a
+    framing caveat rather than data, but a byte compare is about the exact
+    image and one file's image is longer.
+    """
+    if expected.trailing and actual.trailing:
+        return expected.trailing != actual.trailing
+    return compare_bytes and bool(expected.trailing or actual.trailing)
 
 
 def _decode_caveats(expected: DecodeResult, actual: DecodeResult) -> list[str]:

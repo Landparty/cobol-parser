@@ -950,6 +950,15 @@ adds pairing and field comparison, and decodes nothing itself.
 * **Everything the decode was unsure of carries over**: decode caveats from
   both sides (de-duplicated), per-side decode-error counts, per-side trailing
   bytes.
+* **Trailing partial records can make files unequal** (2026-10-04, #250).
+  `CompareResult.trailing_differs` (in `to_dict()`, and a `trailing bytes
+  differ` line in `to_text()`) is set, and `equal` is False, when both files
+  end in a partial record and the two tails differ -- or, under
+  `compare_bytes`, when only one file has a tail (the image is longer).
+  Comparing values, a one-sided tail stays a caveat only. Before, `equal`
+  ignored `trailing` entirely, so `XYZ` vs `QQQ` tails reported "files are
+  equal" and `compare` exited 0 even with `--compare-bytes`. Option (b) of
+  the issue; `_trailing_differs()` is the whole policy.
 * **Memory.** The first cut decodes both files fully and builds an in-memory
   key index. A streaming, key-sorted merge for files that do not fit is a
   planned follow-up (design doc, Risks).

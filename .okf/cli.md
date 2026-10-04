@@ -863,7 +863,9 @@ of a batch run against the actual one. Implementation:
 `generators/data/compare.py`, documented in [generators.md](generators.md)'s
 "Record compare".
 
-* **Exit status follows `cmp`/`diff`**: 0 equal, 1 different, 2 the
+* **Exit status follows `cmp`/`diff`**: 0 equal, 1 different (including
+  differing trailing partial records -- `CompareResult.trailing_differs`,
+  see generators.md, #250), 2 the
   comparison could not be made (unknown key/ignore name, unreadable file,
   layout error, unwritable `-o`). `_cmd_compare` therefore uses its own
   `_compare_fail()` (exit 2) and its own output writer rather than `_fail()` /

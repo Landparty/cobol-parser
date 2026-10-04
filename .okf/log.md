@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-04 -- compare: differing trailing partial records are a difference (#250)
+
+[generators.md](generators.md) / [cli.md](cli.md): `CompareResult.trailing_differs`
+makes `equal` False when both files' tails differ, or under `compare_bytes`
+when only one file has a tail (option (b)); `compare` then exits 1.
+
 ## 2026-10-04 -- lint: parse errors become `parse` findings (#249)
 
 [cli.md](cli.md) / [analysis.md](analysis.md): `lint` turns each
