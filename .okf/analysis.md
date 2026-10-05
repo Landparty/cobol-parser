@@ -655,6 +655,17 @@ key only when non-None, the report's usual optional-field convention. The
 flowchart generators render it instead of the bare THEN/ELSE keyword —
 see [generators.md](generators.md).
 
+**Clause fidelity fix (#274, 2026-10-05):** `SET x UP BY v` / `DOWN BY v`
+rendered as `SET x TO v` (`set_type` was ignored; `TO FALSE` is now
+rendered too); ADD/SUBTRACT took their sources as `operands` minus
+`targets`, so a GIVING item read as a source (`ADD A TO B GIVING C` ->
+`ADD A, C TO B`) -- sources now come from `source_operands` and
+` GIVING ...` is appended (also for `ADD A B GIVING C`, which has no TO
+target). PERFORM renders ` VARYING v FROM x BY y` / ` n TIMES` (the UNTIL
+guard stays the diff renderer's job, `ast_diff._statement_text`) and
+COMPUTE renders `ROUNDED`, so `cobol-parser diff` no longer shows
+identical old/new text for those edits.
+
 **Mypy narrowing fix (2026-08-13, no behavior change):** the EVALUATE
 subject-summary line used `hasattr(s, "to_dict")` to distinguish a
 `CobolExpression` subject from a bare `str` one
