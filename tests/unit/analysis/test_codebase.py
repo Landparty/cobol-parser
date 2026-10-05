@@ -696,6 +696,15 @@ class TestDot:
         assert "(unparsed)" in text
         assert "#f8d7da" in text
 
+    def test_unparsed_label_line_break_is_a_single_dot_escape(self, tmp_path):
+        # #274: the DOT line break went through _dot_str's backslash
+        # escaping, so Graphviz rendered a literal backslash followed by "n".
+        broken = tmp_path / "BROKEN.cbl"
+        broken.write_text(BROKEN_PROGRAM)
+        text = CodebaseGraphBuilder().build([str(broken)]).to_dot()
+        assert 'label="BROKEN\\n(unparsed)"' in text
+        assert "\\\\n" not in text
+
 
 # ---------------------------------------------------------------------------
 # Copybook impact

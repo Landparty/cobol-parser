@@ -465,9 +465,14 @@ class CodebaseGraph:
 
         for pid in programs:
             fill = "#f8d7da" if pid in failed else "#cfe2ff"
-            label = f"{pid}\\n(unparsed)" if pid in failed else pid
+            label = _dot_str(pid)
+            if pid in failed:
+                # The "\n" line break is DOT escape syntax and must reach the
+                # output as-is: passed through _dot_str it became "\\n",
+                # which Graphviz renders as a literal backslash-n (#274).
+                label = f'{label[:-1]}\\n(unparsed)"'
             lines.append(
-                f"    {_program_node_id(pid)} [label={_dot_str(label)},"
+                f"    {_program_node_id(pid)} [label={label},"
                 f' shape=box, fillcolor="{fill}", fontcolor="#000000"];'
             )
         for pid in external:
