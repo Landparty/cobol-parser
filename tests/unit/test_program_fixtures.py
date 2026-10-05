@@ -868,7 +868,12 @@ class TestTargetedArmsAreVerified:
 
     def test_every_scenario_verifies_against_its_own_data(self):
         bundle = _enum_relational_bundle()
-        statuses = {s.name: s.verification["status"] for s in bundle.scenarios}
+        statuses = {
+            s.name: s.verification["status"]
+            for s in bundle.scenarios
+            if s.name != "happy path"
+        }
+        assert statuses
         assert all(v == "verified" for v in statuses.values()), statuses
 
     def test_then_arm_value_is_greater_than_five_and_not_nine(self):

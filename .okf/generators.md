@@ -1343,6 +1343,11 @@ seed — pinned by
 and for `"branches"`/`"all"` runs `ConstraintExtractor` + `ProgramFlowAnalyzer`
 + `ScenarioPlanner` internally and turns every `PlannedScenario` into a real
 `Scenario` with populated fixtures — not just a name and an intent string.
+The happy-path scenario from `generate()` (same seed) is always prepended,
+so these modes add scenarios on top of it and a program with no targetable
+arm gets one scenario rather than an empty bundle (2026-10-05; before, 5 of
+mockymock's 12 examples got zero scenarios under `branches`/`all` and
+`mockymock generate --with-data` exited 1).
 
 ```python
 bundle = generator.generate_with_scenarios_from_file(

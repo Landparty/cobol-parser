@@ -206,6 +206,14 @@ class ProgramFixtureGenerator:
         only the specific fields a `PlannedScenario` constrains are pinned to
         its solved witness; everything else is generated the same
         `ValueFactory` way the happy path already is.
+
+        The "happy path" scenario always comes first in these modes too,
+        byte-identical to the one `mode="happy"` emits for the same seed.
+        Branch targeting adds scenarios on top of it; it never replaces it.
+        Before, a program with no targetable arm (every arm unreachable,
+        fed by a field no boundary writes, or comparing two fields) got a
+        bundle with zero scenarios -- asking for more coverage yielded
+        less, and a consumer like mockymock had nothing to scaffold.
         """
         if mode not in _SCENARIO_MODES:
             raise ValueError(
@@ -215,6 +223,7 @@ class ProgramFixtureGenerator:
             return self.generate(ast, index, report, seed=seed)
 
         bundle_seed = seed if seed is not None else random.randrange(2**31)
+        happy = self.generate(ast, index, report, seed=bundle_seed)
         constraint_report = ConstraintExtractor().extract(ast, index, report)
         flow_report = ProgramFlowAnalyzer().analyze(ast)
         scenario_plan = ScenarioPlanner().plan(
@@ -222,9 +231,9 @@ class ProgramFixtureGenerator:
         )
         stamp_arm_origins(scenario_plan.coverage, index.source_map)
 
-        layouts: dict[str, list[FieldSpec]] = {}
-        unresolved: list[str] = list(report.unresolved)
-        scenarios: list[Scenario] = []
+        layouts: dict[str, list[FieldSpec]] = dict(happy.layouts)
+        unresolved: list[str] = list(happy.unresolved)
+        scenarios: list[Scenario] = list(happy.scenarios)
 
         for planned in scenario_plan.scenarios:
             scenario = Scenario(

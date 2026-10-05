@@ -46,6 +46,11 @@ exactly one scenario. `mode="branches"`/`"all"` route through Phase 5's
 `scenario_coverage` is the only key that is `None` in happy mode and populated
 otherwise.
 
+In `"branches"`/`"all"` the bundle's **first scenario is always that same
+"happy path"** (byte-identical to `mode="happy"`'s for the same seed, with no
+`verification`), followed by the planned scenarios. A program with no
+targetable arm therefore still yields one scenario, never zero.
+
 ## Top level: `FixtureBundle`
 
 | Key | Type | Notes |
