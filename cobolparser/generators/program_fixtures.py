@@ -39,7 +39,12 @@ from .data.layout import FieldSpec, flatten_record
 from .data.options import DataGeneratorOptions
 from .data.program_layout import ProgramLayoutIndex
 from .data.values import ValueFactory
-from .scenarios import PlannedScenario, ScenarioCoverage, ScenarioPlanner
+from .scenarios import (
+    PlannedScenario,
+    ScenarioCoverage,
+    ScenarioPlanner,
+    stamp_arm_origins,
+)
 from .verification import ScenarioVerification, verify_scenario
 
 _SCENARIO_NAME = "happy path"
@@ -215,6 +220,7 @@ class ProgramFixtureGenerator:
         scenario_plan = ScenarioPlanner().plan(
             constraint_report, flow_report, report, mode=mode
         )
+        stamp_arm_origins(scenario_plan.coverage, index.source_map)
 
         layouts: dict[str, list[FieldSpec]] = {}
         unresolved: list[str] = list(report.unresolved)

@@ -30,6 +30,7 @@ from .models import (
     ProgramFlowReport,
 )
 from .scanner import _CLAUSE_BODY_ATTRS  # noqa: F401  (compat re-export)
+from .scanner import LEADING_SENTENCES_NODE
 
 __all__ = [
     "BranchArm",
@@ -37,6 +38,7 @@ __all__ = [
     "FlowEdge",
     "FlowEdgeType",
     "FlowNode",
+    "LEADING_SENTENCES_NODE",
     "ProgramFlowAnalyzer",
     "ProgramFlowReport",
 ]

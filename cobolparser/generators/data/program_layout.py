@@ -164,6 +164,19 @@ class ProgramLayoutIndex:
         #: Never silently dropped; a caller building on this index should
         #: surface these rather than assume full coverage.
         self.unresolved: list[str] = []
+        #: Expanded line number -> (original file, original line), from the
+        #: copybook expander's own per-line record (``ParseResult.
+        #: expansion_source_map``), when ``from_file()`` expanded COPY
+        #: statements. ``None`` when nothing was expanded (``build()``, or
+        #: ``from_file()`` with no ``copybook_paths``) -- every location this
+        #: index's AST carries is already on-disk truth in that case. A
+        #: caller that reports a line number derived from this AST (a
+        #: branch's location, a boundary's line) to the developer should
+        #: translate it through this map first, the same way ``lint``/
+        #: ``parse`` already do via :func:`stamp_report_origins` --
+        #: otherwise a line number from the expanded source gets handed to
+        #: someone looking at the file on disk, where it points at nothing.
+        self.source_map: dict[int, tuple[str, int]] | None = None
 
     # -- construction ------------------------------------------------------
 
@@ -232,7 +245,9 @@ class ProgramLayoutIndex:
             raise ProgramLayoutError(
                 f"{path} did not produce a program AST: {result.errors}"
             )
-        return cls.build(result.ast)
+        index = cls.build(result.ast)
+        index.source_map = getattr(result, "expansion_source_map", None)
+        return index
 
     # -- public lookups ------------------------------------------------------
 

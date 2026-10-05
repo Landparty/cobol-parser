@@ -19,7 +19,8 @@ here is arm coverage, not full path coverage.
 from __future__ import annotations
 
 import itertools
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Any
 
@@ -75,6 +76,12 @@ class ArmOutcome:
     status: str  # "targeted" | "merged" | "missed"
     merged_into: str | None = None
     reason: str | None = None
+    #: (original file, original line), when ``arm_key``'s own line number
+    #: counts lines in a copybook-expanded source rather than the file on
+    #: disk. ``stamp_arm_origins`` fills this in after planning, from the
+    #: same ``expansion_source_map`` ``lint``/``parse`` already use for
+    #: their own findings. ``None`` when nothing needed translating.
+    origin: tuple[str, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -83,6 +90,11 @@ class ArmOutcome:
             "status": self.status,
             "merged_into": self.merged_into,
             "reason": self.reason,
+            "origin": (
+                {"file": self.origin[0], "line": self.origin[1]}
+                if self.origin is not None
+                else None
+            ),
         }
 
 
@@ -104,6 +116,35 @@ class ScenarioCoverage:
             "missed": self.missed,
             "details": [d.to_dict() for d in self.details],
         }
+
+
+_ARM_KEY_LOCATION_RE = re.compile(r"^(?P<proc>.*)@(?P<line>\d+):(?P<col>\d+)/")
+
+
+def stamp_arm_origins(
+    coverage: ScenarioCoverage, source_map: dict[int, tuple[str, int]] | None
+) -> ScenarioCoverage:
+    """Fill in ``ArmOutcome.origin`` for every detail, from *source_map*.
+
+    ``arm_key`` embeds the line :class:`ProgramFlowAnalyzer` saw it at --
+    which, when ``source_map`` is not ``None``, is a line in the
+    copybook-*expanded* source, not in the file on disk (the same gap
+    :func:`cobolparser.analysis.lint.apply_source_map` closes for ``lint``
+    findings). A ``None`` map, or a line it does not cover, leaves that
+    detail's ``origin`` at its default ``None`` -- never a guess.
+
+    Mutates *coverage* in place (``ArmOutcome`` is frozen, so each stamped
+    detail is a fresh instance) and returns it, for chaining.
+    """
+    if not source_map:
+        return coverage
+    stamped: list[ArmOutcome] = []
+    for detail in coverage.details:
+        match = _ARM_KEY_LOCATION_RE.match(detail.arm_key)
+        origin = source_map.get(int(match.group("line"))) if match else None
+        stamped.append(detail if origin is None else replace(detail, origin=origin))
+    coverage.details = stamped
+    return coverage
 
 
 @dataclass

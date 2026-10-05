@@ -5,7 +5,7 @@
     "distutils": {
         "name": "cobolparser._preprocess_fast",
         "sources": [
-            "cobolparser/_preprocess_fast.pyx"
+            "cobolparser\\_preprocess_fast.pyx"
         ]
     },
     "module_name": "cobolparser._preprocess_fast"
