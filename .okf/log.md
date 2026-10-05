@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-04T00:00:00Z
+timestamp: 2026-10-05T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,14 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-10-05 -- from_json restores structure, equals compares content (#273)
+
+[ast-models.md](ast-models.md): `CobolProgram.from_json` rebuilds sections,
+paragraphs (no statements) and data items with their clauses, and warns
+(`LossyDeserializationWarning`) with counts when statements are dropped.
+`ASTNode.equals` compares location-stripped `to_dict()` plus the child
+node-type tree instead of node types and child counts only.
 
 ## 2026-10-04 -- compare: differing trailing partial records are a difference (#250)
 

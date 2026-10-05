@@ -313,3 +313,95 @@ class TestFdRecordTypeMetadata:
         by_name = {item.name: item for item in file_section.data_items}
         assert by_name["INV-REC"].get_metadata("fd_record_type") == "FD"
         assert by_name["SORT-REC"].get_metadata("fd_record_type") == "SD"
+
+
+_QUALIFIED_88 = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. Q88.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT FA ASSIGN TO 'FA.DAT'.
+           SELECT FB ASSIGN TO 'FB.DAT'.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  FA.
+       01  REC-A.
+           05  ST          PIC X.
+               88  IS-OK   VALUE 'Y'.
+       FD  FB.
+       01  REC-B.
+           05  ST          PIC X.
+               88  IS-OK   VALUE 'N' 'M'.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT FA FB.
+           READ FA.
+           READ FB.
+           IF IS-OK OF REC-A
+               DISPLAY 'OK'
+           ELSE
+               DISPLAY 'NOT OK'
+           END-IF.
+           CLOSE FA FB.
+           STOP RUN.
+"""
+
+
+class TestQualifiedConditionName:
+    """#272: a qualified level-88 name (``IS-OK OF REC-A``) never resolved --
+    the condition branch ignored the qualifiers and gave up once the bare
+    88 name had more than one parent field."""
+
+    def _index(self) -> ProgramLayoutIndex:
+        result = parse_cobol(_QUALIFIED_88, filename="Q88.cbl")
+        assert result.ast is not None, result.errors
+        return ProgramLayoutIndex.build(result.ast)
+
+    @pytest.mark.parametrize(
+        ("name", "parent", "values"),
+        [
+            ("IS-OK OF REC-A", "REC-A.ST", ("Y",)),
+            ("IS-OK IN REC-B", "REC-B.ST", ("N", "M")),
+            ("IS-OK OF ST OF REC-B", "REC-B.ST", ("N", "M")),
+            ("REC-A.IS-OK", "REC-A.ST", ("Y",)),
+        ],
+    )
+    def test_qualified_88_resolves(self, name, parent, values) -> None:
+        index = self._index()
+        resolved = index.resolve(name)
+        assert resolved is not None
+        assert resolved.spec.qualified_name == parent
+        assert index.condition_values(name) == values
+        assert index.condition_raw_values(name) == values
+
+    def test_bare_88_stays_ambiguous(self) -> None:
+        index = self._index()
+        assert index.resolve("IS-OK") is None
+        assert index.condition_values("IS-OK") is None
+        assert index.condition_raw_values("IS-OK") is None
+        assert index.ambiguities["IS-OK"] == ["REC-A.ST", "REC-B.ST"]
+
+    def test_qualifier_naming_no_parent_does_not_resolve(self) -> None:
+        index = self._index()
+        assert index.resolve("IS-OK OF NOPE") is None
+        assert index.condition_values("IS-OK OF NOPE") is None
+
+    def test_gen_fixtures_branches_covers_both_arms(self) -> None:
+        from cobolparser.analysis.boundary_inventory import (
+            BoundaryInventoryAnalyzer,
+        )
+        from cobolparser.generators import ProgramFixtureGenerator
+
+        result = parse_cobol(_QUALIFIED_88, filename="Q88.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        bundle = ProgramFixtureGenerator().generate_with_scenarios(
+            result.ast, index, report, mode="branches", seed=1
+        )
+        coverage = bundle.scenario_coverage
+        assert coverage is not None
+        assert coverage["total_arms"] == 2
+        assert coverage["missed"] == 0, coverage["details"]
+        statuses = [s.verification["status"] for s in bundle.scenarios]
+        assert statuses == ["verified", "verified"]

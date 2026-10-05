@@ -655,6 +655,17 @@ key only when non-None, the report's usual optional-field convention. The
 flowchart generators render it instead of the bare THEN/ELSE keyword —
 see [generators.md](generators.md).
 
+**Clause fidelity fix (#274, 2026-10-05):** `SET x UP BY v` / `DOWN BY v`
+rendered as `SET x TO v` (`set_type` was ignored; `TO FALSE` is now
+rendered too); ADD/SUBTRACT took their sources as `operands` minus
+`targets`, so a GIVING item read as a source (`ADD A TO B GIVING C` ->
+`ADD A, C TO B`) -- sources now come from `source_operands` and
+` GIVING ...` is appended (also for `ADD A B GIVING C`, which has no TO
+target). PERFORM renders ` VARYING v FROM x BY y` / ` n TIMES` (the UNTIL
+guard stays the diff renderer's job, `ast_diff._statement_text`) and
+COMPUTE renders `ROUNDED`, so `cobol-parser diff` no longer shows
+identical old/new text for those edits.
+
 **Mypy narrowing fix (2026-08-13, no behavior change):** the EVALUATE
 subject-summary line used `hasattr(s, "to_dict")` to distinguish a
 `CobolExpression` subject from a bare `str` one
@@ -713,12 +724,17 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   form a cycle).
 - **Self-recursive CALL** — a CALL (static, or dynamic and resolved via
   `DynamicCallAnalyzer`, which this analyzer runs internally) whose target
-  equals the program's own `PROGRAM-ID`. Always `HIGH`: the parser does not
-  currently track an `IS RECURSIVE` `PROGRAM-ID` clause (not even accepted
-  syntactically — see `parsers/divisions/identification.py`'s `IS
-  INITIAL|COMMON` loop, which has no `RECURSIVE` branch), so there is no way
-  to tell a deliberately-recursive program from a bug; every self-CALL is
-  flagged the same way.
+  equals the program's own `PROGRAM-ID`. `HIGH`, or `LOW` when the
+  `PROGRAM-ID` is declared `IS RECURSIVE` (re-entry legal; base case
+  unverifiable). Only the unit's *own* statements are walked
+  (`_own_statements`: `get_all_statements()` minus every node of
+  `contained_programs`) — before issue #274 a contained program's
+  `CALL 'OUTER'` was reported as the outer unit calling itself.
+- **CALL to an enclosing program** (#274) — a contained program CALLing a
+  program it is nested in (any `CobolProgram` up its `.parent` chain). The
+  container is necessarily active while the contained program runs, so this
+  is indirect recursion: `HIGH`, or `LOW` when that container is `IS
+  RECURSIVE`. Reported on the *inner* unit, `program` = the container's name.
 
 Exported from both `cobolparser.analysis` and the top-level `cobolparser`
 package, same as `DeadCodeAnalyzer`/`ProgramFlowAnalyzer`. CLI:
@@ -1302,6 +1318,19 @@ termination -- and `CEEISEC` was missing `input_milliseconds` (9 operands,
 not 8), so a CALL written from `le-info`'s example passed `output_seconds`
 where LE reads milliseconds. `TestServiceOperandsMatchIbm`.
 
+**Five more operand lists corrected (issue #270, 2026-10-05), against
+SA38-0683:** `CEEGMT` / `CEEUTC` are `(output_GMT_Lilian, output_GMT_seconds,
+fc)` -- they carried a third `output_Gregorian` CHAR17 operand that only
+`CEELOCT` has, so a CALL copied from `le-info` put the feedback code where LE
+reads nothing and left `fc` unset. `CEEFMDA` / `CEEFMDT` / `CEEFMTM` take a
+leading `country_code` (CHAR2, input; blanks or `OMITTED` for the current
+setting -- positional, so it is *not* `optional`, which in this catalogue means
+"may be dropped from the end of the USING list"). `CEE3DMP`'s `options` is a
+fixed `PIC X(255)` (new `char255` type; `char2` was added too), not a
+halfword-prefixed `vstring`. `CATALOG_VERSION` is unchanged: new type ids,
+same dict shape. Consumers that copied the old lists (the COBOL Analyzer
+extension's hover) pick the fix up from `le-info`.
+
 `IBMEnterpriseCobol.IBM_LE_SERVICE_INFO` is **derived** from this catalogue
 (merged over `_UNCATALOGUED_LE_SERVICE_INFO`, the leftovers), so the dialect's
 one-line metadata and the signatures cannot drift. Categories are cross-checked
@@ -1598,11 +1627,22 @@ boundary it gates on never had a `status_field`. DELETE/START/UNLOCK are
    A write to a *parent group* counts as touching a child field (and vice
    versa), checked via `FieldSpec.path` prefix comparison through the index,
    not bare string equality. "Read" for a write-shaped statement (rung 2's
-   list above) checks only its own read-only attribute (MOVE's `.source`);
-   the generic `.operands` fallback is reserved for statement types with no
-   write-shape at all (DISPLAY, IF conditions, ...) since a write-shaped
-   statement's own `.operands` also contains its target, which would
-   otherwise misread a write as a read of the same name.
+   list above) comes from a per-type read list (`_write_shaped_read_names`,
+   issue #268) and is checked *before* that statement's writes: MOVE's
+   `.source`; ADD/SUBTRACT/MULTIPLY/DIVIDE's operands minus the GIVING and
+   REMAINDER receivers (without GIVING the TO/FROM/BY/INTO target is read
+   *and* written; with GIVING it is read only and is no longer counted as a
+   write target either); every name in a COMPUTE expression; STRING's
+   sending operands, delimiters and POINTER; UNSTRING's source, delimiters,
+   POINTER and TALLYING; SET's value (plus the target for UP/DOWN BY);
+   INITIALIZE's REPLACING BY values. POINTER/TALLYING/COUNT IN/DELIMITER IN
+   are write targets too. A write-shaped type with no read list whose
+   `.operands` names the arg outside its write targets degrades the arg to
+   **BIDIRECTIONAL** `assumed-bidirectional`, never OUT. The generic
+   `.operands` fallback is reserved for statement types with no write-shape
+   at all (DISPLAY, IF conditions, ...) since a write-shaped statement's own
+   `.operands` also contains its target, which would otherwise misread a
+   write as a read of the same name.
 4. Otherwise **BIDIRECTIONAL**, `provenance="assumed-bidirectional"`.
 
 **Rung 3's "read" also covers a branching statement's own condition**
@@ -2442,6 +2482,17 @@ an accumulated parameter is now `input-output` (was `output`) and a
 `SUBTRACT ... FROM LK-B GIVING` operand `input` (was `output`). Pinned by
 `test_xref.py::test_giving_leaves_the_from_operand_unwritten` and friends and
 `test_program_signature.py::test_accumulated_and_giving_operands_get_the_right_direction`.
+
+**Counter / pointer / in-place roles (issue #269).** Operands a statement
+advances or rewrites from their current value are both `read` and `write`:
+an INSPECT TALLYING counter, STRING / UNSTRING `WITH POINTER`, UNSTRING
+`TALLYING IN`, and the inspected item of INSPECT REPLACING / CONVERTING /
+TALLYING ... REPLACING (the item of a plain INSPECT TALLYING stays `read`;
+UNSTRING `COUNT IN` / `DELIMITER IN` stay `write`). They were `write` only,
+so `program-signature` graded such a LINKAGE parameter `output` instead of
+`input-output`; `business-rules` now lists them as inputs and outputs.
+Pinned by `test_xref.py::test_counters_pointers_and_inspect_targets_are_read_write`
+and `test_program_signature.py::TestDirection::test_counters_pointers_and_inspected_items_are_input_output`.
 
 This is the natural completion of `unused_variables.py`. That analyzer answers
 "is this name referenced at all?" with a flat `set[str]`; this one keeps the

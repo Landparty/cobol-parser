@@ -29,8 +29,10 @@ from .models import (
     FlowNode,
     ProgramFlowReport,
 )
-from .scanner import _CLAUSE_BODY_ATTRS  # noqa: F401  (compat re-export)
-from .scanner import LEADING_SENTENCES_NODE
+from .scanner import (
+    _CLAUSE_BODY_ATTRS,  # noqa: F401  (compat re-export)
+    LEADING_SENTENCES_NODE,
+)
 
 __all__ = [
     "BranchArm",

@@ -166,3 +166,96 @@ def test_profiler_context_nested_tracemalloc_safe():
         assert tracemalloc.is_tracing()
     finally:
         tracemalloc.stop()
+
+
+# -- Nested profilers (issue #274 item 5) ---------------------------------------
+
+
+def _work() -> int:
+    return sum(i * i for i in range(20000))
+
+
+def test_nested_profiler_context_keeps_outer_profile_intact():
+    """An inner context must not replace (3.11) or crash on (3.12+) the outer."""
+    import tracemalloc
+
+    with ProfilerContext(top_n=50) as outer:
+        with ProfilerContext(top_n=50) as inner:
+            _work()
+        # The inner context must not stop the session the outer started.
+        assert tracemalloc.is_tracing()
+        _work()
+    assert not tracemalloc.is_tracing()
+
+    names = [f.function for f in outer.result.top_functions]
+    assert any("(_work)" in n for n in names)
+    assert outer.result.function_profile_available is True
+    assert outer.result.caveats == []
+
+    # The inner one is degraded, and says so, but still measures the call.
+    assert inner.result.function_profile_available is False
+    assert inner.result.top_functions == []
+    assert inner.result.prof_file is None
+    assert inner.result.wall_clock_s > 0
+    assert inner.result.peak_memory_mb >= 0
+    assert "another profiler was already active" in inner.result.caveats[0]
+    d = inner.result.to_dict()
+    assert d["function_profile_available"] is False
+    assert d["caveats"] == inner.result.caveats
+
+
+def test_profiler_context_under_bare_cprofile_is_degraded(tmp_path):
+    import cProfile
+    import tracemalloc
+
+    prof_path = str(tmp_path / "inner.prof")
+    outer = cProfile.Profile()
+    outer.enable()
+    try:
+        with ProfilerContext(top_n=5, prof_output=prof_path) as ctx:
+            _work()
+    finally:
+        outer.disable()
+    assert ctx.result.function_profile_available is False
+    assert not (tmp_path / "inner.prof").exists()
+    assert not tracemalloc.is_tracing()
+
+
+def test_enable_value_error_degrades_instead_of_raising(monkeypatch):
+    import tracemalloc
+
+    from cobolparser import profiling
+
+    monkeypatch.setattr(profiling, "_profiler_already_active", lambda: False)
+    ctx = ProfilerContext(top_n=5)
+
+    class _Busy:
+        def enable(self):
+            raise ValueError("Another profiling tool is already active")
+
+        def disable(self):  # pragma: no cover - must not be called
+            raise AssertionError("disable() on a profiler never enabled")
+
+    ctx._profiler = _Busy()  # type: ignore[assignment]
+    with ctx:
+        _work()
+    assert ctx.result.function_profile_available is False
+    assert not tracemalloc.is_tracing()
+
+
+def test_enter_failure_does_not_leak_tracemalloc(monkeypatch):
+    import tracemalloc
+
+    from cobolparser import profiling
+
+    monkeypatch.setattr(profiling, "_profiler_already_active", lambda: False)
+    ctx = ProfilerContext(top_n=5)
+
+    class _Broken:
+        def enable(self):
+            raise RuntimeError("boom")
+
+    ctx._profiler = _Broken()  # type: ignore[assignment]
+    with pytest.raises(RuntimeError):
+        ctx.__enter__()
+    assert not tracemalloc.is_tracing()

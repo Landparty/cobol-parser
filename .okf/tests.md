@@ -3,7 +3,7 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-10-04T00:00:00Z
+timestamp: 2026-10-05T00:00:00Z
 ---
 
 # Overview
@@ -207,9 +207,12 @@ end (the FD clause picked up with no flag at all, every drawn length inside
 47..80, the cut falling mid-`EMP-COMMENT`, the RDW carrying it, and a seed
 reproducing the lengths); the latter covers
 `DataGeneratorOptions.record_varying` for a copybook that has no FD, its
-clamping to the record's real length, and the degenerate equal-bounds case.
+clamping to the record's real length, and the degenerate equal-bounds case
+-- each now also pinning the caveat it reports (#274), plus an FD range past
+the record and the hex VALUE column's `(cut N/M bytes)`.
 `tests/unit/cli/test_gen_data_cli.py::TestRecordVaryingFlag` covers the
 `--record-varying` flag, `MIN-MAX` as well as `MIN:MAX`, malformed ranges,
+an out-of-range one warning on stderr and in the hex header (#274),
 and that passing it alone resolves to `auto` while an explicit
 `--record-format fixed` still wins. That last point is why
 `TestRecordFormatFlag::test_the_default_is_fixed` now asserts the *resolved*
@@ -573,6 +576,8 @@ the existing `TestNewSubcommandsRegistered` and
 same registration/`-o`-silences-stdout coverage the other five analyzer
 subcommands already get.
 
+2026-10-05 (issue #273): `tests/unit/test_models.py` -- `test_ast_from_json_roundtrip` now compares `to_dict()` and asserts no warning for a statement-free program; +1 `test_from_json_restores_structure_and_warns_about_statements` (parsed program: dict equal with paragraph statements emptied, `LossyDeserializationWarning` with the dropped count); +3 in new `TestNodeEquality` (unrelated programs not equal, reparse equal, source position ignored). The existing `from_json` tests in `test_program_model_branches.py` / `test_bug_hunt_r12_misc.py` now expect the warning.
+
 2026-10-04 (issues #247, #248): +3 in `tests/unit/generators/data/test_layout_offsets.py`'s `TestOccursDependingOn` (`test_group_holding_an_odo_table_reports_its_maximum_length`, `test_direct_odo_child_counts_its_maximum_in_the_record_length`, `test_odo_record_length_agrees_with_the_encoder` -- an ODO table's footprint is its maximum, so group/record `byte_length` equals `GeneratedDataset.record_length()`), and +5 at the end of `tests/unit/generators/data/test_decoding.py` (an ODO counter below/above its range is a field error, leftover RDW body bytes are a record-level error, a well-formed VB record stays clean, a `B`/`D` sign nibble on unsigned COMP-3 is an error and does not negate, a COMP value wider than its PICTURE is a TRUNC caveat). All failed before the fixes.
 
 2026-08-14 (Task 8): +1 in `tests/unit/generators/data/test_layout_offsets.py` (new `TestComputeProgramDataItems` class) and +2 new test classes in new `tests/integration/test_data_item_layout_corpus.py`, for the new `compute_program_data_items()` program-wide entry point (see [generators.md](generators.md)'s `layout_offsets.py` entry). The unit test walks a two-record WORKING-STORAGE section and confirms both records' items land in `output["items"]` with independently 0-based offsets, plus the always-present `unresolved` key. The integration test's `TestRedefinesFixture` corrects a wrong assumption in this task's own brief: the brief guessed `tests/samples/redefines_test.cbl` contained a 3-way REDEFINES chain (`WS-REDEF-2 REDEFINES WS-REDEF-1 REDEFINES WS-BASE-AREA`); the real fixture (lines 16-21) is a fan-out — `WS-REDEF-1` and `WS-REDEF-2` both redefine `WS-BASE-AREA` directly — so the test asserts `redefines_chain == ["WS-BASE-AREA"]` for both, all three at `byte_offset == 0`. This also exercises the Task 8 top-level-REDEFINES fix: without it, `WS-REDEF-1`/`WS-REDEF-2` would report an empty `redefines_chain` despite genuinely redefining a section sibling (`compute_record_layout()`'s record-root `LayoutItem` hardcodes `redefines_chain=[]` since it has no visibility into section-level siblings). `TestShamriceCorpusDoesNotRaise` sweeps `examples/cobol/shamrice/*.cbl` for crash-free coverage only. The brief's Step 5 code sample also had a bare `ErrorRecoveryMode.RECOVER`, which does not exist on the enum (`FAIL_FAST`/`COLLECT_ALL` are the only members) — corrected to `COLLECT_ALL` to match every other corpus-sweep test in this suite.
@@ -808,9 +813,9 @@ tests/
     generators/data/
       test_views.py  # build_record_views(): running-offset placement checked against real encoded bytes, REDEFINES overlays at the redefined item's offset, an overlay not moving the fields after it, two redefinitions of one item, short-name lookup, ODO ambiguity flagging, and a parametrised contiguity property over every view (see generators.md)
       test_decoding.py  # RecordDecoder: decode(encode(row)) == row for every storage class and both charsets, ODO under every RecordFormat, RDW framing, overlay switching reading identical bytes, the sign conventions the decoder reads but never writes, bad bytes reported per field (ODO counters out of range, leftover RDW body bytes, negative sign on unsigned COMP-3 included), short/truncated records, paging, and the hex pane (see generators.md)
-    test_program_layout_index.py  # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, record_named(), multi-program units, from_file errors (see generators.md)
-    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md)
-    test_scenario_planner.py  # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable-arm handling, fixed families (empty-input/error-status/boundary-values), exact coverage accounting (see generators.md)
+    test_program_layout_index.py  # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, qualified level-88 names (resolve/condition_values/gen-fixtures arms, #272), record_named(), multi-program units, from_file errors (see generators.md)
+    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md)
+    test_scenario_planner.py  # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable-arm handling, fixed families (empty-input/error-status/boundary-values), exact coverage accounting, TestScenarioNamesAreUnique: verb@line + disjunct naming, merged names, uniqueness over tests/samples and enterprise (#267) (see generators.md)
     io_statements/             # IO parser unit tests
     test_extended_verb_parsers.py  # 2026-09-02 statement-coverage audit: INITIATE/TERMINATE/SUPPRESS, SEND/RECEIVE/ENABLE/DISABLE/PURGE, EXHIBIT/EXAMINE/TRANSFORM/ENTER/NOTE/CHAIN, READY/RESET TRACE, SERVICE, TITLE, RAISE/RESUME/VALIDATE -- node, operands, no warnings; UNSUPPORTED_VERBS == {EXECUTE, GOTO, RECOVER}; every STATEMENT_KEYWORDS verb dispatches (see parser.md)
     cli/

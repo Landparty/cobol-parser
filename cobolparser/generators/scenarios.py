@@ -33,6 +33,7 @@ from ..analysis.constraints import (
 )
 from ..analysis.domains import Unsatisfiable, Witness, solve
 from ..analysis.program_flow import BranchArm, BranchNode, ProgramFlowReport
+from .data.bundle import _unique_names
 from .data.layout import FieldCategory, FieldSpec
 
 # Boundary categories the empty-input family cares about -- an "input"
@@ -268,6 +269,7 @@ class ScenarioPlanner:
                 else branch.parent_proc
             )
             is_unreachable = bool(owner and owner.upper() in unreachable)
+            verb = _branch_verb(branch, branch_node)
 
             # Every arm-id actually present in branch.arms -- this includes
             # OR-split variants ("ELSE#1"/"ELSE#2"), which represent full
@@ -307,7 +309,10 @@ class ScenarioPlanner:
                     continue
 
                 name = _scenario_name(
-                    branch, arm_id, arm_types.get(_base_arm_id(arm_id))
+                    branch,
+                    arm_id,
+                    arm_types.get(_base_arm_id(arm_id)),
+                    verb,
                 )
                 by_field: dict[str, list[FieldConstraint]] = {}
                 for c in constraints:
@@ -349,6 +354,14 @@ class ScenarioPlanner:
 
         if mode == "all":
             scenarios.extend(_fixed_families(constraint_report, boundary_report))
+        # Branch scenarios are already unique among themselves (see
+        # `_merge_candidates`) and come first, so this pass can only ever
+        # rename a fixed-family scenario -- never a merge target some
+        # `ArmOutcome.merged_into` already points at.
+        for scenario, unique in zip(
+            scenarios, _unique_names([s.name for s in scenarios]), strict=True
+        ):
+            scenario.name = unique
 
         coverage = ScenarioCoverage(
             total_arms=len(details),
@@ -504,18 +517,110 @@ def _reason_for_missing_arm(branch: BranchConstraints, arm_id: str) -> str:
     )
 
 
+def _branch_verb(branch: BranchConstraints, branch_node: BranchNode | None) -> str:
+    """The decision verb (``IF`` / ``EVALUATE`` / ``SEARCH``) of *branch*.
+
+    Read off any conjunct's ``origin`` (``"IF@11"``, ``"EVALUATE@90/WHEN#2"``,
+    ``"SEARCH@40/WHEN#1"``), which names the verb exactly; else the flow
+    graph's own ``branch_type``; else inferred from the arm ids.
+    """
+    for constraints in branch.arms.values():
+        for c in constraints:
+            verb = c.origin.split("@", 1)[0]
+            if verb:
+                return verb
+    if branch_node is not None:
+        return branch_node.branch_type
+    bases = {_base_arm_id(a) for a in branch.arms}
+    if bases & {"THEN", "ELSE"}:
+        return "IF"
+    if "AT_END" in bases:
+        return "SEARCH"
+    return "EVALUATE"
+
+
+_OP_TEXT = {
+    "eq": "=",
+    "ne": "NOT =",
+    "lt": "<",
+    "le": "<=",
+    "gt": ">",
+    "ge": ">=",
+    "in_set": "IN",
+    "not_in_set": "NOT IN",
+}
+
+
+def _render_constraint(c: FieldConstraint) -> str:
+    name = c.field.spec.name
+    numeric = c.field.spec.category in (FieldCategory.NUMERIC, FieldCategory.FLOAT)
+    values = ", ".join(v if numeric else f"'{v}'" for v in c.values)
+    if c.op in ("in_set", "not_in_set"):
+        return f"{name} {_OP_TEXT[c.op]} ({values})"
+    if c.op in _OP_TEXT:
+        return f"{name} {_OP_TEXT[c.op]} {values}"
+    if c.op in ("class_numeric", "class_alphabetic"):
+        test = "NUMERIC" if c.op == "class_numeric" else "ALPHABETIC"
+        return f"{name} IS {'NOT ' if c.negated else ''}{test}"
+    if c.op == "figurative":
+        rendered = ", ".join(c.values)
+        return f"{name} {'NOT = ' if c.negated else '= '}{rendered}"
+    return f"{name} {c.op} {', '.join(c.values)}".rstrip()
+
+
 def _scenario_name(
-    branch: BranchConstraints, arm_id: str, matched_arm: BranchArm | None
+    branch: BranchConstraints,
+    arm_id: str,
+    matched_arm: BranchArm | None,
+    verb: str = "IF",
 ) -> str:
+    """One arm's scenario name: ``"<proc>: <VERB>@<line> <arm>[ [disjunct]]"``.
+
+    The verb and line are always present -- two IFs in one paragraph used to
+    both read ``"<proc>: THEN"`` -- and an OR-split arm (``THEN#2``) names
+    its own disjunct, since every disjunct of one arm is a scenario of its
+    own.
+    """
     proc = branch.parent_proc or "?"
-    if matched_arm is not None:
-        return f"{proc}: {matched_arm.label}"
+    where = f"{verb}@{branch.line if branch.line is not None else '?'}"
     base = _base_arm_id(arm_id)
-    if base == "THEN":
-        return f"{proc}: condition at line {branch.line} is true"
-    if base == "ELSE":
-        return f"{proc}: condition at line {branch.line} is false"
-    return f"{proc}: {arm_id} at line {branch.line}"
+    if matched_arm is not None:
+        arm = matched_arm.label
+    elif base == "THEN":
+        arm = "condition is true"
+    elif base == "ELSE":
+        arm = "condition is false"
+    else:
+        arm = arm_id if base == arm_id else base
+    name = f"{proc}: {where} {arm}"
+    if "#" in arm_id:
+        constraints = branch.arms.get(arm_id) or []
+        disjunct = " AND ".join(_render_constraint(c) for c in constraints)
+        name += f" [{disjunct or 'alt ' + arm_id.split('#', 1)[1]}]"
+    return name
+
+
+#: Longest a merged scenario's spelled-out name may get before the later
+#: arms are summarized as "(+N more arms)".
+_MAX_MERGED_NAME = 120
+
+
+def _merged_name(arm_names: list[str]) -> str:
+    """One name for a scenario that targets every arm in *arm_names*.
+
+    Later arms in the first arm's own paragraph drop the repeated
+    ``"<proc>: "`` prefix.
+    """
+    first = arm_names[0]
+    prefix = first.split(": ", 1)[0] + ": " if ": " in first else ""
+    parts = [first] + [
+        n[len(prefix) :] if prefix and n.startswith(prefix) else n
+        for n in arm_names[1:]
+    ]
+    joined = " + ".join(parts)
+    if len(joined) <= _MAX_MERGED_NAME:
+        return joined
+    return f"{first} (+{len(arm_names) - 1} more arms)"
 
 
 def _touched_fields(scenario: PlannedScenario) -> set[str]:
@@ -560,6 +665,10 @@ def _merge_candidates(
     """
     open_scenarios: list[PlannedScenario] = []
     outcomes: list[ArmOutcome] = []
+    #: Parallel to `outcomes`: the scenario a "merged" outcome merged into,
+    #: so `merged_into` can name it once its final name is known.
+    merged_targets: list[PlannedScenario | None] = []
+    arm_names: dict[int, list[str]] = {}
 
     for _, candidate in candidates:
         arm_key = candidate.arm_keys[0]
@@ -581,7 +690,9 @@ def _merge_candidates(
         )
         if target is None:
             open_scenarios.append(candidate)
+            arm_names[id(candidate)] = [candidate.name]
             outcomes.append(ArmOutcome(arm_key, parent_proc, "targeted"))
+            merged_targets.append(None)
         else:
             target.field_constraints.update(candidate.field_constraints)
             target.witnesses.update(candidate.witnesses)
@@ -596,10 +707,20 @@ def _merge_candidates(
                 if gap not in target.path_gaps:
                     target.path_gaps.append(gap)
             target.intent = f"targets {len(target.arm_keys)} branch arms: {', '.join(target.arm_keys)}"
-            outcomes.append(
-                ArmOutcome(arm_key, parent_proc, "merged", merged_into=target.name)
-            )
+            arm_names[id(target)].append(candidate.name)
+            outcomes.append(ArmOutcome(arm_key, parent_proc, "merged"))
+            merged_targets.append(target)
 
+    # A merged scenario is named for every arm it targets, not just the one
+    # it started from -- then made unique, since two scenarios can still
+    # target same-named arms (e.g. a duplicated paragraph body).
+    names = [_merged_name(arm_names[id(s)]) for s in open_scenarios]
+    for scenario, unique in zip(open_scenarios, _unique_names(names), strict=True):
+        scenario.name = unique
+    outcomes = [
+        replace(outcome, merged_into=target.name) if target is not None else outcome
+        for outcome, target in zip(outcomes, merged_targets, strict=True)
+    ]
     return open_scenarios, outcomes
 
 

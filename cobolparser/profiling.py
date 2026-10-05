@@ -11,9 +11,10 @@ import cProfile
 import json
 import os
 import pstats
+import sys
 import time
 import tracemalloc
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 try:
@@ -58,6 +59,13 @@ class ProfilingResult:
     # call's own peak is then unknowable without resetting the outer
     # session's peak, so peak_memory_mb is an upper bound (see __exit__).
     peak_memory_exact: bool = True
+    # False when cProfile could not run because another profiler (an outer
+    # ProfilerContext, a bare cProfile, or any other sys.setprofile /
+    # sys.monitoring PROFILER_ID tool) was already active: top_functions is
+    # then empty and no .prof file is written, while wall-clock, CPU and
+    # memory are still measured. ``caveats`` says why.
+    function_profile_available: bool = True
+    caveats: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +74,8 @@ class ProfilingResult:
             "cpu_system_s": self.cpu_system_s,
             "peak_memory_mb": self.peak_memory_mb,
             "peak_memory_exact": self.peak_memory_exact,
+            "function_profile_available": self.function_profile_available,
+            "caveats": list(self.caveats),
             "prof_file": self.prof_file,
             "top_functions": [f.to_dict() for f in self.top_functions],
         }
@@ -74,6 +84,30 @@ class ProfilingResult:
         if compact:
             return json.dumps(self.to_dict(), separators=(",", ":"))
         return json.dumps(self.to_dict(), indent=2)
+
+
+_PROFILER_BUSY_CAVEAT = (
+    "another profiler was already active (a nested ProfilerContext, cProfile, "
+    "or another profiling tool), so per-function profiling was skipped; "
+    "wall-clock, CPU and memory figures are still this call's own"
+)
+
+
+def _profiler_already_active() -> bool:
+    """Whether a profiling hook is already installed in this thread.
+
+    On 3.11 cProfile installs itself with ``sys.setprofile``; from 3.12 it
+    claims ``sys.monitoring``'s PROFILER_ID instead, and a second
+    ``Profile.enable()`` raises ``ValueError``.  Either way a second profiler
+    cannot run: on 3.11 it silently *replaces* the first, which leaves the
+    outer profile holding nothing but its own ``__enter__``.
+    """
+    if sys.getprofile() is not None:
+        return True
+    monitoring = getattr(sys, "monitoring", None)
+    if monitoring is not None:
+        return monitoring.get_tool(monitoring.PROFILER_ID) is not None
+    return False
 
 
 class ProfilerContext:
@@ -85,6 +119,7 @@ class ProfilerContext:
         self._cpu_before: Any = None
         self._was_tracing: bool = False
         self._traced_before: tuple[int, int] = (0, 0)
+        self._profiling: bool = False
         self.result: ProfilingResult | None = None
 
     def __enter__(self) -> ProfilerContext:
@@ -101,11 +136,26 @@ class ProfilerContext:
         if _PSUTIL_AVAILABLE:
             self._cpu_before = _psutil.Process().cpu_times()
 
-        self._profiler.enable()
+        self._profiling = False
+        if not _profiler_already_active():
+            try:
+                self._profiler.enable()
+                self._profiling = True
+            except ValueError:
+                # 3.12+: "Another profiling tool is already active" -- a tool
+                # the check above could not see. Degrade rather than fail.
+                pass
+            except BaseException:
+                # __exit__ never runs when __enter__ raises: do not leak the
+                # tracemalloc session this call started.
+                if not self._was_tracing:
+                    tracemalloc.stop()
+                raise
         return self
 
     def __exit__(self, *_: Any) -> None:
-        self._profiler.disable()
+        if self._profiling:
+            self._profiler.disable()
         wall_clock_s = time.perf_counter() - self._wall_start
 
         # Memory peak within this call, above what was traced at entry.
@@ -134,7 +184,7 @@ class ProfilerContext:
         # Write .prof binary if requested. dump_stats() raises FileNotFoundError
         # uncaught if its parent directory doesn't exist yet -- create it first,
         # matching the batch-parsing path's os.makedirs(..., exist_ok=True).
-        if self._prof_output:
+        if self._prof_output and self._profiling:
             parent = os.path.dirname(self._prof_output)
             if parent:
                 os.makedirs(parent, exist_ok=True)
@@ -142,7 +192,7 @@ class ProfilerContext:
 
         # Extract top-N functions by cumulative time from cProfile stats
         top_functions: list[FunctionProfile] = []
-        if self._top_n > 0:
+        if self._top_n > 0 and self._profiling:
             stats = pstats.Stats(self._profiler)
             # stats.stats: {(file, lineno, name): (cc, nc, tt, ct, callers)}
             sorted_entries = sorted(
@@ -168,6 +218,8 @@ class ProfilerContext:
             cpu_system_s=cpu_system_s,
             peak_memory_mb=peak_memory_mb,
             top_functions=top_functions,
-            prof_file=self._prof_output,
+            prof_file=self._prof_output if self._profiling else None,
             peak_memory_exact=peak_memory_exact,
+            function_profile_available=self._profiling,
+            caveats=[] if self._profiling else [_PROFILER_BUSY_CAVEAT],
         )

@@ -3160,3 +3160,19 @@ entry). The second anchor exists for copybooks, which have no division
 header; without it a tagged member's comment lines reached the lexer and a
 `#` in them failed the parse. Details in `preprocessing.md` (tagged
 sequence area section).
+
+## Profiling (`profiling.py`)
+
+`ProfilerContext(top_n=50, prof_output=None)` wraps any call with cProfile,
+tracemalloc and (optionally) psutil, and leaves a `ProfilingResult` on
+`.result`: `wall_clock_s`, `cpu_user_s`/`cpu_system_s` (`None` without
+psutil), `peak_memory_mb` + `peak_memory_exact`, `top_functions`,
+`prof_file`, `function_profile_available`, `caveats`.
+
+Nesting is safe (issue #274, 2026-10-05): when another profiler is already
+active (`sys.getprofile()` on 3.11, `sys.monitoring` PROFILER_ID on 3.12+)
+the context skips cProfile, so `function_profile_available` is `False`,
+`top_functions` is empty, no `.prof` file is written, and `caveats` says why.
+Wall-clock, CPU and memory are still measured, and the outer profile is left
+alone. tracemalloc is stopped only by the context that started it, including
+when `__enter__` fails. Tests: `tests/unit/test_profiling.py`.

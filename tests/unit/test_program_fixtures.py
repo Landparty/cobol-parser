@@ -301,7 +301,7 @@ class TestWriteCsvDir:
                 assert os.path.isdir(os.path.join(tmp, slug)), scenario.name
 
     def test_same_named_scenarios_do_not_overwrite_each_others_csvs(self):
-        """Two IFs in one paragraph both plan a "MAIN-PARA: THEN" scenario.
+        """Two IFs in one paragraph used to both plan a "MAIN-PARA: THEN" scenario.
         Both used to slug to one directory: the later scenario's CSV
         overwrote the earlier one's and both manifest entries pointed at
         the survivor."""
@@ -322,6 +322,11 @@ class TestWriteCsvDir:
         bundle = ProgramFixtureGenerator().generate_with_scenarios(
             result.ast, index, report, mode="branches", seed=1
         )
+        # The planner now names every scenario uniquely (#267), but names
+        # are free text and a hand-built bundle can still repeat one, so
+        # force the collision write_csv_dir must survive.
+        for scenario in bundle.scenarios:
+            scenario.name = "MAIN-PARA: THEN"
         names = [s.name for s in bundle.scenarios]
         assert len(set(names)) < len(names)  # the collision this test is about
 

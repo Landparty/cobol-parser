@@ -47,6 +47,25 @@ def _join(items: list[str]) -> str:
     return ", ".join(items)
 
 
+def _perform_loop_text(stmt: PerformStatement) -> str:
+    """The `` VARYING v FROM x BY y`` / `` n TIMES`` part of a PERFORM.
+
+    The UNTIL guard is left out: arm boxes have no room for it, and the
+    diff renderer (``ast_diff._statement_text``) appends it itself.
+    """
+    varying = stmt.varying_clause
+    if varying and varying.get("variable"):
+        text = f" VARYING {varying['variable']}"
+        if varying.get("from_value") is not None:
+            text += f" FROM {varying['from_value']}"
+        if varying.get("by_value") is not None:
+            text += f" BY {varying['by_value']}"
+        return text
+    if stmt.perform_type == "TIMES" and stmt.times_count is not None:
+        return f" {stmt.times_count} TIMES"
+    return ""
+
+
 def summarize_statement(stmt: Any) -> str:
     """Return a compact, COBOL-like one-line summary of *stmt*.
 
@@ -57,14 +76,17 @@ def summarize_statement(stmt: Any) -> str:
     if isinstance(stmt, MoveStatement) and stmt.source and stmt.targets:
         return _truncate(f"MOVE {stmt.source} TO {_join(stmt.targets)}")
     if isinstance(stmt, PerformStatement):
+        text = "PERFORM"
         if stmt.target_paragraph:
-            text = f"PERFORM {stmt.target_paragraph}"
+            text += f" {stmt.target_paragraph}"
             if stmt.thru_paragraph:
                 text += f" THRU {stmt.thru_paragraph}"
+        text += _perform_loop_text(stmt)
+        if stmt.target_paragraph:
             return _truncate(text)
         if stmt.inline_statements:
-            return "PERFORM (inline)"
-        return "PERFORM"
+            return _truncate(f"{text} (inline)")
+        return _truncate(text)
     if isinstance(stmt, GoStatement):
         targets = stmt.target_paragraphs or (
             [stmt.target_paragraph] if stmt.target_paragraph else []
@@ -78,26 +100,38 @@ def summarize_statement(stmt: Any) -> str:
     if isinstance(stmt, CallStatement) and stmt.called_program:
         return _truncate(f"CALL {stmt.called_program}")
     if isinstance(stmt, SetStatement) and stmt.targets:
-        if stmt.set_type == "TRUE":
-            return _truncate(f"SET {_join(stmt.targets)} TO TRUE")
+        if stmt.set_type in ("TRUE", "FALSE"):
+            return _truncate(f"SET {_join(stmt.targets)} TO {stmt.set_type}")
+        if stmt.set_type in ("UP_BY", "DOWN_BY") and stmt.value is not None:
+            direction = "UP" if stmt.set_type == "UP_BY" else "DOWN"
+            return _truncate(f"SET {_join(stmt.targets)} {direction} BY {stmt.value}")
         if stmt.value is not None:
             return _truncate(f"SET {_join(stmt.targets)} TO {stmt.value}")
         return _truncate(f"SET {_join(stmt.targets)}")
     if isinstance(stmt, ComputeStatement) and stmt.targets:
+        target = stmt.targets[0] + (" ROUNDED" if stmt.rounded else "")
         if stmt.expression:
-            return _truncate(f"COMPUTE {stmt.targets[0]} = {stmt.expression}")
-        return _truncate(f"COMPUTE {stmt.targets[0]}")
-    if isinstance(stmt, (AddStatement, SubtractStatement)) and stmt.targets:
-        # ``operands`` lists sources followed by targets; recover the sources
-        # by removing the targets.
-        sources = [o for o in stmt.operands if o not in stmt.targets]
-        if sources:
+            return _truncate(f"COMPUTE {target} = {stmt.expression}")
+        return _truncate(f"COMPUTE {target}")
+    if isinstance(stmt, (AddStatement, SubtractStatement)):
+        # ``source_operands`` holds only the sending items; ``operands``
+        # also lists the TO/FROM targets *and* the GIVING items, so
+        # subtracting the targets from it turned GIVING items into sources.
+        sources = list(stmt.source_operands or []) or [
+            o for o in stmt.operands if o not in stmt.targets + stmt.givings
+        ]
+        if sources and (stmt.targets or stmt.givings):
             verb, prep = (
                 ("ADD", "TO")
                 if isinstance(stmt, AddStatement)
                 else ("SUBTRACT", "FROM")
             )
-            return _truncate(f"{verb} {_join(sources)} {prep} {_join(stmt.targets)}")
+            text = f"{verb} {_join(sources)}"
+            if stmt.targets:
+                text += f" {prep} {_join(stmt.targets)}"
+            if stmt.givings:
+                text += f" GIVING {_join(stmt.givings)}"
+            return _truncate(text)
     if isinstance(stmt, MultiplyStatement) and stmt.operands and stmt.target:
         return _truncate(f"MULTIPLY {stmt.operands[0]} BY {stmt.target}")
     if isinstance(stmt, DivideStatement) and stmt.operands and stmt.target:

@@ -274,8 +274,18 @@ class RecursionRiskAnalyzer:
 
         DynamicCallAnalyzer().analyze(ast)
 
+        # The programs *ast* is nested in, innermost first. Any of them is
+        # necessarily active while *ast* runs -- a contained program is only
+        # reachable through its container -- so CALLing one re-enters it.
+        enclosing: list[CobolProgram] = []
+        parent = ast.parent
+        while parent is not None:
+            if isinstance(parent, CobolProgram):
+                enclosing.append(parent)
+            parent = parent.parent
+
         risks: list[RecursionRisk] = []
-        for stmt in ast.find_all_by_type("CallStatement"):
+        for stmt in _own_statements(ast):
             if not isinstance(stmt, CallStatement):
                 continue
             if stmt.is_dynamic:
@@ -285,6 +295,16 @@ class RecursionRiskAnalyzer:
             else:
                 targets = set()
             if program_name not in targets:
+                container = next(
+                    (
+                        unit
+                        for unit in enclosing
+                        if (unit.program_name or "").strip().upper() in targets
+                    ),
+                    None,
+                )
+                if container is not None:
+                    risks.append(_container_call_risk(stmt, program_name, container))
                 continue
 
             call_kind = "dynamically " if stmt.is_dynamic else ""
@@ -330,3 +350,61 @@ class RecursionRiskAnalyzer:
                 )
             )
         return risks
+
+
+def _own_statements(ast: CobolProgram) -> list[Any]:
+    """*ast*'s statements, without those of the programs it contains.
+
+    ``get_all_statements()`` walks children and a contained program is a
+    child, so an inner unit's ``CALL 'OUTER'`` would otherwise be reported
+    as the outer unit calling itself (#274). Same idiom as
+    ``UnusedVariableAnalyzer._own_statements``.
+    """
+    statements = ast.get_all_statements()
+    if not ast.contained_programs:
+        return list(statements)
+    inner = {
+        id(node)
+        for contained in ast.contained_programs
+        for node in contained.traverse_depth_first()
+    }
+    return [stmt for stmt in statements if id(stmt) not in inner]
+
+
+def _container_call_risk(
+    stmt: CallStatement, program_name: str, container: CobolProgram
+) -> RecursionRisk:
+    """A contained program CALLing a program it is nested in: indirect
+    recursion, since the container is on the call chain whenever the
+    contained program runs."""
+    container_name = (container.program_name or "").strip().upper()
+    call_kind = "dynamically " if stmt.is_dynamic else ""
+    if container.is_recursive:
+        return RecursionRisk(
+            mechanism="CALL",
+            severity="LOW",
+            program=container_name,
+            is_dynamic=stmt.is_dynamic,
+            explanation=(
+                f"This CALL {call_kind}targets '{container_name}', a program "
+                f"'{program_name}' is nested in -- it is always active while "
+                f"'{program_name}' runs, so this re-enters it. "
+                f"'{container_name}' is declared IS RECURSIVE, so re-entry is "
+                "legal; the recursion still needs a base case the analyzer "
+                "cannot verify."
+            ),
+        )
+    return RecursionRisk(
+        mechanism="CALL",
+        severity="HIGH",
+        program=container_name,
+        is_dynamic=stmt.is_dynamic,
+        explanation=(
+            f"This CALL {call_kind}targets '{container_name}', a program "
+            f"'{program_name}' is nested in -- it is always active while "
+            f"'{program_name}' runs, so this re-enters it. "
+            f"'{container_name}' is not declared IS RECURSIVE: re-entering a "
+            "non-recursive program abends or recurses without a "
+            "runtime-enforced bound."
+        ),
+    )

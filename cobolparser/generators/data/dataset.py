@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .encoding import EncodingOptions, encode_record, hex_dump
@@ -39,6 +39,10 @@ class GeneratedDataset:
             range.  Applied only by the variable-length record formats;
             ``RecordFormat.FIXED`` writes full-length records whatever this
             says, because that is what asking for RECFM=F means.
+        caveats: Ways this dataset is not what was asked for -- e.g. a
+            ``RECORD VARYING`` range clamped to the bytes the layout
+            describes, or ignored because nothing of it fit.  Printed in
+            :meth:`to_hex_dump`'s header and on stderr by ``gen-data``.
     """
 
     record_name: str
@@ -47,6 +51,7 @@ class GeneratedDataset:
     seed: int
     varying: VaryingLength | None = None
     declared_lengths: list[int] | None = None
+    caveats: list[str] = field(default_factory=list)
 
     @property
     def header(self) -> list[str]:
@@ -193,6 +198,7 @@ class GeneratedDataset:
             record_name=self.record_name,
             data_lengths=self.declared_lengths,
             varying=self.varying,
+            extra_caveats=self.caveats,
         )
 
     def to_dicts(self) -> list[dict[str, str]]:

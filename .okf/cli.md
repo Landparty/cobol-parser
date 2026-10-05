@@ -186,6 +186,17 @@ a specific subtree. `--errors` shows parse errors only. `--stats` appends
 (see [parser.md](parser.md)) and embed timing/memory metrics in the output, or
 write a binary `.prof` to `PATH`.
 
+**Nested profilers (issue #274, 2026-10-05).** A `ProfilerContext` entered
+while another profiler is active (an outer `ProfilerContext`, a bare
+`cProfile`, anything on `sys.setprofile` or `sys.monitoring`'s PROFILER_ID)
+skips cProfile: its result has `function_profile_available: false`, empty
+`top_functions`, no `.prof` file, and a `caveats` entry, while wall-clock,
+CPU and memory are still measured. Before, on 3.11 the inner cProfile
+silently replaced the outer one (whose `top_functions` then held only
+`__enter__`/`enable`), and on 3.12+ `enable()` raised after tracemalloc had
+started, leaking the session. An inner context never stops a tracemalloc
+session it did not start.
+
 Exit codes (2026-07-07): `0` clean parse; `1` hard failure (`ast is None`,
 bad arguments); `2` recovered-but-errored parse — the JSON is still printed,
 a summary goes to stderr. Previously the CLI exited `0` whenever an AST
@@ -257,6 +268,10 @@ All subcommands that run conditional compilation (`parse`, `preprocess`,
 (unknown `>>IF` conditions, stray `>>ELSE`/`>>END-IF`, malformed
 `>>DEFINE`, unclosed `>>IF` — audit 2026-07-07 H7) to **stderr** as
 `warning: ...` lines, so deleted guarded blocks are no longer silent.
+`preprocess` evaluates `>>IF` / `>>EVALUATE` / `>>DEFINE` **whether or
+not `--define` is given** (issue #271, 2026-10-05): it used to run the
+conditional pass only under `--define`, so without it every `>>IF ... >>ELSE`
+came out with both arms and an in-source `>>DEFINE` was ignored.
 `preprocess` (fixed-format branch only) additionally prints
 `normalize_fixed_format`'s column-72 overflow diagnostics the same way
 (2026-08-14 — see [preprocessing.md](preprocessing.md)'s "Column 73+
@@ -395,7 +410,12 @@ to `--format record|hex` only (CSV and JSON have no notion of record length).
    FD, `--record-varying MIN:MAX` supplies the range (`MIN-MAX` is accepted
    too, since that is how it reads in the FD). The cut can fall mid-field —
    which is exactly what a program reading `REC(1:LEN)` sees — and
-   `--format hex` marks the fields past it as `(past record length)`.
+   `--format hex` marks the fields past it as `(past record length)` and the
+   field it falls inside as `(cut N/M bytes)`. A range reaching past the
+   record's own bytes is clamped to them, and one with nothing left
+   (`40:50` on a 28-byte record, or equal bounds) is ignored -- both with a
+   `warning:` on stderr (every format) and a `* caveat:` in the hex header
+   (#274); previously both happened silently.
 * **The RDW** is `LL LL 00 00` — a big-endian 16-bit length *including the
   four RDW bytes*, then two reserved zero bytes — regardless of `--charset`
   and `--endian`. A record whose total would exceed 65 535 bytes errors out

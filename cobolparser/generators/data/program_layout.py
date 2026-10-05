@@ -293,18 +293,48 @@ class ProgramLayoutIndex:
         scenario was seeded with the *first* 88's value and never reached the
         branch it was named for.
         """
-        if not name or not name.strip():
+        found = self._condition_entry(name)
+        if found is None:
             return None
-        entries = self._condition_index.get(name.strip().upper())
-        if not entries:
+        base, position = found
+        values = self._condition_values.get(base) or []
+        if position >= len(values):
             return None
-        parents = sorted({entry.spec.qualified_name for entry in entries})
-        if len(parents) != 1:
+        return tuple(values[position])
+
+    @staticmethod
+    def _qualifiers_match(entry: ResolvedField, qualifiers: list[str]) -> bool:
+        """Whether every OF/IN qualifier names *entry*'s record or one of the
+        groups on its path -- the one rule :meth:`resolve` applies to a
+        field and to a level-88 condition name alike."""
+        path = {p.upper() for p in entry.spec.path}
+        return all(q == entry.record.name.upper() or q in path for q in qualifiers)
+
+    def _condition_matches(
+        self, base: str, qualifiers: list[str]
+    ) -> list[tuple[int, ResolvedField]]:
+        """``(position, parent field)`` of every level-88 *base* declaration
+        the *qualifiers* admit; position indexes the lockstep value lists."""
+        return [
+            (position, entry)
+            for position, entry in enumerate(self._condition_index.get(base) or [])
+            if self._qualifiers_match(entry, qualifiers)
+        ]
+
+    def _condition_entry(self, name: str) -> tuple[str, int] | None:
+        """``(base, position)`` of the ONE level-88 declaration *name*
+        (bare or qualified) names, or ``None`` when it names none or is
+        ambiguous across more than one parent field."""
+        split = split_qualified_name(name)
+        if split is None:
             return None
-        values = self._condition_values.get(name.strip().upper()) or []
-        if not values:
+        base, qualifiers = split
+        matches = self._condition_matches(base, qualifiers)
+        if not matches:
             return None
-        return tuple(values[0])
+        if len({entry.spec.qualified_name for _, entry in matches}) != 1:
+            return None
+        return base, matches[0][0]
 
     def condition_raw_values(self, name: str) -> tuple[str, ...] | None:
         """The level-88 condition name *name*'s VALUE entries as parsed.
@@ -318,8 +348,11 @@ class ProgramLayoutIndex:
         """
         if self.condition_values(name) is None:
             return None
-        values = self._condition_raw_values.get(name.strip().upper()) or []
-        return tuple(values[0]) if values else None
+        found = self._condition_entry(name)
+        assert found is not None  # condition_values() just found it
+        base, position = found
+        values = self._condition_raw_values.get(base) or []
+        return tuple(values[position]) if position < len(values) else None
 
     def resolve(self, name: str) -> ResolvedField | None:
         """Resolve a data-name (bare, ``A OF B``, or dotted ``B.A``) to a field.
@@ -340,7 +373,9 @@ class ProgramLayoutIndex:
 
         candidates = self._name_index.get(base)
         if not candidates:
-            conditions = self._condition_index.get(base)
+            conditions = [
+                entry for _, entry in self._condition_matches(base, qualifiers)
+            ]
             if conditions:
                 parents = sorted({c.spec.qualified_name for c in conditions})
                 if len(parents) == 1:
@@ -354,7 +389,7 @@ class ProgramLayoutIndex:
                 # parent field (e.g. in two different records): refuse to
                 # guess, record the ambiguity -- same policy as bare-name
                 # and record_named() lookups.
-                self.ambiguities[base] = parents
+                self.ambiguities[text if qualifiers else base] = parents
             return None
 
         if qualifiers:

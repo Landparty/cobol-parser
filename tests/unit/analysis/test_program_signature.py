@@ -193,6 +193,37 @@ class TestDirection:
 
         assert primary.parameters[0].direction == "input-output"
 
+    def test_counters_pointers_and_inspected_items_are_input_output(self):
+        # Issue #269: a TALLYING counter, a STRING POINTER and an INSPECT
+        # REPLACING target are each advanced / rewritten from the caller's
+        # value -- all three were reported as plain output.
+        signature = _signature("""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. S2.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC X(10).
+       01 WS-Y PIC X(10).
+       LINKAGE SECTION.
+       01 LK-CNT PIC 9(4).
+       01 LK-PTR PIC 9(4).
+       01 LK-TXT PIC X(10).
+       PROCEDURE DIVISION USING LK-CNT LK-PTR LK-TXT.
+       MAIN-PARA.
+           INSPECT WS-X TALLYING LK-CNT FOR ALL 'A'
+           STRING 'Z' DELIMITED BY SIZE INTO WS-Y
+               WITH POINTER LK-PTR
+           INSPECT LK-TXT REPLACING ALL 'A' BY 'B'
+           GOBACK.
+""")
+        primary = signature.primary
+        assert primary is not None
+
+        assert [p.direction for p in primary.parameters] == [
+            "input-output",
+            "input-output",
+            "input-output",
+        ]
+
     def test_an_unreferenced_operand_is_unknown_and_recorded_not_guessed(self):
         signature = _signature("""       IDENTIFICATION DIVISION.
        PROGRAM-ID. UNREF.

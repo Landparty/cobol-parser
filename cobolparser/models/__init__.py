@@ -22,6 +22,7 @@ from .program import (
     CobolDivision,
     CobolProgram,
     CobolSection,
+    LossyDeserializationWarning,
 )
 from .sql_statements import (
     DeclareCursorStatement,
@@ -58,6 +59,7 @@ __all__ = [
     "CobolProgram",
     "CobolDivision",
     "CobolSection",
+    "LossyDeserializationWarning",
     "CobolDataItem",
     "PictureClause",
     "OccursClause",

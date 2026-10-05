@@ -110,10 +110,10 @@ substance, differing only in each target format's own attribute syntax:
   (`fill:#1b1b1b,stroke:#c1121f`); DOT emits `shape=doublecircle` with
   matching `fillcolor`/`fontcolor`. Both respect `show_unreachable`
   identically to the main node loop. The terminal id is normally
-  `f"{nid}_EXIT"` (`nid = _sanitize_id(node.name)`), but module-level
-  `_unique_exit_id(nid, paragraph_ids)` (shared by both generators) falls
+  `f"{nid}_EXIT"` (`nid` = the paragraph's own allocated id), but the
+  chart's `_IdAllocator` (see "One id allocator per chart" below) falls
   back to `{nid}_FLOWEXIT`, then an incrementing numeric suffix, whenever
-  that id collides with a real paragraph's own sanitized id. **Bug fixed
+  that id is already taken (e.g. by a real paragraph's sanitized id). **Bug fixed
   2026-08-11:** `PERFORM X THRU X-EXIT` is a common COBOL range idiom, so a
   program can legitimately contain a paragraph literally named e.g.
   `9000-TERM-EXIT`; before the fix, that paragraph's own node id
@@ -188,6 +188,18 @@ Program Flow webview (Mermaid v11, `htmlLabels:false`,
   every DOT node/edge emission site. Mermaid is unaffected: its flowchart
   keywords (`end`, `style`, `class`, `click`, ...) only bite in lower case,
   and every id here is upper case (verified with mermaid 11 `parse()`).
+- **One id allocator per chart (#266, 2026-10-05).** `_sanitize_id` is
+  lossy: paragraphs `A-B` and `A_B` both sanitize to `A_B`, and an external
+  program `SUBPGM` (`EXT_SUBPGM`) meets a paragraph named `EXT-SUBPGM` --
+  the colliding nodes were silently merged and every edge into either
+  landed on the merged box. Each `generate()` builds one
+  `_IdAllocator.for_report(report)`, mapping `(kind, name)` -> a unique id
+  (kinds `node` = paragraph/section/branch/arm keyed by raw name, `ext` =
+  called program, `exit` = terminal). Paragraphs are allocated first so
+  they keep the plain id; a later collision gets a numeric suffix
+  (`A_B_2`, `EXT_SUBPGM_2`). Every node declaration and edge endpoint goes
+  through it; `_hidden_ids()` and the skipped-empty-arm set hold *raw*
+  names. A chart without collisions is byte-identical to before.
 - **`show_unreachable=False` hides what the paragraph owns (2026-09-28).**
   Only the paragraph's own node line (and its terminal node) was skipped;
   its outgoing PERFORM/GO TO/CALL edges, its IF/EVALUATE decision and arm
@@ -1108,7 +1120,14 @@ bytes each *record* carries.
   `VARYING` keyword and parses identically.
 * **`maximum` is clamped to the record's own byte length.** An FD promising
   more than its 01 can hold cannot be honoured by padding — those bytes were
-  never declared — so the range is cut to what exists.
+  never declared — so the range is cut to what exists. **Never silently**
+  (#274, 2026-10-05): `VaryingLength.build(..., caveats=)` appends a sentence
+  whenever it clamps a bound, or ignores the range outright because nothing
+  of it is left (`40:50` on a 28-byte record, or equal bounds) — the record
+  then stays fixed-length. The sentence lands on `GeneratedDataset.caveats`,
+  is printed as a `* caveat:` line in `to_hex_dump()`'s header
+  (`hex_dump(..., extra_caveats=)`), and as `warning:` on stderr by
+  `gen-data` in every output format.
 * **The length is drawn per row at *generation* time**, uniformly across the
   range, from the same seeded RNG the values came from, and stored on
   `GeneratedDataset.declared_lengths`. Drawing it there rather than in the
@@ -1121,7 +1140,9 @@ bytes each *record* carries.
   `EMP-RECORD80(1:EMPREC-LEN)` sees. Passing it also settles
   `RecordFormat.AUTO`, since a declared length is by definition a record that
   varies. `--format hex` shows the fields past the cut as
-  `(past record length)` rather than dropping them, so the cut is visible.
+  `(past record length)` rather than dropping them, so the cut is visible;
+  a field the cut falls *inside* shows `(cut N/M bytes)` in the VALUE column
+  rather than the whole generated value (most of which is not in the file).
 * **The `DEPENDING ON` item is filled in when it *is* in the record.** Usually
   it isn't. When a copybook does put it there, leaving the generated value
   would contradict the record's own length.
@@ -1238,6 +1259,15 @@ one distinct parent field returns `None` and records the parents in
 `ambiguities` -- the same policy `resolve()`/`record_named()` already apply
 to bare names. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestB4DuplicateConditionNamesAreAmbiguous`.
+**Qualified 88 names (#272, 2026-10-05).** `IS-OK OF REC-A` (or `IN`, or
+dotted `REC-A.IS-OK`) filters the 88's declarations by its qualifiers with
+the same rule the field branch uses (each qualifier names the record or a
+group on the parent field's path) before the one-parent check, so a
+qualified reference to a duplicated 88 resolves instead of being given up
+on. `condition_values()` / `condition_raw_values()` split the name with
+`split_qualified_name` and filter the same way (they used to look up the raw
+text, so any qualified name returned `None` and `gen-fixtures --scenarios`
+missed every arm testing it). A *bare* duplicated 88 still refuses to guess.
 
 **`record_named(name)` — whole records, not fields.** `resolve()` only ever
 finds *elementary* fields, because `flatten_record` never emits a `FieldSpec`
@@ -1575,8 +1605,9 @@ by-character instead of hitting a type error) plus a new `csv_path` key
 (the relative CSV path, or `null` if this fixture got no CSV), so a
 consumer can discover what scenarios/fixtures exist — and where each one's
 CSV lives — without walking the directory tree first. **Names are made
-unique** (2026-09-28): scenario names repeat (two IFs in one paragraph both
-plan `"<PARA>: THEN"`), and both used to slug to one directory, the later
+unique** (2026-09-28): scenario names used to repeat (two IFs in one
+paragraph both planned `"<PARA>: THEN"`; the planner names them uniquely
+since #267, but a hand-built bundle still can), and both used to slug to one directory, the later
 scenario's CSV overwriting the earlier one's with both manifest entries
 pointing at the survivor. `_unique_names` suffixes a repeated slug `-2`,
 `-3`, ... (first keeps its plain slug, case-insensitive), and `_csv_names`
@@ -1649,6 +1680,20 @@ boundary (same length, or one side doesn't mention it) -- greedy,
 deterministic: candidates are processed in `(line, column, arm_id)` order,
 each merging into the first open scenario it is compatible with. "Fewer,
 richer scenarios" rather than one per arm.
+
+**Naming** (#267, 2026-10-05). One arm's name is
+`"<proc>: <VERB>@<line> <arm label>"` -- `"MAIN-PARA: IF@11 THEN"`,
+`"P: EVALUATE@90 WHEN 'A'"` -- with the verb read off a conjunct's
+`origin` (else the flow graph's `branch_type`). An OR-split arm
+(`THEN#2`) appends its own disjunct, rendered from its conjuncts
+(`"... THEN [WS-A = 'Z']"`), or `[alt N]` when it has none. After merging,
+a scenario is renamed for *every* arm it targets (later arms in the same
+paragraph drop the repeated `"<proc>: "`), joined with `" + "`, or the
+first arm's name plus `" (+N more arms)"` past 120 characters; then
+`bundle._unique_names` suffixes any repeat `-2`, `-3`, ... -- so names are
+unique within a plan. `ArmOutcome.merged_into` carries the *final* name.
+Before this, two IFs in one paragraph both planned `"<PARA>: THEN"`.
+`name` stays free text (no `bundle_version` bump).
 
 **Unsatisfiable arms.** Every distinct field an arm's conjuncts touch is
 solved independently via `domains.solve()`; if *any* field's constraint set

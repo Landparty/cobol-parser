@@ -116,17 +116,29 @@ class VaryingLength:
 
     @classmethod
     def from_fd_clauses(
-        cls, clauses: dict[str, Any] | None, *, record_size: int
+        cls,
+        clauses: dict[str, Any] | None,
+        *,
+        record_size: int,
+        caveats: list[str] | None = None,
     ) -> VaryingLength | None:
         """Read an FD's ``RECORD`` clause, or ``None`` if it declares no range.
 
-        *record_size* clamps :attr:`maximum`; see its note above.
+        *record_size* clamps :attr:`maximum`; see its note above, and
+        :meth:`build` for *caveats*.
         """
         block = (clauses or {}).get("record") or {}
         low, high = block.get("min"), block.get("max")
         if low is None or high is None or low == high:
             return None
-        return cls.build(int(low), int(high), block.get("depending_on"), record_size)
+        return cls.build(
+            int(low),
+            int(high),
+            block.get("depending_on"),
+            record_size,
+            caveats=caveats,
+            source="FD RECORD VARYING",
+        )
 
     @classmethod
     def build(
@@ -135,12 +147,40 @@ class VaryingLength:
         maximum: int,
         depending_on: str | None,
         record_size: int,
+        *,
+        caveats: list[str] | None = None,
+        source: str = "RECORD VARYING",
     ) -> VaryingLength | None:
-        """A range clamped into what the layout can actually produce."""
+        """A range clamped into what the layout can actually produce.
+
+        Whenever the range is changed to fit -- a bound past the bytes the
+        record layout describes is clamped to them, or nothing of the range
+        is left and it is ignored (the record stays fixed-length) -- a
+        sentence saying so is appended to *caveats*, so a caller that asked
+        for ``FROM 40 TO 50`` on a 28-byte record is told it got neither.
+        *source* names the range in that sentence.
+        """
+        stated = f"{source} FROM {minimum} TO {maximum}"
         low, high = sorted((max(0, minimum), max(0, maximum)))
         if record_size > 0:
-            low, high = min(low, record_size), min(high, record_size)
-        return cls(low, high, depending_on) if high > low else None
+            clamped_low, clamped_high = min(low, record_size), min(high, record_size)
+            if (clamped_low, clamped_high) != (low, high) and caveats is not None:
+                if clamped_high > clamped_low:
+                    caveats.append(
+                        f"{stated} exceeds the {record_size} bytes the record "
+                        f"layout describes; clamped to FROM {clamped_low} TO "
+                        f"{clamped_high}"
+                    )
+            low, high = clamped_low, clamped_high
+        if high > low:
+            return cls(low, high, depending_on)
+        if caveats is not None:
+            caveats.append(
+                f"{stated} leaves no length range within the "
+                f"{record_size}-byte record layout; ignored, every record is "
+                f"written at the layout's full {record_size} bytes"
+            )
+        return None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise the range (used by the CLI's ``--describe`` output)."""

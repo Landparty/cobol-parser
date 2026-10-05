@@ -691,6 +691,39 @@ class TestRecordVaryingFlag:
         )
         assert colon == hyphen
 
+    def test_a_range_past_the_record_warns_instead_of_going_silent(
+        self, comp_copybook, tmp_path, capsys
+    ):
+        # #274: COMP-REC is 13 bytes; 40:50 used to write plain RECFM=F and
+        # 6:40 used to report "FROM 6 TO 13", neither with a word of warning.
+        raw = _gen_records(
+            comp_copybook, tmp_path / "x.bin", "--record-varying", "40:50"
+        )
+        assert len(raw) == 6 * 13
+        err = capsys.readouterr().err
+        assert "warning: requested RECORD VARYING FROM 40 TO 50" in err
+        assert "ignored" in err
+
+        _gen_records(comp_copybook, tmp_path / "y.bin", "--record-varying", "6:40")
+        err = capsys.readouterr().err
+        assert "clamped to FROM 6 TO 13" in err
+
+    def test_a_clamped_range_is_a_caveat_in_the_hex_header(self, comp_copybook, capsys):
+        _run_argv(
+            [
+                "gen-data",
+                comp_copybook,
+                "-n",
+                "1",
+                "--format",
+                "hex",
+                "--record-varying",
+                "40:50",
+            ]
+        )
+        out = capsys.readouterr().out
+        assert "* caveat: requested RECORD VARYING FROM 40 TO 50" in out
+
     @pytest.mark.parametrize("bad", ["notanumber", "5", "1:2:3", "a:b"])
     def test_a_malformed_range_is_rejected(self, comp_copybook, tmp_path, bad):
         with pytest.raises(SystemExit):

@@ -77,6 +77,63 @@ class TestSummarizeStatement:
             _first_summary("           SUBTRACT 1 FROM WS-N.") == "SUBTRACT 1 FROM WS-N"
         )
 
+    # #274: SET UP/DOWN BY rendered as "SET x TO v"; ADD/SUBTRACT GIVING
+    # items were listed as sources; PERFORM VARYING / TIMES and COMPUTE
+    # ROUNDED dropped the clauses that tell two versions apart.
+    def test_set_up_by(self) -> None:
+        assert _first_summary("           SET WS-I UP BY 1.") == "SET WS-I UP BY 1"
+
+    def test_set_down_by(self) -> None:
+        assert (
+            _first_summary("           SET WS-I DOWN BY WS-N.")
+            == "SET WS-I DOWN BY WS-N"
+        )
+
+    def test_set_to_value_unchanged(self) -> None:
+        assert _first_summary("           SET WS-I TO 3.") == "SET WS-I TO 3"
+
+    def test_add_giving(self) -> None:
+        assert (
+            _first_summary("           ADD WS-A TO WS-B GIVING WS-C.")
+            == "ADD WS-A TO WS-B GIVING WS-C"
+        )
+
+    def test_add_giving_without_to(self) -> None:
+        assert (
+            _first_summary("           ADD WS-A WS-B GIVING WS-C.")
+            == "ADD WS-A, WS-B GIVING WS-C"
+        )
+
+    def test_subtract_giving(self) -> None:
+        assert (
+            _first_summary("           SUBTRACT WS-A FROM WS-B GIVING WS-C.")
+            == "SUBTRACT WS-A FROM WS-B GIVING WS-C"
+        )
+
+    def test_compute_rounded(self) -> None:
+        assert (
+            _first_summary("           COMPUTE WS-X ROUNDED = WS-Y / 3.")
+            == "COMPUTE WS-X ROUNDED = WS-Y / 3"
+        )
+
+    def test_perform_varying(self) -> None:
+        body = "           PERFORM 9000-DONE VARYING WS-I FROM 1 BY 2 UNTIL WS-I > 9."
+        assert _first_summary(body) == "PERFORM 9000-DONE VARYING WS-I FROM 1 BY 2"
+
+    def test_inline_perform_varying(self) -> None:
+        body = (
+            "           PERFORM VARYING WS-I FROM 1 BY 1 UNTIL WS-I > 9\n"
+            "               CONTINUE\n"
+            "           END-PERFORM."
+        )
+        assert _first_summary(body) == "PERFORM VARYING WS-I FROM 1 BY 1 (inline)"
+
+    def test_perform_times(self) -> None:
+        assert (
+            _first_summary("           PERFORM 9000-DONE 5 TIMES.")
+            == "PERFORM 9000-DONE 5 TIMES"
+        )
+
     def test_display(self) -> None:
         assert (
             _first_summary("           DISPLAY 'BAD' WS-PURGE-ERRORS.")

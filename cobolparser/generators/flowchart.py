@@ -168,6 +168,80 @@ def _sanitize_id(name: str) -> str:
     return safe or "N_UNKNOWN"
 
 
+class _IdAllocator:
+    """One chart's mapping from ``(kind, name)`` to a unique node id.
+
+    ``_sanitize_id`` is lossy: ``A-B`` and ``A_B`` both become ``A_B``, and
+    an external program ``SUBPGM`` (``EXT_SUBPGM``) meets a paragraph named
+    ``EXT-SUBPGM``. Emitting those ids unchecked silently merged distinct
+    nodes, and every edge into either landed on the merged box (#266). Each
+    generated chart owns one allocator; every node declaration *and* every
+    edge endpoint asks it for the id, so the same ``(kind, name)`` always
+    gets the same id and two different ones never share an id. A collision
+    gets a numeric suffix (``A_B``, ``A_B_2``); a chart with no collisions
+    is emitted exactly as before.
+
+    Kinds: ``"node"`` (paragraph / section / branch / arm, keyed by the raw
+    name edges refer to them by), ``"ext"`` (called program) and ``"exit"``
+    (a paragraph's exit-statement terminal).
+    """
+
+    def __init__(self) -> None:
+        self._ids: dict[tuple[str, str], str] = {}
+        self._taken: set[str] = set()
+
+    def get(self, kind: str, name: str) -> str:
+        """Return the id for *name*, allocating it on first use."""
+        key = (kind, name)
+        found = self._ids.get(key)
+        if found is not None:
+            return found
+        if kind == "ext":
+            candidates = ["EXT_" + _sanitize_id(name)]
+        elif kind == "exit":
+            # ``PERFORM X THRU X-EXIT`` is a common idiom, so a real
+            # paragraph named ``X-EXIT`` is likely: fall back to
+            # ``_FLOWEXIT`` before resorting to a numeric suffix.
+            nid = self.get("node", name)
+            candidates = [f"{nid}_EXIT", f"{nid}_FLOWEXIT"]
+        else:
+            candidates = [_sanitize_id(name)]
+        chosen = next((c for c in candidates if c not in self._taken), None)
+        if chosen is None:
+            base = candidates[-1]
+            suffix = 2
+            while f"{base}_{suffix}" in self._taken:
+                suffix += 1
+            chosen = f"{base}_{suffix}"
+        self._taken.add(chosen)
+        self._ids[key] = chosen
+        return chosen
+
+    @classmethod
+    def for_report(cls, report: ProgramFlowReport) -> _IdAllocator:
+        """An allocator with every declared node pre-allocated.
+
+        Paragraphs/sections first, so in a collision the real paragraph
+        keeps the plain id; then branch and arm boxes, called programs and
+        exit terminals.
+        """
+        ids = cls()
+        for node in report.nodes:
+            ids.get("node", node.key)
+        for bn in report.branch_nodes:
+            ids.get("node", bn.node_id)
+            for arm in bn.arms:
+                ids.get("node", arm.arm_id)
+        for ext in report.external_calls:
+            target = _external_call_target(ext)
+            if target:
+                ids.get("ext", target)
+        for node in report.nodes:
+            if node.exit_statement_kind and node.exit_statement_location:
+                ids.get("exit", node.key)
+        return ids
+
+
 # DOT's reserved words, matched case-independently by Graphviz. A bare
 # keyword can never be a node ID: ``NODE [label=...]`` is read as the
 # default-node attribute statement and ``MAIN -> STRICT;`` is a syntax error.
@@ -189,35 +263,10 @@ def _dot_id(safe_id: str) -> str:
     return safe_id
 
 
-def _unique_exit_id(nid: str, paragraph_ids: set[str]) -> str:
-    """Return a terminal-node id derived from *nid* that cannot collide with
-    a real paragraph's sanitized id.
-
-    ``PERFORM X THRU X-EXIT`` is a common COBOL range idiom, so a program
-    can legitimately contain a paragraph literally named e.g. ``9000-TERM-
-    EXIT``. ``_sanitize_id`` turns both "9000-TERM" + our own "_EXIT" suffix
-    and the real paragraph "9000-TERM-EXIT" into the same id
-    (``N_9000_TERM_EXIT``), which would silently merge two distinct nodes.
-    Fall back to a suffix that's very unlikely to collide, then to an
-    incrementing numeric suffix in the pathological case that even that
-    collides too.
-    """
-    candidate = f"{nid}_EXIT"
-    if candidate not in paragraph_ids:
-        return candidate
-    candidate = f"{nid}_FLOWEXIT"
-    if candidate not in paragraph_ids:
-        return candidate
-    suffix = 2
-    while f"{nid}_FLOWEXIT_{suffix}" in paragraph_ids:
-        suffix += 1
-    return f"{nid}_FLOWEXIT_{suffix}"
-
-
 def _hidden_ids(
     report: ProgramFlowReport, options: FlowchartOptions, unreachable_set: set[str]
 ) -> set[str]:
-    """Sanitized ids of every node ``show_unreachable=False`` leaves out.
+    """Raw names of every node ``show_unreachable=False`` leaves out.
 
     An unreachable paragraph, plus the IF/EVALUATE decision and arm boxes
     that live inside it. Skipping only the paragraph's own node line was not
@@ -228,11 +277,11 @@ def _hidden_ids(
     """
     if options.show_unreachable:
         return set()
-    hidden = {_sanitize_id(name) for name in unreachable_set}
+    hidden = set(unreachable_set)
     for bn in report.branch_nodes:
         if bn.parent_proc in unreachable_set:
-            hidden.add(_sanitize_id(bn.node_id))
-            hidden.update(_sanitize_id(arm.arm_id) for arm in bn.arms)
+            hidden.add(bn.node_id)
+            hidden.update(arm.arm_id for arm in bn.arms)
     return hidden
 
 
@@ -246,7 +295,7 @@ def _external_targets(report: ProgramFlowReport, hidden: set[str]) -> list[str]:
         if not target or target in targets:
             continue
         caller = ext.get("called_from")
-        if caller and _sanitize_id(caller) in hidden:
+        if caller and caller in hidden:
             continue
         targets.append(target)
     return targets
@@ -344,12 +393,13 @@ class MermaidFlowchartGenerator:
 
         unreachable_set = set(report.unreachable_nodes)
         hidden_ids = _hidden_ids(report, options, unreachable_set)
+        ids = _IdAllocator.for_report(report)
 
         # ---- nodes (paragraphs / sections) ------------------------------------
         for node in report.nodes:
             if not options.show_unreachable and node.key in unreachable_set:
                 continue
-            nid = _sanitize_id(node.key)
+            nid = ids.get("node", node.key)
             label = self._node_label(node, options)
             # paragraph → rectangle; section → rounded rectangle
             if node.procedure_type == "SECTION":
@@ -368,15 +418,14 @@ class MermaidFlowchartGenerator:
                 lines.append(f"    class {nid} unreachable")
 
         # ---- exit-statement terminal nodes -------------------------------------
-        paragraph_ids = {_sanitize_id(n.key) for n in report.nodes}
         terminal_link_count = 0
         for node in report.nodes:
             if not node.exit_statement_kind or not node.exit_statement_location:
                 continue
             if not options.show_unreachable and node.key in unreachable_set:
                 continue
-            nid = _sanitize_id(node.key)
-            exit_id = _unique_exit_id(nid, paragraph_ids)
+            nid = ids.get("node", node.key)
+            exit_id = ids.get("exit", node.key)
             # "@" (not a middle dot) -- emitted labels must stay ASCII, see
             # the encoding note on _short_edge_label's map.
             label = f"{node.exit_statement_kind} @ {node.exit_statement_location.line}"
@@ -388,24 +437,24 @@ class MermaidFlowchartGenerator:
         # ---- external call nodes ----------------------------------------------
         if options.show_external_calls:
             for target in _external_targets(report, hidden_ids):
-                eid = "EXT_" + _sanitize_id(target)
+                eid = ids.get("ext", target)
                 lines.append(f'    {eid}(["{target}"])')
                 lines.append(f"    class {eid} external")
 
         # ---- branch / arm nodes -----------------------------------------------
         skipped_arm_ids: set[str] = set()
         for bn in report.branch_nodes:
-            bn_id = _sanitize_id(bn.node_id)
-            if bn_id in hidden_ids:
+            if bn.node_id in hidden_ids:
                 continue
+            bn_id = ids.get("node", bn.node_id)
             cond = _escape_mermaid_label(bn.condition_text)
             lines.append(f'    {bn_id}{{"[{bn.branch_type}] {cond}"}}')
             lines.append(f"    class {bn_id} branch")
             for arm in bn.arms:
-                arm_id = _sanitize_id(arm.arm_id)
                 if _is_empty_if_arm(bn.branch_type, arm):
-                    skipped_arm_ids.add(arm_id)
+                    skipped_arm_ids.add(arm.arm_id)
                     continue
+                arm_id = ids.get("node", arm.arm_id)
                 arm_label = _escape_mermaid_label(_arm_summary_label(arm))
                 if arm.summary and arm.statement_count > 1:
                     arm_label += f"\\n+{arm.statement_count - 1} more"
@@ -436,21 +485,21 @@ class MermaidFlowchartGenerator:
                 # (Task 6) instead of a second, redundant arrow.
                 continue
 
-            src_id = _sanitize_id(edge.source)
-            if src_id in hidden_ids:
+            if edge.source in hidden_ids:
                 continue
+            src_id = ids.get("node", edge.source)
             # target: external call or internal procedure
             if etype in ("CALL", "CALL_DYNAMIC"):
-                tgt_id = "EXT_" + _sanitize_id(edge.target)
+                tgt_id = ids.get("ext", edge.target.upper())
                 if not options.show_external_calls:
                     continue
             else:
                 if not options.show_unreachable and edge.target in unreachable_set:
                     continue
-                tgt_id = _sanitize_id(edge.target)
+                tgt_id = ids.get("node", edge.target)
                 # An edge into an arm box that was dropped as empty would
                 # make Mermaid re-create the node with its bare id as label.
-                if tgt_id in skipped_arm_ids:
+                if edge.target in skipped_arm_ids:
                     continue
 
             arrow, label_parts = self._edge_style(etype, edge, options)
@@ -604,12 +653,13 @@ class DotFlowchartGenerator:
 
         unreachable_set = set(report.unreachable_nodes)
         hidden_ids = _hidden_ids(report, options, unreachable_set)
+        ids = _IdAllocator.for_report(report)
 
         # ---- nodes -----------------------------------------------------------
         for node in report.nodes:
             if not options.show_unreachable and node.key in unreachable_set:
                 continue
-            nid = _sanitize_id(node.key)
+            nid = ids.get("node", node.key)
             role = self._node_role(node, unreachable_set)
             fill = _DOT_COLORS[role]
             fontcolor = _DOT_FONT_COLOR[role]
@@ -621,14 +671,13 @@ class DotFlowchartGenerator:
             )
 
         # ---- exit-statement terminal nodes -------------------------------------
-        paragraph_ids = {_sanitize_id(n.key) for n in report.nodes}
         for node in report.nodes:
             if not node.exit_statement_kind or not node.exit_statement_location:
                 continue
             if not options.show_unreachable and node.key in unreachable_set:
                 continue
-            nid = _sanitize_id(node.key)
-            exit_id = _unique_exit_id(nid, paragraph_ids)
+            nid = ids.get("node", node.key)
+            exit_id = ids.get("exit", node.key)
             # "@" (not a middle dot): keep emitted labels ASCII, matching the
             # Mermaid generator (see the encoding note on _short_edge_label).
             label = self._dot_str(
@@ -643,7 +692,7 @@ class DotFlowchartGenerator:
         # ---- external call nodes ---------------------------------------------
         if options.show_external_calls:
             for target in _external_targets(report, hidden_ids):
-                eid = "EXT_" + _sanitize_id(target)
+                eid = ids.get("ext", target)
                 fill = _DOT_COLORS["external"]
                 fontcolor = _DOT_FONT_COLOR["external"]
                 lines.append(
@@ -654,9 +703,9 @@ class DotFlowchartGenerator:
         # ---- branch / arm nodes ----------------------------------------------
         skipped_arm_ids: set[str] = set()
         for bn in report.branch_nodes:
-            bn_id = _sanitize_id(bn.node_id)
-            if bn_id in hidden_ids:
+            if bn.node_id in hidden_ids:
                 continue
+            bn_id = ids.get("node", bn.node_id)
             cond_label = self._dot_str(f"[{bn.branch_type}] {bn.condition_text}")
             fill = _DOT_COLORS["branch"]
             fontcolor = _DOT_FONT_COLOR["branch"]
@@ -665,10 +714,10 @@ class DotFlowchartGenerator:
                 f' fillcolor="{fill}", fontcolor="{fontcolor}"];'
             )
             for arm in bn.arms:
-                arm_id = _sanitize_id(arm.arm_id)
                 if _is_empty_if_arm(bn.branch_type, arm):
-                    skipped_arm_ids.add(arm_id)
+                    skipped_arm_ids.add(arm.arm_id)
                     continue
+                arm_id = ids.get("node", arm.arm_id)
                 arm_text = _arm_summary_label(arm)
                 if arm.summary and arm.statement_count > 1:
                     # Single-line "(+N more)" -- a "\n" here would collide
@@ -698,20 +747,20 @@ class DotFlowchartGenerator:
             if etype.endswith("_THRU"):
                 continue
 
-            src_id = _sanitize_id(edge.source)
-            if src_id in hidden_ids:
+            if edge.source in hidden_ids:
                 continue
+            src_id = ids.get("node", edge.source)
             if etype in ("CALL", "CALL_DYNAMIC"):
-                tgt_id = "EXT_" + _sanitize_id(edge.target)
+                tgt_id = ids.get("ext", edge.target.upper())
                 if not options.show_external_calls:
                     continue
             else:
                 if not options.show_unreachable and edge.target in unreachable_set:
                     continue
-                tgt_id = _sanitize_id(edge.target)
+                tgt_id = ids.get("node", edge.target)
                 # Parity with the Mermaid generator: no edges into arm
                 # boxes dropped as empty (DOT would auto-create the node).
-                if tgt_id in skipped_arm_ids:
+                if edge.target in skipped_arm_ids:
                     continue
 
             attrs = self._edge_attrs(etype, edge, options)

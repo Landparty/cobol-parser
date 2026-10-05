@@ -274,7 +274,8 @@ class CopybookDataGenerator:
         # After the rows, deliberately: a copybook that declares no varying
         # range draws nothing here, and so generates byte-identical output to
         # a version of this package that had never heard of one.
-        varying = self._varying_for(record, fields)
+        caveats: list[str] = []
+        varying = self._varying_for(record, fields, caveats)
         lengths = self._draw_lengths(varying, fields, rng)
         if lengths is not None:
             self._write_length_field(fields, rows, lengths, varying, factory)
@@ -285,12 +286,16 @@ class CopybookDataGenerator:
             seed=seed,
             varying=varying,
             declared_lengths=lengths,
+            caveats=caveats,
         )
 
     # -- variable record length ---------------------------------------------
 
     def _varying_for(
-        self, record: CobolDataItem, fields: list[FieldSpec]
+        self,
+        record: CobolDataItem,
+        fields: list[FieldSpec],
+        caveats: list[str] | None = None,
     ) -> VaryingLength | None:
         """The record-length range in force, or ``None`` for a fixed record.
 
@@ -299,13 +304,23 @@ class CopybookDataGenerator:
         Otherwise the record's own ``FD ... RECORD VARYING FROM min TO max``
         clause is used, which is present whenever the source parsed was a
         whole program rather than a copybook fragment.
+
+        A range clamped or ignored to fit the layout appends a sentence
+        saying so to *caveats* (see :meth:`VaryingLength.build`).
         """
         size = record_length(fields)
         declared = self.options.record_varying
         if declared is not None:
-            return VaryingLength.build(declared[0], declared[1], None, size)
+            return VaryingLength.build(
+                declared[0],
+                declared[1],
+                None,
+                size,
+                caveats=caveats,
+                source="requested RECORD VARYING",
+            )
         return VaryingLength.from_fd_clauses(
-            record.get_metadata("fd_clauses"), record_size=size
+            record.get_metadata("fd_clauses"), record_size=size, caveats=caveats
         )
 
     def _draw_lengths(

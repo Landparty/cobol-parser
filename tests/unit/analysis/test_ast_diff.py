@@ -571,6 +571,44 @@ def test_changed_perform_target():
     assert _of_kind(report, "statement-changed") == []
 
 
+def test_set_up_to_down_is_a_change_with_distinct_text():
+    # #274: both sides used to render as "SET WS-A TO 1".
+    report = _statement_diff(
+        "           SET WS-A UP BY 1\n           STOP RUN.\n",
+        "           SET WS-A DOWN BY 1\n           STOP RUN.\n",
+    )
+
+    changes = _of_kind(report, "statement-changed")
+    assert len(changes) == 1
+    assert changes[0].old == "SET WS-A UP BY 1"
+    assert changes[0].new == "SET WS-A DOWN BY 1"
+
+
+def test_perform_varying_from_change_has_distinct_text():
+    tail = "           STOP RUN.\n       P2.\n           CONTINUE.\n"
+    report = _statement_diff(
+        "           PERFORM P2 VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3\n" + tail,
+        "           PERFORM P2 VARYING WS-A FROM 2 BY 1 UNTIL WS-A > 3\n" + tail,
+    )
+
+    changes = _of_kind(report, "statement-changed")
+    assert len(changes) == 1
+    assert changes[0].old == "PERFORM P2 VARYING WS-A FROM 1 BY 1 UNTIL WS-A > 3"
+    assert changes[0].new == "PERFORM P2 VARYING WS-A FROM 2 BY 1 UNTIL WS-A > 3"
+
+
+def test_compute_rounded_change_has_distinct_text():
+    report = _statement_diff(
+        "           COMPUTE WS-A = WS-A / 3\n           STOP RUN.\n",
+        "           COMPUTE WS-A ROUNDED = WS-A / 3\n           STOP RUN.\n",
+    )
+
+    changes = _of_kind(report, "statement-changed")
+    assert len(changes) == 1
+    assert changes[0].old == "COMPUTE WS-A = WS-A / 3"
+    assert changes[0].new == "COMPUTE WS-A ROUNDED = WS-A / 3"
+
+
 def test_changed_call_target():
     report = _statement_diff(
         "           CALL 'SUBA' USING WS-A\n           STOP RUN.\n",

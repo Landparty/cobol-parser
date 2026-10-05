@@ -130,6 +130,12 @@ LE_DATA_TYPES: dict[str, LEDataType] = {
             snippet=_VSTRING_SNIPPET,
         ),
         LEDataType(
+            id="char2",
+            declaration="PIC X(2)",
+            byte_length=2,
+            description="Fixed 2-character field, e.g. a country code.",
+        ),
+        LEDataType(
             id="char17",
             declaration="PIC X(17)",
             byte_length=17,
@@ -140,6 +146,12 @@ LE_DATA_TYPES: dict[str, LEDataType] = {
             declaration="PIC X(80)",
             byte_length=80,
             description="Fixed 80-character field, blank padded.",
+        ),
+        LEDataType(
+            id="char255",
+            declaration="PIC X(255)",
+            byte_length=255,
+            description="Fixed 255-character field, blank padded.",
         ),
         LEDataType(
             id="pointer",
@@ -441,18 +453,17 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
         "datetime",
         "Get the current Greenwich Mean Time",
         (
-            LEParameter("output_Lilian", OUT, "int32", "Current GMT as a Lilian date."),
             LEParameter(
-                "output_seconds",
+                "output_GMT_Lilian",
+                OUT,
+                "int32",
+                "Current GMT as a Lilian date.",
+            ),
+            LEParameter(
+                "output_GMT_seconds",
                 OUT,
                 "float64",
                 "Current GMT as Lilian seconds.",
-            ),
-            LEParameter(
-                "output_Gregorian",
-                OUT,
-                "char17",
-                "Current GMT as YYYYMMDDHHMMSSTTT.",
             ),
             _fc(),
         ),
@@ -463,18 +474,17 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
         "datetime",
         "Get the current Coordinated Universal Time",
         (
-            LEParameter("output_Lilian", OUT, "int32", "Current UTC as a Lilian date."),
             LEParameter(
-                "output_seconds",
+                "output_GMT_Lilian",
+                OUT,
+                "int32",
+                "Current UTC as a Lilian date.",
+            ),
+            LEParameter(
+                "output_GMT_seconds",
                 OUT,
                 "float64",
                 "Current UTC as Lilian seconds.",
-            ),
-            LEParameter(
-                "output_Gregorian",
-                OUT,
-                "char17",
-                "Current UTC as YYYYMMDDHHMMSSTTT.",
             ),
             _fc(),
         ),
@@ -616,6 +626,14 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
         "Get the default date picture string",
         (
             LEParameter(
+                "country_code",
+                IN,
+                "char2",
+                "Two-character country code whose default is wanted. Pass "
+                "blanks or OMITTED for the current country setting -- the "
+                "operand is positional, so it cannot simply be left out.",
+            ),
+            LEParameter(
                 "picture_string",
                 OUT,
                 "char80",
@@ -630,6 +648,14 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
         "Get the default date and time picture string",
         (
             LEParameter(
+                "country_code",
+                IN,
+                "char2",
+                "Two-character country code whose default is wanted. Pass "
+                "blanks or OMITTED for the current country setting -- the "
+                "operand is positional, so it cannot simply be left out.",
+            ),
+            LEParameter(
                 "picture_string",
                 OUT,
                 "char80",
@@ -643,6 +669,14 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
         "datetime",
         "Get the default time picture string",
         (
+            LEParameter(
+                "country_code",
+                IN,
+                "char2",
+                "Two-character country code whose default is wanted. Pass "
+                "blanks or OMITTED for the current country setting -- the "
+                "operand is positional, so it cannot simply be left out.",
+            ),
             LEParameter(
                 "picture_string",
                 OUT,
@@ -836,7 +870,7 @@ _SIGNATURES: tuple[LEServiceSignature, ...] = (
             LEParameter(
                 "options",
                 IN,
-                "vstring",
+                "char255",
                 'Blank-separated dump options, e.g. "TRACEBACK VARIABLES".',
             ),
             _fc(),

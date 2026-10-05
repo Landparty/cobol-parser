@@ -3,7 +3,7 @@ type: Module
 title: AST Models
 description: ASTNode hierarchy — CobolProgram, data items, statement nodes, to_dict()/to_json() serialisation.
 tags: [ast, models, cobol-program, data-items, statements]
-timestamp: 2026-10-04T00:00:00Z
+timestamp: 2026-10-05T00:00:00Z
 ---
 
 # Overview
@@ -26,9 +26,21 @@ class ASTNode:
     def to_dict(self) -> dict: ...
     def to_json(self) -> str: ...
     def find_all_by_type(self, type_name: str) -> list[ASTNode]: ...
+    def equals(self, other: object) -> bool: ...
 
 class ASTValidator: ...
 ```
+
+`ASTNode.equals(other)` (issue #273, 2026-10-05) is true when both nodes have
+the same `node_type`, the same tree of child node types (`_shape()`), and the
+same `to_dict()` with every nested `location` key removed
+(`_comparable_dict()`). Source position never matters, content always does: a
+reparse of the same text is equal, a program differing in one PICTURE or one
+MOVE literal is not. `CobolProgram._comparable_dict()` serializes with
+`include_metadata=False` and adds back only the program's own `_metadata`, so
+the derived statistics block (whose `total_lines` comes from locations) does
+not take part. Before #273 it compared node types and child counts only, so
+any two programs with the same division count were "equal".
 
 # Program Structure (`models/program.py`)
 
@@ -55,6 +67,31 @@ class CobolParagraph(ASTNode):
 
 `CobolProgram.to_json()` exports the full tree as JSON for cross-platform
 interoperability.
+
+`CobolProgram.from_json()` is **not** its full inverse -- it restores a
+structural skeleton (issue #273, 2026-10-05):
+
+* **Restored** (with locations and per-node metadata): program name,
+  `unit_kind`, own metadata, contained units (recursively); every division and
+  section; every paragraph's name; every data item with all its serialized
+  clauses (PICTURE -- fields restored verbatim from the dict, currency /
+  DECIMAL-POINT IS COMMA from its metadata --, USAGE, VALUE, OCCURS incl.
+  keys / indexes / DEPENDING ON qualifiers, REDEFINES, SIGN, SYNC, JUST, BWZ,
+  EXTERNAL/GLOBAL/VOLATILE, BYTE-LENGTH, DYNAMIC LENGTH, OBJECT REFERENCE,
+  GROUP-USAGE), subordinate items, level-88 `condition_names` (placed before a
+  group's subordinate items, where a group's 88s sit in source) and each
+  section's level-66 `renames_items`.
+* **Dropped:** every PROCEDURE DIVISION statement -- there is no generic way to
+  rebuild ~100 statement node types from their dicts -- so restored paragraphs
+  are empty. Whenever any were dropped, `from_json` emits
+  `LossyDeserializationWarning` (a `UserWarning`, exported from
+  `cobolparser.models`) naming the program and the statement / paragraph
+  counts. Never silent. Anything `to_dict()` never writes (FD/SD entries,
+  `usage_explicit` -- inferred as "usage is neither DISPLAY nor what the
+  PICTURE implies") cannot come back.
+* Verified over 294 corpus programs: `from_json(p.to_json()).to_dict()` equals
+  `p.to_dict()` with paragraph `statements` emptied, apart from the derived
+  `metadata.statistics`.
 
 Serialization fidelity notes (2026-07-07):
 
