@@ -724,12 +724,17 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   form a cycle).
 - **Self-recursive CALL** — a CALL (static, or dynamic and resolved via
   `DynamicCallAnalyzer`, which this analyzer runs internally) whose target
-  equals the program's own `PROGRAM-ID`. Always `HIGH`: the parser does not
-  currently track an `IS RECURSIVE` `PROGRAM-ID` clause (not even accepted
-  syntactically — see `parsers/divisions/identification.py`'s `IS
-  INITIAL|COMMON` loop, which has no `RECURSIVE` branch), so there is no way
-  to tell a deliberately-recursive program from a bug; every self-CALL is
-  flagged the same way.
+  equals the program's own `PROGRAM-ID`. `HIGH`, or `LOW` when the
+  `PROGRAM-ID` is declared `IS RECURSIVE` (re-entry legal; base case
+  unverifiable). Only the unit's *own* statements are walked
+  (`_own_statements`: `get_all_statements()` minus every node of
+  `contained_programs`) — before issue #274 a contained program's
+  `CALL 'OUTER'` was reported as the outer unit calling itself.
+- **CALL to an enclosing program** (#274) — a contained program CALLing a
+  program it is nested in (any `CobolProgram` up its `.parent` chain). The
+  container is necessarily active while the contained program runs, so this
+  is indirect recursion: `HIGH`, or `LOW` when that container is `IS
+  RECURSIVE`. Reported on the *inner* unit, `program` = the container's name.
 
 Exported from both `cobolparser.analysis` and the top-level `cobolparser`
 package, same as `DeadCodeAnalyzer`/`ProgramFlowAnalyzer`. CLI:

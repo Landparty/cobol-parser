@@ -201,6 +201,56 @@ class TestCallRecursionRisk:
         assert [r for r in report.risks if r.mechanism == "CALL"] == []
 
 
+NESTED_CALLS_CONTAINER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OUTR{recursive}.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL 'INR'
+           GOBACK.
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. INR.
+       PROCEDURE DIVISION.
+       INR-PARA.
+           CALL 'OUTR'
+           GOBACK.
+       END PROGRAM INR.
+       END PROGRAM OUTR.
+"""
+
+
+class TestContainedProgramCalls:
+    """Issue #274 item 4: the outer unit claimed a contained program's
+    ``CALL 'OUTR'`` as its own self-call, and the inner unit showed nothing."""
+
+    def _units(self, recursive: str = ""):
+        ast = _parse(NESTED_CALLS_CONTAINER.format(recursive=recursive))
+        units = {u.program_name: u for u in ast.program_units()}
+        return units["OUTR"], units["INR"]
+
+    def test_outer_unit_does_not_claim_the_inner_call(self) -> None:
+        outer, _ = self._units()
+        report = RecursionRiskAnalyzer().analyze(outer)
+        assert [r for r in report.risks if r.mechanism == "CALL"] == []
+
+    def test_inner_call_to_its_container_is_reported_on_the_inner_unit(
+        self,
+    ) -> None:
+        _, inner = self._units()
+        report = RecursionRiskAnalyzer().analyze(inner)
+        call_risks = [r for r in report.risks if r.mechanism == "CALL"]
+        assert len(call_risks) == 1
+        assert call_risks[0].severity == "HIGH"
+        assert call_risks[0].program == "OUTR"
+        assert "nested in" in call_risks[0].explanation
+
+    def test_recursive_container_downgrades_to_low(self) -> None:
+        _, inner = self._units(recursive=" IS RECURSIVE")
+        report = RecursionRiskAnalyzer().analyze(inner)
+        call_risks = [r for r in report.risks if r.mechanism == "CALL"]
+        assert [(r.severity, r.program) for r in call_risks] == [("LOW", "OUTR")]
+
+
 class TestRecursionRiskReport:
     def test_reuses_precomputed_flow_report(self) -> None:
         from cobolparser.analysis.program_flow import ProgramFlowAnalyzer
