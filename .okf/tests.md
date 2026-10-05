@@ -3,7 +3,7 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-10-04T00:00:00Z
+timestamp: 2026-10-05T00:00:00Z
 ---
 
 # Overview
@@ -575,6 +575,8 @@ the existing `TestNewSubcommandsRegistered` and
 `TestNewSubcommandsOutputSilent` parametrized subcommand lists for the
 same registration/`-o`-silences-stdout coverage the other five analyzer
 subcommands already get.
+
+2026-10-05 (issue #273): `tests/unit/test_models.py` -- `test_ast_from_json_roundtrip` now compares `to_dict()` and asserts no warning for a statement-free program; +1 `test_from_json_restores_structure_and_warns_about_statements` (parsed program: dict equal with paragraph statements emptied, `LossyDeserializationWarning` with the dropped count); +3 in new `TestNodeEquality` (unrelated programs not equal, reparse equal, source position ignored). The existing `from_json` tests in `test_program_model_branches.py` / `test_bug_hunt_r12_misc.py` now expect the warning.
 
 2026-10-04 (issues #247, #248): +3 in `tests/unit/generators/data/test_layout_offsets.py`'s `TestOccursDependingOn` (`test_group_holding_an_odo_table_reports_its_maximum_length`, `test_direct_odo_child_counts_its_maximum_in_the_record_length`, `test_odo_record_length_agrees_with_the_encoder` -- an ODO table's footprint is its maximum, so group/record `byte_length` equals `GeneratedDataset.record_length()`), and +5 at the end of `tests/unit/generators/data/test_decoding.py` (an ODO counter below/above its range is a field error, leftover RDW body bytes are a record-level error, a well-formed VB record stays clean, a `B`/`D` sign nibble on unsigned COMP-3 is an error and does not negate, a COMP value wider than its PICTURE is a TRUNC caveat). All failed before the fixes.
 

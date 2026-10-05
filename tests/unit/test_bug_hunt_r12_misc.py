@@ -18,7 +18,7 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser.cli.parse import main
 from cobolparser.config._yaml import YamlError, parse_yaml
-from cobolparser.models.program import CobolProgram
+from cobolparser.models.program import CobolProgram, LossyDeserializationWarning
 from cobolparser.models.statements.base import ConditionalExpression
 from cobolparser.profiling import ProfilerContext
 
@@ -337,7 +337,8 @@ def test_parenthesised_non_condition_name_is_not_a_condition_name() -> None:
 def test_from_json_keeps_program_units(sample: str) -> None:
     # A CLASS-ID came back as a PROGRAM and every contained unit was dropped.
     ast = parse_cobol((ENTERPRISE / sample).read_text(encoding="utf-8")).ast
-    restored = CobolProgram.from_json(ast.to_json())
+    with pytest.warns(LossyDeserializationWarning):
+        restored = CobolProgram.from_json(ast.to_json())
     assert [(u.program_name, u.unit_kind) for u in restored.program_units()] == [
         (u.program_name, u.unit_kind) for u in ast.program_units()
     ]

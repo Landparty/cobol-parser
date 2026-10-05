@@ -17,6 +17,8 @@ Covers branch coverage gaps (45 missing branches) in:
 
 import json
 
+import pytest
+
 from cobolparser import parse_cobol
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.program import (
@@ -24,6 +26,7 @@ from cobolparser.models.program import (
     CobolParagraph,
     CobolProgram,
     CobolSection,
+    LossyDeserializationWarning,
 )
 from cobolparser.plugins.core import SerializationConfig
 
@@ -349,7 +352,8 @@ class TestFromJson:
         result = _make_minimal_program()
         config = SerializationConfig(include_source_locations=True)
         j = result.ast.to_json(config)
-        reconstructed = CobolProgram.from_json(j)
+        with pytest.warns(LossyDeserializationWarning, match="dropped 3"):
+            reconstructed = CobolProgram.from_json(j)
         assert reconstructed.program_name == result.ast.program_name
 
     def test_from_json_with_metadata(self):
@@ -360,7 +364,8 @@ class TestFromJson:
             include_source_locations=True, include_metadata=True
         )
         j = result.ast.to_json(config)
-        reconstructed = CobolProgram.from_json(j)
+        with pytest.warns(LossyDeserializationWarning):
+            reconstructed = CobolProgram.from_json(j)
         assert reconstructed._metadata.get("custom_key") == "custom_value"
 
     def test_from_json_minimal(self):

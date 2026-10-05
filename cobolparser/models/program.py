@@ -9,6 +9,7 @@ JSON serialization support.
 import fnmatch
 import json
 import re
+import warnings
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 from ..plugins import SerializationConfig
@@ -918,33 +919,78 @@ class CobolProgram(ASTNode):
         data = self.to_dict(config)
         return json.dumps(data, indent=indent)
 
+    def _comparable_dict(self) -> dict[str, Any]:
+        """``to_dict()`` without locations and without the derived metadata
+        block (statistics, parser version, timestamp) -- only this program's
+        own metadata takes part in :meth:`equals`."""
+        data = self.to_dict(
+            SerializationConfig(include_metadata=False, include_source_locations=False)
+        )
+        data["metadata"] = dict(self._metadata)
+        return data
+
     @classmethod
     def from_json(cls, json_str: str) -> "CobolProgram":
-        """Create a CobolProgram instance from JSON representation."""
-        return cls._from_dict(json.loads(json_str))
+        """Rebuild a program from :meth:`to_json` output -- as a structural
+        skeleton, not a full AST.
+
+        Restored, with source locations and per-node metadata:
+
+        * the program name, ``unit_kind``, own metadata and every contained
+          program unit (recursively);
+        * every division and every section in it;
+        * every paragraph (name, location, metadata) -- but **not** its
+          statements;
+        * every data item with all its serialized clauses (level, USAGE,
+          PICTURE, VALUE, OCCURS, REDEFINES, SIGN, SYNC, JUSTIFIED, BLANK
+          WHEN ZERO, EXTERNAL / GLOBAL / VOLATILE, BYTE-LENGTH, DYNAMIC
+          LENGTH, OBJECT REFERENCE, GROUP-USAGE), its subordinate items, its
+          level-88 condition names, and each section's level-66 RENAMES
+          entries.
+
+        **Dropped:** every PROCEDURE DIVISION statement (and so everything
+        nested in one). There are some hundred statement node types and no
+        generic way to rebuild them from their dicts, so the restored
+        paragraphs are empty. Whenever statements are dropped a
+        :class:`LossyDeserializationWarning` names how many, so the loss is
+        never silent. Anything ``to_dict()`` never serializes (FD/SD
+        entries, whether a USAGE was written explicitly) cannot come back
+        either. Reparse the source when a full AST is needed.
+        """
+        dropped: dict[str, int] = {}
+        program = cls._from_dict(json.loads(json_str), dropped)
+        if dropped.get("statements"):
+            warnings.warn(
+                f"CobolProgram.from_json restored a structural skeleton of "
+                f"{program.program_name or '<unnamed>'}: dropped "
+                f"{dropped['statements']} PROCEDURE DIVISION statement(s) "
+                f"from {dropped['paragraphs']} paragraph(s); divisions, "
+                f"sections, paragraphs and data items were restored",
+                LossyDeserializationWarning,
+                stacklevel=2,
+            )
+        return program
 
     @classmethod
-    def _from_dict(cls, data: dict[str, Any]) -> "CobolProgram":
+    def _from_dict(
+        cls, data: dict[str, Any], dropped: dict[str, int] | None = None
+    ) -> "CobolProgram":
         """Rebuild one program unit (and, recursively, the units it contains)
-        from its ``to_dict()`` form."""
-        # Extract basic program information
-        program_name = data.get("program_name", "")
+        from its ``to_dict()`` form. Counts of what could not be rebuilt are
+        accumulated into *dropped*."""
+        if dropped is None:
+            dropped = {}
+        program = cls(data.get("program_name", ""), _location_from(data))
 
-        # Reconstruct location
-        location_data = data.get("location", {"line": 1, "column": 1})
-        location = SourceLocation(location_data["line"], location_data["column"])
-
-        # Create program instance
-        program = cls(program_name, location)
-
-        # Reconstruct divisions
-        divisions_data = data.get("divisions", {})
-        for div_name, div_data in divisions_data.items():
-            div_location_data = div_data.get("location", {"line": 1, "column": 1})
-            div_location = SourceLocation(
-                div_location_data["line"], div_location_data["column"]
+        for div_name, div_data in data.get("divisions", {}).items():
+            division = CobolDivision(
+                div_data.get("division_name", div_name), _location_from(div_data)
             )
-            division = CobolDivision(div_name, div_location)
+            _restore_metadata(division, div_data)
+            for section_data in div_data.get("sections", {}).values():
+                division.add_section(_section_from(section_data, dropped))
+            for para_data in div_data.get("paragraphs", []):
+                division.add_paragraph(_paragraph_from(para_data, dropped))
             program.add_division(division)
 
         # Set metadata if present
@@ -964,9 +1010,175 @@ class CobolProgram(ASTNode):
         # the restored program no longer matched the one serialized.
         program.unit_kind = data.get("unit_kind", "PROGRAM")
         for contained in data.get("contained_programs", []):
-            program.add_contained_program(cls._from_dict(contained))
+            program.add_contained_program(cls._from_dict(contained, dropped))
 
         return program
+
+
+class LossyDeserializationWarning(UserWarning):
+    """``CobolProgram.from_json`` could not restore part of the serialized
+    program (PROCEDURE DIVISION statements); the message says what and how
+    many."""
+
+
+def _location_from(data: dict[str, Any]) -> SourceLocation:
+    """A ``SourceLocation`` from a node dict's ``location`` (1:1 if absent)."""
+    loc = data.get("location") or {}
+    return SourceLocation(loc.get("line", 1), loc.get("column", 1), loc.get("length"))
+
+
+def _restore_metadata(node: ASTNode, data: dict[str, Any]) -> None:
+    for key, value in (data.get("metadata") or {}).items():
+        node.set_metadata(key, value)
+
+
+def _paragraph_from(data: dict[str, Any], dropped: dict[str, int]) -> "CobolParagraph":
+    paragraph = CobolParagraph(data.get("paragraph_name", ""), _location_from(data))
+    _restore_metadata(paragraph, data)
+    statements = data.get("statements") or []
+    if statements:
+        dropped["statements"] = dropped.get("statements", 0) + len(statements)
+        dropped["paragraphs"] = dropped.get("paragraphs", 0) + 1
+    return paragraph
+
+
+def _section_from(data: dict[str, Any], dropped: dict[str, int]) -> CobolSection:
+    from .data_items import RenamesItem
+
+    section = CobolSection(data.get("section_name", ""), _location_from(data))
+    _restore_metadata(section, data)
+    for para_data in data.get("paragraphs", []):
+        section.add_paragraph(_paragraph_from(para_data, dropped))
+    for item_data in data.get("data_items", []):
+        section.add_data_item(_data_item_from(item_data))
+    for ren in data.get("renames_items", []):
+        renames = RenamesItem(
+            ren.get("name", ""),
+            ren.get("renames_from", ""),
+            _location_from(ren),
+            ren.get("renames_through"),
+        )
+        renames.renames_from_qualifiers = list(ren.get("renames_from_qualifiers", []))
+        renames.renames_through_qualifiers = list(
+            ren.get("renames_through_qualifiers", [])
+        )
+        _restore_metadata(renames, ren)
+        section.add_child(renames)
+    return section
+
+
+#: CobolDataItem attributes ``to_dict()`` writes under the same key, only
+#: when set (so absent means the constructor default).
+_DATA_ITEM_OPTIONAL_FIELDS = (
+    "value_clause",
+    "sign_clause",
+    "synchronized",
+    "justified",
+    "blank_when_zero",
+    "is_external",
+    "is_global",
+    "is_volatile",
+    "byte_length",
+    "is_dynamic_length",
+    "dynamic_length_limit",
+    "object_class",
+    "group_usage",
+    "redefines",
+)
+
+#: PictureClause attributes computed from the pattern; restored verbatim from
+#: the dict so a size adjusted after construction (BYTE-LENGTH) survives.
+_PICTURE_FIELDS = (
+    "size",
+    "integer_digits",
+    "decimal_digits",
+    "total_digits",
+    "is_signed",
+    "has_scaling_factor",
+    "scaling_factor",
+    "is_edited",
+    "is_numeric_edited",
+    "is_alphanumeric_edited",
+    "is_national",
+    "is_national_edited",
+    "is_valid",
+)
+
+
+def _data_item_from(data: dict[str, Any]) -> "CobolDataItem":
+    from .data_items import (
+        CobolDataItem,
+        ConditionNameItem,
+        OccursClause,
+        PictureClause,
+    )
+
+    item = CobolDataItem(
+        data.get("name", ""), data.get("level", 1), _location_from(data)
+    )
+    _restore_metadata(item, data)
+
+    pic = data.get("picture_clause")
+    if pic is not None:
+        pic_meta = pic.get("metadata") or {}
+        picture = PictureClause(
+            pic.get("pattern", ""),
+            _location_from(pic),
+            currency_symbols=set(pic_meta.get("currency_symbols", ())),
+            decimal_point_is_comma=bool(pic_meta.get("decimal_point_is_comma")),
+        )
+        for field in _PICTURE_FIELDS:
+            if field in pic:
+                setattr(picture, field, pic[field])
+        picture.validation_errors = list(pic.get("validation_errors", []))
+        _restore_metadata(picture, pic)
+        item.set_picture_clause(picture)
+
+    occ = data.get("occurs_clause")
+    if occ is not None:
+        occurs = OccursClause(_location_from(occ))
+        occurs.min_times = occ.get("min_times")
+        occurs.max_times = occ.get("max_times")
+        occurs.depending_on = occ.get("depending_on")
+        occurs.indexed_by = occ.get("indexed_by")
+        occurs.index_names = list(occ.get("index_names", []))
+        occurs.key_clauses = [dict(kc) for kc in occ.get("key_clauses", [])]
+        occurs.is_unbounded = bool(occ.get("is_unbounded", False))
+        occurs.depending_on_qualifiers = list(occ.get("depending_on_qualifiers", []))
+        _restore_metadata(occurs, occ)
+        item.set_occurs_clause(occurs)
+
+    # USAGE last: set_picture_clause may have implied one. Whether it was
+    # written explicitly is not serialized; a usage other than the one the
+    # PICTURE alone implies (or DISPLAY) must have been.
+    usage = data.get("usage", "DISPLAY")
+    item.usage = usage
+    item.usage_explicit = usage not in ("DISPLAY", _implied_usage(item))
+    if "is_filler" in data:
+        item.is_filler = bool(data["is_filler"])
+    for field in _DATA_ITEM_OPTIONAL_FIELDS:
+        if field in data:
+            setattr(item, field, data[field])
+
+    # A level-88 entry on a group immediately follows the group's own entry,
+    # so condition names come before the subordinate items.
+    for cond in data.get("condition_names", []):
+        condition = ConditionNameItem(cond.get("name", ""), _location_from(cond))
+        condition.values = list(cond.get("values", []))
+        condition.false_value = cond.get("false_value")
+        _restore_metadata(condition, cond)
+        item.add_child(condition)
+    for child in data.get("children", []):
+        item.add_child(_data_item_from(child))
+    return item
+
+
+def _implied_usage(item: "CobolDataItem") -> str | None:
+    from .data_items import _implied_picture_usage
+
+    if item.picture_clause is None:
+        return None
+    return _implied_picture_usage(item.picture_clause)
 
 
 class CobolFileDescription(ASTNode):

@@ -451,31 +451,125 @@ class TestASTSerialization:
         assert "parser_version" in parsed_json["metadata"]
 
     def test_ast_from_json_roundtrip(self):
-        """Test AST JSON serialization round-trip."""
-        # This test will verify round-trip serialization:
-        # 1. Serialize AST to JSON
-        # 2. Deserialize JSON back to AST
-        # 3. Compare original and restored AST
-        # 4. Verify data integrity
+        """A program with no statements round-trips completely: same dict,
+        and ``equals`` agrees."""
+        import warnings
 
         from cobolparser.models.program import CobolDivision, CobolProgram
 
-        # Create original program
         original_program = CobolProgram("ROUND-TRIP-TEST", SourceLocation(1, 1))
         original_program.add_division(
             CobolDivision("IDENTIFICATION", SourceLocation(1, 1))
         )
         original_program.add_division(CobolDivision("PROCEDURE", SourceLocation(5, 1)))
 
-        json_output = original_program.to_json()
-        restored_program = CobolProgram.from_json(json_output)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # nothing dropped -> no warning
+            restored_program = CobolProgram.from_json(original_program.to_json())
 
-        # Test round-trip serialization
-        assert restored_program.program_name == original_program.program_name
-        assert len(restored_program.divisions) == len(original_program.divisions)
-
-        # Deep comparison
+        assert restored_program.to_dict() == original_program.to_dict()
         assert restored_program.equals(original_program)
+
+    def test_from_json_restores_structure_and_warns_about_statements(self):
+        """Issue #273: sections, paragraphs and data items (with clauses)
+        come back exactly; statements are dropped, with a warning saying so."""
+        import pytest
+
+        from cobolparser import parse_cobol
+        from cobolparser.models.program import (
+            CobolProgram,
+            LossyDeserializationWarning,
+        )
+
+        source = _ROUND_TRIP_SOURCE
+        original = parse_cobol(source).ast
+        before = original.to_dict()
+
+        with pytest.warns(LossyDeserializationWarning, match=r"dropped 4 PROCEDURE"):
+            restored = CobolProgram.from_json(original.to_json())
+
+        after = restored.to_dict()
+        expected = json.loads(json.dumps(before))
+        for paragraph in expected["divisions"]["PROCEDURE"]["paragraphs"]:
+            paragraph["statements"] = []
+        # Statistics are derived from what was restored (no statements now).
+        expected["metadata"].pop("statistics")
+        stats = after["metadata"].pop("statistics")
+        assert after == expected
+        assert (
+            stats["data_item_count"]
+            == before["metadata"]["statistics"]["data_item_count"]
+        )
+        assert stats["statement_count"] == 0
+
+        ws = restored.data_division.get_section_by_name("WORKING-STORAGE")
+        group = ws.data_items[0]
+        assert group.name == "WS-REC"
+        qty = group.children[1]
+        assert qty.picture_clause.pattern == "S9(5)V99"
+        assert qty.usage == "COMP-3"
+        assert qty.occurs_clause.max_times == 3
+        status = group.children[0]
+        assert [c.name for c in status.children if c.node_type == "ConditionNameItem"]
+        assert [p.paragraph_name for p in restored.procedure_division.paragraphs] == [
+            "MAIN-PARA",
+            "SUB-PARA",
+        ]
+        # Statements are gone, so the restored program is not equal.
+        assert not restored.equals(original)
+
+
+_ROUND_TRIP_SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RTRIP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-REC.
+          05 WS-STATUS PIC X VALUE 'A'.
+             88 WS-ACTIVE VALUE 'A'.
+          05 WS-QTY PIC S9(5)V99 COMP-3 OCCURS 3 TIMES.
+       01 WS-NAME PIC X(10) VALUE SPACES.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE 'B' TO WS-STATUS
+           PERFORM SUB-PARA
+           STOP RUN.
+       SUB-PARA.
+           DISPLAY WS-NAME.
+"""
+
+
+class TestNodeEquality:
+    """Issue #273: ``equals`` compares content, not just node counts."""
+
+    def test_unrelated_programs_are_not_equal(self):
+        from cobolparser import parse_cobol
+
+        other = _ROUND_TRIP_SOURCE.replace("WS-NAME PIC X(10)", "WS-NAME PIC X(20)")
+        a = parse_cobol(_ROUND_TRIP_SOURCE).ast
+        b = parse_cobol(other).ast
+        assert not a.equals(b)
+        c = parse_cobol(_ROUND_TRIP_SOURCE.replace("'B' TO", "'C' TO")).ast
+        assert not a.equals(c)
+
+    def test_reparse_of_the_same_source_is_equal(self):
+        from cobolparser import parse_cobol
+
+        a = parse_cobol(_ROUND_TRIP_SOURCE).ast
+        b = parse_cobol(_ROUND_TRIP_SOURCE).ast
+        assert a is not b
+        assert a.equals(b)
+
+    def test_source_position_does_not_matter(self):
+        from cobolparser import parse_cobol
+
+        a = parse_cobol(_ROUND_TRIP_SOURCE).ast
+        shifted = parse_cobol(
+            _ROUND_TRIP_SOURCE.replace(
+                "       PROCEDURE DIVISION.\n",
+                "      *> a comment line\n       PROCEDURE DIVISION.\n",
+            )
+        ).ast
+        assert a.equals(shifted)
 
 
 class TestASTQuery:

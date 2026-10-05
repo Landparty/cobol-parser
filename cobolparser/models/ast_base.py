@@ -222,21 +222,43 @@ class ASTNode(ABC):
         """Convert node to JSON representation."""
         return json.dumps(self.to_dict(), indent=indent)
 
+    def _comparable_dict(self) -> dict[str, Any]:
+        """This node's ``to_dict()`` with every source ``location`` removed.
+
+        The basis of :meth:`equals`. Subclasses whose ``to_dict()`` adds
+        derived or volatile data (``CobolProgram``'s statistics block)
+        override it to leave that out.
+        """
+        data = self.to_dict()
+        _strip_location_keys(data)
+        return data
+
+    def _shape(self) -> tuple[Any, ...]:
+        """The tree of node types under this node, children in order."""
+        return (
+            self.node_type,
+            tuple(child._shape() for child in self.children),
+        )
+
     def equals(self, other: object) -> bool:
-        """Check if this node is structurally equal to another node."""
+        """Check if this node is structurally equal to another node.
+
+        Two nodes are equal when they have the same node type, the same tree
+        of child node types, and the same ``to_dict()`` content with source
+        locations ignored -- names, levels, PICTUREs, VALUEs, statements and
+        their operands, metadata all count. Where in the source a node sits
+        does not, so a reparse of the same program text is equal to the
+        original while two different programs are not. (It used to compare
+        node types and child counts only, so any two programs with the same
+        number of divisions were "equal", issue #273.)
+        """
         if not isinstance(other, ASTNode):
             return False
-        if self.node_type != other.node_type or len(self.children) != len(
-            other.children
-        ):
+        if self.node_type != other.node_type:
             return False
-
-        # Compare children recursively
-        for i in range(len(self.children)):
-            if not self.children[i].equals(other.children[i]):
-                return False
-
-        return True
+        if self._shape() != other._shape():
+            return False
+        return self._comparable_dict() == other._comparable_dict()
 
     def __str__(self) -> str:
         """String representation of the node."""
@@ -245,6 +267,18 @@ class ASTNode(ABC):
     def __repr__(self) -> str:
         """Detailed string representation of the node."""
         return f"{self.__class__.__name__}(type={self.node_type}, location={self.location}, children={len(self.children)})"
+
+
+def _strip_location_keys(node: Any) -> None:
+    """Drop every nested ``location`` key of a ``to_dict()`` result in place."""
+    stack: list[Any] = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            current.pop("location", None)
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
 
 
 class ValidationResult:
