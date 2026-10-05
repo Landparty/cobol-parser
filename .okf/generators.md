@@ -1587,8 +1587,9 @@ by-character instead of hitting a type error) plus a new `csv_path` key
 (the relative CSV path, or `null` if this fixture got no CSV), so a
 consumer can discover what scenarios/fixtures exist — and where each one's
 CSV lives — without walking the directory tree first. **Names are made
-unique** (2026-09-28): scenario names repeat (two IFs in one paragraph both
-plan `"<PARA>: THEN"`), and both used to slug to one directory, the later
+unique** (2026-09-28): scenario names used to repeat (two IFs in one
+paragraph both planned `"<PARA>: THEN"`; the planner names them uniquely
+since #267, but a hand-built bundle still can), and both used to slug to one directory, the later
 scenario's CSV overwriting the earlier one's with both manifest entries
 pointing at the survivor. `_unique_names` suffixes a repeated slug `-2`,
 `-3`, ... (first keeps its plain slug, case-insensitive), and `_csv_names`
@@ -1661,6 +1662,20 @@ boundary (same length, or one side doesn't mention it) -- greedy,
 deterministic: candidates are processed in `(line, column, arm_id)` order,
 each merging into the first open scenario it is compatible with. "Fewer,
 richer scenarios" rather than one per arm.
+
+**Naming** (#267, 2026-10-05). One arm's name is
+`"<proc>: <VERB>@<line> <arm label>"` -- `"MAIN-PARA: IF@11 THEN"`,
+`"P: EVALUATE@90 WHEN 'A'"` -- with the verb read off a conjunct's
+`origin` (else the flow graph's `branch_type`). An OR-split arm
+(`THEN#2`) appends its own disjunct, rendered from its conjuncts
+(`"... THEN [WS-A = 'Z']"`), or `[alt N]` when it has none. After merging,
+a scenario is renamed for *every* arm it targets (later arms in the same
+paragraph drop the repeated `"<proc>: "`), joined with `" + "`, or the
+first arm's name plus `" (+N more arms)"` past 120 characters; then
+`bundle._unique_names` suffixes any repeat `-2`, `-3`, ... -- so names are
+unique within a plan. `ArmOutcome.merged_into` carries the *final* name.
+Before this, two IFs in one paragraph both planned `"<PARA>: THEN"`.
+`name` stays free text (no `bundle_version` bump).
 
 **Unsatisfiable arms.** Every distinct field an arm's conjuncts touch is
 solved independently via `domains.solve()`; if *any* field's constraint set

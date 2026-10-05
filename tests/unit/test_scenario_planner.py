@@ -169,3 +169,83 @@ class TestFixedFamilies:
         names = {s.name for s in plan.scenarios}
         assert "empty input" not in names
         assert not any(n.startswith("boundary values") for n in names)
+
+
+class TestScenarioNamesAreUnique:
+    """#267: distinct branch scenarios used to share one name -- the name
+    was only ``"<proc>: <arm label>"``, so two IFs in a paragraph (or two
+    OR-disjuncts of one IF) all read ``"MAIN-PARA: THEN"``."""
+
+    _TWOIF = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TWOIF.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-A PIC X.
+       01 WS-B PIC X.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           ACCEPT WS-A.
+           ACCEPT WS-B.
+           IF WS-A = 'Y' OR WS-A = 'Z'
+               DISPLAY 'A'
+           END-IF.
+           IF WS-B = 'Y'
+               DISPLAY 'B'
+           END-IF.
+           STOP RUN.
+"""
+
+    @staticmethod
+    def _plan_source(source: str, filename: str, mode: str):
+        result = parse_cobol(source, filename=filename)
+        if result.ast is None:
+            return None
+        index = ProgramLayoutIndex.build(result.ast)
+        boundary_report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        constraint_report = ConstraintExtractor().extract(
+            result.ast, index, boundary_report
+        )
+        flow_report = ProgramFlowAnalyzer().analyze(result.ast)
+        return ScenarioPlanner().plan(
+            constraint_report, flow_report, boundary_report, mode=mode
+        )
+
+    def test_two_ifs_and_or_disjuncts_get_distinct_names(self):
+        plan = self._plan_source(self._TWOIF, "TWOIF.cbl", "branches")
+        assert plan is not None
+        names = [s.name for s in plan.scenarios]
+        assert len(names) == 3
+        assert len(set(names)) == len(names), names
+        assert "MAIN-PARA: IF@11 THEN [WS-A = 'Z']" in names
+        # A merged scenario is named for every arm it targets.
+        assert "MAIN-PARA: IF@11 THEN [WS-A = 'Y'] + IF@14 THEN" in names
+        assert "MAIN-PARA: IF@11 ELSE + IF@14 ELSE" in names
+        # merged_into follows the final (rebuilt) name.
+        for detail in plan.coverage.details:
+            if detail.status == "merged":
+                assert detail.merged_into in names
+
+    def test_names_unique_over_every_sample_program(self):
+        from pathlib import Path
+
+        samples = Path(__file__).parent.parent / "samples"
+        paths = sorted(samples.glob("*.cbl")) + sorted(
+            (samples / "enterprise").glob("*.cbl")
+        )
+        assert len(paths) > 20
+        planned = 0
+        for path in paths:
+            source = path.read_text(encoding="utf-8", errors="replace")
+            for mode in ("branches", "all"):
+                plan = self._plan_source(source, str(path), mode)
+                if plan is None:  # a sample the parser cannot read at all
+                    continue
+                names = [s.name for s in plan.scenarios]
+                planned += len(names)
+                assert len(set(names)) == len(names), (path.name, mode, names)
+                targets = {s.name for s in plan.scenarios}
+                for detail in plan.coverage.details:
+                    if detail.status == "merged":
+                        assert detail.merged_into in targets, (path.name, detail)
+        assert planned > 0

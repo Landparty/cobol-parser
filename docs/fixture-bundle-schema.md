@@ -63,7 +63,7 @@ otherwise.
 
 | Key | Type | Notes |
 |---|---|---|
-| `name` | `str` | E.g. `"happy path"`, `"CHECK-QTY: THEN"`, `"empty input"`, `"boundary values: minimum"`. Human-readable, not a stable identifier — don't parse it; `scenario_coverage.details[].arm_key` is the stable per-arm key. |
+| `name` | `str` | E.g. `"happy path"`, `"CHECK-QTY: IF@31 THEN"`, `"empty input"`, `"boundary values: minimum"`. Human-readable and unique within a bundle, not a stable identifier — don't parse it; `scenario_coverage.details[].arm_key` is the stable per-arm key. |
 | `intent` | `str` | One sentence: what this scenario is for. |
 | `entry` | `str \| null` | The program's first PROCEDURE DIVISION paragraph, if any. |
 | `fixtures` | `list[BoundaryFixture]` | Mock in-data for every boundary the scenario touches. |
@@ -293,8 +293,8 @@ figurative, sign/zero) is fully solved.
 
 `DOCEX.cbl` (an OPEN/READ-loop/CLOSE program with one `IF ORDER-QTY > 100`
 branch in `CHECK-QTY`) run through `generate_with_scenarios_from_file(...,
-mode="all", seed=7)` produces five scenarios: `"CHECK-QTY: ELSE"`,
-`"CHECK-QTY: THEN"`, `"empty input"`, `"boundary values: minimum"`, and
+mode="all", seed=7)` produces five scenarios: `"CHECK-QTY: IF@31 ELSE"`,
+`"CHECK-QTY: IF@31 THEN"`, `"empty input"`, `"boundary values: minimum"`, and
 `"boundary values: maximum"` (the `"error status"` family emits nothing here
 — the program declares no `INVALID KEY`/`ON EXCEPTION`/status-checked `OPEN`
 handler for the planner to target). Trimmed to two scenarios plus the
@@ -307,7 +307,7 @@ bundle-level keys:
   "seed": 7,
   "scenarios": [
     {
-      "name": "CHECK-QTY: ELSE",
+      "name": "CHECK-QTY: IF@31 ELSE",
       "intent": "targets branch arm CHECK-QTY@31:5/ELSE",
       "entry": "MAIN-PARA",
       "fixtures": [
@@ -355,7 +355,7 @@ bundle-level keys:
       "unconstrained": []
     },
     {
-      "name": "CHECK-QTY: THEN",
+      "name": "CHECK-QTY: IF@31 THEN",
       "intent": "targets branch arm CHECK-QTY@31:5/THEN",
       "entry": "MAIN-PARA",
       "fixtures": [
@@ -371,7 +371,7 @@ bundle-level keys:
         }
       ],
       "expectations": [
-        "... the same three call_count entries as CHECK-QTY: ELSE above ..."
+        "... the same three call_count entries as CHECK-QTY: IF@31 ELSE above ..."
       ],
       "unconstrained": []
     }
@@ -436,9 +436,9 @@ with `"1244"` computed from whatever value that scenario's own mocked
 
 * **Scenario slugging** (`_slugify` in `bundle.py`): lowercase, everything
   that isn't alphanumeric collapses to a single `-`, leading/trailing `-`
-  stripped. `"CHECK-QTY: THEN"` → `check-qty-then`. Deterministic and
-  filesystem-safe by construction. Scenario names are not unique (two IFs in
-  one paragraph both plan a `"CHECK-QTY: THEN"`), so a repeated slug gets
+  stripped. `"CHECK-QTY: IF@31 THEN"` → `check-qty-if-31-then`. Deterministic and
+  filesystem-safe by construction. The planner names scenarios uniquely, but
+  slugs of distinct names can still collide (`"A: B"` / `"A-B"`), so a repeated slug gets
   `-2`, `-3`, ... in bundle order (compared case-insensitively); the first
   keeps the plain slug. Likewise a `<KEY>.csv` two fixtures of one scenario
   would both write with *different* rows becomes `<KEY>-2.csv` for the
