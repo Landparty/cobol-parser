@@ -1250,6 +1250,15 @@ one distinct parent field returns `None` and records the parents in
 `ambiguities` -- the same policy `resolve()`/`record_named()` already apply
 to bare names. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestB4DuplicateConditionNamesAreAmbiguous`.
+**Qualified 88 names (#272, 2026-10-05).** `IS-OK OF REC-A` (or `IN`, or
+dotted `REC-A.IS-OK`) filters the 88's declarations by its qualifiers with
+the same rule the field branch uses (each qualifier names the record or a
+group on the parent field's path) before the one-parent check, so a
+qualified reference to a duplicated 88 resolves instead of being given up
+on. `condition_values()` / `condition_raw_values()` split the name with
+`split_qualified_name` and filter the same way (they used to look up the raw
+text, so any qualified name returned `None` and `gen-fixtures --scenarios`
+missed every arm testing it). A *bare* duplicated 88 still refuses to guess.
 
 **`record_named(name)` — whole records, not fields.** `resolve()` only ever
 finds *elementary* fields, because `flatten_record` never emits a `FieldSpec`
