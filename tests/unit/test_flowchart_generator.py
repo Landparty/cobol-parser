@@ -1740,3 +1740,101 @@ class TestHiddenUnreachableStaysHidden:
         assert "DEAD_ONE__IF_1" in out
         assert "EXT_DEADSUB" in out
         assert "DEAD_ONE ==>" in out
+
+
+# ---------------------------------------------------------------------------
+# #266: sanitized-id collisions must not merge distinct nodes
+# ---------------------------------------------------------------------------
+
+_COLLIDING_IDS_SRC = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. COLLIDE.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           PERFORM A-B.
+           PERFORM A_B.
+           PERFORM EXT-SUBPGM.
+           CALL 'SUBPGM'.
+           CALL 'SUB-A'.
+           CALL 'SUB_A'.
+           GOBACK.
+       A-B.
+           DISPLAY 'DASH'.
+       A_B.
+           DISPLAY 'UNDERSCORE'.
+       EXT-SUBPGM.
+           DISPLAY 'PARA'.
+"""
+
+
+def _colliding_report() -> ProgramFlowReport:
+    result = parse_cobol(_COLLIDING_IDS_SRC, filename="COLLIDE.cbl")
+    assert result.ast is not None
+    return ProgramFlowAnalyzer().analyze(result.ast)
+
+
+class TestIdCollisions:
+    """Issue #266: ``A-B`` / ``A_B`` and paragraph ``EXT-SUBPGM`` / external
+    ``SUBPGM`` used to share one sanitized id, silently merging the boxes."""
+
+    @staticmethod
+    def _mermaid_ids(out: str) -> dict[str, str]:
+        """Declared node id -> its quoted label."""
+        found: dict[str, str] = {}
+        for m in re.finditer(r'^\s+(\w+)[\[\(]+"([^"]*)"', out, re.MULTILINE):
+            found[m.group(1)] = m.group(2).split("\\n")[0]
+        return found
+
+    @staticmethod
+    def _dot_ids(out: str) -> dict[str, str]:
+        found: dict[str, str] = {}
+        for m in re.finditer(r'^\s+(\w+) \[label="([^"]*)"', out, re.MULTILINE):
+            found[m.group(1)] = m.group(2).split("\\n")[0]
+        return found
+
+    def _expected_labels(self, report: ProgramFlowReport) -> list[str]:
+        externals = sorted({c["program"].upper() for c in report.external_calls})
+        return sorted([n.key for n in report.nodes] + externals)
+
+    def test_mermaid_declares_one_distinct_id_per_node(self) -> None:
+        report = _colliding_report()
+        out = MermaidFlowchartGenerator().generate(report)
+        ids = {
+            k: v for k, v in self._mermaid_ids(out).items() if not k.endswith("_EXIT")
+        }
+        assert sorted(ids.values()) == self._expected_labels(report)
+        assert len(ids) == len(report.nodes) + 3
+
+    def test_dot_declares_one_distinct_id_per_node(self) -> None:
+        report = _colliding_report()
+        out = DotFlowchartGenerator().generate(report)
+        ids = {k: v for k, v in self._dot_ids(out).items() if not k.endswith("_EXIT")}
+        assert sorted(ids.values()) == self._expected_labels(report)
+        assert len(ids) == len(report.nodes) + 3
+
+    def test_mermaid_perform_targets_paragraph_not_external(self) -> None:
+        out = MermaidFlowchartGenerator().generate(_colliding_report())
+        ids = {v: k for k, v in self._mermaid_ids(out).items()}
+        para, ext = ids["EXT-SUBPGM"], ids["SUBPGM"]
+        assert para != ext
+        assert f"    MAIN_PARA --> {para}" in out.splitlines()
+        assert f'    MAIN_PARA -->|"CALL"| {ext}' in out.splitlines()
+        assert ids["A-B"] != ids["A_B"]
+        assert f"    MAIN_PARA --> {ids['A-B']}" in out.splitlines()
+        assert f"    MAIN_PARA --> {ids['A_B']}" in out.splitlines()
+        assert ids["SUB-A"] != ids["SUB_A"]
+
+    def test_dot_perform_targets_paragraph_not_external(self) -> None:
+        out = DotFlowchartGenerator().generate(_colliding_report())
+        ids = {v: k for k, v in self._dot_ids(out).items()}
+        para, ext = ids["EXT-SUBPGM"], ids["SUBPGM"]
+        assert para != ext
+        assert f"    MAIN_PARA -> {para};" in out.splitlines()
+        assert f'    MAIN_PARA -> {ext} [label="CALL"];' in out.splitlines()
+        assert ids["A-B"] != ids["A_B"]
+        assert ids["SUB-A"] != ids["SUB_A"]
+        assert f'    MAIN_PARA -> {ids["SUB_A"]} [label="CALL"];' in out.splitlines()
+
+    def test_non_colliding_program_keeps_plain_ids(self) -> None:
+        out = MermaidFlowchartGenerator().generate(_call_report())
+        assert "_2" not in out

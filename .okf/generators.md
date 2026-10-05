@@ -110,10 +110,10 @@ substance, differing only in each target format's own attribute syntax:
   (`fill:#1b1b1b,stroke:#c1121f`); DOT emits `shape=doublecircle` with
   matching `fillcolor`/`fontcolor`. Both respect `show_unreachable`
   identically to the main node loop. The terminal id is normally
-  `f"{nid}_EXIT"` (`nid = _sanitize_id(node.name)`), but module-level
-  `_unique_exit_id(nid, paragraph_ids)` (shared by both generators) falls
+  `f"{nid}_EXIT"` (`nid` = the paragraph's own allocated id), but the
+  chart's `_IdAllocator` (see "One id allocator per chart" below) falls
   back to `{nid}_FLOWEXIT`, then an incrementing numeric suffix, whenever
-  that id collides with a real paragraph's own sanitized id. **Bug fixed
+  that id is already taken (e.g. by a real paragraph's sanitized id). **Bug fixed
   2026-08-11:** `PERFORM X THRU X-EXIT` is a common COBOL range idiom, so a
   program can legitimately contain a paragraph literally named e.g.
   `9000-TERM-EXIT`; before the fix, that paragraph's own node id
@@ -188,6 +188,18 @@ Program Flow webview (Mermaid v11, `htmlLabels:false`,
   every DOT node/edge emission site. Mermaid is unaffected: its flowchart
   keywords (`end`, `style`, `class`, `click`, ...) only bite in lower case,
   and every id here is upper case (verified with mermaid 11 `parse()`).
+- **One id allocator per chart (#266, 2026-10-05).** `_sanitize_id` is
+  lossy: paragraphs `A-B` and `A_B` both sanitize to `A_B`, and an external
+  program `SUBPGM` (`EXT_SUBPGM`) meets a paragraph named `EXT-SUBPGM` --
+  the colliding nodes were silently merged and every edge into either
+  landed on the merged box. Each `generate()` builds one
+  `_IdAllocator.for_report(report)`, mapping `(kind, name)` -> a unique id
+  (kinds `node` = paragraph/section/branch/arm keyed by raw name, `ext` =
+  called program, `exit` = terminal). Paragraphs are allocated first so
+  they keep the plain id; a later collision gets a numeric suffix
+  (`A_B_2`, `EXT_SUBPGM_2`). Every node declaration and edge endpoint goes
+  through it; `_hidden_ids()` and the skipped-empty-arm set hold *raw*
+  names. A chart without collisions is byte-identical to before.
 - **`show_unreachable=False` hides what the paragraph owns (2026-09-28).**
   Only the paragraph's own node line (and its terminal node) was skipped;
   its outgoing PERFORM/GO TO/CALL edges, its IF/EVALUATE decision and arm
