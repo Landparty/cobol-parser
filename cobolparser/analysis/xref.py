@@ -1240,6 +1240,9 @@ class XrefAnalyzer:
             if stmt.into_target:
                 pairs.append((stmt.into_target, ROLE_WRITE, True))
             if stmt.pointer_variable:
+                # WITH POINTER starts at the pointer's current value and
+                # advances it: read and written (#269).
+                pairs.append((stmt.pointer_variable, ROLE_READ, True))
                 pairs.append((stmt.pointer_variable, ROLE_WRITE, True))
             # ``DELIMITED BY`` holds either a data name, a quote-stripped
             # literal, or the keyword SIZE -- inexact either way.
@@ -1269,21 +1272,26 @@ class XrefAnalyzer:
                     pairs.append((target["count_var"], ROLE_WRITE, True))
                 if target.get("delimiter_var"):
                     pairs.append((target["delimiter_var"], ROLE_WRITE, True))
-            if stmt.pointer_variable:
-                pairs.append((stmt.pointer_variable, ROLE_WRITE, True))
-            if stmt.tallying_variable:
-                pairs.append((stmt.tallying_variable, ROLE_WRITE, True))
+            # POINTER starts at its current value and is advanced; TALLYING
+            # IN is incremented, never reset: both read and written (#269).
+            for value in (stmt.pointer_variable, stmt.tallying_variable):
+                if value:
+                    pairs.append((value, ROLE_READ, True))
+                    pairs.append((value, ROLE_WRITE, True))
         elif isinstance(stmt, InspectStatement):
             if stmt.target:
+                # The inspected item is always read; REPLACING / CONVERTING
+                # rewrite it in place, so it is written too (#269).
+                pairs.append((stmt.target, ROLE_READ, True))
                 inspected = (stmt.inspect_type or "").upper()
-                role = (
-                    ROLE_WRITE
-                    if inspected in ("REPLACING", "CONVERTING")
-                    else ROLE_READ
-                )
-                pairs.append((stmt.target, role, True))
+                # ``TALLYING ... REPLACING`` is recorded as TALLYING_REPLACING.
+                if inspected in ("REPLACING", "CONVERTING", "TALLYING_REPLACING"):
+                    pairs.append((stmt.target, ROLE_WRITE, True))
             for clause in stmt.tallying_clauses:
                 if clause.get("counter"):
+                    # TALLYING adds to the counter's current value: it is
+                    # read as well as written (#269).
+                    pairs.append((clause["counter"], ROLE_READ, True))
                     pairs.append((clause["counter"], ROLE_WRITE, True))
                 # Everything else in an INSPECT clause is a value that may
                 # equally be a quote-stripped literal -- inexact.

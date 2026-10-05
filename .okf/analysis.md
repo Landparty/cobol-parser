@@ -2478,6 +2478,17 @@ an accumulated parameter is now `input-output` (was `output`) and a
 `test_xref.py::test_giving_leaves_the_from_operand_unwritten` and friends and
 `test_program_signature.py::test_accumulated_and_giving_operands_get_the_right_direction`.
 
+**Counter / pointer / in-place roles (issue #269).** Operands a statement
+advances or rewrites from their current value are both `read` and `write`:
+an INSPECT TALLYING counter, STRING / UNSTRING `WITH POINTER`, UNSTRING
+`TALLYING IN`, and the inspected item of INSPECT REPLACING / CONVERTING /
+TALLYING ... REPLACING (the item of a plain INSPECT TALLYING stays `read`;
+UNSTRING `COUNT IN` / `DELIMITER IN` stay `write`). They were `write` only,
+so `program-signature` graded such a LINKAGE parameter `output` instead of
+`input-output`; `business-rules` now lists them as inputs and outputs.
+Pinned by `test_xref.py::test_counters_pointers_and_inspect_targets_are_read_write`
+and `test_program_signature.py::TestDirection::test_counters_pointers_and_inspected_items_are_input_output`.
+
 This is the natural completion of `unused_variables.py`. That analyzer answers
 "is this name referenced at all?" with a flat `set[str]`; this one keeps the
 locations and roles that set throws away, so "unused" becomes "fully

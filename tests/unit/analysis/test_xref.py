@@ -250,8 +250,45 @@ def test_string_unstring_and_inspect_roles():
     assert ROLE_READ in _roles(report, "WS-TEXT")  # UNSTRING source / INSPECT
     assert ROLE_READ in _roles(report, "WS-PART")  # STRING source
     assert ROLE_WRITE in _roles(report, "WS-PART")  # UNSTRING INTO
-    assert _roles(report, "WS-PTR") == [ROLE_WRITE]
-    assert _roles(report, "WS-COUNT") == [ROLE_WRITE]  # TALLYING counter
+    # POINTER and TALLYING counters are advanced from their current value:
+    # read *and* written (#269).
+    assert sorted(_roles(report, "WS-PTR")) == sorted([ROLE_READ, ROLE_WRITE])
+    assert sorted(_roles(report, "WS-COUNT")) == sorted([ROLE_READ, ROLE_WRITE])
+
+
+def test_counters_pointers_and_inspect_targets_are_read_write():
+    # Issue #269: each of these was recorded write-only.
+    report = _analyze_source("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RW.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-SRC   PIC X(30).
+       01  WS-PART  PIC X(10).
+       01  WS-UPTR  PIC 9(4).
+       01  WS-UTAL  PIC 9(4).
+       01  WS-UCNT  PIC 9(4).
+       01  WS-REP   PIC X(10).
+       01  WS-CONV  PIC X(10).
+       01  WS-TR    PIC X(10).
+       01  WS-TRCNT PIC 9(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           UNSTRING WS-SRC DELIMITED BY ',' INTO WS-PART
+               COUNT IN WS-UCNT
+               WITH POINTER WS-UPTR TALLYING IN WS-UTAL
+           END-UNSTRING
+           INSPECT WS-REP REPLACING ALL 'A' BY 'B'
+           INSPECT WS-CONV CONVERTING 'abc' TO 'ABC'
+           INSPECT WS-TR TALLYING WS-TRCNT FOR ALL 'A'
+               REPLACING ALL 'A' BY 'B'
+           STOP RUN.
+""")
+    both = sorted([ROLE_READ, ROLE_WRITE])
+    for name in ("WS-UPTR", "WS-UTAL", "WS-REP", "WS-CONV", "WS-TR", "WS-TRCNT"):
+        assert sorted(_roles(report, name)) == both, name
+    # COUNT IN only stores the length: still write-only.
+    assert _roles(report, "WS-UCNT") == [ROLE_WRITE]
 
 
 def test_accept_and_display_roles():
@@ -1449,8 +1486,9 @@ def test_unstring_count_pointer_and_tallying_are_writes():
     report = _analyze_source(_IO_AND_STRINGS)
     assert _roles(report, "WS-P1") == [ROLE_WRITE]
     assert _roles(report, "WS-C1") == [ROLE_WRITE]
-    assert _roles(report, "WS-PTR") == [ROLE_WRITE]
-    assert _roles(report, "WS-TALLY") == [ROLE_WRITE]
+    # POINTER / TALLYING IN are advanced from their current value (#269).
+    assert sorted(_roles(report, "WS-PTR")) == sorted([ROLE_READ, ROLE_WRITE])
+    assert sorted(_roles(report, "WS-TALLY")) == sorted([ROLE_READ, ROLE_WRITE])
 
 
 def test_xml_parse_reads_its_document_and_performs_its_handler():
