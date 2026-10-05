@@ -403,5 +403,6 @@ class TestQualifiedConditionName:
         assert coverage is not None
         assert coverage["total_arms"] == 2
         assert coverage["missed"] == 0, coverage["details"]
-        statuses = [s.verification["status"] for s in bundle.scenarios]
+        statuses = [s.verification["status"] for s in bundle.scenarios[1:]]
+        assert bundle.scenarios[0].name == "happy path"
         assert statuses == ["verified", "verified"]

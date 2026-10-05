@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-05 -- happy path kept in `branches`/`all` scenario modes
+
+`generators.md`: `generate_with_scenarios` now prepends the happy-path
+scenario in `branches`/`all`, so no bundle comes back with zero scenarios.
+
 ## 2026-10-05 -- from_json restores structure, equals compares content (#273)
 
 [ast-models.md](ast-models.md): `CobolProgram.from_json` rebuilds sections,

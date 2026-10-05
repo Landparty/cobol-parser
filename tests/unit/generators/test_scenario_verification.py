@@ -57,6 +57,11 @@ NESTED_SOURCE = """\
 """
 
 
+def _branch_scenarios(bundle):
+    """Every scenario but the happy path, which targets no branch."""
+    return [s for s in bundle.scenarios if s.name != "happy path"]
+
+
 def _bundle(source: str, mode: str = "branches", rows: int = 3):
     result = parse_cobol(source, filename="t.cbl")
     assert result.ast is not None, result.errors
@@ -117,14 +122,14 @@ class TestPathConditionAccumulation:
 class TestSelfVerification:
     def test_every_branch_scenario_carries_a_verdict(self):
         bundle = _bundle(NESTED_SOURCE)
-        assert bundle.scenarios
-        for scenario in bundle.scenarios:
+        assert _branch_scenarios(bundle)
+        for scenario in _branch_scenarios(bundle):
             assert scenario.verification is not None
             assert scenario.verification["status"] in ("verified", "unverified")
 
     def test_a_well_pinned_scenario_verifies_against_its_own_data(self):
         bundle = _bundle(NESTED_SOURCE)
-        for scenario in bundle.scenarios:
+        for scenario in _branch_scenarios(bundle):
             assert scenario.verification["status"] == "verified", (
                 scenario.name,
                 scenario.verification,
@@ -139,6 +144,16 @@ class TestSelfVerification:
         "verified"."""
         bundle = _bundle(NESTED_SOURCE, mode="happy")
         assert [s.verification for s in bundle.scenarios] == [None]
+
+    def test_branch_modes_keep_the_happy_path_first_and_unverified(self):
+        """`branches` adds scenarios on top of the happy path, it does not
+        replace it: the same scenario `mode="happy"` emits comes first, still
+        with no verdict."""
+        happy = _bundle(NESTED_SOURCE, mode="happy").scenarios[0]
+        first = _bundle(NESTED_SOURCE).scenarios[0]
+        assert first.name == "happy path"
+        assert first.verification is None
+        assert first.to_dict() == happy.to_dict()
 
     def test_an_undecidable_comparison_is_reported_not_assumed_good(self):
         """`IF WS-INPUT > 0` on a `PIC X` field: ordering an alphanumeric
@@ -168,7 +183,7 @@ class TestSelfVerification:
            END-IF.
 """
         bundle = _bundle(source)
-        assert bundle.scenarios == []
+        assert [s.name for s in bundle.scenarios] == ["happy path"]
         coverage = bundle.scenario_coverage
         assert coverage["targeted"] == 0
         assert coverage["missed"] == coverage["total_arms"] > 0
@@ -186,7 +201,9 @@ class TestSelfVerification:
 
         bundle = _bundle(NESTED_SOURCE)
         payload = json.loads(bundle.to_json())
-        assert all("verification" in s for s in payload["scenarios"])
+        branch = [s for s in payload["scenarios"] if s["name"] != "happy path"]
+        assert branch
+        assert all("verification" in s for s in branch)
 
 
 class TestSatisfies:
