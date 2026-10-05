@@ -395,7 +395,12 @@ to `--format record|hex` only (CSV and JSON have no notion of record length).
    FD, `--record-varying MIN:MAX` supplies the range (`MIN-MAX` is accepted
    too, since that is how it reads in the FD). The cut can fall mid-field —
    which is exactly what a program reading `REC(1:LEN)` sees — and
-   `--format hex` marks the fields past it as `(past record length)`.
+   `--format hex` marks the fields past it as `(past record length)` and the
+   field it falls inside as `(cut N/M bytes)`. A range reaching past the
+   record's own bytes is clamped to them, and one with nothing left
+   (`40:50` on a 28-byte record, or equal bounds) is ignored -- both with a
+   `warning:` on stderr (every format) and a `* caveat:` in the hex header
+   (#274); previously both happened silently.
 * **The RDW** is `LL LL 00 00` — a big-endian 16-bit length *including the
   four RDW bytes*, then two reserved zero bytes — regardless of `--charset`
   and `--endian`. A record whose total would exceed 65 535 bytes errors out

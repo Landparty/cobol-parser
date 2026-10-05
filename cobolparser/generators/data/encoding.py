@@ -839,6 +839,7 @@ def hex_dump(
     record_name: str = "",
     data_lengths: list[int] | None = None,
     varying: VaryingLength | None = None,
+    extra_caveats: list[str] | None = None,
 ) -> str:
     """Render *rows* as an annotated, field-by-field hex dump.
 
@@ -850,7 +851,8 @@ def hex_dump(
 
     Any :func:`encoding_caveats` are printed in the header rather than
     swallowed: a dump that silently ignored ``SYNCHRONIZED`` would be
-    confidently wrong about every offset after the aligned item.
+    confidently wrong about every offset after the aligned item.  So are
+    *extra_caveats* (the dataset's own, e.g. a clamped ``RECORD VARYING``).
     """
     fmt = opts.resolved_format(specs, varying=varying is not None)
     length = record_length(specs)
@@ -888,7 +890,10 @@ def hex_dump(
         f"* charset: {opts.charset.value}   "
         f"comp-5/float byte order: {opts.resolved_endian.value}"
     )
-    for caveat in encoding_caveats(specs, opts, varying=varying):
+    for caveat in [
+        *(extra_caveats or []),
+        *encoding_caveats(specs, opts, varying=varying),
+    ]:
         out.append(f"* caveat: {caveat}")
     out.append(
         "*"
@@ -929,7 +934,13 @@ def hex_dump(
                     # omitted, so a reader can see where the cut fell.
                     out.extend(_dump_absent_lines(spec, offset))
                     continue
+                full = len(raw)
                 raw = raw[: declared - written]
+                if len(raw) < full:
+                    # The cell is the whole value; the file holds only the
+                    # bytes before the cut, so showing the cell would claim
+                    # bytes that were never written.
+                    cell = f"(cut {len(raw)}/{full} bytes)"
             written += len(raw)
             out.extend(_dump_field_lines(spec, cell, offset, raw, opts))
             offset += len(raw)

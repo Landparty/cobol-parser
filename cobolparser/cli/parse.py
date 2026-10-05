@@ -1244,6 +1244,10 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
         )
     except CopybookLayoutError as exc:
         _fail(str(exc))
+    # Whatever the format: a --record-varying range clamped or ignored to
+    # fit the layout is otherwise invisible in CSV/JSON/record output.
+    for caveat in dataset.caveats:
+        print(f"warning: {caveat}", file=sys.stderr)
 
     output_path = getattr(args, "output", None)
 

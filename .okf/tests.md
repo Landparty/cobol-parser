@@ -207,9 +207,12 @@ end (the FD clause picked up with no flag at all, every drawn length inside
 47..80, the cut falling mid-`EMP-COMMENT`, the RDW carrying it, and a seed
 reproducing the lengths); the latter covers
 `DataGeneratorOptions.record_varying` for a copybook that has no FD, its
-clamping to the record's real length, and the degenerate equal-bounds case.
+clamping to the record's real length, and the degenerate equal-bounds case
+-- each now also pinning the caveat it reports (#274), plus an FD range past
+the record and the hex VALUE column's `(cut N/M bytes)`.
 `tests/unit/cli/test_gen_data_cli.py::TestRecordVaryingFlag` covers the
 `--record-varying` flag, `MIN-MAX` as well as `MIN:MAX`, malformed ranges,
+an out-of-range one warning on stderr and in the hex header (#274),
 and that passing it alone resolves to `auto` while an explicit
 `--record-format fixed` still wins. That last point is why
 `TestRecordFormatFlag::test_the_default_is_fixed` now asserts the *resolved*

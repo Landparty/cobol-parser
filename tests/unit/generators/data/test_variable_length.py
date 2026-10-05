@@ -266,6 +266,55 @@ class TestExplicitVaryingRange:
         ).for_record_image()
         dataset = CopybookDataGenerator(options).generate_from_source(FIXED_COPYBOOK)
         assert dataset.varying == VaryingLength(4, 16, None)
+        # #274: the clamp is reported, not silent.
+        assert dataset.caveats == [
+            "requested RECORD VARYING FROM 4 TO 40 exceeds the 16 bytes the "
+            "record layout describes; clamped to FROM 4 TO 16"
+        ]
+        assert "* caveat: requested RECORD VARYING FROM 4 TO 40" in (
+            dataset.to_hex_dump()
+        )
+
+    def test_a_range_wholly_past_the_record_is_reported_as_ignored(self):
+        # #274: --record-varying 40:50 on a 16-byte record used to write plain
+        # RECFM=F with no word about the range it was given.
+        options = DataGeneratorOptions(
+            rows=5, seed=3, record_varying=(40, 50)
+        ).for_record_image()
+        dataset = CopybookDataGenerator(options).generate_from_source(FIXED_COPYBOOK)
+        assert dataset.varying is None
+        assert len(dataset.caveats) == 1
+        assert "FROM 40 TO 50 leaves no length range" in dataset.caveats[0]
+        assert "ignored" in dataset.caveats[0]
+
+    def test_a_range_inside_the_record_has_no_caveat(self):
+        options = DataGeneratorOptions(
+            rows=5, seed=3, record_varying=(4, 16)
+        ).for_record_image()
+        dataset = CopybookDataGenerator(options).generate_from_source(FIXED_COPYBOOK)
+        assert dataset.caveats == []
+
+    def test_an_fd_range_past_the_record_is_reported_too(self):
+        source = EMPVL_PROGRAM.replace("FROM 47 TO 80", "FROM 47 TO 90")
+        opts = DataGeneratorOptions(rows=4, seed=7).for_record_image()
+        dataset = CopybookDataGenerator(opts).generate_from_source(
+            source, filename="EMPVL.cbl"
+        )
+        assert dataset.varying == VaryingLength(47, 80, "EMPREC-LEN")
+        assert dataset.caveats == [
+            "FD RECORD VARYING FROM 47 TO 90 exceeds the 80 bytes the record "
+            "layout describes; clamped to FROM 47 TO 80"
+        ]
+
+    def test_the_hex_value_column_does_not_show_bytes_past_the_cut(self):
+        options = DataGeneratorOptions(
+            rows=3, seed=3, record_varying=(7, 8)
+        ).for_record_image()
+        dataset = CopybookDataGenerator(options).generate_from_source(FIXED_COPYBOOK)
+        dump = dataset.to_hex_dump(EncodingOptions(record_format=RecordFormat.VARIABLE))
+        names = [row[1] for row in dataset.rows]
+        assert not any(name.strip() and name in dump for name in names)
+        assert "(cut " in dump
 
     def test_a_degenerate_range_is_not_a_varying_record(self):
         options = DataGeneratorOptions(
@@ -274,6 +323,7 @@ class TestExplicitVaryingRange:
         dataset = CopybookDataGenerator(options).generate_from_source(FIXED_COPYBOOK)
         assert dataset.varying is None
         assert dataset.declared_lengths is None
+        assert dataset.caveats and "ignored" in dataset.caveats[0]
 
     @pytest.mark.parametrize("bad", [(-1, 5), (9, 4)])
     def test_a_nonsense_range_is_refused(self, bad):

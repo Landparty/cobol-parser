@@ -1120,7 +1120,14 @@ bytes each *record* carries.
   `VARYING` keyword and parses identically.
 * **`maximum` is clamped to the record's own byte length.** An FD promising
   more than its 01 can hold cannot be honoured by padding — those bytes were
-  never declared — so the range is cut to what exists.
+  never declared — so the range is cut to what exists. **Never silently**
+  (#274, 2026-10-05): `VaryingLength.build(..., caveats=)` appends a sentence
+  whenever it clamps a bound, or ignores the range outright because nothing
+  of it is left (`40:50` on a 28-byte record, or equal bounds) — the record
+  then stays fixed-length. The sentence lands on `GeneratedDataset.caveats`,
+  is printed as a `* caveat:` line in `to_hex_dump()`'s header
+  (`hex_dump(..., extra_caveats=)`), and as `warning:` on stderr by
+  `gen-data` in every output format.
 * **The length is drawn per row at *generation* time**, uniformly across the
   range, from the same seeded RNG the values came from, and stored on
   `GeneratedDataset.declared_lengths`. Drawing it there rather than in the
@@ -1133,7 +1140,9 @@ bytes each *record* carries.
   `EMP-RECORD80(1:EMPREC-LEN)` sees. Passing it also settles
   `RecordFormat.AUTO`, since a declared length is by definition a record that
   varies. `--format hex` shows the fields past the cut as
-  `(past record length)` rather than dropping them, so the cut is visible.
+  `(past record length)` rather than dropping them, so the cut is visible;
+  a field the cut falls *inside* shows `(cut N/M bytes)` in the VALUE column
+  rather than the whole generated value (most of which is not in the file).
 * **The `DEPENDING ON` item is filled in when it *is* in the record.** Usually
   it isn't. When a copybook does put it there, leaving the generated value
   would contradict the record's own length.
