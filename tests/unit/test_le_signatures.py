@@ -287,6 +287,71 @@ class TestServiceOperandsMatchIbm:
             "fc",
         ]
 
+    @pytest.mark.parametrize("name", ["CEEGMT", "CEEUTC"])
+    def test_gmt_and_utc_return_no_gregorian(self, name: str) -> None:
+        # Issue #270: only CEELOCT returns a Gregorian string; CEEGMT/CEEUTC
+        # carried an extra CHAR17 operand that would shift fc in a real CALL.
+        sig = le_service_signature(name)
+        assert sig is not None
+        assert [p.name for p in sig.parameters] == [
+            "output_GMT_Lilian",
+            "output_GMT_seconds",
+            "fc",
+        ]
+        assert [p.type_id for p in sig.parameters] == [
+            "int32",
+            "float64",
+            "feedback",
+        ]
+        assert IBMEnterpriseCobol().get_le_service_info(name)["parameters"] == [
+            "output_GMT_Lilian",
+            "output_GMT_seconds",
+            "fc",
+        ]
+
+    def test_ceeloct_still_returns_gregorian(self) -> None:
+        sig = le_service_signature("CEELOCT")
+        assert sig is not None
+        assert [p.name for p in sig.parameters] == [
+            "output_Lilian",
+            "output_seconds",
+            "output_Gregorian",
+            "fc",
+        ]
+
+    @pytest.mark.parametrize("name", ["CEEFMDA", "CEEFMDT", "CEEFMTM"])
+    def test_default_picture_services_take_a_country_code(self, name: str) -> None:
+        # Issue #270: the leading country_code operand was missing.
+        sig = le_service_signature(name)
+        assert sig is not None
+        assert [p.name for p in sig.parameters] == [
+            "country_code",
+            "picture_string",
+            "fc",
+        ]
+        country, picture, _ = sig.parameters
+        assert (country.direction, country.type_id) == ("input", "char2")
+        assert country.data_type.declaration == "PIC X(2)"
+        # Omittable via blanks/OMITTED, but positional: it precedes a required
+        # operand, so it is never dropped from the USING list.
+        assert "OMITTED" in country.description
+        assert (picture.direction, picture.type_id) == ("output", "char80")
+        assert [p.name for p in sig.required_parameters] == [
+            "country_code",
+            "picture_string",
+        ]
+
+    def test_cee3dmp_options_is_a_fixed_255_character_string(self) -> None:
+        # Issue #270: options is CHAR255, not a halfword-prefixed vstring.
+        sig = le_service_signature("CEE3DMP")
+        assert sig is not None
+        assert [p.name for p in sig.parameters] == ["title", "options", "fc"]
+        options = sig.parameters[1]
+        assert options.type_id == "char255"
+        assert options.data_type.declaration == "PIC X(255)"
+        assert options.data_type.byte_length == 255
+        assert sig.parameters[0].type_id == "char80"
+
 
 class TestEnterpriseSixIntrinsicSignatures:
     """The post-COBOL-85 intrinsics carry signatures with IBM's arity."""

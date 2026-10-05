@@ -1313,6 +1313,19 @@ termination -- and `CEEISEC` was missing `input_milliseconds` (9 operands,
 not 8), so a CALL written from `le-info`'s example passed `output_seconds`
 where LE reads milliseconds. `TestServiceOperandsMatchIbm`.
 
+**Five more operand lists corrected (issue #270, 2026-10-05), against
+SA38-0683:** `CEEGMT` / `CEEUTC` are `(output_GMT_Lilian, output_GMT_seconds,
+fc)` -- they carried a third `output_Gregorian` CHAR17 operand that only
+`CEELOCT` has, so a CALL copied from `le-info` put the feedback code where LE
+reads nothing and left `fc` unset. `CEEFMDA` / `CEEFMDT` / `CEEFMTM` take a
+leading `country_code` (CHAR2, input; blanks or `OMITTED` for the current
+setting -- positional, so it is *not* `optional`, which in this catalogue means
+"may be dropped from the end of the USING list"). `CEE3DMP`'s `options` is a
+fixed `PIC X(255)` (new `char255` type; `char2` was added too), not a
+halfword-prefixed `vstring`. `CATALOG_VERSION` is unchanged: new type ids,
+same dict shape. Consumers that copied the old lists (the COBOL Analyzer
+extension's hover) pick the fix up from `le-info`.
+
 `IBMEnterpriseCobol.IBM_LE_SERVICE_INFO` is **derived** from this catalogue
 (merged over `_UNCATALOGUED_LE_SERVICE_INFO`, the leftovers), so the dialect's
 one-line metadata and the signatures cannot drift. Categories are cross-checked
