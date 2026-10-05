@@ -857,18 +857,20 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
     if args.strip_directives:
         source = strip_compiler_directives(source)
 
+    # Always evaluated, --define or not: >>IF / >>EVALUATE / >>DEFINE in the
+    # source are themselves directives, and gating this on --define printed
+    # both arms of every >>IF ... >>ELSE when no symbol was given (#271).
     defines = _parse_defines(args.define)
-    if defines:
-        conditional_warnings: list[str] = []
-        # Kept for normalize_fixed_format below (see _do_parse).
-        source = preprocess_conditional_compilation(
-            source,
-            defines,
-            warnings=conditional_warnings,
-            keep_source_format_directives=True,
-        )
-        for cw in conditional_warnings:
-            print(f"warning: {cw}", file=sys.stderr)
+    conditional_warnings: list[str] = []
+    # Kept for normalize_fixed_format below (see _do_parse).
+    source = preprocess_conditional_compilation(
+        source,
+        defines or {},
+        warnings=conditional_warnings,
+        keep_source_format_directives=True,
+    )
+    for cw in conditional_warnings:
+        print(f"warning: {cw}", file=sys.stderr)
 
     # 'fixed' always normalizes; 'auto' (the default) normalizes only when
     # detection classifies the source as fixed-format -- previously auto

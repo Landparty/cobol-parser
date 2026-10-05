@@ -124,6 +124,42 @@ class TestCmdPreprocess:
         out = capsys.readouterr().out
         assert len(out) > 0
 
+    _DEBUG_IF = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. COND.\n"
+        "       PROCEDURE DIVISION.\n"
+        "{define}"
+        "       >>IF DEBUG DEFINED\n"
+        "           DISPLAY 'DEBUG ON'\n"
+        "       >>ELSE\n"
+        "           DISPLAY 'DEBUG OFF'\n"
+        "       >>END-IF\n"
+        "           STOP RUN.\n"
+    )
+
+    def test_conditionals_evaluated_without_define(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # Issue #271: with no --define, both arms were printed verbatim.
+        src = tmp_path / "cond.cbl"
+        src.write_text(self._DEBUG_IF.format(define=""))
+        _cmd_preprocess(_preprocess_args(str(src)))
+        out = capsys.readouterr().out
+        assert "DEBUG OFF" in out
+        assert "DEBUG ON" not in out
+        assert ">>IF" not in out and ">>END-IF" not in out
+
+    def test_in_source_define_honoured_without_cli_define(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        src = tmp_path / "cond.cbl"
+        src.write_text(self._DEBUG_IF.format(define="       >>DEFINE DEBUG\n"))
+        _cmd_preprocess(_preprocess_args(str(src)))
+        out = capsys.readouterr().out
+        assert "DEBUG ON" in out
+        assert "DEBUG OFF" not in out
+        assert ">>DEFINE" not in out
+
     def test_define_keyvalue_format(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

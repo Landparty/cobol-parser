@@ -257,6 +257,10 @@ All subcommands that run conditional compilation (`parse`, `preprocess`,
 (unknown `>>IF` conditions, stray `>>ELSE`/`>>END-IF`, malformed
 `>>DEFINE`, unclosed `>>IF` — audit 2026-07-07 H7) to **stderr** as
 `warning: ...` lines, so deleted guarded blocks are no longer silent.
+`preprocess` evaluates `>>IF` / `>>EVALUATE` / `>>DEFINE` **whether or
+not `--define` is given** (issue #271, 2026-10-05): it used to run the
+conditional pass only under `--define`, so without it every `>>IF ... >>ELSE`
+came out with both arms and an in-source `>>DEFINE` was ignored.
 `preprocess` (fixed-format branch only) additionally prints
 `normalize_fixed_format`'s column-72 overflow diagnostics the same way
 (2026-08-14 — see [preprocessing.md](preprocessing.md)'s "Column 73+
