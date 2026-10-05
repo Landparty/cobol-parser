@@ -1622,11 +1622,22 @@ boundary it gates on never had a `status_field`. DELETE/START/UNLOCK are
    A write to a *parent group* counts as touching a child field (and vice
    versa), checked via `FieldSpec.path` prefix comparison through the index,
    not bare string equality. "Read" for a write-shaped statement (rung 2's
-   list above) checks only its own read-only attribute (MOVE's `.source`);
-   the generic `.operands` fallback is reserved for statement types with no
-   write-shape at all (DISPLAY, IF conditions, ...) since a write-shaped
-   statement's own `.operands` also contains its target, which would
-   otherwise misread a write as a read of the same name.
+   list above) comes from a per-type read list (`_write_shaped_read_names`,
+   issue #268) and is checked *before* that statement's writes: MOVE's
+   `.source`; ADD/SUBTRACT/MULTIPLY/DIVIDE's operands minus the GIVING and
+   REMAINDER receivers (without GIVING the TO/FROM/BY/INTO target is read
+   *and* written; with GIVING it is read only and is no longer counted as a
+   write target either); every name in a COMPUTE expression; STRING's
+   sending operands, delimiters and POINTER; UNSTRING's source, delimiters,
+   POINTER and TALLYING; SET's value (plus the target for UP/DOWN BY);
+   INITIALIZE's REPLACING BY values. POINTER/TALLYING/COUNT IN/DELIMITER IN
+   are write targets too. A write-shaped type with no read list whose
+   `.operands` names the arg outside its write targets degrades the arg to
+   **BIDIRECTIONAL** `assumed-bidirectional`, never OUT. The generic
+   `.operands` fallback is reserved for statement types with no write-shape
+   at all (DISPLAY, IF conditions, ...) since a write-shaped statement's own
+   `.operands` also contains its target, which would otherwise misread a
+   write as a read of the same name.
 4. Otherwise **BIDIRECTIONAL**, `provenance="assumed-bidirectional"`.
 
 **Rung 3's "read" also covers a branching statement's own condition**

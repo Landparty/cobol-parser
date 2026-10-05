@@ -296,6 +296,136 @@ class TestCallArgumentDirectionLadder:
         )
 
 
+class TestCallerDataflowReadsInWriteShapedStatements:
+    """Issue #268: a CALL argument read after the CALL by ADD / COMPUTE /
+    STRING / MULTIPLY / SUBTRACT (a *write-shaped* statement) was graded OUT,
+    because only MOVE's ``.source`` counted as a read."""
+
+    HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. WSREADS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-A                PIC 9(4).
+       01  WS-B                PIC 9(4).
+       01  WS-C                PIC 9(4).
+       01  WS-D                PIC X(4).
+       01  WS-E                PIC X.
+       01  WS-P                PIC 99.
+       01  WS-T                PIC 9(4).
+       01  WS-OUT              PIC X(10).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+"""
+
+    def _args(self, body: str) -> dict:
+        _, _, report = _analyze(self.HEADER + body, "wsreads.cbl")
+        call = next(b for b in report.boundaries if b.ref.category == "CALL")
+        return {a.name: a for a in call.call_args}
+
+    def test_issue_268_repro_add_compute_string_read_the_args(self):
+        args = self._args("""\
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           MOVE 'X' TO WS-D
+           CALL 'SUBA' USING WS-A WS-B WS-D
+           ADD WS-A TO WS-T
+           COMPUTE WS-T = WS-B * 2
+           STRING WS-D DELIMITED BY SIZE INTO WS-OUT.
+""")
+        for name in ("WS-A", "WS-B", "WS-D"):
+            assert args[name].direction == "BIDIRECTIONAL", name
+            assert args[name].provenance == "caller-dataflow", name
+
+    def test_to_from_by_into_targets_without_giving_are_read(self):
+        args = self._args("""\
+           MOVE 1 TO WS-A WS-B WS-C
+           CALL 'SUBA' USING WS-A WS-B WS-C
+           ADD 1 TO WS-A
+           MULTIPLY 3 BY WS-B
+           DIVIDE 2 INTO WS-C.
+""")
+        for name in ("WS-A", "WS-B", "WS-C"):
+            assert args[name].direction == "BIDIRECTIONAL", name
+
+    def test_subtract_from_target_without_giving_is_read(self):
+        args = self._args("""\
+           MOVE 1 TO WS-A
+           CALL 'SUBA' USING WS-A
+           SUBTRACT 1 FROM WS-A.
+""")
+        assert args["WS-A"].direction == "BIDIRECTIONAL"
+
+    def test_giving_receiver_is_written_not_read(self):
+        # WS-A is only stored into by GIVING after the call -> still OUT.
+        args = self._args("""\
+           MOVE 1 TO WS-A
+           CALL 'SUBA' USING WS-A
+           ADD WS-B TO WS-C GIVING WS-A.
+""")
+        assert args["WS-A"].direction == "OUT"
+        assert args["WS-A"].provenance == "caller-dataflow"
+
+    def test_to_operand_with_giving_is_read_not_written(self):
+        # ``ADD 1 TO WS-A GIVING WS-T`` reads WS-A and stores only WS-T, so
+        # WS-A (written before the call) is BIDIRECTIONAL, not OUT.
+        args = self._args("""\
+           MOVE 1 TO WS-A
+           CALL 'SUBA' USING WS-A
+           ADD 1 TO WS-A GIVING WS-T.
+""")
+        assert args["WS-A"].direction == "BIDIRECTIONAL"
+        assert args["WS-A"].provenance == "caller-dataflow"
+
+    def test_unstring_source_and_string_pointer_are_read(self):
+        args = self._args("""\
+           MOVE 'A,B' TO WS-OUT
+           MOVE 1 TO WS-P
+           CALL 'SUBA' USING WS-OUT WS-P
+           STRING 'Z' DELIMITED BY SIZE INTO WS-D
+               WITH POINTER WS-P
+           UNSTRING WS-OUT DELIMITED BY ',' INTO WS-D.
+""")
+        assert args["WS-OUT"].direction == "BIDIRECTIONAL"
+        assert args["WS-P"].direction == "BIDIRECTIONAL"
+
+    def test_set_up_by_and_initialize_replacing_read(self):
+        args = self._args("""\
+           MOVE 1 TO WS-P WS-A
+           CALL 'SUBA' USING WS-P WS-A
+           SET WS-P UP BY 1
+           INITIALIZE WS-T REPLACING NUMERIC DATA BY WS-A.
+""")
+        assert args["WS-P"].direction == "BIDIRECTIONAL"
+        assert args["WS-A"].direction == "BIDIRECTIONAL"
+
+    def test_unknown_write_shaped_type_degrades_to_assumed_bidirectional(self):
+        source = self.HEADER + """\
+           MOVE 1 TO WS-A
+           CALL 'SUBA' USING WS-A
+           MOVE WS-A TO WS-T.
+"""
+        result = parse_cobol(source, filename="wsreads.cbl")
+        assert result.ast is not None
+        index = ProgramLayoutIndex.build(result.ast)
+        statements = list(result.ast.get_all_statements())
+
+        class _OpaqueWrite:
+            # A write-shaped type this module has no read list for.
+            def __init__(self) -> None:
+                self.targets = ["WS-T"]
+                self.operands = ["WS-A", "WS-T"]
+
+        statements[-1] = _OpaqueWrite()
+        call_pos = next(
+            i for i, s in enumerate(statements) if type(s).__name__ == "CallStatement"
+        )
+        direction, provenance = BoundaryInventoryAnalyzer._caller_dataflow_direction(
+            "WS-A", index, statements, call_pos
+        )
+        assert (direction, provenance) == ("BIDIRECTIONAL", "assumed-bidirectional")
+
+
 class TestDynamicCall:
     def test_dynamic_call_keys_on_uppercased_identifier(self):
         source = """\

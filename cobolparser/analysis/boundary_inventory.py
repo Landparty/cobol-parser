@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.sql_statements import ExecSQLStatement, FetchStatement
+from ..models.statements.arithmetic import ArithmeticStatement, ComputeStatement
 from ..models.statements.base import (
     ArithmeticExpression,
     CobolExpression,
@@ -36,7 +37,14 @@ from ..models.statements.control import (
     PerformStatement,
     SearchStatement,
 )
-from ..models.statements.data import DisplayStatement
+from ..models.statements.data import (
+    DisplayStatement,
+    InitializeStatement,
+    MoveStatement,
+    SetStatement,
+    StringStatement,
+    UnstringStatement,
+)
 from ..models.statements.io import (
     IOAcceptStatement,
     IOCloseStatement,
@@ -135,11 +143,18 @@ def _write_targets(statement: Any) -> list[str]:
     READ INTO and STRING/UNSTRING (the latter a list of dicts).
     """
     names: list[str] = []
-    names.extend(getattr(statement, "targets", None) or [])
-    names.extend(getattr(statement, "givings", None) or [])
-    single = getattr(statement, "target", None)
-    if single:
-        names.append(single)
+    givings = getattr(statement, "givings", None) or []
+    if not (isinstance(statement, ArithmeticStatement) and givings):
+        # ``ADD A TO B GIVING C`` keeps ``B`` in ``.targets``/``.target``,
+        # but with GIVING only ``C`` is stored -- ``B`` is merely read.
+        names.extend(getattr(statement, "targets", None) or [])
+        single = getattr(statement, "target", None)
+        if single:
+            names.append(single)
+    names.extend(givings)
+    remainder = getattr(statement, "remainder", None)
+    if isinstance(remainder, str) and remainder:
+        names.append(remainder)
     into_target = getattr(statement, "into_target", None)
     if into_target:
         names.append(into_target)
@@ -154,7 +169,83 @@ def _write_targets(statement: Any) -> list[str]:
         )
         if name:
             names.append(name)
+        if isinstance(entry, dict):
+            for key in ("delimiter_var", "count_var"):
+                if entry.get(key):
+                    names.append(entry[key])
+    if isinstance(statement, (StringStatement, UnstringStatement)):
+        # POINTER is read *and* written; TALLYING is incremented in place.
+        for attr in ("pointer_variable", "tallying_variable"):
+            value = getattr(statement, attr, None)
+            if value:
+                names.append(value)
     return names
+
+
+def _write_shaped_read_names(statement: Any) -> list[str] | None:
+    """Names a write-shaped statement *reads* (its own write targets excluded
+    unless the verb also reads them), or None when this module cannot tell
+    precisely for this statement type.
+
+    - MOVE reads its ``.source``.
+    - ADD/SUBTRACT/MULTIPLY/DIVIDE read every operand except the GIVING and
+      REMAINDER receivers: without GIVING the TO/FROM/BY/INTO target is both
+      read and written (``ADD A TO B`` computes ``B + A``).
+    - COMPUTE reads every name in its expression.
+    - STRING reads its sending operands, identifier delimiters and POINTER;
+      UNSTRING its source, delimiters, POINTER and TALLYING counter.
+    - SET reads its ``.value`` (and the target too for UP BY / DOWN BY).
+    - INITIALIZE reads its REPLACING ... BY values.
+    """
+    if isinstance(statement, MoveStatement):
+        source = statement.source
+        return [source] if isinstance(source, str) and source else []
+    if isinstance(statement, ArithmeticStatement):
+        receivers = {name.upper() for name in statement.givings}
+        remainder = getattr(statement, "remainder", None)  # DIVIDE only
+        if isinstance(remainder, str) and remainder:
+            receivers.add(remainder.upper())
+        return [op for op in statement.operands if op.upper() not in receivers]
+    if isinstance(statement, ComputeStatement):
+        tree = statement.expression_tree
+        names = (
+            _condition_field_names(tree) if isinstance(tree, CobolExpression) else []
+        )
+        # The string form is always captured; tokenizing it over-approximates
+        # (a FUNCTION name is included too) but every name is only ever
+        # compared against the argument, and it covers tree shapes the walk
+        # above skips.
+        text = statement.expression
+        if isinstance(text, str):
+            names.extend(RELAXED_IDENTIFIER_TOKEN_RE.findall(text))
+        return names
+    if isinstance(statement, StringStatement):
+        names = list(statement.operands) + list(statement.delimiters)
+        if statement.pointer_variable:
+            names.append(statement.pointer_variable)
+        return names
+    if isinstance(statement, UnstringStatement):
+        names = list(statement.delimiters)
+        for value in (
+            statement.source_operand,
+            statement.pointer_variable,
+            statement.tallying_variable,
+        ):
+            if value:
+                names.append(value)
+        return names
+    if isinstance(statement, SetStatement):
+        names = [statement.value] if statement.value else []
+        if statement.set_type in ("UP_BY", "DOWN_BY"):
+            names.extend(statement.targets)
+        return names
+    if isinstance(statement, InitializeStatement):
+        return [
+            clause["by_value"]
+            for clause in statement.replacing_clauses
+            if clause.get("by_value")
+        ]
+    return None
 
 
 def _procedure_using_names(ast: CobolProgram) -> list[str]:
@@ -881,21 +972,36 @@ class BoundaryInventoryAnalyzer:
 
         read_after = False
         write_after = False
+        uncertain_after = False
         for statement in enclosing_statements[position + 1 :]:
+            if _is_write_shaped(statement):
+                # A write-shaped statement's generic ``.operands`` also holds
+                # its own write targets, so its reads come from the per-type
+                # read list -- checked *before* its writes, since a verb
+                # like ``ADD X TO ARG`` reads ARG before storing into it.
+                reads = _write_shaped_read_names(statement)
+                if reads is None:
+                    # A write-shaped type this module cannot read precisely:
+                    # an operand naming arg that is not one of its write
+                    # targets may be a read -- do not grade it OUT on a guess.
+                    writes = _write_targets(statement)
+                    if any(
+                        touches(op)
+                        for op in getattr(statement, "operands", None) or []
+                        if op not in writes
+                    ):
+                        uncertain_after = True
+                        break
+                elif any(touches(name) for name in reads):
+                    read_after = True
+                    break
+                if any(touches(t) for t in _write_targets(statement)):
+                    write_after = True
+                    break
+                continue
             if any(touches(t) for t in _write_targets(statement)):
                 write_after = True
                 break
-            if _is_write_shaped(statement):
-                # A write-shaped statement that did not touch arg via its
-                # own write targets -- MOVE's .source is its only precise
-                # read-only attribute; other write-shaped types (arithmetic
-                # expressions, SET's .value) have no such attribute captured
-                # today, so they contribute no read signal here.
-                source = getattr(statement, "source", None)
-                if source and touches(source):
-                    read_after = True
-                    break
-                continue
             if any(touches(op) for op in getattr(statement, "operands", None) or []):
                 read_after = True
                 break
@@ -903,6 +1009,8 @@ class BoundaryInventoryAnalyzer:
                 read_after = True
                 break
 
+        if uncertain_after:
+            return "BIDIRECTIONAL", "assumed-bidirectional"
         if wrote_before and not read_after:
             return "OUT", "caller-dataflow"
         if read_after and not wrote_before:
