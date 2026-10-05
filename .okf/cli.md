@@ -186,6 +186,17 @@ a specific subtree. `--errors` shows parse errors only. `--stats` appends
 (see [parser.md](parser.md)) and embed timing/memory metrics in the output, or
 write a binary `.prof` to `PATH`.
 
+**Nested profilers (issue #274, 2026-10-05).** A `ProfilerContext` entered
+while another profiler is active (an outer `ProfilerContext`, a bare
+`cProfile`, anything on `sys.setprofile` or `sys.monitoring`'s PROFILER_ID)
+skips cProfile: its result has `function_profile_available: false`, empty
+`top_functions`, no `.prof` file, and a `caveats` entry, while wall-clock,
+CPU and memory are still measured. Before, on 3.11 the inner cProfile
+silently replaced the outer one (whose `top_functions` then held only
+`__enter__`/`enable`), and on 3.12+ `enable()` raised after tracemalloc had
+started, leaking the session. An inner context never stops a tracemalloc
+session it did not start.
+
 Exit codes (2026-07-07): `0` clean parse; `1` hard failure (`ast is None`,
 bad arguments); `2` recovered-but-errored parse — the JSON is still printed,
 a summary goes to stderr. Previously the CLI exited `0` whenever an AST
