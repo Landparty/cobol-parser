@@ -658,51 +658,60 @@ class LineageGraph:
 
     # -- queries -----------------------------------------------------------
 
-    def _items_named(self, field_name: str, program: str | None) -> list[NodeKey]:
+    def _items_named(
+        self, field_name: str, programs: Sequence[str] | None
+    ) -> list[NodeKey]:
         parts = [p.strip().upper() for p in field_name.split(" OF ") if p.strip()]
         if not parts:
             return []
         name, qualifiers = parts[0], parts[1:]
-        programs = [program.upper()] if program else list(self.reports)
-        starts: list[NodeKey] = []
-        for prog in programs:
+        wanted = [p.upper() for p in programs] if programs else list(self.reports)
+        matched: dict[str, list[str]] = {}
+        for prog in wanted:
             data = self.reports.get(prog)
             if data is None:
                 continue
-            matched: list[str] = []
             for item in data.get("items") or []:
                 qname = str(item["qualified_name"]).upper()
                 segments = qname.split(".")
                 if qname == name or segments[-1] == name:
                     if all(q in segments[:-1] for q in qualifiers):
-                        matched.append(qname)
-            for node in list(self._out) + list(self._in):
-                if node[0] != "P" or node[1] != prog or node[2] != ITEM:
-                    continue
-                qname = node[3]
-                if any(qname == m or qname.startswith(m + ".") for m in matched):
-                    if node not in starts:
-                        starts.append(node)
-        return starts
+                        matched.setdefault(prog, []).append(qname)
+        starts: list[NodeKey] = []
+        seen: set[NodeKey] = set()
+        for node in (*self._out, *self._in):
+            if node[0] != "P" or node[2] != ITEM or node in seen:
+                continue
+            names = matched.get(node[1])
+            if names and any(
+                node[3] == m or node[3].startswith(m + ".") for m in names
+            ):
+                seen.add(node)
+                starts.append(node)
+        return sorted(starts, key=repr)
 
     def impact(
         self,
         field_name: str,
-        program: str | None = None,
+        program: str | Sequence[str] | None = None,
         direction: str = "forward",
         depth: int | None = None,
     ) -> ImpactResult:
-        """Everything *field_name* (in *program*, or in every program when
-        None) feeds (``direction="forward"``) or is fed by (``"backward"``).
+        """Everything *field_name* (in *program*, in any of several programs
+        -- a copybook field lives in every program that COPYs it -- or in
+        every program when None) feeds (``direction="forward"``) or is fed by
+        (``"backward"``).
 
         ``depth`` caps the number of joins between programs (dataset, CALL,
         table) a path may cross; ``None`` follows every one.
         """
-        starts = self._items_named(field_name, program)
-        label = (
-            f"{program.upper()}:{field_name.upper()}" if program else field_name.upper()
-        )
-        return self._trace(starts, [label], direction, depth)
+        programs = [program] if isinstance(program, str) else program
+        starts = self._items_named(field_name, programs)
+        if programs:
+            label = [f"{p.upper()}:{field_name.upper()}" for p in programs]
+        else:
+            label = [field_name.upper()]
+        return self._trace(starts, label, direction, depth)
 
     def impact_table(
         self, table_column: str, direction: str = "forward", depth: int | None = None

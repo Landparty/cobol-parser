@@ -227,3 +227,11 @@ class TestStoredJoinEdges:
         again = LineageGraph([writer], join_edges=first.join_edges())
         assert again.opaque_callees == ["SUBPGM"]
         assert any("SUBPGM" in c for c in again.caveats)
+
+
+def test_impact_from_several_programs(graph) -> None:
+    result = graph.impact("WS-FEE", program=["WRITER", "READER"])
+    assert result.start == ["WRITER:WS-FEE", "READER:WS-FEE"]
+    hits = _hits(result)
+    assert ("READER", "console:SYSOUT@0+7") in hits
+    assert ("WRITER", "OUT-REC.OUT-FEE") in hits

@@ -5,7 +5,7 @@
     "distutils": {
         "name": "cobolparser._lexer_fast",
         "sources": [
-            "cobolparser\\_lexer_fast.pyx"
+            "cobolparser/_lexer_fast.pyx"
         ]
     },
     "module_name": "cobolparser._lexer_fast"
