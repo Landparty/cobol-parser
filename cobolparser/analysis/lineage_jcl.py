@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import importlib
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -209,16 +209,6 @@ def load_jobs(
     could not be read or expanded. Raises ``ImportError`` when jcl-parser is
     not installed.
     """
-    # Through importlib so mypy does not need jcl-parser installed to check
-    # this module; it is an optional dependency, needed only here.
-    jcl = importlib.import_module("jclparser")
-    parse_jcl = jcl.parse_jcl
-    explode_job = jcl.explode_job
-    create_default_loader = jcl.create_default_loader
-    composite = jcl.CompositeProcedureLoader
-
-    jobs: list[Any] = []
-    problems: list[str] = []
     files: list[Path] = []
     for raw in paths:
         path = Path(raw)
@@ -230,19 +220,48 @@ def load_jobs(
             )
         else:
             files.append(path)
-    base = Path(proc_path) if proc_path else None
-    flat = jcl.DictProcedureLoader(_flat_procs(base))
+    sources: dict[str, str] = {}
+    problems: list[str] = []
     for path in files:
         try:
-            job = parse_jcl(path.read_text(errors="replace"), proc_base_path=base)
-        except Exception as exc:  # noqa: BLE001 -- one bad job must not stop the rest
+            sources[str(path)] = path.read_text(errors="replace")
+        except OSError as exc:
             problems.append(f"{path}: {exc}")
+    base = Path(proc_path) if proc_path else None
+    jobs, parse_problems = jobs_from_sources(sources, _flat_procs(base), base)
+    return jobs, problems + parse_problems
+
+
+def jobs_from_sources(
+    jcl: Mapping[str, str],
+    procs: Mapping[str, str] | None = None,
+    jcllib_base: Path | None = None,
+) -> tuple[list[Any], list[str]]:
+    """Parse and PROC-expand JCL held in memory (the backend keeps every
+    uploaded member's text in its database, not on disk).
+
+    ``jcl`` maps a name used in messages to a job's text; ``procs`` maps a
+    PROC name to its text. Returns the jobs and one message per job that
+    could not be parsed or expanded. Raises ``ImportError`` when jcl-parser
+    is not installed.
+    """
+    # Through importlib so mypy does not need jcl-parser installed to check
+    # this module; it is an optional dependency, needed only here.
+    lib = importlib.import_module("jclparser")
+    flat = lib.DictProcedureLoader(dict(procs or {}))
+    jobs: list[Any] = []
+    problems: list[str] = []
+    for name, text in jcl.items():
+        try:
+            job = lib.parse_jcl(text, proc_base_path=jcllib_base)
+        except Exception as exc:  # noqa: BLE001 -- one bad job must not stop the rest
+            problems.append(f"{name}: {exc}")
             continue
         try:
-            default = create_default_loader(job.procedures, base_path=base)
-            loader = composite([flat, default])
-            job = explode_job(job, proc_loader=loader)
+            default = lib.create_default_loader(job.procedures, base_path=jcllib_base)
+            loader = lib.CompositeProcedureLoader([flat, default])
+            job = lib.explode_job(job, proc_loader=loader)
         except Exception as exc:  # noqa: BLE001
-            problems.append(f"{path}: PROCs not expanded ({exc})")
+            problems.append(f"{name}: PROCs not expanded ({exc})")
         jobs.append(job)
     return jobs, problems

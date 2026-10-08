@@ -66,6 +66,28 @@ flow_dict = flow_report.to_dict()    # must return dict
   to nodes on `qualified_name ?? name`. Absent for every node whose name is
   unique, so such programs serialize exactly as before (issue #258).
 
+### 4b. Field lineage (optional, fault-isolated; 2026-10-08)
+```python
+from cobolparser.analysis.field_lineage import FieldFlowAnalyzer
+from cobolparser.analysis.lineage_graph import LineageGraph
+from cobolparser.analysis.lineage_jcl import bindings_from_jobs, jobs_from_sources
+
+report = FieldFlowAnalyzer().analyze(parse_result.ast).to_dict()   # per program
+jobs, problems = jobs_from_sources({name: jcl_text}, {proc: proc_text})
+graph = LineageGraph(reports, *bindings_from_jobs(jobs))           # per organization
+stored = graph.join_edges()                                         # list[dict]
+graph = LineageGraph(reports, join_edges=stored)                    # query time
+graph.impact(field, program=..., direction="forward"|"backward", depth=N).to_dict()
+```
+- The report dict carries `lineage_version` (currently `"1"`). A change to
+  its shape (ports, edges, node keys) bumps it; a stored report of another
+  version must be recomputed, not read.
+- `join_edges()` entries: `{source, target, kind, line, statement,
+  confidence, cross}`, node keys as lists (`["P", program, kind, name,
+  offset, length]`, `["D", dataset, offset, length]`, `["T", "TABLE.COLUMN"]`).
+- `jobs_from_sources` needs jcl-parser importable; it raises `ImportError`
+  otherwise.
+
 ### 5. Exception type
 ```python
 from cobolparser import ParseError

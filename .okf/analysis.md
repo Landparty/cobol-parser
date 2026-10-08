@@ -2939,6 +2939,12 @@ where *depth* counts entries into a program. `key_relationships()` names
 candidate dataset/table key relationships with the program and line as
 evidence. Joins iterate ports in sorted order so output is identical on
 every run (pinned across `PYTHONHASHSEED`s by hand, 2026-10-08).
+`join_edges()` exports every edge the joins added (JSON-shaped); passing
+them back as `LineageGraph(reports, join_edges=...)` skips the joins, so
+the backend joins once at upload and queries later without the JCL.
+Key-relationship labels come from the dataset edges, not the bindings, so
+both forms answer the same (pinned in `TestStoredJoinEdges`); `unjoined`
+is only populated by a graph that ran the joins itself.
 
 **Bindings (`lineage_jcl.py`).** `bindings_from_jobs(jobs)` turns
 **jcl-parser** `Job`s (duck-typed; imported only in `load_jobs`, through
@@ -2947,7 +2953,9 @@ into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT/ICETOOL (`SORTIN*`
 -> `SORTOUT` + `OUTFIL FNAMES`), IEBGENER/ICEGENER, IDCAMS REPRO,
 IKJEFT01 `RUN PROGRAM(x)`. `load_jobs(paths, proc_path)` reads a flat PROC
 folder (`NAME.prc`) as well as a JCLLIB base -- jcl-parser's own loader
-only searches `JCLLIB ORDER=` libraries. Not built on `cobolparser/jcl/`.
+only searches `JCLLIB ORDER=` libraries. `jobs_from_sources(jcl, procs)`
+does the same from in-memory text (the backend's stored members). Not built
+on `cobolparser/jcl/`.
 
 Tests: `tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
 `test_lineage_jcl.py`, `test_sql_flow.py`, `tests/unit/cli/test_lineage_cli.py`;

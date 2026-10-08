@@ -200,3 +200,30 @@ def test_reports_from_scan() -> None:
     reports, problems = reports_from_scan(scan)
     assert sorted(r["program_id"] for r in reports) == ["READER", "WRITER"]
     assert len(problems) == 1 and "MISSING.cbl" in problems[0]
+
+
+class TestStoredJoinEdges:
+    def test_rebuilt_graph_answers_the_same(self, reports, graph) -> None:
+        import json
+
+        stored = json.loads(json.dumps(graph.join_edges()))
+        again = LineageGraph([r.to_dict() for r in reports], join_edges=stored)
+        for query in (
+            lambda g: g.impact("WS-FEE", program="WRITER"),
+            lambda g: g.impact("WS-FEE", program="READER", direction="backward"),
+            lambda g: g.impact_dataset("PROD.TRAN.DAILY"),
+        ):
+            assert query(again).to_dict() == query(graph).to_dict()
+        assert again.key_relationships() == graph.key_relationships()
+
+    def test_join_edges_are_only_joins(self, graph) -> None:
+        kinds = {e["kind"] for e in graph.join_edges()}
+        assert kinds <= {"dataset", "copy", "aggregate", "call", "table", "opaque-call"}
+        assert {"dataset", "aggregate", "call", "table"} <= kinds
+
+    def test_opaque_edges_survive_the_round_trip(self) -> None:
+        writer = _report("WRITER")
+        first = LineageGraph([writer])
+        again = LineageGraph([writer], join_edges=first.join_edges())
+        assert again.opaque_callees == ["SUBPGM"]
+        assert any("SUBPGM" in c for c in again.caveats)

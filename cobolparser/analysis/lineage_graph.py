@@ -304,6 +304,13 @@ class KeyRelationship:
         }
 
 
+def _opaque_caveat(callees: list[str]) -> str:
+    return (
+        "not in the scan (or not COBOL), so assumed to pass every input "
+        "argument through to every output argument: " + ", ".join(sorted(callees))
+    )
+
+
 def _overlaps(
     a: tuple[int | None, int | None], b: tuple[int | None, int | None]
 ) -> bool:
@@ -321,7 +328,13 @@ class LineageGraph:
         reports: Sequence[FieldFlowReport | dict[str, Any]],
         bindings: Sequence[DatasetBinding | dict[str, Any]] = (),
         passthroughs: Sequence[Passthrough | dict[str, Any]] = (),
+        join_edges: Sequence[dict[str, Any]] | None = None,
     ) -> None:
+        """``join_edges`` (the output of :meth:`join_edges` on an earlier
+        graph over the same reports) replaces the joins: the backend computes
+        them once, at upload, and builds the graph from its stored rows
+        afterwards without the JCL. ``bindings`` / ``passthroughs`` are then
+        ignored."""
         self.reports: dict[str, dict[str, Any]] = {}
         for report in reports:
             data = report.to_dict() if isinstance(report, FieldFlowReport) else report
@@ -342,13 +355,17 @@ class LineageGraph:
         self.opaque_callees: list[str] = []
         self._out: dict[NodeKey, list[tuple[NodeKey, _EdgeInfo]]] = {}
         self._in: dict[NodeKey, list[tuple[NodeKey, _EdgeInfo]]] = {}
-        self._build()
+        self._joins: list[tuple[NodeKey, NodeKey, _EdgeInfo]] = []
+        self._recording = False
+        self._build(join_edges)
 
     # -- building ----------------------------------------------------------
 
     def _add(self, src: NodeKey, dst: NodeKey, info: _EdgeInfo) -> None:
         if src == dst:
             return
+        if self._recording:
+            self._joins.append((src, dst, info))
         self._out.setdefault(src, []).append((dst, info))
         self._in.setdefault(dst, []).append((src, info))
 
@@ -363,7 +380,7 @@ class LineageGraph:
             node.get("length"),
         )
 
-    def _build(self) -> None:
+    def _build(self, join_edges: Sequence[dict[str, Any]] | None) -> None:
         # Ports by role: written (an intra edge ends there: the value leaves
         # the program) and read (an intra edge starts there).
         written: dict[str, set[NodeKey]] = {}
@@ -395,14 +412,56 @@ class LineageGraph:
         # order on every run: a set of tuples of str iterates in hash order.
         written_ports = {p: sorted(v, key=repr) for p, v in written.items()}
         read_ports = {p: sorted(v, key=repr) for p, v in read.items()}
-        self._join_files(written_ports, read_ports)
-        self._join_sql(written_ports, read_ports)
-        self._join_calls(written_ports, read_ports)
+        if join_edges is None:
+            self._recording = True
+            self._join_files(written_ports, read_ports)
+            self._join_sql(written_ports, read_ports)
+            self._join_calls(written_ports, read_ports)
+            self._recording = False
+        else:
+            for edge in join_edges:
+                self._load_join_edge(edge)
+            if self.opaque_callees:
+                self.caveats.append(_opaque_caveat(self.opaque_callees))
         for caveat_source in self.reports.values():
             for caveat in caveat_source.get("caveats") or []:
                 text = f"{caveat_source.get('program_id')}: {caveat}"
                 if text not in self.caveats:
                     self.caveats.append(text)
+
+    def join_edges(self) -> list[dict[str, Any]]:
+        """The edges the joins added (dataset, utility, CALL, table and
+        opaque pass-through), JSON-shaped, in a stable order: what a caller
+        stores to rebuild this graph later with ``LineageGraph(reports,
+        join_edges=...)``. Node keys are lists: ``["P", program, kind, name,
+        offset, length]``, ``["D", dataset, offset, length]`` or ``["T",
+        "TABLE.COLUMN"]``."""
+        return [
+            {
+                "source": list(src),
+                "target": list(dst),
+                "kind": info.kind,
+                "line": info.line,
+                "statement": info.statement,
+                "confidence": info.confidence,
+                "cross": info.cross,
+            }
+            for src, dst, info in self._joins
+        ]
+
+    def _load_join_edge(self, edge: dict[str, Any]) -> None:
+        info = _EdgeInfo(
+            kind=str(edge.get("kind") or ""),
+            line=int(edge.get("line") or 0),
+            statement=str(edge.get("statement") or ""),
+            confidence=str(edge.get("confidence") or "exact"),
+            cross=bool(edge.get("cross")),
+        )
+        self._add(tuple(edge["source"]), tuple(edge["target"]), info)
+        if info.kind == "opaque-call":
+            callee = info.statement.removeprefix("CALL ")
+            if callee and callee not in self.opaque_callees:
+                self.opaque_callees.append(callee)
 
     def _datasets_for(self, program: str, ddname: str) -> list[DatasetBinding]:
         dd = normalize_ddname(ddname)
@@ -595,11 +654,7 @@ class LineageGraph:
                         ),
                     )
         if self.opaque_callees:
-            self.caveats.append(
-                "not in the scan (or not COBOL), so assumed to pass every input "
-                "argument through to every output argument: "
-                + ", ".join(sorted(self.opaque_callees))
-            )
+            self.caveats.append(_opaque_caveat(self.opaque_callees))
 
     # -- queries -----------------------------------------------------------
 
@@ -881,10 +936,15 @@ class LineageGraph:
             return [port[3]]
         labels: list[str] = []
         if port[2] == PORT_FILE:
-            for binding in self._datasets_for(port[1], port[3]):
-                dsn = normalize_dataset(binding.dataset, binding.job)
-                span = f"@{port[4]}+{port[5]}" if port[4] is not None else ""
-                label = f"{dsn}{span}"
+            # From the dataset edges the join added, not the bindings, so a
+            # graph rebuilt from stored join edges answers the same.
+            span = f"@{port[4]}+{port[5]}" if port[4] is not None else ""
+            neighbours = [n for n, _ in self._out.get(port, [])]
+            neighbours += [n for n, _ in self._in.get(port, [])]
+            for node in neighbours:
+                if node[0] != "D":
+                    continue
+                label = f"{node[1]}{span}"
                 if label not in labels:
                     labels.append(label)
             if not labels:

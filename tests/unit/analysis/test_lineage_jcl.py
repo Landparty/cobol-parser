@@ -15,6 +15,7 @@ import pytest
 from cobolparser.analysis.lineage_jcl import (
     _sum_ranges,
     bindings_from_jobs,
+    jobs_from_sources,
     load_jobs,
 )
 
@@ -172,3 +173,23 @@ def test_load_jobs_reports_unreadable_files(tmp_path) -> None:
     jobs, problems = load_jobs([tmp_path / "NOPE.jcl"])
     assert jobs == []
     assert len(problems) == 1 and "NOPE.jcl" in problems[0]
+
+
+def test_jobs_from_sources_in_memory() -> None:
+    pytest.importorskip("jclparser")
+    jobs, problems = jobs_from_sources(
+        {
+            "PROCJOB": "//PROCJOB  JOB (A),'X',CLASS=A\n"
+            "//STEP1    EXEC RUNPGM,PROG=WRITER\n",
+            "BROKEN": "this is not JCL",
+        },
+        {
+            "RUNPGM": "//RUNPGM   PROC\n//RUN      EXEC PGM=&PROG\n"
+            "//INFILE   DD DSN=PROD.IN,DISP=SHR\n"
+        },
+    )
+    bindings, _ = bindings_from_jobs(jobs)
+    assert ("WRITER", "INFILE", "PROD.IN") in {
+        (b.program, b.ddname, b.dataset) for b in bindings
+    }
+    assert len(jobs) + len(problems) >= 2

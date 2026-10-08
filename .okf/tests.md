@@ -1223,3 +1223,6 @@ and `tests/unit/cli/test_lineage_cli.py`. The `field-impact` CLI tests pass
 `--workers 1`: scan's process pool under pytest-cov fails to pickle its
 work items. `tests/unit/test_scan.py`'s failing-analyzer stub takes the new
 `source_map` argument of `_run_analyzer`.
+`TestStoredJoinEdges` (test_lineage_graph.py) pins that a graph rebuilt
+from `join_edges()` answers every query identically; `test_lineage_jcl.py`
+covers `jobs_from_sources` (in-memory JCL + PROCs).
