@@ -144,6 +144,11 @@ ports:
   most callees in `legacy-application`) is an opaque node. Its OUT
   arguments are reported as "set by CURRFMT (ASM), not traced".
 - **SQL.** Writer host variable → `table.column` → reader host variable.
+  INSERT/UPDATE map host variables to columns by position or by `SET`.
+  A SELECT maps each select-list expression to its INTO host variable, and
+  every column inside the expression flows into it. In CTRRPT,
+  `SUM(CASE ... THEN T.AMOUNT ...)` → `:HV-TOTAL-CASH-IN` is
+  `kind="aggregate"`. Without DCLGEN, the column name is the identity.
 - **Unjoined ports** (a dataset no JCL names, a CALL to a program not in the
   scan) are listed, never dropped.
 
@@ -211,6 +216,11 @@ summaries, so the CLI and the backend cannot disagree.
 - `EODPROC` → `CURRFMT` (ASM) ×6 and `DATEUTIL`: CALL arguments into an
   opaque callee.
 - `JOBDISP`: dynamic CALL dispatch through candidates.
+- `BANK.TRANSACTION_HIST.AMOUNT`: written by CHKCLR, INTCALC, LOANPMT,
+  ACCTMNT, ACHPROC and DEPTMQC, each from its own differently named host
+  variable. Read by CTRRPT (aggregated into the $10,000 CTR check and
+  `BANK.REGULATORY_RPT.TRAN_AMOUNT`), GLRECON and EODPROC. Only FEECALC
+  COPYs `TRANREC`, so name and copybook search find almost none of this.
 
 Golden tests: one hand-checked forward and backward query per bullet, plus a
 pass over `tests/samples/enterprise/` asserting no analyzer exception and
