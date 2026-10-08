@@ -310,7 +310,7 @@ IDENTIFICATION_END_COL = 80  # 73-80 identification area end (inclusive, 1-based
 # Column-7 indicator characters that mark a line as a comment. These are the
 # single source of truth for every site that classifies indicator characters
 # -- normalize_fixed_format below, copy_statement_parser.is_comment_line,
-# format_detection.detect_fixed_format, and lexer._fixed_format_comment_tokens all
+# source_format.detect_fixed_format, and lexer._fixed_format_comment_tokens all
 # derive from these sets (the Cython mirror _preprocess_fast.pyx repeats the
 # literals by design, like the rest of its body -- keep it in sync when
 # extending these). The next shop convention from the corpus goes here, not
@@ -1664,8 +1664,8 @@ def _fixed_format_directive_text(line: str) -> str | None:
     expanded = line.expandtabs(8)
     if len(expanded) < TEXT_START_COL or expanded[INDICATOR_COL - 1] != " ":
         return None
-    # Deferred: format_detection imports this module at module scope.
-    from .format_detection import _sequence_area_is_fixed_like
+    # Deferred: source_format imports this module at module scope.
+    from .source_format import _sequence_area_is_fixed_like
 
     if not _sequence_area_is_fixed_like(expanded[:DEFAULT_SEQ_COL_END])[0]:
         return None

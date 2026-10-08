@@ -18,9 +18,13 @@ entries, including both 2026-09-15 sections, were found there on
 
 [parser.md](parser.md): `_parse_core` split into `_preprocess_source` /
 `_normalize_fixed_source` / `_tokenize`; `parse_program`'s loop body into
-`_handle_unmatched_token` / `_parse_division`.
+`_handle_unmatched_token` / `_parse_division`; `_handle_oo_unit_marker`
+into `_open_id_clause_unit` / `_open_factory_or_object_unit` /
+`_close_oo_unit`. `parse_cobol()` no longer detects/normalizes itself --
+it delegates to `CobolParser`, so there is one fixed-format path.
 [preprocessing.md](preprocessing.md): format detection moved to
-`preprocess/format_detection.py` (`detect_fixed_format`).
+`preprocess/source_format.py` (`detect_fixed_format`), with the shared
+`normalize_with_recovery` used by the parser and the lexer.
 
 ## 2026-10-05 -- happy path kept in `branches`/`all` scenario modes
 

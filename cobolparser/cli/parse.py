@@ -850,7 +850,7 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
         preprocess_conditional_compilation,
         strip_compiler_directives,
     )
-    from ..preprocess.format_detection import detect_fixed_format
+    from ..preprocess.source_format import detect_fixed_format
 
     source = _read_source(args.file)
 

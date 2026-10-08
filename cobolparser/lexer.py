@@ -2511,8 +2511,10 @@ def _tokenize_source(
     if not free_form or preprocess_fixed:
         # Deferred imports: parser.py imports this module at load time, and
         # keeping preprocess out of module scope avoids import cycles.
-        from .preprocess import normalize_fixed_format
-        from .preprocess.format_detection import detect_fixed_format
+        from .preprocess.source_format import (
+            detect_fixed_format,
+            normalize_with_recovery,
+        )
 
         should_normalize = (
             detect_fixed_format(source)
@@ -2523,29 +2525,16 @@ def _tokenize_source(
             physical_lines = split_source_lines(source)
             errors: list[LexerError] = []
             normalize_warnings: list[str] = []
-            try:
-                normalized = normalize_fixed_format(
-                    physical_lines, warnings=normalize_warnings
-                )
-            except ValueError as exc:
-                # Unterminated literal at EOF. Record the error and fall back
-                # to the never-raising normalization, mirroring
-                # CobolParser.parse under COLLECT_ALL.
+            # An unterminated literal at EOF is recorded and the
+            # never-raising normalization stands in, mirroring
+            # CobolParser.parse under COLLECT_ALL.
+            normalized, error = normalize_with_recovery(
+                physical_lines, normalize_warnings
+            )
+            assert normalized is not None  # recover=True always yields text
+            if error is not None:
                 errors.append(
-                    LexerError(
-                        str(exc),
-                        SourceLocation(max(len(physical_lines), 1), 1, 1),
-                    )
-                )
-                # The raise happened partway through the line scan, so
-                # normalize_warnings may already hold entries from lines
-                # processed before it -- the retry rescans every line from
-                # the start and would duplicate them if not cleared first.
-                normalize_warnings.clear()
-                normalized = normalize_fixed_format(
-                    physical_lines,
-                    merge_continued_literals=False,
-                    warnings=normalize_warnings,
+                    LexerError(error, SourceLocation(max(len(physical_lines), 1), 1, 1))
                 )
             lexer = CobolLexer(normalized, filename, dialect, free_form=True)
             tokens: list[Token] = lexer.tokenize()

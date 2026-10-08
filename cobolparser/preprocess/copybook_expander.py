@@ -823,7 +823,7 @@ LineOrigin = tuple[str, int]
 def _looks_fixed_format(text: str) -> bool:
     """Whether *text* uses the fixed-format column layout.
 
-    Defers to :func:`~.format_detection.detect_fixed_format` (the same verdict the
+    Defers to :func:`~.source_format.detect_fixed_format` (the same verdict the
     final parse will reach), which declines to judge fewer than three
     non-blank lines; a short member is then judged directly -- fixed when
     every non-blank line carries a valid indicator column and a blank/numeric
@@ -831,7 +831,7 @@ def _looks_fixed_format(text: str) -> bool:
     tag corroborates, see :func:`_has_tagged_line_anchor`), and by default when it has no lines at all (nothing
     to strip either way).
     """
-    from .format_detection import (
+    from .source_format import (
         _has_tagged_line_anchor,
         _sequence_area_is_fixed_like,
         detect_fixed_format,

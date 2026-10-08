@@ -388,7 +388,7 @@ fixed-format handler (`free_form=False`): both now route fixed-format
 source through `normalize_fixed_format` + `free_form=True` lexing — the
 exact path `parse_cobol()` uses — via the shared `_tokenize_source()`
 helper in `lexer.py` (its fixed-or-free verdict comes from
-`preprocess.format_detection.detect_fixed_format`, the same detector
+`preprocess.source_format.detect_fixed_format`, the same detector
 `parse_cobol()` uses), so the two pipelines agree on every non-COMMENT
 token (count, values, line numbers). Comment lines are not lost:
 `_fixed_format_comment_tokens()` captures them during normalization and

@@ -1,11 +1,16 @@
-"""Fixed- vs. free-format source detection.
+"""Fixed- vs. free-format source: deciding which, and normalizing.
 
-Decides whether a COBOL source needs ``normalize_fixed_format`` before it is
-lexed: ``detect_fixed_format`` reads the sequence area (columns 1-6) and the
-indicator column (7) of a sample of lines, with corroborating anchors for
-shops that stamp change tags into the sequence area. Used by
-``parse_cobol``, ``CobolParser._parse_core`` and the lexer's own
-``tokenize`` helper.
+* ``detect_fixed_format`` decides whether a COBOL source needs
+  ``normalize_fixed_format`` before it is lexed, from the sequence area
+  (columns 1-6) and the indicator column (7) of a sample of lines, with
+  corroborating anchors for shops that stamp change tags into the sequence
+  area.
+* ``normalize_with_recovery`` runs that normalization with the one recovery
+  every caller wants: an unterminated literal at EOF is reported, and the
+  never-raising ``merge_continued_literals=False`` pass is used instead.
+
+The single home of both decisions for ``CobolParser`` (and so
+``parse_cobol``), the lexer's ``tokenize_cobol`` and the CLI.
 """
 
 import re
@@ -226,3 +231,36 @@ def detect_fixed_format(source: str) -> bool:
         _has_area_a_division_header(non_empty_lines)
         or _has_tagged_line_anchor(non_empty_lines)
     )
+
+
+def normalize_with_recovery(
+    source_lines: list[str], warnings: list[str], *, recover: bool = True
+) -> tuple[str | None, str | None]:
+    """Normalize fixed-format *source_lines*; returns ``(text, error)``.
+
+    *error* is the message of the ``ValueError`` an unterminated literal at
+    EOF raises, else None. On that error, *recover* (the default) retries
+    with ``merge_continued_literals=False``, which never raises, so *text*
+    is always set; with ``recover=False`` *text* is None. Only the
+    warnings of the pass whose text is returned reach *warnings* -- the
+    failed pass stopped partway through, and its warnings would duplicate
+    the retry's.
+    """
+    # The package attribute, not ``_normalize``'s: ``preprocess/__init__``
+    # swaps in the Cython-accelerated implementation when it is built.
+    from . import normalize_fixed_format
+
+    pass_warnings: list[str] = []
+    try:
+        text = normalize_fixed_format(source_lines, warnings=pass_warnings)
+        error = None
+    except ValueError as exc:
+        error = str(exc)
+        if not recover:
+            return None, error
+        pass_warnings = []
+        text = normalize_fixed_format(
+            source_lines, merge_continued_literals=False, warnings=pass_warnings
+        )
+    warnings.extend(pass_warnings)
+    return text, error

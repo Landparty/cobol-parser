@@ -32,19 +32,19 @@ from .plugins.core import (
     SerializationConfig,
 )
 from .preprocess import (
-    normalize_fixed_format,
     preprocess_conditional_compilation,
     strip_compiler_directives,
 )
 from .preprocess._normalize import ID_DIVISION_HEADER_RE
-from .preprocess.format_detection import (
-    _sequence_area_is_fixed_like,  # noqa: F401
-    detect_fixed_format,
-)
 from .preprocess.replace_statement import (
     apply_replace_statements,
     find_replace_statement_spans,
     strip_unexpanded_copy_statements,
+)
+from .preprocess.source_format import (
+    _sequence_area_is_fixed_like,  # noqa: F401
+    detect_fixed_format,
+    normalize_with_recovery,
 )
 from .profiling import ProfilerContext, ProfilingResult
 
@@ -65,7 +65,7 @@ _OO_CONTAINER_KINDS: frozenset[str] = frozenset({"CLASS", "FACTORY", "OBJECT"})
 _ID_DIV_RE = ID_DIVISION_HEADER_RE
 
 #: Former home of the format detector (now
-#: ``preprocess.format_detection.detect_fixed_format``), kept importable
+#: ``preprocess.source_format.detect_fixed_format``), kept importable
 #: under its old name, as is ``_sequence_area_is_fixed_like`` above.
 _detect_fixed_format = detect_fixed_format
 
@@ -124,9 +124,7 @@ class CobolParser:
         `initial_warnings`, when given, is added (via `add_warning`) at the
         top of the *first* `parse()` call, after `self.warnings` is cleared
         -- for diagnostics a caller already collected before constructing
-        this parser (e.g. `parse_cobol()`'s own pre-normalization of
-        fixed-format source, which runs before a `CobolParser` even
-        exists). Consumed (cleared) after that first call so a `CobolParser`
+        this parser. Consumed (cleared) after that first call so a `CobolParser`
         instance reused to `parse()` multiple sources doesn't keep
         re-appending warnings about a source it no longer reflects.
 
@@ -417,30 +415,19 @@ class CobolParser:
     ) -> str | None:
         """Normalize fixed-format *source* to free-form text.
 
-        An unterminated literal at EOF makes normalization raise; in that
-        case record the error and, unless failing fast, fall back to a
-        best-effort normalization that never raises
-        (merge_continued_literals=False) so a single bad literal no longer
-        loses the whole program under COLLECT_ALL. Returns ``None`` when
-        FAIL_FAST stops the parse.
+        An unterminated literal at EOF is recorded as an error; unless
+        failing fast, the best-effort normalization stands in so a single
+        bad literal does not lose the whole program under COLLECT_ALL.
+        Returns ``None`` when FAIL_FAST stops the parse.
         """
         source_lines = split_source_lines(source)
-        try:
-            return normalize_fixed_format(source_lines, warnings=preprocess_warnings)
-        except ValueError as ve:
-            self.add_error(ParseError(str(ve), line_number=len(source_lines), column=1))
-            if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
-                return None
-        # The raise happened partway through the line scan, so
-        # `preprocess_warnings` may already hold entries from lines
-        # processed before it -- the retry below rescans the same lines
-        # from the start and would duplicate them if not cleared first.
-        preprocess_warnings.clear()
-        return normalize_fixed_format(
-            source_lines,
-            merge_continued_literals=False,
-            warnings=preprocess_warnings,
+        fail_fast = self.error_recovery == ErrorRecoveryMode.FAIL_FAST
+        text, error = normalize_with_recovery(
+            source_lines, preprocess_warnings, recover=not fail_fast
         )
+        if error is not None:
+            self.add_error(ParseError(error, line_number=len(source_lines), column=1))
+        return text
 
     def _tokenize(self, cleaned_source: str, filename: str, free_form: bool) -> bool:
         """Lex *cleaned_source* into ``self.tokens`` and ``self.stream``.
@@ -533,6 +520,11 @@ class CobolParser:
         top_n: int = 50,
         prof_output: str | None = None,
     ) -> "ParseResult | tuple[ParseResult, ProfilingResult]":
+        """Parse COBOL *source*; never raises on bad input.
+
+        Errors land on ``ParseResult.errors``. With *enable_profiling*,
+        returns ``(result, ProfilingResult)`` -- see ``ProfilerContext``.
+        """
         if not enable_profiling:
             return self._parse_core(source, filename, error_recovery)
         ctx = ProfilerContext(top_n=top_n, prof_output=prof_output)
@@ -769,79 +761,102 @@ class CobolParser:
             return False
         token = self.stream.peek()
         value = (token.value or "").upper() if token else ""
-        if not value:
-            return False
-
         if value in ("CLASS-ID", "METHOD-ID"):
-            location = self.get_current_location()
-            if value == "CLASS-ID":
-                name, inherits = IdentificationDivisionParser.parse_class_id_clause(
-                    self.stream
-                )
-                kind = "CLASS"
-            else:
-                name = IdentificationDivisionParser.parse_method_id_clause(self.stream)
-                inherits = None
-                kind = "METHOD"
-            unit = self.current_program or primary_program
-            if unit.has_division("IDENTIFICATION") or divisions_parsed:
-                unit = CobolProgram(name, location)
-                self._attach_new_unit(primary_program, unit)
-            unit.program_name = name
-            unit.unit_kind = kind
-            ident = CobolDivision("IDENTIFICATION", location)
-            ident.metadata.update(
-                {
-                    "program_id": name,
-                    "unit_kind": kind,
-                    "program_attributes": [],
-                    "inherits": inherits,
-                }
-            )
-            unit.add_division(ident)
-            divisions_parsed.append(ident)
+            self._open_id_clause_unit(value, primary_program, divisions_parsed)
             return True
-
         if value in ("FACTORY", "OBJECT"):
-            nxt = self.stream.peek(1)
-            if nxt is None or nxt.value != ".":
-                return False
-            location = self.get_current_location()
-            self.stream.consume()  # FACTORY | OBJECT
-            self.stream.consume()  # .
-            unit = CobolProgram(value, location)
-            self._attach_new_unit(primary_program, unit)
-            unit.unit_kind = value
-            ident = CobolDivision("IDENTIFICATION", location)
-            ident.metadata.update(
-                {"program_id": value, "unit_kind": value, "program_attributes": []}
+            return self._open_factory_or_object_unit(
+                value, primary_program, divisions_parsed
             )
-            unit.add_division(ident)
-            divisions_parsed.append(ident)
-            return True
-
         if value == "END":
-            nxt = self.stream.peek(1)
-            nxt_value = (nxt.value or "").upper() if nxt else ""
-            if nxt_value not in ("METHOD", "FACTORY", "OBJECT", "CLASS"):
-                return False
-            self.stream.consume()  # END
-            self.stream.consume()  # METHOD | FACTORY | OBJECT | CLASS
+            return self._close_oo_unit(primary_program)
+        return False
+
+    def _open_id_clause_unit(
+        self, value: str, primary_program: CobolProgram, divisions_parsed: list[Any]
+    ) -> None:
+        """Open a unit from a header-less ``CLASS-ID.`` / ``METHOD-ID.``."""
+        assert self.stream is not None
+        location = self.get_current_location()
+        inherits: str | None = None
+        if value == "CLASS-ID":
+            name, inherits = IdentificationDivisionParser.parse_class_id_clause(
+                self.stream
+            )
+            kind = "CLASS"
+        else:
+            name = IdentificationDivisionParser.parse_method_id_clause(self.stream)
+            kind = "METHOD"
+        unit = self.current_program or primary_program
+        if unit.has_division("IDENTIFICATION") or divisions_parsed:
+            unit = CobolProgram(name, location)
+            self._attach_new_unit(primary_program, unit)
+        self._add_oo_identification(
+            unit, name, kind, location, divisions_parsed, inherits=inherits
+        )
+
+    def _open_factory_or_object_unit(
+        self, value: str, primary_program: CobolProgram, divisions_parsed: list[Any]
+    ) -> bool:
+        """Open a unit from a ``FACTORY.`` / ``OBJECT.`` paragraph."""
+        assert self.stream is not None
+        nxt = self.stream.peek(1)
+        if nxt is None or nxt.value != ".":
+            return False
+        location = self.get_current_location()
+        self.stream.consume()  # FACTORY | OBJECT
+        self.stream.consume()  # .
+        unit = CobolProgram(value, location)
+        self._attach_new_unit(primary_program, unit)
+        self._add_oo_identification(unit, value, value, location, divisions_parsed)
+        return True
+
+    def _add_oo_identification(
+        self,
+        unit: CobolProgram,
+        name: str,
+        kind: str,
+        location: SourceLocation,
+        divisions_parsed: list[Any],
+        **extra_metadata: Any,
+    ) -> None:
+        """Name *unit* and give it the IDENTIFICATION division it implies."""
+        unit.program_name = name
+        unit.unit_kind = kind
+        ident = CobolDivision("IDENTIFICATION", location)
+        ident.metadata.update(
+            {
+                "program_id": name,
+                "unit_kind": kind,
+                "program_attributes": [],
+                **extra_metadata,
+            }
+        )
+        unit.add_division(ident)
+        divisions_parsed.append(ident)
+
+    def _close_oo_unit(self, primary_program: CobolProgram) -> bool:
+        """Consume ``END METHOD|FACTORY|OBJECT|CLASS [name] [.]``."""
+        assert self.stream is not None
+        nxt = self.stream.peek(1)
+        nxt_value = (nxt.value or "").upper() if nxt else ""
+        if nxt_value not in ("METHOD", "FACTORY", "OBJECT", "CLASS"):
+            return False
+        self.stream.consume()  # END
+        self.stream.consume()  # METHOD | FACTORY | OBJECT | CLASS
+        self.stream.skip_whitespace_and_comments()
+        tail = self.stream.peek()
+        if tail is not None and tail.value and tail.value != ".":
+            self.stream.consume()  # optional unit name
             self.stream.skip_whitespace_and_comments()
             tail = self.stream.peek()
-            if tail is not None and tail.value and tail.value != ".":
-                self.stream.consume()  # optional unit name
-                self.stream.skip_whitespace_and_comments()
-                tail = self.stream.peek()
-            if tail is not None and tail.value == ".":
-                self.stream.consume()
-            if self._unit_stack:
-                self.current_program = self._unit_stack.pop()
-            else:
-                self.current_program = primary_program
-            return True
-
-        return False
+        if tail is not None and tail.value == ".":
+            self.stream.consume()
+        if self._unit_stack:
+            self.current_program = self._unit_stack.pop()
+        else:
+            self.current_program = primary_program
+        return True
 
     def _peek_is_end_program(self) -> bool:
         """True if the stream is at an ``END PROGRAM`` marker."""
@@ -1051,73 +1066,16 @@ def parse_cobol(
             filename = source_str
         source_str = file_content
 
-    # Strip CBL/PROCESS compiler directives before fixed-format detection
-    source_str = strip_compiler_directives(source_str)
-
-    # What the CobolParser instance below is told about fixed-format
-    # preprocessing. None on the happy path (the source is normalized right
-    # here, then lexed free-form, so the parser must not detect/normalize
-    # again); False when the caller explicitly disabled normalization
-    # (threaded through so CobolParser.parse does not re-run auto-detection
-    # and normalize anyway); True only on the ValueError deferral below.
-    parser_preprocess_fixed: bool | None = None
-
-    # Auto-detect fixed-format if not explicitly specified
-    if preprocess_fixed is None:
-        detected_fixed = detect_fixed_format(source_str)
-        preprocess_fixed = detected_fixed
-        # If we detected free-format (not fixed), ensure free_form is True
-        if not detected_fixed and not free_form:
-            free_form = True
-    elif not preprocess_fixed:
-        parser_preprocess_fixed = False
-
-    # Collects normalize_fixed_format's overflow/etc. diagnostics so they can
-    # reach the CobolParser instance below via `initial_warnings` -- this
-    # normalization runs before that instance exists, and its own
-    # `self.warnings` gets cleared at the top of `parse()`, so passing the
-    # list at construction time is the only way these survive.
-    normalize_warnings: list[str] = []
-
-    if preprocess_fixed:
-        try:
-            source_str = normalize_fixed_format(
-                split_source_lines(source_str), warnings=normalize_warnings
-            )
-            free_form = True
-        except ValueError as exc:
-            # Preprocessing hit an unterminated string literal at EOF. Rather
-            # than losing the whole program here, leave the source un-normalized
-            # and defer to CobolParser.parse's recovery, which records the
-            # error once and, under COLLECT_ALL, retries with
-            # merge_continued_literals=False for a partial AST; FAIL_FAST
-            # still aborts. The fixed decision already made here (whether
-            # detected or forced by the caller) is passed through as
-            # preprocess_fixed=True rather than letting the parser re-run
-            # auto-detection: for layouts the detector declines -- the very
-            # case --source-format=fixed exists for -- re-detection would
-            # return False and silently drop the forced normalization along
-            # with the unterminated-literal diagnostic. free_form=False so
-            # the parser's normalization path runs even if the caller passed
-            # free_form=True. Discard any overflow warnings collected before
-            # the raise -- CobolParser.parse() re-normalizes the same lines
-            # from scratch below and will collect its own, complete set.
-            normalize_warnings.clear()
-            free_form = False
-            parser_preprocess_fixed = True
-            logger.debug(
-                "Deferring fixed-format preprocessing recovery to parser for %s: %s",
-                filename,
-                exc,
-                exc_info=True,
-            )
-
+    # Fixed-format detection, normalization and its unterminated-literal
+    # recovery all happen inside CobolParser -- one code path for both entry
+    # points. ``preprocess_fixed=None`` here means "auto-detect even when
+    # free_form is set", which is the parser's None with free_form=False:
+    # it lexes free-form whichever way detection goes.
     parser = CobolParser(
         dialect=dialect,
         error_recovery=error_recovery,
-        free_form=free_form,
-        initial_warnings=normalize_warnings,
-        preprocess_fixed=parser_preprocess_fixed,
+        free_form=free_form and preprocess_fixed is not None,
+        preprocess_fixed=preprocess_fixed,
     )
     return parser.parse(  # type: ignore[no-any-return]
         source_str,

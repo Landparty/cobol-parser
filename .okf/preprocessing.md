@@ -59,7 +59,7 @@ from cobolparser.preprocess import (
 |------|---------------|
 | `preprocess/__init__.py` | **Thin re-export stub only.** Re-exports everything from `_normalize.py` (including the fixed-format column constants `DEFAULT_SEQ_COL_END` / `INDICATOR_COL` / `TEXT_START_COL` / `TEXT_END_COL` / `IDENTIFICATION_END_COL`, which stay reachable at `cobolparser.preprocess` for external consumers) plus `copybook_expander.py`, and swaps in the `_preprocess_fast` Cython `normalize_fixed_format` when compiled (keeping the pure one reachable as `_normalize_fixed_format_pure`). Deliberately holds no implementation |
 | `preprocess/_normalize.py` | `normalize_fixed_format`, `strip_compiler_directives`, `preprocess_conditional_compilation` (with the `_ConditionParser` / `_evaluate_condition` constant-condition evaluator), `validate_copybook_content`, `validate_level_numbers`, plus the `PreprocessingError` hierarchy. Split out of `__init__.py` on 2026-08-14; every name stays importable from `cobolparser.preprocess` unchanged |
-| `preprocess/format_detection.py` | `detect_fixed_format` -- should this source be normalized? (strict sequence-area rule, then the change-tag rule with its Area A header / tagged-line anchors). Moved out of `parser.py` 2026-10-08; `cobolparser.parser._detect_fixed_format` is kept as an alias |
+| `preprocess/source_format.py` | `detect_fixed_format` -- should this source be normalized? (strict sequence-area rule, then the change-tag rule with its Area A header / tagged-line anchors). `normalize_with_recovery` -- `normalize_fixed_format` plus the unterminated-literal retry (`merge_continued_literals=False`), shared by `CobolParser` and the lexer's `_tokenize_source`. Moved out of `parser.py` 2026-10-08; `cobolparser.parser._detect_fixed_format` is kept as an alias |
 | `preprocess/copybook_expander.py` | `expand_copybooks`, `parse_cobol_with_expansion` — recursive COPY inlining with circular-reference detection, encoding detection, content validation, and LRU caching |
 | `preprocess/copy_statement_parser.py` | `CopyStatementLexer`, REPLACING clause handling, continuation line normalisation |
 | `preprocess/path_resolver.py` | Secure copybook path resolution; prevents directory traversal. Found paths are canonicalised to the on-disk basename casing (`_on_disk_casing`, scandir-based) so probe-cased matches on case-insensitive filesystems never leak into reported paths |
@@ -389,11 +389,10 @@ and the CLI's `preprocess` subcommand) passed `warnings=` — so the
 diagnostic channel existed but was completely unreachable from a normal
 parse, and every one of those callers silently truncated with zero
 indication. All four now collect and surface it: `CobolParser.parse()` and
-`parse_cobol()` add it to `ParseResult.warnings` (a `CobolParser.
-__init__(initial_warnings=...)` parameter carries `parse_cobol()`'s
-pre-construction normalization warnings across the `self.warnings.clear()`
-at the top of `parse()`, since that normalization runs before the
-`CobolParser` instance exists), `_tokenize_source` folds it into its
+`parse_cobol()` add it to `ParseResult.warnings` (`parse_cobol()` used
+to normalize before its `CobolParser` existed and carried the warnings in
+via `initial_warnings=`; since 2026-10-08 the parser does the
+normalization itself), `_tokenize_source` folds it into its
 returned warnings tuple element, and `cobol-parser preprocess` prints it to
 stderr (matching the existing `--define` conditional-warnings pattern).
 It's a warning, not an error, in both `FAIL_FAST` and `COLLECT_ALL` — the
