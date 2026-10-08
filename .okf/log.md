@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-05T00:00:00Z
+timestamp: 2026-10-08T00:00:00Z
 ---
 
 # OKF Update Log
@@ -31,6 +31,18 @@ boundary (bare-CR files expand) and `>>` lines never join a data entry.
 separate sign. [jcl.md](jcl.md) / [cli.md](cli.md): omitted positional
 sub-parameters keep their slot; `jcl --dd-map --program` filters;
 `python -m cobolparser.cli.parse` runs.
+
+## 2026-10-08 -- `parser.py` refactor (no behavior change)
+
+[parser.md](parser.md): `_parse_core` split into `_preprocess_source` /
+`_normalize_fixed_source` / `_tokenize`; `parse_program`'s loop body into
+`_handle_unmatched_token` / `_parse_division`; `_handle_oo_unit_marker`
+into `_open_id_clause_unit` / `_open_factory_or_object_unit` /
+`_close_oo_unit`. `parse_cobol()` no longer detects/normalizes itself --
+it delegates to `CobolParser`, so there is one fixed-format path.
+[preprocessing.md](preprocessing.md): format detection moved to
+`preprocess/source_format.py` (`detect_fixed_format`), with the shared
+`normalize_with_recovery` used by the parser and the lexer.
 
 ## 2026-10-05 -- happy path kept in `branches`/`all` scenario modes
 
