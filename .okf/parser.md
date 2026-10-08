@@ -1915,6 +1915,28 @@ every other UNSTRING serializes as before.
   (`_match_relational_operator`) before negating, so `NOT GREATER THAN OR
   EQUAL TO` / `NOT >=` / `NOT > =` is LESS and the `<=` family is GREATER.
   `_NEGATED_OPS` is gone; `_NEGATED_RELATIONAL` does the negation.
+- `data_clauses.py` (2026-10-08): the picture scan stops at a word that
+  sits on the pattern's line *after a gap* (`_follows_gap`, column
+  arithmetic on the previous pattern token): a PICTURE character-string has
+  no embedded spaces, so such a word is the next clause or a stray one.
+  `PIC X(3) VALUES ARE 'ABC'` glued `VALUES` on (`X(3)VALUES`, sized 0),
+  `PIC X(3) FOO` read as `X(3)FOO` sized 1, `PIC X(50) BASED` as
+  `X(50)BASED` -- the terminator keyword list only catches words it names.
+  The stray word now surfaces as the clause loop's "Unparsed token"
+  warning; `BASED` is a recognised clause (`metadata["based"]`). A pattern
+  continued on the next line is unaffected (the line break resets the
+  previous token). Pinned in `tests/regression/test_bug_hunt_2026_10_08.py`.
+- `_conditions.py` (2026-10-08): the abbreviated-combined-condition subject
+  is threaded through `build_condition_expression(..., subject=)` and
+  expanded at the *leaf*, not once on the whole right-hand leg. `A = 1 OR
+  2 AND NOT 3` is `A = 1 OR (A = 2 AND A NOT = 3)` -- the OR split handed
+  `2 AND NOT 3` to `_expand_abbreviated_condition`, which only knows a leg
+  that is one literal or starts with an operator, so both legs under the
+  AND came back as operand-less COMPARISON nodes. Same for `A = 1 OR (2 AND
+  3)` and `A > 1 AND < 5 OR = 9`. Each leg's subject is the rightmost
+  relation of the leg to its left, falling back to the one handed in.
+  Pinned in `tests/regression/test_review_2026_09_09_parser.py`
+  (`TestFinding08ConditionTrees`).
 - `string_unstring_parsers.py`: `BY` after `DELIMITED` is optional
   (`DELIMITED SIZE`, `DELIMITED "," OR ALL SPACE`). A delimiter is only
   consumed when the next token is operand-shaped (`_next_is_delimiter`), so

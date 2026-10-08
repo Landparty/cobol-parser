@@ -1500,6 +1500,13 @@ class XrefAnalyzer:
                 pairs.append((stmt.record_name, ROLE_READ, True))
             if stmt.from_clause:
                 pairs.append((stmt.from_clause, ROLE_READ, True))
+            # ``WRITE ... AFTER ADVANCING WS-N LINES``: the line count is
+            # read on every WRITE. It lives in ``advancing_clause`` only
+            # (never ``.operands``), as an int for a literal count and a
+            # string for an identifier or a mnemonic-name / PAGE.
+            advancing = getattr(stmt, "advancing_clause", None)
+            if isinstance(advancing, dict) and isinstance(advancing.get("value"), str):
+                pairs.append((advancing["value"], ROLE_READ, False))
         elif isinstance(stmt, IOStartStatement):
             if stmt.key_name:
                 pairs.append((stmt.key_name, ROLE_READ, True))

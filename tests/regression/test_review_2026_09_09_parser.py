@@ -333,6 +333,52 @@ class TestFinding08ConditionTrees:
         cond = _strip(_condition(_proc("IF A = 1 OR FLAG-ON DISPLAY 'X' END-IF.")))
         assert cond["right_condition"]["operator"] == "CONDITION_NAME"
 
+    def test_abbreviated_leg_under_a_further_and(self):
+        # ``A = 1 OR 2 AND NOT 3`` is ``A = 1 OR (A = 2 AND A NOT = 3)``: the
+        # abbreviated legs sit under the AND the OR split peeled off, so
+        # expanding only the whole right-hand leg left two operand-less
+        # COMPARISON nodes (2026-10-08).
+        cond = _strip(_condition(_proc("IF A = 1 OR 2 AND NOT 3 DISPLAY 'X' END-IF.")))
+        assert cond == {
+            "expression_type": "LOGICAL",
+            "operator": "OR",
+            "left_condition": _cmp("EQUAL", "A", "1"),
+            "right_condition": {
+                "expression_type": "LOGICAL",
+                "operator": "AND",
+                "left_condition": _cmp("EQUAL", "A", "2"),
+                "right_condition": _cmp("NOT_EQUAL", "A", "3"),
+            },
+        }
+
+    def test_abbreviated_leg_before_a_full_relation(self):
+        cond = _strip(_condition(_proc("IF A = 1 OR 2 AND B = 5 DISPLAY 'X' END-IF.")))
+        assert cond["right_condition"]["left_condition"] == _cmp("EQUAL", "A", "2")
+        assert cond["right_condition"]["right_condition"] == _cmp("EQUAL", "B", "5")
+
+    def test_abbreviated_legs_inside_parentheses(self):
+        cond = _strip(_condition(_proc("IF A = 1 OR (2 AND 3) DISPLAY 'X' END-IF.")))
+        assert cond["right_condition"] == {
+            "expression_type": "LOGICAL",
+            "operator": "AND",
+            "left_condition": _cmp("EQUAL", "A", "2"),
+            "right_condition": _cmp("EQUAL", "A", "3"),
+        }
+
+    def test_abbreviated_operator_led_leg_under_a_further_or(self):
+        cond = _strip(_condition(_proc("IF A > 1 AND < 5 OR = 9 DISPLAY 'X' END-IF.")))
+        assert cond["operator"] == "OR"
+        assert cond["left_condition"]["left_condition"] == _cmp("GREATER", "A", "1")
+        assert cond["left_condition"]["right_condition"] == _cmp("LESS", "A", "5")
+        assert cond["right_condition"] == _cmp("EQUAL", "A", "9")
+
+    def test_perform_until_abbreviated_leg_under_and(self):
+        result = _proc("PERFORM P1 UNTIL A = 1 OR 2 AND NOT 3.")
+        perform = _stmt(result, "PERFORM")
+        tree = _strip(perform.until_condition.to_dict()["condition_tree"])
+        assert tree["right_condition"]["left_condition"] == _cmp("EQUAL", "A", "2")
+        assert tree["right_condition"]["right_condition"] == _cmp("NOT_EQUAL", "A", "3")
+
 
 class TestFinding09CloseForRemoval:
     def test_for_removal_is_an_option_not_a_file(self):

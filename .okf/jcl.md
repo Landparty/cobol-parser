@@ -305,3 +305,16 @@ steps into one row per DD (concatenation members included);
 
 `tests/unit/test_jcl.py`, `tests/unit/cli/test_jcl_cli.py`, and the
 round-pinned `tests/unit/test_bug_hunt_r11_jcl_config.py`.
+
+
+# 2026-10-08
+
+* An omitted positional sub-parameter keeps its slot in
+  `JclParameter.positional` (`DISP=(OLD,,DELETE)` -> `["OLD", "", "DELETE"]`,
+  `UNIT=(,3)` -> `["", "3"]`): JCL positional sub-parameters are identified by
+  position, and dropping the empty one read the abnormal disposition as the
+  normal one. `split_top_level` always preserved it; `_parse_parameter`
+  discarded it. `DDStatement.disposition` (the raw text) is unchanged.
+* `cobol-parser jcl --dd-map --program NAME` filters the map to the DDs of
+  the steps that run NAME, as `--bindings --program` already did; it used to
+  ignore `--program`. See [cli.md](cli.md).

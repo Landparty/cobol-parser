@@ -15,10 +15,28 @@ Properly handles:
 import bisect
 import re
 
+from .._lines import split_source_lines
 from .._source_directive import free_format_flags
 from ..lexer import mask_comment_entries
 from ._normalize import ALL_COMMENT_INDICATORS
 from .models import CopyStatement, ReplacingClause, SuppressClause
+
+
+def _records(text: str) -> list[str]:
+    """``text.split("\\n")`` on every record boundary.
+
+    A source read from a bare-CR (``\\r``) or CRLF file is one record per
+    ``\\r`` / ``\\r\\n`` too (:mod:`cobolparser._lines`); splitting on
+    ``\\n`` alone made a bare-CR program one 72-column "record" whose COPY
+    was silently never expanded. Like ``str.split`` (and unlike
+    ``split_source_lines``) a terminating line break yields a trailing empty
+    element, so the callers' ``"\\n".join`` round-trips the text they had.
+    """
+    parts = split_source_lines(text)
+    if text.endswith(("\n", "\r")):
+        parts.append("")
+    return parts
+
 
 # Fixed-format COBOL column boundaries
 # Columns 1-6: Sequence number area
@@ -98,7 +116,7 @@ def normalize_continuation_lines(
     # Tabs are expanded before any column-sensitive slicing, exactly as
     # normalize_fixed_format does, so the indicator column is found where
     # the final parse will look for it.
-    lines = source.expandtabs(8).split("\n")
+    lines = _records(source.expandtabs(8))
     result: list[str] = []
 
     # Text starts after the indicator column
@@ -286,7 +304,7 @@ def strip_sequence_area(source: str) -> str:
     """
     # Tabs are expanded before slicing, as normalize_fixed_format does, so a
     # tab-indented member is cut at the same columns the final parse uses.
-    lines = source.expandtabs(8).split("\n")
+    lines = _records(source.expandtabs(8))
     result = []
     # Lines after ``>>SOURCE FORMAT IS FREE`` have no sequence area,
     # indicator column or column-72 limit: kept whole, behind a blank
@@ -443,7 +461,7 @@ def remove_comment_lines(source: str) -> str:
     """
     # Tabs expanded first so column 7 is judged where normalize_fixed_format
     # will judge it (a tab-indented line is never a comment in either).
-    lines = source.expandtabs(8).split("\n")
+    lines = _records(source.expandtabs(8))
     result = []
     # A free-format line (after ``>>SOURCE FORMAT IS FREE``) has no
     # indicator column, so column 7 says nothing about it.
@@ -1257,7 +1275,7 @@ def apply_replacing_clauses(
             already had ``strip_sequence_area`` applied, where the indicator
             is the first character of each line.
     """
-    lines = content.split("\n")
+    lines = _records(content)
 
     # Comment status is decided once, from the original content, so a
     # substitution can never shift a line into or out of comment status

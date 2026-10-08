@@ -13,13 +13,19 @@ from __future__ import annotations
 
 import re
 
-#: A COBOL identifier-shaped token: a letter, then letters/digits/hyphens.
-#: The canonical tokenizer for pulling identifier-shaped words out of a raw
-#: text blob that has no AST-level operand list of its own to walk (a
-#: paragraph's source text for clone-detection renaming, an unstructured
-#: EVALUATE selector). Shared so a future fix to what counts as an
-#: identifier token does not have to be made in more than one place.
-IDENTIFIER_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
+#: A COBOL identifier-shaped token: letters/digits/hyphens holding at least
+#: one letter. IBM lets a user word start with a digit (``1ST-NAME``,
+#: ``2ND-REC``); a letter-led-only pattern bit the leading digit off, so
+#: ``MOVE 1ST-NAME TO 2ND-NAME`` referenced ``ST-NAME`` / ``ND-NAME`` and
+#: both declared items read as unused (2026-10-08). A token must not start
+#: inside another word or right after a decimal point, so the ``5E`` of a
+#: floating-point literal ``1.5E+3`` is never a word. The canonical
+#: tokenizer for pulling identifier-shaped words out of a raw text blob that
+#: has no AST-level operand list of its own to walk (a paragraph's source
+#: text for clone-detection renaming, an unstructured EVALUATE selector).
+#: Shared so a future fix to what counts as an identifier token does not
+#: have to be made in more than one place.
+IDENTIFIER_TOKEN_RE = re.compile(r"(?<![\w.])\d*[A-Za-z][A-Za-z0-9-]*")
 
 #: Same, but also matches a token that *starts* with a digit. Only where a
 #: stray non-identifier match is harmless -- the caller looks every match up

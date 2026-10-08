@@ -14,6 +14,24 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-08 -- bug hunt: parser, analyzers, preprocessing, storage, JCL, CLI
+
+[parser.md](parser.md): `_conditions.py` threads the abbreviated subject
+through the recursion, so `A = 1 OR 2 AND NOT 3` and `A = 1 OR (2 AND 3)`
+build full relations instead of operand-less COMPARISON nodes;
+`data_clauses.py` stops the picture scan at a same-line word after a gap
+(`PIC X(3) VALUES ...` no longer reads `X(3)VALUES`), and knows `BASED`.
+[analysis.md](analysis.md): recursion-risk escapes ignore IF/EVALUATE
+branch edges; unused-variables sees PERFORM TIMES counts, WRITE ADVANCING
+counts, INITIALIZE BY values, CORRESPONDING pairs and XML/JSON group
+operands; xref reads WRITE ADVANCING; `_names.py` accepts digit-led words.
+[preprocessing.md](preprocessing.md): the expander splits on every record
+boundary (bare-CR files expand) and `>>` lines never join a data entry.
+[ast-models.md](ast-models.md): signed NATIONAL charges the implicit
+separate sign. [jcl.md](jcl.md) / [cli.md](cli.md): omitted positional
+sub-parameters keep their slot; `jcl --dd-map --program` filters;
+`python -m cobolparser.cli.parse` runs.
+
 ## 2026-10-05 -- happy path kept in `branches`/`all` scenario modes
 
 `generators.md`: `generate_with_scenarios` now prepends the happy-path

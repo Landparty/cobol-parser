@@ -1399,7 +1399,9 @@ class TestOmittedSubParameters:
 """)
         disp = result.jobs[0].steps[0].dd("F1").parameter("DISP")
         assert disp.value == "(NEW,,DELETE)"
-        assert disp.positional == ["NEW", "DELETE"]
+        # The omitted normal disposition keeps its slot, so DELETE stays the
+        # abnormal disposition (it used to shift into the middle slot).
+        assert disp.positional == ["NEW", "", "DELETE"]
 
     def test_empty_item_in_a_set_statement_is_skipped(self):
         result = parse_jcl("//J JOB 1\n// SET A=1,,B=2\n//\n")

@@ -133,7 +133,10 @@ def condition_token_text(token: Token) -> str:
 
 
 def build_condition_expression(
-    tokens: list[str], location: SourceLocation
+    tokens: list[str],
+    location: SourceLocation,
+    *,
+    subject: ConditionalExpression | None = None,
 ) -> CobolExpression | None:
     """Convert a flat list of condition token strings into an expression tree.
 
@@ -141,6 +144,14 @@ def build_condition_expression(
     compound conditions joined by AND / OR, and -- structurally since M12 --
     class conditions (``A IS NUMERIC``), sign conditions (``A IS
     POSITIVE``), and bare condition-names.
+
+    *subject* is the relation an abbreviated combined condition would
+    repeat the subject (and operator) of: the relation to the left of the
+    AND/OR this leg follows. It is threaded through the recursion so a leg
+    nested under a further AND/OR, or inside parentheses, still expands --
+    ``A = 1 OR 2 AND 3`` is ``A = 1 OR (A = 2 AND A = 3)``, and ``A = 1 OR
+    (2 AND 3)`` the same; expanding only the whole right-hand leg left both
+    with two operand-less COMPARISON nodes.
     """
     # Normalise multi-word operators ("NOT LESS", "NOT EQUAL", etc.) and
     # two-character symbolic operators the lexer emits as separate
@@ -217,17 +228,29 @@ def build_condition_expression(
     for logical_op in ("OR", "AND"):
         idx = find_top_level_operator(cleaned, logical_op)
         if idx is not None:
-            left_expr = build_condition_expression(cleaned[:idx], location)
+            left_expr = build_condition_expression(
+                cleaned[:idx], location, subject=subject
+            )
             # ``IF A = 1 OR 2`` / ``IF A > 1 AND < 5``: an abbreviated
             # combined relation condition repeats the subject (and, for a
-            # bare literal, the operator) of the relation before it.
-            right_tokens = _expand_abbreviated_condition(left_expr, cleaned[idx + 1 :])
-            right_expr = build_condition_expression(right_tokens, location)
+            # bare literal, the operator) of the relation before it -- the
+            # rightmost relation of the left leg, or, when the left leg is
+            # itself abbreviated all the way down, the one handed in.
+            right_subject = _rightmost_relation(left_expr) or subject
+            right_expr = build_condition_expression(
+                cleaned[idx + 1 :], location, subject=right_subject
+            )
             if left_expr and right_expr:
                 logical = LogicalExpression(logical_op, location)
                 logical.set_left_condition(left_expr)
                 logical.set_right_condition(right_expr)
                 return logical
+
+    # A leaf under an AND/OR: expand the abbreviated forms (a leg that
+    # starts with a relational operator, a bare literal, ``NOT literal``)
+    # against the relation to the left. Anything else is left alone.
+    if subject is not None:
+        cleaned = _expand_abbreviated_condition(subject, cleaned)
 
     # Leading NOT: ``NOT A = 1``, ``NOT (A = 1 AND B = 2)``, ``NOT FLAG-ON``.
     # NOT binds tighter than AND/OR, so this runs after the split above
@@ -387,9 +410,9 @@ def _is_literal_leg(tokens: list[str]) -> bool:
 
 
 def _expand_abbreviated_condition(
-    left_expr: CobolExpression | None, rest: list[str]
+    subject: ConditionalExpression, rest: list[str]
 ) -> list[str]:
-    """Rebuild the right leg of an AND/OR when it has no subject of its own.
+    """Rebuild one leg of an AND/OR when it has no subject of its own.
 
     COBOL's abbreviated combined relation condition lets the subject -- and
     the operator -- of the preceding relation be omitted: ``A = 1 OR 2 OR
@@ -400,12 +423,12 @@ def _expand_abbreviated_condition(
     operator). A bare identifier is left alone: without a symbol table it
     is indistinguishable from a level-88 condition-name (``A = 1 OR
     FLAG-ON``), and the CONDITION_NAME reading is the one the analyzers
-    resolve. Anything else is returned unchanged.
+    resolve. Anything else is returned unchanged. *subject* is the relation
+    the leg repeats -- see :func:`build_condition_expression`.
     """
     if not rest:
         return rest
-    subject = _rightmost_relation(left_expr)
-    if subject is None or not isinstance(subject.left_operand, str):
+    if not isinstance(subject.left_operand, str):
         return rest
     first = rest[0].upper()
     if first in COMPARISON_OPS or first in _RELATIONAL_OPERATORS:

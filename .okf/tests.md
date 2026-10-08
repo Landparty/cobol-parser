@@ -1196,3 +1196,15 @@ dropping the slash would make `cobolparser/parsers` swallow
   index, and program fixture bundle generator tests
 * [analysis.md](analysis.md) — `tests/unit/analysis/` covers analyzers
 * [parser.md](parser.md) — `tests/integration/` covers end-to-end parsing
+
+## 2026-10-08
+
+`tests/regression/test_bug_hunt_2026_10_08.py` pins the 2026-10-08 bug hunt:
+picture scan stopping at a same-line gap (`PIC X(3) VALUES ...`, `BASED`),
+recursion-risk escapes ignoring IF/EVALUATE branch edges, the
+unused-variable references (PERFORM TIMES, WRITE ADVANCING, INITIALIZE BY,
+CORRESPONDING, XML/JSON groups, digit-led names) and the matching xref
+reads, bare-CR copybook expansion, `>>IF` in a copybook, signed NATIONAL
+width, and `jcl --dd-map --program`. The abbreviated-condition fix is pinned
+in `test_review_2026_09_09_parser.py` (`TestFinding08ConditionTrees`); the
+JCL omitted-sub-parameter slot in `tests/unit/test_jcl.py`.

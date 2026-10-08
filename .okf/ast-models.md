@@ -668,3 +668,13 @@ pass and the CLI's `--program NAME` (see [cli.md](cli.md)). Pinned by
   name such as `"NUMERIC"`, from Enterprise COBOL 6's `{ALL | category} TO
   VALUE`) and `.to_default: bool` (`[THEN] TO DEFAULT`). Both always present
   in `to_dict()`.
+
+
+# `_storage.py`: signed NATIONAL sign width (2026-10-08)
+
+A national decimal item cannot carry an overpunched sign; when the SIGN
+clause is omitted IBM assumes `SIGN IS TRAILING SEPARATE CHARACTER`, so
+`storage_size` charges the sign one national character (2 bytes) whenever
+`is_signed` under `NATIONAL`. `PIC S9(5) USAGE NATIONAL` was 10 bytes (12
+only with an explicit SEPARATE), shifting every later offset by 2. Pinned in
+`tests/regression/test_bug_hunt_2026_10_08.py`.
