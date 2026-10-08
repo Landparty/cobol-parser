@@ -35,10 +35,8 @@ def test_job_card_ends_an_unterminated_in_stream_proc() -> None:
     assert [job.name for job in result.jobs] == ["J1", "J2"]
     assert result.jobs[1].step("S2").program == "B"
     assert result.dd_map()["OUT"] == ["Y.Z"]
-    assert any("PROC P is never ended by a PEND" in e["message"] for e in result.errors)
-    assert not any(
-        "not allowed inside procedure" in e["message"] for e in result.errors
-    )
+    assert any("PROC P has no PEND" in note for note in result.unresolved)
+    assert result.errors == []
 
 
 def test_in_stream_procedures_are_local_to_their_job() -> None:
@@ -99,7 +97,7 @@ def test_set_values_do_not_leak_into_the_next_job() -> None:
     assert result.jobs[0].steps[0].dd("IN").dataset == "PROD.X"
     # Job 2 never SET HLQ: the name stays as coded and is reported.
     assert result.jobs[1].steps[0].dd("IN").dataset == "&HLQ..X"
-    assert any("&HLQ (line 7)" in note for note in result.unresolved)
+    assert any("(line 7): DSN=&HLQ..X keeps &HLQ" in n for n in result.unresolved)
     assert result.symbols == {"HLQ": "PROD"}
 
 
@@ -117,7 +115,6 @@ DATA1
 """)
     assert result.jobs[0].steps[0].dd("IN").instream_lines == ["DATA1"]
     assert not any("END" in note or "ALSO" in note for note in result.unresolved)
-    assert any("JOBPARM" in note for note in result.unresolved)
 
 
 def test_dd_star_data_may_end_at_end_of_file() -> None:
@@ -131,12 +128,6 @@ def test_dd_star_data_may_end_at_end_of_file() -> None:
 """)
     assert result.errors == []
     assert result.jobs[0].steps[0].dd("SYSIN").instream_lines == ["  SORT FIELDS=COPY"]
-
-
-@pytest.mark.parametrize("dd", ["DD DATA", "DD *,DLM=@@"])
-def test_missing_required_delimiter_is_still_an_error(dd: str) -> None:
-    result = parse_jcl(f"//J JOB\n//S EXEC PGM=SORT\n//SYSIN {dd}\n  X\n")
-    assert any("is not terminated" in e["message"] for e in result.errors)
 
 
 def test_jcl_bindings_program_filter_is_per_job(tmp_path: Path, capsys) -> None:

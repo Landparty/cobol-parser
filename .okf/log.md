@@ -14,6 +14,17 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-08 -- JCL is read by jcl-parser
+
+[jcl.md](jcl.md) rewritten: `cobolparser/jcl/` no longer parses JCL. Its card
+scanner (`lexer.py`) and statement parser were deleted; `jcl/parser.py` is now
+an adapter over the sibling `jcl-parser` package (optional extra
+`cobol-parser[jcl]`, `>=2.0.0`), adding several jobs per deck, card-level
+recovery, `proc_paths` procedure libraries (`jcl --proc-path`) and the
+`unresolved` notes. The diagnostics jcl-parser does not raise are listed
+under "Known gaps". [cli.md](cli.md), [index.md](index.md),
+[analysis.md](analysis.md) follow.
+
 ## 2026-10-08 -- bug hunt: parser, analyzers, preprocessing, storage, JCL, CLI
 
 [parser.md](parser.md): `_conditions.py` threads the abbreviated subject

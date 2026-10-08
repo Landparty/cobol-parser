@@ -22,7 +22,7 @@ mirrored here.)
 | Dialects, EXEC SQL/CICS/IMS nodes, LE/intrinsic signatures | [dialects.md](dialects.md) |
 | Flowcharts, copybook → CSV/record data, `gen-fixtures` bundles, scenarios | [generators.md](generators.md) |
 | `parse_files`, `scan_files`, batch fault isolation | [batch.md](batch.md) |
-| **z/OS JCL: cards, jobs, steps, DD → dataset bindings** | [jcl.md](jcl.md) |
+| **z/OS JCL: jobs, steps, DD → dataset bindings (via jcl-parser)** | [jcl.md](jcl.md) |
 | CLI subcommands and flags | [cli.md](cli.md) |
 | Test layout, markers, coverage floor | [tests.md](tests.md) |
 | Backend adapter dict shape | [integration.md](integration.md) |
@@ -46,10 +46,9 @@ mirrored here.)
 * [Dialects](dialects.md) — `IBMEnterpriseCobol`, EXEC SQL/CICS/IMS AST node types, intrinsic-function/LE-service lookups (`le_signatures.py` details live in `analysis.md`)
 * [Generators](generators.md) — flowcharts (Mermaid/DOT), copybook → CSV/record-image data, the `gen-fixtures` bundle/scenario stack
 * [Batch Parsing](batch.md) — `parse_files()` / `parse_files_with_copybooks()`, `scan_files()`, per-file fault isolation
-* [JCL](jcl.md) — the z/OS Job Control Language front end: card scanning,
-  jobs/steps/DD statements, in-stream procedure expansion, and the
-  `ddname -> dataset` binding a COBOL `SELECT ... ASSIGN TO` resolves through.
-  The only part of the library that reads a language other than COBOL.
+* [JCL](jcl.md) — the `ddname -> dataset` binding a COBOL `SELECT ... ASSIGN
+  TO` resolves through. The JCL is read by the `jcl-parser` package (optional
+  extra `cobol-parser[jcl]`); `cobolparser.jcl` adapts its model.
 * [CLI](cli.md) — `cobol-parser` subcommands and flags
 * [Tests](tests.md) — Test layout, pytest markers, coverage floor (90 %)
 

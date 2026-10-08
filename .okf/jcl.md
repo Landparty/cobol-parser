@@ -1,320 +1,161 @@
 ---
 type: Module
 title: JCL
-description: z/OS Job Control Language front end — cards, jobs, steps, DD statements, in-stream procedures, and the ddname → dataset binding a COBOL SELECT resolves through.
-tags: [jcl, zos, dd, dataset, job, step, proc, symbolic-parameters, bindings]
-timestamp: 2026-10-04T00:00:00Z
+description: The ddname -> dataset join a COBOL SELECT resolves through, read from z/OS JCL by the jcl-parser package; cobolparser.jcl is the adapter that shapes its model for this toolchain.
+tags: [jcl, zos, dd, dataset, job, step, proc, bindings, jcl-parser]
+timestamp: 2026-10-08T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/jcl/` is the only part of this library that reads a language
-other than COBOL. It exists for one join that nothing in the COBOL source can
-make on its own:
+`cobolparser/jcl/` exists for one join nothing in the COBOL source can make:
 
 ```cobol
 SELECT INV-FILE ASSIGN TO INVFILE.
 ```
 
-`INVFILE` is a *DD name*. Which dataset it actually is, how it is disposed,
-and what its RECFM/LRECL are, live in the JCL that runs the program — so a
-COBOL toolchain that never reads JCL can only ever report the DD name back to
-you. This package answers the rest.
+`INVFILE` is a *DD name*; which dataset it is, how it is disposed and what its
+RECFM/LRECL are live in the JCL that runs the program.
 
-**It shares no code with the COBOL lexer or parser.** JCL is a different
-language with its own 80-column card format, its own continuation rule and its
-own comment convention, and the package adds no runtime dependency.
+**This package does not parse JCL.** Since 2026-10-08 the JCL is read by the
+sibling **`jcl-parser`** package (`jclparser`), the same library the LegacyLens
+backend uses. `cobolparser.jcl` converts its `Job` model into the
+`JclParseResult` shape below and adds the bindings. Until then it carried its
+own ~1,800-line card scanner and statement parser (`jcl/lexer.py`, the old
+`jcl/parser.py`), written on 2026-09-08 without reference to jcl-parser; that
+copy is gone, and JCL parsing fixes now belong in jcl-parser.
 
-Two properties hold throughout and are as much of the contract as the shapes
-themselves:
+`jcl-parser` is an **optional extra**: `pip install 'cobol-parser[jcl]'`
+(`jcl-parser>=2.0.0`; the `dev` extra pulls it too). The rest of the library
+keeps its no-runtime-dependency rule. `cobolparser.jcl`'s models and bindings
+import without it; `parse_jcl` raises `ImportError` naming the extra.
+1.x releases of jcl-parser (compiled, pre-2.0 API) do not work.
 
-* **A quiet result is never a complete one.** A card that cannot be parsed
-  goes into `JclParseResult.errors` with its line and a reason. Anything read
-  but not fully resolved — a symbolic parameter with no value, a procedure not
-  defined in this file, an `INCLUDE` needing library access, a recognised but
-  unmodelled statement kind — goes into `JclParseResult.unresolved`. No card is
-  dropped and **no dataset name is ever guessed**.
-* **Determinism.** The same input always produces a byte-identical `to_dict()`.
+Two properties hold throughout:
+
+* **A quiet result is never a complete one.** What jclparser rejects lands in
+  `JclParseResult.errors`; what it read but could not resolve lands in
+  `unresolved` (see "What the adapter adds"). No dataset name is guessed.
+* **Determinism.** The same input (and the same `proc_paths` contents) always
+  produces a byte-identical `to_dict()`.
 
 # Public API
 
 ```python
-from cobolparser.jcl import parse_jcl, resolve_dd_bindings, bindings_for_ddname
+from cobolparser.jcl import parse_jcl, JclParser, resolve_dd_bindings, bindings_for_ddname
 
-result = parse_jcl(text, filename="JOB.jcl")     # JclParseResult
-result = JclParser().parse_file("JOB.jcl")       # same, from a path
+result = parse_jcl(text, filename="JOB.jcl", proc_paths=["proclib/"])
+result = JclParser(proc_paths=["proclib/"]).parse_file("JOB.jcl")
 
 result.jobs[0].steps[0].program          # 'INVUPDT'
 result.dd_map()["INVFILE"]               # ['PROD.INVENTORY.MASTER']
-result.steps_running("INVUPDT")          # every step running that program
-result.success                           # True when every card parsed
+result.steps_running("INVUPDT")          # includes steps expanded from PROCs
+result.success                           # True when errors is empty
 result.errors                            # [{line, message}, ...]
 result.unresolved                        # what was read but not resolved
 
-# The shape the rest of the toolchain consumes
 for b in resolve_dd_bindings(result):
-    b.ddname, b.dataset, b.step, b.job, b.disposition
-    b.record_format, b.record_length     # when the JCL states them
-
-bindings_for_ddname(result, "INVFILE")   # one DD name, case-insensitively
+    b.ddname, b.dataset, b.step, b.job, b.disposition, b.record_format, b.record_length
+bindings_for_ddname(result, "INVFILE")   # case-insensitive
 ```
 
-## Model (`jcl/models.py`)
+The card-level helpers of the old scanner (`scan_cards`, `JclCard`,
+`ScanResult`, `split_top_level`, `find_top_level_equals`, the column
+constants) and `EXEC_KEYWORDS` were removed with it.
+
+## Model (`jcl/models.py`, unchanged)
 
 | Class | Holds |
 |-------|-------|
 | `JclParseResult` | `jobs`, `procedures`, `symbols`, `errors`, `unresolved`, `filename` |
-| `JclJob` | `name`, `steps`, `parameters`, job-level `dd_statements` (JOBLIB, JOBCAT), `line` |
+| `JclJob` | `name`, `steps`, `parameters`, job-level `dd_statements` (JOBLIB), `line` |
 | `JobStep` | `name`, `program`, `procedure`, `parm`, `dd_statements`, `condition`, `parameters`, `line` |
 | `DDStatement` | `name`, `dataset`, `disposition`, `sysout`, `is_dummy`, `is_instream`, `instream_lines`, `concatenated`, `record_format`, `record_length`, `parameters`, `procstep`, `line` |
 | `JclParameter` | `keyword`, `value`, `subparameters`, `positional` |
 | `DatasetBinding` | `ddname`, `dataset`, `step`, `job`, `disposition`, `record_format`, `record_length` |
 
-Every node is a plain dataclass with a `to_dict()` whose key order is fixed by
-the literal that builds it, so `json.dumps(result.to_dict())` is byte-identical
-for byte-identical input.
+# Conversion (`jcl/parser.py`)
 
-**`JclParameter` covers three shapes**, readable off the fields without
-re-parsing: `DSN=MY.DATA` → `keyword`/`value`; `DISP=(NEW,CATLG,DELETE)` →
-`positional`; `DCB=(RECFM=FB,LRECL=80)` → `subparameters`. A mixed sub-list
-(`DCB=(MODEL.DSCB,RECFM=FB)`) fills both. `value` is always the text exactly as
-coded, apostrophes included — use `unquote()` to read a quoted string's
-content.
+* **Steps.** `IF`/`ELSE` blocks are flattened; `JobStep.condition` is `COND=`
+  when coded, else the enclosing conditions as jclparser keeps them
+  (`(S1.RC = 0)`, `NOT (S1.RC = 0)` in the ELSE, nested ones joined with
+  ` AND `). jclparser normalises unparenthesised expressions (`RC = 0` reads
+  `RC=0`).
+* **Procedure invocations** keep their own step (`program=None`,
+  `procedure=NAME`, the invocation's override DDs with `procstep` set),
+  followed by one step per procedure step, named `invocation.procstep` (nested:
+  `RUN.S2.S1`), with both `program` and `procedure` (the innermost procedure)
+  set. Each invocation is exploded on its own (`explode_job` over a one-step
+  job), so one missing procedure does not stop the others.
+* **Concatenations.** jclparser keeps unnamed DD cards as separate DDs named
+  `""`; the adapter folds each into the `concatenated` list of the named DD
+  ahead of it, repeating its name.
+* **Parameters.** jclparser's dict values are turned back into
+  `JclParameter`s: a list value becomes `positional` (items with `=` go to
+  `subparameters`), `True` (`*`) a bare keyword, `_pos_N` a bare word. `value`
+  is reconstructed, not the exact coded text (jclparser does not keep it). The
+  JOB card's accounting field comes from `Job.accounting_info`.
+* **Line numbers** are the deck's (each job's are offset by where it starts).
+  Steps expanded from a *library* procedure carry the member's own line
+  numbers.
+* **`procedures`** maps each in-stream PROC to its steps expanded with its own
+  defaults (names without the invocation prefix).
 
-**`DDStatement.dataset` is `None` whenever no DSN was coded** — the normal case
-for SYSOUT, DUMMY and in-stream data, which are flagged by
-`sysout` / `is_dummy` / `is_instream` instead. It is never inferred. The value
-keeps any member (`PDS(MEMBER)`), relative generation (`GDG(+1)`) or temporary
-`&&` prefix as coded.
+# What the adapter adds
 
-**Concatenations**: unnamed DD cards following a named one land in
-`concatenated`, each repeating the owner's `name`, so a binding lookup on the
-DD name finds every dataset in a multi-library STEPLIB. `flatten()` walks a
-card and its members in card order.
+* **Several jobs per deck.** jclparser reads one job (a second JOB card is a
+  hard error), so the deck is split at each JOB card that is not in-stream
+  data (located with jclparser's own `_merge_source_lines`, a private helper,
+  hence the `>=2.0.0` floor). Each job is parsed on its own; SET symbols and
+  in-stream PROCs do not cross jobs. A PROC coded before the first JOB card is
+  visible to every job.
+* **Card-level recovery.** jclparser raises on the first card it cannot read;
+  the adapter records `{line, message}`, blanks that card and re-reads (up to
+  `JclParser.MAX_RECOVERIES` times), so one bad card costs one card.
+* **Procedure libraries, no guessing.** Lookup order: in-stream, then
+  `proc_paths` (directories; one member per file named after it, any
+  extension, first directory wins), else the invocation is kept unexpanded and
+  noted (`PROC NAME (line N): ... neither defined in this file nor found on the
+  procedure path`). `INCLUDE MEMBER=` reads from the same directories.
+  jclparser's bundled IBM-utility PROC templates, `JCLLIB ORDER` library
+  lookup and the `JCL_PROCLIB_PATH` environment variable are **not** used.
+* **Notes in `unresolved`:** every jclparser warning (unmatched ELSE/ENDIF,
+  missing PEND, unrecognised statements, override naming no step, a symbol
+  substituted with nothing, ...); a DSN still holding `&SYM`; a backward
+  reference `DSN=*.step.dd`; a non-numeric LRECL; a PROC defined twice in one
+  job (EXEC runs the last definition); a member with no JOB card. A JOB card
+  with no name is an error.
 
-### Query helpers
+## Known gaps (jcl-parser is silent, the old scanner was not)
 
-* `JclParseResult.all_dd_statements()` — every DD card paired with where it was
-  coded, in job → step → card order; job-level cards come back with a `None`
-  step, concatenated members follow their owner.
-* `JclParseResult.dd_map()` — DD name → every dataset bound to it. **Every DD
-  name seen is a key**: an empty list means "seen, but not backed by a dataset"
-  (SYSOUT/DUMMY/in-stream), while a missing key means "not in this JCL at all".
-* `JclParseResult.steps_running(program)` — includes steps produced by expanding
-  an in-stream procedure, so a program run only from inside a PROC is found.
-* `JclJob.step(name)` / `JobStep.dd(name)` / `DDStatement.parameter(keyword)` —
-  all case-insensitive.
-
-# Card scanning (`jcl/lexer.py`)
-
-`scan_cards(text) -> ScanResult` produces one `JclCard` per **logical**
-statement: continuation already joined, in-stream data already separated.
-
-| Columns | Meaning |
-|---------|---------|
-| 1–2 | `//` identifier field (`//*` comment, `/*` delimiter) |
-| 3 | first column of the name field; blank means "no name" |
-| 3–71 | name, operation and parameter fields, blank-separated |
-| 72 | continuation column (`CONTINUATION_INDICATOR_COLUMN`): never part of a field |
-| 73–80 | identification/sequence field, **discarded before anything reads the card** |
-
-Because columns 72–80 go first, a sequence-numbered deck parses identically to
-an unnumbered one, and a parameter coded through column 71 is not lengthened
-by a column-72 marker. A nonblank in column 72 on a statement that is not
-otherwise continued continues its **comment field**: the next `//` card with
-a blank column 3 is read as more comment, not as a statement. Card kinds are `KIND_STATEMENT`, `KIND_COMMENT`,
-`KIND_NULL`, `KIND_JES`.
-
-## Continuation — the rule that is usually got wrong
-
-The *current* card decides whether the next one continues it, in exactly two
-situations:
-
-1. **Its parameter field ends with a comma.** The next card must have `//` in
-   columns 1–2, a blank in column 3, and its text must resume within columns
-   4–16 (`CONTINUATION_MIN_COLUMN` / `CONTINUATION_MAX_COLUMN`).
-2. **An apostrophe-quoted string is still open** when the card ends. The next
-   card must have `//`, blanks through column 15, and the string resumes at
-   column 16 (`STRING_CONTINUATION_COLUMN`) **verbatim, blanks included** —
-   those blanks are inside the quoted string. The same holds on the card
-   being continued: a continued string is coded through column 71
-   (`STRING_LAST_COLUMN`), so blanks between the last character and column 71
-   are part of the value even when the file has had trailing blanks stripped.
-
-Anything else ends the statement. A card that promises continuation but is not
-followed by a valid continuation card is reported as an error and the statement
-is closed where it stands, so the *following* card is still parsed rather than
-swallowed.
-
-The parameter field ends at the first blank outside both quotes and
-parentheses; the rest of the card is a comment. Blanks *inside* parentheses are
-kept. `IF`/`ELSE`/`ENDIF` follow their own rule because their operand is a
-relational expression, not a parameter list: `IF`'s expression runs, blanks
-included, up to `THEN` — continued onto following cards (text in columns
-4-16, a card opening with an operation word is never a continuation) until
-`THEN` is found — and whatever follows `THEN` is a comment, so a comment
-holding an apostrophe or ending in a comma no longer reads as a continuation.
-`ELSE`/`ENDIF` take no operand; the rest of their card is a comment.
-
-## In-stream data
-
-`DD *` and `DD DATA` are followed by data, not JCL, and the scanner switches
-modes so data is never parsed as JCL. `DD *` data ends at a delimiter card or
-at the first card starting with `//` — unless it coded `DLM=`, in which case,
-as on z/OS, only that delimiter ends it and `//` / `/*` cards are data;
-`DD DATA` data ends **only** at the delimiter, which is `/*` (`DEFAULT_DELIMITER`) unless the DD coded `DLM=xx`.
-Data lines attach to the DD that introduced them and are kept exactly as
-written — full width, **not** truncated at column 72. `DD *` data with no
-`DLM=` may simply run to end of input (no error); only a coded delimiter, or
-`DD DATA`'s required one, can be reported missing.
-
-`/*` followed by a blank is a **delimiter** whose remainder is a comment;
-only `/*` with a verb starting in column 3 (`/*JOBPARM`) is a JES control
-card (`KIND_JES`). Before 2026-09-30 (bug hunt round 11) `/* comment` was
-read as a JES statement named by its comment.
-
-Helpers `split_top_level()` and `find_top_level_equals()` split a parameter
-field without breaking inside quotes or parentheses.
-
-# Parsing (`jcl/parser.py`)
-
-`parse_jcl(text, *, filename="<jcl>")`, or `JclParser().parse()` /
-`.parse_file()`.
-
-Understood: `JOB`, `EXEC`, `DD`, `PROC`, `PEND`, `SET`, `INCLUDE`,
-`IF`/`THEN`/`ELSE`/`ENDIF`, `JCLLIB`, `OUTPUT`, plus `//*` comments, the null
-`//` end-of-job card and `/*` JES control cards.
-
-**Procedure expansion is the load-bearing part.** `EXEC PGM=name` is a program
-step; `EXEC procname` and `EXEC PROC=procname` are procedure steps. When the
-procedure is defined in-stream in the same file its body is *expanded*: one
-extra `JobStep` per procedure step is appended to the job, named
-`invocation.procstep` — the same qualified form z/OS itself reports — carrying
-the procedure's own `PGM=` and DD statements with this invocation's symbol
-values substituted. That is what makes a `ddname -> dataset` lookup work for a
-program run out of a procedure. Such a step has **both** `program` and
-`procedure` set.
-
-`procstep.ddname` DD cards coded on the invocation override the matching DD of
-that procedure step *parameter by parameter* (and `DCB=` *sub-parameter by
-sub-parameter*: overriding `DCB=(RECFM=FB,LRECL=80)` with `DCB=(LRECL=100)`
-keeps `RECFM=FB`); a DD name the procedure step does not have is an addition. The invocation keeps its own copy of every override
-card, so nothing is moved out of sight.
-
-A concatenation is overridden by position: the unnamed cards following a
-`procstep.ddname` override merge into the procedure's concatenated members in
-order (a parameterless card leaves its member alone), extra cards are
-additions, and members no override reaches stay exactly as coded.
-
-`PARM` and `COND` coded on the invoking `EXEC` follow the z/OS rules too:
-`PARM.procstep=` / `COND.procstep=` override that one procedure step (a
-procstep the procedure does not have is noted in `unresolved`); unqualified
-`COND=` overrides every step, while unqualified `PARM=` goes to the *first*
-step and nullifies `PARM` on every later one. A `keyword.procstep` form of
-any `EXEC_KEYWORDS` entry is never read as a symbolic override.
-
-**Symbolic parameters** (`&SYM`, `&SYM.`) are substituted from `SET` values,
-then procedure defaults, then `EXEC` overrides — increasing precedence. The
-`SET` values a procedure sees are the ones in effect at its `EXEC` card; a
-`SET` coded after it does not reach back into it.
-`&&` is left alone (a temporary dataset name, not a symbol). Substitution is
-deliberately **not** performed on the `JOB` card, matching z/OS, so
-`NOTIFY=&SYSUID` does not read as an unresolved user symbol.
-`EXEC_KEYWORDS` is the set of `EXEC` keywords that belong to the step itself;
-anything else coded with a value on an `EXEC` is a symbolic override for the
-procedure being invoked.
-
-`JobStep.condition` carries `COND=` when coded, otherwise the text of the
-enclosing `IF`/`ELSE` (`NOT (...)` inside an `ELSE`, nested conditions joined
-with `AND`), otherwise `None`.
-
-**Scope is per job.** An in-stream procedure is visible only within the job
-that defines it (two jobs may each define `P`; a later job never runs an
-earlier job's `P` — a PROC coded before the first JOB card is still found),
-and `SET` values do not leak into the next `JOB`. A `JOB` card also ends an
-in-stream `PROC` left open without a `PEND` (reported as an error), so the
-next job is not swallowed into the procedure body. (Round 11, 2026-09-30.)
-
-An unnamed `// PROC` header marks a **cataloged** procedure: its keywords seed
-the symbolic defaults, and the JOB-less body is a note in `unresolved`, not an
-error.
-
-## What it deliberately does not do
-
-Nothing reaches outside the file it was handed. A procedure not defined
-in-stream is **not** searched for in a PROCLIB, an `INCLUDE` group is not
-expanded, and `JCLLIB ORDER=` is recorded but not honoured — each lands in
-`unresolved` naming what could not be resolved and why. `OUTPUT`,
-`CNTL`/`ENDCNTL`, `COMMAND`, `XMIT`, `NOTIFY` and JES control cards are
-recognised, kept out of the error list, and reported as not modelled
-(`_UNMODELLED_OPERATIONS`). A DSN whose symbols could not all be resolved is
-stored exactly as coded and reported in `unresolved`.
-
-# Known gaps
-
-* A **named** `PROC` with no `PEND` before EOF is reported as an error (the
-  body is still stored and usable).
-* **`DSN=*.step.ddname` backward references are not resolved** — the text is
-  kept as coded and reported.
-* Datasets are not resolved across *files*: a job that `INCLUDE`s a member or
-  `EXEC`s a cataloged procedure from a PROCLIB gets an `unresolved` entry, not
-  a lookup.
-
-# DUMMY and overrides
-
-`DUMMY` and `DSN=NULLFILE` both mark a DD `is_dummy` with `dataset=None`,
-whatever DSN is also coded. `DSN`/`DSNAME`, `DUMMY`, `SYSOUT` and in-stream
-data (`*` / `DATA`) are mutually exclusive: an overriding `procstep.ddname`
-card that codes any of them drops whichever the procedure DD coded, so
-`//S.IN DD DUMMY` really dummies out a procedure dataset (it used to leave
-`IN -> A.B` in `dd_map()`), `//S.SYSIN DD *` replaces a procedure `DSN=`
-(it used to keep it alongside the data), and a `DSN=` override of a
-procedure `DD *` is no longer still flagged in-stream.
+Not reported at all now: IF without THEN, a continuation card in the wrong
+columns or missing, `DD DATA` / `DLM=` data never terminated, SET with no
+operands, positional parameters on EXEC, a nameless DD with nothing to
+concatenate to, nested PROC definitions and PEND without PROC. A quoted string
+continued from a trailing-blank-stripped card loses the blanks up to column 71
+(`PARM='ABC` + `DEF'` reads `ABCDEF`). These are jcl-parser's to fix.
 
 # CLI
 
 ```bash
-cobol-parser jcl JOB.jcl                  # the whole job structure as JSON
-cobol-parser jcl JOB.jcl --dd-map         # only ddname -> datasets
-cobol-parser jcl JOB.jcl --bindings       # one row per DD binding
-cobol-parser jcl JOB.jcl --program INVUPDT  # only steps running that program (matched per job)
-cobol-parser jcl JOB.jcl --strict         # exit 3 when any card failed to parse
+cobol-parser jcl JOB.jcl                          # the whole job structure
+cobol-parser jcl JOB.jcl --dd-map                 # ddname -> datasets
+cobol-parser jcl JOB.jcl --bindings               # one row per binding
+cobol-parser jcl JOB.jcl --program INVUPDT        # only steps running it
+cobol-parser jcl JOB.jcl --proc-path proclib/     # expand cataloged PROCs
+cobol-parser jcl JOB.jcl --strict                 # exit 3 on any error
 ```
 
-`jcl` is the only subcommand reading a language other than COBOL, so it shares
-none of the COBOL parse flags — no `--dialect`, no `--source-format`, no
-`--copybook-path`. `--strict`'s exit 3 is kept distinct from exit 1, which
-still means the run itself failed. `--compact` and `-o` work as elsewhere.
 See [cli.md](cli.md).
 
 # Not yet joined to the codebase graph
 
-`analysis/codebase.py` builds its cross-program graph from `ProgramNode` /
-`CallEdge` / `CopyEdge` only, and does not read JCL. So today "which dataset
-does this program's `INVFILE` resolve to" is answerable, but "which job
-populates the dataset this program reads" is not — the two halves exist and are
-simply not wired together. See [analysis.md](analysis.md).
-
-# Bindings (`jcl/bindings.py`)
-
-`resolve_dd_bindings(result) -> list[DatasetBinding]` flattens every job's
-steps into one row per DD (concatenation members included);
-`bindings_for_ddname(result, ddname)` filters that list case-insensitively.
+`analysis/codebase.py` has no job, step or dataset node, so "which dataset
+does this program's `INVFILE` resolve to" is answerable and "which job
+populates the dataset this program reads" is not. See [analysis.md](analysis.md).
 
 # Tests
 
-`tests/unit/test_jcl.py`, `tests/unit/cli/test_jcl_cli.py`, and the
-round-pinned `tests/unit/test_bug_hunt_r11_jcl_config.py`.
-
-
-# 2026-10-08
-
-* An omitted positional sub-parameter keeps its slot in
-  `JclParameter.positional` (`DISP=(OLD,,DELETE)` -> `["OLD", "", "DELETE"]`,
-  `UNIT=(,3)` -> `["", "3"]`): JCL positional sub-parameters are identified by
-  position, and dropping the empty one read the abnormal disposition as the
-  normal one. `split_top_level` always preserved it; `_parse_parameter`
-  discarded it. `DDStatement.disposition` (the raw text) is unchanged.
-* `cobol-parser jcl --dd-map --program NAME` filters the map to the DDs of
-  the steps that run NAME, as `--bindings --program` already did; it used to
-  ignore `--program`. See [cli.md](cli.md).
+`tests/unit/test_jcl.py` (the shape and semantics through the adapter),
+`tests/unit/test_jcl_adapter.py` (what the adapter adds), the CLI in
+`tests/unit/cli/test_jcl_cli.py`, and `tests/unit/test_bug_hunt_r11_jcl_config.py`.

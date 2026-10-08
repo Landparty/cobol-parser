@@ -29,7 +29,11 @@ dependencies = []
 
 [project.optional-dependencies]
 fast = ["cython>=3.0"]
+# `cobolparser.jcl` reads JCL through the sibling jcl-parser package; the
+# rest of the library has no runtime dependency.
+jcl = ["jcl-parser>=2.0.0"]
 dev = [
+    "jcl-parser>=2.0.0",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-xdist>=3.0.0",
@@ -195,6 +199,12 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
+
+# jcl-parser is an optional extra (`cobol-parser[jcl]`) and CI's typecheck
+# job does not install it.
+[[tool.mypy.overrides]]
+module = ["jclparser", "jclparser.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "tests.*"

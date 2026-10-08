@@ -1106,6 +1106,7 @@ cobol-parser jcl JOB.jcl
 cobol-parser jcl JOB.jcl --dd-map
 cobol-parser jcl JOB.jcl --bindings
 cobol-parser jcl JOB.jcl --program INVUPDT
+cobol-parser jcl JOB.jcl --proc-path proclib/ --bindings
 cobol-parser jcl JOB.jcl --strict
 ```
 
@@ -1114,11 +1115,13 @@ cobol-parser jcl JOB.jcl --strict
 | `--dd-map` | Only the `ddname -> datasets` mapping, which is what a COBOL `SELECT ... ASSIGN TO ddname` resolves through |
 | `--bindings` | One row per DD binding (ddname, dataset, step, job, DISP, RECFM, LRECL) instead of the job structure |
 | `--program NAME` | Only the steps that run this program (also filters `--bindings` to those steps) |
+| `--proc-path DIR` | Directory of cataloged procedures and INCLUDE members (one member per file, named after it; repeatable, searched in order). Without it only in-stream procedures expand, and every other `EXEC proc` is reported in `unresolved` |
 | `--strict` | **Exit 3** when any card could not be parsed — a CI gate, kept deliberately distinct from exit 1, which still means the run itself failed |
 
 It reads a language other than COBOL, so it shares none of the COBOL parse
 flags: no `--dialect`, no `--source-format`, no `--copybook-path`. `--compact`
-and `-o` work as everywhere else. See [jcl.md](jcl.md).
+and `-o` work as everywhere else. It needs the `jcl-parser` package
+(`pip install 'cobol-parser[jcl]'`), which does the reading. See [jcl.md](jcl.md).
 
 # See Also
 
@@ -1129,8 +1132,8 @@ and `-o` work as everywhere else. See [jcl.md](jcl.md).
 * [batch.md](batch.md) — `scan_files` behind `scan`, and why it is not `batch.py`
 * [generators.md](generators.md) — `ProgramLayoutIndex` / `ProgramFixtureGenerator`
   / `FixtureBundle` / `ScenarioPlanner` (`gen-fixtures`, Phases 1, 3, 5-6)
-* [jcl.md](jcl.md) — the JCL front end behind `jcl`: card format,
-  procedure expansion, and the `ddname -> dataset` binding
+* [jcl.md](jcl.md) — the jcl-parser adapter behind `jcl`: procedure
+  libraries, several jobs per deck, and the `ddname -> dataset` binding
 * [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) — the
   full `FixtureBundle` JSON shape `gen-fixtures --format json` produces
 
