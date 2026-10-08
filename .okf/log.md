@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-05T00:00:00Z
+timestamp: 2026-10-08T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,14 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-10-08 -- `parser.py` refactor (no behavior change)
+
+[parser.md](parser.md): `_parse_core` split into `_preprocess_source` /
+`_normalize_fixed_source` / `_tokenize`; `parse_program`'s loop body into
+`_handle_unmatched_token` / `_parse_division`.
+[preprocessing.md](preprocessing.md): format detection moved to
+`preprocess/format_detection.py` (`detect_fixed_format`).
 
 ## 2026-10-05 -- happy path kept in `branches`/`all` scenario modes
 

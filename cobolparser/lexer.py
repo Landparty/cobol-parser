@@ -2511,11 +2511,11 @@ def _tokenize_source(
     if not free_form or preprocess_fixed:
         # Deferred imports: parser.py imports this module at load time, and
         # keeping preprocess out of module scope avoids import cycles.
-        from .parser import _detect_fixed_format
         from .preprocess import normalize_fixed_format
+        from .preprocess.format_detection import detect_fixed_format
 
         should_normalize = (
-            _detect_fixed_format(source)
+            detect_fixed_format(source)
             if preprocess_fixed is None
             else preprocess_fixed
         )

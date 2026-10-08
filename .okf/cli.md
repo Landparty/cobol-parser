@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-10-04T00:00:00Z
+timestamp: 2026-10-08T00:00:00Z
 ---
 
 # Overview
@@ -224,7 +224,7 @@ Runs fixed-format normalisation and conditional compilation; prints the resultin
 free-form text. `--define` sets compiler flags for conditional blocks.
 `--strip-directives` runs `strip_compiler_directives()` (PROCESS/CBL cards)
 before anything else.
-Under `auto` (the default) normalisation runs only when `_detect_fixed_format`
+Under `auto` (the default) normalisation runs only when `detect_fixed_format` (`preprocess/format_detection.py`)
 classifies the source as fixed (it used to run unconditionally, silently
 slicing columns off genuine free-form input); `--source-format=fixed` forces
 it; `--source-format=free` skips it entirely.
@@ -246,7 +246,7 @@ auto-detect.
 
 | Value | Behaviour |
 |-------|-----------|
-| `auto` | Detect via `_detect_fixed_format` (see [parser.md](parser.md)) |
+| `auto` | Detect via `detect_fixed_format` (`preprocess/format_detection.py`) (see [parser.md](parser.md)) |
 | `fixed` | Always normalise — strips columns 1-6 whatever they hold |
 | `free`  | Never normalise |
 

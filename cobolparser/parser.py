@@ -8,13 +8,11 @@ This module provides delegating CobolParser that orchestrates parsing through:
 
 import logging
 import os
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 # Core parsing infrastructure
 from ._lines import split_source_lines
-from ._source_directive import free_format_flags
 from .core.token_stream import TokenStream
 from .lexer import CobolLexer, Token, TokenType
 from .models.ast_base import SourceLocation
@@ -34,14 +32,15 @@ from .plugins.core import (
     SerializationConfig,
 )
 from .preprocess import (
-    ALL_COMMENT_INDICATORS,
-    TEXT_END_COL,
-    TEXT_START_COL,
     normalize_fixed_format,
     preprocess_conditional_compilation,
     strip_compiler_directives,
 )
 from .preprocess._normalize import ID_DIVISION_HEADER_RE
+from .preprocess.format_detection import (
+    _sequence_area_is_fixed_like,  # noqa: F401
+    detect_fixed_format,
+)
 from .preprocess.replace_statement import (
     apply_replace_statements,
     find_replace_statement_spans,
@@ -64,6 +63,11 @@ _OO_CONTAINER_KINDS: frozenset[str] = frozenset({"CLASS", "FACTORY", "OBJECT"})
 # digits/blanks there skipped a tagged outer header and blanked the whole
 # outer program up to a nested program's header (#252).
 _ID_DIV_RE = ID_DIVISION_HEADER_RE
+
+#: Former home of the format detector (now
+#: ``preprocess.format_detection.detect_fixed_format``), kept importable
+#: under its old name, as is ``_sequence_area_is_fixed_like`` above.
+_detect_fixed_format = detect_fixed_format
 
 
 @dataclass
@@ -129,7 +133,7 @@ class CobolParser:
         `preprocess_fixed` mirrors `parse_cobol`'s parameter of the same
         name: None (the default) auto-detects fixed format when `free_form`
         is False -- the historical behavior; True always normalizes,
-        regardless of what `_detect_fixed_format` would say (the
+        regardless of what `detect_fixed_format` would say (the
         `--source-format=fixed` escape hatch for layouts the detector
         declines); False never normalizes.
         """
@@ -234,6 +238,11 @@ class CobolParser:
     ) -> ParseResult:
         """Parse COBOL source code into AST (core implementation).
 
+        Runs the three pipeline stages in order -- ``_preprocess_source``
+        (source-text passes), ``_tokenize`` (lexing into ``self.stream``)
+        and ``parse_program`` (division dispatch) -- and turns whatever
+        stops early into a ``ParseResult``.
+
         Args:
             source: COBOL source code
             filename: Source filename for error reporting
@@ -271,153 +280,14 @@ class CobolParser:
         self._initial_warnings = []
 
         try:
-            # Preprocess and tokenize
-            cleaned_source = self._skip_to_identification_division(source)
+            prepared = self._preprocess_source(source, filename)
+            if prepared is None:
+                return self._create_result(None)
+            cleaned_source, free_form = prepared
 
-            # Strip CBL/PROCESS compiler directives before fixed-format detection
-            cleaned_source = strip_compiler_directives(cleaned_source)
+            if not self._tokenize(cleaned_source, filename, free_form):
+                return self._create_result(None)
 
-            # Collects diagnostics from every preprocessing pass below
-            # (fixed-format normalization, un-expanded COPY stripping,
-            # REPLACE application) so they can be added to self.warnings in
-            # one place once preprocessing settles.
-            preprocess_warnings: list[str] = []
-
-            # Auto-detect fixed-format if not explicitly specified.
-            # preprocess_fixed=True skips detection and always normalizes
-            # (the forced-layout escape hatch -- also how parse_cobol's
-            # ValueError deferral keeps its already-made fixed decision on
-            # exactly the layouts the detector declines); False skips this
-            # whole block, never normalizing.
-            actual_free_form = self.free_form
-            if self.preprocess_fixed is True or (
-                self.preprocess_fixed is None and not self.free_form
-            ):
-                detected_fixed = (
-                    True
-                    if self.preprocess_fixed
-                    else _detect_fixed_format(cleaned_source)
-                )
-                if detected_fixed:
-                    # Preprocess fixed-format source to free-form. An
-                    # unterminated literal at EOF makes normalization raise; in
-                    # that case record the error and, unless failing fast, fall
-                    # back to a best-effort normalization that never raises
-                    # (merge_continued_literals=False) so a single bad literal
-                    # no longer loses the whole program under COLLECT_ALL.
-                    source_lines = split_source_lines(cleaned_source)
-                    try:
-                        cleaned_source = normalize_fixed_format(
-                            source_lines, warnings=preprocess_warnings
-                        )
-                    except ValueError as ve:
-                        self.add_error(
-                            ParseError(
-                                str(ve),
-                                line_number=len(source_lines),
-                                column=1,
-                            )
-                        )
-                        if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
-                            return self._create_result(None)
-                        # The raise happened partway through the line scan,
-                        # so `preprocess_warnings` may already hold entries
-                        # from lines processed before it -- the retry below
-                        # rescans the same lines from the start and would
-                        # duplicate them if not cleared first.
-                        preprocess_warnings.clear()
-                        cleaned_source = normalize_fixed_format(
-                            source_lines,
-                            merge_continued_literals=False,
-                            warnings=preprocess_warnings,
-                        )
-                    actual_free_form = True
-                else:
-                    # Source is already free-form, no preprocessing needed:
-                    # lex it as free-form (mirrors parse_cobol, which flips
-                    # free_form on for undetected-fixed input). Lexing it
-                    # with the fixed-format column rules instead sliced the
-                    # first seven characters off every line.
-                    actual_free_form = True
-                logger.debug(
-                    "Format auto-detection for %s: %s",
-                    filename,
-                    (
-                        "fixed (normalized to free-form)"
-                        if detected_fixed
-                        else "free-form"
-                    ),
-                )
-
-            # Source-text manipulation before lexing (mirrors a compiler's
-            # COPY/REPLACE text phase). Strip un-expanded COPY statements so a
-            # REPLACING pseudo-text operand does not leak into the token
-            # stream, then apply REPLACE compiler-directing statements. Both
-            # preserve line count. In the copybook-expansion pipeline COPY is
-            # already inlined before this point, so the COPY strip is a no-op
-            # there.
-            # Conditional compilation (``>>DEFINE`` / ``>>IF`` / ``>>EVALUATE``)
-            # runs first, exactly as the compiler orders it: a directive
-            # decides which lines exist before COPY/REPLACE see them. Every
-            # directive line and every line of a skipped block is blanked
-            # in place, so line numbers are unchanged. Gated on the two
-            # characters every directive starts with, so the common case
-            # (no directives at all) costs one substring scan.
-            if ">>" in cleaned_source:
-                cleaned_source = preprocess_conditional_compilation(
-                    cleaned_source, warnings=preprocess_warnings
-                )
-            cleaned_source = strip_unexpanded_copy_statements(
-                cleaned_source, warnings=preprocess_warnings
-            )
-            cleaned_source = apply_replace_statements(
-                cleaned_source, warnings=preprocess_warnings
-            )
-            for _warning in preprocess_warnings:
-                self.add_warning(_warning)
-
-            lexer = CobolLexer(
-                cleaned_source, filename, self.dialect, free_form=actual_free_form
-            )
-            self.tokens = lexer.tokenize()
-            self.statistics.tokens_processed = len(self.tokens)
-            self.decimal_point_is_comma = bool(
-                getattr(lexer, "decimal_point_is_comma", False)
-            )
-            logger.debug("Lexer produced %d tokens for %s", len(self.tokens), filename)
-
-            if lexer.has_errors():
-                lexer_errors = lexer.get_errors()
-                logger.debug(
-                    "Lexer reported %d error(s) for %s", len(lexer_errors), filename
-                )
-                for error in lexer_errors:
-                    self.add_error(
-                        ParseError(
-                            f"Lexer error: {error.message}",
-                            line_number=error.location.line if error.location else 1,
-                            column=error.location.column if error.location else 1,
-                        )
-                    )
-                if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
-                    return self._create_result(None)
-
-            if lexer.has_warnings():
-                for warning in lexer.get_warnings():
-                    self.add_warning(f"Lexer warning: {warning}")
-
-            # Initialize TokenStream and parse program. A `*>` floating
-            # comment (IBM Enterprise COBOL 6.x) is layout wherever it sits:
-            # it may end any line, including one that stops between a clause
-            # keyword and its operand (``OCCURS 10 *> rows`` / ``INDEXED BY
-            # IX``). Every sub-clause reader that skips line breaks would
-            # otherwise have to skip COMMENT tokens too, and most did not --
-            # the operand after the comment was dropped as an "unparsed
-            # token", or (``OCCURS *> n`` / ``10 TIMES``) read as a new
-            # item's level number. The lexer's own token list keeps them.
-            self.stream = TokenStream(
-                [t for t in self.tokens if t.type is not TokenType.COMMENT]
-            )
             program = self.parse_program()
             if program is not None:
                 for unit in program.program_units():
@@ -461,6 +331,163 @@ class CobolParser:
             err.__cause__ = e
             self.add_error(err)
             return self._create_result(None)
+
+    def _preprocess_source(self, source: str, filename: str) -> tuple[str, bool] | None:
+        """Run every source-text pass that precedes lexing.
+
+        Returns ``(cleaned_source, free_form)`` -- the text to lex and the
+        layout to lex it in -- or ``None`` when a FAIL_FAST error (recorded
+        already) means parsing stops here. Every pass preserves the line
+        count, so locations still point into *source*.
+        """
+        cleaned_source = self._skip_to_identification_division(source)
+
+        # Strip CBL/PROCESS compiler directives before fixed-format detection
+        cleaned_source = strip_compiler_directives(cleaned_source)
+
+        # Collects diagnostics from every preprocessing pass below
+        # (fixed-format normalization, un-expanded COPY stripping,
+        # REPLACE application) so they can be added to self.warnings in
+        # one place once preprocessing settles.
+        preprocess_warnings: list[str] = []
+
+        # Auto-detect fixed-format if not explicitly specified.
+        # preprocess_fixed=True skips detection and always normalizes
+        # (the forced-layout escape hatch -- also how parse_cobol's
+        # ValueError deferral keeps its already-made fixed decision on
+        # exactly the layouts the detector declines); False skips this
+        # whole block, never normalizing.
+        actual_free_form = self.free_form
+        if self.preprocess_fixed is True or (
+            self.preprocess_fixed is None and not self.free_form
+        ):
+            detected_fixed = (
+                True if self.preprocess_fixed else detect_fixed_format(cleaned_source)
+            )
+            if detected_fixed:
+                normalized = self._normalize_fixed_source(
+                    cleaned_source, preprocess_warnings
+                )
+                if normalized is None:
+                    return None
+                cleaned_source = normalized
+            # Normalized output is free-form, and so is source the detector
+            # judged free-form already: lex it as free-form (mirrors
+            # parse_cobol, which flips free_form on for undetected-fixed
+            # input). Lexing it with the fixed-format column rules instead
+            # sliced the first seven characters off every line.
+            actual_free_form = True
+            logger.debug(
+                "Format auto-detection for %s: %s",
+                filename,
+                "fixed (normalized to free-form)" if detected_fixed else "free-form",
+            )
+
+        # Source-text manipulation before lexing (mirrors a compiler's
+        # COPY/REPLACE text phase). Strip un-expanded COPY statements so a
+        # REPLACING pseudo-text operand does not leak into the token
+        # stream, then apply REPLACE compiler-directing statements. Both
+        # preserve line count. In the copybook-expansion pipeline COPY is
+        # already inlined before this point, so the COPY strip is a no-op
+        # there.
+        # Conditional compilation (``>>DEFINE`` / ``>>IF`` / ``>>EVALUATE``)
+        # runs first, exactly as the compiler orders it: a directive
+        # decides which lines exist before COPY/REPLACE see them. Every
+        # directive line and every line of a skipped block is blanked
+        # in place, so line numbers are unchanged. Gated on the two
+        # characters every directive starts with, so the common case
+        # (no directives at all) costs one substring scan.
+        if ">>" in cleaned_source:
+            cleaned_source = preprocess_conditional_compilation(
+                cleaned_source, warnings=preprocess_warnings
+            )
+        cleaned_source = strip_unexpanded_copy_statements(
+            cleaned_source, warnings=preprocess_warnings
+        )
+        cleaned_source = apply_replace_statements(
+            cleaned_source, warnings=preprocess_warnings
+        )
+        for _warning in preprocess_warnings:
+            self.add_warning(_warning)
+
+        return cleaned_source, actual_free_form
+
+    def _normalize_fixed_source(
+        self, source: str, preprocess_warnings: list[str]
+    ) -> str | None:
+        """Normalize fixed-format *source* to free-form text.
+
+        An unterminated literal at EOF makes normalization raise; in that
+        case record the error and, unless failing fast, fall back to a
+        best-effort normalization that never raises
+        (merge_continued_literals=False) so a single bad literal no longer
+        loses the whole program under COLLECT_ALL. Returns ``None`` when
+        FAIL_FAST stops the parse.
+        """
+        source_lines = split_source_lines(source)
+        try:
+            return normalize_fixed_format(source_lines, warnings=preprocess_warnings)
+        except ValueError as ve:
+            self.add_error(ParseError(str(ve), line_number=len(source_lines), column=1))
+            if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
+                return None
+        # The raise happened partway through the line scan, so
+        # `preprocess_warnings` may already hold entries from lines
+        # processed before it -- the retry below rescans the same lines
+        # from the start and would duplicate them if not cleared first.
+        preprocess_warnings.clear()
+        return normalize_fixed_format(
+            source_lines,
+            merge_continued_literals=False,
+            warnings=preprocess_warnings,
+        )
+
+    def _tokenize(self, cleaned_source: str, filename: str, free_form: bool) -> bool:
+        """Lex *cleaned_source* into ``self.tokens`` and ``self.stream``.
+
+        Records the lexer's errors and warnings. Returns False when a lexer
+        error under FAIL_FAST means parsing stops here.
+        """
+        lexer = CobolLexer(cleaned_source, filename, self.dialect, free_form=free_form)
+        self.tokens = lexer.tokenize()
+        self.statistics.tokens_processed = len(self.tokens)
+        self.decimal_point_is_comma = bool(
+            getattr(lexer, "decimal_point_is_comma", False)
+        )
+        logger.debug("Lexer produced %d tokens for %s", len(self.tokens), filename)
+
+        if lexer.has_errors():
+            lexer_errors = lexer.get_errors()
+            logger.debug(
+                "Lexer reported %d error(s) for %s", len(lexer_errors), filename
+            )
+            for error in lexer_errors:
+                self.add_error(
+                    ParseError(
+                        f"Lexer error: {error.message}",
+                        line_number=error.location.line if error.location else 1,
+                        column=error.location.column if error.location else 1,
+                    )
+                )
+            if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
+                return False
+
+        if lexer.has_warnings():
+            for warning in lexer.get_warnings():
+                self.add_warning(f"Lexer warning: {warning}")
+
+        # A `*>` floating comment (IBM Enterprise COBOL 6.x) is layout
+        # wherever it sits: it may end any line, including one that stops
+        # between a clause keyword and its operand (``OCCURS 10 *> rows`` /
+        # ``INDEXED BY IX``). Every sub-clause reader that skips line breaks
+        # would otherwise have to skip COMMENT tokens too, and most did not
+        # -- the operand after the comment was dropped as an "unparsed
+        # token", or (``OCCURS *> n`` / ``10 TIMES``) read as a new item's
+        # level number. The lexer's own token list keeps them.
+        self.stream = TokenStream(
+            [t for t in self.tokens if t.type is not TokenType.COMMENT]
+        )
+        return True
 
     # The @overload stubs below are for static type checkers only and must
     # never be compiled: a whole-module Cython build (the retired closed-source
@@ -544,11 +571,8 @@ class CobolParser:
         and PROCEDURE divisions in sequence. Implements error recovery modes
         and coordinated error handling across divisions.
         """
-        program_name = "UNKNOWN"
-        program_location = self.get_current_location()
-
-        # Create initial program (will be updated with metadata from ID division)
-        primary_program = CobolProgram(program_name, program_location)
+        # Created up front; the IDENTIFICATION division fills in the name.
+        primary_program = CobolProgram("UNKNOWN", self.get_current_location())
         self.current_program = primary_program
         # Object-oriented units nest: a CLASS-ID unit holds its FACTORY and
         # OBJECT units, each holding METHOD-ID units. ``END METHOD`` / ``END
@@ -579,41 +603,8 @@ class CobolParser:
                 # Try to find a parser for the current token
                 parser = self._division_factory.find_parser(self.stream)
                 if not parser:
-                    current_token = self.stream.peek()
-                    current_value = (
-                        current_token.value.upper()
-                        if current_token and current_token.value
-                        else "EOF"
-                    )
-                    logger.debug(
-                        "No division parser matched near %r (divisions parsed so "
-                        "far: %d)",
-                        current_value,
-                        len(divisions_parsed),
-                    )
-                    # END PROGRAM closes the current program unit; consume it
-                    # and keep parsing — the compilation unit may contain more
-                    # (stacked or nested) programs. Historically the loop
-                    # broke here and everything after the first END PROGRAM
-                    # was silently dropped.
-                    if (
-                        divisions_parsed
-                        and current_value == "END"
-                        and self._peek_is_end_program()
-                    ):
-                        self._consume_end_program_marker()
+                    if self._handle_unmatched_token(divisions_parsed):
                         continue
-                    # Only the end-of-input marker remains after at least one
-                    # division parsed — a clean end, not an error.
-                    if divisions_parsed and current_value == "EOF":
-                        break
-                    if not divisions_parsed or current_value not in ("END", "PROGRAM"):
-                        self.add_error(
-                            self.create_error(
-                                f"No recognizable COBOL division found near '{current_token.value if current_token and current_token.value else 'EOF'}'",
-                                self.get_current_location(),
-                            )
-                        )
                     break
 
                 # A second IDENTIFICATION DIVISION starts a new program unit
@@ -627,54 +618,21 @@ class CobolParser:
                     self._attach_new_unit(primary_program, new_program)
 
                 try:
-                    # Set host on ProcedureDivisionParser for ParseContext creation
-                    set_host = getattr(parser, "set_host", None)
-                    if callable(set_host):
-                        set_host(self)
-                    elif hasattr(parser, "host"):
-                        parser.host = self
-
-                    logger.debug("Dispatching to %s", type(parser).__name__)
-                    division_ast = parser.parse(self.stream)
-                    if division_ast:
-                        divisions_parsed.append(division_ast)
-                        # Cast to CobolDivision - parser.parse should return compatible type
-                        if isinstance(division_ast, CobolDivision):
-                            self.current_program.add_division(division_ast)
-
-                        # Update program name from IDENTIFICATION division
-                        if hasattr(division_ast, "metadata"):
-                            metadata = getattr(division_ast, "metadata", {})
-                            if isinstance(metadata, dict) and "program_id" in metadata:
-                                program_name = metadata["program_id"]
-                                self.current_program.program_name = program_name
-                                unit_kind = metadata.get("unit_kind")
-                                if unit_kind:
-                                    self.current_program.unit_kind = str(unit_kind)
-
-                except ParseError as pe:
-                    # Already-formatted parse error from a division/statement
-                    # parser; record verbatim so location info is preserved.
-                    logger.debug(
-                        "ParseError from %s: %s",
-                        type(parser).__name__,
-                        pe,
-                        exc_info=True,
-                    )
-                    if pe not in self.errors:
-                        self.add_error(pe)
-                    if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
-                        logger.debug("FAIL_FAST: aborting division loop")
-                        return primary_program if divisions_parsed else None
+                    self._parse_division(parser, divisions_parsed)
                 except Exception as e:
+                    # A ParseError is already formatted by a division or
+                    # statement parser: record it verbatim so its location
+                    # info is preserved.
                     logger.debug(
-                        "Unexpected exception from %s: %s",
+                        "Error from %s: %s",
                         type(parser).__name__,
                         e,
                         exc_info=True,
                     )
-                    error = ParseError(str(e), line_number=1, column=1)
-                    self.add_error(error)
+                    if not isinstance(e, ParseError):
+                        self.add_error(ParseError(str(e), line_number=1, column=1))
+                    elif e not in self.errors:
+                        self.add_error(e)
                     if self.error_recovery == ErrorRecoveryMode.FAIL_FAST:
                         logger.debug("FAIL_FAST: aborting division loop")
                         return primary_program if divisions_parsed else None
@@ -704,6 +662,78 @@ class CobolParser:
             )
 
         return primary_program
+
+    def _handle_unmatched_token(self, divisions_parsed: list[Any]) -> bool:
+        """Deal with a stream head no division parser matched.
+
+        Returns True when the division loop should continue (an ``END
+        PROGRAM`` marker was consumed) and False when it should stop -- at
+        a clean end of input, or after recording a "no recognizable
+        division" error.
+        """
+        assert self.stream is not None
+        current_token = self.stream.peek()
+        current_value = (
+            current_token.value.upper()
+            if current_token and current_token.value
+            else "EOF"
+        )
+        logger.debug(
+            "No division parser matched near %r (divisions parsed so far: %d)",
+            current_value,
+            len(divisions_parsed),
+        )
+        # END PROGRAM closes the current program unit; consume it and keep
+        # parsing — the compilation unit may contain more (stacked or
+        # nested) programs. Historically the loop broke here and everything
+        # after the first END PROGRAM was silently dropped.
+        if divisions_parsed and current_value == "END" and self._peek_is_end_program():
+            self._consume_end_program_marker()
+            return True
+        # Only the end-of-input marker remains after at least one division
+        # parsed — a clean end, not an error.
+        if divisions_parsed and current_value == "EOF":
+            return False
+        if not divisions_parsed or current_value not in ("END", "PROGRAM"):
+            near = (
+                current_token.value if current_token and current_token.value else "EOF"
+            )
+            self.add_error(
+                self.create_error(
+                    f"No recognizable COBOL division found near '{near}'",
+                    self.get_current_location(),
+                )
+            )
+        return False
+
+    def _parse_division(self, parser: Any, divisions_parsed: list[Any]) -> None:
+        """Run one division *parser* and add its node to the current unit.
+
+        The IDENTIFICATION division's ``program_id`` / ``unit_kind``
+        metadata names the current unit.
+        """
+        assert self.stream is not None and self.current_program is not None
+        # Set host on ProcedureDivisionParser for ParseContext creation
+        set_host = getattr(parser, "set_host", None)
+        if callable(set_host):
+            set_host(self)
+        elif hasattr(parser, "host"):
+            parser.host = self
+
+        logger.debug("Dispatching to %s", type(parser).__name__)
+        division_ast = parser.parse(self.stream)
+        if not division_ast:
+            return
+        divisions_parsed.append(division_ast)
+        if isinstance(division_ast, CobolDivision):
+            self.current_program.add_division(division_ast)
+
+        metadata = getattr(division_ast, "metadata", None)
+        if isinstance(metadata, dict) and "program_id" in metadata:
+            self.current_program.program_name = metadata["program_id"]
+            unit_kind = metadata.get("unit_kind")
+            if unit_kind:
+                self.current_program.unit_kind = str(unit_kind)
 
     def _attach_new_unit(
         self, primary_program: CobolProgram, new_program: CobolProgram
@@ -927,220 +957,6 @@ class CobolParser:
         )
 
 
-#: A change-tracking tag as shops stamp it into the sequence area (columns
-#: 1-6): a single unbroken token of letters/digits and the punctuation that
-#: turns up in ticket ids (``SAPR24``, ``28486``, ``GART``, ``JSINT``,
-#: ``ABC-12``, ``#00100``). It may open with one of the z/OS national
-#: characters ``#``/``@``/``$``, which no free-form line can start with. The
-#: "no internal whitespace" property is what keeps ordinary free-form
-#: statement text (``MOVE A``, ``IF A =``) out -- see
-#: :func:`_sequence_area_is_fixed_like`.
-_CHANGE_TAG_RE = re.compile(r"^[A-Za-z0-9#@$][A-Za-z0-9_/#@$.-]*$")
-
-#: Area A headers used to corroborate a *tagged* sequence area. Anchored at
-#: the start of the code area (column 8+), which is exactly where free-form
-#: source does not put them.
-_AREA_A_HEADERS = (
-    "IDENTIFICATION DIVISION",
-    "ID DIVISION",
-    "ENVIRONMENT DIVISION",
-    "DATA DIVISION",
-    "PROCEDURE DIVISION",
-    "PROGRAM-ID",
-)
-
-#: A data-description entry in the code area: a level number, a data name
-#: (or FILLER), then either the closing period of a group item or a clause
-#: keyword. Corroborates a *tagged* sequence area in a copybook, which has no
-#: division header to offer. The trailing period/clause requirement is what
-#: keeps free-form statements that open with a six-letter verb and a number
-#: (``DIVIDE 10 INTO X``) from matching.
-_TAGGED_DATA_ENTRY_RE = re.compile(
-    r"^(?:0?[1-9]|[1-4][0-9]|66|77|88)\s+[A-Za-z0-9][A-Za-z0-9-]*"
-    r"(?:\s*\.|\s+(?:PIC|PICTURE|VALUE|VALUES|OCCURS|REDEFINES|RENAMES|USAGE"
-    r"|COMP(?:UTATIONAL)?(?:-[1-5])?|BINARY|PACKED-DECIMAL|DISPLAY|INDEX"
-    r"|POINTER|SIGN|JUST|JUSTIFIED|SYNC|SYNCHRONIZED|BLANK|EXTERNAL|GLOBAL)\b)",
-    re.IGNORECASE,
-)
-
-#: How far into the file to look for the Area A anchor above. Division headers
-#: cluster at the top of a program, so a bounded scan keeps this O(1)-ish on a
-#: 28,000-line expanded source.
-_HEADER_SCAN_LIMIT = 100
-
-
-def _sequence_area_is_fixed_like(seq_area: str) -> tuple[bool, bool]:
-    """Classify a line's columns 1-6 as fixed-format evidence.
-
-    Returns ``(strict, relaxed)``:
-
-    * ``strict`` -- blank or all-digits, the two conventional sequence-area
-      fills. This is the historical rule and still decides on its own.
-    * ``relaxed`` -- additionally allows a change-tracking *tag*
-      (:data:`_CHANGE_TAG_RE`). Only ever consulted together with the Area A
-      anchor in :func:`_detect_fixed_format`, because a bare tag test alone
-      would also match free-form lines whose first six characters happen to
-      be a word followed by a blank column 7 (``ACCEPT X``, ``SEARCH T``).
-    """
-    stripped = seq_area.strip()
-    if stripped == "" or seq_area.replace(" ", "").isdigit():
-        return True, True
-    if _CHANGE_TAG_RE.match(stripped):
-        return False, True
-    return False, False
-
-
-def _has_area_a_division_header(non_empty_lines: list[str]) -> bool:
-    """True when a division/PROGRAM-ID header starts in the code area.
-
-    Fixed-format source puts these in Area A (columns 8-11); free-form source
-    puts them at column 1, where ``line[7:]`` slices into the middle of the
-    word (``IDENTIFICATION DIVISION.`` -> ``ICATION DIVISION.``) and cannot
-    match. That asymmetry is what makes this a safe corroborating signal for
-    a sequence area holding something other than blanks or digits.
-
-    A header only counts at a word boundary -- followed by a period, a
-    space, or end of text -- so an identifier that merely starts with a
-    header string (``PROGRAM-ID-VAL``, ``DATA-DIVISION-FLAG``) in free-form
-    source indented past column 8 can never anchor rule 2 and drag a
-    genuine free-form program into normalization.
-
-    Only candidate lines consume the ``_HEADER_SCAN_LIMIT`` budget: comment
-    lines (column 7 indicator) and too-short lines are skipped without
-    counting, because the tag-stamping shops this rule exists for are the
-    same shops that open every program with a 100+-line change-history
-    banner block -- counting those against the window would push the
-    IDENTIFICATION DIVISION header out of reach and re-introduce the very
-    misclassification rule 2 fixes.
-    """
-    scanned = 0
-    for line in non_empty_lines:
-        if scanned >= _HEADER_SCAN_LIMIT:
-            break
-        if len(line) < 8 or line[6] in ALL_COMMENT_INDICATORS:
-            continue
-        scanned += 1
-        text = line[TEXT_START_COL - 1 : TEXT_END_COL].lstrip().upper()
-        for header in _AREA_A_HEADERS:
-            if text.startswith(header) and (
-                len(text) == len(header) or text[len(header)] in " ."
-            ):
-                return True
-    return False
-
-
-def _has_tagged_line_anchor(non_empty_lines: list[str]) -> bool:
-    """True when a change-tagged line can only be fixed-format.
-
-    The division-header anchor of :func:`_has_area_a_division_header` never
-    fires for a copybook, which has no divisions. So a member whose columns
-    1-6 carry change tags (``BNC#01``, ``CHG001``) was judged free-form, its
-    column-7 comment lines were spliced in raw, and the first ``#`` in a
-    comment banner surfaced as ``Lexer error: Invalid character: #``.
-
-    Two shapes corroborate a tagged sequence area instead, both impossible in
-    free-form source:
-
-    * a column-7 comment indicator right after the tag (``CHG001*...``) --
-      free-form never puts ``*`` or ``/`` straight after a six-character
-      word;
-    * a data-description entry in the code area (``CHG001     05  WS-A  PIC
-      X.``), see :data:`_TAGGED_DATA_ENTRY_RE`.
-
-    Only lines whose sequence area is a non-blank *tag* count: a blank or
-    numeric one already decides through the strict rule.
-    """
-    scanned = 0
-    for line in non_empty_lines:
-        if scanned >= _HEADER_SCAN_LIMIT:
-            break
-        if len(line) < 8:
-            continue
-        strict, relaxed = _sequence_area_is_fixed_like(line[:6])
-        if strict or not relaxed:
-            continue
-        scanned += 1
-        if line[6] in ALL_COMMENT_INDICATORS:
-            return True
-        if line[6] == " " and _TAGGED_DATA_ENTRY_RE.match(
-            line[TEXT_START_COL - 1 : TEXT_END_COL].lstrip()
-        ):
-            return True
-    return False
-
-
-def _detect_fixed_format(source: str) -> bool:
-    """Detect if source appears to be in fixed-format COBOL.
-
-    Returns True if source appears to be fixed-format, False if free-form.
-
-    Two rules, in order:
-
-    1. **Strict** -- at least 60% of the sampled lines carry a blank or
-       all-digit sequence area with a valid indicator column. Unchanged
-       historical behavior; decides on its own.
-    2. **Tagged sequence area** -- the same 60% bar, but also counting lines
-       whose columns 1-6 hold a change-tracking tag (``SAPR24``, ``28486``),
-       *and* requiring an Area A division header to corroborate. Shops that
-       stamp ticket ids into the sequence area used to fail rule 1 outright,
-       so the whole file was misclassified as free-form, normalization was
-       skipped, and the tag text lexed as code -- surfacing as stray
-       identifier/number tokens before the first division. The corroborating
-       anchor is what keeps genuine free-form source (which never puts a
-       division header at column 8) from being dragged in by rule 2. A
-       copybook has no division header, so a comment indicator or a
-       data-description entry right after a tag corroborates instead (see
-       :func:`_has_tagged_line_anchor`).
-    """
-    lines = split_source_lines(source)
-    non_empty_lines = [line for line in lines if line.strip()]
-
-    if len(non_empty_lines) < 3:
-        return False
-
-    if any(">>" in line for line in lines):
-        # Only lines written in fixed format count: after an early
-        # ``>>SOURCE FORMAT IS FREE`` the free-format lines filled the sample
-        # and a sequence-numbered fixed file was misclassified as free-form.
-        flags = free_format_flags(lines)
-        non_empty_lines = [
-            line
-            for line, free in zip(lines, flags, strict=True)
-            if line.strip() and not free
-        ]
-        if all(line.lstrip().startswith(">>") for line in non_empty_lines):
-            # Nothing but the directive itself precedes the switch: a
-            # free-format file that opens with ``>>SOURCE FORMAT IS FREE``.
-            return False
-
-    sample_size = min(10, len(non_empty_lines))
-    strict_hits = 0
-    relaxed_hits = 0
-
-    for line in non_empty_lines[:sample_size]:
-        if len(line) < 7:
-            continue
-
-        seq_area = line[:6]
-        indicator = line[6]  # the len(line) < 7 guard above makes this safe
-
-        valid_indicator = indicator in (" ", "-") or indicator in ALL_COMMENT_INDICATORS
-        if not valid_indicator:
-            continue
-
-        strict, relaxed = _sequence_area_is_fixed_like(seq_area)
-        strict_hits += strict
-        relaxed_hits += relaxed
-
-    threshold = sample_size * 0.6
-    if strict_hits >= threshold:
-        return True
-    return relaxed_hits >= threshold and (
-        _has_area_a_division_header(non_empty_lines)
-        or _has_tagged_line_anchor(non_empty_lines)
-    )
-
-
 # See the matching comment on CobolParser.parse -- same reason these stubs
 # are TYPE_CHECKING-only rather than unconditional @overload.
 if TYPE_CHECKING:
@@ -1248,7 +1064,7 @@ def parse_cobol(
 
     # Auto-detect fixed-format if not explicitly specified
     if preprocess_fixed is None:
-        detected_fixed = _detect_fixed_format(source_str)
+        detected_fixed = detect_fixed_format(source_str)
         preprocess_fixed = detected_fixed
         # If we detected free-format (not fixed), ensure free_form is True
         if not detected_fixed and not free_form:

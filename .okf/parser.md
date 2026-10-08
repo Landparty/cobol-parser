@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-09-28T00:00:00Z
+timestamp: 2026-10-08T00:00:00Z
 ---
 
 # Overview
@@ -119,6 +119,23 @@ CobolParser.parse(source)
             └─ StatementParserRegistry  (first-match dispatch)
                  └─ 72 statement parsers (every COBOL verb)
 ```
+
+`_parse_core` is a thin driver over three stages (split out 2026-10-08,
+behavior unchanged): `_preprocess_source()` -> `(text, free_form)` (skip
+to the header, directive strip, fixed-format detection +
+`_normalize_fixed_source()` with its COLLECT_ALL retry, conditional
+compilation, COPY strip, REPLACE), `_tokenize()` (lexer errors/warnings,
+builds `self.stream`) and `parse_program()`. Each stage returns `None` /
+`False` when FAIL_FAST stops the parse. Inside `parse_program()`, a token no
+division parser matches goes to `_handle_unmatched_token()` (`END PROGRAM`
+-> continue; EOF -> clean stop; else the "No recognizable COBOL division"
+error), and each matched division runs through `_parse_division()` (sets
+the host, adds the node, names the unit from `program_id` / `unit_kind`).
+
+Fixed- vs free-format detection lives in
+`cobolparser/preprocess/format_detection.py` (`detect_fixed_format`, moved
+out of `parser.py` 2026-10-08). `cobolparser.parser._detect_fixed_format`
+and `_sequence_area_is_fixed_like` stay importable as aliases.
 
 # Core Infrastructure (`cobolparser/core/`)
 

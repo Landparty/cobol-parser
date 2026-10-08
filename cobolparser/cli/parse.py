@@ -845,12 +845,12 @@ def _build_preprocess_parser(
 
 
 def _cmd_preprocess(args: argparse.Namespace) -> None:
-    from ..parser import _detect_fixed_format
     from ..preprocess import (
         normalize_fixed_format,
         preprocess_conditional_compilation,
         strip_compiler_directives,
     )
+    from ..preprocess.format_detection import detect_fixed_format
 
     source = _read_source(args.file)
 
@@ -878,7 +878,7 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
     # free-form input; 'free' never normalizes.
     source_format = _resolve_source_format(args)
     if source_format == "fixed" or (
-        source_format == "auto" and _detect_fixed_format(source)
+        source_format == "auto" and detect_fixed_format(source)
     ):
         from .._lines import split_source_lines
 

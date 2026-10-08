@@ -3,7 +3,7 @@ type: Module
 title: Lexer
 description: Tokenizes COBOL source into Token objects; 244 TokenType values; optional Cython hot-path.
 tags: [lexer, tokenizer, cython, token-type]
-timestamp: 2026-09-28T00:00:00Z
+timestamp: 2026-10-08T00:00:00Z
 ---
 
 # Overview
@@ -387,7 +387,9 @@ pure/Cython parity check.
 fixed-format handler (`free_form=False`): both now route fixed-format
 source through `normalize_fixed_format` + `free_form=True` lexing — the
 exact path `parse_cobol()` uses — via the shared `_tokenize_source()`
-helper in `lexer.py`, so the two pipelines agree on every non-COMMENT
+helper in `lexer.py` (its fixed-or-free verdict comes from
+`preprocess.format_detection.detect_fixed_format`, the same detector
+`parse_cobol()` uses), so the two pipelines agree on every non-COMMENT
 token (count, values, line numbers). Comment lines are not lost:
 `_fixed_format_comment_tokens()` captures them during normalization and
 `_merge_comment_tokens()` re-emits them as `COMMENT` tokens at their
