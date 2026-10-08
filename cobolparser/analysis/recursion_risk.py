@@ -33,6 +33,17 @@ from .program_flow.edges import INTERNAL_EDGE_TYPES, PERFORM_EDGE_TYPES
 from .program_flow.models import FlowEdgeType
 from .value_tracker import DynamicCallAnalyzer
 
+#: Edges that carry control to another paragraph: what a cycle escapes
+#: through. ``INTERNAL_EDGE_TYPES`` also holds the synthetic IF_BRANCH /
+#: EVALUATE_BRANCH edges, whose target is a branch node (``L1__IF_1``) that
+#: is never a cycle member -- so any GO TO loop whose body held an IF read
+#: as having "a way out" and was graded MEDIUM, and HIGH was unreachable for
+#: every real loop (2026-10-08).
+_ESCAPE_EDGE_TYPES: frozenset[FlowEdgeType] = INTERNAL_EDGE_TYPES - {
+    FlowEdgeType.IF_BRANCH,
+    FlowEdgeType.EVALUATE_BRANCH,
+}
+
 _LOOP_CYCLE_KINDS = frozenset({"PERFORM_RECURSION", "GOTO_LOOP", "MIXED"})
 
 
@@ -261,7 +272,7 @@ class RecursionRiskAnalyzer:
             if (
                 edge.source in cycle_set
                 and edge.target not in cycle_set
-                and edge.edge_type in INTERNAL_EDGE_TYPES
+                and edge.edge_type in _ESCAPE_EDGE_TYPES
             ):
                 return True
         return False

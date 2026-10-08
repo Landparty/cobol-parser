@@ -44,7 +44,12 @@ _DATA_DEF_RE = re.compile(
 )
 #: A line that is not part of the entry above it even though it does not start
 #: one either -- an in-line ``EXEC SQL`` block being the copybook case.
-_NON_ENTRY_LINE_RE = re.compile(r"^[ \t]*EXEC\b", re.IGNORECASE)
+# A line that belongs to no data-description entry: an EXEC block, or a
+# ``>>`` compiler directive (``>>IF`` / ``>>ELSE`` / ``>>END-IF`` wrapping
+# alternative entries of a copybook -- the validator runs before the
+# directives are evaluated, and an entry that "ran on" into ``>>ELSE`` read
+# as one missing its period).
+_NON_ENTRY_LINE_RE = re.compile(r"^[ \t]*(?:EXEC\b|>>)", re.IGNORECASE)
 
 #: An IDENTIFICATION (or ID) DIVISION header line, raw or normalized. A
 #: fixed-format record's columns 1-6 may hold *anything* -- sequence digits,

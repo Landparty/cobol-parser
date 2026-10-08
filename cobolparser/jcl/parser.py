@@ -1052,6 +1052,11 @@ class _Builder:
                 for raw_sub in split_top_level(value[1:-1]):
                     sub = raw_sub.strip()
                     if not sub:
+                        # An omitted positional sub-parameter keeps its slot:
+                        # in ``DISP=(OLD,,DELETE)`` the empty middle is the
+                        # normal disposition, and dropping it read DELETE as
+                        # the normal disposition instead of the abnormal one.
+                        param.positional.append("")
                         continue
                     sub_equals = find_top_level_equals(sub)
                     if sub_equals >= 0:
@@ -1064,9 +1069,7 @@ class _Builder:
         if item.startswith("(") or item.startswith("'"):
             param = JclParameter(keyword="", value=item)
             if item.startswith("(") and item.endswith(")"):
-                param.positional = [
-                    sub.strip() for sub in split_top_level(item[1:-1]) if sub.strip()
-                ]
+                param.positional = [sub.strip() for sub in split_top_level(item[1:-1])]
             return param
         return JclParameter(keyword=item, value=None)
 

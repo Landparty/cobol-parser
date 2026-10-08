@@ -38,11 +38,17 @@ from ..models.statements.control import (
     SearchStatement,
 )
 from ..models.statements.data import (
+    InitializeStatement,
     InspectStatement,
     StringStatement,
     UnstringStatement,
 )
-from ..models.statements.misc import MergeStatement, SelectStatement, SortStatement
+from ..models.statements.misc import (
+    MergeStatement,
+    SelectStatement,
+    SortStatement,
+    XmlJsonStatement,
+)
 from ._names import QUALIFIER_SEPARATOR, qualified_references
 
 # DATA DIVISION section names whose data items are in scope for this
@@ -153,6 +159,10 @@ _STR_LIST_EXTRAS: dict[type, tuple[str, ...]] = {
 # keys, none of which reach `.operands`.
 _DICT_LIST_EXTRAS: dict[type, tuple[tuple[str, tuple[str, ...]], ...]] = {
     UnstringStatement: (("into_targets", ("target", "delimiter_var", "count_var")),),
+    # ``INITIALIZE X REPLACING NUMERIC DATA BY WS-ZERO``: the BY value is
+    # read. A literal arrives with its quotes stripped, so it is extracted
+    # as a candidate name too -- harmless, it matches no declared item.
+    InitializeStatement: (("replacing_clauses", ("by_value",)),),
     InspectStatement: (
         ("tallying_clauses", ("counter", "value", "before", "after")),
         ("replacing_clauses", ("from_value", "to_value", "before", "after")),
@@ -304,6 +314,42 @@ def _mark_subtree_used(item: CobolDataItem, group_used: dict[int, bool]) -> None
     for child in item.children:
         if isinstance(child, CobolDataItem):
             _mark_subtree_used(child, group_used)
+
+
+def _descendant_names(item: CobolDataItem) -> set[str]:
+    out: set[str] = set()
+    for child in item.children:
+        if isinstance(child, CobolDataItem):
+            out.add(child.name.upper())
+            out |= _descendant_names(child)
+    return out
+
+
+def _mark_matching_used(
+    item: CobolDataItem, shared: set[str], group_used: dict[int, bool]
+) -> None:
+    for child in item.children:
+        if not isinstance(child, CobolDataItem):
+            continue
+        if child.name.upper() in shared and not child.is_filler:
+            _mark_subtree_used(child, group_used)
+        else:
+            _mark_matching_used(child, shared, group_used)
+
+
+def _mark_corresponding_used(
+    source: CobolDataItem, target: CobolDataItem, group_used: dict[int, bool]
+) -> None:
+    """Mark the same-named subordinates of a CORRESPONDING pair (and the two
+    groups themselves) used; every other subordinate keeps its own standing."""
+    group_used[id(source)] = True
+    group_used[id(target)] = True
+    shared = _descendant_names(source) & _descendant_names(target)
+    shared.discard("FILLER")
+    if not shared:
+        return
+    _mark_matching_used(source, shared, group_used)
+    _mark_matching_used(target, shared, group_used)
 
 
 def _names_from_value(value: object) -> set[str]:
@@ -601,10 +647,26 @@ class UnusedVariableAnalyzer:
         # any group reference: `MOVE SPACES TO WS-GRP` really does leave its
         # fields never individually referenced, which is a finding worth
         # keeping.
-        for ref in self._call_argument_names(ast):
+        for ref in self._whole_group_references(ast):
             for item in own_refs.resolve(ref):
                 if isinstance(item, CobolDataItem):
                     _mark_subtree_used(item, group_used)
+
+        # ``MOVE CORRESPONDING A TO B``: the operands are the subordinates
+        # of A and B that share a name (IBM: "items in identifier-1 and
+        # identifier-2 with the same data-name"), so those -- and only
+        # those -- are referenced by the statement. A field with no
+        # same-named twin stays assessed.
+        for source_ref, target_ref in self._corresponding_pairs(ast):
+            sources = [
+                i for i in own_refs.resolve(source_ref) if isinstance(i, CobolDataItem)
+            ]
+            targets = [
+                i for i in own_refs.resolve(target_ref) if isinstance(i, CobolDataItem)
+            ]
+            for source in sources:
+                for target in targets:
+                    _mark_corresponding_used(source, target, group_used)
 
         # The CICS translator's own LINKAGE items. DFHEIBLK is the EXEC
         # interface block: the translator declares every EIB field and the
@@ -723,6 +785,42 @@ class UnusedVariableAnalyzer:
                 }
         return names
 
+    @staticmethod
+    def _whole_group_references(ast: CobolProgram) -> set[str]:
+        """Group references whose subordinates are consumed *by name* by the
+        statement itself, so every item beneath counts as used (2026-10-08):
+
+        * ``CALL ... USING`` arguments (:meth:`_call_argument_names`);
+        * ``MOVE / ADD / SUBTRACT CORRESPONDING A TO B``: the same-named
+          subordinates of both groups are the operands (IBM: "items in
+          identifier-1 and identifier-2 with the same data-name");
+        * ``XML GENERATE doc FROM group`` / ``JSON GENERATE doc FROM group``
+          emit one element per subordinate, by name; ``XML PARSE`` /
+          ``JSON PARSE doc INTO group`` store into each subordinate by name.
+
+        ``MOVE SPACES TO group`` deliberately stays a plain group reference:
+        its fields really are never individually referenced.
+        """
+        names = UnusedVariableAnalyzer._call_argument_names(ast)
+        for stmt in UnusedVariableAnalyzer._own_statements(ast):
+            if isinstance(stmt, XmlJsonStatement):
+                for operand in (stmt.from_item, stmt.into_item):
+                    names |= _extract_identifiers(operand)
+        return names
+
+    @staticmethod
+    def _corresponding_pairs(ast: CobolProgram) -> list[tuple[str, str]]:
+        """The ``(source, target)`` group references of every ``MOVE / ADD /
+        SUBTRACT CORRESPONDING`` statement, as raw operand text."""
+        pairs: list[tuple[str, str]] = []
+        for stmt in UnusedVariableAnalyzer._own_statements(ast):
+            if not getattr(stmt, "is_corresponding", False):
+                continue
+            operands = [op for op in stmt.operands if isinstance(op, str) and op]
+            if len(operands) >= 2:
+                pairs.append((operands[0], operands[-1]))
+        return pairs
+
     def _collect_referenced_names(self, ast: CobolProgram) -> set[str]:
         """Collect every identifier referenced anywhere in the PROCEDURE
         DIVISION: each statement's own ``.operands`` bag plus the
@@ -752,10 +850,23 @@ class UnusedVariableAnalyzer:
                         for key in keys:
                             names |= _extract_identifiers(entry.get(key))
 
+            # ``WRITE REC AFTER ADVANCING WS-N LINES``: the line count is
+            # read on every WRITE and lives in ``advancing_clause`` only
+            # (a str for an identifier, an int for a literal count).
+            advancing = getattr(stmt, "advancing_clause", None)
+            if isinstance(advancing, dict):
+                value = advancing.get("value")
+                if isinstance(value, str):
+                    names |= _extract_identifiers(value)
+
             if isinstance(stmt, IfStatement):
                 names |= _walk_expression_operands(stmt.condition)
             elif isinstance(stmt, PerformStatement):
                 names |= _walk_expression_operands(stmt.until_condition)
+                # ``PERFORM P WS-N TIMES``: the count is an identifier held
+                # in ``times_count`` only (an int for a literal count).
+                if isinstance(stmt.times_count, str):
+                    names |= _extract_identifiers(stmt.times_count)
                 if stmt.varying_clause:
                     for key in ("variable", "from_value", "by_value"):
                         names |= _extract_identifiers(stmt.varying_clause.get(key))

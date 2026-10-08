@@ -1133,3 +1133,12 @@ and `-o` work as everywhere else. See [jcl.md](jcl.md).
   procedure expansion, and the `ddname -> dataset` binding
 * [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) — the
   full `FixtureBundle` JSON shape `gen-fixtures --format json` produces
+
+
+## 2026-10-08
+
+* `jcl --dd-map --program NAME` now honours `--program` (it listed every
+  step's DDs); the filter is the same step set `--bindings --program` uses.
+* `cobolparser/cli/parse.py` has a `__main__` guard, so `python -m
+  cobolparser.cli.parse ...` runs the CLI (it was a silent no-op; only the
+  `cobol-parser` console script worked).

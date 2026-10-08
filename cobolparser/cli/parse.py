@@ -3383,7 +3383,22 @@ def _cmd_jcl(args: argparse.Namespace) -> None:
             ]
         payload = {"bindings": [b.to_dict() for b in bindings]}
     elif args.dd_map:
-        payload = {"dd_map": result.dd_map()}
+        dd_map = result.dd_map()
+        if args.program:
+            # Only the DDs of the steps that run this program, exactly as
+            # ``--bindings --program`` filters; ``--dd-map --program`` used
+            # to return every step's DDs and silently ignore the program.
+            running = {id(s) for s in result.steps_running(args.program)}
+            dd_map = {
+                ddname: datasets
+                for ddname, datasets in dd_map.items()
+                if any(
+                    id(step) in running and step.dd(ddname) is not None
+                    for job in result.jobs
+                    for step in job.steps
+                )
+            }
+        payload = {"dd_map": dd_map}
     elif args.program:
         payload = {
             "program": args.program,
@@ -3983,3 +3998,7 @@ def main() -> None:
         except (OSError, ValueError):
             pass
         sys.exit(141)  # 128 + SIGPIPE, what the shell reports for `yes | head`
+
+
+if __name__ == "__main__":
+    main()

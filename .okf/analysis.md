@@ -2976,3 +2976,31 @@ statements, in-stream procedure expansion, and the `ddname -> dataset` binding
 a COBOL `SELECT ... ASSIGN TO` resolves through. It is not an analyzer and
 shares no code with the COBOL pipeline; it has its own OKF file:
 **[jcl.md](jcl.md)**.
+
+
+## 2026-10-08 bug hunt (pinned in `tests/regression/test_bug_hunt_2026_10_08.py`)
+
+* **`recursion_risk.py`**: `_has_escape` only counts edges that carry control
+  to another paragraph (`_ESCAPE_EDGE_TYPES` = `INTERNAL_EDGE_TYPES` minus
+  `IF_BRANCH` / `EVALUATE_BRANCH`). The synthetic branch edges target a
+  branch node (`L1__IF_1`) that is never a cycle member, so any GO TO loop
+  whose body held an IF read as having "a way out" and was graded MEDIUM;
+  HIGH was unreachable for every real loop.
+* **`unused_variables.py`**: references it did not see -- `PERFORM P WS-N
+  TIMES` (`times_count`), `WRITE ... AFTER ADVANCING WS-N LINES`
+  (`advancing_clause["value"]`), `INITIALIZE ... REPLACING ... BY WS-ZERO`
+  (`replacing_clauses[].by_value`, via `_DICT_LIST_EXTRAS`), `XML GENERATE
+  doc FROM group` / `JSON PARSE doc INTO group` (every subordinate, by name,
+  through `_whole_group_references`, which also folds in the CALL USING
+  marking), and `MOVE / ADD / SUBTRACT CORRESPONDING A TO B`
+  (`_corresponding_pairs` + `_mark_corresponding_used`: only the
+  same-named subordinates of the two groups, the others keep their own
+  standing). An INITIALIZE target's fields stay assessed, like `MOVE SPACES
+  TO group`.
+* **`xref.py`**: `WRITE ... ADVANCING WS-N LINES` records a `read` of WS-N.
+* **`_names.py`**: `IDENTIFIER_TOKEN_RE` accepts a digit-led user word
+  (`1ST-NAME`, IBM-legal as long as a letter is present) and refuses to
+  start inside another word or after a decimal point (so `1.5E+3` yields no
+  `5E`). The letter-led pattern bit the digit off, so `MOVE 1ST-NAME TO
+  2ND-NAME` referenced `ST-NAME` / `ND-NAME`: both items unused, both
+  names undefined in xref. Shared with `redundancy.py`'s clone renaming.

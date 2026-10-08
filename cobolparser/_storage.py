@@ -136,7 +136,12 @@ def storage_size(
         return binary_byte_length(total_digits) if total_digits else 0
     size = picture_size or 0
     if normalized == "NATIONAL" and not national_picture:
-        if size and is_signed and "SEPARATE" in (sign_clause or "").upper():
+        # A national decimal item cannot carry an overpunched sign: when
+        # the SIGN clause is omitted, IBM assumes SIGN IS TRAILING SEPARATE
+        # CHARACTER, so ``S`` always costs one national character (2 bytes).
+        # It used to count only an explicit SEPARATE, leaving ``PIC S9(5)
+        # USAGE NATIONAL`` 2 bytes short and every later offset shifted.
+        if size and is_signed:
             size += 1
         return 2 * size
     # DISPLAY only: SIGN IS SEPARATE spends a byte the PICTURE does not

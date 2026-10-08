@@ -1439,3 +1439,17 @@ the expansion source map (`_locate_strip_pass_warning`), so they name the
 file and its line and collapse into the expander's identical diagnostic.
 `CopyStatement.source_location` is unchanged (still merged-text lines).
 Pinned by `tests/regression/test_copy_diagnostic_line_numbers.py`.
+
+
+**2026-10-08 bug hunt** (pinned in `tests/regression/test_bug_hunt_2026_10_08.py`):
+`copy_statement_parser.py`'s `normalize_continuation_lines`,
+`strip_sequence_area`, `remove_comment_lines` and the REPLACING pass split
+on `\n` only, so a bare-CR (`\r`) program was one 72-column "record" whose
+COPY was silently never expanded (`_looks_fixed_format` still said fixed);
+they split through `_records()` (`split_source_lines` plus the trailing
+empty element `str.split` gave, so `"\n".join` round-trips). `_normalize.py`'s
+`_NON_ENTRY_LINE_RE` also stops a data entry at a `>>` directive line: a
+copybook wrapping alternative entries in `>>IF` / `>>ELSE` / `>>END-IF` had
+every entry reported "may be missing terminating period", because the
+validator runs before the directives are evaluated and joined `>>ELSE`
+onto the entry.

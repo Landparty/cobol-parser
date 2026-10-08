@@ -104,6 +104,9 @@ _PICTURE_TERMINATOR_KEYWORDS: frozenset[str] = frozenset(
         # and OO COBOL's ``OBJECT REFERENCE``. None is a picture symbol
         # string, so each is a safe terminator.
         "VOLATILE",
+        # ``PIC X(50) BASED`` (Micro Focus / GnuCOBOL; pairs with ALLOCATE
+        # and FREE). It used to be glued onto the picture (``X(50)BASED``).
+        "BASED",
         "BYTE-LENGTH",
         "DYNAMIC",
         "OBJECT",
@@ -297,6 +300,20 @@ def literal_source(token: Token) -> str:
     literal ``X"4142"`` into the four-character text literal ``"4142"``.
     """
     return token.raw_value if token.raw_value else quote_literal(token.value)
+
+
+def _follows_gap(prev: Token, token: Token) -> bool:
+    """True when *token* sits on *prev*'s line but not immediately after it.
+
+    Columns come from the lexer, which keeps them contiguous across a merged
+    continuation line, so the only way to a gap on one line is whitespace in
+    the source.
+    """
+    if token.location.line != prev.location.line:
+        return False
+    return token.location.column > prev.location.column + len(
+        prev.raw_value or prev.value
+    )
 
 
 class DataItemClauseParser:
@@ -536,6 +553,11 @@ class DataItemClauseParser:
             # VOLATILE (Enterprise COBOL 6.2)
             elif value_upper == "VOLATILE":
                 data_item.is_volatile = True
+                token_stream.consume()
+
+            # BASED (Micro Focus / GnuCOBOL): storage comes from ALLOCATE.
+            elif value_upper == "BASED":
+                data_item.metadata["based"] = True
                 token_stream.consume()
 
             # PIC U BYTE-LENGTH n (UTF-8, Enterprise COBOL 6.3)
@@ -1412,6 +1434,17 @@ class DataItemClauseParser:
         pattern_parts = []
         paren_depth = 0  # Track parenthesis nesting
         currency_symbols: set[str] = set()
+        # The last token collected into the pattern on the current line.
+        # A PICTURE character-string has no embedded spaces, so a word that
+        # sits on the same line as the pattern but *after a gap* is the
+        # next clause (or a stray word), never more picture: ``PIC X(3)
+        # VALUES ARE 'ABC'`` used to glue ``VALUES`` on (``X(3)VALUES``,
+        # sized 0) and ``PIC X(3) FOO`` read as ``X(3)FOO``. The keyword
+        # list above still ends the scan early for known clause words; the
+        # gap rule is what catches the ones it does not list. Reset at a
+        # line break so a pattern continued on the next line (which the
+        # NEWLINE branch below tolerates) is unaffected.
+        prev_token: Token | None = None
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -1420,12 +1453,19 @@ class DataItemClauseParser:
 
             # Stop at specific keywords when outside parentheses
             if paren_depth == 0:
+                if (
+                    token.type in _PICTURE_PATTERN_TOKEN_TYPES
+                    and prev_token is not None
+                    and _follows_gap(prev_token, token)
+                ):
+                    break
                 if token.type == TokenType.PERIOD:
                     # An interior '.' is an editing decimal point and stays in
                     # the pattern; the terminating period ends the clause.
                     if self._period_is_picture_decimal(token, token_stream.peek(1)):
                         pattern_parts.append(".")
                         token_stream.consume()
+                        prev_token = token
                         continue
                     break
                 # Stop at keywords that follow picture clause
@@ -1489,8 +1529,11 @@ class DataItemClauseParser:
                         self._warn_picture_clause_missing_terminator(next_item_token)
                         break
                 token_stream.consume()
+                prev_token = None
+                continue
             else:
                 break
+            prev_token = token
 
         self._picture_currency_symbols = frozenset(currency_symbols)
         result = "".join(pattern_parts) if pattern_parts else None
