@@ -205,7 +205,12 @@ Both steps run during upload and are stored in Postgres:
   re-parsed.
 - Queries walk `field_lineage_edges` with a recursive CTE. Nothing is parsed
   at query time.
-- `GET /api/v1/record-fields/{id}/impact?direction=forward|backward&depth=N`;
+- `GET /api/v1/record-fields/{id}/impact?direction=forward|backward&depth=N`
+  on the record-layouts router, plus
+  `GET /api/v1/programs/{program_id}/fields/{name}/impact` for items that are
+  not `RecordField` rows (WORKING-STORAGE, host variables). Both return
+  `{field, paths: [{hops: [...]}], caveats}`, and every hop carries program,
+  field or table.column, line, kind and confidence;
 - frontend: from a field in the code viewer or record-layout view, a
   "Field impact" panel listing affected programs and fields with the evidence
   line, each clickable into the viewer.
