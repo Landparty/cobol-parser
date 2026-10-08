@@ -278,3 +278,37 @@ releases test-data Phases 5 (subset/mask) and 6 (cross-file synthetic data).
 4. **Non-COBOL callees are opaque in v1.** hlasm-parser and pl1-parser
    don't extract parameter layouts yet. They can supply summaries later
    through the same port shape.
+
+## Review fixes (2026-10-08, `LINEAGE_VERSION` "2")
+
+Changes made after review of the first implementation; the sections above
+describe the design, this one what differs from it or sharpens it.
+
+- **OCCURS.** A table field's node stands for any occurrence and its bytes
+  are every occurrence's, so a group move, READ, WRITE or CALL maps each
+  occurrence where it lies and every edge through a table field is inexact.
+  `AMT(3)` (literal subscripts, one per OCCURS level) is an item node of its
+  own at the occurrence's offset, with an exact edge to its bytes on the
+  ports its record reaches and inexact `occurrence` edges to `AMT`. Two
+  `occurrence` edges are never chained (as two `redefines` are not).
+  Tables over 1024 occurrences collapse to one spanning range.
+- **Operands.** Subscripts, reference-modifier offsets/lengths and
+  qualifiers are never value sources; CALL arguments take the MOVE operand
+  path (subscript, reference modification, `OF` qualification).
+- **Same-named items** (two `01 FILLER`) are separate items, keyed `NAME#2`.
+- **MOVE CORRESPONDING** also pairs a group with an elementary item of the
+  same name path.
+- **RETURNING.** `PROCEDURE DIVISION ... RETURNING x` is a linkage port
+  `PROGRAM#RETURNING` (out), joined with the caller's `CALLEE#RETURNING`.
+- **DB2 schema.** `SCHEMA.T.C` and an unqualified `T.C` join as
+  `table-alias`, `confidence="candidate"`; two schemas never join.
+- **JCL.** Concatenated DDs, `DSN=*.STEP.DD` referbacks, IDCAMS REPRO
+  operands in any order; `DUMMY` / `NULLFILE` bind nothing; quoted literals
+  in DFSORT control statements are not keywords. `_INTERFACE_RE` names the
+  MQI verbs instead of every `MQ*` program.
+- **Stored joins.** `LineageGraph.join_state()` exports the joins' caveats
+  and unjoined DDs with the edges; `join_caveats=` / `unjoined=` restore
+  them (`join_edges()` itself is unchanged).
+- **CLI.** `field-impact` exits 1 when nothing parsed or the start matches
+  nothing; the text format lists unjoined DDs and problems.
+

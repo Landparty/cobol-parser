@@ -22,7 +22,14 @@ Utility steps understood:
 - IEBGENER / ICEGENER: ``SYSUT1`` to ``SYSUT2`` (a ``GENERATE``/``RECORD``
   control statement makes it a reformat).
 - IDCAMS ``REPRO`` with ``INFILE``/``OUTFILE`` DD names or
-  ``INDATASET``/``OUTDATASET`` names.
+  ``INDATASET``/``OUTDATASET`` names, in either order.
+
+A concatenated DD (a DD statement with a blank name after a named one) is
+part of the DD before it: every dataset of ``//SORTIN DD DSN=A`` /
+``//  DD DSN=B`` is an input. ``DD DUMMY`` and ``DSN=NULLFILE`` bind nothing.
+A ``DSN=*.STEP.DD`` referback is replaced by the dataset it names.
+Quoted literals in utility control statements (``INCLUDE COND=(...,
+C'BUILD')``) are blanked before keywords are looked for.
 - IKJEFT01 / IKJEFT1A / IKJEFT1B: the program named by ``RUN PROGRAM(x)``
   in ``SYSTSIN`` is bound to the step's DDs (the DB2 batch pattern).
 """
@@ -33,6 +40,7 @@ import importlib
 import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from .lineage_graph import DatasetBinding, Passthrough
@@ -44,11 +52,20 @@ _REFORMAT_RE = re.compile(r"\b(INREC|OUTREC|BUILD|OVERLAY|FINDREP|IFTHEN|PARSE)\
 _SUM_RE = re.compile(r"\bSUM\s+FIELDS\s*=\s*\(([^)]*)\)")
 _FNAMES_RE = re.compile(r"\bFNAMES\s*=\s*\(?([A-Z0-9@#$,\s]+)\)?")
 _RUN_PROGRAM_RE = re.compile(r"\bRUN\s+PROGRAM\s*\(\s*([A-Z0-9@#$]+)\s*\)")
-_REPRO_RE = re.compile(
-    r"\bREPRO\b.*?\b(INFILE|INDATASET|IFILE|IDS)\s*\(\s*'?([A-Z0-9@#$.()+-]+?)'?\s*\)"
-    r".*?\b(OUTFILE|OUTDATASET|OFILE|ODS)\s*\(\s*'?([A-Z0-9@#$.()+-]+?)'?\s*\)",
-    re.S,
+_REPRO_IN_RE = re.compile(
+    r"\b(INFILE|INDATASET|IFILE|IDS)\s*\(\s*'?([A-Z0-9@#$.()+-]+?)'?\s*\)"
 )
+_REPRO_OUT_RE = re.compile(
+    r"\b(OUTFILE|OUTDATASET|OFILE|ODS)\s*\(\s*'?([A-Z0-9@#$.()+-]+?)'?\s*\)"
+)
+#: IDCAMS commands: where one REPRO's operands end.
+_IDCAMS_COMMAND_RE = re.compile(
+    r"\b(REPRO|DEFINE|DELETE|PRINT|LISTCAT|ALTER|VERIFY|EXPORT|IMPORT|SET|IF"
+    r"|BLDINDEX|EXAMINE|DIAGNOSE)\b"
+)
+#: A quoted literal (``C'...'``, ``X'...'``, ``'...'``) in a control statement.
+_LITERAL_RE = re.compile(r"(?:\b[CXZ])?'(?:[^']|'')*'")
+_NULL_DSNS = frozenset({"NULLFILE"})
 
 
 def _flat_steps(steps: Iterable[Any]) -> Iterable[Any]:
@@ -60,18 +77,75 @@ def _flat_steps(steps: Iterable[Any]) -> Iterable[Any]:
             yield step
 
 
-def _inline(dds: list[Any], name: str) -> str:
+def _named(dds: list[Any]) -> list[tuple[str, Any]]:
+    """Each DD with the name it belongs to: a blank-named DD continues the
+    concatenation of the one before it."""
+    out: list[tuple[str, Any]] = []
+    current = ""
     for dd in dds:
-        if (dd.name or "").upper() == name and isinstance(dd.inline_data, str):
+        name = (getattr(dd, "name", None) or "").strip().upper()
+        if name:
+            current = name
+        out.append((current, dd))
+    return out
+
+
+def _dataset(dd: Any) -> str | None:
+    """The dataset a DD statement names; None for none, ``DUMMY`` or
+    ``NULLFILE`` (nothing is read or kept there)."""
+    dsn = getattr(dd, "dataset_name", None)
+    if not dsn or str(dsn).strip().strip("'").upper() in _NULL_DSNS:
+        return None
+    parameters = getattr(dd, "parameters", None) or {}
+    if isinstance(parameters, dict) and any(
+        str(value).upper() == "DUMMY"
+        for key, value in parameters.items()
+        if str(key).startswith("_pos")
+    ):
+        return None
+    return str(dsn)
+
+
+def _inline(dds: list[Any], name: str) -> str:
+    for dd_name, dd in _named(dds):
+        if dd_name == name and isinstance(dd.inline_data, str):
             return dd.inline_data.upper()
     return ""
 
 
+def _control(dds: list[Any], name: str) -> str:
+    """A utility's control statements, quoted literals blanked."""
+    return _LITERAL_RE.sub(" ", _inline(dds, name))
+
+
+def _dsns(dds: list[Any], name: str) -> list[str]:
+    """Every dataset of DD *name*, concatenation included."""
+    out: list[str] = []
+    for dd_name, dd in _named(dds):
+        dsn = _dataset(dd) if dd_name == name else None
+        if dsn and dsn not in out:
+            out.append(dsn)
+    return out
+
+
 def _dsn(dds: list[Any], name: str) -> str | None:
-    for dd in dds:
-        if (dd.name or "").upper() == name and dd.dataset_name:
-            return str(dd.dataset_name)
-    return None
+    found = _dsns(dds, name)
+    return found[0] if found else None
+
+
+def _repro_commands(control: str) -> list[str]:
+    """The operand text of every IDCAMS ``REPRO`` command, continuation
+    (``-`` at the end of a line) joined."""
+    joined = re.sub(r"[-+]\s*\n", " ", control)
+    commands: list[str] = []
+    for line in joined.splitlines():
+        marks = list(_IDCAMS_COMMAND_RE.finditer(line))
+        for index, mark in enumerate(marks):
+            if mark.group(1) != "REPRO":
+                continue
+            end = marks[index + 1].start() if index + 1 < len(marks) else len(line)
+            commands.append(line[mark.end() : end])
+    return commands
 
 
 def _sum_ranges(control: str) -> tuple[tuple[int, int], ...]:
@@ -99,55 +173,48 @@ def bindings_from_jobs(
     passthroughs: list[Passthrough] = []
     for job in jobs:
         job_name = (getattr(job, "name", None) or "").upper() or None
+        earlier: dict[str, str] = {}
         for step in _flat_steps(getattr(job, "steps", None) or []):
             program = (getattr(step, "program", None) or "").upper()
             step_name = (getattr(step, "name", None) or "").upper() or None
-            dds = list(getattr(step, "dd_statements", None) or [])
+            dds = _resolve_referbacks(
+                list(getattr(step, "dd_statements", None) or []), step_name, earlier
+            )
             if not program:
                 continue
             if program in _SORT_PROGRAMS:
                 passthroughs += _sort_passthroughs(dds, job_name, step_name, program)
                 continue
             if program in _COPY_PROGRAMS:
-                src, dst = _dsn(dds, "SYSUT1"), _dsn(dds, "SYSUT2")
-                if src and dst:
-                    control = _inline(dds, "SYSIN")
-                    kind = (
-                        "reformat"
-                        if re.search(r"\b(GENERATE|RECORD)\b", control)
-                        else "copy"
-                    )
-                    passthroughs.append(
-                        Passthrough(src, dst, kind, (), job_name, step_name, program)
-                    )
+                dst = _dsn(dds, "SYSUT2")
+                control = _control(dds, "SYSIN")
+                kind = (
+                    "reformat"
+                    if re.search(r"\b(GENERATE|RECORD)\b", control)
+                    else "copy"
+                )
+                passthroughs += [
+                    Passthrough(src, dst, kind, (), job_name, step_name, program)
+                    for src in _dsns(dds, "SYSUT1")
+                    if dst
+                ]
                 continue
             if program == "IDCAMS":
-                control = _inline(dds, "SYSIN")
-                for match in _REPRO_RE.finditer(control):
-                    src_kw, src, dst_kw, dst = match.groups()
-                    if src_kw in ("INFILE", "IFILE"):
-                        src = _dsn(dds, src) or ""
-                    if dst_kw in ("OUTFILE", "OFILE"):
-                        dst = _dsn(dds, dst) or ""
-                    if src and dst:
-                        passthroughs.append(
-                            Passthrough(
-                                src, dst, "copy", (), job_name, step_name, program
-                            )
-                        )
+                passthroughs += _repro_passthroughs(dds, job_name, step_name)
                 continue
             if program in _TSO_PROGRAMS:
                 run = _RUN_PROGRAM_RE.search(_inline(dds, "SYSTSIN"))
                 if not run:
                     continue
                 program = run.group(1)
-            for dd in dds:
-                if dd.name and dd.dataset_name:
+            for dd_name, dd in _named(dds):
+                dsn = _dataset(dd)
+                if dd_name and dsn:
                     bindings.append(
                         DatasetBinding(
                             program=program,
-                            ddname=str(dd.name).upper(),
-                            dataset=str(dd.dataset_name),
+                            ddname=dd_name,
+                            dataset=dsn,
                             job=job_name,
                             step=step_name,
                         )
@@ -155,15 +222,65 @@ def bindings_from_jobs(
     return bindings, passthroughs
 
 
+def _resolve_referbacks(
+    dds: list[Any], step: str | None, earlier: dict[str, str]
+) -> list[Any]:
+    """Replace ``DSN=*.STEP.DD`` / ``DSN=*.DD`` referbacks with the dataset
+    they name, and remember this step's DDs for the steps after it."""
+    out: list[Any] = []
+    for dd_name, dd in _named(dds):
+        dsn = str(getattr(dd, "dataset_name", None) or "")
+        if dsn.startswith("*."):
+            parts = dsn[2:].upper().split(".")
+            key = ".".join(parts[-2:]) if len(parts) > 1 else f"{step}.{parts[0]}"
+            resolved = earlier.get(key)
+            if resolved is not None:
+                dd = SimpleNamespace(
+                    name=getattr(dd, "name", None),
+                    dataset_name=resolved,
+                    inline_data=getattr(dd, "inline_data", None),
+                    parameters=getattr(dd, "parameters", None),
+                )
+        out.append(dd)
+        found = _dataset(dd)
+        if dd_name and found and f"{step}.{dd_name}" not in earlier:
+            earlier[f"{step}.{dd_name}"] = found
+    return out
+
+
+def _repro_passthroughs(
+    dds: list[Any], job: str | None, step: str | None
+) -> list[Passthrough]:
+    out: list[Passthrough] = []
+    for command in _repro_commands(_inline(dds, "SYSIN")):
+        source, target = _REPRO_IN_RE.search(command), _REPRO_OUT_RE.search(command)
+        if source is None or target is None:
+            continue
+        if source.group(1) in ("INFILE", "IFILE"):
+            inputs = _dsns(dds, source.group(2))
+        else:
+            inputs = [source.group(2)]
+        if target.group(1) in ("OUTFILE", "OFILE"):
+            outputs = _dsns(dds, target.group(2))[:1]
+        else:
+            outputs = [target.group(2)]
+        out += [
+            Passthrough(src, dst, "copy", (), job, step, "IDCAMS")
+            for src in inputs
+            for dst in outputs
+        ]
+    return out
+
+
 def _sort_passthroughs(
     dds: list[Any], job: str | None, step: str | None, program: str
 ) -> list[Passthrough]:
-    control = _inline(dds, "SYSIN")
-    inputs = [
-        str(dd.dataset_name)
-        for dd in dds
-        if dd.dataset_name and re.fullmatch(r"SORTIN(\d\d)?", (dd.name or "").upper())
-    ]
+    control = _control(dds, "SYSIN")
+    inputs: list[str] = []
+    for dd_name, dd in _named(dds):
+        dsn = _dataset(dd)
+        if dsn and dsn not in inputs and re.fullmatch(r"SORTIN(\d\d)?", dd_name):
+            inputs.append(dsn)
     outputs = [d for d in [_dsn(dds, "SORTOUT")] if d]
     for match in _FNAMES_RE.finditer(control):
         for name in re.split(r"[,\s]+", match.group(1).strip()):

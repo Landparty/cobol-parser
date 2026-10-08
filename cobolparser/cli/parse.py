@@ -3144,7 +3144,10 @@ def _build_field_impact_parser(subparsers: argparse._SubParsersAction) -> None:
             "  cobol-parser field-impact --table TRANSACTION_HIST.AMOUNT ./cobol "
             "--direction backward\n"
             "  cobol-parser field-impact --dataset BANK.PROD.TRAN.DAILY ./cobol "
-            "--jcl ./jcl --proc-path ./proc --format text"
+            "--jcl ./jcl --proc-path ./proc --format text\n\n"
+            "Exit status: 0 when the start was found (hits or not); 1 when no "
+            "source produced a report, the start matches nothing (the report "
+            "is still printed), or the arguments are wrong."
         ),
     )
     p.add_argument(
@@ -3287,6 +3290,10 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
         workers=args.workers,
     )
     reports, problems = reports_from_scan(scan)
+    if not reports:
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        _fail("no COBOL program under the given paths produced a lineage report")
     bindings, passthroughs, jcl_problems = _load_bindings(args)
     graph = LineageGraph(reports, bindings, passthroughs)
 
@@ -3299,6 +3306,7 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
         result = graph.impact(field_name, args.program, args.direction, args.depth)
 
     relationships = graph.key_relationships() if args.key_relationships else []
+    all_problems = problems + jcl_problems
     if args.output_format == "text":
         text = result.to_text()
         if relationships:
@@ -3306,14 +3314,21 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
                 f"  {k.source} -> {k.key}  ({k.program} line {k.line})\n"
                 for k in relationships
             )
+        if graph.unjoined:
+            text += "\nUnjoined:\n" + "".join(f"  - {u}\n" for u in graph.unjoined)
+        if all_problems:
+            text += "\nProblems:\n" + "".join(f"  - {p}\n" for p in all_problems)
         _text_out(text, getattr(args, "output", None))
-        return
-    output = result.to_dict()
-    output["graph"] = graph.to_dict()
-    output["problems"] = problems + jcl_problems
-    if args.key_relationships:
-        output["key_relationships"] = [k.to_dict() for k in relationships]
-    _json_out(output, args.compact, getattr(args, "output", None))
+    else:
+        output = result.to_dict()
+        output["graph"] = graph.to_dict()
+        output["problems"] = all_problems
+        if args.key_relationships:
+            output["key_relationships"] = [k.to_dict() for k in relationships]
+        _json_out(output, args.compact, getattr(args, "output", None))
+    if not result.start_found:
+        # The report above says so too; the exit code is for scripts.
+        _fail(f"{', '.join(result.start)}: no such field in any report")
 
 
 # -- Subcommand: diff ---------------------------------------------------------

@@ -52,16 +52,25 @@ from .field_lineage import (
     VALUE_CHANGING_KINDS,
     FieldFlowReport,
     normalize_ddname,
+    overlay_class,
 )
 
 #: System interfaces a CALL reaches that are neither a business program
 #: nor a value transformer: MQ, IMS DL/I, LE callable services, DB2 attach.
 #: Values sent to them leave (a queue, a database segment); values they hand
 #: back come from outside. Never treated as an opaque pass-through.
+_MQI_CALLS = (
+    "MQBACK|MQBEGIN|MQBUFMH|MQCB|MQCLOSE|MQCMIT|MQCONN|MQCONNX|MQCRTMH|MQCTL"
+    "|MQDISC|MQDLTMH|MQDLTMP|MQGET|MQINQ|MQINQMP|MQMHBUF|MQOPEN|MQPUT|MQPUT1"
+    "|MQSET|MQSETMP|MQSTAT|MQSUB|MQSUBRQ"
+)
 _INTERFACE_RE = re.compile(
-    r"^(MQ[A-Z]+|CBLTDLI|AIBTDLI|CEETDLI|AERTDLI|ASMTDLI|PLITDLI|CTDLI"
+    rf"^({_MQI_CALLS}|CBLTDLI|AIBTDLI|CEETDLI|AERTDLI|ASMTDLI|PLITDLI|CTDLI"
     r"|CEE[A-Z0-9]+|DSNTIAR|DSNTIAC|DSNALI|DSNHLI|DSNRLI|ILBO[A-Z0-9]*|IGZ[A-Z0-9]*)$"
 )
+#: ``DD DUMMY`` / ``DSN=NULLFILE``: nothing is read or kept, so nothing joins.
+_NULL_DATASETS = frozenset({"NULLFILE", "DUMMY"})
+_DUP_SUFFIX_RE = re.compile(r"#\d+$")
 
 _GDG_RELATIVE_RE = re.compile(r"\(\s*[+-]?\d+\s*\)$")
 _GDG_ABSOLUTE_RE = re.compile(r"\.G\d{4}V\d{2}$")
@@ -69,7 +78,8 @@ _GDG_ABSOLUTE_RE = re.compile(r"\.G\d{4}V\d{2}$")
 # Node keys. Program-scoped: ("P", program, kind, name, offset, length).
 # Shared: ("D", dataset, offset, length) and ("T", "TABLE.COLUMN").
 NodeKey = tuple[Any, ...]
-_State = tuple[NodeKey, bool]
+#: (node, overlay class of the edge it arrived over: see ``overlay_class``).
+_State = tuple[NodeKey, int]
 
 
 def normalize_dataset(name: str, job: str | None = None) -> str:
@@ -214,6 +224,8 @@ class ImpactResult:
     depth: int | None
     hits: list[ImpactHit] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
+    #: False when nothing in any report matched the start.
+    start_found: bool = True
 
     @property
     def programs(self) -> list[str]:
@@ -239,6 +251,7 @@ class ImpactResult:
             "datasets": self.datasets,
             "hits": [h.to_dict() for h in self.hits],
             "caveats": list(self.caveats),
+            "start_found": self.start_found,
         }
 
     def to_text(self) -> str:
@@ -268,7 +281,9 @@ class ImpactResult:
                 # Read from the hit back toward the start: "<-" (fed by)
                 # going forward, "->" (feeds) going backward.
                 via = (" <- " if self.direction == "forward" else " -> ").join(
-                    h.label for h in reversed(hit.path[:-1]) if h.kind != "redefines"
+                    h.label
+                    for h in reversed(hit.path[:-1])
+                    if h.kind not in ("redefines", "occurrence")
                 )
                 lines.append(
                     f"  {hit.field}{where}  [{', '.join(tags)}]"
@@ -329,17 +344,30 @@ class LineageGraph:
         bindings: Sequence[DatasetBinding | dict[str, Any]] = (),
         passthroughs: Sequence[Passthrough | dict[str, Any]] = (),
         join_edges: Sequence[dict[str, Any]] | None = None,
+        join_caveats: Sequence[str] | None = None,
+        unjoined: Sequence[str] | None = None,
     ) -> None:
         """``join_edges`` (the output of :meth:`join_edges` on an earlier
         graph over the same reports) replaces the joins: the backend computes
         them once, at upload, and builds the graph from its stored rows
         afterwards without the JCL. ``bindings`` / ``passthroughs`` are then
-        ignored."""
+        ignored.
+
+        ``join_caveats`` and ``unjoined`` restore what the joins said besides
+        their edges (a reformatting utility step, an opaque callee, a DD no
+        JCL binds): the ``"caveats"`` and ``"unjoined"`` of
+        :meth:`join_state`. Without them a graph rebuilt from stored edges
+        only re-derives the opaque-callee caveat and has no ``unjoined``.
+        Both are ignored when ``join_edges`` is None.
+        """
         self.reports: dict[str, dict[str, Any]] = {}
+        duplicates: list[str] = []
         for report in reports:
             data = report.to_dict() if isinstance(report, FieldFlowReport) else report
             program = str(data.get("program_id") or "").upper()
             if program in self.reports:
+                if program not in duplicates:
+                    duplicates.append(program)
                 continue
             self.reports[program] = data
         self.bindings = [
@@ -350,14 +378,21 @@ class LineageGraph:
             p if isinstance(p, Passthrough) else Passthrough.from_dict(p)
             for p in passthroughs
         ]
-        self.caveats: list[str] = []
+        self.caveats: list[str] = [
+            f"PROGRAM-ID {program} appears in more than one report; only the "
+            "first is in the graph"
+            for program in duplicates
+        ]
         self.unjoined: list[str] = []
         self.opaque_callees: list[str] = []
+        #: The caveats the joins themselves raised (what :meth:`join_state`
+        #: exports), apart from the reports' own.
+        self._join_caveats: list[str] = []
         self._out: dict[NodeKey, list[tuple[NodeKey, _EdgeInfo]]] = {}
         self._in: dict[NodeKey, list[tuple[NodeKey, _EdgeInfo]]] = {}
         self._joins: list[tuple[NodeKey, NodeKey, _EdgeInfo]] = []
         self._recording = False
-        self._build(join_edges)
+        self._build(join_edges, join_caveats, unjoined)
 
     # -- building ----------------------------------------------------------
 
@@ -380,7 +415,16 @@ class LineageGraph:
             node.get("length"),
         )
 
-    def _build(self, join_edges: Sequence[dict[str, Any]] | None) -> None:
+    def _join_caveat(self, text: str) -> None:
+        self._join_caveats.append(text)
+        self.caveats.append(text)
+
+    def _build(
+        self,
+        join_edges: Sequence[dict[str, Any]] | None,
+        join_caveats: Sequence[str] | None = None,
+        unjoined: Sequence[str] | None = None,
+    ) -> None:
         # Ports by role: written (an intra edge ends there: the value leaves
         # the program) and read (an intra edge starts there).
         written: dict[str, set[NodeKey]] = {}
@@ -419,10 +463,17 @@ class LineageGraph:
             self._join_calls(written_ports, read_ports)
             self._recording = False
         else:
+            # Recorded again, so the rebuilt graph exports the same state.
+            self._recording = True
             for edge in join_edges:
                 self._load_join_edge(edge)
-            if self.opaque_callees:
-                self.caveats.append(_opaque_caveat(self.opaque_callees))
+            self._recording = False
+            if join_caveats is not None:
+                for caveat in join_caveats:
+                    self._join_caveat(str(caveat))
+            elif self.opaque_callees:
+                self._join_caveat(_opaque_caveat(self.opaque_callees))
+            self.unjoined = [str(u) for u in unjoined or []]
         for caveat_source in self.reports.values():
             for caveat in caveat_source.get("caveats") or []:
                 text = f"{caveat_source.get('program_id')}: {caveat}"
@@ -448,6 +499,18 @@ class LineageGraph:
             }
             for src, dst, info in self._joins
         ]
+
+    def join_state(self) -> dict[str, Any]:
+        """Everything the joins produced, JSON-shaped: ``{"edges":
+        join_edges(), "caveats": [...], "unjoined": [...]}``. Rebuild with
+        ``LineageGraph(reports, join_edges=state["edges"],
+        join_caveats=state["caveats"], unjoined=state["unjoined"])`` for a
+        graph whose ``to_dict()`` and impact caveats match this one."""
+        return {
+            "edges": self.join_edges(),
+            "caveats": list(self._join_caveats),
+            "unjoined": list(self.unjoined),
+        }
 
     def _load_join_edge(self, edge: dict[str, Any]) -> None:
         info = _EdgeInfo(
@@ -485,7 +548,11 @@ class LineageGraph:
                 for node in sorted(nodes, key=repr):
                     if node[2] != PORT_FILE:
                         continue
-                    bindings = self._datasets_for(program, node[3])
+                    bindings = [
+                        b
+                        for b in self._datasets_for(program, node[3])
+                        if normalize_dataset(b.dataset) not in _NULL_DATASETS
+                    ]
                     if not bindings:
                         unbound.add(f"{program}: DD {node[3]}")
                         continue
@@ -520,10 +587,12 @@ class LineageGraph:
             for pt in self.passthroughs:
                 src = normalize_dataset(pt.input, pt.job)
                 dst = normalize_dataset(pt.output, pt.job)
+                if src in _NULL_DATASETS or dst in _NULL_DATASETS:
+                    continue
                 if pt.kind == "reformat":
                     if src in ranges and dst not in stopped:
                         stopped.add(dst)
-                        self.caveats.append(
+                        self._join_caveat(
                             f"{pt.step or pt.program or 'a utility step'} reformats "
                             f"{src} into {dst}; values are not traced through it"
                         )
@@ -577,13 +646,33 @@ class LineageGraph:
     def _join_sql(
         self, written: dict[str, list[NodeKey]], read: dict[str, list[NodeKey]]
     ) -> None:
+        columns: set[str] = set()
         for program in self.reports:
             for node in written.get(program, []):
                 if node[2] == PORT_SQL:
+                    columns.add(node[3])
                     self._add(node, ("T", node[3]), _EdgeInfo("table", cross=True))
             for node in read.get(program, []):
                 if node[2] == PORT_SQL:
+                    columns.add(node[3])
                     self._add(("T", node[3]), node, _EdgeInfo("table", cross=True))
+        # SCHEMA.TABLE.COLUMN and an unqualified TABLE.COLUMN may be one
+        # column (the unqualified one resolves through CURRENT SQLID /
+        # QUALIFIER at bind time, which no source says): join them both ways
+        # as candidates. Two different schemas never join.
+        unqualified = {c for c in columns if c.count(".") == 1}
+        for column in sorted(columns):
+            if column.count(".") < 2:
+                continue
+            short = ".".join(column.split(".")[-2:])
+            if short in unqualified:
+                info = _EdgeInfo(
+                    "table-alias",
+                    statement="schema not given",
+                    confidence="candidate",
+                )
+                self._add(("T", column), ("T", short), info)
+                self._add(("T", short), ("T", column), info)
 
     def _join_calls(
         self, written: dict[str, list[NodeKey]], read: dict[str, list[NodeKey]]
@@ -654,7 +743,7 @@ class LineageGraph:
                         ),
                     )
         if self.opaque_callees:
-            self.caveats.append(_opaque_caveat(self.opaque_callees))
+            self._join_caveat(_opaque_caveat(self.opaque_callees))
 
     # -- queries -----------------------------------------------------------
 
@@ -673,7 +762,7 @@ class LineageGraph:
                 continue
             for item in data.get("items") or []:
                 qname = str(item["qualified_name"]).upper()
-                segments = qname.split(".")
+                segments = _DUP_SUFFIX_RE.sub("", qname).split(".")
                 if qname == name or segments[-1] == name:
                     if all(q in segments[:-1] for q in qualifiers):
                         matched.setdefault(prog, []).append(qname)
@@ -684,7 +773,7 @@ class LineageGraph:
                 continue
             names = matched.get(node[1])
             if names and any(
-                node[3] == m or node[3].startswith(m + ".") for m in names
+                node[3] == m or node[3].startswith((m + ".", m + "(")) for m in names
             ):
                 seen.add(node)
                 starts.append(node)
@@ -770,30 +859,32 @@ class LineageGraph:
     ) -> ImpactResult:
         result = ImpactResult(start=label, direction=direction, depth=depth)
         if not starts:
+            result.start_found = False
             result.caveats.append(f"{', '.join(label)}: no such field in any report")
             return result
         adjacency = self._out if direction == "forward" else self._in
         # 0-1 BFS: stepping into a program from outside it (from a dataset or
         # table, or across a CALL) costs 1; every other step costs 0. So
         # ``depth=1`` reaches the programs one join away.
-        # A state is (node, arrived over a redefines edge): as in a
-        # program's own summary, two overlays in a row are never chained,
-        # or one field of a record would reach every other field of it
-        # through an alias covering the whole record.
+        # A state is (node, overlay class it arrived over): as in a
+        # program's own summary, two alias edges of one class in a row are
+        # never chained, or one field of a record would reach every other
+        # field of it through an alias covering the whole record (and one
+        # occurrence of a table every other through the table as a whole).
         best: dict[_State, int] = {}
         parent: dict[_State, tuple[_State, _EdgeInfo]] = {}
         queue: deque[tuple[_State, int]] = deque()
         for start in starts:
-            best[(start, False)] = 0
-            queue.append(((start, False), 0))
+            best[(start, 0)] = 0
+            queue.append(((start, 0), 0))
         while queue:
             state, cost = queue.popleft()
             if cost > best.get(state, cost):
                 continue
-            node, via_overlay = state
+            node, arrived = state
             for nxt, info in adjacency.get(node, []):
-                overlay = info.kind == "redefines"
-                if overlay and via_overlay:
+                overlay = overlay_class(info.kind)
+                if overlay and overlay == arrived:
                     continue
                 enters = nxt[0] == "P" and (node[0] != "P" or node[1] != nxt[1])
                 step = cost + (1 if enters else 0)

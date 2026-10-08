@@ -132,6 +132,78 @@ class TestUtilities:
         ]
 
 
+class TestConcatenationAndOperands:
+    def test_concatenated_dds_inherit_the_name_before_them(self) -> None:
+        reader = step("READER", dd("INFILE", "PROD.ONE"), dd("", "PROD.TWO"))
+        sort = step(
+            "SORT",
+            dd("SORTIN", "PROD.ONE"),
+            dd("", "PROD.THREE"),
+            dd("SORTOUT", "PROD.SORTED"),
+            dd("SYSIN", data=" SORT FIELDS=(1,10,CH,A)"),
+            name="S2",
+        )
+        bindings, passthroughs = bindings_from_jobs([job(reader, sort)])
+        assert [(b.ddname, b.dataset) for b in bindings] == [
+            ("INFILE", "PROD.ONE"),
+            ("INFILE", "PROD.TWO"),
+        ]
+        assert [p.input for p in passthroughs] == ["PROD.ONE", "PROD.THREE"]
+
+    def test_dummy_and_nullfile_bind_nothing(self) -> None:
+        # jcl-parser keeps DUMMY as the first positional parameter.
+        dummy = NS(
+            name="OUT1",
+            dataset_name="A.B",
+            inline_data=None,
+            parameters={"_pos_0": "DUMMY", "DSN": "A.B"},
+        )
+        writer = step("WRITER", dummy, dd("OUT2", "NULLFILE"), dd("OUT3", "A.C"))
+        bindings, _ = bindings_from_jobs([job(writer)])
+        assert [b.ddname for b in bindings] == ["OUT3"]
+
+    def test_referback_names_the_earlier_dataset(self) -> None:
+        writer = step("WRITER", dd("OUT", "A.B.C"), name="S1")
+        reader = step("READER", dd("IN", "*.S1.OUT"), name="S2")
+        bindings, _ = bindings_from_jobs([job(writer, reader)])
+        assert ("READER", "IN", "A.B.C") in {
+            (b.program, b.ddname, b.dataset) for b in bindings
+        }
+
+    def test_idcams_repro_operands_in_any_order(self) -> None:
+        idcams = step(
+            "IDCAMS",
+            dd("IN", "A.IN"),
+            dd("OUT", "A.OUT"),
+            dd(
+                "SYSIN",
+                data="  REPRO OUTFILE(OUT) INFILE(IN)\n"
+                "  REPRO -\n    INDATASET(B.IN) -\n    OUTDATASET(B.OUT)\n",
+            ),
+        )
+        _, passthroughs = bindings_from_jobs([job(idcams)])
+        assert [(p.input, p.output) for p in passthroughs] == [
+            ("A.IN", "A.OUT"),
+            ("B.IN", "B.OUT"),
+        ]
+
+    def test_keywords_inside_literals_are_not_reformats(self) -> None:
+        sort = step(
+            "SORT",
+            dd("SORTIN", "C.IN"),
+            dd("SORTOUT", "C.OUT"),
+            dd(
+                "SYSIN",
+                data="  SORT FIELDS=(1,5,CH,A)\n"
+                "  INCLUDE COND=(10,5,CH,EQ,C'BUILD')",
+            ),
+        )
+        _, passthroughs = bindings_from_jobs([job(sort)])
+        assert [(p.input, p.output, p.kind) for p in passthroughs] == [
+            ("C.IN", "C.OUT", "copy")
+        ]
+
+
 @pytest.mark.parametrize(
     ("control", "expected"),
     [

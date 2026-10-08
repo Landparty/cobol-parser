@@ -235,3 +235,181 @@ def test_impact_from_several_programs(graph) -> None:
     hits = _hits(result)
     assert ("READER", "console:SYSOUT@0+7") in hits
     assert ("WRITER", "OUT-REC.OUT-FEE") in hits
+
+
+def _source(name: str, ws: str, proc: str, linkage: str = "", using: str = "") -> str:
+    lines = [
+        "       IDENTIFICATION DIVISION.",
+        f"       PROGRAM-ID. {name}.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+    ]
+    lines += ["       " + line for line in ws.strip().splitlines()]
+    if linkage:
+        lines.append("       LINKAGE SECTION.")
+        lines += ["       " + line for line in linkage.strip().splitlines()]
+    lines.append(f"       PROCEDURE DIVISION{using}.")
+    lines.append("       MAIN-PARA.")
+    lines += ["           " + line for line in proc.strip().splitlines()]
+    lines.append("           GOBACK.")
+    return "\n".join(lines) + "\n"
+
+
+def _analyze(text: str) -> FieldFlowReport:
+    result = parse_cobol(text)
+    assert result.ast is not None and not result.errors, result.errors
+    return FieldFlowAnalyzer().analyze(result.ast)
+
+
+class TestStoredJoinState:
+    def test_join_state_restores_caveats_and_unjoined(self, reports) -> None:
+        import json
+
+        reformat = Passthrough(
+            "&&FEES", "PROD.FEE.SUMMARY(+1)", "reformat", (), "FEEJOB", "S2", "SORT"
+        )
+        first = LineageGraph(reports, BINDINGS[:3], [reformat])
+        state = json.loads(json.dumps(first.join_state()))
+        assert state["edges"] == first.join_edges()
+        assert any("reformats" in c for c in state["caveats"])
+        assert state["unjoined"] == ["READER: DD MASTER is not bound to any dataset"]
+        again = LineageGraph(
+            [r.to_dict() for r in reports],
+            join_edges=state["edges"],
+            join_caveats=state["caveats"],
+            unjoined=state["unjoined"],
+        )
+        assert again.to_dict() == first.to_dict()
+        query = lambda g: g.impact("WS-FEE", program="WRITER").to_dict()  # noqa: E731
+        assert query(again) == query(first)
+
+    def test_join_edges_alone_still_work(self, reports, graph) -> None:
+        again = LineageGraph(reports, join_edges=graph.join_edges())
+        assert again.unjoined == []
+        assert again.join_state()["edges"] == graph.join_edges()
+
+
+class TestReviewFixes:
+    def test_call_returning_joins_procedure_division_returning(self) -> None:
+        caller = _analyze(
+            _source(
+                "CALLR",
+                "01 A PIC X(2).\n01 R PIC S9(9) COMP.\n01 OUT1 PIC S9(9) COMP.",
+                "CALL 'SUBR' USING A RETURNING R\nMOVE R TO OUT1",
+            )
+        )
+        callee = _analyze(
+            _source(
+                "SUBR",
+                "01 W PIC S9(9) COMP VALUE 5.",
+                "MOVE W TO LR",
+                linkage="01 LA PIC X(2).\n01 LR PIC S9(9) COMP.",
+                using=" USING LA RETURNING LR",
+            )
+        )
+        hits = _hits(LineageGraph([caller, callee]).impact("W", program="SUBR"))
+        assert ("CALLR", "R") in hits and ("CALLR", "OUT1") in hits
+
+    def test_schema_qualified_table_joins_unqualified_as_candidate(self) -> None:
+        def sql(name: str, statement: str) -> FieldFlowReport:
+            return _analyze(
+                _source(
+                    name,
+                    "01 H1 PIC S9(7) COMP-3.\n01 K PIC X(5).",
+                    f"EXEC SQL {statement}\nEND-EXEC",
+                )
+            )
+
+        graph = LineageGraph(
+            [
+                sql("PA", "UPDATE PROD.ACCT SET BAL = :H1 WHERE ID = :K"),
+                sql("PB", "SELECT BAL INTO :H1 FROM ACCT WHERE ID = :K"),
+                sql("PC", "SELECT BAL INTO :H1 FROM TEST.ACCT WHERE ID = :K"),
+            ]
+        )
+        hits = _hits(graph.impact("H1", program="PA"))
+        assert hits[("PB", "H1")].confidence == "candidate"
+        assert ("PC", "H1") not in hits  # another schema is another table
+
+    def test_occurrence_joins_the_reader_field_at_its_bytes(self) -> None:
+        def program(name: str, dd: str, record: str, io: str, proc: str) -> str:
+            return f"""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. {name}.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT F ASSIGN TO {dd}.
+       DATA DIVISION.
+       FILE SECTION.
+       FD F.
+{record}
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC 9(5).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN {io} F
+{proc}
+           GOBACK.
+"""
+
+        writer = program(
+            "W",
+            "OUTDD",
+            "       01 R.\n          05 AMT OCCURS 3 PIC 9(5).",
+            "OUTPUT",
+            "           MOVE WS-X TO AMT(3)\n           WRITE R",
+        )
+        reader = program(
+            "RD",
+            "INDD",
+            "       01 R.\n          05 A1 PIC 9(5).\n          05 A2 PIC 9(5).\n"
+            "          05 A3 PIC 9(5).",
+            "INPUT",
+            "           READ F\n           DISPLAY A3",
+        )
+        graph = LineageGraph(
+            [_analyze(writer), _analyze(reader)],
+            [
+                DatasetBinding("W", "OUTDD", "DS.X"),
+                DatasetBinding("RD", "INDD", "DS.X"),
+            ],
+        )
+        hits = _hits(graph.impact("WS-X", program="W"))
+        assert hits[("RD", "R.A3")].confidence == "exact"
+        # Through the table as a whole the other slots are reachable, never
+        # as an exact field.
+        assert hits[("RD", "R.A1")].confidence != "exact"
+
+    def test_duplicate_program_id_is_a_caveat(self) -> None:
+        writer = _report("WRITER")
+        graph = LineageGraph([writer, writer])
+        assert any(
+            c.startswith("PROGRAM-ID WRITER appears in more than one report")
+            for c in graph.caveats
+        )
+
+    def test_nullfile_does_not_join(self, reports) -> None:
+        bindings = [
+            DatasetBinding("WRITER", "OUTFILE", "NULLFILE", "J"),
+            DatasetBinding("READER", "FEEIN", "NULLFILE", "J"),
+        ]
+        graph = LineageGraph(reports, bindings)
+        assert "READER" not in graph.impact("WS-FEE", program="WRITER").programs
+        assert "WRITER: DD OUTFILE is not bound to any dataset" in graph.unjoined
+
+    def test_only_real_mqi_calls_are_interfaces(self) -> None:
+        report = _analyze(
+            _source(
+                "MQUSER",
+                "01 A PIC X(2).\n01 B PIC X(2).",
+                "CALL 'MQPUT' USING A\nCALL 'MQHELPER' USING A B",
+            )
+        )
+        graph = LineageGraph([report])
+        assert graph.opaque_callees == ["MQHELPER"]
+
+    def test_start_found(self, graph) -> None:
+        assert graph.impact("WS-FEE", program="WRITER").start_found
+        missing = graph.impact("NO-SUCH-FIELD")
+        assert not missing.start_found
+        assert missing.to_dict()["start_found"] is False

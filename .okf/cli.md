@@ -1050,7 +1050,14 @@ cross (a dataset or table hop into another program, or a CALL). JSON output
 is `ImpactResult.to_dict()` plus `graph` (statistics, opaque callees,
 unjoined DDs, caveats) and `problems` (files that produced no report, JCL
 that did not parse or expand). `--format text` groups hits by program with
-the path that reached each.
+the path that reached each, then lists `Unjoined:` DDs and `Problems:`.
+
+Exit codes (2026-10-08): `0` when the start was found, hits or not; `1`
+when no source produced a lineage report (each problem is printed to stderr
+first), when the start (FIELD / `--table` / `--dataset`) matches nothing --
+the report is still printed, with `"start_found": false`, and the error
+goes to stderr -- or on an argument error. Files that failed while others
+parsed stay in `problems` and do not change the exit code.
 
 ## Cross-reference, signatures, codebase graph, SQL/CICS lint, diff, JCL
 

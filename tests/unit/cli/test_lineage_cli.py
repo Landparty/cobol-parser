@@ -48,7 +48,7 @@ class TestLineage:
             _run(monkeypatch, capsys, "lineage", str(SAMPLES / "WRITER.cbl"))
         )
         assert data["program_id"] == "WRITER"
-        assert data["lineage_version"] == "1"
+        assert data["lineage_version"] == "2"
         assert {p["kind"] for p in data["ports"]} == {"file", "call", "sql", "console"}
 
     def test_text(self, monkeypatch, capsys) -> None:
@@ -238,3 +238,36 @@ class TestFieldImpact:
             str(tmp_path / "missing.json"),
         )
         assert "could not be read" in err
+
+    def test_nothing_parsed_exits_1(self, monkeypatch, capsys, tmp_path) -> None:
+        missing = str(tmp_path / "MISSING.cbl")
+        err = _fails(monkeypatch, capsys, "field-impact", "WS-FEE", missing)
+        assert "produced a lineage report" in err
+        assert "MISSING.cbl" in err
+
+    def test_unknown_start_exits_1_after_the_report(self, monkeypatch, capsys) -> None:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            _argv(("field-impact", "NO-SUCH-FIELD", str(SAMPLES / "WRITER.cbl"))),
+        )
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["start_found"] is False
+        assert "no such field" in captured.err
+
+    def test_text_lists_unjoined_and_problems(self, monkeypatch, capsys) -> None:
+        out = _run(
+            monkeypatch,
+            capsys,
+            "field-impact",
+            "WS-FEE",
+            str(SAMPLES / "WRITER.cbl"),
+            str(SAMPLES / "MISSING.cbl"),
+            "--format",
+            "text",
+        )
+        assert "Unjoined:\n  - WRITER: DD INFILE is not bound to any dataset" in out
+        assert "Problems:\n  - " in out and "MISSING.cbl" in out

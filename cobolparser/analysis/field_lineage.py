@@ -52,14 +52,23 @@ Example:
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from collections import deque
 from dataclasses import dataclass, field, replace
+from functools import total_ordering
 from typing import Any
 
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.arithmetic import ArithmeticStatement, ComputeStatement
-from ..models.statements.base import CobolStatement
+from ..models.statements.base import (
+    ArithmeticExpression,
+    CobolExpression,
+    CobolStatement,
+    ConditionalExpression,
+    FunctionCall,
+    LogicalExpression,
+)
 from ..models.statements.call import CallStatement
 from ..models.statements.data import (
     DisplayStatement,
@@ -87,11 +96,20 @@ from ..models.statements.misc import (
 )
 from ._sql_flow import analyze_sql
 from .value_tracker import DynamicCallAnalyzer
-from .xref import ROLE_READ, ROLE_WRITE, XrefAnalyzer, _contained_node_ids
+from .xref import (
+    ROLE_READ,
+    ROLE_WRITE,
+    XrefAnalyzer,
+    _contained_node_ids,
+    _qualifier_names,
+    _split_operand,
+)
 
 #: Bumped whenever the shape of ``FieldFlowReport.to_dict()`` changes, so a
 #: consumer that stored reports (the LegacyLens backend) knows to recompute.
-LINEAGE_VERSION = "1"
+#: "2" (2026-10-08): OCCURS occurrences, ``PROGRAM#RETURNING`` linkage ports
+#: and unique keys for same-named items (``FILLER#2``).
+LINEAGE_VERSION = "2"
 
 ITEM = "item"
 PORT_FILE = "file"
@@ -116,6 +134,68 @@ _ASSIGN_PREFIX_TOKENS = frozenset(
 
 _REFMOD_RE = re.compile(r"\(\s*(\d+)\s*:\s*(\d+)?\s*\)\s*$")
 _QUOTED_RE = re.compile(r"^\s*(['\"]).*\1\s*$")
+#: One data reference: a (qualified) name, an optional subscript group and an
+#: optional reference modifier -- nothing else (no operator, no second name).
+_SINGLE_REF_RE = re.compile(
+    r"^\s*(?P<name>[A-Z0-9][\w-]*(?:\s+(?:OF|IN)\s+[A-Z0-9][\w-]*)*)\s*"
+    r"(?:\((?P<subs>[^():]*)\))?\s*(?:\([^()]*:[^()]*\))?\s*$",
+    re.IGNORECASE,
+)
+
+#: Occurrences of one table field mapped one by one; a table with more is
+#: treated as one byte range spanning every occurrence.
+_PLACEMENT_CAP = 1024
+
+#: Edge kinds a path may not take twice in a row (see ``_summarize``).
+_OVERLAY_CLASS = {"redefines": 1, "occurrence": 2, "table-alias": 3}
+
+
+def overlay_class(kind: str) -> int:
+    """0 for an ordinary edge; otherwise the class of alias edge *kind* is.
+    Two alias edges of one class are never chained: a redefines after a
+    redefines would carry one field of a record into every other through an
+    alias covering both, an occurrence after an occurrence would carry
+    ``T(1)`` into ``T(3)`` through the table as a whole, and a
+    ``table-alias`` (``LineageGraph``'s schema-less column match) after
+    another one ``PROD.T.C`` into ``TEST.T.C`` through ``T.C``."""
+    return _OVERLAY_CLASS.get(kind, 0)
+
+
+def _constant_subscripts(text: str) -> tuple[int, ...] | None:
+    """The literal subscripts of a single reference (``AMT (3)``,
+    ``T (2, 1)``); None when it has none or any is not a plain integer."""
+    match = _SINGLE_REF_RE.match(text)
+    if not match or match.group("subs") is None:
+        return None
+    tokens = [t for t in re.split(r"[\s,]+", match.group("subs").strip()) if t]
+    if not tokens or not all(t.isdigit() for t in tokens):
+        return None
+    return tuple(int(t) for t in tokens)
+
+
+def _expression_leaves(expr: Any) -> list[Any]:
+    """Every operand value inside a condition/arithmetic expression tree,
+    unsplit (``"Y ( I )"`` stays one operand, so its subscript can still be
+    told apart from the value)."""
+    if isinstance(expr, LogicalExpression):
+        return _expression_leaves(expr.left_condition) + _expression_leaves(
+            expr.right_condition
+        )
+    if isinstance(expr, FunctionCall):
+        out: list[Any] = []
+        for arg in expr.arguments:
+            out += _expression_leaves(arg)
+        return out
+    if isinstance(expr, (ConditionalExpression, ArithmeticExpression)):
+        return _expression_leaves(expr.left_operand) + _expression_leaves(
+            expr.right_operand
+        )
+    if isinstance(expr, CobolExpression):
+        if expr.operands:
+            return [str(op) for op in expr.operands]
+        raw = expr.get_metadata("raw_condition")
+        return [str(raw)] if raw else []
+    return [] if expr is None else [expr]
 
 
 def normalize_ddname(value: str | None) -> str:
@@ -137,20 +217,44 @@ def normalize_ddname(value: str | None) -> str:
 # --------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, order=True)
+@total_ordering
+@dataclass(frozen=True)
 class LineageNode:
     """One endpoint of a value flow.
 
     ``kind`` is ``"item"`` for a data item of the program (``name`` is its
     qualified name, ``offset``/``length`` its record-relative bytes), or a
     port kind (``name`` is the port key, ``offset``/``length`` the field's
-    bytes within the port; ``None`` for a SQL column or console item).
+    bytes within the port; ``None`` for a SQL column or console item, and
+    for a field whose offset moves with an ``OCCURS ... DEPENDING ON``
+    table before it).
+
+    An item named ``NAME(3)`` (``NAME(2,1)``) is one occurrence of a table
+    field, addressed with literal subscripts; ``NAME`` alone stands for any
+    occurrence. A second item with an already-used qualified name (two
+    ``01 FILLER`` groups) is keyed ``NAME#2``.
+
+    Nodes order by ``sort_key()``, where an unknown offset or length sorts
+    first.
     """
 
     kind: str
     name: str
     offset: int | None = None
     length: int | None = None
+
+    def sort_key(self) -> tuple[str, str, int, int]:
+        return (
+            self.kind,
+            self.name,
+            -1 if self.offset is None else self.offset,
+            -1 if self.length is None else self.length,
+        )
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, LineageNode):
+            return NotImplemented
+        return self.sort_key() < other.sort_key()
 
     @property
     def is_port(self) -> bool:
@@ -387,6 +491,8 @@ def apply_source_map(
 
 @dataclass
 class _Item:
+    #: Unique key: the qualified name, ``#n``-suffixed for the n-th item
+    #: sharing one (two ``01 FILLER`` groups).
     qname: str
     name: str
     level: int
@@ -397,6 +503,32 @@ class _Item:
     redefines_chain: list[str]
     root: str = ""
     children: list[str] = field(default_factory=list)
+    #: The qualified name as the layout spells it (no ``#n``).
+    raw: str = ""
+    #: ``OCCURS`` count (the maximum for DEPENDING ON); None when not a table.
+    occurs: int | None = None
+
+
+@dataclass(frozen=True)
+class _Ref:
+    """One operand: the item, a literal reference modifier ``(start, length)``
+    (0-based) and literal subscripts, when the operand has them."""
+
+    qname: str
+    window: tuple[int, int | None] | None = None
+    subscripts: tuple[int, ...] | None = None
+
+
+@dataclass(frozen=True)
+class _Piece:
+    """One elementary field (or one occurrence of it) inside an operand:
+    its node, its byte range relative to the operand's start, and whether
+    an edge through it can be exact."""
+
+    node: LineageNode
+    rel: int
+    length: int
+    exact: bool
 
 
 @dataclass
@@ -404,6 +536,26 @@ class _Context:
     paragraph: str | None
     guarded: bool
     location: SourceLocation | None
+
+
+_NO_CONTEXT = _Context(None, False, None)
+
+
+@dataclass
+class _PortLink:
+    """A table field mapped to a port: every literal-subscript occurrence of
+    it the program also names gets an exact edge to its own bytes there."""
+
+    leaf: str
+    kind: str
+    key: str
+    base: int
+    extent: int
+    edge_kind: str
+    statement: str
+    into_program: bool
+    out_of_program: bool
+    context: _Context
 
 
 class FieldFlowAnalyzer:
@@ -421,7 +573,12 @@ class FieldFlowAnalyzer:
     def _reset(self) -> None:
         self._items: dict[str, _Item] = {}
         self._by_name: dict[str, list[str]] = {}
+        self._by_raw: dict[str, list[str]] = {}
         self._leaves_cache: dict[str, list[_Item]] = {}
+        self._placements_cache: dict[str, list[tuple[int, int]] | None] = {}
+        self._wide: set[str] = set()
+        self._occ_nodes: dict[str, dict[str, LineageNode]] = {}
+        self._port_links: list[_PortLink] = []
         self._file_dd: dict[str, str] = {}
         self._file_records: dict[str, list[str]] = {}
         self._record_file: dict[str, str] = {}
@@ -476,6 +633,7 @@ class FieldFlowAnalyzer:
             if id(stmt) not in visited and not isinstance(stmt, SelectStatement):
                 visited.add(id(stmt))
                 self._visit(stmt, _Context(None, False, stmt.location))
+        self._link_occurrences()
 
         if undefined:
             names = ", ".join(undefined[:20])
@@ -497,16 +655,18 @@ class FieldFlowAnalyzer:
                 "offset": item.offset,
                 "length": item.length,
                 "record": item.root,
+                **({"occurs": item.occurs} if item.occurs is not None else {}),
             }
             for item in self._items.values()
         ]
         report.ports = sorted(self._ports.values(), key=lambda p: (p.kind, p.key))
         report.edges = sorted(
             self._edges.values(),
-            key=lambda e: (e.line, e.source, e.target, e.kind),
+            key=lambda e: (e.line, e.source.sort_key(), e.target.sort_key(), e.kind),
         )
         report.key_uses = sorted(
-            set(self._key_uses), key=lambda k: (k.line, k.port, k.item)
+            set(self._key_uses),
+            key=lambda k: (k.line, k.port.sort_key(), k.item, k.statement),
         )
         report.summary = self._summarize(report.edges)
         report.caveats = list(self._caveats)
@@ -523,33 +683,62 @@ class FieldFlowAnalyzer:
         from ..generators.data.layout_offsets import compute_program_data_items
 
         data = compute_program_data_items(ast)
+        # One block per 01/77 record: the layout emits the record root first,
+        # then its subordinates with every group *after* its own children.
+        blocks: list[list[dict[str, Any]]] = []
         for entry in data["items"]:
-            level = int(entry.get("level") or 0)
-            if level in (66, 88):
+            if int(entry.get("level") or 0) in (66, 88):
                 continue
-            name = (entry.get("name") or "").upper()
-            if not name or name == "FILLER":
-                # FILLER is still bytes: keep it for overlays, unnamed.
-                pass
-            item = _Item(
-                qname=entry["qualified_name"].upper(),
-                name=name,
-                level=level,
-                is_group=bool(entry.get("is_group")),
-                offset=entry.get("byte_offset"),
-                length=int(entry.get("byte_length") or 0),
-                parent=(entry.get("parent_qualified_name") or None),
-                redefines_chain=[
-                    str(r).upper() for r in entry.get("redefines_chain") or []
-                ],
-            )
-            if item.parent:
-                item.parent = item.parent.upper()
-            if item.qname in self._items:
-                continue
-            self._items[item.qname] = item
-            if name and name != "FILLER":
-                self._by_name.setdefault(name, []).append(item.qname)
+            if not entry.get("parent_qualified_name") or not blocks:
+                blocks.append([entry])
+            else:
+                blocks[-1].append(entry)
+        used: dict[str, int] = {}
+        for block in blocks:
+            raws = [str(e["qualified_name"]).upper() for e in block]
+            keys: list[str] = []
+            for raw in raws:
+                used[raw] = used.get(raw, 0) + 1
+                keys.append(raw if used[raw] == 1 else f"{raw}#{used[raw]}")
+            for index, entry in enumerate(block):
+                parent_raw = str(entry.get("parent_qualified_name") or "").upper()
+                parent = None
+                if parent_raw:
+                    # The enclosing group is the next entry of that name (a
+                    # group follows its children), else the record root.
+                    for later in range(index + 1, len(block)):
+                        if raws[later] == parent_raw:
+                            parent = keys[later]
+                            break
+                    else:
+                        parent = keys[0] if raws[0] == parent_raw else None
+                name = (entry.get("name") or "").upper()
+                occurs = entry.get("occurs")
+                item = _Item(
+                    qname=keys[index],
+                    name=name,
+                    level=int(entry.get("level") or 0),
+                    is_group=bool(entry.get("is_group")),
+                    offset=entry.get("byte_offset"),
+                    length=int(entry.get("byte_length") or 0),
+                    parent=parent,
+                    redefines_chain=[
+                        str(r).upper() for r in entry.get("redefines_chain") or []
+                    ],
+                    raw=raws[index],
+                    occurs=(
+                        int(occurs.get("max") or occurs.get("min") or 1)
+                        if isinstance(occurs, dict)
+                        else None
+                    ),
+                )
+                self._items[item.qname] = item
+                self._by_raw.setdefault(item.raw, []).append(item.qname)
+                # FILLER is still bytes: kept for overlays, never by name.
+                if name and name != "FILLER":
+                    self._by_name.setdefault(name, []).append(item.qname)
+        # Children in source order: within a block a group follows its
+        # children, so attach them in block order.
         for item in self._items.values():
             if item.parent and item.parent in self._items:
                 self._items[item.parent].children.append(item.qname)
@@ -574,6 +763,63 @@ class FieldFlowAnalyzer:
         self._leaves_cache[qname] = out
         return out
 
+    def _ancestry(self, qname: str) -> list[_Item]:
+        """*qname* and every group enclosing it, innermost first."""
+        chain: list[_Item] = []
+        node: _Item | None = self._items[qname]
+        while node is not None:
+            chain.append(node)
+            node = self._items.get(node.parent) if node.parent else None
+        return chain
+
+    def _dims(self, qname: str) -> list[tuple[int, int]]:
+        """``(stride, count)`` of every OCCURS level over *qname*, outermost
+        first: the subscripts a reference to it takes."""
+        return [
+            (node.length, node.occurs)
+            for node in reversed(self._ancestry(qname))
+            if node.occurs is not None
+        ]
+
+    def _table(self, qname: str) -> str | None:
+        """The innermost OCCURS item at or above *qname* (with more than one
+        occurrence), or None."""
+        for node in self._ancestry(qname):
+            if node.occurs is not None and node.occurs > 1:
+                return node.qname
+        return None
+
+    def _placements(self, qname: str) -> list[tuple[int, int]] | None:
+        """Every ``(offset, length)`` the bytes of *qname* occupy, one per
+        occurrence when it sits in a table; None when its offset is unknown
+        (after an ``OCCURS ... DEPENDING ON``). Past ``_PLACEMENT_CAP``
+        occurrences, one range spanning them all."""
+        if qname in self._placements_cache:
+            return self._placements_cache[qname]
+        item = self._items[qname]
+        out: list[tuple[int, int]] | None = None
+        if item.offset is not None:
+            offsets = [item.offset]
+            end = item.offset + item.length
+            wide = False
+            for node in self._ancestry(qname):
+                if node.occurs is None or node.occurs <= 1:
+                    continue
+                end += (node.occurs - 1) * node.length
+                if wide or len(offsets) * node.occurs > _PLACEMENT_CAP:
+                    wide = True
+                    continue
+                offsets = [
+                    o + k * node.length for o in offsets for k in range(node.occurs)
+                ]
+            if wide:
+                self._wide.add(qname)
+                out = [(item.offset, end - item.offset)]
+            else:
+                out = sorted((o, item.length) for o in offsets)
+        self._placements_cache[qname] = out
+        return out
+
     def _resolve(self, text: str) -> list[str]:
         """Qualified names a (possibly ``A OF B``-qualified) name means."""
         parts = [p.strip().upper() for p in text.split(" OF ") if p.strip()]
@@ -585,27 +831,76 @@ class FieldFlowAnalyzer:
             narrowed = [
                 q
                 for q in candidates
-                if all(qual in q.split(".")[:-1] for qual in qualifiers)
+                if all(
+                    qual in self._items[q].raw.split(".")[:-1] for qual in qualifiers
+                )
             ]
             if narrowed:
                 candidates = narrowed
         return list(candidates)
 
-    def _operand(self, value: Any, role: str) -> list[str]:
-        """Resolve one operand value (operand text or expression) to the
-        qualified names it reads or writes in *role*; subscripts, reference
-        modifiers and qualifiers are never the value itself."""
+    def _occurrence(
+        self, qname: str, subscripts: tuple[int, ...] | None
+    ) -> tuple[int, ...] | None:
+        """*subscripts* when they address one occurrence of *qname* (one per
+        OCCURS level, each within its bounds), else None."""
+        if subscripts is None:
+            return None
+        dims = self._dims(qname)
+        if len(dims) != len(subscripts) or not dims:
+            return None
+        if any(
+            s < 1 or s > count
+            for s, (_stride, count) in zip(subscripts, dims, strict=True)
+        ):
+            return None
+        return subscripts
+
+    def _refs(self, value: Any, role: str) -> list[_Ref]:
+        """The operands one value (operand text or expression) reads or
+        writes in *role*. Subscripts, reference-modifier offsets/lengths and
+        qualifiers locate the operand: they are never its value."""
         if value is None:
             return []
-        if isinstance(value, str) and _QUOTED_RE.match(value):
-            return []
-        out: list[str] = []
-        for name, resolved_role, _exact in self._xref._names_for(value, role):
-            if resolved_role != role:
-                continue
+        out: list[_Ref] = []
+        if isinstance(value, CobolExpression):
+            for leaf in _expression_leaves(value):
+                for ref in self._refs(leaf, role):
+                    if ref not in out:
+                        out.append(ref)
+            return out
+        if not isinstance(value, str):
+            names = [
+                name
+                for name, resolved, _exact in self._xref._names_for(value, role)
+                if resolved == role
+            ]
+            single: re.Match[str] | None = None
+        else:
+            if _QUOTED_RE.match(value):
+                return []
+            base, _refmod, _subscripts, exact = _split_operand(value)
+            if exact:
+                names = sorted(base - _qualifier_names(value))
+            else:
+                # An intrinsic FUNCTION: its arguments, best-effort.
+                names = sorted(base)
+            single = _SINGLE_REF_RE.match(value)
+        window = self._refmod(value) if single else None
+        subscripts = _constant_subscripts(value) if single else None
+        for name in names:
             for qname in self._resolve(name):
-                if qname not in out:
-                    out.append(qname)
+                ref = _Ref(qname, window, self._occurrence(qname, subscripts))
+                if ref not in out:
+                    out.append(ref)
+        return out
+
+    def _operand(self, value: Any, role: str) -> list[str]:
+        """Qualified names of the operands :meth:`_refs` finds."""
+        out: list[str] = []
+        for ref in self._refs(value, role):
+            if ref.qname not in out:
+                out.append(ref.qname)
         return out
 
     @staticmethod
@@ -624,6 +919,69 @@ class FieldFlowAnalyzer:
     def _item_node(self, qname: str) -> LineageNode:
         item = self._items[qname]
         return LineageNode(ITEM, qname, item.offset, item.length)
+
+    def _occ_node(self, qname: str, subscripts: tuple[int, ...]) -> LineageNode | None:
+        """The node of one literal-subscript occurrence of elementary
+        *qname*, joined both ways to the table field as a whole (inexact
+        ``occurrence`` edges: an unknown subscript may be this one)."""
+        item = self._items[qname]
+        if item.offset is None:
+            return None
+        offset = item.offset + sum(
+            (s - 1) * stride
+            for s, (stride, _n) in zip(subscripts, self._dims(qname), strict=True)
+        )
+        name = f"{qname}({','.join(str(s) for s in subscripts)})"
+        nodes = self._occ_nodes.setdefault(qname, {})
+        node = nodes.get(name)
+        if node is None:
+            node = LineageNode(ITEM, name, offset, item.length)
+            nodes[name] = node
+            generic = self._item_node(qname)
+            self._edge(node, generic, "occurrence", _NO_CONTEXT, "OCCURS", False)
+            self._edge(generic, node, "occurrence", _NO_CONTEXT, "OCCURS", False)
+        return node
+
+    def _ref_base(self, ref: _Ref) -> int | None:
+        """Where the operand's bytes start, record-relative."""
+        item = self._items[ref.qname]
+        if item.offset is None:
+            return None
+        base = item.offset
+        if ref.subscripts is not None:
+            dims = self._dims(ref.qname)
+            base += sum(
+                (s - 1) * stride
+                for s, (stride, _n) in zip(ref.subscripts, dims, strict=True)
+            )
+        return base
+
+    def _pieces(self, ref: _Ref) -> list[_Piece] | None:
+        """Elementary fields inside the operand, relative to its start;
+        None when its offset is unknown."""
+        item = self._items[ref.qname]
+        if not item.children:
+            if ref.subscripts is not None:
+                node = self._occ_node(ref.qname, ref.subscripts)
+                if node is not None:
+                    return [_Piece(node, 0, item.length, True)]
+            exact = self._table(ref.qname) is None
+            return [_Piece(self._item_node(ref.qname), 0, item.length, exact)]
+        base = self._ref_base(ref)
+        if base is None:
+            return None
+        end = base + item.length
+        out: list[_Piece] = []
+        for leaf in self._leaves(ref.qname):
+            placements = self._placements(leaf.qname)
+            if placements is None:
+                continue
+            node = self._item_node(leaf.qname)
+            exact = self._table(leaf.qname) is None
+            for offset, length in placements:
+                if offset + length > base and offset < end:
+                    out.append(_Piece(node, offset - base, length, exact))
+        return out
 
     # -- files -------------------------------------------------------------
 
@@ -711,7 +1069,10 @@ class FieldFlowAnalyzer:
             return
         line = ctx.location.line if ctx.location is not None else 0
         key = (source, target, kind, line)
-        if key in self._edges:
+        existing = self._edges.get(key)
+        if existing is not None:
+            if existing.exact and not exact:
+                self._edges[key] = replace(existing, exact=False)
             return
         self._edges[key] = LineageEdge(
             source=source,
@@ -724,79 +1085,86 @@ class FieldFlowAnalyzer:
             exact=exact,
         )
 
+    @staticmethod
+    def _as_ref(value: str | _Ref) -> _Ref:
+        return value if isinstance(value, _Ref) else _Ref(value)
+
     def _overlay(
         self,
-        source: str,
-        target: str,
+        source: str | _Ref,
+        target: str | _Ref,
         kind: str,
         ctx: _Context,
         statement: str,
-        source_window: tuple[int, int | None] | None = None,
-        target_window: tuple[int, int | None] | None = None,
     ) -> None:
         """Edges for a byte-for-byte transfer from *source* to *target*.
 
         Two elementary items: one edge (a numeric MOVE aligns by decimal
         point, not by byte). Anything involving a group: one edge per pair
         of elementary fields whose byte ranges, measured from the start of
-        each operand, overlap.
+        each operand, overlap -- every occurrence of a table field counted
+        at its own bytes, the edge inexact (the node stands for any
+        occurrence).
         """
-        src, tgt = self._items[source], self._items[target]
-        if not src.children and not tgt.children:
-            self._edge(
-                self._item_node(source), self._item_node(target), kind, ctx, statement
-            )
+        src_ref, tgt_ref = self._as_ref(source), self._as_ref(target)
+        src, tgt = self._items[src_ref.qname], self._items[tgt_ref.qname]
+        sources = self._pieces(src_ref)
+        targets = self._pieces(tgt_ref)
+        if not src.children and not tgt.children and sources and targets:
+            s, t = sources[0], targets[0]
+            self._edge(s.node, t.node, kind, ctx, statement, s.exact and t.exact)
             return
-        if src.offset is None or tgt.offset is None:
-            for s in self._leaves(source):
-                for t in self._leaves(target):
+        if sources is None or targets is None:
+            for s_leaf in self._leaves(src_ref.qname):
+                for t_leaf in self._leaves(tgt_ref.qname):
                     self._edge(
-                        self._item_node(s.qname),
-                        self._item_node(t.qname),
+                        self._item_node(s_leaf.qname),
+                        self._item_node(t_leaf.qname),
                         kind,
                         ctx,
                         statement,
                         exact=False,
                     )
             return
-        s_base, s_len = src.offset, src.length
-        t_base, t_len = tgt.offset, tgt.length
-        if source_window is not None:
-            s_base += source_window[0]
-            s_len = source_window[1] or max(s_len - source_window[0], 0)
-        if target_window is not None:
-            t_base += target_window[0]
-            t_len = target_window[1] or max(t_len - target_window[0], 0)
+        s_start, s_len = 0, src.length
+        t_start, t_len = 0, tgt.length
+        if src_ref.window is not None:
+            s_start = src_ref.window[0]
+            s_len = src_ref.window[1] or max(s_len - s_start, 0)
+        if tgt_ref.window is not None:
+            t_start = tgt_ref.window[0]
+            t_len = tgt_ref.window[1] or max(t_len - t_start, 0)
         span = min(s_len, t_len)
-        sources = [
-            (s, s.offset - s_base)
-            for s in self._leaves(source)
-            if s.offset is not None
-            and s.offset + s.length > s_base
-            and s.offset < s_base + span
+        # Both sides relative to the start of the bytes actually moved.
+        moved_s = [
+            replace(p, rel=p.rel - s_start)
+            for p in sources
+            if p.rel + p.length > s_start and p.rel < s_start + span
         ]
-        targets = [
-            (t, t.offset - t_base)
-            for t in self._leaves(target)
-            if t.offset is not None
-            and t.offset + t.length > t_base
-            and t.offset < t_base + span
-        ]
-        for s, s_rel in sources:
-            for t, t_rel in targets:
-                if s_rel < t_rel + t.length and t_rel < s_rel + s.length:
-                    self._edge(
-                        self._item_node(s.qname),
-                        self._item_node(t.qname),
-                        kind,
-                        ctx,
-                        statement,
-                        exact=(s_rel == t_rel and s.length == t.length),
+        moved_t = sorted(
+            (
+                replace(p, rel=p.rel - t_start)
+                for p in targets
+                if p.rel + p.length > t_start and p.rel < t_start + span
+            ),
+            key=lambda p: p.rel,
+        )
+        starts = [p.rel for p in moved_t]
+        longest = max((p.length for p in moved_t), default=0)
+        for s in moved_s:
+            low = bisect_left(starts, s.rel - longest + 1)
+            for t in moved_t[low:]:
+                if t.rel >= s.rel + s.length:
+                    break
+                if s.rel < t.rel + t.length:
+                    exact = (
+                        s.exact and t.exact and s.rel == t.rel and s.length == t.length
                     )
+                    self._edge(s.node, t.node, kind, ctx, statement, exact)
 
     def _to_port(
         self,
-        qname: str,
+        operand: str | _Ref,
         port: Port,
         kind: str,
         ctx: _Context,
@@ -805,19 +1173,78 @@ class FieldFlowAnalyzer:
         into_program: bool,
         out_of_program: bool,
     ) -> None:
-        """Connect every elementary field of *qname* to its byte range on
-        *port*, measured from the start of *qname*."""
-        item = self._items[qname]
-        base = item.offset or 0
-        for leaf in self._leaves(qname):
-            rel = (leaf.offset - base) if leaf.offset is not None else None
-            node = LineageNode(port.kind, port.key, rel, leaf.length)
+        """Connect every elementary field of *operand* to its byte range on
+        *port*, measured from the start of *operand*. A table field reaches
+        the bytes of every occurrence (inexact); an occurrence the program
+        names with literal subscripts gets its own exact edge
+        (:meth:`_link_occurrences`)."""
+        ref = self._as_ref(operand)
+        if into_program:
+            port.directions.add("in")
+        if out_of_program:
+            port.directions.add("out")
+
+        def connect(node: LineageNode, pnode: LineageNode, exact: bool) -> None:
             if out_of_program:
-                port.directions.add("out")
-                self._edge(self._item_node(leaf.qname), node, kind, ctx, statement)
+                self._edge(node, pnode, kind, ctx, statement, exact)
             if into_program:
-                port.directions.add("in")
-                self._edge(node, self._item_node(leaf.qname), kind, ctx, statement)
+                self._edge(pnode, node, kind, ctx, statement, exact)
+
+        pieces = self._pieces(ref)
+        item = self._items[ref.qname]
+        if pieces is None or item.children:
+            # A field whose offset moves with an OCCURS DEPENDING ON table
+            # before it has no byte range of its own on the port.
+            for leaf in self._leaves(ref.qname):
+                if pieces is None or self._placements(leaf.qname) is None:
+                    node = LineageNode(port.kind, port.key, None, leaf.length)
+                    connect(self._item_node(leaf.qname), node, True)
+        if not pieces:
+            return
+        base = self._ref_base(ref)
+        linked: set[str] = set()
+        for piece in pieces:
+            pnode = LineageNode(port.kind, port.key, piece.rel, piece.length)
+            connect(piece.node, pnode, piece.exact)
+            if (
+                not piece.exact
+                and item.children
+                and base is not None
+                and piece.node.name not in linked
+            ):
+                linked.add(piece.node.name)
+                self._port_links.append(
+                    _PortLink(
+                        leaf=piece.node.name,
+                        kind=port.kind,
+                        key=port.key,
+                        base=base,
+                        extent=item.length,
+                        edge_kind=kind,
+                        statement=statement,
+                        into_program=into_program,
+                        out_of_program=out_of_program,
+                        context=ctx,
+                    )
+                )
+
+    def _link_occurrences(self) -> None:
+        """Exact port edges for literal-subscript occurrences of table fields
+        that reach a port as part of their record or group."""
+        for link in self._port_links:
+            ctx = link.context
+            for node in self._occ_nodes.get(link.leaf, {}).values():
+                if node.offset is None or not (
+                    link.base <= node.offset < link.base + link.extent
+                ):
+                    continue
+                pnode = LineageNode(
+                    link.kind, link.key, node.offset - link.base, node.length
+                )
+                if link.out_of_program:
+                    self._edge(node, pnode, link.edge_kind, ctx, link.statement)
+                if link.into_program:
+                    self._edge(pnode, node, link.edge_kind, ctx, link.statement)
 
     def _redefines_edges(self) -> None:
         """Two-way edges between elementary fields that share bytes:
@@ -825,32 +1252,45 @@ class FieldFlowAnalyzer:
         buffers: dict[str, list[str]] = {}
         for item in self._items.values():
             if item.parent is None:
-                anchor = (
-                    item.redefines_chain[-1] if item.redefines_chain else item.qname
-                )
-                anchor = anchor.upper()
+                anchor = item.qname
+                if item.redefines_chain:
+                    raw = item.redefines_chain[-1].upper()
+                    anchor = (self._by_raw.get(raw) or [raw])[0]
                 file_name = self._record_file.get(item.qname) or self._record_file.get(
                     anchor
                 )
                 key = f"FD:{file_name}" if file_name else anchor
                 buffers.setdefault(key, []).append(item.qname)
-        ctx = _Context(None, False, None)
         for roots in buffers.values():
-            leaves = [leaf for root in roots for leaf in self._leaves(root)]
-            leaves = [leaf for leaf in leaves if leaf.offset is not None]
-            leaves.sort(key=lambda leaf: (leaf.offset, leaf.qname))
-            for i, a in enumerate(leaves):
-                assert a.offset is not None
-                for b in leaves[i + 1 :]:
-                    assert b.offset is not None
-                    if b.offset >= a.offset + a.length:
+            pieces: list[tuple[int, int, _Item]] = []
+            for root in roots:
+                for leaf in self._leaves(root):
+                    for offset, length in self._placements(leaf.qname) or []:
+                        if length:
+                            pieces.append((offset, length, leaf))
+            pieces.sort(key=lambda p: (p[0], p[2].qname))
+            for i, (a_off, a_len, a) in enumerate(pieces):
+                for b_off, b_len, b in pieces[i + 1 :]:
+                    if b_off >= a_off + a_len:
                         break
-                    if a.qname == b.qname or a.length == 0 or b.length == 0:
+                    if a.qname == b.qname:
                         continue
-                    exact = a.offset == b.offset and a.length == b.length
+                    a_table, b_table = self._table(a.qname), self._table(b.qname)
+                    if (
+                        (a.qname in self._wide or b.qname in self._wide)
+                        and a_table is not None
+                        and a_table == b_table
+                    ):
+                        continue  # two fields of one table, spanned as a whole
+                    exact = (
+                        a_off == b_off
+                        and a_len == b_len
+                        and a_table is None
+                        and b_table is None
+                    )
                     na, nb = self._item_node(a.qname), self._item_node(b.qname)
-                    self._edge(na, nb, "redefines", ctx, "REDEFINES", exact)
-                    self._edge(nb, na, "redefines", ctx, "REDEFINES", exact)
+                    self._edge(na, nb, "redefines", _NO_CONTEXT, "REDEFINES", exact)
+                    self._edge(nb, na, "redefines", _NO_CONTEXT, "REDEFINES", exact)
 
     def _linkage_edges(self, ast: CobolProgram) -> None:
         from .program_signature import ProgramSignatureExtractor
@@ -858,22 +1298,35 @@ class FieldFlowAnalyzer:
         signature = ProgramSignatureExtractor().analyze(ast)
         for entry in signature.entry_points:
             name = (entry.name or self._program_id).upper().strip("'\"")
+            ctx = _Context(None, False, ast.location)
+            verb = (
+                "PROCEDURE DIVISION" if entry.kind == "procedure-division" else "ENTRY"
+            )
             for position, parameter in enumerate(entry.parameters, start=1):
                 for qname in self._resolve(parameter.name):
                     port = self._port(PORT_LINKAGE, f"{name}#{position}")
                     port.detail.update({"entry": name, "position": position})
-                    ctx = _Context(None, False, ast.location)
                     self._to_port(
                         qname,
                         port,
                         "linkage",
                         ctx,
-                        (
-                            "PROCEDURE DIVISION USING"
-                            if entry.kind == "procedure-division"
-                            else "ENTRY USING"
-                        ),
+                        f"{verb} USING",
                         into_program=True,
+                        out_of_program=True,
+                    )
+            if entry.returning:
+                # The value handed back to ``CALL ... RETURNING``.
+                for qname in self._resolve(entry.returning):
+                    port = self._port(PORT_LINKAGE, f"{name}#RETURNING")
+                    port.detail.update({"entry": name, "position": "RETURNING"})
+                    self._to_port(
+                        qname,
+                        port,
+                        "linkage",
+                        ctx,
+                        f"{verb} RETURNING",
+                        into_program=False,
                         out_of_program=True,
                     )
 
@@ -921,20 +1374,20 @@ class FieldFlowAnalyzer:
             self._key_use(stmt.file_name, stmt.key_name, ctx, "START")
         elif isinstance(stmt, ReleaseStatement):
             if stmt.record_name and stmt.from_source:
-                for src in self._operand(stmt.from_source, ROLE_READ):
-                    for rec in self._operand(stmt.record_name, ROLE_READ):
+                for src in self._refs(stmt.from_source, ROLE_READ):
+                    for rec in self._refs(stmt.record_name, ROLE_READ):
                         self._overlay(src, rec, "move", ctx, "RELEASE FROM")
         elif isinstance(stmt, ReturnStatement):
             if stmt.file_name and stmt.into_target:
-                for rec in self._file_records.get(stmt.file_name.upper(), []):
-                    for tgt in self._operand(stmt.into_target, ROLE_WRITE):
-                        self._overlay(rec, tgt, "move", ctx, "RETURN INTO")
+                for record in self._file_records.get(stmt.file_name.upper(), []):
+                    for into in self._refs(stmt.into_target, ROLE_WRITE):
+                        self._overlay(record, into, "move", ctx, "RETURN INTO")
         elif isinstance(stmt, (SortStatement, MergeStatement)):
             self._visit_sort(stmt, ctx)
         elif isinstance(stmt, IOAcceptStatement):
             source = (stmt.from_source or "SYSIN").upper()
             port = self._port(PORT_CONSOLE, source)
-            for tgt in self._operand(stmt.target, ROLE_WRITE):
+            for tgt in self._refs(stmt.target, ROLE_WRITE):
                 self._to_port(
                     tgt,
                     port,
@@ -947,7 +1400,7 @@ class FieldFlowAnalyzer:
         elif isinstance(stmt, DisplayStatement):
             port = self._port(PORT_CONSOLE, "SYSOUT")
             for item in stmt.display_items:
-                for src in self._operand(item, ROLE_READ):
+                for src in self._refs(item, ROLE_READ):
                     self._to_port(
                         src,
                         port,
@@ -970,67 +1423,75 @@ class FieldFlowAnalyzer:
             self._caveat("EXEC DLI I/O areas are not traced yet")
 
     def _reads_to_writes(self, stmt: CobolStatement, kind: str, ctx: _Context) -> None:
-        reads: list[str] = []
-        writes: list[str] = []
+        reads: list[_Ref] = []
+        writes: list[_Ref] = []
         for value, role, _exact in self._xref._role_assignments(stmt):
             if role == ROLE_READ:
-                reads += [q for q in self._operand(value, ROLE_READ) if q not in reads]
+                reads += [r for r in self._refs(value, ROLE_READ) if r not in reads]
             elif role == ROLE_WRITE:
-                writes += [
-                    q for q in self._operand(value, ROLE_WRITE) if q not in writes
-                ]
+                writes += [r for r in self._refs(value, ROLE_WRITE) if r not in writes]
         statement = stmt.statement_type or type(stmt).__name__
         for src in reads:
-            for tgt in writes:
-                for s in self._leaves(src):
-                    for t in self._leaves(tgt):
+            for s in self._pieces(src) or self._loose_pieces(src):
+                for tgt in writes:
+                    for t in self._pieces(tgt) or self._loose_pieces(tgt):
                         self._edge(
-                            self._item_node(s.qname),
-                            self._item_node(t.qname),
-                            kind,
-                            ctx,
-                            statement,
+                            s.node, t.node, kind, ctx, statement, s.exact and t.exact
                         )
+
+    def _loose_pieces(self, ref: _Ref) -> list[_Piece]:
+        """Every elementary field of an operand whose offset is unknown."""
+        return [
+            _Piece(self._item_node(leaf.qname), 0, leaf.length, False)
+            for leaf in self._leaves(ref.qname)
+        ]
 
     def _visit_move(self, stmt: MoveStatement, ctx: _Context) -> None:
         if not stmt.source:
             return
-        sources = self._operand(stmt.source, ROLE_READ)
+        sources = self._refs(stmt.source, ROLE_READ)
         if not sources:
             return
-        src_window = self._refmod(stmt.source)
         for target_text in stmt.targets:
-            tgt_window = self._refmod(target_text)
-            for tgt in self._operand(target_text, ROLE_WRITE):
+            for tgt in self._refs(target_text, ROLE_WRITE):
                 for src in sources:
                     if stmt.is_corresponding:
-                        self._corresponding(src, tgt, ctx)
+                        self._corresponding(src.qname, tgt.qname, ctx)
                     else:
-                        self._overlay(
-                            src, tgt, "move", ctx, "MOVE", src_window, tgt_window
-                        )
+                        self._overlay(src, tgt, "move", ctx, "MOVE")
 
     def _corresponding(self, source: str, target: str, ctx: _Context) -> None:
+        """``MOVE CORRESPONDING``: subordinates with the same name path below
+        the two groups pair up when at least one of the two is elementary
+        (two groups of one name are not a pair; their own subordinates may
+        be). FILLER, REDEFINES and OCCURS items, and what is under them, do
+        not take part."""
+
         def paths(root: str) -> dict[tuple[str, ...], str]:
-            base = self._items[root].qname.split(".")
+            base = len(self._items[root].raw.split("."))
             out: dict[tuple[str, ...], str] = {}
-            for leaf in self._leaves(root):
-                rel = tuple(leaf.qname.split(".")[len(base) :])
-                if rel and "FILLER" not in rel:
-                    out[rel] = leaf.qname
+            pending = list(self._items[root].children)
+            while pending:
+                qname = pending.pop()
+                item = self._items[qname]
+                if (
+                    item.name in ("", "FILLER")
+                    or item.redefines_chain
+                    or item.occurs is not None
+                ):
+                    continue
+                out.setdefault(tuple(item.raw.split(".")[base:]), qname)
+                pending.extend(item.children)
             return out
 
         target_paths = paths(target)
-        for rel, s in paths(source).items():
+        for rel, s in sorted(paths(source).items()):
             t = target_paths.get(rel)
-            if t is not None:
-                self._edge(
-                    self._item_node(s),
-                    self._item_node(t),
-                    "move",
-                    ctx,
-                    "MOVE CORRESPONDING",
-                )
+            if t is None:
+                continue
+            if self._items[s].children and self._items[t].children:
+                continue
+            self._overlay(s, t, "move", ctx, "MOVE CORRESPONDING")
 
     def _visit_read(self, stmt: IOReadStatement, ctx: _Context) -> None:
         file_name = (stmt.file_name or "").upper()
@@ -1055,7 +1516,7 @@ class FieldFlowAnalyzer:
                 out_of_program=False,
             )
             if stmt.into_target:
-                for tgt in self._operand(stmt.into_target, ROLE_WRITE):
+                for tgt in self._refs(stmt.into_target, ROLE_WRITE):
                     self._overlay(record, tgt, "move", ctx, "READ INTO")
         self._key_use(file_name, stmt.key_name, ctx, "READ KEY")
 
@@ -1065,7 +1526,7 @@ class FieldFlowAnalyzer:
         verb = "REWRITE" if isinstance(stmt, IORewriteStatement) else "WRITE"
         for record in self._operand(stmt.record_name, ROLE_READ):
             if stmt.from_clause:
-                for src in self._operand(stmt.from_clause, ROLE_READ):
+                for src in self._refs(stmt.from_clause, ROLE_READ):
                     self._overlay(src, record, "move", ctx, f"{verb} FROM")
             root = self._items[record].root
             file_name = self._record_file.get(root)
@@ -1159,9 +1620,11 @@ class FieldFlowAnalyzer:
                 port.detail.update(
                     {"callee": callee, "position": position, "dynamic": stmt.is_dynamic}
                 )
-                for qname in self._resolve(parameter.name):
+                # The same operand path a MOVE takes: subscripts, reference
+                # modification and qualifiers locate the argument.
+                for ref in self._refs(parameter.name, ROLE_READ):
                     self._to_port(
-                        qname,
+                        ref,
                         port,
                         "call",
                         ctx,
@@ -1175,9 +1638,9 @@ class FieldFlowAnalyzer:
                     continue
                 port = self._port(PORT_CALL, f"{callee}#RETURNING")
                 port.detail.update({"callee": callee, "position": "RETURNING"})
-                for qname in self._resolve(value):
+                for ref in self._refs(value, ROLE_WRITE):
                     self._to_port(
-                        qname,
+                        ref,
                         port,
                         "call",
                         ctx,
@@ -1235,23 +1698,26 @@ class FieldFlowAnalyzer:
         for edge in edges:
             out_edges.setdefault(edge.source, []).append(edge)
         flows: dict[tuple[LineageNode, LineageNode], PortFlow] = {}
-        starts = sorted({e.source for e in edges if e.source.is_port})
-        # State is (node, arrived over a redefines edge). Two overlays in a row
-        # would carry a value from one field of a record to an unrelated
-        # field of the same record through the alias covering both, so a
-        # redefines edge is never followed by another one.
-        State = tuple[LineageNode, bool]
+        starts = sorted(
+            {e.source for e in edges if e.source.is_port}, key=LineageNode.sort_key
+        )
+        # State is (node, overlay class of the edge it arrived over). Two
+        # alias edges of one class in a row are never followed (see
+        # ``overlay_class``): two redefines would carry a value from one
+        # field of a record to an unrelated one through the alias covering
+        # both, two occurrence edges one occurrence into another.
+        State = tuple[LineageNode, int]
         for start in starts:
             parent: dict[State, tuple[State, LineageEdge]] = {}
-            first: State = (start, False)
+            first: State = (start, 0)
             queue: deque[State] = deque([first])
             seen = {first}
             while queue:
                 state = queue.popleft()
-                node, via_overlay = state
+                node, arrived = state
                 for edge in out_edges.get(node, []):
-                    overlay = edge.kind == "redefines"
-                    if overlay and via_overlay:
+                    overlay = overlay_class(edge.kind)
+                    if overlay and overlay == arrived:
                         continue
                     nxt: State = (edge.target, overlay)
                     if nxt in seen:
@@ -1277,4 +1743,6 @@ class FieldFlowAnalyzer:
                         )
                         continue
                     queue.append(nxt)
-        return sorted(flows.values(), key=lambda f: (f.source, f.target))
+        return sorted(
+            flows.values(), key=lambda f: (f.source.sort_key(), f.target.sort_key())
+        )

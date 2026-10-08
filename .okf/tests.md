@@ -1226,3 +1226,13 @@ work items. `tests/unit/test_scan.py`'s failing-analyzer stub takes the new
 `TestStoredJoinEdges` (test_lineage_graph.py) pins that a graph rebuilt
 from `join_edges()` answers every query identically; `test_lineage_jcl.py`
 covers `jobs_from_sources` (in-memory JCL + PROCs).
+Review regressions (2026-10-08) use small inline programs (`_program` in
+test_field_lineage.py, `_source` in test_lineage_graph.py):
+`TestOccursDependingOn` / `TestOccursTables` (None offsets, every
+occurrence inexact, `AMT(3)` exact, >1024 occurrences), `TestDuplicateNames`,
+`TestOperands` (CALL subscript/refmod/qualifier, subscripts not values,
+CORRESPONDING group vs elementary), `TestReturning`; `TestStoredJoinState`
+and `TestReviewFixes` (RETURNING join, schema candidates, occurrence join
+at the right reader field, duplicate PROGRAM-ID, NULLFILE, MQI names,
+`start_found`); `TestConcatenationAndOperands` (lineage_jcl); and the
+`field-impact` exit-code / text tests in test_lineage_cli.py.
