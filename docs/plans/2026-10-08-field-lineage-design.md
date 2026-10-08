@@ -188,11 +188,23 @@ if I change this field".
 The backend already stores everything the join needs except the per-program
 summary:
 
-- store each program's `FieldFlowReport` summary at parse time, alongside
-  the existing parse result (one JSON column, or a `field_flows` table if
-  queries need it), behind the adapter in `src/parsers/cobol/`;
-- run the Layer 2 join over stored summaries, using `RecordField` offsets and
-  the existing `COBOL_DATASET_READS/WRITES` rows for the dataset match;
+Both steps run during upload and are stored in Postgres:
+
+- **Per program, at parse time.** The parse worker that already handles the
+  COBOL file (behind the adapter in `src/parsers/cobol/`) also runs
+  `FieldFlowAnalyzer` and saves its port-to-port summary to a new
+  `field_flows` table: one row per edge (program, source field and byte
+  range, target field and byte range, port, kind, line, guarded). Re-parsing
+  a program replaces only its own rows.
+- **Across programs, after extraction.** A post-extraction step in
+  `UnifiedUploadOrchestrator`, next to `CobolDatasetResolver` and reusing its
+  `COBOL_DATASET_READS/WRITES` rows and the `RecordField` offsets, runs the
+  Layer 2 join over the stored summaries and writes `field_lineage_edges`
+  (from program/field → to program/field, via dataset/call/table,
+  confidence). It reruns whenever any program in the application is
+  re-parsed.
+- Queries walk `field_lineage_edges` with a recursive CTE. Nothing is parsed
+  at query time.
 - `GET /api/v1/record-fields/{id}/impact?direction=forward|backward&depth=N`;
 - frontend: from a field in the code viewer or record-layout view, a
   "Field impact" panel listing affected programs and fields with the evidence
