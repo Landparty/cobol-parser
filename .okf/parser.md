@@ -3,7 +3,7 @@ type: Module
 title: Parser
 description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-09-28T00:00:00Z
+timestamp: 2026-10-08T00:00:00Z
 ---
 
 # Overview
@@ -70,9 +70,10 @@ instance had parsed last.
 2026-08-15 per Copilot review on PR #153) seeds `self.warnings` with
 caller-supplied diagnostics at the top of the *first* `parse()` call, after
 `self.warnings.clear()` — for warnings a caller already collected before
-constructing the parser (`parse_cobol()`'s own pre-normalization of
-fixed-format source runs before its `CobolParser` instance exists; see
-[preprocessing.md](preprocessing.md)'s "Column 73+ overflow warning").
+constructing the parser. (`parse_cobol()` used it for its own
+pre-normalization of fixed-format source until 2026-10-08; it now leaves
+detection and normalization to `CobolParser`, so nothing in the library
+passes it any more -- it stays as public API.)
 Consumed (cleared) immediately after being applied, so reusing one
 `CobolParser` instance across multiple `parse()` calls only attributes
 those initial warnings to the first call, not every later, unrelated one —
@@ -119,6 +120,31 @@ CobolParser.parse(source)
             └─ StatementParserRegistry  (first-match dispatch)
                  └─ 72 statement parsers (every COBOL verb)
 ```
+
+`parse_cobol()` reads a path if given one, then hands the source to a
+`CobolParser` (`preprocess_fixed=None` maps to the parser's auto-detect with
+`free_form=False`, so detection runs even when the caller set `free_form`,
+as it always has). Before 2026-10-08 it detected and normalized
+fixed-format source itself, a second copy of the parser's own logic.
+
+`_parse_core` is a thin driver over three stages (split out 2026-10-08,
+behavior unchanged): `_preprocess_source()` -> `(text, free_form)` (skip
+to the header, directive strip, fixed-format detection +
+`_normalize_fixed_source()`, which calls
+`source_format.normalize_with_recovery()` -- the unterminated-literal
+retry shared with the lexer's `_tokenize_source`, conditional
+compilation, COPY strip, REPLACE), `_tokenize()` (lexer errors/warnings,
+builds `self.stream`) and `parse_program()`. Each stage returns `None` /
+`False` when FAIL_FAST stops the parse. Inside `parse_program()`, a token no
+division parser matches goes to `_handle_unmatched_token()` (`END PROGRAM`
+-> continue; EOF -> clean stop; else the "No recognizable COBOL division"
+error), and each matched division runs through `_parse_division()` (sets
+the host, adds the node, names the unit from `program_id` / `unit_kind`).
+
+Fixed- vs free-format detection lives in
+`cobolparser/preprocess/source_format.py` (`detect_fixed_format`, moved
+out of `parser.py` 2026-10-08). `cobolparser.parser._detect_fixed_format`
+and `_sequence_area_is_fixed_like` stay importable as aliases.
 
 # Core Infrastructure (`cobolparser/core/`)
 
