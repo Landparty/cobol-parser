@@ -128,6 +128,10 @@ Three properties it owes its caller, all pinned by `tests/unit/test_scan.py`:
   carries it as `origin_file`/`origin_line` (serialized as `"origin"`).
   Before 2026-09-27 a paragraph after a `COPY` reported the expanded line,
   and one inside a member claimed a line of the program file.
+  The `lineage` analyzer (2026-10-08) is the exception to the generic pass:
+  its edges carry a bare `line`, not a `location`, so `_run_analyzer`
+  receives the source map and applies `field_lineage.apply_source_map`
+  itself.
 
 `ScanOptions` carries both layout knobs `parse_cobol` takes: `free_form`
 (the lexer hint) and `preprocess_fixed` (`None` auto-detects, `True`/`False`

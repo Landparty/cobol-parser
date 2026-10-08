@@ -38,7 +38,7 @@ Verified against each repo on 2026-10-08.
 | LINKAGE parameters in USING order | `analysis/program_signature.py`, `ProgramSignature` | The callee side of a CALL join |
 | Dynamic CALL candidate targets | `analysis/value_tracker.py`, `DynamicCallAnalyzer` | CALL joins through `CALL WS-PGM` |
 | SQL host variables ↔ DCLGEN columns | `analysis/host_var_resolver.py`, `dclgen_check.py` | `table.column` ports |
-| DD → dataset per step | `jcl/bindings.py`, `resolve_dd_bindings()` → `DatasetBinding(ddname, dataset, step, job, ...)` | File ports joined across jobs |
+| DD → dataset per step | **jcl-parser** (`parse_jcl` + `explode_job`), read by `analysis/lineage_jcl.py` `bindings_from_jobs()`; or the backend's `COBOL_DATASET_READS/WRITES` rows. Not `cobolparser/jcl/`, which is expected to go | File ports joined across jobs |
 | Cross-file program/copy graph, parallel build | `analysis/codebase.py`, `CodebaseGraphBuilder` | The scaffolding the cross-program join reuses (workers, fault isolation) |
 | Record fields with offsets, FD→layout bindings, COBOL DD→DSN rows | backend `RecordField.offset_bytes/length_bytes`, `FileRecordBinding`, `CobolDatasetResolver` → `COBOL_DATASET_READS/WRITES` | Everything needed to do the cross-program join in SQL |
 
@@ -118,13 +118,15 @@ what could not be followed: unresolved dynamic CALL, pointer/`SET ADDRESS`,
 
 ### Layer 2: cross-program join
 
-`analysis/lineage_graph.py`, `LineageGraphBuilder(paths, jcl_paths=...)`,
-built like `CodebaseGraphBuilder` (same worker pool, same per-file fault
-isolation). It loads one `FieldFlowReport` summary per program and joins
-ports:
+`analysis/lineage_graph.py`, `LineageGraph(reports, bindings, passthroughs)`.
+The reports come from `scan_files(..., analyzers=("lineage",))` (same worker
+pool, same per-file fault isolation) or from the backend's stored rows; the
+bindings and utility pass-throughs from jcl-parser through
+`lineage_jcl.bindings_from_jobs()`, or from whoever already parsed the JCL.
+It joins ports:
 
 - **Files through JCL.** A program's `SELECT f ASSIGN TO DDNAME` is bound to
-  a dataset by `resolve_dd_bindings()` for each step that runs it. A writer's
+  a dataset by the `DD` of each step that runs it. A writer's
   output port and a reader's input port on the same dataset are joined field
   by field on overlapping byte ranges:
   - identical `(offset, length)` → `confidence="exact"`;
@@ -155,9 +157,14 @@ ports:
 ### Queries
 
 ```python
-graph = LineageGraphBuilder(["cobol/"], jcl_paths=["jcl/", "proc/"]).build()
+scan = scan_files(cobol_files, ScanOptions(analyzers=("lineage",), copybook_paths=("copybook/",)))
+reports, problems = reports_from_scan(scan)
+jobs, _ = load_jobs(["jcl/"], proc_path="proc/")          # needs jcl-parser
+graph = LineageGraph(reports, *bindings_from_jobs(jobs))
 graph.impact("TRAN-AMT OF TRAN-REC", program="FEECALC")   # forward
-graph.sources("GL-TOTAL", program="GLRECON")              # backward
+graph.impact("GL-TOTAL", program="GLRECON", direction="backward")
+graph.impact_table("TRANSACTION_HIST.AMOUNT", direction="backward")
+graph.impact_dataset("BANK.PROD.TRAN.DAILY")
 graph.key_relationships()  # test-data Phase 4: flows that land in a key
 ```
 
@@ -172,10 +179,13 @@ no separate inference pass.
 ### CLI
 
 ```
-cobol-parser lineage <file.cbl> [--field NAME] [--format json|text]
-cobol-parser field-impact FIELD PATH... --program NAME [--jcl DIR]...
-    [--direction forward|backward] [--depth N] [--format json|text|mermaid]
-    [--workers N] [--copybook-path DIR]
+cobol-parser lineage <file.cbl> [--field NAME] [--direction forward|backward]
+    [--format json|text]
+cobol-parser field-impact [FIELD] PATH... [--program NAME]
+    [--table T.C | --dataset DSN] [--jcl PATH]... [--proc-path DIR]
+    [--bindings FILE.json] [--direction forward|backward] [--depth N]
+    [--key-relationships] [--format json|text] [--workers N]
+    [--copybook-path DIR]
 ```
 
 `lineage` is the single-program report (Layer 1). `field-impact` is the
@@ -249,7 +259,7 @@ and REDEFINES alias given their own cases.
 | # | Deliverable | Repo | Size |
 |---|---|---|---|
 | 1 | `FieldFlowAnalyzer` + `lineage` CLI (Layer 1) | cobol-parser | M |
-| 2 | `LineageGraphBuilder` + `field-impact` CLI: files via JCL, CALL, SQL (Layer 2) | cobol-parser | M |
+| 2 | `LineageGraph` + `field-impact` CLI: files via JCL (jcl-parser), CALL, SQL (Layer 2) | cobol-parser | M |
 | 3 | `key_relationships()`, which is test-data Phase 4's inference half | cobol-parser | S |
 | 4 | Summary storage, join over stored summaries, impact endpoint, editable key relationships | backend | M |
 | 5 | Field impact panel | frontend | S |
