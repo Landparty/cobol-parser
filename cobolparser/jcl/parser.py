@@ -55,8 +55,9 @@ _INSTALL_HINT = (
     "pip install 'cobol-parser[jcl]'"
 )
 
-#: A JOB card: ``//name JOB`` with the operation as its own word.
-_JOB_CARD = re.compile(r"^//([A-Z@#$][A-Z0-9@#$]{0,7})\s+JOB(?:\s|$)", re.IGNORECASE)
+#: A JOB card: ``//name JOB`` (or a nameless ``// JOB``, which is an error
+#: but still starts a job) with the operation as its own word.
+_JOB_CARD = re.compile(r"^//([A-Z@#$][A-Z0-9@#$]{0,7})?\s+JOB(?:\s|$)", re.IGNORECASE)
 
 #: Keys ``jclparser`` uses for its own bookkeeping, not coded parameters.
 _INTERNAL_KEYS = frozenset({"_records"})
@@ -88,7 +89,8 @@ def _library_members(proc_paths: Sequence[str | os.PathLike[str]]) -> dict[str, 
 def _make_loaders(
     proc_paths: Sequence[str | os.PathLike[str]],
 ) -> tuple[Any, Any]:
-    """(procedure loader factory, INCLUDE member loader) over ``proc_paths``."""
+    """(procedure loader, INCLUDE member loader) over ``proc_paths``; one pair
+    per parse, so each member is read and parsed once."""
     from jclparser.include_loader import IncludeMemberLoader
     from jclparser.proc_loader import ProcedureLoader
 
@@ -119,35 +121,66 @@ def _make_loaders(
         ) -> str | None:
             return _read(member_name)
 
-    return _LibraryProcedureLoader, _LibraryMemberLoader()
+    return _LibraryProcedureLoader(), _LibraryMemberLoader()
 
 
 def _library_proc(text: str, name: str) -> _JProc | None:
     """The procedure a library member defines, with the member's own line
     numbers (``jclparser``'s file loader wraps the member in a JOB card first,
-    which shifts every line by one)."""
+    which shifts every line by one).
+
+    ``EXEC name`` resolves by *member* name, so the member's PROC is used
+    whatever its label says (one named like the member wins if there are
+    several).  A member with no PROC statement at all is its own body.
+    """
     from jclparser import parse_jcl as _jcl_parse
     from jclparser.errors import JCLParseError
-    from jclparser.model import Procedure
 
     try:
         member = _jcl_parse(text, enable_external_procs=False)
     except (JCLParseError, ValueError):
-        return None
-    for proc in member.procedures:
-        if proc.name.upper() in (name, "UNNAMED"):
-            proc.name = name
-            proc.is_external = True
-            return proc
-    if member.steps:
-        # A member with no PROC/PEND: its steps are the body.
-        return Procedure(
-            name=name,
-            steps=list(member.steps),
-            is_external=True,
-            set_statements=dict(member.set_statements),
+        member = None
+    if member is not None and member.procedures:
+        procs = member.procedures
+        proc = next((p for p in procs if p.name.upper() == name), procs[0])
+        proc.name = name
+        proc.is_external = True
+        return proc
+    # No PROC statement: jclparser refuses an EXEC ahead of any JOB or PROC
+    # card, so read the member as the body of a PROC coded on a line of its
+    # own and move every line number back by that one line.
+    try:
+        wrapped = _jcl_parse(
+            f"//{name} PROC\n{text.rstrip()}\n//         PEND\n",
+            enable_external_procs=False,
         )
-    return None
+    except (JCLParseError, ValueError):
+        return None
+    if not wrapped.procedures or not wrapped.procedures[0].steps:
+        return None
+    proc = wrapped.procedures[0]
+    _shift_lines(proc.steps, -1)
+    proc.name = name
+    proc.is_external = True
+    return proc
+
+
+def _shift_lines(items: Iterable[Any], delta: int) -> None:
+    """Move the line numbers of steps (and their DDs) by ``delta``."""
+    from jclparser.model import ConditionalBlock
+
+    for item in items:
+        if isinstance(item, ConditionalBlock):
+            if item.line_number:
+                item.line_number += delta
+            _shift_lines(item.then_steps, delta)
+            _shift_lines(item.else_steps, delta)
+            continue
+        if item.line_number:
+            item.line_number += delta
+        for dd in item.dd_statements:
+            if dd.line_number:
+                dd.line_number += delta
 
 
 class _Missing:
@@ -183,11 +216,15 @@ def _split_jobs(text: str) -> list[tuple[int, str]]:
     from jclparser.parser import _merge_source_lines, split_source_lines
 
     lines = split_source_lines(text)
+    from jclparser.errors import JCLParseError
+
     try:
         scanned = _merge_source_lines(text)
+    except (JCLParseError, ValueError):
+        # The per-job parse reports it; split at every JOB card meanwhile.
+        data: set[int] = set()
+    else:
         data = scanned.inline_data_indices | scanned.control_data_indices
-    except Exception:  # noqa: BLE001 - the per-job parse reports it
-        data = set()
     starts = [
         index
         for index, line in enumerate(lines)
@@ -275,14 +312,78 @@ def _parameters(
     ]
 
 
-def _job_parameters(job: _JJob) -> list[JclParameter]:
-    params: dict[str, Any] = {}
-    if job.accounting_info is not None:
-        # jclparser keeps the accounting field's content without its
-        # parentheses; restore the sub-list shape.
-        params["_pos_0"] = _split_commas(job.accounting_info)
-    params.update(job.parameters)
-    return _parameters(params, job_card=True)
+def _statement_text(chunk: str, line_number: int | None) -> str | None:
+    """The JOB statement starting on ``line_number`` of ``chunk``, its
+    continuations merged and its comment field dropped, as ``jclparser``
+    reads it."""
+    from jclparser.parser import _merge_source_lines
+
+    if not line_number:
+        return None
+    try:
+        merged = _merge_source_lines(chunk).merged_lines
+    except ValueError:
+        return None
+    return next((text for text, number in merged if number == line_number), None)
+
+
+def _top_level_items(operands: str) -> list[str]:
+    """Split on commas outside apostrophe quotes and parentheses."""
+    items: list[str] = []
+    current: list[str] = []
+    depth = 0
+    quoted = False
+    for char in operands:
+        if char == "'":
+            quoted = not quoted
+        elif not quoted and char == "(":
+            depth += 1
+        elif not quoted and char == ")":
+            depth -= 1
+        if char == "," and not quoted and depth == 0:
+            items.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    items.append("".join(current))
+    return items
+
+
+def _coded_positionals(job_card: str | None) -> list[str] | None:
+    """The JOB card's positional operands (accounting information, programmer
+    name) exactly as coded, quotes included; ``jclparser`` drops the quotes."""
+    if job_card is None:
+        return None
+    match = re.match(r"//\S*\s+JOB(?:\s+(.*))?$", job_card, re.IGNORECASE)
+    if match is None:
+        return None
+    operands = (match.group(1) or "").strip()
+    items = _top_level_items(operands) if operands else []
+    out: list[str] = []
+    for item in items:
+        if "=" in item.split("'")[0].split("(")[0]:
+            break
+        out.append(item)
+    return out
+
+
+def _job_parameters(job: _JJob, job_card: str | None = None) -> list[JclParameter]:
+    params = {k: v for k, v in job.parameters.items() if not k.startswith("_pos_")}
+    coded = _coded_positionals(job_card)
+    if coded is None:
+        # No card text to read: fall back on jclparser's (unquoted) values.
+        fallback: dict[str, Any] = {}
+        if job.accounting_info is not None:
+            fallback["_pos_0"] = _split_commas(job.accounting_info)
+        fallback.update(job.parameters)
+        return _parameters(fallback, job_card=True)
+    positionals: list[JclParameter] = []
+    for text in coded:
+        param = JclParameter(keyword="", value=text)
+        if text.startswith("(") and text.endswith(")"):
+            param.positional = _top_level_items(text[1:-1])
+        positionals.append(param)
+    return positionals + _parameters(params, job_card=True)
 
 
 def _dd(dd: _JDD, offset: int, procstep: str | None = None) -> DDStatement:
@@ -305,9 +406,7 @@ def _dd(dd: _JDD, offset: int, procstep: str | None = None) -> DDStatement:
         sysout=sysout,
         is_dummy=is_dummy,
         is_instream=is_instream,
-        instream_lines=(
-            dd.inline_data.split("\n") if dd.inline_data is not None else []
-        ),
+        instream_lines=dd.inline_data.split("\n") if dd.inline_data else [],
         record_format=dcb.recfm if dcb is not None else None,
         record_length=dcb.lrecl if dcb is not None else None,
         parameters=_parameters(params),
@@ -332,12 +431,34 @@ def _dds(
     return out
 
 
+def _grouped(condition: str) -> str:
+    """``condition`` wrapped in parentheses unless one pair already encloses
+    all of it, so ``NOT`` / ``AND`` apply to the whole expression."""
+    text = condition.strip()
+    if text.startswith("(") and text.endswith(")"):
+        depth = 0
+        for index, char in enumerate(text):
+            depth += char == "("
+            depth -= char == ")"
+            if depth == 0:
+                if index == len(text) - 1:
+                    return text
+                break
+    return f"({text})"
+
+
+def _negated(condition: str) -> str:
+    return f"NOT {_grouped(condition)}"
+
+
 def _condition(params: dict[str, Any], enclosing: list[str]) -> str | None:
     if "COND" in params:
         return _raw(params["COND"])
     if not enclosing:
         return None
-    return " AND ".join(enclosing)
+    if len(enclosing) == 1:
+        return enclosing[0]
+    return " AND ".join(_grouped(condition) for condition in enclosing)
 
 
 def _step(
@@ -379,15 +500,20 @@ class _JobConverter:
         self,
         job: _JJob,
         offset: int,
-        library_loader_cls: Any,
+        library_loader: Any,
         unresolved: list[str],
         errors: list[dict[str, Any]],
+        preamble: Iterable[str] = (),
     ) -> None:
         self.job = job
         self.offset = offset
-        self.library_loader_cls = library_loader_cls
+        self.library_loader = library_loader
         self.unresolved = unresolved
         self.errors = errors
+        #: Procedures coded ahead of the first JOB card: in-stream, but their
+        #: line numbers count from the top of the file, not from this job.
+        self.preamble = set(preamble)
+        self.job_card: str | None = None
 
     def convert(self) -> JclJob:
         job = self.job
@@ -396,7 +522,7 @@ class _JobConverter:
         return JclJob(
             name=job.name,
             steps=steps,
-            parameters=_job_parameters(job),
+            parameters=_job_parameters(job, self.job_card),
             line=job.line_number + self.offset if job.line_number else 0,
             dd_statements=_dds(job.joblib_dds, self.offset),
         )
@@ -407,7 +533,7 @@ class _JobConverter:
         for item in items:
             if isinstance(item, ConditionalBlock):
                 self._walk(item.then_steps, [*enclosing, item.condition], out)
-                self._walk(item.else_steps, [*enclosing, f"NOT {item.condition}"], out)
+                self._walk(item.else_steps, [*enclosing, _negated(item.condition)], out)
                 continue
             out.append(_step(item, self.offset, enclosing))
             if item.procedure:
@@ -443,7 +569,7 @@ class _JobConverter:
         loader = CompositeProcedureLoader(
             [
                 InlineProcedureLoader(self.job.procedures),
-                self.library_loader_cls(),
+                self.library_loader,
                 missing.loader(),
             ]
         )
@@ -483,14 +609,16 @@ class _JobConverter:
             for item in items:
                 if isinstance(item, ConditionalBlock):
                     walk(item.then_steps, [*conds, item.condition])
-                    walk(item.else_steps, [*conds, f"NOT {item.condition}"])
+                    walk(item.else_steps, [*conds, _negated(item.condition)])
                     continue
                 info = explosion_map.get(item.original_proc_call or "")
                 procedure = getattr(info, "proc_definition", None) or step.procedure
                 # Line numbers of a library procedure are its own member's,
                 # not this file's.
-                origin = self.offset if procedure in self._inline_names() else 0
-                out.append(_step(item, origin, conds, procedure=str(procedure).upper()))
+                name = str(procedure).upper()
+                inline = name in self._inline_names() and name not in self.preamble
+                origin = self.offset if inline else 0
+                out.append(_step(item, origin, conds, procedure=name))
 
         walk(exploded.steps, list(enclosing))
         return out
@@ -587,7 +715,7 @@ class JclParser:
         """Parse JCL source ``text``."""
         _require_jclparser()
 
-        library_loader_cls, member_loader = _make_loaders(self.proc_paths)
+        library_loader, member_loader = _make_loaders(self.proc_paths)
         jobs: list[JclJob] = []
         procedures: dict[str, list[JobStep]] = {}
         symbols: dict[str, str] = {}
@@ -600,20 +728,21 @@ class JclParser:
             job = self._parse_job(chunk, offset, member_loader, errors)
             if job is None:
                 continue
-            job.procedures[:0] = [
+            borrowed = [
                 proc for proc in preamble if proc.name not in _names(job.procedures)
             ]
+            job.procedures[:0] = borrowed
             for warning in job.warnings:
                 if warning not in unresolved:
                     unresolved.append(warning)
             _note_duplicate_procedures(job, offset, unresolved)
             converter = _JobConverter(
-                job, offset, library_loader_cls, unresolved, errors
+                job, offset, library_loader, unresolved, errors, _names(borrowed)
             )
+            converter.job_card = _statement_text(chunk, job.line_number)
             converted = converter.convert()
-            has_job_card = any(
-                _JOB_CARD.match(line) or line.startswith("// JOB")
-                for line in chunk.splitlines()
+            has_job_card = converter.job_card is not None and bool(
+                _JOB_CARD.match(converter.job_card)
             )
             if not has_job_card:
                 unresolved.append(
@@ -654,8 +783,9 @@ class JclParser:
         card as an error, blank it out, and read the rest of the job."""
         from jclparser import parse_jcl as _jcl_parse
         from jclparser.errors import JCLParseError
+        from jclparser.parser import split_source_lines
 
-        lines = chunk.split("\n")
+        lines = split_source_lines(chunk)
         for _ in range(self.MAX_RECOVERIES):
             try:
                 job: _JJob = _jcl_parse(
@@ -687,7 +817,9 @@ class JclParser:
 
         if not chunks:
             return []
-        lines = chunks[0][1].split("\n")
+        from jclparser.parser import split_source_lines
+
+        lines = split_source_lines(chunks[0][1])
         first = next((i for i, line in enumerate(lines) if _JOB_CARD.match(line)), None)
         if not first:
             return []

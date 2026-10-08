@@ -78,9 +78,9 @@ constants) and `EXEC_KEYWORDS` were removed with it.
 
 * **Steps.** `IF`/`ELSE` blocks are flattened; `JobStep.condition` is `COND=`
   when coded, else the enclosing conditions as jclparser keeps them
-  (`(S1.RC = 0)`, `NOT (S1.RC = 0)` in the ELSE, nested ones joined with
-  ` AND `). jclparser normalises unparenthesised expressions (`RC = 0` reads
-  `RC=0`).
+  (`(S1.RC = 0)`; in the ELSE `NOT (...)` around the whole expression; nested
+  ones each parenthesised and joined with ` AND `). jclparser normalises
+  unparenthesised expressions (`RC = 0` reads `RC=0`).
 * **Procedure invocations** keep their own step (`program=None`,
   `procedure=NAME`, the invocation's override DDs with `procstep` set),
   followed by one step per procedure step, named `invocation.procstep` (nested:
@@ -93,8 +93,10 @@ constants) and `EXEC_KEYWORDS` were removed with it.
 * **Parameters.** jclparser's dict values are turned back into
   `JclParameter`s: a list value becomes `positional` (items with `=` go to
   `subparameters`), `True` (`*`) a bare keyword, `_pos_N` a bare word. `value`
-  is reconstructed, not the exact coded text (jclparser does not keep it). The
-  JOB card's accounting field comes from `Job.accounting_info`.
+  is reconstructed, not the exact coded text (jclparser does not keep it).
+  The JOB card's positionals (accounting information, programmer name) are
+  the exception: jclparser drops their quotes, so they are read back from the
+  merged JOB statement as coded (`'S DION'`, `1`, `(1,'X,Y')`).
 * **Line numbers** are the deck's (each job's are offset by where it starts).
   Steps expanded from a *library* procedure carry the member's own line
   numbers.
@@ -104,17 +106,20 @@ constants) and `EXEC_KEYWORDS` were removed with it.
 # What the adapter adds
 
 * **Several jobs per deck.** jclparser reads one job (a second JOB card is a
-  hard error), so the deck is split at each JOB card that is not in-stream
+  hard error), so the deck is split at each JOB card (named or not) that is not in-stream
   data (located with jclparser's own `_merge_source_lines`, a private helper,
   hence the `>=2.0.0` floor). Each job is parsed on its own; SET symbols and
   in-stream PROCs do not cross jobs. A PROC coded before the first JOB card is
-  visible to every job.
+  visible to every job, with its own (file) line numbers.
 * **Card-level recovery.** jclparser raises on the first card it cannot read;
   the adapter records `{line, message}`, blanks that card and re-reads (up to
   `JclParser.MAX_RECOVERIES` times), so one bad card costs one card.
 * **Procedure libraries, no guessing.** Lookup order: in-stream, then
   `proc_paths` (directories; one member per file named after it, any
-  extension, first directory wins), else the invocation is kept unexpanded and
+  extension, first directory wins; the member name is what `EXEC` resolves,
+  whatever the member's PROC label says, and a member with no PROC statement
+  is its own body; each member is read once per parse), else the invocation
+  is kept unexpanded and
   noted (`PROC NAME (line N): ... neither defined in this file nor found on the
   procedure path`). `INCLUDE MEMBER=` reads from the same directories.
   jclparser's bundled IBM-utility PROC templates, `JCLLIB ORDER` library

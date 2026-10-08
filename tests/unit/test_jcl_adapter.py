@@ -158,6 +158,104 @@ BAD CARD ONE
         assert result.success is False
 
 
+class TestReviewRegressions:
+    def test_member_name_resolves_whatever_the_proc_label_says(self, tmp_path):
+        (tmp_path / "MYPROC.jcl").write_text(
+            "//OTHER PROC\n//S1 EXEC PGM=X\n//         PEND\n"
+        )
+        result = parse_jcl("//J JOB 1\n//R EXEC MYPROC\n//\n", proc_paths=[tmp_path])
+        assert result.unresolved == []
+        step = result.jobs[0].step("R.S1")
+        assert (step.program, step.procedure) == ("X", "MYPROC")
+
+    def test_member_without_a_proc_statement_is_its_own_body(self, tmp_path):
+        (tmp_path / "BARE.jcl").write_text(
+            "//* NO PROC CARD\n//S1 EXEC PGM=NOPROC\n//IN DD DSN=A.B,DISP=SHR\n"
+        )
+        result = parse_jcl("//J JOB 1\n//R2 EXEC BARE\n//\n", proc_paths=[tmp_path])
+        assert result.unresolved == []
+        step = result.jobs[0].step("R2.S1")
+        assert step.program == "NOPROC"
+        # The member's own line numbers.
+        assert (step.line, step.dd("IN").line) == (2, 3)
+
+    def test_each_member_is_parsed_once_per_parse(self, proclib, monkeypatch):
+        from cobolparser.jcl import parser as adapter
+
+        calls: list[str] = []
+        real = adapter._library_proc
+        monkeypatch.setattr(
+            adapter,
+            "_library_proc",
+            lambda text, name: calls.append(name) or real(text, name),
+        )
+        deck = "//J JOB 1\n" + "".join(f"//R{i} EXEC NIGHTLY\n" for i in range(5))
+        parse_jcl(deck, proc_paths=[proclib])
+        assert calls == ["NIGHTLY"]
+
+    def test_else_negates_the_whole_compound_condition(self):
+        result = parse_jcl("""\
+//J JOB 1
+//S1 EXEC PGM=A
+// IF RC = 0 | RC = 4 THEN
+//S2 EXEC PGM=B
+// ELSE
+//S3 EXEC PGM=C
+//   IF S1.RC = 8 THEN
+//S4 EXEC PGM=D
+//   ENDIF
+// ENDIF
+""")
+        job = result.jobs[0]
+        s3 = job.step("S3").condition
+        assert s3.startswith("NOT (") and s3.endswith(")")
+        s4 = job.step("S4").condition
+        assert s4.startswith(f"({s3}) AND (")
+
+    def test_preamble_procedure_keeps_its_file_line_numbers_in_every_job(self):
+        result = parse_jcl("""\
+//P1 PROC
+//S1 EXEC PGM=A
+//   PEND
+//J1 JOB 1
+//R1 EXEC P1
+//J2 JOB 2
+//R2 EXEC P1
+""")
+        assert result.jobs[0].step("R1.S1").line == 2
+        assert result.jobs[1].step("R2.S1").line == 2
+
+    @pytest.mark.parametrize(
+        ("card", "values"),
+        [
+            ("//J JOB 'A,B','S DION'", ["'A,B'", "'S DION'"]),
+            ("//J JOB 1", ["1"]),
+            ("//J JOB (1,(A,B)),CLASS=A", ["(1,(A,B))"]),
+        ],
+    )
+    def test_job_positionals_keep_their_coded_text(self, card, values):
+        job = parse_jcl(card + "\n//S1 EXEC PGM=A\n").jobs[0]
+        positional = [p.value for p in job.parameters if not p.keyword]
+        assert positional == values
+
+    def test_parenthesised_accounting_splits_at_top_level_only(self):
+        job = parse_jcl("//J JOB (1,(A,B),'X,Y')\n//S1 EXEC PGM=A\n").jobs[0]
+        assert job.parameters[0].positional == ["1", "(A,B)", "'X,Y'"]
+
+    def test_empty_in_stream_dd_has_no_records(self):
+        result = parse_jcl("//J JOB 1\n//S1 EXEC PGM=A\n//D1 DD *\n//D2 DD *\nX\n")
+        step = result.jobs[0].steps[0]
+        assert step.dd("D1").instream_lines == []
+        assert step.dd("D2").instream_lines == ["X"]
+
+    def test_nameless_job_card_still_starts_a_job(self):
+        result = parse_jcl("//J1 JOB 1\n//S1 EXEC PGM=A\n// JOB 2\n//S2 EXEC PGM=B\n")
+        assert [s.program for job in result.jobs for s in job.steps] == ["A", "B"]
+        assert any(
+            "no job name" in e["message"] and e["line"] == 3 for e in result.errors
+        )
+
+
 class TestUnresolvedNotes:
     def test_backward_reference_is_reported(self):
         result = parse_jcl("""\

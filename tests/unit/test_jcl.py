@@ -70,7 +70,7 @@ class TestSampleMultiStepJob:
             "REGION",
         ]
         assert job.parameters[0].positional == ["ACCT1234", "'INVENTORY'"]
-        assert job.parameters[1].value == "S DION"
+        assert job.parameters[1].value == "'S DION'"
 
     def test_job_card_symbolics_are_not_substituted(self, invupdt):
         # z/OS does not substitute JCL symbols on the JOB statement, so
@@ -1403,7 +1403,7 @@ CARD
         assert result.errors == []
         job = result.jobs[0]
         assert job.step("S2").condition == "RC=0"
-        assert job.step("S3").condition == "NOT RC=0"
+        assert job.step("S3").condition == "NOT (RC=0)"
         assert job.step("S4").condition is None
 
     def test_concatenation_override_is_positional_and_keeps_the_rest(self):
