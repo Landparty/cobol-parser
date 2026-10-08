@@ -3314,6 +3314,7 @@ def _build_jcl_parser(subparsers: argparse._SubParsersAction) -> None:
             "  cobol-parser jcl JOB.jcl --dd-map\n"
             "  cobol-parser jcl JOB.jcl --bindings\n"
             "  cobol-parser jcl JOB.jcl --program INVUPDT\n"
+            "  cobol-parser jcl JOB.jcl --proc-path proclib/ --bindings\n"
             "  cobol-parser jcl JOB.jcl --strict"
         ),
     )
@@ -3334,6 +3335,15 @@ def _build_jcl_parser(subparsers: argparse._SubParsersAction) -> None:
         "--program",
         metavar="NAME",
         help="Report only the steps that run this program",
+    )
+    p.add_argument(
+        "--proc-path",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="Directory holding cataloged procedures and INCLUDE members, one "
+        "member per file named after it (repeatable, searched in order). "
+        "Without it only in-stream procedures are expanded",
     )
     p.add_argument(
         "--strict",
@@ -3358,7 +3368,9 @@ def _cmd_jcl(args: argparse.Namespace) -> None:
     from ..jcl import parse_jcl, resolve_dd_bindings
 
     source = _read_source(args.file)
-    result = parse_jcl(source, filename=args.file)
+    result = parse_jcl(
+        source, filename=args.file, proc_paths=getattr(args, "proc_path", None)
+    )
 
     payload: dict[str, Any]
     if args.bindings:

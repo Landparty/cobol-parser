@@ -27,7 +27,7 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, `LintAnalyzer`, `XrefAnalyzer`, `ProgramSignatureExtractor`, `CodebaseGraphBuilder`, `SqlCicsAnalyzer`, `ProgramDiffer`, etc.) | `.okf/analysis.md` |
 | Flowcharts, copybook → CSV test data (`CopybookDataGenerator`) | `.okf/generators.md` |
 | `parse_files`, `parse_files_with_copybooks`, batch fault isolation | `.okf/batch.md` |
-| z/OS JCL: cards, jobs/steps, DD → dataset bindings | `.okf/jcl.md` |
+| z/OS JCL: jobs/steps, DD → dataset bindings (read by jcl-parser) | `.okf/jcl.md` |
 | CLI subcommands and flags, the `cobol.yml` project config | `.okf/cli.md` |
 | Test layout, markers, coverage floor | `.okf/tests.md` |
 
@@ -129,7 +129,7 @@ cobol-parser sql-cics-check <file.cbl>
 cobol-parser diff <old.cbl> <new.cbl> [--format json|text] [--rename-threshold RATIO]
 cobol-parser codebase-graph PATH... [--format json|dot|mermaid] [--extension EXT] [--workers N] [--copybook-path DIR]
 cobol-parser copybook-impact <member> PATH... [--extension EXT] [--workers N] [--copybook-path DIR]
-cobol-parser jcl <job.jcl> [--dd-map] [--bindings] [--program NAME] [--strict]
+cobol-parser jcl <job.jcl> [--dd-map] [--bindings] [--program NAME] [--proc-path DIR]... [--strict]   # needs the [jcl] extra
 # Parsing subcommands also take [--error-recovery fail-fast|collect-all] (default collect-all)
 ```
 
@@ -650,7 +650,7 @@ The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather
 - **Linter**: Ruff (pycodestyle, pyflakes, isort, bugbear, comprehensions, pyupgrade; E501 ignored)
 - **Type checker**: mypy with strict settings (`disallow_untyped_defs`, `strict_equality`, etc.; tests are exempted from typed def requirements)
 - **Python**: `>=3.11`, uses modern syntax (`list[]`, `dict[]`, `X | None` unions)
-- **No runtime dependencies**: zero external dependencies for the core library
+- **No runtime dependencies**: zero external dependencies for the core library. The one optional extra, `[jcl]`, installs `jcl-parser`, which `cobolparser.jcl` reads JCL through -- never re-implement JCL parsing here
 - **Imports**: `__init__.py` files may have unused imports (F401 ignored via ruff per-file config)
 
 ## File Organization Conventions

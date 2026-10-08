@@ -2971,10 +2971,10 @@ recorded as caveats rather than silently skipped.
 
 ## JCL (`cobolparser/jcl/`)
 
-The z/OS Job Control Language front end — card scanning, jobs, steps, DD
-statements, in-stream procedure expansion, and the `ddname -> dataset` binding
-a COBOL `SELECT ... ASSIGN TO` resolves through. It is not an analyzer and
-shares no code with the COBOL pipeline; it has its own OKF file:
+The `ddname -> dataset` binding a COBOL `SELECT ... ASSIGN TO` resolves
+through, read from z/OS JCL by the `jcl-parser` package (optional extra
+`cobol-parser[jcl]`); `cobolparser.jcl` is the adapter. It is not an analyzer
+and shares no code with the COBOL pipeline; it has its own OKF file:
 **[jcl.md](jcl.md)**.
 
 

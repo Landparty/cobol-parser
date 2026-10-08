@@ -1,69 +1,40 @@
 """
-Parser for z/OS Job Control Language.
+Read JCL through the ``jcl-parser`` package and shape it for this toolchain.
 
-Turns the card images scanned by :mod:`cobolparser.jcl.lexer` into the model
-in :mod:`cobolparser.jcl.models`: jobs, steps, DD statements and the symbolic
-parameter values that produced them.  It shares nothing with the COBOL parser
--- JCL is a different language with its own card format -- and adds no runtime
-dependency.
+``cobolparser.jcl`` used to carry its own card scanner and statement parser.
+It now delegates every JCL decision -- continuation, in-stream data, symbolic
+parameters, procedure expansion, overrides -- to ``jclparser`` (the sibling
+``jcl-parser`` package, installed with ``pip install 'cobol-parser[jcl]'``),
+and only converts its ``Job`` model into the
+:class:`~cobolparser.jcl.models.JclParseResult` shape the rest of this library
+and the ``cobol-parser jcl`` subcommand consume.
 
-What it understands
--------------------
+What this module adds on top of ``jclparser``:
 
-``JOB``, ``EXEC``, ``DD``, ``PROC``, ``PEND``, ``SET``, ``INCLUDE``,
-``IF``/``THEN``/``ELSE``/``ENDIF``, ``JCLLIB`` and ``OUTPUT``, plus ``//*``
-comment cards, the null ``//`` end-of-job card and ``/*``-prefixed JES control
-cards.
-
-* ``EXEC PGM=name`` is a program step; ``EXEC procname`` and
-  ``EXEC PROC=procname`` are procedure steps.  Both set ``JobStep.procedure``,
-  and when the procedure is defined in-stream in the same file its body is
-  *expanded*: one extra :class:`~cobolparser.jcl.models.JobStep` per procedure
-  step is appended to the job, named ``invocation.procstep`` the way z/OS
-  itself names it, carrying the procedure's own ``PGM=`` and DD statements
-  with this invocation's symbol values substituted.  That is what makes a
-  ``ddname -> dataset`` lookup work for programs run out of a procedure.
-* ``procstep.ddname`` DD cards coded on the invocation override the matching
-  DD of that procedure step, parameter by parameter; a DD name the procedure
-  step does not have is an addition.  The invocation keeps its own copy of
-  every override card, so nothing is moved out of sight.
-* Symbolic parameters (``&SYM``, ``&SYM.``) are substituted from ``SET``
-  values, procedure defaults and ``EXEC`` overrides, in that order of
-  increasing precedence.  ``&&`` is left alone: it introduces a temporary
-  dataset name, not a symbol.  Substitution is *not* performed on the ``JOB``
-  card, matching z/OS, so a ``NOTIFY=&SYSUID`` does not read as an unresolved
-  user symbol.
-
-What it deliberately does not do
---------------------------------
-
-Nothing here reaches outside the file it was handed.  A procedure that is not
-defined in-stream is not searched for in a PROCLIB, an ``INCLUDE`` group is
-not expanded, and ``JCLLIB ORDER=`` is recorded but not honoured -- each of
-those lands in ``JclParseResult.unresolved`` instead, naming what could not be
-resolved and why.  ``OUTPUT``, ``CNTL``/``ENDCNTL``, ``COMMAND``, ``XMIT`` and
-JES control cards are recognised, kept out of the error list, and reported as
-not modelled.  Dataset names are never invented: a DSN whose symbols could not
-all be resolved is stored exactly as coded and reported in ``unresolved``.
+* **Several jobs per file.**  ``jclparser.parse_jcl`` reads one job; a deck
+  with several ``JOB`` cards is split at each one (a ``JOB`` card inside
+  in-stream data is data, not a boundary) and every job is parsed on its own,
+  so one job's syntax error costs only that job.
+* **Procedure libraries without guessing.**  Procedures are found in-stream
+  first, then in the directories passed as ``proc_paths`` (one member per
+  file, named after the procedure, any extension).  ``jclparser``'s bundled
+  IBM utility templates and the ``JCL_PROCLIB_PATH`` environment variable are
+  deliberately *not* consulted: a template's dataset names are not this
+  shop's, and a result must not depend on the caller's environment.
+* **Nothing dropped silently.**  A procedure found nowhere keeps its
+  invocation step and is reported in ``unresolved``; a job ``jclparser``
+  rejects lands in ``errors`` with its line; ``jclparser``'s own warnings are
+  carried into ``unresolved``.
 """
 
 from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
-from typing import Any
+from collections.abc import Iterable, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from .lexer import (
-    KIND_COMMENT,
-    KIND_JES,
-    KIND_NULL,
-    KIND_STATEMENT,
-    JclCard,
-    find_top_level_equals,
-    scan_cards,
-    split_top_level,
-)
 from .models import (
     DDStatement,
     JclJob,
@@ -73,1081 +44,807 @@ from .models import (
     unquote,
 )
 
-#: ``EXEC`` keywords that are parameters of the step itself.  Anything else
-#: coded with a value on an ``EXEC`` is a symbolic parameter override for the
-#: procedure being invoked.
-EXEC_KEYWORDS = frozenset(
-    {
-        "PGM",
-        "PROC",
-        "PARM",
-        "PARMDD",
-        "COND",
-        "REGION",
-        "REGIONX",
-        "TIME",
-        "ACCT",
-        "ADDRSPC",
-        "DYNAMNBR",
-        "PERFORM",
-        "RD",
-        "CCSID",
-        "MEMLIMIT",
-        "RLSTMOUT",
-    }
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from jclparser.model import DDStatement as _JDD
+    from jclparser.model import Job as _JJob
+    from jclparser.model import Procedure as _JProc
+    from jclparser.model import Step as _JStep
+
+_INSTALL_HINT = (
+    "cobolparser.jcl reads JCL through the jcl-parser package; install it with "
+    "pip install 'cobol-parser[jcl]'"
 )
 
-#: Statements that are recognised, kept, but not modelled as job structure.
-_UNMODELLED_OPERATIONS = {
-    "OUTPUT": "JES output descriptor",
-    "CNTL": "program control statement group",
-    "ENDCNTL": "program control statement group",
-    "COMMAND": "operator command",
-    "XMIT": "transmission statement",
-    "NOTIFY": "notify statement",
-}
+#: A JOB card: ``//name JOB`` (or a nameless ``// JOB``, which is an error
+#: but still starts a job) with the operation as its own word.
+_JOB_CARD = re.compile(r"^//([A-Z@#$][A-Z0-9@#$]{0,7})?\s+JOB(?:\s|$)", re.IGNORECASE)
 
-_MAX_SYMBOL_LENGTH = 8
-_MAX_SUBSTITUTION_PASSES = 5
-_THEN_RE = re.compile(r"\bTHEN\b", re.IGNORECASE)
+#: Keys ``jclparser`` uses for its own bookkeeping, not coded parameters.
+_INTERNAL_KEYS = frozenset({"_records"})
 
 
-@dataclass
-class _IfFrame:
-    """One open ``IF`` block."""
-
-    condition: str
-    line: int
-    in_else: bool = False
+def _require_jclparser() -> None:
+    try:
+        import jclparser  # noqa: F401
+    except ImportError as exc:
+        raise ImportError(_INSTALL_HINT) from exc
 
 
-@dataclass
-class _Sink:
-    """Where the steps of one job -- or of one procedure body -- accumulate."""
-
-    steps: list[JobStep]
-    job_dds: list[DDStatement]
-    symbols: dict[str, str]
-    expand_procs: bool
-    context: str
-    #: Which JOB of the deck this sink belongs to (0 before the first one).
-    #: In-stream procedures are local to the job that defines them.
-    job_ordinal: int = 0
-    current_step: JobStep | None = None
-    current_overrides: dict[str, str] = field(default_factory=dict)
-    #: The symbol values in effect at the current step's EXEC card: a SET
-    #: coded after it must not reach back into the procedure it invoked.
-    current_symbols: dict[str, str] = field(default_factory=dict)
-    last_dd: DDStatement | None = None
-    if_stack: list[_IfFrame] = field(default_factory=list)
+# -- Procedure libraries ----------------------------------------------------
 
 
-def _merge_dcb(base: JclParameter, override: JclParameter) -> JclParameter:
-    """Merge a ``DCB=`` override into the procedure's ``DCB=``.
+def _library_members(proc_paths: Sequence[str | os.PathLike[str]]) -> dict[str, Path]:
+    """Member name -> file, first directory wins, as a PROCLIB concatenation."""
+    members: dict[str, Path] = {}
+    for directory in proc_paths:
+        base = Path(directory)
+        if not base.is_dir():
+            continue
+        for entry in sorted(base.iterdir()):
+            if entry.is_file():
+                members.setdefault(entry.stem.upper(), entry)
+    return members
 
-    A DCB override changes only the sub-parameters it codes: overriding
-    ``DCB=(RECFM=FB,LRECL=80)`` with ``DCB=(LRECL=100)`` leaves ``RECFM=FB``
-    in effect.  A positional (a model DSCB or ``*.ddname`` reference) coded on
-    the override replaces the procedure's.
+
+def _make_loaders(
+    proc_paths: Sequence[str | os.PathLike[str]],
+) -> tuple[Any, Any]:
+    """(procedure loader, INCLUDE member loader) over ``proc_paths``; one pair
+    per parse, so each member is read and parsed once."""
+    from jclparser.include_loader import IncludeMemberLoader
+    from jclparser.proc_loader import ProcedureLoader
+
+    members = _library_members(proc_paths)
+
+    def _read(name: str) -> str | None:
+        path = members.get(name.upper())
+        if path is None:
+            return None
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    class _LibraryProcedureLoader(ProcedureLoader):
+        def __init__(self) -> None:
+            self._cache: dict[str, _JProc | None] = {}
+
+        def load_procedure(
+            self, name: str, libraries: Sequence[str] | None = None
+        ) -> _JProc | None:
+            key = name.upper()
+            if key not in self._cache:
+                text = _read(key)
+                self._cache[key] = None if text is None else _library_proc(text, key)
+            return self._cache[key]
+
+    class _LibraryMemberLoader(IncludeMemberLoader):
+        def load_member(
+            self, member_name: str, libraries: list[str] | None = None
+        ) -> str | None:
+            return _read(member_name)
+
+    return _LibraryProcedureLoader(), _LibraryMemberLoader()
+
+
+def _library_proc(text: str, name: str) -> _JProc | None:
+    """The procedure a library member defines, with the member's own line
+    numbers (``jclparser``'s file loader wraps the member in a JOB card first,
+    which shifts every line by one).
+
+    ``EXEC name`` resolves by *member* name, so the member's PROC is used
+    whatever its label says (one named like the member wins if there are
+    several).  A member with no PROC statement at all is its own body.
     """
-    if not override.subparameters and not override.positional:
-        return override
-    positional = list(override.positional or base.positional)
-    subparameters = {**base.subparameters, **override.subparameters}
-    items = positional + [f"{key}={value}" for key, value in subparameters.items()]
-    return JclParameter(
-        keyword=override.keyword,
-        value="(" + ",".join(items) + ")",
-        subparameters=subparameters,
-        positional=positional,
+    from jclparser import parse_jcl as _jcl_parse
+    from jclparser.errors import JCLParseError
+
+    try:
+        member = _jcl_parse(text, enable_external_procs=False)
+    except (JCLParseError, ValueError):
+        member = None
+    if member is not None and member.procedures:
+        procs = member.procedures
+        proc = next((p for p in procs if p.name.upper() == name), procs[0])
+        proc.name = name
+        proc.is_external = True
+        return proc
+    # No PROC statement: jclparser refuses an EXEC ahead of any JOB or PROC
+    # card, so read the member as the body of a PROC coded on a line of its
+    # own and move every line number back by that one line.
+    try:
+        wrapped = _jcl_parse(
+            f"//{name} PROC\n{text.rstrip()}\n//         PEND\n",
+            enable_external_procs=False,
+        )
+    except (JCLParseError, ValueError):
+        return None
+    if not wrapped.procedures or not wrapped.procedures[0].steps:
+        return None
+    proc = wrapped.procedures[0]
+    _shift_lines(proc.steps, -1)
+    proc.name = name
+    proc.is_external = True
+    return proc
+
+
+def _shift_lines(items: Iterable[Any], delta: int) -> None:
+    """Move the line numbers of steps (and their DDs) by ``delta``."""
+    from jclparser.model import ConditionalBlock
+
+    for item in items:
+        if isinstance(item, ConditionalBlock):
+            if item.line_number:
+                item.line_number += delta
+            _shift_lines(item.then_steps, delta)
+            _shift_lines(item.else_steps, delta)
+            continue
+        if item.line_number:
+            item.line_number += delta
+        for dd in item.dd_statements:
+            if dd.line_number:
+                dd.line_number += delta
+
+
+class _Missing:
+    """Last loader in the chain: records the name and yields an empty body,
+    so one missing procedure does not abort the expansion of every other."""
+
+    def __init__(self) -> None:
+        self.names: list[str] = []
+
+    def loader(self) -> Any:
+        from jclparser.model import Procedure
+        from jclparser.proc_loader import ProcedureLoader
+
+        names = self.names
+
+        class _MissingLoader(ProcedureLoader):
+            def load_procedure(
+                self, name: str, libraries: Sequence[str] | None = None
+            ) -> _JProc | None:
+                if name.upper() not in names:
+                    names.append(name.upper())
+                return Procedure(name=name.upper(), steps=[], is_external=True)
+
+        return _MissingLoader()
+
+
+# -- Splitting a deck into jobs --------------------------------------------
+
+
+def _split_jobs(text: str) -> list[tuple[int, str]]:
+    """``(line offset, text)`` per job; lines before the first JOB card go
+    with the first job (a PROC coded ahead of it is still that job's)."""
+    from jclparser.parser import _merge_source_lines, split_source_lines
+
+    lines = split_source_lines(text)
+    from jclparser.errors import JCLParseError
+
+    try:
+        scanned = _merge_source_lines(text)
+    except (JCLParseError, ValueError):
+        # The per-job parse reports it; split at every JOB card meanwhile.
+        data: set[int] = set()
+    else:
+        data = scanned.inline_data_indices | scanned.control_data_indices
+    starts = [
+        index
+        for index, line in enumerate(lines)
+        if index not in data and _JOB_CARD.match(line)
+    ]
+    if len(starts) <= 1:
+        return [(0, text)]
+    bounds = [0, *starts[1:], len(lines)]
+    return [
+        (bounds[i], "\n".join(lines[bounds[i] : bounds[i + 1]]) + "\n")
+        for i in range(len(bounds) - 1)
+    ]
+
+
+# -- Model conversion --------------------------------------------------------
+
+
+def _raw(value: Any) -> str | None:
+    """A ``jclparser`` parameter value back as coded text."""
+    if value is None or value is True:
+        return None
+    if isinstance(value, dict):
+        return "(" + ",".join(f"{k}={v}" for k, v in value.items()) + ")"
+    if isinstance(value, list | tuple):
+        return "(" + ",".join("" if v is None else str(v) for v in value) + ")"
+    return str(value)
+
+
+def _split_commas(text: str) -> list[str]:
+    """Split on commas outside apostrophe quotes."""
+    items: list[str] = []
+    current: list[str] = []
+    quoted = False
+    for char in text:
+        if char == "'":
+            quoted = not quoted
+        if char == "," and not quoted:
+            items.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    items.append("".join(current))
+    return items
+
+
+def _parameter(key: str, value: Any, *, job_card: bool = False) -> JclParameter:
+    if key.startswith("_pos_") and job_card:
+        # JOB positionals: accounting information and programmer name.
+        param = JclParameter(keyword="", value=_raw(value))
+        if isinstance(value, list | tuple):
+            param.positional = ["" if v is None else str(v) for v in value]
+        return param
+    if key.startswith("_pos_"):
+        # A bare positional word (DUMMY, DATA, a procedure name) or a quoted /
+        # parenthesised positional (JOB accounting information).
+        text = _raw(value) or ""
+        if text and text[0] not in "('":
+            return JclParameter(keyword=text, value=None)
+        return JclParameter(keyword="", value=text)
+    if value is True:
+        return JclParameter(keyword=key, value=None)
+    param = JclParameter(keyword=key, value=_raw(value))
+    items: Iterable[Any] = ()
+    if isinstance(value, dict):
+        param.subparameters = {str(k): str(v) for k, v in value.items()}
+    elif isinstance(value, list | tuple):
+        items = value
+    for item in items:
+        text = "" if item is None else str(item)
+        sub_key, sep, sub_value = text.partition("=")
+        if sep and sub_key and "(" not in sub_key and "'" not in sub_key:
+            param.subparameters[sub_key.strip().upper()] = sub_value
+        else:
+            param.positional.append(text)
+    return param
+
+
+def _parameters(
+    params: dict[str, Any], *, job_card: bool = False
+) -> list[JclParameter]:
+    return [
+        _parameter(key, value, job_card=job_card)
+        for key, value in params.items()
+        if key not in _INTERNAL_KEYS
+    ]
+
+
+def _statement_text(chunk: str, line_number: int | None) -> str | None:
+    """The JOB statement starting on ``line_number`` of ``chunk``, its
+    continuations merged and its comment field dropped, as ``jclparser``
+    reads it."""
+    from jclparser.parser import _merge_source_lines
+
+    if not line_number:
+        return None
+    try:
+        merged = _merge_source_lines(chunk).merged_lines
+    except ValueError:
+        return None
+    return next((text for text, number in merged if number == line_number), None)
+
+
+def _top_level_items(operands: str) -> list[str]:
+    """Split on commas outside apostrophe quotes and parentheses."""
+    items: list[str] = []
+    current: list[str] = []
+    depth = 0
+    quoted = False
+    for char in operands:
+        if char == "'":
+            quoted = not quoted
+        elif not quoted and char == "(":
+            depth += 1
+        elif not quoted and char == ")":
+            depth -= 1
+        if char == "," and not quoted and depth == 0:
+            items.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    items.append("".join(current))
+    return items
+
+
+def _coded_positionals(job_card: str | None) -> list[str] | None:
+    """The JOB card's positional operands (accounting information, programmer
+    name) exactly as coded, quotes included; ``jclparser`` drops the quotes."""
+    if job_card is None:
+        return None
+    match = re.match(r"//\S*\s+JOB(?:\s+(.*))?$", job_card, re.IGNORECASE)
+    if match is None:
+        return None
+    operands = (match.group(1) or "").strip()
+    items = _top_level_items(operands) if operands else []
+    out: list[str] = []
+    for item in items:
+        if "=" in item.split("'")[0].split("(")[0]:
+            break
+        out.append(item)
+    return out
+
+
+def _job_parameters(job: _JJob, job_card: str | None = None) -> list[JclParameter]:
+    params = {k: v for k, v in job.parameters.items() if not k.startswith("_pos_")}
+    coded = _coded_positionals(job_card)
+    if coded is None:
+        # No card text to read: fall back on jclparser's (unquoted) values.
+        fallback: dict[str, Any] = {}
+        if job.accounting_info is not None:
+            fallback["_pos_0"] = _split_commas(job.accounting_info)
+        fallback.update(job.parameters)
+        return _parameters(fallback, job_card=True)
+    positionals: list[JclParameter] = []
+    for text in coded:
+        param = JclParameter(keyword="", value=text)
+        if text.startswith("(") and text.endswith(")"):
+            param.positional = _top_level_items(text[1:-1])
+        positionals.append(param)
+    return positionals + _parameters(params, job_card=True)
+
+
+def _dd(dd: _JDD, offset: int, procstep: str | None = None) -> DDStatement:
+    params = dd.parameters
+    positional = {str(v).upper() for k, v in params.items() if k.startswith("_pos_")}
+    dataset = dd.dataset_name
+    if dataset is not None:
+        dataset = unquote(dataset)
+    is_dummy = "DUMMY" in positional or (
+        dataset is not None and dataset.upper() == "NULLFILE"
     )
-
-
-#: The mutually exclusive parameters that decide what a DD *is*.
-_DD_KIND_KEYWORDS = frozenset({"DSN", "DSNAME", "DUMMY", "SYSOUT"})
-#: The positional ``*`` / ``DATA`` that make a DD in-stream: another kind.
-_DD_INSTREAM_POSITIONALS = frozenset({"*", "DATA"})
-
-
-def _is_dd_kind(param: JclParameter) -> bool:
-    """Whether ``param`` decides what a DD *is* (dataset, dummy, sysout, data)."""
-    keyword = param.keyword.upper()
-    if keyword in _DD_KIND_KEYWORDS:
-        return True
-    return param.value is None and keyword in _DD_INSTREAM_POSITIONALS
-
-
-def _clone_dd(dd: DDStatement, *, procstep: str | None = None) -> DDStatement:
-    """A deep-enough copy of ``dd`` so callers can mutate it independently."""
+    is_instream = "*" in params or "DATA" in positional or dd.inline_data is not None
+    sysout = _raw(params.get("SYSOUT")) if "SYSOUT" in params else None
+    dcb = dd.dcb
+    disposition = dd.disposition
     return DDStatement(
         name=dd.name,
-        dataset=dd.dataset,
-        disposition=dd.disposition,
-        sysout=dd.sysout,
-        is_dummy=dd.is_dummy,
-        is_instream=dd.is_instream,
-        instream_lines=list(dd.instream_lines),
-        concatenated=[_clone_dd(member) for member in dd.concatenated],
-        record_format=dd.record_format,
-        record_length=dd.record_length,
-        parameters=[
-            JclParameter(
-                keyword=p.keyword,
-                value=p.value,
-                subparameters=dict(p.subparameters),
-                positional=list(p.positional),
-            )
-            for p in dd.parameters
-        ],
-        line=dd.line,
+        dataset=None if is_dummy else dataset,
+        disposition=_raw(disposition) if disposition is not None else None,
+        sysout=sysout,
+        is_dummy=is_dummy,
+        is_instream=is_instream,
+        instream_lines=dd.inline_data.split("\n") if dd.inline_data else [],
+        record_format=dcb.recfm if dcb is not None else None,
+        record_length=dcb.lrecl if dcb is not None else None,
+        parameters=_parameters(params),
+        line=dd.line_number + offset if dd.line_number else 0,
         procstep=procstep,
     )
 
 
-class _Builder:
-    """Single-use parse state.  One instance per :meth:`JclParser.parse` call."""
-
-    def __init__(self, filename: str) -> None:
-        self.filename = filename
-        self.jobs: list[JclJob] = []
-        self.symbols: dict[str, str] = {}
-        self.errors: list[dict[str, Any]] = []
-        self.unresolved: list[str] = []
-        # Keyed by (job ordinal, procedure name): an in-stream procedure is
-        # local to the job that defines it, so two jobs in one deck may each
-        # define their own `P` and neither sees the other's.
-        self.proc_bodies: dict[
-            tuple[int, str], tuple[str, list[JclCard], dict[str, str]]
-        ] = {}
-        self._seen_errors: set[tuple[int, str]] = set()
-        self._seen_unresolved: set[str] = set()
-        self._implicit_job_reported = False
-        # Set once an unnamed ``// PROC`` header has been seen: the file is
-        # a cataloged procedure, whose steps legitimately precede any JOB.
-        self._cataloged_procedure = False
-
-    # -- diagnostics -----------------------------------------------------
-    def _error(self, line: int, message: str) -> None:
-        key = (line, message)
-        if key in self._seen_errors:
-            return
-        self._seen_errors.add(key)
-        self.errors.append({"line": line, "message": message})
-
-    def _note(self, message: str) -> None:
-        if message in self._seen_unresolved:
-            return
-        self._seen_unresolved.add(message)
-        self.unresolved.append(message)
-
-    # -- entry point -----------------------------------------------------
-    def build(self, text: str) -> JclParseResult:
-        scan = scan_cards(text)
-        for error in scan.errors:
-            self._error(int(error["line"]), str(error["message"]))
-        top_level = self._collect_procedures(scan.cards)
-        self._process_top_level(top_level)
-        procedures = self._parse_declared_procedures()
-        self.errors.sort(key=lambda entry: entry["line"])
-        return JclParseResult(
-            jobs=self.jobs,
-            procedures=procedures,
-            symbols=self.symbols,
-            errors=self.errors,
-            unresolved=self.unresolved,
-            filename=self.filename,
-        )
-
-    # -- pass 1: lift in-stream procedure bodies out of the deck ---------
-    def _collect_procedures(self, cards: list[JclCard]) -> list[JclCard]:
-        top_level: list[JclCard] = []
-        name: str | None = None
-        coded_name = ""
-        body: list[JclCard] = []
-        defaults: dict[str, str] = {}
-        start_line = 0
-        job_ordinal = 0
-        for card in cards:
-            is_statement = card.kind == KIND_STATEMENT
-            if is_statement and card.operation == "JOB":
-                if name is not None:
-                    # A JOB card starts a new job: the procedure left open
-                    # before it can extend no further, and the job -- with
-                    # every step after it -- must not be swallowed into it.
-                    self._error(
-                        start_line,
-                        f"PROC {coded_name} is never ended by a PEND statement",
-                    )
-                    self._store_procedure(
-                        (job_ordinal, name), coded_name, body, defaults, start_line
-                    )
-                    name = None
-                job_ordinal += 1
-                top_level.append(card)
-                continue
-            if is_statement and card.operation == "PROC":
-                if name is not None:
-                    self._error(
-                        card.line,
-                        f"PROC {card.name or '(unnamed)'} appears inside procedure "
-                        f"{coded_name}; nested procedures are not supported",
-                    )
-                    continue
-                if not card.name:
-                    self._cataloged_procedure = True
-                    self._note(
-                        f"PROC statement (line {card.line}): no procedure name, so "
-                        "this is a cataloged-procedure header rather than an "
-                        "in-stream procedure; its body is read as ordinary JCL"
-                    )
-                    top_level.append(card)
-                    continue
-                name = card.name.upper()
-                coded_name = card.name
-                body = []
-                defaults = self._procedure_defaults(card)
-                start_line = card.line
-                continue
-            if is_statement and card.operation == "PEND":
-                if name is None:
-                    top_level.append(card)
-                    continue
-                self._store_procedure(
-                    (job_ordinal, name), coded_name, body, defaults, start_line
-                )
-                name = None
-                continue
-            if name is not None:
-                body.append(card)
-            else:
-                top_level.append(card)
-        if name is not None:
-            self._error(
-                start_line,
-                f"PROC {coded_name} is never ended by a PEND statement",
-            )
-            self._store_procedure(
-                (job_ordinal, name), coded_name, body, defaults, start_line
-            )
-        return top_level
-
-    def _store_procedure(
-        self,
-        key: tuple[int, str],
-        coded_name: str,
-        body: list[JclCard],
-        defaults: dict[str, str],
-        line: int,
-    ) -> None:
-        if key in self.proc_bodies:
-            self._error(
-                line,
-                f"PROC {coded_name} is defined more than once; the first "
-                "definition is used",
-            )
-            return
-        self.proc_bodies[key] = (coded_name, list(body), defaults)
-
-    def _procedure_defaults(self, card: JclCard) -> dict[str, str]:
-        defaults: dict[str, str] = {}
-        for param in self._parse_parameters(card.parameters):
-            if not param.keyword:
-                self._error(
-                    card.line,
-                    f"PROC {card.name}: positional parameter {param.value!r} is "
-                    "not a symbolic parameter default",
-                )
-                continue
-            defaults[param.keyword.upper()] = unquote(param.value or "")
-        return defaults
-
-    def _parse_declared_procedures(self) -> dict[str, list[JobStep]]:
-        """Parse each in-stream procedure body once, with its own defaults."""
-        procedures: dict[str, list[JobStep]] = {}
-        for key, (coded_name, body, defaults) in self.proc_bodies.items():
-            if coded_name in procedures:
-                # The same name defined in-stream by a later job of the deck:
-                # a separate procedure, but `procedures` has one slot per
-                # name, and it keeps the first.
-                continue
-            symbols = dict(self.symbols)
-            symbols.update(defaults)
-            procedures[coded_name] = self._parse_procedure_body(key, body, symbols)
-        return procedures
-
-    # -- pass 2: jobs, steps, DD statements ------------------------------
-    def _process_top_level(self, cards: list[JclCard]) -> None:
-        sink: _Sink | None = None
-        job: JclJob | None = None
-        job_ordinal = 0
-        for card in cards:
-            if card.kind == KIND_COMMENT:
-                continue
-            if card.kind == KIND_JES:
-                self._note(
-                    f"{card.parameters.split()[0]} (line {card.line}): JES control "
-                    "statement is recognised but not modelled"
-                )
-                continue
-            if card.kind == KIND_NULL:
-                if sink is not None:
-                    self._close_top_level_sink(sink)
-                sink = None
-                job = None
-                continue
-            if card.kind != KIND_STATEMENT:  # pragma: no cover - defensive
-                continue
-            if card.operation == "JOB":
-                if sink is not None:
-                    self._close_top_level_sink(sink)
-                job_ordinal += 1
-                job = self._make_job(card)
-                self.jobs.append(job)
-                # SET values are local to the job that codes them: a new
-                # JOB starts from an empty symbol table -- apart from any SET
-                # coded ahead of the deck's first JOB card.
-                preamble = sink is not None and sink.job_ordinal == 0
-                sink = _Sink(
-                    steps=job.steps,
-                    job_dds=job.dd_statements,
-                    symbols=dict(sink.symbols) if sink and preamble else {},
-                    expand_procs=True,
-                    context=f"job {job.name or '(unnamed)'}",
-                    job_ordinal=job_ordinal,
-                )
-                continue
-            if card.operation == "PEND":
-                self._error(
-                    card.line, "PEND statement without a matching PROC statement"
-                )
-                continue
-            if job is None and card.operation in ("EXEC", "DD"):
-                job = self._implicit_job(card)
-                self.jobs.append(job)
-                sink = _Sink(
-                    steps=job.steps,
-                    job_dds=job.dd_statements,
-                    # A cataloged procedure's `// PROC` defaults were read
-                    # into the sink before this first EXEC; keep them.
-                    symbols=sink.symbols if sink is not None else {},
-                    expand_procs=True,
-                    context="implicit job",
-                    job_ordinal=job_ordinal,
-                    if_stack=sink.if_stack if sink is not None else [],
-                )
-            elif sink is None:
-                sink = _Sink(
-                    steps=[],
-                    job_dds=[],
-                    symbols={},
-                    expand_procs=False,
-                    context="before the first JOB statement",
-                    job_ordinal=job_ordinal,
-                )
-            self._dispatch(card, sink)
-        if sink is not None:
-            self._close_top_level_sink(sink)
-
-    def _close_top_level_sink(self, sink: _Sink) -> None:
-        self._close_sink(sink)
-        # `JclParseResult.symbols` summarises every SET value the deck
-        # established (a later job's value for the same name wins there);
-        # substitution itself only ever sees the job's own table.
-        self.symbols.update(sink.symbols)
-
-    def _make_job(self, card: JclCard) -> JclJob:
-        # Symbolic substitution is not performed on the JOB statement, so its
-        # parameters are recorded exactly as coded.
-        if not card.name:
-            self._error(card.line, "JOB statement has no job name")
-        return JclJob(
-            name=card.name,
-            steps=[],
-            parameters=self._parse_parameters(card.parameters),
-            line=card.line,
-        )
-
-    def _implicit_job(self, card: JclCard) -> JclJob:
-        if not self._implicit_job_reported:
-            self._implicit_job_reported = True
-            message = (
-                f"{card.operation} statement appears before any JOB statement; "
-                "its steps are attached to an unnamed job"
-            )
-            if self._cataloged_procedure:
-                # Expected of a cataloged procedure: it has no JOB card.
-                self._note(message)
-            else:
-                self._error(card.line, message)
-        return JclJob(name="", steps=[], parameters=[], line=card.line)
-
-    def _close_sink(self, sink: _Sink) -> None:
-        self._finish_step(sink)
-        for frame in sink.if_stack:
-            self._error(
-                frame.line,
-                f"IF statement in {sink.context} is never closed by an ENDIF",
-            )
-        sink.if_stack.clear()
-
-    # -- statement dispatch ----------------------------------------------
-    def _dispatch(self, card: JclCard, sink: _Sink) -> None:
-        operation = card.operation
-        if operation == "EXEC":
-            self._handle_exec(card, sink)
-        elif operation == "DD":
-            self._handle_dd(card, sink)
-        elif operation == "SET":
-            self._handle_set(card, sink)
-        elif operation == "IF":
-            self._handle_if(card, sink)
-        elif operation == "ELSE":
-            self._handle_else(card, sink)
-        elif operation == "ENDIF":
-            self._handle_endif(card, sink)
-        elif operation == "INCLUDE":
-            member = self._include_member(card, sink)
-            self._note(
-                f"INCLUDE {member} (line {card.line}): the group was not expanded; "
-                "this parser reads only the file it was given"
-            )
-        elif operation == "PROC":
-            # An unnamed ``// PROC`` card is a cataloged procedure's own
-            # header: its keywords are the symbolic-parameter defaults for
-            # the body that follows, read here as ordinary JCL.
-            for keyword, value in self._procedure_defaults(card).items():
-                sink.symbols.setdefault(keyword, value)
-        elif operation == "JCLLIB":
-            self._note(
-                f"JCLLIB (line {card.line}): procedure libraries are not searched, "
-                "so procedures not defined in this file stay unresolved"
-            )
-        elif operation in _UNMODELLED_OPERATIONS:
-            named = f"{operation} {card.name}" if card.name else operation
-            self._note(
-                f"{named} (line {card.line}): "
-                f"{_UNMODELLED_OPERATIONS[operation]} is recognised but not "
-                "modelled"
-            )
+def _dds(
+    statements: Iterable[_JDD], offset: int, procstep: str | None = None
+) -> list[DDStatement]:
+    """Convert DD cards, folding each unnamed card into the concatenation of
+    the named one ahead of it (repeating its name, so a lookup finds both)."""
+    out: list[DDStatement] = []
+    for statement in statements:
+        dd = _dd(statement, offset, procstep)
+        if not dd.name and out:
+            dd.name = out[-1].name
+            out[-1].concatenated.append(dd)
         else:
-            self._error(
-                card.line,
-                f"unknown JCL operation {operation!r} on statement "
-                f"{card.name or '(unnamed)'}",
-            )
+            out.append(dd)
+    return out
 
-    def _include_member(self, card: JclCard, sink: _Sink) -> str:
-        for param in self._parameters(card, sink):
-            if param.keyword.upper() == "MEMBER":
-                return param.value or "(unnamed)"
-        return "(no MEMBER= parameter)"
 
-    # -- EXEC -------------------------------------------------------------
-    def _handle_exec(self, card: JclCard, sink: _Sink) -> None:
-        self._finish_step(sink)
-        params = self._parameters(card, sink)
-        program: str | None = None
-        procedure: str | None = None
-        parm: str | None = None
-        condition: str | None = None
-        overrides: dict[str, str] = {}
-        for index, param in enumerate(params):
-            keyword = param.keyword.upper()
-            if keyword == "PGM":
-                program = unquote(param.value or "")
-            elif keyword == "PROC":
-                procedure = unquote(param.value or "")
-            elif keyword == "PARM":
-                parm = unquote(param.value) if param.value is not None else ""
-            elif keyword == "COND":
-                condition = param.value
-            elif keyword in EXEC_KEYWORDS:
-                continue
-            elif "." in keyword and keyword.partition(".")[0] in EXEC_KEYWORDS:
-                # `PARM.procstep=` and friends: a step parameter aimed at
-                # one step of the procedure, applied when it is expanded.
-                continue
-            elif param.value is None and keyword:
-                if index == 0 and procedure is None and program is None:
-                    procedure = param.keyword
-                else:
-                    self._error(
-                        card.line,
-                        f"EXEC statement {card.name or '(unnamed)'}: unexpected "
-                        f"positional parameter {param.keyword!r}",
-                    )
-            elif not keyword:
-                self._error(
-                    card.line,
-                    f"EXEC statement {card.name or '(unnamed)'}: unexpected "
-                    f"positional parameter {param.value!r}",
-                )
-            else:
-                overrides[keyword] = unquote(param.value or "")
-        if program is None and procedure is None:
-            self._error(
-                card.line,
-                f"EXEC statement {card.name or '(unnamed)'} names neither PGM= "
-                "nor a procedure",
-            )
-        step = JobStep(
-            name=card.name,
-            program=program,
-            procedure=procedure,
-            parm=parm,
-            dd_statements=[],
-            condition=condition or self._if_condition(sink),
-            line=card.line,
-            parameters=params,
-        )
-        sink.steps.append(step)
-        sink.current_step = step
-        sink.current_overrides = overrides
-        sink.current_symbols = dict(sink.symbols)
-        sink.last_dd = None
+def _grouped(condition: str) -> str:
+    """``condition`` wrapped in parentheses unless one pair already encloses
+    all of it, so ``NOT`` / ``AND`` apply to the whole expression."""
+    text = condition.strip()
+    if text.startswith("(") and text.endswith(")"):
+        depth = 0
+        for index, char in enumerate(text):
+            depth += char == "("
+            depth -= char == ")"
+            if depth == 0:
+                if index == len(text) - 1:
+                    return text
+                break
+    return f"({text})"
 
-    def _finish_step(self, sink: _Sink) -> None:
-        step = sink.current_step
-        sink.current_step = None
-        sink.last_dd = None
-        overrides = sink.current_overrides
-        sink.current_overrides = {}
-        exec_symbols = sink.current_symbols
-        sink.current_symbols = {}
-        if step is None:
-            return
-        if step.procedure and sink.expand_procs:
-            self._expand_procedure(sink, step, overrides, exec_symbols)
-        elif step.procedure:
-            self._note(
-                f"EXEC {step.procedure} (line {step.line}): a procedure invoked "
-                "from inside another procedure is not expanded"
-            )
 
-    # -- DD ---------------------------------------------------------------
-    def _handle_dd(self, card: JclCard, sink: _Sink) -> None:
-        params = self._parameters(card, sink)
-        coded_name = card.name
-        procstep: str | None = None
-        name = coded_name
-        if "." in coded_name:
-            procstep, _, name = coded_name.partition(".")
-        dd = self._dd_from_parameters(name, params, card.line, procstep)
-        if card.instream_lines is not None:
-            dd.is_instream = True
-            dd.instream_lines = list(card.instream_lines)
-        if not coded_name:
-            owner = sink.last_dd
-            if owner is None:
-                self._error(
-                    card.line,
-                    "unnamed DD statement does not follow a named DD statement, "
-                    "so there is nothing for it to be concatenated to",
-                )
-                self._append_dd(sink, dd)
-                return
-            dd.name = owner.name
-            dd.procstep = owner.procstep
-            owner.concatenated.append(dd)
-            return
-        self._append_dd(sink, dd)
-        sink.last_dd = dd
+def _negated(condition: str) -> str:
+    return f"NOT {_grouped(condition)}"
 
-    def _append_dd(self, sink: _Sink, dd: DDStatement) -> None:
-        if sink.current_step is None:
-            sink.job_dds.append(dd)
-        else:
-            sink.current_step.dd_statements.append(dd)
 
-    def _dd_from_parameters(
-        self,
-        name: str,
-        params: list[JclParameter],
-        line: int,
-        procstep: str | None,
-    ) -> DDStatement:
-        dataset: str | None = None
-        disposition: str | None = None
-        sysout: str | None = None
-        is_dummy = False
-        record_format: str | None = None
-        record_length: int | None = None
-        for param in params:
-            keyword = param.keyword.upper()
-            # A parameter coded with an empty value (`SYSOUT=`) is JCL's way of
-            # nullifying it on an overriding DD statement, so it reads as absent.
-            if keyword in ("DSN", "DSNAME"):
-                dataset = unquote(param.value) if param.value else None
-            elif keyword == "DISP":
-                disposition = param.value or None
-            elif keyword == "SYSOUT":
-                sysout = param.value or None
-            elif keyword == "DUMMY" and param.value is None:
-                is_dummy = True
-            elif keyword == "RECFM":
-                record_format = param.value or None
-            elif keyword == "LRECL":
-                record_length = (
-                    self._as_length(param.value, name, line) if param.value else None
-                )
-            elif keyword == "DCB":
-                if "RECFM" in param.subparameters:
-                    record_format = param.subparameters["RECFM"]
-                if "LRECL" in param.subparameters:
-                    record_length = self._as_length(
-                        param.subparameters["LRECL"], name, line
-                    )
-        if dataset is not None and dataset.upper() == "NULLFILE":
-            # `DSN=NULLFILE` is z/OS's spelling of DUMMY, not a dataset.
-            is_dummy = True
-        if is_dummy:
-            # A DUMMY DD reads no dataset, whatever DSN is also coded on it
-            # (or left behind by the procedure DD it overrides).
-            dataset = None
-        if dataset is not None and dataset.startswith("*."):
-            self._note(
-                f"DD {name or '(unnamed)'} (line {line}): dataset name "
-                f"{dataset!r} is a backward reference, which is not resolved; "
-                "it is reported exactly as coded"
-            )
-        if dataset is not None and "&" in dataset and not dataset.startswith("&&"):
-            self._note(
-                f"DD {name or '(unnamed)'} (line {line}): dataset name "
-                f"{dataset!r} still contains an unresolved symbolic parameter and "
-                "is reported exactly as coded"
-            )
-        return DDStatement(
-            name=name,
-            dataset=dataset,
-            disposition=disposition,
-            sysout=sysout,
-            is_dummy=is_dummy,
-            is_instream=False,
-            instream_lines=[],
-            concatenated=[],
-            record_format=record_format,
-            record_length=record_length,
-            parameters=params,
-            line=line,
-            procstep=procstep,
-        )
-
-    def _as_length(self, value: str | None, name: str, line: int) -> int | None:
-        if value is not None and value.isdigit():
-            return int(value)
-        self._note(
-            f"DD {name or '(unnamed)'} (line {line}): LRECL={value} is not a "
-            "number, so the record length is unknown"
-        )
+def _condition(params: dict[str, Any], enclosing: list[str]) -> str | None:
+    if "COND" in params:
+        return _raw(params["COND"])
+    if not enclosing:
         return None
+    if len(enclosing) == 1:
+        return enclosing[0]
+    return " AND ".join(_grouped(condition) for condition in enclosing)
 
-    # -- SET / IF / ELSE / ENDIF -----------------------------------------
-    def _handle_set(self, card: JclCard, sink: _Sink) -> None:
-        text = self._substitute(card.parameters, sink.symbols, card.line)
-        items = [item.strip() for item in split_top_level(text)]
-        if not any(items):
-            self._error(card.line, "SET statement has no symbolic parameters")
-            return
-        for item in items:
-            if not item:
-                continue
-            equals = find_top_level_equals(item)
-            if equals < 0:
-                self._error(
-                    card.line,
-                    f"SET parameter {item!r} is not of the form name=value",
-                )
-                continue
-            sink.symbols[item[:equals].strip().upper()] = unquote(
-                item[equals + 1 :].strip()
-            )
 
-    def _handle_if(self, card: JclCard, sink: _Sink) -> None:
-        text = self._substitute(card.parameters, sink.symbols, card.line).strip()
-        match = _THEN_RE.search(text)
-        if match is None:
-            self._error(card.line, "IF statement is missing the THEN keyword")
-            condition = text
-        else:
-            condition = text[: match.start()].strip()
-        if not condition:
-            self._error(card.line, "IF statement has no relational expression")
-        sink.if_stack.append(_IfFrame(condition=condition, line=card.line))
+def _step(
+    step: _JStep,
+    offset: int,
+    enclosing: list[str],
+    *,
+    name: str | None = None,
+    procedure: str | None = None,
+) -> JobStep:
+    params = step.parameters
+    parm = params.get("PARM")
+    dds = _dds(step.dd_statements, offset)
+    for key, override in step.dd_overrides.items():
+        procstep, _, ddname = key.rpartition(".")
+        converted = _dds(
+            [override, *step.dd_override_concatenations.get(key, [])],
+            offset,
+            procstep or None,
+        )
+        for head in converted:
+            for member in head.flatten():
+                member.name = ddname
+        dds.extend(converted)
+    return JobStep(
+        name=name if name is not None else (step.name or ""),
+        program=step.program,
+        procedure=procedure if procedure is not None else step.procedure,
+        parm=None if parm is None else unquote(_raw(parm) or ""),
+        dd_statements=dds,
+        condition=_condition(params, enclosing),
+        line=step.line_number + offset if step.line_number else 0,
+        parameters=_parameters(params),
+    )
 
-    def _handle_else(self, card: JclCard, sink: _Sink) -> None:
-        if not sink.if_stack:
-            self._error(card.line, "ELSE statement without a matching IF statement")
-            return
-        frame = sink.if_stack[-1]
-        if frame.in_else:
-            self._error(card.line, "second ELSE statement for the same IF statement")
-            return
-        frame.in_else = True
 
-    def _handle_endif(self, card: JclCard, sink: _Sink) -> None:
-        if not sink.if_stack:
-            self._error(card.line, "ENDIF statement without a matching IF statement")
-            return
-        sink.if_stack.pop()
-
-    def _if_condition(self, sink: _Sink) -> str | None:
-        if not sink.if_stack:
-            return None
-        parts = [
-            f"NOT ({frame.condition})" if frame.in_else else frame.condition
-            for frame in sink.if_stack
-        ]
-        return " AND ".join(parts)
-
-    # -- procedures -------------------------------------------------------
-    def _expand_procedure(
+class _JobConverter:
+    def __init__(
         self,
-        sink: _Sink,
-        step: JobStep,
-        overrides: dict[str, str],
-        exec_symbols: dict[str, str],
+        job: _JJob,
+        offset: int,
+        library_loader: Any,
+        unresolved: list[str],
+        errors: list[dict[str, Any]],
+        preamble: Iterable[str] = (),
     ) -> None:
-        name = (step.procedure or "").upper()
-        key = (sink.job_ordinal, name)
-        if key not in self.proc_bodies:
-            # A procedure defined ahead of the deck's first JOB card belongs
-            # to no job; like a SET coded there, it carries into the jobs.
-            key = (0, name)
-        entry = self.proc_bodies.get(key)
-        if entry is None:
-            self._note(
-                f"PROC {step.procedure} (line {step.line}): the procedure is not "
-                "defined in this file, so its steps and DD statements could not "
-                "be expanded"
-            )
-            return
-        coded_name, body, defaults = entry
-        symbols = dict(exec_symbols)
-        symbols.update(defaults)
-        symbols.update(overrides)
-        proc_steps = self._parse_procedure_body(key, body, symbols)
-        self._apply_dd_overrides(step, coded_name, proc_steps)
-        self._apply_exec_overrides(step, coded_name, proc_steps)
-        prefix = f"{step.name}." if step.name else ""
-        for proc_step in proc_steps:
-            proc_step.name = f"{prefix}{proc_step.name}"
-            if proc_step.procedure is None:
-                # A step of the procedure body itself; a step that invokes a
-                # further procedure keeps the name it invoked.
-                proc_step.procedure = coded_name
-            if proc_step.condition is None:
-                proc_step.condition = step.condition
-            sink.steps.append(proc_step)
+        self.job = job
+        self.offset = offset
+        self.library_loader = library_loader
+        self.unresolved = unresolved
+        self.errors = errors
+        #: Procedures coded ahead of the first JOB card: in-stream, but their
+        #: line numbers count from the top of the file, not from this job.
+        self.preamble = set(preamble)
+        self.job_card: str | None = None
 
-    def _parse_procedure_body(
-        self, key: tuple[int, str], body: list[JclCard], symbols: dict[str, str]
+    def convert(self) -> JclJob:
+        job = self.job
+        steps: list[JobStep] = []
+        self._walk(job.steps, [], steps)
+        return JclJob(
+            name=job.name,
+            steps=steps,
+            parameters=_job_parameters(job, self.job_card),
+            line=job.line_number + self.offset if job.line_number else 0,
+            dd_statements=_dds(job.joblib_dds, self.offset),
+        )
+
+    def _walk(self, items: list[Any], enclosing: list[str], out: list[JobStep]) -> None:
+        from jclparser.model import ConditionalBlock
+
+        for item in items:
+            if isinstance(item, ConditionalBlock):
+                self._walk(item.then_steps, [*enclosing, item.condition], out)
+                self._walk(item.else_steps, [*enclosing, _negated(item.condition)], out)
+                continue
+            out.append(_step(item, self.offset, enclosing))
+            if item.procedure:
+                out.extend(self._expand(item, enclosing))
+
+    def procedures(self) -> dict[str, list[JobStep]]:
+        """Each in-stream procedure's steps, expanded with its own defaults."""
+        from jclparser.model import Step
+
+        out: dict[str, list[JobStep]] = {}
+        for proc in self.job.procedures:
+            name = proc.name.upper()
+            probe = Step(name=name, procedure=name, line_number=proc.line_number)
+            steps = self._expand(probe, [], quiet=True)
+            for body_step in steps:
+                body_step.name = body_step.name.removeprefix(name + ".")
+            out[name] = steps
+        return out
+
+    def _expand(
+        self, step: _JStep, enclosing: list[str], *, quiet: bool = False
     ) -> list[JobStep]:
-        coded_name = self.proc_bodies[key][0] if key in self.proc_bodies else key[1]
-        sink = _Sink(
-            steps=[],
-            job_dds=[],
-            symbols=dict(symbols),
-            expand_procs=False,
-            context=f"procedure {coded_name}",
+        """The steps an ``EXEC proc`` expands to, one per procedure step."""
+        from jclparser import explode_job
+        from jclparser.errors import JCLParseError
+        from jclparser.model import ConditionalBlock, Job
+        from jclparser.proc_loader import (
+            CompositeProcedureLoader,
+            InlineProcedureLoader,
         )
-        for card in body:
-            if card.kind == KIND_COMMENT:
-                continue
-            if card.kind == KIND_JES:
-                self._note(
-                    f"{card.parameters.split()[0]} (line {card.line}): JES control "
-                    "statement is recognised but not modelled"
-                )
-                continue
-            if card.kind == KIND_NULL:
-                self._error(
-                    card.line,
-                    f"null statement inside procedure {coded_name}",
-                )
-                continue
-            if card.operation in ("JOB", "PROC", "PEND"):
-                self._error(
-                    card.line,
-                    f"{card.operation} statement is not allowed inside "
-                    f"procedure {coded_name}",
-                )
-                continue
-            self._dispatch(card, sink)
-        self._close_sink(sink)
-        for dd in sink.job_dds:
-            self._error(
-                dd.line,
-                f"DD {dd.name or '(unnamed)'} precedes the first EXEC statement "
-                f"of procedure {coded_name}",
+
+        missing = _Missing()
+        loader = CompositeProcedureLoader(
+            [
+                InlineProcedureLoader(self.job.procedures),
+                self.library_loader,
+                missing.loader(),
+            ]
+        )
+        single = Job(
+            name=self.job.name,
+            steps=[step],
+            procedures=self.job.procedures,
+            set_statements=dict(self.job.set_statements),
+        )
+        try:
+            exploded = explode_job(single, proc_loader=loader, audit=True)
+        except (JCLParseError, ValueError, RecursionError) as exc:
+            if quiet:
+                return []
+            self.errors.append(
+                {
+                    "line": step.line_number + self.offset,
+                    "message": f"EXEC {step.procedure}: {exc}",
+                }
             )
-        return sink.steps
+            return []
+        for name in [] if quiet else missing.names:
+            self.unresolved.append(
+                f"PROC {name} (line {step.line_number + self.offset}): the "
+                "procedure is neither defined in this file nor found on the "
+                "procedure path, so its steps and DD statements could not be "
+                "expanded"
+            )
+        for warning in [] if quiet else exploded.warnings:
+            if warning not in self.unresolved:
+                self.unresolved.append(warning)
 
-    def _apply_exec_overrides(
-        self, invocation: JobStep, proc_name: str, proc_steps: list[JobStep]
-    ) -> None:
-        """Apply ``PARM`` / ``COND`` coded on the EXEC that invoked a procedure.
+        out: list[JobStep] = []
+        explosion_map = exploded.explosion_map or {}
 
-        ``PARM.procstep=`` and ``COND.procstep=`` override that one procedure
-        step.  Unqualified, ``COND=`` overrides every step of the procedure,
-        while ``PARM=`` applies to the *first* step and nullifies the ``PARM``
-        of every later one -- the z/OS rules for an EXEC calling a procedure.
-        """
-        for param in invocation.parameters:
-            base, _, procstep = param.keyword.upper().partition(".")
-            if base not in ("PARM", "COND"):
-                continue
-            if procstep:
-                targets = [s for s in proc_steps if s.name.upper() == procstep]
-                if not targets:
-                    self._note(
-                        f"{param.keyword} (line {invocation.line}): procedure "
-                        f"{proc_name} has no step named {procstep}, so the "
-                        "override was not applied"
-                    )
+        def walk(items: list[Any], conds: list[str]) -> None:
+            for item in items:
+                if isinstance(item, ConditionalBlock):
+                    walk(item.then_steps, [*conds, item.condition])
+                    walk(item.else_steps, [*conds, _negated(item.condition)])
                     continue
-            else:
-                targets = list(proc_steps)
-            for index, target in enumerate(targets):
-                value = param.value
-                if base == "PARM" and not procstep and index > 0:
-                    value = None
-                self._set_step_parameter(target, base, value)
+                info = explosion_map.get(item.original_proc_call or "")
+                procedure = getattr(info, "proc_definition", None) or step.procedure
+                # Line numbers of a library procedure are its own member's,
+                # not this file's.
+                name = str(procedure).upper()
+                inline = name in self._inline_names() and name not in self.preamble
+                origin = self.offset if inline else 0
+                out.append(_step(item, origin, conds, procedure=name))
 
-    def _set_step_parameter(
-        self, step: JobStep, keyword: str, value: str | None
-    ) -> None:
-        """Override (or, with an empty value, nullify) one EXEC parameter."""
-        kept = [p for p in step.parameters if p.keyword.upper() != keyword]
-        position = next(
-            (i for i, p in enumerate(step.parameters) if p.keyword.upper() == keyword),
-            len(kept),
-        )
-        if value:
-            kept.insert(position, self._parse_parameter(f"{keyword}={value}"))
-        step.parameters = kept
-        if keyword == "PARM":
-            step.parm = unquote(value) if value else None
-        else:
-            step.condition = value or None
+        walk(exploded.steps, list(enclosing))
+        return out
 
-    def _apply_dd_overrides(
-        self, invocation: JobStep, proc_name: str, proc_steps: list[JobStep]
-    ) -> None:
-        for dd in invocation.dd_statements:
-            target: JobStep | None = None
-            if dd.procstep:
-                for candidate in proc_steps:
-                    if candidate.name.upper() == dd.procstep.upper():
-                        target = candidate
-                        break
-                if target is None:
-                    self._note(
-                        f"DD {dd.procstep}.{dd.name} (line {dd.line}): procedure "
-                        f"{proc_name} has no step named {dd.procstep}, so the "
-                        "override was not applied"
-                    )
-                    continue
-            elif len(proc_steps) == 1:
-                target = proc_steps[0]
-            else:
-                self._note(
-                    f"DD {dd.name} (line {dd.line}): coded on an EXEC of "
-                    f"procedure {proc_name}, which has {len(proc_steps)} steps, "
-                    "without a procstep qualifier, so the override was not applied"
+    def _inline_names(self) -> set[str]:
+        return {proc.name.upper() for proc in self.job.procedures}
+
+
+_SYMBOL = re.compile(r"(?<!&)&([A-Z@#$][A-Z0-9@#$]{0,7})", re.IGNORECASE)
+
+
+def _diagnose(job: JclJob, unresolved: list[str]) -> None:
+    """Report what ``jclparser`` read but could not resolve, rather than let
+    an unresolved name pass for a real one."""
+
+    def note(message: str) -> None:
+        if message not in unresolved:
+            unresolved.append(message)
+
+    dds: list[tuple[JobStep | None, DDStatement]] = [
+        (None, dd) for top in job.dd_statements for dd in top.flatten()
+    ]
+    dds += [
+        (step, dd)
+        for step in job.steps
+        for top in step.dd_statements
+        for dd in top.flatten()
+    ]
+    for step, dd in dds:
+        where = f"DD {dd.name}" + (f" of step {step.name}" if step else "")
+        where += f" (line {dd.line})"
+        dataset = dd.dataset
+        if dataset is not None and not dataset.startswith("&&"):
+            symbols = sorted({m.group(1).upper() for m in _SYMBOL.finditer(dataset)})
+            if symbols:
+                note(
+                    f"{where}: DSN={dataset} keeps "
+                    + ", ".join(f"&{name}" for name in symbols)
+                    + " as coded; no SET, procedure default or EXEC override "
+                    "gives it a value"
                 )
-                continue
-            existing = target.dd(dd.name)
-            if existing is None:
-                target.dd_statements.append(_clone_dd(dd))
-                continue
-            merged = self._merge_dd(existing, dd)
-            target.dd_statements[target.dd_statements.index(existing)] = merged
-
-    def _merge_dd(self, base: DDStatement, override: DDStatement) -> DDStatement:
-        params: list[JclParameter] = [
-            JclParameter(
-                keyword=p.keyword,
-                value=p.value,
-                subparameters=dict(p.subparameters),
-                positional=list(p.positional),
+        if dataset is not None and dataset.startswith("*."):
+            note(
+                f"{where}: DSN={dataset} is a backward reference; the dataset "
+                "it names is not resolved"
             )
-            for p in base.parameters
-        ]
-        # DSN, DUMMY, SYSOUT and in-stream data (`*` / `DATA`) are mutually
-        # exclusive ways of saying what a DD is. An override coding one of
-        # them replaces whichever the procedure coded, rather than leaving
-        # both in effect.
-        replaces_kind = override.is_instream or any(
-            _is_dd_kind(p) for p in override.parameters
+        dcb = dd.parameter("DCB")
+        lrecl = dd.parameter("LRECL")
+        coded = (dcb.subparameters.get("LRECL") if dcb else None) or (
+            lrecl.value if lrecl else None
         )
-        if replaces_kind:
-            params = [p for p in params if not _is_dd_kind(p)]
-        for param in override.parameters:
-            keyword = param.keyword.upper()
-            replaced = False
-            if keyword:
-                for index, existing in enumerate(params):
-                    if existing.keyword.upper() == keyword:
-                        if keyword == "DCB":
-                            param = _merge_dcb(existing, param)
-                        params[index] = param
-                        replaced = True
-                        break
-            if not replaced:
-                params.append(param)
-        merged = self._dd_from_parameters(base.name, params, override.line, None)
-        if override.is_instream:
-            merged.is_instream = True
-            merged.instream_lines = list(override.instream_lines)
-        elif base.is_instream and not replaces_kind:
-            merged.is_instream = True
-            merged.instream_lines = list(base.instream_lines)
-        # Unnamed override cards override the procedure's concatenated
-        # members by position, parameter by parameter; a member no override
-        # reaches is left exactly as the procedure coded it.
-        members: list[DDStatement] = []
-        for index in range(max(len(base.concatenated), len(override.concatenated))):
-            base_member = (
-                base.concatenated[index] if index < len(base.concatenated) else None
-            )
-            override_member = (
-                override.concatenated[index]
-                if index < len(override.concatenated)
-                else None
-            )
-            if base_member is None:
-                assert override_member is not None
-                members.append(_clone_dd(override_member))
-            elif override_member is None or not override_member.parameters:
-                members.append(_clone_dd(base_member))
-            else:
-                members.append(self._merge_dd(base_member, override_member))
-        merged.concatenated = members
-        for member in merged.concatenated:
-            member.name = merged.name
-        return merged
+        if coded is not None and dd.record_length is None:
+            note(f"{where}: LRECL={coded} is not a number; record length unknown")
 
-    # -- parameters and symbols ------------------------------------------
-    def _parameters(self, card: JclCard, sink: _Sink) -> list[JclParameter]:
-        text = self._substitute(card.parameters, sink.symbols, card.line)
-        return self._parse_parameters(text)
 
-    def _parse_parameters(self, text: str) -> list[JclParameter]:
-        params: list[JclParameter] = []
-        for raw in split_top_level(text):
-            item = raw.strip()
-            if not item:
-                continue
-            params.append(self._parse_parameter(item))
-        return params
+def _names(procedures: Iterable[_JProc]) -> set[str]:
+    return {proc.name.upper() for proc in procedures}
 
-    def _parse_parameter(self, item: str) -> JclParameter:
-        equals = find_top_level_equals(item)
-        if equals >= 0:
-            param = JclParameter(
-                keyword=item[:equals].strip(), value=item[equals + 1 :].strip()
+
+def _note_duplicate_procedures(job: _JJob, offset: int, unresolved: list[str]) -> None:
+    seen: set[str] = set()
+    for proc in job.procedures:
+        name = proc.name.upper()
+        if name in seen:
+            unresolved.append(
+                f"PROC {name} (line {proc.line_number + offset}) is defined "
+                "more than once in this job; an EXEC of it runs the last "
+                "definition"
             )
-            value = param.value or ""
-            if value.startswith("(") and value.endswith(")"):
-                for raw_sub in split_top_level(value[1:-1]):
-                    sub = raw_sub.strip()
-                    if not sub:
-                        # An omitted positional sub-parameter keeps its slot:
-                        # in ``DISP=(OLD,,DELETE)`` the empty middle is the
-                        # normal disposition, and dropping it read DELETE as
-                        # the normal disposition instead of the abnormal one.
-                        param.positional.append("")
-                        continue
-                    sub_equals = find_top_level_equals(sub)
-                    if sub_equals >= 0:
-                        param.subparameters[sub[:sub_equals].strip().upper()] = sub[
-                            sub_equals + 1 :
-                        ].strip()
-                    else:
-                        param.positional.append(sub)
-            return param
-        if item.startswith("(") or item.startswith("'"):
-            param = JclParameter(keyword="", value=item)
-            if item.startswith("(") and item.endswith(")"):
-                param.positional = [sub.strip() for sub in split_top_level(item[1:-1])]
-            return param
-        return JclParameter(keyword=item, value=None)
+        seen.add(name)
 
-    def _substitute(
-        self, text: str, symbols: dict[str, str], line: int, depth: int = 0
-    ) -> str:
-        if "&" not in text:
-            return text
-        out: list[str] = []
-        index = 0
-        changed = False
-        while index < len(text):
-            char = text[index]
-            if char != "&":
-                out.append(char)
-                index += 1
-                continue
-            if text[index + 1 : index + 2] == "&":
-                # `&&` introduces a temporary dataset name, not a symbol.
-                out.append("&&")
-                index += 2
-                continue
-            end = index + 1
-            while (
-                end < len(text)
-                and (end - index - 1) < _MAX_SYMBOL_LENGTH
-                and (text[end].isalnum() or text[end] in "@#$")
-            ):
-                end += 1
-            name = text[index + 1 : end]
-            if not name or not (name[0].isalpha() or name[0] in "@#$"):
-                out.append("&")
-                index += 1
-                continue
-            key = name.upper()
-            if key in symbols:
-                out.append(symbols[key])
-                changed = True
-                index = end
-                if text[index : index + 1] == ".":
-                    index += 1
-                continue
-            out.append("&" + name)
-            index = end
-            self._note(
-                f"&{name} (line {line}): symbolic parameter has no value here, so "
-                "the text is left exactly as coded"
-            )
-        result = "".join(out)
-        if changed and "&" in result and depth + 1 < _MAX_SUBSTITUTION_PASSES:
-            return self._substitute(result, symbols, line, depth + 1)
-        return result
+
+# -- Entry points ------------------------------------------------------------
 
 
 class JclParser:
     """Parses z/OS JCL into a :class:`~cobolparser.jcl.models.JclParseResult`.
 
-    The parser is stateless between calls: every :meth:`parse` builds its own
-    state, so the same instance can be reused and the same text always yields
-    the same result.
+    ``proc_paths`` are directories searched, in order, for cataloged
+    procedures (``EXEC name`` with no in-stream ``PROC name``) and ``INCLUDE``
+    members: one member per file, named after the member, any extension.
+    The parser is stateless between calls.
     """
+
+    #: How many unreadable cards one job may have before it is given up on.
+    MAX_RECOVERIES = 50
+
+    def __init__(
+        self, proc_paths: Sequence[str | os.PathLike[str]] | None = None
+    ) -> None:
+        self.proc_paths = list(proc_paths or [])
 
     def parse(self, text: str, *, filename: str = "<jcl>") -> JclParseResult:
         """Parse JCL source ``text``."""
-        return _Builder(filename).build(text)
+        _require_jclparser()
+
+        library_loader, member_loader = _make_loaders(self.proc_paths)
+        jobs: list[JclJob] = []
+        procedures: dict[str, list[JobStep]] = {}
+        symbols: dict[str, str] = {}
+        errors: list[dict[str, Any]] = []
+        unresolved: list[str] = []
+
+        chunks = _split_jobs(text)
+        preamble = self._preamble_procedures(chunks, member_loader)
+        for offset, chunk in chunks:
+            job = self._parse_job(chunk, offset, member_loader, errors)
+            if job is None:
+                continue
+            borrowed = [
+                proc for proc in preamble if proc.name not in _names(job.procedures)
+            ]
+            job.procedures[:0] = borrowed
+            for warning in job.warnings:
+                if warning not in unresolved:
+                    unresolved.append(warning)
+            _note_duplicate_procedures(job, offset, unresolved)
+            converter = _JobConverter(
+                job, offset, library_loader, unresolved, errors, _names(borrowed)
+            )
+            converter.job_card = _statement_text(chunk, job.line_number)
+            converted = converter.convert()
+            has_job_card = converter.job_card is not None and bool(
+                _JOB_CARD.match(converter.job_card)
+            )
+            if not has_job_card:
+                unresolved.append(
+                    "no JOB card: read as a cataloged procedure member, whose "
+                    "steps run only when a job invokes it"
+                )
+            elif not job.name:
+                errors.append(
+                    {
+                        "line": offset + (job.line_number or 1),
+                        "message": "JOB statement has no job name",
+                    }
+                )
+            _diagnose(converted, unresolved)
+            if has_job_card or converted.steps:
+                jobs.append(converted)
+            for name, steps in converter.procedures().items():
+                procedures.setdefault(name, steps)
+            symbols.update(job.set_statements)
+
+        return JclParseResult(
+            jobs=jobs,
+            procedures=procedures,
+            symbols=symbols,
+            errors=errors,
+            unresolved=unresolved,
+            filename=filename,
+        )
+
+    def _parse_job(
+        self,
+        chunk: str,
+        offset: int,
+        member_loader: Any,
+        errors: list[dict[str, Any]],
+    ) -> _JJob | None:
+        """``jclparser`` stops at the first card it cannot read; record that
+        card as an error, blank it out, and read the rest of the job."""
+        from jclparser import parse_jcl as _jcl_parse
+        from jclparser.errors import JCLParseError
+        from jclparser.parser import split_source_lines
+
+        lines = split_source_lines(chunk)
+        for _ in range(self.MAX_RECOVERIES):
+            try:
+                job: _JJob = _jcl_parse(
+                    "\n".join(lines),
+                    enable_external_procs=False,
+                    include_loader=member_loader,
+                )
+                return job
+            except (JCLParseError, ValueError) as exc:
+                line = getattr(exc, "line_number", 0) or 0
+                errors.append(
+                    {
+                        "line": line + offset if line else offset + 1,
+                        "message": getattr(exc, "message", None) or str(exc),
+                    }
+                )
+                if not 0 < line <= len(lines) or lines[line - 1] == "//*":
+                    return None
+                lines[line - 1] = "//*"
+        return None
+
+    def _preamble_procedures(
+        self, chunks: list[tuple[int, str]], member_loader: Any
+    ) -> list[_JProc]:
+        """In-stream procedures coded ahead of the first JOB card, which
+        ``jclparser`` would otherwise not see from inside the job."""
+        from jclparser import parse_jcl as _jcl_parse
+        from jclparser.errors import JCLParseError
+
+        if not chunks:
+            return []
+        from jclparser.parser import split_source_lines
+
+        lines = split_source_lines(chunks[0][1])
+        first = next((i for i, line in enumerate(lines) if _JOB_CARD.match(line)), None)
+        if not first:
+            return []
+        try:
+            head = _jcl_parse(
+                "\n".join(lines[:first]),
+                enable_external_procs=False,
+                include_loader=member_loader,
+            )
+        except (JCLParseError, ValueError):
+            return []
+        return list(head.procedures)
 
     def parse_file(self, path: str | os.PathLike[str]) -> JclParseResult:
-        """Parse the JCL file at ``path``.
-
-        The file is read as UTF-8 with undecodable bytes replaced, so a deck
-        transferred from EBCDIC without conversion produces errors rather than
-        an exception.
-        """
+        """Parse the JCL file at ``path`` (UTF-8, undecodable bytes replaced)."""
         with open(path, encoding="utf-8", errors="replace") as handle:
             text = handle.read()
         return self.parse(text, filename=str(path))
 
 
-def parse_jcl(text: str, *, filename: str = "<jcl>") -> JclParseResult:
+def parse_jcl(
+    text: str,
+    *,
+    filename: str = "<jcl>",
+    proc_paths: Sequence[str | os.PathLike[str]] | None = None,
+) -> JclParseResult:
     """Parse JCL source ``text``.  Convenience wrapper around :class:`JclParser`."""
-    return JclParser().parse(text, filename=filename)
+    return JclParser(proc_paths).parse(text, filename=filename)
