@@ -359,8 +359,14 @@ class CobolParser:
         if self.preprocess_fixed is True or (
             self.preprocess_fixed is None and not self.free_form
         ):
+            # Detect on the raw source, as the lexer does: the banner that
+            # _skip_to_identification_division blanked is often the only
+            # part laid out in columns (tab-indented code fails the
+            # column-7 test).
             detected_fixed = (
-                True if self.preprocess_fixed else detect_fixed_format(cleaned_source)
+                True
+                if self.preprocess_fixed
+                else detect_fixed_format(strip_compiler_directives(source))
             )
             if detected_fixed:
                 normalized = self._normalize_fixed_source(
