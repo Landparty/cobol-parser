@@ -35,6 +35,12 @@ through `CobolParser.parse`, `parse_cobol` and `parse_files(workers=1|2)`.
 `#` in comment lines of a change-tagged copybook (nested COPY, short members,
 direct source, free-form `*>`) and the `DIVIDE 10 INTO X` non-anchor.
 
+2026-10-09: `tests/unit/analysis/test_ims_ssa_segment_resolution.py` (10
+tests) pins `IMSSegmentAnalyzer` segment names read from an SSA's first 8
+bytes across split leaves and nested sub-groups (VALUE, MOVE, qualified
+MOVE through a sub-group, unknown leaf -> `None`), and `EXEC DLI
+SEGMENT((area))` resolved through the area's VALUE / MOVE.
+
 2026-09-30: `tests/unit/analysis/test_business_rules.py` (73 tests) pins
 `BusinessRuleExtractor` against real parses: IF / EVALUATE (subject, TRUE,
 FALSE, ALSO, THRU, OTHER) / SEARCH decision tables with unquoted selector

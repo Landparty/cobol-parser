@@ -1454,6 +1454,22 @@ that is a numeric literal or a data item with a purely numeric PICTURE
 (function codes are always `PIC X(4)`) is now skipped.
 `TestParmcountOperand` in `tests/unit/test_ims_segment_analyzer.py`.
 
+**Segment name = first 8 *bytes*, not first child (2026-10-09):** a group
+SSA's name used to come from its first child only, so a name split across
+leaves (`05 A PIC X(4) VALUE 'CUST'. 05 B PIC X(4) VALUE 'OMER'.`) read
+`CUST`, and one inside a nested sub-group read `None`.
+`_group_segment_candidates` now walks the leaves in storage order
+(`_ssa_leaves`: REDEFINES skipped, a sub-group with its own VALUE/MOVE taken
+whole), each leaf contributing VALUE ∪ MOVEs padded/cut to its width
+(`calculate_size()`), until 8 bytes are known; candidates combine (capped at
+16), and a leaf with unknown content before byte 8 leaves the name `None`
+rather than truncated. Qualified MOVEs match against the SSA *and* every
+intermediate group name. An elementary SSA with a VALUE now also merges
+MOVEs into it. `EXEC DLI ... SEGMENT((area))` (doubled parens = a data area)
+resolves through `_resolve_ssa_segment(area)` instead of reporting the text
+`(AREA)`; `None` when unknown. Pinned by
+`tests/unit/analysis/test_ims_ssa_segment_resolution.py`.
+
 ## HostVariableResolver
 
 ```python
