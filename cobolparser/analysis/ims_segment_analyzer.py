@@ -23,6 +23,7 @@ with a parenthesised field/operator/value expression.
 """
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from ..models.ast_base import ASTNode, SourceLocation
@@ -62,6 +63,9 @@ _PARAM_SSA_START = 3
 
 # Segment name occupies the first 8 bytes of every SSA
 _SSA_SEGMENT_NAME_LEN = 8
+# Most segment-name combinations a split SSA is resolved to before giving up
+# (several MOVEs into each of several leaves multiply).
+_MAX_SEGMENT_CANDIDATES = 16
 
 # Interfaces that accept an optional leading parameter-count operand
 # (`CALL 'CBLTDLI' USING parmcount, function, ...`). CEETDLI takes none.
@@ -330,8 +334,7 @@ class IMSSegmentAnalyzer:
         results.sort(key=lambda call: (call.location.line, call.location.column))
         return results
 
-    @staticmethod
-    def _build_exec_dli_calls(ast: CobolProgram) -> list[IMSDLICall]:
+    def _build_exec_dli_calls(self, ast: CobolProgram) -> list[IMSDLICall]:
         """One :class:`IMSDLICall` per ``EXEC DLI`` statement.
 
         The command-level interface names everything the CALL form hides
@@ -340,6 +343,11 @@ class IMSSegmentAnalyzer:
         each ``SEGMENT(name)`` option names a segment on the path. Program
         control commands (``SCHD``, ``TERM``, ``CHKP``, ...) are reported
         too, with no segment, so a program's full DL/I surface is visible.
+
+        ``SEGMENT((area))`` -- the doubled parentheses -- names a data area
+        holding the segment name rather than the name itself; it is resolved
+        through the area's VALUE / MOVEs like an SSA, or ``None`` when its
+        content is unknown.
         """
         calls: list[IMSDLICall] = []
         for stmt in ast.find_all_by_type("ExecImsStatement"):
@@ -358,7 +366,11 @@ class IMSSegmentAnalyzer:
                 elif keyword in ("INTO", "FROM") and value and io_area is None:
                     io_area = value
                 elif keyword == "SEGMENT" and value:
-                    segments.append(value.upper())
+                    if value.startswith("(") and value.endswith(")"):
+                        area = value[1:-1].strip()
+                        segments.append(self._resolve_ssa_segment(area))
+                    else:
+                        segments.append(value.upper())
             calls.append(
                 IMSDLICall(
                     location=stmt.location,
@@ -426,38 +438,32 @@ class IMSSegmentAnalyzer:
 
         item = self._data_items.get(var)
         if item is not None:
-            # Group item: the segment name lives in the first child field.
-            # Merge its static VALUE clause with any MOVE-tracked values on
-            # that child — programs routinely MOVE a new segment name into
-            # the child (MOVE 'SEGB' TO SSA1-SEG-NAME), and reporting only
-            # the static VALUE would state a stale name with full
-            # confidence. Multiple candidates use the "/" convention.
-            data_children = [c for c in item.children if isinstance(c, CobolDataItem)]
-            if data_children:
-                child = data_children[0]
-                candidates: set[str] = set()
-                if child.value_clause is not None:
-                    raw = str(child.value_clause).strip("\"'")
-                    name = raw[:_SSA_SEGMENT_NAME_LEN].rstrip()
-                    if name:
-                        candidates.add(name)
-                child_name = (child.name or "").upper()
-                moved_in = set(self._moved_values.get(child_name, ()))
-                for qualifiers, values in self._qualified_moves.get(child_name, []):
-                    if qualifiers <= {var}:
-                        moved_in |= values
-                for v in moved_in:
-                    name = v[:_SSA_SEGMENT_NAME_LEN].rstrip()
-                    if name:
-                        candidates.add(name)
+            # Group item: the segment name is the first 8 bytes of its
+            # leaves -- usually one child, but it may be split across several
+            # fields or sit in a nested sub-group. Each leaf's static VALUE is
+            # merged with any MOVE-tracked values on it -- programs routinely
+            # MOVE a new segment name into the child (MOVE 'SEGB' TO
+            # SSA1-SEG-NAME), and reporting only the static VALUE would state
+            # a stale name with full confidence. Multiple candidates use the
+            # "/" convention.
+            if _storage_children(item):
+                candidates = self._group_segment_candidates(item, var)
                 if candidates:
-                    ordered = sorted(candidates)
-                    return "/".join(ordered) if len(ordered) > 1 else ordered[0]
+                    return _join_candidates(candidates)
 
-            # Elementary item: VALUE clause holds the whole SSA; take first 8 bytes
+            # Elementary item: VALUE clause holds the whole SSA; take first 8
+            # bytes, merged with any MOVE into it -- the same rule as a
+            # group's leaves (a VALUE overwritten by a MOVE is stale).
             if item.value_clause is not None:
-                raw = str(item.value_clause).strip("\"'")
-                return raw[:_SSA_SEGMENT_NAME_LEN].rstrip() or None
+                width = _item_width(item)
+                raw_values = {_value_text(item.value_clause, width)}
+                raw_values |= self._moved_values.get(var, set())
+                names = {
+                    v[:_SSA_SEGMENT_NAME_LEN].rstrip()
+                    for v in raw_values
+                    if v[:_SSA_SEGMENT_NAME_LEN].rstrip()
+                }
+                return _join_candidates(names) if names else None
 
         # Fall back to MOVE-tracked values (dynamic assignment). Mirrors
         # `_resolve_func_code`'s handling of a multi-valued variable: report
@@ -477,6 +483,76 @@ class IMSSegmentAnalyzer:
 
         return None
 
+    def _group_segment_candidates(self, group: CobolDataItem, ssa: str) -> set[str]:
+        """Segment names the first 8 bytes of group SSA *ssa* can hold.
+
+        The segment name is the first 8 *bytes* of the SSA, not its first
+        child: a program may split it across several elementary fields
+        (``05 SEG-A PIC X(4) VALUE 'CUST'. 05 SEG-B PIC X(4) VALUE 'OMER'.``)
+        or nest it inside a sub-group (``05 SSA-KEY. 10 SSA-SEG PIC X(8)``).
+        The leaves are walked in storage order, each contributing its VALUE
+        and the values MOVEd into it (padded/cut to its width), until 8
+        bytes are known. Several candidates per leaf combine (bounded by
+        ``_MAX_SEGMENT_CANDIDATES``); a leaf whose bytes are unknown before
+        the 8th byte leaves the name unresolved (empty set) rather than
+        reporting a truncated one.
+        """
+        prefixes: set[str] = {""}
+        for leaf, scope in self._ssa_leaves(group, frozenset({ssa})):
+            width = _item_width(leaf)
+            values = self._leaf_values(leaf, scope, width)
+            if not values:
+                return set()
+            prefixes = {p + v for p in prefixes for v in values}
+            if len(prefixes) > _MAX_SEGMENT_CANDIDATES:
+                return set()
+            if width is None or all(len(p) >= _SSA_SEGMENT_NAME_LEN for p in prefixes):
+                break
+        return {
+            p[:_SSA_SEGMENT_NAME_LEN].rstrip()
+            for p in prefixes
+            if p[:_SSA_SEGMENT_NAME_LEN].rstrip()
+        }
+
+    def _ssa_leaves(
+        self, group: CobolDataItem, scope: frozenset[str]
+    ) -> Iterator[tuple[CobolDataItem, frozenset[str]]]:
+        """Yield *group*'s storage in order, with the names that qualify it.
+
+        A sub-group that itself has a VALUE or received a MOVE is yielded
+        whole (its bytes are known as one run); any other sub-group is
+        descended into. REDEFINES entries overlay storage already yielded
+        and are skipped.
+        """
+        for child in _storage_children(group):
+            if child.redefines:
+                continue
+            if _storage_children(child) and not self._has_own_values(child, scope):
+                inner = scope | {(child.name or "").upper()}
+                yield from self._ssa_leaves(child, inner)
+            else:
+                yield child, scope
+
+    def _has_own_values(self, item: CobolDataItem, scope: frozenset[str]) -> bool:
+        return bool(self._leaf_values(item, scope, None))
+
+    def _leaf_values(
+        self, leaf: CobolDataItem, scope: frozenset[str], width: int | None
+    ) -> set[str]:
+        """The byte strings *leaf* can hold: its VALUE plus MOVEs into it."""
+        raw: set[str] = set()
+        if leaf.value_clause is not None:
+            raw.add(_value_text(leaf.value_clause, width))
+        if not leaf.is_filler and leaf.name:
+            name = leaf.name.upper()
+            raw |= self._moved_values.get(name, set())
+            for qualifiers, values in self._qualified_moves.get(name, []):
+                if qualifiers <= scope:
+                    raw |= values
+        if width is None:
+            return raw
+        return {v[:width].ljust(width) for v in raw}
+
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
 
@@ -492,6 +568,44 @@ _FIGURATIVE_CONSTANTS: dict[str, str] = {
     "HIGH-VALUE": "\xff",
     "HIGH-VALUES": "\xff",
 }
+
+
+def _storage_children(item: CobolDataItem) -> list[CobolDataItem]:
+    """*item*'s direct subordinate storage (no level-66 / level-77 entries)."""
+    return [
+        c
+        for c in item.children
+        if isinstance(c, CobolDataItem) and c.level not in (66, 77)
+    ]
+
+
+def _item_width(item: CobolDataItem) -> int | None:
+    """Bytes *item* occupies, or ``None`` when its size is not known.
+
+    An elementary item with no PICTURE (hand-built ASTs) has no knowable
+    width, so its value is taken whole.
+    """
+    if not _storage_children(item) and item.picture_clause is None:
+        return None
+    return item.calculate_size() or None
+
+
+def _value_text(value_clause: str, width: int | None) -> str:
+    """The characters a VALUE clause puts in storage (quotes removed).
+
+    A figurative constant fills the item (``VALUE SPACE`` is not the five
+    letters ``SPACE``).
+    """
+    text = str(value_clause).strip()
+    upper = text.upper()
+    if upper in _FIGURATIVE_CONSTANTS:
+        return _FIGURATIVE_CONSTANTS[upper] * (width or 1)
+    return text.strip("\"'")
+
+
+def _join_candidates(names: set[str]) -> str:
+    """One name, or several in the analyzer's ``A/B`` convention."""
+    return "/".join(sorted(names))
 
 
 def _strip_quotes(value: str) -> str:
