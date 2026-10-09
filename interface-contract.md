@@ -66,6 +66,50 @@ flow_dict = flow_report.to_dict()    # must return dict
   to nodes on `qualified_name ?? name`. Absent for every node whose name is
   unique, so such programs serialize exactly as before (issue #258).
 
+### 4b. Field lineage (optional, fault-isolated; 2026-10-08)
+```python
+from cobolparser.analysis.field_lineage import FieldFlowAnalyzer
+from cobolparser.analysis.lineage_graph import LineageGraph
+from cobolparser.analysis.lineage_jcl import bindings_from_jobs, jobs_from_sources
+
+report = FieldFlowAnalyzer().analyze(parse_result.ast).to_dict()   # per program
+jobs, problems = jobs_from_sources({name: jcl_text}, {proc: proc_text})
+graph = LineageGraph(reports, *bindings_from_jobs(jobs))           # per organization
+stored = graph.join_edges()                                         # list[dict]
+graph = LineageGraph(reports, join_edges=stored)                    # query time
+graph.impact(field, program=..., direction="forward"|"backward", depth=N).to_dict()
+
+# Optional (added 2026-10-08): keep the joins' caveats and unjoined DDs too
+state = graph.join_state()      # {"edges": [...], "caveats": [str], "unjoined": [str]}
+graph = LineageGraph(reports, join_edges=state["edges"],
+                     join_caveats=state["caveats"], unjoined=state["unjoined"])
+```
+- The report dict carries `lineage_version` (currently `"2"`). A change to
+  its shape (ports, edges, node keys) bumps it; a stored report of another
+  version must be recomputed, not read. `"2"` (2026-10-08) added: item nodes
+  for literal-subscript occurrences of table fields (`name` like
+  `"R.AMT(3)"`, joined to `"R.AMT"` by inexact `kind="occurrence"` edges),
+  `PROGRAM#RETURNING` linkage ports (`PROCEDURE DIVISION ... RETURNING`),
+  `#n`-suffixed `qualified_name`s for the n-th item sharing a name
+  (`"FILLER#2"`), an optional `occurs` key on `items` entries, and table
+  fields mapped to every occurrence's bytes (inexact) instead of the first.
+- `join_edges()` is unchanged. `join_state()` adds what the joins said besides
+  their edges; `LineageGraph(..., join_edges=..., join_caveats=...,
+  unjoined=...)` restores it, and both keyword arguments are optional
+  (without them a rebuilt graph re-derives only the opaque-callee caveat and
+  has an empty `unjoined`, as before). A rebuilt graph's own `join_edges()` /
+  `join_state()` now return the edges it was built from.
+- Join edge kinds: `dataset`, `copy`, `aggregate`, `call`, `table`,
+  `opaque-call`, and (2026-10-08) `table-alias` (`SCHEMA.T.C` <-> `T.C`,
+  `confidence="candidate"`).
+- `ImpactResult.to_dict()` gained `start_found` (False when nothing matched
+  the start field / table / dataset).
+- `join_edges()` entries: `{source, target, kind, line, statement,
+  confidence, cross}`, node keys as lists (`["P", program, kind, name,
+  offset, length]`, `["D", dataset, offset, length]`, `["T", "TABLE.COLUMN"]`).
+- `jobs_from_sources` needs jcl-parser importable; it raises `ImportError`
+  otherwise.
+
 ### 5. Exception type
 ```python
 from cobolparser import ParseError

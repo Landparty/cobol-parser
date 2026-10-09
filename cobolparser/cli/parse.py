@@ -50,6 +50,8 @@ _SUBCOMMANDS = frozenset(
         "copybook-impact",
         "sql-cics-check",
         "business-rules",
+        "lineage",
+        "field-impact",
         "jcl",
         "config",
     }
@@ -3041,6 +3043,294 @@ def _cmd_business_rules(args: argparse.Namespace) -> None:
     _emit_report(report.to_dict(), args, prof, ast)
 
 
+# -- Subcommand: lineage ------------------------------------------------------
+
+
+def _add_direction_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--direction",
+        choices=["forward", "backward"],
+        default="forward",
+        help="forward: what the value feeds; backward: where it comes from "
+        "(default: forward)",
+    )
+
+
+def _build_lineage_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "lineage",
+        help="Field-level data lineage inside one program: every MOVE, "
+        "computation, READ INTO / WRITE FROM, CALL argument and SQL host "
+        "variable as a value flow, and which file / table / CALL fields "
+        "reach which",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser lineage program.cbl --copybook-path ./copybooks\n"
+            "  cobol-parser lineage program.cbl --format text\n"
+            "  cobol-parser lineage program.cbl --field WS-AMOUNT "
+            "--direction backward"
+        ),
+    )
+    p.add_argument("file", help="Path to the COBOL source file")
+    p.add_argument(
+        "--field",
+        default=None,
+        metavar="NAME",
+        help="Report only what this data item feeds (or, with --direction "
+        "backward, is fed by) inside the program",
+    )
+    _add_direction_args(p)
+    p.add_argument(
+        "--format",
+        choices=["json", "text"],
+        default="json",
+        dest="output_format",
+        help="Output format (default: json)",
+    )
+    _add_compact_arg(p)
+    _add_source_format_args(p)
+    _add_dialect_arg(p)
+    _add_error_recovery_arg(p)
+    _add_copybook_args(p)
+    _add_program_arg(p)
+    _add_define_args(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_lineage)
+
+
+def _cmd_lineage(args: argparse.Namespace) -> None:
+    from ..analysis.field_lineage import FieldFlowAnalyzer, apply_source_map
+
+    ast, _prof = _parse_or_fail(args)
+    report = apply_source_map(
+        FieldFlowAnalyzer().analyze(ast), getattr(args, "_expansion_source_map", None)
+    )
+    text = getattr(args, "output_format", "json") == "text"
+    if args.field:
+        from ..analysis.lineage_graph import LineageGraph
+
+        result = LineageGraph([report]).impact(
+            args.field, program=report.program_id, direction=args.direction
+        )
+        if text:
+            _text_out(result.to_text(), getattr(args, "output", None))
+        else:
+            _json_out(result.to_dict(), args.compact, getattr(args, "output", None))
+        return
+    if text:
+        _text_out(report.to_text(), getattr(args, "output", None))
+        return
+    _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+
+
+# -- Subcommand: field-impact -------------------------------------------------
+
+_COBOL_EXTENSIONS = (".cbl", ".cob", ".cobol")
+
+
+def _build_field_impact_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "field-impact",
+        help="Field-level impact across programs: every program, table and "
+        "dataset field a value reaches (or comes from), joined through "
+        "JCL datasets, CALL arguments and DB2 columns",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Exactly one of FIELD, --table or --dataset names the start.\n\n"
+            "Examples:\n"
+            "  cobol-parser field-impact HV-TRAN-AMOUNT ./cobol --program CHKCLR "
+            "--copybook-path ./copybook\n"
+            "  cobol-parser field-impact --table TRANSACTION_HIST.AMOUNT ./cobol "
+            "--direction backward\n"
+            "  cobol-parser field-impact --dataset BANK.PROD.TRAN.DAILY ./cobol "
+            "--jcl ./jcl --proc-path ./proc --format text\n\n"
+            "Exit status: 0 when the start was found (hits or not); 1 when no "
+            "source produced a report, the start matches nothing (the report "
+            "is still printed), or the arguments are wrong."
+        ),
+    )
+    p.add_argument(
+        "targets",
+        nargs="+",
+        metavar="[FIELD] PATH",
+        help="The data item to start from (omit it with --table / --dataset), "
+        "then COBOL source files or directories to walk",
+    )
+    p.add_argument(
+        "--program",
+        default=None,
+        metavar="NAME",
+        help="PROGRAM-ID that owns FIELD (default: every program with a field "
+        "of that name)",
+    )
+    p.add_argument("--table", default=None, metavar="TABLE.COLUMN")
+    p.add_argument("--dataset", default=None, metavar="DSN")
+    _add_direction_args(p)
+    p.add_argument(
+        "--depth",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Joins between programs a path may cross (default: unlimited)",
+    )
+    p.add_argument(
+        "--jcl",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="JCL file or directory whose DD statements bind programs to "
+        "datasets (repeatable; needs jcl-parser installed)",
+    )
+    p.add_argument(
+        "--proc-path",
+        default=None,
+        metavar="DIR",
+        help="Folder of cataloged PROCs (NAME.prc / NAME.jcl), or a JCLLIB "
+        "base, used to expand EXEC PROC= steps in --jcl",
+    )
+    p.add_argument(
+        "--bindings",
+        default=None,
+        metavar="FILE.json",
+        help='Bindings computed elsewhere: {"bindings": [{"program", "ddname", '
+        '"dataset", "job"?, "step"?}], "passthroughs": [...]}',
+    )
+    p.add_argument(
+        "--key-relationships",
+        action="store_true",
+        help="Also report candidate key relationships: values from one "
+        "dataset or table used to look up records in another",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Worker processes for the parse (default: chosen by size)",
+    )
+    p.add_argument(
+        "--format",
+        choices=["json", "text"],
+        default="json",
+        dest="output_format",
+        help="Output format (default: json)",
+    )
+    _add_compact_arg(p)
+    _add_copybook_args(p)
+    _add_output_arg(p)
+    p.set_defaults(func=_cmd_field_impact)
+
+
+def _cobol_files(paths: list[str]) -> list[str]:
+    files: list[str] = []
+    for raw in paths:
+        if os.path.isdir(raw):
+            for root, _dirs, names in sorted(os.walk(raw)):
+                files += [
+                    os.path.join(root, n)
+                    for n in sorted(names)
+                    if n.lower().endswith(_COBOL_EXTENSIONS)
+                ]
+        else:
+            files.append(raw)
+    return files
+
+
+def _load_bindings(args: argparse.Namespace) -> tuple[list[Any], list[Any], list[str]]:
+    bindings: list[Any] = []
+    passthroughs: list[Any] = []
+    problems: list[str] = []
+    if args.bindings:
+        try:
+            with open(args.bindings, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError) as exc:
+            _fail(f"--bindings could not be read: {exc}")
+        if not isinstance(data, dict):
+            _fail("--bindings must hold a JSON object")
+        bindings += list(data.get("bindings") or [])
+        passthroughs += list(data.get("passthroughs") or [])
+    if args.jcl:
+        from ..analysis.lineage_jcl import bindings_from_jobs, load_jobs
+
+        try:
+            jobs, problems = load_jobs(args.jcl, proc_path=args.proc_path)
+        except ImportError:
+            _fail("--jcl needs jcl-parser: pip install jcl-parser")
+        found, carried = bindings_from_jobs(jobs)
+        bindings += found
+        passthroughs += carried
+    return bindings, passthroughs, problems
+
+
+def _cmd_field_impact(args: argparse.Namespace) -> None:
+    from ..analysis.lineage_graph import LineageGraph, reports_from_scan
+    from ..scan import ScanOptions, scan_files
+
+    starts = sum(bool(x) for x in (args.table, args.dataset))
+    if starts > 1:
+        _fail("give at most one of --table and --dataset")
+    targets = list(args.targets)
+    field_name = None if starts else targets.pop(0)
+    if not targets:
+        _fail("no COBOL sources given")
+    if args.workers is not None and args.workers < 1:
+        _fail("--workers must be >= 1")
+    if args.depth is not None and args.depth < 0:
+        _fail("--depth must be >= 0")
+
+    files = _cobol_files(targets)
+    scan = scan_files(
+        files,
+        ScanOptions(
+            analyzers=("lineage",),
+            copybook_paths=tuple(args.copybook_path or []),
+        ),
+        workers=args.workers,
+    )
+    reports, problems = reports_from_scan(scan)
+    if not reports:
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        _fail("no COBOL program under the given paths produced a lineage report")
+    bindings, passthroughs, jcl_problems = _load_bindings(args)
+    graph = LineageGraph(reports, bindings, passthroughs)
+
+    if args.table:
+        result = graph.impact_table(args.table, args.direction, args.depth)
+    elif args.dataset:
+        result = graph.impact_dataset(args.dataset, args.direction, args.depth)
+    else:
+        assert field_name is not None
+        result = graph.impact(field_name, args.program, args.direction, args.depth)
+
+    relationships = graph.key_relationships() if args.key_relationships else []
+    all_problems = problems + jcl_problems
+    if args.output_format == "text":
+        text = result.to_text()
+        if relationships:
+            text += "\nKey relationships:\n" + "".join(
+                f"  {k.source} -> {k.key}  ({k.program} line {k.line})\n"
+                for k in relationships
+            )
+        if graph.unjoined:
+            text += "\nUnjoined:\n" + "".join(f"  - {u}\n" for u in graph.unjoined)
+        if all_problems:
+            text += "\nProblems:\n" + "".join(f"  - {p}\n" for p in all_problems)
+        _text_out(text, getattr(args, "output", None))
+    else:
+        output = result.to_dict()
+        output["graph"] = graph.to_dict()
+        output["problems"] = all_problems
+        if args.key_relationships:
+            output["key_relationships"] = [k.to_dict() for k in relationships]
+        _json_out(output, args.compact, getattr(args, "output", None))
+    if not result.start_found:
+        # The report above says so too; the exit code is for scripts.
+        _fail(f"{', '.join(result.start)}: no such field in any report")
+
+
 # -- Subcommand: diff ---------------------------------------------------------
 
 
@@ -3927,6 +4217,8 @@ def _build_parser() -> argparse.ArgumentParser:
         examples="  cobol-parser sql-cics-check program.cbl",
     )
     _build_business_rules_parser(subparsers)
+    _build_lineage_parser(subparsers)
+    _build_field_impact_parser(subparsers)
     _build_jcl_parser(subparsers)
     _build_le_info_parser(subparsers)
     _build_config_parser(subparsers)

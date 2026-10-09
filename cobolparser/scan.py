@@ -62,6 +62,7 @@ ANALYZERS: tuple[str, ...] = (
     "complexity",
     "dead-code",
     "unused-variables",
+    "lineage",
 )
 
 #: What ``scan`` runs when the caller names nothing. ``health`` is the
@@ -200,7 +201,12 @@ class ScanReport:
 # ---------------------------------------------------------------------------
 
 
-def _run_analyzer(name: str, unit: Any, options: ScanOptions) -> dict[str, Any]:
+def _run_analyzer(
+    name: str,
+    unit: Any,
+    options: ScanOptions,
+    source_map: dict[int, tuple[str, int]] | None = None,
+) -> dict[str, Any]:
     """Run one analyzer over one already-parsed program unit.
 
     Imports are local to each branch for the reason the CLI's own
@@ -237,15 +243,27 @@ def _run_analyzer(name: str, unit: Any, options: ScanOptions) -> dict[str, Any]:
 
         return UnusedVariableAnalyzer().analyze(unit).to_dict()
 
+    if name == "lineage":
+        from .analysis.field_lineage import FieldFlowAnalyzer, apply_source_map
+
+        # Edges carry a bare "line", not a "location", so the generic
+        # stamp_report_origins pass below does not reach them.
+        return apply_source_map(FieldFlowAnalyzer().analyze(unit), source_map).to_dict()
+
     raise ValueError(f"unknown analyzer: {name}")
 
 
-def _scan_unit(unit: Any, depth: int, options: ScanOptions) -> UnitScan:
+def _scan_unit(
+    unit: Any,
+    depth: int,
+    options: ScanOptions,
+    source_map: dict[int, tuple[str, int]] | None = None,
+) -> UnitScan:
     """Every requested analyzer over one unit, each failing on its own."""
     scan = UnitScan(program_name=unit.program_name or "", depth=depth)
     for name in options.analyzers:
         try:
-            scan.reports[name] = _run_analyzer(name, unit, options)
+            scan.reports[name] = _run_analyzer(name, unit, options, source_map)
         except Exception as exc:  # noqa: BLE001 -- see the module docstring
             # Deliberately broad. An analyzer that trips over an exotic
             # program must cost its own report and nothing else: the whole
@@ -306,7 +324,7 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
     )
     source_map = getattr(result, "expansion_source_map", None)
     for unit, depth in _units_with_depth(result.ast):
-        unit_scan = _scan_unit(unit, depth, options)
+        unit_scan = _scan_unit(unit, depth, options, source_map)
         if source_map:
             # With copybooks expanded, every report location counts lines of
             # the expanded text -- past the first COPY it is not the line the

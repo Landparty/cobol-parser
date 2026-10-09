@@ -954,7 +954,8 @@ see batch.md for why the two are separate).
 
 `--analyzer` takes both the repeated and the comma-separated spelling
 (`parse_analyzer_list`); one of `health`, `redundancy`, `complexity`,
-`dead-code`, `unused-variables`, defaulting to `health,redundancy`. An
+`dead-code`, `unused-variables`, `lineage` (2026-10-08; the
+`FieldFlowReport` `field-impact` joins), defaulting to `health,redundancy`. An
 unknown name exits 1 naming the known set -- argparse `choices` would reject
 the comma spelling, so the check lives in `scan_files` instead.
 
@@ -1018,6 +1019,45 @@ two flags; otherwise it takes exactly the shared analyzer flags
 output (a warning says so under `text`), as with `program-flow`. With
 `--copybook-path`, JSON locations are origin-stamped by `_emit_report` like
 every other analyzer; the text format prints expanded-listing line numbers.
+
+## Lineage / Field-Impact (2026-10-08)
+
+```bash
+cobol-parser lineage <file.cbl> [--field NAME] [--direction forward|backward]
+    [--format json|text] [--program NAME] [--copybook-path DIR] [-o out]
+cobol-parser field-impact [FIELD] PATH... [--program NAME]
+    [--table [SCHEMA.]TABLE.COLUMN | --dataset DSN]
+    [--direction forward|backward] [--depth N]
+    [--jcl PATH]... [--proc-path DIR] [--bindings FILE.json]
+    [--key-relationships] [--format json|text] [--workers N]
+    [--copybook-path DIR] [-o out]
+```
+
+`lineage` runs `FieldFlowAnalyzer` over one program (see `.okf/analysis.md`,
+"Field lineage"): ports, edges, port-to-port summary, key uses. Edges are
+origin-stamped from the expansion source map. `--field` instead traces one
+data item inside the program (a single-report `LineageGraph`).
+
+`field-impact` parses every COBOL file under PATH (`.cbl/.cob/.cobol`)
+through `scan_files(..., analyzers=("lineage",))` -- the parse and analysis
+happen in the workers -- and joins the reports in a `LineageGraph`. The
+start is FIELD (optionally narrowed with `--program`), `--table` or
+`--dataset` (exactly one). Bindings come from `--jcl` (needs jcl-parser
+installed; `--proc-path` is a flat PROC folder or a JCLLIB base) and/or
+`--bindings` (`{"bindings": [...], "passthroughs": [...]}`, the dict form
+of `DatasetBinding` / `Passthrough`). `--depth` caps the joins a path may
+cross (a dataset or table hop into another program, or a CALL). JSON output
+is `ImpactResult.to_dict()` plus `graph` (statistics, opaque callees,
+unjoined DDs, caveats) and `problems` (files that produced no report, JCL
+that did not parse or expand). `--format text` groups hits by program with
+the path that reached each, then lists `Unjoined:` DDs and `Problems:`.
+
+Exit codes (2026-10-08): `0` when the start was found, hits or not; `1`
+when no source produced a lineage report (each problem is printed to stderr
+first), when the start (FIELD / `--table` / `--dataset`) matches nothing --
+the report is still printed, with `"start_found": false`, and the error
+goes to stderr -- or on an argument error. Files that failed while others
+parsed stay in `problems` and do not change the exit code.
 
 ## Cross-reference, signatures, codebase graph, SQL/CICS lint, diff, JCL
 

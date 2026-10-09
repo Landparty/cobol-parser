@@ -130,10 +130,10 @@ class TestScanOne:
 
         real = scan_module._run_analyzer
 
-        def explode(name, unit, options):
+        def explode(name, unit, options, source_map=None):
             if name == "health":
                 raise RuntimeError("boom")
-            return real(name, unit, options)
+            return real(name, unit, options, source_map)
 
         monkeypatch.setattr(scan_module, "_run_analyzer", explode)
 

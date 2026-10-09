@@ -1,0 +1,36 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. READER.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT FEE-FILE ASSIGN TO FEEIN.
+           SELECT MAST-FILE ASSIGN TO MASTER
+               ORGANIZATION IS INDEXED
+               ACCESS MODE IS RANDOM
+               RECORD KEY IS MAST-ACCT.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  FEE-FILE.
+       01  FEE-REC.
+           05  FEE-ACCT   PIC X(10).
+           05  FEE-AMT    PIC 9(7)V99.
+           05  FEE-FEE    PIC 9(5)V99.
+       FD  MAST-FILE.
+       01  MAST-REC.
+           05  MAST-ACCT  PIC X(10).
+           05  MAST-BAL   PIC 9(9)V99.
+       WORKING-STORAGE SECTION.
+       01  WS-FEE         PIC 9(5)V99.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT FEE-FILE MAST-FILE
+           READ FEE-FILE
+           MOVE FEE-FEE TO WS-FEE
+           MOVE FEE-ACCT TO MAST-ACCT
+           READ MAST-FILE KEY IS MAST-ACCT
+           EXEC SQL
+               SELECT BALANCE INTO :WS-FEE FROM ACCOUNT
+                WHERE ACCT_NO = :FEE-ACCT
+           END-EXEC
+           DISPLAY WS-FEE
+           STOP RUN.

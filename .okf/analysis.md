@@ -2316,6 +2316,10 @@ programs without sections is unchanged. Pinned by
 | `redundancy.py` | `RedundancyAnalyzer` |
 | `technical_debt.py` | `TechnicalDebtAnalyzer` |
 | `business_rules.py` | `BusinessRuleExtractor` — decision / validation / calculation rule catalogue |
+| `field_lineage.py` | `FieldFlowAnalyzer` — per-program field-level value flows, ports, key uses |
+| `lineage_graph.py` | `LineageGraph` — cross-program field lineage joins and impact queries |
+| `lineage_jcl.py` | `bindings_from_jobs` / `load_jobs` — DD bindings from jcl-parser jobs |
+| `_sql_flow.py` | `analyze_sql` — embedded SQL host variable <-> column flows |
 
 # Silent-Failure Audit (2026-07-08)
 
@@ -2878,6 +2882,137 @@ inline PERFORM *within an arm* is neither a rule nor an action of that arm.
 Tests: `tests/unit/analysis/test_business_rules.py`,
 `tests/unit/cli/test_business_rules_cli.py`.
 
+
+## Field lineage (`field_lineage.py`, `lineage_graph.py`, `lineage_jcl.py`, `_sql_flow.py`, 2026-10-08)
+
+Answers "if I change this field, what else changes?" at field granularity,
+across programs. Design: `docs/plans/2026-10-08-field-lineage-design.md`.
+Backs `cobol-parser lineage` and `cobol-parser field-impact`
+([cli.md](cli.md)), and `scan --analyzer lineage` ([batch.md](batch.md)).
+
+**Layer 1 -- one program (`FieldFlowAnalyzer`).** A may-flow,
+flow-insensitive value graph. Nodes are data items (qualified name, with
+the record-relative byte offset/length `layout_offsets` computes) and
+*ports*, where a value enters or leaves the program:
+
+| Port kind | Key | From |
+|-----------|-----|------|
+| `file` | DD name (`normalize_ddname`: `UT-S-` / `S-` prefixes stripped, the backend's rule) | READ / WRITE / REWRITE / RELEASE / RETURN / SORT-MERGE USING-GIVING, one byte range per record field |
+| `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`), else `?IDENT#n` plus a caveat |
+| `linkage` | `PROGRAM#n` / `ENTRY#n`, `PROGRAM#RETURNING` (out only) | PROCEDURE DIVISION USING / RETURNING, via `ProgramSignatureExtractor` |
+| `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats) |
+| `console` | `SYSIN` / `SYSOUT` | ACCEPT / DISPLAY |
+
+Edge kinds: `move` (group MOVE is a byte overlay; CORRESPONDING pairs by
+name; literal reference modification narrows the range), `arith`,
+`string`, `init`, `set`, `aggregate` / `sql-expr` (SQL `SUM(...)` /
+expressions), `read`, `write`, `redefines` (two-way, including several 01
+records under one FD), `occurrence` (two-way, inexact: a literal-subscript
+occurrence node and its table field), `call`, `linkage`, `sql`, `accept`,
+`display`, `xml`. `LINEAGE_VERSION` is `"2"` (2026-10-08: occurrence nodes,
+`#RETURNING` linkage ports, `#n` item keys). `VALUE_CHANGING_KINDS` (`arith`, `string`, `aggregate`, `sql-expr`)
+make a flow *derived*. Each edge carries `line`, `paragraph`, `guarded`
+(inside IF/EVALUATE/SEARCH) and `exact` (byte ranges coincide).
+`apply_source_map` stamps `origin` on every edge after copybook expansion
+-- edges carry a bare `line`, so `lint.stamp_report_origins` does not
+reach them. `summary` is every input-port field -> output-port field the
+program connects; `key_uses` are items used as READ/START/RECORD KEY or in
+a SQL `WHERE col = :hv`.
+
+**Operands** (`_refs`) go through one path for MOVE, arithmetic, STRING,
+CALL arguments, DISPLAY/ACCEPT, READ INTO / WRITE FROM: xref's
+`_split_operand`, keeping only the base names minus `_qualifier_names`, so
+a subscript, a reference-modifier offset/length or an `OF` qualifier is
+never a value source (`COMPUTE X = Y(I)` does not flow `I` into `X`;
+`LENGTH OF X` / `ADDRESS OF X` flow nothing). A literal reference modifier
+narrows the byte range; literal subscripts are kept (`_constant_subscripts`).
+
+**OCCURS tables.** A table field's node (`T.E`) stands for *any*
+occurrence. Its bytes are every occurrence's (`_placements`: one range per
+occurrence, or a single spanning range past `_PLACEMENT_CAP` = 1024), so a
+group MOVE / READ / WRITE / CALL maps each occurrence where it really lies,
+and every edge through a table field is **inexact** -- never a wrong exact
+field. A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
+OCCURS level, within bounds) on an elementary field gets its own item node
+`R.AMT(3)` at the occurrence's offset, joined both ways to `R.AMT` by
+inexact `occurrence` edges, and an exact edge to its own bytes on every port
+its record or group reaches (`_PortLink`s, resolved after the walk in
+`_link_occurrences`). Nodes order by `LineageNode.sort_key()` (an unknown
+offset -- a field after an `OCCURS DEPENDING ON` -- sorts first; such a field
+maps to a port with no byte range).
+
+**Item keys** are qualified names, except that the n-th item sharing one
+(two `01 FILLER` groups, two same-named subordinates) is keyed `NAME#n`;
+`_index_items` splits the layout into record blocks and finds each item's
+parent by position (a group follows its children in the layout), so two
+FILLER records are two buffers, not one with a spurious redefines.
+`MOVE CORRESPONDING` pairs same-path subordinates when at least one of the
+two is elementary (a group against an elementary item is a byte overlay),
+skipping FILLER, REDEFINES and OCCURS items and what is under them.
+
+**Alias edges are never chained with one of their own class**
+(`overlay_class`; summary BFS and `LineageGraph._trace` both carry the
+class of the edge a node was reached over): two `redefines` in a row would
+carry one field of a record into every other through an alias covering the
+whole record, two `occurrence` edges `T(1)` into `T(3)` through `T`, two
+`table-alias` edges `PROD.T.C` into `TEST.T.C` through `T.C`.
+
+**Layer 2 -- across programs (`LineageGraph`).** Takes the reports (objects
+or their `to_dict()`, which is what the backend stores) plus
+`DatasetBinding`s and `Passthrough`s. Joins: dataset (writer and reader
+ports meet on overlapping byte ranges of the same normalized dataset --
+GDG `(+1)`/`(0)`/`.GnnnnVnn` fold to the base, `&&TEMP`s are job-scoped);
+utility pass-throughs carry ranges both ways to a fixpoint, `SUM FIELDS`
+ranges become `aggregate`, a `reformat` stops the flow with a caveat;
+datasets nothing in scope writes are seeded from their readers' ranges;
+CALL argument *n* meets callee linkage *n* (and `CALLEE#RETURNING` meets
+`PROGRAM#RETURNING`); a callee with no report is an
+*opaque* pass-through (every argument sent reaches every argument back,
+`confidence="opaque"`) unless `_INTERFACE_RE` names it a system interface
+(the MQI verbs by name -- not every `MQ*` -- *TDLI, CEE*, DSN*...). DB2:
+`SCHEMA.TABLE.COLUMN` and an unqualified `TABLE.COLUMN` join both ways by
+`table-alias` edges with `confidence="candidate"`; two schemas never join.
+`NULLFILE` / `DUMMY` bindings and pass-throughs are ignored (the DD counts
+as unbound). A PROGRAM-ID seen in more than one report keeps the first and
+adds a caveat. Queries `impact(field, program, direction,
+depth)`, `impact_table` (schema optional), `impact_dataset` run a 0-1 BFS
+where *depth* counts entries into a program. `key_relationships()` names
+candidate dataset/table key relationships with the program and line as
+evidence. Joins iterate ports in sorted order so output is identical on
+every run (pinned across `PYTHONHASHSEED`s by hand, 2026-10-08).
+`join_edges()` exports every edge the joins added (JSON-shaped); passing
+them back as `LineageGraph(reports, join_edges=...)` skips the joins, so
+the backend joins once at upload and queries later without the JCL.
+Key-relationship labels come from the dataset edges, not the bindings, so
+both forms answer the same (pinned in `TestStoredJoinEdges`).
+`join_state()` -> `{"edges", "caveats", "unjoined"}` adds the joins' own
+caveats (reformat stops, opaque callees; `_join_caveats`) and the unjoined
+DDs; `LineageGraph(reports, join_edges=..., join_caveats=...,
+unjoined=...)` restores them so the rebuilt graph's `to_dict()` equals the
+original's (pinned in `TestStoredJoinState`). Without `join_caveats` only
+the opaque-callee caveat is re-derived and `unjoined` is empty. A rebuilt
+graph records the edges it loads, so its own `join_edges()` re-exports them.
+`ImpactResult.start_found` is False when nothing matched the start.
+
+**Bindings (`lineage_jcl.py`).** `bindings_from_jobs(jobs)` turns
+**jcl-parser** `Job`s (duck-typed; imported only in `load_jobs`, through
+`importlib`, so cobol-parser keeps no runtime or mypy dependency on it)
+into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT/ICETOOL (`SORTIN*`
+-> `SORTOUT` + `OUTFIL FNAMES`), IEBGENER/ICEGENER, IDCAMS REPRO (operands
+in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`. A
+blank-named DD continues the concatenation of the DD before it (`_named`);
+`DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
+referbacks resolve to the earlier step's dataset; quoted literals in
+DFSORT/IEBGENER control statements are blanked before keywords are matched
+(`INCLUDE COND=(...,C'BUILD')` is not a reformat). `load_jobs(paths, proc_path)` reads a flat PROC
+folder (`NAME.prc`) as well as a JCLLIB base -- jcl-parser's own loader
+only searches `JCLLIB ORDER=` libraries. `jobs_from_sources(jcl, procs)`
+does the same from in-memory text (the backend's stored members). Not built
+on `cobolparser/jcl/`.
+
+Tests: `tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
+`test_lineage_jcl.py`, `test_sql_flow.py`, `tests/unit/cli/test_lineage_cli.py`;
+fixtures in `tests/samples/lineage/`.
 
 ## ProgramDiffer (`ast_diff.py`)
 

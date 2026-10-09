@@ -1208,3 +1208,31 @@ reads, bare-CR copybook expansion, `>>IF` in a copybook, signed NATIONAL
 width, and `jcl --dd-map --program`. The abbreviated-condition fix is pinned
 in `test_review_2026_09_09_parser.py` (`TestFinding08ConditionTrees`); the
 JCL omitted-sub-parameter slot in `tests/unit/test_jcl.py`.
+
+### Field lineage (2026-10-08)
+
+`tests/samples/lineage/` holds a three-program chain plus its JCL: WRITER
+(READ INTO, COMPUTE, WRITE, CALL SUBPGM, UPDATE ACCOUNT), SUBPGM (LINKAGE),
+READER (reads the SORT-SUMmed output, keyed READ on a VSAM master, SELECT
+from ACCOUNT), MISC (CORRESPONDING, group overlay, refmod, STRING, ACCEPT,
+SORT USING/GIVING, dynamic CALL) and FEEJOB.jcl. They feed
+`tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
+`test_lineage_jcl.py` (duck-typed jobs; the jcl-parser end-to-end tests
+`importorskip("jclparser")`, which CI does not install), `test_sql_flow.py`
+and `tests/unit/cli/test_lineage_cli.py`. The `field-impact` CLI tests pass
+`--workers 1`: scan's process pool under pytest-cov fails to pickle its
+work items. `tests/unit/test_scan.py`'s failing-analyzer stub takes the new
+`source_map` argument of `_run_analyzer`.
+`TestStoredJoinEdges` (test_lineage_graph.py) pins that a graph rebuilt
+from `join_edges()` answers every query identically; `test_lineage_jcl.py`
+covers `jobs_from_sources` (in-memory JCL + PROCs).
+Review regressions (2026-10-08) use small inline programs (`_program` in
+test_field_lineage.py, `_source` in test_lineage_graph.py):
+`TestOccursDependingOn` / `TestOccursTables` (None offsets, every
+occurrence inexact, `AMT(3)` exact, >1024 occurrences), `TestDuplicateNames`,
+`TestOperands` (CALL subscript/refmod/qualifier, subscripts not values,
+CORRESPONDING group vs elementary), `TestReturning`; `TestStoredJoinState`
+and `TestReviewFixes` (RETURNING join, schema candidates, occurrence join
+at the right reader field, duplicate PROGRAM-ID, NULLFILE, MQI names,
+`start_found`); `TestConcatenationAndOperands` (lineage_jcl); and the
+`field-impact` exit-code / text tests in test_lineage_cli.py.
