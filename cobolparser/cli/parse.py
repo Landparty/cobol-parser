@@ -570,6 +570,7 @@ def _cmd_parse(args: argparse.Namespace) -> None:
         if prof is not None:
             output["profiling"] = prof.to_dict()
         _json_out(output, args.compact, getattr(args, "output", None))
+        _exit_if_partial_parse(args.file, result)
         return
 
     # Resolve path or output full AST
@@ -601,13 +602,19 @@ def _cmd_parse(args: argparse.Namespace) -> None:
         output["profiling"] = prof.to_dict()
 
     _json_out(output, args.compact, getattr(args, "output", None))
+    _exit_if_partial_parse(args.file, result)
 
-    # A recovered-but-errored parse must not report success to the shell:
-    # scripts and CI gate on the exit code, and exiting 0 here silently
-    # promoted every partial parse to a clean one.
+
+def _exit_if_partial_parse(file: str, result: Any) -> None:
+    """Exit 2 after the JSON is out when the parse recovered from errors.
+
+    A recovered-but-errored parse must not report success to the shell:
+    scripts and CI gate on the exit code, and exiting 0 here silently
+    promoted every partial parse to a clean one.
+    """
     if result.errors:
         print(
-            f"warning: parse of {args.file} completed with "
+            f"warning: parse of {file} completed with "
             f"{len(result.errors)} error(s); AST may be incomplete "
             "(re-run with --errors to include them in the JSON output)",
             file=sys.stderr,

@@ -1250,3 +1250,7 @@ at the right reader field, duplicate PROGRAM-ID, NULLFILE, MQI names,
 `test_ims_controller_without_program_parm_is_unchanged`, and
 `test_ims_batch_proc_binds_the_application_program` (jcl-parser end to end:
 an IMSBTCH-shaped PROC and a direct `PGM=DFSRRC00,PARM=(DLI,...)`).
+
+`tests/unit/cli/test_analyzer_cli_gaps.py::TestPartialParseWarning` pins that
+`parse --find-type` exits 2 on a recovered-but-errored parse, like plain
+`parse`.
