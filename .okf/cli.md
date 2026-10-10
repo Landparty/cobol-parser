@@ -199,7 +199,8 @@ session it did not start.
 
 Exit codes (2026-07-07): `0` clean parse; `1` hard failure (`ast is None`,
 bad arguments); `2` recovered-but-errored parse — the JSON is still printed,
-a summary goes to stderr. Previously the CLI exited `0` whenever an AST
+a summary goes to stderr. `--find-type` follows the same rule (it exited
+`0` on a partial parse until 2026-10-10). Previously the CLI exited `0` whenever an AST
 existed, even with collected errors, so scripts gating on `$?` saw every
 partial parse as success. `batch` likewise exits `2` when any file has a
 `read_error` or `success=false`. Analyzer subcommands still exit `0` on a
