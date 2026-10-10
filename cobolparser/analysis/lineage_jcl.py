@@ -32,6 +32,10 @@ Quoted literals in utility control statements (``INCLUDE COND=(...,
 C'BUILD')``) are blanked before keywords are looked for.
 - IKJEFT01 / IKJEFT1A / IKJEFT1B: the program named by ``RUN PROGRAM(x)``
   in ``SYSTSIN`` is bound to the step's DDs (the DB2 batch pattern).
+- DFSRRC00 (the IMS region controller): for a ``DLI`` / ``DBB`` / ``BMP``
+  region, the program named by the second ``PARM`` positional
+  (``PARM='BMP,LOANPMT,LOANPSB,...'``) is bound to the step's DDs (the IMS
+  batch pattern, ``DLIBATCH`` / ``DBBBATCH`` / ``IMSBATCH`` PROCs).
 """
 
 from __future__ import annotations
@@ -48,6 +52,9 @@ from .lineage_graph import DatasetBinding, Passthrough
 _SORT_PROGRAMS = frozenset({"SORT", "DFSORT", "ICEMAN", "SYNCSORT", "ICETOOL"})
 _COPY_PROGRAMS = frozenset({"IEBGENER", "ICEGENER"})
 _TSO_PROGRAMS = frozenset({"IKJEFT01", "IKJEFT1A", "IKJEFT1B"})
+_IMS_CONTROLLER = "DFSRRC00"
+#: IMS region types whose ``PARM`` names the application program second.
+_IMS_BATCH_REGIONS = frozenset({"DLI", "DBB", "BMP"})
 _REFORMAT_RE = re.compile(r"\b(INREC|OUTREC|BUILD|OVERLAY|FINDREP|IFTHEN|PARSE)\b")
 _SUM_RE = re.compile(r"\bSUM\s+FIELDS\s*=\s*\(([^)]*)\)")
 _FNAMES_RE = re.compile(r"\bFNAMES\s*=\s*\(?([A-Z0-9@#$,\s]+)\)?")
@@ -207,6 +214,8 @@ def bindings_from_jobs(
                 if not run:
                     continue
                 program = run.group(1)
+            elif program == _IMS_CONTROLLER:
+                program = _ims_program(step) or program
             for dd_name, dd in _named(dds):
                 dsn = _dataset(dd)
                 if dd_name and dsn:
@@ -220,6 +229,23 @@ def bindings_from_jobs(
                         )
                     )
     return bindings, passthroughs
+
+
+def _ims_program(step: Any) -> str | None:
+    """The application program of an IMS batch region step: the second
+    ``PARM`` positional when the first is ``DLI`` / ``DBB`` / ``BMP``."""
+    parameters = getattr(step, "parameters", None) or {}
+    parm = parameters.get("PARM") if isinstance(parameters, dict) else None
+    if isinstance(parm, (list, tuple)):
+        parts = [str(p) for p in parm]
+    elif parm is not None:
+        parts = str(parm).strip().strip("()'").split(",")
+    else:
+        return None
+    parts = [p.strip().strip("'").upper() for p in parts]
+    if len(parts) > 1 and parts[0] in _IMS_BATCH_REGIONS and parts[1]:
+        return parts[1]
+    return None
 
 
 def _resolve_referbacks(

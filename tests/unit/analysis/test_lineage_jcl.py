@@ -66,6 +66,30 @@ class TestOrdinarySteps:
         bindings, _ = bindings_from_jobs([job(step("IKJEFT01", dd("X", "A")))])
         assert bindings == []
 
+    @pytest.mark.parametrize(
+        "parm",
+        [
+            "BMP,DEPTBMP,DEPTBPSB,,,,,,,,,,Y,N",
+            ["DLI", "DEPTBMP", "DEPTBPSB"],
+            "(DBB,DEPTBMP)",
+            "'dli,deptbmp,deptbpsb'",
+        ],
+    )
+    def test_ims_batch_binds_the_parm_program(self, parm: object) -> None:
+        # DFSRRC00 is the IMS region controller: the application program is
+        # the second PARM positional (DLI / DBB / BMP regions), and the
+        # step's DDs are that program's files.
+        ims = step("DFSRRC00", dd("DEPTIN", "PROD.DEPT.INPUT"))
+        ims.parameters = {"PARM": parm}
+        bindings, _ = bindings_from_jobs([job(ims)])
+        assert [(b.program, b.ddname) for b in bindings] == [("DEPTBMP", "DEPTIN")]
+
+    def test_ims_controller_without_program_parm_is_unchanged(self) -> None:
+        ims = step("DFSRRC00", dd("X", "A"))
+        ims.parameters = {"PARM": "MSG,,,,"}
+        bindings, _ = bindings_from_jobs([job(ims)])
+        assert [(b.program, b.ddname) for b in bindings] == [("DFSRRC00", "X")]
+
     def test_step_without_program_is_skipped(self) -> None:
         bindings, _ = bindings_from_jobs([job(step("", dd("X", "A")))])
         assert bindings == []
@@ -265,3 +289,33 @@ def test_jobs_from_sources_in_memory() -> None:
         (b.program, b.ddname, b.dataset) for b in bindings
     }
     assert len(jobs) + len(problems) >= 2
+
+
+def test_ims_batch_proc_binds_the_application_program() -> None:
+    # The IMSBTCH shape: a PROC runs DFSRRC00 with PARM='BMP,&PROG,&PSB',
+    # and the job adds the program's own DDs to that step.
+    pytest.importorskip("jclparser")
+    jobs, problems = jobs_from_sources(
+        {
+            "LOANJOB": "//LOANJOB  JOB (A),'X',CLASS=A\n"
+            "//STEP020  EXEC IMSBTCH,PROG=LOANPMT,PSB=LOANPSB\n"
+            "//PMTFILE  DD DSN=&&PMTSORT,DISP=(OLD,DELETE)\n"
+            "//LOANRPT  DD DSN=PROD.LOAN.RPT,DISP=(NEW,CATLG)\n",
+            "DLIJOB": "//DLIJOB   JOB (A),'X',CLASS=A\n"
+            "//S1       EXEC PGM=DFSRRC00,PARM=(DLI,ACCTPRG,ACCTPPSB)\n"
+            "//PURGEIN  DD DSN=PROD.PURGE.PARM,DISP=SHR\n",
+        },
+        {
+            "IMSBTCH": "//IMSBTCH  PROC PROG=,PSB=\n"
+            "//IMSBATCH EXEC PGM=DFSRRC00,PARM='BMP,&PROG,&PSB,,,Y,N'\n"
+            "//IMSACB   DD DSN=IMS.ACBLIB,DISP=SHR\n"
+            "//         PEND\n"
+        },
+    )
+    assert problems == []
+    bindings, _ = bindings_from_jobs(jobs)
+    found = {(b.job, b.program, b.ddname, b.dataset) for b in bindings}
+    assert ("LOANJOB", "LOANPMT", "PMTFILE", "&&PMTSORT") in found
+    assert ("LOANJOB", "LOANPMT", "LOANRPT", "PROD.LOAN.RPT") in found
+    assert ("DLIJOB", "ACCTPRG", "PURGEIN", "PROD.PURGE.PARM") in found
+    assert not {b for b in bindings if b.program == "DFSRRC00"}
