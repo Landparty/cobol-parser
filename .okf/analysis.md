@@ -3020,7 +3020,11 @@ blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
 referbacks resolve to the earlier step's dataset; quoted literals in
 DFSORT/IEBGENER control statements are blanked before keywords are matched
-(`INCLUDE COND=(...,C'BUILD')` is not a reformat). `load_jobs(paths, proc_path)` reads a flat PROC
+(`INCLUDE COND=(...,C'BUILD')` is not a reformat). A `DFSRRC00` step (the IMS region
+controller) binds its DDs to the application program named by the second
+`PARM` positional when the region is `DLI` / `DBB` / `BMP` (2026-10-10; they
+were bound to `DFSRRC00` itself, so an IMS batch program's files never
+joined). `load_jobs(paths, proc_path)` reads a flat PROC
 folder (`NAME.prc`) as well as a JCLLIB base -- jcl-parser's own loader
 only searches `JCLLIB ORDER=` libraries. `jobs_from_sources(jcl, procs)`
 does the same from in-memory text (the backend's stored members). Not built

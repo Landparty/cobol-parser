@@ -1242,3 +1242,11 @@ and `TestReviewFixes` (RETURNING join, schema candidates, occurrence join
 at the right reader field, duplicate PROGRAM-ID, NULLFILE, MQI names,
 `start_found`); `TestConcatenationAndOperands` (lineage_jcl); and the
 `field-impact` exit-code / text tests in test_lineage_cli.py.
+
+## 2026-10-10
+
+`tests/unit/analysis/test_lineage_jcl.py`: `TestOrdinarySteps::test_ims_batch_binds_the_parm_program`
+(PARM as string, list, parenthesised, quoted lower-case),
+`test_ims_controller_without_program_parm_is_unchanged`, and
+`test_ims_batch_proc_binds_the_application_program` (jcl-parser end to end:
+an IMSBTCH-shaped PROC and a direct `PGM=DFSRRC00,PARM=(DLI,...)`).
