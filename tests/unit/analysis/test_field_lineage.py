@@ -421,3 +421,31 @@ class TestReturning:
         port = report.port("linkage", "SUBR#RETURNING")
         assert port is not None and port.directions == {"out"}
         assert ("linkage", "LR", "linkage:SUBR#RETURNING@0+4") in _edges(report)
+
+
+class TestDynamicCallFigurativeCandidates:
+    """A MOVE SPACES (or LOW-/HIGH-VALUES) to a dynamic CALL's identifier
+    is the "no program" sentinel, never a callee: it must not become a
+    blank ``call:#n`` port joined to every real candidate."""
+
+    WS = """
+01 WS-PGM PIC X(8) VALUE SPACES.
+01 WS-ARG PIC X(4).
+"""
+
+    def test_blank_candidate_is_not_a_callee(self) -> None:
+        report = _program(
+            self.WS,
+            "MOVE 'SUBA' TO WS-PGM\nMOVE SPACES TO WS-PGM\n"
+            "MOVE LOW-VALUES TO WS-PGM\nMOVE HIGH-VALUES TO WS-PGM\n"
+            "CALL WS-PGM USING WS-ARG",
+        )
+        callees = {p.key for p in report.ports if p.kind == "call"}
+        assert callees == {"SUBA#1"}
+        assert report.caveats == []
+
+    def test_only_blank_candidates_fall_back_to_the_unresolved_caveat(self) -> None:
+        report = _program(self.WS, "MOVE SPACES TO WS-PGM\nCALL WS-PGM USING WS-ARG")
+        callees = {p.key for p in report.ports if p.kind == "call"}
+        assert callees == {"?WS-PGM#1"}
+        assert any("no candidate program names" in c for c in report.caveats)

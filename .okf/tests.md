@@ -1254,3 +1254,11 @@ an IMSBTCH-shaped PROC and a direct `PGM=DFSRRC00,PARM=(DLI,...)`).
 `tests/unit/cli/test_analyzer_cli_gaps.py::TestPartialParseWarning` pins that
 `parse --find-type` exits 2 on a recovered-but-errored parse, like plain
 `parse`.
+
+## 2026-10-11
+
+`tests/unit/analysis/test_field_lineage.py::TestDynamicCallFigurativeCandidates`
+pins that a dynamic CALL's SPACES / LOW-VALUES / HIGH-VALUES candidates
+make no `call:` port (no blank `#1`, no `\x00#1` / `Ÿ#1`), and that a CALL
+whose only candidates are figurative falls back to `?IDENT#n` plus the
+caveat.

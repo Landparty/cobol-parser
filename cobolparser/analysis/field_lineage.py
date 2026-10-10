@@ -1598,9 +1598,13 @@ class FieldFlowAnalyzer:
             return
         callees = [target]
         if stmt.is_dynamic:
+            # SPACES / LOW-VALUES / HIGH-VALUES reach the tracker as " ",
+            # "\x00" and "\xff": the "no program" sentinel a dispatcher
+            # tests before its CALL, never a callee name.
             values = [
-                v.strip().strip("'\"").upper()
+                name
                 for v in getattr(stmt, "possible_values", None) or []
+                if (name := v.strip(" \x00\xff'\"").upper())
             ]
             if values:
                 callees = values

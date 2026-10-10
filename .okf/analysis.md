@@ -2914,7 +2914,7 @@ the record-relative byte offset/length `layout_offsets` computes) and
 | Port kind | Key | From |
 |-----------|-----|------|
 | `file` | DD name (`normalize_ddname`: `UT-S-` / `S-` prefixes stripped, the backend's rule) | READ / WRITE / REWRITE / RELEASE / RETURN / SORT-MERGE USING-GIVING, one byte range per record field |
-| `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`), else `?IDENT#n` plus a caveat |
+| `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`; a SPACES / LOW-VALUES / HIGH-VALUES candidate is the "no program" sentinel and is dropped), else `?IDENT#n` plus a caveat |
 | `linkage` | `PROGRAM#n` / `ENTRY#n`, `PROGRAM#RETURNING` (out only) | PROCEDURE DIVISION USING / RETURNING, via `ProgramSignatureExtractor` |
 | `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats) |
 | `console` | `SYSIN` / `SYSOUT` | ACCEPT / DISPLAY |
