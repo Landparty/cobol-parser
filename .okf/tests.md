@@ -1242,3 +1242,9 @@ and `TestReviewFixes` (RETURNING join, schema candidates, occurrence join
 at the right reader field, duplicate PROGRAM-ID, NULLFILE, MQI names,
 `start_found`); `TestConcatenationAndOperands` (lineage_jcl); and the
 `field-impact` exit-code / text tests in test_lineage_cli.py.
+
+## 2026-10-10
+
+`tests/unit/cli/test_analyzer_cli_gaps.py::TestPartialParseWarning` pins that
+`parse --find-type` exits 2 on a recovered-but-errored parse, like plain
+`parse`.

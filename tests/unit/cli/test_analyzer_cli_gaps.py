@@ -205,6 +205,18 @@ class TestPartialParseWarning:
         captured = capsys.readouterr()
         assert "AST may be incomplete" in captured.err
 
+    def test_parse_find_type_exits_two_on_partial_parse(self, tmp_path, capsys):
+        # --find-type answers from the same partial AST, so it must not
+        # report success to the shell either.
+        program = tmp_path / "partial.cbl"
+        program.write_text(PARTIAL_PARSE_PROGRAM)
+        with pytest.raises(SystemExit) as exc_info:
+            _run_main(["parse", str(program), "--find-type", "MoveStatement"])
+        assert exc_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "AST may be incomplete" in captured.err
+        assert json.loads(captured.out)["node_type"] == "MoveStatement"
+
 
 class TestAnalyzeIncompleteValues:
     def test_incomplete_value_set_is_flagged(self, tmp_path, capsys):
