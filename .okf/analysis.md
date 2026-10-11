@@ -1597,7 +1597,8 @@ report.unresolved          # program-level gaps (never silently dropped)
 **Categories**: `CALL`/`DYNCALL` (per-argument direction, see below),
 `OPEN`/`CLOSE`/`READ`/`WRITE`/`REWRITE`/`DELETE`/`START`/`UNLOCK` (the eight
 file-op verbs), `SQL`, `CICS`, `DLI`, `ACCEPT` (console only --
-non-interactive sources filtered). `DISPLAY` is never a boundary (assert-only,
+non-interactive sources filtered, matched on the source's first word so
+`FROM DATE YYYYMMDD` / `FROM DAY YYYYDDD` count as `DATE` / `DAY`). `DISPLAY` is never a boundary (assert-only,
 out of scope for this phase, matching mockymock's own `mock_surface`).
 
 **File ops.** WRITE/REWRITE key on the *record* name (COBOL syntax names the
