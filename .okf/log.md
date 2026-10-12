@@ -14,6 +14,15 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-12 -- lineage: ACCEPT FROM DATE is not a console port
+
+[analysis.md](analysis.md): `FieldFlowAnalyzer` made every ACCEPT a
+`console` port keyed on its whole `from_source`, so `ACCEPT X FROM DATE
+YYYYMMDD` became a port `console:DATE YYYYMMDD` and a summary row from it
+to every output the date reached. DATE / DAY / DAY-OF-WEEK / TIME
+(matched on the first word, as PR #290 makes `BoundaryInventoryAnalyzer`
+do) now make no port.
+
 ## 2026-10-08 -- JCL is read by jcl-parser
 
 [jcl.md](jcl.md) rewritten: `cobolparser/jcl/` no longer parses JCL. Its card
