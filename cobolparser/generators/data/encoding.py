@@ -282,6 +282,40 @@ def _normalized_usage(spec: FieldSpec) -> str:
     return (spec.usage or "DISPLAY").upper()
 
 
+#: Figurative constants that fill a FILLER's every byte with one fixed byte.
+_FILLER_FILL_BYTES: dict[str, int | None] = {
+    "SPACE": None,  # the charset's own space byte
+    "SPACES": None,
+    "LOW-VALUE": 0x00,
+    "LOW-VALUES": 0x00,
+    "NULL": 0x00,
+    "NULLS": 0x00,
+    "HIGH-VALUE": 0xFF,
+    "HIGH-VALUES": 0xFF,
+}
+
+
+def _filler_fill(spec: FieldSpec, opts: EncodingOptions) -> bytes | None:
+    """The bytes a ``FILLER ... VALUE SPACES`` (or ``LOW-``/``HIGH-VALUES``,
+    ``NULL``, optionally after ``ALL``) leaves in the record, else ``None``.
+
+    The value generator reads those figuratives as "no meaningful content"
+    and draws random text for the cell, which is right for a named field a
+    program fills in -- and wrong for a FILLER, whose declared bytes are all
+    it ever holds (the report-line gap between two columns).  ``None`` means
+    the FILLER's cell is to be encoded as usual.
+    """
+    if not spec.is_filler or not spec.value_clause:
+        return None
+    word = spec.value_clause.strip().upper()
+    if word.startswith("ALL "):
+        word = word[4:].strip()
+    if word not in _FILLER_FILL_BYTES:
+        return None
+    fill = _FILLER_FILL_BYTES[word]
+    return bytes([opts.space if fill is None else fill]) * field_storage_size(spec)
+
+
 def _total_digits(spec: FieldSpec) -> int:
     """Digit positions the field holds, floored at 1.
 
@@ -522,6 +556,9 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         # (numeric) -- COBOL's own convention for uninitialized filler --
         # without any of them needing to know about FILLER.
         text = ""
+    filled = _filler_fill(spec, opts)
+    if filled is not None:
+        return filled
 
     if usage == "INDEX" or usage in POINTER_USAGES:
         # Neither is file data: an index is a compiler-managed occurrence
@@ -795,7 +832,10 @@ def _dump_field_lines(
     """One field's rows in the hex dump: what it is, then its bytes."""
     picture = spec.picture or ""
     usage = _normalized_usage(spec)
-    value = cell if not (spec.is_filler and not spec.value_clause) else ""
+    blank = spec.is_filler and (
+        not spec.value_clause or _filler_fill(spec, opts) is not None
+    )
+    value = "" if blank else cell
     head = (
         f"{offset:06X}  {len(raw):>4}  {spec.column[:24]:<24} "
         f"{picture[:14]:<14} {usage:<9} {value[:18]:<18} "

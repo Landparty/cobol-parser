@@ -161,6 +161,11 @@ compare (C vs F sign nibble, slack past the layout), VB records with absent
 fixture is a record image from `encode_record`, not a hand-built decode
 result. See `generators.md`'s "Record compare".
 
+2026-10-12: `tests/unit/generators/data/test_encoding.py::TestFiller`
+(+10 cases) pins a FILLER `VALUE SPACES` / `LOW-VALUES` / `HIGH-VALUES` /
+`NULLS` / `ALL SPACES` filling every byte in ASCII and EBCDIC, also through
+a generated dataset. See `generators.md`.
+
 2026-09-27: `tests/unit/generators/data/test_layout_offsets.py::TestSynchronizedSlack`
 (4 tests) pins `data-items` flagging offsets that unmodelled SYNC slack
 could shift. See `generators.md`.
