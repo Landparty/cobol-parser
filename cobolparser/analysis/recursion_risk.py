@@ -28,6 +28,7 @@ from typing import Any
 
 from ..models.program import CobolProgram
 from ..models.statements.call import CallStatement
+from ._names import callee_names
 from .program_flow import ProgramFlowAnalyzer, ProgramFlowReport
 from .program_flow.edges import INTERNAL_EDGE_TYPES, PERFORM_EDGE_TYPES
 from .program_flow.models import FlowEdgeType
@@ -300,7 +301,7 @@ class RecursionRiskAnalyzer:
             if not isinstance(stmt, CallStatement):
                 continue
             if stmt.is_dynamic:
-                targets = {v.strip("'\"").upper() for v in stmt.possible_values}
+                targets = set(callee_names(stmt.possible_values))
             elif stmt.called_program:
                 targets = {stmt.called_program.strip("'\"").upper()}
             else:

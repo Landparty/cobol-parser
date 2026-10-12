@@ -71,6 +71,7 @@ from ..models.statements.call import CallStatement
 from ..preprocess.copy_statement_parser import extract_copy_statements
 from ..preprocess.models import CopybookSearchPath
 from ..preprocess.path_resolver import PathResolver
+from ._names import callee_names
 from .value_tracker import DynamicCallAnalyzer
 
 __all__ = [
@@ -854,8 +855,7 @@ class CodebaseGraphBuilder:
             call_edges.append(CallEdge(caller=program_id, callee=callee))
             return
 
-        values = [_normalize_program_name(v) for v in statement.possible_values]
-        values = sorted({v for v in values if v})
+        values = sorted(callee_names(statement.possible_values))
         incomplete = bool(statement.get_metadata("possible_values_incomplete"))
 
         if not values:

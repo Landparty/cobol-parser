@@ -57,7 +57,7 @@ from ..models.statements.io import (
     IOWriteStatement,
 )
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement, ExecImsStatement
-from ._names import RELAXED_IDENTIFIER_TOKEN_RE
+from ._names import RELAXED_IDENTIFIER_TOKEN_RE, callee_names
 from .value_tracker import DynamicCallAnalyzer
 
 if TYPE_CHECKING:
@@ -816,7 +816,7 @@ class BoundaryInventoryAnalyzer:
             call_args=call_args,
         )
         if is_dynamic:
-            possible = getattr(statement, "possible_values", None) or []
+            possible = callee_names(getattr(statement, "possible_values", None) or [])
             if not name:
                 report.unresolved.append("dynamic CALL with no identifier captured")
             elif not possible:

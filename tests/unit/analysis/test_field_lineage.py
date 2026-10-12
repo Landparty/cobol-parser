@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from cobolparser import parse_cobol
+from cobolparser.analysis._names import callee_names
 from cobolparser.analysis.field_lineage import (
     FieldFlowAnalyzer,
     FieldFlowReport,
@@ -424,7 +425,7 @@ class TestReturning:
 
 
 class TestDynamicCallFigurativeCandidates:
-    """A MOVE SPACES (or LOW-/HIGH-VALUES) to a dynamic CALL's identifier
+    """A MOVE SPACES (or LOW-/HIGH-VALUES, ZERO) to a dynamic CALL's identifier
     is the "no program" sentinel, never a callee: it must not become a
     blank ``call:#n`` port joined to every real candidate."""
 
@@ -438,7 +439,7 @@ class TestDynamicCallFigurativeCandidates:
             self.WS,
             "MOVE 'SUBA' TO WS-PGM\nMOVE SPACES TO WS-PGM\n"
             "MOVE LOW-VALUES TO WS-PGM\nMOVE HIGH-VALUES TO WS-PGM\n"
-            "CALL WS-PGM USING WS-ARG",
+            "MOVE ZERO TO WS-PGM\nCALL WS-PGM USING WS-ARG",
         )
         callees = {p.key for p in report.ports if p.kind == "call"}
         assert callees == {"SUBA#1"}
@@ -449,3 +450,8 @@ class TestDynamicCallFigurativeCandidates:
         callees = {p.key for p in report.ports if p.kind == "call"}
         assert callees == {"?WS-PGM#1"}
         assert any("no candidate program names" in c for c in report.caveats)
+
+    def test_callee_names_keeps_only_program_names(self) -> None:
+        assert callee_names([" ", "\x00", "\xff", "0", "'suba'", "SUBA", "''"]) == [
+            "SUBA"
+        ]

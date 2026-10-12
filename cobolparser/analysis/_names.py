@@ -103,3 +103,28 @@ def qualified_references(text: str, skip_words: frozenset[str]) -> set[str]:
 def bare_names(refs: set[str]) -> set[str]:
     """The plain names of :func:`qualified_references` output."""
     return {ref.split(QUALIFIER_SEPARATOR, 1)[0] for ref in refs}
+
+
+#: What a dynamic CALL candidate is stripped of before it is read as a
+#: program name: blanks, the LOW-VALUES / HIGH-VALUES bytes, and quotes.
+_CALLEE_STRIP = " \x00\xff'\""
+
+
+def callee_names(possible_values: list[str]) -> list[str]:
+    """The program names among a dynamic CALL's ``possible_values``.
+
+    ``DynamicCallAnalyzer`` records every value MOVEd to the CALL's
+    identifier, figuratives included: SPACES / LOW-VALUES / HIGH-VALUES
+    arrive as ``" "`` / ``"\\x00"`` / ``"\\xff"`` and ZERO as ``"0"``. Those
+    are the "no program" sentinel a dispatcher tests before its CALL, never
+    a callee, and an all-digit value is not a program name either. The
+    one filter every consumer of the candidates shares, so lineage, the
+    codebase call graph, recursion-check and gen-fixtures agree on what a
+    dynamic CALL can reach. Uppercased, de-duplicated, in first-seen order.
+    """
+    names: list[str] = []
+    for value in possible_values:
+        name = value.strip(_CALLEE_STRIP).upper()
+        if name and not name.isdigit() and name not in names:
+            names.append(name)
+    return names

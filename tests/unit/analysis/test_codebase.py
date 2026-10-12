@@ -228,6 +228,45 @@ class TestDynamicCalls:
         edges = _edge(graph.call_edges, "RESOLVED", "CALLEE")
         assert [(e.is_dynamic, e.resolved) for e in edges] == [(True, True)]
 
+    def test_figurative_candidates_make_no_call_edge(self, tmp_path):
+        # SPACES / LOW-VALUES / HIGH-VALUES / ZERO are the "no program"
+        # sentinel, not callees: no '\x00' / '0' / '\xff' node in the graph.
+        program = tmp_path / "D.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. DISPATCH.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-PGM PIC X(8) VALUE SPACES.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-LOGIC.\n"
+            "           MOVE 'SUBA' TO WS-PGM.\n"
+            "           MOVE LOW-VALUES TO WS-PGM.\n"
+            "           MOVE HIGH-VALUES TO WS-PGM.\n"
+            "           MOVE ZERO TO WS-PGM.\n"
+            "           CALL WS-PGM.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder().build([str(program)])
+        assert [e.callee for e in graph.call_edges] == ["SUBA"]
+
+    def test_only_figurative_candidates_are_reported_unresolved(self, tmp_path):
+        program = tmp_path / "D.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. DISPATCH.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-PGM PIC X(8) VALUE SPACES.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-LOGIC.\n"
+            "           CALL WS-PGM.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder().build([str(program)])
+        assert graph.call_edges == []
+        assert any("no possible target" in note for note in graph.unresolved)
+
 
 class TestCycles:
     def test_mutual_recursion_is_reported(self, graph):

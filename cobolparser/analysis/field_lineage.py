@@ -94,6 +94,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ._names import callee_names
 from ._sql_flow import analyze_sql
 from .value_tracker import DynamicCallAnalyzer
 from .xref import (
@@ -1598,14 +1599,7 @@ class FieldFlowAnalyzer:
             return
         callees = [target]
         if stmt.is_dynamic:
-            # SPACES / LOW-VALUES / HIGH-VALUES reach the tracker as " ",
-            # "\x00" and "\xff": the "no program" sentinel a dispatcher
-            # tests before its CALL, never a callee name.
-            values = [
-                name
-                for v in getattr(stmt, "possible_values", None) or []
-                if (name := v.strip(" \x00\xff'\"").upper())
-            ]
+            values = callee_names(getattr(stmt, "possible_values", None) or [])
             if values:
                 callees = values
             else:

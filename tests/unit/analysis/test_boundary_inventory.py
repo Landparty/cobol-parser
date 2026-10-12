@@ -664,3 +664,24 @@ class TestCalleeSourceBindsByProcedureUsing:
             ("WS-2", "OUT", "callee-source"),
             ("WS-3", "IN", "callee-source"),
         ]
+
+
+class TestDynamicCallSentinelCandidates:
+    def test_only_figurative_candidates_are_unresolved(self):
+        _, _, report = _analyze(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. DISPATCH.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 WS-PGM PIC X(8).\n"
+            "       01 WS-ARG PIC X(4).\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-LOGIC.\n"
+            "           MOVE SPACES TO WS-PGM.\n"
+            "           CALL WS-PGM USING WS-ARG.\n"
+            "           STOP RUN.\n"
+        )
+        assert any(
+            "dynamic CALL WS-PGM: no possible target values resolved" in note
+            for note in report.unresolved
+        )
