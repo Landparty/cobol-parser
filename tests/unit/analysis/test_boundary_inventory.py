@@ -514,6 +514,7 @@ class TestAccept:
 """
         _, _, report = _analyze(source, "acceptfmt.cbl")
         assert [b for b in report.boundaries if b.ref.category == "ACCEPT"] == []
+        assert report.unresolved == []
 
 
 class TestDisplayIsNotABoundary:
