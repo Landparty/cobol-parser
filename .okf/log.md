@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-13 -- bug hunt: ConstantFolder and control flow it did not follow
+
+[analysis.md](analysis.md): `field_equals` values contradicted GnuCOBOL
+output for `PERFORM` of a SECTION (walked nothing), `IF ... GO TO X-EXIT` /
+`EXIT PARAGRAPH` (the skipped MOVE was folded), and DISPLAYs inside IF arms,
+loops or past a GO TO (never treated as sites). All three now veto or
+poison; see "Every site, and only control flow the walk really follows".
+
 ## 2026-10-11 -- bug hunt: ACCEPT FROM DATE YYYYMMDD is not a boundary
 
 [analysis.md](analysis.md): `BoundaryInventoryAnalyzer._classify_accept`

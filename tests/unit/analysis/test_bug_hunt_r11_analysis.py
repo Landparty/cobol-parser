@@ -277,13 +277,14 @@ def test_const_fold_entry_skips_declaratives():
         "       01 IN-REC PIC X(80).\n"
         "       WORKING-STORAGE SECTION.\n"
         "       01 WS-A PIC X.\n"
+        "       01 WS-B PIC X.\n"
         "       PROCEDURE DIVISION.\n"
         "       DECLARATIVES.\n"
         "       ERR SECTION.\n"
         "           USE AFTER ERROR PROCEDURE ON IN-FILE.\n"
         "       ERR-P.\n"
-        "           MOVE 'E' TO WS-A\n"
-        "           DISPLAY WS-A.\n"
+        "           MOVE 'E' TO WS-B\n"
+        "           DISPLAY WS-B.\n"
         "       END DECLARATIVES.\n"
         "       MAIN SECTION.\n"
         "       M1.\n"
@@ -292,6 +293,8 @@ def test_const_fold_entry_skips_declaratives():
         "           STOP RUN.\n"
     )
     result = ConstantFolder().fold(ast, ProgramLayoutIndex.build(ast))
+    # WS-B is shown only inside the USE procedure, a site the walk never
+    # reaches (the runtime may still run it), so it is not knowable.
     assert result.known == {"WS-A": "M"}
 
 
