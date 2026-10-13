@@ -41,7 +41,7 @@ Two properties matter more than breadth here:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -142,6 +142,12 @@ class LintFinding:
     # or the map had nothing for that line.
     origin_file: str | None = None
     origin_line: int | None = None
+    # The column in that file, when :func:`apply_source_map` was told how
+    # far each file's columns sit from the analyzed text's (#301). A
+    # fixed-format line is analyzed as columns 8-72 only, so its analyzer
+    # column is 7 short of the column an editor shows. ``None`` means the
+    # offset was not known; ``location.column`` is then all there is.
+    origin_column: int | None = None
     # The underlying analyzer's own category for this finding, when it has
     # one (IOViolationKind.READ_BEFORE_OPEN, RecursionRisk.severity, ...).
     # Preserved so a consumer can filter more finely than by rule without
@@ -162,7 +168,13 @@ class LintFinding:
         # -- rather than having to treat a defaulted echo of `location`, or a
         # half-filled `{"file": null, "line": 12}`, as an answer.
         if self.origin_file is not None and self.origin_line is not None:
-            result["origin"] = {"file": self.origin_file, "line": self.origin_line}
+            origin: dict[str, Any] = {
+                "file": self.origin_file,
+                "line": self.origin_line,
+            }
+            if self.origin_column is not None:
+                origin["column"] = self.origin_column
+            result["origin"] = origin
         return result
 
 
@@ -344,7 +356,9 @@ def add_parse_errors(report: LintReport, errors: list[Any]) -> LintReport:
 
 
 def apply_source_map(
-    report: LintReport, source_map: dict[int, tuple[str, int]] | None
+    report: LintReport,
+    source_map: dict[int, tuple[str, int]] | None,
+    column_offsets: Mapping[str, int] | None = None,
 ) -> LintReport:
     """Stamp every located finding with the file and line it really came from.
 
@@ -361,6 +375,12 @@ def apply_source_map(
     cover; the finding keeps ``origin_file``/``origin_line`` unset rather than
     claiming a line nobody vouched for.
 
+    ``column_offsets`` maps an origin file to how many columns its lines sit
+    to the right of the analyzed text (7 for a fixed-format file, whose
+    columns 1-7 never reach the analyzers; see :func:`fixed_format_column_offset`).
+    When the origin file has an entry, ``origin_column`` is stamped with the
+    column an editor shows; without one it stays ``None``.
+
     The report is modified in place and returned, for chaining.
     """
     if not source_map:
@@ -372,7 +392,35 @@ def apply_source_map(
         if origin is None:
             continue
         finding.origin_file, finding.origin_line = origin
+        if column_offsets is not None and origin[0] in column_offsets:
+            finding.origin_column = finding.location.column + column_offsets[origin[0]]
     return report
+
+
+#: How far a fixed-format line's analyzer column sits left of its real one:
+#: ``normalize_fixed_format`` hands the lexer columns 8-72, so column 8 on
+#: disk is column 1 to every analyzer.
+FIXED_FORMAT_COLUMN_OFFSET = 7
+
+
+def fixed_format_column_offset(parsed_fixed: bool, file_fixed: bool) -> int:
+    """Columns to add to an analyzer column to get *a file's* on-disk column.
+
+    *parsed_fixed* is whether the text the analyzers ran over was normalized
+    from fixed format (the program, or the expanded listing built from it);
+    *file_fixed* is whether the file a line came from is itself fixed-format.
+
+    * fixed listing, fixed file -- the line kept its columns, then lost 1-7
+      to normalization: 7.
+    * fixed listing, free-form copybook -- the expander re-padded the member
+      by exactly the 7 columns normalization strips again: 0.
+    * free-form listing, fixed-format copybook -- the expander cut the
+      member's 6-column sequence area, keeping its indicator column: 6.
+    * free-form throughout: 0.
+    """
+    if not file_fixed:
+        return 0
+    return FIXED_FORMAT_COLUMN_OFFSET if parsed_fixed else 6
 
 
 def stamp_report_origins(
@@ -391,7 +439,13 @@ def stamp_report_origins(
         return report
     if isinstance(report, dict):
         location = report.get("location")
-        if isinstance(location, dict) and isinstance(location.get("line"), int):
+        # An origin already there was stamped with more than this map knows
+        # (a lint finding's ``origin.column``, #301); keep it.
+        if (
+            "origin" not in report
+            and isinstance(location, dict)
+            and isinstance(location.get("line"), int)
+        ):
             origin = source_map.get(location["line"])
             if origin is not None:
                 report["origin"] = {"file": origin[0], "line": origin[1]}

@@ -1069,6 +1069,12 @@ too (see commands above).
   command line: `expand --source-map` / `--keep-comments`, and lint findings
   carrying the copybook they are really in (this is what the VS Code
   extension consumes).
+* #301 (2026-10-13): `test_lint_subcommand.py::TestTextOutput` pins the
+  on-disk column for fixed-format and free-form programs (the old `:6:1:`
+  expectation encoded the bug); `test_expand_source_map_cli.py` pins
+  `origin.column` and the free-member-in-fixed-parent / fixed-member-in-free-
+  parent offsets; `test_expansion_source_map_and_comments.py` pins
+  `apply_source_map(..., column_offsets)` and `fixed_format_column_offset`.
 
 # Cross-repo review follow-up fixes (2026-09-10)
 

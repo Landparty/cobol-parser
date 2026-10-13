@@ -109,10 +109,38 @@ class TestTextOutput:
         _run(program, "--format", "text")
         lines = capsys.readouterr().out.strip().splitlines()
         assert any(
-            line.startswith(f"{program}:6:1: warning [unused-variables]")
+            line.startswith(f"{program}:6:8: warning [unused-variables]")
             for line in lines
         )
         assert lines[-1].endswith("rule(s) ran)")
+
+    def test_fixed_format_column_is_the_one_an_editor_shows(
+        self, program: str, capsys
+    ) -> None:
+        # #301: analyzers count columns in the normalized text (columns 8-72),
+        # so `01` in column 8 used to print as column 1 and a statement in
+        # Area B (column 12) as column 5.
+        _run(program, "--format", "text")
+        out = capsys.readouterr().out
+        assert f"{program}:6:8: warning [unused-variables]" in out
+        assert f"{program}:17:8: warning [dead-code]" in out
+        assert f"{program}:12:12: error [move-type-check]" in out
+
+    def test_free_format_column_is_left_alone(self, tmp_path: Path, capsys) -> None:
+        path = tmp_path / "FREE.cbl"
+        path.write_text(
+            "IDENTIFICATION DIVISION.\n"
+            "PROGRAM-ID. FREE.\n"
+            "DATA DIVISION.\n"
+            "WORKING-STORAGE SECTION.\n"
+            "01 WS-NEVER-USED PIC X.\n"
+            "PROCEDURE DIVISION.\n"
+            "MAIN-PARA.\n"
+            "    GOBACK.\n",
+            encoding="utf-8",
+        )
+        _run(str(path), "--format", "text")
+        assert f"{path}:5:1: warning [unused-variables]" in capsys.readouterr().out
 
     def test_summary_line_counts_every_severity(self, program: str, capsys) -> None:
         _run(program, "--format", "text")

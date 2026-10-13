@@ -2763,7 +2763,7 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
     p.set_defaults(func=_cmd_lint)
 
 
-def _lint_text_report(report: Any, source_file: str) -> str:
+def _lint_text_report(report: Any, source_file: str, column_offset: int = 0) -> str:
     """Render a :class:`LintReport` as compiler-style diagnostic lines.
 
     Deliberately the same ``file:line:column: severity`` prefix an editor's
@@ -2772,6 +2772,11 @@ def _lint_text_report(report: Any, source_file: str) -> str:
     cycle spans procedures rather than sitting on one line) print as
     ``file: severity ...`` -- the column is omitted rather than faked as 0,
     which a parser would render as a real position at the top of the file.
+
+    The column is the one an editor shows (#301): ``origin_column`` for a
+    mapped finding, else the analyzer column plus *column_offset* -- 7 when
+    *source_file* was fixed-format, whose columns 1-7 never reach the
+    analyzers.
     """
     lines: list[str] = []
     for finding in report.findings:
@@ -2780,10 +2785,16 @@ def _lint_text_report(report: Any, source_file: str) -> str:
         # stays clickable after expansion instead of pointing at whatever
         # happens to sit at that line number of the program.
         if finding.origin_file is not None and finding.origin_line is not None:
-            column = finding.location.column if finding.location is not None else 0
+            if finding.origin_column is not None:
+                column = finding.origin_column
+            elif finding.location is not None:
+                column = finding.location.column
+            else:
+                column = 0
             prefix = f"{finding.origin_file}:{finding.origin_line}:{column}:"
         elif finding.location is not None:
-            prefix = f"{source_file}:{finding.location.line}:{finding.location.column}:"
+            column = finding.location.column + column_offset
+            prefix = f"{source_file}:{finding.location.line}:{column}:"
         else:
             prefix = f"{source_file}:"
         lines.append(f"{prefix} {finding.severity} [{finding.rule}] {finding.message}")
@@ -2849,6 +2860,55 @@ def _lint_copybook_item_names(args: argparse.Namespace, ast: Any) -> set[str] | 
     return declared_across_units(ast) - declared_across_units(local_root)
 
 
+def _lint_column_offsets(
+    args: argparse.Namespace, source_map: dict[int, tuple[str, int]] | None
+) -> tuple[int, dict[str, int]]:
+    """How far each file's columns sit from the analyzer's, for lint (#301).
+
+    Returns the offset for ``args.file`` itself and one per file the source
+    map names. Whether the parse normalized fixed format is decided the way
+    ``CobolParser`` decides it (``--source-format`` first, else the
+    detector); each copybook is judged the way the expander judged it when
+    it spliced the member in. A file that cannot be read again gets no
+    entry, so its findings keep the analyzer column rather than a guess.
+    """
+    from pathlib import Path as _Path
+
+    from ..analysis.lint import fixed_format_column_offset
+    from ..preprocess import strip_compiler_directives
+    from ..preprocess.copybook_expander import _looks_fixed_format
+    from ..preprocess.source_format import detect_fixed_format
+
+    preprocess_fixed = _source_format_kwargs(args)["preprocess_fixed"]
+    if preprocess_fixed is None:
+        try:
+            source = _Path(args.file).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return 0, {}
+        parsed_fixed = detect_fixed_format(strip_compiler_directives(source))
+    else:
+        parsed_fixed = bool(preprocess_fixed)
+
+    main_offset = fixed_format_column_offset(parsed_fixed, parsed_fixed)
+    offsets: dict[str, int] = {}
+    for origin_file in {origin[0] for origin in (source_map or {}).values()}:
+        try:
+            same = _Path(origin_file).resolve() == _Path(args.file).resolve()
+        except OSError:
+            same = False
+        if same:
+            offsets[origin_file] = main_offset
+            continue
+        try:
+            text = _Path(origin_file).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        offsets[origin_file] = fixed_format_column_offset(
+            parsed_fixed, _looks_fixed_format(text)
+        )
+    return main_offset, offsets
+
+
 def _severity_at_least(severity: str, threshold: str) -> bool:
     """True when *severity* is as severe as *threshold*, or more so."""
     from ..analysis.lint import SEVERITIES
@@ -2883,7 +2943,12 @@ def _cmd_lint(args: argparse.Namespace) -> None:
     # With --copybook-path the analyzers ran over expanded text, so every
     # location counts expanded lines. The expander's own map turns each one
     # back into the file and line a reader can open.
-    apply_source_map(report, getattr(result, "expansion_source_map", None))
+    source_map = getattr(result, "expansion_source_map", None)
+    # Analyzer columns count the normalized text, 7 short of the real column
+    # on a fixed-format line; the offsets turn them back into the column an
+    # editor shows (#301).
+    main_column_offset, column_offsets = _lint_column_offsets(args, source_map)
+    apply_source_map(report, source_map, column_offsets)
     report.findings = filter_by_severity(report.findings, args.min_severity)
 
     if args.output_format == "text":
@@ -2895,7 +2960,10 @@ def _cmd_lint(args: argparse.Namespace) -> None:
                 "output; ignoring for --format text",
                 file=sys.stderr,
             )
-        _text_out(_lint_text_report(report, args.file), getattr(args, "output", None))
+        _text_out(
+            _lint_text_report(report, args.file, main_column_offset),
+            getattr(args, "output", None),
+        )
     else:
         _emit_report(report.to_dict(), args, prof, ast)
 

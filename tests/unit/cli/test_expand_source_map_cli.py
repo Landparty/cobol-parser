@@ -134,7 +134,12 @@ class TestLintReportsOrigins:
         )
 
         unused = next(f for f in data["findings"] if f["symbol"] == "CUST-NAME")
-        assert unused["origin"] == {"file": str(library / "CUSTOMER.cpy"), "line": 4}
+        # `05` sits in column 12 of the fixed-format copybook (#301).
+        assert unused["origin"] == {
+            "file": str(library / "CUSTOMER.cpy"),
+            "line": 4,
+            "column": 12,
+        }
 
     def test_text_output_is_clickable_at_the_real_location(self, capsys, library):
         out = _run_text(
@@ -147,7 +152,68 @@ class TestLintReportsOrigins:
             "text",
         )
 
-        assert f"{library / 'CUSTOMER.cpy'}:4:" in out
+        assert f"{library / 'CUSTOMER.cpy'}:4:12:" in out
+
+    def test_free_form_copybook_in_a_fixed_program_keeps_its_own_column(
+        self, capsys, tmp_path
+    ):
+        # The expander pads a free-form member by exactly the 7 columns
+        # normalization strips again, so its analyzer column is already the
+        # one on disk (#301).
+        (tmp_path / "FREEMEM.cpy").write_text(
+            "*> free member\n"
+            "01 FREE-REC.\n"
+            "   05 FREE-A PIC X.\n"
+            "   05 FREE-B PIC X.\n"
+        )
+        (tmp_path / "MIX.cbl").write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. MIX.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       COPY FREEMEM.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           DISPLAY FREE-A.\n"
+            "           GOBACK.\n"
+        )
+        out = _run_text(
+            capsys,
+            "lint",
+            str(tmp_path / "MIX.cbl"),
+            "--copybook-path",
+            str(tmp_path),
+            "--format",
+            "text",
+        )
+
+        assert f"{tmp_path / 'FREEMEM.cpy'}:4:4:" in out
+
+    def test_fixed_format_copybook_in_a_free_form_program(self, capsys, library):
+        # A free-form parent keeps the member's indicator column but cuts its
+        # 6-column sequence area: an offset of 6, not 7.
+        (library / "FREEPAY.cbl").write_text(
+            "IDENTIFICATION DIVISION.\n"
+            "PROGRAM-ID. FREEPAY.\n"
+            "DATA DIVISION.\n"
+            "WORKING-STORAGE SECTION.\n"
+            "COPY CUSTOMER.\n"
+            "PROCEDURE DIVISION.\n"
+            "MAIN-PARA.\n"
+            "    DISPLAY CUST-ID.\n"
+            "    GOBACK.\n"
+        )
+        out = _run_text(
+            capsys,
+            "lint",
+            str(library / "FREEPAY.cbl"),
+            "--copybook-path",
+            str(library),
+            "--format",
+            "text",
+        )
+
+        assert f"{library / 'CUSTOMER.cpy'}:4:12:" in out
 
     def test_without_expansion_there_is_no_origin_to_report(self, capsys, library):
         # No --copybook-path: nothing was expanded, so locations already count

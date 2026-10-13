@@ -330,6 +330,27 @@ class TestApplySourceMap:
             "file": "CUSTOMER.cpy",
             "line": 3,
         }
+        assert report.findings[0].origin_column is None
+
+    def test_column_offset_stamps_the_on_disk_column(self):
+        # #301: a fixed-format file's columns 1-7 never reach the analyzers.
+        report = apply_source_map(
+            self._report(9), {9: ("CUSTOMER.cpy", 3)}, {"CUSTOMER.cpy": 7}
+        )
+
+        assert report.findings[0].to_dict()["origin"] == {
+            "file": "CUSTOMER.cpy",
+            "line": 3,
+            "column": 8,
+        }
+
+    def test_fixed_format_column_offset_per_layout(self):
+        from cobolparser.analysis.lint import fixed_format_column_offset
+
+        assert fixed_format_column_offset(parsed_fixed=True, file_fixed=True) == 7
+        assert fixed_format_column_offset(parsed_fixed=True, file_fixed=False) == 0
+        assert fixed_format_column_offset(parsed_fixed=False, file_fixed=True) == 6
+        assert fixed_format_column_offset(parsed_fixed=False, file_fixed=False) == 0
 
     def test_no_map_leaves_the_finding_alone(self):
         report = apply_source_map(self._report(9), None)
