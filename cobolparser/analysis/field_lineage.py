@@ -94,6 +94,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ._names import callee_names
 from ._sql_flow import analyze_sql
 from .value_tracker import DynamicCallAnalyzer
 from .xref import (
@@ -1609,10 +1610,7 @@ class FieldFlowAnalyzer:
             return
         callees = [target]
         if stmt.is_dynamic:
-            values = [
-                v.strip().strip("'\"").upper()
-                for v in getattr(stmt, "possible_values", None) or []
-            ]
+            values = callee_names(getattr(stmt, "possible_values", None) or [])
             if values:
                 callees = values
             else:

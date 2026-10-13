@@ -1413,6 +1413,17 @@ randomization. The `analyze` CLI also emits the
 `possible_values_incomplete` flag now (see cli.md). Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA2PossibleValuesDeterministic`.
 
+**Consumers read candidates through `_names.callee_names` (2026-10-12):**
+`possible_values` keeps every literal MOVEd to the CALL identifier,
+figuratives included (SPACES / LOW-VALUES / HIGH-VALUES as `" "` /
+`"\x00"` / `"\xff"`, ZERO as `"0"`) -- the "no program" sentinel a
+dispatcher tests before its CALL. `callee_names()` strips those bytes and
+quotes, drops anything empty or all-digit, and is the one filter
+`field_lineage`, `codebase` (codebase-graph), `recursion_risk` and
+`boundary_inventory` share, so none of them invents a `\x00` / `0` / `Ÿ`
+callee, and a CALL whose only candidates are sentinels is reported
+unresolved. The `possible_values` JSON itself is unchanged.
+
 **A write through a REDEFINES overlay is a write to the CALL variable
 (#257).** `_overlapping_names()` -- which decides what counts as "writing
 the CALL variable's storage" for `_mark_untracked_writes()` -- follows
@@ -2921,7 +2932,7 @@ the record-relative byte offset/length `layout_offsets` computes) and
 | Port kind | Key | From |
 |-----------|-----|------|
 | `file` | DD name (`normalize_ddname`: `UT-S-` / `S-` prefixes stripped, the backend's rule) | READ / WRITE / REWRITE / RELEASE / RETURN / SORT-MERGE USING-GIVING, one byte range per record field |
-| `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`), else `?IDENT#n` plus a caveat |
+| `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`; SPACES / LOW-VALUES / HIGH-VALUES / ZERO candidates are the "no program" sentinel and are dropped by `_names.callee_names`), else `?IDENT#n` plus a caveat |
 | `linkage` | `PROGRAM#n` / `ENTRY#n`, `PROGRAM#RETURNING` (out only) | PROCEDURE DIVISION USING / RETURNING, via `ProgramSignatureExtractor` |
 | `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats) |
 | `console` | `SYSIN` / `SYSOUT` (or the ACCEPT's `FROM` source) | ACCEPT / DISPLAY; `ACCEPT FROM DATE` / `DAY` / `DAY-OF-WEEK` / `TIME` (with or without a format qualifier) make no port -- the runtime's clock, not data entering the program |
