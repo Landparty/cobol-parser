@@ -347,3 +347,125 @@ class TestRender:
         )
         for _ in range(20):
             assert not factory.render(spec, "5").startswith("-")
+
+
+class TestWideNumericPrecision:
+    """Issue #285: wide numeric fields keep every low-order digit.
+
+    ``whole + random()`` used to turn the value into a float64, so a
+    ``PIC 9(18)`` value lost everything past ~15 significant digits and
+    most rows ended in ``00``.
+    """
+
+    def _values(self, spec: FieldSpec, rows: int = 200) -> list[str]:
+        factory = _factory(seed=1)
+        return [factory.value_for(spec, row) for row in range(rows)]
+
+    def test_pic_9_18_low_digits_are_exercised(self):
+        spec = _spec("A", category=FieldCategory.NUMERIC, size=18, integer_digits=18)
+        values = self._values(spec)
+        trailing_00 = sum(v.endswith("00") for v in values)
+        # Uniform low digits end in "00" about 1% of the time.
+        assert trailing_00 < 10, trailing_00
+        assert len({v[-1] for v in values}) == 10
+        for v in values:
+            assert int(v) <= 10**18 - 1
+
+    def test_signed_comp_style_18_digits_round_trip_exactly(self):
+        spec = _spec(
+            "B",
+            category=FieldCategory.NUMERIC,
+            size=18,
+            integer_digits=18,
+            is_signed=True,
+        )
+        for v in self._values(spec):
+            assert str(int(v)) == v
+            assert len(v.lstrip("-")) <= 18
+
+    def test_wide_integer_part_keeps_its_decimals(self):
+        # S9(13)V9(5): 18 digits in all, past what a float64 holds.
+        spec = _spec(
+            "C",
+            category=FieldCategory.NUMERIC,
+            size=18,
+            integer_digits=13,
+            decimal_digits=5,
+            is_signed=True,
+        )
+        values = self._values(spec)
+        for v in values:
+            assert re.fullmatch(r"-?\d{1,13}\.\d{5}", v), v
+        assert len({v[-1] for v in values}) == 10
+        assert sum(v.endswith("0") for v in values) < 50
+
+    def test_fraction_wider_than_a_float_is_fully_random(self):
+        # V9(18): a single random() draw cannot fill 18 decimal places.
+        spec = _spec(
+            "D",
+            category=FieldCategory.NUMERIC,
+            size=19,
+            integer_digits=1,
+            decimal_digits=18,
+        )
+        values = self._values(spec)
+        for v in values:
+            assert re.fullmatch(r"\d\.\d{18}", v), v
+        assert sum(v.endswith("00") for v in values) < 10
+
+    def test_widest_31_digit_field_keeps_every_digit(self):
+        spec = _spec(
+            "E",
+            category=FieldCategory.NUMERIC,
+            size=31,
+            integer_digits=18,
+            decimal_digits=13,
+        )
+        values = self._values(spec, rows=50)
+        for v in values:
+            assert re.fullmatch(r"\d{1,18}\.\d{13}", v), v
+        assert len({v[-1] for v in values}) > 5
+
+    def test_same_seed_same_output(self):
+        spec = _spec("F", category=FieldCategory.NUMERIC, size=18, integer_digits=18)
+        assert self._values(spec, 20) == self._values(spec, 20)
+
+    def test_narrow_fields_are_unchanged(self):
+        # Pinned from the float path's output before the fix: a field a
+        # float64 already held exactly keeps its seeded values.
+        cases = {
+            (7, 2, True): [
+                "2254257.57",
+                "1058756.26",
+                "7541208.47",
+                "-3522457.09",
+                "6539906.43",
+                "35333.70",
+            ],
+            (12, 0, False): [
+                "623347347957",
+                "884107995871",
+                "71999863748",
+                "129944532028",
+                "835351532923",
+                "517326624931",
+            ],
+            (5, 4, False): [
+                "17611.5692",
+                "8271.2551",
+                "64937.7610",
+                "61898.6516",
+                "27519.0939",
+                "3715.8933",
+            ],
+        }
+        for (whole, decimals, signed), expected in cases.items():
+            spec = _spec(
+                "G",
+                category=FieldCategory.NUMERIC,
+                size=whole + decimals,
+                integer_digits=whole,
+                decimal_digits=decimals,
+                is_signed=signed,
+            )
+            assert self._values(spec, rows=6) == expected

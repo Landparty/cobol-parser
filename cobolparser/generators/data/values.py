@@ -6,7 +6,7 @@ import random
 import re
 import string
 import struct
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 
 from ...models.data_items import PictureClause
 from .layout import FieldCategory, FieldSpec, _strip_literal_quotes
@@ -21,6 +21,10 @@ _DOUBLE_FLOAT_DIGITS = 15
 
 #: Decimals a freely drawn float value is quantised to before storage.
 _FLOAT_DECIMALS = 4
+
+#: Decimal places one ``random()`` draw can fill: its repr carries about 16
+#: significant digits, so a wider fraction is drawn as an integer instead.
+_FLOAT_FRACTION_DIGITS = 15
 
 
 def _render_float(value: float, *, single: bool) -> str:
@@ -502,8 +506,21 @@ class ValueFactory:
 
         upper = 10**digits - 1 if digits > 0 else 0
         whole = self._rng.randint(0, max(0, upper))
-        fraction = self._rng.random() if spec.decimal_digits else 0.0
-        return self._format_number(whole + fraction, spec)
+        # Exact, never float: ``whole + random()`` made a PIC 9(18) value a
+        # float64 and lost every digit past ~15 (issue #285). The fraction
+        # is still one ``random()`` draw, rendered through its own repr, so
+        # a narrow field's seeded output is unchanged; only a fraction wider
+        # than that repr can carry is drawn as an integer instead.
+        decimals = spec.decimal_digits
+        if not decimals:
+            return self._format_number(whole, spec)
+        if decimals > _FLOAT_FRACTION_DIGITS:
+            fraction = Decimal(self._rng.randint(0, 10**decimals - 1)).scaleb(-decimals)
+        else:
+            fraction = Decimal(str(self._rng.random()))
+        with localcontext() as ctx:
+            ctx.prec = max(ctx.prec, digits + decimals + 20)
+            return self._format_number(Decimal(whole) + fraction, spec)
 
     def _money_amount(self, spec: FieldSpec) -> float:
         """A plausible currency magnitude that still fits the field."""
