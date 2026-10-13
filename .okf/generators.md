@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
-timestamp: 2026-09-04T00:00:00Z
+timestamp: 2026-10-13T00:00:00Z
 ---
 
 # Overview
@@ -950,7 +950,15 @@ adds pairing and field comparison, and decodes nothing itself.
   not byte by byte (slack past the layout under `record_length`). Bytes of an
   *ignored* field are blanked on both sides before that image check
   (2026-09-27: `--compare-bytes --ignore UPD-TS` had reported the ignored
-  timestamp's bytes as `(unmapped bytes)`, so the ignore did nothing). A field that
+  timestamp's bytes as `(unmapped bytes)`, so the ignore did nothing).
+  **Padding is invisible to a values compare** (2026-10-13, #287, option
+  (b)): the decoder strips trailing spaces *and* NULs from DISPLAY text, so
+  `'ALICE'` + 5 x `x'00'` equals `'ALICE     '` by value, though the program
+  tells them apart (`IF A-NAME = SPACES`). Only `compare_bytes` reports it;
+  this is stated in `--compare-bytes --help` and the module docstring, and
+  pinned by `test_low_values_padding_is_equal_by_value_but_not_by_bytes`.
+  Changing it (strip spaces only, or compare text by bytes) would change what
+  a values compare means, so it was declined. A field that
   did not decode cleanly on *either* side is always compared by bytes: its
   best-effort value is not evidence.
 * **Absent fields** (a shorter VB record, an `OCCURS DEPENDING ON` occurrence

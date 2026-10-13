@@ -24,6 +24,10 @@ change fails the run.  This compares what a COBOL programmer would compare::
   nibble equals ``+5`` packed with ``F``: the program cannot tell them apart
   either.  ``compare_bytes=True`` compares the raw bytes instead, for the
   cases where the exact image matters (a file handed to another system).
+  It is also the only way to catch a *padding* difference: decoded text has
+  its trailing spaces and NULs stripped alike, so a text field left as
+  LOW-VALUES past its data equals the space-padded baseline by value, even
+  though ``IF NAME = SPACES`` tells them apart (#287).
   A field whose bytes did not decode cleanly on either side is always
   compared by its bytes -- its best-effort value is not a thing to trust.
 * **Nothing is dropped quietly.**  A key or ignore name the layout does not
@@ -392,7 +396,9 @@ def compare_records(
             layout even when both files are empty.
         key: Fields to pair records on.  Empty pairs them by position.
         ignore: Fields, field names or groups to leave out of the compare.
-        compare_bytes: Compare raw bytes rather than decoded values.
+        compare_bytes: Compare raw bytes rather than decoded values.  The
+            only mode that reports trailing LOW-VALUES where the baseline
+            has spaces: both decode to the same stripped text.
         max_differences: Report at most this many differing records.  The
             counts stay exact either way.
 

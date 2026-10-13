@@ -3,7 +3,7 @@ type: Module
 title: CLI
 description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
 tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-10-08T00:00:00Z
+timestamp: 2026-10-13T00:00:00Z
 ---
 
 # Overview
@@ -897,6 +897,9 @@ of a batch run against the actual one. Implementation:
   `cobol.yml` error (`main()` now routes it through `_config_fail()`, which
   exits 2 when the subcommand is `compare`), and a copybook that is not text
   (a `UnicodeDecodeError` traceback; now caught).
+* **`--compare-bytes`** is the only mode that catches padding differences
+  (trailing LOW-VALUES vs spaces in a text field decode to the same value;
+  #287). Its `--help` says so.
 * **`--key`** (repeatable) pairs records by key; **`--ignore`** (repeatable)
   drops a column, a field name (every occurrence) or a group. Both are checked
   against the layout; a typo is exit 2 with the valid column names.

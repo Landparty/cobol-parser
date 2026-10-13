@@ -226,3 +226,10 @@ def test_one_sided_trailing_partial_record_exits_one_only_by_bytes(files, capsys
     assert _run(_args(copybook, expected, actual)) == 0
     assert "files are equal" in capsys.readouterr().out
     assert _run(_args(copybook, expected, actual, "--compare-bytes")) == 1
+
+
+def test_help_says_only_compare_bytes_catches_padding(capsys):
+    # #287: a values compare cannot see trailing LOW-VALUES vs spaces.
+    assert _run(["compare", "--help"]) == 0
+    out = " ".join(capsys.readouterr().out.split())
+    assert "LOW-VALUES" in out and "padding differences" in out

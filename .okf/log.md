@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-08T00:00:00Z
+timestamp: 2026-10-13T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,12 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-10-13 -- compare: padding is only caught by `--compare-bytes` (#287)
+
+[generators.md](generators.md), [cli.md](cli.md): a values compare treats
+trailing LOW-VALUES and trailing spaces in a text field as equal (the
+decoder strips both). Kept as is (option (b)); now documented and tested.
 
 ## 2026-10-13 -- bug hunt: a CALL may write GLOBAL / EXTERNAL storage
 
