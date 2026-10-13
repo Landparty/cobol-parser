@@ -2947,6 +2947,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [2.0.0](https://github.com/Landparty/cobol-parser/compare/v1.10.0...v2.0.0) (2026-10-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **jcl:** cobolparser.jcl no longer exports scan_cards, JclCard, ScanResult, split_top_level, find_top_level_equals, the card-column constants or EXEC_KEYWORDS, and parse_jcl needs the [jcl] extra. Steps of a nested procedure are now expanded, an unqualified DD override applies to the first procedure step, and some syntax diagnostics jcl-parser does not raise are no longer reported (listed in .okf/jcl.md "Known gaps").
+
+### Features
+
+* **analysis:** field-level data lineage across programs ([4026f22](https://github.com/Landparty/cobol-parser/commit/4026f22ec6d3c1b7c6166e6a38fda3423d1c8781))
+* **lineage:** impact can start from several programs ([cb56337](https://github.com/Landparty/cobol-parser/commit/cb5633741ce9bd0e72e135c46ef8a39a5163d990))
+* **lineage:** store and reload join edges; JCL from in-memory sources ([c666c39](https://github.com/Landparty/cobol-parser/commit/c666c39e60ab787d6464370e36430d68167f2e64))
+
+
+### Bug Fixes
+
+* **analysis:** share one dynamic-CALL callee filter across analyzers ([8add38f](https://github.com/Landparty/cobol-parser/commit/8add38f986eec796dfac562d23b49fea00cf7def))
+* **boundary:** ACCEPT FROM DATE YYYYMMDD is not a console boundary ([626060b](https://github.com/Landparty/cobol-parser/commit/626060b7168fa2625b81cc0f3e0188a6f59df7cb))
+* **boundary:** ACCEPT FROM DATE YYYYMMDD is not a console boundary ([d180471](https://github.com/Landparty/cobol-parser/commit/d180471a212e3b12a2fe420af2206f4a9c725147))
+* **boundary:** distinct keys for multi-line EXEC sites differing after a line break ([d654ec8](https://github.com/Landparty/cobol-parser/commit/d654ec8011a5019406a4de03802f79e6b6d7b474))
+* **boundary:** distinct keys for multi-line EXEC sites differing after a line break ([fe8bc74](https://github.com/Landparty/cobol-parser/commit/fe8bc7462dd8246cbd9cb565937664b57a2b79ab))
+* bug-hunt fixes across parser, analyzers, preprocessing, storage, JCL and CLI ([6aeed4e](https://github.com/Landparty/cobol-parser/commit/6aeed4eb87144941e995e84c282a71f97d3a9d86))
+* **cli:** parse --find-type exits 2 on a partial parse ([c455e76](https://github.com/Landparty/cobol-parser/commit/c455e766bd2b6e101051c27a74a4311970e93918))
+* **gen-data:** keep FILLER VALUE SPACES/LOW-VALUES bytes in record images ([a406839](https://github.com/Landparty/cobol-parser/commit/a4068399627a3d29d5a1b476192c5bdaa7aa5575))
+* **gen-data:** keep FILLER VALUE SPACES/LOW-VALUES bytes in record images ([2cd6233](https://github.com/Landparty/cobol-parser/commit/2cd62337ade9e5224177296661a260e851d67edd))
+* **ims:** resolve split/nested SSA segment names and EXEC DLI SEGMENT((area)) ([15f66ce](https://github.com/Landparty/cobol-parser/commit/15f66cea01916901d3ae341a696a665af3017ef1))
+* **jcl:** address review findings in the jcl-parser adapter ([313b4bd](https://github.com/Landparty/cobol-parser/commit/313b4bd7c421e150581ce6ff146ff4eb969c5e97))
+* **lineage:** ACCEPT FROM DATE/DAY/TIME is not a console port ([6a44566](https://github.com/Landparty/cobol-parser/commit/6a445661b1ab687826758b1ad863c0f6673f5b90))
+* **lineage:** ACCEPT FROM DATE/DAY/TIME is not a console port ([41e2cbc](https://github.com/Landparty/cobol-parser/commit/41e2cbc449bc1e0b9eb9c56f8f07835880635f5b))
+* **lineage:** address review findings on field lineage ([620805f](https://github.com/Landparty/cobol-parser/commit/620805fd84d4d6355aa6ecad32b80cc27956bf82))
+* **lineage:** bind IMS batch DDs to the PARM program, not DFSRRC00 ([e7fdaca](https://github.com/Landparty/cobol-parser/commit/e7fdaca7abe4ad11ca7f84a3784cc1363277d5b6))
+* **lineage:** drop figurative dynamic-CALL candidates as callees ([4553a59](https://github.com/Landparty/cobol-parser/commit/4553a591cf514adfeec19b88e52575523e46604c))
+* **lineage:** drop figurative dynamic-CALL candidates as callees ([d6b4087](https://github.com/Landparty/cobol-parser/commit/d6b40876a3acd1304e50671ce7e129addc3cf83d))
+* **parser:** detect fixed format on the raw source, before the banner is blanked ([5156a41](https://github.com/Landparty/cobol-parser/commit/5156a4163c326afcc5dfd3825548c138562c5ca5))
+
+
+### Documentation
+
+* design for field-level data lineage across programs ([0ab2057](https://github.com/Landparty/cobol-parser/commit/0ab20572738acd4f3dca3048708a41f112222464))
+* **lineage:** impact endpoints and response shape ([8fc87cd](https://github.com/Landparty/cobol-parser/commit/8fc87cdb88200677714abf797f9965e292c44a84))
+* **lineage:** SQL select-list aggregation and the TRANSACTION_HIST example ([5962f5b](https://github.com/Landparty/cobol-parser/commit/5962f5b2b0df8c4c7e5111b167e88e964f1f409f))
+* **lineage:** store flows and lineage edges in Postgres during upload ([6e4638c](https://github.com/Landparty/cobol-parser/commit/6e4638c23fa417bd0ab400b8990a45cf5c4d6974))
+
+
+### Code Refactoring
+
+* **jcl:** read JCL through jcl-parser instead of a second parser ([db8e160](https://github.com/Landparty/cobol-parser/commit/db8e160f427c761444893e3b1892f8c5d3062723))
+
 ## [1.10.0](https://github.com/Landparty/cobol-parser/compare/v1.9.0...v1.10.0) (2026-10-05)
 
 
