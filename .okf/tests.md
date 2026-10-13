@@ -1242,7 +1242,8 @@ test_field_lineage.py, `_source` in test_lineage_graph.py):
 `TestOccursDependingOn` / `TestOccursTables` (None offsets, every
 occurrence inexact, `AMT(3)` exact, >1024 occurrences), `TestDuplicateNames`,
 `TestOperands` (CALL subscript/refmod/qualifier, subscripts not values,
-CORRESPONDING group vs elementary), `TestReturning`; `TestStoredJoinState`
+CORRESPONDING group vs elementary), `TestAccept` (ACCEPT FROM DATE /
+DAY / DAY-OF-WEEK / TIME make no console port), `TestReturning`; `TestStoredJoinState`
 and `TestReviewFixes` (RETURNING join, schema candidates, occurrence join
 at the right reader field, duplicate PROGRAM-ID, NULLFILE, MQI names,
 `start_found`); `TestConcatenationAndOperands` (lineage_jcl); and the

@@ -22,6 +22,14 @@ entries, including both 2026-09-15 sections, were found there on
 generator draws for those figuratives. Checked byte-for-byte against
 GnuCOBOL 3.2.
 
+## 2026-10-12 -- lineage: ACCEPT FROM DATE is not a console port
+
+[analysis.md](analysis.md): `FieldFlowAnalyzer` made every ACCEPT a
+`console` port keyed on its whole `from_source`, so `ACCEPT X FROM DATE
+YYYYMMDD` became a port `console:DATE YYYYMMDD` and a summary row from it
+to every output the date reached. DATE / DAY / DAY-OF-WEEK / TIME
+(matched on the first word, as PR #290 makes `BoundaryInventoryAnalyzer`
+do) now make no port.
 ## 2026-10-12 -- multi-line EXEC boundary keys
 
 [analysis.md](analysis.md): `BoundaryInventoryAnalyzer._unique_prefix`
