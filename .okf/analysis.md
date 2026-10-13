@@ -1716,6 +1716,11 @@ keys are uppercased/normalized. SQL/CICS/DLI keys are the shortest
 word-prefix of the normalized command text no other same-category site in
 the program shares (`_unique_prefix`, re-derived from mockymock's
 `generator._unique_prefix`), falling back to the full text on a genuine tie.
+The other texts are whitespace-collapsed before the comparison
+(2026-10-12): the prefix is joined from split words, while the raw
+`sql_text`/`cics_text`/`ims_text` keep their line breaks, so two multi-line
+sites agreeing up to a line break (CICSONLN's two `SEND MAP`s, differing
+only in `ERASE`/`DATAONLY`) used to get the same truncated key.
 **Two-pass since 2026-08-12 (audit A-B2):** `analyze()` first collects every
 SQL/CICS/DLI site's FULL normalized text per category
 (`_collect_exec_texts`), and each site's prefix is checked against all
