@@ -14,6 +14,15 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-11 -- bug hunt: ACCEPT FROM DATE YYYYMMDD is not a boundary
+
+[analysis.md](analysis.md): `BoundaryInventoryAnalyzer._classify_accept`
+compared the whole `from_source` against the non-interactive sources, but
+cobolparser keeps the format qualifier there (`DATE YYYYMMDD`, `DAY
+YYYYDDD`), so the commonest date idiom became a console `ACCEPT` boundary:
+`gen-fixtures` generated stdin data for it and mockymock's `generate
+--with-data` warned of a boundary key mismatch. It now compares the first
+word, as mockymock's `mock_surface` does.
 ## 2026-10-12 -- FILLER VALUE SPACES in record images
 
 [generators.md](generators.md): a FILLER whose `VALUE` is `SPACES`,

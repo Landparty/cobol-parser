@@ -1196,7 +1196,11 @@ class BoundaryInventoryAnalyzer:
         index: ProgramLayoutIndex,
         report: BoundaryReport,
     ) -> None:
-        source = (statement.from_source or "").upper()
+        # from_source keeps a format qualifier (`FROM DATE YYYYMMDD` ->
+        # "DATE YYYYMMDD", `FROM DAY YYYYDDD`), so the source is its first
+        # word; compared whole, those read as console input.
+        source_words = (statement.from_source or "").upper().split()
+        source = source_words[0] if source_words else ""
         if source in _NON_INTERACTIVE_ACCEPT_SOURCES:
             return  # not a boundary: resolved without touching stdin
 

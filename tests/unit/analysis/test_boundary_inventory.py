@@ -495,6 +495,27 @@ class TestAccept:
         _, _, report = _analyze(source, "acceptdate.cbl")
         assert [b for b in report.boundaries if b.ref.category == "ACCEPT"] == []
 
+    def test_system_accept_with_a_format_qualifier_is_not_a_boundary(self):
+        # cobolparser keeps the qualifier in from_source ("DATE YYYYMMDD",
+        # "DAY YYYYDDD"); compared whole, the commonest date idiom read as
+        # console input, so gen-fixtures generated stdin data for it and
+        # mockymock reported a boundary key mismatch.
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ACCEPTFMT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-TODAY            PIC 9(8).
+       01  WS-JULIAN           PIC 9(7).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           ACCEPT WS-TODAY FROM DATE YYYYMMDD
+           ACCEPT WS-JULIAN FROM DAY YYYYDDD.
+"""
+        _, _, report = _analyze(source, "acceptfmt.cbl")
+        assert [b for b in report.boundaries if b.ref.category == "ACCEPT"] == []
+        assert report.unresolved == []
+
 
 class TestDisplayIsNotABoundary:
     def test_display_produces_no_boundary(self):
