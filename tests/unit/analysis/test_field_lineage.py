@@ -401,6 +401,33 @@ MOVE A OF G1 TO W""",
         assert flagged[("move", "S.X.XB", "T.X")] is False
 
 
+class TestAccept:
+    def test_clock_sources_are_not_a_console_port(self) -> None:
+        # The parser keeps the format qualifier in from_source
+        # ("DATE YYYYMMDD"); either way the value comes from the runtime's
+        # clock, not from data entering the program.
+        report = _program(
+            """
+01 WS-TODAY PIC 9(8).
+01 WS-JULIAN PIC 9(7).
+01 WS-DOW PIC 9.
+01 WS-NOW PIC 9(8).
+01 WS-PARM PIC X(8).
+""",
+            """
+ACCEPT WS-TODAY FROM DATE YYYYMMDD
+ACCEPT WS-JULIAN FROM DAY YYYYDDD
+ACCEPT WS-DOW FROM DAY-OF-WEEK
+ACCEPT WS-NOW FROM TIME
+ACCEPT WS-PARM
+""",
+        )
+        assert [p.key for p in report.ports if p.kind == "console"] == ["SYSIN"]
+        assert {e.target.label() for e in report.edges if e.kind == "accept"} == {
+            "WS-PARM"
+        }
+
+
 class TestReturning:
     def test_procedure_division_returning_is_an_outgoing_port(self) -> None:
         text = """       IDENTIFICATION DIVISION.

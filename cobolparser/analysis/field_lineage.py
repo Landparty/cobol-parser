@@ -120,6 +120,11 @@ PORT_SQL = "sql"
 PORT_CONSOLE = "console"
 PORT_KINDS = (PORT_FILE, PORT_CALL, PORT_LINKAGE, PORT_SQL, PORT_CONSOLE)
 
+#: ACCEPT sources the runtime fills from its own clock: no data enters the
+#: program there, so they are not a console port. Matched on the source's
+#: first word -- the parser keeps a format qualifier (``DATE YYYYMMDD``).
+_CLOCK_ACCEPT_SOURCES = frozenset({"DATE", "DAY", "DAY-OF-WEEK", "TIME"})
+
 #: Edge kinds whose target holds a value *computed* from the source, rather
 #: than a copy of it.
 VALUE_CHANGING_KINDS = frozenset({"arith", "string", "aggregate", "sql-expr"})
@@ -1386,18 +1391,7 @@ class FieldFlowAnalyzer:
         elif isinstance(stmt, (SortStatement, MergeStatement)):
             self._visit_sort(stmt, ctx)
         elif isinstance(stmt, IOAcceptStatement):
-            source = (stmt.from_source or "SYSIN").upper()
-            port = self._port(PORT_CONSOLE, source)
-            for tgt in self._refs(stmt.target, ROLE_WRITE):
-                self._to_port(
-                    tgt,
-                    port,
-                    "accept",
-                    ctx,
-                    "ACCEPT",
-                    into_program=True,
-                    out_of_program=False,
-                )
+            self._visit_accept(stmt, ctx)
         elif isinstance(stmt, DisplayStatement):
             port = self._port(PORT_CONSOLE, "SYSOUT")
             for item in stmt.display_items:
@@ -1545,6 +1539,23 @@ class FieldFlowAnalyzer:
                 verb,
                 into_program=False,
                 out_of_program=True,
+            )
+
+    def _visit_accept(self, stmt: IOAcceptStatement, ctx: _Context) -> None:
+        source = (stmt.from_source or "SYSIN").upper()
+        words = source.split()
+        if words and words[0] in _CLOCK_ACCEPT_SOURCES:
+            return  # the runtime's clock, not data entering the program
+        port = self._port(PORT_CONSOLE, source)
+        for tgt in self._refs(stmt.target, ROLE_WRITE):
+            self._to_port(
+                tgt,
+                port,
+                "accept",
+                ctx,
+                "ACCEPT",
+                into_program=True,
+                out_of_program=False,
             )
 
     def _visit_sort(self, stmt: Any, ctx: _Context) -> None:

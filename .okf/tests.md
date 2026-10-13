@@ -161,6 +161,11 @@ compare (C vs F sign nibble, slack past the layout), VB records with absent
 fixture is a record image from `encode_record`, not a hand-built decode
 result. See `generators.md`'s "Record compare".
 
+2026-10-12: `tests/unit/generators/data/test_encoding.py::TestFiller`
+(+10 cases) pins a FILLER `VALUE SPACES` / `LOW-VALUES` / `HIGH-VALUES` /
+`NULLS` / `ALL SPACES` filling every byte in ASCII and EBCDIC, also through
+a generated dataset. See `generators.md`.
+
 2026-09-27: `tests/unit/generators/data/test_layout_offsets.py::TestSynchronizedSlack`
 (4 tests) pins `data-items` flagging offsets that unmodelled SYNC slack
 could shift. See `generators.md`.
@@ -828,7 +833,7 @@ tests/
       test_decode_cli.py  # decode: CSV/JSON/hex output, --view / --list-views, gen-data -> decode CSV round trip through the CLI, --skip/--max-records paging, trailing-byte warning, --strict exit code; plus dclgen-check as a subcommand and as a lint rule (see cli.md)
       test_gen_fixtures_cli.py  # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes (see cli.md)
     analysis/
-      test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability (IF/EVALUATE/SEARCH), CALL argument-direction ladder, ACCEPT filtering, IOLogger cross-check (see analysis.md)
+      test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability (IF/EVALUATE/SEARCH), CALL argument-direction ladder, ACCEPT filtering (incl. `FROM DATE YYYYMMDD` qualifiers), IOLogger cross-check (see analysis.md)
       test_constraints.py  # ConstraintExtractor: relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan, EVALUATE TRUE + 88s, WHEN OTHER, SEARCH WHEN, PERFORM-UNTIL SequenceConstraint (see analysis.md)
       test_domains.py  # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value, TestEnumDomainHonoursRelationalConjuncts: a level-88 pick re-checked against gt/ge/lt/le (#244) (see analysis.md)
       test_dclgen_check.py  # DclgenChecker: DCLGEN column <-> host-variable pairing (the CUST_ID/CUST-VAL underscore-hyphen normalization), every violation kind and its severity, both null-indicator syntaxes, what it declines to check (VARCHAR group binding, BLOB), source ordering, ambiguous columns, and a parametrised "what DCLGEN itself would generate is always clean" table (see analysis.md)
@@ -1237,7 +1242,8 @@ test_field_lineage.py, `_source` in test_lineage_graph.py):
 `TestOccursDependingOn` / `TestOccursTables` (None offsets, every
 occurrence inexact, `AMT(3)` exact, >1024 occurrences), `TestDuplicateNames`,
 `TestOperands` (CALL subscript/refmod/qualifier, subscripts not values,
-CORRESPONDING group vs elementary), `TestReturning`; `TestStoredJoinState`
+CORRESPONDING group vs elementary), `TestAccept` (ACCEPT FROM DATE /
+DAY / DAY-OF-WEEK / TIME make no console port), `TestReturning`; `TestStoredJoinState`
 and `TestReviewFixes` (RETURNING join, schema candidates, occurrence join
 at the right reader field, duplicate PROGRAM-ID, NULLFILE, MQI names,
 `start_found`); `TestConcatenationAndOperands` (lineage_jcl); and the

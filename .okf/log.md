@@ -14,6 +14,39 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-11 -- bug hunt: ACCEPT FROM DATE YYYYMMDD is not a boundary
+
+[analysis.md](analysis.md): `BoundaryInventoryAnalyzer._classify_accept`
+compared the whole `from_source` against the non-interactive sources, but
+cobolparser keeps the format qualifier there (`DATE YYYYMMDD`, `DAY
+YYYYDDD`), so the commonest date idiom became a console `ACCEPT` boundary:
+`gen-fixtures` generated stdin data for it and mockymock's `generate
+--with-data` warned of a boundary key mismatch. It now compares the first
+word, as mockymock's `mock_surface` does.
+## 2026-10-12 -- FILLER VALUE SPACES in record images
+
+[generators.md](generators.md): a FILLER whose `VALUE` is `SPACES`,
+`LOW-VALUES`, `HIGH-VALUES` or `NULL` is encoded as that byte throughout
+(`encoding._filler_fill()`); it used to carry the random text the value
+generator draws for those figuratives. Checked byte-for-byte against
+GnuCOBOL 3.2.
+
+## 2026-10-12 -- lineage: ACCEPT FROM DATE is not a console port
+
+[analysis.md](analysis.md): `FieldFlowAnalyzer` made every ACCEPT a
+`console` port keyed on its whole `from_source`, so `ACCEPT X FROM DATE
+YYYYMMDD` became a port `console:DATE YYYYMMDD` and a summary row from it
+to every output the date reached. DATE / DAY / DAY-OF-WEEK / TIME
+(matched on the first word, as PR #290 makes `BoundaryInventoryAnalyzer`
+do) now make no port.
+## 2026-10-12 -- multi-line EXEC boundary keys
+
+[analysis.md](analysis.md): `BoundaryInventoryAnalyzer._unique_prefix`
+collapses the other sites' whitespace before comparing, so two multi-line
+EXEC SQL/CICS/DLI sites that differ only after a line break get distinct
+keys (they used to share one, and mockymock `generate --with-data` warned of
+a key mismatch and left both sites with placeholder bodies).
+
 ## 2026-10-08 -- JCL is read by jcl-parser
 
 [jcl.md](jcl.md) rewritten: `cobolparser/jcl/` no longer parses JCL. Its card

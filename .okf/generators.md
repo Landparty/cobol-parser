@@ -649,7 +649,13 @@ out, every occurrence expanded, no cap); the CLI applies it for
 `--format record|hex` and prints a note to stderr so the overridden flags
 don't look ignored. FILLER encodes as spaces/zeros regardless of its
 generated cell — an empty cell falls through every encoder as exactly that,
-so no encoder needs to know about FILLER.
+so no encoder needs to know about FILLER. A FILLER with a `VALUE` keeps
+that value, and one whose `VALUE` is `SPACES` / `LOW-VALUES` /
+`HIGH-VALUES` / `NULL` (optionally after `ALL`) is filled with that byte
+(`_filler_fill()`, 2026-10-12). The value generator reads those
+figuratives as "no meaningful content" and draws random text for the cell,
+which the encoder used to write into the record -- so the report-line gap
+`05 FILLER PIC X(5) VALUE SPACES` between two columns came out as `QH7KZ`.
 
 **Encodings, all verified against GnuCOBOL** by compiling a probe program
 and reading back `LENGTH OF` plus the raw group bytes (the probe and its
