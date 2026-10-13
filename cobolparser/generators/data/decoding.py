@@ -724,10 +724,10 @@ def decode_record(
     """
     counts: _Counts = {}
     out: list[DecodedField] = []
-    # *data* is the whole record, so an overlay starts where the item it
-    # redefines does rather than at byte 0 -- switching view re-reads the
-    # same record from a different offset, which is the point.
-    position = view.offset
+    # *data* is the whole record, and so is every view: an overlay view is
+    # the record with the redefinition swapped in, so the walk starts at the
+    # view's first field -- byte 0 -- whichever view was asked for.
+    position = view.fields[0].offset if view.fields else 0
 
     for placed in view.fields:
         spec = placed.spec

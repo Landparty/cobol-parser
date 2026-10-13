@@ -113,7 +113,8 @@ def test_decode_switches_redefines_overlay(sample, capsys):
         ]
     )
     rows = list(csv.reader(io.StringIO(capsys.readouterr().out)))
-    assert rows[0] == ["OS-COUNTRY", "OS-LINE"]
+    assert "OS-COUNTRY" in rows[0] and "OS-LINE" in rows[0]
+    assert "HOME-STREET" not in rows[0]
     assert len(rows) == 5
 
 

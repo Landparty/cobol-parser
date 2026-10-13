@@ -323,15 +323,17 @@ def test_an_overlay_reads_the_same_bytes_differently():
     overlay = decoder.decode_bytes(raw, view="ADDR-OVERSEAS")
 
     assert base.header == ["CUST-ID", "HOME-STREET", "HOME-ZIP"]
-    assert overlay.header == ["OS-COUNTRY", "OS-LINE"]
+    # The whole record, with the overlay swapped in for ADDR-HOME (#296).
+    assert overlay.header == ["CUST-ID", "OS-COUNTRY", "OS-LINE"]
     assert len(overlay.records) == len(base.records)
     for base_record, overlay_record in zip(base.records, overlay.records, strict=True):
         # The values differ (one reading is two text fields, the other a
         # street and a zip), but they must come from exactly the same bytes.
         home = b"".join(f.raw for f in base_record.fields[1:])
-        away = b"".join(f.raw for f in overlay_record.fields)
+        away = b"".join(f.raw for f in overlay_record.fields[1:])
         assert home == away
-        assert overlay_record.fields[0].offset == 6
+        assert overlay_record.fields[0].raw == base_record.fields[0].raw
+        assert overlay_record.fields[1].offset == 6
 
 
 def test_framing_uses_the_base_record_length_whatever_the_view():
@@ -731,3 +733,26 @@ def test_a_binary_value_wider_than_its_picture_is_a_caveat_not_an_error():
     assert any("TRUNC" in caveat and "B" in caveat for caveat in result.caveats)
     fits = _decoder(source, EncodingOptions()).decode_bytes(b"\x27\x0f")
     assert not any("TRUNC" in caveat for caveat in fits.caveats)
+
+
+TABLE_OVERLAY = """
+       01  TBL-REC.
+           05  TBL OCCURS 2 TIMES.
+               10  T-VAL       PIC XX.
+               10  T-ALT REDEFINES T-VAL.
+                   15  T-A     PIC X.
+                   15  T-B     PIC X.
+"""
+
+
+def test_an_overlay_inside_a_table_decodes_every_occurrence():
+    """#296: `--view T-ALT` used to read occurrence 1 only."""
+    decoder = _decoder(TABLE_OVERLAY, EncodingOptions())
+    result = decoder.decode_bytes(b"ABCD", view="T-ALT")
+    assert result.header == ["T-A(1)", "T-B(1)", "T-A(2)", "T-B(2)"]
+    assert result.records[0].values() == {
+        "T-A(1)": "A",
+        "T-B(1)": "B",
+        "T-A(2)": "C",
+        "T-B(2)": "D",
+    }

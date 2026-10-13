@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -648,6 +649,7 @@ def flatten_record(
     options: DataGeneratorOptions | None = None,
     *,
     ignore_root_redefines: bool = False,
+    substitutions: Mapping[int, CobolDataItem] | None = None,
 ) -> list[FieldSpec]:
     """Flatten *record* into the ordered list of columns to generate.
 
@@ -664,6 +666,14 @@ def flatten_record(
     ``REDEFINES`` nested inside the subtree still excludes its fields, so
     the result stays a contiguous byte map whose widths sum to the
     subtree's footprint.
+
+    *substitutions* reads the record through chosen ``REDEFINES`` overlays:
+    it maps ``id()`` of a redefined item to the item redefining it, and the
+    walk emits the overlay's fields wherever the redefined item's would have
+    gone -- once per occurrence when it sits inside a table.  An overlay
+    shorter than what it redefines is padded with a FILLER so every field
+    after it keeps its offset.  This is how :mod:`.views` builds an overlay
+    view: the whole record with the overlay swapped in.
     """
     opts = options or DataGeneratorOptions()
     specs: list[FieldSpec] = []
@@ -677,6 +687,7 @@ def flatten_record(
         specs,
         redefines_label=record.redefines if ignore_root_redefines else None,
         ignore_own_redefines=ignore_root_redefines,
+        substitutions=substitutions,
     )
     _link_odo_counters(specs)
     _assign_columns(specs, opts)
@@ -694,6 +705,7 @@ def _flatten_into(
     *,
     redefines_label: str | None = None,
     ignore_own_redefines: bool = False,
+    substitutions: Mapping[int, CobolDataItem] | None = None,
 ) -> None:
     """Recursive worker for :func:`flatten_record`.
 
@@ -762,6 +774,20 @@ def _flatten_into(
         children = _child_items(item)
         if children:
             for child in children:
+                overlay = substitutions.get(id(child)) if substitutions else None
+                if overlay is not None and substitutions:
+                    _flatten_overlay(
+                        child,
+                        overlay,
+                        item_path,
+                        occ,
+                        inherited_redefines,
+                        inherited_controls,
+                        opts,
+                        out,
+                        substitutions,
+                    )
+                    continue
                 _flatten_into(
                     child,
                     item_path,
@@ -771,6 +797,7 @@ def _flatten_into(
                     opts,
                     out,
                     redefines_label=redefines_label,
+                    substitutions=substitutions,
                 )
             continue
 
@@ -814,6 +841,66 @@ def _flatten_into(
                 odo_controls=inherited_controls,
             )
         )
+
+
+def _flatten_overlay(
+    target: CobolDataItem,
+    overlay: CobolDataItem,
+    path: tuple[str, ...],
+    subscripts: tuple[int, ...],
+    redefines: str | None,
+    odo_controls: tuple[OdoControl, ...],
+    opts: DataGeneratorOptions,
+    out: list[FieldSpec],
+    substitutions: Mapping[int, CobolDataItem],
+) -> None:
+    """Emit *overlay*'s fields in *target*'s place, padded to its width.
+
+    The pad keeps the record's own geometry: a redefinition aliases bytes,
+    it does not remove any, so the fields after it stay where the base
+    layout puts them.  A *wider* overlay (non-conforming below level 01) is
+    emitted whole and moves what follows -- :mod:`.views` says so in its
+    caveats.
+    """
+    start = len(out)
+    _flatten_into(
+        overlay,
+        path,
+        subscripts,
+        redefines,
+        odo_controls,
+        opts,
+        out,
+        redefines_label=overlay.redefines,
+        ignore_own_redefines=True,
+        substitutions=substitutions,
+    )
+    own = sum(spec.storage_size for spec in out[start:])
+    probe: list[FieldSpec] = []
+    _flatten_into(target, path, subscripts, redefines, odo_controls, opts, probe)
+    gap = sum(spec.storage_size for spec in probe) - own
+    if gap <= 0:
+        return
+    out.append(
+        FieldSpec(
+            name="FILLER",
+            path=(*path, overlay.name, "FILLER"),
+            column="FILLER",
+            level=overlay.level,
+            picture=f"X({gap})",
+            usage="DISPLAY",
+            category=FieldCategory.ALPHANUMERIC,
+            size=gap,
+            integer_digits=0,
+            decimal_digits=0,
+            is_signed=False,
+            subscripts=subscripts,
+            redefines=overlay.redefines,
+            is_filler=True,
+            occurs_depending_on=odo_controls[0].depending_on if odo_controls else None,
+            odo_controls=odo_controls,
+        )
+    )
 
 
 def _occurrence_indexes(

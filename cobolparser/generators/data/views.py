@@ -17,11 +17,16 @@ what each one means, which needs the two things the sequence leaves implicit:
   one and writes it); a decoder cannot, so every redefinition becomes a
   *view* of its own that a caller can switch to.
 
-So a :class:`RecordView` is one such reading: a name, the offset it starts at,
-and its fields already placed.  :func:`build_record_views` returns the base
-view (the record as declared, redefinitions excluded) plus one overlay per
-``REDEFINES`` item anywhere in the tree, each rooted at the offset of the item
-it redefines.
+So a :class:`RecordView` is one such reading: a name and its fields already
+placed.  :func:`build_record_views` returns the base view (the record as
+declared, redefinitions excluded) plus one overlay view per ``REDEFINES`` item
+anywhere in the tree.  An overlay view is the *whole record* with that one
+redefinition swapped in for the item it redefines (and, for a redefinition
+nested inside another, the enclosing one swapped in too).  Two things follow
+from reading the whole record rather than the overlay's bytes alone: a field
+outside the redefined area -- a record key -- is still there to compare on,
+and an overlay inside an ``OCCURS`` table is read at every occurrence, the
+same way the base view reads the item it redefines.
 
 Every offset here is *record-relative*: the record root starts at byte 0.
 That matches :mod:`.layout_offsets`, which reports the same numbers for the
@@ -84,16 +89,20 @@ class RecordView:
             distinguishable.
         redefines: The item this view redefines, or ``None`` for the base
             view.
-        offset: Record-relative byte offset the view starts at.  Always 0
-            for the base view; the redefined item's own offset for an
-            overlay.
+        offset: Record-relative byte offset the redefinition starts at --
+            its first occurrence, when it sits inside a table.  Always 0
+            for the base view.  The view's *fields* always start at 0: an
+            overlay view is the whole record with the overlay swapped in.
         fields: The view's fields, in byte order, already placed.
-        offset_ambiguous: True when something before this view makes its
-            offset a guess rather than a fact -- an ``OCCURS ... DEPENDING
-            ON`` table earlier in the record (whose real length is per-record
-            data), or an enclosing ``OCCURS`` table (this view is reported at
-            occurrence 1).  The bytes are still decoded; the caller is simply
-            told not to trust the offset for every record.
+        offset_ambiguous: True when an ``OCCURS ... DEPENDING ON`` table in
+            the record (whose real length is per-record data) makes the
+            static offsets a guess for any record whose table is not full.
+            The decoder resolves those per record; the caller is simply told
+            not to trust the listed offsets for every record.
+        overlay_length: Bytes the redefinition itself covers (one
+            occurrence); the base view's own length for the base view.
+            ``offset + overlay_length`` is how far the redefinition reaches,
+            which is what :attr:`RecordViews.framing_length` measures.
     """
 
     name: str
@@ -101,6 +110,7 @@ class RecordView:
     offset: int
     fields: list[PlacedField]
     offset_ambiguous: bool = False
+    overlay_length: int | None = None
 
     @property
     def is_base(self) -> bool:
@@ -115,7 +125,13 @@ class RecordView:
     @property
     def end(self) -> int:
         """Offset one past the view's last byte."""
-        return self.offset + self.length
+        return self.fields[-1].end if self.fields else 0
+
+    @property
+    def overlay_end(self) -> int:
+        """Offset one past the redefinition's own last byte (first occurrence)."""
+        span = self.length if self.overlay_length is None else self.overlay_length
+        return self.offset + span
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise the view and its placed fields."""
@@ -125,6 +141,9 @@ class RecordView:
             "is_base": self.is_base,
             "offset": self.offset,
             "length": self.length,
+            "overlay_length": (
+                self.length if self.overlay_length is None else self.overlay_length
+            ),
             "offset_ambiguous": self.offset_ambiguous,
             "fields": [placed.to_dict() for placed in self.fields],
         }
@@ -177,7 +196,7 @@ class RecordViews:
         reading the serialized form frames records on the same number
         :class:`~.decoding.RecordDecoder` does.
         """
-        return max([self.base.length, *(view.end for view in self.overlays)])
+        return max([self.base.length, *(view.overlay_end for view in self.overlays)])
 
     @property
     def names(self) -> list[str]:
@@ -255,20 +274,13 @@ def build_record_views(
     )
     overlays: list[RecordView] = []
     caveats: list[str] = []
-    _scan_overlays(
-        record,
-        (record.name,),
-        0,
-        opts,
-        overlays,
-        ambiguous=False,
-        in_table=False,
-    )
+    _scan_overlays(record, record, (record.name,), 0, opts, overlays, chain={})
     if any(view.offset_ambiguous for view in overlays):
         caveats.append(
-            "these REDEFINES overlays sit inside or after a table whose "
-            "length is per-record data, so their offsets hold for a record "
-            "whose tables are full and may be too high otherwise: "
+            "these REDEFINES overlays are read through a record with a table "
+            "whose length is per-record data, so their listed offsets hold "
+            "for a record whose tables are full and may be too high "
+            "otherwise: "
             + ", ".join(view.name for view in overlays if view.offset_ambiguous)
         )
     if base.offset_ambiguous:
@@ -277,15 +289,16 @@ def build_record_views(
             "offset reported after it assumes a record whose tables are "
             "full; a decoded record's own offsets come from its counters"
         )
-    oversized = [view for view in overlays if view.end > base.length]
+    oversized = [view for view in overlays if view.overlay_end > base.length]
     if oversized:
         caveats.append(
             "these REDEFINES entries are wider than the item they redefine, "
             "which COBOL does not permit below level 01: the record is read "
             "as the widest of them ("
-            + str(max(view.end for view in oversized))
-            + f" bytes, not {base.length}), and offsets after the "
-            "redefined item are the base layout's own: "
+            + str(max(view.overlay_end for view in oversized))
+            + f" bytes, not {base.length}), offsets after the redefined item "
+            "are the base layout's own, and reading through one of them "
+            "moves the fields after it along by the extra bytes: "
             + ", ".join(view.name for view in oversized)
         )
     return RecordViews(
@@ -333,64 +346,76 @@ def _footprint(item: CobolDataItem, opts: DataGeneratorOptions) -> int:
 
 
 def _scan_overlays(
+    record: CobolDataItem,
     item: CobolDataItem,
     path: tuple[str, ...],
     start: int,
     opts: DataGeneratorOptions,
     out: list[RecordView],
     *,
-    ambiguous: bool,
-    in_table: bool,
+    chain: dict[int, CobolDataItem],
 ) -> None:
     """Walk *item*'s children, emitting a view for every ``REDEFINES``.
 
     Mirrors :func:`.layout_offsets._layout_siblings`' slot bookkeeping: a run
     of siblings that redefine each other share one slot, the slot starts
     where its first (non-redefining) member starts, and the slot's footprint
-    is its widest member.  What differs is the output -- placed
-    :class:`FieldSpec` s rather than :class:`~.layout_offsets.LayoutItem` s --
-    and that the walk continues *into* a redefining child, so a redefinition
-    nested inside a redefinition gets a view of its own.
+    is its widest member.  Each view is the whole *record* flattened with
+    the redefinition swapped in for the slot's first member -- plus every
+    enclosing redefinition already in *chain*, so a redefinition nested
+    inside another is read through both.  *start* (and so
+    :attr:`RecordView.offset`) is the first occurrence's offset; the fields
+    themselves are placed at every occurrence by the flattening.
     """
     offset = start
     slot_start = start
+    slot_item: CobolDataItem | None = None
     slot_footprint = 0
-    trailing_odo = ambiguous
 
     for child in _storage_children(item):
         if not child.redefines:
             offset += slot_footprint
             slot_footprint = 0
             slot_start = offset
+            slot_item = child
 
-        occurs = child.occurs_clause
+        child_chain = chain
         if child.redefines:
+            if slot_item is not None:
+                child_chain = {**chain, id(slot_item): child}
+                fields = _place(
+                    flatten_record(
+                        record,
+                        opts,
+                        ignore_root_redefines=True,
+                        substitutions=child_chain,
+                    ),
+                    0,
+                )
+            else:
+                # A REDEFINES with nothing before it to redefine: no slot to
+                # swap it into, so the view is the overlay's own bytes.
+                fields = _place(
+                    flatten_record(child, opts, ignore_root_redefines=True),
+                    slot_start,
+                )
             out.append(
                 RecordView(
                     name=".".join((*path, child.name)),
                     redefines=child.redefines,
                     offset=slot_start,
-                    fields=_place(
-                        flatten_record(child, opts, ignore_root_redefines=True),
-                        slot_start,
-                    ),
-                    offset_ambiguous=trailing_odo or in_table,
+                    fields=fields,
+                    offset_ambiguous=any(p.spec.odo_controls for p in fields),
+                    overlay_length=_footprint(child, opts),
                 )
             )
         _scan_overlays(
+            record,
             child,
             (*path, child.name),
             slot_start,
             opts,
             out,
-            ambiguous=trailing_odo,
-            in_table=in_table or occurs is not None,
+            chain=child_chain,
         )
-
-        if occurs is not None and occurs.depending_on:
-            # Everything after a DEPENDING ON table sits at an offset only
-            # that record's own counter decides. The decoder resolves it per
-            # record; a static view cannot, so say so rather than imply the
-            # maximum-length offset is the only one.
-            trailing_odo = True
         slot_footprint = max(slot_footprint, _footprint(child, opts))
