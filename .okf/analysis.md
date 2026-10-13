@@ -2098,6 +2098,14 @@ check now also folds `tests/samples/file_operations.cbl` and
 `enterprise/COMPDIR.cbl`. `bundle_version` is unchanged: only which
 expectations are emitted changes, not their shape.
 
+**A CALL / INVOKE forgets every GLOBAL and EXTERNAL leaf** (2026-10-13 bug
+hunt): a contained program writes a GLOBAL item by name and every program
+declaring the same EXTERNAL item shares its bytes, USING list or not, so
+`MOVE 1 TO X. CALL 'INNER'. DISPLAY X.` with `X GLOBAL` claimed `1` where
+GnuCOBOL shows what INNER stored. `_LayoutFacts.shared` (inherited from a
+GLOBAL/EXTERNAL group) is dropped in `_poison_statement_writes`. Pinned by
+`tests/unit/analysis/test_const_fold.py::TestCallMayWriteSharedStorage`.
+
 **"Exact by construction, or absent" -- never a guess.** Every ambiguity
 below resolves by leaving a field unknown (poisoned: removed from the
 internal env) rather than approximating:
