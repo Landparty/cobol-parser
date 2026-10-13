@@ -1718,6 +1718,11 @@ keys are uppercased/normalized. SQL/CICS/DLI keys are the shortest
 word-prefix of the normalized command text no other same-category site in
 the program shares (`_unique_prefix`, re-derived from mockymock's
 `generator._unique_prefix`), falling back to the full text on a genuine tie.
+The other texts are whitespace-collapsed before the comparison
+(2026-10-12): the prefix is joined from split words, while the raw
+`sql_text`/`cics_text`/`ims_text` keep their line breaks, so two multi-line
+sites agreeing up to a line break (CICSONLN's two `SEND MAP`s, differing
+only in `ERASE`/`DATAONLY`) used to get the same truncated key.
 **Two-pass since 2026-08-12 (audit A-B2):** `analyze()` first collects every
 SQL/CICS/DLI site's FULL normalized text per category
 (`_collect_exec_texts`), and each site's prefix is checked against all
@@ -2919,7 +2924,7 @@ the record-relative byte offset/length `layout_offsets` computes) and
 | `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`), else `?IDENT#n` plus a caveat |
 | `linkage` | `PROGRAM#n` / `ENTRY#n`, `PROGRAM#RETURNING` (out only) | PROCEDURE DIVISION USING / RETURNING, via `ProgramSignatureExtractor` |
 | `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats) |
-| `console` | `SYSIN` / `SYSOUT` | ACCEPT / DISPLAY |
+| `console` | `SYSIN` / `SYSOUT` (or the ACCEPT's `FROM` source) | ACCEPT / DISPLAY; `ACCEPT FROM DATE` / `DAY` / `DAY-OF-WEEK` / `TIME` (with or without a format qualifier) make no port -- the runtime's clock, not data entering the program |
 
 Edge kinds: `move` (group MOVE is a byte overlay; CORRESPONDING pairs by
 name; literal reference modification narrows the range), `arith`,

@@ -1034,6 +1034,12 @@ class BoundaryInventoryAnalyzer:
         words = match_text.split()
         if not words:
             return ""
+        # The prefix is built from whitespace-split words, so the other
+        # texts must be compared in the same collapsed form: a raw text
+        # still holds its line breaks (`... MAPSET ( X ) \n FROM ...`), so
+        # a prefix spanning one never matched it and two multi-line sites
+        # differing only after a line break got the same key.
+        others = [" ".join(other.split()) for other in others]
         for length in range(1, len(words) + 1):
             prefix = " ".join(words[:length])
             if not any(o.startswith(prefix) for o in others):

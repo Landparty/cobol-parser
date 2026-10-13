@@ -310,6 +310,48 @@ class TestFiller:
         )
         assert encode_record(specs, ["HDR"], EncodingOptions()) == b"HDR"
 
+    @pytest.mark.parametrize(
+        ("value", "opts", "expected"),
+        [
+            ("SPACES", EncodingOptions(), b"AB   "),
+            ("SPACE", EncodingOptions(), b"AB   "),
+            ("ALL SPACES", EncodingOptions(), b"AB   "),
+            ("SPACES", EBCDIC, bytes.fromhex("c1c2404040")),
+            ("LOW-VALUES", EncodingOptions(), b"AB\x00\x00\x00"),
+            ("LOW-VALUE", EBCDIC, bytes.fromhex("c1c2000000")),
+            ("NULLS", EncodingOptions(), b"AB\x00\x00\x00"),
+            ("HIGH-VALUES", EncodingOptions(), b"AB\xff\xff\xff"),
+            ("HIGH-VALUE", EBCDIC, bytes.fromhex("c1c2ffffff")),
+        ],
+    )
+    def test_filler_value_figurative_fills_every_byte(self, value, opts, expected):
+        # The report-line idiom: ``FILLER PIC X(n) VALUE SPACES`` between two
+        # columns.  The value generator treats SPACES/LOW-VALUES as "no
+        # meaningful content" and draws random text for the cell, which the
+        # encoder used to write into the gap because the FILLER had a VALUE
+        # clause.  GnuCOBOL leaves exactly these bytes there.
+        specs = specs_for(
+            "       01  R.\n"
+            "           05  A PIC X(2).\n"
+            f"           05  FILLER PIC X(3) VALUE {value}.\n"
+        )
+        assert encode_record(specs, ["AB", "QH7"], opts) == expected
+
+    def test_generated_record_keeps_filler_value_spaces_blank(self):
+        from cobolparser.generators import CopybookDataGenerator
+
+        copybook = (
+            "       01  R.\n"
+            "           05  A PIC X(2).\n"
+            "           05  FILLER PIC X(3) VALUE SPACES.\n"
+            "           05  B PIC X(2).\n"
+        )
+        opts = DataGeneratorOptions(rows=20, seed=1).for_record_image()
+        dataset = CopybookDataGenerator(opts).generate_from_source(copybook)
+        raw = dataset.to_records(EncodingOptions())
+        assert len(raw) == 20 * 7
+        assert all(raw[i * 7 + 2 : i * 7 + 5] == b"   " for i in range(20))
+
 
 class TestRecordAssembly:
     COPYBOOK = (

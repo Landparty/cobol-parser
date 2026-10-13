@@ -161,6 +161,11 @@ compare (C vs F sign nibble, slack past the layout), VB records with absent
 fixture is a record image from `encode_record`, not a hand-built decode
 result. See `generators.md`'s "Record compare".
 
+2026-10-12: `tests/unit/generators/data/test_encoding.py::TestFiller`
+(+10 cases) pins a FILLER `VALUE SPACES` / `LOW-VALUES` / `HIGH-VALUES` /
+`NULLS` / `ALL SPACES` filling every byte in ASCII and EBCDIC, also through
+a generated dataset. See `generators.md`.
+
 2026-09-27: `tests/unit/generators/data/test_layout_offsets.py::TestSynchronizedSlack`
 (4 tests) pins `data-items` flagging offsets that unmodelled SYNC slack
 could shift. See `generators.md`.
@@ -1237,7 +1242,8 @@ test_field_lineage.py, `_source` in test_lineage_graph.py):
 `TestOccursDependingOn` / `TestOccursTables` (None offsets, every
 occurrence inexact, `AMT(3)` exact, >1024 occurrences), `TestDuplicateNames`,
 `TestOperands` (CALL subscript/refmod/qualifier, subscripts not values,
-CORRESPONDING group vs elementary), `TestReturning`; `TestStoredJoinState`
+CORRESPONDING group vs elementary), `TestAccept` (ACCEPT FROM DATE /
+DAY / DAY-OF-WEEK / TIME make no console port), `TestReturning`; `TestStoredJoinState`
 and `TestReviewFixes` (RETURNING join, schema candidates, occurrence join
 at the right reader field, duplicate PROGRAM-ID, NULLFILE, MQI names,
 `start_found`); `TestConcatenationAndOperands` (lineage_jcl); and the

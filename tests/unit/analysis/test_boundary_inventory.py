@@ -685,3 +685,66 @@ class TestCalleeSourceBindsByProcedureUsing:
             ("WS-2", "OUT", "callee-source"),
             ("WS-3", "IN", "callee-source"),
         ]
+
+
+class TestMultiLineExecKeys:
+    """Two multi-line EXEC sites whose text agrees up to a line break must
+    still get distinct keys: the uniqueness check compared the
+    whitespace-collapsed key against the other sites' RAW text, so a
+    prefix spanning a line break never matched and both sites were cut
+    to the same key (CICSONLN's two SEND MAPs, differing only in
+    ERASE/DATAONLY on their third line)."""
+
+    def test_cics_sites_differing_after_a_line_break_get_distinct_keys(self):
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CICSKEYS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-MAP-AREA         PIC X(100).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           EXEC CICS SEND MAP('CINQMAP') MAPSET('CINQSET')
+               FROM(WS-MAP-AREA)
+               ERASE
+           END-EXEC
+           EXEC CICS SEND MAP('CINQMAP') MAPSET('CINQSET')
+               FROM(WS-MAP-AREA)
+               DATAONLY
+           END-EXEC
+           GOBACK.
+"""
+        _, _, report = _analyze(source, "cicskeys.cbl")
+        keys = [b.ref.key for b in report.boundaries if b.ref.category == "CICS"]
+        assert len(keys) == 2
+        assert len(set(keys)) == 2, f"CICS keys must be unique: {keys}"
+        assert keys[0].endswith("ERASE")
+        assert keys[1].endswith("DATAONLY")
+
+    def test_sql_sites_differing_after_a_line_break_get_distinct_keys(self):
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SQLKEYS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+           EXEC SQL INCLUDE SQLCA END-EXEC.
+       01  WS-ID               PIC X(8).
+       01  WS-NAME             PIC X(20).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           EXEC SQL
+               UPDATE CUSTOMER
+               SET NAME = :WS-NAME
+               WHERE ID = :WS-ID
+           END-EXEC
+           EXEC SQL
+               UPDATE CUSTOMER
+               SET STATUS = 'X'
+               WHERE ID = :WS-ID
+           END-EXEC
+           GOBACK.
+"""
+        _, _, report = _analyze(source, "sqlkeys.cbl")
+        keys = [b.ref.key for b in report.boundaries if b.ref.category == "SQL"]
+        assert len(keys) == 2
+        assert len(set(keys)) == 2, f"SQL keys must be unique: {keys}"
