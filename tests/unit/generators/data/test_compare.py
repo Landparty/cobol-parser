@@ -284,11 +284,15 @@ def test_c_and_f_sign_nibbles_are_equal_by_value_but_not_by_bytes():
     assert diff.expected_hex.endswith("5C") and diff.actual_hex.endswith("5F")
 
 
-def test_low_values_padding_is_equal_by_value_but_not_by_bytes():
-    """#287, option (b): the decoder strips trailing spaces *and* NULs from
-    DISPLAY text, so a text field left as LOW-VALUES past its data compares
-    equal to the space-padded baseline by value.  Only a bytes compare --
-    the documented way to catch padding differences -- reports it."""
+def _cust_name_as(image: bytes, pad: bytes) -> bytes:
+    """Overwrite CUST-NAME (bytes 4..11) with *pad*, left to right."""
+    return image[:4] + pad + image[4 + len(pad) :]
+
+
+def test_low_values_padding_differs_from_space_padding():
+    """#287: the decoder strips trailing spaces *and* NULs, so 'ALICE' + NULs
+    decodes the same as 'ALICE' + spaces; the program tells them apart
+    (``IF NAME = SPACES``), so a values compare has to as well."""
     decoder = RecordDecoder.from_copybook_source(CUSTOMER, opts=EBCDIC)
     original = _image(CUSTOMER, [ALICE], EBCDIC)
     # CUST-NAME is bytes 4..11: 'ALICE' then three EBCDIC spaces.
@@ -297,14 +301,37 @@ def test_low_values_padding_is_equal_by_value_but_not_by_bytes():
     expected = decoder.decode_bytes(original)
     actual = decoder.decode_bytes(nulled)
 
-    assert compare_records(expected, actual, view=decoder.views.base).equal
-    by_bytes = compare_records(
-        expected, actual, view=decoder.views.base, compare_bytes=True
-    )
-    [diff] = by_bytes.differences[0].fields
+    result = compare_records(expected, actual, view=decoder.views.base)
+    assert not result.equal
+    [diff] = result.differences[0].fields
     assert diff.name == "CUST-NAME"
+    assert diff.expected == diff.actual == "ALICE"
     assert diff.expected_hex.endswith("40 40 40")
     assert diff.actual_hex.endswith("00 00 00")
+    assert "x'C1D3C9C3C5404040' vs x'C1D3C9C3C5000000'" in result.to_text()
+
+
+def test_an_all_low_values_field_differs_from_an_all_spaces_one():
+    decoder = RecordDecoder.from_copybook_source(CUSTOMER, opts=EBCDIC)
+    original = _image(CUSTOMER, [ALICE], EBCDIC)
+    spaces = _cust_name_as(original, b"\x40" * 8)
+    nulls = _cust_name_as(original, b"\x00" * 8)
+
+    result = compare_records(
+        decoder.decode_bytes(spaces),
+        decoder.decode_bytes(nulls),
+        view=decoder.views.base,
+    )
+    [diff] = result.differences[0].fields
+    assert diff.name == "CUST-NAME"
+    assert diff.expected == diff.actual == ""
+
+
+def test_the_same_low_values_on_both_sides_stay_equal():
+    decoder = RecordDecoder.from_copybook_source(CUSTOMER, opts=EBCDIC)
+    nulls = _cust_name_as(_image(CUSTOMER, [ALICE], EBCDIC), b"\x00" * 8)
+    decoded = decoder.decode_bytes(nulls)
+    assert compare_records(decoded, decoded, view=decoder.views.base).equal
 
 
 def test_bytes_compare_reports_slack_no_field_covers():

@@ -897,9 +897,9 @@ of a batch run against the actual one. Implementation:
   `cobol.yml` error (`main()` now routes it through `_config_fail()`, which
   exits 2 when the subcommand is `compare`), and a copybook that is not text
   (a `UnicodeDecodeError` traceback; now caught).
-* **`--compare-bytes`** is the only mode that catches padding differences
-  (trailing LOW-VALUES vs spaces in a text field decode to the same value;
-  #287). Its `--help` says so.
+* A text field padded with LOW-VALUES on one side and spaces on the other
+  is a difference without `--compare-bytes` (#287); when the two values
+  print the same, the text report adds both fields' hex.
 * **`--key`** (repeatable) pairs records by key; **`--ignore`** (repeatable)
   drops a column, a field name (every occurrence) or a group. Both are checked
   against the layout; a typo is exit 2 with the valid column names.

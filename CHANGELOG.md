@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`compare`: a text field padded with LOW-VALUES no longer equals the
+  space-padded baseline** (#287). The decoder strips trailing spaces and
+  NULs alike, so `'ALICE'` + `x'00'`s, or a field left entirely LOW-VALUES,
+  compared equal to spaces and an uninitialised output field passed the
+  check. Text fields now also compare where their NUL bytes are; the text
+  report shows both fields' hex when the two values print the same.
 * **Same-named fields and paragraphs were merged by name** (#258): two
   records carrying the same field names (the `MOVE CORRESPONDING` shape)
   and paragraph names reused across sections (`X1` in `S1` and in `S2`)

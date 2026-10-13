@@ -951,14 +951,16 @@ adds pairing and field comparison, and decodes nothing itself.
   *ignored* field are blanked on both sides before that image check
   (2026-09-27: `--compare-bytes --ignore UPD-TS` had reported the ignored
   timestamp's bytes as `(unmapped bytes)`, so the ignore did nothing).
-  **Padding is invisible to a values compare** (2026-10-13, #287, option
-  (b)): the decoder strips trailing spaces *and* NULs from DISPLAY text, so
-  `'ALICE'` + 5 x `x'00'` equals `'ALICE     '` by value, though the program
-  tells them apart (`IF A-NAME = SPACES`). Only `compare_bytes` reports it;
-  this is stated in `--compare-bytes --help` and the module docstring, and
-  pinned by `test_low_values_padding_is_equal_by_value_but_not_by_bytes`.
-  Changing it (strip spaces only, or compare text by bytes) would change what
-  a values compare means, so it was declined. A field that
+  **LOW-VALUES padding is a difference** (2026-10-13, #287): the decoder
+  strips trailing spaces *and* NULs from DISPLAY text (display output keeps
+  doing so), so `'ALICE'` + 5 x `x'00'` and `'ALICE     '` decode alike, yet
+  the program tells them apart (`IF A-NAME = SPACES`) and an uninitialised
+  output field is what the check exists to catch. `_same()` therefore also
+  requires a text field's (alphanumeric / alphabetic / alphanumeric-edited /
+  national) NUL byte positions to match once the values agree. Before, only
+  `--compare-bytes` caught it, and that also flags C/F sign nibbles and
+  filler. The text report appends `(bytes x'..' vs x'..')` to a difference
+  whose two values print the same, so the reader can see what differs. A field that
   did not decode cleanly on *either* side is always compared by bytes: its
   best-effort value is not evidence.
 * **Absent fields** (a shorter VB record, an `OCCURS DEPENDING ON` occurrence

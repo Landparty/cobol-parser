@@ -1705,10 +1705,7 @@ def _build_compare_parser(
         action="store_true",
         help=(
             "Compare raw bytes rather than decoded values (a C and an F sign "
-            "nibble then differ), and report bytes no field covers. The only "
-            "mode that catches padding differences: decoded text drops "
-            "trailing spaces and LOW-VALUES alike, so 'ALICE' padded with "
-            "x'00' equals 'ALICE' padded with spaces by value"
+            "nibble then differ), and report bytes no field covers"
         ),
     )
     p.add_argument(

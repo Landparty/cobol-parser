@@ -14,11 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
-## 2026-10-13 -- compare: padding is only caught by `--compare-bytes` (#287)
+## 2026-10-13 -- compare: LOW-VALUES padding is a difference (#287)
 
-[generators.md](generators.md), [cli.md](cli.md): a values compare treats
-trailing LOW-VALUES and trailing spaces in a text field as equal (the
-decoder strips both). Kept as is (option (b)); now documented and tested.
+[generators.md](generators.md), [cli.md](cli.md): a values compare treated
+trailing (or all) LOW-VALUES and spaces in a text field as equal, because
+the decoder strips both. Text fields now also compare their NUL positions,
+and the text report shows hex when two differing values print the same.
 
 ## 2026-10-13 -- bug hunt: a CALL may write GLOBAL / EXTERNAL storage
 

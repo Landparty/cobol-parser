@@ -24,10 +24,10 @@ change fails the run.  This compares what a COBOL programmer would compare::
   nibble equals ``+5`` packed with ``F``: the program cannot tell them apart
   either.  ``compare_bytes=True`` compares the raw bytes instead, for the
   cases where the exact image matters (a file handed to another system).
-  It is also the only way to catch a *padding* difference: decoded text has
-  its trailing spaces and NULs stripped alike, so a text field left as
-  LOW-VALUES past its data equals the space-padded baseline by value, even
-  though ``IF NAME = SPACES`` tells them apart (#287).
+  Text fields are the exception to "by value": decoded text has trailing
+  spaces and NULs stripped alike, but a field left as LOW-VALUES is not the
+  space-padded baseline to the program (``IF NAME = SPACES``), so two equal
+  text values still differ when their NULs are in different places (#287).
   A field whose bytes did not decode cleanly on either side is always
   compared by its bytes -- its best-effort value is not a thing to trust.
 * **Nothing is dropped quietly.**  A key or ignore name the layout does not
@@ -46,6 +46,7 @@ from typing import Any, Literal
 
 from .decoding import DecodedField, DecodedRecord, DecodeResult, RecordDecoder
 from .errors import CopybookLayoutError
+from .layout import FieldCategory
 from .views import RecordView
 
 DifferenceKind = Literal["changed", "missing", "extra"]
@@ -259,10 +260,18 @@ class CompareResult:
             lines.append(_describe_record(item, self.key))
             width = max((len(diff.name) for diff in item.fields), default=0)
             for diff in item.fields:
-                lines.append(
+                line = (
                     f"  {diff.name.ljust(width)}  @{diff.offset}+{diff.length}  "
                     f"expected {_show(diff.expected)}  actual {_show(diff.actual)}"
                 )
+                if diff.expected is not None and diff.expected == diff.actual:
+                    # Same value, different bytes (padding, a sign nibble):
+                    # the values alone would not show what differs.
+                    line += (
+                        f"  (bytes x'{diff.expected_hex.replace(' ', '')}' vs "
+                        f"x'{diff.actual_hex.replace(' ', '')}')"
+                    )
+                lines.append(line)
         if self.truncated:
             shown = len(self.differences)
             total = self.changed_count + self.missing_count + self.extra_count
@@ -396,9 +405,7 @@ def compare_records(
             layout even when both files are empty.
         key: Fields to pair records on.  Empty pairs them by position.
         ignore: Fields, field names or groups to leave out of the compare.
-        compare_bytes: Compare raw bytes rather than decoded values.  The
-            only mode that reports trailing LOW-VALUES where the baseline
-            has spaces: both decode to the same stripped text.
+        compare_bytes: Compare raw bytes rather than decoded values.
         max_differences: Report at most this many differing records.  The
             counts stay exact either way.
 
@@ -587,7 +594,30 @@ def _same(exp: DecodedField, act: DecodedField, compare_bytes: bool) -> bool:
         return True
     if compare_bytes or exp.error or act.error:
         return exp.raw == act.raw
-    return exp.value == act.value
+    if exp.value != act.value:
+        return False
+    if exp.category in _TEXT_CATEGORIES:
+        # Decoded text has trailing spaces *and* NULs stripped, so 'ALICE'
+        # padded with LOW-VALUES decodes the same as 'ALICE' padded with
+        # spaces -- yet ``IF NAME = SPACES`` tells them apart, and a field
+        # nobody initialised is what an output check exists to catch (#287).
+        # Equal values plus NULs in the same places means the same bytes.
+        return _nul_positions(exp.raw) == _nul_positions(act.raw)
+    return True
+
+
+_TEXT_CATEGORIES = frozenset(
+    {
+        FieldCategory.ALPHANUMERIC.value,
+        FieldCategory.ALPHABETIC.value,
+        FieldCategory.ALPHANUMERIC_EDITED.value,
+        FieldCategory.NATIONAL.value,
+    }
+)
+
+
+def _nul_positions(raw: bytes) -> tuple[int, ...]:
+    return tuple(index for index, byte in enumerate(raw) if byte == 0)
 
 
 def _difference(exp: DecodedField, act: DecodedField | None) -> FieldDifference:
