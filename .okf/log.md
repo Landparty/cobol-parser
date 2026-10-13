@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-13 -- bug hunt: a CALL may write GLOBAL / EXTERNAL storage
+
+[analysis.md](analysis.md): ConstantFolder kept a GLOBAL or EXTERNAL
+field's value across a CALL that never named it; a contained program (or
+any program sharing the EXTERNAL item) can write it. Every CALL / INVOKE
+now forgets those leaves.
+
 ## 2026-10-13 -- bug hunt: ConstantFolder and control flow it did not follow
 
 [analysis.md](analysis.md): `field_equals` values contradicted GnuCOBOL

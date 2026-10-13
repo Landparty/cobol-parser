@@ -91,6 +91,7 @@ from ..models.statements.io import IOAcceptStatement, IOReadStatement, IOWriteSt
 from ..models.statements.misc import (
     ExitStatement,
     GobackStatement,
+    InvokeStatement,
     MergeStatement,
     NextSentenceStatement,
     SortStatement,
@@ -216,7 +217,7 @@ class _LayoutFacts:
     share bytes through a REDEFINES chain, and which are JUSTIFIED. Built
     once per index from the raw `CobolDataItem` trees and cached weakly."""
 
-    __slots__ = ("groups", "leaves", "aliases", "justified", "renames")
+    __slots__ = ("groups", "leaves", "aliases", "justified", "renames", "shared")
 
     def __init__(self) -> None:
         #: UPPERCASED bare group/record name -> qualified paths of every
@@ -232,6 +233,10 @@ class _LayoutFacts:
         #: covers. A 66 is not a `CobolDataItem` (the index never resolves
         #: it), so without this a write through the alias poisoned nothing.
         self.renames: dict[str, list[str]] = {}
+        #: Leaves under a GLOBAL or EXTERNAL item: storage another program
+        #: (a contained program, or any program declaring the same EXTERNAL
+        #: name) can write, so every CALL / INVOKE may change them.
+        self.shared: set[str] = set()
 
     def leaves_under(self, qpath: str) -> list[str]:
         prefix = qpath + "."
@@ -352,18 +357,28 @@ def _data_children(item: CobolDataItem) -> list[CobolDataItem]:
 
 
 def _collect_facts(
-    item: CobolDataItem, path: tuple[str, ...], facts: _LayoutFacts
+    item: CobolDataItem,
+    path: tuple[str, ...],
+    facts: _LayoutFacts,
+    shared: bool = False,
 ) -> None:
     qpath = (*path, item.name)
     qname = ".".join(qpath)
+    shared = (
+        shared
+        or bool(getattr(item, "is_global", False))
+        or bool(getattr(item, "is_external", False))
+    )
     children = _data_children(item)
     if children:
         facts.groups.setdefault(item.name.upper(), []).append(qname)
         for child in children:
-            _collect_facts(child, qpath, facts)
+            _collect_facts(child, qpath, facts, shared)
         _link_redefines(children, qpath, facts)
         return
     facts.leaves.append(qname)
+    if shared:
+        facts.shared.add(qname)
     if getattr(item, "justified", False):
         facts.justified.add(qname)
 
@@ -1077,6 +1092,11 @@ def _poison_statement_writes(
         base, _ = _base_name(stmt.target)
         state.accepted.add(base.upper())
     _poison_names(_write_targets(stmt), index, env)
+    if isinstance(stmt, (CallStatement, InvokeStatement)):
+        # The called program may write any GLOBAL item (a contained program
+        # sees them by name) and any EXTERNAL one, USING list or not.
+        for leaf in _facts(index).shared:
+            _drop(leaf, index, env)
 
 
 def _mark_observed(operand: str, index: ProgramLayoutIndex, state: _WalkState) -> None:

@@ -1252,3 +1252,54 @@ class TestControlFlowTheWalkDoesNotFollow:
             "           COMPUTE WS-A = 2 + 3.\n"
         )
         assert "WS-A" not in fold.known
+
+
+class TestCallMayWriteSharedStorage:
+    """A CALL can change storage it was never passed: a contained program
+    writes a GLOBAL item by name, and every program declaring the same
+    EXTERNAL item shares its bytes."""
+
+    def test_contained_program_writes_a_global_item(self):
+        # GnuCOBOL 3.2 displays 002.
+        source = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. G1.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 X PIC 9(3) VALUE 0 GLOBAL.\n"
+            "       01 Y PIC 9(3) VALUE 0.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO X.\n"
+            "           MOVE 4 TO Y.\n"
+            "           CALL 'INNER'.\n"
+            "           DISPLAY X.\n"
+            "           DISPLAY Y.\n"
+            "           STOP RUN.\n"
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. INNER.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           MOVE 2 TO X.\n"
+            "           GOBACK.\n"
+            "       END PROGRAM INNER.\n"
+            "       END PROGRAM G1.\n"
+        )
+        result = parse_cobol(source, filename="t.cbl")
+        assert result.errors == [], result.errors
+        fold = ConstantFolder().fold(result.ast, ProgramLayoutIndex.build(result.ast))
+        assert fold.known == {"Y": "4"}
+
+    def test_external_group_leaves_are_forgotten_by_a_call(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO WS-EXT-A.\n"
+            "           MOVE 4 TO WS-A.\n"
+            "           CALL 'OTHER'.\n"
+            "           DISPLAY WS-EXT-A.\n"
+            "           DISPLAY WS-A.\n"
+            "           STOP RUN.\n",
+            extra_data=(
+                "       01  WS-EXT EXTERNAL.\n" "           05  WS-EXT-A PIC 9(3).\n"
+            ),
+        )
+        assert fold.known == {"WS-A": "4"}
