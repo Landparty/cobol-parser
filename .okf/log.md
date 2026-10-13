@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-12 -- FILLER VALUE SPACES in record images
+
+[generators.md](generators.md): a FILLER whose `VALUE` is `SPACES`,
+`LOW-VALUES`, `HIGH-VALUES` or `NULL` is encoded as that byte throughout
+(`encoding._filler_fill()`); it used to carry the random text the value
+generator draws for those figuratives. Checked byte-for-byte against
+GnuCOBOL 3.2.
+
 ## 2026-10-12 -- lineage: ACCEPT FROM DATE is not a console port
 
 [analysis.md](analysis.md): `FieldFlowAnalyzer` made every ACCEPT a
