@@ -991,3 +991,73 @@ class TestSubscriptedAndReferenceModifiedOperands:
             (14, MoveViolationKind.WARNING, "T-E(IX)(1:2)"),
         ]
         assert report.to_dict()["unresolved_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Intrinsic FUNCTION sending operands with arguments (issue #291): the
+# result category comes from the intrinsic catalog, or from the first
+# argument for TRIM / ABS / MAX / MIN / USUBSTR, instead of being counted as
+# an unresolved operand that the lint caveat blamed on a missing COPY.
+# ---------------------------------------------------------------------------
+
+
+class TestIntrinsicFunctionsWithArguments:
+    SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. FUNCS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 GRP.
+          05 WS-X PIC X(10).
+       01 WS-Y PIC X(10).
+       01 WS-N PIC 9(5).
+       01 WS-AL PIC A(5).
+       01 TBL.
+          05 T-E PIC 9(3)V9 OCCURS 5.
+       PROCEDURE DIVISION.
+           MOVE FUNCTION TRIM(WS-X) TO WS-Y
+           MOVE FUNCTION TRIM ( WS-X OF GRP LEADING ) TO WS-Y
+           MOVE FUNCTION LENGTH(T-E(1)) TO WS-N
+           MOVE FUNCTION UPPER-CASE(WS-X) TO WS-AL
+           MOVE FUNCTION CURRENT-DATE(1:8) TO WS-Y
+           MOVE FUNCTION UPPER-CASE(WS-X)(1:3) TO WS-Y
+           MOVE FUNCTION TRIM("A B") TO WS-Y
+           MOVE FUNCTION NUMVAL(WS-X) TO WS-AL
+           MOVE FUNCTION MAX(T-E(1), T-E(2)) TO WS-Y
+           MOVE FUNCTION INTEGER(T-E(1)) TO WS-Y
+           STOP RUN.
+"""
+
+    def test_every_function_source_is_checked(self):
+        report = MoveTypeChecker().check(parse_cobol(self.SOURCE).ast)
+        assert report.unresolved_count == 0
+        assert report.unresolved_function_count == 0
+
+    def test_verdicts_follow_the_return_category(self):
+        report = MoveTypeChecker().check(parse_cobol(self.SOURCE).ast)
+        found = [(v.location.line, v.kind, v.source_name) for v in report.violations]
+        assert found == [
+            # NUMVAL is numeric: illegal into an alphabetic item.
+            (20, MoveViolationKind.ERROR, "FUNCTION NUMVAL(WS-X)"),
+            # MAX takes its arguments' class: a non-integer numeric here,
+            # which may not go to an alphanumeric item.
+            (21, MoveViolationKind.ERROR, "FUNCTION MAX(T-E(1), T-E(2))"),
+        ]
+
+    def test_argument_class_function_with_unresolved_argument(self):
+        # The argument may come from a COPY that was not expanded, so this
+        # one is an ordinary unresolved operand, not a function caveat.
+        report = _check([("TGT", "X(5)")], [("FUNCTION TRIM(MISSING)", ["TGT"])])
+        assert report.unresolved_count == 1
+        assert report.unresolved_function_count == 0
+
+    def test_national_and_uncatalogued_functions_count_as_function_gaps(self):
+        report = _check(
+            [("SRC", "X(5)"), ("TGT", "X(5)")],
+            [
+                ("FUNCTION NATIONAL-OF(SRC)", ["TGT"]),
+                ("FUNCTION SOME-OTHER-FUNC(SRC)", ["TGT"]),
+            ],
+        )
+        assert report.unresolved_count == 2
+        assert report.unresolved_function_count == 2
+        assert report.to_dict()["unresolved_function_count"] == 2

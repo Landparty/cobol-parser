@@ -633,11 +633,20 @@ class LintAnalyzer:
         from .move_type_checker import MoveTypeChecker
 
         result = MoveTypeChecker().check(ast)
-        if result.unresolved_count:
+        unresolved_operands = result.unresolved_count - result.unresolved_function_count
+        if unresolved_operands:
             report.caveats.append(
-                f"move-type-check skipped {result.unresolved_count} MOVE operand(s) whose data "
+                f"move-type-check skipped {unresolved_operands} MOVE operand(s) whose data "
                 "category could not be resolved (most often an unresolved COPY) -- pass "
                 "--copybook-path so they can be checked"
+            )
+        if result.unresolved_function_count:
+            # No copybook can resolve these, so the --copybook-path hint
+            # above would send the user after a COPY that is not missing.
+            report.caveats.append(
+                f"move-type-check skipped {result.unresolved_function_count} MOVE(s) "
+                "whose source is an intrinsic FUNCTION with no category it can check "
+                "(a NATIONAL result or an uncatalogued function)"
             )
         return [
             LintFinding(

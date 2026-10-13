@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-13 -- issue #291: MOVE FUNCTION sources are checked
+
+[analysis.md](analysis.md): move-type-check counted every `MOVE FUNCTION
+x(...)` as unresolved and lint blamed a missing COPY. Intrinsic results now
+take their category from the intrinsic catalog (or their first argument);
+the rest is counted in `unresolved_function_count` with its own caveat.
+
 ## 2026-10-13 -- bug hunt: a CALL may write GLOBAL / EXTERNAL storage
 
 [analysis.md](analysis.md): ConstantFolder kept a GLOBAL or EXTERNAL
