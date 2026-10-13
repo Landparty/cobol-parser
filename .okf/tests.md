@@ -3,10 +3,16 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-10-05T00:00:00Z
+timestamp: 2026-10-13T00:00:00Z
 ---
 
 # Overview
+
+2026-10-13: `tests/regression/test_copy_member_case_folding.py`
+(8 tests, #289) pins COPY member names folding to uppercase on a
+case-sensitive filesystem: `copy errorcd.` finds `ERRORCD.cpy`, the uppercase
+member beats `errorcd.cpy`, a lowercase-only member still resolves, and
+directory order outranks case, in both `PathResolver` and `find_copybook_file`.
 
 2026-10-04: `tests/regression/test_copy_diagnostic_line_numbers.py`
 (3 tests, #256) pins COPY diagnostics after continuation records naming the

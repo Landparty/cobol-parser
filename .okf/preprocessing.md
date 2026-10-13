@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-10-08T00:00:00Z
+timestamp: 2026-10-13T00:00:00Z
 ---
 
 # Overview
@@ -62,7 +62,7 @@ from cobolparser.preprocess import (
 | `preprocess/source_format.py` | `detect_fixed_format` -- should this source be normalized? (strict sequence-area rule, then the change-tag rule with its Area A header / tagged-line anchors). `normalize_with_recovery` -- `normalize_fixed_format` plus the unterminated-literal retry (`merge_continued_literals=False`), shared by `CobolParser` and the lexer's `_tokenize_source`. Moved out of `parser.py` 2026-10-08; `cobolparser.parser._detect_fixed_format` is kept as an alias |
 | `preprocess/copybook_expander.py` | `expand_copybooks`, `parse_cobol_with_expansion` — recursive COPY inlining with circular-reference detection, encoding detection, content validation, and LRU caching |
 | `preprocess/copy_statement_parser.py` | `CopyStatementLexer`, REPLACING clause handling, continuation line normalisation |
-| `preprocess/path_resolver.py` | Secure copybook path resolution; prevents directory traversal. Found paths are canonicalised to the on-disk basename casing (`_on_disk_casing`, scandir-based) so probe-cased matches on case-insensitive filesystems never leak into reported paths |
+| `preprocess/path_resolver.py` | Secure copybook path resolution; prevents directory traversal. Found paths are canonicalised to the on-disk basename casing (`_on_disk_casing`, scandir-based) so probe-cased matches on case-insensitive filesystems never leak into reported paths. The member name is folded to uppercase like Enterprise COBOL's COPY text-name (`_member_name_bases`): `copy errorcd.` probes `ERRORCD` first, then the name as written, so on a case-sensitive filesystem `ERRORCD.cpy` wins over `errorcd.cpy` and a lowercase-only member still resolves; directory (SYSLIB) order still outranks case (issue #289, `tests/regression/test_copy_member_case_folding.py`) |
 | `preprocess/models.py` | `CopybookExpansion`, `CopyStatement`, `CopybookSearchPath`, `ExpansionStatistics` |
 
 # normalize_fixed_format

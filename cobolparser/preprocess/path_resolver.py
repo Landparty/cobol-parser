@@ -238,6 +238,13 @@ def _library_directory(search_dir: str, library: str, case_sensitive: bool) -> s
     return os.path.join(search_dir, matches[0]) if matches else exact
 
 
+def _member_name_bases(member_name: str) -> list[str]:
+    """The member names to probe, in order: the uppercased name (the COPY
+    text-name as Enterprise COBOL folds it), then the name as written."""
+    folded = member_name.upper()
+    return [folded] if folded == member_name else [folded, member_name]
+
+
 def find_copybook_file(
     member_name: str,
     search_config: CopybookSearchPath,
@@ -271,11 +278,17 @@ def find_copybook_file(
     search_dirs = search_config.directories
     extensions = search_config.extensions
 
-    # Build list of possible filenames
-    possible_names = [member_name]  # Try exact name first
-    for ext in extensions:
-        if ext:  # Skip empty extension (already added as exact name)
-            possible_names.append(f"{member_name}{ext}")
+    # Build list of possible filenames. Enterprise COBOL folds a COPY
+    # text-name to uppercase, so the uppercased member is probed first --
+    # `copy errorcd.` finds ERRORCD.cpy, and wins over errorcd.cpy when a
+    # case-sensitive filesystem holds both (issue #289). The name as written
+    # is still tried after it, so a member stored in lowercase resolves.
+    possible_names: list[str] = []
+    for base in _member_name_bases(member_name):
+        possible_names.append(base)
+        for ext in extensions:
+            if ext:  # Skip empty extension (already added as the bare name)
+                possible_names.append(f"{base}{ext}")
 
     # If not case-sensitive, also try case variations
     if not search_config.case_sensitive:
@@ -477,23 +490,26 @@ class PathResolver:
             if self._dir_index is None:
                 self._dir_index = self._build_directory_index()
 
-            lookup_key = (
-                member_name
+            lookup_keys = (
+                _member_name_bases(member_name)
                 if self.search_config.case_sensitive
-                else member_name.upper()
+                else [member_name.upper()]
             )
-            # Candidates in Tier-3 probe order: the name as written, then
-            # the name plus each configured extension in order. The winner
-            # is the first *directory* that holds any candidate (directory
-            # order is the SYSLIB concatenation order), and within that
-            # directory the first candidate in probe order.
-            candidates = [lookup_key]
-            for ext in self.search_config.extensions:
-                if ext:
-                    candidates.append(
-                        f"{lookup_key}"
-                        f"{ext if self.search_config.case_sensitive else ext.upper()}"
-                    )
+            # Candidates in Tier-3 probe order: for the uppercased name and
+            # then the name as written, the bare name followed by the name
+            # plus each configured extension in order. The winner is the
+            # first *directory* that holds any candidate (directory order is
+            # the SYSLIB concatenation order), and within that directory the
+            # first candidate in probe order.
+            candidates: list[str] = []
+            for lookup_key in lookup_keys:
+                candidates.append(lookup_key)
+                for ext in self.search_config.extensions:
+                    if ext:
+                        candidates.append(
+                            f"{lookup_key}"
+                            f"{ext if self.search_config.case_sensitive else ext.upper()}"
+                        )
             best: tuple[int, int, str] | None = None
             for order, key in enumerate(candidates):
                 hit = self._dir_index.get(key)
