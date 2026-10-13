@@ -2741,6 +2741,11 @@ results into one graph with two kinds of edge:
   `sql_include=True`), with the same `COPY` label and the same unresolved-member
   reporting as a COPY -- it is how SQLCA and DCLGEN members are normally pulled
   in, and `copybook-impact` on a DCLGEN returned nothing without it (#295).
+  Nothing in the JSON/DOT/Mermaid output tells a COPY edge from an INCLUDE
+  edge. An INCLUDE of `SQLCA` / `SQLDA` (`_PRECOMPILER_MEMBERS`) that is not on
+  the path keeps its edge but adds no `unresolved` note, matching the
+  expander; a COPY of either, or an INCLUDE of any other missing member, is
+  still reported.
 
 ```python
 from cobolparser.analysis.codebase import CodebaseGraphBuilder, CopybookImpactAnalyzer
