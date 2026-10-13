@@ -22,6 +22,14 @@ entries, including both 2026-09-15 sections, were found there on
 generator draws for those figuratives. Checked byte-for-byte against
 GnuCOBOL 3.2.
 
+## 2026-10-12 -- multi-line EXEC boundary keys
+
+[analysis.md](analysis.md): `BoundaryInventoryAnalyzer._unique_prefix`
+collapses the other sites' whitespace before comparing, so two multi-line
+EXEC SQL/CICS/DLI sites that differ only after a line break get distinct
+keys (they used to share one, and mockymock `generate --with-data` warned of
+a key mismatch and left both sites with placeholder bodies).
+
 ## 2026-10-08 -- JCL is read by jcl-parser
 
 [jcl.md](jcl.md) rewritten: `cobolparser/jcl/` no longer parses JCL. Its card
