@@ -21,6 +21,14 @@ field's value across a CALL that never named it; a contained program (or
 any program sharing the EXTERNAL item) can write it. Every CALL / INVOKE
 now forgets those leaves.
 
+## 2026-10-13 -- bug hunt: ConstantFolder and control flow it did not follow
+
+[analysis.md](analysis.md): `field_equals` values contradicted GnuCOBOL
+output for `PERFORM` of a SECTION (walked nothing), `IF ... GO TO X-EXIT` /
+`EXIT PARAGRAPH` (the skipped MOVE was folded), and DISPLAYs inside IF arms,
+loops or past a GO TO (never treated as sites). All three now veto or
+poison; see "Every site, and only control flow the walk really follows".
+
 ## 2026-10-11 -- bug hunt: ACCEPT FROM DATE YYYYMMDD is not a boundary
 
 [analysis.md](analysis.md): `BoundaryInventoryAnalyzer._classify_accept`

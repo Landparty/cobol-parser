@@ -43,6 +43,11 @@ than guessing:
   coercion. Real COBOL truncation rules for an overflowing MOVE are
   well-defined, but replicating them exactly is out of scope for v1; an
   overflowing result is poisoned instead of guessed.
+* Every DISPLAY/WRITE in the program is a site: one inside an arm, loop or
+  handler records "unknown", and one the walk never reached (past a GO TO,
+  DECLARATIVES, dead code) vetoes the field at the end. A GO TO / EXIT
+  PARAGRAPH / NEXT SENTENCE the walk cannot follow puts it in "uncertain"
+  mode, where every later write poisons instead of folding.
 * Only a bare ``DISPLAY``/``WRITE`` operand that resolves directly to an
   elementary field is an observation point -- a whole-record WRITE's
   individual member fields are not (yet) walked, so some real
@@ -78,11 +83,19 @@ from ..models.statements.control import (
     GoStatement,
     IfStatement,
     PerformStatement,
+    SearchStatement,
     StopStatement,
 )
 from ..models.statements.data import DisplayStatement, MoveStatement
 from ..models.statements.io import IOAcceptStatement, IOReadStatement, IOWriteStatement
-from ..models.statements.misc import ExitStatement, GobackStatement, InvokeStatement
+from ..models.statements.misc import (
+    ExitStatement,
+    GobackStatement,
+    InvokeStatement,
+    MergeStatement,
+    NextSentenceStatement,
+    SortStatement,
+)
 
 if TYPE_CHECKING:
     # Same shape as constraints.py's own guard: cobolparser.generators
@@ -112,6 +125,13 @@ _SUFFIX_RE = re.compile(r"\s*\(.*$", re.DOTALL)
 #: budget the fold reports nothing rather than a partial (possibly wrong)
 #: answer.
 _MAX_WALK_STEPS = 50_000
+
+#: `ordered_names` key prefix for a SECTION header (a marker, never a
+#: paragraph) and for a paragraph with no name (statements written straight
+#: under a SECTION header, or straight under PROCEDURE DIVISION). Neither
+#: can collide with a COBOL name.
+_SECTION_KEY = "\x00SECTION:"
+_UNNAMED_KEY = "\x00UNNAMED:"
 
 _TEXT_CATEGORIES = frozenset(
     {FieldCategory.ALPHANUMERIC, FieldCategory.ALPHABETIC, FieldCategory.NATIONAL}
@@ -557,6 +577,21 @@ class ConstantFolder:
             # observed: no reported value could be shown to be the only one.
             return ConstantFoldResult(known={})
 
+        # A DISPLAY/WRITE site the walk never reached (code after a GO TO,
+        # code only a GO TO reaches, a DECLARATIVES procedure, ...) may emit
+        # any value at all, so a field shown there is not knowable either --
+        # "every site that observed it" must be every site, not just the
+        # walked ones.
+        for site in _observation_sites(ast):
+            if id(site) in state.visited_sites:
+                continue
+            for operand in _site_operands(site):
+                resolved = _safe_resolve(index, operand)
+                if resolved is not None:
+                    state.observed.setdefault(resolved.spec.qualified_name, []).append(
+                        None
+                    )
+
         # A field is reported only when every DISPLAY/WRITE site that
         # observed it saw the same known value -- the value the program
         # actually emitted there, not whatever it held when the walk ended.
@@ -577,12 +612,64 @@ def _fall_through_chain(
     ordered_names: list[str],
     by_name: dict[str, CobolParagraph],
 ) -> list[CobolParagraph]:
-    """*entry* followed by every paragraph after it in source order."""
-    name = (entry.paragraph_name or "").upper()
-    if name not in by_name or by_name[name] is not entry:
+    """*entry* followed by every paragraph after it in source order (across
+    SECTION boundaries: control falls into the next section too)."""
+    start = next(
+        (i for i, key in enumerate(ordered_names) if by_name.get(key) is entry),
+        None,
+    )
+    if start is None:
         return [entry]
-    start = ordered_names.index(name)
-    return [by_name[following] for following in ordered_names[start:]]
+    return [by_name[key] for key in ordered_names[start:] if key in by_name]
+
+
+def _observation_sites(ast: CobolProgram) -> list[Any]:
+    """Every DISPLAY and WRITE statement of the PROCEDURE DIVISION, nested
+    ones (IF/EVALUATE/SEARCH arms, inline PERFORM bodies, handlers)
+    included."""
+    procedure = ast.get_division("PROCEDURE")
+    if procedure is None:
+        return []
+    pending: list[list[Any]] = [list(p.statements) for p in procedure.paragraphs]
+    for section in procedure._sections.values():
+        pending.extend(list(p.statements) for p in section.paragraphs)
+    sites: list[Any] = []
+    seen: set[int] = set()
+    while pending:
+        for stmt in pending.pop():
+            if id(stmt) in seen:
+                continue
+            seen.add(id(stmt))
+            if isinstance(stmt, (DisplayStatement, IOWriteStatement)):
+                sites.append(stmt)
+            pending.extend(_nested_statement_lists(stmt))
+    return sites
+
+
+def _site_operands(stmt: Any) -> list[str]:
+    """The operands `_dispatch_one` marks observed for a DISPLAY/WRITE."""
+    if isinstance(stmt, DisplayStatement):
+        return list(stmt.display_items)
+    if isinstance(stmt, IOWriteStatement) and stmt.record_name:
+        return [stmt.record_name]
+    return []
+
+
+def _transfer_kind(stmt: Any) -> str | None:
+    """``"jump"`` for a GO TO (control goes to code this walk does not
+    follow), ``"skip"`` for a transfer that only skips forward inside the
+    current paragraph / section / inline PERFORM / sentence, else None."""
+    if isinstance(stmt, GoStatement):
+        return "jump"
+    if isinstance(stmt, NextSentenceStatement):
+        return "skip"
+    if isinstance(stmt, ExitStatement) and (stmt.exit_type or "") in {
+        "PARAGRAPH",
+        "SECTION",
+        "PERFORM",
+    }:
+        return "skip"
+    return None
 
 
 # -- walk state ---------------------------------------------------------------
@@ -598,6 +685,8 @@ class _WalkState:
         "accepted",
         "steps",
         "exhausted",
+        "visited_sites",
+        "uncertain",
     )
 
     def __init__(
@@ -624,6 +713,15 @@ class _WalkState:
         self.steps = 0
         #: Set when the budget ran out; `fold()` then reports nothing.
         self.exhausted = False
+        #: ``id()`` of every DISPLAY/WRITE the walk reached (main line or
+        #: nested), so `fold()` can tell which sites it never saw.
+        self.visited_sites: set[int] = set()
+        #: Set once a branch arm / loop body / handler could GO TO, EXIT
+        #: PARAGRAPH/SECTION/PERFORM or NEXT SENTENCE (or the main line does
+        #: an EXIT PARAGRAPH/... itself): from then on the walk cannot tell
+        #: whether a later statement really ran, so every write it meets
+        #: poisons instead of folding.
+        self.uncertain = False
 
 
 # -- entry point / paragraph ordering -----------------------------------------
@@ -671,11 +769,15 @@ def _ordered_paragraphs(
     by_name: dict[str, CobolParagraph] = {}
 
     def register(para: CobolParagraph) -> None:
-        if para.paragraph_name:
-            name = para.paragraph_name.upper()
-            if name not in by_name:
-                ordered.append(name)
-                by_name[name] = para
+        # A paragraph with no name (statements straight under a SECTION
+        # header) still runs when control falls into it or its section is
+        # PERFORMed, so it gets a key no PERFORM can name.
+        name = (para.paragraph_name or "").upper()
+        if not name:
+            name = f"{_UNNAMED_KEY}{len(ordered)}"
+        if name not in by_name:
+            ordered.append(name)
+            by_name[name] = para
 
     top_level_items: list[Any] = sorted(
         [*procedure._sections.values(), *procedure.paragraphs],
@@ -685,6 +787,10 @@ def _ordered_paragraphs(
         if isinstance(item, CobolParagraph):
             register(item)
         else:
+            # A marker (absent from `by_name`) so `PERFORM SEC-A` / `THRU
+            # SEC-B` can find where a section's paragraphs start and end.
+            section_name = (getattr(item, "section_name", "") or "").upper()
+            ordered.append(f"{_SECTION_KEY}{section_name}")
             for para in item.paragraphs:
                 register(para)
     return ordered, by_name
@@ -775,6 +881,27 @@ def _dispatch_one(
 ) -> tuple[str | None, list[Any]] | None:
     """Per-statement-type fold dispatch for `_walk_one` (which additionally
     poisons conditional handler bodies around whatever happens here)."""
+    if state.uncertain and isinstance(
+        stmt,
+        (
+            MoveStatement,
+            ArithmeticStatement,
+            ComputeStatement,
+            IOReadStatement,
+            IOAcceptStatement,
+        ),
+    ):
+        # Past a possible skip/jump: this write may or may not have run.
+        _poison_written_names(
+            [stmt], index, state.env, by_name, ordered_names, state=state
+        )
+        return None
+    if _transfer_kind(stmt) == "skip":
+        # EXIT PARAGRAPH / SECTION / PERFORM, NEXT SENTENCE on the main
+        # line: the statements after it are skipped, which this straight-line
+        # walk does not model.
+        state.uncertain = True
+        return None
     if isinstance(stmt, MoveStatement):
         _fold_move(stmt, index, state.env)
     elif isinstance(stmt, AddStatement):
@@ -788,10 +915,14 @@ def _dispatch_one(
     elif isinstance(stmt, ComputeStatement):
         _fold_compute(stmt, index, state.env)
     elif isinstance(stmt, DisplayStatement):
+        state.visited_sites.add(id(stmt))
         for item in stmt.display_items:
             _mark_observed(item, index, state)
     elif isinstance(stmt, IOWriteStatement):
-        if stmt.record_name and stmt.from_clause:
+        state.visited_sites.add(id(stmt))
+        if stmt.record_name and stmt.from_clause and state.uncertain:
+            _poison_names([stmt.record_name], index, state.env)
+        elif stmt.record_name and stmt.from_clause:
             # `WRITE rec FROM id` is `MOVE id TO rec` and then the WRITE. A
             # group record target is poisoned whole by `_apply_move_target`.
             source = _resolve_move_source(stmt.from_clause, index, state.env)
@@ -846,7 +977,11 @@ def _dispatch_one(
         # values with seedable IN ones, and the raw AST does not carry
         # resolved direction to tell them apart (only
         # `BoundaryInventoryAnalyzer`'s own richer analysis does).
-        _poison_statement_writes(stmt, index, state.env, state=state)
+        # Nested bodies (SEARCH WHEN, ...) and out-of-line procedures
+        # (SORT/MERGE INPUT/OUTPUT PROCEDURE) are poisoned the same way.
+        _poison_written_names(
+            [stmt], index, state.env, by_name, ordered_names, state=state
+        )
     return None
 
 
@@ -996,6 +1131,9 @@ def _walk_perform(
         body = stmt.inline_statements or _perform_body_statements(
             stmt, by_name, ordered_names
         )
+        if body is None:
+            state.env.clear()  # an unknown target could have written anything
+            return None
         _poison_written_names(
             body, index, state.env, by_name, ordered_names, state=state
         )
@@ -1008,25 +1146,60 @@ def _walk_perform(
         return None
     target = stmt.target_paragraph.upper()
     body = _perform_body_statements(stmt, by_name, ordered_names)
+    if body is None:
+        state.env.clear()  # an unknown target could have written anything
+        return None
     return (target, body)
+
+
+def _procedure_span(name: str, ordered_names: list[str], *, last: bool) -> int | None:
+    """Index in *ordered_names* where the paragraph or SECTION *name* starts
+    (or, with *last*, ends). A paragraph name wins over a section name."""
+    if name in ordered_names:
+        return ordered_names.index(name)
+    marker = f"{_SECTION_KEY}{name}"
+    if marker not in ordered_names:
+        return None
+    start = ordered_names.index(marker)
+    if not last:
+        return start
+    end = start
+    for idx in range(start + 1, len(ordered_names)):
+        if ordered_names[idx].startswith(_SECTION_KEY):
+            break
+        end = idx
+    return end
 
 
 def _perform_body_statements(
     stmt: PerformStatement,
     by_name: dict[str, CobolParagraph],
     ordered_names: list[str],
-) -> list[Any]:
+) -> list[Any] | None:
+    """The statements a PERFORM of a paragraph, a SECTION or a THRU range
+    executes, or None when the target cannot be found -- the caller must
+    then assume the PERFORM could have written anything."""
     if not stmt.target_paragraph:
-        return []
-    start = stmt.target_paragraph.upper()
-    end = (stmt.thru_paragraph or stmt.target_paragraph).upper()
-    if start not in ordered_names or end not in ordered_names:
-        para = by_name.get(start)
-        return list(para.statements) if para else []
-    start_idx = ordered_names.index(start)
-    end_idx = ordered_names.index(end)
-    if end_idx < start_idx:
-        return []  # malformed/unexpected THRU order: nothing to walk, not a guess
+        return None
+    return _range_statements(
+        stmt.target_paragraph, stmt.thru_paragraph, by_name, ordered_names
+    )
+
+
+def _range_statements(
+    first: str,
+    thru: str | None,
+    by_name: dict[str, CobolParagraph],
+    ordered_names: list[str],
+) -> list[Any] | None:
+    """The statements of procedure *first* (THRU *thru*), or None when it
+    cannot be found."""
+    start = first.upper()
+    end = (thru or first).upper()
+    start_idx = _procedure_span(start, ordered_names, last=False)
+    end_idx = _procedure_span(end, ordered_names, last=True)
+    if start_idx is None or end_idx is None or end_idx < start_idx:
+        return None  # unknown target / malformed THRU order: not a guess
     statements: list[Any] = []
     for name in ordered_names[start_idx : end_idx + 1]:
         para = by_name.get(name)
@@ -1108,7 +1281,29 @@ def _nested_statement_lists(stmt: Any) -> list[list[Any]]:
             lists.append(wc.statements)
         if stmt.default_when:
             lists.append(stmt.default_when.statements)
+    elif isinstance(stmt, SearchStatement):
+        # SEARCH's WHEN clauses are dicts: {"condition", "statements"}.
+        for clause in stmt.when_clauses:
+            body = clause.get("statements") if isinstance(clause, dict) else None
+            if isinstance(body, list):
+                lists.append(body)
     return lists
+
+
+def _procedure_ranges(stmt: Any) -> list[tuple[str, str | None]]:
+    """Out-of-line procedures a non-PERFORM statement runs: a SORT/MERGE
+    INPUT / OUTPUT PROCEDURE (optionally THRU)."""
+    ranges: list[tuple[str, str | None]] = []
+    if isinstance(stmt, (SortStatement, MergeStatement)):
+        for first_attr, thru_attr in (
+            ("input_procedure", "input_procedure_thru"),
+            ("output_procedure", "output_procedure_thru"),
+        ):
+            first = getattr(stmt, first_attr, None)
+            if isinstance(first, str) and first:
+                thru = getattr(stmt, thru_attr, None)
+                ranges.append((first, thru if isinstance(thru, str) else None))
+    return ranges
 
 
 def _poison_written_names(
@@ -1154,10 +1349,43 @@ def _poison_written_names(
             if not target or target in visiting:
                 continue  # non-looping PERFORM cycle: stop rather than recurse forever
             body = _perform_body_statements(stmt, by_name, ordered_names)
+            if body is None:
+                env.clear()  # an unknown target could have written anything
+                continue
             visiting.add(target)
             frames.append((iter(body), target))
             continue
+        if state is not None:
+            if isinstance(stmt, (DisplayStatement, IOWriteStatement)):
+                # A site inside a block that may run zero, one or many times:
+                # what it shows is not knowable, so it vetoes the field.
+                state.visited_sites.add(id(stmt))
+                for operand in _site_operands(stmt):
+                    resolved = _safe_resolve(index, operand)
+                    if resolved is not None:
+                        state.observed.setdefault(
+                            resolved.spec.qualified_name, []
+                        ).append(None)
+            transfer = _transfer_kind(stmt)
+            if transfer is not None:
+                # The block may leave the straight line: later statements may
+                # not run, and a GO TO runs code this walk never sees.
+                state.uncertain = True
+                if transfer == "jump":
+                    env.clear()
         _poison_statement_writes(stmt, index, env, state=state)
+        for first, thru in _procedure_ranges(stmt):
+            # A SORT/MERGE INPUT/OUTPUT PROCEDURE runs once per record: a
+            # loop body, poisoned like one.
+            key = first.upper()
+            if key in visiting:
+                continue
+            body = _range_statements(first, thru, by_name, ordered_names)
+            if body is None:
+                env.clear()
+                continue
+            visiting.add(key)
+            frames.append((iter(body), key))
         for nested in _nested_statement_lists(stmt):
             _poison_written_names(
                 nested, index, env, by_name, ordered_names, visiting, state=state
