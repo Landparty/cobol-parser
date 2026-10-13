@@ -399,8 +399,8 @@ class TestWideNumericPrecision:
         assert len({v[-1] for v in values}) == 10
         assert sum(v.endswith("0") for v in values) < 50
 
-    def test_fraction_wider_than_a_float_is_fully_random(self):
-        # V9(18): a single random() draw cannot fill 18 decimal places.
+    def test_fraction_wider_than_a_float_fills_every_place(self):
+        # V9(18): a random() repr cannot fill 18 places; its exact value can.
         spec = _spec(
             "D",
             category=FieldCategory.NUMERIC,
@@ -469,3 +469,75 @@ class TestWideNumericPrecision:
                 is_signed=signed,
             )
             assert self._values(spec, rows=6) == expected
+
+    def test_integers_of_29_to_31_digits_keep_every_digit(self):
+        # Past Decimal's default 28-digit context.
+        for width, signed in ((29, False), (30, True), (31, True)):
+            spec = _spec(
+                "W",
+                category=FieldCategory.NUMERIC,
+                size=width,
+                integer_digits=width,
+                is_signed=signed,
+            )
+            values = self._values(spec, rows=100)
+            for v in values:
+                assert str(int(v)) == v
+                assert len(v.lstrip("-")) <= width
+            assert sum(v.endswith("000") for v in values) < 5, width
+            assert len({v[-1] for v in values}) == 10
+
+    def test_value_literal_wider_than_28_digits_renders_exactly(self):
+        literal = "1234567890123456789012345678901.1234"
+        spec = _spec(
+            "V",
+            category=FieldCategory.NUMERIC,
+            size=35,
+            integer_digits=31,
+            decimal_digits=4,
+            value_clause=literal,
+        )
+        assert _factory().value_for(spec, 0) == literal
+        assert _factory().render(spec, literal) == literal
+
+    def test_31_digit_ceiling_clamps_exactly(self):
+        spec = _spec(
+            "M",
+            category=FieldCategory.NUMERIC,
+            size=35,
+            integer_digits=31,
+            decimal_digits=4,
+        )
+        assert _factory().render(spec, "9" * 40) == "9" * 31 + ".9999"
+
+
+class TestWideFieldRecordSeedStability:
+    """A wide field must not shift the RNG stream for the fields after it."""
+
+    COPYBOOK = """\
+       01 W.
+           05 A PIC 9(18).
+           05 D PIC 9V9(18).
+           05 F PIC S9(13)V9(5).
+           05 E PIC 9(5).
+           05 G PIC X(6).
+           05 H PIC S9(5)V99.
+"""
+
+    def test_fields_after_wide_ones_keep_their_seeded_values(self, tmp_path):
+        from cobolparser.generators import CopybookDataGenerator
+
+        path = tmp_path / "W.cpy"
+        path.write_text(self.COPYBOOK)
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(rows=4, seed=3)
+        ).generate_from_file(str(path))
+        tail = [line.split(",")[3:] for line in dataset.to_csv().splitlines()]
+        # Pinned from main before the fix (#285): E, G, H are unchanged.
+        assert tail == [
+            ["E", "G", "H"],
+            ["61503", "Q9OM48", "72041.48"],
+            ["8392", "KCTBR4", "77955.72"],
+            ["17821", "5NQ1T0", "66485.83"],
+            ["36658", "KU8GNR", "37349.12"],
+        ]

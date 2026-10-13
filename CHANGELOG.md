@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`gen-data` keeps every digit of wide numeric fields** (#285). A freely
+  drawn number went through float64, so a `PIC 9(18)` value lost everything
+  past ~15 digits (most rows ended in `00`), and numbers of 29-31 digits,
+  generated or declared in a VALUE / level-88 literal, were rounded to
+  Decimal's default 28. **Seeded output changes** for numeric fields of 13
+  or more total digits (in the last place for 13-15 digits); fields of 12
+  or fewer digits, and every other field in the record, keep their values.
+  Checked-in fixtures generated with wide numeric fields will drift.
+
 * **Same-named fields and paragraphs were merged by name** (#258): two
   records carrying the same field names (the `MOVE CORRESPONDING` shape)
   and paragraph names reused across sections (`X1` in `S1` and in `S2`)
