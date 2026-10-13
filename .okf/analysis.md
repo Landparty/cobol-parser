@@ -2098,6 +2098,35 @@ check now also folds `tests/samples/file_operations.cbl` and
 `enterprise/COMPDIR.cbl`. `bundle_version` is unchanged: only which
 expectations are emitted changes, not their shape.
 
+**Every site, and only control flow the walk really follows** (2026-10-13
+bug hunt; each case checked against GnuCOBOL 3.2 output):
+
+* **Every DISPLAY/WRITE is a site, walked or not.** A site inside an
+  IF/EVALUATE arm, a loop body or a handler is recorded as unknown
+  (`_poison_written_names`), and at the end `fold()` vetoes every field
+  shown at a site the walk never reached (`_observation_sites` against
+  `_WalkState.visited_sites`): code past a `GO TO`, code only a `GO TO`
+  reaches, DECLARATIVES, dead paragraphs. `MOVE 1 TO A. DISPLAY A. IF ...
+  MOVE 2 TO A DISPLAY A END-IF.` used to claim `A = 1`.
+* **`PERFORM` of a SECTION** (and `THRU` a section) walks the section's
+  paragraphs, unnamed ones included: `_ordered_paragraphs` keeps a
+  `_SECTION_KEY` marker per section and an `_UNNAMED_KEY` key per unnamed
+  paragraph, `_procedure_span` resolves both ends. It used to walk nothing,
+  as if the PERFORM wrote nothing. A target that resolves to nothing at all
+  now clears the env.
+* **SEARCH WHEN bodies and SORT/MERGE INPUT/OUTPUT PROCEDUREs** are
+  poisoned like a loop body (`_nested_statement_lists`, `_procedure_ranges`);
+  both used to be skipped, so a write there survived as a known value.
+* **Conditional transfers.** A `GO TO`, `EXIT PARAGRAPH/SECTION/PERFORM` or
+  `NEXT SENTENCE` inside an arm / loop / handler (or a main-line `EXIT
+  PARAGRAPH`...) sets `_WalkState.uncertain`: from then on every
+  MOVE/arithmetic/READ/ACCEPT poisons instead of folding, because the walk
+  can no longer tell whether it ran. A `GO TO` also clears the env (it runs
+  code the walk never sees). The `IF ... GO TO P1-EXIT` idiom used to fold
+  the MOVE the GO TO skips. Conservative: uncertainty lasts to the end of
+  the walk. Pinned by
+  `tests/unit/analysis/test_const_fold.py::TestControlFlowTheWalkDoesNotFollow`.
+
 **"Exact by construction, or absent" -- never a guess.** Every ambiguity
 below resolves by leaving a field unknown (poisoned: removed from the
 internal env) rather than approximating:

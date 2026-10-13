@@ -998,9 +998,12 @@ class TestValueAtObservationPoint:
             "           STOP RUN.\n"
             "       NEXT-PARA.\n"
             "           MOVE 2 TO N3.\n"
-            "           DISPLAY N3.\n",
-            extra_data=self._DATA,
+            "           DISPLAY N4.\n",
+            extra_data=self._DATA
+            + "       01  N4                  PIC S9(3) VALUE 4.\n",
         )
+        # NEXT-PARA is never walked: its MOVE does not leak into N3, and
+        # N4, shown only there, is not claimed.
         assert fold.known == {"N3": "1"}
 
 
@@ -1023,3 +1026,229 @@ class TestWalkBudget:
                 paras.append(f"       PARA-{i}.\n           DISPLAY WS-A.\n")
         fold = _fold("".join(paras))
         assert fold.known == {}
+
+
+class TestControlFlowTheWalkDoesNotFollow:
+    """Every value below was checked against the program's real output under
+    GnuCOBOL 3.2. A `field_equals` value must hold at *every* DISPLAY/WRITE
+    of the field: one the walk skipped (PERFORM of a SECTION), one it took
+    as unconditional (a GO TO / EXIT PARAGRAPH inside an IF), or a site it
+    never looked at (inside an IF arm or loop, or past a GO TO) used to
+    produce a value the program never showed there."""
+
+    def test_perform_of_a_section_runs_its_paragraphs(self):
+        # GnuCOBOL: 002
+        fold = _fold(
+            "       MAIN-SEC SECTION.\n"
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           PERFORM SEC-A.\n"
+            "           DISPLAY WS-A.\n"
+            "           STOP RUN.\n"
+            "       SEC-A SECTION.\n"
+            "       SEC-A-P.\n"
+            "           MOVE 2 TO WS-A.\n"
+        )
+        assert fold.known == {"WS-A": "2"}
+
+    def test_perform_of_a_section_with_unnamed_paragraphs(self):
+        # GnuCOBOL: 003
+        fold = _fold(
+            "       MAIN-SEC SECTION.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           PERFORM SEC-A.\n"
+            "           DISPLAY WS-A.\n"
+            "           STOP RUN.\n"
+            "       SEC-A SECTION.\n"
+            "           MOVE 2 TO WS-A.\n"
+            "           ADD 1 TO WS-A.\n"
+        )
+        assert fold.known == {"WS-A": "3"}
+
+    def test_perform_thru_a_section_range(self):
+        fold = _fold(
+            "       MAIN-SEC SECTION.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           PERFORM SEC-A THRU SEC-B.\n"
+            "           DISPLAY WS-A.\n"
+            "           STOP RUN.\n"
+            "       SEC-A SECTION.\n"
+            "           MOVE 2 TO WS-A.\n"
+            "       SEC-B SECTION.\n"
+            "       SEC-B-1.\n"
+            "           ADD 5 TO WS-A.\n"
+            "       SEC-B-2.\n"
+            "           ADD 1 TO WS-A.\n"
+            "       SEC-C SECTION.\n"
+            "           MOVE 9 TO WS-A.\n"
+        )
+        assert fold.known == {"WS-A": "8"}
+
+    def test_perform_of_an_unknown_procedure_forgets_everything(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           PERFORM NO-SUCH-PARA.\n"
+            "           DISPLAY WS-A.\n"
+            "           STOP RUN.\n"
+        )
+        assert fold.known == {}
+
+    def test_conditional_go_to_the_range_exit_skips_the_move(self):
+        # GnuCOBOL: 001 (the GO TO is taken), never 002
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 5 TO WS-B.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           PERFORM P1 THRU P1-EXIT.\n"
+            "           DISPLAY WS-A.\n"
+            "           STOP RUN.\n"
+            "       P1.\n"
+            "           IF WS-B = 5\n"
+            "              GO TO P1-EXIT\n"
+            "           END-IF.\n"
+            "           MOVE 2 TO WS-A.\n"
+            "       P1-EXIT.\n"
+            "           EXIT.\n"
+        )
+        assert "WS-A" not in fold.known
+
+    def test_conditional_exit_paragraph_skips_the_move(self):
+        # GnuCOBOL: 001, never 002
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 5 TO WS-B.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           PERFORM P1.\n"
+            "           DISPLAY WS-A.\n"
+            "           STOP RUN.\n"
+            "       P1.\n"
+            "           IF WS-B = 5\n"
+            "              EXIT PARAGRAPH\n"
+            "           END-IF.\n"
+            "           MOVE 2 TO WS-A.\n"
+        )
+        assert "WS-A" not in fold.known
+
+    def test_a_field_untouched_past_a_conditional_exit_stays_known(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 7 TO WS-B.\n"
+            "           PERFORM P1.\n"
+            "           DISPLAY WS-B.\n"
+            "           STOP RUN.\n"
+            "       P1.\n"
+            "           IF WS-FLAG = 'Y'\n"
+            "              EXIT PARAGRAPH\n"
+            "           END-IF.\n"
+            "           MOVE 2 TO WS-A.\n"
+        )
+        assert fold.known == {"WS-B": "7"}
+
+    def test_displays_inside_an_if_arm_and_a_loop_are_sites_too(self):
+        # GnuCOBOL: 001 002 003 004 -- not "always 1"
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 5 TO WS-B.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           DISPLAY WS-A.\n"
+            "           IF WS-B = 5\n"
+            "              MOVE 2 TO WS-A\n"
+            "              DISPLAY WS-A\n"
+            "           END-IF.\n"
+            "           PERFORM 2 TIMES\n"
+            "              ADD 1 TO WS-A\n"
+            "              DISPLAY WS-A\n"
+            "           END-PERFORM.\n"
+            "           STOP RUN.\n"
+        )
+        assert "WS-A" not in fold.known
+
+    def test_a_display_only_a_go_to_reaches_is_a_site_too(self):
+        # GnuCOBOL: 001 002
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           DISPLAY WS-A.\n"
+            "           GO TO P9.\n"
+            "       P8.\n"
+            "           STOP RUN.\n"
+            "       P9.\n"
+            "           MOVE 2 TO WS-A.\n"
+            "           DISPLAY WS-A.\n"
+            "           GO TO P8.\n"
+        )
+        assert "WS-A" not in fold.known
+
+    def test_a_search_when_body_may_run(self):
+        # GnuCOBOL: 002
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 'ABC' TO WS-T.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           SET WS-TI TO 1.\n"
+            "           SEARCH WS-TE\n"
+            "              AT END MOVE 7 TO WS-B\n"
+            "              WHEN WS-TE(WS-TI) = 'B'\n"
+            "                 MOVE 2 TO WS-A\n"
+            "           END-SEARCH.\n"
+            "           DISPLAY WS-A.\n"
+            "           STOP RUN.\n",
+            extra_data=(
+                "       01  WS-T.\n"
+                "           05  WS-TE PIC X OCCURS 3 INDEXED BY WS-TI.\n"
+            ),
+        )
+        assert "WS-A" not in fold.known
+
+    def test_a_sort_input_procedure_runs(self):
+        # GnuCOBOL: 002
+        source = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. T.\n"
+            "       ENVIRONMENT DIVISION.\n"
+            "       INPUT-OUTPUT SECTION.\n"
+            "       FILE-CONTROL.\n"
+            "           SELECT SW ASSIGN TO 'SW.TMP'.\n"
+            "       DATA DIVISION.\n"
+            "       FILE SECTION.\n"
+            "       SD SW.\n"
+            "       01 SW-REC.\n"
+            "          05 SW-KEY PIC 9(3).\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 X PIC 9(3) VALUE 0.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO X.\n"
+            "           SORT SW ON ASCENDING KEY SW-KEY\n"
+            "              INPUT PROCEDURE IS P-IN\n"
+            "              OUTPUT PROCEDURE IS P-OUT.\n"
+            "           DISPLAY X.\n"
+            "           STOP RUN.\n"
+            "       P-IN.\n"
+            "           MOVE 5 TO SW-KEY.\n"
+            "           RELEASE SW-REC.\n"
+            "           MOVE 2 TO X.\n"
+            "       P-OUT.\n"
+            "           RETURN SW AT END CONTINUE END-RETURN.\n"
+        )
+        result = parse_cobol(source, filename="t.cbl")
+        assert result.errors == [], result.errors
+        fold = ConstantFolder().fold(result.ast, ProgramLayoutIndex.build(result.ast))
+        assert "X" not in fold.known
+
+    def test_a_compute_past_a_conditional_exit_may_not_run(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 5 TO WS-B.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           PERFORM P1.\n"
+            "           DISPLAY WS-A.\n"
+            "           STOP RUN.\n"
+            "       P1.\n"
+            "           IF WS-B = 5\n"
+            "              EXIT PARAGRAPH\n"
+            "           END-IF.\n"
+            "           COMPUTE WS-A = 2 + 3.\n"
+        )
+        assert "WS-A" not in fold.known
