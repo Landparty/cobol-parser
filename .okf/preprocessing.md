@@ -606,8 +606,10 @@ appended and therefore **never expanded**; an unterminated `==pseudo-text==`
 REPLACING operand abandons the clause. Both used to be fully silent — the
 copybook's data items simply did not exist. `_expand_source_recursive`
 routes them into `ExpansionStatistics.warnings`;
-`extract_copy_statements(source, source_file, warnings=None)` exposes the
-same channel. The scanner also checks the **left** word boundary so
+`extract_copy_statements(source, source_file, warnings=None,
+sql_include=False)` exposes the same channel; `sql_include=True` also returns
+each `EXEC SQL INCLUDE member END-EXEC` (marked `sql_include=True`), which is
+how the codebase graph sees INCLUDE edges (#295). The scanner also checks the **left** word boundary so
 `GOODCOPY.` is not probed as a COPY statement (previously only the right
 boundary was checked).
 

@@ -14,7 +14,11 @@ and aggregates the results into a single graph with two kinds of edge:
   targets, each marked ``resolved=False`` so the edge set is never mistaken
   for an exhaustive one.
 - **copy edges** -- ``program A copies member X``, and ``member X copies
-  member Y`` for nested copybooks. These are collected by re-scanning each
+  member Y`` for nested copybooks. A DB2 ``EXEC SQL INCLUDE X END-EXEC`` is
+  a copy edge too, with the same ``COPY`` label and the same unresolved-member
+  reporting: it is how SQLCA and DCLGEN members are normally pulled in, so
+  leaving it out made "what uses this DCLGEN?" answer nothing (#295). These
+  are collected by re-scanning each
   source with :func:`~cobolparser.preprocess.copy_statement_parser.extract_copy_statements`
   rather than from an expanded parse, because expansion *consumes* the COPY
   statement and discards exactly the edge we are after. Members are resolved
@@ -923,7 +927,7 @@ class CodebaseGraphBuilder:
 
         warnings: list[str] = []
         statements = extract_copy_statements(
-            source, source_file=path, warnings=warnings
+            source, source_file=path, warnings=warnings, sql_include=True
         )
         for warning in warnings:
             unresolved.append(f"{path}: COPY statement not usable: {warning}")
@@ -985,7 +989,7 @@ class CodebaseGraphBuilder:
             return []
         warnings: list[str] = []
         statements = extract_copy_statements(
-            source, source_file=member_path, warnings=warnings
+            source, source_file=member_path, warnings=warnings, sql_include=True
         )
         for warning in warnings:
             unresolved.append(f"{member_path}: COPY statement not usable: {warning}")

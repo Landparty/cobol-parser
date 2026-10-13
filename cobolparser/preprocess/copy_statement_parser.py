@@ -944,6 +944,7 @@ def extract_copy_statements(
     source_code: str,
     source_file: str = "<main>",
     warnings: list[str] | None = None,
+    sql_include: bool = False,
 ) -> list[CopyStatement]:
     """
     Extract all COPY statements from COBOL source code using a robust shallow lexer.
@@ -960,6 +961,9 @@ def extract_copy_statements(
         warnings: Optional list that receives diagnostics for COPY statements
             that were recognized but dropped (no terminating period,
             unterminated pseudo-text) and will therefore never be expanded
+        sql_include: Also return each ``EXEC SQL INCLUDE member END-EXEC`` as
+            a :class:`CopyStatement` with ``sql_include=True`` -- the same
+            members the copybook expander inlines. Off by default.
 
     Returns:
         List of CopyStatement objects representing each COPY statement found
@@ -976,7 +980,7 @@ def extract_copy_statements(
     )
 
     # Step 4: Use CopyStatementLexer for extraction
-    lexer = CopyStatementLexer(normalized_source, source_file)
+    lexer = CopyStatementLexer(normalized_source, source_file, sql_include=sql_include)
     statements = lexer.tokenize_copy_statements()
     if warnings is not None and lexer.warnings:
         warnings.extend(lexer.warnings)

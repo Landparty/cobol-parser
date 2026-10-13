@@ -2737,6 +2737,10 @@ results into one graph with two kinds of edge:
   after. Members resolve to real files through the same `PathResolver` the
   expander uses, so a nested chain is followed to its leaves and a circular pair
   (`A COPY B`, `B COPY A`) is reported, not looped on.
+  A DB2 `EXEC SQL INCLUDE X END-EXEC` is a copy edge too (the scan passes
+  `sql_include=True`), with the same `COPY` label and the same unresolved-member
+  reporting as a COPY -- it is how SQLCA and DCLGEN members are normally pulled
+  in, and `copybook-impact` on a DCLGEN returned nothing without it (#295).
 
 ```python
 from cobolparser.analysis.codebase import CodebaseGraphBuilder, CopybookImpactAnalyzer
