@@ -39,7 +39,7 @@ def test_keyword_spelled_literals_are_plain_values():
     )
     assert errors == []
     assert selectors == [
-        [{"type": "Literal", "value": value}]
+        [{"type": "Literal", "value": value, "quoted": True}]
         for value in ("ANY", "THRU", "AND", "NOT", "<", "A OR B")
     ]
 
