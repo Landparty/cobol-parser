@@ -24,6 +24,12 @@ kept). Four selector-shape tests now expect the additive `"quoted": True`.
 `WHEN SPACES` -> `WHEN 'SPACES'` and `WHEN WS-B` -> `WHEN 'WS-B'` each diff
 as one `condition-changed`.
 
+2026-10-14: +10 in `tests/unit/analysis/test_dead_code.py`'s new
+`TestSectionExitGoTo` (issue #312): `GO TO nnnn-EXIT` inside a PERFORMed /
+SORT-procedure SECTION no longer keeps later sections alive; three guards
+pin that a section also fallen into or gone to still runs past its exit,
+four more that a jump into it from another section (or an ENTRY) does too.
+
 2026-10-14: `tests/regression/test_evaluate_stacked_when.py`
 (11 tests, #314) pins stacked WHEN phrases (`WHEN 'A' WHEN 'B' stmt`) as one
 arm while the AST keeps one `WhenClause` per phrase: `when_groups()`,
