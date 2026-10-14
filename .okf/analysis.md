@@ -3237,6 +3237,12 @@ unrecognised nested clause, REPORT SECTION group clauses, level-66 RENAMES,
 ENVIRONMENT/IDENTIFICATION content beyond the above, a duplicate procedure name,
 a near-miss rename. Tests: `tests/unit/analysis/test_ast_diff.py`.
 
+A `WHEN` selector's text carries the parser's markers (#313, 2026-10-14):
+`FIG:SPACES` for a figurative constant, `ID:WS-B` for a data name,
+`Literal:'SPACES'` for a quoted literal. The values alone are identical
+once the lexer strips quotes, so `WHEN SPACES` -> `WHEN 'SPACES'` used to
+diff as "No structural changes".
+
 **Known gaps**: statements outside any named paragraph are not compared, and
 neither are contained programs (`diff` has no `--program` flag yet) — both are
 recorded as caveats rather than silently skipped.
