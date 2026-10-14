@@ -465,3 +465,36 @@ def test_compare_files_reads_both_paths(tmp_path):
     result = compare_files(decoder, expected, actual, key=["CUST-ID"])
     assert result.changed_count == 1
     assert result.expected_count == result.actual_count == 2
+
+
+# ---------------------------------------------------------------------------
+# #296: an overlay view is the whole record, so it can be keyed outside it
+# ---------------------------------------------------------------------------
+
+OVERLAY_KEYED = """
+       01  MSG-REC.
+           05  KEY-ID      PIC 9(3).
+           05  BODY        PIC X(6).
+           05  BODY-ALT REDEFINES BODY.
+               10  ALT-CODE PIC X(2).
+               10  ALT-AMT  PIC 9(4).
+"""
+
+
+def test_a_compare_through_an_overlay_can_be_keyed_outside_it():
+    decoder = RecordDecoder.from_copybook_source(OVERLAY_KEYED, opts=EBCDIC)
+    expected = decoder.decode_bytes(
+        _image(OVERLAY_KEYED, [["1", "AB0010"], ["2", "CD0020"]], EBCDIC),
+        view="BODY-ALT",
+    )
+    actual = decoder.decode_bytes(
+        _image(OVERLAY_KEYED, [["2", "CD0021"], ["1", "AB0010"]], EBCDIC),
+        view="BODY-ALT",
+    )
+    result = compare_records(
+        expected, actual, view=decoder.resolve_view("BODY-ALT"), key=["KEY-ID"]
+    )
+    assert result.changed_count == 1
+    assert result.missing_count == result.extra_count == 0
+    [difference] = result.differences
+    assert [f.name for f in difference.fields] == ["ALT-AMT"]

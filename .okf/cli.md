@@ -836,7 +836,9 @@ compiled against them. Implementation:
   uses, so both halves land on the same layout.
 * **`--view`** reads the same bytes through a `REDEFINES` overlay, by the
   redefining item's own short name (`ADDR-OVERSEAS`) or its qualified path
-  (`CUST-REC.ADDR-OVERSEAS`). **`--list-views`** prints the layout and every
+  (`CUST-REC.ADDR-OVERSEAS`). The output is the whole record with the
+  overlay's fields in place of the redefined item's (every occurrence, inside
+  a table), so `compare --view` can still `--key` on fields outside it (#296). **`--list-views`** prints the layout and every
   overlay with byte offsets and exits *without needing a data file at all* —
   which is also how you find out what `--view` will accept.
 * **`--format`**: `csv` (default) is one row per record, byte-identical to

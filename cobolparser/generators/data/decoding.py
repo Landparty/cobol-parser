@@ -76,7 +76,7 @@ from .encoding import (
     RecordFormat,
 )
 from .errors import CopybookLayoutError
-from .layout import FieldCategory, FieldSpec, VaryingLength
+from .layout import FieldCategory, FieldSpec, HiddenCounter, VaryingLength
 from .options import DataGeneratorOptions
 from .storage import (
     BINARY_NATIVE_USAGES,
@@ -724,13 +724,22 @@ def decode_record(
     """
     counts: _Counts = {}
     out: list[DecodedField] = []
-    # *data* is the whole record, so an overlay starts where the item it
-    # redefines does rather than at byte 0 -- switching view re-reads the
-    # same record from a different offset, which is the point.
-    position = view.offset
+    # *data* is the whole record, and so is every view: an overlay view is
+    # the record with the redefinition swapped in, so the walk starts at the
+    # view's first field -- byte 0 -- whichever view was asked for.
+    position = view.fields[0].offset if view.fields else 0
+    hidden: dict[int, list[HiddenCounter]] = {}
+    for counter in view.hidden_counters:
+        hidden.setdefault(counter.index, []).append(counter)
 
-    for placed in view.fields:
+    for index, placed in enumerate(view.fields):
         spec = placed.spec
+        if index in hidden and _present(spec, counts):
+            # The overlay starting here covers a table's DEPENDING ON
+            # counter. It is not a field of this view, but the table still
+            # takes its length from those bytes, so read them as the
+            # counter the base layout declares.
+            _read_hidden_counters(hidden[index], data, position, opts, counts)
         if trim_tables and not _present(spec, counts):
             out.append(_absent_field(placed, position))
             continue
@@ -761,6 +770,25 @@ def decode_record(
                 counts, spec, _counter_value(decoded.value, spec.odo_counter_bounds)
             )
     return out
+
+
+def _read_hidden_counters(
+    counters: list[HiddenCounter],
+    data: bytes,
+    position: int,
+    opts: EncodingOptions,
+    counts: _Counts,
+) -> None:
+    for counter in counters:
+        spec = counter.spec
+        at = position + counter.offset
+        raw = data[at : at + spec.storage_size]
+        if len(raw) < spec.storage_size or spec.odo_counter_bounds is None:
+            continue
+        decoded = decode_field(PlacedField(spec, at), raw, opts, offset=at)
+        _store_count(
+            counts, spec, _counter_value(decoded.value, spec.odo_counter_bounds)
+        )
 
 
 #: Decoded ODO counter values, keyed ``(name, subscripts)`` -- and also
@@ -1277,7 +1305,10 @@ class RecordDecoder:
 
         specs = [placed.spec for placed in view.fields]
         caveats = list(self.views.caveats)
-        for caveat in encoding_caveats(specs, opts):
+        # A counter the overlay covers is still read (see decode_record), so
+        # it counts as part of the record: leaving it out claimed it was not.
+        counters = [counter.spec for counter in view.hidden_counters]
+        for caveat in encoding_caveats([*specs, *counters], opts):
             if caveat not in caveats:
                 caveats.append(caveat)
         if any(_normalized_usage(spec) in SINGLE_FLOAT_USAGES for spec in specs):
