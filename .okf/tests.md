@@ -1375,3 +1375,12 @@ nesting and a bare `NOT SIZE ERROR` (#399).
 by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
 (`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
 `COMP-5` is still a change.
+
+## 2026-10-14 (issue #351)
+
+`tests/unit/analysis/test_codebase.py::TestLibraryQualifiedCopy` pins that
+`COPY REC OF LIBA` / `COPY REC IN LIBB` resolve to each library's own file in
+codebase-graph, that a nested COPY inside `LIBB/REC` reaches only the programs
+copying `LIBB/REC` (chains `[PB, REC, INNER]`), that `copybook-impact` on a
+member name resolving to several files unions their fields and says so, and
+that a hand-built nested `CopyEdge` without `parent_path` still matches by name.

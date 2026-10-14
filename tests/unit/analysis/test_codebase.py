@@ -804,6 +804,8 @@ class TestSerialization:
             "member": "M",
             "path": None,
             "nested": False,
+            "library": None,
+            "parent_path": None,
         }
 
     def test_graph_dict_keys(self, graph):
@@ -1064,6 +1066,7 @@ class TestCopybookImpact:
             "chains",
             "fields",
             "unresolved",
+            "paths",
             "summary",
         }
         assert set(payload["summary"]) == {
@@ -1166,10 +1169,10 @@ class TestHelpers:
         builder = CodebaseGraphBuilder(copybook_paths=[str(books)])
         # Resolve the member, then delete the file before it is scanned for
         # its own nested COPY statements.
-        builder._member_paths["OUTER"] = str(books / "OUTER.cpy")
+        outer = str(books / "OUTER.cpy")
         (books / "OUTER.cpy").unlink()
         unresolved: list[str] = []
-        assert builder._member_direct_copies("OUTER", unresolved) == []
+        assert builder._member_direct_copies("OUTER", outer, unresolved) == []
         assert any("could not be read" in note for note in unresolved)
 
 
@@ -1231,3 +1234,93 @@ class TestReviewFollowUps:
         (copybooks / "OUTER.cpy").write_text("       COPY INNER2.\n")
         second = builder.build([str(program)])
         assert ("OUTER", "INNER2") in {(e.program, e.member) for e in second.copy_edges}
+
+
+def _program_copying(member: str, program_id: str) -> str:
+    return (
+        "       IDENTIFICATION DIVISION.\n"
+        f"       PROGRAM-ID. {program_id}.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "       01 WS-REC.\n"
+        f"           COPY {member}.\n"
+        "       PROCEDURE DIVISION.\n"
+        "           GOBACK.\n"
+    )
+
+
+class TestLibraryQualifiedCopy:
+    """#351: COPY X OF/IN LIB resolves per library, not by bare member name."""
+
+    @pytest.fixture
+    def lib_graph(self, tmp_path) -> CodebaseGraph:
+        books = tmp_path / "cpy"
+        (books / "LIBA").mkdir(parents=True)
+        (books / "LIBB").mkdir(parents=True)
+        (books / "LIBA" / "REC.cpy").write_text("       05 RA PIC X.\n")
+        (books / "LIBB" / "REC.cpy").write_text(
+            "       05 RB PIC X.\n       COPY INNER.\n"
+        )
+        (books / "INNER.cpy").write_text("       05 RI PIC X.\n")
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "PA.cbl").write_text(_program_copying("REC OF LIBA", "PA"))
+        (src / "PB.cbl").write_text(_program_copying("REC OF LIBB", "PB"))
+        (src / "PC.cbl").write_text(_program_copying("REC IN LIBB", "PC"))
+        return CodebaseGraphBuilder(copybook_paths=[str(books)]).build_from_directory(
+            str(src)
+        )
+
+    def test_each_program_edge_points_at_its_own_library(self, lib_graph, tmp_path):
+        paths = {
+            e.program: Path(e.path).relative_to(tmp_path).as_posix()
+            for e in lib_graph.copy_edges
+            if not e.nested and e.path
+        }
+        assert paths == {
+            "PA": "cpy/LIBA/REC.cpy",
+            "PB": "cpy/LIBB/REC.cpy",
+            "PC": "cpy/LIBB/REC.cpy",
+        }
+        libraries = {e.program: e.library for e in lib_graph.copy_edges}
+        assert libraries["PA"] == "LIBA"
+        assert libraries["PC"] == "LIBB"
+
+    def test_nested_member_of_one_library_is_followed(self, lib_graph, tmp_path):
+        nested = [e for e in lib_graph.copy_edges if e.nested]
+        assert [(e.program, e.member) for e in nested] == [("REC", "INNER")]
+        assert nested[0].parent_path is not None
+        assert Path(nested[0].parent_path) == tmp_path / "cpy" / "LIBB" / "REC.cpy"
+
+    def test_nested_member_reaches_only_the_library_copiers(self, lib_graph):
+        assert lib_graph.programs_using("INNER") == ["PB", "PC"]
+        report = CopybookImpactAnalyzer(lib_graph).analyze("INNER")
+        assert report.direct_programs == []
+        assert report.transitive_programs == ["PB", "PC"]
+        assert report.chains == [["PB", "REC", "INNER"], ["PC", "REC", "INNER"]]
+        assert report.fields == ["RI"]
+
+    def test_same_named_members_report_both_files(self, lib_graph):
+        report = CopybookImpactAnalyzer(lib_graph).analyze("REC")
+        assert report.direct_programs == ["PA", "PB", "PC"]
+        assert report.fields == ["RA", "RB"]
+        assert len(report.paths) == 2
+        assert any("resolves to 2 different files" in n for n in report.unresolved)
+
+    def test_unresolved_library_names_the_library(self, tmp_path):
+        books = tmp_path / "cpy"
+        books.mkdir()
+        (books / "REC.cpy").write_text("       05 R PIC X.\n")
+        program = tmp_path / "P.cbl"
+        program.write_text(_program_copying("NOSUCH OF LIBX", "P"))
+        graph = CodebaseGraphBuilder(copybook_paths=[str(books)]).build([str(program)])
+        assert any("COPY member NOSUCH OF LIBX" in n for n in graph.unresolved)
+
+    def test_hand_built_nested_edge_without_parent_path_matches_by_name(self):
+        graph = CodebaseGraph(
+            copy_edges=[
+                CopyEdge(program="P", member="OUTER", path="/x/OUTER.cpy"),
+                CopyEdge(program="OUTER", member="INNER", nested=True),
+            ]
+        )
+        assert graph.programs_using("INNER") == ["P"]
