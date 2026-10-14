@@ -147,6 +147,7 @@ def is_bare_separator(token: Token, paren_depth: int) -> bool:
     """
     return paren_depth == 0 and token.type in SEPARATOR_TOKEN_TYPES
 
+
 #: Explicit scope terminators (END-xxx). These can never begin a statement or
 #: act as an operand, so operand/parameter collection loops must stop on them
 #: rather than swallow them (e.g. ``CALL "X" USING WS-AMT END-READ``).
