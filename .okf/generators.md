@@ -970,6 +970,12 @@ adds pairing and field comparison, and decodes nothing itself.
 * **Absent fields** (a shorter VB record, an `OCCURS DEPENDING ON` occurrence
   its counter excludes) compare as absent: `FieldDifference.expected` /
   `.actual` is `None`, rendered `(absent)` in the text report.
+* **Truncated fields** (#357, 2026-10-14): a field the record ended part-way
+  through (`DecodedField.truncated`) differs from one of another length, even
+  when what is left decodes to the same value (`'ABC '` cut to `'ABC'`,
+  `'0000'` cut to `'0'`). `_same()` compares `length` before values. Before,
+  a shorter actual record compared equal and `compare` exited 0; only
+  `--compare-bytes` caught it. Two fields cut at the same place stay equal.
 * **Name resolution is against the `RecordView`, not the records**, so a
   typo is caught even when both files are empty. A key token resolves, in
   order, as a column (`QTY(2)`), a qualified name, or a field's own name, and

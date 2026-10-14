@@ -454,6 +454,53 @@ def test_variable_records_with_different_occurrence_counts():
     assert "(absent)" in result.to_text()
 
 
+SHORT_FIELDS = """
+       01  R.
+           05  K   PIC 9(2).
+           05  A   PIC X(4).
+           05  N   PIC 9(4).
+"""
+
+
+def _rdw_file(*bodies: bytes) -> bytes:
+    return b"".join(
+        (len(body) + 4).to_bytes(2, "big") + bytes(2) + body for body in bodies
+    )
+
+
+def _compare_variable(expected: bytes, actual: bytes, **kwargs):
+    opts = EncodingOptions(charset=Charset.ASCII, record_format=RecordFormat.VARIABLE)
+    decoder = RecordDecoder.from_copybook_source(SHORT_FIELDS, opts=opts)
+    return compare_records(
+        decoder.decode_bytes(_rdw_file(expected)),
+        decoder.decode_bytes(_rdw_file(actual)),
+        view=decoder.views.base,
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize(
+    ("expected", "actual", "field"),
+    [
+        (b"01ABC ", b"01ABC", "A"),  # text cut mid-field, same decoded value
+        (b"01ABCD0000", b"01ABCD0", "N"),  # '0000' and '0' both decode to 0
+        (b"01ABC", b"01ABC ", "A"),  # the short record on the expected side
+    ],
+)
+def test_a_field_cut_short_by_the_record_end_differs(expected, actual, field):
+    result = _compare_variable(expected, actual)
+
+    assert not result.equal
+    assert result.changed_count == 1
+    (difference,) = result.differences[0].fields
+    assert difference.name == field
+    assert difference.expected_hex != difference.actual_hex
+
+
+def test_fields_cut_at_the_same_place_stay_equal():
+    assert _compare_variable(b"01ABC", b"01ABC").equal
+
+
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
