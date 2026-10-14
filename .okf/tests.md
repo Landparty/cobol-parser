@@ -8,6 +8,13 @@ timestamp: 2026-10-14T00:00:00Z
 
 # Overview
 
+2026-10-14: `tests/regression/test_evaluate_word_operator_when.py` (38
+tests, #387) pins EVALUATE WHEN phrases with relational words
+(`GREATER THAN`, `EQUAL TO`, `OR EQUAL`), class tests and sign tests as
+single `Condition` selectors (a lone `WHEN ZERO` stays figurative), the
+logical-only `operator: "OR"`, and what business-rules / xref /
+ConstraintExtractor / complexity read from them.
+
 2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
 #377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
 read, no phantom paragraph appears, and dead-code / program-flow /

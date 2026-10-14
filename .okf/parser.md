@@ -643,6 +643,16 @@ so without these `WHEN SPACES` and `WHEN 'SPACES'` built identical dicts.
 The markers are additive; `type` stays `"Literal"`. Pinned by
 `tests/regression/test_evaluate_figurative_when.py`.
 
+**Word-form operators and class/sign tests are conditions (#387,
+2026-10-14).** `_build_selector` also makes a `Condition` of a WHEN phrase
+holding a relational word (`GREATER LESS EQUAL EQUALS`) or a class test
+(`NUMERIC ALPHABETIC ALPHABETIC-LOWER ALPHABETIC-UPPER DBCS KANJI`), and of
+one holding a sign test (`POSITIVE NEGATIVE ZERO`) after its first word -- a
+lone `WHEN ZERO` stays the figurative `Literal`. Before, `WHEN X GREATER THAN
+1` / `WHEN X IS NUMERIC` were stored as one `Literal`. `operator: "OR"` is set
+only for a logical OR, never the OR of `OR EQUAL` (`_has_logical_or`). Pinned
+by `tests/regression/test_evaluate_word_operator_when.py`.
+
 **EVALUATE subjects reach `.operands` (`evaluate_parser.py`, 2026-08-17
 review follow-up):** `_parse_subjects` routes each parsed subject through
 `EvaluateStatement.add_subject()` instead of appending straight to

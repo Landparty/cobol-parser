@@ -2104,6 +2104,12 @@ F1-VALID` and a simple comparison like `WHEN F1-QTY = 5` both arrive as
 `_parse_relational_text` itself reports any text holding an `AND`/`OR`
 outside a quoted literal as unsupported rather than splitting it on its first
 operator.
+Before matching, `_symbolize_relational_words` spells the word operators
+as symbols (`[IS] [NOT] GREATER|LESS [THAN] [OR EQUAL [TO]]`, `EQUAL[S]
+[TO]`; quoted literals untouched), so `WHEN X GREATER THAN OR EQUAL TO 1`
+yields the same `ge` constraint as `WHEN X >= 1` and its `OR` is not taken
+for a connective (#387). `complexity.py`'s `_BOOL_WORD_RE` likewise skips
+the OR of `OR EQUAL`.
 
 **Two-field comparisons are unsupported in v1** (`IF F1-QTY > F1-STATUS`) --
 stated as a parent-plan limitation, not attempted.
