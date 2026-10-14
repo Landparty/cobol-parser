@@ -98,6 +98,28 @@ class RecursionRiskReport:
         }
 
 
+def _perform_range(target: str, flow_report: ProgramFlowReport) -> list[str]:
+    """The procedures ``PERFORM target`` executes, in source order.
+
+    A paragraph is its own range; a SECTION is its header plus every
+    paragraph up to the next section, so the range ends at the section's
+    last paragraph rather than at the header node.
+    """
+    nodes = flow_report.nodes
+    for idx, node in enumerate(nodes):
+        if node.key != target:
+            continue
+        if node.procedure_type != "SECTION":
+            return [target]
+        members = [target]
+        for later in nodes[idx + 1 :]:
+            if later.procedure_type == "SECTION":
+                break
+            members.append(later.key)
+        return members
+    return [target]
+
+
 class RecursionRiskAnalyzer:
     """Finds PERFORM/GO TO cycles and self-recursive CALLs that risk an
     infinite loop (or equivalent runtime misbehavior) rather than terminating.
@@ -152,6 +174,27 @@ class RecursionRiskAnalyzer:
             if self._closed_by_perform_range_end(nodes, flow_report):
                 continue
             path = " -> ".join([*nodes, nodes[0]])
+
+            if kind == "MIXED" and self._reenters_own_perform_range(nodes, flow_report):
+                risks.append(
+                    RecursionRisk(
+                        mechanism="PERFORM",
+                        severity="HIGH",
+                        has_escape=False,
+                        procedures=nodes,
+                        explanation=(
+                            f"{path} PERFORMs a range (a SECTION, or a THRU "
+                            "range) from inside that same range -- the cycle "
+                            "only falls through the range's own paragraphs "
+                            "back to the PERFORM. Standard COBOL does not "
+                            "support re-entering a range while an earlier "
+                            "PERFORM of it is still active; this typically "
+                            "corrupts the return address and manifests as an "
+                            "infinite loop (or abend) at runtime."
+                        ),
+                    )
+                )
+                continue
 
             if kind == "PERFORM_RECURSION":
                 risks.append(
@@ -248,9 +291,55 @@ class RecursionRiskAnalyzer:
                 for edge in hop_edges[j]:
                     # ``PERFORM A`` returns from the end of A; ``PERFORM A
                     # THRU C`` (and its ``*_THRU`` edge, whose target is C)
-                    # from C.
-                    if (edge.thru_target or edge.target) == src:
+                    # from C; ``PERFORM S`` of a SECTION from S's last
+                    # paragraph -- the header's fall-through into its first
+                    # paragraph is the range executing, not leaving.
+                    end = _perform_range(edge.thru_target or edge.target, flow_report)
+                    if end[-1] == src:
                         return True
+        return False
+
+    @staticmethod
+    def _reenters_own_perform_range(
+        cycle: list[str], flow_report: ProgramFlowReport
+    ) -> bool:
+        """True if *cycle* is a PERFORM of a multi-procedure range made from
+        inside that range: one hop is a PERFORM (or PERFORM THRU) whose
+        range -- a SECTION and its paragraphs, or a THRU span -- holds every
+        node of the cycle, and every other hop is a plain fall-through
+        between members of it.
+
+        ``ProgramFlowAnalyzer`` reports that shape as ``MIXED`` (fall-through
+        + PERFORM), but it is the range-level twin of ``P. PERFORM P.``: the
+        PERFORM always re-enters a range that is still active, whatever
+        other exits its paragraphs have.
+        """
+        pair_types: dict[tuple[str, str], set[FlowEdgeType]] = {}
+        perform_edges: dict[tuple[str, str], list[Any]] = {}
+        for edge in flow_report.edges:
+            if edge.edge_type not in INTERNAL_EDGE_TYPES:
+                continue
+            pair = (edge.source, edge.target)
+            pair_types.setdefault(pair, set()).add(edge.edge_type)
+            if edge.edge_type in PERFORM_EDGE_TYPES:
+                perform_edges.setdefault(pair, []).append(edge)
+
+        n = len(cycle)
+        hops = [(cycle[i], cycle[(i + 1) % n]) for i in range(n)]
+        cycle_set = set(cycle)
+        for i, hop in enumerate(hops):
+            for edge in perform_edges.get(hop, []):
+                members = set(
+                    edge.range_members or _perform_range(edge.target, flow_report)
+                )
+                if len(members) < 2 or not cycle_set <= members:
+                    continue
+                if all(
+                    pair_types.get(other) == {FlowEdgeType.FALL_THROUGH}
+                    for k, other in enumerate(hops)
+                    if k != i
+                ):
+                    return True
         return False
 
     @staticmethod

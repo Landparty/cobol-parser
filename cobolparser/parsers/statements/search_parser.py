@@ -4,8 +4,9 @@ from typing import Any
 
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
-from ...models.statements import SearchStatement
-from ._conditions import condition_token_text
+from ...models.ast_base import SourceLocation
+from ...models.statements import CobolExpression, SearchStatement
+from ._conditions import build_condition_expression, condition_token_text
 from ._utils import (
     LITERAL_TOKEN_TYPES,
     SEPARATOR_TOKEN_TYPES,
@@ -122,7 +123,7 @@ class SearchStatementParser(IStatementParser):
                     if _sentence_period_consumed(token_stream):
                         break
             elif val == "WHEN":
-                token_stream.consume()
+                when_location = token_location(token_stream.consume())
                 skip_whitespace(token_stream)
                 # Collect condition text until statement keyword
                 cond_parts: list[str] = []
@@ -148,7 +149,11 @@ class SearchStatementParser(IStatementParser):
                     skip_whitespace(token_stream)
                 # Parse nested statements after condition
                 when_stmts = self._parse_nested_statements(token_stream)
-                stmt.add_when_clause(" ".join(cond_parts), when_stmts)
+                stmt.add_when_clause(
+                    " ".join(cond_parts),
+                    when_stmts,
+                    _condition_tree(cond_parts, when_location),
+                )
                 if when_stmts and _sentence_period_consumed(token_stream):
                     break
             elif token.type in SEPARATOR_TOKEN_TYPES:
@@ -191,6 +196,24 @@ class SearchStatementParser(IStatementParser):
                 # into this WHEN (or AT END) body.
                 break
         return stmts
+
+
+def _condition_tree(
+    cond_parts: list[str], location: SourceLocation
+) -> CobolExpression | None:
+    """The WHEN condition as a structural tree, or None.
+
+    Built with the same machinery IF and PERFORM UNTIL use, so a compound
+    ``WHEN A = 1 AND B = 2`` is an AND of two comparisons rather than one
+    string a consumer has to re-split. Fail-soft, like PERFORM UNTIL's: a
+    condition the builder cannot handle keeps only the raw text.
+    """
+    if not cond_parts:
+        return None
+    try:
+        return build_condition_expression(list(cond_parts), location)
+    except Exception:
+        return None
 
 
 def _sentence_period_consumed(token_stream: ITokenStream) -> bool:

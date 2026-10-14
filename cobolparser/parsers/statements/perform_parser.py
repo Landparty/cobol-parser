@@ -38,6 +38,18 @@ from ...models.statements import CobolExpression, PerformStatement
 
 logger = logging.getLogger(__name__)
 
+#: Layout tokens that never belong in an UNTIL condition (#347). The IF and
+#: EVALUATE parsers drop them too; a trailing NEWLINE rendered as "\n" made
+#: ``tokens[-1]`` something other than the condition's real last token, so a
+#: bare condition-name, ``NOT cond``, a class test or an enclosing ``( ... )``
+#: was no longer recognised when the condition ended at a line break.
+_UNTIL_LAYOUT_TOKEN_TYPES = (
+    TokenType.WHITESPACE,
+    TokenType.NEWLINE,
+    TokenType.CONTINUATION,
+    TokenType.COMMENT,
+)
+
 
 def _make_until_condition_expression(condition_tokens: list[str]) -> CobolExpression:
     """Build the UNTIL condition node from its collected token strings.
@@ -51,6 +63,9 @@ def _make_until_condition_expression(condition_tokens: list[str]) -> CobolExpres
     the condition structurally. Tree building is best-effort and never
     fails the PERFORM parse.
     """
+    # Second safeguard for #347: a layout token's text ("\n", spaces) that
+    # reached here would defeat the shared condition machinery.
+    condition_tokens = [t for t in condition_tokens if t and t.strip()]
     condition_str = " ".join(condition_tokens).strip()
     condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
     condition_expr.operands = [condition_str]
@@ -730,6 +745,9 @@ class PerformStatementParser(IStatementParser):
             token = stream.peek()
             if not token:
                 break
+            if token.type in _UNTIL_LAYOUT_TOKEN_TYPES:
+                stream.consume()
+                continue
             if token.type == TokenType.PERIOD:
                 break
             if token.type == TokenType.END_PERFORM:
@@ -823,6 +841,9 @@ class PerformStatementParser(IStatementParser):
                 token = stream.peek()
                 if not token:
                     break
+                if token.type in _UNTIL_LAYOUT_TOKEN_TYPES:
+                    stream.consume()
+                    continue
                 if token.type == TokenType.PERIOD:
                     stream.consume()
                     break
