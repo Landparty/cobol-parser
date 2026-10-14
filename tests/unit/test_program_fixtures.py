@@ -473,6 +473,36 @@ class TestScenarioModes:
         assert int(min_read.sequence[0]["F1-QTY"]) == 0
         assert int(max_read.sequence[0]["F1-QTY"]) == 999
 
+    def test_compound_search_when_pins_each_conjunct_not_the_joined_text(self):
+        # Issue #348: the WHEN arm's witness was the literal
+        # "K1' AND IN-TYPE = 'Z", written into IN-CODE of every READ row,
+        # with IN-TYPE left random -- and the arm still reported targeted.
+        source = _SCENARIO_MODE_HEADER.replace(
+            "           05  F1-QTY          PIC 9(3).\n",
+            "           05  IN-CODE         PIC X(30).\n"
+            "           05  IN-TYPE         PIC X.\n",
+        ).replace(
+            "           IF F1-QTY > 100\n"
+            "               DISPLAY 'HIGH'\n"
+            "           END-IF.\n",
+            "           SEARCH F1-REC\n"
+            "             WHEN IN-CODE = 'K1' AND IN-TYPE = 'Z'\n"
+            "               DISPLAY 'HIT'\n"
+            "           END-SEARCH.\n",
+        )
+        result = parse_cobol(source, filename="srchand.cbl")
+        assert result.ast is not None, result.errors
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        bundle = ProgramFixtureGenerator().generate_with_scenarios(
+            result.ast, index, report, mode="branches", seed=1
+        )
+        scenario = next(s for s in bundle.scenarios if "WHEN_1" in s.name)
+        read_fixture = next(f for f in scenario.fixtures if f.ref.category == "READ")
+        assert read_fixture.sequence
+        for row in read_fixture.sequence:
+            assert (row["IN-CODE"], row["IN-TYPE"]) == ("K1", "Z")
+
     def test_scenario_coverage_is_attached_to_the_bundle(self):
         bundle = _scenario_mode_bundle("branches")
         assert bundle.scenario_coverage is not None
