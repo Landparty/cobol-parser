@@ -1400,3 +1400,12 @@ nesting and a bare `NOT SIZE ERROR` (#399).
 by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
 (`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
 `COMP-5` is still a change.
+
+`tests/regression/test_optional_keyword_forms.py` (#405) pins the
+optional-keyword forms that used to lose data: `XML PARSE x PROCEDURE IS p`
+without PROCESSING (and dead-code not reporting `p`), SORT bare
+`DUPLICATES`, SORT/MERGE bare `SEQUENCE name` and `KEY IS k`, the
+no-keys warning on a file SORT/MERGE (not on a table SORT), and
+SPECIAL-NAMES mnemonic entries and `SYMBOLIC CHARACTERS` without IS.
+`test_initialize_sort_arithmetic_comma_gaps.py`'s two USING/GIVING comma-list
+SORTs gained a key, since a keyless file SORT now warns.

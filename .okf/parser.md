@@ -3325,3 +3325,22 @@ meaningful token after the verb, besides the raw second token: keyed on
 an earlier `EXEC <newline> SQL`. Pinned by
 `tests/regression/test_keyword_line_breaks.py`, which parses each case with
 the gap joined and broken and requires identical ASTs.
+
+**Optional keywords left out (issue #405, 2026-10-14):** forms that omit a
+keyword the IBM Enterprise COBOL diagram does not underline used to lose
+data. Now accepted: `XML PARSE x PROCEDURE IS p` (PROCESSING left out;
+`xml_json_parser.py::_consume_processing_procedure` starts at either word,
+so `p` is the `processing_procedure`, not an operand dead-code ignores);
+SORT `[WITH] DUPLICATES` and SORT/MERGE `[COLLATING] SEQUENCE [IS] name`
+(`_parse_collating_sequence`; SEQUENCE also ends the key list); `KEY IS k`
+(GnuCOBOL spelling -- the IS used to end the key list, dropping every key).
+A file SORT (USING/GIVING/INPUT/OUTPUT present) or any MERGE that still
+collects no key adds a warning ("no sort keys were recorded"); a table SORT
+may omit keys and does not. SPECIAL-NAMES: `environment-name [IS]
+mnemonic-name` without IS is recognised only after a known IBM
+environment-name (`_ENVIRONMENT_NAMES`: C01-C12, CSP, S01-S05,
+SYSIN/SYSIPT, SYSOUT/SYSLIST/SYSLST, SYSPUNCH/SYSPCH, CONSOLE, UPSI-0..7,
+AFP-5A), since otherwise an entry's start cannot be told apart from an
+operand; `UPSI-0 ON x` without STATUS/IS likewise. `SYMBOLIC CHARACTERS`
+takes IS/ARE as optional: the first integer ends the group's names.
+`tests/regression/test_optional_keyword_forms.py`.
