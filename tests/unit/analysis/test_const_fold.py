@@ -1368,3 +1368,22 @@ class TestInspectAndExecWrites:
             "           DISPLAY WS-A.\n"
         )
         assert fold.known == {}
+
+    def test_exec_cics_set_address_of_forgets_the_record(self):
+        # SET(ADDRESS OF LS-REC) re-points the record at new storage, so a
+        # value moved into it before is not what the DISPLAY shows.
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           EXEC CICS GETMAIN SET(ADDRESS OF LS-REC) FLENGTH(3)\n"
+            "           END-EXEC.\n"
+            "           MOVE 'ABC' TO LS-F.\n"
+            "           EXEC CICS READ FILE('F') RIDFLD(WS-A)\n"
+            "                SET(ADDRESS OF LS-REC) END-EXEC.\n"
+            "           DISPLAY LS-F.\n",
+            extra_data=(
+                "       LINKAGE SECTION.\n"
+                "       01  LS-REC.\n"
+                "           05  LS-F PIC X(3).\n"
+            ),
+        )
+        assert fold.known == {}
