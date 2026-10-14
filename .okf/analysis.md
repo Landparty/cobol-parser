@@ -99,6 +99,17 @@ either by bare name.
 > (a nested `ENTRY` made the container's same-named paragraph an entry
 > point). Pinned by `TestContainedProgramScope` in `test_dead_code.py`.
 
+> 2026-10-14 (issue #312): the SECTION form of the `GO TO nnnn-EXIT` idiom.
+> The last paragraph of every section a PERFORM / SORT / MERGE / XML PARSE
+> runs (`_section_exits`) is treated like a THRU range end: a GO TO onto it
+> is a reference, not a fall-through source, so it no longer keeps every
+> later section alive. Exception: when the section is itself a fall-through
+> source (fallen into, or a GO TO target), `_collect_fallthrough_refs`
+> restores the exit as a fall-through source, since on that path it runs
+> on. The same holds when the section is entered by a jump from *outside*
+> it (`_sections_entered_by_jump`: a GO TO written in another section, an
+> ALTER, a CICS HANDLE, an ENTRY). Pinned by `TestSectionExitGoTo`.
+
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]
