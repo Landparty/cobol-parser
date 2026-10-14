@@ -92,8 +92,9 @@ __all__ = [
 
 #: Members the DB2 precompiler supplies itself. An ``EXEC SQL INCLUDE`` of one
 #: that is not on the copybook path is normal, not a gap: it still gets its
-#: edge, but no ``unresolved`` note -- the copybook expander lets the same
-#: INCLUDE through for the same reason. A COPY of either is still reported.
+#: edge, but no ``unresolved`` note. This is narrower than the copybook
+#: expander, which lets *every* unresolvable INCLUDE through silently: here a
+#: missing DCLGEN is still a gap worth reporting, and so is a COPY of either.
 _PRECOMPILER_MEMBERS = frozenset({"SQLCA", "SQLDA"})
 
 #: File extensions :meth:`CodebaseGraphBuilder.build_from_directory` treats as
@@ -621,6 +622,9 @@ class CodebaseGraphBuilder:
         self._member_paths: dict[str, str | None] = {}
         # member -> why it could not be resolved (only for failed members)
         self._member_failures: dict[str, str] = {}
+        # (member, referrer) pairs already reported unresolved this build, so
+        # a COPY and an INCLUDE of one missing member give one note, not two
+        self._reported_failures: set[tuple[str, str]] = set()
         # member -> its own direct (member name, is EXEC SQL INCLUDE), sorted
         self._member_copies: dict[str, list[tuple[str, bool]]] = {}
 
@@ -632,6 +636,7 @@ class CodebaseGraphBuilder:
         # long-lived builder must not serve the previous build's chain.
         self._member_paths = {}
         self._member_failures = {}
+        self._reported_failures = set()
         self._member_copies = {}
         files = self._normalize_paths(paths)
 
@@ -976,7 +981,8 @@ class CodebaseGraphBuilder:
         A failure is reported for every reference that is not an INCLUDE of
         a precompiler-supplied member (:data:`_PRECOMPILER_MEMBERS`), so a
         quiet ``INCLUDE SQLCA`` seen first cannot silence a later ``COPY
-        SQLCA``; the graph dedupes the repeated notes.
+        SQLCA``. One note per (member, referrer): whichever of COPY / INCLUDE
+        is seen first names it.
         """
         if self._resolver is None:
             return None
@@ -988,7 +994,12 @@ class CodebaseGraphBuilder:
                 self._member_paths[member] = None
                 self._member_failures[member] = f"{type(exc).__name__}: {exc}"
         resolved = self._member_paths[member]
-        if resolved is None and not (sql_include and member in _PRECOMPILER_MEMBERS):
+        if (
+            resolved is None
+            and not (sql_include and member in _PRECOMPILER_MEMBERS)
+            and (member, referrer) not in self._reported_failures
+        ):
+            self._reported_failures.add((member, referrer))
             kind = "EXEC SQL INCLUDE" if sql_include else "COPY"
             unresolved.append(
                 f"{kind} member {member} (referenced by {referrer}) could not be "

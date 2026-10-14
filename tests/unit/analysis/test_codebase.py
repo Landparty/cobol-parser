@@ -512,6 +512,29 @@ class TestSqlIncludeEdges:
         )
         assert any(note.startswith("COPY member SQLCA") for note in graph.unresolved)
 
+    def test_copy_and_include_of_one_missing_member_give_one_note(
+        self, tmp_path, copybooks
+    ):
+        program = tmp_path / "P.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. BOTHWAYS.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       COPY DCLGONE.\n"
+            "           EXEC SQL INCLUDE DCLGONE END-EXEC.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       P.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder(copybook_paths=[str(copybooks)]).build(
+            [str(program)]
+        )
+        assert [e.member for e in graph.copy_edges] == ["DCLGONE"]
+        notes = [n for n in graph.unresolved if "DCLGONE" in n]
+        assert len(notes) == 1
+        assert notes[0].startswith("COPY member DCLGONE")
+
     def test_lowercase_and_quoted_include_names(self, tmp_path):
         books = tmp_path / "books"
         books.mkdir()
