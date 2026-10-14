@@ -784,6 +784,8 @@ def test_an_overlay_of_a_depending_on_counter_still_sizes_the_table():
         "TAIL": "END",
     }
     assert result.error_count == 0
+    # The counter is read, so no caveat may say it is missing from the record.
+    assert not any("not part of the record" in c for c in result.caveats)
 
 
 def test_a_wider_overlay_reads_the_field_after_it():

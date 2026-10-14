@@ -288,3 +288,13 @@ def test_overlay_views_are_built_only_when_read():
     assert len(views.overlays) == 20
     assert all(view.__dict__.get("_built") is None for view in views.overlays)
     assert len(views.get("F3-A").fields) == 20 * 500
+
+
+def test_a_lazy_overlay_view_survives_dataclasses_replace():
+    import dataclasses
+
+    overlay = _views(OVERLAID).get("ADDR-OVERSEAS")
+    renamed = dataclasses.replace(overlay, name="OTHER")
+    assert renamed.name == "OTHER"
+    assert renamed.fields == overlay.fields
+    assert renamed.overlay_length == overlay.overlay_length

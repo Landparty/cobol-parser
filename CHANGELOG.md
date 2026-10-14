@@ -319,11 +319,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     record, not just the overlay's own. Fields outside the overlay keep the
     base view's column names; an overlay inside `OCCURS` gets one column per
     occurrence (`T-A(1)`, `T-A(2)`, ...) instead of occurrence 1 only; an
-    overlay shorter than what it redefines is followed by a `FILLER` column.
+    overlay shorter than what it redefines is followed by a padding column
+    (`FILLER`, or its qualified path such as `R.A-R.FILLER` when the record
+    already has a `FILLER` column).
   * In `decode --list-views` (`RecordViews.to_dict()`), an overlay view's
     `length` and `fields` now cover the whole record and start at offset 0.
     `offset` is still where the overlay itself starts, and its own span moves
     to a new `overlay_length` key.
+    To get the old overlay-only field list back, keep the fields whose
+    `offset` is in `offset .. offset + overlay_length` (first occurrence; for
+    an overlay inside `OCCURS`, each occurrence's fields carry their own
+    subscripts).
   * `compare --view X --key K` now works when `K` is outside the overlay
     (it used to fail with "key field is not in the layout").
   * An overlay that redefines an `OCCURS ... DEPENDING ON` counter still

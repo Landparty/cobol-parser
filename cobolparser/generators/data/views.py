@@ -172,15 +172,22 @@ class _LazyOverlayView(RecordView):
 
     def __init__(
         self,
-        *,
         name: str,
-        redefines: str,
+        redefines: str | None,
         offset: int,
-        offset_ambiguous: bool,
-        overlay_length: int,
-        widens: bool,
-        build: Callable[[], tuple[list[PlacedField], tuple[HiddenCounter, ...]]],
+        fields: list[PlacedField] | None = None,
+        offset_ambiguous: bool = False,
+        overlay_length: int | None = None,
+        hidden_counters: tuple[HiddenCounter, ...] = (),
+        widens: bool = False,
+        *,
+        build: (
+            Callable[[], tuple[list[PlacedField], tuple[HiddenCounter, ...]]] | None
+        ) = None,
     ) -> None:
+        # The positional parameters mirror RecordView's own fields, so
+        # dataclasses.replace() -- which passes every field back in -- still
+        # works: it hands over the already-built fields and no builder.
         for attr, value in (
             ("name", name),
             ("redefines", redefines),
@@ -189,7 +196,7 @@ class _LazyOverlayView(RecordView):
             ("overlay_length", overlay_length),
             ("widens", widens),
             ("_build", build),
-            ("_built", None),
+            ("_built", None if build is not None else (fields or [], hidden_counters)),
         ):
             object.__setattr__(self, attr, value)
 

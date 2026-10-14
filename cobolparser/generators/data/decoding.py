@@ -1305,7 +1305,10 @@ class RecordDecoder:
 
         specs = [placed.spec for placed in view.fields]
         caveats = list(self.views.caveats)
-        for caveat in encoding_caveats(specs, opts):
+        # A counter the overlay covers is still read (see decode_record), so
+        # it counts as part of the record: leaving it out claimed it was not.
+        counters = [counter.spec for counter in view.hidden_counters]
+        for caveat in encoding_caveats([*specs, *counters], opts):
             if caveat not in caveats:
                 caveats.append(caveat)
         if any(_normalized_usage(spec) in SINGLE_FLOAT_USAGES for spec in specs):
