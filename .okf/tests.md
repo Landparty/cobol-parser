@@ -24,6 +24,13 @@ kept). Four selector-shape tests now expect the additive `"quoted": True`.
 `WHEN SPACES` -> `WHEN 'SPACES'` and `WHEN WS-B` -> `WHEN 'WS-B'` each diff
 as one `condition-changed`.
 
+2026-10-14 (issue #392): new `tests/unit/analysis/test_cics_terminators.py`
+(29 tests): `EXEC CICS RETURN` / `XCTL` / `ABEND` end a paragraph for
+dead-code (later paragraphs dead), program-flow (no `FALL_THROUGH`,
+`has_cics_exit`, exit point) and recursion-check (a RETURN TRANSID retry
+loop is MEDIUM with an escape, not a HIGH lint error); a RETURN / XCTL with
+`RESP` / `RESP2` / `NOHANDLE` still falls through, ABEND never does.
+
 2026-10-14: +10 in `tests/unit/analysis/test_dead_code.py`'s new
 `TestSectionExitGoTo` (issue #312): `GO TO nnnn-EXIT` inside a PERFORMed /
 SORT-procedure SECTION no longer keeps later sections alive; three guards

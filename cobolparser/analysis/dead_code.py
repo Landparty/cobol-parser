@@ -28,6 +28,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ._cics import cics_terminator_kind
 from ._procedures import ProcedureIndex, enclosing_section, statement_qualifier
 
 
@@ -630,9 +631,11 @@ class DeadCodeAnalyzer:
     def _is_terminator(stmt: Any) -> bool:
         """Check whether *stmt* unconditionally transfers control away when
         reached: STOP RUN (not STOP 'literal', which merely halts pending
-        operator action), GOBACK, EXIT PROGRAM, or a bare (non-DEPENDING)
-        GO TO.
+        operator action), GOBACK, EXIT PROGRAM, a bare (non-DEPENDING)
+        GO TO, or EXEC CICS RETURN / XCTL / ABEND (see ``_cics``).
         """
+        if cics_terminator_kind(stmt) is not None:
+            return True
         if isinstance(stmt, GobackStatement):
             return True
         if isinstance(stmt, StopStatement):

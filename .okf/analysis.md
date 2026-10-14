@@ -133,7 +133,8 @@ the one immediately before it is itself already known to be reachable
 extending) and does not terminate per `_terminates`: any of its own
 top-level statements (not just the last one — see Copilot follow-up below)
 is a hard terminator (`STOP RUN` — not `STOP 'literal'`, which merely
-halts pending operator action; `GOBACK`; `EXIT PROGRAM`) or an
+halts pending operator action; `GOBACK`; `EXIT PROGRAM`; `EXEC CICS
+RETURN` / `XCTL` / `ABEND`, see `_cics.py` below) or an
 unconditional (non-`DEPENDING`) `GO TO`. The reachability gate matters:
 without it, a chain of paragraphs that are *all* themselves unreached
 would still credit each other purely for standing next to one another in
@@ -730,7 +731,7 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   A `GOTO_LOOP`/`MIXED` cycle is graded by `_has_escape`: `HIGH` if no
   paragraph in the cycle has an edge leaving it (to a paragraph outside the
   cycle) or a program-terminating statement (`has_stop_run`/`has_goback`/
-  `has_exit_program`/`has_return` on the `FlowNode`), `MEDIUM` otherwise —
+  `has_exit_program`/`has_cics_exit`/`has_return` on the `FlowNode`), `MEDIUM` otherwise —
   fall-through-only cycles are never reported (fall-through can't actually
   form a cycle).
   A `MIXED` cycle that is a PERFORM of a multi-procedure range (a SECTION
@@ -3385,3 +3386,20 @@ and shares no code with the COBOL pipeline; it has its own OKF file:
   `5E`). The letter-led pattern bit the digit off, so `MOVE 1ST-NAME TO
   2ND-NAME` referenced `ST-NAME` / `ND-NAME`: both items unused, both
   names undefined in xref. Shared with `redundancy.py`'s clone renaming.
+
+
+## CICS terminators (issue #392, `_cics.py`)
+
+`cics_terminator_kind(stmt)` is the one rule for which EXEC CICS commands
+never return control to the next statement: `RETURN`, `XCTL` and `ABEND`.
+Both `_is_terminator` copies (`dead_code.py`, `program_flow/scanner.py`)
+call it, so neither draws fall-through past such a paragraph. The scanner
+also sets `FlowNode.has_cics_exit`, adds the paragraph to `exit_points` and
+records `exit_statement_kind` (`"EXEC CICS RETURN"`, ...);
+`RecursionRiskAnalyzer._has_escape` counts `has_cics_exit` as a way out.
+Decision (option (a) on the issue): a `RETURN` / `XCTL` carrying `RESP`,
+`RESP2` or `NOHANDLE` is **not** a terminator, since a failed command then
+continues at the next statement; `ABEND` always is. A pseudo-conversational
+retry loop ending in `RETURN TRANSID` is therefore graded `MEDIUM` (has an
+escape), the same as the GOBACK equivalent, not a `HIGH` lint error.
+Pinned in `tests/unit/analysis/test_cics_terminators.py`.

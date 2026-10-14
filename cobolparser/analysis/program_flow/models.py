@@ -69,6 +69,8 @@ class FlowNode:
     has_stop_run: bool = False
     has_goback: bool = False
     has_exit_program: bool = False
+    #: EXEC CICS RETURN / XCTL / ABEND that never returns control here.
+    has_cics_exit: bool = False
     has_return: bool = False
     has_exit_section: bool = False
     has_exit_paragraph: bool = False
@@ -112,6 +114,8 @@ class FlowNode:
             result["has_goback"] = True
         if self.has_exit_program:
             result["has_exit_program"] = True
+        if self.has_cics_exit:
+            result["has_cics_exit"] = True
         if self.has_return:
             result["has_return"] = True
         if self.has_exit_section:

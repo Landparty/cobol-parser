@@ -31,6 +31,7 @@ from ...models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from .._cics import cics_terminator_kind
 from .._procedures import ProcedureIndex, enclosing_section
 from .condition_text import render_condition_text
 from .edges import EdgeCollector
@@ -551,6 +552,11 @@ class ProcedureScanner:
                 self._collector.process_xml_parse(stmt, proc_name)
             elif getattr(stmt, "node_type", None) == "EXEC_CICS":
                 self._collector.process_cics_handle(stmt, proc_name)
+                cics_exit = cics_terminator_kind(stmt)
+                if cics_exit is not None:
+                    node.has_cics_exit = True
+                    self._exit_points.add(proc_name)
+                    self._record_exit_statement(node, cics_exit, stmt.location)
             elif isinstance(stmt, AlterStatement):
                 self._collector.process_alter(stmt, source_id)
             elif isinstance(stmt, CancelStatement):
@@ -629,10 +635,13 @@ class ProcedureScanner:
     def _is_terminator(stmt: Any) -> bool:
         """Check whether *stmt* unconditionally transfers control away when
         reached: STOP RUN (not STOP 'literal', which merely halts pending
-        operator action), GOBACK, EXIT PROGRAM, or a bare (non-DEPENDING)
-        GO TO. Mirrors DeadCodeAnalyzer._is_terminator, kept independent per
-        this package's existing collaborator architecture.
+        operator action), GOBACK, EXIT PROGRAM, a bare (non-DEPENDING)
+        GO TO, or EXEC CICS RETURN / XCTL / ABEND (see ``_cics``). Mirrors
+        DeadCodeAnalyzer._is_terminator, kept independent per this package's
+        existing collaborator architecture.
         """
+        if cics_terminator_kind(stmt) is not None:
+            return True
         if isinstance(stmt, GobackStatement):
             return True
         if isinstance(stmt, StopStatement):

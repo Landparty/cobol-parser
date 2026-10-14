@@ -355,6 +355,7 @@ class RecursionRiskAnalyzer:
                 node.has_stop_run
                 or node.has_goback
                 or node.has_exit_program
+                or node.has_cics_exit
                 or node.has_return
             ):
                 return True
