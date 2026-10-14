@@ -382,3 +382,28 @@ class TestCopybookImpact:
 
         assert payload["direct_programs"] == []
         assert payload["summary"]["program_count"] == 0
+
+    def test_a_member_pulled_in_by_exec_sql_include_is_found(self, tree, capsys):
+        (tree / "copybooks" / "DCLCUST.cpy").write_text(
+            "       01 DCLCUST.\n          05 CUST-KEY PIC X(6).\n",
+            encoding="utf-8",
+        )
+        (tree / "DB2PGM.cbl").write_text(
+            MAINPGM.replace("MAINPGM", "DB2PGM").replace(
+                "COPY CUSTREC.", "EXEC SQL INCLUDE DCLCUST END-EXEC."
+            ),
+            encoding="utf-8",
+        )
+        _cmd_copybook_impact(
+            argparse.Namespace(
+                member="DCLCUST",
+                **vars(
+                    _graph_args([str(tree)], copybook_path=[str(tree / "copybooks")])
+                ),
+            )
+        )
+        payload = json.loads(capsys.readouterr().out)
+
+        assert payload["direct_programs"] == ["DB2PGM"]
+        assert "CUST-KEY" in payload["fields"]
+        assert payload["unresolved"] == []

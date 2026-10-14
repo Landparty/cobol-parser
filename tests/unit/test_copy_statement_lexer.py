@@ -148,3 +148,24 @@ def test_source_location_with_mixed_line_endings():
     assert statements[0].source_location is not None
     _file, line, _col = statements[0].source_location
     assert line == 4
+
+
+class TestExtractCopyStatementsSqlInclude:
+    """``extract_copy_statements(sql_include=True)`` reports INCLUDEs (#295)."""
+
+    SOURCE = (
+        "       WORKING-STORAGE SECTION.\n"
+        "       COPY CUSTREC.\n"
+        "           EXEC SQL INCLUDE SQLCA END-EXEC.\n"
+    )
+
+    def test_default_ignores_sql_include(self):
+        names = [s.member_name for s in extract_copy_statements(self.SOURCE)]
+        assert names == ["CUSTREC"]
+
+    def test_flag_reports_sql_include_marked_as_such(self):
+        found = extract_copy_statements(self.SOURCE, sql_include=True)
+        assert [(s.member_name, s.sql_include) for s in found] == [
+            ("CUSTREC", False),
+            ("SQLCA", True),
+        ]
