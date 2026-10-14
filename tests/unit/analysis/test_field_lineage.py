@@ -215,6 +215,20 @@ def _program(
     return FieldFlowAnalyzer().analyze(result.ast)
 
 
+@pytest.mark.parametrize(
+    "select", ["SELECT F ASSIGN TO INDD,", "SELECT F ASSIGN TO INDD;"]
+)
+def test_separator_after_assign_names_the_dd_port(select: str) -> None:
+    """Issue #342: ``ASSIGN TO INDD,`` made the port ``file:,``."""
+    report = _program(
+        "01 X PIC X.",
+        "OPEN INPUT F\nREAD F\nDISPLAY R",
+        fd="FD F.\n01 R PIC X(4).",
+        select=select + "\n               ORGANIZATION IS SEQUENTIAL.",
+    )
+    assert [p.key for p in report.ports if p.kind == "file"] == ["INDD"]
+
+
 def _flagged(report: FieldFlowReport) -> dict[tuple[str, str, str], bool]:
     return {(e.kind, e.source.label(), e.target.label()): e.exact for e in report.edges}
 

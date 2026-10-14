@@ -383,8 +383,8 @@ recurse both sides; `ConditionalExpression`/`ArithmeticExpression` ->
 `left_operand`/`right_operand`; `FunctionCall` -> `arguments`) but collects
 leaf identifiers instead of rendering text, falling back to a best-effort
 regex over `operands[0]`/`raw_condition` for a node shape it can't
-decompose structurally (SEARCH WHEN and `EVALUATE TRUE` Condition-type
-selectors, per `constraints.py`'s same documented gap — see
+decompose structurally (`EVALUATE TRUE` Condition-type selectors, and
+SEARCH WHEN conditions that carry no `condition_tree`, per `constraints.py`'s same documented gap — see
 `ConstraintExtractor`'s section above). The fallback is deliberately
 over-inclusive: a false positive there only makes the analyzer *miss* an
 unused variable, never wrongly flag a used one.
@@ -2020,21 +2020,29 @@ one `unsupported` note rather than silence; a pure internal counter loop
 (`PERFORM UNTIL I > 10`, `I` not boundary-fed) is correctly silent -- out of
 scope, not a gap.
 
-**SEARCH WHEN and `EVALUATE TRUE`'s non-compound selectors share one text
-parser.** `SearchStatement.when_clauses`' `"condition"` key is a single raw
-joined string, not a structured tree (unlike IF/PERFORM, SEARCH conditions
-were never given the M12 structural treatment) -- confirmed against
-`search_parser.py`. `EVALUATE TRUE WHEN <selector>` also lacks structure for
-a simple relational selector: `evaluate_parser.py`'s `_build_selector` never
-emits an `"Identifier"` selector type at all (a documented assumption this
-module's first draft got wrong) -- a bare condition-name like `WHEN
+**SEARCH WHEN is extracted from a condition tree (issue #348, 2026-10-14).**
+`search_parser.py` builds each WHEN condition with the shared
+`build_condition_expression` (the IF / PERFORM UNTIL machinery) and stores
+it as `when_clauses[i]["condition_tree"]` next to the unchanged raw
+`"condition"` string; `SearchStatement.to_dict()` serializes it too.
+`_extract_search` walks that tree with `_extract_expr`, so `WHEN A = 'K1' AND
+B = 'Z'` is two conjuncts and an OR becomes `WHEN_n#1` / `WHEN_n#2` arms,
+exactly like IF. Before, the raw text was split on its first operator and the
+whole tail (`K1' AND B = 'Z`) became one made-up literal that gen-fixtures
+wrote into every row while reporting the arm targeted. A SEARCH node built
+without a tree still falls back to the text parser below.
+
+**`EVALUATE TRUE`'s non-compound selectors use a minimal text parser.**
+`EVALUATE TRUE WHEN <selector>` lacks structure for a simple relational
+selector: `evaluate_parser.py`'s `_build_selector` never emits an
+`"Identifier"` selector type at all -- a bare condition-name like `WHEN
 F1-VALID` and a simple comparison like `WHEN F1-QTY = 5` both arrive as
 `{"type": "Literal", ...}` / `{"type": "Condition", "text": ...}` with no
-`"operator"` key, the *same* raw-text shapes SEARCH already has to handle.
-Both route through the same minimal relational-text parser
-(`_parse_relational_text`); a compound `AND`/`OR` selector text (`sel
-["operator"]` present) stays unsupported in v1, same limitation as a
-compound SEARCH WHEN.
+`"operator"` key. Those route through `_parse_relational_text`; a compound
+`AND`/`OR` selector (`sel["operator"]` present) stays unsupported in v1.
+`_parse_relational_text` itself reports any text holding an `AND`/`OR`
+outside a quoted literal as unsupported rather than splitting it on its first
+operator.
 
 **Two-field comparisons are unsupported in v1** (`IF F1-QTY > F1-STATUS`) --
 stated as a parent-plan limitation, not attempted.
