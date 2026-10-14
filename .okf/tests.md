@@ -8,6 +8,13 @@ timestamp: 2026-10-13T00:00:00Z
 
 # Overview
 
+2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
+#377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
+read, no phantom paragraph appears, and dead-code / program-flow /
+unused-variables / complexity all see the jump table.
+`test_go_parser_edge_cases.py`'s `test_depending_without_on_reads_variable`
+replaces the test that pinned the old behavior.
+
 2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests,
 #313) pins EVALUATE `WHEN SPACES` / `ZERO` / `LOW-VALUES` as figurative
 selectors and constraints, distinct from a quoted `WHEN 'SPACES'`, through
@@ -327,6 +334,13 @@ and tagged members parse cleanly under it; only `--source-format=free`
 hard-disables) and adds `preprocess` auto-detection pins (free-form
 input passes through untouched by default; `--source-format=fixed`
 still forces).
+
+2026-10-14: New `tests/unit/test_perform_until_newline.py` (19 tests,
+issue #347) -- a PERFORM UNTIL condition ending at a line break, in the
+out-of-line, inline and VARYING forms: bare condition-name, `( A > 5 )`,
+a parenthesised OR, `NOT cond` and a class test each get a real condition
+tree; the line-break form matches the period form; and the READ/AT END/EOF
+flag idiom yields a `SequenceConstraint`. See [parser.md](parser.md).
 
 2026-08-24 (second entry this date): New
 `tests/regression/test_corpus_residual_findings.py` (10 tests) pinning a

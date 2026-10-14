@@ -609,6 +609,12 @@ def _same(
         return False
     if not exp.present:
         return True
+    if exp.length != act.length:
+        # One record ended part-way through the field (#357). What is left
+        # can decode to the same value -- 'ABC ' cut to 'ABC', '0000' cut to
+        # '0' -- yet the records differ: the LRECL is not the same, and a
+        # READ leaves the bytes past a short record undefined.
+        return False
     if compare_bytes or exp.error or act.error:
         return exp.raw == act.raw
     if exp.value != act.value:
