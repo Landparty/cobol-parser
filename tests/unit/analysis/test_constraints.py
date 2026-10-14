@@ -412,6 +412,78 @@ class TestSearch:
         assert branch.arms["WHEN_1"][0].values == ("5",)
         assert "AT_END" in branch.arms
 
+    def test_search_when_and_is_two_conjuncts_not_one_made_up_literal(self):
+        # Issue #348: the raw text split on its first operator made the whole
+        # tail ("A' AND F1-QTY = 5") the right-hand value of one equality.
+        _, _, _, report = _extract(
+            "           SEARCH F1-REC\n"
+            "               WHEN F1-STATUS = 'A' AND F1-QTY = 5\n"
+            "                   DISPLAY 'FOUND'\n"
+            "           END-SEARCH.\n"
+        )
+        branch = _branch(report)
+        assert [(c.field.spec.name, c.op, c.values) for c in branch.arms["WHEN_1"]] == [
+            ("F1-STATUS", "eq", ("A",)),
+            ("F1-QTY", "eq", ("5",)),
+        ]
+        assert branch.unsupported == []
+
+    def test_search_when_or_is_one_arm_variant_per_side(self):
+        _, _, _, report = _extract(
+            "           SEARCH F1-REC\n"
+            "               WHEN F1-STATUS = 'A' OR F1-QTY > 7\n"
+            "                   DISPLAY 'FOUND'\n"
+            "           END-SEARCH.\n"
+        )
+        branch = _branch(report)
+        assert [
+            [(c.field.spec.name, c.op, c.values) for c in branch.arms[arm]]
+            for arm in ("WHEN_1#1", "WHEN_1#2")
+        ] == [[("F1-STATUS", "eq", ("A",))], [("F1-QTY", "gt", ("7",))]]
+
+    def test_search_when_tree_is_recorded_alongside_the_text(self):
+        ast, _, _, _ = _extract(
+            "           SEARCH F1-REC\n"
+            "               WHEN F1-STATUS = 'A' AND F1-QTY = 5\n"
+            "                   DISPLAY 'FOUND'\n"
+            "           END-SEARCH.\n"
+        )
+        (search,) = ast.find_all_by_type("SearchStatement")
+        clause = search.when_clauses[0]
+        assert clause["condition"] == "F1-STATUS = 'A' AND F1-QTY = 5"
+        assert clause["condition_tree"].operator == "AND"
+        serialized = search.to_dict()["when_clauses"][0]
+        assert serialized["condition"] == clause["condition"]
+        assert serialized["condition_tree"]["operator"] == "AND"
+
+
+class TestRelationalTextCompound:
+    """The raw-text fallback reports a compound condition rather than
+    inventing a literal out of its tail (issue #348)."""
+
+    def test_and_in_text_is_unsupported(self):
+        from cobolparser.analysis.constraints import _parse_relational_text
+
+        _, index, boundary_report, _ = _extract("           STOP RUN.\n")
+        unsupported: list[str] = []
+        fed = {
+            name.upper() for b in boundary_report.boundaries for name in b.record_names
+        }
+        result = _parse_relational_text(
+            "F1-STATUS = 'A' AND F1-QTY = 5", index, fed, "T", unsupported
+        )
+        assert result is None
+        assert len(unsupported) == 1
+        assert "compound condition" in unsupported[0]
+
+    def test_and_inside_a_quoted_literal_is_not_a_connective(self):
+        from cobolparser.analysis.constraints import _parse_relational_text
+
+        _, index, _, _ = _extract("           STOP RUN.\n")
+        unsupported: list[str] = []
+        _parse_relational_text("F1-STATUS = 'A AND B'", index, set(), "T", unsupported)
+        assert not any("compound condition" in reason for reason in unsupported)
+
 
 class TestSequenceConstraint:
     def test_perform_until_eof_flag_pattern(self):
