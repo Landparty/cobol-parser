@@ -770,7 +770,7 @@ method names — 5 of the 15 tests above cover these. 2026-08-04: +454 tests acr
 (Phase 5), wiring `--scenarios branches|all` into a populated
 `FixtureBundle` plus a hand-written schema doc (Phase 6, +15 tests: see
 `docs/fixture-bundle-schema.md`), and per-scenario tier 1/2 `Expectation`s —
-`call_count` derived exactly from each scenario's own generated sequence,
+`call_count` (exact counts only since issue #363: see generators.md),
 `field_equals` from the new `analysis.const_fold.ConstantFolder` single-pass
 walk seeded with that scenario's own mocked inputs (Phase 7, +104 tests:
 `test_const_fold.py` (44 unit tests over MOVE/arithmetic/COMPUTE folding,

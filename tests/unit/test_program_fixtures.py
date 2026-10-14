@@ -518,23 +518,31 @@ class TestTerminalStatusFieldResolution:
         assert read_fixture.terminal == {"WS-SEQ-STATUS": "10"}
 
 
+def _counts(scenario) -> dict[str, list[int]]:
+    found: dict[str, list[int]] = {}
+    for e in scenario.expectations:
+        if e.kind == "call_count":
+            found.setdefault(e.ref, []).append(e.value)
+    return found
+
+
 class TestTier1CallCountExpectations:
-    """Phase 7 tier 1 (structural): call_count is derivable exactly from a
-    scenario's own generated sequence, so it is emitted for every boundary
-    that actually got a fixture -- never a guess, never absent when it could
-    be exact."""
+    """Phase 7 tier 1 (structural): one call_count per mocked boundary, and
+    only when it is exact -- the program's own control flow decides how many
+    times a statement runs, not the length of the generated sequence."""
 
-    def test_status_only_boundary_gets_call_count_of_one(self):
+    def test_status_only_boundaries_count_every_statement(self):
         bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
-        opens = [
-            e
-            for e in bundle.scenarios[0].expectations
-            if e.kind == "call_count" and e.ref.startswith("OPEN:")
-        ]
-        assert opens
-        assert all(e.value == 1 for e in opens)
+        counts = _counts(bundle.scenarios[0])
+        # SEQ-FILE is opened twice (INPUT, then OUTPUT): one merged count.
+        # The `IF WS-SEQ-STATUS NOT = '00' ... STOP RUN` between them tests a
+        # status the scenario's own fixture supplies, so it does not make
+        # the rest of the program uncertain.
+        assert counts["OPEN:SEQ-FILE"] == [2]
+        assert counts["OPEN:IDX-FILE"] == [1]
+        assert counts["OPEN:REL-FILE"] == [1]
 
-    def test_read_with_at_end_handler_counts_rows_plus_one(self):
+    def test_straight_line_read_with_at_end_counts_one_not_rows_plus_one(self):
         bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
         seq_file_read = next(
             f
@@ -542,43 +550,23 @@ class TestTier1CallCountExpectations:
             if f.ref.category == "READ" and f.ref.key == "SEQ-FILE"
         )
         assert seq_file_read.terminal is not None
-        expectation = next(
-            e
-            for e in bundle.scenarios[0].expectations
-            if e.kind == "call_count" and e.ref == "READ:SEQ-FILE"
-        )
-        assert expectation.value == len(seq_file_read.sequence) + 1 == 11
+        assert len(seq_file_read.sequence) == 10
+        # One READ statement, run once: the program never loops over the
+        # file, so it is invoked once however many rows the mock holds.
+        assert _counts(bundle.scenarios[0])["READ:SEQ-FILE"] == [1]
 
-    def test_read_without_at_end_handler_counts_rows_only(self):
+    def test_reads_of_one_file_merge_into_one_count(self):
         bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
-        # IDX-FILE has two distinct READ boundaries: a keyed random read (no
-        # AT END, INVALID KEY only) and a NEXT RECORD read (has AT END) --
-        # only the former should have no "+1".
-        idx_reads = [
-            f
-            for f in bundle.scenarios[0].fixtures
-            if f.ref.category == "READ" and f.ref.key == "IDX-FILE"
-        ]
-        no_at_end = next(f for f in idx_reads if f.terminal is None)
-        expectation = next(
-            e
-            for e in bundle.scenarios[0].expectations
-            if e.kind == "call_count"
-            and e.ref == "READ:IDX-FILE"
-            and e.value == len(no_at_end.sequence)
-        )
-        assert expectation.value == 10
+        # IDX-FILE has two READ statements (a keyed random read and a NEXT
+        # RECORD read), each run once.
+        assert _counts(bundle.scenarios[0])["READ:IDX-FILE"] == [2]
 
-    def test_call_boundary_gets_call_count_of_one(self):
+    def test_call_boundary_counts_every_call_statement(self):
         bundle = ProgramFixtureGenerator().generate_from_file(
             SUBPROGRAM_DEMO, seed=3, callee_paths=[]
         )
-        calculator_count = next(
-            e
-            for e in bundle.scenarios[0].expectations
-            if e.kind == "call_count" and e.ref == "CALL:CALCULATOR"
-        )
-        assert calculator_count.value == 1
+        # Three CALL 'CALCULATOR' statements in one PERFORMed paragraph.
+        assert _counts(bundle.scenarios[0])["CALL:CALCULATOR"] == [3]
 
     def test_out_boundary_gets_no_call_count_expectation(self):
         bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
@@ -639,6 +627,153 @@ def _tier2_bundle(seed: int = 7):
     index = ProgramLayoutIndex.build(result.ast)
     report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
     return ProgramFixtureGenerator().generate(result.ast, index, report, seed=seed)
+
+
+def _bundle_for(source: str, *, mode: str = "branches", rows: int = 3):
+    from cobolparser.generators.data.options import DataGeneratorOptions
+
+    result = parse_cobol(source, filename="counts.cbl")
+    assert result.ast is not None, result.errors
+    index = ProgramLayoutIndex.build(result.ast)
+    report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+    return ProgramFixtureGenerator(
+        DataGeneratorOptions(rows=rows)
+    ).generate_with_scenarios(result.ast, index, report, mode=mode, seed=1)
+
+
+_WS_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. COUNTS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-IN               PIC X.
+       01  WS-RATE             PIC 9(3).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+"""
+
+_EOF_LOOP_PROGRAM = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. EOFLOOP.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-FILE ASSIGN TO 'IN.DAT'.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  IN-FILE.
+       01  IN-REC.
+           05  IN-QTY          PIC 9(3).
+       WORKING-STORAGE SECTION.
+       01  WS-EOF              PIC X VALUE 'N'.
+       01  WS-RATE             PIC 9(3).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT IN-FILE
+           READ IN-FILE AT END MOVE 'Y' TO WS-EOF END-READ
+           PERFORM UNTIL WS-EOF = 'Y'
+               CALL 'SUBX' USING WS-RATE
+               READ IN-FILE AT END MOVE 'Y' TO WS-EOF END-READ
+           END-PERFORM
+           CLOSE IN-FILE
+           STOP RUN.
+"""
+
+
+class TestCallCountFollowsControlFlow:
+    """Issue #363: a count is stated only where control flow makes it exact."""
+
+    def test_call_inside_a_branch_gets_no_count(self):
+        bundle = _bundle_for(_WS_HEADER + """\
+           ACCEPT WS-IN
+           IF WS-IN = 'A'
+              CALL 'GETRATE' USING WS-RATE
+           ELSE
+              DISPLAY 'NONE'
+           END-IF
+           STOP RUN.
+""")
+        assert len(bundle.scenarios) >= 3  # happy path + THEN + ELSE
+        for scenario in bundle.scenarios:
+            counts = _counts(scenario)
+            assert counts["ACCEPT:WS-IN"] == [1], scenario.name
+            assert "CALL:GETRATE" not in counts, scenario.name
+            # The CALL still gets its mocked fixture; only the count is gone.
+            assert any(f.ref.key == "GETRATE" for f in scenario.fixtures)
+
+    def test_literal_times_loop_multiplies_the_count(self):
+        bundle = _bundle_for(_WS_HEADER + """\
+           PERFORM 3 TIMES
+               ACCEPT WS-IN
+               CALL 'GETRATE' USING WS-RATE
+           END-PERFORM
+           PERFORM SUB-PARA 2 TIMES
+           PERFORM SUB-PARA
+           STOP RUN.
+       SUB-PARA.
+           CALL 'SUBY' USING WS-RATE.
+""")
+        counts = _counts(bundle.scenarios[0])
+        assert counts["ACCEPT:WS-IN"] == [3]
+        assert counts["CALL:GETRATE"] == [3]
+        assert counts["CALL:SUBY"] == [3]
+
+    def test_until_loop_body_gets_no_count(self):
+        bundle = _bundle_for(_WS_HEADER + """\
+           PERFORM UNTIL WS-IN = 'Q'
+               ACCEPT WS-IN
+           END-PERFORM
+           STOP RUN.
+""")
+        assert "ACCEPT:WS-IN" not in _counts(bundle.scenarios[0])
+
+    def test_priming_read_and_loop_read_share_one_eof_count(self):
+        bundle = _bundle_for(_EOF_LOOP_PROGRAM, rows=3)
+        happy = bundle.scenarios[0]
+        counts = _counts(happy)
+        read_rows = {
+            len(f.sequence) for f in happy.fixtures if f.ref.category == "READ"
+        }
+        assert read_rows == {3}
+        # 3 records plus the READ that hits end of file, once for the file.
+        assert counts["READ:IN-FILE"] == [4]
+        assert counts["OPEN:IN-FILE"] == [1]
+        assert counts["CLOSE:IN-FILE"] == [1]
+        # The loop body's CALL runs once per record: not stated.
+        assert "CALL:SUBX" not in counts
+
+    def test_eof_count_follows_the_empty_input_sequence(self):
+        bundle = _bundle_for(_EOF_LOOP_PROGRAM, mode="all", rows=3)
+        empty = next(s for s in bundle.scenarios if s.name == "empty input")
+        assert _counts(empty)["READ:IN-FILE"] == [1]
+
+    def test_data_dependent_stop_hides_later_counts(self):
+        bundle = _bundle_for(_WS_HEADER + """\
+           ACCEPT WS-IN
+           IF WS-IN = 'X'
+              STOP RUN
+           END-IF
+           CALL 'GETRATE' USING WS-RATE
+           STOP RUN.
+""")
+        counts = _counts(bundle.scenarios[0])
+        assert counts["ACCEPT:WS-IN"] == [1]
+        assert "CALL:GETRATE" not in counts
+
+    def test_code_after_a_main_line_go_to_gets_no_count(self):
+        bundle = _bundle_for(_WS_HEADER + """\
+           ACCEPT WS-IN
+           GO TO NEXT-PARA.
+       SKIPPED-PARA.
+           CALL 'NEVER' USING WS-RATE.
+       NEXT-PARA.
+           CALL 'GETRATE' USING WS-RATE
+           STOP RUN.
+""")
+        counts = _counts(bundle.scenarios[0])
+        assert counts["ACCEPT:WS-IN"] == [1]
+        assert "CALL:NEVER" not in counts
+        assert "CALL:GETRATE" not in counts
 
 
 class TestTier2FieldEqualsExpectations:

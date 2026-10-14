@@ -2387,6 +2387,40 @@ both counts, scanner.py had already been fixed to interleave). Behavior for
 programs without sections is unchanged. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestA4OrderedParagraphsInterleaveSections`.
 
+## Invocation counts (`invocation_counts.py`)
+
+Backs `gen-fixtures`' tier 1 `call_count` (issue #363; see
+`.okf/generators.md`). `count_invocations(ast, report, index)` walks the
+entry chain with `const_fold.py`'s own paragraph helpers
+(`_entry_paragraph`, `_fall_through_chain`, `_ordered_paragraphs`,
+`_perform_body_statements`, `_transfer_kind`) on an explicit frame stack,
+and gives each statement it reaches an exact execution count or "unknown":
+
+* main line and SIMPLE PERFORMs (inline, out of line, THRU, SECTION) add
+  their multiplier each time reached -- a paragraph PERFORMed and also
+  fallen into counts 2; `PERFORM <literal> TIMES` multiplies;
+* IF / EVALUATE / SEARCH arms, handler bodies, `PERFORM UNTIL` / `VARYING` /
+  variable-`TIMES` bodies and SORT / MERGE procedures are unknown;
+* a transfer (GO TO, EXIT PARAGRAPH / SECTION / PERFORM, NEXT SENTENCE,
+  STOP RUN, GOBACK, EXIT PROGRAM) inside such a region makes everything
+  after it unknown; on the main line, GO TO / STOP ends the walk and a skip
+  makes the rest unknown; inside a literal `TIMES` body any transfer
+  discards every count (they would be overstated);
+* **status exemption**: an IF reading only boundary status fields (FILE
+  STATUS fields and their level-88s, `SQLCODE`/`SQLSTATE`/`EIBRESP`), an
+  INVALID KEY handler, and a CALL's ON EXCEPTION / ON OVERFLOW are decided
+  by the scenario's status fixture, so a STOP RUN inside them does not
+  blank later counts. Without it, the universal `OPEN` + status-check idiom
+  would leave no count after the first OPEN.
+
+`InvocationCounts.for_boundary(ref)` matches a `BoundaryRef` by
+(paragraph, line) against statements of a boundary type only, so a MOVE in
+an AT END handler on the READ's own line cannot blur the READ's count.
+`count_at(line, type)` answers for any statement (used for the EOF loop's
+`PERFORM UNTIL`). Unreached statements (GO TO-only targets, DECLARATIVES)
+have no count. Tests: `tests/unit/analysis/test_invocation_counts.py`,
+`tests/unit/test_program_fixtures.py::TestCallCountFollowsControlFlow`.
+
 ## Module File Map
 
 | File | Analyzer |
@@ -2408,6 +2442,7 @@ programs without sections is unchanged. Pinned by
 | `constraints.py` | `ConstraintExtractor` (Phase 4 of `gen-fixtures`) |
 | `domains.py` | `solve()` constraint/witness solver (Phase 4 of `gen-fixtures`) |
 | `const_fold.py` | `ConstantFolder` (Phase 7 of `gen-fixtures`) |
+| `invocation_counts.py` | `count_invocations` -- exact per-statement execution counts for `gen-fixtures`' `call_count` |
 | `dclgen_check.py` | `DclgenChecker` — DCLGEN `DECLARE TABLE` vs. host-variable types |
 | `unused_variables.py` | `UnusedVariableAnalyzer` |
 | `recursion_risk.py` | `RecursionRiskAnalyzer` |

@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-14 -- issue #363: gen-fixtures call_count follows control flow
+
+[generators.md](generators.md), [analysis.md](analysis.md): `call_count`
+was `len(sequence)` (+1 for AT END), or 1 for CALL/STATUS_ONLY, one per
+statement, whatever branches and loops surrounded it. New
+`analysis/invocation_counts.py` counts each statement on the certain path;
+counts are merged per boundary key and omitted where they are not exact.
+
 ## 2026-10-13 -- issue #291: MOVE FUNCTION sources are checked
 
 [analysis.md](analysis.md): move-type-check counted every `MOVE FUNCTION
