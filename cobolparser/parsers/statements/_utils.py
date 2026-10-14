@@ -1420,6 +1420,24 @@ def consume_optional_qualifiers(stream: ITokenStream, value: str) -> str:
     return " ".join(p for p in parts if p)
 
 
+def literal_operand_text(token: Token) -> str:
+    """A consumed operand token's text, a string literal kept quoted.
+
+    The lexer hands a ``STRING_LITERAL`` over decoded -- delimiters stripped
+    -- so an operand recorded as bare ``token.value`` made the literal
+    ``'A'`` indistinguishable from the data item ``A`` (and ``X'00'`` from
+    the two characters ``00``). A typed literal keeps its original prefixed
+    spelling from ``raw_value``; any other is re-quoted by
+    :func:`~cobolparser._literals.quote_literal` -- the convention MOVE and
+    DISPLAY already follow. Every other token's value is returned as is.
+    """
+    from cobolparser._literals import quote_literal
+
+    if token.type == TokenType.STRING_LITERAL:
+        return token.raw_value or quote_literal(token.value)
+    return token.value or ""
+
+
 def consume_value_operand(stream: ITokenStream) -> str | None:
     """Consume one value operand (a literal or data name) if present.
 
@@ -1442,7 +1460,7 @@ def consume_value_operand(stream: ITokenStream) -> str | None:
     token = stream.peek()
     if not token or not token.value:
         return None
-    value = token.value
+    value = literal_operand_text(token)
     stream.consume()
     if token.type == TokenType.IDENTIFIER:
         value = consume_optional_qualifiers(stream, value)

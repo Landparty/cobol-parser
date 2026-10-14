@@ -722,6 +722,15 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   `has_exit_program`/`has_return` on the `FlowNode`), `MEDIUM` otherwise —
   fall-through-only cycles are never reported (fall-through can't actually
   form a cycle).
+  A `MIXED` cycle that is a PERFORM of a multi-procedure range (a SECTION
+  with its paragraphs, or a THRU span) made from *inside* that range, every
+  other hop a fall-through between its members, is reported as
+  `mechanism="PERFORM"`, `HIGH` (`_reenters_own_perform_range`, #350): the
+  range-level twin of `P. PERFORM P.`. `_closed_by_perform_range_end` (which
+  drops the priming-read false positive) ends a SECTION's range at its last
+  paragraph (`_perform_range`), not at the header node -- before #350 the
+  header's fall-through into its first paragraph read as "leaving the range"
+  and `S. S1. PERFORM S.` was reported clean.
 - **Self-recursive CALL** — a CALL (static, or dynamic and resolved via
   `DynamicCallAnalyzer`, which this analyzer runs internally) whose target
   equals the program's own `PROGRAM-ID`. `HIGH`, or `LOW` when the
@@ -2227,6 +2236,16 @@ internal env) rather than approximating:
   contract (divide-by-zero and non-terminating decimals poison, not
   truncate).
   Pinned by `tests/regression/test_bug_review_2026_08_12.py::TestDivideMode`.
+* **Writes that live outside `.operands`** (issue #317, 2026-10-14).
+  `_write_targets` also collects `InspectStatement.tallying_clauses[*]["counter"]`
+  (INSPECT ... TALLYING increments it in place), every string value of
+  `ExecCicsStatement.options` (INTO/SET/LENGTH/RESP/RESP2/ITEM/...: the
+  command decides which are written, so all are taken as written), and the
+  argument of each `KEYWORD(arg)` in `ExecImsStatement.arguments` (EXEC DLI
+  INTO/KEYFEEDBACK/...). Both EXEC nodes have an empty `.operands`, so
+  before this a field MOVEd before the statement kept its old value and
+  gen-fixtures asserted a `field_equals` a real run fails.
+  Pinned by `tests/unit/analysis/test_const_fold.py::TestInspectAndExecWrites`.
 * **Exactness is decided over `Fraction`, never over `Decimal`** (2026-09-16
   audit). Both halves of the exactness machinery used to decide exactness
   *using inexact decimal arithmetic*, and both let a wrong value through:
@@ -2992,8 +3011,8 @@ selector (`WHEN NOT 0 THRU 17`, a `Condition` dict with `negated` plus
 from its raw `THRU` text; only a single negated value reads `AGE <> 6`
 (#260). Level-88 values are
 also stored unquoted with `THRU` as `"THROUGH:end"`; `_condition_values`
-quotes them unless the item's PICTURE / USAGE is numeric. STRING sources are
-unquoted too, so one naming no declared item is re-quoted. Actions are
+quotes them unless the item's PICTURE / USAGE is numeric. STRING sources
+arrive quoted (#330), so they are rendered as is. Actions are
 rendered in full here rather than via `program_flow/statement_text.py`
 (flowchart summaries, truncated to 48 chars).
 

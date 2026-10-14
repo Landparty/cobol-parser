@@ -270,7 +270,7 @@ def test_inspect_replacing_characters_has_no_from_value() -> None:
     first, second = result.ast.find_all_by_type("InspectStatement")[:2]
     assert first.replacing_clauses[0]["replace_type"] == "CHARACTERS"
     assert first.replacing_clauses[0]["from_value"] is None
-    assert first.replacing_clauses[0]["to_value"] == "X"
+    assert first.replacing_clauses[0]["to_value"] == '"X"'
     assert second.replacing_clauses[0]["from_value"] is not None
     assert second.replacing_clauses[1]["from_value"] is None
 

@@ -892,6 +892,17 @@ so gating the stop on `for_varying` avoids truncating a condition that
 happens to contain an `AFTER` token (Copilot review on PR #79 caught the
 original unconditional stop). Pinned by `::TestH2PerformVaryingAfter`.
 
+**PERFORM UNTIL drops layout tokens (#347, 2026-10-14):** both UNTIL
+token loops (`_collect_until_condition_tokens` and
+`_parse_until_condition_only`) consume WHITESPACE / NEWLINE / CONTINUATION /
+COMMENT tokens without appending them, as the IF and EVALUATE parsers do;
+`_make_until_condition_expression` also drops whitespace-only strings as a
+second guard. A condition ending at a line break (no period) used to end in
+`"\n"`, so a bare condition-name, `NOT cond`, a class test or `( ... )`
+fell back to a raw COMPARISON with `left_operand=None` -- 11 of the 14
+enterprise-sample PERFORM UNTIL guards. Pinned by
+`tests/unit/test_perform_until_newline.py`.
+
 **All-digit procedure names / PERFORM THRU numbering (2026-07-20, extended
 2026-08-21):** COBOL permits procedure names made entirely of digits, and
 `PERFORM 1000 THRU 1999` numbering is idiomatic in THRU-style code. Those
@@ -938,6 +949,16 @@ a paragraph by name:
 Pinned by `tests/unit/test_perform_thru_numeric.py` and
 `tests/regression/test_real_corpus_parse_failures.py`
 (`TestAlterNumericProcedureNames`, `TestGoToDependingOnNumericTargets`).
+
+**`GO TO ... DEPENDING` without ON (issue #377).** `ON` is optional in
+`GO TO a b DEPENDING ws-x` (NIST NC102A), but `_parse_depending_on_clause`
+returned as soon as the word after `DEPENDING` was not `ON`, leaving the
+variable in the stream. It was re-parsed as a phantom paragraph, and the
+jump table read as an unconditional GO TO its first target (dead-code
+called the fall-through paragraph dead, program-flow missed the other
+targets, unused-variables flagged the variable, complexity scored 1).
+`ON` is now consumed only when present. Pinned by
+`tests/regression/test_go_depending_without_on.py`.
 
 **ENVIRONMENT division SELECT clauses (`environment.py`, audit 2026-07-07
 H4/H5):** SELECT parsing captures ALTERNATE RECORD KEY (repeatable, WITH
@@ -1741,6 +1762,19 @@ module (same rationale as `_errors.py`) because its callers span both
 | `statements/move_parser.py` | MOVE's literal source |
 | `statements/display_parser.py` | DISPLAY items and function-call operands |
 | `statements/write_parser.py` | WRITE's `FROM <literal>` |
+| `statements/_utils.py::literal_operand_text` | STRING / UNSTRING operands and delimiters, CALL `USING` arguments, INSPECT TALLYING / REPLACING / CONVERTING / BEFORE / AFTER values, SET's value (and PERFORM VARYING's `FROM` / `BY`, via `consume_value_operand`), INITIALIZE `REPLACING ... BY` (#330, 2026-10-14) |
+
+**#330 (2026-10-14).** The statements in that last row stored a literal
+operand's decoded `token.value`, so `'A'` and the data item `A` produced
+the same AST value and `X'00'` read as `00`. unused-variables counted a
+literal spelling a declared name as a reference, lineage drew a flow from
+it, and xref listed a `CALL ... USING 'LIT'` argument as an undefined data
+item. `literal_operand_text(token)` returns `raw_value` for a typed literal
+and `quote_literal(value)` for any other STRING_LITERAL -- the MOVE /
+DISPLAY convention (option (a) on the issue), chosen over a per-operand
+`is_literal` marker so every consumer that already skips quoted text keeps
+working. It changes these statements' `to_dict()` values (`"A"` where
+`A` was). Pinned by `tests/regression/test_literal_operand_quotes.py`.
 
 Level-88 condition values are deliberately **not** in that list:
 `data_special_entries.py` stores them undelimited (`item.add_value(t.value)`),

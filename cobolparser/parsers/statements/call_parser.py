@@ -10,6 +10,7 @@ from cobolparser.parsers.statements._utils import (
     consume_optional_qualifiers,
     get_parse_context,
     is_statement_boundary,
+    literal_operand_text,
     matches_keyword,
     peek_past_noise,
     previous_meaningful_token,
@@ -500,7 +501,9 @@ class CallStatementParser(IStatementParser):
                 TokenType.LEVEL_NUMBER,
                 TokenType.OMITTED,
             ):
-                param_name = token.value if token.value else "OMITTED"
+                # A literal argument keeps its quotes (``BY CONTENT 'A'``
+                # is not the data item A; ``X'00'`` is not ``00``).
+                param_name = literal_operand_text(token) or "OMITTED"
                 token_stream.consume()
                 if token.type == TokenType.IDENTIFIER:
                     # ``ADDRESS OF x`` / ``LENGTH OF x`` argument forms, then

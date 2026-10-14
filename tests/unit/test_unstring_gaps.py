@@ -96,7 +96,7 @@ class TestUnstringMultiDelimiter:
         )
         assert result.errors == []
         stmts = result.ast.find_statements("UNSTRING")
-        assert stmts[0].delimiters == [",", ";"]
+        assert stmts[0].delimiters == ['","', '";"']
 
     def test_three_delimiters_with_all(self):
         result = parse_cobol(
@@ -108,7 +108,7 @@ class TestUnstringMultiDelimiter:
         )
         assert result.errors == []
         stmts = result.ast.find_statements("UNSTRING")
-        assert stmts[0].delimiters == [",", ";", "-"]
+        assert stmts[0].delimiters == ['","', '";"', '"-"']
         # The INTO target must still be reachable after the OR chain --
         # a regression here would mean OR consumed INTO too.
         assert stmts[0].into_targets[0]["target"] == "WS-TGT-B"
@@ -175,7 +175,7 @@ class TestUnstringCombined:
         stmt = stmts[0]
 
         assert stmt.source_operand == "WS-SRC"
-        assert stmt.delimiters == [",", ";"]
+        assert stmt.delimiters == ['","', '";"']
 
         targets = stmt.into_targets
         assert len(targets) == 2
@@ -202,7 +202,7 @@ class TestUnstringCombined:
         assert stmt.not_on_overflow[0].statement_type == "DISPLAY"
 
         d = stmt.to_dict()
-        assert d["delimiters"] == [",", ";"]
+        assert d["delimiters"] == ['","', '";"']
         assert len(d["into_targets"]) == 2
         assert d["pointer_variable"] == "WS-PTR"
         assert d["tallying_variable"] == "WS-TALLY"
@@ -285,7 +285,7 @@ class TestUnstringDelimitedByAll:
             "           UNSTRING WS-SRC DELIMITED BY ',' OR ALL SPACE\n"
             "               INTO WS-TGT-B WS-TGT-C.\n"
         )
-        assert node.delimiters == [",", "SPACE"]
+        assert node.delimiters == ['","', "SPACE"]
         assert node.delimiter_all == [False, True]
         assert node.to_dict()["delimiter_all"] == [False, True]
 
@@ -312,7 +312,7 @@ class TestUnstringDelimitedWithoutBy:
         assert not result.errors
         assert not result.warnings
         (node,) = result.ast.find_all_by_type("UnstringStatement")
-        assert node.delimiters == [",", "SPACE"]
+        assert node.delimiters == ['","', "SPACE"]
         assert node.delimiter_all == [False, True]
         assert [t["target"] for t in node.into_targets] == ["WS-TGT-B", "WS-TGT-C"]
 

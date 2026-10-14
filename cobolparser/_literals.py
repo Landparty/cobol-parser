@@ -12,6 +12,28 @@ delimiter inside a literal: repeating it.
 
 from __future__ import annotations
 
+import re
+
+#: A quoted literal in operand or condition text, a typed-literal prefix
+#: (``X"00"``, ``Z'A'``, ``NX"..."``) included. The prefix only counts when no
+#: word character precedes it, so the ``X`` of ``WS-X"..."`` is never eaten;
+#: without one the pattern matches exactly what a bare ``'...'|"..."`` did.
+#: Stripping only the quoted part of ``X'00'`` left ``X`` behind, to be read
+#: as the data item ``X``.
+QUOTED_LITERAL_RE = re.compile(
+    r"(?:(?<![A-Za-z0-9_-])(?:NX|UX|BX|[XNGZUB]))?(?:'[^']*'|\"[^\"]*\")",
+    re.IGNORECASE,
+)
+_WHOLE_LITERAL_RE = re.compile(
+    r"\s*(?:NX|UX|BX|[XNGZUB])?(['\"]).*\1\s*", re.IGNORECASE | re.DOTALL
+)
+
+
+def is_quoted_literal(text: str) -> bool:
+    """Whether *text* is, as a whole, one quoted (or typed) literal: ``"A"``,
+    ``'IT''S'``, ``X'00'``, ``Z"hello"`` -- never a data name."""
+    return _WHOLE_LITERAL_RE.fullmatch(text) is not None
+
 
 def quote_literal(value: str | None) -> str:
     """Render `value` (a decoded literal's content) as a double-quote-

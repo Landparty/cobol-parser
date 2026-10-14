@@ -34,6 +34,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .._literals import QUOTED_LITERAL_RE
 from ..lexer import CobolLexer
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
@@ -61,7 +62,7 @@ from .unused_variables import (
     UnusedVariableItem,
 )
 
-_QUOTED_TEXT_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+_QUOTED_TEXT_RE = QUOTED_LITERAL_RE
 
 # Clause-list attributes holding statements that run only when the clause
 # fires. Each present body is part of what its statement *does*, so it is

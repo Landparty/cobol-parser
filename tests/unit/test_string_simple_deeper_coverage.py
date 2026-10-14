@@ -238,7 +238,7 @@ class TestStringStatementParser:
         assert not result.warnings
         stmt = _find_stmt(result, StringStatement)
         assert stmt is not None
-        assert stmt.delimiters == ["SIZE", ","]
+        assert stmt.delimiters == ["SIZE", '","']
         assert stmt.operands == ["WS-SOURCE", "WS-SOURCE2"]
         assert stmt.into_target == "WS-TARGET"
 

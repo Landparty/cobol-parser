@@ -10,6 +10,7 @@ from ._utils import (
     consume_optional_qualifiers,
     consume_period,
     is_statement_boundary,
+    literal_operand_text,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
@@ -75,12 +76,13 @@ def _consume_operand(token_stream: ITokenStream) -> str | None:
     (``A(1:2)``, ``D(3:5)``, ``WS-T(I)``). Returns None -- consuming nothing
     -- at a period or end of stream. Reading a single token here silently
     truncated every subscripted or reference-modified operand and left the
-    ``(I)`` tokens to be misread as further operands."""
+    ``(I)`` tokens to be misread as further operands. A string literal keeps
+    its quotes (``'A'``, ``X'00'``) so it never reads as the data item ``A``."""
     token = token_stream.peek()
     if not token or token.type == TokenType.PERIOD:
         return None
     token_stream.consume()
-    value = token.value or ""
+    value = literal_operand_text(token)
     if token.type == TokenType.IDENTIFIER:
         value = consume_optional_qualifiers(token_stream, value)
     return value
