@@ -428,8 +428,9 @@ was the third independent P-scaling check; now reads `decimal_digits`
 alone).
 
 ```python
-VaryingLength:     .minimum .maximum .depending_on
+VaryingLength:     .minimum .maximum .depending_on .per_record
                    .from_fd_clauses(clauses, *, record_size)
+                   .file_range(minimum, maximum, *, record_size)
                    .build(minimum, maximum, depending_on, record_size)
 DataGeneratorOptions:
                    .record_varying ((min, max) | None) — for a copybook
@@ -1144,8 +1145,18 @@ bytes each *record* carries.
   metadata. So `gen-data` on a **whole program** picks it up with no flag. A
   bare **copybook** has no FD; `DataGeneratorOptions.record_varying` (CLI
   `--record-varying MIN:MAX`) supplies it, and overrides the FD when both
-  exist. `RECORD CONTAINS 47 TO 80` declares the same thing without the
-  `VARYING` keyword and parses identically.
+  exist.
+* **Only `DEPENDING ON` draws lengths** (#320, 2026-10-14). `RECORD CONTAINS
+  47 TO 80` (format 2) and `RECORD VARYING` without `DEPENDING ON` make the
+  *file* variable, but IBM COBOL writes each record at the length of the 01
+  it was written from, never cut mid-field. `from_fd_clauses()` routes those
+  to `VaryingLength.file_range()`: the range is kept unclamped with
+  `per_record=False` (so `AUTO` still resolves to variable and LRECL is still
+  the declared max), `_draw_lengths()` draws nothing, and each record is the
+  layout's full length. A layout outside the range is a caveat, not a cut.
+  `GeneratedDataset._resolved_options()` settles `AUTO` against the dataset,
+  since the encoder only sees a range through a drawn `data_length`. An
+  explicit `record_varying` still opts in to drawn lengths.
 * **`maximum` is clamped to the record's own byte length.** An FD promising
   more than its 01 can hold cannot be honoured by padding — those bytes were
   never declared — so the range is cut to what exists. **Never silently**
