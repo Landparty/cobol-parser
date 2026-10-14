@@ -25,6 +25,9 @@ class TokenStream(ITokenStream):
         self._len = len(tokens)
         self._lookahead_size = lookahead
         self._parse_context = None
+        # 1-based (first, last) line ranges of source text removed before
+        # lexing (an unexpanded COPY); set by CobolParser.
+        self.omitted_source_lines: tuple[tuple[int, int], ...] = ()
 
     def peek(self, offset: int = 0) -> Token | None:
         """Look at token without consuming it.

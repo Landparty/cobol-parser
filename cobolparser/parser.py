@@ -146,6 +146,7 @@ class CobolParser:
 
         # Parser state
         self.tokens: list[Token] = []
+        self._omitted_copy_lines: list[tuple[int, int]] = []
         self.errors: list[ParseError] = []
         self.warnings: list[str] = []
         self.statistics = ParseStatistics()
@@ -405,8 +406,11 @@ class CobolParser:
             cleaned_source = preprocess_conditional_compilation(
                 cleaned_source, warnings=preprocess_warnings
             )
+        self._omitted_copy_lines = []
         cleaned_source = strip_unexpanded_copy_statements(
-            cleaned_source, warnings=preprocess_warnings
+            cleaned_source,
+            warnings=preprocess_warnings,
+            omitted_lines=self._omitted_copy_lines,
         )
         cleaned_source = apply_replace_statements(
             cleaned_source, warnings=preprocess_warnings
@@ -480,6 +484,10 @@ class CobolParser:
         self.stream = TokenStream(
             [t for t in self.tokens if t.type is not TokenType.COMMENT]
         )
+        # Lines whose COPY text was blanked before lexing: the tokens alone
+        # cannot tell that something was written there (see
+        # EvaluateStatementParser._at_stacked_when).
+        self.stream.omitted_source_lines = tuple(self._omitted_copy_lines)
         return True
 
     # The @overload stubs below are for static type checkers only and must

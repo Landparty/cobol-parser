@@ -219,8 +219,10 @@ Program Flow webview (Mermaid v11, `htmlLabels:false`,
   label. Additionally, module-level `_is_empty_if_arm()` drops the empty
   ELSE arm the scanner synthesizes for every IF with no ELSE clause (and
   its `IF_ELSE` edge — otherwise Mermaid/DOT would auto-recreate the node
-  from the dangling edge). EVALUATE arms are never dropped: an empty WHEN
-  still documents that its selector value is deliberately handled.
+  from the dangling edge). EVALUATE arms are never dropped. Stacked WHENs
+  (`WHEN 'A' WHEN 'B' stmt`) already arrive as one arm labelled
+  `WHEN A / WHEN B` (the scanner groups them, #314), so an EVALUATE arm that
+  is still empty is a WHEN deliberately left with no action.
 
 Reference tests: `tests/unit/test_flowchart_generator.py` —
 `TestMermaidFlowchartGenerator` (linkStyle/terminal-node/THRU-badge

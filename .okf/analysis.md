@@ -99,6 +99,17 @@ either by bare name.
 > (a nested `ENTRY` made the container's same-named paragraph an entry
 > point). Pinned by `TestContainedProgramScope` in `test_dead_code.py`.
 
+> 2026-10-14 (issue #312): the SECTION form of the `GO TO nnnn-EXIT` idiom.
+> The last paragraph of every section a PERFORM / SORT / MERGE / XML PARSE
+> runs (`_section_exits`) is treated like a THRU range end: a GO TO onto it
+> is a reference, not a fall-through source, so it no longer keeps every
+> later section alive. Exception: when the section is itself a fall-through
+> source (fallen into, or a GO TO target), `_collect_fallthrough_refs`
+> restores the exit as a fall-through source, since on that path it runs
+> on. The same holds when the section is entered by a jump from *outside*
+> it (`_sections_entered_by_jump`: a GO TO written in another section, an
+> ALTER, a CICS HANDLE, an ENTRY). Pinned by `TestSectionExitGoTo`.
+
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]
@@ -3029,6 +3040,13 @@ SUBTRACT / MULTIPLY / DIVIDE at paragraph level (not inside an arm) is a
 INTO B GIVING C` -> `C = B / A`); inside an arm it is an action of that
 decision only, never counted twice. Counters (`ADD 1 TO X`, `COMPUTE X = X +
 1`) are not rules at all.
+
+**Stacked WHENs (#314).** `WHEN 'A' WHEN 'B' stmt` is one arm whose
+condition is `WS-T = 'A' OR WS-T = 'B'` (via `EvaluateStatement.when_groups()`);
+the same grouping numbers program-flow `BranchArm`s (one `WHEN_n` arm, label
+`WHEN A / WHEN B`) and constraint arms, where each phrase of a stack is an
+OR-split disjunct of that arm (`WHEN_1#1`, `WHEN_1#2`) and later arms /
+WHEN OTHER negate every phrase.
 
 **Technical vs business.** A decision whose *own* condition reads only
 technical items, or a calculation that writes only technical items, is
