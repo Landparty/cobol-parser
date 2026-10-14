@@ -1303,3 +1303,10 @@ ZERO is pinned there too, along with `callee_names` itself.
 codebase-graph, and
 `test_boundary_inventory.py::TestDynamicCallSentinelCandidates` pins the
 "no possible target values resolved" note when only sentinels remain.
+
+## 2026-10-14
+
+`tests/unit/test_compute_bare_size_error.py` pins that COMPUTE ends its
+expression at a bare `SIZE ERROR` (no `ON`), with the handler body landing
+in `on_size_error` rather than the paragraph; covers the `IF ... END-COMPUTE`
+nesting and a bare `NOT SIZE ERROR` (#399).
