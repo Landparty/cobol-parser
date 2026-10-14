@@ -544,9 +544,7 @@ def test_a_variable_record_cut_inside_a_field_counts_as_an_error():
     )
     result = decoder.decode_bytes(rdw + body)
     assert result.error_count == 1
-    assert result.records[0].errors == [
-        "N: 3 of 4 bytes: record ends inside the field"
-    ]
+    assert result.records[0].errors == ["N: 3 of 4 bytes: record ends inside the field"]
 
 
 def test_a_fixed_record_length_shorter_than_the_layout_counts_as_an_error():
