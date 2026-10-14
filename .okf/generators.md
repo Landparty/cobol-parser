@@ -959,7 +959,11 @@ adds pairing and field comparison, and decodes nothing itself.
   requires a text field's (alphanumeric / alphabetic / alphanumeric-edited /
   national) NUL byte positions to match once the values agree. Before, only
   `--compare-bytes` caught it, and that also flags C/F sign nibbles and
-  filler. The text report appends `(bytes x'..' vs x'..')` to a difference
+  filler. Numeric-edited fields are checked too (an unmodelled picture reads
+  as plain text and was otherwise blind to it). **FILLER is exempt** (round
+  2 review): uninitialised FILLER in an FD record is common and harmless, so
+  making it a difference would fail compares that passed before; only
+  `compare_bytes` reports it. The text report appends `(bytes x'..' vs x'..')` to a difference
   whose two values print the same, so the reader can see what differs. A field that
   did not decode cleanly on *either* side is always compared by bytes: its
   best-effort value is not evidence.

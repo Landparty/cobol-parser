@@ -334,6 +334,50 @@ def test_the_same_low_values_on_both_sides_stay_equal():
     assert compare_records(decoded, decoded, view=decoder.views.base).equal
 
 
+FILLER_LAYOUT = """
+       01  R.
+           05  A       PIC X(3).
+           05  FILLER  PIC X(4).
+           05  E       PIC 9(3)/.
+           05  FILLER  PIC X(2).
+"""
+
+
+def test_low_values_in_filler_stay_equal_by_value():
+    """Uninitialised FILLER in an FD record is common and harmless, so it is
+    exempt from the LOW-VALUES-vs-spaces check; a bytes compare still sees
+    it."""
+    decoder = RecordDecoder.from_copybook_source(FILLER_LAYOUT)
+    spaces = decoder.decode_bytes(b"ABC    123/  ")
+    nulls = decoder.decode_bytes(b"ABC\x00\x00\x00\x00123/\x00\x00")
+
+    assert compare_records(spaces, nulls, view=decoder.views.base).equal
+    by_bytes = compare_records(
+        spaces, nulls, view=decoder.views.base, compare_bytes=True
+    )
+    assert [f.name for f in by_bytes.differences[0].fields] == [
+        "FILLER",
+        "FILLER_2",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("picture", "padded", "nulled"),
+    [
+        ("9(3)CR", b"123  ", b"123\x00\x00"),  # modelled edit
+        ("Z(3)9.9(2)E", b"  12.34 ", b"  12.34\x00"),  # read as plain text
+    ],
+)
+def test_low_values_padding_in_a_numeric_edited_field_differs(picture, padded, nulled):
+    decoder = RecordDecoder.from_copybook_source(
+        f"       01  R.\n           05  E  PIC {picture}.\n"
+    )
+    expected = decoder.decode_bytes(padded)
+    actual = decoder.decode_bytes(nulled)
+    assert expected.records[0].values() == actual.records[0].values()
+    assert not compare_records(expected, actual, view=decoder.views.base).equal
+
+
 def test_bytes_compare_reports_slack_no_field_covers():
     decoder = RecordDecoder.from_copybook_source(
         CUSTOMER, opts=EBCDIC, record_length=44

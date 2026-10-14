@@ -898,7 +898,8 @@ of a batch run against the actual one. Implementation:
   exits 2 when the subcommand is `compare`), and a copybook that is not text
   (a `UnicodeDecodeError` traceback; now caught).
 * A text field padded with LOW-VALUES on one side and spaces on the other
-  is a difference without `--compare-bytes` (#287); when the two values
+  is a difference without `--compare-bytes` (#287), except in FILLER,
+  which only `--compare-bytes` checks; when the two values
   print the same, the text report adds both fields' hex.
 * **`--key`** (repeatable) pairs records by key; **`--ignore`** (repeatable)
   drops a column, a field name (every occurrence) or a group. Both are checked

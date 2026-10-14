@@ -28,6 +28,8 @@ change fails the run.  This compares what a COBOL programmer would compare::
   spaces and NULs stripped alike, but a field left as LOW-VALUES is not the
   space-padded baseline to the program (``IF NAME = SPACES``), so two equal
   text values still differ when their NULs are in different places (#287).
+  ``FILLER`` is exempt -- uninitialised FILLER is common and harmless -- and
+  only a bytes compare reports it.
   A field whose bytes did not decode cleanly on either side is always
   compared by its bytes -- its best-effort value is not a thing to trust.
 * **Nothing is dropped quietly.**  A key or ignore name the layout does not
@@ -442,6 +444,12 @@ def compare_records(
         trailing_differs=_trailing_differs(expected, actual, compare_bytes),
     )
     skip = frozenset(ignored)
+    # FILLER is exempt from the LOW-VALUES-vs-spaces check: uninitialised
+    # FILLER in an FD record is common and harmless (#287).  A bytes
+    # compare still reports it.
+    fillers = frozenset(
+        placed.spec.column.upper() for placed in view.fields if placed.spec.is_filler
+    )
 
     def record(item: RecordDifference) -> None:
         if max_differences is not None and len(compare.differences) >= max_differences:
@@ -452,7 +460,7 @@ def compare_records(
     def pair(
         exp: DecodedRecord, act: DecodedRecord, record_key: tuple[str, ...] | None
     ) -> None:
-        fields = _field_differences(exp, act, skip, compare_bytes)
+        fields = _field_differences(exp, act, skip, compare_bytes, fillers)
         if fields:
             compare.changed_count += 1
             record(
@@ -553,6 +561,7 @@ def _field_differences(
     act: DecodedRecord,
     skip: frozenset[str],
     compare_bytes: bool,
+    fillers: frozenset[str] = frozenset(),
 ) -> list[FieldDifference]:
     differences: list[FieldDifference] = []
     actual_fields = {decoded.name.upper(): decoded for decoded in act.fields}
@@ -561,7 +570,9 @@ def _field_differences(
         if name in skip:
             continue
         act_field = actual_fields.get(name)
-        if act_field is None or not _same(exp_field, act_field, compare_bytes):
+        if act_field is None or not _same(
+            exp_field, act_field, compare_bytes, pad_sensitive=name not in fillers
+        ):
             differences.append(_difference(exp_field, act_field))
     if compare_bytes and not differences:
         # Every field agrees, yet the images may not: the difference is in
@@ -587,7 +598,13 @@ def _without_ignored(item: DecodedRecord, skip: frozenset[str]) -> bytes:
     return bytes(image)
 
 
-def _same(exp: DecodedField, act: DecodedField, compare_bytes: bool) -> bool:
+def _same(
+    exp: DecodedField,
+    act: DecodedField,
+    compare_bytes: bool,
+    *,
+    pad_sensitive: bool = True,
+) -> bool:
     if exp.present != act.present:
         return False
     if not exp.present:
@@ -596,7 +613,7 @@ def _same(exp: DecodedField, act: DecodedField, compare_bytes: bool) -> bool:
         return exp.raw == act.raw
     if exp.value != act.value:
         return False
-    if exp.category in _TEXT_CATEGORIES:
+    if pad_sensitive and exp.category in _TEXT_CATEGORIES:
         # Decoded text has trailing spaces *and* NULs stripped, so 'ALICE'
         # padded with LOW-VALUES decodes the same as 'ALICE' padded with
         # spaces -- yet ``IF NAME = SPACES`` tells them apart, and a field
@@ -611,6 +628,7 @@ _TEXT_CATEGORIES = frozenset(
         FieldCategory.ALPHANUMERIC.value,
         FieldCategory.ALPHABETIC.value,
         FieldCategory.ALPHANUMERIC_EDITED.value,
+        FieldCategory.NUMERIC_EDITED.value,
         FieldCategory.NATIONAL.value,
     }
 )
