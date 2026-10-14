@@ -1548,8 +1548,9 @@ alongside Phase 3's OUT-boundary stubs, via two small helpers in
   overridden boundary's own `call_count`, and only when it is not a READ;
   every other count is dropped, because `report.boundaries` is source order,
   not execution order, so no boundary is provably *before* the failure.
-  Tier 2 runs with `seed_from_fixtures=False`: literal-only folds survive,
-  nothing is seeded from a mocked row.
+  Tier 2 is skipped for these scenarios entirely: the fold walks the normal
+  path, so even a literal-only `field_equals` may observe a site the failure
+  path never reaches (review on #418).
 * **Tier 2 — `_tier2_expectations`, backed by
   `cobolparser.analysis.const_fold.ConstantFolder`** (see `.okf/analysis.md`
   for the folder's own extensive "exact by construction, or absent" rules).

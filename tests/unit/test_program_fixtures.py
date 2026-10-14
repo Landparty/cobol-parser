@@ -1033,13 +1033,34 @@ class TestFailurePathExpectations:
         assert _counts(failed) == {"OPEN:VS-FILE": 1}
         assert "VS-REC.VS-AMT" not in _field_equals(failed)
 
-    def test_literal_only_field_equals_survives_a_status_override(self):
+    def test_status_override_scenarios_assert_no_field_equals(self):
+        # Even a literal-only fold walks the normal path: WS-LIT is MOVEd and
+        # DISPLAYed on it, but nothing proves the failure path gets there.
         scenarios = _all_mode_scenarios(_RANDOM_READ_SOURCE)
+        assert _field_equals(scenarios["happy path"]).get("WS-LIT") == "42"
         for name in (
             "error status: OPEN VS-FILE not found",
             "error status: READ VS-FILE INVALID KEY",
         ):
-            assert _field_equals(scenarios[name]).get("WS-LIT") == "42", name
+            assert _field_equals(scenarios[name]) == {}, name
+
+    def test_failed_open_does_not_assert_a_literal_set_after_it(self):
+        # Review repro on #418: status 35 stops the run before the MOVE, so
+        # WS-MSG = 'DONE' is never displayed on that path.
+        source = _OPEN_CHECK_SOURCE.replace(
+            "       01  WS-EOF PIC X VALUE 'N'.\n",
+            "       01  WS-EOF PIC X VALUE 'N'.\n       01  WS-MSG PIC X(4).\n",
+        ).replace(
+            "           CLOSE IN-FILE\n",
+            "           CLOSE IN-FILE\n"
+            "           MOVE 'DONE' TO WS-MSG\n"
+            "           DISPLAY WS-MSG\n",
+        )
+        assert "WS-MSG" in source
+        scenarios = _all_mode_scenarios(source)
+        assert _field_equals(scenarios["happy path"]).get("WS-MSG") == "DONE"
+        failed = scenarios["error status: OPEN IN-FILE not found"]
+        assert "WS-MSG" not in _field_equals(failed)
 
     def test_happy_path_still_seeds_the_fold_from_a_single_row(self):
         scenarios = _all_mode_scenarios(_RANDOM_READ_SOURCE)

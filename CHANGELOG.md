@@ -167,8 +167,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one invocation by construction (OPEN, CALL, SQL; never a READ, whose count
   comes from rows a failing READ never consumes). Every other `call_count` is
   dropped, since the program's error path may skip the READ loop or CLOSE.
-  Its `field_equals` expectations are folded from the program's literals
-  alone, never seeded from a mocked row. A zero-row fixture with no AT END
+  It asserts no `field_equals` at all: the constant fold walks the normal
+  path, so even a value folded from literals may sit past the point where
+  the failure path stops. A zero-row fixture with no AT END
   handler (a random-access READ in "empty input") no longer asserts a
   `call_count` of 0: the READ still runs once.
 

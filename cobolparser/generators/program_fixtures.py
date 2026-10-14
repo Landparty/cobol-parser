@@ -274,17 +274,16 @@ class ProgramFixtureGenerator:
                 scenario.expectations.extend(expectations)
                 unresolved.extend(extra_unresolved)
             if planned.status_overrides:
+                # The fold walks the normal path; a failure path may stop
+                # before any site it observed, so no field_equals is known
+                # to hold there -- not even one folded from literals alone.
                 scenario.expectations = _drop_failure_path_counts(
                     scenario.expectations, planned
                 )
-            scenario.expectations.extend(
-                self._tier2_expectations(
-                    ast,
-                    index,
-                    scenario,
-                    seed_from_fixtures=not planned.status_overrides,
+            else:
+                scenario.expectations.extend(
+                    self._tier2_expectations(ast, index, scenario)
                 )
-            )
             # Self-verify BEFORE the scenario is written out: re-read the
             # data this scenario actually emitted and re-check it against the
             # conditions that motivated it. Without this the scenario's name
@@ -643,11 +642,7 @@ class ProgramFixtureGenerator:
 
     @staticmethod
     def _tier2_expectations(
-        ast: CobolProgram,
-        index: ProgramLayoutIndex,
-        scenario: Scenario,
-        *,
-        seed_from_fixtures: bool = True,
+        ast: CobolProgram, index: ProgramLayoutIndex, scenario: Scenario
     ) -> list[Expectation]:
         """Tier 2 (Phase 7): constant-fold this scenario's own straight-line
         chain, seeded by its own single-invocation mocked inputs, and turn
@@ -657,16 +652,9 @@ class ProgramFixtureGenerator:
         one) has no single representative value, and (not coincidentally)
         every field a `PERFORM UNTIL`/`VARYING` loop writes is poisoned by
         the folder's own loop-abort rule anyway, since that is exactly where
-        a multi-row READ is read from in practice.
-
-        ``seed_from_fixtures=False`` folds from the program's own literals
-        alone. A scenario with a status override takes a failure path: the
-        overridden boundary hands back no record (INVALID KEY, SQLCODE 100,
-        a failed OPEN), and nothing here knows which other boundaries still
-        run after it, so no mocked row is a value the program is known to
-        have read."""
+        a multi-row READ is read from in practice."""
         seed_values: dict[str, str] = {}
-        for fixture in scenario.fixtures if seed_from_fixtures else []:
+        for fixture in scenario.fixtures:
             if len(fixture.sequence) != 1:
                 continue
             for spec in fixture.layout:
