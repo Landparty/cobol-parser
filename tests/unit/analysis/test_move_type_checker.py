@@ -1064,9 +1064,11 @@ class TestIntrinsicFunctionsWithArguments:
 
 
 class TestNumericFunctionIntegerness:
-    """A numeric intrinsic's integer-ness is only known when its arguments
-    decide it (SUM / REM / RANGE of integers); otherwise a MOVE of it to an
-    alphanumeric item is a function caveat, never a guessed ERROR."""
+    """A numeric intrinsic's integer-ness is known only when its arguments
+    decide it, by one rule for SUM / REM / RANGE / MAX / MIN / ABS: any
+    non-integer argument makes a non-integer result, all-integer arguments an
+    integer one. Otherwise (NUMVAL, ...) a MOVE of it to an alphanumeric item
+    is a function caveat, never a guessed ERROR."""
 
     SOURCE = """       IDENTIFICATION DIVISION.
        PROGRAM-ID. NUMFN.
@@ -1075,6 +1077,7 @@ class TestNumericFunctionIntegerness:
        01 WS-I1 PIC 9(3).
        01 WS-I2 PIC 9(3).
        01 WS-D PIC 9(3)V99.
+       01 WS-F COMP-2.
        01 WS-X PIC X(10).
        01 WS-Y PIC X(10).
        01 WS-N PIC 9(5).
@@ -1086,23 +1089,33 @@ class TestNumericFunctionIntegerness:
            MOVE FUNCTION RANGE(WS-I1, 7) TO WS-Y
            MOVE FUNCTION NUMVAL(WS-X) TO WS-Y
            MOVE FUNCTION SUM(WS-I1 WS-D) TO WS-Y
+           MOVE FUNCTION SUM(WS-F WS-I1) TO WS-Y
+           MOVE FUNCTION MAX(WS-I1 WS-D) TO WS-Y
            MOVE FUNCTION NUMVAL(WS-X) TO WS-N
            MOVE FUNCTION NUMVAL(WS-X) TO WS-AL
            MOVE FUNCTION MAX(WS-I1 FUNCTION NUMVAL(WS-X)) TO WS-Y
            MOVE FUNCTION UPPER-CASE(WS-NAT) TO WS-Y
+           MOVE FUNCTION TRIM(WS-NAT) TO WS-Y
            STOP RUN.
 """
 
     def _report(self):
         return MoveTypeChecker().check(parse_cobol(self.SOURCE).ast)
 
-    def test_only_the_alphabetic_receiver_is_an_error(self):
-        found = [(v.location.line, v.kind) for v in self._report().violations]
-        assert found == [(20, MoveViolationKind.ERROR)]
+    def test_non_integer_arguments_and_alphabetic_receivers_are_errors(self):
+        found = [(v.location.line, v.source_name) for v in self._report().violations]
+        assert found == [
+            (19, "FUNCTION SUM(WS-I1 WS-D)"),
+            (20, "FUNCTION SUM(WS-F WS-I1)"),
+            (21, "FUNCTION MAX(WS-I1 WS-D)"),
+            (23, "FUNCTION NUMVAL(WS-X)"),
+        ]
+        assert all(v.kind == MoveViolationKind.ERROR for v in self._report().violations)
 
-    def test_undecidable_integerness_is_a_function_caveat(self):
+    def test_undecidable_results_are_function_caveats(self):
         report = self._report()
-        # NUMVAL -> X, SUM with a V99 argument -> X, MAX over a NUMVAL -> X;
-        # UPPER-CASE of a national item is an unresolved argument instead.
-        assert report.unresolved_function_count == 3
+        # NUMVAL -> X and MAX over a NUMVAL -> X (integer-ness unknown), and
+        # UPPER-CASE / TRIM of a national item (a national result): every
+        # skipped MOVE here is the function's, none is a missing COPY's.
+        assert report.unresolved_function_count == 4
         assert report.unresolved_count == 4

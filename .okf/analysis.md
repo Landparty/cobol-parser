@@ -1144,9 +1144,10 @@ user to pass `--copybook-path` for a COPY that was never missing. The result
 category now comes from `dialects.le_signatures.intrinsic_signature(name).returns`:
 `alphanumeric` → ALPHANUMERIC, `integer` → integer NUMERIC, `numeric` →
 NUMERIC whose integer-ness is *unknown* (`None`: NUMVAL("12") is an integer,
-NUMVAL("1.5") is not), except SUM / REM / RANGE of integer arguments, which
-are integers. TRIM / ABS / USUBSTR / MAX / MIN take their first argument's
-category (non-integer if any argument is, unknown if any is unknown);
+NUMVAL("1.5") is not). SUM / REM / RANGE / MAX / MIN / ABS take their
+integer-ness from their arguments by one rule: non-integer if any argument
+is, an integer if all are, unknown otherwise. TRIM / ABS / USUBSTR / MAX /
+MIN take their first argument's category;
 UPPER-CASE / LOWER-CASE / REVERSE are ALPHANUMERIC only when their argument
 resolves (a national argument gives a national result). A reference-modified
 result (`FUNCTION CURRENT-DATE(1:8)`) is ALPHANUMERIC. A nested `FUNCTION
@@ -1154,7 +1155,8 @@ x(...)` argument is one argument. So `MOVE FUNCTION NUMVAL(X) TO` a `PIC A`
 item is an error, but to a `PIC X` item it is skipped, never a guessed
 error. What stays unchecked because of the function itself (NATIONAL-OF, an
 uncatalogued name, a numeric result of unknown integer-ness into an
-alphanumeric receiver) is also counted in `unresolved_function_count`, and
+alphanumeric receiver, UPPER-CASE / TRIM / ... of a declared PIC N item) is
+also counted in `unresolved_function_count`, and
 lint words that caveat separately without the copybook hint; an unresolved
 *argument* is still an ordinary unresolved operand. Pinned by
 `test_move_type_checker.py::TestIntrinsicFunctionsWithArguments` /

@@ -204,8 +204,9 @@ _INTRINSIC_RETURN_CATEGORIES: dict[str, tuple[DataCategory, bool | None]] = {
     "numeric": (DataCategory.NUMERIC, None),
 }
 
-# Numeric functions whose result is an integer whenever every argument is
-# one: a sum, a remainder or a range of integers has no decimal places.
+# Numeric functions whose integer-ness follows their arguments, like MAX / MIN
+# / ABS: a sum, remainder or range of integers is an integer, and one with a
+# non-integer argument is not.
 _INTEGER_WHEN_ARGUMENTS_ARE = frozenset({"SUM", "REM", "RANGE"})
 
 # Alphanumeric-catalogued functions that really return their argument's class
@@ -887,7 +888,9 @@ class MoveTypeChecker:
         instead. A reference-modified result is alphanumeric whatever the
         function returns. UNKNOWN for a NATIONAL result (not modelled here),
         a name the catalog does not list, or an argument that does not
-        resolve. SUM / REM / RANGE of integers are integers; any other
+        resolve. SUM / REM / RANGE / MAX / MIN / ABS take their integer-ness
+        from their arguments the same way: a non-integer argument makes a
+        non-integer result, all-integer arguments an integer one. Any other
         numeric function's integer-ness is unknown.
         """
         if function.reference_modified:
@@ -901,10 +904,11 @@ class MoveTypeChecker:
             ) in (DataCategory.UNKNOWN, DataCategory.FIGURATIVE):
                 return DataCategory.UNKNOWN, False
             return DataCategory.ALPHANUMERIC, False
-        if function.name in _INTEGER_WHEN_ARGUMENTS_ARE and self._all_integers(
-            function.arguments
+        if function.name in _INTEGER_WHEN_ARGUMENTS_ARE and all(
+            self._resolve_category(argument) == DataCategory.NUMERIC
+            for argument in function.arguments
         ):
-            return DataCategory.NUMERIC, False
+            return DataCategory.NUMERIC, self._arguments_non_integer(function)
         if signature.returns in _INTRINSIC_RETURN_CATEGORIES:
             return _INTRINSIC_RETURN_CATEGORIES[signature.returns]
         if signature.returns in _ARGUMENT_CLASS_RETURNS and function.arguments:
@@ -913,32 +917,48 @@ class MoveTypeChecker:
                 return DataCategory.UNKNOWN, False
             if category != DataCategory.NUMERIC:
                 return category, False
-            flags = [self._is_non_integer(argument) for argument in function.arguments]
-            if any(flag is True for flag in flags):
-                return category, True
-            return category, None if None in flags else False
+            return category, self._arguments_non_integer(function)
         return DataCategory.UNKNOWN, False
 
-    def _all_integers(self, arguments: tuple[str, ...]) -> bool:
-        """Whether every argument is known to be an integer numeric value."""
-        return bool(arguments) and all(
-            self._resolve_category(argument) == DataCategory.NUMERIC
-            and self._is_non_integer(argument) is False
-            for argument in arguments
-        )
+    def _arguments_non_integer(self, function: _FunctionSource) -> bool | None:
+        """Integer-ness of a result derived from numeric arguments: True if
+        any argument is a non-integer, False if every one is an integer,
+        ``None`` when an argument's integer-ness is itself unknown."""
+        if not function.arguments:
+            return None
+        flags = [self._is_non_integer(argument) for argument in function.arguments]
+        if any(flag is True for flag in flags):
+            return True
+        return None if None in flags else False
 
-    @staticmethod
-    def _function_has_no_category(function: _FunctionSource) -> bool:
+    def _is_declared_without_category(self, name: str) -> bool:
+        """Whether *name* is a DATA DIVISION item this checker has no
+        category for (a PIC N / national item): declared, so no copybook is
+        missing."""
+        upper = _reference_name(name).upper()
+        if upper in self._catalog:
+            return self._catalog[upper] == DataCategory.UNKNOWN
+        qualified = self._qualified_entry(name)
+        return qualified is not None and qualified[0] == DataCategory.UNKNOWN
+
+    def _function_has_no_category(self, function: _FunctionSource) -> bool:
         """Whether an intrinsic result is UNKNOWN because of the function
         itself (a NATIONAL result, an uncatalogued name) rather than an
-        argument a copybook might have declared."""
+        argument a copybook might have declared. A function that returns its
+        argument's class has a national result when that argument is a
+        declared national item."""
         if function.reference_modified:
             return False
         signature = intrinsic_signature(function.name)
         if signature is None:
             return True
-        if signature.returns in _ARGUMENT_CLASS_RETURNS:
-            return not function.arguments
+        if (
+            function.name in _ARGUMENT_CLASS_ALPHANUMERIC
+            or signature.returns in _ARGUMENT_CLASS_RETURNS
+        ):
+            return not function.arguments or self._is_declared_without_category(
+                function.arguments[0]
+            )
         return signature.returns not in _INTRINSIC_RETURN_CATEGORIES
 
     def _is_non_integer(self, name: str) -> bool | None:
