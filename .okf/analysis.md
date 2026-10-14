@@ -944,7 +944,8 @@ files: `cobol-parser scan --clones` (see cli.md and batch.md).
 
 ```python
 report: TechnicalDebtReport = TechnicalDebtAnalyzer(weights=None, size_threshold=50).analyze(ast)
-# report.score: float (0-100, higher = more debt); report.grade: "A".."F"
+# report.score: float (0-100, higher = more debt); report.grade: "A".."F", or None (see below)
+# report.parse_error_count / report.caveats  -- set from analyze(..., parse_error_count=N)
 # report.components: list[ComponentBreakdown]  -- one per weighted component, each with its own findings
 # report.top_offenders: list[OffenderProcedure]  -- worst procedures, with reasons
 ```
@@ -978,6 +979,17 @@ carry a `"no procedures to rate"` finding (rather than an empty findings
 list) on a program with no procedures, per the every-point-explained
 contract. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA7GradeMatchesSerializedScore`.
+
+**Parse errors withhold the grade (#397, 2026-10-14).** A file that mostly
+failed to parse hands over a near-empty AST, which scores 0.0 and used to
+grade "A". `analyze(ast, parse_error_count=len(result.errors))` keeps the
+score (computed over what was recovered) but sets `grade` to `None` and adds
+a `caveats` entry; `to_dict()` always carries `parse_error_count` and
+`caveats`. The `health` subcommand passes the count; `scan` does not (it
+already flags `parse_error_count` per file, and its grade feeds the
+extension's portfolio sort). Pinned by `test_technical_debt.py::
+TestParseErrorsWithholdTheGrade` and `test_complexity_health_subcommands.py::
+TestHealthWithParseErrors`.
 
 **`top_offenders`** ranks procedures by a severity score built from the
 same underlying findings (HIGH complexity +30, MODERATE +10, each GO TO +3,

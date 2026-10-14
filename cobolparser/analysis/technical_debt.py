@@ -113,18 +113,28 @@ class TechnicalDebtReport:
 
     program_name: str = ""
     score: float = 0.0
-    grade: str = "A"
+    #: ``None`` when the program parsed with errors: the score then measures
+    #: only the part of the program the parser recovered, and a letter grade
+    #: would read as a verdict on code nobody saw (#397).
+    grade: str | None = "A"
     weights: DebtWeights = field(default_factory=DebtWeights)
     components: list[ComponentBreakdown] = field(default_factory=list)
     top_offenders: list[OffenderProcedure] = field(default_factory=list)
     complexity_summary: dict[str, Any] = field(default_factory=dict)
     redundancy_summary: dict[str, Any] = field(default_factory=dict)
+    #: Parse errors the analyzed AST was recovered from (``analyze``'s
+    #: *parse_error_count*). Nonzero withholds the grade.
+    parse_error_count: int = 0
+    #: Why the report may not reflect the program, in words.
+    caveats: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "program_name": self.program_name,
             "score": round(self.score, 2),
             "grade": self.grade,
+            "parse_error_count": self.parse_error_count,
+            "caveats": list(self.caveats),
             "weights": {
                 "complexity": self.weights.complexity,
                 "redundancy": self.weights.redundancy,
@@ -171,12 +181,19 @@ class TechnicalDebtAnalyzer:
         redundancy_report: RedundancyReport | None = None,
         recursion_report: RecursionRiskReport | None = None,
         top_n: int = 5,
+        parse_error_count: int = 0,
     ) -> TechnicalDebtReport:
         """Analyze a COBOL program and compute its technical-debt score.
 
         Any of the four sub-reports can be passed in precomputed (a caller
         that already ran these analyzers avoids redundant passes over the
         same AST); each is computed fresh when omitted.
+
+        *parse_error_count* is ``len(ParseResult.errors)``. A file that mostly
+        failed to parse hands over an AST with almost nothing in it, which
+        scores as debt-free; when it is nonzero the score is still computed
+        over what was recovered, but ``grade`` is ``None`` and ``caveats``
+        says why (#397).
         """
         if flow_report is None:
             flow_report = ProgramFlowAnalyzer().analyze(ast)
@@ -221,10 +238,20 @@ class TechnicalDebtAnalyzer:
             top_n,
         )
 
+        caveats: list[str] = []
+        if parse_error_count > 0:
+            caveats.append(
+                f"the program parsed with {parse_error_count} error(s): the "
+                "score covers only what the parser recovered, so no grade "
+                "is given"
+            )
+
         return TechnicalDebtReport(
             program_name=ast.program_name,
             score=score,
-            grade=_grade_for(score),
+            grade=_grade_for(score) if parse_error_count <= 0 else None,
+            parse_error_count=max(0, parse_error_count),
+            caveats=caveats,
             weights=weights,
             components=components,
             top_offenders=top_offenders,
