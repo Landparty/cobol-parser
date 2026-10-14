@@ -301,3 +301,73 @@ class TestRecursionRiskReport:
         assert risk.program is None
         assert risk.is_dynamic is False
         assert risk.has_escape is False
+
+
+SECTION_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SECREC.
+       PROCEDURE DIVISION.
+"""
+
+
+class TestSectionPerformRecursion:
+    """A SECTION PERFORMed from one of its own paragraphs (issue #350)."""
+
+    def test_section_performing_itself_is_high(self) -> None:
+        ast = _parse(SECTION_HEADER + """\
+       MAIN-SEC SECTION.
+       M1.
+           PERFORM S-ONE
+           STOP RUN.
+       S-ONE SECTION.
+       S1-A.
+           DISPLAY "A"
+           PERFORM S-ONE.
+       S-TWO SECTION.
+       S2-A.
+           STOP RUN.
+""")
+        risks = RecursionRiskAnalyzer().analyze(ast).risks
+        assert len(risks) == 1
+        assert risks[0].mechanism == "PERFORM"
+        assert risks[0].severity == "HIGH"
+        assert set(risks[0].procedures) == {"S-ONE", "S1-A"}
+
+    def test_section_performed_from_its_last_paragraph_is_high(self) -> None:
+        ast = _parse(SECTION_HEADER + """\
+       MAIN-SEC SECTION.
+       M1.
+           PERFORM S-ONE
+           STOP RUN.
+       S-ONE SECTION.
+       S1-A.
+           DISPLAY "A".
+       S1-B.
+           PERFORM S-ONE.
+       S-TWO SECTION.
+       S2-A.
+           STOP RUN.
+""")
+        risks = RecursionRiskAnalyzer().analyze(ast).risks
+        assert [(r.mechanism, r.severity) for r in risks] == [("PERFORM", "HIGH")]
+        assert set(risks[0].procedures) == {"S-ONE", "S1-A", "S1-B"}
+
+    def test_section_priming_read_idiom_is_clean(self) -> None:
+        ast = _parse(SECTION_HEADER + """\
+       MAIN-SEC SECTION.
+       M1.
+           PERFORM S-READ
+           PERFORM S-PROC
+           STOP RUN.
+       S-READ SECTION.
+       R1.
+           DISPLAY "READ".
+       S-PROC SECTION.
+       P1.
+           DISPLAY "PROC"
+           PERFORM S-READ.
+       S-END SECTION.
+       E1.
+           STOP RUN.
+""")
+        assert RecursionRiskAnalyzer().analyze(ast).risks == []

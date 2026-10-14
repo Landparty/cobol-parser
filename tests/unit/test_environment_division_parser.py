@@ -152,6 +152,41 @@ class TestInputOutputSection:
             "SEQUENTIAL",
         )
 
+    def test_separator_comma_and_semicolon_not_kept_in_names(self):
+        """Issue #342: a separator after ``ASSIGN TO ddname`` was kept in
+        the name (``"INDD ,"``), and ``FILE STATUS IS FS1, FS2`` took the
+        comma as the VSAM status variable and dropped ``FS2``."""
+        src = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. TEST-PROG.\n"
+            "       ENVIRONMENT DIVISION.\n"
+            "       INPUT-OUTPUT SECTION.\n"
+            "       FILE-CONTROL.\n"
+            "           SELECT F1 ASSIGN TO INDD,\n"
+            "               ORGANIZATION IS SEQUENTIAL.\n"
+            "           SELECT F2 ASSIGN TO UT-S-SYSIN;\n"
+            "               FILE STATUS IS FS1, FS2.\n"
+            "           SELECT F3 ASSIGN TO DD3\n"
+            "               FILE STATUS IS FS1; FS2.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 FS1 PIC XX.\n"
+            "       01 FS2 PIC X(6).\n"
+            "       PROCEDURE DIVISION.\n"
+            "           STOP RUN.\n"
+        )
+        result = _parse(src)
+        assert result.warnings == []
+        f1, f2, f3 = result.ast.find_all_by_type("SelectStatement")
+        assert (f1.assign_to, f1.organization) == ("INDD", "SEQUENTIAL")
+        assert (f2.assign_to, f2.assign_device_type) == ("UT-S-SYSIN", "UT-S")
+        assert (f2.file_status, f2.file_status_vsam) == ("FS1", "FS2")
+        assert (f3.assign_to, f3.file_status, f3.file_status_vsam) == (
+            "DD3",
+            "FS1",
+            "FS2",
+        )
+
     def test_select_indexed(self):
         src = (
             "       IDENTIFICATION DIVISION.\n"
