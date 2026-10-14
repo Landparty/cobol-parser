@@ -1303,3 +1303,11 @@ ZERO is pinned there too, along with `callee_names` itself.
 codebase-graph, and
 `test_boundary_inventory.py::TestDynamicCallSentinelCandidates` pins the
 "no possible target values resolved" note when only sentinels remain.
+
+## 2026-10-14 (issue #342)
+
+`test_environment_division_parser.py::TestInputOutputSection::test_separator_comma_and_semicolon_not_kept_in_names`
+pins that a comma/semicolon after `ASSIGN TO ddname` or between the two
+FILE STATUS variables is not kept in the name, and
+`test_field_lineage.py::test_separator_after_assign_names_the_dd_port`
+that the lineage file port is `INDD`, not `,`.
