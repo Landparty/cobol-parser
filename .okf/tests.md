@@ -200,7 +200,7 @@ fixture is a record image from `encode_record`, not a hand-built decode
 result. See `generators.md`'s "Record compare".
 
 2026-10-14: `tests/unit/generators/data/test_encoding.py::TestHexLiteralBytes`
-(+11 cases) pins `VALUE X'..'` and level-88 hex witnesses written as their
+(+10 cases) pins `VALUE X'..'` and level-88 hex witnesses written as their
 own bytes in ASCII and EBCDIC, padded/justified/truncated like any text
 (issue #319). See `generators.md`.
 
