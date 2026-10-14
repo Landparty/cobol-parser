@@ -906,7 +906,11 @@ def hex_dump(
     # The FD range describes this record's length only while it is the thing
     # deciding it. When a table decides, the layout's own bounds are the
     # honest span; the FD clause is still printed below, as metadata.
-    fd_decides = varying is not None and not any(spec.odo_controls for spec in specs)
+    fd_decides = (
+        varying is not None
+        and varying.per_record
+        and not any(spec.odo_controls for spec in specs)
+    )
     if fmt.is_variable:
         low = (
             varying.minimum if fd_decides and varying else minimum_record_length(specs)
@@ -925,6 +929,11 @@ def hex_dump(
         out.append(
             f"* FD RECORD VARYING FROM {varying.minimum} TO "
             f"{varying.maximum}{depending}"
+            + (
+                ""
+                if varying.per_record
+                else " (no DEPENDING ON: each record is its 01's full length)"
+            )
         )
     out.append(
         f"* charset: {opts.charset.value}   "

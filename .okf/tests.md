@@ -1274,7 +1274,9 @@ dropping the slash would make `cobolparser/parsers` swallow
   alongside it
 * `tests/unit/generators/data/test_variable_length.py` — fixed vs variable
   record length: ODO layout linking, per-row trimming, counter bounds, RDW
-  framing, and the length reporting built on them
+  framing, and the length reporting built on them.
+  `TestFdRangeWithoutDependingOn` (#320) pins that an FD range with no
+  DEPENDING ON writes every record at its own 01's full length, never cut
 * [cli.md](cli.md) — `tests/unit/cli/` covers CLI subcommands
 * [generators.md](generators.md) — flowchart, copybook → CSV, program layout
   index, and program fixture bundle generator tests

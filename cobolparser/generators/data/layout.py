@@ -98,8 +98,15 @@ class VaryingLength:
     handed to the encoder, which is exactly what ``data_length`` on
     :func:`.encoding.encode_record` is for.
 
-    ``RECORD CONTAINS 47 TO 80`` declares the same thing without the
-    ``VARYING`` keyword and is treated identically.
+    Only a range with ``DEPENDING ON`` varies inside one record layout.
+    ``RECORD CONTAINS 47 TO 80`` (RECORD format 2) and ``RECORD VARYING``
+    without ``DEPENDING ON`` declare a variable-length *file*, but each
+    record's length is that of the 01 record description it was written
+    from -- never a cut inside a field. Those ranges are kept (the file is
+    still RECFM=V, and its LRECL is still the declared maximum) with
+    :attr:`per_record` false, so no length is drawn per row. An explicit
+    :attr:`~.options.DataGeneratorOptions.record_varying` remains the way
+    to ask for arbitrary per-record lengths without a ``DEPENDING ON``.
 
     Attributes:
         minimum: Shortest record the FD permits, in bytes.
@@ -109,11 +116,15 @@ class VaryingLength:
         depending_on: The ``DEPENDING ON`` data name, when the clause has
             one.  Usually a WORKING-STORAGE item rather than part of the
             record, which is why it is recorded but rarely writable.
+        per_record: Whether each record's length is drawn from the range.
+            False for an FD range without ``DEPENDING ON``, where the range
+            bounds the file and every record keeps its own 01's length.
     """
 
     minimum: int
     maximum: int
     depending_on: str | None = None
+    per_record: bool = True
 
     @classmethod
     def from_fd_clauses(
@@ -132,14 +143,47 @@ class VaryingLength:
         low, high = block.get("min"), block.get("max")
         if low is None or high is None or low == high:
             return None
+        depending_on = block.get("depending_on")
+        if not depending_on:
+            return cls.file_range(
+                int(low), int(high), record_size=record_size, caveats=caveats
+            )
         return cls.build(
             int(low),
             int(high),
-            block.get("depending_on"),
+            depending_on,
             record_size,
             caveats=caveats,
             source="FD RECORD VARYING",
         )
+
+    @classmethod
+    def file_range(
+        cls,
+        minimum: int,
+        maximum: int,
+        *,
+        record_size: int,
+        caveats: list[str] | None = None,
+    ) -> VaryingLength | None:
+        """An FD range with no ``DEPENDING ON``: bounds the file, not the record.
+
+        IBM COBOL writes such a record at the length of the 01 record named
+        on the WRITE, so the range is not clamped to this one layout (a
+        10-byte header under ``RECORD CONTAINS 10 TO 20`` is as valid as the
+        20-byte detail beside it). A layout outside the range is a mismatch
+        and appended to *caveats*; its records are still written whole.
+        """
+        low, high = sorted((max(0, minimum), max(0, maximum)))
+        if high <= low:
+            return None
+        if record_size > 0 and not low <= record_size <= high and caveats is not None:
+            caveats.append(
+                f"FD RECORD FROM {low} TO {high} does not include the "
+                f"{record_size}-byte record layout; every record is written "
+                f"at the layout's full {record_size} bytes"
+            )
+        return cls(low, high, None, per_record=False)
 
     @classmethod
     def build(
@@ -189,6 +233,7 @@ class VaryingLength:
             "minimum": self.minimum,
             "maximum": self.maximum,
             "depending_on": self.depending_on,
+            "per_record": self.per_record,
         }
 
 
