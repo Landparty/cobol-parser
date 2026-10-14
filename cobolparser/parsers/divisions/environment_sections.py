@@ -16,6 +16,7 @@ from typing import Any
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import SourceLocation
+from cobolparser.parsers.statements._utils import peek_past_noise
 
 from .environment_select import SelectClauseParser
 
@@ -237,8 +238,19 @@ class ConfigurationSectionParser:
         def _skip_noise() -> None:
             token_stream.skip_whitespace_and_comments()
 
+        def _meaningful(offset: int = 0) -> Any:
+            # The *offset*-th token past layout: any word of a clause may
+            # start the next line (``SYSOUT <newline> IS SYSPRINT``), and a
+            # raw peek(offset) there saw the NEWLINE and lost the clause.
+            token, at = peek_past_noise(token_stream, 0)
+            for _ in range(offset):
+                if token is None:
+                    break
+                token, at = peek_past_noise(token_stream, at + 1)
+            return token
+
         def _word(offset: int = 0) -> str:
-            token = token_stream.peek(offset)
+            token = _meaningful(offset)
             return token.value.upper() if token is not None and token.value else ""
 
         def _at_para_end() -> bool:
@@ -253,7 +265,7 @@ class ConfigurationSectionParser:
         def _mnemonic_start(offset: int = 0) -> bool:
             # ``environment-name IS mnemonic-name`` or the name-less
             # ``UPSI-0 ON STATUS IS condition`` form.
-            token = token_stream.peek(offset)
+            token = _meaningful(offset)
             if token is None or token.type in _LITERAL_TYPES or token.value == ".":
                 return False
             nxt = _word(offset + 1)
@@ -310,6 +322,7 @@ class ConfigurationSectionParser:
                         _skip_noise()
                     if _word() == "PICTURE" and _word(1) == "SYMBOL":
                         token_stream.consume()
+                        _skip_noise()
                         token_stream.consume()
                         _skip_noise()
                         sym = token_stream.peek(0)
@@ -344,6 +357,7 @@ class ConfigurationSectionParser:
                 _skip_noise()
                 if _word() == "FOR" and _word(1) in ("ALPHANUMERIC", "NATIONAL"):
                     token_stream.consume()
+                    _skip_noise()
                     token_stream.consume()
                     _skip_noise()
                 if _word() == "IS":
@@ -362,6 +376,7 @@ class ConfigurationSectionParser:
                     _skip_noise()
                 if _word() == "FOR" and _word(1) in ("ALPHANUMERIC", "NATIONAL"):
                     token_stream.consume()
+                    _skip_noise()
                     token_stream.consume()
                 symbolic_characters.extend(
                     self._parse_symbolic_characters(token_stream)

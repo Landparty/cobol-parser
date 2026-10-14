@@ -3279,3 +3279,22 @@ the context skips cProfile, so `function_profile_available` is `False`,
 Wall-clock, CPU and memory are still measured, and the outer profile is left
 alone. tracemalloc is stopped only by the context that started it, including
 when `__enter__` fails. Tests: `tests/unit/test_profiling.py`.
+
+# Line breaks between keywords (2026-10-14, issue #385)
+
+A lookahead that reads the *next word* must step over layout tokens: a
+bare `peek()` / `peek(1)` sees the NEWLINE when the second word starts the
+next line, and the parse silently changes. Use `peek_past_noise` for a
+non-destructive check and `skip_whitespace` (or the division parsers'
+`_skip_newlines`) before consuming a word that must follow. Sites fixed:
+STOP <operand>, WHEN OTHER, 88/66 names, `VALUES ARE`, FD/SD/RD names,
+CALL `ON EXCEPTION` / `ON OVERFLOW`, ENTRY name, EXEC SQL/CICS/DLI/IMS
+(procedure and data division), END DECLARATIVES, every SPECIAL-NAMES word
+lookahead (`_word(n)` counts meaningful tokens), and `OBJECT REFERENCE`.
+
+`StatementParserRegistry`'s dispatch cache key now also carries the first
+meaningful token after the verb, besides the raw second token: keyed on
+`(EXEC, NEWLINE)` alone, `EXEC <newline> CICS` reused the parser cached for
+an earlier `EXEC <newline> SQL`. Pinned by
+`tests/regression/test_keyword_line_breaks.py`, which parses each case with
+the gap joined and broken and requires identical ASTs.

@@ -49,7 +49,9 @@ class EntryStatementParser(IStatementParser):
             else SourceLocation(0, 0)
         )
 
-        # Parse entry name (must be a string literal)
+        # Parse entry name (must be a string literal). It may start the next
+        # line; the NEWLINE token was taken as the name and USING was lost.
+        skip_whitespace(token_stream)
         if token_stream.is_empty():
             raise ValueError("ENTRY statement requires a name")
 
