@@ -2775,9 +2775,9 @@ def _lint_text_report(report: Any, source_file: str) -> str:
     which a parser would render as a real position at the top of the file.
     A finding with a line but no real column prints ``file:line:``.
 
-    The column is ``origin_column``, the one an editor shows (#301), when it
-    is known; analyzer columns count the normalized text, 7 short on a
-    fixed-format line.
+    The column is ``origin_column``, the one an editor shows (#301); when it
+    is not known the column is left out, since analyzer columns count the
+    normalized text and are 7 short on a fixed-format line.
     """
     lines: list[str] = []
     for finding in report.findings:
@@ -2794,10 +2794,12 @@ def _lint_text_report(report: Any, source_file: str) -> str:
             prefix = f"{finding.origin_file}:{finding.origin_line}:"
         else:
             prefix = f"{source_file}:{finding.location.line}:"
+        # Only a column an editor would agree with is printed; the analyzer
+        # column alone is 7 short on a fixed-format line, so without an
+        # on-disk column (a copybook that could not be re-read, a parse error
+        # that gave only a line) the prefix stops at the line.
         if finding.origin_column is not None:
             prefix += f"{finding.origin_column}:"
-        elif finding.column_known:
-            prefix += f"{finding.location.column}:"
         lines.append(f"{prefix} {finding.severity} [{finding.rule}] {finding.message}")
     for caveat in report.caveats:
         lines.append(f"{source_file}: note: {caveat}")

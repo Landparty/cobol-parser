@@ -160,6 +160,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`lint` printed a column 7 too small on fixed-format source** (#301):
+  analyzer columns count the normalized text (columns 8-72), so `--format
+  text` pointed 7 columns left of the code. Text output now prints the column
+  an editor shows, per file and per line -- copybooks of either layout and
+  lines after `>>SOURCE FORMAT IS FREE` included. A column that cannot be
+  vouched for (a parse error that gave only a line, a copybook that cannot be
+  re-read) is left out: `file:line:`. **JSON:** each located finding's
+  `origin` gains `column`, and lint now emits `origin` on *every* located
+  finding, not only after copybook expansion -- without `--copybook-path` it
+  names the file itself and the same line. A consumer that read "`origin`
+  present" as "copybooks were expanded" should compare `origin.file` with
+  `source_file` instead. `location.column` is unchanged.
+
 * **Same-named fields and paragraphs were merged by name** (#258): two
   records carrying the same field names (the `MOVE CORRESPONDING` shape)
   and paragraph names reused across sections (`X1` in `S1` and in `S2`)

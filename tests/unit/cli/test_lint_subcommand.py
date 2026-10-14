@@ -166,6 +166,51 @@ class TestTextOutput:
         assert f"{path}:5:8: warning [unused-variables]" in out
         assert f"{path}:7:5: warning [unused-variables]" in out
 
+    def test_switching_back_to_fixed_shifts_again(self, tmp_path: Path, capsys) -> None:
+        path = tmp_path / "BACK.cbl"
+        path.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. BACK.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "      >>SOURCE FORMAT IS FREE\n"
+            "  01 WS-FREE-UNUSED PIC X.\n"
+            ">>SOURCE FORMAT IS FIXED\n"
+            "       01  WS-FIXED-UNUSED  PIC X.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           GOBACK.\n",
+            encoding="utf-8",
+        )
+        _run(str(path), "--format", "text")
+        out = capsys.readouterr().out
+        assert f"{path}:6:3: warning [unused-variables]" in out
+        assert f"{path}:8:8: warning [unused-variables]" in out
+
+    def test_source_format_fixed_flag_shifts(self, program: str, capsys) -> None:
+        # --source-format decides the layout without the detector, and the
+        # shift follows that decision.
+        _run(program, "--format", "text", "--source-format", "fixed")
+        assert f"{program}:6:8: warning [unused-variables]" in capsys.readouterr().out
+
+    def test_source_format_free_flag_does_not_shift(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        path = tmp_path / "FREE.cbl"
+        path.write_text(
+            "IDENTIFICATION DIVISION.\n"
+            "PROGRAM-ID. FREE.\n"
+            "DATA DIVISION.\n"
+            "WORKING-STORAGE SECTION.\n"
+            "   01 WS-NEVER-USED PIC X.\n"
+            "PROCEDURE DIVISION.\n"
+            "MAIN-PARA.\n"
+            "    GOBACK.\n",
+            encoding="utf-8",
+        )
+        _run(str(path), "--format", "text", "--source-format", "free")
+        assert f"{path}:5:4: warning [unused-variables]" in capsys.readouterr().out
+
     def test_json_origin_carries_the_on_disk_column(self, program: str, capsys) -> None:
         _run(program, "--compact")
         data = json.loads(capsys.readouterr().out)

@@ -677,9 +677,13 @@ listing + fixed member 6 (the expander cuts only the sequence area), free
 throughout 0. Lint now **always** stamps `origin` -- without
 `--copybook-path` it is the file itself, same line -- so JSON carries the
 on-disk column as `origin.column` in both cases and text prints it;
-`location.column` stays the analyzer's own count. A parse error that
-reported no column (`LintFinding.column_known` False) prints `file:line:`
-and has no `origin.column`, instead of its placeholder 1 shifted to 8.
+`location.column` stays the analyzer's own count. Text prints only a
+column it can vouch for: a parse error that reported no column
+(`LintFinding.column_known` False), a copybook that cannot be re-read, or a
+line the source map does not cover prints `file:line:` and has no
+`origin.column`, rather than the analyzer column (7 short on a fixed line).
+Known gap (predates #301): a `>>SOURCE FORMAT IS FREE` *inside a copybook*
+leaves the expanded listing a column off, so those columns are off by one.
 `stamp_report_origins` no longer overwrites an `origin` already present, or
 `_emit_report` would drop that column again.
 
@@ -714,8 +718,11 @@ expanded text; the expander's own source map turns each one back into a real
 file and line, emitted per finding as `"origin": {"file", "line"}` and used
 by `--format text` for its `file:line:column:` prefix. A finding inside an
 inlined member therefore names the *copybook*, not the program. Findings the
-map cannot place, and runs with no expansion at all, carry no `origin` key
-rather than a guess.
+map cannot place carry no `origin` key rather than a guess. Since #301
+(2026-10-13) a run with no expansion **does** carry `origin` on every located
+finding -- the file itself, the same line, plus the on-disk `column` -- so
+"`origin` present" no longer means "copybooks were expanded"; compare
+`origin.file` with `source_file` for that.
 
 **Copybook provenance covers every unit too.** `_lint_copybook_item_names`
 diffs declared DATA DIVISION names between an expanded and an unexpanded

@@ -154,6 +154,32 @@ class TestLintReportsOrigins:
 
         assert f"{library / 'CUSTOMER.cpy'}:4:12:" in out
 
+    def test_a_copybook_that_cannot_be_reread_prints_no_column(self, capsys, library):
+        # Without the member's text there is no telling its layout, so the
+        # analyzer column (7 short for this fixed-format member) is not
+        # printed as if it were the real one.
+        from pathlib import Path
+
+        real_read_text = Path.read_text
+
+        def read_text(self, *args, **kwargs):
+            if self.name == "CUSTOMER.cpy":
+                raise OSError("gone")
+            return real_read_text(self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", read_text):
+            out = _run_text(
+                capsys,
+                "lint",
+                str(library / "PAYROLL.cbl"),
+                "--copybook-path",
+                str(library),
+                "--format",
+                "text",
+            )
+
+        assert f"{library / 'CUSTOMER.cpy'}:4: info [unused-variables]" in out
+
     def test_free_form_copybook_in_a_fixed_program_keeps_its_own_column(
         self, capsys, tmp_path
     ):
