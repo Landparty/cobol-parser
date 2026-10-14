@@ -160,6 +160,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`gen-fixtures --scenarios all`: error-status and empty-input scenarios no
+  longer assert the normal path** (#318). A scenario with a status override
+  (OPEN status 35, READ INVALID KEY 23, CALL ON EXCEPTION, SQLCODE 100) now
+  keeps only the overridden boundary's own `call_count`, and only when that is
+  one invocation by construction (OPEN, CALL, SQL; never a READ, whose count
+  comes from rows a failing READ never consumes). Every other `call_count` is
+  dropped, since the program's error path may skip the READ loop or CLOSE.
+  It asserts no `field_equals` at all: the constant fold walks the normal
+  path, so even a value folded from literals may sit past the point where
+  the failure path stops. A zero-row fixture with no AT END
+  handler (a random-access READ in "empty input") no longer asserts a
+  `call_count` of 0: the READ still runs once.
+
 * **`lint` printed a column 7 too small on fixed-format source** (#301):
   analyzer columns count the normalized text (columns 8-72), so `--format
   text` pointed 7 columns left of the code. Text output now prints the column

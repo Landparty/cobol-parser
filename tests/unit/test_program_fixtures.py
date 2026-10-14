@@ -473,6 +473,36 @@ class TestScenarioModes:
         assert int(min_read.sequence[0]["F1-QTY"]) == 0
         assert int(max_read.sequence[0]["F1-QTY"]) == 999
 
+    def test_compound_search_when_pins_each_conjunct_not_the_joined_text(self):
+        # Issue #348: the WHEN arm's witness was the literal
+        # "K1' AND IN-TYPE = 'Z", written into IN-CODE of every READ row,
+        # with IN-TYPE left random -- and the arm still reported targeted.
+        source = _SCENARIO_MODE_HEADER.replace(
+            "           05  F1-QTY          PIC 9(3).\n",
+            "           05  IN-CODE         PIC X(30).\n"
+            "           05  IN-TYPE         PIC X.\n",
+        ).replace(
+            "           IF F1-QTY > 100\n"
+            "               DISPLAY 'HIGH'\n"
+            "           END-IF.\n",
+            "           SEARCH F1-REC\n"
+            "             WHEN IN-CODE = 'K1' AND IN-TYPE = 'Z'\n"
+            "               DISPLAY 'HIT'\n"
+            "           END-SEARCH.\n",
+        )
+        result = parse_cobol(source, filename="srchand.cbl")
+        assert result.ast is not None, result.errors
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        bundle = ProgramFixtureGenerator().generate_with_scenarios(
+            result.ast, index, report, mode="branches", seed=1
+        )
+        scenario = next(s for s in bundle.scenarios if "WHEN_1" in s.name)
+        read_fixture = next(f for f in scenario.fixtures if f.ref.category == "READ")
+        assert read_fixture.sequence
+        for row in read_fixture.sequence:
+            assert (row["IN-CODE"], row["IN-TYPE"]) == ("K1", "Z")
+
     def test_scenario_coverage_is_attached_to_the_bundle(self):
         bundle = _scenario_mode_bundle("branches")
         assert bundle.scenario_coverage is not None
@@ -1152,3 +1182,163 @@ class TestTargetedArmsAreVerified:
             assert "verification" in detail["reason"]
         # ...and it is a gap `--strict` refuses to pass over.
         assert any("verification" in item for item in bundle.unresolved)
+
+
+_OPEN_CHECK_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SEQLOOP.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-FILE ASSIGN TO INFILE
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  IN-FILE.
+       01  IN-REC.
+           05 IN-AMT PIC 9(5).
+       WORKING-STORAGE SECTION.
+       01  WS-FS  PIC XX.
+       01  WS-EOF PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT IN-FILE
+           IF WS-FS NOT = "00"
+               DISPLAY "OPEN FAILED"
+               GOBACK
+           END-IF
+           PERFORM UNTIL WS-EOF = 'Y'
+               READ IN-FILE
+                   AT END MOVE 'Y' TO WS-EOF
+               END-READ
+           END-PERFORM
+           CLOSE IN-FILE
+           GOBACK.
+"""
+
+_RANDOM_READ_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RNDREAD.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT VS-FILE ASSIGN TO VSFILE
+               ORGANIZATION IS INDEXED
+               ACCESS MODE IS RANDOM
+               RECORD KEY IS VS-KEY
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  VS-FILE.
+       01  VS-REC.
+           05 VS-KEY PIC X(5).
+           05 VS-AMT PIC 9(5).
+       WORKING-STORAGE SECTION.
+       01  WS-FS  PIC XX.
+       01  WS-LIT PIC 9(3).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE 42 TO WS-LIT
+           OPEN INPUT VS-FILE
+           MOVE "00001" TO VS-KEY
+           READ VS-FILE
+               INVALID KEY DISPLAY "NOT FOUND"
+           END-READ
+           DISPLAY VS-AMT
+           DISPLAY WS-LIT
+           CLOSE VS-FILE
+           GOBACK.
+"""
+
+
+def _all_mode_scenarios(source: str, rows: int = 1) -> dict:
+    from cobolparser.generators.data.options import DataGeneratorOptions
+
+    result = parse_cobol(source, filename="failpath.cbl")
+    assert result.ast is not None, result.errors
+    index = ProgramLayoutIndex.build(result.ast)
+    report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+    bundle = ProgramFixtureGenerator(
+        DataGeneratorOptions(rows=rows)
+    ).generate_with_scenarios(result.ast, index, report, mode="all", seed=7)
+    return {s.name: s for s in bundle.scenarios}
+
+
+def _count_by_ref(scenario) -> dict:
+    return {e.ref: e.value for e in scenario.expectations if e.kind == "call_count"}
+
+
+def _field_equals(scenario) -> dict:
+    return {e.ref: e.value for e in scenario.expectations if e.kind == "field_equals"}
+
+
+class TestFailurePathExpectations:
+    """#318: an error-status or empty-input scenario sends the program down a
+    path the generated sequence does not describe, so it must assert nothing
+    that only holds on the normal path."""
+
+    def test_failed_open_drops_downstream_read_and_close_count_by_ref(self):
+        scenarios = _all_mode_scenarios(_OPEN_CHECK_SOURCE, rows=3)
+        failed = scenarios["error status: OPEN IN-FILE not found"]
+        assert _count_by_ref(failed) == {"OPEN:IN-FILE": 1}
+        # The normal path is untouched.
+        happy = _count_by_ref(scenarios["happy path"])
+        assert happy == {"OPEN:IN-FILE": 1, "READ:IN-FILE": 4, "CLOSE:IN-FILE": 1}
+
+    def test_invalid_key_read_does_not_seed_the_fold_from_its_row(self):
+        scenarios = _all_mode_scenarios(_RANDOM_READ_SOURCE)
+        invalid = scenarios["error status: READ VS-FILE INVALID KEY"]
+        assert "VS-REC.VS-AMT" not in _field_equals(invalid)
+        # Its own count comes from the row sequence a failing READ never
+        # consumes, so it is dropped too.
+        assert "READ:VS-FILE" not in _count_by_ref(invalid)
+
+    def test_failed_open_asserts_nothing_from_a_later_read(self):
+        scenarios = _all_mode_scenarios(_RANDOM_READ_SOURCE)
+        failed = scenarios["error status: OPEN VS-FILE not found"]
+        assert _count_by_ref(failed) == {"OPEN:VS-FILE": 1}
+        assert "VS-REC.VS-AMT" not in _field_equals(failed)
+
+    def test_status_override_scenarios_assert_no_field_equals(self):
+        # Even a literal-only fold walks the normal path: WS-LIT is MOVEd and
+        # DISPLAYed on it, but nothing proves the failure path gets there.
+        scenarios = _all_mode_scenarios(_RANDOM_READ_SOURCE)
+        assert _field_equals(scenarios["happy path"]).get("WS-LIT") == "42"
+        for name in (
+            "error status: OPEN VS-FILE not found",
+            "error status: READ VS-FILE INVALID KEY",
+        ):
+            assert _field_equals(scenarios[name]) == {}, name
+
+    def test_failed_open_does_not_assert_a_literal_set_after_it(self):
+        # Review repro on #418: status 35 stops the run before the MOVE, so
+        # WS-MSG = 'DONE' is never displayed on that path.
+        source = _OPEN_CHECK_SOURCE.replace(
+            "       01  WS-EOF PIC X VALUE 'N'.\n",
+            "       01  WS-EOF PIC X VALUE 'N'.\n       01  WS-MSG PIC X(4).\n",
+        ).replace(
+            "           CLOSE IN-FILE\n",
+            "           CLOSE IN-FILE\n"
+            "           MOVE 'DONE' TO WS-MSG\n"
+            "           DISPLAY WS-MSG\n",
+        )
+        assert "WS-MSG" in source
+        scenarios = _all_mode_scenarios(source)
+        assert _field_equals(scenarios["happy path"]).get("WS-MSG") == "DONE"
+        failed = scenarios["error status: OPEN IN-FILE not found"]
+        assert "WS-MSG" not in _field_equals(failed)
+
+    def test_happy_path_still_seeds_the_fold_from_a_single_row(self):
+        scenarios = _all_mode_scenarios(_RANDOM_READ_SOURCE)
+        assert "VS-REC.VS-AMT" in _field_equals(scenarios["happy path"])
+
+    def test_empty_input_random_read_gets_no_zero_call_count(self):
+        # No AT END handler and no rows: the random READ still runs once,
+        # so "0 invocations" would be false. The count follows the
+        # statement on the main line, not the empty row sequence.
+        scenarios = _all_mode_scenarios(_RANDOM_READ_SOURCE)
+        assert _count_by_ref(scenarios["empty input"])["READ:VS-FILE"] == 1
+
+    def test_empty_input_sequential_read_still_counts_the_eof_call(self):
+        scenarios = _all_mode_scenarios(_OPEN_CHECK_SOURCE)
+        assert _count_by_ref(scenarios["empty input"])["READ:IN-FILE"] == 1
