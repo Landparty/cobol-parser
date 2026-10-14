@@ -15,6 +15,15 @@ unused-variables / complexity all see the jump table.
 `test_go_parser_edge_cases.py`'s `test_depending_without_on_reads_variable`
 replaces the test that pinned the old behavior.
 
+2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests,
+#313) pins EVALUATE `WHEN SPACES` / `ZERO` / `LOW-VALUES` as figurative
+selectors and constraints, distinct from a quoted `WHEN 'SPACES'`, through
+gen-fixtures (blank data for the figurative arm) and business-rules (quotes
+kept). Four selector-shape tests now expect the additive `"quoted": True`.
+`tests/unit/analysis/test_ast_diff.py` adds a parametrized test that
+`WHEN SPACES` -> `WHEN 'SPACES'` and `WHEN WS-B` -> `WHEN 'WS-B'` each diff
+as one `condition-changed`.
+
 2026-10-13: `tests/regression/test_copy_member_case_folding.py`
 (17 tests, #289) pins COPY member and library names folding to uppercase on
 a case-sensitive filesystem: `copy errorcd.` finds `ERRORCD.cpy`, the uppercase
@@ -1265,6 +1274,13 @@ width, and `jcl --dd-map --program`. The abbreviated-condition fix is pinned
 in `test_review_2026_09_09_parser.py` (`TestFinding08ConditionTrees`); the
 JCL omitted-sub-parameter slot in `tests/unit/test_jcl.py`.
 
+`tests/regression/test_keyword_line_breaks.py` (issue #385) parses each
+keyword pair (STOP RUN, WHEN OTHER, 88/66 names, FD/SD, CALL ON EXCEPTION,
+ENTRY, EXEC SQL/CICS/DLI, END DECLARATIVES, SPECIAL-NAMES, OBJECT
+REFERENCE, ...) once on one line and once broken across two, and requires
+identical ASTs apart from locations; it also pins the dispatch cache
+telling EXEC<newline>SQL from EXEC<newline>CICS within one parse.
+
 ### Field lineage (2026-10-08)
 
 `tests/samples/lineage/` holds a three-program chain plus its JCL: WRITER
@@ -1329,6 +1345,11 @@ FILE STATUS variables is not kept in the name, and
 that the lineage file port is `INDD`, not `,`.
 
 ## 2026-10-14
+
+`tests/unit/test_compute_bare_size_error.py` pins that COMPUTE ends its
+expression at a bare `SIZE ERROR` (no `ON`), with the handler body landing
+in `on_size_error` rather than the paragraph; covers the `IF ... END-COMPUTE`
+nesting and a bare `NOT SIZE ERROR` (#399).
 
 `tests/unit/analysis/test_ast_diff.py::test_equivalent_picture_spellings_are_not_a_change`
 / `test_usage_synonyms_are_not_a_change` pin that `diff` compares a PICTURE

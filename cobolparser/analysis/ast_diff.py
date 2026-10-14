@@ -418,7 +418,16 @@ def _selector_text(selector: Any) -> str:
         return f"RANGE:{selector.get('start', '')}..{selector.get('end', '')}"
     if sel_type == "Condition":
         return f"COND:{selector.get('text', '')}"
-    return f"{sel_type}:{selector.get('value', '')}"
+    value = str(selector.get("value", ""))
+    # The lexer strips quotes, so WHEN SPACES and WHEN 'SPACES' share a
+    # value; the parser's markers are what tell them apart (#313).
+    if selector.get("figurative"):
+        return f"FIG:{value}"
+    if selector.get("identifier"):
+        return f"ID:{value}"
+    if selector.get("quoted"):
+        return f"{sel_type}:'{value.replace(chr(39), chr(39) * 2)}'"
+    return f"{sel_type}:{value}"
 
 
 def _statement_signature(stmt: Any) -> tuple[Any, ...]:
