@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-14 -- issue #403: leading IS in an abbreviated leg
+
+[parser.md](parser.md): `_expand_abbreviated_condition` drops the optional
+`IS` that opens an abbreviated leg (`IF A > 1 AND IS < 5`), so the leg
+expands to `A < 5` instead of an operand-less COMPARISON.
+
 ## 2026-10-14 -- issue #330: literal operands keep their quotes
 
 [parser.md](parser.md) ("Literal Re-Quoting"), [analysis.md](analysis.md):

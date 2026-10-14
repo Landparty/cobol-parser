@@ -418,7 +418,7 @@ def _expand_abbreviated_condition(
     the operator -- of the preceding relation be omitted: ``A = 1 OR 2 OR
     3`` means ``A = 1 OR A = 2 OR A = 3`` and ``A > 1 AND < 5`` means ``A >
     1 AND A < 5``. Two shapes are expanded: a leg that *starts with a
-    relational operator* (subject prepended) and a leg that is *one bare
+    relational operator*, optionally after ``IS`` (subject prepended) and a leg that is *one bare
     literal* (subject and operator prepended; ``NOT literal`` negates the
     operator). A bare identifier is left alone: without a symbol table it
     is indistinguishable from a level-88 condition-name (``A = 1 OR
@@ -430,6 +430,12 @@ def _expand_abbreviated_condition(
         return rest
     if not isinstance(subject.left_operand, str):
         return rest
+    if len(rest) > 1 and rest[0].upper() == "IS":
+        # ``A > 1 AND IS < 5``: the optional IS that opens a relational
+        # operator survives cleaning when the leg has no subject before it.
+        nxt = rest[1].upper()
+        if nxt == "NOT" or nxt in COMPARISON_OPS or nxt in _RELATIONAL_OPERATORS:
+            rest = rest[1:]
     first = rest[0].upper()
     if first in COMPARISON_OPS or first in _RELATIONAL_OPERATORS:
         return [subject.left_operand, *rest]

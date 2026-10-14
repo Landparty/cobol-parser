@@ -2027,6 +2027,14 @@ every other UNSTRING serializes as before.
   relation of the leg to its left, falling back to the one handed in.
   Pinned in `tests/regression/test_review_2026_09_09_parser.py`
   (`TestFinding08ConditionTrees`).
+- `_conditions.py` (2026-10-14, issue #403): an abbreviated leg may open
+  with the optional `IS` of its relational operator (`A > 1 AND IS < 5`,
+  `A = 1 OR IS EQUAL TO 2`, `A > 1 AND IS NOT > 5`).
+  `_expand_abbreviated_condition` drops a leading `IS` when an operator or
+  `NOT` follows, then expands the leg like the form without `IS`; before,
+  the leg was an operand-less COMPARISON with `raw_condition` `IS < 5`. An
+  `IS` before anything else is left alone. Pinned in
+  `tests/regression/test_issue_403_abbreviated_leading_is.py`.
 - `string_unstring_parsers.py`: `BY` after `DELIMITED` is optional
   (`DELIMITED SIZE`, `DELIMITED "," OR ALL SPACE`). A delimiter is only
   consumed when the next token is operand-shaped (`_next_is_delimiter`), so
