@@ -319,6 +319,13 @@ hard-disables) and adds `preprocess` auto-detection pins (free-form
 input passes through untouched by default; `--source-format=fixed`
 still forces).
 
+2026-10-14: New `tests/unit/test_perform_until_newline.py` (19 tests,
+issue #347) -- a PERFORM UNTIL condition ending at a line break, in the
+out-of-line, inline and VARYING forms: bare condition-name, `( A > 5 )`,
+a parenthesised OR, `NOT cond` and a class test each get a real condition
+tree; the line-break form matches the period form; and the READ/AT END/EOF
+flag idiom yields a `SequenceConstraint`. See [parser.md](parser.md).
+
 2026-08-24 (second entry this date): New
 `tests/regression/test_corpus_residual_findings.py` (10 tests) pinning a
 follow-up 105-program corpus sweep's four residual findings -- see

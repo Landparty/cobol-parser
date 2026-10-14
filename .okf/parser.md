@@ -892,6 +892,17 @@ so gating the stop on `for_varying` avoids truncating a condition that
 happens to contain an `AFTER` token (Copilot review on PR #79 caught the
 original unconditional stop). Pinned by `::TestH2PerformVaryingAfter`.
 
+**PERFORM UNTIL drops layout tokens (#347, 2026-10-14):** both UNTIL
+token loops (`_collect_until_condition_tokens` and
+`_parse_until_condition_only`) consume WHITESPACE / NEWLINE / CONTINUATION /
+COMMENT tokens without appending them, as the IF and EVALUATE parsers do;
+`_make_until_condition_expression` also drops whitespace-only strings as a
+second guard. A condition ending at a line break (no period) used to end in
+`"\n"`, so a bare condition-name, `NOT cond`, a class test or `( ... )`
+fell back to a raw COMPARISON with `left_operand=None` -- 11 of the 14
+enterprise-sample PERFORM UNTIL guards. Pinned by
+`tests/unit/test_perform_until_newline.py`.
+
 **All-digit procedure names / PERFORM THRU numbering (2026-07-20, extended
 2026-08-21):** COBOL permits procedure names made entirely of digits, and
 `PERFORM 1000 THRU 1999` numbering is idiomatic in THRU-style code. Those
