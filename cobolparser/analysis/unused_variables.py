@@ -15,10 +15,10 @@ analyzer only looks at *ast* itself, not ``ast.contained_programs``. Call
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .._literals import QUOTED_LITERAL_RE
 from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolProgram, CobolSection
@@ -124,7 +124,7 @@ _NON_IDENTIFIER_WORDS = frozenset(
     }
 )
 
-_QUOTED_TEXT_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+_QUOTED_TEXT_RE = QUOTED_LITERAL_RE
 
 # Statement attributes holding a single identifier string that isn't
 # already folded into `.operands` by the statement's own setters -- found

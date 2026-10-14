@@ -16,6 +16,7 @@ import os
 import random
 import zlib
 
+from .._literals import is_quoted_literal
 from ..analysis.boundary_inventory import (
     Boundary,
     BoundaryInventoryAnalyzer,
@@ -486,6 +487,10 @@ class ProgramFixtureGenerator:
         expectations: list[Expectation] = []
 
         for arg in boundary.call_args:
+            if is_quoted_literal(arg.name):
+                # ``BY CONTENT 'A'`` / ``X'00'``: a constant the caller
+                # supplies, not a data item the layout index could hold.
+                continue
             arg_fields = self._fields_for_names([arg.name], index)
             if not arg_fields:
                 unresolved.append(

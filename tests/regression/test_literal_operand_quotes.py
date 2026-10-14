@@ -141,3 +141,91 @@ class TestAnalyzers:
         report = FieldFlowAnalyzer().analyze(_parse(*self._STATEMENTS).ast)
         sources = json.dumps([e.source.to_dict() for e in report.edges])
         assert "WS-CODE" not in sources
+
+
+_TYPED_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TYPED.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 X      PIC X.
+       01 Z      PIC X.
+       01 WS-IN  PIC X(20).
+       01 WS-OUT PIC X(20).
+       PROCEDURE DIVISION.
+           STRING WS-IN DELIMITED BY X'00' INTO WS-OUT.
+           UNSTRING WS-IN DELIMITED BY X'00' INTO WS-OUT.
+           INSPECT WS-IN REPLACING ALL X'00' BY SPACE.
+           CALL 'puts' USING BY REFERENCE Z'hello'.
+           CALL 'SUBPGM' USING BY CONTENT 'A' X'00'.
+           DISPLAY WS-OUT.
+           STOP RUN.
+"""
+
+
+class TestTypedLiteralPrefix:
+    """The prefix letter of ``X'00'`` / ``Z'hello'`` is not the data item X/Z."""
+
+    def _ast(self, source: str = _TYPED_HEADER):
+        result = parse_cobol(source)
+        assert result.errors == []
+        return result.ast
+
+    def test_unused_variables_still_flags_x_and_z(self) -> None:
+        report = UnusedVariableAnalyzer().analyze(self._ast())
+        assert sorted(i.name for i in report.unused_items) == ["X", "Z"]
+
+    def test_xref_attributes_no_reference_to_x_or_z(self) -> None:
+        report = XrefAnalyzer().analyze(self._ast())
+        refs = {e.name: len(e.references) for e in report.entries}
+        assert refs["X"] == 0
+        assert refs["Z"] == 0
+
+    def test_xref_reports_no_undefined_prefix_letter(self) -> None:
+        source = _TYPED_HEADER.replace("       01 X      PIC X.\n", "").replace(
+            "       01 Z      PIC X.\n", ""
+        )
+        assert XrefAnalyzer().analyze(self._ast(source)).undefined == []
+
+    def test_lineage_draws_no_flow_from_x(self) -> None:
+        report = FieldFlowAnalyzer().analyze(self._ast())
+        sources = {e.source.to_dict().get("name") for e in report.edges}
+        assert "X" not in sources
+        assert "Z" not in sources
+
+    def test_gen_fixtures_does_not_report_literal_arguments_unresolved(
+        self, tmp_path
+    ) -> None:
+        from cobolparser.generators import ProgramFixtureGenerator
+
+        path = tmp_path / "TYPED.cbl"
+        path.write_text(_TYPED_HEADER)
+        bundle = ProgramFixtureGenerator().generate_from_file(str(path), seed=1)
+        assert not [u for u in bundle.unresolved if "argument" in u]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('"A"', True),
+        ("'IT''S'", True),
+        ("X'00'", True),
+        ('z"hello"', True),
+        ("NX'0041'", True),
+        ("X", False),
+        ("WS-X", False),
+        ("TBL(1)", False),
+        ("5", False),
+    ],
+)
+def test_is_quoted_literal(text: str, expected: bool) -> None:
+    from cobolparser._literals import is_quoted_literal
+
+    assert is_quoted_literal(text) is expected
+
+
+def test_quoted_literal_re_keeps_a_name_ending_in_a_prefix_letter() -> None:
+    from cobolparser._literals import QUOTED_LITERAL_RE
+
+    assert QUOTED_LITERAL_RE.sub(" ", "WS-X'00'") == "WS-X "
+    assert QUOTED_LITERAL_RE.sub(" ", "A X'00' Z'B' \"C\"").split() == ["A"]

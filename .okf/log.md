@@ -22,6 +22,10 @@ re-quote a string-literal operand the way MOVE and DISPLAY do, through
 `_utils.literal_operand_text()`. business-rules' STRING re-quoting
 heuristic is gone; unused-variables, lineage and xref no longer read
 `'WS-CODE'` as the item `WS-CODE`.
+Follow-up from review: `_literals.QUOTED_LITERAL_RE` / `is_quoted_literal()`
+take the typed-literal prefix with the quotes, so the `X` of `X'00'` is no
+longer read as the item `X` (unused-variables, xref, lineage, redundancy),
+and gen-fixtures no longer reports a literal CALL argument unresolved.
 
 ## 2026-10-13 -- issue #291: MOVE FUNCTION sources are checked
 
