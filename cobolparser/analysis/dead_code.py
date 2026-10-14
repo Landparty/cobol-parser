@@ -159,6 +159,11 @@ class DeadCodeAnalyzer:
         # fall-through sources until ``_collect_fallthrough_refs`` knows
         # whether their section is itself entered and keeps running.
         self._section_exit_jumps: set[str] = set()
+        # Sections some transfer that does not return lands in from
+        # *outside* the section (a GO TO / ALTER / CICS HANDLE written in
+        # another section, or an ENTRY): on that path the section is not
+        # running as a PERFORM, so its exit paragraph runs on.
+        self._sections_entered_by_jump: set[str] = set()
         # Maps paragraph name -> its CobolParagraph node, for fall-through
         # termination checks. A section has an entry only when sentences sit
         # between its header and its first paragraph (the parser's unnamed
@@ -198,6 +203,7 @@ class DeadCodeAnalyzer:
         self._range_ends = set()
         self._section_exits = {}
         self._section_exit_jumps = set()
+        self._sections_entered_by_jump = set()
         self._paragraph_nodes = {}
         self._fallthrough_sources = set()
         self._declarative_procs = set()
@@ -510,7 +516,7 @@ class DeadCodeAnalyzer:
                 "target_qualifier" if not stmt.depending_on_variable else None
             )
             for key in self._keys(stmt, target, qualifier_key):
-                self._add_goto_ref(key)
+                self._add_goto_ref(key, enclosing_section(stmt))
 
     def _collect_sort_refs(self, stmt: SortStatement) -> None:
         """Collect references from a SORT statement's procedures."""
@@ -553,6 +559,8 @@ class DeadCodeAnalyzer:
             return
         for key in self._keys(stmt, stmt.section_name):
             self._add_jump_ref(key)
+            # Called from outside the program: never a PERFORM of its section.
+            self._note_jump_into(key, None)
 
     def _collect_fallthrough_refs(self) -> None:
         """Mark a procedure as referenced when the one immediately before it
@@ -580,10 +588,14 @@ class DeadCodeAnalyzer:
         for i in range(len(self._ordered_procedures) - 1):
             current = self._ordered_procedures[i]
             next_proc = self._ordered_procedures[i + 1]
-            if current in self._fallthrough_sources:
-                # A performed section that is *also* fallen into or gone to
-                # runs on past its exit paragraph on that path, so a GO TO
-                # onto the exit does too (issue #312's caveat).
+            if (
+                current in self._fallthrough_sources
+                or current in self._sections_entered_by_jump
+            ):
+                # A performed section that is *also* fallen into, gone to, or
+                # jumped into from another section runs on past its exit
+                # paragraph on that path, so a GO TO onto the exit does too
+                # (issue #312's caveat).
                 paras = self._section_paragraphs.get(current)
                 if paras and paras[-1] in self._section_exit_jumps:
                     self._fallthrough_sources.add(paras[-1])
@@ -688,7 +700,17 @@ class DeadCodeAnalyzer:
             self._add_ref(key)
             self._fallthrough_sources.add(key)
 
-    def _add_goto_ref(self, key: str | None) -> None:
+    def _note_jump_into(self, key: str, from_section: str | None) -> None:
+        """Record the section(s) of jump target *key* as entered by a jump
+        when the jump comes from outside them (*from_section* ``None`` means
+        from anywhere: an ALTER, a CICS HANDLE, an ENTRY)."""
+        if key in self._section_paragraphs:
+            targets = {key}
+        else:
+            targets = self._paragraph_sections.get(key, set())
+        self._sections_entered_by_jump.update(t for t in targets if t != from_section)
+
+    def _add_goto_ref(self, key: str | None, from_section: str | None = None) -> None:
         """Add a GO TO (or ALTER ... TO PROCEED TO) target.
 
         A jump lands in the target and carries on -- unless the target is
@@ -702,9 +724,13 @@ class DeadCodeAnalyzer:
         residual over-approximation is deliberate -- a range end can also
         be reached by a path that never PERFORMed it, and reporting live
         code dead is the worse error.
+
+        Every caller but a plain GO TO passes no *from_section*: an ALTERed
+        GO TO or a CICS HANDLE branch can fire from any section.
         """
         if not key:
             return
+        self._note_jump_into(key, from_section)
         if key in self._range_ends:
             self._add_ref(key)
         elif key in self._section_exits:

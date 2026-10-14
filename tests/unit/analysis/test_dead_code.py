@@ -1710,6 +1710,37 @@ class TestSectionExitGoTo:
         )
         assert _dead_names(source) == []
 
+    def test_performed_section_also_jumped_into_from_outside(self) -> None:
+        """A GO TO from another section into a performed section's paragraph
+        enters it without a PERFORM: its exit runs on into 9000-OBSOLETE."""
+        source = _section_exit_program(
+            "           PERFORM 1000-INIT\n           GO TO 1000-START.",
+            "           GO TO 1000-EXIT.",
+        )
+        assert _dead_names(source) == []
+
+    def test_performed_section_middle_paragraph_jumped_into(self) -> None:
+        source = _section_exit_program(
+            "           PERFORM 1000-INIT\n           GO TO 1000-MID.",
+            "           GO TO 1000-EXIT.\n       1000-MID.\n"
+            "           GO TO 1000-EXIT.",
+        )
+        assert _dead_names(source) == []
+
+    def test_performed_section_exit_gone_to_from_outside(self) -> None:
+        source = _section_exit_program(
+            "           PERFORM 1000-INIT\n           GO TO 1000-EXIT.",
+            "           GO TO 1000-EXIT.",
+        )
+        assert _dead_names(source) == []
+
+    def test_performed_section_holding_an_entry_runs_past_exit(self) -> None:
+        source = _section_exit_program(
+            "           PERFORM 1000-INIT\n           STOP RUN.",
+            "           ENTRY 'ALTENT'\n           GO TO 1000-EXIT.",
+        )
+        assert _dead_names(source) == []
+
     def test_goto_exit_of_unperformed_section_still_falls_through(self) -> None:
         """Only a performed section's exit returns; a section entered by GO
         TO alone runs on past its exit as before."""

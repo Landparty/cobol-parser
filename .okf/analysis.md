@@ -106,7 +106,9 @@ either by bare name.
 > later section alive. Exception: when the section is itself a fall-through
 > source (fallen into, or a GO TO target), `_collect_fallthrough_refs`
 > restores the exit as a fall-through source, since on that path it runs
-> on. Pinned by `TestSectionExitGoTo`.
+> on. The same holds when the section is entered by a jump from *outside*
+> it (`_sections_entered_by_jump`: a GO TO written in another section, an
+> ALTER, a CICS HANDLE, an ENTRY). Pinned by `TestSectionExitGoTo`.
 
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
