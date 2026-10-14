@@ -680,6 +680,32 @@ _EOF_LOOP_PROGRAM = """\
 """
 
 
+_GO_TO_LOOP_PROGRAM = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GOTOLOOP.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-FILE ASSIGN TO 'IN.DAT'
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  IN-FILE.
+       01  IN-REC.
+           05  IN-QTY          PIC 9(3).
+       WORKING-STORAGE SECTION.
+       01  WS-FS               PIC XX.
+           88  WS-AT-EOF       VALUE '10'.
+       01  WS-CNT              PIC 9(3).
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           OPEN INPUT IN-FILE.
+{body}       9000-END.
+           CLOSE IN-FILE
+           STOP RUN.
+"""
+
+
 class TestCallCountFollowsControlFlow:
     """Issue #363: a count is stated only where control flow makes it exact."""
 
@@ -760,7 +786,7 @@ class TestCallCountFollowsControlFlow:
         assert counts["ACCEPT:WS-IN"] == [1]
         assert "CALL:GETRATE" not in counts
 
-    def test_code_after_a_main_line_go_to_gets_no_count(self):
+    def test_forward_go_to_is_followed(self):
         bundle = _bundle_for(_WS_HEADER + """\
            ACCEPT WS-IN
            GO TO NEXT-PARA.
@@ -772,8 +798,83 @@ class TestCallCountFollowsControlFlow:
 """)
         counts = _counts(bundle.scenarios[0])
         assert counts["ACCEPT:WS-IN"] == [1]
+        assert counts["CALL:GETRATE"] == [1]
+        # Skipped by the GO TO: it never runs, but "never" is not a count
+        # this walk claims.
         assert "CALL:NEVER" not in counts
-        assert "CALL:GETRATE" not in counts
+
+    def test_go_to_read_loop_states_no_count(self):
+        # Review of #420: a backward GO TO re-runs the READ once per record.
+        bundle = _bundle_for(_GO_TO_LOOP_PROGRAM.format(body="""\
+       1000-READ.
+           READ IN-FILE AT END GO TO 9000-END END-READ
+           ADD 1 TO WS-CNT
+           GO TO 1000-READ.
+"""))
+        counts = _counts(bundle.scenarios[0])
+        assert "READ:IN-FILE" not in counts
+        assert "CLOSE:IN-FILE" not in counts
+
+    def test_go_to_loop_with_status_check_states_no_count(self):
+        bundle = _bundle_for(_GO_TO_LOOP_PROGRAM.format(body="""\
+       1000-READ.
+           READ IN-FILE
+           IF WS-FS = '10' GO TO 9000-END END-IF
+           CALL 'PROCREC' USING WS-CNT
+           GO TO 1000-READ.
+"""))
+        counts = _counts(bundle.scenarios[0])
+        assert "READ:IN-FILE" not in counts
+        assert "CALL:PROCREC" not in counts
+
+    def test_end_of_file_status_check_is_not_exempt(self):
+        # Review of #420: what a READ leaves in the status is decided by the
+        # data ('10' at end of file, and at once for empty input).
+        bundle = _bundle_for(
+            _GO_TO_LOOP_PROGRAM.format(body="""\
+           READ IN-FILE
+           IF WS-AT-EOF
+              DISPLAY 'EMPTY'
+              CLOSE IN-FILE
+              STOP RUN
+           END-IF
+           CALL 'INITRPT' USING WS-CNT
+           PERFORM UNTIL WS-AT-EOF
+              READ IN-FILE
+           END-PERFORM.
+"""),
+            mode="all",
+        )
+        for scenario in bundle.scenarios:
+            counts = _counts(scenario)
+            assert counts["OPEN:IN-FILE"] == [1], scenario.name
+            assert "CALL:INITRPT" not in counts, scenario.name
+
+    def test_status_check_right_after_open_is_still_exempt(self):
+        bundle = _bundle_for(_GO_TO_LOOP_PROGRAM.format(body="""\
+           IF WS-FS NOT = '00' STOP RUN END-IF
+           CALL 'INITRPT' USING WS-CNT.
+"""))
+        assert _counts(bundle.scenarios[0])["CALL:INITRPT"] == [1]
+
+    def test_eof_loop_with_another_exit_condition_states_no_read_count(self):
+        # Review of #420: the loop can stop before end of file.
+        source = _EOF_LOOP_PROGRAM.replace(
+            "PERFORM UNTIL WS-EOF = 'Y'\n",
+            "PERFORM UNTIL WS-EOF = 'Y' OR WS-RATE >= 3\n",
+        ).replace("CALL 'SUBX' USING WS-RATE\n", "ADD 1 TO WS-RATE\n")
+        assert source != _EOF_LOOP_PROGRAM
+        bundle = _bundle_for(source, rows=10)
+        assert "READ:IN-FILE" not in _counts(bundle.scenarios[0])
+
+    def test_eof_loop_with_exit_perform_states_no_read_count(self):
+        source = _EOF_LOOP_PROGRAM.replace(
+            "CALL 'SUBX' USING WS-RATE\n",
+            "IF IN-QTY = 0 EXIT PERFORM END-IF\n",
+        )
+        assert source != _EOF_LOOP_PROGRAM
+        bundle = _bundle_for(source, rows=10)
+        assert "READ:IN-FILE" not in _counts(bundle.scenarios[0])
 
 
 class TestTier2FieldEqualsExpectations:

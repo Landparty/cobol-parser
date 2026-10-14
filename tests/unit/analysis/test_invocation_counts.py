@@ -194,3 +194,71 @@ def test_count_at_reports_a_perform_statement():
     perform_line = source.splitlines().index("           PERFORM SUB-PARA") + 1
     assert counts.count_at(perform_line, PerformStatement) == 1
     assert counts.count_at(perform_line + 100, PerformStatement) is None
+
+
+def test_go_to_out_of_a_performed_paragraph_reports_nothing():
+    found = _counts("""\
+       MAIN-PARA.
+           CALL 'FIRST' USING WS-RATE
+           PERFORM SUB-PARA
+           STOP RUN.
+       SUB-PARA.
+           GO TO END-PARA.
+       END-PARA.
+           STOP RUN.
+""")
+    assert found["CALL:FIRST"] == [None]
+
+
+def test_go_to_depending_on_reports_nothing():
+    found = _counts("""\
+       MAIN-PARA.
+           CALL 'FIRST' USING WS-RATE
+           GO TO A-PARA B-PARA DEPENDING ON WS-N.
+       A-PARA.
+           STOP RUN.
+       B-PARA.
+           STOP RUN.
+""")
+    assert found["CALL:FIRST"] == [None]
+
+
+def test_a_program_with_alter_follows_no_go_to():
+    found = _counts("""\
+       MAIN-PARA.
+           ALTER SWITCH-PARA TO PROCEED TO B-PARA
+           CALL 'FIRST' USING WS-RATE
+           GO TO A-PARA.
+       SWITCH-PARA.
+           GO TO A-PARA.
+       A-PARA.
+           STOP RUN.
+       B-PARA.
+           STOP RUN.
+""")
+    assert found["CALL:FIRST"] == [None]
+
+
+def test_go_to_a_section_continues_at_its_first_paragraph():
+    found = _counts("""\
+       MAIN-SECTION SECTION.
+       MAIN-PARA.
+           GO TO LATER-SECTION.
+       SKIPPED-PARA.
+           CALL 'NEVER' USING WS-RATE.
+       LATER-SECTION SECTION.
+       LATER-PARA.
+           CALL 'AFTER' USING WS-RATE
+           STOP RUN.
+""")
+    assert found["CALL:AFTER"] == [1]
+    assert found["CALL:NEVER"] == [None]
+
+
+def test_go_to_an_unknown_target_reports_nothing():
+    found = _counts("""\
+       MAIN-PARA.
+           CALL 'FIRST' USING WS-RATE
+           GO TO NO-SUCH-PARA.
+""")
+    assert found["CALL:FIRST"] == [None]

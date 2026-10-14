@@ -1538,8 +1538,9 @@ alongside Phase 3's OUT-boundary stubs, via two small helpers in
   IF/EVALUATE/SEARCH arm, a handler, a `PERFORM UNTIL`/`VARYING` body, a
   SORT procedure, or after a branch that could transfer control has no count.
   The one data-dependent exception is the read-until-EOF idiom: a READ file
-  with a `SequenceConstraint` whose `PERFORM UNTIL` itself runs exactly once
-  is invoked `len(sequence) + 1` times (every row, plus the READ that hits
+  with a `SequenceConstraint` whose `PERFORM UNTIL` itself runs exactly once,
+  tests only the EOF flag and has no transfer in its body
+  (`is_plain_eof_loop`), is invoked `len(sequence) + 1` times (every row, plus the READ that hits
   end of file), whichever READ statements share the work -- a priming READ
   and the loop's READ are one count. A straight-line READ with an AT END
   handler is invoked once, not `rows + 1`: the old formula

@@ -18,7 +18,11 @@ statement it reaches either an exact execution count or "unknown":
 * once a branch arm or loop body could transfer control (GO TO, EXIT
   PARAGRAPH / SECTION / PERFORM, NEXT SENTENCE, STOP RUN, GOBACK, EXIT
   PROGRAM), everything after it is unknown too: the walk cannot tell whether
-  it still runs.
+  it still runs;
+* a GO TO on the certain path is followed only forward, into code not yet
+  walked. A jump back is a loop with a data-dependent trip count, so no
+  count is reported at all; the same for a GO TO out of a PERFORMed
+  paragraph, GO TO DEPENDING ON, and any GO TO in a program using ALTER.
 
 One exception keeps the ubiquitous status check from blanking every count
 after the first OPEN: an IF whose condition reads nothing but boundary
@@ -26,8 +30,12 @@ status fields (FILE STATUS fields, their level-88s, SQLCODE / SQLSTATE /
 EIBRESP), and an INVALID KEY handler or a CALL's ON EXCEPTION / ON OVERFLOW,
 is decided by the status the scenario's own fixtures supply. A scenario that
 supplies a success status never takes those arms, so a STOP RUN inside one
-does not make the code after it uncertain. Scenarios that override a status
-to an error take the arm; what their counts should be is a separate question.
+does not make the code after it uncertain. A FILE STATUS field counts only
+while the last boundary that set it ran on the certain path and could not
+hit end of file: after a READ that reads to the end, the field holds '10' in
+every scenario (and at once for empty input), so a check on it is data.
+Scenarios that override a status to an error take the arm; what their counts
+should be is a separate question.
 
 Statements the walk never reaches (only reachable through GO TO, inside
 DECLARATIVES, ...) have no count either: "exact, or absent".
@@ -52,7 +60,7 @@ from ..models.statements.control import (
     StopStatement,
 )
 from ..models.statements.io import IOAcceptStatement
-from ..models.statements.misc import ExitStatement, GobackStatement
+from ..models.statements.misc import AlterStatement, ExitStatement, GobackStatement
 from ..parsers.statements.ibm_exec_statements import (
     ExecCicsStatement,
     ExecImsStatement,
@@ -66,6 +74,7 @@ from .boundary_inventory import (
 from .const_fold import (
     _HANDLER_BODY_ATTRS,
     _MAX_WALK_STEPS,
+    _SECTION_KEY,
     _entry_paragraph,
     _fall_through_chain,
     _nested_statement_lists,
@@ -93,6 +102,16 @@ _BOUNDARY_TYPES: tuple[type, ...] = (
     ExecImsStatement,
     IOAcceptStatement,
 )
+
+_FILE_CATEGORIES = frozenset(category for _, category in _FILE_OP_SPECS)
+
+
+def _category_of(stmt: Any) -> str | None:
+    for statement_type, category in _FILE_OP_SPECS:
+        if isinstance(stmt, statement_type):
+            return category
+    return None
+
 
 #: Status registers that are not declared FILE STATUS fields but are set by
 #: a mocked boundary all the same.
@@ -157,6 +176,14 @@ class InvocationCounts:
         ]
         return self._agree(candidates)
 
+    def statements_at(self, line: int, statement_type: type) -> list[Any]:
+        """The *statement_type* statements starting on *line*."""
+        return [
+            stmt
+            for stmt in self._by_line.get(line, [])
+            if isinstance(stmt, statement_type)
+        ]
+
     def _agree(self, statements: list[Any] | None) -> int | None:
         if not statements:
             return None
@@ -193,11 +220,16 @@ class _Walk:
     def __init__(
         self,
         ast: CobolProgram,
-        status_names: frozenset[str],
+        sites: dict[tuple[str, int], list[_StatusSite]],
         index: ProgramLayoutIndex | None,
     ) -> None:
         self.ordered_names, self.by_name = _ordered_paragraphs(ast)
-        self.status_names = status_names
+        self.status_sites = sites
+        #: Status field -> True while the last boundary that set it ran on
+        #: the certain path and cannot have hit end of file.
+        self.status_ok: dict[str, bool] = {}
+        #: ``id(statement)`` -> (UPPERCASED paragraph, line), boundary types.
+        self.site_of: dict[int, tuple[str, int]] = {}
         self.index = index
         self.result = InvocationCounts()
         self.stack: list[_Frame | _RegionEnd] = []
@@ -210,11 +242,25 @@ class _Walk:
         #: Counts are wrong somewhere; report nothing.
         self.poisoned = False
         self.steps = 0
+        #: ALTER retargets a GO TO at run time; no GO TO can be followed.
+        self.has_alter = any(
+            isinstance(stmt, AlterStatement) for stmt in ast.get_all_statements()
+        )
 
     # -- bookkeeping ------------------------------------------------------
 
     def record(self, stmt: Any, multiplier: int | None) -> None:
         key = id(stmt)
+        site = self.site_of.get(key)
+        if site is not None:
+            category = _category_of(stmt)
+            for site_category, field_name, data_driven in self.status_sites.get(
+                site, []
+            ):
+                if site_category == category:
+                    self.status_ok[field_name] = (
+                        multiplier is not None and not data_driven
+                    )
         if multiplier is None:
             self.result.unknown.add(key)
         else:
@@ -243,10 +289,7 @@ class _Walk:
         entry = _entry_paragraph(ast)
         if entry is None:
             return self.result
-        for paragraph in reversed(
-            _fall_through_chain(entry, self.ordered_names, self.by_name)
-        ):
-            self.stack.append(_Frame(iter(paragraph.statements), 1))
+        self.push_chain(entry)
         while self.stack and not self.stopped:
             top = self.stack[-1]
             if isinstance(top, _RegionEnd):
@@ -279,9 +322,10 @@ class _Walk:
                 self.poisoned = True
             elif _transfer_kind(stmt) == "skip":
                 self.uncertain = True
+            elif isinstance(stmt, GoStatement):
+                self.follow_go_to(stmt)
             else:
-                # GO TO goes where this walk does not follow; STOP RUN /
-                # GOBACK / EXIT PROGRAM ends the run.
+                # STOP RUN / GOBACK / EXIT PROGRAM ends the run.
                 self.stopped = True
             return
 
@@ -309,6 +353,59 @@ class _Walk:
                 self.uncertain = True
             else:
                 self.push_region([body], exempt=False)
+
+    def follow_go_to(self, stmt: GoStatement) -> None:
+        """A GO TO on the certain path: keep walking at its target.
+
+        Only a jump forward into code not yet walked is followed. A jump
+        back into walked code is a loop whose trip count depends on the
+        data, so every count already taken could be short: report nothing.
+        The same goes for a GO TO out of a PERFORMed paragraph (where control
+        goes after the range ends is not modelled), GO TO DEPENDING ON, and
+        any GO TO in a program that ALTERs one.
+        """
+        targets = list(stmt.target_paragraphs) or (
+            [stmt.target_paragraph] if stmt.target_paragraph else []
+        )
+        if (
+            self.has_alter
+            or stmt.depending_on_variable
+            or len(targets) != 1
+            or any(isinstance(f, _Frame) and f.entered is not None for f in self.stack)
+        ):
+            self.poisoned = True
+            return
+        target = self._paragraph_named(targets[0])
+        if target is None or any(
+            id(walked) in self.result.exact or id(walked) in self.result.unknown
+            for walked in target.statements
+        ):
+            self.poisoned = True
+            return
+        self.stack.clear()
+        self.visiting.clear()
+        self.push_chain(target)
+
+    def push_chain(self, paragraph: Any) -> None:
+        """*paragraph* and every paragraph control falls into after it."""
+        for chained in reversed(
+            _fall_through_chain(paragraph, self.ordered_names, self.by_name)
+        ):
+            self.stack.append(_Frame(iter(chained.statements), 1))
+
+    def _paragraph_named(self, name: str) -> Any:
+        key = name.upper()
+        if key in self.by_name:
+            return self.by_name[key]
+        marker = f"{_SECTION_KEY}{key}"
+        if marker not in self.ordered_names:
+            return None
+        for following in self.ordered_names[self.ordered_names.index(marker) + 1 :]:
+            if following.startswith(_SECTION_KEY):
+                return None
+            if following in self.by_name:
+                return self.by_name[following]
+        return None
 
     def push_handlers(self, stmt: Any) -> None:
         exempt_attrs = _STATUS_HANDLERS | (
@@ -364,8 +461,6 @@ class _Walk:
 
     def status_only(self, condition: Any) -> bool:
         """True when *condition* reads boundary status fields and nothing else."""
-        if not self.status_names:
-            return False
         saw_status = False
         for raw in _condition_field_names(condition):
             name = raw.strip()
@@ -373,7 +468,7 @@ class _Walk:
             if not name or _LITERAL_RE.match(name) or upper in _FIGURATIVES:
                 continue
             qualified = self._qualified(name)
-            if qualified in self.status_names or upper in _STATUS_REGISTERS:
+            if self.status_ok.get(qualified) or upper in _STATUS_REGISTERS:
                 saw_status = True
                 continue
             return False
@@ -411,6 +506,7 @@ class _Walk:
                     self.result._by_line.setdefault(line, []).append(stmt)
                     if isinstance(stmt, _BOUNDARY_TYPES):
                         self.result._by_site.setdefault((name, line), []).append(stmt)
+                        self.site_of[id(stmt)] = (name, line)
                 for nested in _nested_statement_lists(stmt):
                     pending.extend(nested)
 
@@ -426,25 +522,100 @@ def _literal_times(stmt: PerformStatement) -> int | None:
     return None
 
 
-def status_field_names(
+#: A status a scenario's own fixture keeps at success, until the data says
+#: otherwise.
+_StatusSite = tuple[str, str, bool]  # (category, status field, data-driven)
+
+
+def status_sites(
     report: BoundaryReport, index: ProgramLayoutIndex | None
-) -> frozenset[str]:
-    """Qualified, UPPERCASED names of every field a boundary reports status in."""
-    names: set[str] = set()
-    raw: list[str] = []
-    for boundary in report.boundaries:
-        if boundary.status_field:
-            raw.append(boundary.status_field)
-        elif index is not None:
-            facts = index.file_facts(boundary.ref.key)
-            if facts is not None and facts.file_status_field:
-                raw.append(facts.file_status_field)
-    for name in raw:
+) -> dict[tuple[str, int], list[_StatusSite]]:
+    """(UPPERCASED paragraph, line) -> the status each boundary there sets.
+
+    The status field is qualified and UPPERCASED. *data-driven* marks a
+    READ that can reach end of file (an AT END handler, or no INVALID KEY
+    handler): reading to the end sets the status to '10' in every scenario,
+    and an empty-input scenario starts there, so what such a READ leaves in
+    the field is decided by the data, not by a status the scenario chose.
+    SQL boundaries are left out: SQLCODE / SQLSTATE are status registers.
+    """
+
+    def qualified(name: str) -> str:
         resolved = index.resolve(name) if index is not None else None
-        names.add(
+        return str(resolved.spec.qualified_name).upper() if resolved else name.upper()
+
+    sites: dict[tuple[str, int], list[_StatusSite]] = {}
+    for boundary in report.boundaries:
+        ref = boundary.ref
+        if ref.line is None or ref.category not in _FILE_CATEGORIES:
+            continue
+        field_name = boundary.status_field
+        if not field_name and index is not None:
+            facts = index.file_facts(ref.key)
+            field_name = facts.file_status_field if facts is not None else None
+        if not field_name:
+            continue
+        data_driven = ref.category == "READ" and (
+            "AT_END" in boundary.handlers or "INVALID_KEY" not in boundary.handlers
+        )
+        sites.setdefault(((ref.paragraph or "").upper(), ref.line), []).append(
+            (ref.category, qualified(field_name), data_driven)
+        )
+    return sites
+
+
+def is_plain_eof_loop(
+    ast: CobolProgram, stmt: PerformStatement, index: ProgramLayoutIndex | None
+) -> bool:
+    """True when *stmt* loops until one flag, with nothing that leaves early.
+
+    `PERFORM UNTIL WS-EOF = 'Y'` runs until end of file. `UNTIL WS-EOF = 'Y'
+    OR WS-CNT >= 3`, or a body that can GO TO / EXIT PERFORM / STOP, may stop
+    first, so the file is not necessarily read to the end.
+    """
+    tree = stmt.until_condition.condition_tree if stmt.until_condition else None
+    if tree is None:
+        return False
+    tested: set[str] = set()
+    for raw in _condition_field_names(tree):
+        name = raw.strip()
+        if not name or _LITERAL_RE.match(name) or name.upper() in _FIGURATIVES:
+            continue
+        resolved = index.resolve(name) if index is not None else None
+        tested.add(
             str(resolved.spec.qualified_name).upper() if resolved else name.upper()
         )
-    return frozenset(names)
+    if len(tested) != 1:
+        return False
+    ordered_names, by_name = _ordered_paragraphs(ast)
+    body = stmt.inline_statements or _perform_body_statements(
+        stmt, by_name, ordered_names
+    )
+    if body is None:
+        return False
+    pending = list(body)
+    seen_targets: set[str] = set()
+    while pending:
+        inner = pending.pop()
+        if _Walk._transfers(inner):
+            return False
+        if isinstance(inner, PerformStatement) and not inner.inline_statements:
+            target = (inner.target_paragraph or "").upper()
+            if target in seen_targets:
+                continue
+            seen_targets.add(target)
+            performed = _perform_body_statements(inner, by_name, ordered_names)
+            if performed is None:
+                return False
+            pending.extend(performed)
+        for first, thru in _procedure_ranges(inner):
+            procedure = _range_statements(first, thru, by_name, ordered_names)
+            if procedure is None:
+                return False
+            pending.extend(procedure)
+        for nested in _nested_statement_lists(inner):
+            pending.extend(nested)
+    return True
 
 
 def count_invocations(
@@ -453,7 +624,12 @@ def count_invocations(
     index: ProgramLayoutIndex | None = None,
 ) -> InvocationCounts:
     """Walk *ast*'s entry chain and count what runs on its certain path."""
-    return _Walk(ast, status_field_names(report, index), index).run(ast)
+    return _Walk(ast, status_sites(report, index), index).run(ast)
 
 
-__all__ = ["InvocationCounts", "count_invocations", "status_field_names"]
+__all__ = [
+    "InvocationCounts",
+    "count_invocations",
+    "is_plain_eof_loop",
+    "status_sites",
+]

@@ -2406,12 +2406,25 @@ and gives each statement it reaches an exact execution count or "unknown":
   after it unknown; on the main line, GO TO / STOP ends the walk and a skip
   makes the rest unknown; inside a literal `TIMES` body any transfer
   discards every count (they would be overstated);
+* a main-line GO TO is followed forward (`push_chain` at the target) only
+  when no statement of the target paragraph was walked yet; a backward jump
+  (a GO TO read loop), a GO TO out of a PERFORMed paragraph, GO TO
+  DEPENDING ON, an unknown target, or any ALTER in the program discards
+  every count;
 * **status exemption**: an IF reading only boundary status fields (FILE
   STATUS fields and their level-88s, `SQLCODE`/`SQLSTATE`/`EIBRESP`), an
   INVALID KEY handler, and a CALL's ON EXCEPTION / ON OVERFLOW are decided
   by the scenario's status fixture, so a STOP RUN inside them does not
   blank later counts. Without it, the universal `OPEN` + status-check idiom
-  would leave no count after the first OPEN.
+  would leave no count after the first OPEN. A FILE STATUS field qualifies
+  only while the last boundary that set it (`status_sites`) ran on the
+  certain path and is not a READ that can reach end of file: after one, the
+  field is '10' in every read-to-EOF scenario and at once for empty input.
+
+`is_plain_eof_loop(ast, perform, index)` backs `_CallCounter`'s EOF rule:
+the UNTIL tests exactly one field, and the body (followed through PERFORMs
+and SORT procedures) has no transfer -- `UNTIL WS-EOF = 'Y' OR WS-CNT >= 3`
+or an EXIT PERFORM can stop before end of file.
 
 `InvocationCounts.for_boundary(ref)` matches a `BoundaryRef` by
 (paragraph, line) against statements of a boundary type only, so a MOVE in

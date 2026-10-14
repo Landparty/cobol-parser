@@ -24,7 +24,11 @@ from ..analysis.boundary_inventory import (
 )
 from ..analysis.const_fold import ConstantFolder
 from ..analysis.constraints import ConstraintExtractor
-from ..analysis.invocation_counts import InvocationCounts, count_invocations
+from ..analysis.invocation_counts import (
+    InvocationCounts,
+    count_invocations,
+    is_plain_eof_loop,
+)
 from ..analysis.program_flow import ProgramFlowAnalyzer
 from ..models.program import CobolProgram
 from ..models.statements.call import CallStatement
@@ -93,7 +97,8 @@ class _CallCounter:
     `PERFORM UNTIL`, runs a data-dependent number of times, so it gets no
     `call_count` at all. The one data-dependent count that *is* exact is
     the read-until-end-of-file idiom: a file whose READ sets the flag a
-    `PERFORM UNTIL` loop tests, with that loop on the unconditional path, is
+    `PERFORM UNTIL` loop tests -- that flag alone, with nothing in the body
+    able to leave early, and the loop on the unconditional path -- is
     read once per row of the scenario's own sequence plus once more to hit
     end of file -- however many READ statements share the work (a priming
     READ and the loop's own READ are one count, not two).
@@ -113,7 +118,14 @@ class _CallCounter:
             constraints = ConstraintExtractor().extract(ast, index, report)
             for seq in constraints.sequence_constraints:
                 _, _, line = seq.origin.partition("@")
-                if line.isdigit() and counts.count_at(int(line), PerformStatement) == 1:
+                if not line.isdigit():
+                    continue
+                loops = counts.statements_at(int(line), PerformStatement)
+                if (
+                    len(loops) == 1
+                    and counts.count_at(int(line), PerformStatement) == 1
+                    and is_plain_eof_loop(ast, loops[0], index)
+                ):
                     eof_files.add((seq.boundary.category, seq.boundary.key))
         return cls(counts=counts, eof_files=eof_files)
 
