@@ -169,6 +169,12 @@ RELEASE/RETURN). See `analysis.md`.
 `test_program_signature.py` (+1) pin arithmetic read/write roles and the
 LINKAGE directions derived from them. See `analysis.md`.
 
+2026-10-14: `tests/unit/analysis/test_io_sequence_perform_summaries.py` (7
+tests, #371) pins io-sequence surviving a 1,500-deep PERFORM chain, walking a
+2x fan-out 40 levels deep once per level, re-walking a shared range only from
+a new file state or recursion-guard context, and reporting a violation once
+per location. See `analysis.md`.
+
 2026-09-27: `tests/unit/analysis/test_io_sequence.py::TestGoToReadLoop` (3
 tests) pins the READ ... AT END GO TO loop not reporting its file left open,
 while a missing/duplicate CLOSE in its exit paragraph still is. See

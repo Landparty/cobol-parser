@@ -1064,11 +1064,10 @@ alone must still surface both lists.
 Two rules (`recursion-check`, `complexity`) need the CFG; `LintAnalyzer`
 builds it at most once per `analyze()` call and accepts a precomputed
 `flow_report`. Findings identical in every visible field collapse to one
-(`_deduplicate`) — `IOSequenceAnalyzer` legitimately reports one READ-before-
-OPEN once per control flow path reaching it, which is two facts about the
-graph but one thing to fix, and two identical squiggles in an editor. That
-collapsing is this aggregate view's choice; the analyzers themselves are
-unchanged.
+(`_deduplicate`) — identical findings from one analyzer are two facts about
+the graph but one thing to fix, and two identical squiggles in an editor.
+(`IOSequenceAnalyzer` itself now reports a violation once per source location
+since #371, so it no longer produces these.)
 
 CLI: `cobol-parser lint <file.cbl>` (see cli.md), including `--format text`,
 `--min-severity`, and `--fail-on` (exit 3).
@@ -1112,6 +1111,24 @@ via a range stack; per-chain visited sets keep GO TO cycles finite).
 Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Conditional
 branches still share one state (unchanged conservatism); paragraphs
 unreachable from the entry procedure are no longer walked at all.
+
+**PERFORM ranges are summarized, not re-inlined (2026-10-14, #371).** Each
+PERFORM used to re-walk its target paragraphs through Python recursion, so a
+PERFORM chain ~248 deep raised `RecursionError` (and `lint` reported the rule
+as failed), and a paragraph PERFORMed twice per nesting level cost 2**depth
+walks. The walk is now generators (`_run_paragraph`, `_process_statement`,
+`_run_perform`, `_walk_range`) that `yield` the sub-step they would have
+called; `_drive` runs them off an explicit stack. The first run of a range
+from a given entry state (open files, closed files) is stored as a
+`_RangeSummary` (exit state, violations, queued conditional GO TO targets,
+whether it terminated) and replayed at later call sites with the same state.
+A summary is only reused when the re-entrancy guard would decide the same
+way: none of the ranges it `entered` is on the PERFORM stack, and every
+enclosing range it skipped (`guarded`) still is. Violations are emitted once
+per (kind, file, location, message) -- the walk used to repeat them once per
+call path. Output was checked identical (after that dedup) to the old walk
+on every sample/NIST program and 3,000 random programs. Pinned by
+`tests/unit/analysis/test_io_sequence_perform_summaries.py`.
 
 **`CLOSE f REEL` / `CLOSE f UNIT` keep the file open (2026-09-28).** They
 close only the current volume (`close_options[f]["reel"/"unit"]`); treating
