@@ -2236,6 +2236,16 @@ internal env) rather than approximating:
   contract (divide-by-zero and non-terminating decimals poison, not
   truncate).
   Pinned by `tests/regression/test_bug_review_2026_08_12.py::TestDivideMode`.
+* **Writes that live outside `.operands`** (issue #317, 2026-10-14).
+  `_write_targets` also collects `InspectStatement.tallying_clauses[*]["counter"]`
+  (INSPECT ... TALLYING increments it in place), every string value of
+  `ExecCicsStatement.options` (INTO/SET/LENGTH/RESP/RESP2/ITEM/...: the
+  command decides which are written, so all are taken as written), and the
+  argument of each `KEYWORD(arg)` in `ExecImsStatement.arguments` (EXEC DLI
+  INTO/KEYFEEDBACK/...). Both EXEC nodes have an empty `.operands`, so
+  before this a field MOVEd before the statement kept its old value and
+  gen-fixtures asserted a `field_equals` a real run fails.
+  Pinned by `tests/unit/analysis/test_const_fold.py::TestInspectAndExecWrites`.
 * **Exactness is decided over `Fraction`, never over `Decimal`** (2026-09-16
   audit). Both halves of the exactness machinery used to decide exactness
   *using inexact decimal arithmetic*, and both let a wrong value through:
