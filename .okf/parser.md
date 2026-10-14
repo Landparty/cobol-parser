@@ -422,7 +422,7 @@ sibling) and a dedicated anonymous-item case.
 | `read_parser.py` | READ |
 | `report_writer_parsers.py` | INITIATE, TERMINATE, SUPPRESS (Report Writer; GENERATE is in `simple_statement_parsers.py`; 2026-09-02) |
 | `rewrite_parser.py` | REWRITE |
-| `search_parser.py` | SEARCH |
+| `search_parser.py` | SEARCH (each WHEN also gets a `condition_tree` from the shared `build_condition_expression`, next to its raw `condition` text, so AND/OR conditions are structural; #348, 2026-10-14) |
 | `set_parser.py` | SET |
 | `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE (RELEASE `FROM` / RETURN `INTO` operands go through `consume_optional_qualifiers`, as MOVE's do: `WS-REC OF GRP`, `TBL ( I )`; before 2026-09-28 only the first word was kept) |
 | `sort_merge_parsers.py` | SORT, MERGE |
