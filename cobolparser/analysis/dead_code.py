@@ -148,6 +148,17 @@ class DeadCodeAnalyzer:
         # *returns* to the performer -- it does not run on into whatever
         # follows the range in source order.
         self._range_ends: set[str] = set()
+        # Last paragraph of every section a PERFORM/SORT/MERGE/XML PARSE runs
+        # (``PERFORM 1000-INIT`` with no THRU, or a range ending on a
+        # section) -> that section. The SECTION form of the ``GO TO
+        # 1000-EXIT`` idiom: a jump onto it ends the performed section and
+        # returns, the same as a THRU range end -- unless the section is
+        # itself entered by fall-through or a GO TO, where the exit runs on.
+        self._section_exits: dict[str, str] = {}
+        # Section exits some GO TO / ALTER lands on, held back from being
+        # fall-through sources until ``_collect_fallthrough_refs`` knows
+        # whether their section is itself entered and keeps running.
+        self._section_exit_jumps: set[str] = set()
         # Maps paragraph name -> its CobolParagraph node, for fall-through
         # termination checks. A section has an entry only when sentences sit
         # between its header and its first paragraph (the parser's unnamed
@@ -185,6 +196,8 @@ class DeadCodeAnalyzer:
         self._section_paragraphs = {}
         self._paragraph_sections = {}
         self._range_ends = set()
+        self._section_exits = {}
+        self._section_exit_jumps = set()
         self._paragraph_nodes = {}
         self._fallthrough_sources = set()
         self._declarative_procs = set()
@@ -429,19 +442,52 @@ class DeadCodeAnalyzer:
         which genuinely needs the CFG's cycle data and correctly reuses
         ``ProgramFlowAnalyzer`` for it.
         """
-        ends: list[str | None] = []
+        # (start, thru, start qualifier, thru qualifier) per procedure phrase.
+        phrases: list[tuple[str | None, str | None, str | None, str | None]] = []
         if isinstance(stmt, PerformStatement):
-            ends.extend(self._keys(stmt, stmt.thru_paragraph, "thru_qualifier"))
+            phrases.append(
+                (
+                    stmt.target_paragraph,
+                    stmt.thru_paragraph,
+                    "target_qualifier",
+                    "thru_qualifier",
+                )
+            )
         elif isinstance(stmt, SortStatement):
-            for end in (stmt.input_procedure_thru, stmt.output_procedure_thru):
-                ends.extend(self._keys(stmt, end))
+            phrases.append(
+                (stmt.input_procedure, stmt.input_procedure_thru, None, None)
+            )
+            phrases.append(
+                (stmt.output_procedure, stmt.output_procedure_thru, None, None)
+            )
         elif isinstance(stmt, MergeStatement):
-            ends.extend(self._keys(stmt, stmt.output_procedure_thru))
+            phrases.append(
+                (stmt.output_procedure, stmt.output_procedure_thru, None, None)
+            )
         elif isinstance(stmt, XmlJsonStatement):
-            ends.extend(self._keys(stmt, stmt.processing_procedure_thru))
-        for end in ends:
-            if end:
-                self._range_ends.add(end)
+            phrases.append(
+                (
+                    stmt.processing_procedure,
+                    stmt.processing_procedure_thru,
+                    None,
+                    None,
+                )
+            )
+        for start, thru, start_q, thru_q in phrases:
+            ends = (
+                self._keys(stmt, thru, thru_q)
+                if thru
+                else self._keys(stmt, start, start_q)
+            )
+            for end in ends:
+                if thru:
+                    self._range_ends.add(end)
+                # A range ending on a section (``PERFORM 1000-INIT``, or
+                # ``... THRU 2000-SEC``) returns after that section's last
+                # paragraph.
+                paras = self._section_paragraphs.get(end)
+                if paras:
+                    self._section_exits[paras[-1]] = end
 
     def _collect_perform_refs(self, stmt: PerformStatement) -> None:
         """Collect references from a PERFORM statement."""
@@ -534,6 +580,13 @@ class DeadCodeAnalyzer:
         for i in range(len(self._ordered_procedures) - 1):
             current = self._ordered_procedures[i]
             next_proc = self._ordered_procedures[i + 1]
+            if current in self._fallthrough_sources:
+                # A performed section that is *also* fallen into or gone to
+                # runs on past its exit paragraph on that path, so a GO TO
+                # onto the exit does too (issue #312's caveat).
+                paras = self._section_paragraphs.get(current)
+                if paras and paras[-1] in self._section_exit_jumps:
+                    self._fallthrough_sources.add(paras[-1])
             if current in self._fallthrough_sources and not self._terminates(current):
                 self._add_ref(next_proc)
                 self._fallthrough_sources.add(next_proc)
@@ -654,6 +707,11 @@ class DeadCodeAnalyzer:
             return
         if key in self._range_ends:
             self._add_ref(key)
+        elif key in self._section_exits:
+            # Settled in ``_collect_fallthrough_refs``, once it is known
+            # whether the section itself is entered and keeps running.
+            self._add_ref(key)
+            self._section_exit_jumps.add(key)
         else:
             self._add_jump_ref(key)
 

@@ -8,6 +8,11 @@ timestamp: 2026-10-13T00:00:00Z
 
 # Overview
 
+2026-10-14: +6 in `tests/unit/analysis/test_dead_code.py`'s new
+`TestSectionExitGoTo` (issue #312): `GO TO nnnn-EXIT` inside a PERFORMed /
+SORT-procedure SECTION no longer keeps later sections alive; three guards
+pin that a section also fallen into or gone to still runs past its exit.
+
 2026-10-13: `tests/regression/test_copy_member_case_folding.py`
 (17 tests, #289) pins COPY member and library names folding to uppercase on
 a case-sensitive filesystem: `copy errorcd.` finds `ERRORCD.cpy`, the uppercase

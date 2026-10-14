@@ -1610,6 +1610,116 @@ class TestDefensiveEdgeCases:
         assert not report.has_dead_code
 
 
+def _section_exit_program(main_body: str, init_start: str, extra: str = "") -> str:
+    return f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DC4.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-A PIC 9.
+       PROCEDURE DIVISION.
+       0000-MAIN SECTION.
+       0000-START.
+{main_body}
+       1000-INIT SECTION.
+       1000-START.
+{init_start}
+       1000-EXIT.
+           EXIT.
+{extra}\
+       9000-OBSOLETE SECTION.
+       9000-START.
+           DISPLAY 'OLD'.
+       9000-EXIT.
+           EXIT.
+"""
+
+
+def _dead_names(source: str) -> list[str]:
+    result = parse_cobol(source, filename="dc4.cbl")
+    assert result.ast is not None
+    return sorted(i.name for i in DeadCodeAnalyzer().analyze(result.ast).dead_items)
+
+
+class TestSectionExitGoTo:
+    """Issue #312: ``GO TO nnnn-EXIT`` inside a PERFORMed SECTION returns to
+    the performer, like the THRU idiom; it must not make the exit paragraph
+    a fall-through source that keeps every later section alive."""
+
+    _CONDITIONAL_GOTO = """\
+           MOVE 1 TO WS-A
+           IF WS-A = 1
+              GO TO 1000-EXIT
+           END-IF
+           DISPLAY 'MORE'."""
+
+    def test_issue_repro_reports_later_section_dead(self) -> None:
+        source = _section_exit_program(
+            "           PERFORM 1000-INIT\n           STOP RUN.",
+            self._CONDITIONAL_GOTO,
+        )
+        assert _dead_names(source) == ["9000-EXIT", "9000-OBSOLETE", "9000-START"]
+
+    def test_unconditional_goto_exit_in_performed_section(self) -> None:
+        source = _section_exit_program(
+            "           PERFORM 1000-INIT\n           STOP RUN.",
+            "           GO TO 1000-EXIT.",
+        )
+        assert _dead_names(source) == ["9000-EXIT", "9000-OBSOLETE", "9000-START"]
+
+    def test_sort_input_procedure_section_exit(self) -> None:
+        """SORT INPUT PROCEDURE IS a section: same return-at-section-end."""
+        prog = _make_program(
+            [],
+            sections=[
+                (
+                    "MAIN-S",
+                    [
+                        (
+                            "MAIN-P",
+                            [_sort_with_procedures(input_proc="IN-S"), _stop_run()],
+                        )
+                    ],
+                ),
+                (
+                    "IN-S",
+                    [
+                        ("IN-START", [_goto("IN-EXIT")]),
+                        ("IN-EXIT", [_continue()]),
+                    ],
+                ),
+                ("DEAD-S", [("DEAD-P", [_continue()])]),
+            ],
+        )
+        report = DeadCodeAnalyzer().analyze(prog)
+        assert sorted(i.name for i in report.dead_items) == ["DEAD-P", "DEAD-S"]
+
+    def test_section_also_fallen_into_keeps_running_past_exit(self) -> None:
+        """No STOP RUN: 1000-INIT is also entered by fall-through, and on that
+        path the jump onto 1000-EXIT runs on into 9000-OBSOLETE."""
+        source = _section_exit_program(
+            "           PERFORM 1000-INIT.",
+            "           GO TO 1000-EXIT.",
+        )
+        assert _dead_names(source) == []
+
+    def test_section_also_gone_to_keeps_running_past_exit(self) -> None:
+        source = _section_exit_program(
+            "           PERFORM 1000-INIT\n           GO TO 1000-INIT.",
+            "           GO TO 1000-EXIT.",
+        )
+        assert _dead_names(source) == []
+
+    def test_goto_exit_of_unperformed_section_still_falls_through(self) -> None:
+        """Only a performed section's exit returns; a section entered by GO
+        TO alone runs on past its exit as before."""
+        source = _section_exit_program(
+            "           GO TO 1000-INIT.",
+            "           GO TO 1000-EXIT.",
+        )
+        assert _dead_names(source) == []
+
+
 class TestFallThroughOnlyEscapesReachableRuns:
     """Regression tests for the audit finding that fall-through was credited
     out of *any* referenced procedure, PERFORM targets included.
