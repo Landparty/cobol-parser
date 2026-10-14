@@ -1611,6 +1611,24 @@ A name may resolve to either an elementary field or a whole record
 `resolve()`-then-`record_named()` fallback `BoundaryInventoryAnalyzer` uses)
 — a CALL argument or SQL host variable can legally be either.
 
+**Several 01 records under one FD (issue #364, 2026-10-14).** A READ with no
+INTO gets every record of its FD in `Boundary.record_names` (Phase 4's
+`ConstraintExtractor` relies on that to know every field the READ feeds), but
+those records are views of ONE record area -- an implicit REDEFINES. The
+generator used to join all their fields into one row, so `HDR-TYPE` and
+`DTL-TYPE` (both offset 0) got two different values, the record grew to the
+sum of the records' lengths, and a field name repeated in the second record
+(the `REC-TYPE` idiom) was dropped by the column de-dup. `_record_view()` now
+picks exactly one record per scenario: the one holding the most of that
+scenario's pinned fields (`witnesses` + every `row_witnesses` row), the first
+in source order on a tie or with no scenario. `bundle.layouts` is keyed by the
+chosen record, so a scenario that picks the second record adds its own key.
+The records left out are reported once in `bundle.unresolved` ("alternate
+view(s) not generated: ..."); a scenario whose pins span two records gets one
+more entry naming the pins its rows cannot honour. Only `READ` boundaries are
+narrowed: an SQL boundary's several names are distinct host variables.
+Pinned by `tests/unit/test_program_fixtures.py::TestMultipleRecordsUnderOneFd`.
+
 ## Determinism: per-boundary sub-seeds
 
 One `bundle.seed`. Each boundary derives its own
