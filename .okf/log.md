@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-13T00:00:00Z
+timestamp: 2026-10-14T00:00:00Z
 ---
 
 # OKF Update Log
@@ -34,6 +34,13 @@ was `len(sequence)` (+1 for AT END), or 1 for CALL/STATUS_ONLY, one per
 statement, whatever branches and loops surrounded it. New
 `analysis/invocation_counts.py` counts each statement on the certain path;
 counts are merged per boundary key and omitted where they are not exact.
+
+## 2026-10-14 -- bug hunt: `diff` PICTURE / USAGE spellings
+
+[analysis.md](analysis.md): `diff` reported `PIC X(2)` -> `PIC XX` as
+picture-changed and `COMP-3` -> `PACKED-DECIMAL` (or `COMP` -> `BINARY`) as
+usage-changed. Both now compare by meaning; the strings are still shown as
+coded.
 
 ## 2026-10-13 -- issue #291: MOVE FUNCTION sources are checked
 

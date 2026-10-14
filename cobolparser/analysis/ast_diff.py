@@ -118,8 +118,15 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any
 
+from .._storage import (
+    BINARY_FIXED_USAGES,
+    BINARY_NATIVE_USAGES,
+    DOUBLE_FLOAT_USAGES,
+    PACKED_USAGES,
+    SINGLE_FLOAT_USAGES,
+)
 from ..models.ast_base import SourceLocation
-from ..models.data_items import CobolDataItem, ConditionNameItem
+from ..models.data_items import CobolDataItem, ConditionNameItem, PictureClause
 from ..models.program import CobolParagraph, CobolProgram, CobolSection
 from ..models.sql_statements import ExecSQLStatement
 from ..models.statements.arithmetic import ComputeStatement
@@ -1196,14 +1203,22 @@ class ProgramDiffer:
 
         old_picture = _picture_text(old_item)
         new_picture = _picture_text(new_item)
-        if old_picture != new_picture:
+        # `X(2)` and `XX` are one PICTURE: compare the character positions,
+        # report the strings as coded.
+        if _picture_positions(old_picture) != _picture_positions(new_picture):
             record("picture-changed", "PICTURE", old_picture, new_picture)
 
         for attr, kind, label in _DATA_FLAG_FIELDS:
             old_value = getattr(old_item, attr, None)
             new_value = getattr(new_item, attr, None)
-            if _normalize(old_value) != _normalize(new_value):
-                record(kind, label, old_value, new_value)
+            if attr == "usage":
+                # IBM synonyms (`COMP-3` / `COMPUTATIONAL-3` / `PACKED-DECIMAL`)
+                # are one storage format, not a change.
+                if _canonical_usage(old_value) == _canonical_usage(new_value):
+                    continue
+            elif _normalize(old_value) == _normalize(new_value):
+                continue
+            record(kind, label, old_value, new_value)
 
         old_occurs = _occurs_text(old_item)
         new_occurs = _occurs_text(new_item)
@@ -1763,6 +1778,31 @@ def _picture_text(item: CobolDataItem) -> str:
     if picture is None:
         return ""
     return str(picture.pattern or "").upper()
+
+
+def _picture_positions(picture: str) -> str:
+    """A PICTURE string with every repeat factor written out, so two
+    spellings of the same picture (`X(2)` / `XX`, `S9(3)V9(2)` / `S999V99`)
+    compare equal."""
+    return "".join(PictureClause._expand_symbols(picture))
+
+
+def _canonical_usage(usage: Any) -> str:
+    """One spelling per USAGE: the IBM Enterprise COBOL synonyms (`BINARY` /
+    `COMP-4` / `COMPUTATIONAL` are `COMP`, `PACKED-DECIMAL` is `COMP-3`, ...).
+    `COMP-5` stays distinct from `COMP`: it is not truncated to its PICTURE,
+    so changing one into the other changes what the program computes."""
+    upper = str(usage or "DISPLAY").strip().upper()
+    for spellings, canonical in (
+        (BINARY_FIXED_USAGES, "COMP"),
+        (BINARY_NATIVE_USAGES, "COMP-5"),
+        (PACKED_USAGES, "COMP-3"),
+        (SINGLE_FLOAT_USAGES, "COMP-1"),
+        (DOUBLE_FLOAT_USAGES, "COMP-2"),
+    ):
+        if upper in spellings:
+            return canonical
+    return upper.replace("COMPUTATIONAL", "COMP")
 
 
 def _occurs_text(item: CobolDataItem) -> str:
