@@ -1010,6 +1010,16 @@ directly before the value, was tolerated. Still open: a qualified `RECORD
 KEY IS K OF R` keeps only `K` (the rest is warned as unparsed).
 `tests/regression/test_select_optional_organization_word.py`.
 
+**SELECT separators (`environment_select.py`, 2026-10-14, issue #342):** a
+separator comma/semicolon is skipped (`_is_separator`) inside the ASSIGN
+collector, and `_skip_select_separators` skips one before the second (VSAM)
+FILE STATUS variable. `ASSIGN TO INDD,` gave `assign_to == "INDD ,"`, so
+`normalize_ddname` returned `","` and the lineage port read `file:,`;
+`FILE STATUS IS FS1, FS2` took `,` as `file_status_vsam` and warned `FS2`
+as unparsed. Tests: `test_environment_division_parser.py`
+(`test_separator_comma_and_semicolon_not_kept_in_names`) and
+`test_field_lineage.py` (`test_separator_after_assign_names_the_dd_port`).
+
 # Statement-coverage audit (2026-09-02)
 
 Question asked of the parser: *can a PROCEDURE DIVISION statement leave the
