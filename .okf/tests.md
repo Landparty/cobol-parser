@@ -8,6 +8,12 @@ timestamp: 2026-10-13T00:00:00Z
 
 # Overview
 
+2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests,
+#313) pins EVALUATE `WHEN SPACES` / `ZERO` / `LOW-VALUES` as figurative
+selectors and constraints, distinct from a quoted `WHEN 'SPACES'`, through
+gen-fixtures (blank data for the figurative arm) and business-rules (quotes
+kept). Four selector-shape tests now expect the additive `"quoted": True`.
+
 2026-10-13: `tests/regression/test_copy_member_case_folding.py`
 (17 tests, #289) pins COPY member and library names folding to uppercase on
 a case-sensitive filesystem: `copy errorcd.` finds `ERRORCD.cpy`, the uppercase

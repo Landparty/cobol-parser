@@ -400,7 +400,7 @@ class TestFinding10SelectorAndSearchConditionLiterals:
         ev = _stmt(result, "EVALUATE")
         sels = [wc.selectors[0] for wc in ev.when_clauses]
         assert sels[0] == {"type": "Literal", "value": "B", "identifier": True}
-        assert sels[1] == {"type": "Literal", "value": "B"}
+        assert sels[1] == {"type": "Literal", "value": "B", "quoted": True}
         assert sels[2] == {"type": "Literal", "value": "1"}
 
     def test_search_when_condition_requotes_string_literals(self):

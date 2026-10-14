@@ -610,6 +610,14 @@ became the `Any` wildcard, `WHEN "THRU"` an end-less `Range` (a spurious
 `"<"` / `"A OR B"` a `Condition` -- exactly how a COBOL tokenizer spells its
 operator table. Pinned by `tests/regression/test_evaluate_keyword_literal_when.py`.
 
+**Single-token WHEN selectors say what they were (#313, 2026-10-14).** A
+`Literal` selector built from one token carries `"identifier": True`
+(IDENTIFIER), `"figurative": True` (FIGURATIVE_CONSTANT: `WHEN SPACES`) or
+`"quoted": True` (STRING_LITERAL: `WHEN 'SPACES'`). The lexer strips quotes,
+so without these `WHEN SPACES` and `WHEN 'SPACES'` built identical dicts.
+The markers are additive; `type` stays `"Literal"`. Pinned by
+`tests/regression/test_evaluate_figurative_when.py`.
+
 **EVALUATE subjects reach `.operands` (`evaluate_parser.py`, 2026-08-17
 review follow-up):** `_parse_subjects` routes each parsed subject through
 `EvaluateStatement.add_subject()` instead of appending straight to

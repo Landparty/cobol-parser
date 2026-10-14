@@ -1935,6 +1935,18 @@ be negated into one constraint (a `THRU` range, a conjunction, an
 unsupported selector) is left out and noted in `unsupported`. `WHEN OTHER`
 still negates only each arm's *own* selector constraints.
 
+**A figurative `WHEN` selector is a `figurative` constraint (#313,
+2026-10-14).** `_build_selector` marks a single-token selector
+`"figurative": True` (`WHEN SPACES` / `ZERO` / `LOW-VALUES`) or
+`"quoted": True` (`WHEN 'SPACES'`); before that both were the same
+`{"type": "Literal", "value": "SPACES"}`, so gen-fixtures wrote the six
+characters `SPACES` for the figurative arm and called it verified, and
+`WHEN ZERO` / `WHEN LOW-VALUES` were missed as literals that do not fit.
+`_extract_evaluate_selector` now maps a figurative selector the way the IF
+path does (`_figurative_name`), and a quoted selector is never looked up as
+a data name. `business_rules._literal` renders a quoted selector with its
+quotes, so `WHEN 'SPACES'` no longer reads as `= SPACES`.
+
 **The level-88 enum domain is a preference, not the field's domain.**
 `solve()` tries `EnumDomain(spec.condition_values)` first whenever a set op is
 in play, so `IF NOT TYPE-M` against 88s `"05"`/`"09"` still yields the other

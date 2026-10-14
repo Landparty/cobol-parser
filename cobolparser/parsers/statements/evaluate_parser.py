@@ -349,7 +349,10 @@ class EvaluateStatementParser(IStatementParser):
         A plain value selector is always ``{"type": "Literal", "value": ...}``
         -- the lexer strips string quotes, so ``WHEN "AB"`` and ``WHEN WS-AB``
         were indistinguishable in the dict. When the selector is a single
-        IDENTIFIER token the dict additionally carries ``"identifier": True``.
+        IDENTIFIER token the dict additionally carries ``"identifier": True``;
+        a single FIGURATIVE_CONSTANT token (``WHEN SPACES``) carries
+        ``"figurative": True`` and a single STRING_LITERAL (``WHEN 'SPACES'``)
+        ``"quoted": True`` -- without them the two read as the same value.
         The ``type`` key deliberately stays ``"Literal"``: the constraint
         extractor (``analysis/constraints.py``) keys EVALUATE TRUE
         condition-name selectors on it, so an additive marker is the
@@ -379,10 +382,10 @@ class EvaluateStatementParser(IStatementParser):
         # stored as ``A = B`` read the literal as the data name ``B``.
         condition_text = " ".join(text for _, _, text in kept).strip()
         normalized_tokens = [token for token, _ in pairs]
-        is_identifier = bool(
-            token_types
-            and len(token_types) == len(selector_tokens) == 1
-            and token_types[0] == TokenType.IDENTIFIER
+        single_type = (
+            token_types[0]
+            if token_types and len(token_types) == len(selector_tokens) == 1
+            else None
         )
 
         selector_text = " ".join(normalized_tokens).strip()
@@ -438,8 +441,12 @@ class EvaluateStatementParser(IStatementParser):
             return selector
 
         literal: dict[str, Any] = {"type": "Literal", "value": selector_text}
-        if is_identifier:
+        if single_type == TokenType.IDENTIFIER:
             literal["identifier"] = True
+        elif single_type == TokenType.FIGURATIVE_CONSTANT:
+            literal["figurative"] = True
+        elif single_type == TokenType.STRING_LITERAL:
+            literal["quoted"] = True
         return literal
 
     def _skip_clause_statements(
