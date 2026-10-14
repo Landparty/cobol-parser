@@ -346,9 +346,15 @@ class XmlJsonStatementParser(IStatementParser):
             clause_parts.append(word)
             return word
 
+        def next_word_upper() -> str:
+            # The next word may sit on the following line, behind a NEWLINE
+            # token, so look past layout noise rather than at peek(0).
+            token, _ = peek_past_noise(token_stream, 0)
+            return (token.value or "").upper() if token else ""
+
         take()  # PROCESSING
         take()  # PROCEDURE
-        if peek_value_upper(token_stream) == "IS":
+        if next_word_upper() == "IS":
             take()
         skip_whitespace(token_stream)
         name_token = peek_token(token_stream)
@@ -356,7 +362,7 @@ class XmlJsonStatementParser(IStatementParser):
             return True
         name = take()
         thru: str | None = None
-        if peek_value_upper(token_stream) in ("THRU", "THROUGH"):
+        if next_word_upper() in ("THRU", "THROUGH"):
             take()
             skip_whitespace(token_stream)
             thru_token = peek_token(token_stream)

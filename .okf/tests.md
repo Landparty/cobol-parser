@@ -684,7 +684,8 @@ SOURCE/SUM/GROUP INDICATE/JUSTIFIED, to_dict, missing-RD-period guard,
 FD `REPORT IS` non-header) and +5 in new
 `tests/unit/test_xml_json_structured_clauses.py` (XML PARSE PROCESSING
 PROCEDURE fields, XML/JSON ON EXCEPTION bodies as statements, END-JSON
-inside IF). The 2026-08-13 file's REPORT tests were re-pointed at the parsed
+inside IF); issue #394 added 3 more there (IS / THRU / THROUGH on their
+own lines, and the THRU range staying live for dead-code). The 2026-08-13 file's REPORT tests were re-pointed at the parsed
 shape (no warning) and `report_writer.cbl` rejoined `test_sample_programs.py`.
 
 2026-08-13: +23 in new `tests/regression/test_screen_report_communication_sections.py`

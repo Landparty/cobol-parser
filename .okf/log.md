@@ -14,6 +14,16 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-14 -- issue #394: XML PARSE THRU on the next line
+
+[ast-models.md](ast-models.md), [analysis.md](analysis.md): the
+`PROCESSING PROCEDURE [IS] p [THRU|THROUGH q]` consumer in
+`xml_json_parser.py` looks past line breaks for `IS` and `THRU`/`THROUGH`
+(`peek_past_noise`). A THRU on its own line used to fall into
+`operands`/`clause_items`, leaving `processing_procedure_thru` None, so
+dead-code, program-flow and lint reported the handler range dead. An `IS`
+on its own line was read as the procedure name the same way.
+
 ## 2026-10-14 -- issue #330: literal operands keep their quotes
 
 [parser.md](parser.md) ("Literal Re-Quoting"), [analysis.md](analysis.md):
