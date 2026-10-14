@@ -2638,6 +2638,17 @@ program.
   Both joined `INTERNAL_EDGE_TYPES` and the PERFORM/GOTO sets the cycle
   classifier, complexity and the flowcharts read
   (`flowchart.py`'s label/verbose/perform/goto tables).
+* **SQL WHENEVER handlers** (#349): `EXEC SQL WHENEVER SQLERROR|SQLWARNING|
+  NOT FOUND GO TO p` (also `GOTO`, `:p`; the EXEC text collector leaves
+  `GOTO:P`) is a GO TO-shaped reference to `p`
+  (`DeadCodeAnalyzer._collect_sql_whenever_refs`) and a
+  `FlowEdgeType.SQL_WHENEVER` edge (`EdgeCollector.process_sql_whenever`).
+  Both read the target through `analysis/_sql_whenever.py`'s
+  `whenever_goto_target()` so they cannot disagree. Modelled as **one edge
+  from the procedure holding the directive**, not one per SQL statement it
+  covers: coverage is by source order, not flow, and the handler is reached
+  either way. Joined the INTERNAL/GOTO sets and flowchart tables like
+  `CICS_HANDLE`. Pinned by `tests/unit/analysis/test_sql_whenever_references.py`.
 * **CICS translator items** (`CICSONLN`, `CICSLINK`): `LinkageChecker`
   marks `DFHEIBLK` and `DFHCOMMAREA` referenced unconditionally
   (`_CICS_TRANSLATOR_ITEMS` -- the translator passes them on the USING it

@@ -1375,3 +1375,11 @@ nesting and a bare `NOT SIZE ERROR` (#399).
 by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
 (`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
 `COMP-5` is still a change.
+
+## 2026-10-14 (issue #349)
+
+`tests/unit/analysis/test_sql_whenever_references.py` (21 tests) pins that
+`EXEC SQL WHENEVER SQLERROR|SQLWARNING|NOT FOUND GO TO p` (also `GOTO`,
+`:p`, lowercase) keeps `p` out of dead-code and lint, that `CONTINUE` and an
+unknown target reference nothing, and that program flow carries one
+`SQL_WHENEVER` edge from the directive's paragraph to `p`.

@@ -24,6 +24,7 @@ from .._procedures import (
     statement_qualifier,
     unique,
 )
+from .._sql_whenever import whenever_goto_target
 from .condition_text import render_condition_text
 from .models import FlowEdge, FlowEdgeType
 
@@ -45,6 +46,7 @@ INTERNAL_EDGE_TYPES: frozenset[FlowEdgeType] = frozenset(
         FlowEdgeType.XML_PROCESSING_PROCEDURE_THRU,
         FlowEdgeType.ALTER,
         FlowEdgeType.CICS_HANDLE,
+        FlowEdgeType.SQL_WHENEVER,
         FlowEdgeType.IF_BRANCH,
         FlowEdgeType.IF_THEN,
         FlowEdgeType.IF_ELSE,
@@ -77,6 +79,7 @@ GOTO_EDGE_TYPES: frozenset[FlowEdgeType] = frozenset(
         FlowEdgeType.GOTO_DEPENDING,
         FlowEdgeType.ALTER,
         FlowEdgeType.CICS_HANDLE,
+        FlowEdgeType.SQL_WHENEVER,
     }
 )
 
@@ -358,6 +361,29 @@ class EdgeCollector:
                         source=source,
                         target=target,
                         edge_type=FlowEdgeType.CICS_HANDLE,
+                        location=stmt.location,
+                    )
+                )
+
+    def process_sql_whenever(self, stmt: Any, source: str) -> None:
+        """Create the edge for ``EXEC SQL WHENEVER ... GO TO p``.
+
+        GO TO-shaped like :meth:`process_cics_handle`. Modelled as one edge
+        from the procedure holding the directive rather than one per SQL
+        statement it covers: which statements those are is decided by
+        source order, not flow, and the target is reached either way.
+        """
+        target_name = whenever_goto_target(stmt)
+        if not target_name:
+            return
+        known = set(self._ordered_procedures)
+        for target in self.resolve(stmt, target_name):
+            if target in known:
+                self._edges.append(
+                    FlowEdge(
+                        source=source,
+                        target=target,
+                        edge_type=FlowEdgeType.SQL_WHENEVER,
                         location=stmt.location,
                     )
                 )

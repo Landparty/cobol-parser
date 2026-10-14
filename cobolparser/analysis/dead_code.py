@@ -14,6 +14,7 @@ from typing import Any
 
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
+from ..models.sql_statements import ExecSQLStatement
 from ..models.statements.call import EntryStatement
 from ..models.statements.control import (
     GoStatement,
@@ -29,6 +30,7 @@ from ..models.statements.misc import (
     XmlJsonStatement,
 )
 from ._procedures import ProcedureIndex, enclosing_section, statement_qualifier
+from ._sql_whenever import whenever_goto_target
 
 
 @dataclass
@@ -414,6 +416,8 @@ class DeadCodeAnalyzer:
                 self._collect_xml_refs(stmt)
             elif getattr(stmt, "node_type", None) == "EXEC_CICS":
                 self._collect_cics_handle_refs(stmt)
+            elif isinstance(stmt, ExecSQLStatement):
+                self._collect_sql_whenever_refs(stmt)
 
     def _collect_xml_refs(self, stmt: XmlJsonStatement) -> None:
         """``XML PARSE ... PROCESSING PROCEDURE p [THRU q]`` runs p (through
@@ -432,6 +436,15 @@ class DeadCodeAnalyzer:
             if value and self._is_valid_procedure_name(value):
                 for key in self._keys(stmt, value):
                     self._add_goto_ref(key)
+
+    def _collect_sql_whenever_refs(self, stmt: ExecSQLStatement) -> None:
+        """``EXEC SQL WHENEVER SQLERROR|SQLWARNING|NOT FOUND GO TO p``: the
+        precompiler puts a ``GO TO p`` after every SQL statement the
+        directive covers, so ``p`` is reached like any GO TO target."""
+        target = whenever_goto_target(stmt)
+        if target and self._is_valid_procedure_name(target):
+            for key in self._keys(stmt, target):
+                self._add_goto_ref(key)
 
     def _collect_range_end(self, stmt: Any) -> None:
         """Record the closing paragraph of a PERFORM/SORT/MERGE THRU range.

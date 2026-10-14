@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`dead-code` no longer reports the `EXEC SQL WHENEVER ... GO TO` handler
+  as dead** (#349). `WHENEVER SQLERROR | SQLWARNING | NOT FOUND GO TO p`
+  (also `GOTO`, `:p`) now counts `p` as a GO TO-shaped reference, the way
+  `EXEC CICS HANDLE` already did, so `lint` and `health` stop reporting it
+  too. Program flow gains a `SQL_WHENEVER` edge (GO TO-shaped, one edge from
+  the procedure holding the directive to `p`); `CONTINUE` adds nothing.
+
 * **`gen-fixtures --scenarios all`: error-status and empty-input scenarios no
   longer assert the normal path** (#318). A scenario with a status override
   (OPEN status 35, READ INVALID KEY 23, CALL ON EXCEPTION, SQLCODE 100) now

@@ -36,6 +36,10 @@ class FlowEdgeType(Enum):
     # EXEC CICS HANDLE AID/CONDITION/ABEND option(paragraph): CICS branches
     # there (a GO TO the runtime performs) when the AID/condition occurs.
     CICS_HANDLE = "CICS_HANDLE"
+    # EXEC SQL WHENEVER SQLERROR|SQLWARNING|NOT FOUND GO TO p: the
+    # precompiler branches to p after any SQL statement the directive covers.
+    # One edge, from the procedure holding the directive.
+    SQL_WHENEVER = "SQL_WHENEVER"
     ALTER = "ALTER"
     FALL_THROUGH = "FALL_THROUGH"
     IF_BRANCH = "IF_BRANCH"
