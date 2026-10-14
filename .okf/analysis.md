@@ -848,7 +848,14 @@ window, no near-miss/type-3 similarity scoring, matching the design goal of
 kinds:
 
 - **Type-1 (exact)**: identical statement types, operands, and condition
-  text, verbatim -- and everything else each statement does (#262, below).
+  text -- and everything else each statement does (#262, below). "Identical"
+  is up to what COBOL itself ignores (#391): `_normalize_text` collapses
+  every whitespace run outside a literal to one space and upper-cases all
+  text outside a literal, for *both* types, so a line break inside a
+  COMPUTE or condition, or a paragraph written in lowercase, no longer hides
+  a Type-1 clone (lowercase used to drop to Type-2; a line break used to
+  lose the match entirely). Literal text stays exactly as written:
+  `DISPLAY "Done"` vs `display "DONE"` is not a clone.
 - **Type-2 (renamed)**: identical statement-type/control-flow shape with
   identifier-shaped tokens (data-names, paragraph-names) consistently
   substituted with per-paragraph positional placeholders (`ID1`, `ID2`,

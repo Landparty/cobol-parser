@@ -778,3 +778,98 @@ class TestBehaviourBearingClonesStillMatch:
         group = _group_with(report, "Q0")
         assert group is not None
         assert group.clone_type == "TYPE_2"
+
+
+_LAYOUT_BASE = """\
+           COMPUTE WS-A = WS-B + 1
+           IF WS-A > 5 MOVE 1 TO WS-B END-IF
+           DISPLAY WS-A.
+"""
+
+
+def _layout_pair(second: str) -> str:
+    return (
+        HEADER
+        + """\
+       PROCEDURE DIVISION.
+       P1.
+"""
+        + _LAYOUT_BASE
+        + """\
+       P2.
+"""
+        + second
+    )
+
+
+class TestLayoutAndCaseDoNotAffectClones:
+    """#391: COBOL ignores line breaks and the case of its words, so neither
+    may change which clone type two paragraphs are -- only literal text is
+    case-sensitive."""
+
+    def _assert_type1(self, second: str) -> None:
+        _, report = _analyze(_layout_pair(second))
+        group = _group_with(report, "P1")
+        assert group is not None
+        assert group.clone_type == "TYPE_1"
+        assert {m.name for m in group.members} == {"P1", "P2"}
+
+    def test_line_break_inside_compute_is_still_type1(self) -> None:
+        self._assert_type1("""\
+           COMPUTE WS-A = WS-B
+               + 1
+           IF WS-A > 5 MOVE 1 TO WS-B END-IF
+           DISPLAY WS-A.
+""")
+
+    def test_line_break_inside_condition_is_still_type1(self) -> None:
+        self._assert_type1("""\
+           COMPUTE WS-A = WS-B + 1
+           IF WS-A
+                 > 5
+               MOVE 1 TO WS-B
+           END-IF
+           DISPLAY WS-A.
+""")
+
+    def test_lowercase_is_still_type1(self) -> None:
+        self._assert_type1(_LAYOUT_BASE.lower())
+
+    def test_extra_spaces_are_still_type1(self) -> None:
+        self._assert_type1("""\
+           COMPUTE   WS-A  =  WS-B   +   1
+           IF  WS-A  >  5  MOVE  1  TO  WS-B  END-IF
+           DISPLAY   WS-A.
+""")
+
+    def test_literal_case_still_breaks_the_match(self) -> None:
+        source = HEADER + """\
+       PROCEDURE DIVISION.
+       P1.
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           DISPLAY "Done".
+       P2.
+           move 1 to ws-a
+           move 2 to ws-b
+           display "DONE".
+"""
+        _, report = _analyze(source)
+        assert report.clone_groups == []
+
+    def test_digests_ignore_layout_and_case(self) -> None:
+        """``scan``'s cross-file clone groups join on these digests."""
+        _, left = _analyze(_layout_pair(_LAYOUT_BASE))
+        _, right = _analyze(_layout_pair("""\
+           compute ws-a = ws-b
+               + 1
+           if ws-a > 5 move 1 to ws-b end-if
+           display ws-a.
+"""))
+        fps = {
+            (side, f.name): f
+            for side, report in (("l", left), ("r", right))
+            for f in report.paragraph_fingerprints
+        }
+        assert fps[("l", "P1")].type1 == fps[("r", "P2")].type1
+        assert fps[("l", "P1")].type2 == fps[("r", "P2")].type2

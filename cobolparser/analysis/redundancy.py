@@ -63,6 +63,7 @@ from .unused_variables import (
 )
 
 _QUOTED_TEXT_RE = QUOTED_LITERAL_RE
+_WHITESPACE_RUN_RE = re.compile(r"\s+")
 
 # Clause-list attributes holding statements that run only when the clause
 # fires. Each present body is part of what its statement *does*, so it is
@@ -178,7 +179,11 @@ def _normalize_text(
 ) -> str:
     """Normalize one operand/condition-text string for fingerprinting.
 
-    Type-1 (``type2=False``) returns *text* verbatim. Type-2 replaces every
+    Both types first erase what COBOL itself ignores (#391): every run of
+    whitespace outside a literal collapses to one space, and all text
+    outside a literal is upper-cased (COBOL words are case-insensitive;
+    literal text is not, so quoted substrings are left exactly as written).
+    That is all Type-1 (``type2=False``) does. Type-2 then replaces every
     identifier-shaped token (skipping quoted substrings, so literal text is
     never touched) with a per-paragraph positional placeholder (``ID1``,
     ``ID2``, ...), assigned in first-seen order and reused on repeat -- so
@@ -190,11 +195,12 @@ def _normalize_text(
     operand and condition text; a statement's detail fields pass the wider
     ``_DETAIL_KEYWORDS`` since they hold reserved words as values.
     """
-    if not text or not type2:
+    if not text:
         return text
 
-    # Protect quoted substrings from identifier substitution by splitting on
-    # them first (mirrors unused_variables.py's own quoted-text handling).
+    # Protect quoted substrings from case folding, whitespace collapsing and
+    # identifier substitution by splitting on them first (mirrors
+    # unused_variables.py's own quoted-text handling).
     pieces = []
     last = 0
     for m in _QUOTED_TEXT_RE.finditer(text):
@@ -205,17 +211,18 @@ def _normalize_text(
 
     def repl(m: re.Match[str]) -> str:
         tok = m.group(0)
-        if tok.upper() in keywords:
+        if tok in keywords:
             return tok
-        return id_map.setdefault(tok.upper(), f"ID{len(id_map) + 1}")
+        return id_map.setdefault(tok, f"ID{len(id_map) + 1}")
 
     out = []
     for kind, chunk in pieces:
         if kind == "quoted":
             out.append(chunk)
-        else:
-            out.append(IDENTIFIER_TOKEN_RE.sub(repl, chunk))
-    return "".join(out)
+            continue
+        chunk = _WHITESPACE_RUN_RE.sub(" ", chunk).upper()
+        out.append(IDENTIFIER_TOKEN_RE.sub(repl, chunk) if type2 else chunk)
+    return "".join(out).strip()
 
 
 def _selector_text(selector: Any) -> str:

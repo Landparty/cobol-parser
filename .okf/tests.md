@@ -1092,8 +1092,8 @@ Pythons, so the guard is not in force there; only the `coverage` job skips
 them. The ratio-based overhead assertion is unaffected. Surfaced the moment
 the suite was first wired into CI.
 
-The full suite (~12,300 tests across 439 `test_*.py` files as of
-2026-10-04; ~9,400 at the time) **does** run on every PR, as of the
+The full suite (~13,000 tests across 464 `test_*.py` files as of
+2026-10-14; ~9,400 at the time) **does** run on every PR, as of the
 2026-09-07 audit (on 3.13 only since 2026-10-03 -- see `build` above). It previously ran nowhere: this file used to describe a
 `test` job gated on `if: github.event_name == 'workflow_dispatch'`, and no
 such job was ever in `ci.yml` — the suite and the `--cov-fail-under=90`

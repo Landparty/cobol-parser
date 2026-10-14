@@ -783,6 +783,14 @@ string (`"Y + 1 END-READ"`) instead of ending the clause, which the
 `tests/regression/test_tier2_silent_drop_regressions.py::TestComputeDoesNotSwallowFollowingCall`
 and `::TestComputeDoesNotSwallowEnclosingScopeTerminator`.
 
+**COMPUTE `expression` text carried line breaks (`arithmetic_parsers.py`,
+#391, 2026-10-14):** the expression loop appended `NEWLINE` tokens'
+`"\n"` values, so `COMPUTE X = Y` / `+ 1` on two lines serialized as
+`"Y \n + 1"` and differed from the one-line form (which hid exact clones in
+`redundancy.py`). `NEWLINE` tokens are now consumed without being added to
+the expression text; `build_compute_expression_tree` already ignored them.
+Pinned by `tests/unit/test_compute_expression_parsing.py::TestComputeExpressionLayout`.
+
 **ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE never consumed their own explicit
 scope terminator, causing a phantom paragraph (`arithmetic_parsers.py`,
 `_utils.py`):** `END-ADD`/`END-SUBTRACT`/`END-MULTIPLY`/`END-DIVIDE`/

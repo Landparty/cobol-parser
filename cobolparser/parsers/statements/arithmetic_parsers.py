@@ -994,7 +994,11 @@ class ComputeStatementParser(IStatementParser):
             if paren_depth != 0 and is_statement_boundary(token):
                 break
 
-            expr_tokens.append(token.value if token.value else "")
+            # A line break inside the expression is layout, not a term: keep
+            # it out of the expression text so ``Y`` / ``+ 1`` on two lines
+            # serializes the same as ``Y + 1`` on one (#391).
+            if tok_type != TokenType.NEWLINE:
+                expr_tokens.append(token.value if token.value else "")
             token_stream.consume()
 
         if expr_tokens:
