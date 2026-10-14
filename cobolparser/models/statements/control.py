@@ -167,6 +167,31 @@ class EvaluateStatement(CobolStatement):
         self.default_when = clause
         self.add_child(clause)
 
+    def when_groups(self) -> list[list[WhenClause]]:
+        """The WHEN arms as they execute: stacked WHEN phrases grouped.
+
+        ``WHEN 'A' WHEN 'B' PERFORM X`` is one arm with two selector sets:
+        the imperative statements after the last WHEN of a stack belong to
+        every WHEN in it. The AST keeps one `WhenClause` per WHEN phrase (so
+        the earlier ones have no statements); this joins each such empty
+        clause to the clause after it. The last clause of each group owns
+        the shared body (``group[-1].statements``).
+
+        A stack with no statements at all before WHEN OTHER / END-EVALUATE
+        is still one group, whose shared body is empty. WHEN OTHER
+        (`default_when`) is never part of a group.
+        """
+        groups: list[list[WhenClause]] = []
+        pending: list[WhenClause] = []
+        for clause in self.when_clauses:
+            pending.append(clause)
+            if clause.statements:
+                groups.append(pending)
+                pending = []
+        if pending:
+            groups.append(pending)
+        return groups
+
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         subjects_serialized: list[Any] = []

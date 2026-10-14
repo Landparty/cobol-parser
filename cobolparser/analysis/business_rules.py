@@ -732,10 +732,16 @@ class BusinessRuleExtractor:
             subjects = [self._subject_text(s) for s in stmt.subjects]
             rule.condition = " ALSO ".join(subjects)
             seen: list[str] = []
-            for clause in stmt.when_clauses:
-                text = self._when_text(subjects, clause)
-                seen.append(text)
-                arms.append(("WHEN", text, clause.statements))
+            # Stacked WHENs (``WHEN 'A' WHEN 'B' stmt``) are one arm whose
+            # condition is either phrase's, not an empty 'A' arm.
+            for group in stmt.when_groups():
+                texts = [self._when_text(subjects, clause) for clause in group]
+                seen.extend(texts)
+                text = " OR ".join(
+                    f"({t})" if len(texts) > 1 and _BOOL_WORD_RE.search(t) else t
+                    for t in texts
+                )
+                arms.append(("WHEN", text, group[-1].statements))
             if stmt.default_when is not None:
                 other = " AND ".join(_negate(text) for text in seen) or "TRUE"
                 arms.append(("WHEN OTHER", other, stmt.default_when.statements))
