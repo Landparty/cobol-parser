@@ -68,6 +68,9 @@ from ._names import QUALIFIER_SEPARATOR, qualified_references
 # first retain their data items before this set could expose them.
 _DATA_SECTION_NAMES = frozenset({"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"})
 
+# OO units whose DATA DIVISION every contained METHOD sees, GLOBAL or not.
+_OO_DATA_OWNERS = frozenset({"FACTORY", "OBJECT"})
+
 # Words that can appear as, or inside, an operand's text but are never
 # themselves a data-name reference: figurative constants, connective/
 # qualification keywords the parser leaves joined into an operand string
@@ -596,10 +599,14 @@ class UnusedVariableAnalyzer:
         # references count for those alone (``get_all_statements()`` walks
         # into contained programs, and crediting every one of their
         # references here hid the container's genuinely unused items).
+        # The exception is IBM OO COBOL: data declared in a FACTORY or OBJECT
+        # paragraph is visible to every METHOD of that paragraph without a
+        # GLOBAL clause, so there the methods' references count for all of it.
         nested_referenced = self._nested_referenced_names(ast)
+        shares_all_data = getattr(ast, "unit_kind", "PROGRAM") in _OO_DATA_OWNERS
         global_ids: set[int] = set()
         for item in declared_items:
-            if getattr(item, "is_global", False):
+            if shares_all_data or getattr(item, "is_global", False):
                 global_ids.add(id(item))
                 global_ids.update(id(child) for child in item.get_all_children())
 

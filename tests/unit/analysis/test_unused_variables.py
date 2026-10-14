@@ -984,3 +984,93 @@ class TestSortProcedureOperands:
         unused = _names(_analyze(src))
         assert "WS-IN" not in unused
         assert "WS-OUT" not in unused
+
+
+class TestObjectOrientedUnitData:
+    """IBM OO COBOL: FACTORY / OBJECT data is visible to that paragraph's
+    METHODs without GLOBAL, so a method's reference uses it (issue #379)."""
+
+    SRC = """\
+       IDENTIFICATION DIVISION.
+       CLASS-ID. ACCT INHERITS BASE.
+       ENVIRONMENT DIVISION.
+       CONFIGURATION SECTION.
+       REPOSITORY.
+           CLASS BASE IS 'java.lang.Object'.
+       FACTORY.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  FACT-COUNTER            PIC 9(5) VALUE 0.
+       01  FACT-NEVER-USED         PIC 9(5).
+       01  FACT-USED-BY-OBJECT     PIC 9(5).
+       PROCEDURE DIVISION.
+       METHOD-ID. "bump".
+       PROCEDURE DIVISION.
+           ADD 1 TO FACT-COUNTER
+           GOBACK.
+       END METHOD "bump".
+       END FACTORY.
+       OBJECT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  OBJ-BALANCE             PIC S9(7)V99 VALUE 0.
+       01  OBJ-REC.
+           05  OBJ-NAME            PIC X(20).
+           05  OBJ-SPARE           PIC X(10).
+       01  OBJ-NEVER-USED          PIC X(5).
+       PROCEDURE DIVISION.
+       METHOD-ID. "show".
+       PROCEDURE DIVISION.
+           DISPLAY OBJ-BALANCE
+           MOVE 'X' TO OBJ-NAME
+           MOVE 1 TO FACT-USED-BY-OBJECT
+           GOBACK.
+       END METHOD "show".
+       END OBJECT.
+       END CLASS ACCT.
+"""
+
+    def _unit_unused(self, kind: str) -> set[str]:
+        result = parse_cobol(self.SRC)
+        assert result.ast is not None, "\n".join(str(e) for e in result.errors)
+        (unit,) = [u for u in result.ast.program_units() if u.unit_kind == kind]
+        return _names(UnusedVariableAnalyzer().analyze(unit))
+
+    def test_object_data_used_only_by_methods_is_not_unused(self) -> None:
+        unused = self._unit_unused("OBJECT")
+        assert "OBJ-BALANCE" not in unused
+        assert "OBJ-NAME" not in unused
+        assert "OBJ-REC" not in unused
+
+    def test_object_data_no_method_touches_is_still_unused(self) -> None:
+        unused = self._unit_unused("OBJECT")
+        assert "OBJ-NEVER-USED" in unused
+        assert "OBJ-SPARE" in unused
+
+    def test_factory_data_used_only_by_factory_method_is_not_unused(self) -> None:
+        unused = self._unit_unused("FACTORY")
+        assert "FACT-COUNTER" not in unused
+        assert "FACT-NEVER-USED" in unused
+
+    def test_object_method_reference_does_not_reach_factory_data(self) -> None:
+        # Instance methods cannot see factory data, so a same-named
+        # reference from an OBJECT method does not use it.
+        assert "FACT-USED-BY-OBJECT" in self._unit_unused("FACTORY")
+
+    def test_enterprise_sample_instance_data_is_used(self) -> None:
+        from pathlib import Path
+
+        path = Path(__file__).parents[2] / "samples/enterprise/OOCOBOL.cbl"
+        result = parse_cobol(path.read_text(), filename=str(path))
+        assert result.ast is not None
+        unused: set[str] = set()
+        for unit in result.ast.program_units():
+            if unit.unit_kind in ("FACTORY", "OBJECT"):
+                unused |= _names(UnusedVariableAnalyzer().analyze(unit))
+        assert not unused & {
+            "OBJ-ACCT-NO",
+            "OBJ-OWNER",
+            "OBJ-BALANCE",
+            "OBJ-STATUS",
+            "FACT-NEXT-ACCT-NO",
+        }
