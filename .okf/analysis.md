@@ -722,6 +722,15 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   `has_exit_program`/`has_return` on the `FlowNode`), `MEDIUM` otherwise —
   fall-through-only cycles are never reported (fall-through can't actually
   form a cycle).
+  A `MIXED` cycle that is a PERFORM of a multi-procedure range (a SECTION
+  with its paragraphs, or a THRU span) made from *inside* that range, every
+  other hop a fall-through between its members, is reported as
+  `mechanism="PERFORM"`, `HIGH` (`_reenters_own_perform_range`, #350): the
+  range-level twin of `P. PERFORM P.`. `_closed_by_perform_range_end` (which
+  drops the priming-read false positive) ends a SECTION's range at its last
+  paragraph (`_perform_range`), not at the header node -- before #350 the
+  header's fall-through into its first paragraph read as "leaving the range"
+  and `S. S1. PERFORM S.` was reported clean.
 - **Self-recursive CALL** — a CALL (static, or dynamic and resolved via
   `DynamicCallAnalyzer`, which this analyzer runs internally) whose target
   equals the program's own `PROGRAM-ID`. `HIGH`, or `LOW` when the
