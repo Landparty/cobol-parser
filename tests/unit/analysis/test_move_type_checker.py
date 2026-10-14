@@ -1061,3 +1061,48 @@ class TestIntrinsicFunctionsWithArguments:
         assert report.unresolved_count == 2
         assert report.unresolved_function_count == 2
         assert report.to_dict()["unresolved_function_count"] == 2
+
+
+class TestNumericFunctionIntegerness:
+    """A numeric intrinsic's integer-ness is only known when its arguments
+    decide it (SUM / REM / RANGE of integers); otherwise a MOVE of it to an
+    alphanumeric item is a function caveat, never a guessed ERROR."""
+
+    SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. NUMFN.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-I1 PIC 9(3).
+       01 WS-I2 PIC 9(3).
+       01 WS-D PIC 9(3)V99.
+       01 WS-X PIC X(10).
+       01 WS-Y PIC X(10).
+       01 WS-N PIC 9(5).
+       01 WS-AL PIC A(5).
+       01 WS-NAT PIC N(5).
+       PROCEDURE DIVISION.
+           MOVE FUNCTION SUM(WS-I1 WS-I2) TO WS-Y
+           MOVE FUNCTION REM(WS-I1 WS-I2) TO WS-Y
+           MOVE FUNCTION RANGE(WS-I1, 7) TO WS-Y
+           MOVE FUNCTION NUMVAL(WS-X) TO WS-Y
+           MOVE FUNCTION SUM(WS-I1 WS-D) TO WS-Y
+           MOVE FUNCTION NUMVAL(WS-X) TO WS-N
+           MOVE FUNCTION NUMVAL(WS-X) TO WS-AL
+           MOVE FUNCTION MAX(WS-I1 FUNCTION NUMVAL(WS-X)) TO WS-Y
+           MOVE FUNCTION UPPER-CASE(WS-NAT) TO WS-Y
+           STOP RUN.
+"""
+
+    def _report(self):
+        return MoveTypeChecker().check(parse_cobol(self.SOURCE).ast)
+
+    def test_only_the_alphabetic_receiver_is_an_error(self):
+        found = [(v.location.line, v.kind) for v in self._report().violations]
+        assert found == [(20, MoveViolationKind.ERROR)]
+
+    def test_undecidable_integerness_is_a_function_caveat(self):
+        report = self._report()
+        # NUMVAL -> X, SUM with a V99 argument -> X, MAX over a NUMVAL -> X;
+        # UPPER-CASE of a national item is an unresolved argument instead.
+        assert report.unresolved_function_count == 3
+        assert report.unresolved_count == 4

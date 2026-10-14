@@ -98,7 +98,8 @@ class MoveTypeReport:
     #: The part of ``unresolved_count`` that no copybook could ever resolve:
     #: a MOVE whose source is an intrinsic FUNCTION this checker has no
     #: category for (a NATIONAL result, or a name the intrinsic catalog does
-    #: not list). Counted separately so a caveat can name the real reason
+    #: not list), or a numeric FUNCTION result that may or may not be an
+    #: integer moved to an alphanumeric item. Counted separately so a caveat can name the real reason
     #: instead of pointing at a COPY that is not missing.
     unresolved_function_count: int = 0
 
@@ -193,13 +194,23 @@ _NUMERIC_SPECIAL_REGISTERS = frozenset({"RETURN-CODE", "TALLY", "LINAGE-COUNTER"
 
 # Intrinsic FUNCTION result categories, keyed by the ``returns`` wording of
 # ``dialects.le_signatures``' intrinsic catalog (which lists every intrinsic).
-# An integer function is numeric with no decimal places; a numeric function
-# may carry them, so it is treated as a non-integer sending item.
-_INTRINSIC_RETURN_CATEGORIES: dict[str, tuple[DataCategory, bool]] = {
+# An integer function is numeric with no decimal places. Whether a numeric
+# function's result has any is not known at compile time (NUMVAL("12") is an
+# integer, NUMVAL("1.5") is not), so its integer-ness is ``None``: unknown,
+# never assumed either way.
+_INTRINSIC_RETURN_CATEGORIES: dict[str, tuple[DataCategory, bool | None]] = {
     "alphanumeric": (DataCategory.ALPHANUMERIC, False),
     "integer": (DataCategory.NUMERIC, False),
-    "numeric": (DataCategory.NUMERIC, True),
+    "numeric": (DataCategory.NUMERIC, None),
 }
+
+# Numeric functions whose result is an integer whenever every argument is
+# one: a sum, a remainder or a range of integers has no decimal places.
+_INTEGER_WHEN_ARGUMENTS_ARE = frozenset({"SUM", "REM", "RANGE"})
+
+# Alphanumeric-catalogued functions that really return their argument's class
+# (a national argument gives a national result): their argument must resolve.
+_ARGUMENT_CLASS_ALPHANUMERIC = frozenset({"LOWER-CASE", "UPPER-CASE", "REVERSE"})
 
 # Intrinsics whose result takes the class of their argument(s) (TRIM, ABS,
 # USUBSTR, MAX, MIN): resolved from the first argument's category.
@@ -267,8 +278,9 @@ def _split_arguments(text: str) -> tuple[str, ...]:
     """One string per argument of an intrinsic's argument list.
 
     Arguments are separated by blanks or commas outside parentheses and
-    quotes; an ``OF``/``IN`` qualifier stays with the name it qualifies, and
-    a subscript group stays with the item it subscripts.
+    quotes; an ``OF``/``IN`` qualifier stays with the name it qualifies, a
+    subscript group stays with the item it subscripts, and a nested
+    ``FUNCTION name(...)`` stays one argument.
     """
     words: list[str] = []
     current = ""
@@ -302,6 +314,10 @@ def _split_arguments(text: str) -> tuple[str, ...]:
         if word.upper() in _FUNCTION_ARGUMENT_KEYWORDS:
             i += 1
             continue
+        if word.upper() == "FUNCTION" and i + 1 < len(words):
+            # A nested intrinsic is one argument: FUNCTION NUMVAL(X).
+            i += 1
+            word = f"{word} {words[i]}"
         while i + 2 < len(words) and words[i + 1].upper() in ("OF", "IN"):
             word = f"{word} {words[i + 1]} {words[i + 2]}"
             i += 2
@@ -701,9 +717,12 @@ class MoveTypeChecker:
             return
 
         loc = getattr(stmt, "location", None)
-        source_non_integer = source_cat == DataCategory.NUMERIC and (
+        integer_flag = (
             self._is_non_integer(source_name)
+            if source_cat == DataCategory.NUMERIC
+            else False
         )
+        source_non_integer = integer_flag is True
 
         for target_name in stmt.targets or []:
             target_name = target_name.strip()
@@ -781,6 +800,14 @@ class MoveTypeChecker:
                     )
                 )
             elif (
+                integer_flag is None
+                and target_cat in _NON_INTEGER_NUMERIC_ILLEGAL_TARGETS
+            ):
+                # A numeric FUNCTION result (NUMVAL, MEAN, ...) is legal here
+                # only if it is an integer, which the source cannot tell us.
+                self._unresolved_count += 1
+                self._unresolved_function_count += 1
+            elif (
                 source_non_integer
                 and target_cat in _NON_INTEGER_NUMERIC_ILLEGAL_TARGETS
             ):
@@ -848,9 +875,11 @@ class MoveTypeChecker:
             return DataCategory.NUMERIC
         return _classify_literal(name)
 
-    def _resolve_function(self, function: _FunctionSource) -> tuple[DataCategory, bool]:
-        """The category of an intrinsic FUNCTION result, and whether it may
-        carry decimal places.
+    def _resolve_function(
+        self, function: _FunctionSource
+    ) -> tuple[DataCategory, bool | None]:
+        """The category of an intrinsic FUNCTION result, and whether it is a
+        non-integer (``None`` when that is not known at compile time).
 
         The return category comes from the intrinsic catalog in
         ``dialects.le_signatures``; TRIM / ABS / MAX / MIN / USUBSTR take
@@ -858,24 +887,45 @@ class MoveTypeChecker:
         instead. A reference-modified result is alphanumeric whatever the
         function returns. UNKNOWN for a NATIONAL result (not modelled here),
         a name the catalog does not list, or an argument that does not
-        resolve.
+        resolve. SUM / REM / RANGE of integers are integers; any other
+        numeric function's integer-ness is unknown.
         """
         if function.reference_modified:
             return DataCategory.ALPHANUMERIC, False
         signature = intrinsic_signature(function.name)
         if signature is None:
             return DataCategory.UNKNOWN, False
+        if function.name in _ARGUMENT_CLASS_ALPHANUMERIC:
+            if not function.arguments or self._resolve_category(
+                function.arguments[0]
+            ) in (DataCategory.UNKNOWN, DataCategory.FIGURATIVE):
+                return DataCategory.UNKNOWN, False
+            return DataCategory.ALPHANUMERIC, False
+        if function.name in _INTEGER_WHEN_ARGUMENTS_ARE and self._all_integers(
+            function.arguments
+        ):
+            return DataCategory.NUMERIC, False
         if signature.returns in _INTRINSIC_RETURN_CATEGORIES:
             return _INTRINSIC_RETURN_CATEGORIES[signature.returns]
         if signature.returns in _ARGUMENT_CLASS_RETURNS and function.arguments:
             category = self._resolve_category(function.arguments[0])
             if category in (DataCategory.UNKNOWN, DataCategory.FIGURATIVE):
                 return DataCategory.UNKNOWN, False
-            non_integer = category == DataCategory.NUMERIC and any(
-                self._is_non_integer(argument) for argument in function.arguments
-            )
-            return category, non_integer
+            if category != DataCategory.NUMERIC:
+                return category, False
+            flags = [self._is_non_integer(argument) for argument in function.arguments]
+            if any(flag is True for flag in flags):
+                return category, True
+            return category, None if None in flags else False
         return DataCategory.UNKNOWN, False
+
+    def _all_integers(self, arguments: tuple[str, ...]) -> bool:
+        """Whether every argument is known to be an integer numeric value."""
+        return bool(arguments) and all(
+            self._resolve_category(argument) == DataCategory.NUMERIC
+            and self._is_non_integer(argument) is False
+            for argument in arguments
+        )
 
     @staticmethod
     def _function_has_no_category(function: _FunctionSource) -> bool:
@@ -891,10 +941,11 @@ class MoveTypeChecker:
             return not function.arguments
         return signature.returns not in _INTRINSIC_RETURN_CATEGORIES
 
-    def _is_non_integer(self, name: str) -> bool:
+    def _is_non_integer(self, name: str) -> bool | None:
         """Whether a NUMERIC source is a non-integer: a catalogued item with
         decimal digits / leading P scaling / floating-point usage, or a
-        numeric literal with a decimal point."""
+        numeric literal with a decimal point. ``None`` for a numeric
+        FUNCTION result whose integer-ness is not known at compile time."""
         function = _function_source(name)
         if function is not None:
             return self._resolve_function(function)[1]

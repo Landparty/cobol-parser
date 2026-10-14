@@ -644,9 +644,10 @@ class LintAnalyzer:
             # No copybook can resolve these, so the --copybook-path hint
             # above would send the user after a COPY that is not missing.
             report.caveats.append(
-                f"move-type-check skipped {result.unresolved_function_count} MOVE(s) "
-                "whose source is an intrinsic FUNCTION with no category it can check "
-                "(a NATIONAL result or an uncatalogued function)"
+                f"move-type-check skipped {result.unresolved_function_count} MOVE "
+                "operand(s) whose source is an intrinsic FUNCTION it cannot check "
+                "(a NATIONAL result, an uncatalogued function, or a numeric result "
+                "that may not be an integer moved to an alphanumeric item)"
             )
         return [
             LintFinding(
