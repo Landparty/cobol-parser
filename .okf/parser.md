@@ -313,6 +313,16 @@ file a program can `OPEN`. Purely additive metadata; no existing behavior
 changed. Pinned by
 `tests/unit/test_program_layout_index.py::TestFdRecordTypeMetadata`.
 
+**FD clause order and the second RECORD word (`data_file_description.py`,
+issue #401):** `RECORD` is both a clause start (RECORD CONTAINS / VARYING) and
+the second word of `LABEL RECORD(S)` / `DATA RECORD(S)`. `parse_fd_clauses`
+treats it as that second word only while the LABEL/DATA clause has captured
+nothing yet; any later `RECORD` starts its own clause. The guard used to apply
+to every later `RECORD`, so `LABEL RECORDS ARE STANDARD RECORD CONTAINS 30`
+lost the record length (and `DATA RECORD IS X RECORD CONTAINS 30` read
+`data_records=["X","CONTAINS","30"]`). Pinned by
+`tests/regression/test_fd_record_after_label_data.py`.
+
 **LEVEL_NUMBER-as-literal gotcha (`data.py`):** the lexer types every 1-2
 digit integer as `TokenType.LEVEL_NUMBER` regardless of context (even inside
 `PIC 9(4)` or after `VALUE`). Any data-division clause that consumes a numeric

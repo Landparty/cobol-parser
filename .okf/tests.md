@@ -1300,6 +1300,12 @@ REFERENCE, ...) once on one line and once broken across two, and requires
 identical ASTs apart from locations; it also pins the dispatch cache
 telling EXEC<newline>SQL from EXEC<newline>CICS within one parse.
 
+`tests/regression/test_fd_record_after_label_data.py` (issue #401) pins
+RECORD CONTAINS / RECORD VARYING written after LABEL RECORDS or DATA RECORD:
+the `fd_clauses["record"]` length and `ProgramLayoutIndex.file_facts()`
+record length survive every clause order, and `data_records` holds only the
+record names.
+
 ### Field lineage (2026-10-08)
 
 `tests/samples/lineage/` holds a three-program chain plus its JCL: WRITER
