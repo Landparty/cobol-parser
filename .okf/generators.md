@@ -1538,7 +1538,18 @@ alongside Phase 3's OUT-boundary stubs, via two small helpers in
   end-of-file -- "does exhaustion happen" and "do we know a field name to
   report it in" are independent questions; `call_count` must not go stale
   just because `terminal` came back `None`). Derivable exactly from the
-  scenario's own already-generated sequence -- never a guess.
+  scenario's own already-generated sequence -- never a guess. A count of 0
+  (no rows, no AT END handler: a random-access READ in "empty input") is
+  never emitted, since such a READ still runs once.
+* **Failure-path scenarios (#318, option A).** A `PlannedScenario` with any
+  `status_overrides` (the error-status family, and "empty input" when it
+  overrides SQL to 100) runs the program's error path, which the generated
+  sequences do not describe. `_drop_failure_path_counts` keeps only the
+  overridden boundary's own `call_count`, and only when it is not a READ;
+  every other count is dropped, because `report.boundaries` is source order,
+  not execution order, so no boundary is provably *before* the failure.
+  Tier 2 runs with `seed_from_fixtures=False`: literal-only folds survive,
+  nothing is seeded from a mocked row.
 * **Tier 2 — `_tier2_expectations`, backed by
   `cobolparser.analysis.const_fold.ConstantFolder`** (see `.okf/analysis.md`
   for the folder's own extensive "exact by construction, or absent" rules).

@@ -91,6 +91,25 @@ def _call_count_expectation(ref: BoundaryRef, times: int) -> Expectation:
     )
 
 
+def _drop_failure_path_counts(
+    expectations: list[Expectation], planned: PlannedScenario
+) -> list[Expectation]:
+    """Remove the tier-1 counts a status override makes untrue (#318).
+
+    A scenario that fails a boundary (OPEN status 35, READ INVALID KEY 23,
+    CALL ON EXCEPTION, SQLCODE 100) sends the program down its error path,
+    where the downstream READ loop, CLOSE or WRITE may run zero times or a
+    different number of times. The boundary order here is source order, not
+    execution order, so no other boundary is provably *before* the failure:
+    every count but the overridden boundary's own is dropped. The overridden
+    one keeps its count only when it is one invocation by construction (an
+    OPEN, a CALL, an SQL statement); a READ's count comes from its generated
+    row sequence, which a failing READ does not consume.
+    """
+    kept_refs = {key for key in planned.status_overrides if not key.startswith("READ:")}
+    return [e for e in expectations if e.kind != "call_count" or e.ref in kept_refs]
+
+
 def _demote_violated_arms(
     coverage: ScenarioCoverage,
     planned: PlannedScenario,
@@ -254,7 +273,18 @@ class ProgramFixtureGenerator:
                     scenario.fixtures.append(fixture)
                 scenario.expectations.extend(expectations)
                 unresolved.extend(extra_unresolved)
-            scenario.expectations.extend(self._tier2_expectations(ast, index, scenario))
+            if planned.status_overrides:
+                scenario.expectations = _drop_failure_path_counts(
+                    scenario.expectations, planned
+                )
+            scenario.expectations.extend(
+                self._tier2_expectations(
+                    ast,
+                    index,
+                    scenario,
+                    seed_from_fixtures=not planned.status_overrides,
+                )
+            )
             # Self-verify BEFORE the scenario is written out: re-read the
             # data this scenario actually emitted and re-check it against the
             # conditions that motivated it. Without this the scenario's name
@@ -417,7 +447,12 @@ class ProgramFixtureGenerator:
         expectations = []
         if fixture is not None:
             times = len(fixture.sequence) + (1 if has_terminal_invocation else 0)
-            expectations.append(_call_count_expectation(ref, times))
+            # Zero rows and no end-of-file call to count is not "never
+            # invoked": a random-access READ (INVALID KEY, no AT END) still
+            # runs once with nothing to hand back, so 0 would be a false
+            # claim and any other number a guess.
+            if times > 0:
+                expectations.append(_call_count_expectation(ref, times))
         if boundary.direction == "BIDIRECTIONAL":
             expectations.append(
                 Expectation(
@@ -608,7 +643,11 @@ class ProgramFixtureGenerator:
 
     @staticmethod
     def _tier2_expectations(
-        ast: CobolProgram, index: ProgramLayoutIndex, scenario: Scenario
+        ast: CobolProgram,
+        index: ProgramLayoutIndex,
+        scenario: Scenario,
+        *,
+        seed_from_fixtures: bool = True,
     ) -> list[Expectation]:
         """Tier 2 (Phase 7): constant-fold this scenario's own straight-line
         chain, seeded by its own single-invocation mocked inputs, and turn
@@ -618,9 +657,16 @@ class ProgramFixtureGenerator:
         one) has no single representative value, and (not coincidentally)
         every field a `PERFORM UNTIL`/`VARYING` loop writes is poisoned by
         the folder's own loop-abort rule anyway, since that is exactly where
-        a multi-row READ is read from in practice."""
+        a multi-row READ is read from in practice.
+
+        ``seed_from_fixtures=False`` folds from the program's own literals
+        alone. A scenario with a status override takes a failure path: the
+        overridden boundary hands back no record (INVALID KEY, SQLCODE 100,
+        a failed OPEN), and nothing here knows which other boundaries still
+        run after it, so no mocked row is a value the program is known to
+        have read."""
         seed_values: dict[str, str] = {}
-        for fixture in scenario.fixtures:
+        for fixture in scenario.fixtures if seed_from_fixtures else []:
             if len(fixture.sequence) != 1:
                 continue
             for spec in fixture.layout:
