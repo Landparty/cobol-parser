@@ -515,8 +515,9 @@ def condition_ranges(raw_values: list[str]) -> list[tuple[str, str]]:
         match = _THROUGH_RE.match(raw)
         if match is None:
             previous = (
-                None if all_literal_operand(raw) is not None else
-                _strip_literal_quotes(raw)
+                None
+                if all_literal_operand(raw) is not None
+                else _strip_literal_quotes(raw)
             )
             continue
         end = _strip_literal_quotes(match.group(1))

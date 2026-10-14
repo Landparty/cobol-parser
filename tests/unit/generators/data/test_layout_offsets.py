@@ -625,9 +625,7 @@ class TestConditionRanges:
         assert by_name["A-OK"]["condition_ranges"] == [{"from": "1", "to": "99999"}]
         assert by_name["A-SMALL"]["condition_ranges"] == [{"from": "1", "to": "3"}]
         assert by_name["B-ALPHA"]["condition_ranges"] == [{"from": "A", "to": "Z"}]
-        assert by_name["C-MID"]["condition_ranges"] == [
-            {"from": "1.50", "to": "2.00"}
-        ]
+        assert by_name["C-MID"]["condition_ranges"] == [{"from": "1.50", "to": "2.00"}]
         # A range directly under a 01/77 root goes through the root's path.
         assert by_name["FLAG-ON"]["condition_ranges"] == [{"from": "1", "to": "5"}]
 
