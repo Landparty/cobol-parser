@@ -417,7 +417,11 @@ class TestM4LayoutAgreement:
             DataGeneratorOptions(),
         )
         assert views.base.length == 6
-        assert views.framing_length == 8
+        # 10, not 8: the slot is the widest member, so B sits at 8 -- what
+        # `data-items` reports -- and the record ends at 10. Before #296 the
+        # overlay view held only A-R, so framing stopped at 8 and B decoded
+        # as '' with no error.
+        assert views.framing_length == 10
         assert any("wider than the item they redefine" in c for c in views.caveats)
 
     def test_a_conforming_layout_frames_at_its_own_length(self):
@@ -467,7 +471,7 @@ class TestM4LayoutAgreement:
         )
         payload = views.to_dict()
         assert payload["record_length"] == 6
-        assert payload["framing_length"] == 8 == views.framing_length
+        assert payload["framing_length"] == 10 == views.framing_length
         assert payload["caveats"], "the divergence must be named, not just numbered"
 
     def test_the_two_lengths_agree_for_a_conforming_layout(self):

@@ -113,7 +113,8 @@ def test_decode_switches_redefines_overlay(sample, capsys):
         ]
     )
     rows = list(csv.reader(io.StringIO(capsys.readouterr().out)))
-    assert rows[0] == ["OS-COUNTRY", "OS-LINE"]
+    assert "OS-COUNTRY" in rows[0] and "OS-LINE" in rows[0]
+    assert "HOME-STREET" not in rows[0]
     assert len(rows) == 5
 
 
@@ -132,6 +133,11 @@ def test_list_views_reports_offsets_without_reading_the_data(tmp_path, capsys):
     ]
     overlay = payload["views"][1]
     assert overlay["offset"] == payload["views"][0]["fields"][3]["offset"]
+    # Since #296 an overlay view is the whole record; its own span is
+    # overlay_length.
+    assert overlay["length"] == payload["views"][0]["length"] == 36
+    assert overlay["overlay_length"] == 14
+    assert [f["offset"] for f in overlay["fields"]][0] == 0
 
 
 def test_json_format_carries_the_bytes_behind_every_value(sample, capsys):

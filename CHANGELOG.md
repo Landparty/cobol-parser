@@ -173,6 +173,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   present" as "copybooks were expanded" should compare `origin.file` with
   `source_file` instead. `location.column` is unchanged.
 
+* **`gen-data` keeps every digit of wide numeric fields** (#285). A freely
+  drawn number went through float64, so a `PIC 9(18)` value lost everything
+  past ~15 digits (most rows ended in `00`), and numbers of 29-31 digits,
+  generated or declared in a VALUE / level-88 literal, were rounded to
+  Decimal's default 28. **Seeded output changes** for numeric fields of 12
+  or more total digits: rarely, and only in the last decimal place, for
+  12-15 digits (0.01% of `9(9)V9(3)` rows, ~3.5% of `9(13)V99`); in most
+  rows past 15 digits (~96% of `9(18)`). Fields of 11 or fewer digits, and
+  every other field in the record, keep their values. Checked-in fixtures
+  generated with numeric fields of 12 or more digits will drift.
+
 * **Same-named fields and paragraphs were merged by name** (#258): two
   records carrying the same field names (the `MOVE CORRESPONDING` shape)
   and paragraph names reused across sections (`X1` in `S1` and in `S2`)
@@ -324,6 +335,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaving an unterminated literal behind.
 
 ### Changed
+
+* **BREAKING: `decode --view` / `compare --view` / `decode --list-views`:
+  an overlay view is now the whole record with the `REDEFINES` swapped in**
+  (#296). Output shape change for anything reading these:
+  * `decode --view X` (CSV and JSON) now has a column for every field of the
+    record, not just the overlay's own. Fields outside the overlay keep the
+    base view's column names; an overlay inside `OCCURS` gets one column per
+    occurrence (`T-A(1)`, `T-A(2)`, ...) instead of occurrence 1 only; an
+    overlay shorter than what it redefines is followed by a padding column
+    (`FILLER`, or its qualified path such as `R.A-R.FILLER` when the record
+    already has a `FILLER` column).
+  * In `decode --list-views` (`RecordViews.to_dict()`), an overlay view's
+    `length` and `fields` now cover the whole record and start at offset 0.
+    `offset` is still where the overlay itself starts, and its own span moves
+    to a new `overlay_length` key.
+    To get the old overlay-only field list back, keep the fields whose
+    `offset` is in `offset .. offset + overlay_length` (first occurrence; for
+    an overlay inside `OCCURS`, each occurrence's fields carry their own
+    subscripts).
+  * `compare --view X --key K` now works when `K` is outside the overlay
+    (it used to fail with "key field is not in the layout").
+  * An overlay that redefines an `OCCURS ... DEPENDING ON` counter still
+    sizes the table from those bytes, so the fields after it decode in
+    place. An overlay wider than what it redefines now frames the record at
+    the widest member's length (what `data-items` reports), so the field
+    after it decodes instead of coming back empty.
+  * `offset_ambiguous` is set on an overlay only when a `DEPENDING ON` table
+    sits before or inside it, not on every overlay of a record with one.
 
 * **Conditional compilation runs by default.** `>>DEFINE` / `>>IF` /
   `>>ELSE` / `>>END-IF` / `>>EVALUATE` / `>>WHEN` are evaluated in every
