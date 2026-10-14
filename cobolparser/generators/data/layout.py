@@ -829,7 +829,7 @@ def _flatten_into(
             ),
         )
 
-    item_path = (*path, item.name)
+    item_path = (*path, item.layout_name)
     for index in indexes:
         occ = (*subscripts, index) if index is not None else subscripts
         children = _child_items(item)
@@ -870,9 +870,9 @@ def _flatten_into(
         )
         out.append(
             FieldSpec(
-                name=item.name,
+                name=item.layout_name,
                 path=item_path,
-                column=item.name,
+                column=item.layout_name,
                 level=item.level,
                 picture=picture.pattern if picture else None,
                 usage=(item.usage or "DISPLAY").upper(),
