@@ -892,14 +892,14 @@ class TestSortMergeThruReferences:
 
 
 # ---------------------------------------------------------------------------
-# _mark_thru_range with inverted range (start > end — no-op)
+# _mark_thru_ranges with inverted range (start > end — no-op)
 # ---------------------------------------------------------------------------
 
 
 class TestMarkThruRangeInverted:
     def test_inverted_thru_range_does_not_mark_procedures(self) -> None:
         # PERFORM PARA-B THRU PARA-A where B comes *after* A in source order
-        # _mark_thru_range should be a no-op when start_index > end_index
+        # _mark_thru_ranges should be a no-op when start_index > end_index
         prog = _make_program(
             paragraphs=[
                 ("MAIN", [_perform("PARA-B", thru="PARA-A")]),
@@ -1540,7 +1540,7 @@ class TestDefensiveEdgeCases:
 
     def test_merge_without_output_procedure_thru_adds_no_range(self) -> None:
         """MERGE with an output procedure but no THRU clause must not touch
-        `_mark_thru_range` at all.
+        `_mark_thru_ranges` at all.
 
         MRG-PROC ends with STOP RUN so it doesn't fall through into
         UNREACHED -- the only thing under test is that the missing THRU
@@ -1561,8 +1561,8 @@ class TestDefensiveEdgeCases:
     def test_merge_thru_with_no_output_procedure_is_a_noop_range(self) -> None:
         """A MERGE statement whose `output_procedure_thru` is set without a
         corresponding `output_procedure` (malformed/partial construction)
-        must not crash `_mark_thru_range` -- the falsy `start` guard returns
-        immediately instead of indexing `_ordered_procedures`."""
+        must not crash `_mark_thru_ranges` -- an empty `start` resolves to no key, so
+        no range is recorded and `_ordered_procedures` is never indexed."""
         stmt = MergeStatement(SourceLocation(1, 12))
         stmt.set_file_name("FILE-MERGE")
         stmt.set_output_procedure("", "MRG-END")
@@ -2019,3 +2019,129 @@ class TestContainedProgramScope:
         flow = ProgramFlowAnalyzer().analyze(result.ast)
         assert "ALT-PARA" not in flow.entry_points
         assert "ALT-PARA" in flow.unreachable_nodes
+
+
+def _thru_program(body: str) -> str:
+    return f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. THRU381.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-X PIC 9.
+       PROCEDURE DIVISION.
+{body}"""
+
+
+class TestThruRangeSkippedMembers:
+    """Issue #381: a ``PERFORM A THRU C`` range runs its members in source
+    order, so a member every path jumps over is dead -- the range does not
+    make it live just by containing it."""
+
+    def test_issue_repro_stub_skipped_by_goto_exit_is_dead(self) -> None:
+        source = _thru_program("""\
+       0000-MAIN.
+           PERFORM 1000-PROC THRU 1000-EXIT
+           STOP RUN.
+       1000-PROC.
+           IF WS-X = 1 GO TO 1000-EXIT END-IF
+           DISPLAY 'WORK'
+           GO TO 1000-EXIT.
+       1000-OLD-CODE.
+           DISPLAY 'NEVER RUNS'.
+       1000-EXIT.
+           EXIT.
+""")
+        assert _dead_names(source) == ["1000-OLD-CODE"]
+
+    def test_members_skipped_across_sections_are_dead(self) -> None:
+        source = _thru_program("""\
+       0000-MAIN SECTION.
+       0000-START.
+           PERFORM 2000-A THRU 2000-C
+           STOP RUN.
+       2000-A SECTION.
+       2000-A1.
+           GO TO 2000-B2.
+       2000-A2.
+           DISPLAY 'SKIPPED'.
+       2000-B SECTION.
+       2000-B1.
+           DISPLAY 'SKIPPED'.
+       2000-B2.
+           DISPLAY 'RUNS'.
+       2000-C SECTION.
+       2000-C1.
+           EXIT.
+""")
+        assert _dead_names(source) == ["2000-A2", "2000-B1"]
+
+    def test_range_without_terminator_is_all_live(self) -> None:
+        source = _thru_program("""\
+       0000-MAIN.
+           PERFORM 1000-PROC THRU 1000-EXIT
+           STOP RUN.
+       1000-PROC.
+           IF WS-X = 1 GO TO 1000-EXIT END-IF
+           DISPLAY 'WORK'.
+       1000-MORE.
+           DISPLAY 'MORE'.
+       1000-EXIT.
+           EXIT.
+""")
+        assert _dead_names(source) == []
+
+    def test_member_reached_by_goto_resumes_the_walk(self) -> None:
+        """A GO TO into the middle of the range lands there and runs on, so
+        everything after the landing point is live; only the skipped stub
+        between is dead."""
+        source = _thru_program("""\
+       0000-MAIN.
+           PERFORM 1000-PROC THRU 1000-EXIT
+           STOP RUN.
+       1000-PROC.
+           GO TO 1000-RESUME.
+       1000-STUB.
+           DISPLAY 'NEVER'.
+       1000-RESUME.
+           DISPLAY 'RESUMED'.
+       1000-TAIL.
+           DISPLAY 'TAIL'.
+       1000-EXIT.
+           EXIT.
+""")
+        assert _dead_names(source) == ["1000-STUB"]
+
+    def test_skipped_member_performed_elsewhere_stays_live(self) -> None:
+        source = _thru_program("""\
+       0000-MAIN.
+           PERFORM 1000-PROC THRU 1000-EXIT
+           PERFORM 1000-OLD-CODE
+           STOP RUN.
+       1000-PROC.
+           GO TO 1000-EXIT.
+       1000-OLD-CODE.
+           DISPLAY 'PERFORMED DIRECTLY'.
+       1000-EXIT.
+           EXIT.
+""")
+        assert _dead_names(source) == []
+
+    def test_sort_input_procedure_thru_range_is_walked(self) -> None:
+        prog = _make_program(
+            paragraphs=[
+                (
+                    "MAIN",
+                    [
+                        _sort_with_procedures(
+                            input_proc="IN-START", input_thru="IN-END"
+                        ),
+                        _stop_run(),
+                    ],
+                ),
+                ("IN-START", [_goto("IN-END")]),
+                ("IN-STUB", [_continue()]),
+                ("IN-END", [_continue()]),
+            ]
+        )
+        dead = [i.name for i in DeadCodeAnalyzer().analyze(prog).dead_items]
+        assert dead == ["IN-STUB"]

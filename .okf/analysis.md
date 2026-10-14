@@ -175,9 +175,22 @@ transfers that land in a procedure and carry on — and then by
 paragraph reached by falling in is itself a fall-through source. PERFORM
 and SORT/MERGE procedure targets are deliberately absent: they stay in
 `_referenced_names` (so they are never reported dead) without licensing an
-edge out of their own end. `_mark_thru_range` still marks a whole
-`PERFORM A THRU C` range referenced, and C still does not escape. Pinned by
+edge out of their own end. A `PERFORM A THRU C` range's end C still does
+not escape. Pinned by
 `tests/unit/analysis/test_dead_code.py::TestFallThroughOnlyEscapesReachableRuns`.
+
+**THRU ranges are walked, not blanket-marked (issue #381, 2026-10-14).**
+`_mark_thru_range` used to mark every procedure between the two ends of a
+`p THRU q` range referenced, so an obsolete stub inside `PERFORM 1000-PROC
+THRU 1000-EXIT` that every path jumps over with `GO TO 1000-EXIT` was never
+reported. Ranges are now recorded during collection (`_thru_ranges`) and
+walked by `_mark_thru_ranges` *after* `_collect_fallthrough_refs`, in source
+order like the section walk: a member is reached when the one before it was
+reached and does not `_terminate`, or when it is a fall-through source (a
+GO TO / ALTER / ENTRY landing) or a section-exit jump target. Sections in the
+range are walked through, since their paragraphs follow the header in
+`_ordered_procedures`. Both ends stay referenced unconditionally. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestThruRangeSkippedMembers`.
 
 **Known related over-approximation, deliberately not changed.**
 `ProgramFlowAnalyzer`'s `graph.build_fall_through_edges` still emits a

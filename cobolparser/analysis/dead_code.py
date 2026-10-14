@@ -174,6 +174,9 @@ class DeadCodeAnalyzer:
         # A strict subset of ``_referenced_names``: see the class docstring
         # for why a PERFORM/SORT-procedure target is excluded.
         self._fallthrough_sources: set[str] = set()
+        # (start, end) key pairs of every ``p THRU q`` range, walked by
+        # ``_mark_thru_ranges`` once the fall-through sources are known.
+        self._thru_ranges: list[tuple[str, str]] = []
         # Sections declared between DECLARATIVES. and END DECLARATIVES.
         # (and their paragraphs): USE procedures the runtime invokes, so
         # they are live without any PERFORM naming them, and they are never
@@ -206,6 +209,7 @@ class DeadCodeAnalyzer:
         self._sections_entered_by_jump = set()
         self._paragraph_nodes = {}
         self._fallthrough_sources = set()
+        self._thru_ranges = []
         self._declarative_procs = set()
 
         proc_division = ast.procedure_division
@@ -234,6 +238,10 @@ class DeadCodeAnalyzer:
         self._referenced_names.update(self._declarative_procs)
 
         self._collect_fallthrough_refs()
+
+        # Needs the finished fall-through sources: a range member is reached
+        # by running on from the one before it, or by landing in it.
+        self._mark_thru_ranges()
 
         # When a section is referenced, all its paragraphs are too
         self._propagate_section_references()
@@ -680,7 +688,7 @@ class DeadCodeAnalyzer:
             self._add_ref(key)
         for s_key in starts:
             for e_key in ends:
-                self._mark_thru_range(s_key, e_key)
+                self._thru_ranges.append((s_key, e_key))
 
     def _add_ref(self, key: str | None) -> None:
         """Add a procedure key as referenced."""
@@ -741,23 +749,39 @@ class DeadCodeAnalyzer:
         else:
             self._add_jump_ref(key)
 
-    def _mark_thru_range(self, start: str | None, end: str | None) -> None:
-        """Mark all procedures between keys start and end (inclusive) as
-        referenced.
+    def _mark_thru_ranges(self) -> None:
+        """Mark the procedures each ``p THRU q`` range actually runs.
 
-        Uses index-based lookup so that a missing or inverted range does not
-        accidentally mark procedures all the way to the end of the list.
+        A range runs its procedures in source order, so -- like the section
+        walk in ``_propagate_section_references`` -- a member is reached
+        only when the member before it was reached and does not terminate,
+        or when control lands in it some other way (a GO TO / ALTER / ENTRY
+        target, or a procedure fall-through already reached). Marking every
+        procedure between the two ends hid the commonest legacy shape of
+        dead code: an obsolete stub inside ``PERFORM 1000-PROC THRU
+        1000-EXIT`` that every path jumps over with ``GO TO 1000-EXIT``
+        (issue #381). A section inside the range is walked the same way,
+        since its paragraphs follow its header in ``_ordered_procedures``.
+
+        Both ends are always referenced (``_collect_range_refs``); a missing
+        or inverted range marks nothing more, rather than running on to the
+        end of the program.
         """
-        if not start or not end:
-            return
-        try:
-            start_index = self._ordered_procedures.index(start)
-            end_index = self._ordered_procedures.index(end)
-        except ValueError:
-            return
-
-        if start_index > end_index:
-            return
-
-        for name in self._ordered_procedures[start_index : end_index + 1]:
-            self._referenced_names.add(name)
+        for start, end in self._thru_ranges:
+            try:
+                start_index = self._ordered_procedures.index(start)
+                end_index = self._ordered_procedures.index(end)
+            except ValueError:
+                continue
+            if start_index > end_index:
+                continue
+            live = True
+            for name in self._ordered_procedures[start_index : end_index + 1]:
+                reached = (
+                    live
+                    or name in self._fallthrough_sources
+                    or name in self._section_exit_jumps
+                )
+                if reached:
+                    self._referenced_names.add(name)
+                live = reached and not self._terminates(name)
