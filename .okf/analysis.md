@@ -1267,8 +1267,9 @@ item's own section. Needs `divisions/base.py`'s new `using_parameter_modes`
 metadata (name → `"VALUE"`/`"REFERENCE"`, alongside the existing
 `using_parameters` name list) to know the callee's declared mode; only
 resolvable for a static CALL to a program in the same source whose implicit
-entry interface was collected — an `ENTRY` statement's own USING carries no
-BY clause in COBOL, so a CALL to one is never checked for this. `BY CONTENT`
+entry interface was collected. A CALL to an `ENTRY` statement is never checked
+for this, even though `EntryStatement.parameter_modes` now records an ENTRY's
+own `USING [BY] VALUE/REFERENCE` modes (issue #402). `BY CONTENT`
 call arguments are never flagged either way (no USING counterpart to compare
 against).
 
@@ -2819,7 +2820,8 @@ caller would have to write it (a group item is described by level and length
 rather than a fabricated picture). `EntryPoint.kind` is `"procedure-division"`
 or `"entry-statement"`. `by_clause` is the callee's declared passing mode
 (`"REFERENCE"` / `"VALUE"`, from the division's `using_parameter_modes`
-metadata) on the primary entry, `None` on an ENTRY statement's operands;
+metadata) on the primary entry, and from `EntryStatement.parameter_modes` on
+an ENTRY statement's operands (issue #402; it used to be `None` there);
 `call_example()` writes a `BY VALUE` / `BY REFERENCE` phrase only where the
 mode changes (`CALL "E1" USING LK-A, BY VALUE LK-B RETURNING LK-R`). The
 RETURNING item counts as named, so it is never `unreferenced_linkage`.

@@ -1375,3 +1375,12 @@ nesting and a bare `NOT SIZE ERROR` (#399).
 by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
 (`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
 `COMP-5` is still a change.
+
+## 2026-10-14 (issue #402)
+
+`tests/regression/test_optional_keyword_forms.py` pins the four optional-
+keyword forms: `OCCURS n TO UNBOUNDED`, FD `RECORD VARYING n TO m` without
+FROM, `ENTRY ... USING [BY] REFERENCE/VALUE` (operands and
+`parameter_modes`, plus the signature's `by_clause`), and `INITIALIZE ...
+FILLER` without WITH. `test_program_signature.py::test_by_clause_is_set_and_rendered_where_the_mode_changes`
+now expects an ENTRY operand's `by_clause` to be `"REFERENCE"`, not None.

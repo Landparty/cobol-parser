@@ -422,7 +422,7 @@ positionally for DB2 scroll and rowset FETCHes (2026-09-28; see
 |------|-------------|
 | `base.py` | `CobolStatement`, `CobolExpression`, `ArithmeticExpression`, `ConditionalExpression`, `LogicalExpression`, `FunctionCall` |
 | `arithmetic.py` | `ArithmeticStatement`, `AddStatement`, `SubtractStatement`, `MultiplyStatement`, `DivideStatement`, `ComputeStatement` |
-| `call.py` | `CallStatement`, `EntryStatement`, `CallParameter` |
+| `call.py` | `CallStatement`, `EntryStatement` (`using_parameters` names plus a parallel `parameter_modes` list, `"REFERENCE"`/`"VALUE"`, serialized; #402), `CallParameter` |
 | `communication.py` | `SendStatement`, `ReceiveStatement`, `EnableStatement`, `DisableStatement`, `PurgeStatement` (2026-09-02) |
 | `control.py` | `IfStatement`, `EvaluateStatement`, `WhenClause`, `PerformStatement`, `GoStatement`, `StopStatement`, `SearchStatement` (`when_clauses[i]` holds `condition` text, `statements`, and, when one could be built, `condition_tree`, serialized by `to_dict()`; #348), `RaiseStatement`, `ResumeStatement` |
 | `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement`, `ValidateStatement` |
@@ -658,7 +658,8 @@ pass and the CLI's `--program NAME` (see [cli.md](cli.md)). Pinned by
   the PICTURE), `is_dynamic_length` + `dynamic_length_limit`
   (`set_dynamic_length`), `object_class` (`set_object_reference`; usage
   `"OBJECT REFERENCE"`) -- each serialized only when set.
-  `OccursClause.is_unbounded` (`max_times` None; serialized when True).
+  `OccursClause.is_unbounded` (`max_times` None; serialized when True), set
+  by both `OCCURS UNBOUNDED` and `OCCURS n TO UNBOUNDED` (#402).
   `PictureClause` accepts `U` (UTF-8, one byte per symbol).
 * `CobolDataItem.usage_explicit` (2026-09-28): True when the entry carries
   its own USAGE (`set_usage` / `set_object_reference`); not serialized.

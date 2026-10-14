@@ -1145,7 +1145,9 @@ bytes each *record* carries.
   bare **copybook** has no FD; `DataGeneratorOptions.record_varying` (CLI
   `--record-varying MIN:MAX`) supplies it, and overrides the FD when both
   exist. `RECORD CONTAINS 47 TO 80` declares the same thing without the
-  `VARYING` keyword and parses identically.
+  `VARYING` keyword and parses identically. `FROM` itself is optional
+  (`VARYING IN SIZE 47 TO 80` has a minimum of 47, issue #402); with
+  neither FROM nor an integer before TO, the minimum is None.
 * **`maximum` is clamped to the record's own byte length.** An FD promising
   more than its 01 can hold cannot be honoured by padding — those bytes were
   never declared — so the range is cut to what exists. **Never silently**

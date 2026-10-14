@@ -14,6 +14,16 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-14 -- issue #402: optional-keyword forms
+
+[parser.md](parser.md): `OCCURS n TO UNBOUNDED` is an unbounded ODO table
+(Python walker and the `_data_fast.pyx` bail-out); `INITIALIZE ... FILLER`
+without WITH sets `with_filler`; FD `RECORD VARYING [IN SIZE] n TO m`
+without FROM takes n as the minimum. `ENTRY ... USING [BY] VALUE/REFERENCE`
+keeps every operand and records `EntryStatement.parameter_modes`, which
+[analysis.md](analysis.md)'s `ProgramSignatureExtractor` now carries as each
+ENTRY operand's `by_clause`.
+
 ## 2026-10-14 -- issue #330: literal operands keep their quotes
 
 [parser.md](parser.md) ("Literal Re-Quoting"), [analysis.md](analysis.md):
