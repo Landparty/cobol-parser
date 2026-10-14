@@ -15,10 +15,10 @@ analyzer only looks at *ast* itself, not ``ast.contained_programs``. Call
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .._literals import QUOTED_LITERAL_RE
 from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolProgram, CobolSection
@@ -124,7 +124,7 @@ _NON_IDENTIFIER_WORDS = frozenset(
     }
 )
 
-_QUOTED_TEXT_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+_QUOTED_TEXT_RE = QUOTED_LITERAL_RE
 
 # Statement attributes holding a single identifier string that isn't
 # already folded into `.operands` by the statement's own setters -- found
@@ -160,8 +160,8 @@ _STR_LIST_EXTRAS: dict[type, tuple[str, ...]] = {
 _DICT_LIST_EXTRAS: dict[type, tuple[tuple[str, tuple[str, ...]], ...]] = {
     UnstringStatement: (("into_targets", ("target", "delimiter_var", "count_var")),),
     # ``INITIALIZE X REPLACING NUMERIC DATA BY WS-ZERO``: the BY value is
-    # read. A literal arrives with its quotes stripped, so it is extracted
-    # as a candidate name too -- harmless, it matches no declared item.
+    # read. A literal arrives quoted, and its quoted text is never taken
+    # for a name.
     InitializeStatement: (("replacing_clauses", ("by_value",)),),
     InspectStatement: (
         ("tallying_clauses", ("counter", "value", "before", "after")),
