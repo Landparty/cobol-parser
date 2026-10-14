@@ -2867,7 +2867,16 @@ results into one graph with two kinds of edge:
   dynamic `CALL WS-TARGET` resolved through `DynamicCallAnalyzer`. A dynamic
   call whose value set that analyzer could not fully resolve still contributes
   its known targets, each marked `resolved=False`, so the edge set is never
-  mistaken for an exhaustive one.
+  mistaken for an exhaustive one. `EXEC CICS LINK PROGRAM(...)` and `EXEC
+  CICS XCTL PROGRAM(...)` are call edges too (#315), told apart by
+  `CallEdge.kind` (`call` / `cics-link` / `cics-xctl`; `to_dict()` carries
+  it). `PROGRAM('X')` is static (read off `ExecCicsStatement.literal_options`,
+  since `options` holds literals unquoted); `PROGRAM(WS-X)` takes
+  `DynamicCallAnalyzer.resolve_variable("WS-X")`, the same values and
+  incomplete flag `CALL WS-X` would get, or is reported in `unresolved`.
+  `cycles()` skips XCTL edges: XCTL never returns, so a menu loop of XCTLs is
+  not recursion; LINK cycles count. Chosen over a separate `transfer_edges`
+  list so `callers_of` and impact questions see CICS callers with no change.
 * **Copy edges** — `program A copies member X`, and `member X copies member Y`
   for nested copybooks. Collected by **re-scanning** each source with
   `extract_copy_statements()` rather than from an expanded parse, because
@@ -2911,7 +2920,7 @@ report.program_count
 `ProgramNode` holds `program_id` (uppercased; the **file stem** when the file
 would not parse, recorded as such in `unresolved`), `path`, `calls`, `copies`
 and `parse_failed` — with `parse_failed` true, `calls` is "empty and unknown",
-not "empty and known". `CallEdge` carries `is_dynamic` / `resolved`; `CopyEdge`
+not "empty and known". `CallEdge` carries `is_dynamic` / `resolved` / `kind`; `CopyEdge`
 carries `member`, `path` and `nested`, where for a nested edge `program` is the
 *outer member name*, which is what makes a `PROG1 -> OUTER -> INNER` chain
 walkable in either direction.

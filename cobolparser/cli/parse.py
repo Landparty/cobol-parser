@@ -3532,8 +3532,8 @@ def _cmd_diff(args: argparse.Namespace) -> None:
 def _build_codebase_graph_parser(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "codebase-graph",
-        help="Build the cross-program CALL graph and copybook dependency "
-        "graph for a whole source tree",
+        help="Build the cross-program CALL (and CICS LINK/XCTL) graph and "
+        "copybook dependency graph for a whole source tree",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
