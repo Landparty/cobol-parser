@@ -150,6 +150,17 @@ _FIGURATIVE_NAMES = frozenset(
 _RELATIONAL_TEXT_RE = re.compile(
     r"^(.*?)\s*(NOT\s*=|<>|>=|<=|=|>|<)\s*(.*)$", re.IGNORECASE
 )
+# A logical connective in relational text, once quoted literals are masked
+# (see _mask_quoted) so `= 'A AND B'` is not mistaken for one.
+_LOGICAL_CONNECTIVE_RE = re.compile(r"(?:^|\s|\))(?:AND|OR)(?:\s|\(|$)", re.IGNORECASE)
+_QUOTED_TEXT_RE = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
+
+
+def _mask_quoted(text: str) -> str:
+    """*text* with every quoted literal replaced by an empty one."""
+    return _QUOTED_TEXT_RE.sub("''", text)
+
+
 _RELATIONAL_TEXT_OP_CANON: dict[str, str] = {
     "=": "eq",
     "<>": "ne",
@@ -506,11 +517,22 @@ class ConstraintExtractor:
         for idx, when_dict in enumerate(statement.when_clauses, start=1):
             arm_id = f"WHEN_{idx}"
             origin = f"SEARCH@{line}/WHEN#{idx}"
-            condition_text = (
-                when_dict.get("condition", "") if isinstance(when_dict, dict) else ""
-            )
+            # The structural tree (see search_parser._condition_tree) is
+            # the only form in which a compound WHEN is several comparisons:
+            # the raw text, split on its first operator, turned
+            # `A = 'K1' AND B = 'Z'` into one equality against the literal
+            # "K1' AND B = 'Z". The text path stays for SEARCH nodes built
+            # without a tree.
+            tree = when_dict.get("condition_tree")
+            if tree is not None:
+                _register_variants(
+                    arms,
+                    arm_id,
+                    _extract_expr(tree, False, index, fed_names, origin, unsupported),
+                )
+                continue
             constraint = _parse_relational_text(
-                condition_text, index, fed_names, origin, unsupported
+                when_dict.get("condition", ""), index, fed_names, origin, unsupported
             )
             if constraint is not None:
                 arms[arm_id] = [constraint]
@@ -1236,6 +1258,16 @@ def _parse_relational_text(
     text = (text or "").strip()
     if not text:
         unsupported.append(f"{origin}: SEARCH WHEN has no condition text")
+        return None
+
+    if _LOGICAL_CONNECTIVE_RE.search(_mask_quoted(text)):
+        # A compound condition: the regex below would take everything after
+        # the first operator, AND/OR included, as the right-hand literal --
+        # a made-up value no record can carry to reach the arm.
+        unsupported.append(
+            f"{origin}: compound condition text (AND/OR) not structurally "
+            f"parseable in v1: {text!r}"
+        )
         return None
 
     match = _RELATIONAL_TEXT_RE.match(text)
