@@ -2317,9 +2317,12 @@ def _cmd_complexity(args: argparse.Namespace) -> None:
 def _cmd_health(args: argparse.Namespace) -> None:
     from ..analysis.technical_debt import TechnicalDebtAnalyzer
 
-    ast, prof = _parse_or_fail(args)
+    result, prof = _parse_result_or_fail(args)
+    ast = result.ast
 
-    report = TechnicalDebtAnalyzer().analyze(ast)
+    # A partial AST is a quiet one: a file that mostly failed to parse used
+    # to grade "A". With the error count the grade is withheld (#397).
+    report = TechnicalDebtAnalyzer().analyze(ast, parse_error_count=len(result.errors))
 
     _emit_report(report.to_dict(), args, prof, ast)
 

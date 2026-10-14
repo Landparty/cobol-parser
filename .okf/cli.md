@@ -642,6 +642,10 @@ escape recursion cycle, ...) that put them there. Embeds the underlying
 `complexity` directly for that. Registered the same way as
 `recursion-check`.
 
+A file that parsed with errors still exits 0, but its JSON has `"grade":
+null`, a nonzero `parse_error_count` and a `caveats` entry (#397): the score
+then covers only what the parser recovered.
+
 ## Lint
 
 ```bash
