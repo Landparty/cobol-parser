@@ -127,6 +127,15 @@ CobolParser.parse(source)
 as it always has). Before 2026-10-08 it detected and normalized
 fixed-format source itself, a second copy of the parser's own logic.
 
+`debug_lines` (`parse_cobol` and `CobolParser`, default False; #334)
+compiles fixed-format `D` lines as code. With it off,
+`_normalize_fixed_source` records the dropped line numbers and
+`_warn_dropped_debug_lines()` (called after `parse_program()`) warns once
+when any unit's SOURCE-COMPUTER is `WITH DEBUGGING MODE`
+(`_debugging_mode_on()` reads the CONFIGURATION section's
+`source_computer` metadata). Reset per parse in `_begin_parse`. Details in
+[preprocessing.md](preprocessing.md).
+
 `_parse_core` is a thin driver over three stages (split out 2026-10-08,
 behavior unchanged): `_preprocess_source()` -> `(text, free_form)` (skip
 to the header, directive strip, fixed-format detection +

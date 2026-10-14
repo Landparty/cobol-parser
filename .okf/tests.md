@@ -1235,7 +1235,12 @@ all` and `scan` accepting it; and per-type traits (the CICS commands,
 DL/I function codes, MQ calls, OO unit tree, declarative sections, flow
 edges, 6.x data attributes ... that make the program its kind).
 `TestCorpusShape` fails when the directory and `PROGRAM_TYPES` disagree, so
-a new type has to be added to both. `tests/samples/*.cbl` smoke checks
+a new type has to be added to both. The corpus is parsed with
+`debug_lines=True` (COMPDIR declares `WITH DEBUGGING MODE`; it is the only
+program with D lines), so COMPDIR's D-line DISPLAYs are in its AST and it
+stays warning-free; `tests/unit/test_debugging_mode_lines.py` pins the
+default (dropped + warning), the option on every surface (API, CLI,
+cobol.yml, scan, tokenize) and `debug_line_numbers` (#334). `tests/samples/*.cbl` smoke checks
 (`test_all_samples.py`) cover the corpus too, since it lives under
 `tests/samples/`. The same 22 files are copied into
 `mocky-mock/tests/fixtures/enterprise/`, where

@@ -25,6 +25,7 @@ Shape (every key optional)::
       copybook_path: [copybooks]    # string or list, relative to this file
       callee_path: [src/subprograms]
       source_format: fixed          # auto | fixed | free
+      debug_lines: false            # compile D-in-column-7 lines as code
       dialect: ibm-enterprise
       error_recovery: collect-all   # collect-all | fail-fast
       seed: 42
@@ -150,6 +151,9 @@ class ProjectConfig:
     copybook_path: tuple[str, ...] = ()
     callee_path: tuple[str, ...] = ()
     source_format: str | None = None
+    # Compile fixed-format debugging lines (D in column 7) as code; None
+    # when the file does not say, so the built-in default (off) applies.
+    debug_lines: bool | None = None
     dialect: str | None = None
     error_recovery: str | None = None
     seed: int | None = None
@@ -234,6 +238,14 @@ def _int(value: Any, where: str, source: Path) -> int | None:
     return int(value)
 
 
+def _bool(value: Any, where: str, source: Path) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ConfigError(f"{source}: '{where}' must be true or false")
+    return value
+
+
 def _defines(value: Any, source: Path) -> tuple[str, ...]:
     """`define:` accepts the natural YAML mapping shape as well as the
     ``SYMBOL=VALUE`` list `--define` itself takes. Both normalize to the
@@ -296,6 +308,7 @@ _PROJECT_KEYS = (
     "copybook_path",
     "callee_path",
     "source_format",
+    "debug_lines",
     "dialect",
     "error_recovery",
     "seed",
@@ -380,6 +393,7 @@ def build_config(document: Any, source: Path) -> ProjectConfig:
             "project.source_format",
             source,
         ),
+        debug_lines=_bool(project.get("debug_lines"), "project.debug_lines", source),
         dialect=_enum(project.get("dialect"), _DIALECTS, "project.dialect", source),
         error_recovery=_enum(
             project.get("error_recovery"),

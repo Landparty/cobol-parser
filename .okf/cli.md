@@ -87,7 +87,7 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   get `None`, since argparse's append copies-and-appends to the default and a
   non-list sentinel would raise). Only runs when a config file was found.
 * **Bound dests** — `copybook_path`, `callee_path`, `source_format`,
-  `dialect`, `error_recovery`, `seed`, `extensions`, `define`, `charset`,
+  `debug_lines`, `dialect`, `error_recovery`, `seed`, `extensions`, `define`, `charset`,
   `endian`, `record_format`, `record_separator`, `rows`, `rules`,
   `min_severity`, `fail_on`. Note `extensions`/`rules` are argparse *dests*,
   not the `--extension`/`--rule` flag spellings — getting that wrong is how
@@ -257,6 +257,15 @@ source it classifies as fixed-format (scripts that always passed it
 against conventional fixed-format members relied on that lenience). It is
 **not** an alias for `--source-format=free`, which hard-disables
 normalisation. Passing both flags is rejected by argparse.
+
+`--debug-lines` / `--no-debug-lines` (`BooleanOptionalAction`, default off)
+ride along in `_add_source_format_args`: compile fixed-format `D` lines as
+code instead of dropping them (see [preprocessing.md](preprocessing.md),
+#334). `_source_format_kwargs()` adds `debug_lines=True` to its dict only
+when set; `scan` forwards it as `ScanOptions.debug_lines`; `preprocess`
+passes it to `normalize_fixed_format` directly. cobol.yml
+`project.debug_lines: true|false` (strictly a boolean) fills it, and
+`--no-debug-lines` is the way to override a `true` there.
 
 Reach for `fixed` when a shop's layout defeats auto-detection — e.g. a
 sequence area holding a tag with an internal space. Auto-detection already
