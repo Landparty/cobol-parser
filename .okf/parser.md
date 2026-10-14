@@ -939,6 +939,16 @@ Pinned by `tests/unit/test_perform_thru_numeric.py` and
 `tests/regression/test_real_corpus_parse_failures.py`
 (`TestAlterNumericProcedureNames`, `TestGoToDependingOnNumericTargets`).
 
+**`GO TO ... DEPENDING` without ON (issue #377).** `ON` is optional in
+`GO TO a b DEPENDING ws-x` (NIST NC102A), but `_parse_depending_on_clause`
+returned as soon as the word after `DEPENDING` was not `ON`, leaving the
+variable in the stream. It was re-parsed as a phantom paragraph, and the
+jump table read as an unconditional GO TO its first target (dead-code
+called the fall-through paragraph dead, program-flow missed the other
+targets, unused-variables flagged the variable, complexity scored 1).
+`ON` is now consumed only when present. Pinned by
+`tests/regression/test_go_depending_without_on.py`.
+
 **ENVIRONMENT division SELECT clauses (`environment.py`, audit 2026-07-07
 H4/H5):** SELECT parsing captures ALTERNATE RECORD KEY (repeatable, WITH
 DUPLICATES), PADDING CHARACTER, RESERVE n AREAS, SHARING WITH, LOCK MODE
