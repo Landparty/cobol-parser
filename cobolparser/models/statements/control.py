@@ -64,6 +64,13 @@ class WhenClause(ASTNode):
         super().__init__("WhenClause", location)
         self.selectors: list = selectors  # List of selector dicts
         self.statements: list[CobolStatement] = []
+        # True when the source has no imperative statement between this WHEN
+        # and the next (non-OTHER) WHEN: the two are one stacked arm. Set by
+        # the parser from the tokens, not inferred from an empty
+        # `statements` -- a body that was in the source but never reached
+        # the AST (an unexpanded COPY, a statement dropped by error
+        # recovery) is not a stack. See `EvaluateStatement.when_groups`.
+        self.stacked: bool = False
 
     def add_statement(self, statement: "CobolStatement") -> None:
         self.statements.append(statement)
@@ -173,19 +180,20 @@ class EvaluateStatement(CobolStatement):
         ``WHEN 'A' WHEN 'B' PERFORM X`` is one arm with two selector sets:
         the imperative statements after the last WHEN of a stack belong to
         every WHEN in it. The AST keeps one `WhenClause` per WHEN phrase (so
-        the earlier ones have no statements); this joins each such empty
-        clause to the clause after it. The last clause of each group owns
-        the shared body (``group[-1].statements``).
+        the earlier ones have no statements); this joins each clause the
+        parser marked `stacked` to the clause after it. The last clause of
+        each group owns the shared body (``group[-1].statements``).
 
-        A stack with no statements at all before WHEN OTHER / END-EVALUATE
-        is still one group, whose shared body is empty. WHEN OTHER
-        (`default_when`) is never part of a group.
+        A WHEN that is merely empty in the AST is not joined: only the
+        parser can tell "no statement in the source" from "a statement that
+        did not make it into the AST". WHEN OTHER (`default_when`) is never
+        part of a group.
         """
         groups: list[list[WhenClause]] = []
         pending: list[WhenClause] = []
         for clause in self.when_clauses:
             pending.append(clause)
-            if clause.statements:
+            if not clause.stacked:
                 groups.append(pending)
                 pending = []
         if pending:

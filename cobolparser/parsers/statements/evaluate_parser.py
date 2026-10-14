@@ -163,6 +163,9 @@ class EvaluateStatementParser(IStatementParser):
                 # registered as an AST child and its nested statements are
                 # reachable via find_all_by_type / traverse_depth_first.
                 stmt.add_when_clause(when_clause)
+                when_clause.stacked = self._at_stacked_when(
+                    token_stream, when_location.line
+                )
                 statements, period_terminated = self._skip_clause_statements(
                     token_stream
                 )
@@ -526,6 +529,36 @@ class EvaluateStatementParser(IStatementParser):
                     token_stream.consume()
 
         return statements if statements else None, period_terminated
+
+    @staticmethod
+    def _at_stacked_when(token_stream: ITokenStream, when_line: int) -> bool:
+        """True when the next phrase is another (non-OTHER) WHEN.
+
+        Called right after a WHEN's selectors: nothing but layout between
+        them and the next WHEN means the two phrases share one body (a
+        stacked WHEN). WHEN OTHER cannot be stacked onto. Text removed before
+        lexing (an unexpanded COPY) on the lines from this WHEN to the next
+        is a body that never reached the AST, not a stack.
+        """
+        skip_statement_separators(token_stream)
+        token = token_stream.peek()
+        if token is None or not token.value or token.value.upper() != "WHEN":
+            return False
+        next_line = token.location.line if token.location else when_line
+        omitted = getattr(token_stream, "omitted_source_lines", ())
+        if any(first <= next_line and last >= when_line for first, last in omitted):
+            return False
+        offset = 1
+        while True:
+            following = token_stream.peek(offset)
+            if following is None or following.type != TokenType.NEWLINE:
+                break
+            offset += 1
+        return not (
+            following is not None
+            and following.value
+            and following.value.upper() == "OTHER"
+        )
 
     @staticmethod
     def _is_statement_keyword(word: str) -> bool:

@@ -435,8 +435,13 @@ positionally for DB2 scroll and rowset FETCHes (2026-09-28; see
 one `WhenClause` per WHEN phrase, so `when_clauses[0]` has no statements; the
 statements after the last WHEN belong to every WHEN of the stack. The AST
 shape is deliberately unchanged. `EvaluateStatement.when_groups()` returns
-the arms as they execute -- each empty clause joined to the clause after it,
-`group[-1].statements` the shared body. Anything that reasons per *arm*
+the arms as they execute -- each clause the parser marked `stacked` joined
+to the clause after it, `group[-1].statements` the shared body. `stacked` is
+decided from the tokens (nothing but layout between this WHEN and a next,
+non-OTHER WHEN, and no unexpanded COPY blanked on those lines --
+`TokenStream.omitted_source_lines`), never from an empty `statements`: a body
+that was in the source but did not reach the AST is not a stack. Not in
+`to_dict()`. Anything that reasons per *arm*
 (business rules, program-flow `BranchArm`s, constraints / scenarios) must
 iterate `when_groups()`, not `when_clauses`; per-*phrase* walks (xref,
 unused variables, complexity's decision count, diff) keep `when_clauses`.

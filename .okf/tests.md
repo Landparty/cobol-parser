@@ -9,11 +9,12 @@ timestamp: 2026-10-13T00:00:00Z
 # Overview
 
 2026-10-14: `tests/regression/test_evaluate_stacked_when.py`
-(6 tests, #314) pins stacked WHEN phrases (`WHEN 'A' WHEN 'B' stmt`) as one
+(11 tests, #314) pins stacked WHEN phrases (`WHEN 'A' WHEN 'B' stmt`) as one
 arm while the AST keeps one `WhenClause` per phrase: `when_groups()`,
 business rules (`WS-T = 'A' OR WS-T = 'B'`, `reached_via`), one program-flow
 `BranchArm` owning the PERFORM, constraint disjuncts `WHEN_1#1`/`WHEN_1#2`
-negated by later arms and WHEN OTHER, and scenario names.
+negated by later arms and WHEN OTHER, and scenario names; an empty WHEN
+whose body was an unexpanded COPY, or one before WHEN OTHER, is not stacked.
 
 2026-10-13: `tests/regression/test_copy_member_case_folding.py`
 (17 tests, #289) pins COPY member and library names folding to uppercase on

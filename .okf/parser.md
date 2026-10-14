@@ -585,6 +585,16 @@ lookahead (`peek(1).value.upper() == "IS"`) and collected into
 keys when the UPSI switch form is used). Pinned by
 `tests/unit/test_special_names.py` and `tests/unit/test_write_advancing.py`.
 
+**EVALUATE stacked WHENs (`evaluate_parser.py`, #314):** after a WHEN's
+selectors, `_at_stacked_when` sets `WhenClause.stacked` when the next
+meaningful token is another WHEN (not WHEN OTHER) and no unexpanded COPY was
+blanked on the lines between (`TokenStream.omitted_source_lines`, filled by
+`CobolParser` from `strip_unexpanded_copy_statements`).
+`EvaluateStatement.when_groups()` groups on that flag; the AST keeps one
+`WhenClause` per phrase. Deciding it from an empty `statements` instead would
+merge a WHEN whose body was dropped (unexpanded COPY, recovery) into the next
+arm.
+
 **EVALUATE blank string-literal WHEN selectors (`evaluate_parser.py`):**
 the lexer strips quotes off string literals, so `WHEN '  '` (the IMS DL/I
 status-code idiom) arrives as a whitespace-only token that `_build_selector`

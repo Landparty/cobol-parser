@@ -76,9 +76,77 @@ def test_ast_keeps_one_clause_per_when_phrase():
 
 def test_trailing_empty_whens_form_one_group():
     stmt = _evaluate(_ast())
-    stmt.when_clauses[1].statements.clear()
-    stmt.when_clauses[2].statements.clear()
+    stmt.when_clauses[1].stacked = True
     assert [len(g) for g in stmt.when_groups()] == [3]
+
+
+def _evaluate_body(body: str) -> EvaluateStatement:
+    source = (
+        _PROGRAM.split("           EVALUATE WS-T")[0]
+        + body
+        + ("           GOBACK.\n       SET-RATE.\n           CONTINUE.\n")
+    )
+    result = parse_cobol(source, filename="t.cbl")
+    assert result.ast is not None
+    return _evaluate(result.ast)
+
+
+def test_empty_when_whose_body_never_reached_the_ast_is_not_stacked():
+    # An unexpanded COPY leaves WHEN 'F' with no statements in the AST, but
+    # the source had a body there: 'F' must not inherit 'G's PERFORM.
+    stmt = _evaluate_body(
+        "           EVALUATE WS-T\n"
+        "             WHEN 'F'\n"
+        "               COPY HANDLEF.\n"
+        "             WHEN 'G'\n"
+        "               PERFORM SET-RATE\n"
+        "           END-EVALUATE\n"
+    )
+    assert [len(c.statements) for c in stmt.when_clauses] == [0, 1]
+    assert [c.stacked for c in stmt.when_clauses] == [False, False]
+    assert [len(g) for g in stmt.when_groups()] == [1, 1]
+
+
+def test_unexpanded_copy_on_the_when_line_is_not_stacked():
+    stmt = _evaluate_body(
+        "           EVALUATE WS-T\n"
+        "             WHEN 'F' COPY HANDLEF.\n"
+        "             WHEN 'G'\n"
+        "               PERFORM SET-RATE\n"
+        "           END-EVALUATE\n"
+    )
+    assert [len(g) for g in stmt.when_groups()] == [1, 1]
+
+
+def test_unexpanded_copy_elsewhere_does_not_break_a_real_stack():
+    stmt = _evaluate_body(
+        "           COPY OTHERCP.\n"
+        "           EVALUATE WS-T\n"
+        "             WHEN 'A'\n"
+        "             WHEN 'B'\n"
+        "               PERFORM SET-RATE\n"
+        "             WHEN 'C'\n"
+        "               COPY HANDLEC.\n"
+        "           END-EVALUATE\n"
+    )
+    assert [len(g) for g in stmt.when_groups()] == [2, 1]
+
+
+def test_empty_when_before_when_other_is_not_stacked():
+    stmt = _evaluate_body(
+        "           EVALUATE WS-T\n"
+        "             WHEN 'A'\n"
+        "             WHEN OTHER\n"
+        "               PERFORM SET-RATE\n"
+        "           END-EVALUATE\n"
+    )
+    assert [c.stacked for c in stmt.when_clauses] == [False]
+    assert [len(g) for g in stmt.when_groups()] == [1]
+
+
+def test_parser_marks_only_the_stacked_phrase():
+    stmt = _evaluate(_ast())
+    assert [c.stacked for c in stmt.when_clauses] == [True, False, False]
 
 
 def test_business_rules_reads_one_arm_for_the_stack():

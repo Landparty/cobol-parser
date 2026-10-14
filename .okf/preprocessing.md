@@ -762,7 +762,11 @@ from cobolparser.preprocess.replace_statement import (
   leaking as a malformed statement (e.g. `BY MOVE ==DELETE==` had leaked a
   `MOVE` with no `TO`). In the **copybook-expansion** pipeline COPY is already
   inlined before this point, so the strip is a no-op there. `warnings` receives
-  one diagnostic per removed COPY plus any the lexer recorded.
+  one diagnostic per removed COPY plus any the lexer recorded. `omitted_lines`
+  (optional list) receives each removed COPY's 1-based `(first, last)` line
+  range; `CobolParser` stores them on its `TokenStream` as
+  `omitted_source_lines` so the EVALUATE parser can tell a WHEN whose body was
+  an unexpanded COPY from a stacked WHEN (#314).
 
 These two passes are what let NIST `SM208A` (30x `REPLACE`) and `SM206A`
 (`COPY ... REPLACING` pseudo-text) parse error-free; pinned by
