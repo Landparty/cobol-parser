@@ -30,6 +30,14 @@ SORT-procedure SECTION no longer keeps later sections alive; three guards
 pin that a section also fallen into or gone to still runs past its exit,
 four more that a jump into it from another section (or an ENTRY) does too.
 
+2026-10-14: `tests/regression/test_evaluate_stacked_when.py`
+(11 tests, #314) pins stacked WHEN phrases (`WHEN 'A' WHEN 'B' stmt`) as one
+arm while the AST keeps one `WhenClause` per phrase: `when_groups()`,
+business rules (`WS-T = 'A' OR WS-T = 'B'`, `reached_via`), one program-flow
+`BranchArm` owning the PERFORM, constraint disjuncts `WHEN_1#1`/`WHEN_1#2`
+negated by later arms and WHEN OTHER, and scenario names; an empty WHEN
+whose body was an unexpanded COPY, or one before WHEN OTHER, is not stacked.
+
 2026-10-13: `tests/regression/test_copy_member_case_folding.py`
 (17 tests, #289) pins COPY member and library names folding to uppercase on
 a case-sensitive filesystem: `copy errorcd.` finds `ERRORCD.cpy`, the uppercase

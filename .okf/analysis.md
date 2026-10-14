@@ -2993,6 +2993,13 @@ INTO B GIVING C` -> `C = B / A`); inside an arm it is an action of that
 decision only, never counted twice. Counters (`ADD 1 TO X`, `COMPUTE X = X +
 1`) are not rules at all.
 
+**Stacked WHENs (#314).** `WHEN 'A' WHEN 'B' stmt` is one arm whose
+condition is `WS-T = 'A' OR WS-T = 'B'` (via `EvaluateStatement.when_groups()`);
+the same grouping numbers program-flow `BranchArm`s (one `WHEN_n` arm, label
+`WHEN A / WHEN B`) and constraint arms, where each phrase of a stack is an
+OR-split disjunct of that arm (`WHEN_1#1`, `WHEN_1#2`) and later arms /
+WHEN OTHER negate every phrase.
+
 **Technical vs business.** A decision whose *own* condition reads only
 technical items, or a calculation that writes only technical items, is
 `technical` and excluded by default (counted in `technical_rules_excluded`;

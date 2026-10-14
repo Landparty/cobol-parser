@@ -148,8 +148,10 @@ def _is_empty_if_arm(branch_type: str, arm: BranchArm) -> bool:
 
     Every IF gets an ELSE arm from the scanner even when the source has no
     ELSE clause; drawing an empty "ELSE" box is pure noise. EVALUATE arms
-    are never dropped -- an empty WHEN still documents that its selector
-    value is deliberately handled.
+    are never dropped. Stacked WHENs (``WHEN 'A' WHEN 'B' stmt``) are
+    already one arm by the time they get here (see
+    `EvaluateStatement.when_groups`); an EVALUATE arm that is still empty
+    is a WHEN whose selector value is deliberately left with no action.
     """
     return (
         branch_type == "IF" and arm.statement_count == 0 and not arm.nested_call_targets

@@ -511,7 +511,9 @@ def find_replace_statement_spans(source: str) -> list[tuple[int, int]]:
 
 
 def strip_unexpanded_copy_statements(
-    source: str, warnings: list[str] | None = None
+    source: str,
+    warnings: list[str] | None = None,
+    omitted_lines: list[tuple[int, int]] | None = None,
 ) -> str:
     """Blank ``COPY`` statements that will not be expanded, preserving lines.
 
@@ -532,6 +534,10 @@ def strip_unexpanded_copy_statements(
         warnings: Optional list; receives one diagnostic per removed COPY plus
             any diagnostics the lexer recorded for COPY statements it could not
             fully tokenize.
+        omitted_lines: Optional list; receives the 1-based ``(first, last)``
+            line range of each removed COPY, so a later pass can tell "nothing
+            was written here" from "something was written here and dropped"
+            (an EVALUATE's stacked-WHEN check relies on this).
 
     Returns:
         Source with recognized COPY statements blanked. When no COPY statements
@@ -557,6 +563,9 @@ def strip_unexpanded_copy_statements(
         pieces.append(source[cursor:start])
         pieces.append(_blank_span(source[start:end]))
         cursor = end
+        if omitted_lines is not None:
+            first = source.count("\n", 0, start) + 1
+            omitted_lines.append((first, first + source.count("\n", start, end)))
         if warnings is not None:
             member = (stmt.member_name or "").strip()
             # Wording is path-neutral: this pass runs both when no copybook
