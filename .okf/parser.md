@@ -1077,7 +1077,9 @@ Pinned by `tests/unit/test_extended_verb_parsers.py` and
   `parse_size_error_clauses`, `call_parser.py` (main loop and
   `_parse_using_clause` stop set), `read_parser.py`, `write_parser.py`,
   `simple_statement_parsers.py` (RETURN) and `search_parser.py` accept the
-  bare forms; the arithmetic target/GIVING stop sets gained `SIZE`. A bare
+  bare forms; the arithmetic target/GIVING stop sets gained `SIZE`, and so
+  did COMPUTE's expression loop (#399: `COMPUTE C = A + B SIZE ERROR ...`
+  folded `SIZE ERROR` into the expression). A bare
   `END` is only an `AT END` when it does not start `END PROGRAM` /
   `END DIVISION` (`_utils.bare_end_starts_at_end_clause`).
   `parse_size_error_clauses` also no longer consumes a `NOT` that does not

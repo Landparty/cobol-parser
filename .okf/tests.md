@@ -1327,3 +1327,10 @@ pins that a comma/semicolon after `ASSIGN TO ddname` or between the two
 FILE STATUS variables is not kept in the name, and
 `test_field_lineage.py::test_separator_after_assign_names_the_dd_port`
 that the lineage file port is `INDD`, not `,`.
+
+## 2026-10-14
+
+`tests/unit/test_compute_bare_size_error.py` pins that COMPUTE ends its
+expression at a bare `SIZE ERROR` (no `ON`), with the handler body landing
+in `on_size_error` rather than the paragraph; covers the `IF ... END-COMPUTE`
+nesting and a bare `NOT SIZE ERROR` (#399).
