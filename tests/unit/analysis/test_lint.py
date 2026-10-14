@@ -329,6 +329,40 @@ class TestCaveats:
         report = LintAnalyzer(["move-type-check"]).analyze(_ast(source))
         assert any("move-type-check skipped" in c for c in report.caveats)
 
+    def test_function_sources_do_not_blame_a_missing_copy(self) -> None:
+        # Issue #291: MOVE FUNCTION TRIM(...) is checked, so no caveat at all.
+        source = PROGRAM.replace(
+            "           MOVE WS-NAME TO WS-COUNTER",
+            "           MOVE FUNCTION TRIM(WS-NAME) TO WS-NAME",
+        )
+        report = LintAnalyzer(["move-type-check"]).analyze(_ast(source))
+        assert report.caveats == []
+
+    def test_uncheckable_function_source_names_the_real_reason(self) -> None:
+        source = PROGRAM.replace(
+            "           MOVE WS-NAME TO WS-COUNTER",
+            "           MOVE FUNCTION NATIONAL-OF(WS-NAME) TO WS-NAME",
+        )
+        report = LintAnalyzer(["move-type-check"]).analyze(_ast(source))
+        assert len(report.caveats) == 1
+        assert "intrinsic FUNCTION" in report.caveats[0]
+        assert "--copybook-path" not in report.caveats[0]
+
+    def test_both_kinds_of_skipped_move_get_their_own_caveat(self) -> None:
+        source = PROGRAM.replace(
+            "           MOVE WS-NAME TO WS-COUNTER",
+            "           MOVE UNDECLARED-FIELD TO WS-COUNTER\n"
+            "           MOVE FUNCTION NUMVAL(WS-NAME) TO WS-NAME",
+        )
+        report = LintAnalyzer(["move-type-check"]).analyze(_ast(source))
+        assert len(report.caveats) == 2
+        copybook, function = report.caveats
+        assert "skipped 1 MOVE operand(s)" in copybook
+        assert "--copybook-path" in copybook
+        assert "skipped 1 MOVE operand(s)" in function
+        assert "intrinsic FUNCTION" in function
+        assert "--copybook-path" not in function
+
     def test_no_caveats_when_everything_was_checkable(self) -> None:
         report = LintAnalyzer().analyze(_ast(CLEAN_PROGRAM))
         assert report.caveats == []
