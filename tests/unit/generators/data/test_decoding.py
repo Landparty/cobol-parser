@@ -31,7 +31,7 @@ from cobolparser.generators.data.encoding import (
     RecordFormat,
     encode_record,
 )
-from cobolparser.generators.data.layout import present_indexes
+from cobolparser.generators.data.layout import flatten_record, present_indexes
 from cobolparser.generators.data.options import DataGeneratorOptions
 from cobolparser.generators.data.views import build_record_views
 
@@ -756,3 +756,44 @@ def test_an_overlay_inside_a_table_decodes_every_occurrence():
         "T-A(2)": "C",
         "T-B(2)": "D",
     }
+
+
+def test_an_overlay_of_a_depending_on_counter_still_sizes_the_table():
+    """An overlay redefining an ODO counter drops the counter from its view,
+    but the table still takes its length from those bytes: under RECFM=V
+    every field after the table moved, with no error, before the fix."""
+    source = """
+       01  R.
+           05  CNT         PIC 9.
+           05  CNT-X REDEFINES CNT PIC X.
+           05  TBL OCCURS 1 TO 3 TIMES DEPENDING ON CNT.
+               10  V       PIC XX.
+           05  TAIL        PIC XXX.
+"""
+    opts = EncodingOptions(record_format=RecordFormat.VARIABLE)
+    specs = flatten_record(
+        parse_copybook_records(source)[0], DataGeneratorOptions().for_record_image()
+    )
+    raw = encode_record(specs, ["2", "AA", "BB", "", "END"], opts)
+    result = _decoder(source, opts).decode_bytes(raw, view="CNT-X")
+    assert result.records[0].values() == {
+        "CNT-X": "2",
+        "V(1)": "AA",
+        "V(2)": "BB",
+        "V(3)": "",
+        "TAIL": "END",
+    }
+    assert result.error_count == 0
+
+
+def test_a_wider_overlay_reads_the_field_after_it():
+    """Non-conforming, but compilers accept it: the slot is the widest
+    member, so B sits after the 8-byte overlay and the record is 10 bytes."""
+    source = """
+       01  R.
+           05 A PIC X(4).
+           05 A-R REDEFINES A PIC X(8).
+           05 B PIC X(2).
+"""
+    result = _decoder(source, EncodingOptions()).decode_bytes(b"12345678BB", view="A-R")
+    assert result.records[0].values() == {"A-R": "12345678", "B": "BB"}

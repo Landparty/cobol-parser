@@ -312,6 +312,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+* **`decode --view` / `compare --view` / `decode --list-views`: an overlay
+  view is now the whole record with the `REDEFINES` swapped in** (#296).
+  Output shape change for anything reading these:
+  * `decode --view X` (CSV and JSON) now has a column for every field of the
+    record, not just the overlay's own. Fields outside the overlay keep the
+    base view's column names; an overlay inside `OCCURS` gets one column per
+    occurrence (`T-A(1)`, `T-A(2)`, ...) instead of occurrence 1 only; an
+    overlay shorter than what it redefines is followed by a `FILLER` column.
+  * In `decode --list-views` (`RecordViews.to_dict()`), an overlay view's
+    `length` and `fields` now cover the whole record and start at offset 0.
+    `offset` is still where the overlay itself starts, and its own span moves
+    to a new `overlay_length` key.
+  * `compare --view X --key K` now works when `K` is outside the overlay
+    (it used to fail with "key field is not in the layout").
+  * An overlay that redefines an `OCCURS ... DEPENDING ON` counter still
+    sizes the table from those bytes, so the fields after it decode in
+    place. An overlay wider than what it redefines now frames the record at
+    the widest member's length (what `data-items` reports), so the field
+    after it decodes instead of coming back empty.
+  * `offset_ambiguous` is set on an overlay only when a `DEPENDING ON` table
+    sits before or inside it, not on every overlay of a record with one.
+
 * **Conditional compilation runs by default.** `>>DEFINE` / `>>IF` /
   `>>ELSE` / `>>END-IF` / `>>EVALUATE` / `>>WHEN` are evaluated in every
   parse (`parse_cobol`, `CobolParser.parse`, and after expansion), not only

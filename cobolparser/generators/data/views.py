@@ -36,11 +36,13 @@ so a byte the layout map calls offset 12 is the byte the decoder reads there.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 from ...models.data_items import CobolDataItem
-from .layout import FieldSpec, flatten_record
+from .layout import FieldSpec, HiddenCounter, flatten_overlay_view, flatten_record
 from .options import DataGeneratorOptions
 
 #: Levels that name no storage of their own: 66 RENAMES and 88 condition
@@ -94,15 +96,18 @@ class RecordView:
             for the base view.  The view's *fields* always start at 0: an
             overlay view is the whole record with the overlay swapped in.
         fields: The view's fields, in byte order, already placed.
-        offset_ambiguous: True when an ``OCCURS ... DEPENDING ON`` table in
-            the record (whose real length is per-record data) makes the
-            static offsets a guess for any record whose table is not full.
-            The decoder resolves those per record; the caller is simply told
-            not to trust the listed offsets for every record.
+        offset_ambiguous: True when an ``OCCURS ... DEPENDING ON`` table
+            (whose real length is per-record data) makes this view's static
+            offsets a guess for any record whose table is not full: for the
+            base view, any such table in the record; for an overlay, one
+            before or inside the overlay itself.  The decoder resolves those
+            per record; the caller is simply told not to trust the listed
+            offsets for every record.
         overlay_length: Bytes the redefinition itself covers (one
             occurrence); the base view's own length for the base view.
-            ``offset + overlay_length`` is how far the redefinition reaches,
-            which is what :attr:`RecordViews.framing_length` measures.
+        hidden_counters: ``DEPENDING ON`` counters the overlay covers up.
+            They are not fields of the view, but their tables still take
+            their length from them, so the decoder reads them anyway.
     """
 
     name: str
@@ -111,6 +116,10 @@ class RecordView:
     fields: list[PlacedField]
     offset_ambiguous: bool = False
     overlay_length: int | None = None
+    hidden_counters: tuple[HiddenCounter, ...] = ()
+    #: True when this overlay (or one it is nested in) is wider than what it
+    #: redefines, so the view is longer than the base record.
+    widens: bool = False
 
     @property
     def is_base(self) -> bool:
@@ -147,6 +156,59 @@ class RecordView:
             "offset_ambiguous": self.offset_ambiguous,
             "fields": [placed.to_dict() for placed in self.fields],
         }
+
+
+class _LazyOverlayView(RecordView):
+    """An overlay view whose fields are flattened on first use.
+
+    Each overlay view is the whole record flattened again, so a layout with
+    many overlays inside a large table would pay for every one of them up
+    front even though a decode reads through just one.  Everything a
+    :class:`RecordViews` needs without the fields -- name, offset, the
+    ambiguity flag, whether the overlay grows the record -- is set eagerly;
+    ``fields`` and ``hidden_counters`` are built the first time either is
+    read, and then kept.
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        redefines: str,
+        offset: int,
+        offset_ambiguous: bool,
+        overlay_length: int,
+        widens: bool,
+        build: Callable[[], tuple[list[PlacedField], tuple[HiddenCounter, ...]]],
+    ) -> None:
+        for attr, value in (
+            ("name", name),
+            ("redefines", redefines),
+            ("offset", offset),
+            ("offset_ambiguous", offset_ambiguous),
+            ("overlay_length", overlay_length),
+            ("widens", widens),
+            ("_build", build),
+            ("_built", None),
+        ):
+            object.__setattr__(self, attr, value)
+
+    def _materialize(self) -> tuple[list[PlacedField], tuple[HiddenCounter, ...]]:
+        built: tuple[list[PlacedField], tuple[HiddenCounter, ...]] | None
+        built = self.__dict__["_built"]
+        if built is None:
+            built = self.__dict__["_build"]()
+            object.__setattr__(self, "_built", built)
+        assert built is not None
+        return built
+
+    @property
+    def fields(self) -> list[PlacedField]:
+        return self._materialize()[0]
+
+    @property
+    def hidden_counters(self) -> tuple[HiddenCounter, ...]:
+        return self._materialize()[1]
 
 
 @dataclass(frozen=True)
@@ -196,7 +258,13 @@ class RecordViews:
         reading the serialized form frames records on the same number
         :class:`~.decoding.RecordDecoder` does.
         """
-        return max([self.base.length, *(view.overlay_end for view in self.overlays)])
+        # `end`, not `overlay_end`: an overlay view is the whole record, and
+        # with a wider overlay swapped in the fields after it move along --
+        # which is where data-items puts them too -- so the record is that
+        # view's full length.
+        return max(
+            [self.base.length, *(view.end for view in self.overlays if view.widens)]
+        )
 
     @property
     def names(self) -> list[str]:
@@ -274,7 +342,21 @@ def build_record_views(
     )
     overlays: list[RecordView] = []
     caveats: list[str] = []
-    _scan_overlays(record, record, (record.name,), 0, opts, overlays, chain={})
+    base_columns = {_column_key(spec): spec.column for spec in base_specs}
+    first_odo = next((p.offset for p in base.fields if p.spec.odo_controls), None)
+    _scan_overlays(
+        record,
+        record,
+        (record.name,),
+        0,
+        opts,
+        overlays,
+        chain={},
+        base_columns=base_columns,
+        path_style=opts.header_style == "path",
+        first_odo=first_odo,
+        widened=False,
+    )
     if any(view.offset_ambiguous for view in overlays):
         caveats.append(
             "these REDEFINES overlays are read through a record with a table "
@@ -289,17 +371,17 @@ def build_record_views(
             "offset reported after it assumes a record whose tables are "
             "full; a decoded record's own offsets come from its counters"
         )
-    oversized = [view for view in overlays if view.overlay_end > base.length]
+    oversized = [view for view in overlays if view.widens]
     if oversized:
         caveats.append(
             "these REDEFINES entries are wider than the item they redefine, "
             "which COBOL does not permit below level 01: the record is read "
             "as the widest of them ("
-            + str(max(view.overlay_end for view in oversized))
-            + f" bytes, not {base.length}), offsets after the redefined item "
-            "are the base layout's own, and reading through one of them "
-            "moves the fields after it along by the extra bytes: "
-            + ", ".join(view.name for view in oversized)
+            + str(max(view.end for view in oversized))
+            + f" bytes, not {base.length}). Read through one of them, the "
+            "fields after it sit past the wider entry, where a compiler that "
+            "accepts it puts them; the base view still reads them at the "
+            "declared offsets: " + ", ".join(view.name for view in oversized)
         )
     return RecordViews(
         record_name=record.name, base=base, overlays=overlays, caveats=caveats
@@ -354,6 +436,10 @@ def _scan_overlays(
     out: list[RecordView],
     *,
     chain: dict[int, CobolDataItem],
+    base_columns: dict[tuple[tuple[str, ...], tuple[int, ...]], str],
+    path_style: bool,
+    first_odo: int | None,
+    widened: bool,
 ) -> None:
     """Walk *item*'s children, emitting a view for every ``REDEFINES``.
 
@@ -371,6 +457,7 @@ def _scan_overlays(
     slot_start = start
     slot_item: CobolDataItem | None = None
     slot_footprint = 0
+    slot_target = 0
 
     for child in _storage_children(item):
         if not child.redefines:
@@ -380,35 +467,52 @@ def _scan_overlays(
             slot_item = child
 
         child_chain = chain
+        child_widened = widened
+        child_specs = flatten_record(child, opts, ignore_root_redefines=True)
+        child_footprint = sum(spec.storage_size for spec in child_specs)
         if child.redefines:
+            # Ambiguous when a DEPENDING ON table sits before the overlay's
+            # end -- before it in the record, or inside it -- since only
+            # then does a short table move the overlay's own bytes.
+            ambiguous = any(spec.odo_controls for spec in child_specs) or (
+                first_odo is not None and first_odo < slot_start + child_footprint
+            )
             if slot_item is not None:
                 child_chain = {**chain, id(slot_item): child}
-                fields = _place(
-                    flatten_record(
-                        record,
-                        opts,
-                        ignore_root_redefines=True,
-                        substitutions=child_chain,
-                    ),
-                    0,
+                child_widened = widened or child_footprint > slot_target
+                out.append(
+                    _LazyOverlayView(
+                        name=".".join((*path, child.name)),
+                        redefines=child.redefines,
+                        offset=slot_start,
+                        offset_ambiguous=ambiguous,
+                        overlay_length=child_footprint,
+                        widens=child_widened,
+                        build=partial(
+                            _build_overlay,
+                            record,
+                            child_chain,
+                            opts,
+                            base_columns,
+                            path_style,
+                        ),
+                    )
                 )
             else:
                 # A REDEFINES with nothing before it to redefine: no slot to
                 # swap it into, so the view is the overlay's own bytes.
-                fields = _place(
-                    flatten_record(child, opts, ignore_root_redefines=True),
-                    slot_start,
+                out.append(
+                    RecordView(
+                        name=".".join((*path, child.name)),
+                        redefines=child.redefines,
+                        offset=slot_start,
+                        fields=_place(child_specs, slot_start),
+                        offset_ambiguous=ambiguous,
+                        overlay_length=child_footprint,
+                    )
                 )
-            out.append(
-                RecordView(
-                    name=".".join((*path, child.name)),
-                    redefines=child.redefines,
-                    offset=slot_start,
-                    fields=fields,
-                    offset_ambiguous=any(p.spec.odo_controls for p in fields),
-                    overlay_length=_footprint(child, opts),
-                )
-            )
+        else:
+            slot_target = child_footprint
         _scan_overlays(
             record,
             child,
@@ -417,5 +521,65 @@ def _scan_overlays(
             opts,
             out,
             chain=child_chain,
+            base_columns=base_columns,
+            path_style=path_style,
+            first_odo=first_odo,
+            widened=child_widened,
         )
-        slot_footprint = max(slot_footprint, _footprint(child, opts))
+        slot_footprint = max(slot_footprint, child_footprint)
+
+
+def _build_overlay(
+    record: CobolDataItem,
+    substitutions: dict[int, CobolDataItem],
+    opts: DataGeneratorOptions,
+    base_columns: dict[tuple[tuple[str, ...], tuple[int, ...]], str],
+    path_style: bool,
+) -> tuple[list[PlacedField], tuple[HiddenCounter, ...]]:
+    """Flatten *record* with *substitutions* swapped in, and place it."""
+    specs, hidden = flatten_overlay_view(record, substitutions, opts)
+    _align_columns(specs, base_columns, path_style=path_style)
+    return _place(specs, 0), tuple(hidden)
+
+
+def _column_key(spec: FieldSpec) -> tuple[tuple[str, ...], tuple[int, ...]]:
+    return (spec.path, spec.subscripts)
+
+
+def _align_columns(
+    specs: list[FieldSpec],
+    base_columns: dict[tuple[tuple[str, ...], tuple[int, ...]], str],
+    *,
+    path_style: bool,
+) -> None:
+    """Give an overlay view's fields the base view's column names.
+
+    A field outside the overlay is the same field in both views, so it keeps
+    the same header -- otherwise an overlay that happens to declare a name
+    the base also uses (``AMT``) would qualify *both* (``R.A.AMT``) in its
+    own view, and ``compare --view ... --key AMT`` would stop finding the
+    key.  The overlay's own fields keep their short name unless that is
+    taken, then the qualified path, then a numeric suffix -- the same
+    fallbacks :func:`.layout._assign_columns` uses.
+    """
+    keyed = [(spec, base_columns.get(_column_key(spec))) for spec in specs]
+    used = {column for _, column in keyed if column is not None}
+    for spec, known in keyed:
+        if known is not None:
+            spec.column = known
+            continue
+        suffix = (
+            "(" + ",".join(str(s) for s in spec.subscripts) + ")"
+            if spec.subscripts
+            else ""
+        )
+        column = (spec.qualified_name if path_style else spec.name) + suffix
+        if column in used:
+            column = spec.qualified_name + suffix
+        base = column
+        n = 2
+        while column in used:
+            column = f"{base}_{n}"
+            n += 1
+        used.add(column)
+        spec.column = column

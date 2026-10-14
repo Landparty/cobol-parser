@@ -242,3 +242,49 @@ def test_a_nested_redefinition_is_read_through_its_enclosing_one():
         ("P1-ALT", 1),
         ("P2", 3),
     ]
+
+
+def test_an_overlay_before_a_depending_on_table_is_not_flagged():
+    views = _views("""
+       01  R.
+           05  HDR         PIC X(2).
+           05  HDR-ALT REDEFINES HDR PIC 99.
+           05  CNT         PIC 9.
+           05  TBL OCCURS 1 TO 3 TIMES DEPENDING ON CNT.
+               10  V       PIC X.
+           05  TAIL        PIC X.
+           05  TAIL-ALT REDEFINES TAIL PIC 9.
+""")
+    assert views.get("HDR-ALT").offset_ambiguous is False
+    assert views.get("TAIL-ALT").offset_ambiguous is True
+
+
+def test_base_columns_keep_their_names_in_an_overlay_view():
+    """An overlay declaring a name the base also uses must not rename the
+    base field in its view -- a compare keyed on it would stop finding it."""
+    views = _views("""
+       01  R.
+           05  AMT         PIC 9(3).
+           05  A           PIC X(4).
+           05  A-ALT REDEFINES A.
+               10  AMT     PIC 9(4).
+""")
+    assert [p.spec.column for p in views.base.fields] == ["AMT", "A"]
+    assert [p.spec.column for p in views.get("A-ALT").fields] == [
+        "AMT",
+        "R.A-ALT.AMT",
+    ]
+
+
+def test_overlay_views_are_built_only_when_read():
+    """Each overlay view is the whole record flattened again; a record with
+    many overlays in a large table must not pay for all of them up front."""
+    body = "       01  R.\n           05  T OCCURS 500.\n" + "".join(
+        f"               10  F{i} PIC XX.\n"
+        f"               10  F{i}-A REDEFINES F{i} PIC 99.\n"
+        for i in range(20)
+    )
+    views = _views(body)
+    assert len(views.overlays) == 20
+    assert all(view.__dict__.get("_built") is None for view in views.overlays)
+    assert len(views.get("F3-A").fields) == 20 * 500

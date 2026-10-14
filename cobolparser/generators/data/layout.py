@@ -649,7 +649,6 @@ def flatten_record(
     options: DataGeneratorOptions | None = None,
     *,
     ignore_root_redefines: bool = False,
-    substitutions: Mapping[int, CobolDataItem] | None = None,
 ) -> list[FieldSpec]:
     """Flatten *record* into the ordered list of columns to generate.
 
@@ -666,14 +665,6 @@ def flatten_record(
     ``REDEFINES`` nested inside the subtree still excludes its fields, so
     the result stays a contiguous byte map whose widths sum to the
     subtree's footprint.
-
-    *substitutions* reads the record through chosen ``REDEFINES`` overlays:
-    it maps ``id()`` of a redefined item to the item redefining it, and the
-    walk emits the overlay's fields wherever the redefined item's would have
-    gone -- once per occurrence when it sits inside a table.  An overlay
-    shorter than what it redefines is padded with a FILLER so every field
-    after it keeps its offset.  This is how :mod:`.views` builds an overlay
-    view: the whole record with the overlay swapped in.
     """
     opts = options or DataGeneratorOptions()
     specs: list[FieldSpec] = []
@@ -687,11 +678,81 @@ def flatten_record(
         specs,
         redefines_label=record.redefines if ignore_root_redefines else None,
         ignore_own_redefines=ignore_root_redefines,
-        substitutions=substitutions,
     )
     _link_odo_counters(specs)
     _assign_columns(specs, opts)
     return specs
+
+
+@dataclass(frozen=True)
+class HiddenCounter:
+    """An ``OCCURS ... DEPENDING ON`` counter an overlay view covers up.
+
+    When a ``REDEFINES`` overlay is swapped in for the item holding a
+    table's counter, the counter is no longer one of the view's fields --
+    but the table still takes its length from those bytes.  The decoder
+    reads the counter from them anyway, so every field after the table
+    stays where the record's own counter puts it.
+
+    Attributes:
+        index: Position in the view's specs where the overlay starts; the
+            counter's bytes are read when the decoder reaches it.
+        offset: Bytes from the overlay's start to the counter's first byte.
+        spec: The counter itself, as the base layout declares it.
+    """
+
+    index: int
+    offset: int
+    spec: FieldSpec
+
+
+@dataclass
+class _OverlayWalk:
+    """What a :func:`flatten_overlay_view` walk carries down the tree."""
+
+    substitutions: Mapping[int, CobolDataItem]
+    hidden: list[HiddenCounter] = field(default_factory=list)
+
+
+def flatten_overlay_view(
+    record: CobolDataItem,
+    substitutions: Mapping[int, CobolDataItem],
+    options: DataGeneratorOptions | None = None,
+) -> tuple[list[FieldSpec], list[HiddenCounter]]:
+    """Flatten *record* read through chosen ``REDEFINES`` overlays.
+
+    *substitutions* maps ``id()`` of a redefined item to the item
+    redefining it.  The walk emits the overlay's fields wherever the
+    redefined item's would have gone -- once per occurrence when it sits
+    inside a table.  An overlay shorter than what it redefines is padded
+    with a FILLER so every field after it keeps its offset.  This is how
+    :mod:`.views` builds an overlay view: the whole record with the overlay
+    swapped in.
+
+    Also returns the ``DEPENDING ON`` counters the overlays cover up (see
+    :class:`HiddenCounter`), which the decoder still has to read.  Columns
+    are left unassigned (each spec's bare name): a view names them to match
+    its base view, which this walk cannot see.
+    """
+    opts = options or DataGeneratorOptions()
+    specs: list[FieldSpec] = []
+    walk = _OverlayWalk(substitutions)
+    _flatten_into(
+        record,
+        (),
+        (),
+        None,
+        (),
+        opts,
+        specs,
+        redefines_label=record.redefines,
+        ignore_own_redefines=True,
+        overlays=walk,
+    )
+    # Link over the hidden counters too: they are counters of tables in
+    # these very specs, and only linking finds out which ones are.
+    _link_odo_counters([*specs, *(hidden.spec for hidden in walk.hidden)])
+    return specs, [h for h in walk.hidden if h.spec.odo_counter_bounds is not None]
 
 
 def _flatten_into(
@@ -705,7 +766,7 @@ def _flatten_into(
     *,
     redefines_label: str | None = None,
     ignore_own_redefines: bool = False,
-    substitutions: Mapping[int, CobolDataItem] | None = None,
+    overlays: _OverlayWalk | None = None,
 ) -> None:
     """Recursive worker for :func:`flatten_record`.
 
@@ -774,8 +835,8 @@ def _flatten_into(
         children = _child_items(item)
         if children:
             for child in children:
-                overlay = substitutions.get(id(child)) if substitutions else None
-                if overlay is not None and substitutions:
+                overlay = overlays.substitutions.get(id(child)) if overlays else None
+                if overlay is not None and overlays is not None:
                     _flatten_overlay(
                         child,
                         overlay,
@@ -785,7 +846,7 @@ def _flatten_into(
                         inherited_controls,
                         opts,
                         out,
-                        substitutions,
+                        overlays,
                     )
                     continue
                 _flatten_into(
@@ -797,7 +858,7 @@ def _flatten_into(
                     opts,
                     out,
                     redefines_label=redefines_label,
-                    substitutions=substitutions,
+                    overlays=overlays,
                 )
             continue
 
@@ -852,15 +913,18 @@ def _flatten_overlay(
     odo_controls: tuple[OdoControl, ...],
     opts: DataGeneratorOptions,
     out: list[FieldSpec],
-    substitutions: Mapping[int, CobolDataItem],
+    overlays: _OverlayWalk,
 ) -> None:
     """Emit *overlay*'s fields in *target*'s place, padded to its width.
 
     The pad keeps the record's own geometry: a redefinition aliases bytes,
     it does not remove any, so the fields after it stay where the base
     layout puts them.  A *wider* overlay (non-conforming below level 01) is
-    emitted whole and moves what follows -- :mod:`.views` says so in its
-    caveats.
+    emitted whole and moves what follows, which is where a compiler that
+    accepts it puts them too -- :mod:`.views` says so in its caveats.
+
+    *target*'s own fields are flattened too, to measure it and to keep any
+    ``DEPENDING ON`` counter among them as a :class:`HiddenCounter`.
     """
     start = len(out)
     _flatten_into(
@@ -873,12 +937,16 @@ def _flatten_overlay(
         out,
         redefines_label=overlay.redefines,
         ignore_own_redefines=True,
-        substitutions=substitutions,
+        overlays=overlays,
     )
     own = sum(spec.storage_size for spec in out[start:])
     probe: list[FieldSpec] = []
     _flatten_into(target, path, subscripts, redefines, odo_controls, opts, probe)
-    gap = sum(spec.storage_size for spec in probe) - own
+    at = 0
+    for spec in probe:
+        overlays.hidden.append(HiddenCounter(index=start, offset=at, spec=spec))
+        at += spec.storage_size
+    gap = at - own
     if gap <= 0:
         return
     out.append(
