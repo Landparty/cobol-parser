@@ -110,13 +110,25 @@ either by bare name.
 > it (`_sections_entered_by_jump`: a GO TO written in another section, an
 > ALTER, a CICS HANDLE, an ENTRY). Pinned by `TestSectionExitGoTo`.
 
+> 2026-10-14 (issue #384): dead code is followed **transitively** -- "dead"
+> now means unreachable, not merely unreferenced. `analyze` runs a worklist
+> from the roots (entry point, declaratives, the leading body, ENTRY
+> paragraphs, CICS HANDLE labels): a procedure's statements are admitted
+> to `_collect_references` only once the procedure itself is reached, so a
+> paragraph PERFORMed only from a dead paragraph is reported dead too
+> (retired report code, NIST IC222A/IC227A). THRU range ends and section
+> exits are still collected from *every* statement up front, which keeps
+> each round monotone (admitting statements only adds references). Lint's
+> message is now "can never be reached". Pinned by `TestTransitiveDeadCode`.
+
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]
 ```
 
-Detects unreferenced paragraphs and sections (paragraphs/sections never the
-target of a PERFORM, GO TO, or fall-through control flow). The first
+Detects unreachable paragraphs and sections (paragraphs/sections never the
+target of a PERFORM, GO TO, or fall-through control flow *from reachable
+code*). The first
 procedure is always referenced (program entry point), and so is any
 paragraph containing an `EntryStatement` (2026-08-11 fix, see below).
 

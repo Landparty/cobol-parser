@@ -4202,7 +4202,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_analyzer_parser(
         subparsers,
         "dead-code",
-        "Detect unreferenced paragraphs/sections (dead code)",
+        "Detect unreachable paragraphs/sections (dead code)",
         _cmd_dead_code,
         profiling=True,
         examples="  cobol-parser dead-code program.cbl",

@@ -540,7 +540,8 @@ dedicated subcommand below.
 cobol-parser dead-code <file.cbl>
 ```
 
-Runs `DeadCodeAnalyzer` and lists unreferenced paragraphs/sections.
+Runs `DeadCodeAnalyzer` and lists unreachable paragraphs/sections. A
+paragraph referenced only from dead code is dead too (issue #384).
 
 ## Unused-Variables
 

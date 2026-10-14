@@ -24,6 +24,13 @@ kept). Four selector-shape tests now expect the additive `"quoted": True`.
 `WHEN SPACES` -> `WHEN 'SPACES'` and `WHEN WS-B` -> `WHEN 'WS-B'` each diff
 as one `condition-changed`.
 
+2026-10-14: +9 in `tests/unit/analysis/test_dead_code.py`'s new
+`TestTransitiveDeadCode` (issue #384): paragraphs PERFORMed / GONE TO only
+from dead code are dead (chains, cycles, sections, an ALTER in dead code),
+while declaratives, ENTRY paragraphs and live multi-hop chains keep their
+targets alive; NIST IC222A / IC227A pin that every paragraph program-flow
+finds unreachable is reported dead.
+
 2026-10-14: +10 in `tests/unit/analysis/test_dead_code.py`'s new
 `TestSectionExitGoTo` (issue #312): `GO TO nnnn-EXIT` inside a PERFORMed /
 SORT-procedure SECTION no longer keeps later sections alive; three guards
