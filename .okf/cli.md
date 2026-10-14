@@ -233,6 +233,11 @@ Records are split with `_lines.split_source_lines` (\n / \r\n / \r only),
 the same splitter the parser uses. Before 2026-09-28 `preprocess` used
 `str.splitlines()`, so a form feed / NEL / U+2028 inside a comment record
 split it in two and the comment's tail came out as code.
+Normalisation goes through `source_format.normalize_with_recovery()`, like
+`parse` and `tokenize`: an unterminated literal at end of file (a truncated
+upload) prints `warning: Unterminated string literal ...` on stderr and the
+recovered text on stdout, exit 0. Before #372 it escaped as a `ValueError`
+traceback.
 
 ## Source layout (`--source-format`)
 
