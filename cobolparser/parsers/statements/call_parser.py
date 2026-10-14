@@ -202,12 +202,15 @@ class CallStatementParser(IStatementParser):
                     and token.value
                     and token.value.upper() == "ON"
                 ):
-                    next_tok = token_stream.peek(1)
+                    # ``ON <newline> EXCEPTION``: look past the line break,
+                    # or the handler was dropped and its body escaped.
+                    next_tok, _ = peek_past_noise(token_stream, 1)
                     next_val = (
                         next_tok.value.upper() if next_tok and next_tok.value else ""
                     )
                     if next_val == "EXCEPTION":
                         token_stream.consume()  # ON
+                        skip_whitespace(token_stream)
                         token_stream.consume()  # EXCEPTION
                         nested = self._parse_nested_stmts(
                             token_stream, stop_at={"ON", "NOT", "END-CALL"}
@@ -217,6 +220,7 @@ class CallStatementParser(IStatementParser):
                             stmt.add_child(_nested_stmt)
                     elif next_val == "OVERFLOW":
                         token_stream.consume()  # ON
+                        skip_whitespace(token_stream)
                         token_stream.consume()  # OVERFLOW
                         nested = self._parse_nested_stmts(
                             token_stream, stop_at={"ON", "NOT", "END-CALL"}

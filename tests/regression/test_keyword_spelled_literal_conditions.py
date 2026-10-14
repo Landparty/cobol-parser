@@ -86,7 +86,8 @@ def test_search_and_evaluate_when_literal_when():
         "WS-K ( IX ) = 'END-SEARCH'",
     ]
     assert [c.selectors for c in evaluate.when_clauses] == [
-        [{"type": "Literal", "value": v}] for v in ("WHEN", "ALSO", "END-EVALUATE")
+        [{"type": "Literal", "value": v, "quoted": True}]
+        for v in ("WHEN", "ALSO", "END-EVALUATE")
     ]
     assert all(len(c.statements) == 1 for c in evaluate.when_clauses)
     assert stop.statement_type == "STOP"

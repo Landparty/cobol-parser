@@ -97,6 +97,9 @@ class SpecialEntryParser:
         if location is None:
             location = SourceLocation(0, 0)
 
+        # The name may start the next line; a bare peek recorded the
+        # NEWLINE token's "\n" as the name.
+        _skip_newlines(token_stream)
         name_token = token_stream.peek()
         if not name_token or not name_token.value:
             return None
@@ -117,7 +120,8 @@ class SpecialEntryParser:
             # skipped every value as noise and recorded none.
             if t.value and t.value.upper() in ("VALUE", "VALUES"):
                 token_stream.consume()
-                # optional IS / ARE
+                # optional IS / ARE, possibly on the next line
+                _skip_newlines(token_stream)
                 nxt = token_stream.peek()
                 if nxt and nxt.value and nxt.value.upper() in ("IS", "ARE"):
                     token_stream.consume()
@@ -301,6 +305,9 @@ class SpecialEntryParser:
         if location is None:
             location = SourceLocation(0, 0)
 
+        # The name may start the next line; a bare peek recorded the
+        # NEWLINE token's "\n" as the name.
+        _skip_newlines(token_stream)
         name_token = token_stream.peek()
         if not name_token or not name_token.value:
             return None
@@ -415,7 +422,8 @@ class SpecialEntryParser:
         start_token = token_stream.consume()  # EXEC
         start_location = start_token.location if start_token else SourceLocation(0, 0)
 
-        # Consume SQL keyword
+        # Consume SQL keyword (possibly on the next line)
+        _skip_newlines(token_stream)
         if not token_stream.is_empty():
             token_stream.consume()
 

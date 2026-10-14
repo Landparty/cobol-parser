@@ -29,6 +29,7 @@ from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import ASTNode, SourceLocation
 from cobolparser.models.program import CobolDivision, CobolParagraph, CobolSection
 from cobolparser.parsers.statements._utils import (
+    peek_past_noise,
     skip_statement_separators,
     skip_whitespace,
 )
@@ -216,7 +217,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
             # DECLARATIVES (span ends), and the object-oriented unit ends
             # END METHOD / END FACTORY / END OBJECT / END CLASS.
             if token_value == "END":
-                next_token = token_stream.peek(1)
+                # The second word may start the next line (``END`` alone on
+                # a line): a bare peek(1) saw the NEWLINE, so END
+                # DECLARATIVES never closed the span.
+                next_token, _ = peek_past_noise(token_stream, 1)
                 next_value = (
                     next_token.value.upper() if next_token and next_token.value else ""
                 )
@@ -226,6 +230,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                     break
                 if next_value == "DECLARATIVES":
                     token_stream.consume()  # END
+                    skip_whitespace(token_stream)
                     token_stream.consume()  # DECLARATIVES
                     if self._next_is_period(token_stream, offset=0):
                         token_stream.consume()  # .

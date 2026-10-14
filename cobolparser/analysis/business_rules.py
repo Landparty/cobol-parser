@@ -1028,6 +1028,7 @@ class BusinessRuleExtractor:
         value = self._literal(
             selector.get("value"),
             bool(selector.get("identifier")) or kind == "Identifier",
+            quoted=bool(selector.get("quoted")),
         )
         if subject_upper == "TRUE":
             return value
@@ -1036,9 +1037,20 @@ class BusinessRuleExtractor:
         return f"{subject} = {value}"
 
     @staticmethod
-    def _literal(value: Any, identifier: bool) -> str:
-        """An EVALUATE selector value; selector literals arrive unquoted."""
-        text = str(value or "").strip()
+    def _literal(value: Any, identifier: bool, quoted: bool = False) -> str:
+        """An EVALUATE selector value; selector literals arrive unquoted.
+
+        ``quoted`` is the parser's word that the value was a string literal:
+        ``WHEN 'SPACES'`` must not render as the figurative ``SPACES``.
+        """
+        text = str(value or "")
+        if quoted:
+            # A blank literal reaches us already re-quoted by the parser.
+            if len(text) >= 2 and text[0] in "'\"" and text[-1] == text[0]:
+                if not text[1:-1].strip():
+                    return text
+            return "'" + text.replace("'", "''") + "'"
+        text = text.strip()
         if identifier or not text:
             return text
         if _NUMERIC_LITERAL_RE.match(text) or text.upper() in _FIGURATIVES:

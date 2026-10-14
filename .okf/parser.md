@@ -610,6 +610,14 @@ became the `Any` wildcard, `WHEN "THRU"` an end-less `Range` (a spurious
 `"<"` / `"A OR B"` a `Condition` -- exactly how a COBOL tokenizer spells its
 operator table. Pinned by `tests/regression/test_evaluate_keyword_literal_when.py`.
 
+**Single-token WHEN selectors say what they were (#313, 2026-10-14).** A
+`Literal` selector built from one token carries `"identifier": True`
+(IDENTIFIER), `"figurative": True` (FIGURATIVE_CONSTANT: `WHEN SPACES`) or
+`"quoted": True` (STRING_LITERAL: `WHEN 'SPACES'`). The lexer strips quotes,
+so without these `WHEN SPACES` and `WHEN 'SPACES'` built identical dicts.
+The markers are additive; `type` stays `"Literal"`. Pinned by
+`tests/regression/test_evaluate_figurative_when.py`.
+
 **EVALUATE subjects reach `.operands` (`evaluate_parser.py`, 2026-08-17
 review follow-up):** `_parse_subjects` routes each parsed subject through
 `EvaluateStatement.add_subject()` instead of appending straight to
@@ -1077,7 +1085,9 @@ Pinned by `tests/unit/test_extended_verb_parsers.py` and
   `parse_size_error_clauses`, `call_parser.py` (main loop and
   `_parse_using_clause` stop set), `read_parser.py`, `write_parser.py`,
   `simple_statement_parsers.py` (RETURN) and `search_parser.py` accept the
-  bare forms; the arithmetic target/GIVING stop sets gained `SIZE`. A bare
+  bare forms; the arithmetic target/GIVING stop sets gained `SIZE`, and so
+  did COMPUTE's expression loop (#399: `COMPUTE C = A + B SIZE ERROR ...`
+  folded `SIZE ERROR` into the expression). A bare
   `END` is only an `AT END` when it does not start `END PROGRAM` /
   `END DIVISION` (`_utils.bare_end_starts_at_end_clause`).
   `parse_size_error_clauses` also no longer consumes a `NOT` that does not
@@ -3277,3 +3287,22 @@ the context skips cProfile, so `function_profile_available` is `False`,
 Wall-clock, CPU and memory are still measured, and the outer profile is left
 alone. tracemalloc is stopped only by the context that started it, including
 when `__enter__` fails. Tests: `tests/unit/test_profiling.py`.
+
+# Line breaks between keywords (2026-10-14, issue #385)
+
+A lookahead that reads the *next word* must step over layout tokens: a
+bare `peek()` / `peek(1)` sees the NEWLINE when the second word starts the
+next line, and the parse silently changes. Use `peek_past_noise` for a
+non-destructive check and `skip_whitespace` (or the division parsers'
+`_skip_newlines`) before consuming a word that must follow. Sites fixed:
+STOP <operand>, WHEN OTHER, 88/66 names, `VALUES ARE`, FD/SD/RD names,
+CALL `ON EXCEPTION` / `ON OVERFLOW`, ENTRY name, EXEC SQL/CICS/DLI/IMS
+(procedure and data division), END DECLARATIVES, every SPECIAL-NAMES word
+lookahead (`_word(n)` counts meaningful tokens), and `OBJECT REFERENCE`.
+
+`StatementParserRegistry`'s dispatch cache key now also carries the first
+meaningful token after the verb, besides the raw second token: keyed on
+`(EXEC, NEWLINE)` alone, `EXEC <newline> CICS` reused the parser cached for
+an earlier `EXEC <newline> SQL`. Pinned by
+`tests/regression/test_keyword_line_breaks.py`, which parses each case with
+the gap joined and broken and requires identical ASTs.
