@@ -42,9 +42,11 @@ class Expectation:
     a "happy path" scenario has no scenario-specific branch outcome to
     assert on yet):
 
-    * ``"call_count"`` -- structural, always safe: a boundary was invoked
-      exactly ``value`` times (derivable from the scenario's own sequence
-      length).
+    * ``"call_count"`` -- structural: a boundary was invoked exactly
+      ``value`` times, merged over every statement invoking it. Emitted only
+      when control flow makes the count exact (the invoking statements sit
+      on the unconditional path, or a read-until-end-of-file loop reads the
+      scenario's whole sequence); absent otherwise.
     * ``"field_equals"`` -- a field's value is knowable by constant-folding
       a chain of MOVE/arithmetic from mock-supplied inputs.
     * ``"stub"`` -- everything else: a placeholder naming the paragraph that

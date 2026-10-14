@@ -1533,22 +1533,6 @@ Every scenario's `expectations` (in both `generate()` and
 alongside Phase 3's OUT-boundary stubs, via two small helpers in
 `program_fixtures.py`:
 
-* **Tier 1 — `_call_count_expectation`.** For every boundary that gets an
-  actual fixture (an OUT-only boundary has nothing mocked to count, so it
-  gets none), `Expectation(kind="call_count", ref="<CATEGORY>:<KEY>",
-  value=times)` where `times = len(sequence) + (1 if has_terminal_invocation
-  else 0)` -- except a `STATUS_ONLY` fixture, always `1` (its `sequence` is
-  empty by design, not because zero invocations happened).
-  `has_terminal_invocation` is `"AT_END" in boundary.handlers`, checked
-  directly rather than derived from whether `terminal` resolved to a dict
-  (bug fixed 2026-08-04: a READ with an `AT END` handler but no resolvable
-  status field still genuinely invokes the boundary one more time to hit
-  end-of-file -- "does exhaustion happen" and "do we know a field name to
-  report it in" are independent questions; `call_count` must not go stale
-  just because `terminal` came back `None`). Derivable exactly from the
-  scenario's own already-generated sequence -- never a guess. A count of 0
-  (no rows, no AT END handler: a random-access READ in "empty input") is
-  never emitted, since such a READ still runs once.
 * **Failure-path scenarios (#318, option A).** A `PlannedScenario` with any
   `status_overrides` (the error-status family, and "empty input" when it
   overrides SQL to 100) runs the program's error path, which the generated
@@ -1559,6 +1543,33 @@ alongside Phase 3's OUT-boundary stubs, via two small helpers in
   Tier 2 is skipped for these scenarios entirely: the fold walks the normal
   path, so even a literal-only `field_equals` may observe a site the failure
   path never reaches (review on #418).
+
+* **Tier 1 — `_CallCounter`** (issue #363). One
+  `Expectation(kind="call_count", ref="<CATEGORY>:<KEY>", value=times)` per
+  mocked `(category, key)` -- every statement invoking the same boundary
+  merged into one count -- and only when that count is exact; otherwise
+  none. A group whose boundaries got no fixture (OUT-only, nothing
+  generatable) has nothing mocked to count and gets none. `times` comes from
+  `cobolparser.analysis.invocation_counts.count_invocations` (see
+  `.okf/analysis.md`): the sum of each invoking statement's static execution
+  count along the entry chain -- main line and SIMPLE PERFORMs count once per
+  time reached, `PERFORM <literal> TIMES` multiplies, and anything inside an
+  IF/EVALUATE/SEARCH arm, a handler, a `PERFORM UNTIL`/`VARYING` body, a
+  SORT procedure, or after a branch that could transfer control has no count.
+  The one data-dependent exception is the read-until-EOF idiom: a READ file
+  with a `SequenceConstraint` whose `PERFORM UNTIL` itself runs exactly once,
+  tests only the EOF flag and has no transfer in its body
+  (`is_plain_eof_loop`), is invoked `len(sequence) + 1` times (every row, plus the READ that hits
+  end of file), whichever READ statements share the work -- a priming READ
+  and the loop's READ are one count. A straight-line READ with an AT END
+  handler is invoked once, not `rows + 1`: the old formula
+  (`len(sequence) + AT END`, `1` for STATUS_ONLY and CALL, one expectation
+  per statement) ignored branches and loops entirely. Each count is inserted
+  where the group's first fixture's expectations start and keeps the old
+  `note`, so bundles whose counts were already right are byte-identical
+  (`FIXTUREDEMO.bundle.json` unchanged). Error-status scenarios' counts
+  (which take a status-check arm this walk assumes is not taken) are issue
+  #318.
 * **Tier 2 — `_tier2_expectations`, backed by
   `cobolparser.analysis.const_fold.ConstantFolder`** (see `.okf/analysis.md`
   for the folder's own extensive "exact by construction, or absent" rules).
