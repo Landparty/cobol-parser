@@ -3,7 +3,7 @@ type: Module
 title: Preprocessing
 description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
 tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-10-08T00:00:00Z
+timestamp: 2026-10-13T00:00:00Z
 ---
 
 # Overview
@@ -62,7 +62,7 @@ from cobolparser.preprocess import (
 | `preprocess/source_format.py` | `detect_fixed_format` -- should this source be normalized? (strict sequence-area rule, then the change-tag rule with its Area A header / tagged-line anchors). `normalize_with_recovery` -- `normalize_fixed_format` plus the unterminated-literal retry (`merge_continued_literals=False`), shared by `CobolParser` and the lexer's `_tokenize_source`. Moved out of `parser.py` 2026-10-08; `cobolparser.parser._detect_fixed_format` is kept as an alias |
 | `preprocess/copybook_expander.py` | `expand_copybooks`, `parse_cobol_with_expansion` — recursive COPY inlining with circular-reference detection, encoding detection, content validation, and LRU caching |
 | `preprocess/copy_statement_parser.py` | `CopyStatementLexer`, REPLACING clause handling, continuation line normalisation |
-| `preprocess/path_resolver.py` | Secure copybook path resolution; prevents directory traversal. Found paths are canonicalised to the on-disk basename casing (`_on_disk_casing`, scandir-based) so probe-cased matches on case-insensitive filesystems never leak into reported paths |
+| `preprocess/path_resolver.py` | Secure copybook path resolution; prevents directory traversal. Found paths are canonicalised to the on-disk basename casing (`_on_disk_casing`, scandir-based) so probe-cased matches on case-insensitive filesystems never leak into reported paths. The member name is folded to uppercase like Enterprise COBOL's COPY text-name (`_member_probe_names`): the name exactly as written first, then for each configured extension in order the uppercased name before the name as written, with the bare uppercased name in the `""` slot -- so `copy errorcd.` finds `ERRORCD.cpy` (and prefers it to `errorcd.cpy`), but extension order still decides before case (`COPY Foo` takes `Foo.cpy` over `FOO.cbl`). A name holding `.`, `/` or `\` can only be a literal file path (`COPY "sub/mem"`) and is not folded. The `OF`/`IN` library-name is folded the same way (`_library_directories`: `MYLIB/`, then `mylib/`, then the search directory itself, so an unrelated `MYLIB/` never hides the member in `mylib/`); directory (SYSLIB) order outranks both (issue #289, `tests/regression/test_copy_member_case_folding.py`) |
 | `preprocess/models.py` | `CopybookExpansion`, `CopyStatement`, `CopybookSearchPath`, `ExpansionStatistics` |
 
 # normalize_fixed_format
@@ -606,8 +606,10 @@ appended and therefore **never expanded**; an unterminated `==pseudo-text==`
 REPLACING operand abandons the clause. Both used to be fully silent — the
 copybook's data items simply did not exist. `_expand_source_recursive`
 routes them into `ExpansionStatistics.warnings`;
-`extract_copy_statements(source, source_file, warnings=None)` exposes the
-same channel. The scanner also checks the **left** word boundary so
+`extract_copy_statements(source, source_file, warnings=None,
+sql_include=False)` exposes the same channel; `sql_include=True` also returns
+each `EXEC SQL INCLUDE member END-EXEC` (marked `sql_include=True`), which is
+how the codebase graph sees INCLUDE edges (#295). The scanner also checks the **left** word boundary so
 `GOODCOPY.` is not probed as a COPY statement (previously only the right
 boundary was checked).
 

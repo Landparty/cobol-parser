@@ -109,10 +109,16 @@ def test_redefines_becomes_an_overlay_at_the_redefined_offset():
     assert overlay.is_base is False
     # ADDR-HOME starts right after the 6-byte id, and so does its overlay.
     assert overlay.offset == 6
+    assert overlay.overlay_length == 20
+    # The view is the whole record with the overlay swapped in, so the
+    # fields around the redefined area are still there to read (#296).
     assert [(p.spec.column, p.offset) for p in overlay.fields] == [
+        ("CUST-ID", 0),
         ("OS-COUNTRY", 6),
         ("OS-LINE", 10),
+        ("CUST-FLAG", 26),
     ]
+    assert overlay.length == views.base.length
 
 
 def test_the_overlay_does_not_move_the_fields_after_it():
@@ -127,7 +133,8 @@ def test_two_redefinitions_of_one_item_are_two_views():
     views = _views(NESTED)
     assert views.names == ["MSG-REC", "MSG-REC.MSG-ORDER", "MSG-REC.MSG-SHIP"]
     assert [v.offset for v in views.overlays] == [1, 1]
-    assert [v.length for v in views.overlays] == [30, 30]
+    assert [v.overlay_length for v in views.overlays] == [30, 30]
+    assert [v.length for v in views.overlays] == [31, 31]
 
 
 def test_get_accepts_the_short_name_and_the_qualified_one():
@@ -153,10 +160,12 @@ def test_to_dict_round_trips_the_placements():
     assert data["record_length"] == views.base.length
     overlay = data["views"][1]
     assert overlay["redefines"] == "ADDR-HOME"
-    assert overlay["fields"][0]["offset"] == 6
-    assert overlay["fields"][0]["length"] == 4
+    assert overlay["offset"] == 6
+    assert overlay["overlay_length"] == 20
+    assert overlay["fields"][1]["offset"] == 6
+    assert overlay["fields"][1]["length"] == 4
     # The spec's own keys are carried through alongside the placement.
-    assert overlay["fields"][0]["picture"] == "X(4)"
+    assert overlay["fields"][1]["picture"] == "X(4)"
 
 
 @pytest.mark.parametrize("source", [FLAT, OVERLAID, NESTED, TABLE])
@@ -164,8 +173,128 @@ def test_every_view_is_contiguous(source):
     """No gaps and no overlaps inside a single view -- that is what makes
     the decoder able to walk it with one running position."""
     for view in _views(source).views:
-        offset = view.offset
+        offset = 0
         for placed in view.fields:
             assert placed.offset == offset
             offset += placed.length
         assert offset == view.end
+
+
+TABLE_OVERLAY = """
+       01  TBL-REC.
+           05  KEY-ID          PIC 9(3).
+           05  TBL OCCURS 2 TIMES.
+               10  T-VAL       PIC XX.
+               10  T-ALT REDEFINES T-VAL.
+                   15  T-A     PIC X.
+                   15  T-B     PIC X.
+           05  TAIL            PIC X.
+"""
+
+
+def test_an_overlay_inside_a_table_is_placed_at_every_occurrence():
+    """#296: the overlay used to be placed at occurrence 1 only."""
+    views = _views(TABLE_OVERLAY)
+    overlay = views.get("T-ALT")
+    assert [(p.spec.column, p.offset) for p in overlay.fields] == [
+        ("KEY-ID", 0),
+        ("T-A(1)", 3),
+        ("T-B(1)", 4),
+        ("T-A(2)", 5),
+        ("T-B(2)", 6),
+        ("TAIL", 7),
+    ]
+    assert overlay.offset == 3
+    assert overlay.offset_ambiguous is False
+    assert views.caveats == []
+
+
+def test_a_shorter_overlay_is_padded_so_later_fields_keep_their_offsets():
+    views = _views("""
+       01  R.
+           05  A           PIC X(4).
+           05  A-R REDEFINES A PIC X(2).
+           05  B           PIC X(2).
+""")
+    overlay = views.get("A-R")
+    assert [(p.spec.column, p.offset, p.length) for p in overlay.fields] == [
+        ("A-R", 0, 2),
+        ("FILLER", 2, 2),
+        ("B", 4, 2),
+    ]
+    assert overlay.fields[1].spec.is_filler
+
+
+def test_a_nested_redefinition_is_read_through_its_enclosing_one():
+    views = _views("""
+       01  R.
+           05  K           PIC X.
+           05  BODY        PIC X(4).
+           05  BODY-ALT REDEFINES BODY.
+               10  P1      PIC XX.
+               10  P1-ALT REDEFINES P1 PIC 99.
+               10  P2      PIC XX.
+""")
+    assert views.names == ["R", "R.BODY-ALT", "R.BODY-ALT.P1-ALT"]
+    nested = views.get("P1-ALT")
+    assert [(p.spec.column, p.offset) for p in nested.fields] == [
+        ("K", 0),
+        ("P1-ALT", 1),
+        ("P2", 3),
+    ]
+
+
+def test_an_overlay_before_a_depending_on_table_is_not_flagged():
+    views = _views("""
+       01  R.
+           05  HDR         PIC X(2).
+           05  HDR-ALT REDEFINES HDR PIC 99.
+           05  CNT         PIC 9.
+           05  TBL OCCURS 1 TO 3 TIMES DEPENDING ON CNT.
+               10  V       PIC X.
+           05  TAIL        PIC X.
+           05  TAIL-ALT REDEFINES TAIL PIC 9.
+""")
+    assert views.get("HDR-ALT").offset_ambiguous is False
+    assert views.get("TAIL-ALT").offset_ambiguous is True
+
+
+def test_base_columns_keep_their_names_in_an_overlay_view():
+    """An overlay declaring a name the base also uses must not rename the
+    base field in its view -- a compare keyed on it would stop finding it."""
+    views = _views("""
+       01  R.
+           05  AMT         PIC 9(3).
+           05  A           PIC X(4).
+           05  A-ALT REDEFINES A.
+               10  AMT     PIC 9(4).
+""")
+    assert [p.spec.column for p in views.base.fields] == ["AMT", "A"]
+    assert [p.spec.column for p in views.get("A-ALT").fields] == [
+        "AMT",
+        "R.A-ALT.AMT",
+    ]
+
+
+def test_overlay_views_are_built_only_when_read():
+    """Each overlay view is the whole record flattened again; a record with
+    many overlays in a large table must not pay for all of them up front."""
+    body = "       01  R.\n           05  T OCCURS 500.\n" + "".join(
+        f"               10  F{i} PIC XX.\n"
+        f"               10  F{i}-A REDEFINES F{i} PIC 99.\n"
+        for i in range(20)
+    )
+    views = _views(body)
+    assert len(views.overlays) == 20
+    assert all(view.__dict__.get("_built") is None for view in views.overlays)
+    assert len(views.get("F3-A").fields) == 20 * 500
+
+
+def test_a_lazy_overlay_view_survives_dataclasses_replace():
+    import dataclasses
+
+    overlay = _views(OVERLAID).get("ADDR-OVERSEAS")
+    renamed = dataclasses.replace(overlay, name="OTHER")
+    assert renamed.name == "OTHER"
+    assert renamed.fields == overlay.fields
+    assert renamed.overlay_length == overlay.overlay_length

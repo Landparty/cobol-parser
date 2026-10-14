@@ -347,3 +347,197 @@ class TestRender:
         )
         for _ in range(20):
             assert not factory.render(spec, "5").startswith("-")
+
+
+class TestWideNumericPrecision:
+    """Issue #285: wide numeric fields keep every low-order digit.
+
+    ``whole + random()`` used to turn the value into a float64, so a
+    ``PIC 9(18)`` value lost everything past ~15 significant digits and
+    most rows ended in ``00``.
+    """
+
+    def _values(self, spec: FieldSpec, rows: int = 200) -> list[str]:
+        factory = _factory(seed=1)
+        return [factory.value_for(spec, row) for row in range(rows)]
+
+    def test_pic_9_18_low_digits_are_exercised(self):
+        spec = _spec("A", category=FieldCategory.NUMERIC, size=18, integer_digits=18)
+        values = self._values(spec)
+        trailing_00 = sum(v.endswith("00") for v in values)
+        # Uniform low digits end in "00" about 1% of the time.
+        assert trailing_00 < 10, trailing_00
+        assert len({v[-1] for v in values}) == 10
+        for v in values:
+            assert int(v) <= 10**18 - 1
+
+    def test_signed_comp_style_18_digits_round_trip_exactly(self):
+        spec = _spec(
+            "B",
+            category=FieldCategory.NUMERIC,
+            size=18,
+            integer_digits=18,
+            is_signed=True,
+        )
+        for v in self._values(spec):
+            assert str(int(v)) == v
+            assert len(v.lstrip("-")) <= 18
+
+    def test_wide_integer_part_keeps_its_decimals(self):
+        # S9(13)V9(5): 18 digits in all, past what a float64 holds.
+        spec = _spec(
+            "C",
+            category=FieldCategory.NUMERIC,
+            size=18,
+            integer_digits=13,
+            decimal_digits=5,
+            is_signed=True,
+        )
+        values = self._values(spec)
+        for v in values:
+            assert re.fullmatch(r"-?\d{1,13}\.\d{5}", v), v
+        assert len({v[-1] for v in values}) == 10
+        assert sum(v.endswith("0") for v in values) < 50
+
+    def test_fraction_wider_than_a_float_fills_every_place(self):
+        # V9(18): a random() repr cannot fill 18 places; its exact value can.
+        spec = _spec(
+            "D",
+            category=FieldCategory.NUMERIC,
+            size=19,
+            integer_digits=1,
+            decimal_digits=18,
+        )
+        values = self._values(spec)
+        for v in values:
+            assert re.fullmatch(r"\d\.\d{18}", v), v
+        assert sum(v.endswith("00") for v in values) < 10
+
+    def test_widest_31_digit_field_keeps_every_digit(self):
+        spec = _spec(
+            "E",
+            category=FieldCategory.NUMERIC,
+            size=31,
+            integer_digits=18,
+            decimal_digits=13,
+        )
+        values = self._values(spec, rows=50)
+        for v in values:
+            assert re.fullmatch(r"\d{1,18}\.\d{13}", v), v
+        assert len({v[-1] for v in values}) > 5
+
+    def test_same_seed_same_output(self):
+        spec = _spec("F", category=FieldCategory.NUMERIC, size=18, integer_digits=18)
+        assert self._values(spec, 20) == self._values(spec, 20)
+
+    def test_narrow_fields_are_unchanged(self):
+        # Pinned from the float path's output before the fix: a field a
+        # float64 already held exactly keeps its seeded values.
+        cases = {
+            (7, 2, True): [
+                "2254257.57",
+                "1058756.26",
+                "7541208.47",
+                "-3522457.09",
+                "6539906.43",
+                "35333.70",
+            ],
+            (12, 0, False): [
+                "623347347957",
+                "884107995871",
+                "71999863748",
+                "129944532028",
+                "835351532923",
+                "517326624931",
+            ],
+            (5, 4, False): [
+                "17611.5692",
+                "8271.2551",
+                "64937.7610",
+                "61898.6516",
+                "27519.0939",
+                "3715.8933",
+            ],
+        }
+        for (whole, decimals, signed), expected in cases.items():
+            spec = _spec(
+                "G",
+                category=FieldCategory.NUMERIC,
+                size=whole + decimals,
+                integer_digits=whole,
+                decimal_digits=decimals,
+                is_signed=signed,
+            )
+            assert self._values(spec, rows=6) == expected
+
+    def test_integers_of_29_to_31_digits_keep_every_digit(self):
+        # Past Decimal's default 28-digit context.
+        for width, signed in ((29, False), (30, True), (31, True)):
+            spec = _spec(
+                "W",
+                category=FieldCategory.NUMERIC,
+                size=width,
+                integer_digits=width,
+                is_signed=signed,
+            )
+            values = self._values(spec, rows=100)
+            for v in values:
+                assert str(int(v)) == v
+                assert len(v.lstrip("-")) <= width
+            assert sum(v.endswith("000") for v in values) < 5, width
+            assert len({v[-1] for v in values}) == 10
+
+    def test_value_literal_wider_than_28_digits_renders_exactly(self):
+        literal = "1234567890123456789012345678901.1234"
+        spec = _spec(
+            "V",
+            category=FieldCategory.NUMERIC,
+            size=35,
+            integer_digits=31,
+            decimal_digits=4,
+            value_clause=literal,
+        )
+        assert _factory().value_for(spec, 0) == literal
+        assert _factory().render(spec, literal) == literal
+
+    def test_31_digit_ceiling_clamps_exactly(self):
+        spec = _spec(
+            "M",
+            category=FieldCategory.NUMERIC,
+            size=35,
+            integer_digits=31,
+            decimal_digits=4,
+        )
+        assert _factory().render(spec, "9" * 40) == "9" * 31 + ".9999"
+
+
+class TestWideFieldRecordSeedStability:
+    """A wide field must not shift the RNG stream for the fields after it."""
+
+    COPYBOOK = """\
+       01 W.
+           05 A PIC 9(18).
+           05 D PIC 9V9(18).
+           05 F PIC S9(13)V9(5).
+           05 E PIC 9(5).
+           05 G PIC X(6).
+           05 H PIC S9(5)V99.
+"""
+
+    def test_fields_after_wide_ones_keep_their_seeded_values(self, tmp_path):
+        from cobolparser.generators import CopybookDataGenerator
+
+        path = tmp_path / "W.cpy"
+        path.write_text(self.COPYBOOK)
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(rows=4, seed=3)
+        ).generate_from_file(str(path))
+        tail = [line.split(",")[3:] for line in dataset.to_csv().splitlines()]
+        # Pinned from main before the fix (#285): E, G, H are unchanged.
+        assert tail == [
+            ["E", "G", "H"],
+            ["61503", "Q9OM48", "72041.48"],
+            ["8392", "KCTBR4", "77955.72"],
+            ["17821", "5NQ1T0", "66485.83"],
+            ["36658", "KU8GNR", "37349.12"],
+        ]

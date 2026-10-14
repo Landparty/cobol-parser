@@ -6,7 +6,7 @@ import random
 import re
 import string
 import struct
-from decimal import Decimal, InvalidOperation
+from decimal import Context, Decimal, InvalidOperation, localcontext
 
 from ...models.data_items import PictureClause
 from .layout import FieldCategory, FieldSpec, _strip_literal_quotes
@@ -21,6 +21,15 @@ _DOUBLE_FLOAT_DIGITS = 15
 
 #: Decimals a freely drawn float value is quantised to before storage.
 _FLOAT_DECIMALS = 4
+
+#: Decimal places one ``random()`` draw's repr can fill. A wider fraction
+#: takes the draw's exact binary value instead, so it still fills every place.
+_FLOAT_FRACTION_DIGITS = 15
+
+#: Arithmetic context for numbers built here. Decimal's default 28 digits
+#: rounds a 29-31 digit COBOL field (and a 31-digit field's ceiling minus one
+#: unit of its last decimal place) on the first ``abs()`` or subtraction.
+_EXACT = Context(prec=100)
 
 
 def _render_float(value: float, *, single: bool) -> str:
@@ -474,7 +483,9 @@ class ValueFactory:
             stored = max(1, spec.stored_digits)
             mantissa = self._rng.randint(0, 10**stored - 1)
             exponent = scaling if scaling > 0 else -spec.decimal_digits
-            return self._format_number(Decimal(mantissa).scaleb(exponent), spec)
+            with localcontext(_EXACT):
+                scaled = Decimal(mantissa).scaleb(exponent)
+            return self._format_number(scaled, spec)
 
         # A date/time is drawn as a digit string (``055132``) but rendered
         # like every other number (``55132``): the decoder renders numbers
@@ -502,8 +513,24 @@ class ValueFactory:
 
         upper = 10**digits - 1 if digits > 0 else 0
         whole = self._rng.randint(0, max(0, upper))
-        fraction = self._rng.random() if spec.decimal_digits else 0.0
-        return self._format_number(whole + fraction, spec)
+        # Exact, never float: ``whole + random()`` made a PIC 9(18) value a
+        # float64 and lost every digit past ~15 (issue #285). The fraction is
+        # still exactly one ``random()`` draw, so the RNG stream -- and every
+        # later field in the record -- is the same as before. Its repr fills
+        # up to 15 places; a wider fraction takes the draw's exact binary
+        # value. A field of 11 or fewer total digits keeps its seeded output;
+        # 12-15 digits can (rarely) differ in the last decimal place, where
+        # the float sum was rounding; past 15 most rows change.
+        decimals = spec.decimal_digits
+        if not decimals:
+            return self._format_number(whole, spec)
+        draw = self._rng.random()
+        fraction = (
+            Decimal(draw) if decimals > _FLOAT_FRACTION_DIGITS else Decimal(str(draw))
+        )
+        with localcontext(_EXACT):
+            value = Decimal(whole) + fraction
+        return self._format_number(value, spec)
 
     def _money_amount(self, spec: FieldSpec) -> float:
         """A plausible currency magnitude that still fits the field."""
@@ -585,8 +612,20 @@ class ValueFactory:
         VALUE literal, a solved witness) must render digit-for-digit even
         past float64's ~16 significant digits (``PIC 9(18)`` keys). Randomly
         generated floats pass through unchanged in practice -- ``str(float)``
-        round-trips exactly.
+        round-trips exactly. It runs under :data:`_EXACT`, not the default
+        28-digit context, so a 29-31 digit field keeps every digit too.
         """
+        with localcontext(_EXACT):
+            return self._format_exact(value, spec, allow_random_sign=allow_random_sign)
+
+    def _format_exact(
+        self,
+        value: float | int | Decimal,
+        spec: FieldSpec,
+        *,
+        allow_random_sign: bool,
+    ) -> str:
+        """:meth:`_format_number`'s body, run under the :data:`_EXACT` context."""
         decimals = spec.decimal_digits
         digits = spec.integer_digits
         exact = value if isinstance(value, Decimal) else Decimal(str(value))
