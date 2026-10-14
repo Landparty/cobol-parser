@@ -2498,6 +2498,18 @@ and `tests/regression/test_nested_program_units.py`.
 a serialized analyzer report: every `"location": {"line": N}` mapping gains a
 sibling `"origin"`. Used by `scan_one` and the `unused-variables` CLI.
 
+**And at which column (#301, 2026-10-13).** `LintFinding.origin_column`,
+serialized as `origin.column` only when known, is the column an editor
+shows. `apply_source_map(report, source_map, column_offset)` takes a
+`(file, line) -> int | None` and adds its answer to `location.column`;
+`fixed_format_column_offset()` holds the per-layout table (7 for a
+fixed-format line, whose columns 1-7 never reach the analyzers; 0 for a
+free-form member in a fixed listing; 6 for a fixed-format member in a
+free-form listing). `LintFinding.column_known` (not serialized) is False for
+a parse error that gave only a line; such a finding gets no `origin_column`.
+`stamp_report_origins` leaves an existing `origin` alone so the CLI's dict
+pass does not erase it. Detail in [cli.md](cli.md).
+
 
 # Program-type corpus fixes (2026-09-15)
 

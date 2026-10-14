@@ -1083,6 +1083,21 @@ too (see commands above).
   command line: `expand --source-map` / `--keep-comments`, and lint findings
   carrying the copybook they are really in (this is what the VS Code
   extension consumes).
+* #301 (2026-10-13): `test_lint_subcommand.py::TestTextOutput` pins the
+  on-disk column for fixed-format and free-form programs (the old `:6:1:`
+  expectation encoded the bug); `test_expand_source_map_cli.py` pins
+  `origin.column` and the free-member-in-fixed-parent / fixed-member-in-free-
+  parent offsets; `test_expansion_source_map_and_comments.py` pins
+  `apply_source_map(..., column_offset)` and `fixed_format_column_offset`.
+  Review follow-up: `test_source_format_free_directive_stops_the_shift`,
+  `test_json_origin_carries_the_on_disk_column`,
+  `test_without_expansion_origin_is_the_file_itself` (replaced the old
+  "no origin without expansion" test), and the no-column parse error case.
+  Round 2: `test_switching_back_to_fixed_shifts_again`,
+  `test_source_format_fixed_flag_shifts` / `..._free_flag_does_not_shift`,
+  `test_a_copybook_that_cannot_be_reread_prints_no_column` (patches
+  `Path.read_text`, which only the column helper uses; the expander opens
+  files itself).
 
 # Cross-repo review follow-up fixes (2026-09-10)
 

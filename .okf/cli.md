@@ -663,6 +663,30 @@ followed by `note:` lines for caveats and failed rules, then a summary line.
 A finding with no location (a recursion cycle spans procedures) prints as
 `file: severity ...`; the column is omitted rather than faked as 0.
 
+**Columns are on-disk columns (#301, 2026-10-13).** Analyzer locations count
+columns in the *normalized* text, which for a fixed-format line is columns
+8-72 -- so they are 7 short of what an editor shows. `_lint_column_offset`
+returns a `(file, line) -> offset` function: the program itself is judged
+the way `CobolParser` decides (`--source-format`, else `detect_fixed_format`),
+each copybook the way the expander judged it (`_looks_fixed_format`), and
+within a fixed-format file a line after `>>SOURCE FORMAT FREE`
+(`free_format_flags`) gets no shift. The per-file table lives in
+`analysis.lint.fixed_format_column_offset`: fixed listing + fixed file 7,
+fixed listing + free member 0 (the expander re-pads it by exactly 7), free
+listing + fixed member 6 (the expander cuts only the sequence area), free
+throughout 0. Lint now **always** stamps `origin` -- without
+`--copybook-path` it is the file itself, same line -- so JSON carries the
+on-disk column as `origin.column` in both cases and text prints it;
+`location.column` stays the analyzer's own count. Text prints only a
+column it can vouch for: a parse error that reported no column
+(`LintFinding.column_known` False), a copybook that cannot be re-read, or a
+line the source map does not cover prints `file:line:` and has no
+`origin.column`, rather than the analyzer column (7 short on a fixed line).
+Known gap (predates #301): a `>>SOURCE FORMAT IS FREE` *inside a copybook*
+leaves the expanded listing a column off, so those columns are off by one.
+`stamp_report_origins` no longer overwrites an `origin` already present, or
+`_emit_report` would drop that column again.
+
 **Exit codes.** `0` ran to completion (findings alone never change it); `1`
 the file could not be read, produced no AST at all, or its output could not
 be written (`_fail`); `2` argparse rejected the arguments — an unknown `--rule` or flag,
@@ -694,8 +718,11 @@ expanded text; the expander's own source map turns each one back into a real
 file and line, emitted per finding as `"origin": {"file", "line"}` and used
 by `--format text` for its `file:line:column:` prefix. A finding inside an
 inlined member therefore names the *copybook*, not the program. Findings the
-map cannot place, and runs with no expansion at all, carry no `origin` key
-rather than a guess.
+map cannot place carry no `origin` key rather than a guess. Since #301
+(2026-10-13) a run with no expansion **does** carry `origin` on every located
+finding -- the file itself, the same line, plus the on-disk `column` -- so
+"`origin` present" no longer means "copybooks were expanded"; compare
+`origin.file` with `source_file` for that.
 
 **Copybook provenance covers every unit too.** `_lint_copybook_item_names`
 diffs declared DATA DIVISION names between an expanded and an unexpanded
