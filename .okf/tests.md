@@ -24,6 +24,20 @@ kept). Four selector-shape tests now expect the additive `"quoted": True`.
 `WHEN SPACES` -> `WHEN 'SPACES'` and `WHEN WS-B` -> `WHEN 'WS-B'` each diff
 as one `condition-changed`.
 
+2026-10-14: +10 in `tests/unit/analysis/test_dead_code.py`'s new
+`TestSectionExitGoTo` (issue #312): `GO TO nnnn-EXIT` inside a PERFORMed /
+SORT-procedure SECTION no longer keeps later sections alive; three guards
+pin that a section also fallen into or gone to still runs past its exit,
+four more that a jump into it from another section (or an ENTRY) does too.
+
+2026-10-14: `tests/regression/test_evaluate_stacked_when.py`
+(11 tests, #314) pins stacked WHEN phrases (`WHEN 'A' WHEN 'B' stmt`) as one
+arm while the AST keeps one `WhenClause` per phrase: `when_groups()`,
+business rules (`WS-T = 'A' OR WS-T = 'B'`, `reached_via`), one program-flow
+`BranchArm` owning the PERFORM, constraint disjuncts `WHEN_1#1`/`WHEN_1#2`
+negated by later arms and WHEN OTHER, and scenario names; an empty WHEN
+whose body was an unexpanded COPY, or one before WHEN OTHER, is not stacked.
+
 2026-10-13: `tests/regression/test_copy_member_case_folding.py`
 (17 tests, #289) pins COPY member and library names folding to uppercase on
 a case-sensitive filesystem: `copy errorcd.` finds `ERRORCD.cpy`, the uppercase
@@ -793,7 +807,7 @@ method names — 5 of the 15 tests above cover these. 2026-08-04: +454 tests acr
 (Phase 5), wiring `--scenarios branches|all` into a populated
 `FixtureBundle` plus a hand-written schema doc (Phase 6, +15 tests: see
 `docs/fixture-bundle-schema.md`), and per-scenario tier 1/2 `Expectation`s —
-`call_count` derived exactly from each scenario's own generated sequence,
+`call_count` (exact counts only since issue #363: see generators.md),
 `field_equals` from the new `analysis.const_fold.ConstantFolder` single-pass
 walk seeded with that scenario's own mocked inputs (Phase 7, +104 tests:
 `test_const_fold.py` (44 unit tests over MOVE/arithmetic/COMPUTE folding,
@@ -865,6 +879,8 @@ tests/
     test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning (incl. a compound SEARCH WHEN pinning each conjunct, #348) / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md)
 
     test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244), TestFailurePathExpectations: error-status / empty-input scenarios assert no normal-path call_count and no field_equals (#318) (see generators.md)
+
+    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md); TestCallCountFollowsControlFlow: call_count only where exact -- branches, literal TIMES, UNTIL bodies, the read-to-EOF rule and its early exits, GO TO loops, EOF status checks (#363)
     test_scenario_planner.py  # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable-arm handling, fixed families (empty-input/error-status/boundary-values), exact coverage accounting, TestScenarioNamesAreUnique: verb@line + disjunct naming, merged names, uniqueness over tests/samples and enterprise (#267) (see generators.md)
     io_statements/             # IO parser unit tests
     test_extended_verb_parsers.py  # 2026-09-02 statement-coverage audit: INITIATE/TERMINATE/SUPPRESS, SEND/RECEIVE/ENABLE/DISABLE/PURGE, EXHIBIT/EXAMINE/TRANSFORM/ENTER/NOTE/CHAIN, READY/RESET TRACE, SERVICE, TITLE, RAISE/RESUME/VALIDATE -- node, operands, no warnings; UNSUPPORTED_VERBS == {EXECUTE, GOTO, RECOVER}; every STATEMENT_KEYWORDS verb dispatches (see parser.md)
@@ -877,6 +893,9 @@ tests/
       test_domains.py  # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value, TestEnumDomainHonoursRelationalConjuncts: a level-88 pick re-checked against gt/ge/lt/le (#244) (see analysis.md)
       test_dclgen_check.py  # DclgenChecker: DCLGEN column <-> host-variable pairing (the CUST_ID/CUST-VAL underscore-hyphen normalization), every violation kind and its severity, both null-indicator syntaxes, what it declines to check (VARCHAR group binding, BLOB), source ordering, ambiguous columns, and a parametrised "what DCLGEN itself would generate is always clean" table (see analysis.md)
       test_const_fold.py  # ConstantFolder: MOVE/ADD/SUBTRACT/MULTIPLY/COMPUTE folding, GIVING forms, loop/branch write-poisoning, DIVIDE's unconditional poison, the ADD-X-TO-X self-reference gap, PERFORM (inline/paragraph/THRU) chaining, GO TO/STOP RUN stopping the walk, ACCEPT/READ preserving a seeded value, DISPLAY/WRITE as the only observation points, TestStorageAliasing: sibling FD records / WRITE FROM / JUSTIFIED RIGHT padding (#245), TestValueAtObservationPoint: value at each DISPLAY/WRITE site + paragraph fall-through (#246), TestWalkBudget: the step budget on a quadratic fall-through chain (see analysis.md), TestInspectAndExecWrites: INSPECT TALLYING counters and EXEC CICS options / EXEC DLI arguments are writes (#317)
+
+      test_const_fold.py  # ConstantFolder: MOVE/ADD/SUBTRACT/MULTIPLY/COMPUTE folding, GIVING forms, loop/branch write-poisoning, DIVIDE's unconditional poison, the ADD-X-TO-X self-reference gap, PERFORM (inline/paragraph/THRU) chaining, GO TO/STOP RUN stopping the walk, ACCEPT/READ preserving a seeded value, DISPLAY/WRITE as the only observation points, TestStorageAliasing: sibling FD records / WRITE FROM / JUSTIFIED RIGHT padding (#245), TestValueAtObservationPoint: value at each DISPLAY/WRITE site + paragraph fall-through (#246), TestWalkBudget: the step budget on a quadratic fall-through chain (see analysis.md)
+      test_invocation_counts.py  # count_invocations (issue #363): status-check exemption (level-88, mixed conditions, INVALID KEY), EVALUATE / UNTIL / VARYING / variable TIMES bodies unknown, EXIT PARAGRAPH, literal TIMES with a transfer, fall-through + PERFORM counted twice, GO TO followed forward / into a SECTION, GO TO out of a PERFORM / DEPENDING ON / with ALTER / to an unknown target reporting nothing
   integration/                 # end-to-end parsing
     test_shamrice_examples.py  # parametrised: all *.cbl in examples/cobol/shamrice/ must parse error-free
     test_nist_cobol85_support.py  # parametrised: all 459 NIST *.CBL must parse error-free (strict-xfail KNOWN_ISSUES ratchet); copybook validation

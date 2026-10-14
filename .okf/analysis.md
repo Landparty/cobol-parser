@@ -99,6 +99,17 @@ either by bare name.
 > (a nested `ENTRY` made the container's same-named paragraph an entry
 > point). Pinned by `TestContainedProgramScope` in `test_dead_code.py`.
 
+> 2026-10-14 (issue #312): the SECTION form of the `GO TO nnnn-EXIT` idiom.
+> The last paragraph of every section a PERFORM / SORT / MERGE / XML PARSE
+> runs (`_section_exits`) is treated like a THRU range end: a GO TO onto it
+> is a reference, not a fall-through source, so it no longer keeps every
+> later section alive. Exception: when the section is itself a fall-through
+> source (fallen into, or a GO TO target), `_collect_fallthrough_refs`
+> restores the exit as a fall-through source, since on that path it runs
+> on. The same holds when the section is entered by a jump from *outside*
+> it (`_sections_entered_by_jump`: a GO TO written in another section, an
+> ALTER, a CICS HANDLE, an ENTRY). Pinned by `TestSectionExitGoTo`.
+
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]
@@ -2426,6 +2437,53 @@ both counts, scanner.py had already been fixed to interleave). Behavior for
 programs without sections is unchanged. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestA4OrderedParagraphsInterleaveSections`.
 
+## Invocation counts (`invocation_counts.py`)
+
+Backs `gen-fixtures`' tier 1 `call_count` (issue #363; see
+`.okf/generators.md`). `count_invocations(ast, report, index)` walks the
+entry chain with `const_fold.py`'s own paragraph helpers
+(`_entry_paragraph`, `_fall_through_chain`, `_ordered_paragraphs`,
+`_perform_body_statements`, `_transfer_kind`) on an explicit frame stack,
+and gives each statement it reaches an exact execution count or "unknown":
+
+* main line and SIMPLE PERFORMs (inline, out of line, THRU, SECTION) add
+  their multiplier each time reached -- a paragraph PERFORMed and also
+  fallen into counts 2; `PERFORM <literal> TIMES` multiplies;
+* IF / EVALUATE / SEARCH arms, handler bodies, `PERFORM UNTIL` / `VARYING` /
+  variable-`TIMES` bodies and SORT / MERGE procedures are unknown;
+* a transfer (GO TO, EXIT PARAGRAPH / SECTION / PERFORM, NEXT SENTENCE,
+  STOP RUN, GOBACK, EXIT PROGRAM) inside such a region makes everything
+  after it unknown; on the main line, GO TO / STOP ends the walk and a skip
+  makes the rest unknown; inside a literal `TIMES` body any transfer
+  discards every count (they would be overstated);
+* a main-line GO TO is followed forward (`push_chain` at the target) only
+  when no statement of the target paragraph was walked yet; a backward jump
+  (a GO TO read loop), a GO TO out of a PERFORMed paragraph, GO TO
+  DEPENDING ON, an unknown target, or any ALTER in the program discards
+  every count;
+* **status exemption**: an IF reading only boundary status fields (FILE
+  STATUS fields and their level-88s, `SQLCODE`/`SQLSTATE`/`EIBRESP`), an
+  INVALID KEY handler, and a CALL's ON EXCEPTION / ON OVERFLOW are decided
+  by the scenario's status fixture, so a STOP RUN inside them does not
+  blank later counts. Without it, the universal `OPEN` + status-check idiom
+  would leave no count after the first OPEN. A FILE STATUS field qualifies
+  only while the last boundary that set it (`status_sites`) ran on the
+  certain path and is not a READ that can reach end of file: after one, the
+  field is '10' in every read-to-EOF scenario and at once for empty input.
+
+`is_plain_eof_loop(ast, perform, index)` backs `_CallCounter`'s EOF rule:
+the UNTIL tests exactly one field, and the body (followed through PERFORMs
+and SORT procedures) has no transfer -- `UNTIL WS-EOF = 'Y' OR WS-CNT >= 3`
+or an EXIT PERFORM can stop before end of file.
+
+`InvocationCounts.for_boundary(ref)` matches a `BoundaryRef` by
+(paragraph, line) against statements of a boundary type only, so a MOVE in
+an AT END handler on the READ's own line cannot blur the READ's count.
+`count_at(line, type)` answers for any statement (used for the EOF loop's
+`PERFORM UNTIL`). Unreached statements (GO TO-only targets, DECLARATIVES)
+have no count. Tests: `tests/unit/analysis/test_invocation_counts.py`,
+`tests/unit/test_program_fixtures.py::TestCallCountFollowsControlFlow`.
+
 ## Module File Map
 
 | File | Analyzer |
@@ -2447,6 +2505,7 @@ programs without sections is unchanged. Pinned by
 | `constraints.py` | `ConstraintExtractor` (Phase 4 of `gen-fixtures`) |
 | `domains.py` | `solve()` constraint/witness solver (Phase 4 of `gen-fixtures`) |
 | `const_fold.py` | `ConstantFolder` (Phase 7 of `gen-fixtures`) |
+| `invocation_counts.py` | `count_invocations` -- exact per-statement execution counts for `gen-fixtures`' `call_count` |
 | `dclgen_check.py` | `DclgenChecker` — DCLGEN `DECLARE TABLE` vs. host-variable types |
 | `unused_variables.py` | `UnusedVariableAnalyzer` |
 | `recursion_risk.py` | `RecursionRiskAnalyzer` |
@@ -2981,6 +3040,13 @@ SUBTRACT / MULTIPLY / DIVIDE at paragraph level (not inside an arm) is a
 INTO B GIVING C` -> `C = B / A`); inside an arm it is an action of that
 decision only, never counted twice. Counters (`ADD 1 TO X`, `COMPUTE X = X +
 1`) are not rules at all.
+
+**Stacked WHENs (#314).** `WHEN 'A' WHEN 'B' stmt` is one arm whose
+condition is `WS-T = 'A' OR WS-T = 'B'` (via `EvaluateStatement.when_groups()`);
+the same grouping numbers program-flow `BranchArm`s (one `WHEN_n` arm, label
+`WHEN A / WHEN B`) and constraint arms, where each phrase of a stack is an
+OR-split disjunct of that arm (`WHEN_1#1`, `WHEN_1#2`) and later arms /
+WHEN OTHER negate every phrase.
 
 **Technical vs business.** A decision whose *own* condition reads only
 technical items, or a calculation that writes only technical items, is

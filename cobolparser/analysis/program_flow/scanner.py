@@ -456,24 +456,16 @@ class ProcedureScanner:
                 # WHEN k+1's edge is only appended once WHEN k's subtree is
                 # fully drained from the work stack — matching the
                 # interleaving the old recursive version produced.
+                #
+                # Stacked WHENs (``WHEN 'A' WHEN 'B' stmt``) are one arm: the
+                # statements after the last WHEN run for every WHEN in the
+                # stack, so the group is numbered and drawn as one.
                 clause_thunks: list[Callable[[], None]] = []
-                for wc_idx, wc in enumerate(stmt.when_clauses):
-                    sel = wc.selectors[0] if wc.selectors else {}
-                    sel_type = sel.get("type", "") if isinstance(sel, dict) else ""
-                    if sel_type == "Any":
-                        when_label = "WHEN ANY"
-                    elif sel_type == "Literal":
-                        when_label = f"WHEN {sel.get('value', '')}"
-                    elif sel_type == "Identifier":
-                        when_label = f"WHEN {sel.get('value', '')}"
-                    elif sel_type == "Range":
-                        when_label = (
-                            f"WHEN {sel.get('start', '')}..{sel.get('end', '')}"
-                        )
-                    elif sel_type == "Condition":
-                        when_label = f"WHEN {sel.get('text', '')}"
-                    else:
-                        when_label = f"WHEN {wc_idx + 1}"
+                for wc_idx, group in enumerate(stmt.when_groups()):
+                    wc = group[-1]
+                    when_label = " / ".join(
+                        _when_label(member, wc_idx) for member in group
+                    )
                     arm_id = f"{bn_id}__WHEN_{wc_idx + 1}"
                     when_arm = BranchArm(
                         arm_id=arm_id,
@@ -650,3 +642,18 @@ class ProcedureScanner:
         if isinstance(stmt, GoStatement):
             return bool(stmt.target_paragraph) and not stmt.depending_on_variable
         return False
+
+
+def _when_label(clause: Any, wc_idx: int) -> str:
+    """One WHEN phrase's display label, from its first selector."""
+    sel = clause.selectors[0] if clause.selectors else {}
+    sel_type = sel.get("type", "") if isinstance(sel, dict) else ""
+    if sel_type == "Any":
+        return "WHEN ANY"
+    if sel_type in ("Literal", "Identifier"):
+        return f"WHEN {sel.get('value', '')}"
+    if sel_type == "Range":
+        return f"WHEN {sel.get('start', '')}..{sel.get('end', '')}"
+    if sel_type == "Condition":
+        return f"WHEN {sel.get('text', '')}"
+    return f"WHEN {wc_idx + 1}"

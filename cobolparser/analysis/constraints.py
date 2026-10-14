@@ -435,29 +435,40 @@ class ConstraintExtractor:
         # Each WHEN arm's own selector constraints, before the earlier arms'
         # negations are conjoined -- what WHEN OTHER and later arms negate.
         own_arms: dict[str, list[FieldConstraint]] = {}
-        for idx, wc in enumerate(statement.when_clauses, start=1):
+        # Stacked WHENs (``WHEN 'A' WHEN 'B' stmt``) are one arm, numbered
+        # by group; each phrase of a stack is an OR-split disjunct of it
+        # (``WHEN_1#1`` / ``WHEN_1#2``), a scenario of its own as for IF.
+        for idx, group in enumerate(statement.when_groups(), start=1):
             arm_id = f"WHEN_{idx}"
             origin = f"EVALUATE@{line}/WHEN#{idx}"
-            constraints = _extract_evaluate_selector(
-                wc.selectors,
-                subject,
-                is_true_form,
-                index,
-                fed_names,
-                origin,
-                unsupported,
-            )
-            if constraints is not None:
+            variants: list[list[FieldConstraint]] = []
+            for member in group:
+                constraints = _extract_evaluate_selector(
+                    member.selectors,
+                    subject,
+                    is_true_form,
+                    index,
+                    fed_names,
+                    origin,
+                    unsupported,
+                )
+                if constraints is None:
+                    break
+                variants.append(constraints)
+            if len(variants) == len(group):
                 # EVALUATE is first-match: WHEN_n runs only when every earlier
                 # WHEN failed, so its data must also falsify each of them. A
                 # witness solved from WHEN_n's own selector alone could land in
                 # an earlier arm (``WHEN A > 50 / WHEN A > 10`` witnessing 55
                 # for the second) and the scenario named for WHEN_n would never
                 # reach it.
-                arms[arm_id] = constraints + _negate_earlier_whens(
+                negations = _negate_earlier_whens(
                     own_arms, any_when_unsupported, origin, unsupported
                 )
-                own_arms[arm_id] = constraints
+                _register_variants(
+                    arms, arm_id, [variant + negations for variant in variants]
+                )
+                _register_variants(own_arms, arm_id, variants)
             else:
                 any_when_unsupported = True
 
@@ -1478,9 +1489,9 @@ def _nested_statement_lists(statement: Any) -> list[tuple[str | None, list[Any]]
         if value:
             lists.append((arm_bearing.get(attr), value))
     if isinstance(statement, EvaluateStatement):
-        for index, when in enumerate(statement.when_clauses, start=1):
-            if when.statements:
-                lists.append((f"WHEN_{index}", when.statements))
+        for index, group in enumerate(statement.when_groups(), start=1):
+            if group[-1].statements:
+                lists.append((f"WHEN_{index}", group[-1].statements))
         if statement.default_when is not None and statement.default_when.statements:
             lists.append(("WHEN_OTHER", statement.default_when.statements))
     if isinstance(statement, SearchStatement):
