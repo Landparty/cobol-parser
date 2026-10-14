@@ -312,9 +312,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-* **`decode --view` / `compare --view` / `decode --list-views`: an overlay
-  view is now the whole record with the `REDEFINES` swapped in** (#296).
-  Output shape change for anything reading these:
+* **BREAKING: `decode --view` / `compare --view` / `decode --list-views`:
+  an overlay view is now the whole record with the `REDEFINES` swapped in**
+  (#296). Output shape change for anything reading these:
   * `decode --view X` (CSV and JSON) now has a column for every field of the
     record, not just the overlay's own. Fields outside the overlay keep the
     base view's column names; an overlay inside `OCCURS` gets one column per
