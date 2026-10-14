@@ -58,6 +58,7 @@ from dataclasses import dataclass, field, replace
 from functools import total_ordering
 from typing import Any
 
+from .._literals import is_quoted_literal
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.arithmetic import ArithmeticStatement, ComputeStatement
@@ -139,7 +140,6 @@ _ASSIGN_PREFIX_TOKENS = frozenset(
 )
 
 _REFMOD_RE = re.compile(r"\(\s*(\d+)\s*:\s*(\d+)?\s*\)\s*$")
-_QUOTED_RE = re.compile(r"^\s*(['\"]).*\1\s*$")
 #: One data reference: a (qualified) name, an optional subscript group and an
 #: optional reference modifier -- nothing else (no operator, no second name).
 _SINGLE_REF_RE = re.compile(
@@ -883,7 +883,7 @@ class FieldFlowAnalyzer:
             ]
             single: re.Match[str] | None = None
         else:
-            if _QUOTED_RE.match(value):
+            if is_quoted_literal(value):
                 return []
             base, _refmod, _subscripts, exact = _split_operand(value)
             if exact:
@@ -1621,7 +1621,7 @@ class FieldFlowAnalyzer:
                 )
         for callee in callees:
             for position, parameter in enumerate(stmt.using_parameters, start=1):
-                if not parameter.name or _QUOTED_RE.match(parameter.name):
+                if not parameter.name or is_quoted_literal(parameter.name):
                     continue
                 mode = (parameter.passing_mode or "REFERENCE").upper()
                 by_reference = mode not in ("CONTENT", "VALUE")

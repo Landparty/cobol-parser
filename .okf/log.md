@@ -14,6 +14,19 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-14 -- issue #330: literal operands keep their quotes
+
+[parser.md](parser.md) ("Literal Re-Quoting"), [analysis.md](analysis.md):
+STRING, UNSTRING, INSPECT, CALL USING, SET and INITIALIZE REPLACING now
+re-quote a string-literal operand the way MOVE and DISPLAY do, through
+`_utils.literal_operand_text()`. business-rules' STRING re-quoting
+heuristic is gone; unused-variables, lineage and xref no longer read
+`'WS-CODE'` as the item `WS-CODE`.
+Follow-up from review: `_literals.QUOTED_LITERAL_RE` / `is_quoted_literal()`
+take the typed-literal prefix with the quotes, so the `X` of `X'00'` is no
+longer read as the item `X` (unused-variables, xref, lineage, redundancy),
+and gen-fixtures no longer reports a literal CALL argument unresolved.
+
 ## 2026-10-13 -- issue #291: MOVE FUNCTION sources are checked
 
 [analysis.md](analysis.md): move-type-check counted every `MOVE FUNCTION

@@ -835,7 +835,7 @@ class TestRenderingEdges:
             "PERFORM 2000-X 3 TIMES",
             "PERFORM 2000-X UNTIL POL-CLAIMS > 5",
             "PERFORM 2000-X VARYING WS-COUNT FROM 1 BY 1 UNTIL WS-COUNT > 3",
-            "STRING 'POLICY ' POL-ID INTO WS-MSG",
+            'STRING "POLICY " POL-ID INTO WS-MSG',
             "UNSTRING WS-MSG INTO WS-CLASS WS-FLAG",
             "CALL 'RATESUB' USING POL-ID, WS-RATE",
             "GO TO 2000-X",

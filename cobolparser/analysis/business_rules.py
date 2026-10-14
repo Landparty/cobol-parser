@@ -1052,18 +1052,6 @@ class BusinessRuleExtractor:
             return _tidy(text)
         return "'" + text.replace("'", "''") + "'"
 
-    def _string_source(self, operand: str) -> str:
-        base = operand.split("(")[0].strip().upper()
-        if (
-            base in self._declared
-            or base in _SPECIAL_REGISTERS
-            or operand[:1] in ("'", '"')
-            or _NUMERIC_LITERAL_RE.match(operand.strip())
-            or base in _FIGURATIVES
-        ):
-            return operand
-        return "'" + operand.replace("'", "''") + "'"
-
     def _statement_text(self, stmt: CobolStatement) -> str:
         return _tidy(self._raw_statement_text(stmt))
 
@@ -1109,10 +1097,8 @@ class BusinessRuleExtractor:
             stop_type = getattr(stmt, "stop_type", None) or ""
             return f"STOP {stop_type}"
         if isinstance(stmt, StringStatement):
-            # STRING sources arrive with literal quotes stripped; one that
-            # names no declared item can only have been a literal.
-            sources = [self._string_source(op) for op in stmt.operands]
-            return f"STRING {' '.join(sources)} INTO {stmt.into_target or ''}"
+            # A literal source arrives quoted, as DISPLAY's items do.
+            return f"STRING {' '.join(stmt.operands)} INTO {stmt.into_target or ''}"
         if isinstance(stmt, UnstringStatement):
             receivers = [str(t.get("target", "")) for t in stmt.into_targets]
             return f"UNSTRING {stmt.source_operand or ''} INTO {' '.join(receivers)}"

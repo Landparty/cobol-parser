@@ -447,8 +447,8 @@ class TestInspectParser:
         stmts = result.ast.find_statements("INSPECT")
         assert len(stmts) >= 1
         assert stmts[0].inspect_type == "CONVERTING"
-        assert stmts[0].converting_from == "abc"
-        assert stmts[0].converting_to == "ABC"
+        assert stmts[0].converting_from == '"abc"'
+        assert stmts[0].converting_to == '"ABC"'
 
 
 # ── SORT ──────────────────────────────────────────────────────────

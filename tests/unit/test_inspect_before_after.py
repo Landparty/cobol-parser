@@ -82,9 +82,9 @@ class TestTallyingBeforeAndAfterOnSamePhrase:
         clause = stmt.tallying_clauses[0]
         assert clause["counter"] == "WS-COUNT"
         assert clause["for_type"] == "ALL"
-        assert clause["value"] == "X"
-        assert clause["before"] == "Y"
-        assert clause["after"] == "Z"
+        assert clause["value"] == '"X"'
+        assert clause["before"] == '"Y"'
+        assert clause["after"] == '"Z"'
 
     def test_multi_phrase_both_and_single_do_not_interfere(self):
         """One FOR-phrase with BEFORE+AFTER, another with just AFTER."""
@@ -117,14 +117,14 @@ class TestTallyingBeforeAndAfterOnSamePhrase:
 
         first = stmt.tallying_clauses[0]
         assert first["counter"] == "WS-COUNT"
-        assert first["before"] == "Y"
-        assert first["after"] == "Z"
+        assert first["before"] == '"Y"'
+        assert first["after"] == '"Z"'
 
         second = stmt.tallying_clauses[1]
         assert second["counter"] == "WS-COUNT2"
         assert second["for_type"] == "LEADING"
         assert second["before"] is None
-        assert second["after"] == "B"
+        assert second["after"] == '"B"'
 
 
 # ---------------------------------------------------------------------------
@@ -156,10 +156,10 @@ class TestReplacingBeforeAndAfterOnSamePhrase:
         assert len(stmt.replacing_clauses) == 1
         clause = stmt.replacing_clauses[0]
         assert clause["replace_type"] == "ALL"
-        assert clause["from_value"] == "A"
-        assert clause["to_value"] == "B"
-        assert clause["before"] == "X"
-        assert clause["after"] == "Y"
+        assert clause["from_value"] == '"A"'
+        assert clause["to_value"] == '"B"'
+        assert clause["before"] == '"X"'
+        assert clause["after"] == '"Y"'
 
     def test_multi_phrase_both_and_single_do_not_interfere(self):
         """One REPLACING phrase with BEFORE+AFTER, another with just BEFORE."""
@@ -191,12 +191,12 @@ class TestReplacingBeforeAndAfterOnSamePhrase:
         assert len(stmt.replacing_clauses) == 2
 
         first = stmt.replacing_clauses[0]
-        assert first["before"] == "X"
-        assert first["after"] == "Y"
+        assert first["before"] == '"X"'
+        assert first["after"] == '"Y"'
 
         second = stmt.replacing_clauses[1]
         assert second["replace_type"] == "LEADING"
-        assert second["before"] == "E"
+        assert second["before"] == '"E"'
         assert second["after"] is None
 
 
@@ -232,8 +232,8 @@ MAIN-PARA.
         stmts = result.ast.find_all_by_type("InspectStatement")
         assert len(stmts) == 1
         clause = stmts[0].to_dict()["tallying_clauses"][0]
-        assert clause["before"] == "Y"
-        assert clause["after"] == "Z"
+        assert clause["before"] == '"Y"'
+        assert clause["after"] == '"Z"'
 
     def test_replacing_both_qualifiers_end_to_end(self):
         result = self._parse(
@@ -247,8 +247,8 @@ MAIN-PARA.
         stmts = result.ast.find_all_by_type("InspectStatement")
         assert len(stmts) == 1
         clause = stmts[0].to_dict()["replacing_clauses"][0]
-        assert clause["before"] == "X"
-        assert clause["after"] == "Y"
+        assert clause["before"] == '"X"'
+        assert clause["after"] == '"Y"'
 
     def test_tallying_reversed_qualifier_order(self):
         """IBM Enterprise COBOL allows AFTER before BEFORE -- both must be
@@ -264,8 +264,8 @@ MAIN-PARA.
         stmts = result.ast.find_all_by_type("InspectStatement")
         assert len(stmts) == 1
         clause = stmts[0].to_dict()["tallying_clauses"][0]
-        assert clause["before"] == "Y"
-        assert clause["after"] == "Z"
+        assert clause["before"] == '"Y"'
+        assert clause["after"] == '"Z"'
 
     def test_replacing_reversed_qualifier_order(self):
         result = self._parse(
@@ -278,8 +278,8 @@ MAIN-PARA.
         stmts = result.ast.find_all_by_type("InspectStatement")
         assert len(stmts) == 1
         clause = stmts[0].to_dict()["replacing_clauses"][0]
-        assert clause["before"] == "X"
-        assert clause["after"] == "Y"
+        assert clause["before"] == '"X"'
+        assert clause["after"] == '"Y"'
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +331,7 @@ class TestInspectDelimiterAndOperandShapes:
             {
                 "counter": "D",
                 "for_type": "ALL",
-                "value": "Z",
+                "value": '"Z"',
                 "before": None,
                 "after": None,
             },
