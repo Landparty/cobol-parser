@@ -215,22 +215,26 @@ def _on_disk_casing(file_path: str) -> str:
     return file_path
 
 
-def _library_directory(search_dir: str, library: str, case_sensitive: bool) -> str:
-    """The subdirectory of *search_dir* that ``COPY member OF library`` names.
+def _library_directories(
+    search_dir: str, library: str, case_sensitive: bool
+) -> list[str]:
+    """The subdirectories of *search_dir* that ``COPY member OF library``
+    names, in the order to search them.
 
     Matched the way the member name itself is: when the search is
     case-sensitive, the uppercased name first (Enterprise COBOL folds the
     library-name as it does the text-name, so ``OF mylib`` finds ``MYLIB/``)
-    and then the name as written; otherwise in any casing (``OF MYLIB`` finds
-    ``mylib/``), so a case-insensitive search does not find ``MEM.cpy`` but
-    miss the library directory holding it.
+    and then the name as written -- both, so an unrelated ``MYLIB/`` never
+    hides the member in ``mylib/``. Otherwise in any casing (``OF MYLIB``
+    finds ``mylib/``), so a case-insensitive search does not find
+    ``MEM.cpy`` but miss the library directory holding it.
     """
     exact = os.path.join(search_dir, library)
     if case_sensitive:
         folded = os.path.join(search_dir, library.upper())
-        return folded if os.path.isdir(folded) else exact
+        return [folded, exact] if folded != exact else [exact]
     if os.path.isdir(exact):
-        return exact
+        return [exact]
     try:
         with os.scandir(search_dir) as entries:
             matches = sorted(
@@ -239,8 +243,13 @@ def _library_directory(search_dir: str, library: str, case_sensitive: bool) -> s
                 if entry.is_dir() and entry.name.casefold() == library.casefold()
             )
     except OSError:
-        return exact
-    return os.path.join(search_dir, matches[0]) if matches else exact
+        return [exact]
+    return [os.path.join(search_dir, matches[0]) if matches else exact]
+
+
+def _is_path_literal(member_name: str) -> bool:
+    """True when *member_name* holds a character no COBOL word can."""
+    return any(ch in member_name for ch in "./\\")
 
 
 def _member_probe_names(member_name: str, extensions: Sequence[str]) -> list[str]:
@@ -255,8 +264,12 @@ def _member_probe_names(member_name: str, extensions: Sequence[str]) -> list[str
     ``errorcd.cpy`` when a case-sensitive filesystem holds both. The bare
     uppercased name sits where the ``""`` extension does (last by default),
     so an extensionless ``FOO`` never shadows ``foo.cpy``.
+
+    A name holding ``.``, ``/`` or ``\\`` cannot be a COBOL word, so it came
+    from a literal (``COPY "sub/mem"``) naming a file path; it is used as
+    written and not folded.
     """
-    folded = member_name.upper()
+    folded = member_name if _is_path_literal(member_name) else member_name.upper()
     slots = list(extensions) if "" in extensions else [*extensions, ""]
     names = [member_name]
     for ext in slots:
@@ -333,11 +346,8 @@ def find_copybook_file(
         # filesystem the qualifier often has no directory equivalent.
         candidate_dirs = [search_dir]
         if library_qualifier:
-            candidate_dirs.insert(
-                0,
-                _library_directory(
-                    search_dir, library_qualifier, search_config.case_sensitive
-                ),
+            candidate_dirs[:0] = _library_directories(
+                search_dir, library_qualifier, search_config.case_sensitive
             )
 
         for actual_search_dir in candidate_dirs:

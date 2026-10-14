@@ -138,3 +138,38 @@ def test_case_insensitive_search_unchanged(tmp_path: Path) -> None:
     for member in ("errorcd", "ERRORCD"):
         assert PathResolver(config).resolve(member).lower().endswith("errorcd.cpy")
         assert find_copybook_file(member, config).lower().endswith("errorcd.cpy")
+
+
+def test_unrelated_uppercase_library_does_not_hide_member(tmp_path: Path) -> None:
+    # MYLIB/ exists but does not hold the member: mylib/ must still be
+    # searched rather than the lookup failing.
+    root = tmp_path / "copy"
+    root.mkdir()
+    _write(root / "MYLIB", "OTHER.cpy", "OTHER-REC")
+    expected = str(_write(root / "mylib", "errorcd.cpy", "LIB-REC"))
+    config = _config(root)
+    assert PathResolver(config).resolve("errorcd", "mylib") == expected
+    assert find_copybook_file("errorcd", config, "mylib") == expected
+
+
+def test_path_literal_is_not_folded(tmp_path: Path) -> None:
+    # `COPY "sub/mem"` names a file path; SUB/MEM.cpy must not win over it.
+    root = tmp_path / "copy"
+    root.mkdir()
+    _write(root / "SUB", "MEM.cpy", "UPPER-REC")
+    expected = str(_write(root / "sub", "mem.cpy", "LOWER-REC"))
+    config = _config(root)
+    assert find_copybook_file("sub/mem", config) == expected
+    assert PathResolver(config).resolve("sub/mem") == expected
+
+
+def test_configured_extension_order_is_honoured(tmp_path: Path) -> None:
+    # A shop listing .cbl before .cpy gets .cbl first, folded or not.
+    d = tmp_path / "copy"
+    expected = str(_write(d, "FOO.cbl", "PROG-REC"))
+    _write(d, "Foo.cpy", "COPY-REC")
+    config = CopybookSearchPath(
+        directories=[str(d)], extensions=[".cbl", ".cpy", ""], case_sensitive=True
+    )
+    assert PathResolver(config).resolve("Foo") == expected
+    assert find_copybook_file("Foo", config) == expected
