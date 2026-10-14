@@ -1563,6 +1563,16 @@ MoveTypeChecker → [analysis.md](analysis.md), H6 PathResolver →
   precedent) before the loop breaks; the existing top-level
   `_is_paragraph_or_section_start()` check then picks the identifier up as
   a normal new paragraph — no separate paragraph-name pre-scan was needed.
+  Issue #390 added three more exclusions: `SPECIAL_REGISTERS`
+  (`RETURN-CODE`, `TALLY`, `SORT-RETURN`, `WHEN-COMPILED`, the `XML-` /
+  `JSON-` registers, ... -- never declared, so (c) could not see them),
+  `NON_PARAGRAPH_RESERVED_WORDS` (`RUN`, `TRUE`, `SENTENCE`, ... -- reserved
+  words that lex as plain `IDENTIFIER`; `DECLARATIVES` / `FACTORY` /
+  `OBJECT` deliberately left out), and, when this parse normalized
+  fixed-format source (`CobolParser.source_is_fixed_format`), any token in
+  Area B (normalized column >= `NORMALIZED_AREA_B_COLUMN` = 5, i.e. old
+  column 12). Before it, `MOVE 0` / `TO` / `RETURN-CODE.` at one column
+  gave a MOVE with no target and a phantom `RETURN-CODE` paragraph.
   `INSPECT`'s `TALLYING` loop is a special case: its own inner check
   breaks without warning, because the outer "consume to period" trailer in
   `InspectStatementParser.parse()` re-checks the same un-consumed token and

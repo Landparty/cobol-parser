@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-14 -- issue #390: special registers are not paragraph headers
+
+[parser.md](parser.md) (the `looks_like_paragraph_boundary()` entry):
+special registers (`RETURN-CODE`, `TALLY`, ...), reserved words that lex as
+identifiers (`RUN`, `TRUE`, ...) and, in fixed-format source, any token in
+Area B are never read as a paragraph header swallowed by a missing period.
+
 ## 2026-10-14 -- issue #330: literal operands keep their quotes
 
 [parser.md](parser.md) ("Literal Re-Quoting"), [analysis.md](analysis.md):

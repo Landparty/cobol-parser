@@ -156,6 +156,11 @@ class CobolParser:
         #: ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA`` (decided by the lexer
         #: from the whole source): PICTURE strings exchange ``,`` and ``.``.
         self.decimal_point_is_comma: bool = False
+        #: True when this parse normalized fixed-format source to free-form
+        #: text: column 1 of every lexed line is then the old column 8, so
+        #: Area A is columns 1-4 and Area B starts at
+        #: :data:`~cobolparser.parsers.statements._utils.NORMALIZED_AREA_B_COLUMN`.
+        self.source_is_fixed_format: bool = False
 
         # Initialize division parser factory
         self._division_factory = DivisionParserFactory()
@@ -266,6 +271,7 @@ class CobolParser:
 
         self._begin_parse()
         self.decimal_point_is_comma = False
+        self.source_is_fixed_format = False
         # Set up front, not only on the success path: a FAIL_FAST lexer
         # error or a propagated ParseError returns early, and its result
         # used to report ``lines_parsed == 0`` for a non-empty source.
@@ -376,6 +382,7 @@ class CobolParser:
                 if normalized is None:
                     return None
                 cleaned_source = normalized
+                self.source_is_fixed_format = True
             # Normalized output is free-form, and so is source the detector
             # judged free-form already: lex it as free-form (mirrors
             # parse_cobol, which flips free_form on for undetected-fixed

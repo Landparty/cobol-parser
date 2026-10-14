@@ -8,6 +8,14 @@ timestamp: 2026-10-13T00:00:00Z
 
 # Overview
 
+2026-10-14: `tests/regression/test_special_register_paragraph_boundary.py`
+(13 tests, #390) pins `MOVE 0` / `TO` / `RETURN-CODE.` (and TALLY,
+SORT-RETURN, the XML-/JSON- registers, `SET ... TO TRUE`) with each word on
+its own line: one MOVE with the register as target, no phantom paragraph.
+Also pins the fixed-format Area B rule (an undeclared Area B name stays an
+operand) and two controls: an Area A header after a missing period, and an
+indented free-format name, are still boundaries.
+
 2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
 #377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
 read, no phantom paragraph appears, and dead-code / program-flow /
