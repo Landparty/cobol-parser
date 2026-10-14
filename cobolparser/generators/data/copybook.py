@@ -17,6 +17,7 @@ from .errors import CopybookLayoutError
 from .layout import FieldSpec, VaryingLength, flatten_record
 from .options import DataGeneratorOptions
 from .values import ValueFactory
+from .views import build_record_views
 
 # ---------------------------------------------------------------------------
 # Copybook parsing
@@ -204,6 +205,49 @@ def select_record(
     )
 
 
+def fd_record_length(
+    records: list[CobolDataItem],
+    chosen: CobolDataItem,
+    options: DataGeneratorOptions | None = None,
+) -> int | None:
+    """The fixed-length ``LRECL`` of *chosen*'s file, when it is longer than
+    *chosen* itself.
+
+    Every 01 under one FD describes the same record area, so in a RECFM=F
+    file each record is the file's length, whichever 01 it happens to be --
+    not the length of the 01 somebody picked with ``--record``.  That length
+    is the FD's own ``RECORD CONTAINS n`` when it states one, else the
+    largest 01 under the FD (what the compiler sizes the area to).
+
+    ``None`` when the layout's own length already is the answer: *chosen*
+    belongs to no FD/SD (a bare copybook, a WORKING-STORAGE record), or it
+    is the longest record of its file.  Module-level, like
+    :func:`select_record`, because ``gen-data`` and ``decode`` must frame
+    the same source the same way.
+    """
+    fd_name = chosen.get_metadata("fd_file_name")
+    if not fd_name:
+        return None
+    own = build_record_views(chosen, options).framing_length
+    block = (chosen.get_metadata("fd_clauses") or {}).get("record") or {}
+    declared = block.get("max")
+    if declared is not None and block.get("min") is None and not block.get("varying"):
+        lrecl = int(declared)
+    else:
+        lrecl = max(
+            [
+                own,
+                *(
+                    build_record_views(item, options).framing_length
+                    for item in records
+                    if item is not chosen
+                    and item.get_metadata("fd_file_name") == fd_name
+                ),
+            ]
+        )
+    return lrecl if lrecl > own else None
+
+
 class CopybookDataGenerator:
     """Generates synthetic CSV test data from a COBOL copybook layout.
 
@@ -250,7 +294,9 @@ class CopybookDataGenerator:
         """
         records = parse_copybook_records(source, filename=filename)
         chosen = self._select_record(records, record, filename)
-        return self.generate_from_record(chosen)
+        dataset = self.generate_from_record(chosen)
+        dataset.lrecl = fd_record_length(records, chosen, self.options)
+        return dataset
 
     def generate_from_record(self, record: CobolDataItem) -> GeneratedDataset:
         """Generate a dataset from an already-parsed record item."""

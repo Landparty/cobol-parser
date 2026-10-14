@@ -43,6 +43,12 @@ class GeneratedDataset:
             ``RECORD VARYING`` range clamped to the bytes the layout
             describes, or ignored because nothing of it fit.  Printed in
             :meth:`to_hex_dump`'s header and on stderr by ``gen-data``.
+        lrecl: The FD's fixed record length, when the source was a whole
+            program and that FD's ``LRECL`` is longer than this record --
+            another 01 under the same FD is longer, or ``RECORD CONTAINS``
+            says so.  :attr:`RecordFormat.FIXED` records are padded out to
+            it with spaces, so the file is the one ``decode`` frames.
+            ``None`` means the layout's own length is the LRECL.
     """
 
     record_name: str
@@ -52,6 +58,7 @@ class GeneratedDataset:
     varying: VaryingLength | None = None
     declared_lengths: list[int] | None = None
     caveats: list[str] = field(default_factory=list)
+    lrecl: int | None = None
 
     @property
     def header(self) -> list[str]:
@@ -148,7 +155,11 @@ class GeneratedDataset:
         options = opts or EncodingOptions()
         return [
             _row_record_length(
-                self.fields, row, options, data_length=self._length_for(index)
+                self.fields,
+                row,
+                options,
+                data_length=self._length_for(index),
+                pad_to=self.lrecl,
             )
             for index, row in enumerate(self.rows)
         ]
@@ -165,7 +176,11 @@ class GeneratedDataset:
         options = opts or EncodingOptions()
         return b"".join(
             encode_record(
-                self.fields, row, options, data_length=self._length_for(index)
+                self.fields,
+                row,
+                options,
+                data_length=self._length_for(index),
+                pad_to=self.lrecl,
             )
             + options.record_separator
             for index, row in enumerate(self.rows)
@@ -199,6 +214,7 @@ class GeneratedDataset:
             data_lengths=self.declared_lengths,
             varying=self.varying,
             extra_caveats=self.caveats,
+            pad_to=self.lrecl,
         )
 
     def to_dicts(self) -> list[dict[str, str]]:

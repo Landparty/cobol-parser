@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **decode / compare / gen-data: a whole program's RECFM=F file is framed at
+  the FD's LRECL** (#362). `--record X` on a program source used to cut the
+  file at that 01's own length; every 01 under one FD shares the record area,
+  so the LRECL is the FD's `RECORD CONTAINS n`, else its largest 01.
+  `decode`/`compare` now frame there by default (`--record-length` still
+  overrides), and `gen-data --format record|hex` pads a shorter 01 out to it
+  with spaces, so the two round-trip.
+
 * **`gen-fixtures --scenarios all`: error-status and empty-input scenarios no
   longer assert the normal path** (#318). A scenario with a status override
   (OPEN status 35, READ INVALID KEY 23, CALL ON EXCEPTION, SQLCODE 100) now

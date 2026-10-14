@@ -819,6 +819,25 @@ again rather than a parallel size model.
 `decode_file(path, ...)` is the same in binary mode (a COMP field routinely
 contains 0x0A, which a text-mode read would translate).
 
+**Fixed framing of a whole program is the FD's LRECL, not the chosen 01's
+length** (#362, 2026-10-14). Every 01 under one FD shares the record area,
+so a RECFM=F file of that FD holds LRECL-byte records whichever 01
+`--record` picks. `copybook.fd_record_length(records, chosen, options)`
+returns that LRECL -- the FD's `RECORD CONTAINS n` (fixed, not a range) when
+stated, else the largest sibling 01's `framing_length` -- or `None` when it is
+not longer than `chosen` (no FD/SD, a bare copybook, or `chosen` is the
+longest). `from_copybook_source()` uses it as the default `record_length`
+(`--record-length` still overrides; `from_record()` alone has no siblings to
+look at). `CopybookDataGenerator.generate_from_source()` stores the same
+number as `GeneratedDataset.lrecl`, and under `RecordFormat.FIXED`
+`to_records()` / `record_lengths()` / `to_hex_dump()` pad each record out to it
+with the charset's space (`encode_record(..., pad_to=)`), the dump showing an
+`(FD LRECL slack)` row -- so `gen-data --record HDR-REC --format record`
+writes the file `decode --record HDR-REC` reads. Variable formats are not
+padded. Before, a 9-byte header read off a 16-byte file shredded every
+record after the first, and with an all-text layout and a file length
+divisible by both sizes, silently.
+
 Per storage class, each the exact inverse of `encoding.py`'s encoder and
 dispatched on the same `USAGE`-then-category ladder:
 

@@ -1418,7 +1418,8 @@ def _add_record_file_args(p: argparse.ArgumentParser) -> None:
         help=(
             "LRECL to cut fixed-length records at, when the file's records "
             "are longer than the copybook describes (trailing slack, or a "
-            "copybook covering only a prefix)"
+            "copybook covering only a prefix). Defaults to the FD's LRECL "
+            "when the source is a whole program"
         ),
     )
     p.add_argument(

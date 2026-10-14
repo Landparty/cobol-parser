@@ -8,6 +8,13 @@ timestamp: 2026-10-13T00:00:00Z
 
 # Overview
 
+2026-10-14: `tests/regression/test_fd_lrecl_framing_issue_362.py` (18
+tests, #362) pins RECFM=F framing at the FD's LRECL for a whole-program
+source: `fd_record_length` (largest sibling 01, `RECORD CONTAINS`, `None`
+for the longest 01 / WORKING-STORAGE / a bare copybook), `decode`/`compare`
+framing a shorter 01's file, `--record-length` still overriding, and
+`gen-data` space-padding (ASCII and EBCDIC) so the two round-trip.
+
 2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
 #377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
 read, no phantom paragraph appears, and dead-code / program-flow /

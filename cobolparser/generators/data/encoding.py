@@ -610,6 +610,7 @@ def encode_record(
     opts: EncodingOptions,
     *,
     data_length: int | None = None,
+    pad_to: int | None = None,
 ) -> bytes:
     """Concatenate one generated row into its record image.
 
@@ -635,6 +636,11 @@ def encode_record(
     record that varies.  The length is drawn per row at *generation* time
     (:meth:`~.copybook.CopybookDataGenerator.generate_from_record`) rather
     than here, so this function stays deterministic and RNG-free.
+
+    *pad_to* is the file's ``LRECL`` under :attr:`RecordFormat.FIXED` when
+    it is longer than this layout -- a shorter 01 under an FD that also
+    declares a longer one.  The record is filled out to it with the
+    charset's space, because RECFM=F means every record is that long.
     """
     if len(specs) != len(row):
         raise RecordEncodingError(
@@ -647,6 +653,8 @@ def encode_record(
             encode_field(spec, cell, opts)
             for spec, cell in zip(specs, row, strict=True)
         )
+        if pad_to is not None and pad_to > len(body):
+            body += bytes([opts.space]) * (pad_to - len(body))
     else:
         body = b"".join(
             encode_field(specs[index], row[index], opts)
@@ -693,18 +701,20 @@ def row_record_length(
     opts: EncodingOptions | None = None,
     *,
     data_length: int | None = None,
+    pad_to: int | None = None,
 ) -> int:
     """Byte length one generated *row* occupies, RDW included when framed.
 
     Cheaper than measuring ``len(encode_record(...))`` -- it sums the widths
     the layout already knows rather than building the bytes -- and used
     wherever a length is wanted for reporting rather than for writing.
-    *data_length* means the same thing it does on :func:`encode_record`.
+    *data_length* and *pad_to* mean the same things they do on
+    :func:`encode_record`.
     """
     options = opts or EncodingOptions()
     fmt = options.resolved_format(specs, varying=data_length is not None)
     if fmt is RecordFormat.FIXED:
-        return record_length(specs)
+        return max(record_length(specs), pad_to or 0)
     body = sum(
         field_storage_size(specs[index]) for index in present_indexes(specs, row)
     )
@@ -861,6 +871,22 @@ def _dump_absent_lines(spec: FieldSpec, offset: int) -> list[str]:
     ]
 
 
+def _dump_slack_lines(offset: int, size: int, opts: EncodingOptions) -> list[str]:
+    """The space fill out to the FD's LRECL, shaped like a FILLER's rows."""
+    raw = bytes([opts.space]) * size
+    head = (
+        f"{offset:06X}  {size:>4}  {'(FD LRECL slack)':<24} {'':<14} {'':<9} {'':<18} "
+    )
+    indent = " " * len(head)
+    return [
+        f"{head if start == 0 else indent}"
+        f"{' '.join(f'{b:02X}' for b in chunk):<{_DUMP_BYTES_PER_LINE * 3}} "
+        f"|{_printable(chunk, opts)}|"
+        for start in range(0, size, _DUMP_BYTES_PER_LINE)
+        for chunk in [raw[start : start + _DUMP_BYTES_PER_LINE]]
+    ]
+
+
 def _dump_rdw_lines(rdw: bytes, opts: EncodingOptions) -> list[str]:
     """The RDW's own row in the hex dump, shaped like a field's."""
     head = (
@@ -880,6 +906,7 @@ def hex_dump(
     data_lengths: list[int] | None = None,
     varying: VaryingLength | None = None,
     extra_caveats: list[str] | None = None,
+    pad_to: int | None = None,
 ) -> str:
     """Render *rows* as an annotated, field-by-field hex dump.
 
@@ -893,9 +920,12 @@ def hex_dump(
     swallowed: a dump that silently ignored ``SYNCHRONIZED`` would be
     confidently wrong about every offset after the aligned item.  So are
     *extra_caveats* (the dataset's own, e.g. a clamped ``RECORD VARYING``).
+    *pad_to* is :func:`encode_record`'s, and its slack is shown as its own
+    row so the record's length adds up.
     """
     fmt = opts.resolved_format(specs, varying=varying is not None)
     length = record_length(specs)
+    slack = max(0, (pad_to or 0) - length) if fmt is RecordFormat.FIXED else 0
     framing = RDW_SIZE if fmt is RecordFormat.VARIABLE else 0
     out: list[str] = [
         f"* record layout: {record_name or '(unnamed)'}",
@@ -917,7 +947,10 @@ def hex_dump(
             + (" (RDW included)" if framing else "")
         )
     else:
-        out.append(f"* record length: {length} bytes")
+        out.append(
+            f"* record length: {length + slack} bytes"
+            + (f" (FD LRECL; the layout is {length})" if slack else "")
+        )
     if varying is not None:
         depending = (
             f" DEPENDING ON {varying.depending_on}" if varying.depending_on else ""
@@ -953,7 +986,10 @@ def hex_dump(
         )
         if declared is not None and fmt.is_variable:
             body = min(body, declared)
-        out.append(f"\n* --- record {index} of {len(rows)}: {body + framing} bytes ---")
+        out.append(
+            f"\n* --- record {index} of {len(rows)}: "
+            f"{body + framing + slack} bytes ---"
+        )
         offset = 0
         if framing:
             # The RDW is not a field, but it is bytes in the file, and a dump
@@ -984,4 +1020,6 @@ def hex_dump(
             written += len(raw)
             out.extend(_dump_field_lines(spec, cell, offset, raw, opts))
             offset += len(raw)
+        if slack:
+            out.extend(_dump_slack_lines(offset, slack, opts))
     return "\n".join(out) + "\n"
