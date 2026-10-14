@@ -8,7 +8,9 @@ Covers:
   default is not None -- the case a plain `is None` test cannot detect, and
   the reason `_project_config` parses argv a second time
 - `--config FILE` / `--no-config` work on either side of the subcommand, and
-  do not confuse the legacy "bare filename means parse" rewrite
+  do not confuse the legacy "bare filename means parse" rewrite, and an
+  abbreviation of either (`--no-conf`, `--conf=FILE`) is an error rather
+  than silently ignored
 - A malformed or missing config file is a clean exit-1 error naming it,
   never a silent fallback to built-in defaults
 - The `config` subcommand reports the file and only what it actually sets
@@ -219,6 +221,34 @@ def test_config_without_a_path_is_an_error(project):
         with pytest.raises(SystemExit) as exc:
             main()
     assert exc.value.code == 1
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [["--no-conf"], ["--no"], ["--conf=other.yml"], ["--conf", "other.yml"]],
+)
+@pytest.mark.parametrize("side", ["before", "after"])
+def test_abbreviated_config_flags_are_rejected(project, capsys, spelling, side):
+    # Only the exact spellings are stripped by extract_config_flags(). An
+    # abbreviation argparse quietly accepted would leave the discovered
+    # cobol.yml in force while the user believed they had switched it off
+    # or replaced it (issue #323).
+    argv = (
+        [*spelling, "lint", "PROG.cbl"]
+        if side == "before"
+        else ["lint", "PROG.cbl", *spelling]
+    )
+    with patch("cobolparser.cli.parse._cmd_lint") as cmd:
+        with patch("sys.argv", ["cobol-parser", *argv]):
+            with pytest.raises(SystemExit) as exc:
+                main()
+    assert exc.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
+    cmd.assert_not_called()
+
+
+def test_top_level_parser_does_not_accept_abbreviations():
+    assert _build_parser().allow_abbrev is False
 
 
 def test_missing_explicit_config_file_is_a_clean_error(project, capsys):
