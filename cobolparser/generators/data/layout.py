@@ -499,6 +499,33 @@ def expand_condition_values(
     return list(dict.fromkeys(v for v in values if v != ""))
 
 
+def condition_ranges(raw_values: list[str]) -> list[tuple[str, str]]:
+    """Every ``THRU`` range of one condition name, as ``(from, to)`` written.
+
+    The parser records ``VALUE 2 THRU 4`` as ``["2", "THROUGH:4"]``; this
+    pairs each range end with the literal before it, quotes stripped and
+    nothing expanded. :func:`expand_condition_values` lists a range only in
+    part (an integer range up to the expansion cap, any other range just its
+    endpoints), so these pairs are the only full statement of what the
+    condition admits.
+    """
+    ranges: list[tuple[str, str]] = []
+    previous: str | None = None
+    for raw in raw_values:
+        match = _THROUGH_RE.match(raw)
+        if match is None:
+            previous = (
+                None if all_literal_operand(raw) is not None else
+                _strip_literal_quotes(raw)
+            )
+            continue
+        end = _strip_literal_quotes(match.group(1))
+        if previous is not None:
+            ranges.append((previous, end))
+        previous = end
+    return ranges
+
+
 def condition_values_exhaustive(raw_values: list[str], decimal_digits: int) -> bool:
     """Whether :func:`expand_condition_values` lists *every* value the
     condition name admits, for a field with *decimal_digits* decimals.

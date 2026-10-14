@@ -14,12 +14,16 @@ its program-wide absolute memory position -- what a hover popup needs is
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ...models.data_items import CobolDataItem, ConditionNameItem
 from ...models.program import CobolProgram, CobolSection
-from .layout import expand_condition_values
+from .layout import (
+    condition_ranges,
+    condition_values_exhaustive,
+    expand_condition_values,
+)
 from .storage import BINARY_USAGES, FLOAT_USAGES, POINTER_USAGES, storage_size
 
 _SECTION_NAMES = ("FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE")
@@ -40,6 +44,14 @@ class LayoutItem:
     occurs: dict[str, int] | None
     condition_values: list[str]
     parent_qualified_name: str | None
+    #: A level-88's ``THRU`` ranges as written, ``(from, to)``.
+    #: ``condition_values`` lists a range only in part, so this is the one
+    #: complete statement of what the condition admits.
+    condition_ranges: list[tuple[str, str]] = field(default_factory=list)
+    #: Whether ``condition_values`` is every value the condition admits. Not
+    #: serialized: :func:`compute_program_data_items` turns a False into an
+    #: ``unresolved`` entry instead.
+    condition_values_complete: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +68,9 @@ class LayoutItem:
             "occurs": self.occurs,
             "condition_values": self.condition_values,
             "parent_qualified_name": self.parent_qualified_name,
+            "condition_ranges": [
+                {"from": low, "to": high} for low, high in self.condition_ranges
+            ],
         }
 
 
@@ -73,6 +88,41 @@ def _direct_data_children(item: CobolDataItem) -> list[CobolDataItem]:
 
 def _direct_condition_children(item: CobolDataItem) -> list[ConditionNameItem]:
     return [c for c in item.children if isinstance(c, ConditionNameItem)]
+
+
+def _condition_item(
+    cond: ConditionNameItem,
+    parent: CobolDataItem,
+    parent_qualified_name: str,
+    byte_offset: int | None,
+    byte_length: int,
+    offset_ambiguous: bool,
+) -> LayoutItem:
+    """The LayoutItem for level-88 *cond* declared under *parent*."""
+    ranges = condition_ranges(cond.values)
+    decimal_digits = (
+        (parent.picture_clause.decimal_digits or 0) if parent.picture_clause else 0
+    )
+    return LayoutItem(
+        name=cond.name,
+        qualified_name=f"{parent_qualified_name}.{cond.name}",
+        level=88,
+        is_group=False,
+        picture=None,
+        usage=None,
+        byte_offset=byte_offset,
+        byte_length=byte_length,
+        offset_ambiguous=offset_ambiguous,
+        redefines_chain=[],
+        occurs=None,
+        condition_values=expand_condition_values(cond.values),
+        parent_qualified_name=parent_qualified_name,
+        condition_ranges=ranges,
+        # Only a THRU range makes the list partial here: a figurative
+        # constant (VALUE SPACES) is listed as its word, which is the value.
+        condition_values_complete=not ranges
+        or condition_values_exhaustive(cond.values, decimal_digits),
+    )
 
 
 def _find_misnested_level_77_items(item: CobolDataItem) -> list[CobolDataItem]:
@@ -286,20 +336,13 @@ def _layout_item(
 
     for cond in _direct_condition_children(item):
         out.append(
-            LayoutItem(
-                name=cond.name,
-                qualified_name=f"{qualified_name}.{cond.name}",
-                level=88,
-                is_group=False,
-                picture=None,
-                usage=None,
-                byte_offset=start_offset,
-                byte_length=one_occurrence_length,
-                offset_ambiguous=item_ambiguous,
-                redefines_chain=[],
-                occurs=None,
-                condition_values=expand_condition_values(cond.values),
-                parent_qualified_name=qualified_name,
+            _condition_item(
+                cond,
+                item,
+                qualified_name,
+                start_offset,
+                one_occurrence_length,
+                item_ambiguous,
             )
         )
 
@@ -356,21 +399,7 @@ def compute_record_layout(record: CobolDataItem) -> list[LayoutItem]:
     # flag idiom) would be silently dropped -- mirror _layout_item's
     # condition-children loop here for the root itself.
     root_conditions = [
-        LayoutItem(
-            name=cond.name,
-            qualified_name=f"{record.name}.{cond.name}",
-            level=88,
-            is_group=False,
-            picture=None,
-            usage=None,
-            byte_offset=0,
-            byte_length=record_length,
-            offset_ambiguous=False,
-            redefines_chain=[],
-            occurs=None,
-            condition_values=expand_condition_values(cond.values),
-            parent_qualified_name=record.name,
-        )
+        _condition_item(cond, record, record.name, 0, record_length, False)
         for cond in _direct_condition_children(record)
     ]
     out[1:1] = root_conditions
@@ -460,6 +489,7 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
                     record, siblings_by_name
                 )
             _flag_sync_slack(record, record_layout, unresolved)
+            _flag_partial_condition_values(record_layout, unresolved)
             for layout_item in record_layout:
                 items.append(layout_item.to_dict())
 
@@ -469,10 +499,27 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
                     misnested_layout[0].redefines_chain = _walk_redefines_chain(
                         misnested, siblings_by_name
                     )
+                _flag_partial_condition_values(misnested_layout, unresolved)
                 for layout_item in misnested_layout:
                     items.append(layout_item.to_dict())
 
     return {"items": items, "unresolved": unresolved}
+
+
+def _flag_partial_condition_values(
+    layout: list[LayoutItem], unresolved: list[str]
+) -> None:
+    """Say in *unresolved* which level-88s list only part of their values --
+    without it, a reader of ``condition_values`` takes 66 or 'M' to be
+    outside ``VALUE 1 THRU 99999`` or ``VALUE 'A' THRU 'Z'``."""
+    for entry in layout:
+        if entry.condition_values_complete:
+            continue
+        spans = ", ".join(f"{low} THRU {high}" for low, high in entry.condition_ranges)
+        unresolved.append(
+            f"{entry.qualified_name}: condition_values lists only part of "
+            f"VALUE {spans}; condition_ranges holds the full range"
+        )
 
 
 def _flag_sync_slack(

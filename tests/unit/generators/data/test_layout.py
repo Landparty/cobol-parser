@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from cobolparser.generators.data.copybook import parse_copybook_records
-from cobolparser.generators.data.layout import expand_condition_values, flatten_record
+from cobolparser.generators.data.layout import (
+    condition_ranges,
+    expand_condition_values,
+    flatten_record,
+)
 from cobolparser.generators.data.options import DataGeneratorOptions
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import PictureClause
@@ -113,3 +117,21 @@ def test_blank_when_zero_is_carried_on_the_field_spec():
     )[0]
     specs = flatten_record(record, DataGeneratorOptions())
     assert [s.blank_when_zero for s in specs] == [True, False]
+
+
+class TestConditionRanges:
+    def test_pairs_each_range_end_with_the_literal_before_it(self):
+        assert condition_ranges(["1", "THROUGH:3", "7", "9", "THROUGH:12"]) == [
+            ("1", "3"),
+            ("9", "12"),
+        ]
+
+    def test_quotes_are_stripped_and_nothing_is_expanded(self):
+        assert condition_ranges(['"A"', 'THROUGH:"Z"']) == [("A", "Z")]
+        assert condition_ranges(["1", "THROUGH:999999"]) == [("1", "999999")]
+
+    def test_no_range(self):
+        assert condition_ranges(['"Y"', "SPACES"]) == []
+
+    def test_a_range_end_with_no_start_is_skipped(self):
+        assert condition_ranges(['ALL "X"', "THROUGH:Z"]) == []
