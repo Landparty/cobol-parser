@@ -288,6 +288,12 @@ class FieldSpec:
     #: the decimal point and ``.`` an insertion character, so an edited
     #: field displays ``1.234,56``. Read off the item's own ``PictureClause``.
     decimal_point_is_comma: bool = False
+    #: The exact bytes each hex literal (``VALUE X'C1C2'``, a level-88 ``X'FF'``)
+    #: declared for this field names, keyed by the text cell that stands for
+    #: it (the bytes read as Latin-1, cut to the field's width).  A hex
+    #: literal is bytes, not characters: :func:`.encoding.encode_field` writes
+    #: these verbatim instead of re-encoding the cell in the record charset.
+    literal_bytes: dict[str, bytes] = field(default_factory=dict)
 
     @property
     def scaling_positions(self) -> int:
@@ -579,6 +585,41 @@ def _condition_values(item: CobolDataItem) -> list[str]:
         values.extend(expand_condition_values(child.values, width))
     # Preserve first-seen order while removing duplicates.
     return list(dict.fromkeys(v for v in values if v != ""))
+
+
+def hex_literal_bytes(value: str) -> bytes | None:
+    """The bytes an ``X'..'`` literal names, or ``None`` for any other text
+    (another typed literal, a quoted one, hex that does not decode)."""
+    stripped = value.strip()
+    if len(stripped) < 3 or stripped[0] not in "xX" or stripped[1] not in "\"'":
+        return None
+    try:
+        return bytes.fromhex(unquote_literal(stripped[1:]))
+    except ValueError:
+        return None
+
+
+def _literal_bytes(item: CobolDataItem, width: int) -> dict[str, bytes]:
+    """Every hex literal *item* declares -- its VALUE clause and its level-88
+    values -- as ``{text cell: bytes}``; see :attr:`FieldSpec.literal_bytes`.
+
+    The key is the literal's Latin-1 text cut to *width*, the same cut
+    ``ValueFactory`` applies when it writes the literal into a cell, so the
+    encoder finds the cell it was handed.
+    """
+    raws: list[str] = [item.value_clause] if item.value_clause else []
+    for child in item.children:
+        if isinstance(child, ConditionNameItem):
+            raws.extend(str(value) for value in child.values)
+    found: dict[str, bytes] = {}
+    for raw in raws:
+        data = hex_literal_bytes(raw)
+        if not data:
+            continue
+        if width > 0:
+            data = data[:width]
+        found.setdefault(data.decode("latin-1"), data)
+    return found
 
 
 def _strip_literal_quotes(value: str) -> str:
@@ -889,6 +930,7 @@ def _flatten_into(
                 is_signed=_is_signed(picture),
                 value_clause=item.value_clause,
                 condition_values=_condition_values(item),
+                literal_bytes=_literal_bytes(item, size),
                 subscripts=occ,
                 redefines=inherited_redefines or redefines_label,
                 is_filler=item.is_filler,
