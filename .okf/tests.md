@@ -1303,3 +1303,11 @@ ZERO is pinned there too, along with `callee_names` itself.
 codebase-graph, and
 `test_boundary_inventory.py::TestDynamicCallSentinelCandidates` pins the
 "no possible target values resolved" note when only sentinels remain.
+
+## 2026-10-14
+
+`tests/unit/analysis/test_ast_diff.py::test_equivalent_picture_spellings_are_not_a_change`
+/ `test_usage_synonyms_are_not_a_change` pin that `diff` compares a PICTURE
+by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
+(`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
+`COMP-5` is still a change.

@@ -3206,6 +3206,15 @@ sides run through `SequenceMatcher` and only those outside its matching blocks
 are reported moved — so inserting one paragraph at the top does not report every
 following paragraph as moved, and a pure reformat reports nothing at all.
 
+**Spellings are not changes** (2026-10-14 bug hunt). A PICTURE is compared by
+its character positions, repeat factors written out (`_picture_positions`:
+`X(2)` = `XX`, `S9(3)V9(2)` = `S999V99`), and a USAGE by its storage format
+(`_canonical_usage`, the `_storage.py` synonym sets: `COMP` = `BINARY` =
+`COMP-4` = `COMPUTATIONAL`, `COMP-3` = `PACKED-DECIMAL`). `COMP-5` stays
+distinct from `COMP` (no truncation to the PICTURE). The change still reports
+both strings as coded. A VALUE is still compared as written (`+12` vs `12`,
+`'AB'` vs `'AB  '` on `PIC X(4)` read as changes).
+
 Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
 IF, EVALUATE, SEARCH, and (review follow-up) OPEN, EXEC SQL, EXEC CICS, COMPUTE,
 INSPECT, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its

@@ -831,6 +831,43 @@ def test_picture_changed():
     assert changes[0].new == "X(9)"
 
 
+def test_equivalent_picture_spellings_are_not_a_change():
+    # `X(2)` and `XX` (and `S9(3)V9(2)` / `S999V99`) are one PICTURE; a
+    # rewrite from one spelling to the other used to read as picture-changed.
+    report = _data_diff(
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  WS-A PIC X(2).\n"
+        "       01  WS-B PIC S9(3)V9(2).\n"
+        "       01  WS-C PIC 9(4).\n",
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  WS-A PIC XX.\n"
+        "       01  WS-B PIC S999V99.\n"
+        "       01  WS-C PIC 9(5).\n",
+    )
+
+    changes = _of_kind(report, "picture-changed")
+    assert [(c.symbol, c.old, c.new) for c in changes] == [("WS-C", "9(4)", "9(5)")]
+
+
+def test_usage_synonyms_are_not_a_change():
+    report = _data_diff(
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  WS-A PIC S9(5) COMP-3.\n"
+        "       01  WS-B PIC S9(4) COMP.\n"
+        "       01  WS-C PIC S9(4) COMPUTATIONAL-4.\n"
+        "       01  WS-D PIC S9(4) COMP.\n",
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  WS-A PIC S9(5) PACKED-DECIMAL.\n"
+        "       01  WS-B PIC S9(4) BINARY.\n"
+        "       01  WS-C PIC S9(4) COMP.\n"
+        "       01  WS-D PIC S9(4) COMP-5.\n",
+    )
+
+    # COMP-5 is not truncated to its PICTURE, so COMP -> COMP-5 is real.
+    changes = _of_kind(report, "usage-changed")
+    assert [(c.symbol, c.old, c.new) for c in changes] == [("WS-D", "COMP", "COMP-5")]
+
+
 def test_usage_level_and_value_changed():
     report = _data_diff(
         "       WORKING-STORAGE SECTION.\n"
