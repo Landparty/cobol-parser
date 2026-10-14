@@ -1303,3 +1303,68 @@ class TestCallMayWriteSharedStorage:
             ),
         )
         assert fold.known == {"WS-A": "4"}
+
+
+class TestInspectAndExecWrites:
+    """Issue #317: writes that live outside `.operands` must poison."""
+
+    def test_inspect_tallying_counter_is_forgotten(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 'A,B,C' TO WS-NAME.\n"
+            "           MOVE ZERO TO WS-A.\n"
+            "           MOVE 7 TO WS-B.\n"
+            "           INSPECT WS-NAME TALLYING WS-A FOR ALL ','.\n"
+            "           DISPLAY WS-A.\n"
+            "           DISPLAY WS-B.\n"
+        )
+        assert fold.known == {"WS-B": "7"}
+
+    def test_inspect_tallying_for_characters_counter_is_forgotten(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 1 TO WS-A.\n"
+            "           INSPECT WS-NAME TALLYING WS-A FOR CHARACTERS.\n"
+            "           DISPLAY WS-A.\n"
+        )
+        assert fold.known == {}
+
+    def test_exec_cics_into_length_resp_are_forgotten(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 'ABC' TO WS-NAME.\n"
+            "           MOVE 0 TO WS-A.\n"
+            "           MOVE 0 TO WS-B.\n"
+            "           MOVE 5 TO WS-TOTAL.\n"
+            "           EXEC CICS RECEIVE INTO(WS-NAME) LENGTH(WS-A)\n"
+            "                RESP(WS-B) END-EXEC.\n"
+            "           DISPLAY WS-NAME.\n"
+            "           DISPLAY WS-A.\n"
+            "           DISPLAY WS-B.\n"
+            "           DISPLAY WS-TOTAL.\n"
+        )
+        assert fold.known == {"WS-TOTAL": "5"}
+
+    def test_exec_dli_into_is_forgotten(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 'ABC' TO WS-NAME.\n"
+            "           MOVE 5 TO WS-TOTAL.\n"
+            "           EXEC DLI GU USING PCB(1) SEGMENT(ROOT)\n"
+            "                INTO(WS-NAME) END-EXEC.\n"
+            "           DISPLAY WS-NAME.\n"
+            "           DISPLAY WS-TOTAL.\n"
+        )
+        assert fold.known == {"WS-TOTAL": "5"}
+
+    def test_exec_cics_inside_a_branch_is_forgotten(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           MOVE 0 TO WS-A.\n"
+            "           IF WS-FLAG = 'Y'\n"
+            "               EXEC CICS RECEIVE INTO(WS-NAME) LENGTH(WS-A)\n"
+            "               END-EXEC\n"
+            "           END-IF.\n"
+            "           DISPLAY WS-A.\n"
+        )
+        assert fold.known == {}

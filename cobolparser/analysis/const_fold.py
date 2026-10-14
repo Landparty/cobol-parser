@@ -1211,6 +1211,9 @@ def _range_statements(
 # -- "what does this block write" (IF/EVALUATE arms, loop bodies) -------------
 
 
+_KEYWORD_ARGUMENT_RE = re.compile(r"^[A-Z0-9-]+\s*\((.+)\)$", re.IGNORECASE)
+
+
 def _write_targets(stmt: Any) -> list[str]:
     if isinstance(stmt, MoveStatement):
         return list(stmt.targets)
@@ -1267,6 +1270,27 @@ def _write_targets(stmt: Any) -> list[str]:
             value = entry.get(key)
             if isinstance(value, str) and value:
                 names.append(value)
+    # INSPECT ... TALLYING: each counter is incremented in place.
+    for clause in getattr(stmt, "tallying_clauses", None) or []:
+        if isinstance(clause, dict):
+            counter = clause.get("counter")
+            if isinstance(counter, str) and counter:
+                names.append(counter)
+    # EXEC CICS keeps its data names in `.options` (INTO/SET/LENGTH/RESP/
+    # RESP2/ITEM/...), never in `.operands`. Which options a command writes
+    # depends on the command, so every option value is taken as written; a
+    # literal or a FROM source that does not change only costs an
+    # expectation, never a wrong one.
+    options = getattr(stmt, "options", None)
+    if isinstance(options, dict):
+        names.extend(v for v in options.values() if isinstance(v, str) and v)
+    # EXEC DLI keeps `KEYWORD(arg)` strings in `.arguments` (INTO(...),
+    # KEYFEEDBACK(...), FEEDBACK(...)); same rule as the CICS options.
+    for argument in getattr(stmt, "arguments", None) or []:
+        if isinstance(argument, str):
+            match = _KEYWORD_ARGUMENT_RE.match(argument)
+            if match:
+                names.append(match.group(1))
     return names
 
 
