@@ -3209,6 +3209,15 @@ header; without it a tagged member's comment lines reached the lexer and a
 `#` in them failed the parse. Details in `preprocessing.md` (tagged
 sequence area section).
 
+# UNSTRING optional noise words (issue #400, 2026-10-14)
+
+`UnstringStatementParser` treats `ON` (before `OVERFLOW`), `WITH` (before
+`POINTER`) and `IN` (after `TALLYING`) as optional, like the STRING parser
+already did. `_parse_into_targets` stops at `POINTER` and `OVERFLOW` too, so
+neither is folded into the INTO list; a bare `OVERFLOW` opens the
+`on_overflow` handler; `TALLYING C` sets `tallying_variable` with or without
+`IN`. Tests: `tests/unit/test_unstring_gaps.py::TestUnstringOptionalKeywords`.
+
 ## Profiling (`profiling.py`)
 
 `ProfilerContext(top_n=50, prof_output=None)` wraps any call with cProfile,

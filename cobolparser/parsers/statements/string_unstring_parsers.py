@@ -373,13 +373,14 @@ class UnstringStatementParser(IStatementParser):
             elif val == "TALLYING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
+                # ``IN`` is optional: a bare ``TALLYING C`` is the same clause.
                 nxt = token_stream.peek()
                 if nxt and _val(nxt) == "IN":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    tally = _consume_operand(token_stream)
-                    if tally is not None:
-                        stmt.set_tallying_variable(tally)
+                tally = _consume_operand(token_stream)
+                if tally is not None:
+                    stmt.set_tallying_variable(tally)
             elif val in ("ON", "NOT") and not _starts_overflow_phrase(token_stream):
                 # An enclosing statement's phrase (``NOT AT END``, ``NOT ON
                 # EXCEPTION``, ...): this statement ends here.
@@ -408,6 +409,13 @@ class UnstringStatementParser(IStatementParser):
                     overflow_stmts = _parse_overflow_stmts(token_stream)
                     if overflow_stmts:
                         stmt.set_not_on_overflow_clause(overflow_stmts)
+            elif val == "OVERFLOW":
+                # Standalone OVERFLOW (without ON prefix)
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                overflow_stmts = _parse_overflow_stmts(token_stream)
+                if overflow_stmts:
+                    stmt.set_on_overflow_clause(overflow_stmts)
             else:
                 token_stream.consume()
 
@@ -435,8 +443,10 @@ class UnstringStatementParser(IStatementParser):
             tval = _val(tgt)
             if tgt.type == TokenType.PERIOD or tval in (
                 "WITH",
+                "POINTER",
                 "TALLYING",
                 "ON",
+                "OVERFLOW",
                 "NOT",
                 "END-UNSTRING",
             ):
