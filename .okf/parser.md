@@ -422,7 +422,7 @@ sibling) and a dedicated anonymous-item case.
 | `read_parser.py` | READ |
 | `report_writer_parsers.py` | INITIATE, TERMINATE, SUPPRESS (Report Writer; GENERATE is in `simple_statement_parsers.py`; 2026-09-02) |
 | `rewrite_parser.py` | REWRITE |
-| `search_parser.py` | SEARCH |
+| `search_parser.py` | SEARCH (each WHEN also gets a `condition_tree` from the shared `build_condition_expression`, next to its raw `condition` text, so AND/OR conditions are structural; #348, 2026-10-14) |
 | `set_parser.py` | SET |
 | `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE (RELEASE `FROM` / RETURN `INTO` operands go through `consume_optional_qualifiers`, as MOVE's do: `WS-REC OF GRP`, `TBL ( I )`; before 2026-09-28 only the first word was kept) |
 | `sort_merge_parsers.py` | SORT, MERGE |
@@ -892,6 +892,17 @@ so gating the stop on `for_varying` avoids truncating a condition that
 happens to contain an `AFTER` token (Copilot review on PR #79 caught the
 original unconditional stop). Pinned by `::TestH2PerformVaryingAfter`.
 
+**PERFORM UNTIL drops layout tokens (#347, 2026-10-14):** both UNTIL
+token loops (`_collect_until_condition_tokens` and
+`_parse_until_condition_only`) consume WHITESPACE / NEWLINE / CONTINUATION /
+COMMENT tokens without appending them, as the IF and EVALUATE parsers do;
+`_make_until_condition_expression` also drops whitespace-only strings as a
+second guard. A condition ending at a line break (no period) used to end in
+`"\n"`, so a bare condition-name, `NOT cond`, a class test or `( ... )`
+fell back to a raw COMPARISON with `left_operand=None` -- 11 of the 14
+enterprise-sample PERFORM UNTIL guards. Pinned by
+`tests/unit/test_perform_until_newline.py`.
+
 **All-digit procedure names / PERFORM THRU numbering (2026-07-20, extended
 2026-08-21):** COBOL permits procedure names made entirely of digits, and
 `PERFORM 1000 THRU 1999` numbering is idiomatic in THRU-style code. Those
@@ -938,6 +949,16 @@ a paragraph by name:
 Pinned by `tests/unit/test_perform_thru_numeric.py` and
 `tests/regression/test_real_corpus_parse_failures.py`
 (`TestAlterNumericProcedureNames`, `TestGoToDependingOnNumericTargets`).
+
+**`GO TO ... DEPENDING` without ON (issue #377).** `ON` is optional in
+`GO TO a b DEPENDING ws-x` (NIST NC102A), but `_parse_depending_on_clause`
+returned as soon as the word after `DEPENDING` was not `ON`, leaving the
+variable in the stream. It was re-parsed as a phantom paragraph, and the
+jump table read as an unconditional GO TO its first target (dead-code
+called the fall-through paragraph dead, program-flow missed the other
+targets, unused-variables flagged the variable, complexity scored 1).
+`ON` is now consumed only when present. Pinned by
+`tests/regression/test_go_depending_without_on.py`.
 
 **ENVIRONMENT division SELECT clauses (`environment.py`, audit 2026-07-07
 H4/H5):** SELECT parsing captures ALTERNATE RECORD KEY (repeatable, WITH
@@ -1009,6 +1030,16 @@ breaks between their own words (`_try_consume_word`); only one break,
 directly before the value, was tolerated. Still open: a qualified `RECORD
 KEY IS K OF R` keeps only `K` (the rest is warned as unparsed).
 `tests/regression/test_select_optional_organization_word.py`.
+
+**SELECT separators (`environment_select.py`, 2026-10-14, issue #342):** a
+separator comma/semicolon is skipped (`_is_separator`) inside the ASSIGN
+collector, and `_skip_select_separators` skips one before the second (VSAM)
+FILE STATUS variable. `ASSIGN TO INDD,` gave `assign_to == "INDD ,"`, so
+`normalize_ddname` returned `","` and the lineage port read `file:,`;
+`FILE STATUS IS FS1, FS2` took `,` as `file_status_vsam` and warned `FS2`
+as unparsed. Tests: `test_environment_division_parser.py`
+(`test_separator_comma_and_semicolon_not_kept_in_names`) and
+`test_field_lineage.py` (`test_separator_after_assign_names_the_dd_port`).
 
 # Statement-coverage audit (2026-09-02)
 
@@ -3208,6 +3239,15 @@ entry). The second anchor exists for copybooks, which have no division
 header; without it a tagged member's comment lines reached the lexer and a
 `#` in them failed the parse. Details in `preprocessing.md` (tagged
 sequence area section).
+
+# UNSTRING optional noise words (issue #400, 2026-10-14)
+
+`UnstringStatementParser` treats `ON` (before `OVERFLOW`), `WITH` (before
+`POINTER`) and `IN` (after `TALLYING`) as optional, like the STRING parser
+already did. `_parse_into_targets` stops at `POINTER` and `OVERFLOW` too, so
+neither is folded into the INTO list; a bare `OVERFLOW` opens the
+`on_overflow` handler; `TALLYING C` sets `tallying_variable` with or without
+`IN`. Tests: `tests/unit/test_unstring_gaps.py::TestUnstringOptionalKeywords`.
 
 ## Profiling (`profiling.py`)
 

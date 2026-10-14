@@ -269,6 +269,32 @@ class SelectClauseParser:
             token_stream.consume()
 
     @staticmethod
+    def _is_separator(token: Any) -> bool:
+        """Whether *token* is a separator comma or semicolon, which COBOL
+        lets a programmer write between any two words and which is never
+        part of a name (issue #342: ``ASSIGN TO INDD,`` parsed as
+        ``"INDD ,"``)."""
+        return bool(
+            token
+            and (
+                token.type.name in ("COMMA", "SEMICOLON")
+                or (token.value and token.value.strip() in (",", ";"))
+            )
+        )
+
+    @staticmethod
+    def _skip_select_separators(token_stream: ITokenStream) -> None:
+        """Skip whitespace and separator commas/semicolons."""
+        while not token_stream.is_empty():
+            token = token_stream.peek(0)
+            if not token:
+                break
+            if token.value and token.value.strip():
+                if not SelectClauseParser._is_separator(token):
+                    break
+            token_stream.consume()
+
+    @staticmethod
     def _next_word(token_stream: ITokenStream) -> str:
         """Upper-cased value of the first non-blank token after the next."""
         offset = 1
@@ -494,8 +520,8 @@ class SelectClauseParser:
             if not token:
                 break
 
-            # Skip whitespace
-            if not token.value.strip():
+            # Skip whitespace and separator commas/semicolons
+            if not token.value.strip() or self._is_separator(token):
                 token_stream.consume()
                 continue
 
@@ -659,8 +685,9 @@ class SelectClauseParser:
             )
 
         # Optional second status variable (VSAM return code, IBM extension):
-        # FILE STATUS IS ws-status ws-vsam-status
-        self._skip_select_blanks(token_stream)
+        # FILE STATUS IS ws-status ws-vsam-status (or ``ws-status,
+        # ws-vsam-status``: a separator comma is not the second variable)
+        self._skip_select_separators(token_stream)
         token = token_stream.peek(0)
         if (
             token
