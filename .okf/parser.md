@@ -346,6 +346,12 @@ width fill it -- see `expand_condition_values(raw, width)` in
 [generators.md](generators.md). Pinned by
 `tests/regression/test_level88_value_all.py`.
 
+A semicolon separates level-88 values exactly as a comma does
+(`VALUES 'A', 'B'; 'C'` -> `['A', 'B', 'C']`; `VALUE 'A' THRU 'C'; 'X' THRU
+'Z'` keeps both ranges). Before 2026-10-14 (issue #343) a `;` ended the list
+and the values after it were dropped. Pinned by
+`tests/regression/test_level_88_semicolon_separator.py`.
+
 **Multi-line clauses (`data_clauses.py` + `_data_fast.pyx`):** the lexer
 emits NEWLINE tokens, so any clause reader that peeks for an operand after
 consuming a keyword must skip NEWLINEs first or a line break between keyword
