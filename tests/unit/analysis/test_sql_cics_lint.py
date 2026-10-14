@@ -827,7 +827,10 @@ def test_a_bare_handle_condition_restores_the_default_action():
     assert len(_of_kind(report, KIND_CICS_NO_RESP)) == 1
 
 
-def test_ignore_condition_cancels_an_established_handler():
+def test_ignore_condition_error_counts_as_handling():
+    # IGNORE CONDITION means "take no action": nothing abends, execution
+    # continues at the next statement. It replaces the label handler and is
+    # credited the same way (issue #396).
     report = _analyze("""       MAIN-PARA.
            EXEC CICS HANDLE CONDITION ERROR(ERR-PARA)
            END-EXEC.
@@ -838,6 +841,61 @@ def test_ignore_condition_cancels_an_established_handler():
            GOBACK.
        ERR-PARA.
            DISPLAY 'CICS FAILED'.
+""")
+    assert _of_kind(report, KIND_CICS_NO_RESP) == []
+    assert report.unchecked == []
+
+
+def test_ignore_condition_without_prior_handler_reports_no_abend():
+    # The reproduction from issue #396.
+    report = _analyze("""       MAIN-PARA.
+           EXEC CICS IGNORE CONDITION NOTFND ERROR END-EXEC.
+           EXEC CICS READ FILE('CUSTFIL')
+                INTO(WS-NAME) RIDFLD(WS-KEY)
+           END-EXEC.
+           GOBACK.
+""")
+    assert _of_kind(report, KIND_CICS_NO_RESP) == []
+    assert report.unchecked == []
+
+
+def test_ignore_condition_of_a_specific_condition_is_unchecked():
+    report = _analyze("""       MAIN-PARA.
+           EXEC CICS IGNORE CONDITION NOTFND END-EXEC.
+           EXEC CICS READ FILE('CUSTFIL')
+                INTO(WS-NAME) RIDFLD(WS-KEY)
+           END-EXEC.
+           GOBACK.
+""")
+    assert _of_kind(report, KIND_CICS_NO_RESP) == []
+    assert len(report.unchecked) == 1
+    assert "NOTFND" in report.unchecked[0]
+
+
+def test_handle_condition_after_ignore_restores_the_default_abend():
+    report = _analyze("""       MAIN-PARA.
+           EXEC CICS IGNORE CONDITION ERROR END-EXEC.
+           EXEC CICS HANDLE CONDITION ERROR END-EXEC.
+           EXEC CICS READ FILE('CUSTFIL')
+                INTO(WS-NAME) RIDFLD(WS-KEY)
+           END-EXEC.
+           GOBACK.
+""")
+    assert len(_of_kind(report, KIND_CICS_NO_RESP)) == 1
+
+
+def test_push_handle_suspends_an_ignore_condition():
+    report = _analyze("""       MAIN-PARA.
+           EXEC CICS IGNORE CONDITION ERROR END-EXEC.
+           EXEC CICS PUSH HANDLE END-EXEC.
+           EXEC CICS READ FILE('CUSTFIL')
+                INTO(WS-NAME) RIDFLD(WS-KEY)
+           END-EXEC.
+           EXEC CICS POP HANDLE END-EXEC.
+           EXEC CICS READ FILE('CUSTFIL')
+                INTO(WS-NAME) RIDFLD(WS-KEY)
+           END-EXEC.
+           GOBACK.
 """)
     assert len(_of_kind(report, KIND_CICS_NO_RESP)) == 1
 

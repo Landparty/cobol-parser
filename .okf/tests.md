@@ -1375,3 +1375,12 @@ nesting and a bare `NOT SIZE ERROR` (#399).
 by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
 (`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
 `COMP-5` is still a change.
+
+## 2026-10-14 (issue #396)
+
+`tests/unit/analysis/test_sql_cics_lint.py` replaces the test that pinned
+`IGNORE CONDITION` as cancelling a handler with five that pin it as handling:
+`IGNORE CONDITION ERROR` (alone or replacing a label handler) clears
+`CICS_NO_RESP_HANDLING`, a narrower `IGNORE CONDITION NOTFND` goes to
+`unchecked`, a bare `HANDLE CONDITION ERROR` afterwards restores the finding,
+and `PUSH HANDLE` suspends an ignore like any other handler.
