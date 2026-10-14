@@ -14,6 +14,16 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-14 -- issue #395: dynamic-SQL trace respects statement order
+
+[analysis.md](analysis.md) (`SQL_DYNAMIC_CONCATENATION` row):
+`SqlCicsAnalyzer` no longer blames a PREPARE on a STRING the buffer was
+overwritten after. A whole-item `MOVE` written directly earlier in the
+PREPARE's paragraph cuts off every writer before it and elsewhere;
+`_WriterFlow` in `sql_cics_lint.py` owns the rule. Without such a MOVE the
+trace stays program-wide, so a statement built in a PERFORMed paragraph is
+still found.
+
 ## 2026-10-14 -- issue #330: literal operands keep their quotes
 
 [parser.md](parser.md) ("Literal Re-Quoting"), [analysis.md](analysis.md):

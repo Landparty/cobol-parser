@@ -75,6 +75,12 @@ Two conservatisms are worth stating plainly, since they shape the findings:
   and, transitively, every paragraph ``PERFORM``ed from it.  A check that
   happens only in the paragraph the program falls through into is not seen,
   and the statement is reported.
+* The text handed to ``PREPARE`` / ``EXECUTE IMMEDIATE`` is traced through
+  every ``STRING`` and ``MOVE`` into it anywhere in the program unit, unless
+  a ``MOVE`` written directly in the same paragraph, before the statement,
+  overwrites the whole item. Then only that MOVE and what can run between it
+  and the statement count (``_WriterFlow``), so a buffer reused for a
+  constant statement is not blamed on an earlier ``STRING``.
 
 Typical usage::
 
@@ -90,7 +96,7 @@ Typical usage::
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -445,6 +451,7 @@ class SqlCicsAnalyzer:
 
         declared_names = _declared_data_names(ast)
         writers = _assignment_index(ordered)
+        flow = _WriterFlow(blocks, by_name, writers)
 
         whenever: dict[str, str] = {}
         status_cache: dict[int, bool] = {}
@@ -463,7 +470,7 @@ class SqlCicsAnalyzer:
                     blocks=blocks,
                     by_name=by_name,
                     whenever=whenever,
-                    writers=writers,
+                    flow=flow,
                     declared_names=declared_names,
                     status_cache=status_cache,
                     report=report,
@@ -485,7 +492,7 @@ class SqlCicsAnalyzer:
         blocks: list[_Block],
         by_name: dict[str, list[int]],
         whenever: dict[str, str],
-        writers: dict[str, list[ASTNode]],
+        flow: _WriterFlow,
         declared_names: set[str],
         status_cache: dict[int, bool],
         report: SqlCicsReport,
@@ -514,7 +521,12 @@ class SqlCicsAnalyzer:
             )
 
         if _is_dynamic_text_statement(statement, upper):
-            _check_dynamic_sql(statement, writers, declared_names, report)
+            _check_dynamic_sql(
+                statement,
+                lambda name: flow.reaching(name, block_index, position),
+                declared_names,
+                report,
+            )
 
         if _is_non_executable(statement, upper):
             return
@@ -760,7 +772,7 @@ def _check_connect(
 
 def _check_dynamic_sql(
     statement: ExecSQLStatement,
-    writers: dict[str, list[ASTNode]],
+    reaching: Callable[[str], list[ASTNode]],
     declared_names: set[str],
     report: SqlCicsReport,
 ) -> None:
@@ -768,7 +780,9 @@ def _check_dynamic_sql(
 
     One finding per host variable, however many statements wrote it: the
     defect is that untrusted text reaches this ``PREPARE``, and every writer
-    that carries it there is listed in ``detail["assignments"]``.
+    that carries it there is listed in ``detail["assignments"]``. *reaching*
+    names the writers whose text can still be in the item when this
+    statement runs (see ``_WriterFlow``).
     """
     line = statement.location.line if statement.location else 0
     label = _sql_label(statement)
@@ -776,7 +790,7 @@ def _check_dynamic_sql(
         name = _normalize_name(raw)
         if not name:
             continue
-        assignments = writers.get(name)
+        assignments = reaching(name)
         if not assignments:
             report.unchecked.append(
                 f"line {line}: the statement text {label} executes comes from "
@@ -1204,6 +1218,107 @@ def _assignment_index(
                 if target:
                     writers.setdefault(target, []).append(statement)
     return writers
+
+
+class _WriterFlow:
+    """Which STRINGs and MOVEs can still be in an item at one statement.
+
+    The program-wide answer (every writer anywhere) is the fallback. It is
+    narrowed only when the item is overwritten whole, unconditionally,
+    earlier in the same paragraph: a ``MOVE`` to the bare item (no
+    reference modification, no subscript, not ``CORRESPONDING``) written
+    directly in the paragraph, so it always runs first. That MOVE replaces
+    every byte, so writers before it -- and writers elsewhere in the
+    program -- cannot reach the statement. What still can:
+
+    * the MOVE itself, and every writer between it and the statement in
+      the same paragraph (conditional ones included);
+    * every writer in a paragraph a ``PERFORM`` in that stretch runs,
+      transitively;
+    * when the statement sits inside an inline ``PERFORM`` loop, every
+      writer in that loop, since a later pass runs them before it.
+
+    A ``STRING`` never cuts the trace: it leaves the bytes past what it
+    transfers untouched, so earlier content can survive it.
+    """
+
+    def __init__(
+        self,
+        blocks: list[_Block],
+        by_name: dict[str, list[int]],
+        writers: dict[str, list[ASTNode]],
+    ) -> None:
+        self._blocks = blocks
+        self._by_name = by_name
+        self._writers = writers
+
+    def reaching(self, name: str, block_index: int, position: int) -> list[ASTNode]:
+        """The writers of *name* that can reach ``statements[position]``."""
+        everywhere = self._writers.get(name, [])
+        if not everywhere:
+            return []
+        block = self._blocks[block_index]
+        statements = block.statements
+        # The statement written directly in the paragraph that holds this
+        # one (itself, when it is not nested in an IF/EVALUATE/loop).
+        top = next(
+            (
+                index
+                for index in range(position, -1, -1)
+                if id(statements[index]) in block.unconditional
+            ),
+            None,
+        )
+        if top is None:
+            return everywhere
+        kill = next(
+            (
+                index
+                for index in range(top - 1, -1, -1)
+                if id(statements[index]) in block.unconditional
+                and _overwrites_whole(statements[index], name)
+            ),
+            None,
+        )
+        if kill is None:
+            return everywhere
+        top_end = next(
+            (
+                index
+                for index in range(top + 1, len(statements))
+                if id(statements[index]) in block.unconditional
+            ),
+            len(statements),
+        )
+        in_loop = any(
+            isinstance(node, PerformStatement)
+            and getattr(node, "inline_statements", None)
+            for node in statements[top:top_end]
+        )
+        stretch = statements[kill : top_end if in_loop else position]
+        reached = {id(node) for node in stretch}
+        visited: set[int] = set()
+        pending = [node for node in stretch if isinstance(node, PerformStatement)]
+        while pending:
+            perform = pending.pop()
+            for index in _perform_block_indexes(perform, self._by_name):
+                if index in visited:
+                    continue
+                visited.add(index)
+                for node in self._blocks[index].statements:
+                    reached.add(id(node))
+                    if isinstance(node, PerformStatement):
+                        pending.append(node)
+        return [writer for writer in everywhere if id(writer) in reached]
+
+
+def _overwrites_whole(statement: ASTNode, name: str) -> bool:
+    """True for a MOVE that replaces every byte of the item *name*."""
+    if not isinstance(statement, MoveStatement) or statement.is_corresponding:
+        return False
+    return any(
+        "(" not in raw and _normalize_name(raw) == name for raw in statement.targets
+    )
 
 
 def _declared_data_names(ast: CobolProgram) -> set[str]:
