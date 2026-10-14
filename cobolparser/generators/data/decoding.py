@@ -1091,10 +1091,15 @@ class RecordDecoder:
         # decided by the record format, not by the counter: RECFM=F reserves
         # them all. Resolved once, from the base view, because it is a
         # property of the file rather than of the view being read.
-        trim_tables = options.resolved_format(
+        fmt = options.resolved_format(
             [placed.spec for placed in self.views.base.fields],
             varying=self.varying is not None,
-        ).is_variable
+        )
+        trim_tables = fmt.is_variable
+        # A fixed-length file declared newline-separated: the separator is
+        # the only check that the lines really are LRECL bytes long, so it
+        # is checked rather than merely skipped when it happens to be there.
+        separator = options.record_separator if fmt is RecordFormat.FIXED else b""
         specs = [placed.spec for placed in chosen.fields]
         over_picture: list[str] = []
         position = 0
@@ -1131,6 +1136,19 @@ class RecordDecoder:
                             f"record: {extra} byte(s) after the last field "
                             f"(RDW body is {len(body)}, the layout reads {used})"
                         )
+                if separator:
+                    record_errors.extend(
+                        self._separator_errors(
+                            data,
+                            position,
+                            body,
+                            consumed,
+                            separator,
+                            chosen,
+                            fields,
+                            options,
+                        )
+                    )
                 for name in _binary_over_picture(fields, specs):
                     if name not in over_picture:
                         over_picture.append(name)
@@ -1291,6 +1309,43 @@ class RecordDecoder:
             # not a record -- the same verdict RECFM=F gives a short tail.
             return None
         return data[position : position + consumed], consumed, None
+
+    def _separator_errors(
+        self,
+        data: bytes,
+        position: int,
+        body: bytes,
+        consumed: int,
+        separator: bytes,
+        chosen: RecordView,
+        fields: list[DecodedField],
+        opts: EncodingOptions,
+    ) -> list[str]:
+        """Why a fixed-length record framed with a declared *separator* is
+        misframed: no separator after it (and not at the end of the data),
+        or a separator inside its DISPLAY bytes -- a shorter line that the
+        fixed length ran on into the next one."""
+        errors: list[str] = []
+        end_at = position + len(body)
+        if consumed == len(body) and end_at < len(data):
+            errors.append(
+                f"record: expected record separator at offset {end_at}; the "
+                f"lines are not {len(body)} bytes long, so the file is not "
+                "fixed-length at this record length"
+            )
+        base = self.views.base
+        framed = (
+            fields
+            if chosen is base
+            else decode_record(base, body, opts, trim_tables=False)
+        )
+        if not _separators_only_in_binary(body, separator, framed):
+            at = position + body.find(separator)
+            errors.append(
+                f"record: record separator at offset {at} inside non-binary "
+                "data; the line is shorter than the record length"
+            )
+        return errors
 
     @staticmethod
     def _separator_width(data: bytes, at: int, separator: bytes) -> int:
