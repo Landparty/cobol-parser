@@ -284,6 +284,100 @@ def test_c_and_f_sign_nibbles_are_equal_by_value_but_not_by_bytes():
     assert diff.expected_hex.endswith("5C") and diff.actual_hex.endswith("5F")
 
 
+def _cust_name_as(image: bytes, pad: bytes) -> bytes:
+    """Overwrite CUST-NAME (bytes 4..11) with *pad*, left to right."""
+    return image[:4] + pad + image[4 + len(pad) :]
+
+
+def test_low_values_padding_differs_from_space_padding():
+    """#287: the decoder strips trailing spaces *and* NULs, so 'ALICE' + NULs
+    decodes the same as 'ALICE' + spaces; the program tells them apart
+    (``IF NAME = SPACES``), so a values compare has to as well."""
+    decoder = RecordDecoder.from_copybook_source(CUSTOMER, opts=EBCDIC)
+    original = _image(CUSTOMER, [ALICE], EBCDIC)
+    # CUST-NAME is bytes 4..11: 'ALICE' then three EBCDIC spaces.
+    assert original[9:12] == b"\x40\x40\x40"
+    nulled = original[:9] + b"\x00\x00\x00" + original[12:]
+    expected = decoder.decode_bytes(original)
+    actual = decoder.decode_bytes(nulled)
+
+    result = compare_records(expected, actual, view=decoder.views.base)
+    assert not result.equal
+    [diff] = result.differences[0].fields
+    assert diff.name == "CUST-NAME"
+    assert diff.expected == diff.actual == "ALICE"
+    assert diff.expected_hex.endswith("40 40 40")
+    assert diff.actual_hex.endswith("00 00 00")
+    assert "x'C1D3C9C3C5404040' vs x'C1D3C9C3C5000000'" in result.to_text()
+
+
+def test_an_all_low_values_field_differs_from_an_all_spaces_one():
+    decoder = RecordDecoder.from_copybook_source(CUSTOMER, opts=EBCDIC)
+    original = _image(CUSTOMER, [ALICE], EBCDIC)
+    spaces = _cust_name_as(original, b"\x40" * 8)
+    nulls = _cust_name_as(original, b"\x00" * 8)
+
+    result = compare_records(
+        decoder.decode_bytes(spaces),
+        decoder.decode_bytes(nulls),
+        view=decoder.views.base,
+    )
+    [diff] = result.differences[0].fields
+    assert diff.name == "CUST-NAME"
+    assert diff.expected == diff.actual == ""
+
+
+def test_the_same_low_values_on_both_sides_stay_equal():
+    decoder = RecordDecoder.from_copybook_source(CUSTOMER, opts=EBCDIC)
+    nulls = _cust_name_as(_image(CUSTOMER, [ALICE], EBCDIC), b"\x00" * 8)
+    decoded = decoder.decode_bytes(nulls)
+    assert compare_records(decoded, decoded, view=decoder.views.base).equal
+
+
+FILLER_LAYOUT = """
+       01  R.
+           05  A       PIC X(3).
+           05  FILLER  PIC X(4).
+           05  E       PIC 9(3)/.
+           05  FILLER  PIC X(2).
+"""
+
+
+def test_low_values_in_filler_stay_equal_by_value():
+    """Uninitialised FILLER in an FD record is common and harmless, so it is
+    exempt from the LOW-VALUES-vs-spaces check; a bytes compare still sees
+    it."""
+    decoder = RecordDecoder.from_copybook_source(FILLER_LAYOUT)
+    spaces = decoder.decode_bytes(b"ABC    123/  ")
+    nulls = decoder.decode_bytes(b"ABC\x00\x00\x00\x00123/\x00\x00")
+
+    assert compare_records(spaces, nulls, view=decoder.views.base).equal
+    by_bytes = compare_records(
+        spaces, nulls, view=decoder.views.base, compare_bytes=True
+    )
+    assert [f.name for f in by_bytes.differences[0].fields] == [
+        "FILLER",
+        "FILLER_2",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("picture", "padded", "nulled"),
+    [
+        ("9(3)CR", b"123  ", b"123\x00\x00"),  # modelled edit
+        ("Z(3)9.9(2)E", b"  12.34 ", b"  12.34\x00"),  # read as plain text
+    ],
+)
+def test_low_values_padding_in_a_numeric_edited_field_differs(picture, padded, nulled):
+    decoder = RecordDecoder.from_copybook_source(
+        f"       01  R.\n           05  E  PIC {picture}.\n"
+    )
+    expected = decoder.decode_bytes(padded)
+    actual = decoder.decode_bytes(nulled)
+    assert expected.records[0].values() == actual.records[0].values()
+    assert not compare_records(expected, actual, view=decoder.views.base).equal
+
+
 def test_bytes_compare_reports_slack_no_field_covers():
     decoder = RecordDecoder.from_copybook_source(
         CUSTOMER, opts=EBCDIC, record_length=44
@@ -358,6 +452,53 @@ def test_variable_records_with_different_occurrence_counts():
     assert fields["LINE-QTY(2)"].expected is None  # absent from the short record
     assert fields["LINE-QTY(2)"].actual == "7"
     assert "(absent)" in result.to_text()
+
+
+SHORT_FIELDS = """
+       01  R.
+           05  K   PIC 9(2).
+           05  A   PIC X(4).
+           05  N   PIC 9(4).
+"""
+
+
+def _rdw_file(*bodies: bytes) -> bytes:
+    return b"".join(
+        (len(body) + 4).to_bytes(2, "big") + bytes(2) + body for body in bodies
+    )
+
+
+def _compare_variable(expected: bytes, actual: bytes, **kwargs):
+    opts = EncodingOptions(charset=Charset.ASCII, record_format=RecordFormat.VARIABLE)
+    decoder = RecordDecoder.from_copybook_source(SHORT_FIELDS, opts=opts)
+    return compare_records(
+        decoder.decode_bytes(_rdw_file(expected)),
+        decoder.decode_bytes(_rdw_file(actual)),
+        view=decoder.views.base,
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize(
+    ("expected", "actual", "field"),
+    [
+        (b"01ABC ", b"01ABC", "A"),  # text cut mid-field, same decoded value
+        (b"01ABCD0000", b"01ABCD0", "N"),  # '0000' and '0' both decode to 0
+        (b"01ABC", b"01ABC ", "A"),  # the short record on the expected side
+    ],
+)
+def test_a_field_cut_short_by_the_record_end_differs(expected, actual, field):
+    result = _compare_variable(expected, actual)
+
+    assert not result.equal
+    assert result.changed_count == 1
+    (difference,) = result.differences[0].fields
+    assert difference.name == field
+    assert difference.expected_hex != difference.actual_hex
+
+
+def test_fields_cut_at_the_same_place_stay_equal():
+    assert _compare_variable(b"01ABC", b"01ABC").equal
 
 
 # ---------------------------------------------------------------------------

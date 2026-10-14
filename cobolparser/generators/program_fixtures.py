@@ -16,6 +16,7 @@ import os
 import random
 import zlib
 
+from .._literals import is_quoted_literal
 from ..analysis.boundary_inventory import (
     Boundary,
     BoundaryInventoryAnalyzer,
@@ -24,9 +25,15 @@ from ..analysis.boundary_inventory import (
 )
 from ..analysis.const_fold import ConstantFolder
 from ..analysis.constraints import ConstraintExtractor
+from ..analysis.invocation_counts import (
+    InvocationCounts,
+    count_invocations,
+    is_plain_eof_loop,
+)
 from ..analysis.program_flow import ProgramFlowAnalyzer
 from ..models.program import CobolProgram
 from ..models.statements.call import CallStatement
+from ..models.statements.control import PerformStatement
 from .data.bundle import (
     BoundaryFixture,
     CoverageSummary,
@@ -76,19 +83,126 @@ def _min_rows_for(override: PlannedScenario) -> int:
     return max(override.row_witnesses) + 1
 
 
-def _call_count_expectation(ref: BoundaryRef, times: int) -> Expectation:
-    """Tier 1 (Phase 7): a structural expectation derivable exactly from the
-    scenario's own generated sequence -- the scenario *defines* how many
-    times a mocked boundary is invoked, so this is always safe, never a
-    guess. Emitted for every boundary that gets an actual fixture (STATUS_ONLY
-    included, always exactly once); an OUT-only boundary has nothing mocked
-    to count, so it gets no call_count expectation."""
-    return Expectation(
-        kind="call_count",
-        ref=f"{ref.category}:{ref.key}",
-        value=times,
-        note="derived from this scenario's own generated sequence length",
-    )
+#: Unchanged from when every count was taken from the sequence length, so
+#: bundles whose counts were already right stay byte-identical.
+_COUNT_NOTE = "derived from this scenario's own generated sequence length"
+
+
+@dataclasses.dataclass
+class _CallCounter:
+    """Tier 1 (Phase 7): how many times each mocked boundary is invoked.
+
+    A count is stated only when it is exact. For most boundaries that means
+    every statement invoking it sits on the program's unconditional path
+    (`count_invocations`): a CALL inside an IF arm, or an ACCEPT inside a
+    `PERFORM UNTIL`, runs a data-dependent number of times, so it gets no
+    `call_count` at all. The one data-dependent count that *is* exact is
+    the read-until-end-of-file idiom: a file whose READ sets the flag a
+    `PERFORM UNTIL` loop tests -- that flag alone, with nothing in the body
+    able to leave early, and the loop on the unconditional path -- is
+    read once per row of the scenario's own sequence plus once more to hit
+    end of file -- however many READ statements share the work (a priming
+    READ and the loop's own READ are one count, not two).
+    """
+
+    counts: InvocationCounts
+    #: (category, key) of every READ boundary driven by such an EOF loop.
+    eof_files: set[tuple[str, str]]
+
+    @classmethod
+    def build(
+        cls, ast: CobolProgram, index: ProgramLayoutIndex, report: BoundaryReport
+    ) -> _CallCounter:
+        counts = count_invocations(ast, report, index)
+        eof_files: set[tuple[str, str]] = set()
+        if any(b.ref.category == "READ" for b in report.boundaries):
+            constraints = ConstraintExtractor().extract(ast, index, report)
+            for seq in constraints.sequence_constraints:
+                _, _, line = seq.origin.partition("@")
+                if not line.isdigit():
+                    continue
+                loops = counts.statements_at(int(line), PerformStatement)
+                if (
+                    len(loops) == 1
+                    and counts.count_at(int(line), PerformStatement) == 1
+                    and is_plain_eof_loop(ast, loops[0], index)
+                ):
+                    eof_files.add((seq.boundary.category, seq.boundary.key))
+        return cls(counts=counts, eof_files=eof_files)
+
+    def insert(
+        self,
+        report: BoundaryReport,
+        scenario: Scenario,
+        anchors: dict[tuple[str, str], int],
+    ) -> None:
+        """Put each count where its boundary's own expectations start.
+
+        *anchors* maps a (category, key) to the index in
+        `scenario.expectations` where the first of its boundaries that got a
+        fixture began adding expectations -- the position a per-boundary
+        count always had, so bundles keep their order.
+        """
+        found = self.expectations(report, scenario)
+        ordered = sorted(found, key=lambda group: anchors.get(group, 0))
+        for inserted, group in enumerate(ordered):
+            scenario.expectations.insert(anchors.get(group, 0) + inserted, found[group])
+
+    def expectations(
+        self, report: BoundaryReport, scenario: Scenario
+    ) -> dict[tuple[str, str], Expectation]:
+        """One `call_count` per mocked (category, key) whose count is exact.
+
+        A boundary with no fixture in *scenario* (OUT-only, or nothing
+        generatable) has nothing mocked to count, so it gets none.
+        """
+        groups: dict[tuple[str, str], list[BoundaryRef]] = {}
+        for boundary in report.boundaries:
+            ref = boundary.ref
+            groups.setdefault((ref.category, ref.key), []).append(ref)
+        expectations: dict[tuple[str, str], Expectation] = {}
+        for group, refs in groups.items():
+            fixtures = [
+                f for f in scenario.fixtures if (f.ref.category, f.ref.key) == group
+            ]
+            if not fixtures:
+                continue
+            counted = [self.counts.for_boundary(ref) for ref in refs]
+            times: int | None = None
+            if all(count is not None for count in counted):
+                times = sum(count for count in counted if count is not None)
+            elif group in self.eof_files:
+                lengths = {len(f.sequence) for f in fixtures}
+                if len(lengths) == 1:
+                    times = lengths.pop() + 1
+            if times is None:
+                continue
+            expectations[group] = Expectation(
+                kind="call_count",
+                ref=f"{group[0]}:{group[1]}",
+                value=times,
+                note=_COUNT_NOTE,
+            )
+        return expectations
+
+
+def _drop_failure_path_counts(
+    expectations: list[Expectation], planned: PlannedScenario
+) -> list[Expectation]:
+    """Remove the tier-1 counts a status override makes untrue (#318).
+
+    A scenario that fails a boundary (OPEN status 35, READ INVALID KEY 23,
+    CALL ON EXCEPTION, SQLCODE 100) sends the program down its error path,
+    where the downstream READ loop, CLOSE or WRITE may run zero times or a
+    different number of times. The boundary order here is source order, not
+    execution order, so no other boundary is provably *before* the failure:
+    every count but the overridden boundary's own is dropped. The overridden
+    one keeps its count only when it is one invocation by construction (an
+    OPEN, a CALL, an SQL statement); a READ's count comes from its generated
+    row sequence, which a failing READ does not consume.
+    """
+    kept_refs = {key for key in planned.status_overrides if not key.startswith("READ:")}
+    return [e for e in expectations if e.kind != "call_count" or e.ref in kept_refs]
 
 
 def _demote_violated_arms(
@@ -159,6 +273,8 @@ class ProgramFixtureGenerator:
         )
         layouts: dict[str, list[FieldSpec]] = {}
         unresolved: list[str] = list(report.unresolved)
+        counter = _CallCounter.build(ast, index, report)
+        anchors: dict[tuple[str, str], int] = {}
 
         for boundary in report.boundaries:
             fixture, expectations, extra_unresolved = self._build_fixture(
@@ -166,8 +282,13 @@ class ProgramFixtureGenerator:
             )
             if fixture is not None:
                 scenario.fixtures.append(fixture)
+                anchors.setdefault(
+                    (boundary.ref.category, boundary.ref.key),
+                    len(scenario.expectations),
+                )
             scenario.expectations.extend(expectations)
             unresolved.extend(extra_unresolved)
+        counter.insert(report, scenario, anchors)
         scenario.expectations.extend(self._tier2_expectations(ast, index, scenario))
 
         unresolved_count = sum(1 for b in report.boundaries if b.unresolved)
@@ -230,6 +351,7 @@ class ProgramFixtureGenerator:
             constraint_report, flow_report, report, mode=mode
         )
         stamp_arm_origins(scenario_plan.coverage, index.source_map)
+        counter = _CallCounter.build(ast, index, report)
 
         layouts: dict[str, list[FieldSpec]] = dict(happy.layouts)
         unresolved: list[str] = list(happy.unresolved)
@@ -241,6 +363,7 @@ class ProgramFixtureGenerator:
                 intent=planned.intent,
                 entry=self._entry_paragraph(ast),
             )
+            anchors: dict[tuple[str, str], int] = {}
             for boundary in report.boundaries:
                 fixture, expectations, extra_unresolved = self._build_fixture(
                     boundary,
@@ -252,9 +375,24 @@ class ProgramFixtureGenerator:
                 )
                 if fixture is not None:
                     scenario.fixtures.append(fixture)
+                    anchors.setdefault(
+                        (boundary.ref.category, boundary.ref.key),
+                        len(scenario.expectations),
+                    )
                 scenario.expectations.extend(expectations)
                 unresolved.extend(extra_unresolved)
-            scenario.expectations.extend(self._tier2_expectations(ast, index, scenario))
+            counter.insert(report, scenario, anchors)
+            if planned.status_overrides:
+                # The fold walks the normal path; a failure path may stop
+                # before any site it observed, so no field_equals is known
+                # to hold there -- not even one folded from literals alone.
+                scenario.expectations = _drop_failure_path_counts(
+                    scenario.expectations, planned
+                )
+            else:
+                scenario.expectations.extend(
+                    self._tier2_expectations(ast, index, scenario)
+                )
             # Self-verify BEFORE the scenario is written out: re-read the
             # data this scenario actually emitted and re-check it against the
             # conditions that motivated it. Without this the scenario's name
@@ -362,7 +500,7 @@ class ProgramFixtureGenerator:
                 direction=boundary.direction,
                 status=self._status_dict(boundary, index, override=override),
             )
-            return status_fixture, [_call_count_expectation(ref, 1)], unresolved
+            return status_fixture, [], unresolved
 
         if boundary.direction == "OUT":
             expectation = Expectation(
@@ -391,16 +529,8 @@ class ProgramFixtureGenerator:
                 for row in range(rows_count)
             ]
             self._register_layout(layouts, boundary, fields)
-            # "Does exhaustion happen at all" (has_terminal_invocation) and
-            # "do we know a field name to report it in" (terminal, the
-            # dict) are independent: a program with an AT END handler but
-            # no resolvable FILE STATUS field still genuinely invokes the
-            # boundary one more time to hit end-of-file -- call_count must
-            # count that invocation even when there's no field to name in
-            # the dict itself (see _resolve_status_field's docstring).
-            has_terminal_invocation = "AT_END" in boundary.handlers
             terminal = None
-            if has_terminal_invocation:
+            if "AT_END" in boundary.handlers:
                 terminal_field = self._resolve_status_field(boundary, index)
                 if terminal_field is not None:
                     terminal = {terminal_field: "10"}
@@ -415,9 +545,6 @@ class ProgramFixtureGenerator:
             )
 
         expectations = []
-        if fixture is not None:
-            times = len(fixture.sequence) + (1 if has_terminal_invocation else 0)
-            expectations.append(_call_count_expectation(ref, times))
         if boundary.direction == "BIDIRECTIONAL":
             expectations.append(
                 Expectation(
@@ -486,6 +613,10 @@ class ProgramFixtureGenerator:
         expectations: list[Expectation] = []
 
         for arg in boundary.call_args:
+            if is_quoted_literal(arg.name):
+                # ``BY CONTENT 'A'`` / ``X'00'``: a constant the caller
+                # supplies, not a data item the layout index could hold.
+                continue
             arg_fields = self._fields_for_names([arg.name], index)
             if not arg_fields:
                 unresolved.append(
@@ -528,7 +659,7 @@ class ProgramFixtureGenerator:
             sequence=[row],
             unresolved=list(boundary.unresolved),
         )
-        return fixture, [_call_count_expectation(ref, 1), *expectations], unresolved
+        return fixture, expectations, unresolved
 
     # -- helpers -------------------------------------------------------------
 

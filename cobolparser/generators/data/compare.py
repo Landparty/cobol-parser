@@ -24,6 +24,12 @@ change fails the run.  This compares what a COBOL programmer would compare::
   nibble equals ``+5`` packed with ``F``: the program cannot tell them apart
   either.  ``compare_bytes=True`` compares the raw bytes instead, for the
   cases where the exact image matters (a file handed to another system).
+  Text fields are the exception to "by value": decoded text has trailing
+  spaces and NULs stripped alike, but a field left as LOW-VALUES is not the
+  space-padded baseline to the program (``IF NAME = SPACES``), so two equal
+  text values still differ when their NULs are in different places (#287).
+  ``FILLER`` is exempt -- uninitialised FILLER is common and harmless -- and
+  only a bytes compare reports it.
   A field whose bytes did not decode cleanly on either side is always
   compared by its bytes -- its best-effort value is not a thing to trust.
 * **Nothing is dropped quietly.**  A key or ignore name the layout does not
@@ -42,6 +48,7 @@ from typing import Any, Literal
 
 from .decoding import DecodedField, DecodedRecord, DecodeResult, RecordDecoder
 from .errors import CopybookLayoutError
+from .layout import FieldCategory
 from .views import RecordView
 
 DifferenceKind = Literal["changed", "missing", "extra"]
@@ -255,10 +262,18 @@ class CompareResult:
             lines.append(_describe_record(item, self.key))
             width = max((len(diff.name) for diff in item.fields), default=0)
             for diff in item.fields:
-                lines.append(
+                line = (
                     f"  {diff.name.ljust(width)}  @{diff.offset}+{diff.length}  "
                     f"expected {_show(diff.expected)}  actual {_show(diff.actual)}"
                 )
+                if diff.expected is not None and diff.expected == diff.actual:
+                    # Same value, different bytes (padding, a sign nibble):
+                    # the values alone would not show what differs.
+                    line += (
+                        f"  (bytes x'{diff.expected_hex.replace(' ', '')}' vs "
+                        f"x'{diff.actual_hex.replace(' ', '')}')"
+                    )
+                lines.append(line)
         if self.truncated:
             shown = len(self.differences)
             total = self.changed_count + self.missing_count + self.extra_count
@@ -429,6 +444,12 @@ def compare_records(
         trailing_differs=_trailing_differs(expected, actual, compare_bytes),
     )
     skip = frozenset(ignored)
+    # FILLER is exempt from the LOW-VALUES-vs-spaces check: uninitialised
+    # FILLER in an FD record is common and harmless (#287).  A bytes
+    # compare still reports it.
+    fillers = frozenset(
+        placed.spec.column.upper() for placed in view.fields if placed.spec.is_filler
+    )
 
     def record(item: RecordDifference) -> None:
         if max_differences is not None and len(compare.differences) >= max_differences:
@@ -439,7 +460,7 @@ def compare_records(
     def pair(
         exp: DecodedRecord, act: DecodedRecord, record_key: tuple[str, ...] | None
     ) -> None:
-        fields = _field_differences(exp, act, skip, compare_bytes)
+        fields = _field_differences(exp, act, skip, compare_bytes, fillers)
         if fields:
             compare.changed_count += 1
             record(
@@ -540,6 +561,7 @@ def _field_differences(
     act: DecodedRecord,
     skip: frozenset[str],
     compare_bytes: bool,
+    fillers: frozenset[str] = frozenset(),
 ) -> list[FieldDifference]:
     differences: list[FieldDifference] = []
     actual_fields = {decoded.name.upper(): decoded for decoded in act.fields}
@@ -548,7 +570,9 @@ def _field_differences(
         if name in skip:
             continue
         act_field = actual_fields.get(name)
-        if act_field is None or not _same(exp_field, act_field, compare_bytes):
+        if act_field is None or not _same(
+            exp_field, act_field, compare_bytes, pad_sensitive=name not in fillers
+        ):
             differences.append(_difference(exp_field, act_field))
     if compare_bytes and not differences:
         # Every field agrees, yet the images may not: the difference is in
@@ -574,14 +598,50 @@ def _without_ignored(item: DecodedRecord, skip: frozenset[str]) -> bytes:
     return bytes(image)
 
 
-def _same(exp: DecodedField, act: DecodedField, compare_bytes: bool) -> bool:
+def _same(
+    exp: DecodedField,
+    act: DecodedField,
+    compare_bytes: bool,
+    *,
+    pad_sensitive: bool = True,
+) -> bool:
     if exp.present != act.present:
         return False
     if not exp.present:
         return True
+    if exp.length != act.length:
+        # One record ended part-way through the field (#357). What is left
+        # can decode to the same value -- 'ABC ' cut to 'ABC', '0000' cut to
+        # '0' -- yet the records differ: the LRECL is not the same, and a
+        # READ leaves the bytes past a short record undefined.
+        return False
     if compare_bytes or exp.error or act.error:
         return exp.raw == act.raw
-    return exp.value == act.value
+    if exp.value != act.value:
+        return False
+    if pad_sensitive and exp.category in _TEXT_CATEGORIES:
+        # Decoded text has trailing spaces *and* NULs stripped, so 'ALICE'
+        # padded with LOW-VALUES decodes the same as 'ALICE' padded with
+        # spaces -- yet ``IF NAME = SPACES`` tells them apart, and a field
+        # nobody initialised is what an output check exists to catch (#287).
+        # Equal values plus NULs in the same places means the same bytes.
+        return _nul_positions(exp.raw) == _nul_positions(act.raw)
+    return True
+
+
+_TEXT_CATEGORIES = frozenset(
+    {
+        FieldCategory.ALPHANUMERIC.value,
+        FieldCategory.ALPHABETIC.value,
+        FieldCategory.ALPHANUMERIC_EDITED.value,
+        FieldCategory.NUMERIC_EDITED.value,
+        FieldCategory.NATIONAL.value,
+    }
+)
+
+
+def _nul_positions(raw: bytes) -> tuple[int, ...]:
+    return tuple(index for index, byte in enumerate(raw) if byte == 0)
 
 
 def _difference(exp: DecodedField, act: DecodedField | None) -> FieldDifference:

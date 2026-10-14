@@ -150,6 +150,17 @@ _FIGURATIVE_NAMES = frozenset(
 _RELATIONAL_TEXT_RE = re.compile(
     r"^(.*?)\s*(NOT\s*=|<>|>=|<=|=|>|<)\s*(.*)$", re.IGNORECASE
 )
+# A logical connective in relational text, once quoted literals are masked
+# (see _mask_quoted) so `= 'A AND B'` is not mistaken for one.
+_LOGICAL_CONNECTIVE_RE = re.compile(r"(?:^|\s|\))(?:AND|OR)(?:\s|\(|$)", re.IGNORECASE)
+_QUOTED_TEXT_RE = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
+
+
+def _mask_quoted(text: str) -> str:
+    """*text* with every quoted literal replaced by an empty one."""
+    return _QUOTED_TEXT_RE.sub("''", text)
+
+
 _RELATIONAL_TEXT_OP_CANON: dict[str, str] = {
     "=": "eq",
     "<>": "ne",
@@ -424,29 +435,40 @@ class ConstraintExtractor:
         # Each WHEN arm's own selector constraints, before the earlier arms'
         # negations are conjoined -- what WHEN OTHER and later arms negate.
         own_arms: dict[str, list[FieldConstraint]] = {}
-        for idx, wc in enumerate(statement.when_clauses, start=1):
+        # Stacked WHENs (``WHEN 'A' WHEN 'B' stmt``) are one arm, numbered
+        # by group; each phrase of a stack is an OR-split disjunct of it
+        # (``WHEN_1#1`` / ``WHEN_1#2``), a scenario of its own as for IF.
+        for idx, group in enumerate(statement.when_groups(), start=1):
             arm_id = f"WHEN_{idx}"
             origin = f"EVALUATE@{line}/WHEN#{idx}"
-            constraints = _extract_evaluate_selector(
-                wc.selectors,
-                subject,
-                is_true_form,
-                index,
-                fed_names,
-                origin,
-                unsupported,
-            )
-            if constraints is not None:
+            variants: list[list[FieldConstraint]] = []
+            for member in group:
+                constraints = _extract_evaluate_selector(
+                    member.selectors,
+                    subject,
+                    is_true_form,
+                    index,
+                    fed_names,
+                    origin,
+                    unsupported,
+                )
+                if constraints is None:
+                    break
+                variants.append(constraints)
+            if len(variants) == len(group):
                 # EVALUATE is first-match: WHEN_n runs only when every earlier
                 # WHEN failed, so its data must also falsify each of them. A
                 # witness solved from WHEN_n's own selector alone could land in
                 # an earlier arm (``WHEN A > 50 / WHEN A > 10`` witnessing 55
                 # for the second) and the scenario named for WHEN_n would never
                 # reach it.
-                arms[arm_id] = constraints + _negate_earlier_whens(
+                negations = _negate_earlier_whens(
                     own_arms, any_when_unsupported, origin, unsupported
                 )
-                own_arms[arm_id] = constraints
+                _register_variants(
+                    arms, arm_id, [variant + negations for variant in variants]
+                )
+                _register_variants(own_arms, arm_id, variants)
             else:
                 any_when_unsupported = True
 
@@ -495,11 +517,22 @@ class ConstraintExtractor:
         for idx, when_dict in enumerate(statement.when_clauses, start=1):
             arm_id = f"WHEN_{idx}"
             origin = f"SEARCH@{line}/WHEN#{idx}"
-            condition_text = (
-                when_dict.get("condition", "") if isinstance(when_dict, dict) else ""
-            )
+            # The structural tree (see search_parser._condition_tree) is
+            # the only form in which a compound WHEN is several comparisons:
+            # the raw text, split on its first operator, turned
+            # `A = 'K1' AND B = 'Z'` into one equality against the literal
+            # "K1' AND B = 'Z". The text path stays for SEARCH nodes built
+            # without a tree.
+            tree = when_dict.get("condition_tree")
+            if tree is not None:
+                _register_variants(
+                    arms,
+                    arm_id,
+                    _extract_expr(tree, False, index, fed_names, origin, unsupported),
+                )
+                continue
             constraint = _parse_relational_text(
-                condition_text, index, fed_names, origin, unsupported
+                when_dict.get("condition", ""), index, fed_names, origin, unsupported
             )
             if constraint is not None:
                 arms[arm_id] = [constraint]
@@ -1184,7 +1217,20 @@ def _extract_evaluate_selector(
     # that is the rare case, and it errs toward the visible answer.
     if sel_type == "Literal":
         value = str(sel.get("value", ""))
-        if index.resolve(value) is not None:
+        if sel.get("figurative"):
+            # ``WHEN SPACES`` is the figurative constant, not the six
+            # characters S-P-A-C-E-S: model it as the IF path does.
+            figurative = _figurative_name(value)
+            if figurative is None:
+                unsupported.append(
+                    f"{origin}: WHEN figurative constant not supported in v1: "
+                    f"{value}"
+                )
+                return None
+            return [
+                FieldConstraint(resolved, "figurative", (figurative,), origin, False)
+            ]
+        if not sel.get("quoted") and index.resolve(value) is not None:
             unsupported.append(
                 f"{origin}: WHEN selector names a data item rather than a "
                 f"literal, which is not supported in v1: {value}"
@@ -1225,6 +1271,16 @@ def _parse_relational_text(
     text = (text or "").strip()
     if not text:
         unsupported.append(f"{origin}: SEARCH WHEN has no condition text")
+        return None
+
+    if _LOGICAL_CONNECTIVE_RE.search(_mask_quoted(text)):
+        # A compound condition: the regex below would take everything after
+        # the first operator, AND/OR included, as the right-hand literal --
+        # a made-up value no record can carry to reach the arm.
+        unsupported.append(
+            f"{origin}: compound condition text (AND/OR) not structurally "
+            f"parseable in v1: {text!r}"
+        )
         return None
 
     match = _RELATIONAL_TEXT_RE.match(text)
@@ -1433,9 +1489,9 @@ def _nested_statement_lists(statement: Any) -> list[tuple[str | None, list[Any]]
         if value:
             lists.append((arm_bearing.get(attr), value))
     if isinstance(statement, EvaluateStatement):
-        for index, when in enumerate(statement.when_clauses, start=1):
-            if when.statements:
-                lists.append((f"WHEN_{index}", when.statements))
+        for index, group in enumerate(statement.when_groups(), start=1):
+            if group[-1].statements:
+                lists.append((f"WHEN_{index}", group[-1].statements))
         if statement.default_when is not None and statement.default_when.statements:
             lists.append(("WHEN_OTHER", statement.default_when.statements))
     if isinstance(statement, SearchStatement):

@@ -85,6 +85,9 @@ class EvaluateStatementParser(IStatementParser):
                     token.location if hasattr(token, "location") else start_location
                 )
                 token_stream.consume()
+                # A selector always follows WHEN, so a line break here is
+                # layout: ``WHEN <newline> OTHER`` must still be the default.
+                skip_statement_separators(token_stream)
 
                 next_token = token_stream.peek()
                 if (
@@ -163,6 +166,9 @@ class EvaluateStatementParser(IStatementParser):
                 # registered as an AST child and its nested statements are
                 # reachable via find_all_by_type / traverse_depth_first.
                 stmt.add_when_clause(when_clause)
+                when_clause.stacked = self._at_stacked_when(
+                    token_stream, when_location.line
+                )
                 statements, period_terminated = self._skip_clause_statements(
                     token_stream
                 )
@@ -349,7 +355,10 @@ class EvaluateStatementParser(IStatementParser):
         A plain value selector is always ``{"type": "Literal", "value": ...}``
         -- the lexer strips string quotes, so ``WHEN "AB"`` and ``WHEN WS-AB``
         were indistinguishable in the dict. When the selector is a single
-        IDENTIFIER token the dict additionally carries ``"identifier": True``.
+        IDENTIFIER token the dict additionally carries ``"identifier": True``;
+        a single FIGURATIVE_CONSTANT token (``WHEN SPACES``) carries
+        ``"figurative": True`` and a single STRING_LITERAL (``WHEN 'SPACES'``)
+        ``"quoted": True`` -- without them the two read as the same value.
         The ``type`` key deliberately stays ``"Literal"``: the constraint
         extractor (``analysis/constraints.py``) keys EVALUATE TRUE
         condition-name selectors on it, so an additive marker is the
@@ -379,10 +388,10 @@ class EvaluateStatementParser(IStatementParser):
         # stored as ``A = B`` read the literal as the data name ``B``.
         condition_text = " ".join(text for _, _, text in kept).strip()
         normalized_tokens = [token for token, _ in pairs]
-        is_identifier = bool(
-            token_types
-            and len(token_types) == len(selector_tokens) == 1
-            and token_types[0] == TokenType.IDENTIFIER
+        single_type = (
+            token_types[0]
+            if token_types and len(token_types) == len(selector_tokens) == 1
+            else None
         )
 
         selector_text = " ".join(normalized_tokens).strip()
@@ -438,8 +447,12 @@ class EvaluateStatementParser(IStatementParser):
             return selector
 
         literal: dict[str, Any] = {"type": "Literal", "value": selector_text}
-        if is_identifier:
+        if single_type == TokenType.IDENTIFIER:
             literal["identifier"] = True
+        elif single_type == TokenType.FIGURATIVE_CONSTANT:
+            literal["figurative"] = True
+        elif single_type == TokenType.STRING_LITERAL:
+            literal["quoted"] = True
         return literal
 
     def _skip_clause_statements(
@@ -526,6 +539,36 @@ class EvaluateStatementParser(IStatementParser):
                     token_stream.consume()
 
         return statements if statements else None, period_terminated
+
+    @staticmethod
+    def _at_stacked_when(token_stream: ITokenStream, when_line: int) -> bool:
+        """True when the next phrase is another (non-OTHER) WHEN.
+
+        Called right after a WHEN's selectors: nothing but layout between
+        them and the next WHEN means the two phrases share one body (a
+        stacked WHEN). WHEN OTHER cannot be stacked onto. Text removed before
+        lexing (an unexpanded COPY) on the lines from this WHEN to the next
+        is a body that never reached the AST, not a stack.
+        """
+        skip_statement_separators(token_stream)
+        token = token_stream.peek()
+        if token is None or not token.value or token.value.upper() != "WHEN":
+            return False
+        next_line = token.location.line if token.location else when_line
+        omitted = getattr(token_stream, "omitted_source_lines", ())
+        if any(first <= next_line and last >= when_line for first, last in omitted):
+            return False
+        offset = 1
+        while True:
+            following = token_stream.peek(offset)
+            if following is None or following.type != TokenType.NEWLINE:
+                break
+            offset += 1
+        return not (
+            following is not None
+            and following.value
+            and following.value.upper() == "OTHER"
+        )
 
     @staticmethod
     def _is_statement_keyword(word: str) -> bool:

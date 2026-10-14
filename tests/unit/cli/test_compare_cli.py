@@ -226,3 +226,19 @@ def test_one_sided_trailing_partial_record_exits_one_only_by_bytes(files, capsys
     assert _run(_args(copybook, expected, actual)) == 0
     assert "files are equal" in capsys.readouterr().out
     assert _run(_args(copybook, expected, actual, "--compare-bytes")) == 1
+
+
+def test_low_values_padding_is_a_difference_end_to_end(files, capsys):
+    # #287: CUST-NAME (bytes 6..17) 'ALICE' + 7 EBCDIC spaces on one side,
+    # 'ALICE' + 7 x'00' on the other.
+    tmp, copybook = files
+    expected = _write(tmp / "E.DAT", ROWS[:1])
+    image = (tmp / "E.DAT").read_bytes()
+    assert image[11:18] == b"\x40" * 7
+    actual = tmp / "A.DAT"
+    actual.write_bytes(image[:11] + b"\x00" * 7 + image[18:])
+
+    assert _run(_args(copybook, expected, str(actual))) == 1
+    out = capsys.readouterr().out
+    assert "CUST-NAME" in out
+    assert "x'C1D3C9C3C540404040404040' vs x'C1D3C9C3C500000000000000'" in out

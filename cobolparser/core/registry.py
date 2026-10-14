@@ -18,7 +18,17 @@ CICS) are always dispatched to the correct handler.
 
 import logging
 
+from ..lexer import TokenType
 from .interfaces import IStatementParser, ITokenStream
+
+#: Layout tokens a parser's lookahead may step over (``EXEC`` alone on a
+#: line, then ``SQL``); see ``_utils._NOISE_TOKEN_TYPES``.
+_LAYOUT_TOKEN_TYPES = (
+    TokenType.WHITESPACE,
+    TokenType.COMMENT,
+    TokenType.NEWLINE,
+    TokenType.CONTINUATION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +69,9 @@ class StatementParserRegistry:
         # tok*_val entries are uppercased str or None; tok1_* entries are None when
         # the stream has fewer than two tokens remaining.
         self._dispatch_cache: dict[
-            tuple[object, str | None, object | None, str | None],
+            tuple[
+                object, str | None, object | None, str | None, object | None, str | None
+            ],
             IStatementParser | None,
         ] = {}
 
@@ -115,7 +127,29 @@ class StatementParserRegistry:
             if second_token is not None and second_token.value
             else None
         )
-        cache_key = (first_token.type, tok0_val, tok1_type, tok1_val)
+        # A parser may look past a line break to the second word (EXEC <newline>
+        # CICS), so the first meaningful token after it is part of the key
+        # too: keyed on the NEWLINE alone, EXEC <newline> CICS reused the
+        # parser cached for an earlier EXEC <newline> SQL.
+        offset = 1
+        meaningful = second_token
+        while meaningful is not None and meaningful.type in _LAYOUT_TOKEN_TYPES:
+            offset += 1
+            meaningful = token_stream.peek(offset)
+        tok2_type = meaningful.type if meaningful is not None else None
+        tok2_val = (
+            meaningful.value.upper()
+            if meaningful is not None and meaningful.value
+            else None
+        )
+        cache_key = (
+            first_token.type,
+            tok0_val,
+            tok1_type,
+            tok1_val,
+            tok2_type,
+            tok2_val,
+        )
 
         if cache_key in self._dispatch_cache:
             return self._dispatch_cache[cache_key]

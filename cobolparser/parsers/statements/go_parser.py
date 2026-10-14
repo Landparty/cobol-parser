@@ -25,7 +25,7 @@ class GoStatementParser(IStatementParser):
     GO statements transfer control to labeled paragraphs or sections.
     Syntax:
         GO TO paragraph-name
-        GO TO paragraph-name DEPENDING ON variable
+        GO TO paragraph-name ... DEPENDING [ON] variable
 
     Example:
         GO TO PARA-1.
@@ -234,16 +234,17 @@ class GoStatementParser(IStatementParser):
         # Consume DEPENDING keyword
         token_stream.consume()
 
-        # Expect ON keyword
+        # ON is optional (``GO TO A B DEPENDING WS-X``, NIST NC102A). Returning
+        # here when it was absent left the variable in the stream, where it
+        # was re-parsed as a phantom paragraph and the jump table read as an
+        # unconditional GO TO its first target.
         _skip_layout()
         if token_stream.is_empty():
             return
 
         next_token = token_stream.peek()
-        if not next_token or not next_token.value or next_token.value.upper() != "ON":
-            return
-
-        token_stream.consume()  # consume ON
+        if next_token and next_token.value and next_token.value.upper() == "ON":
+            token_stream.consume()  # consume optional ON
 
         # Parse variable name
         _skip_layout()

@@ -422,7 +422,7 @@ sibling) and a dedicated anonymous-item case.
 | `read_parser.py` | READ |
 | `report_writer_parsers.py` | INITIATE, TERMINATE, SUPPRESS (Report Writer; GENERATE is in `simple_statement_parsers.py`; 2026-09-02) |
 | `rewrite_parser.py` | REWRITE |
-| `search_parser.py` | SEARCH |
+| `search_parser.py` | SEARCH (each WHEN also gets a `condition_tree` from the shared `build_condition_expression`, next to its raw `condition` text, so AND/OR conditions are structural; #348, 2026-10-14) |
 | `set_parser.py` | SET |
 | `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE (RELEASE `FROM` / RETURN `INTO` operands go through `consume_optional_qualifiers`, as MOVE's do: `WS-REC OF GRP`, `TBL ( I )`; before 2026-09-28 only the first word was kept) |
 | `sort_merge_parsers.py` | SORT, MERGE |
@@ -585,6 +585,16 @@ lookahead (`peek(1).value.upper() == "IS"`) and collected into
 keys when the UPSI switch form is used). Pinned by
 `tests/unit/test_special_names.py` and `tests/unit/test_write_advancing.py`.
 
+**EVALUATE stacked WHENs (`evaluate_parser.py`, #314):** after a WHEN's
+selectors, `_at_stacked_when` sets `WhenClause.stacked` when the next
+meaningful token is another WHEN (not WHEN OTHER) and no unexpanded COPY was
+blanked on the lines between (`TokenStream.omitted_source_lines`, filled by
+`CobolParser` from `strip_unexpanded_copy_statements`).
+`EvaluateStatement.when_groups()` groups on that flag; the AST keeps one
+`WhenClause` per phrase. Deciding it from an empty `statements` instead would
+merge a WHEN whose body was dropped (unexpanded COPY, recovery) into the next
+arm.
+
 **EVALUATE blank string-literal WHEN selectors (`evaluate_parser.py`):**
 the lexer strips quotes off string literals, so `WHEN '  '` (the IMS DL/I
 status-code idiom) arrives as a whitespace-only token that `_build_selector`
@@ -609,6 +619,14 @@ became the `Any` wildcard, `WHEN "THRU"` an end-less `Range` (a spurious
 "THRU/THROUGH range is incomplete" error on valid code), and `WHEN "AND"` /
 `"<"` / `"A OR B"` a `Condition` -- exactly how a COBOL tokenizer spells its
 operator table. Pinned by `tests/regression/test_evaluate_keyword_literal_when.py`.
+
+**Single-token WHEN selectors say what they were (#313, 2026-10-14).** A
+`Literal` selector built from one token carries `"identifier": True`
+(IDENTIFIER), `"figurative": True` (FIGURATIVE_CONSTANT: `WHEN SPACES`) or
+`"quoted": True` (STRING_LITERAL: `WHEN 'SPACES'`). The lexer strips quotes,
+so without these `WHEN SPACES` and `WHEN 'SPACES'` built identical dicts.
+The markers are additive; `type` stays `"Literal"`. Pinned by
+`tests/regression/test_evaluate_figurative_when.py`.
 
 **EVALUATE subjects reach `.operands` (`evaluate_parser.py`, 2026-08-17
 review follow-up):** `_parse_subjects` routes each parsed subject through
@@ -892,6 +910,17 @@ so gating the stop on `for_varying` avoids truncating a condition that
 happens to contain an `AFTER` token (Copilot review on PR #79 caught the
 original unconditional stop). Pinned by `::TestH2PerformVaryingAfter`.
 
+**PERFORM UNTIL drops layout tokens (#347, 2026-10-14):** both UNTIL
+token loops (`_collect_until_condition_tokens` and
+`_parse_until_condition_only`) consume WHITESPACE / NEWLINE / CONTINUATION /
+COMMENT tokens without appending them, as the IF and EVALUATE parsers do;
+`_make_until_condition_expression` also drops whitespace-only strings as a
+second guard. A condition ending at a line break (no period) used to end in
+`"\n"`, so a bare condition-name, `NOT cond`, a class test or `( ... )`
+fell back to a raw COMPARISON with `left_operand=None` -- 11 of the 14
+enterprise-sample PERFORM UNTIL guards. Pinned by
+`tests/unit/test_perform_until_newline.py`.
+
 **All-digit procedure names / PERFORM THRU numbering (2026-07-20, extended
 2026-08-21):** COBOL permits procedure names made entirely of digits, and
 `PERFORM 1000 THRU 1999` numbering is idiomatic in THRU-style code. Those
@@ -938,6 +967,16 @@ a paragraph by name:
 Pinned by `tests/unit/test_perform_thru_numeric.py` and
 `tests/regression/test_real_corpus_parse_failures.py`
 (`TestAlterNumericProcedureNames`, `TestGoToDependingOnNumericTargets`).
+
+**`GO TO ... DEPENDING` without ON (issue #377).** `ON` is optional in
+`GO TO a b DEPENDING ws-x` (NIST NC102A), but `_parse_depending_on_clause`
+returned as soon as the word after `DEPENDING` was not `ON`, leaving the
+variable in the stream. It was re-parsed as a phantom paragraph, and the
+jump table read as an unconditional GO TO its first target (dead-code
+called the fall-through paragraph dead, program-flow missed the other
+targets, unused-variables flagged the variable, complexity scored 1).
+`ON` is now consumed only when present. Pinned by
+`tests/regression/test_go_depending_without_on.py`.
 
 **ENVIRONMENT division SELECT clauses (`environment.py`, audit 2026-07-07
 H4/H5):** SELECT parsing captures ALTERNATE RECORD KEY (repeatable, WITH
@@ -1010,6 +1049,16 @@ directly before the value, was tolerated. Still open: a qualified `RECORD
 KEY IS K OF R` keeps only `K` (the rest is warned as unparsed).
 `tests/regression/test_select_optional_organization_word.py`.
 
+**SELECT separators (`environment_select.py`, 2026-10-14, issue #342):** a
+separator comma/semicolon is skipped (`_is_separator`) inside the ASSIGN
+collector, and `_skip_select_separators` skips one before the second (VSAM)
+FILE STATUS variable. `ASSIGN TO INDD,` gave `assign_to == "INDD ,"`, so
+`normalize_ddname` returned `","` and the lineage port read `file:,`;
+`FILE STATUS IS FS1, FS2` took `,` as `file_status_vsam` and warned `FS2`
+as unparsed. Tests: `test_environment_division_parser.py`
+(`test_separator_comma_and_semicolon_not_kept_in_names`) and
+`test_field_lineage.py` (`test_separator_after_assign_names_the_dd_port`).
+
 # Statement-coverage audit (2026-09-02)
 
 Question asked of the parser: *can a PROCEDURE DIVISION statement leave the
@@ -1046,7 +1095,9 @@ Pinned by `tests/unit/test_extended_verb_parsers.py` and
   `parse_size_error_clauses`, `call_parser.py` (main loop and
   `_parse_using_clause` stop set), `read_parser.py`, `write_parser.py`,
   `simple_statement_parsers.py` (RETURN) and `search_parser.py` accept the
-  bare forms; the arithmetic target/GIVING stop sets gained `SIZE`. A bare
+  bare forms; the arithmetic target/GIVING stop sets gained `SIZE`, and so
+  did COMPUTE's expression loop (#399: `COMPUTE C = A + B SIZE ERROR ...`
+  folded `SIZE ERROR` into the expression). A bare
   `END` is only an `AT END` when it does not start `END PROGRAM` /
   `END DIVISION` (`_utils.bare_end_starts_at_end_clause`).
   `parse_size_error_clauses` also no longer consumes a `NOT` that does not
@@ -1731,6 +1782,19 @@ module (same rationale as `_errors.py`) because its callers span both
 | `statements/move_parser.py` | MOVE's literal source |
 | `statements/display_parser.py` | DISPLAY items and function-call operands |
 | `statements/write_parser.py` | WRITE's `FROM <literal>` |
+| `statements/_utils.py::literal_operand_text` | STRING / UNSTRING operands and delimiters, CALL `USING` arguments, INSPECT TALLYING / REPLACING / CONVERTING / BEFORE / AFTER values, SET's value (and PERFORM VARYING's `FROM` / `BY`, via `consume_value_operand`), INITIALIZE `REPLACING ... BY` (#330, 2026-10-14) |
+
+**#330 (2026-10-14).** The statements in that last row stored a literal
+operand's decoded `token.value`, so `'A'` and the data item `A` produced
+the same AST value and `X'00'` read as `00`. unused-variables counted a
+literal spelling a declared name as a reference, lineage drew a flow from
+it, and xref listed a `CALL ... USING 'LIT'` argument as an undefined data
+item. `literal_operand_text(token)` returns `raw_value` for a typed literal
+and `quote_literal(value)` for any other STRING_LITERAL -- the MOVE /
+DISPLAY convention (option (a) on the issue), chosen over a per-operand
+`is_literal` marker so every consumer that already skips quoted text keeps
+working. It changes these statements' `to_dict()` values (`"A"` where
+`A` was). Pinned by `tests/regression/test_literal_operand_quotes.py`.
 
 Level-88 condition values are deliberately **not** in that list:
 `data_special_entries.py` stores them undelimited (`item.add_value(t.value)`),
@@ -3209,6 +3273,15 @@ header; without it a tagged member's comment lines reached the lexer and a
 `#` in them failed the parse. Details in `preprocessing.md` (tagged
 sequence area section).
 
+# UNSTRING optional noise words (issue #400, 2026-10-14)
+
+`UnstringStatementParser` treats `ON` (before `OVERFLOW`), `WITH` (before
+`POINTER`) and `IN` (after `TALLYING`) as optional, like the STRING parser
+already did. `_parse_into_targets` stops at `POINTER` and `OVERFLOW` too, so
+neither is folded into the INTO list; a bare `OVERFLOW` opens the
+`on_overflow` handler; `TALLYING C` sets `tallying_variable` with or without
+`IN`. Tests: `tests/unit/test_unstring_gaps.py::TestUnstringOptionalKeywords`.
+
 ## Profiling (`profiling.py`)
 
 `ProfilerContext(top_n=50, prof_output=None)` wraps any call with cProfile,
@@ -3224,3 +3297,22 @@ the context skips cProfile, so `function_profile_available` is `False`,
 Wall-clock, CPU and memory are still measured, and the outer profile is left
 alone. tracemalloc is stopped only by the context that started it, including
 when `__enter__` fails. Tests: `tests/unit/test_profiling.py`.
+
+# Line breaks between keywords (2026-10-14, issue #385)
+
+A lookahead that reads the *next word* must step over layout tokens: a
+bare `peek()` / `peek(1)` sees the NEWLINE when the second word starts the
+next line, and the parse silently changes. Use `peek_past_noise` for a
+non-destructive check and `skip_whitespace` (or the division parsers'
+`_skip_newlines`) before consuming a word that must follow. Sites fixed:
+STOP <operand>, WHEN OTHER, 88/66 names, `VALUES ARE`, FD/SD/RD names,
+CALL `ON EXCEPTION` / `ON OVERFLOW`, ENTRY name, EXEC SQL/CICS/DLI/IMS
+(procedure and data division), END DECLARATIVES, every SPECIAL-NAMES word
+lookahead (`_word(n)` counts meaningful tokens), and `OBJECT REFERENCE`.
+
+`StatementParserRegistry`'s dispatch cache key now also carries the first
+meaningful token after the verb, besides the raw second token: keyed on
+`(EXEC, NEWLINE)` alone, `EXEC <newline> CICS` reused the parser cached for
+an earlier `EXEC <newline> SQL`. Pinned by
+`tests/regression/test_keyword_line_breaks.py`, which parses each case with
+the gap joined and broken and requires identical ASTs.

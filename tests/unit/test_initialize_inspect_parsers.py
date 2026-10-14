@@ -294,7 +294,7 @@ class TestInspectTallying:
         assert stmt.inspect_type == "TALLYING"
         clause = stmt.tallying_clauses[0]
         assert clause["for_type"] == "ALL"
-        assert clause["value"] == "A"
+        assert clause["value"] == '"A"'
 
     def test_tallying_for_leading(self):
         tokens = [
@@ -311,7 +311,7 @@ class TestInspectTallying:
         stmt = InspectStatementParser().parse(_stream(*tokens))
         clause = stmt.tallying_clauses[0]
         assert clause["for_type"] == "LEADING"
-        assert clause["value"] == "0"
+        assert clause["value"] == '"0"'
 
     def test_tallying_with_before_initial(self):
         tokens = [
@@ -330,7 +330,7 @@ class TestInspectTallying:
         ]
         stmt = InspectStatementParser().parse(_stream(*tokens))
         clause = stmt.tallying_clauses[0]
-        assert clause["before"] == "B"
+        assert clause["before"] == '"B"'
 
     def test_tallying_with_after_initial(self):
         tokens = [
@@ -349,7 +349,7 @@ class TestInspectTallying:
         ]
         stmt = InspectStatementParser().parse(_stream(*tokens))
         clause = stmt.tallying_clauses[0]
-        assert clause["after"] == "X"
+        assert clause["after"] == '"X"'
 
 
 class TestInspectReplacing:
@@ -369,7 +369,7 @@ class TestInspectReplacing:
         assert len(stmt.replacing_clauses) == 1
         clause = stmt.replacing_clauses[0]
         assert clause["replace_type"] == "CHARACTERS"
-        assert clause["to_value"] == "X"
+        assert clause["to_value"] == '"X"'
 
     def test_replacing_all_by(self):
         tokens = [
@@ -386,8 +386,8 @@ class TestInspectReplacing:
         stmt = InspectStatementParser().parse(_stream(*tokens))
         clause = stmt.replacing_clauses[0]
         assert clause["replace_type"] == "ALL"
-        assert clause["from_value"] == "A"
-        assert clause["to_value"] == "B"
+        assert clause["from_value"] == '"A"'
+        assert clause["to_value"] == '"B"'
 
     def test_replacing_first_by(self):
         tokens = [
@@ -438,7 +438,7 @@ class TestInspectReplacing:
         ]
         stmt = InspectStatementParser().parse(_stream(*tokens))
         clause = stmt.replacing_clauses[0]
-        assert clause["before"] == "C"
+        assert clause["before"] == '"C"'
 
     def test_replacing_with_after_initial(self):
         tokens = [
@@ -457,7 +457,7 @@ class TestInspectReplacing:
         ]
         stmt = InspectStatementParser().parse(_stream(*tokens))
         clause = stmt.replacing_clauses[0]
-        assert clause["after"] == "D"
+        assert clause["after"] == '"D"'
 
 
 class TestInspectConverting:
@@ -474,8 +474,8 @@ class TestInspectConverting:
         ]
         stmt = InspectStatementParser().parse(_stream(*tokens))
         assert stmt.inspect_type == "CONVERTING"
-        assert stmt.converting_from == "ABCDE"
-        assert stmt.converting_to == "abcde"
+        assert stmt.converting_from == '"ABCDE"'
+        assert stmt.converting_to == '"abcde"'
 
 
 class TestInspectTallyingReplacing:
@@ -539,5 +539,5 @@ class TestInspectToDict:
         # converting fields are conditionally serialised — assert directly on d
         # so that a missing key in to_dict() is caught rather than masked by the
         # stmt attribute fallback.
-        assert d["converting_from"] == "ABC"
-        assert d["converting_to"] == "abc"
+        assert d["converting_from"] == '"ABC"'
+        assert d["converting_to"] == '"abc"'

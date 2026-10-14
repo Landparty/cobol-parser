@@ -134,7 +134,12 @@ class TestLintReportsOrigins:
         )
 
         unused = next(f for f in data["findings"] if f["symbol"] == "CUST-NAME")
-        assert unused["origin"] == {"file": str(library / "CUSTOMER.cpy"), "line": 4}
+        # `05` sits in column 12 of the fixed-format copybook (#301).
+        assert unused["origin"] == {
+            "file": str(library / "CUSTOMER.cpy"),
+            "line": 4,
+            "column": 12,
+        }
 
     def test_text_output_is_clickable_at_the_real_location(self, capsys, library):
         out = _run_text(
@@ -147,11 +152,106 @@ class TestLintReportsOrigins:
             "text",
         )
 
-        assert f"{library / 'CUSTOMER.cpy'}:4:" in out
+        assert f"{library / 'CUSTOMER.cpy'}:4:12:" in out
 
-    def test_without_expansion_there_is_no_origin_to_report(self, capsys, library):
-        # No --copybook-path: nothing was expanded, so locations already count
-        # lines in the file itself and claiming an origin would add nothing.
-        data = _run_json(capsys, "lint", str(library / "PAYROLL.cbl"), "--compact")
+    def test_a_copybook_that_cannot_be_reread_prints_no_column(self, capsys, library):
+        # Without the member's text there is no telling its layout, so the
+        # analyzer column (7 short for this fixed-format member) is not
+        # printed as if it were the real one.
+        from pathlib import Path
 
-        assert all("origin" not in f for f in data["findings"])
+        real_read_text = Path.read_text
+
+        def read_text(self, *args, **kwargs):
+            if self.name == "CUSTOMER.cpy":
+                raise OSError("gone")
+            return real_read_text(self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", read_text):
+            out = _run_text(
+                capsys,
+                "lint",
+                str(library / "PAYROLL.cbl"),
+                "--copybook-path",
+                str(library),
+                "--format",
+                "text",
+            )
+
+        assert f"{library / 'CUSTOMER.cpy'}:4: info [unused-variables]" in out
+
+    def test_free_form_copybook_in_a_fixed_program_keeps_its_own_column(
+        self, capsys, tmp_path
+    ):
+        # The expander pads a free-form member by exactly the 7 columns
+        # normalization strips again, so its analyzer column is already the
+        # one on disk (#301).
+        (tmp_path / "FREEMEM.cpy").write_text(
+            "*> free member\n"
+            "01 FREE-REC.\n"
+            "   05 FREE-A PIC X.\n"
+            "   05 FREE-B PIC X.\n"
+        )
+        (tmp_path / "MIX.cbl").write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. MIX.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       COPY FREEMEM.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       MAIN-PARA.\n"
+            "           DISPLAY FREE-A.\n"
+            "           GOBACK.\n"
+        )
+        out = _run_text(
+            capsys,
+            "lint",
+            str(tmp_path / "MIX.cbl"),
+            "--copybook-path",
+            str(tmp_path),
+            "--format",
+            "text",
+        )
+
+        assert f"{tmp_path / 'FREEMEM.cpy'}:4:4:" in out
+
+    def test_fixed_format_copybook_in_a_free_form_program(self, capsys, library):
+        # A free-form parent keeps the member's indicator column but cuts its
+        # 6-column sequence area: an offset of 6, not 7.
+        (library / "FREEPAY.cbl").write_text(
+            "IDENTIFICATION DIVISION.\n"
+            "PROGRAM-ID. FREEPAY.\n"
+            "DATA DIVISION.\n"
+            "WORKING-STORAGE SECTION.\n"
+            "COPY CUSTOMER.\n"
+            "PROCEDURE DIVISION.\n"
+            "MAIN-PARA.\n"
+            "    DISPLAY CUST-ID.\n"
+            "    GOBACK.\n"
+        )
+        out = _run_text(
+            capsys,
+            "lint",
+            str(library / "FREEPAY.cbl"),
+            "--copybook-path",
+            str(library),
+            "--format",
+            "text",
+        )
+
+        assert f"{library / 'CUSTOMER.cpy'}:4:12:" in out
+
+    def test_without_expansion_origin_is_the_file_itself(self, capsys, library):
+        # No --copybook-path: nothing was expanded, so the origin is this
+        # file and the same line. It is still emitted, because it carries the
+        # on-disk column that `location.column` (analyzer columns, 7 short on
+        # a fixed-format line) does not (#301).
+        program = str(library / "PAYROLL.cbl")
+        data = _run_json(capsys, "lint", program, "--compact")
+
+        for finding in data["findings"]:
+            if finding["location"] is None:
+                continue
+            assert finding["origin"]["file"] == program
+            assert finding["origin"]["line"] == finding["location"]["line"]
+            assert finding["origin"]["column"] == finding["location"]["column"] + 7

@@ -96,7 +96,7 @@ class TestUnstringMultiDelimiter:
         )
         assert result.errors == []
         stmts = result.ast.find_statements("UNSTRING")
-        assert stmts[0].delimiters == [",", ";"]
+        assert stmts[0].delimiters == ['","', '";"']
 
     def test_three_delimiters_with_all(self):
         result = parse_cobol(
@@ -108,7 +108,7 @@ class TestUnstringMultiDelimiter:
         )
         assert result.errors == []
         stmts = result.ast.find_statements("UNSTRING")
-        assert stmts[0].delimiters == [",", ";", "-"]
+        assert stmts[0].delimiters == ['","', '";"', '"-"']
         # The INTO target must still be reachable after the OR chain --
         # a regression here would mean OR consumed INTO too.
         assert stmts[0].into_targets[0]["target"] == "WS-TGT-B"
@@ -175,7 +175,7 @@ class TestUnstringCombined:
         stmt = stmts[0]
 
         assert stmt.source_operand == "WS-SRC"
-        assert stmt.delimiters == [",", ";"]
+        assert stmt.delimiters == ['","', '";"']
 
         targets = stmt.into_targets
         assert len(targets) == 2
@@ -202,7 +202,7 @@ class TestUnstringCombined:
         assert stmt.not_on_overflow[0].statement_type == "DISPLAY"
 
         d = stmt.to_dict()
-        assert d["delimiters"] == [",", ";"]
+        assert d["delimiters"] == ['","', '";"']
         assert len(d["into_targets"]) == 2
         assert d["pointer_variable"] == "WS-PTR"
         assert d["tallying_variable"] == "WS-TALLY"
@@ -285,7 +285,7 @@ class TestUnstringDelimitedByAll:
             "           UNSTRING WS-SRC DELIMITED BY ',' OR ALL SPACE\n"
             "               INTO WS-TGT-B WS-TGT-C.\n"
         )
-        assert node.delimiters == [",", "SPACE"]
+        assert node.delimiters == ['","', "SPACE"]
         assert node.delimiter_all == [False, True]
         assert node.to_dict()["delimiter_all"] == [False, True]
 
@@ -312,6 +312,91 @@ class TestUnstringDelimitedWithoutBy:
         assert not result.errors
         assert not result.warnings
         (node,) = result.ast.find_all_by_type("UnstringStatement")
-        assert node.delimiters == [",", "SPACE"]
+        assert node.delimiters == ['","', "SPACE"]
         assert node.delimiter_all == [False, True]
         assert [t["target"] for t in node.into_targets] == ["WS-TGT-B", "WS-TGT-C"]
+
+
+class TestUnstringOptionalKeywords:
+    """Issue #400: ``ON``, ``WITH`` and ``IN`` are optional noise words.
+
+    Leaving them out used to fold ``OVERFLOW`` / ``POINTER`` into the INTO
+    target list, drop the overflow handler (its statements then ran
+    unconditionally), and skip a ``TALLYING`` operand not preceded by ``IN``.
+    """
+
+    @staticmethod
+    def _unstring(body: str):
+        result = parse_cobol(_prog(body))
+        stmts = result.ast.find_statements("UNSTRING")
+        assert len(stmts) == 1
+        return result, stmts[0]
+
+    def test_bare_overflow_handler(self):
+        result, stmt = self._unstring(
+            '           UNSTRING WS-SRC DELIMITED BY ","\n'
+            "               INTO WS-TGT-B\n"
+            "               OVERFLOW DISPLAY 'E'\n"
+            "           END-UNSTRING."
+        )
+        assert result.errors == []
+        assert result.warnings == []
+        assert [t["target"] for t in stmt.into_targets] == ["WS-TGT-B"]
+        assert [s.statement_type for s in stmt.on_overflow] == ["DISPLAY"]
+
+    def test_bare_overflow_then_not_on_overflow(self):
+        result, stmt = self._unstring(
+            '           UNSTRING WS-SRC DELIMITED BY ","\n'
+            "               INTO WS-TGT-B\n"
+            "               OVERFLOW DISPLAY 'E'\n"
+            "               NOT ON OVERFLOW DISPLAY 'F'\n"
+            "           END-UNSTRING."
+        )
+        assert result.errors == []
+        assert result.warnings == []
+        assert [t["target"] for t in stmt.into_targets] == ["WS-TGT-B"]
+        assert stmt.on_overflow[0].display_items == ['"E"']
+        assert stmt.not_on_overflow[0].display_items == ['"F"']
+
+    def test_tallying_then_bare_overflow(self):
+        result, stmt = self._unstring(
+            '           UNSTRING WS-SRC DELIMITED BY ","\n'
+            "               INTO WS-TGT-B TALLYING WS-TALLY\n"
+            "               OVERFLOW DISPLAY 'E'\n"
+            "           END-UNSTRING."
+        )
+        assert result.errors == []
+        assert stmt.tallying_variable == "WS-TALLY"
+        assert [s.statement_type for s in stmt.on_overflow] == ["DISPLAY"]
+        # The handler's DISPLAY is nested, not a sibling that always runs.
+        top_level = result.ast.find_statements("DISPLAY")
+        assert all(s in stmt.on_overflow for s in top_level)
+
+    def test_with_pointer_then_bare_overflow(self):
+        result, stmt = self._unstring(
+            '           UNSTRING WS-SRC DELIMITED BY ","\n'
+            "               INTO WS-TGT-B WITH POINTER WS-PTR\n"
+            "               OVERFLOW DISPLAY 'E'\n"
+            "           END-UNSTRING."
+        )
+        assert result.errors == []
+        assert stmt.pointer_variable == "WS-PTR"
+        assert [s.statement_type for s in stmt.on_overflow] == ["DISPLAY"]
+
+    def test_bare_pointer_and_bare_tallying_after_into(self):
+        result, stmt = self._unstring(
+            '           UNSTRING WS-SRC DELIMITED BY ","\n'
+            "               INTO WS-TGT-B POINTER WS-PTR TALLYING WS-TALLY."
+        )
+        assert result.errors == []
+        assert [t["target"] for t in stmt.into_targets] == ["WS-TGT-B"]
+        assert stmt.pointer_variable == "WS-PTR"
+        assert stmt.tallying_variable == "WS-TALLY"
+
+    def test_tallying_without_in(self):
+        result, stmt = self._unstring(
+            '           UNSTRING WS-SRC DELIMITED BY ","\n'
+            "               INTO WS-TGT-B TALLYING WS-TALLY."
+        )
+        assert result.errors == []
+        assert stmt.tallying_variable == "WS-TALLY"

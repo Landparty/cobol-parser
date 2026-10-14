@@ -934,8 +934,8 @@ class ComputeStatementParser(IStatementParser):
 
             # Cheap checks first: token type tests, parenthesis counting.
             # Only fall back to the ``.upper()`` keyword test at paren depth
-            # zero when the token could plausibly be ``ON``/``NOT``/
-            # ``END-COMPUTE`` (i.e. has a value).
+            # zero when the token could plausibly be ``ON``/``SIZE``/
+            # ``NOT``/``END-COMPUTE`` (i.e. has a value).
             tok_type = token.type
             if tok_type == TokenType.LEFT_PAREN:
                 paren_depth += 1
@@ -946,7 +946,12 @@ class ComputeStatementParser(IStatementParser):
                     break
                 if token.value:
                     upper = token.value.upper()
-                    if upper in ("ON", "NOT", "END-COMPUTE"):
+                    # ``ON`` is optional before SIZE ERROR, so a bare
+                    # ``SIZE`` (a reserved word, never an expression term)
+                    # must also end the expression; otherwise the phrase is
+                    # folded into it and the handler body escapes the
+                    # COMPUTE as free-standing statements.
+                    if upper in ("ON", "SIZE", "NOT", "END-COMPUTE"):
                         break
                     # Without this check, a COMPUTE with no trailing period
                     # immediately followed by another statement (e.g. a

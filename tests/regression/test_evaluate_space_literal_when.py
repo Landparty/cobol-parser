@@ -91,4 +91,4 @@ class TestBlankLiteralWhenSelector:
         result = parse_cobol(source, filename="evalspc.cbl")
         stmt = _first_evaluate(result)
         (selector,) = stmt.when_clauses[0].selectors
-        assert selector == {"type": "Literal", "value": "GB"}
+        assert selector == {"type": "Literal", "value": "GB", "quoted": True}

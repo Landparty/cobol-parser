@@ -200,21 +200,22 @@ class TestGoDependingOnEdgeCases:
         assert result.target_paragraph == "PARA-1"
         assert result.depending_on_variable is None
 
-    def test_depending_on_wrong_word_after_depending(self):
-        """DEPENDING followed by non-ON keyword — covers line 140-141."""
+    def test_depending_without_on_reads_variable(self):
+        """ON is optional: ``DEPENDING WS-X`` names the variable (issue #377)."""
         tokens = [
             _make_token(TokenType.IDENTIFIER, "GO"),
             _make_token(TokenType.IDENTIFIER, "TO"),
             _make_token(TokenType.IDENTIFIER, "PARA-1"),
             _make_token(TokenType.IDENTIFIER, "DEPENDING"),
-            _make_token(TokenType.IDENTIFIER, "WRONG"),
+            _make_token(TokenType.IDENTIFIER, "WS-X"),
         ]
         stream = TokenStream(tokens)
         stream.context = None
         parser = GoStatementParser()
         result = parser.parse(stream)
         assert result.target_paragraph == "PARA-1"
-        assert result.depending_on_variable is None
+        assert result.depending_on_variable == "WS-X"
+        assert stream.is_empty()
 
 
 class TestGoFullProgramIntegration:

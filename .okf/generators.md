@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
-timestamp: 2026-09-04T00:00:00Z
+timestamp: 2026-10-13T00:00:00Z
 ---
 
 # Overview
@@ -219,8 +219,10 @@ Program Flow webview (Mermaid v11, `htmlLabels:false`,
   label. Additionally, module-level `_is_empty_if_arm()` drops the empty
   ELSE arm the scanner synthesizes for every IF with no ELSE clause (and
   its `IF_ELSE` edge — otherwise Mermaid/DOT would auto-recreate the node
-  from the dangling edge). EVALUATE arms are never dropped: an empty WHEN
-  still documents that its selector value is deliberately handled.
+  from the dangling edge). EVALUATE arms are never dropped. Stacked WHENs
+  (`WHEN 'A' WHEN 'B' stmt`) already arrive as one arm labelled
+  `WHEN A / WHEN B` (the scanner groups them, #314), so an EVALUATE arm that
+  is still empty is a WHEN deliberately left with no action.
 
 Reference tests: `tests/unit/test_flowchart_generator.py` —
 `TestMermaidFlowchartGenerator` (linkStyle/terminal-node/THRU-badge
@@ -950,12 +952,32 @@ adds pairing and field comparison, and decodes nothing itself.
   not byte by byte (slack past the layout under `record_length`). Bytes of an
   *ignored* field are blanked on both sides before that image check
   (2026-09-27: `--compare-bytes --ignore UPD-TS` had reported the ignored
-  timestamp's bytes as `(unmapped bytes)`, so the ignore did nothing). A field that
+  timestamp's bytes as `(unmapped bytes)`, so the ignore did nothing).
+  **LOW-VALUES padding is a difference** (2026-10-13, #287): the decoder
+  strips trailing spaces *and* NULs from DISPLAY text (display output keeps
+  doing so), so `'ALICE'` + 5 x `x'00'` and `'ALICE     '` decode alike, yet
+  the program tells them apart (`IF A-NAME = SPACES`) and an uninitialised
+  output field is what the check exists to catch. `_same()` therefore also
+  requires a text field's (alphanumeric / alphabetic / alphanumeric-edited /
+  national) NUL byte positions to match once the values agree. Before, only
+  `--compare-bytes` caught it, and that also flags C/F sign nibbles and
+  filler. Numeric-edited fields are checked too (an unmodelled picture reads
+  as plain text and was otherwise blind to it). **FILLER is exempt** (round
+  2 review): uninitialised FILLER in an FD record is common and harmless, so
+  making it a difference would fail compares that passed before; only
+  `compare_bytes` reports it. The text report appends `(bytes x'..' vs x'..')` to a difference
+  whose two values print the same, so the reader can see what differs. A field that
   did not decode cleanly on *either* side is always compared by bytes: its
   best-effort value is not evidence.
 * **Absent fields** (a shorter VB record, an `OCCURS DEPENDING ON` occurrence
   its counter excludes) compare as absent: `FieldDifference.expected` /
   `.actual` is `None`, rendered `(absent)` in the text report.
+* **Truncated fields** (#357, 2026-10-14): a field the record ended part-way
+  through (`DecodedField.truncated`) differs from one of another length, even
+  when what is left decodes to the same value (`'ABC '` cut to `'ABC'`,
+  `'0000'` cut to `'0'`). `_same()` compares `length` before values. Before,
+  a shorter actual record compared equal and `compare` exited 0; only
+  `--compare-bytes` caught it. Two fields cut at the same place stay equal.
 * **Name resolution is against the `RecordView`, not the records**, so a
   typo is caught even when both files are empty. A key token resolves, in
   order, as a column (`QTY(2)`), a qualified name, or a field's own name, and
@@ -1511,20 +1533,43 @@ Every scenario's `expectations` (in both `generate()` and
 alongside Phase 3's OUT-boundary stubs, via two small helpers in
 `program_fixtures.py`:
 
-* **Tier 1 — `_call_count_expectation`.** For every boundary that gets an
-  actual fixture (an OUT-only boundary has nothing mocked to count, so it
-  gets none), `Expectation(kind="call_count", ref="<CATEGORY>:<KEY>",
-  value=times)` where `times = len(sequence) + (1 if has_terminal_invocation
-  else 0)` -- except a `STATUS_ONLY` fixture, always `1` (its `sequence` is
-  empty by design, not because zero invocations happened).
-  `has_terminal_invocation` is `"AT_END" in boundary.handlers`, checked
-  directly rather than derived from whether `terminal` resolved to a dict
-  (bug fixed 2026-08-04: a READ with an `AT END` handler but no resolvable
-  status field still genuinely invokes the boundary one more time to hit
-  end-of-file -- "does exhaustion happen" and "do we know a field name to
-  report it in" are independent questions; `call_count` must not go stale
-  just because `terminal` came back `None`). Derivable exactly from the
-  scenario's own already-generated sequence -- never a guess.
+* **Failure-path scenarios (#318, option A).** A `PlannedScenario` with any
+  `status_overrides` (the error-status family, and "empty input" when it
+  overrides SQL to 100) runs the program's error path, which the generated
+  sequences do not describe. `_drop_failure_path_counts` keeps only the
+  overridden boundary's own `call_count`, and only when it is not a READ;
+  every other count is dropped, because `report.boundaries` is source order,
+  not execution order, so no boundary is provably *before* the failure.
+  Tier 2 is skipped for these scenarios entirely: the fold walks the normal
+  path, so even a literal-only `field_equals` may observe a site the failure
+  path never reaches (review on #418).
+
+* **Tier 1 — `_CallCounter`** (issue #363). One
+  `Expectation(kind="call_count", ref="<CATEGORY>:<KEY>", value=times)` per
+  mocked `(category, key)` -- every statement invoking the same boundary
+  merged into one count -- and only when that count is exact; otherwise
+  none. A group whose boundaries got no fixture (OUT-only, nothing
+  generatable) has nothing mocked to count and gets none. `times` comes from
+  `cobolparser.analysis.invocation_counts.count_invocations` (see
+  `.okf/analysis.md`): the sum of each invoking statement's static execution
+  count along the entry chain -- main line and SIMPLE PERFORMs count once per
+  time reached, `PERFORM <literal> TIMES` multiplies, and anything inside an
+  IF/EVALUATE/SEARCH arm, a handler, a `PERFORM UNTIL`/`VARYING` body, a
+  SORT procedure, or after a branch that could transfer control has no count.
+  The one data-dependent exception is the read-until-EOF idiom: a READ file
+  with a `SequenceConstraint` whose `PERFORM UNTIL` itself runs exactly once,
+  tests only the EOF flag and has no transfer in its body
+  (`is_plain_eof_loop`), is invoked `len(sequence) + 1` times (every row, plus the READ that hits
+  end of file), whichever READ statements share the work -- a priming READ
+  and the loop's READ are one count. A straight-line READ with an AT END
+  handler is invoked once, not `rows + 1`: the old formula
+  (`len(sequence) + AT END`, `1` for STATUS_ONLY and CALL, one expectation
+  per statement) ignored branches and loops entirely. Each count is inserted
+  where the group's first fixture's expectations start and keeps the old
+  `note`, so bundles whose counts were already right are byte-identical
+  (`FIXTUREDEMO.bundle.json` unchanged). Error-status scenarios' counts
+  (which take a status-check arm this walk assumes is not taken) are issue
+  #318.
 * **Tier 2 — `_tier2_expectations`, backed by
   `cobolparser.analysis.const_fold.ConstantFolder`** (see `.okf/analysis.md`
   for the folder's own extensive "exact by construction, or absent" rules).

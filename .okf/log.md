@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-08T00:00:00Z
+timestamp: 2026-10-14T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,47 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-10-14 -- issue #330: literal operands keep their quotes
+
+[parser.md](parser.md) ("Literal Re-Quoting"), [analysis.md](analysis.md):
+STRING, UNSTRING, INSPECT, CALL USING, SET and INITIALIZE REPLACING now
+re-quote a string-literal operand the way MOVE and DISPLAY do, through
+`_utils.literal_operand_text()`. business-rules' STRING re-quoting
+heuristic is gone; unused-variables, lineage and xref no longer read
+`'WS-CODE'` as the item `WS-CODE`.
+Follow-up from review: `_literals.QUOTED_LITERAL_RE` / `is_quoted_literal()`
+take the typed-literal prefix with the quotes, so the `X` of `X'00'` is no
+longer read as the item `X` (unused-variables, xref, lineage, redundancy),
+and gen-fixtures no longer reports a literal CALL argument unresolved.
+
+## 2026-10-14 -- issue #363: gen-fixtures call_count follows control flow
+
+[generators.md](generators.md), [analysis.md](analysis.md): `call_count`
+was `len(sequence)` (+1 for AT END), or 1 for CALL/STATUS_ONLY, one per
+statement, whatever branches and loops surrounded it. New
+`analysis/invocation_counts.py` counts each statement on the certain path;
+counts are merged per boundary key and omitted where they are not exact.
+
+## 2026-10-14 -- bug hunt: `diff` PICTURE / USAGE spellings
+
+[analysis.md](analysis.md): `diff` reported `PIC X(2)` -> `PIC XX` as
+picture-changed and `COMP-3` -> `PACKED-DECIMAL` (or `COMP` -> `BINARY`) as
+usage-changed. Both now compare by meaning; the strings are still shown as
+coded.
+
+## 2026-10-13 -- issue #291: MOVE FUNCTION sources are checked
+
+[analysis.md](analysis.md): move-type-check counted every `MOVE FUNCTION
+x(...)` as unresolved and lint blamed a missing COPY. Intrinsic results now
+take their category from the intrinsic catalog (or their first argument);
+the rest is counted in `unresolved_function_count` with its own caveat.
+## 2026-10-13 -- compare: LOW-VALUES padding is a difference (#287)
+
+[generators.md](generators.md), [cli.md](cli.md): a values compare treated
+trailing (or all) LOW-VALUES and spaces in a text field as equal, because
+the decoder strips both. Text fields now also compare their NUL positions,
+and the text report shows hex when two differing values print the same.
 
 ## 2026-10-13 -- bug hunt: a CALL may write GLOBAL / EXTERNAL storage
 

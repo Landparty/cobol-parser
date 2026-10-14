@@ -64,6 +64,13 @@ class WhenClause(ASTNode):
         super().__init__("WhenClause", location)
         self.selectors: list = selectors  # List of selector dicts
         self.statements: list[CobolStatement] = []
+        # True when the source has no imperative statement between this WHEN
+        # and the next (non-OTHER) WHEN: the two are one stacked arm. Set by
+        # the parser from the tokens, not inferred from an empty
+        # `statements` -- a body that was in the source but never reached
+        # the AST (an unexpanded COPY, a statement dropped by error
+        # recovery) is not a stack. See `EvaluateStatement.when_groups`.
+        self.stacked: bool = False
 
     def add_statement(self, statement: "CobolStatement") -> None:
         self.statements.append(statement)
@@ -166,6 +173,32 @@ class EvaluateStatement(CobolStatement):
     def set_default_when(self, clause: WhenClause) -> None:
         self.default_when = clause
         self.add_child(clause)
+
+    def when_groups(self) -> list[list[WhenClause]]:
+        """The WHEN arms as they execute: stacked WHEN phrases grouped.
+
+        ``WHEN 'A' WHEN 'B' PERFORM X`` is one arm with two selector sets:
+        the imperative statements after the last WHEN of a stack belong to
+        every WHEN in it. The AST keeps one `WhenClause` per WHEN phrase (so
+        the earlier ones have no statements); this joins each clause the
+        parser marked `stacked` to the clause after it. The last clause of
+        each group owns the shared body (``group[-1].statements``).
+
+        A WHEN that is merely empty in the AST is not joined: only the
+        parser can tell "no statement in the source" from "a statement that
+        did not make it into the AST". WHEN OTHER (`default_when`) is never
+        part of a group.
+        """
+        groups: list[list[WhenClause]] = []
+        pending: list[WhenClause] = []
+        for clause in self.when_clauses:
+            pending.append(clause)
+            if not clause.stacked:
+                groups.append(pending)
+                pending = []
+        if pending:
+            groups.append(pending)
+        return groups
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
@@ -450,10 +483,22 @@ class SearchStatement(CobolStatement):
         self.varying_variable = variable
 
     def add_when_clause(
-        self, condition: str, statements: list["CobolStatement"]
+        self,
+        condition: str,
+        statements: list["CobolStatement"],
+        condition_tree: CobolExpression | None = None,
     ) -> None:
-        """Add a WHEN clause with condition and statements."""
-        clause = {"condition": condition, "statements": statements}
+        """Add a WHEN clause with condition and statements.
+
+        *condition* stays the raw joined text every existing consumer reads;
+        *condition_tree*, when the shared condition machinery could build
+        one, is the structural ConditionalExpression / LogicalExpression
+        tree -- the only form in which ``A = 1 AND B = 2`` is two
+        comparisons rather than one string.
+        """
+        clause: dict[str, Any] = {"condition": condition, "statements": statements}
+        if condition_tree is not None:
+            clause["condition_tree"] = condition_tree
         self.when_clauses.append(clause)
         for stmt in statements:
             self.add_child(stmt)
@@ -473,6 +518,11 @@ class SearchStatement(CobolStatement):
             result["when_clauses"] = [
                 {
                     "condition": clause["condition"],
+                    **(
+                        {"condition_tree": clause["condition_tree"].to_dict()}
+                        if clause.get("condition_tree") is not None
+                        else {}
+                    ),
                     "statements": [s.to_dict() for s in clause["statements"]],
                 }
                 for clause in self.when_clauses

@@ -8,6 +8,36 @@ timestamp: 2026-10-13T00:00:00Z
 
 # Overview
 
+2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
+#377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
+read, no phantom paragraph appears, and dead-code / program-flow /
+unused-variables / complexity all see the jump table.
+`test_go_parser_edge_cases.py`'s `test_depending_without_on_reads_variable`
+replaces the test that pinned the old behavior.
+
+2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests,
+#313) pins EVALUATE `WHEN SPACES` / `ZERO` / `LOW-VALUES` as figurative
+selectors and constraints, distinct from a quoted `WHEN 'SPACES'`, through
+gen-fixtures (blank data for the figurative arm) and business-rules (quotes
+kept). Four selector-shape tests now expect the additive `"quoted": True`.
+`tests/unit/analysis/test_ast_diff.py` adds a parametrized test that
+`WHEN SPACES` -> `WHEN 'SPACES'` and `WHEN WS-B` -> `WHEN 'WS-B'` each diff
+as one `condition-changed`.
+
+2026-10-14: +10 in `tests/unit/analysis/test_dead_code.py`'s new
+`TestSectionExitGoTo` (issue #312): `GO TO nnnn-EXIT` inside a PERFORMed /
+SORT-procedure SECTION no longer keeps later sections alive; three guards
+pin that a section also fallen into or gone to still runs past its exit,
+four more that a jump into it from another section (or an ENTRY) does too.
+
+2026-10-14: `tests/regression/test_evaluate_stacked_when.py`
+(11 tests, #314) pins stacked WHEN phrases (`WHEN 'A' WHEN 'B' stmt`) as one
+arm while the AST keeps one `WhenClause` per phrase: `when_groups()`,
+business rules (`WS-T = 'A' OR WS-T = 'B'`, `reached_via`), one program-flow
+`BranchArm` owning the PERFORM, constraint disjuncts `WHEN_1#1`/`WHEN_1#2`
+negated by later arms and WHEN OTHER, and scenario names; an empty WHEN
+whose body was an unexpanded COPY, or one before WHEN OTHER, is not stacked.
+
 2026-10-13: `tests/regression/test_copy_member_case_folding.py`
 (17 tests, #289) pins COPY member and library names folding to uppercase on
 a case-sensitive filesystem: `copy errorcd.` finds `ERRORCD.cpy`, the uppercase
@@ -319,6 +349,13 @@ hard-disables) and adds `preprocess` auto-detection pins (free-form
 input passes through untouched by default; `--source-format=fixed`
 still forces).
 
+2026-10-14: New `tests/unit/test_perform_until_newline.py` (19 tests,
+issue #347) -- a PERFORM UNTIL condition ending at a line break, in the
+out-of-line, inline and VARYING forms: bare condition-name, `( A > 5 )`,
+a parenthesised OR, `NOT cond` and a class test each get a real condition
+tree; the line-break form matches the period form; and the READ/AT END/EOF
+flag idiom yields a `SequenceConstraint`. See [parser.md](parser.md).
+
 2026-08-24 (second entry this date): New
 `tests/regression/test_corpus_residual_findings.py` (10 tests) pinning a
 follow-up 105-program corpus sweep's four residual findings -- see
@@ -595,6 +632,8 @@ the existing `TestNewSubcommandsRegistered` and
 same registration/`-o`-silences-stdout coverage the other five analyzer
 subcommands already get.
 
+2026-10-13 (issue #291): +4 in new `tests/unit/analysis/test_move_type_checker.py::TestIntrinsicFunctionsWithArguments` (every `MOVE FUNCTION x(...)` form in a parsed program is checked -- spaced args with an `OF` qualifier and TRIM's `LEADING`, subscripted args, quoted literal args, `CURRENT-DATE(1:8)` and a reference-modified result; NUMVAL into `PIC A` and a non-integer MAX into `PIC X` are errors; an unresolved TRIM argument is an ordinary unresolved operand; NATIONAL-OF and an uncatalogued name count in `unresolved_function_count`), and +2 in `tests/unit/analysis/test_lint.py::TestCaveats` (no caveat for a checked function source; an uncheckable one gets its own caveat without the `--copybook-path` hint). All failed before the fix. Review follow-up: +2 in `TestNumericFunctionIntegerness` (SUM / REM / RANGE of integers into `PIC X` are clean; NUMVAL, SUM with a `V99` argument and MAX over a nested NUMVAL into `PIC X` are function caveats, not ERRORs; NUMVAL into `PIC A` stays an ERROR; UPPER-CASE of a `PIC N` item is unresolved) and +1 in `TestCaveats` (an unresolved COPY operand and a function caveat together give two separately worded caveats). Round 2: `TestNumericFunctionIntegerness` also pins one argument rule for SUM / MAX (a `V99` or COMP-2 argument into `PIC X` is an ERROR for both) and counts UPPER-CASE / TRIM of a `PIC N` item as function caveats, not missing COPYs.
+
 2026-10-05 (issue #273): `tests/unit/test_models.py` -- `test_ast_from_json_roundtrip` now compares `to_dict()` and asserts no warning for a statement-free program; +1 `test_from_json_restores_structure_and_warns_about_statements` (parsed program: dict equal with paragraph statements emptied, `LossyDeserializationWarning` with the dropped count); +3 in new `TestNodeEquality` (unrelated programs not equal, reparse equal, source position ignored). The existing `from_json` tests in `test_program_model_branches.py` / `test_bug_hunt_r12_misc.py` now expect the warning.
 
 2026-10-13 (issue #296): +3 in `test_views.py` (overlay inside OCCURS placed at every occurrence, a shorter overlay padded with FILLER, a nested overlay read through its enclosing one), +1 in `test_decoding.py` (`decode --view` on an overlay inside OCCURS reads both occurrences), +1 in `test_compare.py` (a compare through an overlay view keyed on a field outside it). Existing overlay assertions updated for the whole-record view shape.
@@ -768,7 +807,7 @@ method names — 5 of the 15 tests above cover these. 2026-08-04: +454 tests acr
 (Phase 5), wiring `--scenarios branches|all` into a populated
 `FixtureBundle` plus a hand-written schema doc (Phase 6, +15 tests: see
 `docs/fixture-bundle-schema.md`), and per-scenario tier 1/2 `Expectation`s —
-`call_count` derived exactly from each scenario's own generated sequence,
+`call_count` (exact counts only since issue #363: see generators.md),
 `field_equals` from the new `analysis.const_fold.ConstantFolder` single-pass
 walk seeded with that scenario's own mocked inputs (Phase 7, +104 tests:
 `test_const_fold.py` (44 unit tests over MOVE/arithmetic/COMPUTE folding,
@@ -837,7 +876,11 @@ tests/
       test_views.py  # build_record_views(): running-offset placement checked against real encoded bytes, REDEFINES overlays as the whole record with the overlay swapped in (every occurrence inside OCCURS, FILLER padding for a shorter overlay, a nested overlay read through its enclosing one -- #296), an overlay not moving the fields after it, two redefinitions of one item, short-name lookup, ODO ambiguity flagging, and a parametrised contiguity property over every view (see generators.md)
       test_decoding.py  # RecordDecoder: decode(encode(row)) == row for every storage class and both charsets, ODO under every RecordFormat, RDW framing, overlay switching reading identical bytes (and every occurrence of an overlay inside OCCURS, #296), the sign conventions the decoder reads but never writes, bad bytes reported per field (ODO counters out of range, leftover RDW body bytes, negative sign on unsigned COMP-3 included), short/truncated records, paging, and the hex pane (see generators.md)
     test_program_layout_index.py  # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, qualified level-88 names (resolve/condition_values/gen-fixtures arms, #272), record_named(), multi-program units, from_file errors (see generators.md)
-    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md)
+    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning (incl. a compound SEARCH WHEN pinning each conjunct, #348) / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md)
+
+    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244), TestFailurePathExpectations: error-status / empty-input scenarios assert no normal-path call_count and no field_equals (#318) (see generators.md)
+
+    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md); TestCallCountFollowsControlFlow: call_count only where exact -- branches, literal TIMES, UNTIL bodies, the read-to-EOF rule and its early exits, GO TO loops, EOF status checks (#363)
     test_scenario_planner.py  # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable-arm handling, fixed families (empty-input/error-status/boundary-values), exact coverage accounting, TestScenarioNamesAreUnique: verb@line + disjunct naming, merged names, uniqueness over tests/samples and enterprise (#267) (see generators.md)
     io_statements/             # IO parser unit tests
     test_extended_verb_parsers.py  # 2026-09-02 statement-coverage audit: INITIATE/TERMINATE/SUPPRESS, SEND/RECEIVE/ENABLE/DISABLE/PURGE, EXHIBIT/EXAMINE/TRANSFORM/ENTER/NOTE/CHAIN, READY/RESET TRACE, SERVICE, TITLE, RAISE/RESUME/VALIDATE -- node, operands, no warnings; UNSUPPORTED_VERBS == {EXECUTE, GOTO, RECOVER}; every STATEMENT_KEYWORDS verb dispatches (see parser.md)
@@ -846,10 +889,13 @@ tests/
       test_gen_fixtures_cli.py  # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes (see cli.md)
     analysis/
       test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability (IF/EVALUATE/SEARCH), CALL argument-direction ladder, ACCEPT filtering (incl. `FROM DATE YYYYMMDD` qualifiers), IOLogger cross-check (see analysis.md)
-      test_constraints.py  # ConstraintExtractor: relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan, EVALUATE TRUE + 88s, WHEN OTHER, SEARCH WHEN, PERFORM-UNTIL SequenceConstraint (see analysis.md)
+      test_constraints.py  # ConstraintExtractor: relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan, EVALUATE TRUE + 88s, WHEN OTHER, SEARCH WHEN (incl. AND/OR from its condition tree, #348), PERFORM-UNTIL SequenceConstraint (see analysis.md)
       test_domains.py  # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value, TestEnumDomainHonoursRelationalConjuncts: a level-88 pick re-checked against gt/ge/lt/le (#244) (see analysis.md)
       test_dclgen_check.py  # DclgenChecker: DCLGEN column <-> host-variable pairing (the CUST_ID/CUST-VAL underscore-hyphen normalization), every violation kind and its severity, both null-indicator syntaxes, what it declines to check (VARCHAR group binding, BLOB), source ordering, ambiguous columns, and a parametrised "what DCLGEN itself would generate is always clean" table (see analysis.md)
+      test_const_fold.py  # ConstantFolder: MOVE/ADD/SUBTRACT/MULTIPLY/COMPUTE folding, GIVING forms, loop/branch write-poisoning, DIVIDE's unconditional poison, the ADD-X-TO-X self-reference gap, PERFORM (inline/paragraph/THRU) chaining, GO TO/STOP RUN stopping the walk, ACCEPT/READ preserving a seeded value, DISPLAY/WRITE as the only observation points, TestStorageAliasing: sibling FD records / WRITE FROM / JUSTIFIED RIGHT padding (#245), TestValueAtObservationPoint: value at each DISPLAY/WRITE site + paragraph fall-through (#246), TestWalkBudget: the step budget on a quadratic fall-through chain (see analysis.md), TestInspectAndExecWrites: INSPECT TALLYING counters and EXEC CICS options / EXEC DLI arguments are writes (#317)
+
       test_const_fold.py  # ConstantFolder: MOVE/ADD/SUBTRACT/MULTIPLY/COMPUTE folding, GIVING forms, loop/branch write-poisoning, DIVIDE's unconditional poison, the ADD-X-TO-X self-reference gap, PERFORM (inline/paragraph/THRU) chaining, GO TO/STOP RUN stopping the walk, ACCEPT/READ preserving a seeded value, DISPLAY/WRITE as the only observation points, TestStorageAliasing: sibling FD records / WRITE FROM / JUSTIFIED RIGHT padding (#245), TestValueAtObservationPoint: value at each DISPLAY/WRITE site + paragraph fall-through (#246), TestWalkBudget: the step budget on a quadratic fall-through chain (see analysis.md)
+      test_invocation_counts.py  # count_invocations (issue #363): status-check exemption (level-88, mixed conditions, INVALID KEY), EVALUATE / UNTIL / VARYING / variable TIMES bodies unknown, EXIT PARAGRAPH, literal TIMES with a transfer, fall-through + PERFORM counted twice, GO TO followed forward / into a SECTION, GO TO out of a PERFORM / DEPENDING ON / with ALTER / to an unknown target reporting nothing
   integration/                 # end-to-end parsing
     test_shamrice_examples.py  # parametrised: all *.cbl in examples/cobol/shamrice/ must parse error-free
     test_nist_cobol85_support.py  # parametrised: all 459 NIST *.CBL must parse error-free (strict-xfail KNOWN_ISSUES ratchet); copybook validation
@@ -1081,6 +1127,21 @@ too (see commands above).
   command line: `expand --source-map` / `--keep-comments`, and lint findings
   carrying the copybook they are really in (this is what the VS Code
   extension consumes).
+* #301 (2026-10-13): `test_lint_subcommand.py::TestTextOutput` pins the
+  on-disk column for fixed-format and free-form programs (the old `:6:1:`
+  expectation encoded the bug); `test_expand_source_map_cli.py` pins
+  `origin.column` and the free-member-in-fixed-parent / fixed-member-in-free-
+  parent offsets; `test_expansion_source_map_and_comments.py` pins
+  `apply_source_map(..., column_offset)` and `fixed_format_column_offset`.
+  Review follow-up: `test_source_format_free_directive_stops_the_shift`,
+  `test_json_origin_carries_the_on_disk_column`,
+  `test_without_expansion_origin_is_the_file_itself` (replaced the old
+  "no origin without expansion" test), and the no-column parse error case.
+  Round 2: `test_switching_back_to_fixed_shifts_again`,
+  `test_source_format_fixed_flag_shifts` / `..._free_flag_does_not_shift`,
+  `test_a_copybook_that_cannot_be_reread_prints_no_column` (patches
+  `Path.read_text`, which only the column helper uses; the expander opens
+  files itself).
 
 # Cross-repo review follow-up fixes (2026-09-10)
 
@@ -1232,6 +1293,13 @@ width, and `jcl --dd-map --program`. The abbreviated-condition fix is pinned
 in `test_review_2026_09_09_parser.py` (`TestFinding08ConditionTrees`); the
 JCL omitted-sub-parameter slot in `tests/unit/test_jcl.py`.
 
+`tests/regression/test_keyword_line_breaks.py` (issue #385) parses each
+keyword pair (STOP RUN, WHEN OTHER, 88/66 names, FD/SD, CALL ON EXCEPTION,
+ENTRY, EXEC SQL/CICS/DLI, END DECLARATIVES, SPECIAL-NAMES, OBJECT
+REFERENCE, ...) once on one line and once broken across two, and requires
+identical ASTs apart from locations; it also pins the dispatch cache
+telling EXEC<newline>SQL from EXEC<newline>CICS within one parse.
+
 ### Field lineage (2026-10-08)
 
 `tests/samples/lineage/` holds a three-program chain plus its JCL: WRITER
@@ -1286,3 +1354,24 @@ ZERO is pinned there too, along with `callee_names` itself.
 codebase-graph, and
 `test_boundary_inventory.py::TestDynamicCallSentinelCandidates` pins the
 "no possible target values resolved" note when only sentinels remain.
+
+## 2026-10-14 (issue #342)
+
+`test_environment_division_parser.py::TestInputOutputSection::test_separator_comma_and_semicolon_not_kept_in_names`
+pins that a comma/semicolon after `ASSIGN TO ddname` or between the two
+FILE STATUS variables is not kept in the name, and
+`test_field_lineage.py::test_separator_after_assign_names_the_dd_port`
+that the lineage file port is `INDD`, not `,`.
+
+## 2026-10-14
+
+`tests/unit/test_compute_bare_size_error.py` pins that COMPUTE ends its
+expression at a bare `SIZE ERROR` (no `ON`), with the handler body landing
+in `on_size_error` rather than the paragraph; covers the `IF ... END-COMPUTE`
+nesting and a bare `NOT SIZE ERROR` (#399).
+
+`tests/unit/analysis/test_ast_diff.py::test_equivalent_picture_spellings_are_not_a_change`
+/ `test_usage_synonyms_are_not_a_change` pin that `diff` compares a PICTURE
+by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
+(`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
+`COMP-5` is still a change.

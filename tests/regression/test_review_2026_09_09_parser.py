@@ -180,7 +180,7 @@ class TestFinding05InspectSubscriptedTarget:
             {
                 "counter": "A",
                 "for_type": "ALL",
-                "value": "X",
+                "value": '"X"',
                 "before": None,
                 "after": None,
             }
@@ -192,7 +192,7 @@ class TestFinding05InspectSubscriptedTarget:
         assert ins.target == "D ( I )"
         assert ins.inspect_type == "REPLACING"
         assert [(c["from_value"], c["to_value"]) for c in ins.replacing_clauses] == [
-            ("A", "B")
+            ('"A"', '"B"')
         ]
 
 
@@ -215,14 +215,14 @@ class TestFinding06InspectFigurativesAndRepeatedPairs:
         assert [
             (c["replace_type"], c["from_value"], c["to_value"])
             for c in ins.replacing_clauses
-        ] == [("ALL", "A", "B"), ("ALL", "C", "D")]
+        ] == [("ALL", '"A"', '"B"'), ("ALL", '"C"', '"D"')]
 
     def test_tallying_second_counter_still_a_counter(self):
         result = _proc("INSPECT D TALLYING A FOR ALL 'X' B FOR ALL 'Y'.")
         ins = _stmt(result, "INSPECT")
         assert [(c["counter"], c["value"]) for c in ins.tallying_clauses] == [
-            ("A", "X"),
-            ("B", "Y"),
+            ("A", '"X"'),
+            ("B", '"Y"'),
         ]
 
 
@@ -400,7 +400,7 @@ class TestFinding10SelectorAndSearchConditionLiterals:
         ev = _stmt(result, "EVALUATE")
         sels = [wc.selectors[0] for wc in ev.when_clauses]
         assert sels[0] == {"type": "Literal", "value": "B", "identifier": True}
-        assert sels[1] == {"type": "Literal", "value": "B"}
+        assert sels[1] == {"type": "Literal", "value": "B", "quoted": True}
         assert sels[2] == {"type": "Literal", "value": "1"}
 
     def test_search_when_condition_requotes_string_literals(self):
@@ -454,7 +454,7 @@ class TestFinding12CheapExtras:
         assert result.warnings == []
         st = _stmt(result, "SET")
         assert st.targets == ["I"]
-        assert st.value == "SUB1"
+        assert st.value == '"SUB1"'
         assert st.get_metadata("value_is_entry") is True
 
     def test_set_entry_form_does_not_leak_into_a_later_group(self):
@@ -464,7 +464,7 @@ class TestFinding12CheapExtras:
         # own value is an ordinary identifier.
         result = _proc("SET I TO ENTRY 'SUB1' J TO 2.")
         st = _stmt(result, "SET")
-        assert st.value == "SUB1"
+        assert st.value == '"SUB1"'
         assert st.get_metadata("value_is_entry") is True
         (group,) = st.groups
         assert group["targets"] == ["J"]
@@ -480,7 +480,7 @@ class TestFinding12CheapExtras:
         assert st.get_metadata("value_is_entry") is None
         (group,) = st.groups
         assert group["targets"] == ["J"]
-        assert group["value"] == "SUB2"
+        assert group["value"] == '"SUB2"'
         assert group["value_is_entry"] is True
 
     def test_perform_thru_qualifier(self):

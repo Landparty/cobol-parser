@@ -1244,18 +1244,17 @@ class XrefAnalyzer:
                 # advances it: read and written (#269).
                 pairs.append((stmt.pointer_variable, ROLE_READ, True))
                 pairs.append((stmt.pointer_variable, ROLE_WRITE, True))
-            # ``DELIMITED BY`` holds either a data name, a quote-stripped
-            # literal, or the keyword SIZE -- inexact either way.
+            # ``DELIMITED BY`` holds either a data name, a (quoted) literal,
+            # or the keyword SIZE -- inexact either way.
             pairs += [(d, ROLE_READ, False) for d in stmt.delimiters]
             consumed = {
                 value.upper()
                 for value in (stmt.into_target, stmt.pointer_variable)
                 if value
             }
-            # The STRING parser hands literal operands through quote-
-            # stripped (``'VERY LONG TEXT'`` arrives as ``VERY LONG TEXT``),
-            # so an operand cannot be told from a run of words: inexact,
-            # never reported undefined.
+            # A literal operand arrives quoted (``'VERY LONG TEXT'`` as
+            # ``"VERY LONG TEXT"``); operands stay inexact so a figurative
+            # constant or special register is never reported undefined.
             pairs += [
                 (operand, ROLE_READ, False)
                 for operand in stmt.operands
@@ -1294,7 +1293,7 @@ class XrefAnalyzer:
                     pairs.append((clause["counter"], ROLE_READ, True))
                     pairs.append((clause["counter"], ROLE_WRITE, True))
                 # Everything else in an INSPECT clause is a value that may
-                # equally be a quote-stripped literal -- inexact.
+                # equally be a (quoted) literal or a figurative -- inexact.
                 for key in ("value", "before", "after"):
                     if clause.get(key):
                         pairs.append((clause[key], ROLE_READ, False))

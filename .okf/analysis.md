@@ -99,6 +99,17 @@ either by bare name.
 > (a nested `ENTRY` made the container's same-named paragraph an entry
 > point). Pinned by `TestContainedProgramScope` in `test_dead_code.py`.
 
+> 2026-10-14 (issue #312): the SECTION form of the `GO TO nnnn-EXIT` idiom.
+> The last paragraph of every section a PERFORM / SORT / MERGE / XML PARSE
+> runs (`_section_exits`) is treated like a THRU range end: a GO TO onto it
+> is a reference, not a fall-through source, so it no longer keeps every
+> later section alive. Exception: when the section is itself a fall-through
+> source (fallen into, or a GO TO target), `_collect_fallthrough_refs`
+> restores the exit as a fall-through source, since on that path it runs
+> on. The same holds when the section is entered by a jump from *outside*
+> it (`_sections_entered_by_jump`: a GO TO written in another section, an
+> ALTER, a CICS HANDLE, an ENTRY). Pinned by `TestSectionExitGoTo`.
+
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]
@@ -383,8 +394,8 @@ recurse both sides; `ConditionalExpression`/`ArithmeticExpression` ->
 `left_operand`/`right_operand`; `FunctionCall` -> `arguments`) but collects
 leaf identifiers instead of rendering text, falling back to a best-effort
 regex over `operands[0]`/`raw_condition` for a node shape it can't
-decompose structurally (SEARCH WHEN and `EVALUATE TRUE` Condition-type
-selectors, per `constraints.py`'s same documented gap — see
+decompose structurally (`EVALUATE TRUE` Condition-type selectors, and
+SEARCH WHEN conditions that carry no `condition_tree`, per `constraints.py`'s same documented gap — see
 `ConstraintExtractor`'s section above). The fallback is deliberately
 over-inclusive: a false positive there only makes the analyzer *miss* an
 unused variable, never wrongly flag a used one.
@@ -722,6 +733,15 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   `has_exit_program`/`has_return` on the `FlowNode`), `MEDIUM` otherwise —
   fall-through-only cycles are never reported (fall-through can't actually
   form a cycle).
+  A `MIXED` cycle that is a PERFORM of a multi-procedure range (a SECTION
+  with its paragraphs, or a THRU span) made from *inside* that range, every
+  other hop a fall-through between its members, is reported as
+  `mechanism="PERFORM"`, `HIGH` (`_reenters_own_perform_range`, #350): the
+  range-level twin of `P. PERFORM P.`. `_closed_by_perform_range_end` (which
+  drops the priming-read false positive) ends a SECTION's range at its last
+  paragraph (`_perform_range`), not at the header node -- before #350 the
+  header's fall-through into its first paragraph read as "leaving the range"
+  and `S. S1. PERFORM S.` was reported clean.
 - **Self-recursive CALL** — a CALL (static, or dynamic and resolved via
   `DynamicCallAnalyzer`, which this analyzer runs internally) whose target
   equals the program's own `PROGRAM-ID`. `HIGH`, or `LOW` when the
@@ -1128,11 +1148,39 @@ report: MoveTypeReport = MoveTypeChecker().check(ast)
 #                                    not be resolved (undeclared identifier,
 #                                    unexpanded copybook, ...); serialized
 #                                    in report.to_dict()
+# report.unresolved_function_count: int -- the part of unresolved_count no
+#                                    copybook can fix: a FUNCTION source with
+#                                    a NATIONAL result or an uncatalogued name
 # MoveViolationKind: NUMERIC_TO_ALPHANUMERIC, ALPHANUMERIC_TO_NUMERIC, …
 ```
 
 Detects MOVE statements with type-incompatible sending/receiving fields based on
 PICTURE clause categories.
+
+**Intrinsic FUNCTION sources (2026-10-13, issue #291):** a `MOVE FUNCTION
+x(...) TO y` was always skipped into `unresolved_count` (only the argless
+`CURRENT-DATE` / `WHEN-COMPILED` were known), and lint's caveat then told the
+user to pass `--copybook-path` for a COPY that was never missing. The result
+category now comes from `dialects.le_signatures.intrinsic_signature(name).returns`:
+`alphanumeric` → ALPHANUMERIC, `integer` → integer NUMERIC, `numeric` →
+NUMERIC whose integer-ness is *unknown* (`None`: NUMVAL("12") is an integer,
+NUMVAL("1.5") is not). SUM / REM / RANGE / MAX / MIN / ABS take their
+integer-ness from their arguments by one rule: non-integer if any argument
+is, an integer if all are, unknown otherwise. TRIM / ABS / USUBSTR / MAX /
+MIN take their first argument's category;
+UPPER-CASE / LOWER-CASE / REVERSE are ALPHANUMERIC only when their argument
+resolves (a national argument gives a national result). A reference-modified
+result (`FUNCTION CURRENT-DATE(1:8)`) is ALPHANUMERIC. A nested `FUNCTION
+x(...)` argument is one argument. So `MOVE FUNCTION NUMVAL(X) TO` a `PIC A`
+item is an error, but to a `PIC X` item it is skipped, never a guessed
+error. What stays unchecked because of the function itself (NATIONAL-OF, an
+uncatalogued name, a numeric result of unknown integer-ness into an
+alphanumeric receiver, UPPER-CASE / TRIM / ... of a declared PIC N item) is
+also counted in `unresolved_function_count`, and
+lint words that caveat separately without the copybook hint; an unresolved
+*argument* is still an ordinary unresolved operand. Pinned by
+`test_move_type_checker.py::TestIntrinsicFunctionsWithArguments` /
+`TestNumericFunctionIntegerness` and `test_lint.py::TestCaveats`.
 
 **Group receivers and `ZERO` → alphabetic (2026-09-27):** a MOVE *into* a
 group item is a group move (bytes copied as alphanumeric) and legal from any
@@ -1907,6 +1955,18 @@ be negated into one constraint (a `THRU` range, a conjunction, an
 unsupported selector) is left out and noted in `unsupported`. `WHEN OTHER`
 still negates only each arm's *own* selector constraints.
 
+**A figurative `WHEN` selector is a `figurative` constraint (#313,
+2026-10-14).** `_build_selector` marks a single-token selector
+`"figurative": True` (`WHEN SPACES` / `ZERO` / `LOW-VALUES`) or
+`"quoted": True` (`WHEN 'SPACES'`); before that both were the same
+`{"type": "Literal", "value": "SPACES"}`, so gen-fixtures wrote the six
+characters `SPACES` for the figurative arm and called it verified, and
+`WHEN ZERO` / `WHEN LOW-VALUES` were missed as literals that do not fit.
+`_extract_evaluate_selector` now maps a figurative selector the way the IF
+path does (`_figurative_name`), and a quoted selector is never looked up as
+a data name. `business_rules._literal` renders a quoted selector with its
+quotes, so `WHEN 'SPACES'` no longer reads as `= SPACES`.
+
 **The level-88 enum domain is a preference, not the field's domain.**
 `solve()` tries `EnumDomain(spec.condition_values)` first whenever a set op is
 in play, so `IF NOT TYPE-M` against 88s `"05"`/`"09"` still yields the other
@@ -1992,21 +2052,29 @@ one `unsupported` note rather than silence; a pure internal counter loop
 (`PERFORM UNTIL I > 10`, `I` not boundary-fed) is correctly silent -- out of
 scope, not a gap.
 
-**SEARCH WHEN and `EVALUATE TRUE`'s non-compound selectors share one text
-parser.** `SearchStatement.when_clauses`' `"condition"` key is a single raw
-joined string, not a structured tree (unlike IF/PERFORM, SEARCH conditions
-were never given the M12 structural treatment) -- confirmed against
-`search_parser.py`. `EVALUATE TRUE WHEN <selector>` also lacks structure for
-a simple relational selector: `evaluate_parser.py`'s `_build_selector` never
-emits an `"Identifier"` selector type at all (a documented assumption this
-module's first draft got wrong) -- a bare condition-name like `WHEN
+**SEARCH WHEN is extracted from a condition tree (issue #348, 2026-10-14).**
+`search_parser.py` builds each WHEN condition with the shared
+`build_condition_expression` (the IF / PERFORM UNTIL machinery) and stores
+it as `when_clauses[i]["condition_tree"]` next to the unchanged raw
+`"condition"` string; `SearchStatement.to_dict()` serializes it too.
+`_extract_search` walks that tree with `_extract_expr`, so `WHEN A = 'K1' AND
+B = 'Z'` is two conjuncts and an OR becomes `WHEN_n#1` / `WHEN_n#2` arms,
+exactly like IF. Before, the raw text was split on its first operator and the
+whole tail (`K1' AND B = 'Z`) became one made-up literal that gen-fixtures
+wrote into every row while reporting the arm targeted. A SEARCH node built
+without a tree still falls back to the text parser below.
+
+**`EVALUATE TRUE`'s non-compound selectors use a minimal text parser.**
+`EVALUATE TRUE WHEN <selector>` lacks structure for a simple relational
+selector: `evaluate_parser.py`'s `_build_selector` never emits an
+`"Identifier"` selector type at all -- a bare condition-name like `WHEN
 F1-VALID` and a simple comparison like `WHEN F1-QTY = 5` both arrive as
 `{"type": "Literal", ...}` / `{"type": "Condition", "text": ...}` with no
-`"operator"` key, the *same* raw-text shapes SEARCH already has to handle.
-Both route through the same minimal relational-text parser
-(`_parse_relational_text`); a compound `AND`/`OR` selector text (`sel
-["operator"]` present) stays unsupported in v1, same limitation as a
-compound SEARCH WHEN.
+`"operator"` key. Those route through `_parse_relational_text`; a compound
+`AND`/`OR` selector (`sel["operator"]` present) stays unsupported in v1.
+`_parse_relational_text` itself reports any text holding an `AND`/`OR`
+outside a quoted literal as unsupported rather than splitting it on its first
+operator.
 
 **Two-field comparisons are unsupported in v1** (`IF F1-QTY > F1-STATUS`) --
 stated as a parent-plan limitation, not attempted.
@@ -2191,6 +2259,16 @@ internal env) rather than approximating:
   contract (divide-by-zero and non-terminating decimals poison, not
   truncate).
   Pinned by `tests/regression/test_bug_review_2026_08_12.py::TestDivideMode`.
+* **Writes that live outside `.operands`** (issue #317, 2026-10-14).
+  `_write_targets` also collects `InspectStatement.tallying_clauses[*]["counter"]`
+  (INSPECT ... TALLYING increments it in place), every string value of
+  `ExecCicsStatement.options` (INTO/SET/LENGTH/RESP/RESP2/ITEM/...: the
+  command decides which are written, so all are taken as written), and the
+  argument of each `KEYWORD(arg)` in `ExecImsStatement.arguments` (EXEC DLI
+  INTO/KEYFEEDBACK/...). Both EXEC nodes have an empty `.operands`, so
+  before this a field MOVEd before the statement kept its old value and
+  gen-fixtures asserted a `field_equals` a real run fails.
+  Pinned by `tests/unit/analysis/test_const_fold.py::TestInspectAndExecWrites`.
 * **Exactness is decided over `Fraction`, never over `Decimal`** (2026-09-16
   audit). Both halves of the exactness machinery used to decide exactness
   *using inexact decimal arithmetic*, and both let a wrong value through:
@@ -2359,6 +2437,53 @@ both counts, scanner.py had already been fixed to interleave). Behavior for
 programs without sections is unchanged. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestA4OrderedParagraphsInterleaveSections`.
 
+## Invocation counts (`invocation_counts.py`)
+
+Backs `gen-fixtures`' tier 1 `call_count` (issue #363; see
+`.okf/generators.md`). `count_invocations(ast, report, index)` walks the
+entry chain with `const_fold.py`'s own paragraph helpers
+(`_entry_paragraph`, `_fall_through_chain`, `_ordered_paragraphs`,
+`_perform_body_statements`, `_transfer_kind`) on an explicit frame stack,
+and gives each statement it reaches an exact execution count or "unknown":
+
+* main line and SIMPLE PERFORMs (inline, out of line, THRU, SECTION) add
+  their multiplier each time reached -- a paragraph PERFORMed and also
+  fallen into counts 2; `PERFORM <literal> TIMES` multiplies;
+* IF / EVALUATE / SEARCH arms, handler bodies, `PERFORM UNTIL` / `VARYING` /
+  variable-`TIMES` bodies and SORT / MERGE procedures are unknown;
+* a transfer (GO TO, EXIT PARAGRAPH / SECTION / PERFORM, NEXT SENTENCE,
+  STOP RUN, GOBACK, EXIT PROGRAM) inside such a region makes everything
+  after it unknown; on the main line, GO TO / STOP ends the walk and a skip
+  makes the rest unknown; inside a literal `TIMES` body any transfer
+  discards every count (they would be overstated);
+* a main-line GO TO is followed forward (`push_chain` at the target) only
+  when no statement of the target paragraph was walked yet; a backward jump
+  (a GO TO read loop), a GO TO out of a PERFORMed paragraph, GO TO
+  DEPENDING ON, an unknown target, or any ALTER in the program discards
+  every count;
+* **status exemption**: an IF reading only boundary status fields (FILE
+  STATUS fields and their level-88s, `SQLCODE`/`SQLSTATE`/`EIBRESP`), an
+  INVALID KEY handler, and a CALL's ON EXCEPTION / ON OVERFLOW are decided
+  by the scenario's status fixture, so a STOP RUN inside them does not
+  blank later counts. Without it, the universal `OPEN` + status-check idiom
+  would leave no count after the first OPEN. A FILE STATUS field qualifies
+  only while the last boundary that set it (`status_sites`) ran on the
+  certain path and is not a READ that can reach end of file: after one, the
+  field is '10' in every read-to-EOF scenario and at once for empty input.
+
+`is_plain_eof_loop(ast, perform, index)` backs `_CallCounter`'s EOF rule:
+the UNTIL tests exactly one field, and the body (followed through PERFORMs
+and SORT procedures) has no transfer -- `UNTIL WS-EOF = 'Y' OR WS-CNT >= 3`
+or an EXIT PERFORM can stop before end of file.
+
+`InvocationCounts.for_boundary(ref)` matches a `BoundaryRef` by
+(paragraph, line) against statements of a boundary type only, so a MOVE in
+an AT END handler on the READ's own line cannot blur the READ's count.
+`count_at(line, type)` answers for any statement (used for the EOF loop's
+`PERFORM UNTIL`). Unreached statements (GO TO-only targets, DECLARATIVES)
+have no count. Tests: `tests/unit/analysis/test_invocation_counts.py`,
+`tests/unit/test_program_fixtures.py::TestCallCountFollowsControlFlow`.
+
 ## Module File Map
 
 | File | Analyzer |
@@ -2380,6 +2505,7 @@ programs without sections is unchanged. Pinned by
 | `constraints.py` | `ConstraintExtractor` (Phase 4 of `gen-fixtures`) |
 | `domains.py` | `solve()` constraint/witness solver (Phase 4 of `gen-fixtures`) |
 | `const_fold.py` | `ConstantFolder` (Phase 7 of `gen-fixtures`) |
+| `invocation_counts.py` | `count_invocations` -- exact per-statement execution counts for `gen-fixtures`' `call_count` |
 | `dclgen_check.py` | `DclgenChecker` — DCLGEN `DECLARE TABLE` vs. host-variable types |
 | `unused_variables.py` | `UnusedVariableAnalyzer` |
 | `recursion_risk.py` | `RecursionRiskAnalyzer` |
@@ -2469,6 +2595,18 @@ and `tests/regression/test_nested_program_units.py`.
 `stamp_report_origins(report_dict, source_map)` (2026-09-27) is its twin for
 a serialized analyzer report: every `"location": {"line": N}` mapping gains a
 sibling `"origin"`. Used by `scan_one` and the `unused-variables` CLI.
+
+**And at which column (#301, 2026-10-13).** `LintFinding.origin_column`,
+serialized as `origin.column` only when known, is the column an editor
+shows. `apply_source_map(report, source_map, column_offset)` takes a
+`(file, line) -> int | None` and adds its answer to `location.column`;
+`fixed_format_column_offset()` holds the per-layout table (7 for a
+fixed-format line, whose columns 1-7 never reach the analyzers; 0 for a
+free-form member in a fixed listing; 6 for a fixed-format member in a
+free-form listing). `LintFinding.column_known` (not serialized) is False for
+a parse error that gave only a line; such a finding gets no `origin_column`.
+`stamp_report_origins` leaves an existing `origin` alone so the CLI's dict
+pass does not erase it. Detail in [cli.md](cli.md).
 
 
 # Program-type corpus fixes (2026-09-15)
@@ -2903,6 +3041,13 @@ INTO B GIVING C` -> `C = B / A`); inside an arm it is an action of that
 decision only, never counted twice. Counters (`ADD 1 TO X`, `COMPUTE X = X +
 1`) are not rules at all.
 
+**Stacked WHENs (#314).** `WHEN 'A' WHEN 'B' stmt` is one arm whose
+condition is `WS-T = 'A' OR WS-T = 'B'` (via `EvaluateStatement.when_groups()`);
+the same grouping numbers program-flow `BranchArm`s (one `WHEN_n` arm, label
+`WHEN A / WHEN B`) and constraint arms, where each phrase of a stack is an
+OR-split disjunct of that arm (`WHEN_1#1`, `WHEN_1#2`) and later arms /
+WHEN OTHER negate every phrase.
+
 **Technical vs business.** A decision whose *own* condition reads only
 technical items, or a calculation that writes only technical items, is
 `technical` and excluded by default (counted in `technical_rules_excluded`;
@@ -2944,8 +3089,8 @@ selector (`WHEN NOT 0 THRU 17`, a `Condition` dict with `negated` plus
 from its raw `THRU` text; only a single negated value reads `AGE <> 6`
 (#260). Level-88 values are
 also stored unquoted with `THRU` as `"THROUGH:end"`; `_condition_values`
-quotes them unless the item's PICTURE / USAGE is numeric. STRING sources are
-unquoted too, so one naming no declared item is re-quoted. Actions are
+quotes them unless the item's PICTURE / USAGE is numeric. STRING sources
+arrive quoted (#330), so they are rendered as is. Actions are
 rendered in full here rather than via `program_flow/statement_text.py`
 (flowchart summaries, truncated to 48 chars).
 
@@ -3166,6 +3311,15 @@ sides run through `SequenceMatcher` and only those outside its matching blocks
 are reported moved — so inserting one paragraph at the top does not report every
 following paragraph as moved, and a pure reformat reports nothing at all.
 
+**Spellings are not changes** (2026-10-14 bug hunt). A PICTURE is compared by
+its character positions, repeat factors written out (`_picture_positions`:
+`X(2)` = `XX`, `S9(3)V9(2)` = `S999V99`), and a USAGE by its storage format
+(`_canonical_usage`, the `_storage.py` synonym sets: `COMP` = `BINARY` =
+`COMP-4` = `COMPUTATIONAL`, `COMP-3` = `PACKED-DECIMAL`). `COMP-5` stays
+distinct from `COMP` (no truncation to the PICTURE). The change still reports
+both strings as coded. A VALUE is still compared as written (`+12` vs `12`,
+`'AB'` vs `'AB  '` on `PIC X(4)` read as changes).
+
 Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
 IF, EVALUATE, SEARCH, and (review follow-up) OPEN, EXEC SQL, EXEC CICS, COMPUTE,
 INSPECT, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
@@ -3184,6 +3338,12 @@ Anything not compared exactly goes to `caveats`: a contained program unit, an
 unrecognised nested clause, REPORT SECTION group clauses, level-66 RENAMES,
 ENVIRONMENT/IDENTIFICATION content beyond the above, a duplicate procedure name,
 a near-miss rename. Tests: `tests/unit/analysis/test_ast_diff.py`.
+
+A `WHEN` selector's text carries the parser's markers (#313, 2026-10-14):
+`FIG:SPACES` for a figurative constant, `ID:WS-B` for a data name,
+`Literal:'SPACES'` for a quoted literal. The values alone are identical
+once the lexer strips quotes, so `WHEN SPACES` -> `WHEN 'SPACES'` used to
+diff as "No structural changes".
 
 **Known gaps**: statements outside any named paragraph are not compared, and
 neither are contained programs (`diff` has no `--program` flag yet) — both are

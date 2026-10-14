@@ -10,6 +10,7 @@ from ._utils import (
     consume_optional_qualifiers,
     consume_period,
     is_statement_boundary,
+    literal_operand_text,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
@@ -75,12 +76,13 @@ def _consume_operand(token_stream: ITokenStream) -> str | None:
     (``A(1:2)``, ``D(3:5)``, ``WS-T(I)``). Returns None -- consuming nothing
     -- at a period or end of stream. Reading a single token here silently
     truncated every subscripted or reference-modified operand and left the
-    ``(I)`` tokens to be misread as further operands."""
+    ``(I)`` tokens to be misread as further operands. A string literal keeps
+    its quotes (``'A'``, ``X'00'``) so it never reads as the data item ``A``."""
     token = token_stream.peek()
     if not token or token.type == TokenType.PERIOD:
         return None
     token_stream.consume()
-    value = token.value or ""
+    value = literal_operand_text(token)
     if token.type == TokenType.IDENTIFIER:
         value = consume_optional_qualifiers(token_stream, value)
     return value
@@ -373,13 +375,14 @@ class UnstringStatementParser(IStatementParser):
             elif val == "TALLYING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
+                # ``IN`` is optional: a bare ``TALLYING C`` is the same clause.
                 nxt = token_stream.peek()
                 if nxt and _val(nxt) == "IN":
                     token_stream.consume()
                     skip_whitespace(token_stream)
-                    tally = _consume_operand(token_stream)
-                    if tally is not None:
-                        stmt.set_tallying_variable(tally)
+                tally = _consume_operand(token_stream)
+                if tally is not None:
+                    stmt.set_tallying_variable(tally)
             elif val in ("ON", "NOT") and not _starts_overflow_phrase(token_stream):
                 # An enclosing statement's phrase (``NOT AT END``, ``NOT ON
                 # EXCEPTION``, ...): this statement ends here.
@@ -408,6 +411,13 @@ class UnstringStatementParser(IStatementParser):
                     overflow_stmts = _parse_overflow_stmts(token_stream)
                     if overflow_stmts:
                         stmt.set_not_on_overflow_clause(overflow_stmts)
+            elif val == "OVERFLOW":
+                # Standalone OVERFLOW (without ON prefix)
+                token_stream.consume()
+                skip_whitespace(token_stream)
+                overflow_stmts = _parse_overflow_stmts(token_stream)
+                if overflow_stmts:
+                    stmt.set_on_overflow_clause(overflow_stmts)
             else:
                 token_stream.consume()
 
@@ -435,8 +445,10 @@ class UnstringStatementParser(IStatementParser):
             tval = _val(tgt)
             if tgt.type == TokenType.PERIOD or tval in (
                 "WITH",
+                "POINTER",
                 "TALLYING",
                 "ON",
+                "OVERFLOW",
                 "NOT",
                 "END-UNSTRING",
             ):

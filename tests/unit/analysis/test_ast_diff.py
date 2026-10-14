@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
 from cobolparser.analysis.ast_diff import (
     DiffChange,
     DiffReport,
@@ -726,6 +728,32 @@ def test_changed_evaluate_when_selector():
     assert "WHEN" in changes[0].detail
 
 
+@pytest.mark.parametrize(
+    ("old_selector", "new_selector"),
+    [
+        ("SPACES", "'SPACES'"),  # figurative vs. quoted literal (#313)
+        ("WS-B", "'WS-B'"),  # data name vs. quoted literal
+    ],
+)
+def test_figurative_or_identifier_selector_to_quoted_literal_is_a_change(
+    old_selector: str, new_selector: str
+):
+    def body(selector: str) -> str:
+        return (
+            "           EVALUATE WS-B\n"
+            f"              WHEN {selector}\n"
+            "                 MOVE 1 TO WS-A\n"
+            "           END-EVALUATE\n"
+            "           STOP RUN.\n"
+        )
+
+    report = _statement_diff(body(old_selector), body(new_selector))
+
+    changes = _of_kind(report, "condition-changed")
+    assert len(changes) == 1, _kinds(report)
+    assert "WHEN" in changes[0].detail
+
+
 def test_changed_goto_target():
     report = _statement_diff(
         "           GO TO ONE-PARA.\n"
@@ -829,6 +857,43 @@ def test_picture_changed():
     assert changes[0].symbol == "WS-A"
     assert changes[0].old == "X(5)"
     assert changes[0].new == "X(9)"
+
+
+def test_equivalent_picture_spellings_are_not_a_change():
+    # `X(2)` and `XX` (and `S9(3)V9(2)` / `S999V99`) are one PICTURE; a
+    # rewrite from one spelling to the other used to read as picture-changed.
+    report = _data_diff(
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  WS-A PIC X(2).\n"
+        "       01  WS-B PIC S9(3)V9(2).\n"
+        "       01  WS-C PIC 9(4).\n",
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  WS-A PIC XX.\n"
+        "       01  WS-B PIC S999V99.\n"
+        "       01  WS-C PIC 9(5).\n",
+    )
+
+    changes = _of_kind(report, "picture-changed")
+    assert [(c.symbol, c.old, c.new) for c in changes] == [("WS-C", "9(4)", "9(5)")]
+
+
+def test_usage_synonyms_are_not_a_change():
+    report = _data_diff(
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  WS-A PIC S9(5) COMP-3.\n"
+        "       01  WS-B PIC S9(4) COMP.\n"
+        "       01  WS-C PIC S9(4) COMPUTATIONAL-4.\n"
+        "       01  WS-D PIC S9(4) COMP.\n",
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  WS-A PIC S9(5) PACKED-DECIMAL.\n"
+        "       01  WS-B PIC S9(4) BINARY.\n"
+        "       01  WS-C PIC S9(4) COMP.\n"
+        "       01  WS-D PIC S9(4) COMP-5.\n",
+    )
+
+    # COMP-5 is not truncated to its PICTURE, so COMP -> COMP-5 is real.
+    changes = _of_kind(report, "usage-changed")
+    assert [(c.symbol, c.old, c.new) for c in changes] == [("WS-D", "COMP", "COMP-5")]
 
 
 def test_usage_level_and_value_changed():
