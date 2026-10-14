@@ -194,6 +194,32 @@ class TestFdRecordVarying:
             row[0] for row in dataset.rows
         ]
 
+    def test_a_varying_record_cut_mid_field_by_its_length_is_not_an_error(self):
+        # #358 made a field the record ends inside an error; a RECORD VARYING
+        # record whose length is inside its FD's range ends there by design.
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        dataset = empvl(rows=40)
+        assert any(47 < length < 80 for length in dataset.declared_lengths)
+        decoder = RecordDecoder.from_copybook_source(
+            EMPVL_PROGRAM, filename="EMPVL.cbl", opts=AUTO
+        )
+        result = decoder.decode_bytes(dataset.to_records(AUTO))
+        assert result.error_count == 0
+        assert any(item.truncated for r in result.records for item in r.fields)
+
+    def test_a_varying_record_below_its_minimum_cut_mid_field_is_an_error(self):
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        decoder = RecordDecoder.from_copybook_source(
+            EMPVL_PROGRAM, filename="EMPVL.cbl", opts=VARIABLE
+        )
+        body = decoder.decode_bytes(empvl().to_records(VARIABLE)).records[0].raw
+        short = body[:3]  # inside the first field, far below the 47 minimum
+        rdw = (len(short) + RDW_SIZE).to_bytes(2, "big") + b"\x00\x00"
+        result = decoder.decode_bytes(rdw + short)
+        assert result.error_count == 1
+
     def test_decode_auto_honours_an_explicit_record_varying(self):
         from cobolparser.generators.data.decoding import RecordDecoder
 

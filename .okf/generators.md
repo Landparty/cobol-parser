@@ -911,8 +911,14 @@ Invalid data that is still *readable* counts too (issue #248, 2026-10-04):
 `EncodingOptions.record_separator` is consumed after each record when it is
 actually there. Fields past the end of a short record come back
 `present=False` (the column stays, so a table has the same shape for every
-row); a record cut mid-field comes back `truncated=True`, decoded from what
-was there. Bytes left after the last whole record are `DecodeResult.trailing`
+row); a record cut mid-field comes back `truncated=True` **with an `error`**
+(`"3 of 4 bytes: record ends inside the field"`, #358, 2026-10-14), so it
+counts in `error_count` and fails `decode --strict`: text keeps the characters
+that were there, every other value is `""` (three of `PIC 9(4)`'s digits,
+`001`, are not the value `1`). The one exemption is an RDW-framed record of
+an FD `RECORD VARYING FROM n TO m` decoder whose body length is inside
+`n..m` -- it ends mid-field by design (`decode_record(cut_ok=True)`, via
+`RecordDecoder._cut_by_design`), still flagged `truncated`, no error. Bytes left after the last whole record are `DecodeResult.trailing`
 — never dropped silently, because a tail that is not a whole record almost
 always means the record length is wrong. `max_records`/`skip` page a large
 file, and a run stopped by `max_records` reports `trailing == b""` rather
