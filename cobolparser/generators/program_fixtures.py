@@ -16,6 +16,7 @@ import os
 import random
 import zlib
 
+from .._literals import is_quoted_literal
 from ..analysis.boundary_inventory import (
     Boundary,
     BoundaryInventoryAnalyzer,
@@ -89,6 +90,25 @@ def _call_count_expectation(ref: BoundaryRef, times: int) -> Expectation:
         value=times,
         note="derived from this scenario's own generated sequence length",
     )
+
+
+def _drop_failure_path_counts(
+    expectations: list[Expectation], planned: PlannedScenario
+) -> list[Expectation]:
+    """Remove the tier-1 counts a status override makes untrue (#318).
+
+    A scenario that fails a boundary (OPEN status 35, READ INVALID KEY 23,
+    CALL ON EXCEPTION, SQLCODE 100) sends the program down its error path,
+    where the downstream READ loop, CLOSE or WRITE may run zero times or a
+    different number of times. The boundary order here is source order, not
+    execution order, so no other boundary is provably *before* the failure:
+    every count but the overridden boundary's own is dropped. The overridden
+    one keeps its count only when it is one invocation by construction (an
+    OPEN, a CALL, an SQL statement); a READ's count comes from its generated
+    row sequence, which a failing READ does not consume.
+    """
+    kept_refs = {key for key in planned.status_overrides if not key.startswith("READ:")}
+    return [e for e in expectations if e.kind != "call_count" or e.ref in kept_refs]
 
 
 def _demote_violated_arms(
@@ -254,7 +274,17 @@ class ProgramFixtureGenerator:
                     scenario.fixtures.append(fixture)
                 scenario.expectations.extend(expectations)
                 unresolved.extend(extra_unresolved)
-            scenario.expectations.extend(self._tier2_expectations(ast, index, scenario))
+            if planned.status_overrides:
+                # The fold walks the normal path; a failure path may stop
+                # before any site it observed, so no field_equals is known
+                # to hold there -- not even one folded from literals alone.
+                scenario.expectations = _drop_failure_path_counts(
+                    scenario.expectations, planned
+                )
+            else:
+                scenario.expectations.extend(
+                    self._tier2_expectations(ast, index, scenario)
+                )
             # Self-verify BEFORE the scenario is written out: re-read the
             # data this scenario actually emitted and re-check it against the
             # conditions that motivated it. Without this the scenario's name
@@ -417,7 +447,12 @@ class ProgramFixtureGenerator:
         expectations = []
         if fixture is not None:
             times = len(fixture.sequence) + (1 if has_terminal_invocation else 0)
-            expectations.append(_call_count_expectation(ref, times))
+            # Zero rows and no end-of-file call to count is not "never
+            # invoked": a random-access READ (INVALID KEY, no AT END) still
+            # runs once with nothing to hand back, so 0 would be a false
+            # claim and any other number a guess.
+            if times > 0:
+                expectations.append(_call_count_expectation(ref, times))
         if boundary.direction == "BIDIRECTIONAL":
             expectations.append(
                 Expectation(
@@ -486,6 +521,10 @@ class ProgramFixtureGenerator:
         expectations: list[Expectation] = []
 
         for arg in boundary.call_args:
+            if is_quoted_literal(arg.name):
+                # ``BY CONTENT 'A'`` / ``X'00'``: a constant the caller
+                # supplies, not a data item the layout index could hold.
+                continue
             arg_fields = self._fields_for_names([arg.name], index)
             if not arg_fields:
                 unresolved.append(

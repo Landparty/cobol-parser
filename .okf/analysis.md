@@ -1944,6 +1944,18 @@ be negated into one constraint (a `THRU` range, a conjunction, an
 unsupported selector) is left out and noted in `unsupported`. `WHEN OTHER`
 still negates only each arm's *own* selector constraints.
 
+**A figurative `WHEN` selector is a `figurative` constraint (#313,
+2026-10-14).** `_build_selector` marks a single-token selector
+`"figurative": True` (`WHEN SPACES` / `ZERO` / `LOW-VALUES`) or
+`"quoted": True` (`WHEN 'SPACES'`); before that both were the same
+`{"type": "Literal", "value": "SPACES"}`, so gen-fixtures wrote the six
+characters `SPACES` for the figurative arm and called it verified, and
+`WHEN ZERO` / `WHEN LOW-VALUES` were missed as literals that do not fit.
+`_extract_evaluate_selector` now maps a figurative selector the way the IF
+path does (`_figurative_name`), and a quoted selector is never looked up as
+a data name. `business_rules._literal` renders a quoted selector with its
+quotes, so `WHEN 'SPACES'` no longer reads as `= SPACES`.
+
 **The level-88 enum domain is a preference, not the field's domain.**
 `solve()` tries `EnumDomain(spec.condition_values)` first whenever a set op is
 in play, so `IF NOT TYPE-M` against 88s `"05"`/`"09"` still yields the other
@@ -2236,6 +2248,16 @@ internal env) rather than approximating:
   contract (divide-by-zero and non-terminating decimals poison, not
   truncate).
   Pinned by `tests/regression/test_bug_review_2026_08_12.py::TestDivideMode`.
+* **Writes that live outside `.operands`** (issue #317, 2026-10-14).
+  `_write_targets` also collects `InspectStatement.tallying_clauses[*]["counter"]`
+  (INSPECT ... TALLYING increments it in place), every string value of
+  `ExecCicsStatement.options` (INTO/SET/LENGTH/RESP/RESP2/ITEM/...: the
+  command decides which are written, so all are taken as written), and the
+  argument of each `KEYWORD(arg)` in `ExecImsStatement.arguments` (EXEC DLI
+  INTO/KEYFEEDBACK/...). Both EXEC nodes have an empty `.operands`, so
+  before this a field MOVEd before the statement kept its old value and
+  gen-fixtures asserted a `field_equals` a real run fails.
+  Pinned by `tests/unit/analysis/test_const_fold.py::TestInspectAndExecWrites`.
 * **Exactness is decided over `Fraction`, never over `Decimal`** (2026-09-16
   audit). Both halves of the exactness machinery used to decide exactness
   *using inexact decimal arithmetic*, and both let a wrong value through:
@@ -3008,8 +3030,8 @@ selector (`WHEN NOT 0 THRU 17`, a `Condition` dict with `negated` plus
 from its raw `THRU` text; only a single negated value reads `AGE <> 6`
 (#260). Level-88 values are
 also stored unquoted with `THRU` as `"THROUGH:end"`; `_condition_values`
-quotes them unless the item's PICTURE / USAGE is numeric. STRING sources are
-unquoted too, so one naming no declared item is re-quoted. Actions are
+quotes them unless the item's PICTURE / USAGE is numeric. STRING sources
+arrive quoted (#330), so they are rendered as is. Actions are
 rendered in full here rather than via `program_flow/statement_text.py`
 (flowchart summaries, truncated to 48 chars).
 
@@ -3248,6 +3270,12 @@ Anything not compared exactly goes to `caveats`: a contained program unit, an
 unrecognised nested clause, REPORT SECTION group clauses, level-66 RENAMES,
 ENVIRONMENT/IDENTIFICATION content beyond the above, a duplicate procedure name,
 a near-miss rename. Tests: `tests/unit/analysis/test_ast_diff.py`.
+
+A `WHEN` selector's text carries the parser's markers (#313, 2026-10-14):
+`FIG:SPACES` for a figurative constant, `ID:WS-B` for a data name,
+`Literal:'SPACES'` for a quoted literal. The values alone are identical
+once the lexer strips quotes, so `WHEN SPACES` -> `WHEN 'SPACES'` used to
+diff as "No structural changes".
 
 **Known gaps**: statements outside any named paragraph are not compared, and
 neither are contained programs (`diff` has no `--program` flag yet) — both are

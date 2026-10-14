@@ -303,7 +303,7 @@ class TestLiteralSpelledLikeVerb:
     def test_string_source_literal_if(self):
         result = _parse("STRING 'IF' DELIMITED BY SIZE INTO WS-B.")
         _clean(result)
-        assert _main(result)[0].operands == ["IF"]
+        assert _main(result)[0].operands == ['"IF"']
 
     def test_compute_function_argument_literal(self):
         result = _parse("COMPUTE WS-A = FUNCTION LENGTH('IF').")

@@ -1217,7 +1217,20 @@ def _extract_evaluate_selector(
     # that is the rare case, and it errs toward the visible answer.
     if sel_type == "Literal":
         value = str(sel.get("value", ""))
-        if index.resolve(value) is not None:
+        if sel.get("figurative"):
+            # ``WHEN SPACES`` is the figurative constant, not the six
+            # characters S-P-A-C-E-S: model it as the IF path does.
+            figurative = _figurative_name(value)
+            if figurative is None:
+                unsupported.append(
+                    f"{origin}: WHEN figurative constant not supported in v1: "
+                    f"{value}"
+                )
+                return None
+            return [
+                FieldConstraint(resolved, "figurative", (figurative,), origin, False)
+            ]
+        if not sel.get("quoted") and index.resolve(value) is not None:
             unsupported.append(
                 f"{origin}: WHEN selector names a data item rather than a "
                 f"literal, which is not supported in v1: {value}"
