@@ -41,7 +41,7 @@ Two properties matter more than breadth here:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -146,8 +146,12 @@ class LintFinding:
     # far each file's columns sit from the analyzed text's (#301). A
     # fixed-format line is analyzed as columns 8-72 only, so its analyzer
     # column is 7 short of the column an editor shows. ``None`` means the
-    # offset was not known; ``location.column`` is then all there is.
+    # offset was not known, or the finding has no real column at all.
     origin_column: int | None = None
+    # False when ``location.column`` is a placeholder (a parse error that
+    # reported only a line): no column is then printed or mapped, rather
+    # than a made-up one. Not serialized.
+    column_known: bool = True
     # The underlying analyzer's own category for this finding, when it has
     # one (IOViolationKind.READ_BEFORE_OPEN, RecursionRisk.severity, ...).
     # Preserved so a consumer can filter more finely than by rule without
@@ -347,6 +351,8 @@ def add_parse_errors(report: LintReport, errors: list[Any]) -> LintReport:
                 severity="error",
                 message=message,
                 location=location,
+                # SourceLocation needs a column; 1 stands in for "none".
+                column_known=bool(column),
                 kind=getattr(error, "code", None) or type(error).__name__,
             )
         )
@@ -358,7 +364,7 @@ def add_parse_errors(report: LintReport, errors: list[Any]) -> LintReport:
 def apply_source_map(
     report: LintReport,
     source_map: dict[int, tuple[str, int]] | None,
-    column_offsets: Mapping[str, int] | None = None,
+    column_offset: Callable[[str, int], int | None] | None = None,
 ) -> LintReport:
     """Stamp every located finding with the file and line it really came from.
 
@@ -370,16 +376,16 @@ def apply_source_map(
     ``ParseResult.expansion_source_map`` -- answers both exactly, replacing
     the search-for-the-symbol guesswork every consumer had to do instead.
 
-    A ``None`` map (nothing was expanded) leaves the report untouched: the
-    locations are already on-disk truth. So does a line the map does not
-    cover; the finding keeps ``origin_file``/``origin_line`` unset rather than
-    claiming a line nobody vouched for.
+    A ``None`` map leaves the report untouched. So does a line the map does
+    not cover; the finding keeps ``origin_file``/``origin_line`` unset rather
+    than claiming a line nobody vouched for.
 
-    ``column_offsets`` maps an origin file to how many columns its lines sit
-    to the right of the analyzed text (7 for a fixed-format file, whose
-    columns 1-7 never reach the analyzers; see :func:`fixed_format_column_offset`).
-    When the origin file has an entry, ``origin_column`` is stamped with the
-    column an editor shows; without one it stays ``None``.
+    ``column_offset(file, line)`` says how many columns that line of that
+    file sits to the right of the analyzed text (7 on a fixed-format line,
+    whose columns 1-7 never reach the analyzers; see
+    :func:`fixed_format_column_offset`), or ``None`` when it cannot say.
+    With an answer, ``origin_column`` is stamped with the column an editor
+    shows; without one it stays ``None``.
 
     The report is modified in place and returned, for chaining.
     """
@@ -392,8 +398,10 @@ def apply_source_map(
         if origin is None:
             continue
         finding.origin_file, finding.origin_line = origin
-        if column_offsets is not None and origin[0] in column_offsets:
-            finding.origin_column = finding.location.column + column_offsets[origin[0]]
+        if column_offset is not None and finding.column_known:
+            offset = column_offset(*origin)
+            if offset is not None:
+                finding.origin_column = finding.location.column + offset
     return report
 
 

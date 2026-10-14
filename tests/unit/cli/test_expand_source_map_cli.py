@@ -215,9 +215,17 @@ class TestLintReportsOrigins:
 
         assert f"{library / 'CUSTOMER.cpy'}:4:12:" in out
 
-    def test_without_expansion_there_is_no_origin_to_report(self, capsys, library):
-        # No --copybook-path: nothing was expanded, so locations already count
-        # lines in the file itself and claiming an origin would add nothing.
-        data = _run_json(capsys, "lint", str(library / "PAYROLL.cbl"), "--compact")
+    def test_without_expansion_origin_is_the_file_itself(self, capsys, library):
+        # No --copybook-path: nothing was expanded, so the origin is this
+        # file and the same line. It is still emitted, because it carries the
+        # on-disk column that `location.column` (analyzer columns, 7 short on
+        # a fixed-format line) does not (#301).
+        program = str(library / "PAYROLL.cbl")
+        data = _run_json(capsys, "lint", program, "--compact")
 
-        assert all("origin" not in f for f in data["findings"])
+        for finding in data["findings"]:
+            if finding["location"] is None:
+                continue
+            assert finding["origin"]["file"] == program
+            assert finding["origin"]["line"] == finding["location"]["line"]
+            assert finding["origin"]["column"] == finding["location"]["column"] + 7

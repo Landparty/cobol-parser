@@ -1074,7 +1074,11 @@ too (see commands above).
   expectation encoded the bug); `test_expand_source_map_cli.py` pins
   `origin.column` and the free-member-in-fixed-parent / fixed-member-in-free-
   parent offsets; `test_expansion_source_map_and_comments.py` pins
-  `apply_source_map(..., column_offsets)` and `fixed_format_column_offset`.
+  `apply_source_map(..., column_offset)` and `fixed_format_column_offset`.
+  Review follow-up: `test_source_format_free_directive_stops_the_shift`,
+  `test_json_origin_carries_the_on_disk_column`,
+  `test_without_expansion_origin_is_the_file_itself` (replaced the old
+  "no origin without expansion" test), and the no-column parse error case.
 
 # Cross-repo review follow-up fixes (2026-09-10)
 

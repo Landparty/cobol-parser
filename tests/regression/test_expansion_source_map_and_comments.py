@@ -335,7 +335,9 @@ class TestApplySourceMap:
     def test_column_offset_stamps_the_on_disk_column(self):
         # #301: a fixed-format file's columns 1-7 never reach the analyzers.
         report = apply_source_map(
-            self._report(9), {9: ("CUSTOMER.cpy", 3)}, {"CUSTOMER.cpy": 7}
+            self._report(9),
+            {9: ("CUSTOMER.cpy", 3)},
+            lambda file, line: 7 if (file, line) == ("CUSTOMER.cpy", 3) else None,
         )
 
         assert report.findings[0].to_dict()["origin"] == {
@@ -343,6 +345,30 @@ class TestApplySourceMap:
             "line": 3,
             "column": 8,
         }
+
+    def test_a_parse_error_without_a_column_gets_none_mapped(self):
+        # The placeholder column 1 must not become a real-looking column 8.
+        from types import SimpleNamespace
+
+        from cobolparser.analysis.lint import add_parse_errors
+
+        report = add_parse_errors(
+            LintReport(),
+            [SimpleNamespace(line_number=4, column=None, message="bad", code=None)],
+        )
+        apply_source_map(report, {4: ("x.cbl", 4)}, lambda _f, _l: 7)
+
+        finding = report.findings[0]
+        assert finding.column_known is False
+        assert finding.origin_column is None
+        assert finding.to_dict()["origin"] == {"file": "x.cbl", "line": 4}
+
+    def test_column_offset_none_leaves_the_column_unset(self):
+        report = apply_source_map(
+            self._report(9), {9: ("CUSTOMER.cpy", 3)}, lambda _f, _l: None
+        )
+
+        assert report.findings[0].origin_column is None
 
     def test_fixed_format_column_offset_per_layout(self):
         from cobolparser.analysis.lint import fixed_format_column_offset

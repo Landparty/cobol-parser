@@ -142,6 +142,36 @@ class TestTextOutput:
         _run(str(path), "--format", "text")
         assert f"{path}:5:1: warning [unused-variables]" in capsys.readouterr().out
 
+    def test_source_format_free_directive_stops_the_shift(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        # Lines after `>>SOURCE FORMAT IS FREE` in a fixed-format file reach
+        # the analyzers unshifted, so they must print unshifted too.
+        path = tmp_path / "SWITCH.cbl"
+        path.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. SWITCH.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01  WS-FIXED-UNUSED  PIC X.\n"
+            "      >>SOURCE FORMAT IS FREE\n"
+            "    01 WS-FREE-UNUSED PIC X.\n"
+            "PROCEDURE DIVISION.\n"
+            "MAIN-PARA.\n"
+            "    GOBACK.\n",
+            encoding="utf-8",
+        )
+        _run(str(path), "--format", "text")
+        out = capsys.readouterr().out
+        assert f"{path}:5:8: warning [unused-variables]" in out
+        assert f"{path}:7:5: warning [unused-variables]" in out
+
+    def test_json_origin_carries_the_on_disk_column(self, program: str, capsys) -> None:
+        _run(program, "--compact")
+        data = json.loads(capsys.readouterr().out)
+        unused = next(f for f in data["findings"] if f["symbol"] == "WS-NEVER-USED")
+        assert unused["origin"] == {"file": program, "line": 6, "column": 8}
+
     def test_summary_line_counts_every_severity(self, program: str, capsys) -> None:
         _run(program, "--format", "text")
         summary = capsys.readouterr().out.strip().splitlines()[-1]

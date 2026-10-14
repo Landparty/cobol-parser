@@ -665,16 +665,21 @@ A finding with no location (a recursion cycle spans procedures) prints as
 
 **Columns are on-disk columns (#301, 2026-10-13).** Analyzer locations count
 columns in the *normalized* text, which for a fixed-format line is columns
-8-72 -- so they are 7 short of what an editor shows. `_lint_column_offsets`
-decides, per file, how far to shift them back: the program itself the way
-`CobolParser` decides (`--source-format`, else `detect_fixed_format`), each
-copybook the way the expander judged it (`_looks_fixed_format`). The offset
-table lives in `analysis.lint.fixed_format_column_offset`: fixed listing +
-fixed file 7, fixed listing + free member 0 (the expander re-pads it by
-exactly 7), free listing + fixed member 6 (the expander cuts only the
-sequence area), free throughout 0. Text output prints the shifted column;
-JSON adds it as `origin.column` on a mapped finding (`location.column` stays
-the analyzer's own count, and an unexpanded run still emits no `origin`).
+8-72 -- so they are 7 short of what an editor shows. `_lint_column_offset`
+returns a `(file, line) -> offset` function: the program itself is judged
+the way `CobolParser` decides (`--source-format`, else `detect_fixed_format`),
+each copybook the way the expander judged it (`_looks_fixed_format`), and
+within a fixed-format file a line after `>>SOURCE FORMAT FREE`
+(`free_format_flags`) gets no shift. The per-file table lives in
+`analysis.lint.fixed_format_column_offset`: fixed listing + fixed file 7,
+fixed listing + free member 0 (the expander re-pads it by exactly 7), free
+listing + fixed member 6 (the expander cuts only the sequence area), free
+throughout 0. Lint now **always** stamps `origin` -- without
+`--copybook-path` it is the file itself, same line -- so JSON carries the
+on-disk column as `origin.column` in both cases and text prints it;
+`location.column` stays the analyzer's own count. A parse error that
+reported no column (`LintFinding.column_known` False) prints `file:line:`
+and has no `origin.column`, instead of its placeholder 1 shifted to 8.
 `stamp_report_origins` no longer overwrites an `origin` already present, or
 `_emit_report` would drop that column again.
 
