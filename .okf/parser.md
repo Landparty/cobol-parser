@@ -2316,6 +2316,11 @@ need no fix:
   can mutate the caller's data. Fixed by initializing `passing_mode` once
   before the loop instead of inside it, so it only changes when a `BY`
   keyword is actually encountered.
+  **Follow-up (#388):** `BY` is optional in IBM's CALL syntax, so a bare
+  `REFERENCE` / `CONTENT` / `VALUE` now switches the mode too
+  (`USING CONTENT X REFERENCE Y` -> X by content, Y by reference). Before,
+  the bare word was recorded as an argument (and a bare leading `VALUE`
+  dropped every argument). Pinned in `tests/unit/test_call_using_mode_without_by.py`.
 * **`COMPUTE id-1, id-2 = expr` (comma-separated multi-target) was a hard
   parse failure**, not a silent/warned drop (`arithmetic_parsers.py`,
   `ComputeStatementParser.parse`'s additional-target loop): unlike every

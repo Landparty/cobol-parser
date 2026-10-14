@@ -1375,3 +1375,10 @@ nesting and a bare `NOT SIZE ERROR` (#399).
 by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
 (`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
 `COMP-5` is still a change.
+
+## 2026-10-14 (issue #388)
+
+`tests/unit/test_call_using_mode_without_by.py` pins that a bare
+`REFERENCE` / `CONTENT` / `VALUE` in `CALL ... USING` (BY omitted) switches
+the passing mode instead of being recorded as an argument, alone and mixed
+with `BY` phrases, literals and figurative constants.

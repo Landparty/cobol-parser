@@ -452,10 +452,13 @@ class CallStatementParser(IStatementParser):
             ):
                 break
 
-            # Check for BY [REFERENCE|CONTENT|VALUE] -- only overwrites the
-            # mode established above/by a prior iteration when a BY keyword
+            # Check for [BY] REFERENCE|CONTENT|VALUE -- only overwrites the
+            # mode established above/by a prior iteration when a mode word
             # is actually present; otherwise passing_mode carries over
-            # unchanged (see the persistence note above the loop).
+            # unchanged (see the persistence note above the loop). BY is
+            # optional in IBM's CALL syntax (``USING CONTENT X REFERENCE Y``),
+            # as it is in the PROCEDURE DIVISION header, so a bare mode word
+            # switches the mode too rather than being taken as an argument.
             if token.type == TokenType.BY or (
                 token.type == TokenType.IDENTIFIER
                 and token.value
@@ -464,15 +467,15 @@ class CallStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
                 token = token_stream.peek()
-                if token and (
-                    token.type == TokenType.IDENTIFIER or token.type == TokenType.VALUE
-                ):
-                    mode_val = token.value.upper() if token.value else ""
-                    if mode_val in ("REFERENCE", "CONTENT", "VALUE"):
-                        passing_mode = mode_val
-                        token_stream.consume()
-                        skip_whitespace(token_stream)
-                        token = token_stream.peek()
+            if token and (
+                token.type == TokenType.IDENTIFIER or token.type == TokenType.VALUE
+            ):
+                mode_val = token.value.upper() if token.value else ""
+                if mode_val in ("REFERENCE", "CONTENT", "VALUE"):
+                    passing_mode = mode_val
+                    token_stream.consume()
+                    skip_whitespace(token_stream)
+                    token = token_stream.peek()
 
             # ``BY CONTENT ZERO`` / ``BY VALUE -7`` -- a figurative constant
             # or a signed numeric literal is one argument; stopping here
