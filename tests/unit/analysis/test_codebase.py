@@ -363,6 +363,249 @@ class TestCopyEdges:
         assert "EMPLOYEE" in node.copies
 
 
+SQL_PROGRAM = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. SQLPGM.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+           EXEC SQL INCLUDE SQLCA END-EXEC.
+           EXEC SQL
+               INCLUDE DCLCUST
+           END-EXEC.
+       PROCEDURE DIVISION.
+       P.
+           STOP RUN.
+"""
+
+SQLCA_MEMBER = """\
+       01  SQLCA.
+           05  SQLCAID     PIC X(8).
+           05  SQLCODE     PIC S9(9) COMP.
+"""
+
+DCLCUST_MEMBER = """\
+       01  DCLCUST.
+           05  CUST-ID     PIC X(10).
+           EXEC SQL INCLUDE DCLADDR END-EXEC.
+"""
+
+DCLADDR_MEMBER = """\
+           05  CUST-ADDR   PIC X(40).
+"""
+
+
+class TestSqlIncludeEdges:
+    """``EXEC SQL INCLUDE`` pulls a member in exactly as COPY does (#295)."""
+
+    @pytest.fixture
+    def sql_graph(self, tmp_path) -> CodebaseGraph:
+        books = tmp_path / "sqlbooks"
+        books.mkdir()
+        (books / "SQLCA.cpy").write_text(SQLCA_MEMBER)
+        (books / "DCLCUST.cpy").write_text(DCLCUST_MEMBER)
+        (books / "DCLADDR.cpy").write_text(DCLADDR_MEMBER)
+        program = tmp_path / "SQLPGM.cbl"
+        program.write_text(SQL_PROGRAM)
+        return CodebaseGraphBuilder(copybook_paths=[str(books)]).build([str(program)])
+
+    def test_include_members_are_direct_copy_edges(self, sql_graph, tmp_path):
+        direct = {
+            (e.program, e.member): e for e in sql_graph.copy_edges if not e.nested
+        }
+        assert set(direct) == {("SQLPGM", "SQLCA"), ("SQLPGM", "DCLCUST")}
+        assert direct[("SQLPGM", "SQLCA")].path == str(
+            tmp_path / "sqlbooks" / "SQLCA.cpy"
+        )
+        node = next(p for p in sql_graph.programs if p.program_id == "SQLPGM")
+        assert node.copies == ["DCLCUST", "SQLCA"]
+
+    def test_include_inside_a_member_is_a_nested_edge(self, sql_graph):
+        nested = {(e.program, e.member) for e in sql_graph.copy_edges if e.nested}
+        assert ("DCLCUST", "DCLADDR") in nested
+        assert sql_graph.programs_using("DCLADDR") == ["SQLPGM"]
+
+    def test_copybook_impact_finds_the_including_program(self, sql_graph):
+        report = CopybookImpactAnalyzer(sql_graph).analyze("SQLCA")
+        assert report.direct_programs == ["SQLPGM"]
+        assert "SQLCODE" in report.fields
+        assert report.unresolved == []
+
+    def test_include_edges_use_the_copy_label(self, sql_graph):
+        assert '-.->|"COPY"| C_SQLCA' in sql_graph.to_mermaid()
+        assert 'label="COPY", style=dashed' in sql_graph.to_dot()
+
+    def test_missing_dclgen_include_is_reported_unresolved(self, tmp_path, copybooks):
+        program = tmp_path / "P.cbl"
+        program.write_text(SQL_PROGRAM)
+        graph = CodebaseGraphBuilder(copybook_paths=[str(copybooks)]).build(
+            [str(program)]
+        )
+        edge = next(e for e in graph.copy_edges if e.member == "DCLCUST")
+        assert edge.path is None
+        assert any(
+            note.startswith("EXEC SQL INCLUDE member DCLCUST")
+            for note in graph.unresolved
+        )
+
+    def test_precompiler_members_keep_their_edge_but_are_not_unresolved(
+        self, tmp_path, copybooks
+    ):
+        program = tmp_path / "P.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. DB2PGM.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "           EXEC SQL INCLUDE SQLCA END-EXEC.\n"
+            "           EXEC SQL INCLUDE SQLDA END-EXEC.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       P.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder(copybook_paths=[str(copybooks)]).build(
+            [str(program)]
+        )
+        members = {e.member: e.path for e in graph.copy_edges}
+        assert members == {"SQLCA": None, "SQLDA": None}
+        assert not any("SQLCA" in note or "SQLDA" in note for note in graph.unresolved)
+
+    def test_precompiler_member_included_from_a_copybook_is_not_unresolved(
+        self, tmp_path
+    ):
+        books = tmp_path / "books"
+        books.mkdir()
+        (books / "DB2WS.cpy").write_text(
+            "           EXEC SQL INCLUDE SQLCA END-EXEC.\n"
+        )
+        program = tmp_path / "P.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. NESTPGM.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       COPY DB2WS.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       P.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder(copybook_paths=[str(books)]).build([str(program)])
+        assert ("DB2WS", "SQLCA") in {
+            (e.program, e.member) for e in graph.copy_edges if e.nested
+        }
+        assert not any("SQLCA" in note for note in graph.unresolved)
+
+    def test_copy_of_a_precompiler_member_is_still_reported(self, tmp_path, copybooks):
+        program = tmp_path / "P.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. COPIER.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "           EXEC SQL INCLUDE SQLCA END-EXEC.\n"
+            "       COPY SQLCA.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       P.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder(copybook_paths=[str(copybooks)]).build(
+            [str(program)]
+        )
+        assert any(note.startswith("COPY member SQLCA") for note in graph.unresolved)
+
+    def test_copy_and_include_of_one_missing_member_give_one_note(
+        self, tmp_path, copybooks
+    ):
+        program = tmp_path / "P.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. BOTHWAYS.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       COPY DCLGONE.\n"
+            "           EXEC SQL INCLUDE DCLGONE END-EXEC.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       P.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder(copybook_paths=[str(copybooks)]).build(
+            [str(program)]
+        )
+        assert [e.member for e in graph.copy_edges] == ["DCLGONE"]
+        notes = [n for n in graph.unresolved if "DCLGONE" in n]
+        assert len(notes) == 1
+        assert notes[0].startswith("COPY member DCLGONE")
+
+    def test_lowercase_and_quoted_include_names(self, tmp_path):
+        books = tmp_path / "books"
+        books.mkdir()
+        (books / "SQLCA.cpy").write_text(SQLCA_MEMBER)
+        (books / "DCLCUST.cpy").write_text("       01  DCLCUST PIC X.\n")
+        program = tmp_path / "P.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. LOWPGM.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "           exec sql include sqlca end-exec.\n"
+            "           EXEC SQL INCLUDE 'DCLCUST' END-EXEC.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       P.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder(copybook_paths=[str(books)]).build([str(program)])
+        resolved = {e.member: e.path for e in graph.copy_edges}
+        assert resolved == {
+            "SQLCA": str(books / "SQLCA.cpy"),
+            "DCLCUST": str(books / "DCLCUST.cpy"),
+        }
+        assert CopybookImpactAnalyzer(graph).analyze("DCLCUST").direct_programs == [
+            "LOWPGM"
+        ]
+
+    def test_copy_and_include_of_one_member_give_one_edge(self, tmp_path):
+        books = tmp_path / "books"
+        books.mkdir()
+        (books / "SQLCA.cpy").write_text(SQLCA_MEMBER)
+        (books / "BOTH.cpy").write_text(
+            "       COPY SQLCA.\n           EXEC SQL INCLUDE SQLCA END-EXEC.\n"
+        )
+        program = tmp_path / "P.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. TWICE.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       COPY SQLCA.\n"
+            "           EXEC SQL INCLUDE SQLCA END-EXEC.\n"
+            "       COPY BOTH.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       P.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder(copybook_paths=[str(books)]).build([str(program)])
+        pairs = [(e.program, e.member, e.nested) for e in graph.copy_edges]
+        assert pairs.count(("TWICE", "SQLCA", False)) == 1
+        assert pairs.count(("BOTH", "SQLCA", True)) == 1
+        assert graph.programs_using("SQLCA") == ["TWICE"]
+
+    def test_include_as_an_ordinary_word_is_not_an_edge(self, tmp_path, copybooks):
+        program = tmp_path / "P.cbl"
+        program.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. PLAIN.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01 INCLUDE-FLAG PIC X VALUE 'INCLUDE SQLCA END-EXEC'.\n"
+            "       PROCEDURE DIVISION.\n"
+            "       P.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder(copybook_paths=[str(copybooks)]).build(
+            [str(program)]
+        )
+        assert graph.copy_edges == []
+
+
 class TestProgramsUsing:
     def test_direct_only(self, graph):
         assert graph.programs_using("LEVEL2", transitive=False) == ["SUBPGM"]

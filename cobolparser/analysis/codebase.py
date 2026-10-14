@@ -14,7 +14,13 @@ and aggregates the results into a single graph with two kinds of edge:
   targets, each marked ``resolved=False`` so the edge set is never mistaken
   for an exhaustive one.
 - **copy edges** -- ``program A copies member X``, and ``member X copies
-  member Y`` for nested copybooks. These are collected by re-scanning each
+  member Y`` for nested copybooks. A DB2 ``EXEC SQL INCLUDE X END-EXEC`` is
+  a copy edge too, with the same ``COPY`` label and the same unresolved-member
+  reporting: it is how SQLCA and DCLGEN members are normally pulled in, so
+  leaving it out made "what uses this DCLGEN?" answer nothing (#295). The
+  output does not say which of the two produced an edge. An INCLUDE of
+  ``SQLCA`` or ``SQLDA`` that is not on the path is not reported unresolved,
+  since the precompiler supplies those. These are collected by re-scanning each
   source with :func:`~cobolparser.preprocess.copy_statement_parser.extract_copy_statements`
   rather than from an expanded parse, because expansion *consumes* the COPY
   statement and discards exactly the edge we are after. Members are resolved
@@ -83,6 +89,13 @@ __all__ = [
     "ImpactReport",
     "ProgramNode",
 ]
+
+#: Members the DB2 precompiler supplies itself. An ``EXEC SQL INCLUDE`` of one
+#: that is not on the copybook path is normal, not a gap: it still gets its
+#: edge, but no ``unresolved`` note. This is narrower than the copybook
+#: expander, which lets *every* unresolvable INCLUDE through silently: here a
+#: missing DCLGEN is still a gap worth reporting, and so is a COPY of either.
+_PRECOMPILER_MEMBERS = frozenset({"SQLCA", "SQLDA"})
 
 #: File extensions :meth:`CodebaseGraphBuilder.build_from_directory` treats as
 #: COBOL program source. Matched case-insensitively.
@@ -607,8 +620,13 @@ class CodebaseGraphBuilder:
             )
         # member -> resolved file path (None when it could not be resolved)
         self._member_paths: dict[str, str | None] = {}
-        # member -> its own direct COPY member names (sorted)
-        self._member_copies: dict[str, list[str]] = {}
+        # member -> why it could not be resolved (only for failed members)
+        self._member_failures: dict[str, str] = {}
+        # (member, referrer) pairs already reported unresolved this build, so
+        # a COPY and an INCLUDE of one missing member give one note, not two
+        self._reported_failures: set[tuple[str, str]] = set()
+        # member -> its own direct (member name, is EXEC SQL INCLUDE), sorted
+        self._member_copies: dict[str, list[tuple[str, bool]]] = {}
 
     # -- public API -------------------------------------------------------
 
@@ -617,6 +635,8 @@ class CodebaseGraphBuilder:
         # Per-build caches: a copybook edited between two builds on one
         # long-lived builder must not serve the previous build's chain.
         self._member_paths = {}
+        self._member_failures = {}
+        self._reported_failures = set()
         self._member_copies = {}
         files = self._normalize_paths(paths)
 
@@ -923,7 +943,7 @@ class CodebaseGraphBuilder:
 
         warnings: list[str] = []
         statements = extract_copy_statements(
-            source, source_file=path, warnings=warnings
+            source, source_file=path, warnings=warnings, sql_include=True
         )
         for warning in warnings:
             unresolved.append(f"{path}: COPY statement not usable: {warning}")
@@ -934,7 +954,11 @@ class CodebaseGraphBuilder:
             if not member:
                 continue
             member_path = self._resolve_member(
-                member, statement.library_qualifier, path, unresolved
+                member,
+                statement.library_qualifier,
+                path,
+                unresolved,
+                sql_include=statement.sql_include,
             )
             copy_edges.append(
                 CopyEdge(program=owner, member=member, path=member_path, nested=False)
@@ -949,27 +973,48 @@ class CodebaseGraphBuilder:
         library: str | None,
         referrer: str,
         unresolved: list[str],
+        *,
+        sql_include: bool = False,
     ) -> str | None:
-        """Resolve *member* to a file, caching the answer (and the failure)."""
+        """Resolve *member* to a file, caching the answer (and the failure).
+
+        A failure is reported for every reference that is not an INCLUDE of
+        a precompiler-supplied member (:data:`_PRECOMPILER_MEMBERS`), so a
+        quiet ``INCLUDE SQLCA`` seen first cannot silence a later ``COPY
+        SQLCA``. One note per (member, referrer): whichever of COPY / INCLUDE
+        is seen first names it.
+        """
         if self._resolver is None:
             return None
-        if member in self._member_paths:
-            return self._member_paths[member]
-        try:
-            resolved = self._resolver.resolve(member, library)
-        except Exception as exc:  # noqa: BLE001 -- an unresolvable member is a
-            # finding, not a crash: record why and carry on with the rest.
-            self._member_paths[member] = None
+        if member not in self._member_paths:
+            try:
+                self._member_paths[member] = self._resolver.resolve(member, library)
+            except Exception as exc:  # noqa: BLE001 -- an unresolvable member
+                # is a finding, not a crash: record why and carry on.
+                self._member_paths[member] = None
+                self._member_failures[member] = f"{type(exc).__name__}: {exc}"
+        resolved = self._member_paths[member]
+        if (
+            resolved is None
+            and not (sql_include and member in _PRECOMPILER_MEMBERS)
+            and (member, referrer) not in self._reported_failures
+        ):
+            self._reported_failures.add((member, referrer))
+            kind = "EXEC SQL INCLUDE" if sql_include else "COPY"
             unresolved.append(
-                f"COPY member {member} (referenced by {referrer}) could not be "
-                f"resolved on the copybook search path: {type(exc).__name__}: {exc}"
+                f"{kind} member {member} (referenced by {referrer}) could not be "
+                "resolved on the copybook search path: "
+                f"{self._member_failures[member]}"
             )
-            return None
-        self._member_paths[member] = resolved
         return resolved
 
-    def _member_direct_copies(self, member: str, unresolved: list[str]) -> list[str]:
-        """The member names *member* itself COPYs (empty when unresolved)."""
+    def _member_direct_copies(
+        self, member: str, unresolved: list[str]
+    ) -> list[tuple[str, bool]]:
+        """What *member* itself COPYs or INCLUDEs (empty when unresolved).
+
+        Each entry is ``(member name, is EXEC SQL INCLUDE)``.
+        """
         if member in self._member_copies:
             return self._member_copies[member]
         self._member_copies[member] = []
@@ -985,13 +1030,13 @@ class CodebaseGraphBuilder:
             return []
         warnings: list[str] = []
         statements = extract_copy_statements(
-            source, source_file=member_path, warnings=warnings
+            source, source_file=member_path, warnings=warnings, sql_include=True
         )
         for warning in warnings:
             unresolved.append(f"{member_path}: COPY statement not usable: {warning}")
         names = sorted(
             {
-                _normalize_member(s.member_name)
+                (_normalize_member(s.member_name), s.sql_include)
                 for s in statements
                 if _normalize_member(s.member_name)
             }
@@ -1007,8 +1052,15 @@ class CodebaseGraphBuilder:
         unresolved: list[str],
     ) -> None:
         """Emit nested member->member edges below *member*, cycle-safe."""
-        for nested in self._member_direct_copies(member, unresolved):
-            nested_path = self._resolve_member(nested, None, member, unresolved)
+        seen: set[str] = set()
+        for nested, sql_include in self._member_direct_copies(member, unresolved):
+            nested_path = self._resolve_member(
+                nested, None, member, unresolved, sql_include=sql_include
+            )
+            if nested in seen:
+                # COPY and INCLUDE of one member: one edge, as for a program.
+                continue
+            seen.add(nested)
             copy_edges.append(
                 CopyEdge(program=member, member=nested, path=nested_path, nested=True)
             )
