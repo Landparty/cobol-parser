@@ -42,7 +42,7 @@ from .data.bundle import (
     Scenario,
 )
 from .data.errors import ProgramLayoutError
-from .data.layout import FieldSpec, flatten_record
+from .data.layout import FieldSpec, _assign_columns, flatten_record
 from .data.options import DataGeneratorOptions
 from .data.program_layout import ProgramLayoutIndex
 from .data.values import ValueFactory
@@ -648,6 +648,10 @@ class ProgramFixtureGenerator:
         if not fields:
             return None, expectations, unresolved
 
+        # Each argument's columns are unique only within that argument: two
+        # USING records that both hold an ``AMT`` would otherwise share one
+        # row entry, so one value would stand for two fields (#365).
+        fields = self._unique_columns(fields)
         row = {
             spec.column: self._value_for(spec, factory, 0, override) for spec in fields
         }
@@ -667,14 +671,35 @@ class ProgramFixtureGenerator:
         self, names: list[str], index: ProgramLayoutIndex
     ) -> list[FieldSpec]:
         fields: list[FieldSpec] = []
-        seen_columns: set[str] = set()
         for name in names:
-            for spec in self._fields_for_name(name, index):
-                if spec.column in seen_columns:
-                    continue
-                seen_columns.add(spec.column)
-                fields.append(spec)
-        return fields
+            fields.extend(self._fields_for_name(name, index))
+        return self._unique_columns(fields)
+
+    def _unique_columns(self, fields: list[FieldSpec]) -> list[FieldSpec]:
+        """Drop repeats of the same field, then give every column a unique name.
+
+        Fields gathered from several records (READ INTO several records, a
+        CALL with several USING arguments) only had their columns made unique
+        within their own record, so ``REC-A.AMT`` and ``REC-B.AMT`` both
+        arrive as ``AMT``. A row is keyed by column, so that would leave one
+        value for two fields. Identity is the qualified name (plus subscripts),
+        never the column. On a collision the columns are reassigned over the
+        whole list the way a single record's are -- on copies, since a spec
+        from `ProgramLayoutIndex.resolve()` is the index's own.
+        """
+        unique: list[FieldSpec] = []
+        seen: set[tuple[str, tuple[int, ...]]] = set()
+        for spec in fields:
+            identity = (spec.qualified_name, tuple(spec.subscripts))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            unique.append(spec)
+        if len({spec.column for spec in unique}) == len(unique):
+            return unique
+        copies = [dataclasses.replace(spec) for spec in unique]
+        _assign_columns(copies, self.options)
+        return copies
 
     def _fields_for_name(self, name: str, index: ProgramLayoutIndex) -> list[FieldSpec]:
         """A name may resolve to one elementary field or a whole record --
