@@ -137,6 +137,12 @@ def is_section_marker(token_stream: ITokenStream) -> bool:
     if not token:
         return False
 
+    # ``EXIT SECTION.`` is the statement, never a section named EXIT (a
+    # reserved word): written straight after a section header it became an
+    # empty section ``EXIT`` that swallowed the paragraphs after it.
+    if (token.value or "").upper() == "EXIT":
+        return False
+
     # Look ahead for SECTION keyword
     for offset in range(1, 3):
         next_tok = token_stream.peek(offset)

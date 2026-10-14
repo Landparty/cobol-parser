@@ -602,6 +602,39 @@ class DeadCodeAnalyzer:
             if current in self._fallthrough_sources and not self._terminates(current):
                 self._add_ref(next_proc)
                 self._fallthrough_sources.add(next_proc)
+            elif current in self._fallthrough_sources:
+                self._collect_exit_section_ref(current)
+
+    def _collect_exit_section_ref(self, name: str) -> None:
+        """Credit the procedure after *name*'s section when *name* leaves
+        the section by ``EXIT SECTION`` and that section keeps running.
+
+        ``EXIT SECTION`` passes control to the end of the section: the rest
+        of the section is skipped, and what happens next is what happens at
+        the end of the section's last paragraph. A PERFORMed section returns
+        to its performer; a section fallen into, gone to or jumped into runs
+        on into the procedure after it. Only the latter is a fall-through
+        edge here, mirroring how ``_section_exit_jumps`` settles a GO TO
+        onto a section's exit paragraph.
+        """
+        section = self._exited_section(name)
+        if section is None:
+            return
+        if (
+            section not in self._fallthrough_sources
+            and section not in self._sections_entered_by_jump
+        ):
+            return
+        paras = self._section_paragraphs.get(section)
+        last = paras[-1] if paras else section
+        try:
+            pos = self._ordered_procedures.index(last)
+        except ValueError:
+            return
+        if pos + 1 < len(self._ordered_procedures):
+            successor = self._ordered_procedures[pos + 1]
+            self._add_ref(successor)
+            self._fallthrough_sources.add(successor)
 
     def _terminates(self, name: str) -> bool:
         """Check whether procedure *name* unconditionally transfers control
@@ -624,14 +657,38 @@ class DeadCodeAnalyzer:
             # whatever comes next. A section with sentences before its first
             # paragraph is keyed here to that unnamed body.
             return False
-        return any(self._is_terminator(stmt) for stmt in para.statements)
+        if any(self._is_terminator(stmt) for stmt in para.statements):
+            return True
+        # EXIT SECTION never falls into the next paragraph: it leaves for
+        # the end of the section (see ``_collect_exit_section_ref``).
+        return self._exited_section(name) is not None
+
+    def _exited_section(self, name: str) -> str | None:
+        """The section procedure *name* leaves by a top-level ``EXIT
+        SECTION``, or ``None``.
+
+        ``None`` too when an unconditional terminator comes first (that one
+        fires instead) or when *name* is not in a section, where the
+        compiler rejects ``EXIT SECTION`` and nothing is assumed of it.
+        """
+        para = self._paragraph_nodes.get(name)
+        section = self._index.section_of(name)
+        if para is None or section is None:
+            return None
+        for stmt in para.statements:
+            if self._is_terminator(stmt):
+                return None
+            if isinstance(stmt, ExitStatement) and stmt.exit_type == "SECTION":
+                return section
+        return None
 
     @staticmethod
     def _is_terminator(stmt: Any) -> bool:
         """Check whether *stmt* unconditionally transfers control away when
         reached: STOP RUN (not STOP 'literal', which merely halts pending
-        operator action), GOBACK, EXIT PROGRAM, or a bare (non-DEPENDING)
-        GO TO.
+        operator action), GOBACK, EXIT PROGRAM, or a non-DEPENDING GO TO --
+        including the alterable ``GO TO.`` with no operand, which always
+        transfers to whatever an ALTER last set it to.
         """
         if isinstance(stmt, GobackStatement):
             return True
@@ -640,7 +697,7 @@ class DeadCodeAnalyzer:
         if isinstance(stmt, ExitStatement):
             return stmt.exit_type == "PROGRAM"
         if isinstance(stmt, GoStatement):
-            return bool(stmt.target_paragraph) and not stmt.depending_on_variable
+            return not stmt.depending_on_variable
         return False
 
     @staticmethod

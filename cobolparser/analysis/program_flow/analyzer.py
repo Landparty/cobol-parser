@@ -101,6 +101,7 @@ class ProgramFlowAnalyzer:
         self._unreachable_nodes = []
         self._branch_nodes = []
         self._terminating_paragraphs = set()
+        exit_section_procedures: dict[str, str] = {}
 
         proc_division = ast.procedure_division
         if proc_division is None:
@@ -121,6 +122,7 @@ class ProgramFlowAnalyzer:
             branch_nodes=self._branch_nodes,
             collector=collector,
             terminating_paragraphs=self._terminating_paragraphs,
+            exit_section_procedures=exit_section_procedures,
         )
 
         # Pass 1: Collect all procedures as nodes
@@ -142,6 +144,9 @@ class ProgramFlowAnalyzer:
             self._edges,
             self._ordered_procedures,
             self._terminating_paragraphs,
+            exit_section_procedures=exit_section_procedures,
+            section_ends=self._section_ends(scanner.index),
+            sections_entered=self._sections_entered(scanner.index, declaratives),
         )
 
         # Mark the first procedure as entry point before cycle/reachability analysis
@@ -212,6 +217,48 @@ class ProgramFlowAnalyzer:
             for e in index.entries
             if e.key in declarative or e.section in declarative
         }
+
+    @staticmethod
+    def _section_ends(index: ProcedureIndex) -> dict[str, str]:
+        """Each section's last member: its last paragraph, else itself."""
+        ends: dict[str, str] = {}
+        for entry in index.entries:
+            if entry.procedure_type == "SECTION":
+                ends[entry.key] = entry.key
+            elif entry.section is not None:
+                ends[entry.section] = entry.key
+        return ends
+
+    def _sections_entered(
+        self, index: ProcedureIndex, declaratives: set[str]
+    ) -> set[str]:
+        """Sections control can enter other than by PERFORM, so that the end
+        of the section runs on into the next procedure: the one holding the
+        entry point or an ENTRY, and any a GO TO / ALTER / CICS HANDLE lands
+        in from outside. ALTER and CICS HANDLE count whatever section they
+        are written in -- the altered GO TO (or the CICS branch) can fire
+        from anywhere.
+        """
+        entered: set[str] = set()
+        first = next(
+            (p for p in self._ordered_procedures if p not in declaratives), None
+        )
+        for name in [first, *self._entry_points]:
+            section = index.section_of(name)
+            if section is not None:
+                entered.add(section)
+        parent = {bn.node_id: bn.parent_proc for bn in self._branch_nodes}
+        for edge in self._edges:
+            if edge.edge_type in (FlowEdgeType.ALTER, FlowEdgeType.CICS_HANDLE):
+                section = index.section_of(edge.target)
+                if section is not None:
+                    entered.add(section)
+            elif edge.edge_type in (FlowEdgeType.GOTO, FlowEdgeType.GOTO_DEPENDING):
+                section = index.section_of(edge.target)
+                source = parent.get(edge.source, edge.source)
+                if section is not None and index.section_of(source) != section:
+                    entered.add(section)
+        return entered
 
     def _detect_unreachable_nodes(self) -> None:
         """Find nodes not reachable from any entry point via internal edges."""
