@@ -431,6 +431,17 @@ def fixed_format_column_offset(parsed_fixed: bool, file_fixed: bool) -> int:
     return FIXED_FORMAT_COLUMN_OFFSET if parsed_fixed else 6
 
 
+#: The location-shaped keys :func:`stamp_report_origins` stamps, each with
+#: the sibling key its origin goes under. A ``"location"`` keeps the plain
+#: ``"origin"`` every consumer already reads; the rest name their own, since
+#: one dict can carry more than one of them.
+_ORIGIN_KEYS: dict[str, str] = {
+    "location": "origin",
+    "definition": "definition_origin",
+    "exit_statement_location": "exit_statement_origin",
+}
+
+
 def stamp_report_origins(
     report: Any, source_map: dict[int, tuple[str, int]] | None
 ) -> Any:
@@ -440,24 +451,28 @@ def stamp_report_origins(
     Every ``"location": {"line": N, ...}`` mapping anywhere in *report* gains
     a sibling ``"origin": {"file", "line"}`` from *source_map*, under the same
     rules: nothing is added for a ``None`` map or a line the map does not
-    cover. ``location`` itself is left alone, so a consumer that indexes the
-    expanded listing still can. Modified in place and returned.
+    cover. The other location-shaped keys in :data:`_ORIGIN_KEYS` -- xref's
+    ``definition``, program-flow's ``exit_statement_location`` -- gain a
+    sibling of their own name (``definition_origin``, ...) the same way
+    (#367). The location itself is left alone, so a consumer that indexes
+    the expanded listing still can. Modified in place and returned.
     """
     if not source_map:
         return report
     if isinstance(report, dict):
-        location = report.get("location")
-        # An origin already there was stamped with more than this map knows
-        # (a lint finding's ``origin.column``, #301); keep it.
-        if (
-            "origin" not in report
-            and isinstance(location, dict)
-            and isinstance(location.get("line"), int)
-        ):
-            origin = source_map.get(location["line"])
-            if origin is not None:
-                report["origin"] = {"file": origin[0], "line": origin[1]}
-        for value in report.values():
+        for key, origin_key in _ORIGIN_KEYS.items():
+            location = report.get(key)
+            # An origin already there was stamped with more than this map
+            # knows (a lint finding's ``origin.column``, #301); keep it.
+            if (
+                origin_key not in report
+                and isinstance(location, dict)
+                and isinstance(location.get("line"), int)
+            ):
+                origin = source_map.get(location["line"])
+                if origin is not None:
+                    report[origin_key] = {"file": origin[0], "line": origin[1]}
+        for value in list(report.values()):
             stamp_report_origins(value, source_map)
     elif isinstance(report, list):
         for value in report:

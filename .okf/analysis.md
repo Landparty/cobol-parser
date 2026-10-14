@@ -2594,7 +2594,10 @@ clickable after expansion. Pinned by
 and `tests/regression/test_nested_program_units.py`.
 `stamp_report_origins(report_dict, source_map)` (2026-09-27) is its twin for
 a serialized analyzer report: every `"location": {"line": N}` mapping gains a
-sibling `"origin"`. Used by `scan_one` and the `unused-variables` CLI.
+sibling `"origin"`; xref's `"definition"` gains `"definition_origin"` and
+program-flow's `"exit_statement_location"` gains `"exit_statement_origin"`
+(`_ORIGIN_KEYS`, #367). Used by `scan_one` and every analyzer CLI's
+`_emit_report`.
 
 **And at which column (#301, 2026-10-13).** `LintFinding.origin_column`,
 serialized as `origin.column` only when known, is the column an editor

@@ -300,3 +300,73 @@ class TestEveryAnalyzerStampsOrigins:
         program.write_text(FLOW_PROGRAM)
         _run_main(["complexity", str(program)])
         assert '"origin"' not in capsys.readouterr().out
+
+
+XREF_COPY_PROGRAM = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. XCP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       COPY CUSTREC.
+       01 WS-X PIC X.
+       PROCEDURE DIVISION.
+           MOVE CUST-NAME TO WS-X
+           STOP RUN.
+       ORPHAN.
+           DISPLAY WS-X.
+"""
+
+
+class TestDefinitionsAndExitsStampOrigins:
+    """#367: stamping keyed on ``"location"`` alone, so xref's
+    ``definition`` and program-flow's ``exit_statement_location`` kept their
+    expanded-listing line past a COPY with nothing to map it back."""
+
+    @pytest.fixture
+    def copy_setup(self, tmp_path):
+        cpy_dir = tmp_path / "cpy"
+        cpy_dir.mkdir()
+        (cpy_dir / "CUSTREC.CPY").write_text(COPYBOOK)
+        program = tmp_path / "xcp.cbl"
+        program.write_text(XREF_COPY_PROGRAM)
+        return program, cpy_dir
+
+    def test_xref_definitions_gain_origin(self, copy_setup, capsys):
+        program, cpy_dir = copy_setup
+        _run_main(["xref", str(program), "--copybook-path", str(cpy_dir)])
+        entries = {e["name"]: e for e in json.loads(capsys.readouterr().out)["entries"]}
+        assert entries["WS-X"]["definition_origin"] == {
+            "file": str(program),
+            "line": 6,
+        }
+        assert entries["ORPHAN"]["definition_origin"] == {
+            "file": str(program),
+            "line": 10,
+        }
+        assert entries["CUST-NAME"]["definition_origin"] == {
+            "file": str(cpy_dir / "CUSTREC.CPY"),
+            "line": 3,
+        }
+        # The expanded-listing line is left as it was.
+        assert entries["WS-X"]["definition"]["line"] == 8
+
+    def test_program_flow_exit_statement_gains_origin(self, copy_setup, capsys):
+        program, cpy_dir = copy_setup
+        _run_main(["program-flow", str(program), "--copybook-path", str(cpy_dir)])
+        exits = [
+            n
+            for n in json.loads(capsys.readouterr().out)["nodes"]
+            if n.get("exit_statement_location")
+        ]
+        assert exits
+        assert exits[0]["exit_statement_origin"] == {
+            "file": str(program),
+            "line": 9,
+        }
+
+    def test_no_definition_origin_without_expansion(self, tmp_path, capsys):
+        program = tmp_path / "flow.cbl"
+        program.write_text(FLOW_PROGRAM)
+        _run_main(["xref", str(program)])
+        entries = json.loads(capsys.readouterr().out)["entries"]
+        assert entries
+        assert not any("definition_origin" in e for e in entries)

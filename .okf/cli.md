@@ -568,7 +568,11 @@ analyzer subcommand that takes `--copybook-path` (dead-code, complexity,
 health, move-type-check, xref, ...): `_parse_result_or_fail` remembers the
 map on `args._expansion_source_map`. Previously only lint and
 unused-variables said where an expanded-listing line really is. Additive:
-no map (no `--copybook-path`), no `origin`. `gen-fixtures` is *not* stamped
+no map (no `--copybook-path`), no `origin`. Locations not under a
+`location` key get a sibling of their own name (2026-10-14, #367): xref's
+`definition` gains `definition_origin`, program-flow's
+`exit_statement_location` gains `exit_statement_origin`
+(`analysis.lint._ORIGIN_KEYS`). `gen-fixtures` is *not* stamped
 (its bundle uses bare `line` keys under `bundle_version`).
 
 ## Program-Flow
