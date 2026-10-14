@@ -539,9 +539,9 @@ class ProgramSignatureExtractor:
                     "its calling interface is not described here"
                 )
                 continue
-            modes = list(getattr(stmt, "parameter_modes", None) or [])
+            entry_modes = list(getattr(stmt, "parameter_modes", None) or [])
             params = [
-                (str(p), modes[i] if i < len(modes) else None)
+                (str(p), entry_modes[i] if i < len(entry_modes) else None)
                 for i, p in enumerate(stmt.using_parameters or [])
                 if str(p).strip()
             ]
