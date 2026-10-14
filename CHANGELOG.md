@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`scan --clones`: a shared PROCEDURE DIVISION copybook is no longer
+  reported as a clone of itself** (#352). Paragraphs expanded from the same
+  copybook line are one source included by several programs, not copy-paste,
+  so `cross_file_clone_groups` now counts *distinct sources* (new
+  `source_count` on each group) against `min_members` and in the volume
+  ranking. Such a paragraph forms no group on its own; when it has also been
+  pasted into another program the group is still reported, every inclusion
+  listed as a member, but the copybook counts once. A widely included error
+  handler no longer tops every scan.
+
 * **`gen-fixtures --scenarios all`: error-status and empty-input scenarios no
   longer assert the normal path** (#318). A scenario with a status override
   (OPEN status 35, READ INVALID KEY 23, CALL ON EXCEPTION, SQLCODE 100) now

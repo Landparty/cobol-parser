@@ -23,6 +23,7 @@ from cobolparser.scan import (
     ANALYZERS,
     DEFAULT_ANALYZERS,
     SCAN_VERSION,
+    CrossFileCloneGroup,
     ScanOptions,
     cross_file_clone_groups,
     parse_analyzer_list,
@@ -593,12 +594,122 @@ class TestCopybookExpansion:
             ScanOptions(analyzers=("redundancy",), copybook_paths=(str(tmp_path),)),
             workers=1,
         )
-        (group,) = cross_file_clone_groups(report)
         cpy = str(tmp_path / "PARAS.cpy")
-        assert [m.to_dict()["origin"] for m in group.members] == [
+        fingerprints = [
+            f
+            for file_scan in report.ok_files
+            for f in file_scan.units[0].reports["redundancy"]["paragraph_fingerprints"]
+            if f["name"] == "SHARED-PARA"
+        ]
+        assert [f["origin"] for f in fingerprints] == [
             {"file": cpy, "line": 1},
             {"file": cpy, "line": 1},
         ]
+
+    _SHARED_COPYBOOK = (
+        "       SHARED-PARA.\n           MOVE 1 TO WS-A\n"
+        "           MOVE 2 TO WS-B\n           DISPLAY 'X'.\n"
+    )
+    _INCLUDER = (
+        "           PERFORM SHARED-PARA\n           STOP RUN.\n           COPY PARAS.\n"
+    )
+
+    def _scan_with_copybooks(
+        self, tmp_path: Path, paths: list[str]
+    ) -> list[CrossFileCloneGroup]:
+        report = scan_files(
+            paths,
+            ScanOptions(analyzers=("redundancy",), copybook_paths=(str(tmp_path),)),
+            workers=1,
+        )
+        return cross_file_clone_groups(report)
+
+    def test_a_shared_copybook_paragraph_is_not_a_clone(self, tmp_path: Path) -> None:
+        """#352: one copybook included by several programs is one source,
+        not copy-paste. Reporting it would put every shop's shared error
+        handler at the top of the ranking."""
+        (tmp_path / "PARAS.cpy").write_text(self._SHARED_COPYBOOK)
+        paths = [
+            _write(tmp_path, f"{n}.cbl", _program(n, "MAIN-PARA", self._INCLUDER))
+            for n in ("PROGA", "PROGB", "PROGC")
+        ]
+        assert self._scan_with_copybooks(tmp_path, paths) == []
+
+    def test_a_real_copy_of_a_copybook_paragraph_is_still_a_clone(
+        self, tmp_path: Path
+    ) -> None:
+        """The copybook text pasted verbatim into another program is a second
+        copy to keep in step. The group keeps every inclusion as a member so
+        a reader sees each program the text reaches, but counts the copybook
+        once."""
+        (tmp_path / "PARAS.cpy").write_text(self._SHARED_COPYBOOK)
+        paths = [
+            _write(tmp_path, f"{n}.cbl", _program(n, "MAIN-PARA", self._INCLUDER))
+            for n in ("PROGA", "PROGB")
+        ]
+        pasted = (
+            self._INCLUDER.replace("           COPY PARAS.\n", "")
+            + self._SHARED_COPYBOOK
+        )
+        paths.append(
+            _write(tmp_path, "PROGC.cbl", _program("PROGC", "MAIN-PARA", pasted))
+        )
+        (group,) = self._scan_with_copybooks(tmp_path, paths)
+        assert group.clone_type == "TYPE_1"
+        assert len(group.members) == 3
+        assert group.source_count == 2
+        assert group.to_dict()["source_count"] == 2
+        assert group.file_count == 3
+
+    def test_min_members_counts_sources_not_inclusions(self, tmp_path: Path) -> None:
+        (tmp_path / "PARAS.cpy").write_text(self._SHARED_COPYBOOK)
+        paths = [
+            _write(tmp_path, f"{n}.cbl", _program(n, "MAIN-PARA", self._INCLUDER))
+            for n in ("PROGA", "PROGB", "PROGC")
+        ]
+        pasted = (
+            self._INCLUDER.replace("           COPY PARAS.\n", "")
+            + self._SHARED_COPYBOOK
+        )
+        paths.append(
+            _write(tmp_path, "PROGD.cbl", _program("PROGD", "MAIN-PARA", pasted))
+        )
+        report = scan_files(
+            paths,
+            ScanOptions(analyzers=("redundancy",), copybook_paths=(str(tmp_path),)),
+            workers=1,
+        )
+        # Four members, but only two copies of the text.
+        assert cross_file_clone_groups(report, min_members=3) == []
+        assert len(cross_file_clone_groups(report, min_members=2)) == 1
+
+    def test_ranking_counts_a_shared_copybook_once(self, tmp_path: Path) -> None:
+        """A small copybook paragraph included widely, and copied once, must
+        not outrank a bigger paragraph copy-pasted into two programs."""
+        (tmp_path / "PARAS.cpy").write_text(self._SHARED_COPYBOOK)
+        big = "".join(f"           MOVE {i % 10} TO WS-C\n" for i in range(14))
+        big_para = "       BIG-PARA.\n" + big + "           DISPLAY 'BIG'.\n"
+        includers = [
+            _write(
+                tmp_path,
+                f"INC{i}.cbl",
+                _program(f"INC{i}", "MAIN-PARA", self._INCLUDER),
+            )
+            for i in range(10)
+        ]
+        pasted = (
+            self._INCLUDER.replace("           COPY PARAS.\n", "")
+            + self._SHARED_COPYBOOK
+            + big_para
+        )
+        copies = [
+            _write(tmp_path, f"CP{i}.cbl", _program(f"CP{i}", "MAIN-PARA", pasted))
+            for i in range(2)
+        ]
+        groups = self._scan_with_copybooks(tmp_path, includers + copies)
+        names = [{m.paragraph for m in g.members} for g in groups]
+        assert names[0] == {"BIG-PARA"}
+        assert {"SHARED-PARA"} in names
 
     def test_no_origin_without_expansion(self, tmp_path: Path) -> None:
         path = _write(tmp_path, "A.cbl", _program("PROGA", "ONLY-PARA", _BODY))
