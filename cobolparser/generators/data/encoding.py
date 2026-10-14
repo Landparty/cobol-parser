@@ -374,7 +374,17 @@ def _encode_text(
     characters rather than its rightmost.
     """
     codec = EBCDIC_CODEC if opts.charset is Charset.EBCDIC else "ascii"
-    raw = text.encode(codec, errors="replace")
+    return _place_bytes(
+        text.encode(codec, errors="replace"), size, opts, justified=justified
+    )
+
+
+def _place_bytes(
+    raw: bytes, size: int, opts: EncodingOptions, *, justified: bool = False
+) -> bytes:
+    """*raw* in a *size*-byte alphanumeric field: padded with the charset's
+    space or truncated, left-aligned unless *justified* (see
+    :func:`_encode_text`)."""
     if len(raw) >= size:
         return raw[len(raw) - size :] if justified else raw[:size]
     pad = bytes([opts.space]) * (size - len(raw))
@@ -601,6 +611,12 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         )
         if edited is not None and len(edited) == width:
             return _encode_text(edited, width, opts)
+    literal = spec.literal_bytes.get(text)
+    if literal is not None:
+        # A hex literal (``VALUE X'C1C2'``) names bytes, not characters: the
+        # cell is only their Latin-1 stand-in, and re-encoding it in the
+        # record charset wrote C1 C2 as ``?``s (ASCII) or 65 62 (EBCDIC).
+        return _place_bytes(literal, width, opts, justified=spec.justified)
     return _encode_text(text, width, opts, justified=spec.justified)
 
 

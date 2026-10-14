@@ -3,7 +3,7 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-10-13T00:00:00Z
+timestamp: 2026-10-14T00:00:00Z
 ---
 
 # Overview
@@ -211,6 +211,11 @@ compare (C vs F sign nibble, slack past the layout), VB records with absent
 `OCCURS DEPENDING ON` occurrences, and the CLI's 0/1/2 exit statuses. Every
 fixture is a record image from `encode_record`, not a hand-built decode
 result. See `generators.md`'s "Record compare".
+
+2026-10-14: `tests/unit/generators/data/test_encoding.py::TestHexLiteralBytes`
+(+10 cases) pins `VALUE X'..'` and level-88 hex witnesses written as their
+own bytes in ASCII and EBCDIC, padded/justified/truncated like any text
+(issue #319). See `generators.md`.
 
 2026-10-12: `tests/unit/generators/data/test_encoding.py::TestFiller`
 (+10 cases) pins a FILLER `VALUE SPACES` / `LOW-VALUES` / `HIGH-VALUES` /
