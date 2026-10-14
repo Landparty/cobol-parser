@@ -79,9 +79,62 @@ def test_directory_order_still_decides_first(tmp_path: Path) -> None:
     assert find_copybook_file("errorcd", config) == expected
 
 
-def test_library_qualified_lowercase_member(tmp_path: Path) -> None:
-    lib = tmp_path / "copy" / "MYLIB"
+@pytest.mark.parametrize("library", ["mylib", "MYLIB"])
+def test_library_name_folds_to_uppercase(tmp_path: Path, library: str) -> None:
+    # A top-level ERRORCD.cpy must not shadow MYLIB/ERRORCD.cpy just
+    # because the program spelled the library in lowercase.
+    root = tmp_path / "copy"
+    _write(root, "ERRORCD.cpy", "TOP-REC")
+    lib = root / "MYLIB"
+    lib.mkdir()
+    expected = str(_write(lib, "ERRORCD.cpy", "LIB-REC"))
+    config = _config(root)
+    assert PathResolver(config).resolve("errorcd", library) == expected
+    assert find_copybook_file("errorcd", config, library) == expected
+
+
+def test_lowercase_library_directory_still_resolves(tmp_path: Path) -> None:
+    root = tmp_path / "copy"
+    lib = root / "mylib"
     lib.mkdir(parents=True)
-    expected = str(_write(lib, "ERRORCD.cpy", "ERR-CD"))
-    config = _config(tmp_path / "copy")
-    assert PathResolver(config).resolve("errorcd", "MYLIB") == expected
+    expected = str(_write(lib, "ERRORCD.cpy", "LIB-REC"))
+    assert find_copybook_file("errorcd", _config(root), "mylib") == expected
+
+
+def test_extension_order_decides_before_case(tmp_path: Path) -> None:
+    # .cpy comes before .cbl in the configured order, whatever the case:
+    # folding must not pull the program source FOO.cbl in over Foo.cpy.
+    d = tmp_path / "copy"
+    _write(d, "FOO.cbl", "PROG-REC")
+    expected = str(_write(d, "Foo.cpy", "COPY-REC"))
+    config = _config(d)
+    assert PathResolver(config).resolve("Foo") == expected
+    assert find_copybook_file("Foo", config) == expected
+
+
+def test_extensionless_upper_member_does_not_shadow_cpy(tmp_path: Path) -> None:
+    d = tmp_path / "copy"
+    _write(d, "FOO", "BARE-REC")
+    expected = str(_write(d, "foo.cpy", "COPY-REC"))
+    config = _config(d)
+    assert PathResolver(config).resolve("foo") == expected
+    assert find_copybook_file("foo", config) == expected
+
+
+def test_name_as_written_with_extension_is_tried_first(tmp_path: Path) -> None:
+    # A literal text-name that already names a file is used as written.
+    d = tmp_path / "copy"
+    expected = str(_write(d, "mem.cpy", "LOWER-REC"))
+    _write(d, "MEM.CPY", "UPPER-REC")
+    config = _config(d)
+    assert PathResolver(config).resolve("mem.cpy") == expected
+    assert find_copybook_file("mem.cpy", config) == expected
+
+
+def test_case_insensitive_search_unchanged(tmp_path: Path) -> None:
+    d = tmp_path / "copy"
+    _write(d, "Errorcd.cpy", "ERR-CD")
+    config = CopybookSearchPath(directories=[str(d)], case_sensitive=False)
+    for member in ("errorcd", "ERRORCD"):
+        assert PathResolver(config).resolve(member).lower().endswith("errorcd.cpy")
+        assert find_copybook_file(member, config).lower().endswith("errorcd.cpy")

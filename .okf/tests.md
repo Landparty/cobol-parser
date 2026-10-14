@@ -9,10 +9,11 @@ timestamp: 2026-10-13T00:00:00Z
 # Overview
 
 2026-10-13: `tests/regression/test_copy_member_case_folding.py`
-(8 tests, #289) pins COPY member names folding to uppercase on a
-case-sensitive filesystem: `copy errorcd.` finds `ERRORCD.cpy`, the uppercase
-member beats `errorcd.cpy`, a lowercase-only member still resolves, and
-directory order outranks case, in both `PathResolver` and `find_copybook_file`.
+(14 tests, #289) pins COPY member and library names folding to uppercase on
+a case-sensitive filesystem: `copy errorcd.` finds `ERRORCD.cpy`, the uppercase
+member beats `errorcd.cpy`, a lowercase-only member still resolves, extension
+order decides before case, `OF mylib` finds `MYLIB/`, and directory order
+outranks case, in both `PathResolver` and `find_copybook_file`.
 
 2026-10-04: `tests/regression/test_copy_diagnostic_line_numbers.py`
 (3 tests, #256) pins COPY diagnostics after continuation records naming the
