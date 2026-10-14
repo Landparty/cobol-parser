@@ -9,6 +9,7 @@ from ._utils import (
     consume_optional_qualifiers,
     consume_period,
     is_statement_boundary,
+    literal_operand_text,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
@@ -186,7 +187,7 @@ class InitializeStatementParser(IStatementParser):
                 nxt = ts.peek()
                 if nxt and nxt.type != TokenType.PERIOD:
                     ts.consume()
-                    by_value = nxt.value or ""
+                    by_value = literal_operand_text(nxt)
                     if nxt.type == TokenType.IDENTIFIER:
                         # `BY WS-X OF GRP` / `BY TBL (I)`: a qualified or
                         # subscripted sending item is one value.
@@ -403,7 +404,11 @@ class InspectStatementParser(IStatementParser):
                     skip_whitespace(ts)
                     before, after = self._parse_before_after(ts)
                     stmt.add_tallying_clause(
-                        counter, for_type, extra.value, before, after
+                        counter,
+                        for_type,
+                        literal_operand_text(extra),
+                        before,
+                        after,
                     )
             else:
                 break
@@ -472,7 +477,7 @@ class InspectStatementParser(IStatementParser):
         if not (v and v.type in _INSPECT_VALUE_TOKEN_TYPES):
             return None
         ts.consume()
-        value = v.value or ""
+        value = literal_operand_text(v)
         if v.type == TokenType.IDENTIFIER:
             value = consume_optional_qualifiers(ts, value)
         skip_whitespace(ts)

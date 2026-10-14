@@ -25,6 +25,7 @@ from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import CobolDataItem, OccursClause, PictureClause
+from cobolparser.parsers.statements._utils import peek_past_noise
 
 logger = logging.getLogger(__name__)
 
@@ -836,14 +837,14 @@ class DataItemClauseParser:
     def _at_object_reference(token_stream: ITokenStream) -> bool:
         """True at ``OBJECT REFERENCE`` (the stream is at ``OBJECT`` or, after
         a consumed USAGE keyword, at ``[IS] OBJECT``)."""
-        offset = 0
-        first = token_stream.peek(0)
+        # Each word may start the next line (``OBJECT <newline> REFERENCE``);
+        # a fixed-offset peek saw the NEWLINE and recorded plain OBJECT.
+        first, at = peek_past_noise(token_stream, 0)
         if first is not None and first.type == TokenType.IS:
-            offset = 1
-            first = token_stream.peek(1)
+            first, at = peek_past_noise(token_stream, at + 1)
         if first is None or (first.value or "").upper() != "OBJECT":
             return False
-        second = token_stream.peek(offset + 1)
+        second, _ = peek_past_noise(token_stream, at + 1)
         return bool(second is not None and (second.value or "").upper() == "REFERENCE")
 
     def _parse_object_reference(
@@ -853,7 +854,9 @@ class DataItemClauseParser:
         ACTIVE-CLASS]`` and record it on *data_item* (IBM OO COBOL)."""
         if self._consume_if(token_stream, "IS") is not None:
             pass
+        self._skip_newlines(token_stream)
         token_stream.consume()  # OBJECT
+        self._skip_newlines(token_stream)
         token_stream.consume()  # REFERENCE
         self._skip_clause_separators(token_stream)
         class_name: str | None = None

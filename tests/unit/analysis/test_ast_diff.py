@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
 from cobolparser.analysis.ast_diff import (
     DiffChange,
     DiffReport,
@@ -723,6 +725,32 @@ def test_changed_evaluate_when_selector():
 
     changes = _of_kind(report, "condition-changed")
     assert len(changes) == 1
+    assert "WHEN" in changes[0].detail
+
+
+@pytest.mark.parametrize(
+    ("old_selector", "new_selector"),
+    [
+        ("SPACES", "'SPACES'"),  # figurative vs. quoted literal (#313)
+        ("WS-B", "'WS-B'"),  # data name vs. quoted literal
+    ],
+)
+def test_figurative_or_identifier_selector_to_quoted_literal_is_a_change(
+    old_selector: str, new_selector: str
+):
+    def body(selector: str) -> str:
+        return (
+            "           EVALUATE WS-B\n"
+            f"              WHEN {selector}\n"
+            "                 MOVE 1 TO WS-A\n"
+            "           END-EVALUATE\n"
+            "           STOP RUN.\n"
+        )
+
+    report = _statement_diff(body(old_selector), body(new_selector))
+
+    changes = _of_kind(report, "condition-changed")
+    assert len(changes) == 1, _kinds(report)
     assert "WHEN" in changes[0].detail
 
 

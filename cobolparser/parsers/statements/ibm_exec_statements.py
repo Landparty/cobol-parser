@@ -10,7 +10,12 @@ from ...lexer import TokenType
 from ...models.ast_base import ASTNode, SourceLocation
 from ...models.sql_statements import parse_exec_sql
 from ...models.statements.base import CobolStatement
-from ._utils import collect_exec_sql_text, peek_token
+from ._utils import (
+    _NOISE_TOKEN_TYPES,
+    collect_exec_sql_text,
+    peek_token,
+    skip_whitespace,
+)
 
 _IMS_CALL_TYPES = frozenset(
     {"GU", "GN", "GNP", "ISRT", "REPL", "DLET", "CHKP", "ROLLB", "TERM", "XRST", "XDLT"}
@@ -154,6 +159,21 @@ def _parse_ims_arguments(text: str) -> list[str]:
     return arguments
 
 
+def _exec_interface_token(token_stream: ITokenStream) -> Any | None:
+    """The token naming the interface after EXEC (SQL / CICS / DLI / IMS).
+
+    Looks past line breaks: ``EXEC`` alone on a line is ordinary layout, and
+    a fixed ``peek(1)`` there saw the NEWLINE, so the block matched no EXEC
+    parser and was split into stray statements.
+    """
+    offset = 1
+    token = peek_token(token_stream, offset)
+    while token is not None and token.type in _NOISE_TOKEN_TYPES:
+        offset += 1
+        token = peek_token(token_stream, offset)
+    return token
+
+
 class ExecCicsStatement(CobolStatement):
     """AST node for EXEC CICS statements.
 
@@ -227,7 +247,7 @@ class ExecSqlStatementParser(IStatementParser):
             return False
 
         # Check if next token is SQL
-        next_token = peek_token(token_stream, 1)
+        next_token = _exec_interface_token(token_stream)
         if not next_token:
             return False
 
@@ -245,7 +265,8 @@ class ExecSqlStatementParser(IStatementParser):
         start_token = token_stream.consume()  # EXEC
         start_location = start_token.location if start_token else SourceLocation(0, 0)
 
-        # Skip SQL keyword
+        # Skip SQL keyword (possibly on the next line)
+        skip_whitespace(token_stream)
         if not token_stream.is_empty():
             token_stream.consume()
 
@@ -285,7 +306,7 @@ class ExecCicsStatementParser(IStatementParser):
             return False
 
         # Check if next token is CICS
-        next_token = peek_token(token_stream, 1)
+        next_token = _exec_interface_token(token_stream)
         if not next_token:
             return False
 
@@ -303,7 +324,8 @@ class ExecCicsStatementParser(IStatementParser):
         start_token = token_stream.consume()  # EXEC
         start_location = start_token.location if start_token else SourceLocation(0, 0)
 
-        # Skip CICS keyword
+        # Skip CICS keyword (possibly on the next line)
+        skip_whitespace(token_stream)
         if not token_stream.is_empty():
             token_stream.consume()
 
@@ -402,7 +424,7 @@ class ExecImsStatementParser(IStatementParser):
         if not is_exec:
             return False
 
-        next_token = peek_token(token_stream, 1)
+        next_token = _exec_interface_token(token_stream)
         if not next_token:
             return False
 
@@ -417,7 +439,8 @@ class ExecImsStatementParser(IStatementParser):
         start_token = token_stream.consume()  # EXEC
         start_location = start_token.location if start_token else SourceLocation(0, 0)
 
-        # Skip IMS / DLI keyword
+        # Skip IMS / DLI keyword (possibly on the next line)
+        skip_whitespace(token_stream)
         if not token_stream.is_empty():
             token_stream.consume()
 

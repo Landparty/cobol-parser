@@ -1028,6 +1028,7 @@ class BusinessRuleExtractor:
         value = self._literal(
             selector.get("value"),
             bool(selector.get("identifier")) or kind == "Identifier",
+            quoted=bool(selector.get("quoted")),
         )
         if subject_upper == "TRUE":
             return value
@@ -1036,9 +1037,20 @@ class BusinessRuleExtractor:
         return f"{subject} = {value}"
 
     @staticmethod
-    def _literal(value: Any, identifier: bool) -> str:
-        """An EVALUATE selector value; selector literals arrive unquoted."""
-        text = str(value or "").strip()
+    def _literal(value: Any, identifier: bool, quoted: bool = False) -> str:
+        """An EVALUATE selector value; selector literals arrive unquoted.
+
+        ``quoted`` is the parser's word that the value was a string literal:
+        ``WHEN 'SPACES'`` must not render as the figurative ``SPACES``.
+        """
+        text = str(value or "")
+        if quoted:
+            # A blank literal reaches us already re-quoted by the parser.
+            if len(text) >= 2 and text[0] in "'\"" and text[-1] == text[0]:
+                if not text[1:-1].strip():
+                    return text
+            return "'" + text.replace("'", "''") + "'"
+        text = text.strip()
         if identifier or not text:
             return text
         if _NUMERIC_LITERAL_RE.match(text) or text.upper() in _FIGURATIVES:
@@ -1051,18 +1063,6 @@ class BusinessRuleExtractor:
         if _SPACED_CALL_RE.match(text):
             return _tidy(text)
         return "'" + text.replace("'", "''") + "'"
-
-    def _string_source(self, operand: str) -> str:
-        base = operand.split("(")[0].strip().upper()
-        if (
-            base in self._declared
-            or base in _SPECIAL_REGISTERS
-            or operand[:1] in ("'", '"')
-            or _NUMERIC_LITERAL_RE.match(operand.strip())
-            or base in _FIGURATIVES
-        ):
-            return operand
-        return "'" + operand.replace("'", "''") + "'"
 
     def _statement_text(self, stmt: CobolStatement) -> str:
         return _tidy(self._raw_statement_text(stmt))
@@ -1109,10 +1109,8 @@ class BusinessRuleExtractor:
             stop_type = getattr(stmt, "stop_type", None) or ""
             return f"STOP {stop_type}"
         if isinstance(stmt, StringStatement):
-            # STRING sources arrive with literal quotes stripped; one that
-            # names no declared item can only have been a literal.
-            sources = [self._string_source(op) for op in stmt.operands]
-            return f"STRING {' '.join(sources)} INTO {stmt.into_target or ''}"
+            # A literal source arrives quoted, as DISPLAY's items do.
+            return f"STRING {' '.join(stmt.operands)} INTO {stmt.into_target or ''}"
         if isinstance(stmt, UnstringStatement):
             receivers = [str(t.get("target", "")) for t in stmt.into_targets]
             return f"UNSTRING {stmt.source_operand or ''} INTO {' '.join(receivers)}"
