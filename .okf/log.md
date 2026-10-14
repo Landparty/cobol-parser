@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-08T00:00:00Z
+timestamp: 2026-10-13T00:00:00Z
 ---
 
 # OKF Update Log
@@ -20,6 +20,12 @@ entries, including both 2026-09-15 sections, were found there on
 x(...)` as unresolved and lint blamed a missing COPY. Intrinsic results now
 take their category from the intrinsic catalog (or their first argument);
 the rest is counted in `unresolved_function_count` with its own caveat.
+## 2026-10-13 -- compare: LOW-VALUES padding is a difference (#287)
+
+[generators.md](generators.md), [cli.md](cli.md): a values compare treated
+trailing (or all) LOW-VALUES and spaces in a text field as equal, because
+the decoder strips both. Text fields now also compare their NUL positions,
+and the text report shows hex when two differing values print the same.
 
 ## 2026-10-13 -- bug hunt: a CALL may write GLOBAL / EXTERNAL storage
 
