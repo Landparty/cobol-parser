@@ -3008,6 +3008,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
 
+## [3.0.0](https://github.com/Landparty/cobol-parser/compare/v2.0.1...v3.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **decode:** `decode --view X` (CSV and JSON) now emits a column for every field of the record, not just the overlay's own, and in `decode --list-views` / `RecordViews.to_dict()` an overlay view's `length` and `fields` cover the whole record, with the overlay's own span under a new `overlay_length` key. Consumers reading these by position or length need updating. See CHANGELOG.md (Unreleased, Changed).
+
+### Features
+
+* implement closed-source PyPI release for cobol-parser ([2759806](https://github.com/Landparty/cobol-parser/commit/2759806c252f1f4ba2e206ac4269cd3855ddcbc6))
+
+
+### Bug Fixes
+
+* **codebase:** count EXEC SQL INCLUDE members as copy edges ([97cd840](https://github.com/Landparty/cobol-parser/commit/97cd840730f6087387529458347fc17c409f565f))
+* **codebase:** count EXEC SQL INCLUDE members as copy edges ([4e22bad](https://github.com/Landparty/cobol-parser/commit/4e22bada5042db9b01d99bd19e991c2d03292450)), closes [#295](https://github.com/Landparty/cobol-parser/issues/295)
+* **codebase:** don't report precompiler INCLUDE members as unresolved ([5da33a4](https://github.com/Landparty/cobol-parser/commit/5da33a41ff31e100155c93df61c27d4b45de13bb)), closes [#295](https://github.com/Landparty/cobol-parser/issues/295)
+* **codebase:** one unresolved note per member, accurate expander docs ([1de4bb1](https://github.com/Landparty/cobol-parser/commit/1de4bb16e033f6952818f1eab68f630dd194a688)), closes [#295](https://github.com/Landparty/cobol-parser/issues/295)
+* **const_fold:** a CALL may write GLOBAL and EXTERNAL storage ([f174261](https://github.com/Landparty/cobol-parser/commit/f17426132aa359c5ca9298478bc7e3148b6d0e33))
+* **const_fold:** follow the control flow a field_equals value depends on ([7e07b53](https://github.com/Landparty/cobol-parser/commit/7e07b535d58cefd255bb85efd194609a9cc9ea49))
+* **const-fold:** a CALL may change GLOBAL or EXTERNAL fields ([48ef090](https://github.com/Landparty/cobol-parser/commit/48ef0904bce90a93a22357ac3d60b78fb058d236))
+* **const-fold:** no field_equals across control flow the walk does not follow ([684282f](https://github.com/Landparty/cobol-parser/commit/684282f441b640f7b8f30c440e14b70ae57fbca5))
+* **copybook:** fold COPY member names to uppercase like Enterprise COBOL ([23c0131](https://github.com/Landparty/cobol-parser/commit/23c01319b3fed7d28337aec50f34a223267ec13e))
+* **copybook:** fold COPY member names to uppercase like Enterprise COBOL ([d406888](https://github.com/Landparty/cobol-parser/commit/d406888ddb3d8bf016dc10ce490ade84e7f857aa)), closes [#289](https://github.com/Landparty/cobol-parser/issues/289)
+* **copybook:** probe extensions before case, fold library names too ([d1e86aa](https://github.com/Landparty/cobol-parser/commit/d1e86aa1264cb0a33348ea3bcf1001a99b46ed97))
+* **copybook:** search both library folders, keep path literals as written ([45fd371](https://github.com/Landparty/cobol-parser/commit/45fd371642addfb788b86c4395aa2b9e6eba93fe))
+* **decode:** drop the false missing-counter caveat on overlay views ([1a7275c](https://github.com/Landparty/cobol-parser/commit/1a7275c73c6f8fd8d8f738f480afff0b4bd0b4fe)), closes [#296](https://github.com/Landparty/cobol-parser/issues/296)
+* **decode:** keep ODO counters, wide overlays and base columns right in overlay views ([7c20c97](https://github.com/Landparty/cobol-parser/commit/7c20c97ef34da755f214b7718d47f20ae8592a12)), closes [#296](https://github.com/Landparty/cobol-parser/issues/296)
+* **decode:** mark the whole-record overlay view change as breaking ([c13f1a4](https://github.com/Landparty/cobol-parser/commit/c13f1a4dc06d2cca1208f1e8523bb95a1f3d7b27)), closes [#296](https://github.com/Landparty/cobol-parser/issues/296)
+* **decode:** read REDEFINES views as the whole record with the overlay swapped in ([3264685](https://github.com/Landparty/cobol-parser/commit/3264685b489c0c8496b915e8115f32c2b4c71ae0)), closes [#296](https://github.com/Landparty/cobol-parser/issues/296)
+* **gen-data:** keep 29-31 digit numbers exact and the RNG stream stable ([4af90a3](https://github.com/Landparty/cobol-parser/commit/4af90a3a2af586ec78eab2765903c4acb1b83ec0))
+* **gen-data:** keep every digit of wide numeric fields ([c2c9340](https://github.com/Landparty/cobol-parser/commit/c2c93408c2f1dc96d57475e11b8ef7a6ebfc08c4))
+* **gen-data:** keep every digit of wide numeric fields ([6641ce7](https://github.com/Landparty/cobol-parser/commit/6641ce7ebaa052a27b479bc801cd8ef043d2a6a9)), closes [#285](https://github.com/Landparty/cobol-parser/issues/285)
+
+
+### Documentation
+
+* **gen-data:** correct which fields keep their seeded output ([b486975](https://github.com/Landparty/cobol-parser/commit/b4869757de58453fefc72a084c35fe2f8f281604))
+
 ## [2.0.1](https://github.com/Landparty/cobol-parser/compare/v2.0.0...v2.0.1) (2026-10-13)
 
 
