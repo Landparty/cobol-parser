@@ -8,6 +8,13 @@ timestamp: 2026-10-13T00:00:00Z
 
 # Overview
 
+2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
+#377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
+read, no phantom paragraph appears, and dead-code / program-flow /
+unused-variables / complexity all see the jump table.
+`test_go_parser_edge_cases.py`'s `test_depending_without_on_reads_variable`
+replaces the test that pinned the old behavior.
+
 2026-10-13: `tests/regression/test_copy_member_case_folding.py`
 (17 tests, #289) pins COPY member and library names folding to uppercase on
 a case-sensitive filesystem: `copy errorcd.` finds `ERRORCD.cpy`, the uppercase
