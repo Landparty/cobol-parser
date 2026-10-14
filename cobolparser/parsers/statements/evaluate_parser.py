@@ -6,8 +6,10 @@ from cobolparser.parsers.statements._utils import (
     LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     get_parse_context,
+    is_bare_separator,
     keyword_upper,
     matches_keyword,
+    paren_depth_after,
     report_parse_error,
     skip_statement_separators,
     try_parse_nested_statement,
@@ -218,6 +220,7 @@ class EvaluateStatementParser(IStatementParser):
                 stmt.add_subject(subject)
 
         current_subject: list[str] = []
+        paren_depth = 0
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -243,7 +246,12 @@ class EvaluateStatementParser(IStatementParser):
                 token_stream.consume()
                 continue
 
-            if token.type != TokenType.NEWLINE:
+            # A separator comma/semicolon is a space (#386): ``EVALUATE Y;``
+            # evaluates ``Y``, not ``Y ;``.
+            if token.type != TokenType.NEWLINE and not is_bare_separator(
+                token, paren_depth
+            ):
+                paren_depth = paren_depth_after(token, paren_depth)
                 current_subject.append(condition_token_text(token))
             token_stream.consume()
 

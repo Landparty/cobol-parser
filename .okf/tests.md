@@ -1300,6 +1300,11 @@ REFERENCE, ...) once on one line and once broken across two, and requires
 identical ASTs apart from locations; it also pins the dispatch cache
 telling EXEC<newline>SQL from EXEC<newline>CICS within one parse.
 
+`tests/regression/test_condition_expression_separators.py` (issue #386)
+pins a separator `,` / `;` after an IF condition, a PERFORM UNTIL condition
+(inline, out-of-line, VARYING), an EVALUATE subject and a COMPUTE expression
+being dropped, and a comma inside `FUNCTION MAX(X, Y)` being kept.
+
 ### Field lineage (2026-10-08)
 
 `tests/samples/lineage/` holds a three-program chain plus its JCL: WRITER

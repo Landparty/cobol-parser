@@ -34,6 +34,7 @@ from ._utils import (
     consume_optional_qualifiers,
     consume_signed_numeric,
     get_parse_context,
+    is_bare_separator,
     is_statement_boundary,
     keyword_upper,
     looks_dedented_relative_to,
@@ -944,6 +945,11 @@ class ComputeStatementParser(IStatementParser):
             elif paren_depth == 0:
                 if tok_type == TokenType.PERIOD:
                     break
+                # A separator comma/semicolon is a space (#386):
+                # ``COMPUTE Z = X + Y, DISPLAY Z`` computes ``X + Y``.
+                if is_bare_separator(token, paren_depth):
+                    token_stream.consume()
+                    continue
                 if token.value:
                     upper = token.value.upper()
                     # ``ON`` is optional before SIZE ERROR, so a bare
