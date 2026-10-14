@@ -85,6 +85,9 @@ class EvaluateStatementParser(IStatementParser):
                     token.location if hasattr(token, "location") else start_location
                 )
                 token_stream.consume()
+                # A selector always follows WHEN, so a line break here is
+                # layout: ``WHEN <newline> OTHER`` must still be the default.
+                skip_statement_separators(token_stream)
 
                 next_token = token_stream.peek()
                 if (

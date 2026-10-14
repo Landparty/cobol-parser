@@ -32,6 +32,7 @@ from cobolparser.models.data_items import (
 )
 from cobolparser.models.program import CobolDivision, CobolSection
 from cobolparser.models.sql_statements import ExecSQLStatement
+from cobolparser.parsers.statements._utils import peek_past_noise, skip_whitespace
 
 from .base import BaseDivisionParser, at_division_boundary
 from .data_clauses import _DIVISION_TOKEN_TYPES, DataItemClauseParser
@@ -348,6 +349,9 @@ class DataDivisionParser(BaseDivisionParser):
             ):
                 current_fd_record_type = "SD" if value_upper == "SD" else "FD"
                 token_stream.consume()  # consume FD/SD
+                # The file name may start the next line (``FD`` alone on a
+                # line); a bare peek saw the NEWLINE and lost the name.
+                skip_whitespace(token_stream)
                 fd_name_tok = token_stream.peek()
                 if fd_name_tok and fd_name_tok.type == TokenType.IDENTIFIER:
                     current_fd_name = fd_name_tok.value
@@ -367,6 +371,7 @@ class DataDivisionParser(BaseDivisionParser):
                 and value_upper == "RD"
             ):
                 token_stream.consume()  # RD
+                skip_whitespace(token_stream)
                 rd_name_tok = token_stream.peek()
                 if rd_name_tok and rd_name_tok.type == TokenType.IDENTIFIER:
                     current_rd_name = rd_name_tok.value
@@ -380,7 +385,7 @@ class DataDivisionParser(BaseDivisionParser):
                 tok_type == TokenType.IDENTIFIER and value_upper == "EXEC"
             )
             if is_exec and paren_depth == 0:
-                next_tok = token_stream.peek(1)
+                next_tok, _ = peek_past_noise(token_stream, 1)
                 is_sql = next_tok and (
                     next_tok.type == TokenType.SQL
                     or (

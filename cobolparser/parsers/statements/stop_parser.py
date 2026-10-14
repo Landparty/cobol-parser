@@ -5,7 +5,7 @@ from typing import Any
 from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import StopStatement
-from ._utils import consume_period, matches_keyword
+from ._utils import consume_period, matches_keyword, skip_whitespace
 
 
 class StopStatementParser(IStatementParser):
@@ -31,7 +31,10 @@ class StopStatementParser(IStatementParser):
         location = getattr(start_token, "location", None) or SourceLocation(0, 0)
         stmt = StopStatement(location)
 
-        # Parse STOP type: STOP RUN or STOP "literal" (or STOP <numeric>)
+        # Parse STOP type: STOP RUN or STOP "literal" (or STOP <numeric>).
+        # STOP always takes an operand, so a line break before it is layout:
+        # left in place, ``STOP <newline> RUN.`` became a paragraph named RUN.
+        skip_whitespace(token_stream)
         if not token_stream.is_empty():
             next_token = token_stream.peek()
             if next_token and next_token.value:

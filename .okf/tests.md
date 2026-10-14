@@ -1249,6 +1249,13 @@ width, and `jcl --dd-map --program`. The abbreviated-condition fix is pinned
 in `test_review_2026_09_09_parser.py` (`TestFinding08ConditionTrees`); the
 JCL omitted-sub-parameter slot in `tests/unit/test_jcl.py`.
 
+`tests/regression/test_keyword_line_breaks.py` (issue #385) parses each
+keyword pair (STOP RUN, WHEN OTHER, 88/66 names, FD/SD, CALL ON EXCEPTION,
+ENTRY, EXEC SQL/CICS/DLI, END DECLARATIVES, SPECIAL-NAMES, OBJECT
+REFERENCE, ...) once on one line and once broken across two, and requires
+identical ASTs apart from locations; it also pins the dispatch cache
+telling EXEC<newline>SQL from EXEC<newline>CICS within one parse.
+
 ### Field lineage (2026-10-08)
 
 `tests/samples/lineage/` holds a three-program chain plus its JCL: WRITER
