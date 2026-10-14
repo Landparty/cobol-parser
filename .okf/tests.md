@@ -162,6 +162,12 @@ RELEASE/RETURN). See `analysis.md`.
 `test_program_signature.py` (+1) pin arithmetic read/write roles and the
 LINKAGE directions derived from them. See `analysis.md`.
 
+2026-10-14: `tests/unit/analysis/test_io_sequence_branches.py` (12 tests)
+pins IF/EVALUATE arms being forked and merged in `IOSequenceAnalyzer`
+(issue #380): mutually exclusive OPENs, the `CLOSE ... STOP RUN` error exit,
+GOBACK/GO TO/PERFORMed-abend arms left out of the merge, while violations
+that hold on every path are still reported. See `analysis.md`.
+
 2026-09-27: `tests/unit/analysis/test_io_sequence.py::TestGoToReadLoop` (3
 tests) pins the READ ... AT END GO TO loop not reporting its file left open,
 while a missing/duplicate CLOSE in its exit paragraph still is. See
