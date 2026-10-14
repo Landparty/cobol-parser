@@ -518,9 +518,9 @@ class ValueFactory:
         # still exactly one ``random()`` draw, so the RNG stream -- and every
         # later field in the record -- is the same as before. Its repr fills
         # up to 15 places; a wider fraction takes the draw's exact binary
-        # value. A field of 12 or fewer total digits keeps its seeded output;
-        # a wider one can differ in its last place, which the float sum was
-        # rounding.
+        # value. A field of 11 or fewer total digits keeps its seeded output;
+        # 12-15 digits can (rarely) differ in the last decimal place, where
+        # the float sum was rounding; past 15 most rows change.
         decimals = spec.decimal_digits
         if not decimals:
             return self._format_number(whole, spec)
