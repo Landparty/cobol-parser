@@ -484,11 +484,13 @@ def _classify_picture(pic: PictureClause) -> DataCategory:
     has_edit_chars = bool(_PIC_EDITED_CHARS_RE.search(pattern_no_reps))
 
     if has_edit_chars:
+        # Test symbols on pattern_no_reps: the 9 in a repeat count such as
+        # X(9)BX(9) is not a digit position.
         # Numeric-edited: contains 9s alongside editing characters
-        if "9" in pattern:
+        if "9" in pattern_no_reps:
             return DataCategory.NUMERIC_EDITED
         # Alphanumeric-edited: X with editing chars
-        if "X" in pattern or "A" in pattern:
+        if "X" in pattern_no_reps or "A" in pattern_no_reps:
             return DataCategory.ALPHANUMERIC_EDITED
         return DataCategory.NUMERIC_EDITED  # default for edited
 

@@ -533,6 +533,58 @@ class TestPictureVariants:
         assert _classify_picture(_pic("S9(20)")) == DataCategory.NUMERIC
         assert _classify_picture(_pic("9(10)V9(2)")) == DataCategory.NUMERIC
 
+    def test_nine_in_repeat_count_is_not_a_digit_position(self):
+        # Regression #336: the 9 in X(9) / A(9) is a repeat count, not a
+        # digit, so these must classify like their X(10) / A(10) siblings.
+        for pattern in ("X(9)BX(9)", "X(10)BX(10)", "A(9)B", "X(9)0", "X(19)/X"):
+            assert (
+                _classify_picture(_pic(pattern)) == DataCategory.ALPHANUMERIC_EDITED
+            ), pattern
+
+    def test_digit_positions_still_numeric_edited(self):
+        assert _classify_picture(_pic("9(9)B9(9)")) == DataCategory.NUMERIC_EDITED
+        assert _classify_picture(_pic("Z(9).99")) == DataCategory.NUMERIC_EDITED
+
+    def test_repeat_count_nine_moves_match_x10_variant(self):
+        # The four MOVEs from issue #336, through a real parse.
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-ALPHA PIC A(5).
+       01 WS-AN    PIC X(5).
+       01 WS-DEC   PIC 9(3)V99.
+       01 WS-XE    PIC X(9)BX(9).
+       01 WS-XE2   PIC X(10)BX(10).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           MOVE WS-ALPHA TO {t}
+           MOVE WS-AN TO {t}
+           MOVE WS-DEC TO {t}
+           MOVE {t} TO WS-DEC
+           STOP RUN.
+"""
+
+        def findings(target):
+            result = parse_cobol(src.format(t=target))
+            assert result.ast is not None
+            report = MoveTypeChecker().check(result.ast)
+            return sorted(
+                (
+                    "T" if v.source_name == target else v.source_name,
+                    "T" if v.target_name == target else v.target_name,
+                    v.kind.name,
+                    v.target_category.name,
+                )
+                for v in report.violations
+            )
+
+        xe = findings("WS-XE")
+        assert xe == findings("WS-XE2")
+        assert ("WS-DEC", "T", "ERROR", "ALPHANUMERIC_EDITED") in xe
+        assert not any(t == "T" and k != "ERROR" for _, t, k, _ in xe)
+
 
 class TestLiteralSourceMoves:
     """MOVE with a literal source (not a data item name)."""

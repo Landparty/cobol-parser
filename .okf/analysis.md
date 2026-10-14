@@ -1212,6 +1212,13 @@ skipped into `unresolved_count`) while `9(5)DB` was NUMERIC_EDITED only
 because its 'B' happened to match the blank-insertion edit char. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA5A6MoveTypePictureClassification`.
 
+**Repeat counts are not symbols (2026-10-14, #336):** inside an edited
+picture, the `9` / `X` / `A` tests that pick NUMERIC_EDITED vs
+ALPHANUMERIC_EDITED run on `pattern_no_reps` (repeat counts stripped), so
+the 9 in `X(9)BX(9)` or `A(9)B` no longer reads as a digit position; these
+classify ALPHANUMERIC_EDITED like `X(10)BX(10)`. Pinned by
+`test_move_type_checker.py::TestPictureVariants::test_nine_in_repeat_count_is_not_a_digit_position`.
+
 **`unresolved_count` (2026-07-09, audit finding H5):** before this field
 existed, an unresolvable source category (`UNKNOWN`/`FIGURATIVE`) caused
 `_validate_move` to `return` early, and an unresolvable target category
