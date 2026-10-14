@@ -1157,6 +1157,20 @@ report: MoveTypeReport = MoveTypeChecker().check(ast)
 Detects MOVE statements with type-incompatible sending/receiving fields based on
 PICTURE clause categories.
 
+**MOVE CORRESPONDING (2026-10-14, issue #383):** a CORR move was skipped
+outright and not counted anywhere, so a type-mismatched one read as a clean
+all-clear. It is now expanded into its pairs by the IBM rule (same name path
+below the two groups, at least one of the two elementary; FILLER, level
+66/77/88, REDEFINES, OCCURS and INDEX/POINTER subordinates -- and what is
+under a REDEFINES/OCCURS item -- excluded, mirroring
+`field_lineage._corresponding`), and each pair is checked like an ordinary
+MOVE. Violations name the pair qualified (`AMT OF GRP-A` → `AMT OF GRP-B`).
+An operand that does not resolve to exactly one declared *group* (undeclared,
+ambiguous without qualifiers, elementary) adds one to `unresolved_count` per
+receiving operand; a paired item with no category this checker models adds
+one per pair. Pinned by
+`test_move_type_checker.py::TestMoveCorrespondingPairs`.
+
 **Intrinsic FUNCTION sources (2026-10-13, issue #291):** a `MOVE FUNCTION
 x(...) TO y` was always skipped into `unresolved_count` (only the argless
 `CURRENT-DATE` / `WHEN-COMPILED` were known), and lint's caveat then told the
