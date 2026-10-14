@@ -1731,6 +1731,19 @@ module (same rationale as `_errors.py`) because its callers span both
 | `statements/move_parser.py` | MOVE's literal source |
 | `statements/display_parser.py` | DISPLAY items and function-call operands |
 | `statements/write_parser.py` | WRITE's `FROM <literal>` |
+| `statements/_utils.py::literal_operand_text` | STRING / UNSTRING operands and delimiters, CALL `USING` arguments, INSPECT TALLYING / REPLACING / CONVERTING / BEFORE / AFTER values, SET's value (and PERFORM VARYING's `FROM` / `BY`, via `consume_value_operand`), INITIALIZE `REPLACING ... BY` (#330, 2026-10-14) |
+
+**#330 (2026-10-14).** The statements in that last row stored a literal
+operand's decoded `token.value`, so `'A'` and the data item `A` produced
+the same AST value and `X'00'` read as `00`. unused-variables counted a
+literal spelling a declared name as a reference, lineage drew a flow from
+it, and xref listed a `CALL ... USING 'LIT'` argument as an undefined data
+item. `literal_operand_text(token)` returns `raw_value` for a typed literal
+and `quote_literal(value)` for any other STRING_LITERAL -- the MOVE /
+DISPLAY convention (option (a) on the issue), chosen over a per-operand
+`is_literal` marker so every consumer that already skips quoted text keeps
+working. It changes these statements' `to_dict()` values (`"A"` where
+`A` was). Pinned by `tests/regression/test_literal_operand_quotes.py`.
 
 Level-88 condition values are deliberately **not** in that list:
 `data_special_entries.py` stores them undelimited (`item.add_value(t.value)`),

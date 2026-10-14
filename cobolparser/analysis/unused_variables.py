@@ -160,8 +160,8 @@ _STR_LIST_EXTRAS: dict[type, tuple[str, ...]] = {
 _DICT_LIST_EXTRAS: dict[type, tuple[tuple[str, tuple[str, ...]], ...]] = {
     UnstringStatement: (("into_targets", ("target", "delimiter_var", "count_var")),),
     # ``INITIALIZE X REPLACING NUMERIC DATA BY WS-ZERO``: the BY value is
-    # read. A literal arrives with its quotes stripped, so it is extracted
-    # as a candidate name too -- harmless, it matches no declared item.
+    # read. A literal arrives quoted, and its quoted text is never taken
+    # for a name.
     InitializeStatement: (("replacing_clauses", ("by_value",)),),
     InspectStatement: (
         ("tallying_clauses", ("counter", "value", "before", "after")),

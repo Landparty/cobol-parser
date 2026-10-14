@@ -2984,8 +2984,8 @@ selector (`WHEN NOT 0 THRU 17`, a `Condition` dict with `negated` plus
 from its raw `THRU` text; only a single negated value reads `AGE <> 6`
 (#260). Level-88 values are
 also stored unquoted with `THRU` as `"THROUGH:end"`; `_condition_values`
-quotes them unless the item's PICTURE / USAGE is numeric. STRING sources are
-unquoted too, so one naming no declared item is re-quoted. Actions are
+quotes them unless the item's PICTURE / USAGE is numeric. STRING sources
+arrive quoted (#330), so they are rendered as is. Actions are
 rendered in full here rather than via `program_flow/statement_text.py`
 (flowchart summaries, truncated to 48 chars).
 
