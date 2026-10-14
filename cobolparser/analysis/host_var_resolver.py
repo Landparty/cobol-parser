@@ -207,7 +207,7 @@ class HostVariableResolver:
         child_ancestors = ancestors
         if isinstance(node, CobolDataItem):
             name = (node.name or "").strip().upper()
-            if name and name != "FILLER":
+            if name and not node.is_filler:
                 # First occurrence wins (outer declaration takes precedence)
                 self._symbol_table.setdefault(name, node)
                 self._all_items.setdefault(name, []).append((node, ancestors))
