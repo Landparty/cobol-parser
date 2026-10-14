@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
-timestamp: 2026-09-04T00:00:00Z
+timestamp: 2026-10-13T00:00:00Z
 ---
 
 # Overview
@@ -950,7 +950,21 @@ adds pairing and field comparison, and decodes nothing itself.
   not byte by byte (slack past the layout under `record_length`). Bytes of an
   *ignored* field are blanked on both sides before that image check
   (2026-09-27: `--compare-bytes --ignore UPD-TS` had reported the ignored
-  timestamp's bytes as `(unmapped bytes)`, so the ignore did nothing). A field that
+  timestamp's bytes as `(unmapped bytes)`, so the ignore did nothing).
+  **LOW-VALUES padding is a difference** (2026-10-13, #287): the decoder
+  strips trailing spaces *and* NULs from DISPLAY text (display output keeps
+  doing so), so `'ALICE'` + 5 x `x'00'` and `'ALICE     '` decode alike, yet
+  the program tells them apart (`IF A-NAME = SPACES`) and an uninitialised
+  output field is what the check exists to catch. `_same()` therefore also
+  requires a text field's (alphanumeric / alphabetic / alphanumeric-edited /
+  national) NUL byte positions to match once the values agree. Before, only
+  `--compare-bytes` caught it, and that also flags C/F sign nibbles and
+  filler. Numeric-edited fields are checked too (an unmodelled picture reads
+  as plain text and was otherwise blind to it). **FILLER is exempt** (round
+  2 review): uninitialised FILLER in an FD record is common and harmless, so
+  making it a difference would fail compares that passed before; only
+  `compare_bytes` reports it. The text report appends `(bytes x'..' vs x'..')` to a difference
+  whose two values print the same, so the reader can see what differs. A field that
   did not decode cleanly on *either* side is always compared by bytes: its
   best-effort value is not evidence.
 * **Absent fields** (a shorter VB record, an `OCCURS DEPENDING ON` occurrence

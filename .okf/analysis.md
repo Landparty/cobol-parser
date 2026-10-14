@@ -1128,11 +1128,39 @@ report: MoveTypeReport = MoveTypeChecker().check(ast)
 #                                    not be resolved (undeclared identifier,
 #                                    unexpanded copybook, ...); serialized
 #                                    in report.to_dict()
+# report.unresolved_function_count: int -- the part of unresolved_count no
+#                                    copybook can fix: a FUNCTION source with
+#                                    a NATIONAL result or an uncatalogued name
 # MoveViolationKind: NUMERIC_TO_ALPHANUMERIC, ALPHANUMERIC_TO_NUMERIC, …
 ```
 
 Detects MOVE statements with type-incompatible sending/receiving fields based on
 PICTURE clause categories.
+
+**Intrinsic FUNCTION sources (2026-10-13, issue #291):** a `MOVE FUNCTION
+x(...) TO y` was always skipped into `unresolved_count` (only the argless
+`CURRENT-DATE` / `WHEN-COMPILED` were known), and lint's caveat then told the
+user to pass `--copybook-path` for a COPY that was never missing. The result
+category now comes from `dialects.le_signatures.intrinsic_signature(name).returns`:
+`alphanumeric` → ALPHANUMERIC, `integer` → integer NUMERIC, `numeric` →
+NUMERIC whose integer-ness is *unknown* (`None`: NUMVAL("12") is an integer,
+NUMVAL("1.5") is not). SUM / REM / RANGE / MAX / MIN / ABS take their
+integer-ness from their arguments by one rule: non-integer if any argument
+is, an integer if all are, unknown otherwise. TRIM / ABS / USUBSTR / MAX /
+MIN take their first argument's category;
+UPPER-CASE / LOWER-CASE / REVERSE are ALPHANUMERIC only when their argument
+resolves (a national argument gives a national result). A reference-modified
+result (`FUNCTION CURRENT-DATE(1:8)`) is ALPHANUMERIC. A nested `FUNCTION
+x(...)` argument is one argument. So `MOVE FUNCTION NUMVAL(X) TO` a `PIC A`
+item is an error, but to a `PIC X` item it is skipped, never a guessed
+error. What stays unchecked because of the function itself (NATIONAL-OF, an
+uncatalogued name, a numeric result of unknown integer-ness into an
+alphanumeric receiver, UPPER-CASE / TRIM / ... of a declared PIC N item) is
+also counted in `unresolved_function_count`, and
+lint words that caveat separately without the copybook hint; an unresolved
+*argument* is still an ordinary unresolved operand. Pinned by
+`test_move_type_checker.py::TestIntrinsicFunctionsWithArguments` /
+`TestNumericFunctionIntegerness` and `test_lint.py::TestCaveats`.
 
 **Group receivers and `ZERO` → alphabetic (2026-09-27):** a MOVE *into* a
 group item is a group move (bytes copied as alphanumeric) and legal from any
