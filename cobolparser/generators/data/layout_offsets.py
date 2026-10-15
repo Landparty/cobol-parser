@@ -313,7 +313,7 @@ def _layout_item(
     items always report False here: a directly-attached DEPENDING ON is
     already handled by the caller's own check on ``occurs_clause``.
     """
-    item_path = (*path, item.name)
+    item_path = (*path, item.layout_name)
     qualified_name = ".".join(item_path)
     parent_qualified_name = ".".join(path) if path else None
     data_children = _direct_data_children(item)
@@ -333,7 +333,7 @@ def _layout_item(
 
     out.append(
         LayoutItem(
-            name=item.name,
+            name=item.layout_name,
             qualified_name=qualified_name,
             level=item.level,
             is_group=bool(data_children),
@@ -452,7 +452,7 @@ def _first_unaligned_sync(
     order: list[tuple[str, CobolDataItem, bool]] = []
 
     def walk(item: CobolDataItem, path: tuple[str, ...], in_table: bool) -> None:
-        item_path = (*path, item.name)
+        item_path = (*path, item.layout_name)
         in_table = in_table or item.occurs_clause is not None
         order.append((".".join(item_path), item, in_table))
         for child in _direct_data_children(item):

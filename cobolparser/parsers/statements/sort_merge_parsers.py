@@ -7,6 +7,7 @@ from ...lexer import TokenType
 from ...models.statements import MergeStatement, SortStatement
 from ._utils import (
     consume_optional_qualifiers,
+    get_parse_context,
     is_statement_boundary,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
@@ -39,6 +40,7 @@ def _parse_keys(
         if val == "KEY":
             ts.consume()
             skip_whitespace(ts)
+            _skip_word(ts, "IS")
             continue
 
         if val in ("ASCENDING", "DESCENDING"):
@@ -46,11 +48,11 @@ def _parse_keys(
             ts.consume()
             skip_whitespace(ts)
 
-            # Optional KEY keyword
-            nxt = ts.peek()
-            if nxt and _val(nxt) == "KEY":
-                ts.consume()
-                skip_whitespace(ts)
+            # Optional KEY keyword, and the ``KEY IS`` spelling GnuCOBOL
+            # accepts: before 2026-10-14 the IS ended the key list and every
+            # key was dropped without a diagnostic.
+            if _skip_word(ts, "KEY"):
+                _skip_word(ts, "IS")
 
             # Collect field names
             while not ts.is_empty():
@@ -71,6 +73,7 @@ def _parse_keys(
                     "ON",
                     "WITH",
                     "COLLATING",
+                    "SEQUENCE",
                     "INPUT",
                     "OUTPUT",
                     "USING",
@@ -108,6 +111,46 @@ def _parse_keys(
             break
 
     return keys
+
+
+def _skip_word(ts: ITokenStream, word: str) -> bool:
+    """Consume *word* (and trailing layout) when it is next; True if it was."""
+    token = ts.peek()
+    if token is None or _val(token) != word:
+        return False
+    ts.consume()
+    skip_whitespace(ts)
+    return True
+
+
+def _parse_collating_sequence(ts: ITokenStream) -> str | None:
+    """Parse ``[COLLATING] SEQUENCE [IS] alphabet-name`` from either of its
+    first two words. COLLATING is optional in IBM Enterprise COBOL; before
+    2026-10-14 a bare ``SEQUENCE NATIVE`` was folded into the key list."""
+    _skip_word(ts, "COLLATING")
+    _skip_word(ts, "SEQUENCE")
+    _skip_word(ts, "IS")
+    n = ts.peek()
+    if n and n.type != TokenType.PERIOD:
+        ts.consume()
+        skip_whitespace(ts)
+        return n.value
+    return None
+
+
+def _warn_no_keys(ts: ITokenStream, verb: str, location: Any) -> None:
+    """Warn that a file SORT/MERGE collected no keys: a key list the parser
+    could not read is otherwise indistinguishable from an empty one."""
+    line = getattr(location, "line", None)
+    where = f" at line {line}" if line else ""
+    context = get_parse_context(ts)
+    host = getattr(context, "host", None) if context else None
+    add_warning = getattr(host, "add_warning", None)
+    if callable(add_warning):
+        add_warning(
+            f"{verb} statement{where} has no ON ASCENDING/DESCENDING KEY "
+            "phrase that could be read: no sort keys were recorded"
+        )
 
 
 def _parse_file_list(
@@ -224,35 +267,15 @@ class SortStatementParser(IStatementParser):
                 # falling through to the generic-clause-token consume below.
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
-            elif val == "WITH":
-                token_stream.consume()
-                skip_whitespace(token_stream)
-                nxt = token_stream.peek()
-                if nxt and _val(nxt) == "DUPLICATES":
-                    token_stream.consume()
+            elif val in ("WITH", "DUPLICATES"):
+                # [WITH] DUPLICATES [IN ORDER]: WITH is optional.
+                _skip_word(token_stream, "WITH")
+                if _skip_word(token_stream, "DUPLICATES"):
                     stmt.duplicates_in_order = True
-                    skip_whitespace(token_stream)
-                    # Skip "IN ORDER"
-                    for kw in ("IN", "ORDER"):
-                        n = token_stream.peek()
-                        if n and _val(n) == kw:
-                            token_stream.consume()
-                            skip_whitespace(token_stream)
-            elif val == "COLLATING":
-                token_stream.consume()
-                skip_whitespace(token_stream)
-                n = token_stream.peek()
-                if n and _val(n) == "SEQUENCE":
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
-                n = token_stream.peek()
-                if n and _val(n) == "IS":
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
-                n = token_stream.peek()
-                if n and n.type != TokenType.PERIOD:
-                    token_stream.consume()
-                    stmt.collating_sequence = n.value
+                    _skip_word(token_stream, "IN")
+                    _skip_word(token_stream, "ORDER")
+            elif val in ("COLLATING", "SEQUENCE"):
+                stmt.collating_sequence = _parse_collating_sequence(token_stream)
             elif val == "USING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -321,6 +344,15 @@ class SortStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
 
+        if not stmt.keys and (
+            stmt.using_files
+            or stmt.giving_files
+            or stmt.input_procedure
+            or stmt.output_procedure
+        ):
+            # A file SORT always has a key; a table SORT may omit it.
+            _warn_no_keys(token_stream, "SORT", stmt.location)
+
         return stmt
 
 
@@ -386,21 +418,8 @@ class MergeStatementParser(IStatementParser):
                 # falling through to the generic-clause-token consume below.
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
-            elif val == "COLLATING":
-                token_stream.consume()
-                skip_whitespace(token_stream)
-                n = token_stream.peek()
-                if n and _val(n) == "SEQUENCE":
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
-                n = token_stream.peek()
-                if n and _val(n) == "IS":
-                    token_stream.consume()
-                    skip_whitespace(token_stream)
-                n = token_stream.peek()
-                if n and n.type != TokenType.PERIOD:
-                    token_stream.consume()
-                    stmt.collating_sequence = n.value
+            elif val in ("COLLATING", "SEQUENCE"):
+                stmt.collating_sequence = _parse_collating_sequence(token_stream)
             elif val == "USING":
                 token_stream.consume()
                 skip_whitespace(token_stream)
@@ -442,4 +461,6 @@ class MergeStatementParser(IStatementParser):
                 token_stream.consume()
                 skip_whitespace(token_stream)
 
+        if not stmt.keys:
+            _warn_no_keys(token_stream, "MERGE", stmt.location)
         return stmt

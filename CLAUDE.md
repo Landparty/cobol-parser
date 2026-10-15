@@ -93,7 +93,7 @@ python -m mypy cobolparser/
 # the subcommand: [--config FILE] to read a specific cobol.yml, [--no-config]
 # to ignore any of them. See "Project Config" below and docs/project-config.md
 cobol-parser config [--json]
-cobol-parser parse <file.cbl> [path] [--compact] [--source-format auto|fixed|free] [--free-form] [--dialect ibm-enterprise] [--errors] [--stats]
+cobol-parser parse <file.cbl> [path] [--compact] [--source-format auto|fixed|free] [--free-form] [--debug-lines] [--dialect ibm-enterprise] [--errors] [--stats]
 cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
 cobol-parser expand <file.cbl> --copybook-path ./copybooks [--keep-comments] [--source-map]
