@@ -697,19 +697,22 @@ class RedundancyAnalyzer:
     ) -> list[CloneGroup]:
         paragraphs = self._collect_paragraphs(proc_division)
 
-        type1_groups = self._group_by_fingerprint(paragraphs, type2=False)
+        type1_buckets = self._bucket_by_fingerprint(paragraphs, type2=False)
+        type1_groups = self._groups_from_buckets(type1_buckets, type2=False)
         # Any pair that's already a Type-1 match is a Type-1 match, not also
         # a "renamed" one -- Type-2 grouping only runs over paragraphs that
         # didn't already land in a Type-1 group of size >= 2, so every
-        # paragraph is reported in exactly one clone group.
-        type1_names = {
-            m.name for g in type1_groups if len(g.members) >= 2 for m in g.members
+        # paragraph is reported in exactly one clone group. Excluded by
+        # identity, never by name: a paragraph name may repeat across
+        # sections, and one ``P1`` in a Type-1 group must not take every
+        # other section's ``P1`` out of Type-2 grouping with it (#353).
+        type1_ids = {
+            id(p)
+            for members, _ in type1_buckets.values()
+            if len(members) >= 2
+            for p in members
         }
-        remaining = [
-            p
-            for p in paragraphs
-            if p.paragraph_name and p.paragraph_name.upper() not in type1_names
-        ]
+        remaining = [p for p in paragraphs if id(p) not in type1_ids]
         type2_groups = self._group_by_fingerprint(remaining, type2=True)
 
         groups = [g for g in type1_groups if len(g.members) >= 2] + [
@@ -718,11 +721,11 @@ class RedundancyAnalyzer:
         return [g for g in groups if g.statement_count >= min_clone_statements]
 
     @staticmethod
-    def _group_by_fingerprint(
+    def _bucket_by_fingerprint(
         paragraphs: list[CobolParagraph], *, type2: bool
-    ) -> list[CloneGroup]:
-        buckets: dict[Any, list[CobolParagraph]] = {}
-        leaf_counts: dict[Any, int] = {}
+    ) -> dict[Any, tuple[list[CobolParagraph], int]]:
+        """Paragraphs bucketed by fingerprint, each with its leaf count."""
+        buckets: dict[Any, tuple[list[CobolParagraph], int]] = {}
         for para in paragraphs:
             if not para.paragraph_name:
                 continue
@@ -730,23 +733,35 @@ class RedundancyAnalyzer:
             fingerprint = fp.fingerprint_paragraph(para)
             if fp.leaf_count == 0:
                 continue
-            buckets.setdefault(fingerprint, []).append(para)
-            leaf_counts[fingerprint] = fp.leaf_count
+            members, _ = buckets.get(fingerprint, ([], 0))
+            members.append(para)
+            buckets[fingerprint] = (members, fp.leaf_count)
+        return buckets
 
+    @classmethod
+    def _group_by_fingerprint(
+        cls, paragraphs: list[CobolParagraph], *, type2: bool
+    ) -> list[CloneGroup]:
+        return cls._groups_from_buckets(
+            cls._bucket_by_fingerprint(paragraphs, type2=type2), type2=type2
+        )
+
+    @staticmethod
+    def _groups_from_buckets(
+        buckets: dict[Any, tuple[list[CobolParagraph], int]], *, type2: bool
+    ) -> list[CloneGroup]:
         groups = []
-        for fingerprint, members in buckets.items():
+        for members, leaf_count in buckets.values():
             groups.append(
                 CloneGroup(
                     clone_type="TYPE_2" if type2 else "TYPE_1",
-                    statement_count=leaf_counts[fingerprint],
+                    statement_count=leaf_count,
                     members=[
                         # Uppercased to match the convention every other
                         # analyzer uses for procedure names (DeadCodeItem,
                         # FlowNode, ...) -- callers like
                         # TechnicalDebtAnalyzer match clone membership by
-                        # name against those always-uppercase sets, and
-                        # `_find_clone_groups`'s own Type-1/Type-2 dedup
-                        # below compares against `.upper()` too.
+                        # name against those always-uppercase sets.
                         CloneMember(name=p.paragraph_name.upper(), location=p.location)
                         for p in members
                     ],

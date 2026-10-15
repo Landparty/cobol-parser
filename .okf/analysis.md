@@ -954,7 +954,13 @@ nested trees that happen to serialize the same way; the nested-tuple shape
 encodes tree structure unambiguously). Paragraphs are grouped by exact
 fingerprint equality; Type-1 grouping runs first, and any paragraph already
 in a Type-1 group of size >= 2 is excluded from the Type-2 pass, so a
-paragraph is only ever reported in one clone group. Groups below
+paragraph is only ever reported in one clone group. That exclusion is by
+paragraph *identity*, not by name (#353, 2026-10-15): a paragraph name may
+repeat across sections, and keying it on the bare name used to let one `P1`
+in a Type-1 group silently drop another section's `P1` -- and with it a
+whole Type-2 group -- from the Type-2 pass. `CloneMember.name` is still the
+bare uppercased paragraph name (callers join on it); its `location` tells
+two same-named members apart. Groups below
 `min_clone_statements` (default 3 -- two bare `EXIT.` paragraphs matching
 each other isn't meaningful redundancy) are dropped.
 

@@ -8,6 +8,11 @@ timestamp: 2026-10-15T00:00:00Z
 
 # Overview
 
+2026-10-15: `tests/unit/analysis/test_redundancy.py::TestClonePriority::
+test_repeated_paragraph_name_does_not_drop_type2_group` (#353) pins a
+Type-2 clone group surviving when one of its members shares its name with a
+Type-1 member in another section. See `analysis.md`.
+
 2026-10-14: `tests/unit/analysis/test_exit_section_and_alterable_goto.py`
 (11 tests, #382) pins the alterable `GO TO.` and `EXIT SECTION` as
 terminators in dead-code and program-flow: a PERFORMed section returns at
