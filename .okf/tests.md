@@ -1,12 +1,384 @@
 ---
 type: Reference
 title: Tests
-description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
+description: Test suite layout (tests/ directories, corpora, conftest fixtures), pytest markers and their per-directory enforcement, the 90% coverage floor and why it is measured on pure Python, the CI jobs in .github/workflows/ci.yml, and a dated log of what each test file pins.
 tags: [tests, pytest, coverage, fixtures, markers]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
+
+The suite lives under `tests/` and runs with plain pytest: **~13,690 tests
+collected from 483 `test_*.py` files** (`python -m pytest tests --collect-only
+-q --no-cov`, 2026-10-15). Configuration is `[tool.pytest.ini_options]` in
+`pyproject.toml` (`testpaths = ["tests"]`, `--strict-markers`, coverage on by
+default with a **90% floor**, branch coverage enabled). Two shared fixtures
+(`parser`, `samples_dir`) come from `tests/conftest.py`; four markers
+(`integration`, `slow`, `contract`, `io`), three of them applied structurally
+by per-directory `conftest.py` files.
+
+Getting started: `pip install -e ".[dev]"`, then `python -m pytest
+tests/unit/test_lexer.py --no-cov` for a single file (`--no-cov`, because a
+subset always fails the 90% floor), or `python -m pytest tests/ -n auto` for
+the whole suite with coverage (`pytest-xdist` is in `[dev]`). The default
+backend is **pure Python**: the Cython accelerators are only built and only
+used under `COBOLPARSER_ACCEL=1` (`cobolparser/_accel.py`), so a default run
+measures coverage correctly even with `*.so` files present. To exercise the
+fast paths, build and run with the variable set and `--no-cov` (see
+[Coverage](#coverage-requirement-detail)).
+
+Where to put a new test: `tests/unit/` (one component; analyzers under
+`unit/analysis/`, CLI under `unit/cli/`, record encoding/decoding under
+`unit/generators/data/`), `tests/regression/` (a pinned bug fix, usually
+named for the issue or finding), `tests/integration/` (end-to-end over a
+corpus), `tests/contracts/` (public API shapes other repos depend on). The
+reference sections below describe the suite as it is; the
+[Change log](#change-log) records, per test file, what it pins and why.
+
+## Contents
+
+- [Directory Layout](#directory-layout)
+- [pytest Markers](#pytest-markers) (incl. per-directory enforcement)
+- [Shared Fixtures](#shared-fixtures-testsconftestpy)
+- [Running Tests](#running-tests)
+- [Example Corpora](#example-corpora)
+- [Enterprise program-type corpus](#enterprise-program-type-corpus)
+- [Coverage Requirement Detail](#coverage-requirement-detail)
+- [CI/CD](#cicd)
+- [OKF staleness map guard](#okf-staleness-map-guard)
+- [See Also](#see-also)
+- [Change log](#change-log) -- dated, per-test-file notes (rationale and history)
+
+# Directory Layout
+
+File counts are `test_*.py` files, recursive, as of 2026-10-15.
+
+```
+tests/
+  conftest.py                  # shared fixtures: parser(), samples_dir()
+  test_all_samples.py          # smoke-tests every tests/samples/*.cbl program
+  test_okf_staleness_map.py    # OKF_MAP guard (see "OKF staleness map guard")
+  unit/                        # 295 files: individual components (200 directly in unit/)
+    test_copybook_data_generator.py  # copybook -> CSV: flattening, categories, value constraints, options, dataset surface
+    test_program_layout_index.py     # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, qualified level-88 names (resolve/condition_values/gen-fixtures arms, #272), record_named(), multi-program units, from_file errors (see generators.md)
+    test_program_fixtures.py         # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON round trip, one directory per scenario, distinct CSVs on a forced name collision); TestScenarioModes (witness pinning incl. compound SEARCH WHEN #348, empty-input, boundary min-max, scenario_coverage); TestTier1CallCountExpectations / TestTier2FieldEqualsExpectations; TestTargetedArmsAreVerified (#244); TestFailurePathExpectations (#318); TestCallCountFollowsControlFlow (#363); TestMultipleRecordsUnderOneFd (#364); TestArmsOnTwoRecordsOfOneFd; TestFillerOwningConditionName; TestCallFixtureSameNamedFields (#365); TestKeyedReadReturnsTheKeyAskedFor (#322) (see generators.md)
+    test_scenario_planner.py         # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable arms, fixed families (empty-input/error-status/boundary-values), exact coverage accounting, TestScenarioNamesAreUnique (#267) (see generators.md)
+    test_extended_verb_parsers.py    # 2026-09-02 statement-coverage audit: every Report Writer / Communication / legacy / COBOL 2002 verb -> node, operands, no warnings; UNSUPPORTED_VERBS == {EXECUTE, GOTO, RECOVER}; every STATEMENT_KEYWORDS verb dispatches (see parser.md)
+    test_fast_import.py              # Cython import guard: extensions load when compiled (importorskip otherwise), pure Python is the default even when compiled, swapped in only under COBOLPARSER_ACCEL=1, accelerators_enabled() spellings
+    analysis/                  # 48 files: every analyzer
+      test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability, CALL argument-direction ladder, structure-qualified SQL host variables, ACCEPT filtering, IOLogger cross-check
+      test_constraints.py      # ConstraintExtractor: relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan, EVALUATE TRUE + 88s, WHEN OTHER, SEARCH WHEN (#348), PERFORM-UNTIL SequenceConstraint
+      test_domains.py          # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value, level-88 pick re-checked against gt/ge/lt/le (#244)
+      test_dclgen_check.py     # DclgenChecker: column <-> host-variable pairing, every violation kind/severity, both null-indicator syntaxes, what it declines to check, "DCLGEN's own output is always clean" table
+      test_const_fold.py       # ConstantFolder: MOVE/arithmetic/COMPUTE folding, GIVING, loop/branch poisoning, DIVIDE poison, PERFORM chaining, GO TO/STOP RUN, observation points; TestStorageAliasing (#245), TestValueAtObservationPoint (#246), TestWalkBudget, TestInspectAndExecWrites (#317), TestReadKeys (#322)
+      test_invocation_counts.py  # count_invocations (#363): status-check exemption, unknown-count bodies, EXIT PARAGRAPH, literal TIMES, fall-through + PERFORM, GO TO following
+    cli/                       # 26 files: CLI subcommands
+      test_decode_cli.py       # decode: CSV/JSON/hex, --view / --list-views, gen-data -> decode round trip, paging, trailing bytes, --strict; dclgen-check subcommand and lint rule
+      test_gen_fixtures_cli.py # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes
+    test_flowchart_generator.py      # Mermaid/DOT flowcharts: label fidelity, quoting, escaping (see generators.md)
+    generators/                # 14 files (3 here: bug-hunt r11, row witnesses, scenario verification; + data/)
+      data/                    # 11 files: compare, decoding, editing, encoding, layout, layout_offsets, program_layout_conditions, storage, values, variable_length, views
+        test_views.py          # build_record_views(): running offsets vs real encoded bytes, REDEFINES overlays (every occurrence inside OCCURS, FILLER padding, nested overlays #296), short-name lookup, ODO ambiguity, contiguity property
+        test_decoding.py       # RecordDecoder: decode(encode(row)) == row for every storage class and both charsets, ODO under every RecordFormat, RDW framing, overlay switching, sign conventions read but never written, bad bytes reported per field, paging, hex pane
+    io_statements/             # 7 files: IO parser unit tests (`io` marker)
+  integration/                 # 32 files: end-to-end over corpora (`integration` marker)
+    test_shamrice_examples.py  # all examples/cobol/shamrice/*.cbl parse error-free
+    test_nist_cobol85_support.py  # all 459 NIST *.CBL parse error-free (strict-xfail KNOWN_ISSUES ratchet, now empty); copybook validation
+    test_enterprise_program_types.py  # tests/samples/enterprise/ (see below)
+    test_copybook_csv_generation.py   # sample + NIST *.CPY: gen-data never crashes; no-layout copybooks raise CopybookLayoutError; every cell fits its field
+    test_data_item_layout_corpus.py   # compute_program_data_items() over fixtures and shamrice
+    test_program_layout_corpus.py, test_boundary_inventory_corpus.py, test_gen_fixtures_corpus.py,
+    test_constraint_extractor_corpus.py, test_scenario_planner_corpus.py, test_const_fold_corpus.py
+                               # gen-fixtures phases 1-7 parametrised over shamrice: no raise, no unexpected unresolved, layout-valid values, exact coverage accounting
+    io/                        # 1 file: IO coverage reporting integration (`io` too)
+    io_statements/             # 2 files: IO statement parsing, VSAM (`io` too)
+  contracts/                   # 21 files: API contract tests (`contract` marker)
+    test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version, generator signatures, to_dict() key sets, reproducibility, scenario-mode contract (see docs/fixture-bundle-schema.md)
+    io_statements/             # 1 file (`io` too)
+  regression/                  # 132 files: pinned bug fixes, typically named for the issue/finding, e.g.
+                               #   test_swallow_sweep.py: one period-less snippet per registered statement
+                               #     parser x a DISPLAY 'MARKER'. sentinel; fails if a new parser is
+                               #     registered without a fixture (see parser.md)
+                               #   test_statement_coverage_audit_2026_09_02.py: EXEC CICS/DLI in
+                               #     get_all_statements(), handler boundaries, NIST no-drop-warning guard
+                               #   test_open_findings_high_regressions.py / ..._medium_regressions.py:
+                               #     reports/open-findings.md H1-H8 / M-series
+                               #   test_nist_edge_case_fixes.py: minimal repros of NIST edge cases
+  performance/                 # test_factory_performance.py (`slow`; absolute floors skipped under a tracer)
+                               # + bench_cython_vs_pure.py (a script, not collected)
+  samples/                     # shared COBOL fixtures: 48 *.cbl at top level
+    copybook_programs/         # programs with COPY statements
+    copybooks/                 # .CPY files
+    enterprise/                # 22 programs, one per IBM Enterprise COBOL program type, + copybooks/
+    io/positive/, io/negative/ # valid / invalid IO patterns
+    jcl/                       # invupdt.jcl, payproc.jcl
+    lineage/                   # WRITER/SUBPGM/READER/MISC .cbl + FEEJOB.jcl (field-lineage chain)
+```
+
+# pytest Markers
+
+Declared in `pyproject.toml` (`--strict-markers`, so an undeclared marker is
+a collection error):
+
+| Marker | Meaning |
+|--------|---------|
+| `integration` | Integration tests |
+| `slow` | Slow-running tests (only `tests/performance/test_factory_performance.py` today) |
+| `contract` | API contract tests |
+| `io` | IO statement tests (OPEN, CLOSE, READ, WRITE, REWRITE, DELETE, START, ACCEPT, DISPLAY, UNLOCK) |
+
+```bash
+python -m pytest -m "integration"    # integration tests only
+python -m pytest -m "slow"           # slow tests only
+python -m pytest -m "contract"       # API contract tests only
+python -m pytest -m "io"             # IO statement tests only
+```
+
+## Per-directory marker enforcement
+
+The `contract`, `integration`, and `io` markers are applied **structurally**
+by per-directory `conftest.py` files (a `pytest_collection_modifyitems` hook
+that adds the marker to every item collected under that directory), so new
+test files can never drift out of `-m` selection (since 2026-08-12):
+
+| conftest.py location | Marker applied |
+|----------------------|----------------|
+| `tests/contracts/` | `contract` |
+| `tests/integration/` | `integration` |
+| `tests/unit/io_statements/` | `io` |
+| `tests/integration/io_statements/` | `io` (plus `integration` from parent) |
+| `tests/integration/io/` | `io` (plus `integration` from parent) |
+| `tests/contracts/io_statements/` | `io` (plus `contract` from parent) |
+
+In-file `pytestmark = pytest.mark.<x>` lines still exist in many files;
+they are harmless duplicates and are no longer required. A file *outside*
+these directories can still opt in explicitly (e.g.
+`tests/unit/test_ims_segment_analyzer.py`,
+`tests/regression/test_nist_edge_case_fixes.py`).
+
+# Shared Fixtures (`tests/conftest.py`)
+
+| Fixture | Returns |
+|---------|---------|
+| `parser()` | Fresh `CobolParser` instance |
+| `samples_dir()` | `Path` to `tests/samples/` |
+
+# Running Tests
+
+```bash
+# All tests with coverage (90% min); -n auto (pytest-xdist) is optional
+python -m pytest tests/ -v
+
+# Single file / single test (--no-cov: a subset always misses the floor)
+python -m pytest tests/unit/test_lexer.py -v --no-cov
+python -m pytest tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_with_periods -xvs --no-cov
+
+# By directory (no dedicated marker needed)
+python -m pytest tests/regression/ -v
+python -m pytest tests/contracts/ -v
+python -m pytest tests/performance/ -v
+
+# The suite against the Cython accelerators (opt-in; never trust its coverage)
+COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
+COBOLPARSER_ACCEL=1 python -m pytest tests/ -q --no-cov
+```
+
+Running only a subset of tests with coverage on will trigger a coverage
+failure -- that is expected.
+
+# Example Corpora
+
+| Path | Contents |
+|------|----------|
+| `tests/samples/` | 48 COBOL programs covering all statement types, smoke-tested by `test_all_samples.py` |
+| `tests/samples/enterprise/` | 22 programs, one per IBM Enterprise COBOL program type (see next section) |
+| `examples/cobol/` | NIST COBOL-85 test suite (459 .CBL files + 51 .CPY copybooks); **all 459** parse error-free, pinned by `test_nist_cobol85_support.py`. Its strict-xfail `KNOWN_ISSUES` ratchet is now empty: OBNC1M was fixed (comment-entry-aware IDENTIFICATION DIVISION boundaries), SM206A was fixed, and SM101A is parsed through copybook expansion (`REQUIRES_COPYBOOK_EXPANSION`) since its COPY members are statement fragments. Minimal repros for the fixed edge cases live in `tests/regression/test_nist_edge_case_fixes.py` |
+| `examples/cobol/shamrice/` | 24 IBM COBOL programs from shamrice/COBOL-Examples; all parse cleanly under FAIL_FAST; the gen-fixtures corpus tests sweep it |
+
+# Enterprise program-type corpus
+
+`tests/samples/enterprise/` holds one program per IBM Enterprise COBOL
+program type (22 programs + `copybooks/`; the matrix with every
+distinguishing construct is `docs/enterprise-program-types.md`).
+`tests/integration/test_enterprise_program_types.py` (`integration`
+marker) asserts, per program: a FAIL_FAST parse with no errors and no
+warnings other than the informational "Compilation unit contains N
+program units"; a JSON round trip; every analyzer over every unit without
+raising and `LintReport.failed_rules == []`; `gen-fixtures --scenarios
+all` and `scan` accepting it; and per-type traits (the CICS commands,
+DL/I function codes, MQ calls, OO unit tree, declarative sections, flow
+edges, 6.x data attributes ... that make the program its kind).
+`TestCorpusShape` fails when the directory and `PROGRAM_TYPES` disagree, so
+a new type has to be added to both. The corpus is parsed with
+`debug_lines=True` (COMPDIR declares `WITH DEBUGGING MODE`; it is the only
+program with D lines), so COMPDIR's D-line DISPLAYs are in its AST and it
+stays warning-free; `tests/unit/test_debugging_mode_lines.py` pins the
+default (dropped + warning), the option on every surface (API, CLI,
+cobol.yml, scan, tokenize, batch, the copybook expansion -- with a real
+COPY, since a program without one passes through the expander untouched --
+and every subcommand that parses COBOL) and `debug_line_numbers` (#334).
+`test_all_samples.py` covers the corpus too, since it lives under
+`tests/samples/`. The same 22 files are copied into
+`mocky-mock/tests/fixtures/enterprise/`, where
+`mocky-mock/tests/unit/test_enterprise_corpus.py` pins `mockymock generate`'s
+outcome per program (that path is in the *sibling* repo, not this one).
+
+`tests/unit/test_enterprise_syntax.py` pins each construct the corpus
+surfaced in isolation: PROGRAM-ID attributes, OO units, DECLARATIVES,
+`USE BEFORE REPORTING`, the 6.x data clauses, `OCCURS UNBOUNDED`, JSON
+`CONVERTING`, `RETURNING`, `SET ADDRESS OF`, conditional compilation by
+default, and REPLACE partial words.
+
+When the corpus was added (2026-09-15) three older tests changed on purpose:
+the missing period after the `PROGRAM-ID` keyword is tolerated (IBM), the
+mandatory-PROGRAM-ID message names CLASS-ID / METHOD-ID too, and an unknown
+`>>` directive is blanked rather than passed through.
+
+# Coverage Requirement Detail
+
+From `pyproject.toml`:
+
+```toml
+addopts = [
+    "--strict-markers",
+    "--cov=cobolparser",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-fail-under=90",
+]
+```
+
+Branch coverage is also enabled (`[tool.coverage.run] branch = true`,
+`source = ["cobolparser"]`). No coverage baselines are stored in the repo
+(there is no `baselines/` directory); the floor above is the only gate.
+
+**Measure coverage on the pure-Python backend.** coverage.py cannot see into
+a compiled Cython extension, so with the accelerators in use the pure-Python
+bodies they shadow read as unexecuted: same suite, same commit, measured
+2026-09-07, **54.32%** with the extensions in use vs **91.76%** without.
+Since 2026-10-15 pure Python is the default -- a built `*.so` is ignored
+unless `COBOLPARSER_ACCEL=1` is set at import time -- so a plain `python -m
+pytest tests/` measures correctly. Run the accelerated suite separately with
+`COBOLPARSER_ACCEL=1 ... --no-cov`. Accelerator-specific tests
+(`tests/unit/test_fast_import.py`,
+`tests/regression/test_data_fast_signature_drift.py`, the parity checks)
+`importorskip` the extension and set the variable themselves where needed.
+
+**Timing assertions and coverage.** `tests/performance/test_factory_performance.py`
+guards its two absolute nodes/sec floors (100,000) with `requires_untraced`
+(`skipif("sys.gettrace() is not None")`). Under coverage.py's tracer the
+suite took 950 s instead of 94 s, and `test_factory_throughput` measured
+64,243 nodes/sec against its 100,000 floor on a CI runner that clears it
+comfortably uninstrumented -- the number describes the tracer, not the
+factory. Any `--no-cov` run (e.g. CI's `build` job) enforces the floors;
+only a coverage run skips them. The ratio-based overhead assertion is
+unaffected.
+
+# CI/CD
+
+> **Currently disabled.** Every line of `.github/workflows/ci.yml` is
+> commented out (commit `315d474`, "refactor(ci): comment out CI
+> configuration"; the 2026-10-15 accelerator opt-in `476ec02` updated the
+> commented text). No lint, typecheck, test or coverage job runs on push or
+> PR today; run them locally. The job definitions below are what the file
+> describes and what runs once it is uncommented. `release-please.yml` is
+> still active.
+
+Triggers (as written): push/PR to `main`, a nightly `schedule`
+(`17 4 * * *`) and manual `workflow_dispatch`. Push and PR triggers carry
+`paths-ignore` for `docs/**`, `.okf/**`, `reports/**` and `**/*.md`, so a
+docs-only change runs no CI. A new push to a PR cancels the run in flight
+(`concurrency`); runs on `main` are never cancelled.
+
+1. **lint** -- `ruff check .` + `black --check .` (Python 3.13, `ruff==0.15.0`
+   / `black==26.3.0`, pinned to match `.pre-commit-config.yaml`)
+2. **typecheck** -- `mypy cobolparser/` (Python 3.13, `mypy==1.20.0`)
+3. **build** -- `pip install -e ".[dev,fast]"` +
+   `COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace` +
+   `COBOLPARSER_ACCEL=1 python -m pytest <targets> -q -p no:randomly -n auto --no-cov`
+   on matrix Python 3.11, 3.12, 3.13, on every trigger. Its job is to run the
+   suite *through the Cython extensions* (hence the variable at both ends,
+   and `--no-cov`). The full `tests/` suite runs on all three for a push to
+   `main`, the nightly run and a dispatch; on a **PR** only 3.13 runs the
+   full suite, and 3.11/3.12 run a smoke subset (`tests/unit/test_lexer.py
+   tests/test_all_samples.py tests/unit/test_program_fixtures.py`). The
+   nightly full matrix is what catches a 3.11/3.12-only break that slipped
+   through a PR.
+4. **coverage** -- `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` +
+   `python -m pytest tests/ -q -p no:randomly -n auto` on Python 3.13
+   (`if: github.event_name != 'push'`: PRs, nightly and dispatch). This is
+   where the 90% floor (from `addopts`) is enforced, on a pure-Python
+   install, for the reason in [Coverage](#coverage-requirement-detail).
+   (`COBOLPARSER_SKIP_EXT=1` is belt and braces: without
+   `COBOLPARSER_ACCEL=1` nothing is compiled anyway.)
+
+`-n auto` keeps each test job near two minutes; `-p no:randomly` keeps a
+failure reproducible from the log (pytest-randomly is not a declared
+dependency; the flag is a no-op without it).
+
+History, as rationale: until the 2026-09-07 audit the suite ran nowhere in
+CI (this file described a `test` job gated on `workflow_dispatch` that never
+existed in `ci.yml`), so the floor went unenforced; the `build`/`coverage`
+split came then. The PR cost cut (full suite on 3.13 only for PRs, nightly
+full matrix) is commit `5fd5b8e` (2026-10-03).
+
+Release builds are a separate workflow,
+`.github/workflows/release-please.yml`: release-please cuts the release from
+Conventional Commits, then `cibuildwheel` builds wheels (manylinux x86_64,
+macOS arm64, Windows AMD64 x CPython 3.11-3.13, with
+`environment = { COBOLPARSER_ACCEL = "1" }` so the three Cython accelerators
+are compiled; every other module ships as `.py`) and a `build-sdist` job
+builds the sdist; both are published to PyPI as `cobol-parser` via Trusted
+Publishing. `[tool.cibuildwheel]`'s `test-command` imports the three
+extensions, sets `COBOLPARSER_ACCEL=1` and asserts the fast lexer is swapped
+in, then runs `tests/unit/test_lexer.py tests/test_all_samples.py
+tests/unit/test_program_fixtures.py --no-cov` against the installed wheel.
+The former closed-source release mode (`COBOLPARSER_CLOSED_SOURCE=1`) was
+removed 2026-10-03 (`1d6078e`); the package is AGPL-3.0-or-later.
+
+# OKF staleness map guard
+
+`tests/test_okf_staleness_map.py` pins `scripts/okf_staleness_check.py`'s
+`OKF_MAP`: every tracked `.py`/`.pyx` under `cobolparser/` must map to at
+least one OKF file, every mapped OKF file must exist, and every prefix that
+names a directory must end with `/`. (`tests/` itself maps to this file.)
+
+A file missing from that map is not a lint nit -- it is a file whose
+documentation can rot silently, because the pre-commit hook will never ask
+for an update when it changes. That is how `cobolparser/jcl/` and
+`cobolparser/parser.py` (missed because the `cobolparser/parsers/` prefix
+ends in a slash and so never matched it) both went unmapped; 15 files were
+uncovered when the guard was written (2026-09-15). The directory-slash
+assertion exists because dropping the slash would make `cobolparser/parsers`
+swallow `cobolparser/parser.py` -- the inverse mistake.
+
+# See Also
+
+* [cli.md](cli.md) -- `tests/unit/cli/` covers CLI subcommands
+* [generators.md](generators.md) -- flowchart, copybook -> CSV, record
+  encoding/decoding, program layout index, and fixture bundle tests
+* [analysis.md](analysis.md) -- `tests/unit/analysis/` covers analyzers
+* [parser.md](parser.md) -- `tests/integration/` covers end-to-end parsing
+* [lexer.md](lexer.md) -- the `COBOLPARSER_ACCEL` switch and pure/Cython parity
+* `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` -- the
+  `gen-data --format record|hex` flags, that CSV output is unchanged by any
+  of them, and (counting `encode_record` calls) that `--output` encodes the
+  dataset exactly once. `::TestRecordFormatFlag` covers `--record-format`
+  alongside it
+* `tests/unit/generators/data/test_variable_length.py` -- fixed vs variable
+  record length: ODO layout linking, per-row trimming, counter bounds, RDW
+  framing, and the length reporting built on them.
+  `TestFdRangeWithoutDependingOn` (#320) pins that an FD range with no
+  DEPENDING ON writes every record at its own 01's full length, never cut
+
+# Change log
+
+Dated notes on what individual test files and classes pin, and why. They are
+rationale and history: the reference sections above describe the suite as
+it is. The running log is roughly newest first; the topic write-ups after it
+are in date order. Test counts in an entry are as of that date.
+
+## Running log
 
 2026-10-15: +1 `tests/unit/analysis/test_program_flow.py::TestProgramFlowExceptionBodies` (a PERFORM / GO TO in a JSON GENERATE or ACCEPT `ON EXCEPTION` / `NOT ON EXCEPTION` body is a flow edge; nothing reads as unreachable).
 
@@ -62,8 +434,8 @@ still is, an OBJECT method's reference does not reach FACTORY data, and a
 method's CALL USING / MOVE CORRESPONDING marks the OBJECT group's fields. One
 test runs `tests/samples/enterprise/OOCOBOL.cbl`. See `analysis.md`.
 
-2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
-#377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
+2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests, #377)
+pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
 read, no phantom paragraph appears, and dead-code / program-flow /
 unused-variables / complexity all see the jump table.
 `test_go_parser_edge_cases.py`'s `test_depending_without_on_reads_variable`
@@ -79,8 +451,8 @@ CALL, INVOKE and STOP literals differing only in case are never TYPE_1);
 `test_evaluate_keyword_literal_when.py` now expects them on `'A' THRU 'C'`); `test_compute_expression_parsing.py::
 TestComputeExpressionLayout` pins a multi-line COMPUTE's expression text.
 
-2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests,
-#313) pins EVALUATE `WHEN SPACES` / `ZERO` / `LOW-VALUES` as figurative
+2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests, #313)
+pins EVALUATE `WHEN SPACES` / `ZERO` / `LOW-VALUES` as figurative
 selectors and constraints, distinct from a quoted `WHEN 'SPACES'`, through
 gen-fixtures (blank data for the figurative arm) and business-rules (quotes
 kept). Four selector-shape tests now expect the additive `"quoted": True`.
@@ -994,264 +1366,7 @@ unquoted `(`/`[` inside one (a loop annotation, `CALL (dynamic)`, a
 `[THRU n]` badge) can't be misread by Mermaid's flowchart lexer as a node
 shape token. See [generators.md](generators.md)'s "Flowcharts" section.
 
-Running only a subset of tests will trigger a coverage failure — that is expected.
-
-# Directory Layout
-
-```
-tests/
-  conftest.py                  # shared fixtures: parser(), samples_dir()
-  test_all_samples.py          # smoke-tests all sample COBOL programs
-  unit/                        # individual components
-    analysis/                  # IO coverage reporter, diagnostics, all analyzers
-    cli/                       # CLI command tests
-    generators/                # Flowchart generator tests
-    test_copybook_data_generator.py  # copybook -> CSV: flattening, categories, value constraints, options, dataset surface
-    generators/data/
-      test_views.py  # build_record_views(): running-offset placement checked against real encoded bytes, REDEFINES overlays as the whole record with the overlay swapped in (every occurrence inside OCCURS, FILLER padding for a shorter overlay, a nested overlay read through its enclosing one -- #296), an overlay not moving the fields after it, two redefinitions of one item, short-name lookup, ODO ambiguity flagging, and a parametrised contiguity property over every view (see generators.md)
-      test_decoding.py  # RecordDecoder: decode(encode(row)) == row for every storage class and both charsets, ODO under every RecordFormat, RDW framing, overlay switching reading identical bytes (and every occurrence of an overlay inside OCCURS, #296), the sign conventions the decoder reads but never writes, bad bytes reported per field (ODO counters out of range, leftover RDW body bytes, negative sign on unsigned COMP-3 included), short/truncated records, paging, and the hex pane (see generators.md)
-    test_program_layout_index.py  # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, qualified level-88 names (resolve/condition_values/gen-fixtures arms, #272), record_named(), multi-program units, from_file errors (see generators.md)
-    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning (incl. a compound SEARCH WHEN pinning each conjunct, #348) / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244), TestCallFixtureSameNamedFields: same-named fields in two USING records get their own column and value, index specs not renamed in place (#365) (see generators.md)
-
-    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244), TestFailurePathExpectations: error-status / empty-input scenarios assert no normal-path call_count and no field_equals (#318) (see generators.md)
-
-    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md); TestCallCountFollowsControlFlow: call_count only where exact -- branches, literal TIMES, UNTIL bodies, the read-to-EOF rule and its early exits, GO TO loops, EOF status checks (#363); TestMultipleRecordsUnderOneFd: an FD's several 01 records give one record's columns per row, never all joined, picked by the scenario's pins (#364); TestArmsOnTwoRecordsOfOneFd: arms on two 01 records of one FD are never merged, an arm pinning both is missed, dropped pins demote the scenario's arms, the alternate-view note names only unused records; TestFillerOwningConditionName: a FILLER (omitted or explicit) owning a level-88 keeps its FILLER#<n> column and witness
-    test_scenario_planner.py  # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable-arm handling, fixed families (empty-input/error-status/boundary-values), exact coverage accounting, TestScenarioNamesAreUnique: verb@line + disjunct naming, merged names, uniqueness over tests/samples and enterprise (#267) (see generators.md)
-    io_statements/             # IO parser unit tests
-    test_extended_verb_parsers.py  # 2026-09-02 statement-coverage audit: INITIATE/TERMINATE/SUPPRESS, SEND/RECEIVE/ENABLE/DISABLE/PURGE, EXHIBIT/EXAMINE/TRANSFORM/ENTER/NOTE/CHAIN, READY/RESET TRACE, SERVICE, TITLE, RAISE/RESUME/VALIDATE -- node, operands, no warnings; UNSUPPORTED_VERBS == {EXECUTE, GOTO, RECOVER}; every STATEMENT_KEYWORDS verb dispatches (see parser.md)
-    cli/
-      test_decode_cli.py  # decode: CSV/JSON/hex output, --view / --list-views, gen-data -> decode CSV round trip through the CLI, --skip/--max-records paging, trailing-byte warning, --strict exit code; plus dclgen-check as a subcommand and as a lint rule (see cli.md)
-      test_gen_fixtures_cli.py  # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes (see cli.md)
-    analysis/
-      test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability (IF/EVALUATE/SEARCH), CALL argument-direction ladder, structure-qualified SQL host variables (`:REC-A.AMT`), ACCEPT filtering (incl. `FROM DATE YYYYMMDD` qualifiers), IOLogger cross-check (see analysis.md)
-      test_constraints.py  # ConstraintExtractor: relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan, EVALUATE TRUE + 88s, WHEN OTHER, SEARCH WHEN (incl. AND/OR from its condition tree, #348), PERFORM-UNTIL SequenceConstraint (see analysis.md)
-      test_domains.py  # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value, TestEnumDomainHonoursRelationalConjuncts: a level-88 pick re-checked against gt/ge/lt/le (#244) (see analysis.md)
-      test_dclgen_check.py  # DclgenChecker: DCLGEN column <-> host-variable pairing (the CUST_ID/CUST-VAL underscore-hyphen normalization), every violation kind and its severity, both null-indicator syntaxes, what it declines to check (VARCHAR group binding, BLOB), source ordering, ambiguous columns, and a parametrised "what DCLGEN itself would generate is always clean" table (see analysis.md)
-      test_const_fold.py  # ConstantFolder: MOVE/ADD/SUBTRACT/MULTIPLY/COMPUTE folding, GIVING forms, loop/branch write-poisoning, DIVIDE's unconditional poison, the ADD-X-TO-X self-reference gap, PERFORM (inline/paragraph/THRU) chaining, GO TO/STOP RUN stopping the walk, ACCEPT/READ preserving a seeded value, DISPLAY/WRITE as the only observation points, TestStorageAliasing: sibling FD records / WRITE FROM / JUSTIFIED RIGHT padding (#245), TestValueAtObservationPoint: value at each DISPLAY/WRITE site + paragraph fall-through (#246), TestWalkBudget: the step budget on a quadratic fall-through chain (see analysis.md), TestInspectAndExecWrites: INSPECT TALLYING counters and EXEC CICS options / EXEC DLI arguments are writes (#317)
-
-      test_const_fold.py  # ConstantFolder: MOVE/ADD/SUBTRACT/MULTIPLY/COMPUTE folding, GIVING forms, loop/branch write-poisoning, DIVIDE's unconditional poison, the ADD-X-TO-X self-reference gap, PERFORM (inline/paragraph/THRU) chaining, GO TO/STOP RUN stopping the walk, ACCEPT/READ preserving a seeded value, DISPLAY/WRITE as the only observation points, TestStorageAliasing: sibling FD records / WRITE FROM / JUSTIFIED RIGHT padding (#245), TestValueAtObservationPoint: value at each DISPLAY/WRITE site + paragraph fall-through (#246), TestWalkBudget: the step budget on a quadratic fall-through chain (see analysis.md)
-      test_invocation_counts.py  # count_invocations (issue #363): status-check exemption (level-88, mixed conditions, INVALID KEY), EVALUATE / UNTIL / VARYING / variable TIMES bodies unknown, EXIT PARAGRAPH, literal TIMES with a transfer, fall-through + PERFORM counted twice, GO TO followed forward / into a SECTION, GO TO out of a PERFORM / DEPENDING ON / with ALTER / to an unknown target reporting nothing
-  integration/                 # end-to-end parsing
-    test_shamrice_examples.py  # parametrised: all *.cbl in examples/cobol/shamrice/ must parse error-free
-    test_nist_cobol85_support.py  # parametrised: all 459 NIST *.CBL must parse error-free (strict-xfail KNOWN_ISSUES ratchet); copybook validation
-    test_copybook_csv_generation.py  # parametrised over the sample + NIST *.CPY corpora: no copybook may crash gen-data; a copybook with no record layout must raise CopybookLayoutError, and every generated cell must be assignable to its field (see generators.md)
-    test_program_layout_corpus.py  # parametrised over examples/cobol/shamrice/: ProgramLayoutIndex must build without raising and report zero unexpected unresolved/ambiguities entries
-    test_boundary_inventory_corpus.py  # parametrised over examples/cobol/shamrice/: BoundaryInventoryAnalyzer must build without raising and report zero unexpected unresolved entries
-    test_gen_fixtures_corpus.py  # parametrised over examples/cobol/shamrice/: ProgramFixtureGenerator must build a bundle without raising, every generated cell fits its field's category, and determinism holds across the corpus
-    test_constraint_extractor_corpus.py  # parametrised over examples/cobol/shamrice/: every branch/loop either produces constraints or a reason in unsupported (no silent drop); every solved witness is layout-valid (see analysis.md)
-    test_scenario_planner_corpus.py  # parametrised over examples/cobol/shamrice/ x {branches,all}: coverage accounting sums to the arm count for every program; every miss/merge carries a reason/target (see generators.md)
-    test_const_fold_corpus.py  # parametrised over examples/cobol/shamrice/: ConstantFolder must fold without raising, and every known value is layout-valid (also smoke-tested ad hoc against the full 459-file NIST corpus -- see analysis.md)
-    io/                        # IO coverage reporting integration
-    io_statements/             # IO statement parsing, VSAM
-  contracts/                   # API contract tests — stability guarantees
-    test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version, generator signatures, to_dict() key sets, reproducibility; TestScenarioModeContract: generate_with_scenarios(_from_file) signatures, happy-mode byte-identity with generate, scenario_coverage population/absence, seed reproducibility, unknown-mode ValueError (see generators.md, docs/fixture-bundle-schema.md)
-    io_statements/
-  regression/                  # backward compatibility
-                               #   test_statement_coverage_audit_2026_09_02.py: EXEC CICS/DLI in get_all_statements(); GO TO target across newline; optional ON/AT handler words; literal spelled like a verb; CALL handler boundaries; ,/; separators; XML GENERATE SUPPRESS; NIST clause forms; 20-program NIST no-drop-warning guard (see parser.md)
-                               #   test_swallow_sweep.py: generic cross-product
-                               #   sweep -- one period-less snippet per
-                               #   registered statement parser x a DISPLAY
-                               #   'MARKER'. sentinel, asserting the marker
-                               #   survives as CobolParagraph's next top-level
-                               #   statement. Fails automatically if a new
-                               #   parser is registered without a fixture
-                               #   (2026-07-21) -- see parser.md's "Generic
-                               #   swallow-sweep regression" section
-                               #   test_evaluate_traversal_regression.py:
-                               #   EVALUATE WHEN branches must be AST children
-                               #   (find_all_by_type reaches nested statements;
-                               #   duplicate WHEN OTHER reuses one default clause)
-                               #   test_screen_report_communication_sections.py:
-                               #   SCREEN/REPORT/COMMUNICATION SECTION header
-                               #   recognition (2026-08-13) -- see parser.md
-                               #   test_tier5_silent_drip_audit.py: SORT/MERGE/
-                               #   ENTRY/CALL-handler silent-drop fixes (2026-07-08)
-                               #   test_normalize_line_number_preservation.py:
-                               #   normalize_fixed_format / preprocess_conditional_
-                               #   compilation line-number preservation + Cython
-                               #   parity (2026-07-08)
-                               #   test_open_findings_high_regressions.py:
-                               #   H1-H8 from reports/open-findings.md (SET
-                               #   ADDRESS OF, COMPUTE unbalanced parens, PERFORM
-                               #   trailing-identifier + bare excepts, MoveType-
-                               #   Checker unresolved_count, PathResolver Tier-2
-                               #   containment, lexer unterminated-string warning,
-                               #   CLOSE combined per-file options) (2026-07-09)
-  performance/                 # benchmarks (factory, parser)
-  samples/                     # shared COBOL fixtures
-    copybook_programs/         # programs with COPY statements
-    copybooks/                 # .CPY files
-    io/
-      positive/                # valid IO operations
-      negative/                # invalid IO patterns
-```
-
-# pytest Markers
-
-| Marker | Meaning |
-|--------|---------|
-| `integration` | Integration tests |
-| `slow` | Slow-running tests |
-| `contract` | API contract tests |
-| `io` | IO statement tests (OPEN, CLOSE, READ, WRITE, REWRITE, DELETE, START, ACCEPT, DISPLAY, UNLOCK) |
-
-```bash
-python -m pytest -m "integration"    # integration tests only
-python -m pytest -m "slow"           # slow tests only
-python -m pytest -m "contract"       # API contract tests only
-python -m pytest -m "io"             # IO statement tests only
-```
-
-## Per-directory marker enforcement (2026-08-12)
-
-The `contract`, `integration`, and `io` markers are applied **structurally**
-by per-directory `conftest.py` files (a `pytest_collection_modifyitems` hook
-that adds the marker to every item collected under that directory), so new
-test files can never drift out of `-m` selection:
-
-| conftest.py location | Marker applied |
-|----------------------|----------------|
-| `tests/contracts/` | `contract` |
-| `tests/integration/` | `integration` |
-| `tests/unit/io_statements/` | `io` |
-| `tests/integration/io_statements/` | `io` (plus `integration` from parent) |
-| `tests/integration/io/` | `io` (plus `integration` from parent) |
-| `tests/contracts/io_statements/` | `io` (plus `contract` from parent) |
-
-In-file `pytestmark = pytest.mark.<x>` lines still exist in many files;
-they are harmless duplicates and are no longer required. A file *outside*
-these directories can still opt in with an explicit `pytestmark` (e.g. the
-`integration` marker is carried by a few files elsewhere).
-
-# Shared Fixtures (`tests/conftest.py`)
-
-| Fixture | Returns |
-|---------|---------|
-| `parser()` | Fresh `CobolParser` instance |
-| `samples_dir()` | `Path` to `tests/samples/` |
-
-# Running Tests
-
-```bash
-# All tests with coverage (90% min)
-python -m pytest tests/ -v
-
-# Single file
-python -m pytest tests/unit/test_lexer.py -v
-
-# Single test
-python -m pytest tests/integration/test_call_comprehensive.py::TestCallComprehensive::test_call_with_periods -xvs
-
-# By directory (no dedicated marker needed)
-python -m pytest tests/regression/ -v
-python -m pytest tests/contracts/ -v
-python -m pytest tests/performance/ -v
-```
-
-# Example Corpora
-
-| Path | Contents |
-|------|----------|
-| `tests/samples/` | ~48 COBOL programs covering all statement types |
-| `examples/cobol/` | NIST COBOL-85 test suite (459 .CBL files + 51 .CPY copybooks); 457/459 parse error-free — pinned by `test_nist_cobol85_support.py` (2 strict-xfail `KNOWN_ISSUES`: OBNC1M needs Area A/B awareness, SM101A needs copybook expansion by design; both SM101A and SM207A parse clean with expansion). Minimal repros for the fixed edge cases live in `tests/regression/test_nist_edge_case_fixes.py` |
-| `examples/cobol/shamrice/` | 24 IBM COBOL programs from shamrice/COBOL-Examples; all parse cleanly under FAIL_FAST |
-
-# Coverage Requirement Detail
-
-From `pyproject.toml`:
-
-```toml
-addopts = [
-    "--strict-markers",
-    "--cov=cobolparser",
-    "--cov-report=term-missing",
-    "--cov-report=html:htmlcov",
-    "--cov-fail-under=90",
-]
-```
-
-Branch coverage is also enabled (`[tool.coverage.run] branch = true`).
-No coverage baselines are stored in the repo (there is no `baselines/`
-directory); the floor above is the only gate.
-
-# CI/CD
-
-GitHub Actions (`.github/workflows/ci.yml`) on push/PR to `main`, a nightly
-`schedule` (`17 4 * * *`) and manual `workflow_dispatch`. Push and PR
-triggers carry `paths-ignore` for `docs/**`, `.okf/**`, `reports/**` and
-`**/*.md`, so a docs-only change runs no CI at all. A new push to a PR
-cancels the run in flight (`concurrency`); runs on `main` are never
-cancelled. (Reshaped 2026-10-03, commit `5fd5b8e` "ci: cut PR build cost".)
-
-1. **lint** — `ruff check .` + `black --check .` (Python 3.13, `ruff==0.15.0`
-   / `black==26.3.0`, pinned to match `.pre-commit-config.yaml`)
-2. **typecheck** — `mypy cobolparser/` (Python 3.13, `mypy==1.20.0`)
-3. **build** — `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace`
-   + `python -m pytest <targets> -q -p no:randomly -n auto --no-cov` on matrix
-   Python 3.11, 3.12, 3.13, on **every** trigger. The full `tests/` suite
-   runs on all three for a push to `main`, the nightly run and a dispatch; on
-   a **PR** only 3.13 runs the full suite, and 3.11/3.12 run a smoke subset
-   (`tests/unit/test_lexer.py tests/test_all_samples.py
-   tests/unit/test_program_fixtures.py`). The nightly full matrix is what
-   catches a 3.11/3.12-only break that slipped through a PR.
-4. **coverage** — `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` +
-   `python -m pytest tests/ -q -p no:randomly -n auto` on Python 3.13
-   (`if: github.event_name != 'push'`: PRs, nightly and dispatch). Where
-   the 90% floor is actually enforced, and why it is a job of its own:
-   coverage.py cannot see into a compiled Cython extension, so once
-   `build_ext` has run the pure-Python bodies it shadows read as unexecuted.
-   Same suite, same commit, measured 2026-09-07: **54.32%** with the
-   extensions built, **91.76%** without. Gating inside `build` would fail on
-   the build step rather than on the code.
-
-Release builds are a separate workflow,
-`.github/workflows/release-please.yml`: release-please cuts the release from
-Conventional Commits, then `cibuildwheel` builds wheels (manylinux x86_64,
-macOS arm64, Windows AMD64 × CPython 3.11–3.13; only the three Cython
-accelerators are compiled, every other module ships as `.py`) and a
-`build-sdist` job builds the sdist; both are attached to the GitHub Release
-and published to PyPI as `cobol-parser` via Trusted Publishing.
-`[tool.cibuildwheel]`'s `test-command` runs a fast pytest subset against the
-installed wheel (`--no-cov`). The former closed-source release mode
-(`COBOLPARSER_CLOSED_SOURCE=1`) was removed 2026-10-03 (`1d6078e`); the
-package is AGPL-3.0-or-later (`fdd1199`).
-
-**Timing assertions and coverage.** `tests/performance/test_factory_performance.py`
-guards its two absolute nodes/sec floors with `requires_untraced`
-(`sys.gettrace() is not None`). Under coverage.py's tracer the suite takes
-950 s instead of 94 s, and `test_factory_throughput` measured 64,243
-nodes/sec against its 100,000 floor on a CI runner that clears it
-comfortably uninstrumented — the number describes the tracer, not the
-factory. The `build` matrix runs the file uninstrumented on all three
-Pythons, so the guard is not in force there; only the `coverage` job skips
-them. The ratio-based overhead assertion is unaffected. Surfaced the moment
-the suite was first wired into CI.
-
-The full suite (~13,000 tests across 464 `test_*.py` files as of
-2026-10-14; ~9,400 at the time) **does** run on every PR, as of the
-2026-09-07 audit (on 3.13 only since 2026-10-03 -- see `build` above). It previously ran nowhere: this file used to describe a
-`test` job gated on `if: github.event_name == 'workflow_dispatch'`, and no
-such job was ever in `ci.yml` — the suite and the `--cov-fail-under=90`
-floor went unenforced on every push and PR alike.
-
-**Pure Python default (2026-10-15).** The Cython accelerators are now used
-only under `COBOLPARSER_ACCEL=1` (build and import time; `.okf/lexer.md`), so
-a default run takes the pure-Python paths even with `*.so` files present and
-coverage measures correctly. `ci.yml` (currently commented out) sets the
-variable on `build`'s `build_ext` and pytest steps so that job still exercises
-the extensions. Locally: the default run is the pure suite; run it again with
-`COBOLPARSER_ACCEL=1 ... --no-cov` after building to cover the fast paths.
-
-It now runs twice, for two different reasons. In `build`, after `build_ext`,
-so CI exercises the Cython extensions rather than the pure-Python fallback
-(which it built and never ran a line through) — `--no-cov` there, per the
-coverage note above. In `coverage`, on a pure-Python install, where the 90%
-floor is enforced. `-n auto` keeps each near two minutes; `-p no:randomly`
-keeps a failure reproducible from the log. Run it locally during development
-too (see commands above).
-
-
-# Source map, comments and program units (2026-09-07)
+## Source map, comments and program units (2026-09-07)
 
 * `tests/regression/test_expansion_source_map_and_comments.py` — the
   expander's per-line source map (identity without a COPY, across a splice,
@@ -1286,7 +1401,7 @@ too (see commands above).
   `Path.read_text`, which only the column helper uses; the expander opens
   files itself).
 
-# Cross-repo review follow-up fixes (2026-09-10)
+## Cross-repo review follow-up fixes (2026-09-10)
 
 * `tests/unit/analysis/test_const_fold.py::TestObservationPoints` — two new
   regression cases (`test_accept_into_reference_modified_target_...`,
@@ -1335,7 +1450,7 @@ too (see commands above).
   (2026-09-28) — `ConditionNameItem.false_value`; INITIALIZE
   `to_value_category` / `to_default`.
 
-# Copybook missing-period check, per entry (2026-09-12)
+## Copybook missing-period check, per entry (2026-09-12)
 
 * `tests/unit/test_preprocess_init_coverage.py::TestValidateCopybookContent`
   — four new cases around `validate_copybook_content`'s "may be missing
@@ -1356,82 +1471,6 @@ too (see commands above).
   `remove_comment_lines` inside an entry is not a terminator). They sit
   alongside the decimal-point-PIC pair from the 2026-07-27 fix to the same
   check, which pins the opposite direction.
-
-# Enterprise program-type corpus (2026-09-15)
-
-`tests/samples/enterprise/` holds one program per IBM Enterprise COBOL
-program type (22 programs + `copybooks/`; the matrix with every
-distinguishing construct is `docs/enterprise-program-types.md`).
-`tests/integration/test_enterprise_program_types.py` (`integration`
-marker) asserts, per program: a FAIL_FAST parse with no errors and no
-warnings other than the informational "Compilation unit contains N
-program units"; a JSON round trip; every analyzer over every unit without
-raising and `LintReport.failed_rules == []`; `gen-fixtures --scenarios
-all` and `scan` accepting it; and per-type traits (the CICS commands,
-DL/I function codes, MQ calls, OO unit tree, declarative sections, flow
-edges, 6.x data attributes ... that make the program its kind).
-`TestCorpusShape` fails when the directory and `PROGRAM_TYPES` disagree, so
-a new type has to be added to both. The corpus is parsed with
-`debug_lines=True` (COMPDIR declares `WITH DEBUGGING MODE`; it is the only
-program with D lines), so COMPDIR's D-line DISPLAYs are in its AST and it
-stays warning-free; `tests/unit/test_debugging_mode_lines.py` pins the
-default (dropped + warning), the option on every surface (API, CLI,
-cobol.yml, scan, tokenize, batch, the copybook expansion -- with a real
-COPY, since a program without one passes through the expander untouched --
-and every subcommand that parses COBOL) and `debug_line_numbers` (#334). `tests/samples/*.cbl` smoke checks
-(`test_all_samples.py`) cover the corpus too, since it lives under
-`tests/samples/`. The same 22 files are copied into
-`mocky-mock/tests/fixtures/enterprise/`, where
-`mocky-mock/tests/unit/test_enterprise_corpus.py` pins `mockymock generate`'s
-outcome per program (that path is in the *sibling* repo, not this one).
-
-`tests/unit/test_enterprise_syntax.py` pins each construct the corpus
-surfaced in isolation: PROGRAM-ID attributes, OO units, DECLARATIVES,
-`USE BEFORE REPORTING`, the 6.x data clauses, `OCCURS UNBOUNDED`, JSON
-`CONVERTING`, `RETURNING`, `SET ADDRESS OF`, conditional compilation by
-default, and REPLACE partial words.
-
-Three older tests changed on purpose: the missing period after the
-`PROGRAM-ID` keyword is tolerated (IBM), the mandatory-PROGRAM-ID message
-names CLASS-ID / METHOD-ID too, and an unknown `>>` directive is blanked
-rather than passed through.
-
-
-# OKF staleness map guard (2026-09-15)
-
-`tests/test_okf_staleness_map.py` pins `scripts/okf_staleness_check.py`'s
-`OKF_MAP`: every tracked `.py`/`.pyx` under `cobolparser/` must map to at
-least one OKF file, every mapped OKF file must exist, and every prefix that
-names a directory must end with `/`.
-
-A file missing from that map is not a lint nit -- it is a file whose
-documentation can rot silently, because the pre-commit hook will never ask
-for an update when it changes. That is exactly how `cobolparser/jcl/` (a
-1,900-line JCL front end) and `cobolparser/parser.py` (the parse
-orchestrator, missed because the `cobolparser/parsers/` prefix ends in a
-slash and so never matched it) both went unmapped; 15 files were uncovered
-when the guard was written. The directory-slash assertion exists because
-dropping the slash would make `cobolparser/parsers` swallow
-`cobolparser/parser.py` -- the inverse mistake.
-
-
-# See Also
-
-* `tests/unit/cli/test_gen_data_cli.py::TestRecordImageFormats` — the
-  `gen-data --format record|hex` flags, that CSV output is unchanged by any
-  of them, and (counting `encode_record` calls) that `--output` encodes the
-  dataset exactly once. `::TestRecordFormatFlag` covers `--record-format`
-  alongside it
-* `tests/unit/generators/data/test_variable_length.py` — fixed vs variable
-  record length: ODO layout linking, per-row trimming, counter bounds, RDW
-  framing, and the length reporting built on them.
-  `TestFdRangeWithoutDependingOn` (#320) pins that an FD range with no
-  DEPENDING ON writes every record at its own 01's full length, never cut
-* [cli.md](cli.md) — `tests/unit/cli/` covers CLI subcommands
-* [generators.md](generators.md) — flowchart, copybook → CSV, program layout
-  index, and program fixture bundle generator tests
-* [analysis.md](analysis.md) — `tests/unit/analysis/` covers analyzers
-* [parser.md](parser.md) — `tests/integration/` covers end-to-end parsing
 
 ## 2026-10-08
 
@@ -1473,7 +1512,7 @@ from ACCOUNT), MISC (CORRESPONDING, group overlay, refmod, STRING, ACCEPT,
 SORT USING/GIVING, dynamic CALL) and FEEJOB.jcl. They feed
 `tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
 `test_lineage_jcl.py` (duck-typed jobs; the jcl-parser end-to-end tests
-`importorskip("jclparser")`, which CI does not install), `test_sql_flow.py`
+`importorskip("jclparser")`; `jcl-parser` is in the `[dev]` extra, so they run in a dev install), `test_sql_flow.py`
 and `tests/unit/cli/test_lineage_cli.py`. The `field-impact` CLI tests pass
 `--workers 1`: scan's process pool under pytest-cov fails to pickle its
 work items. `tests/unit/test_scan.py`'s failing-analyzer stub takes the new
@@ -1569,6 +1608,7 @@ SORTs gained a key, since a keyless file SORT now warns.
 `CICS_NO_RESP_HANDLING`, a narrower `IGNORE CONDITION NOTFND` goes to
 `unchecked`, a bare `HANDLE CONDITION ERROR` afterwards restores the finding,
 and `PUSH HANDLE` suspends an ignore like any other handler.
+
 ## 2026-10-14 (issue #402)
 
 `tests/regression/test_optional_keyword_forms_402.py` pins the four optional-
@@ -1577,6 +1617,7 @@ FROM, `ENTRY ... USING [BY] REFERENCE/VALUE` (operands and
 `parameter_modes`, plus the signature's `by_clause`), and `INITIALIZE ...
 FILLER` without WITH. `test_program_signature.py::test_by_clause_is_set_and_rendered_where_the_mode_changes`
 now expects an ENTRY operand's `by_clause` to be `"REFERENCE"`, not None.
+
 ## 2026-10-14 (issue #388)
 
 `tests/unit/test_call_using_mode_without_by.py` pins that a bare
@@ -1595,6 +1636,7 @@ pins the source-order model: a directive in a never-performed setup
 paragraph still covers SQL that runs, SQL before the directive or only in a
 dead paragraph is not a branch, CONTINUE is per condition, declarations are
 not covered, and dead-code and program flow agree on every case.
+
 ## 2026-10-14 (issue #351)
 
 `tests/unit/analysis/test_codebase.py::TestLibraryQualifiedCopy` pins that

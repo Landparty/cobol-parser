@@ -65,7 +65,7 @@ pip install -e ".[fast]"
 COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
 COBOLPARSER_ACCEL=1 python -m pytest tests/ --no-cov   # suite on the fast paths
 
-# Run all tests with coverage (90% minimum; ~12,340 tests across 439 files).
+# Run all tests with coverage (90% minimum; ~13,700 tests across 483 files).
 # Measure coverage on a pure-Python build -- see "Coverage Requirement".
 python -m pytest tests/ -v
 
@@ -578,7 +578,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~12,340 tests across 439 files in 5 directories:
+~13,700 tests across 483 `test_*.py` files (see `.okf/tests.md` for the per-directory breakdown):
 
 ```
 tests/
@@ -587,7 +587,7 @@ tests/
   unit/                  # Unit tests - individual components
     analysis/            # IO coverage reporter, diagnostics, all analyzers
     cli/                 # CLI command tests
-    generators/          # Flowchart generator tests
+    generators/          # Generator tests (data/ encoders, scenario verification, row witnesses)
     io_statements/       # IO parser unit tests
   integration/           # Integration tests - end-to-end parsing
     test_shamrice_examples.py  # Parametrized: all *.cbl in examples/cobol/shamrice/ must parse error-free
@@ -632,7 +632,7 @@ When running only a subset of tests, expect the check to fail -- that is normal 
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`, nightly (`schedule`), and manual `workflow_dispatch`; push/PR skip docs-only changes (`paths-ignore`: `docs/**`, `.okf/**`, `reports/**`, `**/*.md`):
+**Currently disabled:** every line of `.github/workflows/ci.yml` is commented out (commit 315d474), so no CI runs on push or PR -- run lint, typecheck and the suite locally. When enabled, GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`, nightly (`schedule`), and manual `workflow_dispatch`; push/PR skip docs-only changes (`paths-ignore`: `docs/**`, `.okf/**`, `reports/**`, `**/*.md`):
 
 1. **lint** -- `ruff check .` + `black --check .` (Python 3.13, pinned versions matching `.pre-commit-config.yaml`)
 2. **typecheck** -- `mypy cobolparser/` (Python 3.13, pinned version)
