@@ -3253,6 +3253,11 @@ FILLER records are two buffers, not one with a spurious redefines.
 `MOVE CORRESPONDING` pairs same-path subordinates when at least one of the
 two is elementary (a group against an elementary item is a byte overlay),
 skipping FILLER, REDEFINES and OCCURS items and what is under them.
+`ADD` / `SUBTRACT CORRESPONDING` walk the same pairing
+(`_visit_arith_corresponding`) but keep only elementary pairs whose sending
+item is numeric and receiving item numeric or numeric-edited (`_Item.category`,
+from PICTURE / USAGE), one `arith` edge each; the generic reads-to-writes
+path would join every subordinate to every other one (issue #337).
 
 **Alias edges are never chained with one of their own class**
 (`overlay_class`; summary BFS and `LineageGraph._trace` both carry the
