@@ -1472,3 +1472,9 @@ FROM, `ENTRY ... USING [BY] REFERENCE/VALUE` (operands and
 `parameter_modes`, plus the signature's `by_clause`), and `INITIALIZE ...
 FILLER` without WITH. `test_program_signature.py::test_by_clause_is_set_and_rendered_where_the_mode_changes`
 now expects an ENTRY operand's `by_clause` to be `"REFERENCE"`, not None.
+## 2026-10-14 (issue #388)
+
+`tests/unit/test_call_using_mode_without_by.py` pins that a bare
+`REFERENCE` / `CONTENT` / `VALUE` in `CALL ... USING` (BY omitted) switches
+the passing mode instead of being recorded as an argument, alone and mixed
+with `BY` phrases, literals and figurative constants.
