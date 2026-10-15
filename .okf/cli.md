@@ -1246,7 +1246,9 @@ cobol-parser jcl JOB.jcl --strict
 It reads a language other than COBOL, so it shares none of the COBOL parse
 flags: no `--dialect`, no `--source-format`, no `--copybook-path`. `--compact`
 and `-o` work as everywhere else. It needs the `jcl-parser` package
-(`pip install 'cobol-parser[jcl]'`), which does the reading. See [jcl.md](jcl.md).
+(`pip install 'cobol-parser[jcl]'`), which does the reading; without it,
+`jcl` exits 1 with that install hint as a one-line `error:` (no traceback).
+See [jcl.md](jcl.md).
 
 # See Also
 
@@ -1270,3 +1272,8 @@ and `-o` work as everywhere else. It needs the `jcl-parser` package
 * `cobolparser/cli/parse.py` has a `__main__` guard, so `python -m
   cobolparser.cli.parse ...` runs the CLI (it was a silent no-op; only the
   `cobol-parser` console script worked).
+
+## 2026-10-15
+
+* `jcl` without the `[jcl]` extra prints the install hint as a one-line
+  `error:` and exits 1, instead of an `ImportError` traceback (#326).

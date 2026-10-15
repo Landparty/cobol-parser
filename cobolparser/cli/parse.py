@@ -3835,9 +3835,15 @@ def _cmd_jcl(args: argparse.Namespace) -> None:
     from ..jcl import parse_jcl, resolve_dd_bindings
 
     source = _read_source(args.file)
-    result = parse_jcl(
-        source, filename=args.file, proc_paths=getattr(args, "proc_path", None)
-    )
+    try:
+        result = parse_jcl(
+            source, filename=args.file, proc_paths=getattr(args, "proc_path", None)
+        )
+    except ImportError as exc:
+        # jcl-parser is the optional [jcl] extra: a plain install is a
+        # configuration error to name on one line (the install hint), not a
+        # traceback.
+        _fail(str(exc))
 
     payload: dict[str, Any]
     if args.bindings:

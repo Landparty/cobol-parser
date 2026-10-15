@@ -194,3 +194,25 @@ class TestSampleJcl:
         assert payload["dd_map"]["INVFILE"] == ["PROD.INV.MASTER"]
         # A concatenated DD contributes every dataset in the concatenation.
         assert len(payload["dd_map"]["JOBLIB"]) == 2
+
+
+class TestMissingJclParser:
+    def test_missing_extra_is_a_one_line_error_not_a_traceback(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        # A plain `pip install cobol-parser` has no jcl-parser: a None entry
+        # in sys.modules makes `import jclparser` raise ImportError.
+        import sys
+
+        monkeypatch.setitem(sys.modules, "jclparser", None)
+        path = tmp_path / "JOB.jcl"
+        path.write_text(TWO_STEP, encoding="utf-8")
+
+        with pytest.raises(SystemExit) as exc:
+            _cmd_jcl(_args(str(path)))
+
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert err.startswith("error: ")
+        assert "pip install 'cobol-parser[jcl]'" in err
+        assert "Traceback" not in err
