@@ -4,6 +4,7 @@ This document describes exactly what two external consumers call into `cobolpars
 
 1. **`backend/src/parsers/cobol/parser.py`** (the `CobolLegacyParser` adapter) — the LegacyLens backend service. See "Entry Points Called by the Adapter" through "File Extensions Handled" below.
 2. **The sibling `mocky-mock` repo's generators surface** (`mockymock generate --with-data` / `mockymock fixtures`) — see "Generators Surface (mocky-mock)" near the end of this document.
+3. **MCP clients** of `cobol-parser mcp` (AI agents) — see "MCP Surface" at the end of this document.
 
 **Adapter source:** `backend/src/parsers/cobol/parser.py`
 **Import path in backend:** `from ..dependencies import CobolParser, CobolProgram, DialectType, ErrorRecoveryMode, DynamicCallAnalyzer, ProgramFlowAnalyzer, CobolParseError`
@@ -324,3 +325,29 @@ mocky-mock exactly as it would be for the backend adapter above — bump
 `bundle_version` (see `docs/fixture-bundle-schema.md`'s "Versioning and
 compatibility policy") so mocky-mock's gate catches it instead of silently
 emitting corrupted `.cut` data.
+
+---
+
+## MCP Surface
+
+`cobol-parser mcp` (`cobolparser/mcp/`, added 2026-10-15) serves tools to MCP
+clients: AI agents in Claude Code, Claude desktop, Cursor and similar. The
+same tools are callable without the SDK as `cobolparser.mcp.CobolTools`
+methods returning the same dicts. User guide: `docs/mcp-server.md`.
+
+What a client depends on:
+
+- The tool names `read_source`, `lint` and `explain_symbol`, and their
+  argument names.
+- The envelope every tool returns: `surface_version`, `answer`, `caveats`
+  (`kind`, `detail`, optional `effect`), `truncated` (`field`, `shown`,
+  `total`) and, for tools about a program, `program` (`file`,
+  `program_id`, `program_units`).
+- Locations as `{"file", "line", "column"?}`, root-relative paths on disk.
+- The closed `caveats[].kind` vocabulary, `cobolparser.mcp.CAVEAT_KINDS`.
+
+**Versioning contract:** removing or renaming a tool or argument, removing or
+retyping an envelope key, changing a key's meaning, or adding a caveat kind
+bumps `MCP_SURFACE_VERSION` (`cobolparser/mcp/envelope.py`). Adding a new tool
+or a new optional key to an `answer` does not.
+

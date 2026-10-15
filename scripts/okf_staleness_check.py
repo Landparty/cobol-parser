@@ -265,6 +265,7 @@ OKF_MAP = [
     ("cobolparser/scan.py", [".okf/batch.md"]),
     ("cobolparser/cli/", [".okf/cli.md"]),
     ("cobolparser/config/", [".okf/cli.md"]),
+    ("cobolparser/mcp/", [".okf/mcp.md"]),
     ("cobolparser/__main__.py", [".okf/cli.md"]),
     (
         "cobolparser/dialects/le_signatures.py",

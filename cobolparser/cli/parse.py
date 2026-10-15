@@ -55,6 +55,7 @@ _SUBCOMMANDS = frozenset(
         "field-impact",
         "jcl",
         "config",
+        "mcp",
     }
 )
 
@@ -2967,75 +2968,13 @@ def _lint_copybook_item_names(args: argparse.Namespace, ast: Any) -> set[str] | 
 def _lint_column_offset(
     args: argparse.Namespace,
 ) -> Callable[[str, int], int | None]:
-    """``(file, line) -> offset``: how far a line's on-disk column sits right
-    of the analyzer's, for lint (#301).
+    """``(file, line) -> offset`` for lint (#301); see
+    :func:`cobolparser.analysis.lint.source_column_offsets`."""
+    from ..analysis.lint import source_column_offsets
 
-    Whether the parse normalized fixed format is decided the way
-    ``CobolParser`` decides it (``--source-format`` first, else the
-    detector); each copybook is judged the way the expander judged it when
-    it spliced the member in. Within a fixed-format file, a line after
-    ``>>SOURCE FORMAT FREE`` is free-form and is not shifted. A file that
-    cannot be read again answers ``None``, so its findings keep no column
-    rather than a guessed one.
-    """
-    from pathlib import Path as _Path
-
-    from .._lines import split_source_lines
-    from .._source_directive import free_format_flags
-    from ..analysis.lint import fixed_format_column_offset
-    from ..preprocess import strip_compiler_directives
-    from ..preprocess.copybook_expander import _looks_fixed_format
-    from ..preprocess.source_format import detect_fixed_format
-
-    def read(path: str) -> str | None:
-        try:
-            return _Path(path).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return None
-
-    def same_file(path: str) -> bool:
-        try:
-            return bool(_Path(path).resolve() == _Path(args.file).resolve())
-        except OSError:
-            return bool(path == args.file)
-
-    preprocess_fixed = _source_format_kwargs(args)["preprocess_fixed"]
-    main_source = read(args.file)
-    if preprocess_fixed is not None:
-        parsed_fixed = bool(preprocess_fixed)
-    elif main_source is not None:
-        parsed_fixed = detect_fixed_format(strip_compiler_directives(main_source))
-    else:
-        return lambda _file, _line: None
-
-    # file -> (offset of a fixed-format line, per-line free-format flags)
-    layouts: dict[str, tuple[int, list[bool]] | None] = {}
-
-    def layout(path: str) -> tuple[int, list[bool]] | None:
-        if path not in layouts:
-            main = same_file(path)
-            text = main_source if main else read(path)
-            if text is None:
-                layouts[path] = None
-            else:
-                file_fixed = parsed_fixed if main else _looks_fixed_format(text)
-                offset = fixed_format_column_offset(parsed_fixed, file_fixed)
-                flags = (
-                    free_format_flags(split_source_lines(text)) if file_fixed else []
-                )
-                layouts[path] = (offset, flags)
-        return layouts[path]
-
-    def column_offset(path: str, line: int) -> int | None:
-        known = layout(path)
-        if known is None:
-            return None
-        offset, free_flags = known
-        if 0 < line <= len(free_flags) and free_flags[line - 1]:
-            return 0
-        return offset
-
-    return column_offset
+    return source_column_offsets(
+        args.file, _source_format_kwargs(args)["preprocess_fixed"]
+    )
 
 
 def _severity_at_least(severity: str, threshold: str) -> bool:
@@ -4185,6 +4124,59 @@ def _build_config_parser(subparsers: argparse._SubParsersAction) -> None:
     p.set_defaults(func=_cmd_config)
 
 
+def _build_mcp_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "mcp",
+        help="Serve COBOL analysis tools to AI agents over MCP (stdio)",
+        description=(
+            "Run a Model Context Protocol server on stdin/stdout, answering "
+            "questions about the COBOL under --root: read_source, lint and "
+            "explain_symbol. Every location in an answer is a file and line "
+            "on disk, and every answer names what could not be checked. "
+            "cobol.yml is found from --root. Needs the [mcp] extra."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser mcp --root /path/to/checkout\n"
+            "  claude mcp add cobol -- cobol-parser mcp --root /path/to/checkout"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "--root",
+        default=".",
+        help="Directory the server answers about; files outside it (and its "
+        "copybook directories) are refused (default: the current directory)",
+    )
+    p.add_argument(
+        "--cache-size",
+        type=int,
+        default=32,
+        metavar="N",
+        help="Parsed programs to keep in memory (default: 32)",
+    )
+    p.set_defaults(func=_cmd_mcp)
+
+
+def _cmd_mcp(args: argparse.Namespace) -> None:
+    try:
+        from ..mcp.server import run_stdio
+    except ImportError as exc:
+        _fail(
+            "the MCP server needs the [mcp] extra: "
+            f"pip install 'cobol-parser[mcp]' ({exc})"
+        )
+    from ..mcp.envelope import ToolError
+    from ..mcp.workspace import Workspace
+
+    config = args._project_config if getattr(args, "_config_explicit", False) else None
+    try:
+        workspace = Workspace(args.root, config, cache_size=args.cache_size)
+    except (ToolError, ConfigError) as exc:
+        _fail(str(exc))
+    run_stdio(workspace)
+
+
 def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:
     """The loaded config as JSON, with unset keys left out entirely."""
 
@@ -4449,6 +4441,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_jcl_parser(subparsers)
     _build_le_info_parser(subparsers)
     _build_config_parser(subparsers)
+    _build_mcp_parser(subparsers)
 
     return parser
 
@@ -4504,6 +4497,9 @@ def main() -> None:
         except ConfigError as exc:
             _config_fail(str(exc), argv)
     args._project_config = config
+    # `mcp` searches for cobol.yml from its --root, not the cwd, unless the
+    # user named a file or turned config off.
+    args._config_explicit = config_path is not None or config_disabled
 
     if config.source is not None:
         # The second parse (see cli/_project_config) is what separates a flag

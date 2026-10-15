@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-15 -- MCP server, Phase 1
+
+New [mcp.md](mcp.md) for `cobolparser/mcp/` and `cobol-parser mcp`
+(`read_source`, `lint`, `explain_symbol`). [cli.md](cli.md) gains the `mcp`
+row; [analysis/lint.md](analysis/lint.md) documents
+`source_column_offsets()`, moved out of the CLI so the server shares it.
+
 ## 2026-10-15 -- bundle restructure: history archived, big files split, content guard
 
 Topic files now describe current behaviour only. Dated write-ups, audits and

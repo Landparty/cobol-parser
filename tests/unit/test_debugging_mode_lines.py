@@ -480,7 +480,9 @@ def test_cli_field_impact_passes_debug_lines(copy_program, capsys) -> None:
 def test_only_record_layout_subcommands_lack_debug_lines() -> None:
     # A subcommand without the dest silently ignores cobol.yml's
     # project.debug_lines. The ones left read record layouts (copybooks,
-    # data files) or no COBOL at all, and drop D lines as comments.
+    # data files) or no COBOL at all, and drop D lines as comments -- except
+    # `mcp`, which takes no parse flags and reads debug_lines from cobol.yml
+    # itself (cobolparser/mcp/workspace.py).
     from cobolparser.cli._project_config import _iter_parsers
     from cobolparser.cli.parse import _build_parser
 
@@ -490,4 +492,12 @@ def test_only_record_layout_subcommands_lack_debug_lines() -> None:
         for sub in _iter_parsers(top)
         if sub is not top and "debug_lines" not in {a.dest for a in sub._actions}
     }
-    assert lacking == {"gen-data", "decode", "compare", "jcl", "le-info", "config"}
+    assert lacking == {
+        "gen-data",
+        "decode",
+        "compare",
+        "jcl",
+        "le-info",
+        "config",
+        "mcp",
+    }

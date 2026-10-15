@@ -32,8 +32,12 @@ fast = ["cython>=3.0"]
 # `cobolparser.jcl` reads JCL through the sibling jcl-parser package; the
 # rest of the library has no runtime dependency.
 jcl = ["jcl-parser>=2.0.0"]
+# `cobol-parser mcp`: the MCP server (cobolparser/mcp/server.py). Pinned below
+# 2, whose SDK renames FastMCP; only server.py imports it.
+mcp = ["mcp>=1.10,<2"]
 dev = [
     "jcl-parser>=2.0.0",
+    "mcp>=1.10,<2",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-xdist>=3.0.0",
@@ -208,6 +212,12 @@ strict_equality = true
 # job does not install it.
 [[tool.mypy.overrides]]
 module = ["jclparser", "jclparser.*"]
+ignore_missing_imports = true
+
+# The MCP SDK is the optional [mcp] extra; only cobolparser/mcp/server.py
+# imports it (with pydantic, which it brings in).
+[[tool.mypy.overrides]]
+module = ["mcp", "mcp.*", "pydantic", "pydantic.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

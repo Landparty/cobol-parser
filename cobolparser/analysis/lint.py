@@ -431,6 +431,79 @@ def fixed_format_column_offset(parsed_fixed: bool, file_fixed: bool) -> int:
     return FIXED_FORMAT_COLUMN_OFFSET if parsed_fixed else 6
 
 
+def source_column_offsets(
+    main_file: str, preprocess_fixed: bool | None = None
+) -> Callable[[str, int], int | None]:
+    """``(file, line) -> offset``: how far a line's on-disk column sits right
+    of the analyzer's, for every file a parse of *main_file* read (#301).
+
+    The ``column_offset`` argument :func:`apply_source_map` takes. Whether the
+    parse normalized fixed format is decided the way ``CobolParser`` decides
+    it (*preprocess_fixed* -- ``parse_cobol``'s own override -- first, else
+    the detector); each copybook is judged the way the expander judged it
+    when it spliced the member in. Within a fixed-format file, a line after
+    ``>>SOURCE FORMAT FREE`` is free-form and is not shifted. A file that
+    cannot be read again answers ``None``, so its findings keep no column
+    rather than a guessed one.
+    """
+    from pathlib import Path
+
+    from .._lines import split_source_lines
+    from .._source_directive import free_format_flags
+    from ..preprocess import strip_compiler_directives
+    from ..preprocess.copybook_expander import _looks_fixed_format
+    from ..preprocess.source_format import detect_fixed_format
+
+    def read(path: str) -> str | None:
+        try:
+            return Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+
+    def same_file(path: str) -> bool:
+        try:
+            return bool(Path(path).resolve() == Path(main_file).resolve())
+        except OSError:
+            return bool(path == main_file)
+
+    main_source = read(main_file)
+    if preprocess_fixed is not None:
+        parsed_fixed = bool(preprocess_fixed)
+    elif main_source is not None:
+        parsed_fixed = detect_fixed_format(strip_compiler_directives(main_source))
+    else:
+        return lambda _file, _line: None
+
+    # file -> (offset of a fixed-format line, per-line free-format flags)
+    layouts: dict[str, tuple[int, list[bool]] | None] = {}
+
+    def layout(path: str) -> tuple[int, list[bool]] | None:
+        if path not in layouts:
+            main = same_file(path)
+            text = main_source if main else read(path)
+            if text is None:
+                layouts[path] = None
+            else:
+                file_fixed = parsed_fixed if main else _looks_fixed_format(text)
+                offset = fixed_format_column_offset(parsed_fixed, file_fixed)
+                flags = (
+                    free_format_flags(split_source_lines(text)) if file_fixed else []
+                )
+                layouts[path] = (offset, flags)
+        return layouts[path]
+
+    def column_offset(path: str, line: int) -> int | None:
+        known = layout(path)
+        if known is None:
+            return None
+        offset, free_flags = known
+        if 0 < line <= len(free_flags) and free_flags[line - 1]:
+            return 0
+        return offset
+
+    return column_offset
+
+
 #: The location-shaped keys :func:`stamp_report_origins` stamps, each with
 #: the sibling key its origin goes under. A ``"location"`` keeps the plain
 #: ``"origin"`` every consumer already reads; the rest name their own, since

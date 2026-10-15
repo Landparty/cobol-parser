@@ -44,6 +44,7 @@ generators) are folders with a short routing page in front.
 | `parse_files`, `scan_files`, batch fault isolation, cross-file clones | [batch.md](batch.md) |
 | z/OS JCL: jobs, steps, DD → dataset bindings (via jcl-parser) | [jcl.md](jcl.md) |
 | CLI subcommands and flags, exit codes, the `cobol.yml` project config | [cli.md](cli.md) |
+| The MCP server for AI agents (`cobol-parser mcp`): tools, envelope, caveats, workspace guard and cache | [mcp.md](mcp.md) |
 | Test layout, markers, fixtures, coverage floor, where behaviour is pinned | [tests.md](tests.md) |
 | What the backend adapter and mocky-mock consume (summary of `interface-contract.md`) | [integration.md](integration.md) |
 
@@ -82,7 +83,7 @@ it with `git config core.hooksPath .githooks`) and by the test suite:
   `cli.md` must match argparse; and counts the code can answer (there are
   <!-- okf:gen analysis-module-count -->33<!-- /okf:gen --> analysis
   modules, <!-- okf:gen tokentype-count -->244<!-- /okf:gen --> `TokenType`
-  members, <!-- okf:gen cli-subcommand-count -->38<!-- /okf:gen -->
+  members, <!-- okf:gen cli-subcommand-count -->39<!-- /okf:gen -->
   subcommands) are written as `<!-- okf:gen NAME -->` spans that must equal
   the generator's output. After a code change that moves one, run
   `python scripts/okf_check.py --write`. `tests/test_okf_claims.py` runs the

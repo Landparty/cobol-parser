@@ -202,6 +202,12 @@ def _gen_bundle_version() -> str:
     return str(BUNDLE_VERSION)
 
 
+def _gen_mcp_caveat_kinds() -> str:
+    from cobolparser.mcp.envelope import CAVEAT_KINDS
+
+    return ", ".join(f"`{k}`" for k in CAVEAT_KINDS)
+
+
 GENERATORS: dict[str, Callable[[], str]] = {
     "cli-subcommand-table": _gen_cli_subcommand_table,
     "cli-subcommand-count": _gen_cli_subcommand_count,
@@ -219,6 +225,7 @@ GENERATORS: dict[str, Callable[[], str]] = {
     "unsupported-verbs": _gen_unsupported_verbs,
     "generators-export-count": _gen_generators_export_count,
     "bundle-version": _gen_bundle_version,
+    "mcp-caveat-kinds": _gen_mcp_caveat_kinds,
 }
 
 GEN_RE = re.compile(

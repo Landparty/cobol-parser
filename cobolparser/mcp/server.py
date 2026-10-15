@@ -1,0 +1,125 @@
+"""The MCP server: the only module that imports the MCP SDK.
+
+Each tool here is a typed wrapper over :class:`~.tools.CobolTools` -- the
+argument annotations and docstrings become the tool schemas a client sees --
+and nothing else. Keeping the SDK in this one module means a change of SDK
+(its v2 renames ``FastMCP``) touches one file.
+
+Needs the ``[mcp]`` extra: ``pip install 'cobol-parser[mcp]'``.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated, Any
+
+from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+from pydantic import Field
+
+from .tools import CobolTools
+from .workspace import Workspace
+
+INSTRUCTIONS = """\
+Tools for answering questions about COBOL source with an exact parser,
+instead of reading a program by eye. COBOL programs are long, their meaning
+is spread across copybooks, and byte layouts are easy to get wrong, so prefer
+these tools and cite what they return.
+
+Every result has the same envelope:
+- answer: the tool's own result. Every location is {file, line[, column]}
+  in the file on disk (a copybook is named as itself), relative to the
+  workspace root. Cite these as file:line.
+- caveats: what could NOT be checked (an unresolved COPY, a partial parse,
+  an analyzer that failed, ...). A caveat changes what the answer proves:
+  say so rather than presenting an incomplete answer as complete.
+- truncated: lists that were cut to the limit, with their true totals.
+  Narrow the question or raise limit instead of assuming completeness.
+
+Use read_source to show the code at a cited line.
+"""
+
+_READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
+
+File = Annotated[
+    str,
+    Field(description="COBOL source file, relative to the workspace root"),
+]
+Program = Annotated[
+    str | None,
+    Field(
+        description="PROGRAM-ID of one program unit, when the file holds "
+        "several (default: the outermost)"
+    ),
+]
+Limit = Annotated[
+    int | None,
+    Field(description="Most items to return in a list (default 50, max 500)"),
+]
+
+
+def build_server(workspace: Workspace) -> FastMCP:
+    """An MCP server answering about *workspace*, not yet running."""
+    tools = CobolTools(workspace)
+    server = FastMCP("cobol-parser", instructions=INSTRUCTIONS, log_level="WARNING")
+
+    def read_source(
+        file: Annotated[
+            str, Field(description="File to read, relative to the workspace root")
+        ],
+        line: Annotated[int, Field(description="1-based line to centre on")] = 1,
+        before: Annotated[int, Field(description="Lines to show before")] = 10,
+        after: Annotated[int, Field(description="Lines to show after")] = 10,
+    ) -> dict[str, Any]:
+        """The source lines around file:line (at most 200), numbered as an
+        editor numbers them. Use it to show the code behind a citation."""
+        return tools.read_source(file, line, before, after)
+
+    def lint(
+        file: File,
+        rules: Annotated[
+            list[str] | None,
+            Field(
+                description="Rules to run (default: all, or cobol.yml's lint "
+                "rules): dead-code, unused-variables, move-type-check, "
+                "io-sequence, linkage-check, recursion-check, complexity, "
+                "dclgen-check, sql-cics-check"
+            ),
+        ] = None,
+        min_severity: Annotated[
+            str | None,
+            Field(description="Lowest severity to report: error, warning or info"),
+        ] = None,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """Everything wrong with a program in one pass: dead code, unused
+        data items, MOVE type mismatches, I/O sequencing, LINKAGE problems,
+        recursion risks, complexity, DCLGEN and SQL/CICS checks. Findings are
+        worst first, each with its location on disk."""
+        return tools.lint(file, rules, min_severity, limit)
+
+    def explain_symbol(
+        file: File,
+        name: Annotated[
+            str,
+            Field(
+                description="Data item, condition name (level 88), paragraph, "
+                "section or file name; qualify as 'X OF Y' when it is ambiguous"
+            ),
+        ],
+        program: Program = None,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """What a name is and where it is used: its declaration (with
+        PICTURE, USAGE, byte offset and length, REDEFINES, level-88 values),
+        then every reference with its role (read, write, condition, ...),
+        statement and paragraph. Suggests close names when it is not found."""
+        return tools.explain_symbol(file, name, program, limit)
+
+    for tool in (read_source, lint, explain_symbol):
+        server.add_tool(tool, annotations=_READ_ONLY, structured_output=True)
+    return server
+
+
+def run_stdio(workspace: Workspace) -> None:
+    """Serve *workspace* over stdio until the client disconnects."""
+    build_server(workspace).run("stdio")

@@ -22,6 +22,11 @@ subcommand over reading source whenever one covers the question.
 
 ## Setup
 
+When a `cobol` MCP server is connected (`cobol-parser mcp`), prefer its
+`explain_symbol`, `lint` and `read_source` tools for those questions: they
+answer from one cached parse, cite every fact as `file:line` on disk, and
+list what they could not check under `caveats`.
+
 The CLI is `cobol-parser` (entry point `cobolparser.cli:main`). In this repo,
 `pip install -e ".[dev]"`; elsewhere it may be installed already — check with
 `cobol-parser --version`.

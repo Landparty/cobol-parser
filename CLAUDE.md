@@ -30,6 +30,7 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | `parse_files`, `parse_files_with_copybooks`, `scan_files`, batch fault isolation | `.okf/batch.md` |
 | z/OS JCL: jobs/steps, DD → dataset bindings (read by jcl-parser) | `.okf/jcl.md` |
 | CLI subcommands and flags, the `cobol.yml` project config | `.okf/cli.md` |
+| The MCP server for AI agents (`cobol-parser mcp`), its tools, envelope and caveats | `.okf/mcp.md` |
 | Test layout, markers, coverage floor | `.okf/tests.md` |
 | Backend adapter dict shape (summary of `interface-contract.md`) | `.okf/integration.md` |
 
@@ -134,6 +135,7 @@ cobol-parser diff <old.cbl> <new.cbl> [--format json|text] [--rename-threshold R
 cobol-parser codebase-graph PATH... [--format json|dot|mermaid] [--extension EXT] [--workers N] [--copybook-path DIR]
 cobol-parser copybook-impact <member> PATH... [--extension EXT] [--workers N] [--copybook-path DIR]
 cobol-parser jcl <job.jcl> [--dd-map] [--bindings] [--program NAME] [--proc-path DIR]... [--strict]   # needs the [jcl] extra
+cobol-parser mcp [--root DIR] [--cache-size N]   # MCP server on stdio for AI agents; needs the [mcp] extra
 # Parsing subcommands also take [--error-recovery fail-fast|collect-all] (default collect-all)
 ```
 
@@ -242,6 +244,8 @@ COBOL source (.cbl/.cob)
 **`cobolparser/profiling.py`** -- `ProfilerContext` wraps any parse call with `cProfile`, `tracemalloc`, and optional `psutil` CPU accounting. Returns `ProfilingResult` (wall-clock, CPU, peak memory, top `FunctionProfile` entries). Install the `profiling` extra (`pip install -e ".[profiling]"`) to enable CPU accounting; the module imports `psutil` lazily so the package remains usable without it.
 
 **`cobolparser/config/`** -- The **universal project config file**, `cobol.yml` (or `cobol.yaml`), read by every tool in the family: this CLI, the `mockymock` CLI, and the COBOL Analyzer VS Code extension. A shop states its copybook directories, source format, dialect and record encoding once at the project root instead of on every invocation. Discovery walks up from the cwd the way `git` walks up looking for `.git`; paths inside resolve against the config file's own directory, not the cwd. Precedence is always **explicit CLI flag > config file > built-in default**. `project.py` owns the schema and the discovery; `_yaml.py` is a stdlib-only reader for the strict YAML subset a config file needs (the package has no runtime dependencies, so PyYAML is not an option) that **rejects** anchors, tags, block scalars, merge keys, multi-document files, tabs in indentation and duplicate keys with a line number rather than guessing. `mockymock:` / `analyzer:` sections are carried through verbatim for the tools that own them. User-facing reference: [`docs/project-config.md`](docs/project-config.md). See `.okf/cli.md`
+
+**`cobolparser/mcp/`** -- The **MCP server** (`cobol-parser mcp --root DIR`, stdio) that lets AI agents question COBOL source: `read_source`, `lint`, `explain_symbol`. Tools answer questions rather than mirror subcommands, every location is a `file:line` on disk (copybooks named as themselves, through the expansion source map and `analysis/lint.py`'s `source_column_offsets()`), and every answer carries a closed-vocabulary `caveats` list and a `truncated` list (`envelope.py`). `workspace.py` guards paths (root + `cobol.yml` copybook dirs only), reads `cobol.yml` from the root, and caches parses until a program or one of its copybooks changes. `tools.py` imports no SDK, so the backend can call `CobolTools` directly; only `server.py` imports the `[mcp]` extra (`mcp>=1.10,<2`). User guide: [`docs/mcp-server.md`](docs/mcp-server.md); design and later phases: `docs/plans/2026-10-15-mcp-server-design.md`. See `.okf/mcp.md`
 
 **`cobolparser/cli/`** -- Command-line interface:
 - `parse.py` -- Implements all CLI subcommands (see "Commands" above for the full list); most analyzer subcommands share argument-building via `_build_analyzer_parser()`

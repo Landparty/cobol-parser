@@ -1,7 +1,12 @@
 # An MCP server for AI-assisted COBOL analysis
 
-**Status:** design only, nothing implemented. Read against `cobol-parser` main
-@ `af1690d` on 2026-10-15. Implements `docs/feature-ideas.md` #30.
+**Status:** Phase 1 implemented (2026-10-15): `cobolparser/mcp/`,
+`cobol-parser mcp`, tools `read_source`, `lint`, `explain_symbol`; user guide
+in `docs/mcp-server.md`. Phases 2-4 are design only. Read against
+`cobol-parser` main @ `af1690d` on 2026-10-15. Implements
+`docs/feature-ideas.md` #30.
+
+**Decided 2026-10-15 (Samuel):** the official `mcp` SDK, and stdio only.
 
 ## The question
 
@@ -132,6 +137,26 @@ first library feature this server would pull forward.
 - Parsing uses `ErrorRecoveryMode.COLLECT_ALL`, as the CLI does, so a program
   with one bad statement still answers, with a `partial-parse` caveat.
 
+## Phase 1 as built: what differed from this plan
+
+- The shared location helper mostly existed already: `lint.stamp_report_origins`
+  maps lines in any serialized report. What lived only in the CLI was the
+  *column* offset, so Phase 1 moved `_lint_column_offset` into
+  `analysis/lint.py` as `source_column_offsets()`; the CLI and the server both
+  call it. The server maps each location itself (`ParsedProgram.locate`).
+- xref reference columns are the statement's, not the operand's, so
+  `explain_symbol` cites references by line only.
+- A missing copybook makes the expander raise; the server re-parses without
+  expansion and says so in an `unresolved-copybook` caveat instead of failing.
+- `cobol-parser mcp` without the extra exits 1 (the CLI's `_fail()`), not 2.
+- `[mcp]` is also in `[dev]`, so CI's coverage job tests the server too; the
+  tests live in `tests/unit/mcp_server/` because a test package named `mcp`
+  shadows the SDK.
+- Two caveat kinds were not needed (`dynamic-call`, `outside-workspace`: a
+  path outside the workspace is an error result) and one was added
+  (`incomplete-analysis`, an analyzer's own note that it could not examine
+  everything).
+
 ## The one library change v1 needs: source-mapped locations everywhere
 
 Today only `LintAnalyzer` (`lint.apply_source_map`) and `FieldFlowAnalyzer`
@@ -215,7 +240,8 @@ Because `tools.py` never imports the SDK, switching later costs one module.
 
 1. ~~SDK in an extra or a zero-dependency hand-rolled server?~~ Decided:
    the official SDK (see "SDK choice").
-2. stdio only for now, or HTTP too so the backend can host it?
+2. ~~stdio only for now, or HTTP too?~~ Decided: stdio only. The backend
+   can call `CobolTools` directly.
 3. Should the server ship the `cobol-analysis` skill's guidance as MCP
    *prompts*, so clients without skills get the same "run the tool, cite it,
    read the caveats" instructions?

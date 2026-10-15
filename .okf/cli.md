@@ -8,7 +8,7 @@ timestamp: 2026-10-15T00:00:00Z
 
 # CLI
 
-The `cobol-parser` command: <!-- okf:gen cli-subcommand-count -->38<!-- /okf:gen --> subcommands that parse, tokenize, preprocess,
+The `cobol-parser` command: <!-- okf:gen cli-subcommand-count -->39<!-- /okf:gen --> subcommands that parse, tokenize, preprocess,
 expand, analyze, generate/decode/compare record data for, and graph COBOL
 (plus one for JCL and one for the LE catalogue), all built with `argparse` in
 `cobolparser/cli/parse.py`, and the `cobol.yml` project config every
@@ -121,10 +121,12 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `jcl` | `file` | `--dd-map`, `--bindings`, `--program NAME`, `--proc-path DIR`..., `--strict` | `--compact`, `-o` | job JSON; needs `[jcl]` extra; exit 3 on `--strict` |
 | `le-info` | `[name ...]` | `--kind {service,function,all}` (all) | `--compact`, `-o` | LE / intrinsic signature catalogue |
 | `config` | — | `--json` | `--compact`, `-o` | effective `cobol.yml` |
+| `mcp` | — | `--root DIR` (`.`), `--cache-size N` (32) | — | MCP server on stdio until the client disconnects; needs `[mcp]` extra; `cobol.yml` found from `--root` (see [mcp.md](mcp.md)) |
 
 Subcommands that take none of the COBOL parse flags (`--source-format`,
 `--dialect`, `--debug-lines`, `--define`, `--error-recovery`): `gen-data`,
-`decode`, `compare` (they read a record layout only), `jcl`, `le-info`, `config`.
+`decode`, `compare` (they read a record layout only), `jcl`, `le-info`, `config`,
+`mcp` (it reads `cobol.yml` instead).
 
 ## Exit codes
 
