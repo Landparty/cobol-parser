@@ -530,7 +530,7 @@ class ProgramLayoutIndex:
         qualified_index: dict[str, list[ResolvedField]],
     ) -> None:
         """Map each level-88 condition name to its parent field's ResolvedField."""
-        item_path = (*path, item.name)
+        item_path = (*path, item.layout_name)
         qualified = ".".join(item_path)
         for child in item.children:
             if isinstance(child, ConditionNameItem):

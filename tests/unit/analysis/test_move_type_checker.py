@@ -5,7 +5,7 @@ Covers:
 - Figurative constant classification
 - Numeric literal classification
 - MOVE pair (legal / warning / error) detection
-- MOVE CORRESPONDING (skip — no picture data on CORR source)
+- MOVE CORRESPONDING (each same-named pair checked like an ordinary MOVE)
 - Unknown source/target variable (skip without error)
 - Full COBOL source round-trip via parse_cobol()
 - Report.errors / Report.warnings properties
@@ -533,6 +533,58 @@ class TestPictureVariants:
         assert _classify_picture(_pic("S9(20)")) == DataCategory.NUMERIC
         assert _classify_picture(_pic("9(10)V9(2)")) == DataCategory.NUMERIC
 
+    def test_nine_in_repeat_count_is_not_a_digit_position(self):
+        # Regression #336: the 9 in X(9) / A(9) is a repeat count, not a
+        # digit, so these must classify like their X(10) / A(10) siblings.
+        for pattern in ("X(9)BX(9)", "X(10)BX(10)", "A(9)B", "X(9)0", "X(19)/X"):
+            assert (
+                _classify_picture(_pic(pattern)) == DataCategory.ALPHANUMERIC_EDITED
+            ), pattern
+
+    def test_digit_positions_still_numeric_edited(self):
+        assert _classify_picture(_pic("9(9)B9(9)")) == DataCategory.NUMERIC_EDITED
+        assert _classify_picture(_pic("Z(9).99")) == DataCategory.NUMERIC_EDITED
+
+    def test_repeat_count_nine_moves_match_x10_variant(self):
+        # The four MOVEs from issue #336, through a real parse.
+        src = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTPROG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-ALPHA PIC A(5).
+       01 WS-AN    PIC X(5).
+       01 WS-DEC   PIC 9(3)V99.
+       01 WS-XE    PIC X(9)BX(9).
+       01 WS-XE2   PIC X(10)BX(10).
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           MOVE WS-ALPHA TO {t}
+           MOVE WS-AN TO {t}
+           MOVE WS-DEC TO {t}
+           MOVE {t} TO WS-DEC
+           STOP RUN.
+"""
+
+        def findings(target):
+            result = parse_cobol(src.format(t=target))
+            assert result.ast is not None
+            report = MoveTypeChecker().check(result.ast)
+            return sorted(
+                (
+                    "T" if v.source_name == target else v.source_name,
+                    "T" if v.target_name == target else v.target_name,
+                    v.kind.name,
+                    v.target_category.name,
+                )
+                for v in report.violations
+            )
+
+        xe = findings("WS-XE")
+        assert xe == findings("WS-XE2")
+        assert ("WS-DEC", "T", "ERROR", "ALPHANUMERIC_EDITED") in xe
+        assert not any(t == "T" and k != "ERROR" for _, t, k, _ in xe)
+
 
 class TestLiteralSourceMoves:
     """MOVE with a literal source (not a data item name)."""
@@ -580,9 +632,10 @@ class TestLiteralSourceMoves:
 
 
 class TestMoveCorresponding:
-    """MOVE CORRESPONDING sets is_corresponding=True; checker must not error."""
+    """MOVE CORRESPONDING sets is_corresponding=True; with elementary operands
+    there are no pairs to check, so the statement is unresolved, not clean."""
 
-    def test_corresponding_move_no_error(self):
+    def test_corresponding_move_of_elementary_items_is_unresolved(self):
         prog = _make_program_with_items(
             [("SRC", "9(5)"), ("TGT", "A(10)")],
             [],
@@ -602,8 +655,8 @@ class TestMoveCorresponding:
         prog.procedure_division.add_paragraph(para)
 
         report = MoveTypeChecker().check(prog)
-        # CORRESPONDING moves are structural; skip category checking on them
         assert not report.has_errors
+        assert report.unresolved_count == 1
 
 
 class TestMoveEmptyOperands:
@@ -1119,3 +1172,134 @@ class TestNumericFunctionIntegerness:
         # skipped MOVE here is the function's, none is a missing COPY's.
         assert report.unresolved_function_count == 4
         assert report.unresolved_count == 4
+
+
+class TestMoveCorrespondingPairs:
+    """Issue #383: MOVE CORRESPONDING is checked pair by pair, and a pairing
+    that cannot be worked out counts as unresolved rather than clean."""
+
+    _GROUPS = (
+        "       01 GRP-A.\n"
+        "          05 AMT  PIC S9(5)V99 COMP-3.\n"
+        "          05 NAME PIC X(10).\n"
+        "          05 ONLY-A PIC X(3).\n"
+        "       01 GRP-B.\n"
+        "          05 AMT  PIC X(9).\n"
+        "          05 NAME PIC 9(10).\n"
+        "          05 ONLY-B PIC A(3).\n"
+    )
+
+    def test_mismatched_pairs_are_reported(self):
+        report = _check_source(self._GROUPS, "MOVE CORRESPONDING GRP-A TO GRP-B")
+        found = [(v.kind, v.source_name, v.target_name) for v in report.violations]
+        assert found == [
+            (MoveViolationKind.ERROR, "AMT OF GRP-A", "AMT OF GRP-B"),
+            (MoveViolationKind.WARNING, "NAME OF GRP-A", "NAME OF GRP-B"),
+        ]
+        assert report.unresolved_count == 0
+
+    def test_corr_abbreviation_and_matching_pairs_are_clean(self):
+        data = (
+            "       01 GRP-A.\n"
+            "          05 AMT  PIC S9(5)V99.\n"
+            "          05 NAME PIC X(10).\n"
+            "       01 GRP-B.\n"
+            "          05 AMT  PIC S9(7)V99 COMP-3.\n"
+            "          05 NAME PIC X(20).\n"
+        )
+        report = _check_source(data, "MOVE CORR GRP-A TO GRP-B")
+        assert not report.violations
+        assert report.unresolved_count == 0
+
+    def test_nested_pairs_match_by_name_path(self):
+        data = (
+            "       01 GRP-A.\n"
+            "          05 DTL.\n"
+            "             10 QTY PIC 9(3)V9.\n"
+            "          05 QTY PIC X(4).\n"
+            "       01 GRP-B.\n"
+            "          05 DTL.\n"
+            "             10 QTY PIC 9(3)V9.\n"
+            "          05 QTY PIC X(4).\n"
+        )
+        # Pairing by bare name would cross DTL's QTY (non-integer) with the
+        # top-level QTY (alphanumeric) -- an illegal move that is not there.
+        report = _check_source(data, "MOVE CORRESPONDING GRP-A TO GRP-B")
+        assert not report.violations
+        report = _check_source(
+            data + "       01 GRP-C.\n"
+            "          05 DTL.\n"
+            "             10 QTY PIC A(4).\n",
+            "MOVE CORRESPONDING GRP-A TO GRP-C",
+        )
+        found = [(v.source_name, v.target_name) for v in report.violations]
+        assert found == [("QTY OF DTL OF GRP-A", "QTY OF DTL OF GRP-C")]
+
+    def test_excluded_subordinates_do_not_pair(self):
+        data = (
+            "       01 GRP-A.\n"
+            "          05 AMT  PIC 9(5)V99.\n"
+            "          05 TBL  PIC X(2) OCCURS 3.\n"
+            "          05 ALT  REDEFINES AMT PIC X(7).\n"
+            "          05 FILLER PIC X(4).\n"
+            "       01 GRP-B.\n"
+            "          05 AMT  PIC 9(5)V99.\n"
+            "          05 TBL  PIC 9(2) OCCURS 3.\n"
+            "          05 ALT  PIC 9(7).\n"
+            "          05 FILLER PIC 9(4).\n"
+        )
+        report = _check_source(data, "MOVE CORRESPONDING GRP-A TO GRP-B")
+        assert not report.violations
+        assert report.unresolved_count == 0
+
+    def test_group_receiver_pair_is_a_legal_group_move(self):
+        data = (
+            "       01 GRP-A.\n"
+            "          05 DTL PIC 9(5)V99.\n"
+            "       01 GRP-B.\n"
+            "          05 DTL.\n"
+            "             10 X PIC X(7).\n"
+        )
+        report = _check_source(data, "MOVE CORRESPONDING GRP-A TO GRP-B")
+        assert not report.violations
+        assert report.unresolved_count == 0
+
+    def test_qualified_groups_resolve(self):
+        data = (
+            "       01 OUTER-1.\n"
+            "          05 REC.\n"
+            "             10 AMT PIC 9(3)V9.\n"
+            "       01 OUTER-2.\n"
+            "          05 REC.\n"
+            "             10 AMT PIC X(4).\n"
+        )
+        report = _check_source(
+            data, "MOVE CORRESPONDING REC OF OUTER-1 TO REC OF OUTER-2"
+        )
+        found = [(v.source_name, v.target_name) for v in report.violations]
+        assert found == [("AMT OF REC OF OUTER-1", "AMT OF REC OF OUTER-2")]
+
+    def test_unresolvable_group_counts_as_unresolved(self):
+        data = (
+            "       01 OUTER-1.\n"
+            "          05 REC.\n"
+            "             10 AMT PIC 9(3)V9.\n"
+            "       01 OUTER-2.\n"
+            "          05 REC.\n"
+            "             10 AMT PIC X(4).\n"
+        )
+        # REC alone is ambiguous; NOWHERE is undeclared.
+        report = _check_source(data, "MOVE CORRESPONDING REC TO REC OF OUTER-2")
+        assert not report.violations
+        assert report.unresolved_count == 1
+        report = _check_source(data, "MOVE CORRESPONDING NOWHERE TO REC OF OUTER-2")
+        assert report.unresolved_count == 1
+
+    def test_each_receiving_group_is_checked(self):
+        data = self._GROUPS + ("       01 GRP-C.\n" "          05 NAME PIC A(10).\n")
+        report = _check_source(data, "MOVE CORRESPONDING GRP-A TO GRP-B GRP-C")
+        found = [(v.source_name, v.target_name) for v in report.violations]
+        assert found == [
+            ("AMT OF GRP-A", "AMT OF GRP-B"),
+            ("NAME OF GRP-A", "NAME OF GRP-B"),
+        ]

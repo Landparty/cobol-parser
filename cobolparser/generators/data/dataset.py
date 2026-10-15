@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .encoding import EncodingOptions, encode_record, hex_dump
@@ -139,13 +139,29 @@ class GeneratedDataset:
             return None
         return self.declared_lengths[index]
 
+    def _resolved_options(self, opts: EncodingOptions | None) -> EncodingOptions:
+        """*opts* with ``AUTO`` decided against this dataset, once.
+
+        The encoder can only see a record-length range through a drawn
+        ``data_length``; an FD range without ``DEPENDING ON`` draws none but
+        still makes the file variable, so ``AUTO`` is settled here, where the
+        :attr:`varying` range is known.
+        """
+        options = opts or EncodingOptions()
+        fmt = options.resolved_format(self.fields, varying=self.varying is not None)
+        return (
+            options
+            if fmt is options.record_format
+            else replace(options, record_format=fmt)
+        )
+
     def record_lengths(self, opts: EncodingOptions | None = None) -> list[int]:
         """Byte length of each row's record image, in row order.
 
         Computed from the layout rather than by encoding, so asking what a
         large dataset's records weigh does not cost building all of them.
         """
-        options = opts or EncodingOptions()
+        options = self._resolved_options(opts)
         return [
             _row_record_length(
                 self.fields, row, options, data_length=self._length_for(index)
@@ -162,7 +178,7 @@ class GeneratedDataset:
         field an overpunched sign.  See :mod:`.encoding` for the conventions
         and their documented limits.
         """
-        options = opts or EncodingOptions()
+        options = self._resolved_options(opts)
         return b"".join(
             encode_record(
                 self.fields, row, options, data_length=self._length_for(index)
@@ -194,7 +210,7 @@ class GeneratedDataset:
         return hex_dump(
             self.fields,
             self.rows,
-            opts or EncodingOptions(),
+            self._resolved_options(opts),
             record_name=self.record_name,
             data_lengths=self.declared_lengths,
             varying=self.varying,

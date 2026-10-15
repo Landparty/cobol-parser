@@ -110,13 +110,25 @@ either by bare name.
 > it (`_sections_entered_by_jump`: a GO TO written in another section, an
 > ALTER, a CICS HANDLE, an ENTRY). Pinned by `TestSectionExitGoTo`.
 
+> 2026-10-14 (issue #384): dead code is followed **transitively** -- "dead"
+> now means unreachable, not merely unreferenced. `analyze` runs a worklist
+> from the roots (entry point, declaratives, the leading body, ENTRY
+> paragraphs, CICS HANDLE labels): a procedure's statements are admitted
+> to `_collect_references` only once the procedure itself is reached, so a
+> paragraph PERFORMed only from a dead paragraph is reported dead too
+> (retired report code, NIST IC222A/IC227A). THRU range ends and section
+> exits are still collected from *every* statement up front, which keeps
+> each round monotone (admitting statements only adds references). Lint's
+> message is now "can never be reached". Pinned by `TestTransitiveDeadCode`.
+
 ```python
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]
 ```
 
-Detects unreferenced paragraphs and sections (paragraphs/sections never the
-target of a PERFORM, GO TO, or fall-through control flow). The first
+Detects unreachable paragraphs and sections (paragraphs/sections never the
+target of a PERFORM, GO TO, or fall-through control flow *from reachable
+code*). The first
 procedure is always referenced (program entry point), and so is any
 paragraph containing an `EntryStatement` (2026-08-11 fix, see below).
 
@@ -191,6 +203,17 @@ GO TO / ALTER / ENTRY landing) or a section-exit jump target. Sections in the
 range are walked through, since their paragraphs follow the header in
 `_ordered_procedures`. Both ends stay referenced unconditionally. Pinned by
 `tests/unit/analysis/test_dead_code.py::TestThruRangeSkippedMembers`.
+Two refinements from review: "landing in it" means any member in
+`_jump_targets` (every GO TO / ALTER / CICS HANDLE target, *including*
+range ends and section exits, which are not fall-through sources) -- so
+`GO TO P1-EXIT` inside a `PERFORM P0 THRU P2-EXIT` that also nests
+`PERFORM P1 THRU P1-EXIT` still runs on into P2; and an `EXIT SECTION`
+member (`_exits_section`) resumes the walk at the next section header in the
+range, since it leaves only its own section. `_mark_thru_ranges` runs
+*inside* the #384 worklist right after `_collect_fallthrough_refs`, so a
+reached range member's statements are admitted the next round (after the
+loop, a PERFORM in a range member would never be collected). Pinned by
+`TestThruRangeNestedAndSectionExits`.
 
 **Known related over-approximation, deliberately not changed.**
 `ProgramFlowAnalyzer`'s `graph.build_fall_through_edges` still emits a
@@ -740,10 +763,16 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   `PERFORM_RECURSION` cycle (out-of-line paragraphs performing each other in
   a loop — invalid re-entrant PERFORM in standard COBOL) is always `HIGH`,
   independent of any UNTIL/TIMES/VARYING clause on the individual PERFORMs.
-  A `GOTO_LOOP`/`MIXED` cycle is graded by `_has_escape`: `HIGH` if no
-  paragraph in the cycle has an edge leaving it (to a paragraph outside the
-  cycle) or a program-terminating statement (`has_stop_run`/`has_goback`/
-  `has_exit_program`/`has_return` on the `FlowNode`), `MEDIUM` otherwise —
+  A `GOTO_LOOP`/`MIXED` cycle is graded by `_has_escape` over the cycle's
+  **strongly connected component** (`_components`, Tarjan over
+  `_ESCAPE_EDGE_TYPES`), not the cycle alone: `HIGH` if no paragraph in the
+  component has an edge leaving it or a program-terminating statement
+  (`has_stop_run`/`has_goback`/`has_exit_program` on the `FlowNode`),
+  `MEDIUM` otherwise. Per-cycle checking (before #393) let two cycles that
+  share a paragraph each "escape" into the other, so an inescapable
+  `P1 -> P2 -> P1` / `P1 -> P3 -> P1` pair read MEDIUM. `has_return` is a
+  SORT/MERGE `RETURN sd-file`, **not** a terminator (it was, before #393,
+  so every SORT output-procedure loop read MEDIUM) —
   fall-through-only cycles are never reported (fall-through can't actually
   form a cycle).
   A `MIXED` cycle that is a PERFORM of a multi-procedure range (a SECTION
@@ -957,7 +986,8 @@ files: `cobol-parser scan --clones` (see cli.md and batch.md).
 
 ```python
 report: TechnicalDebtReport = TechnicalDebtAnalyzer(weights=None, size_threshold=50).analyze(ast)
-# report.score: float (0-100, higher = more debt); report.grade: "A".."F"
+# report.score: float (0-100, higher = more debt); report.grade: "A".."F", or None (see below)
+# report.parse_error_count / report.caveats  -- set from analyze(..., parse_error_count=N)
 # report.components: list[ComponentBreakdown]  -- one per weighted component, each with its own findings
 # report.top_offenders: list[OffenderProcedure]  -- worst procedures, with reasons
 ```
@@ -991,6 +1021,17 @@ carry a `"no procedures to rate"` finding (rather than an empty findings
 list) on a program with no procedures, per the every-point-explained
 contract. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA7GradeMatchesSerializedScore`.
+
+**Parse errors withhold the grade (#397, 2026-10-14).** A file that mostly
+failed to parse hands over a near-empty AST, which scores 0.0 and used to
+grade "A". `analyze(ast, parse_error_count=len(result.errors))` keeps the
+score (computed over what was recovered) but sets `grade` to `None` and adds
+a `caveats` entry; `to_dict()` always carries `parse_error_count` and
+`caveats`. The `health` subcommand passes the count; `scan` does not (it
+already flags `parse_error_count` per file, and its grade feeds the
+extension's portfolio sort). Pinned by `test_technical_debt.py::
+TestParseErrorsWithholdTheGrade` and `test_complexity_health_subcommands.py::
+TestHealthWithParseErrors`.
 
 **`top_offenders`** ranks procedures by a severity score built from the
 same underlying findings (HIGH complexity +30, MODERATE +10, each GO TO +3,
@@ -1065,11 +1106,10 @@ alone must still surface both lists.
 Two rules (`recursion-check`, `complexity`) need the CFG; `LintAnalyzer`
 builds it at most once per `analyze()` call and accepts a precomputed
 `flow_report`. Findings identical in every visible field collapse to one
-(`_deduplicate`) — `IOSequenceAnalyzer` legitimately reports one READ-before-
-OPEN once per control flow path reaching it, which is two facts about the
-graph but one thing to fix, and two identical squiggles in an editor. That
-collapsing is this aggregate view's choice; the analyzers themselves are
-unchanged.
+(`_deduplicate`) — identical findings from one analyzer are two facts about
+the graph but one thing to fix, and two identical squiggles in an editor.
+(`IOSequenceAnalyzer` itself now reports a violation once per source location
+since #371, so it no longer produces these.)
 
 CLI: `cobol-parser lint <file.cbl>` (see cli.md), including `--format text`,
 `--min-severity`, and `--fail-on` (exit 3).
@@ -1113,6 +1153,24 @@ via a range stack; per-chain visited sets keep GO TO cycles finite).
 Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Conditional
 branches still share one state (unchanged conservatism); paragraphs
 unreachable from the entry procedure are no longer walked at all.
+
+**PERFORM ranges are summarized, not re-inlined (2026-10-14, #371).** Each
+PERFORM used to re-walk its target paragraphs through Python recursion, so a
+PERFORM chain ~248 deep raised `RecursionError` (and `lint` reported the rule
+as failed), and a paragraph PERFORMed twice per nesting level cost 2**depth
+walks. The walk is now generators (`_run_paragraph`, `_process_statement`,
+`_run_perform`, `_walk_range`) that `yield` the sub-step they would have
+called; `_drive` runs them off an explicit stack. The first run of a range
+from a given entry state (open files, closed files) is stored as a
+`_RangeSummary` (exit state, violations, queued conditional GO TO targets,
+whether it terminated) and replayed at later call sites with the same state.
+A summary is only reused when the re-entrancy guard would decide the same
+way: none of the ranges it `entered` is on the PERFORM stack, and every
+enclosing range it skipped (`guarded`) still is. Violations are emitted once
+per (kind, file, location, message) -- the walk used to repeat them once per
+call path. Output was checked identical (after that dedup) to the old walk
+on every sample/NIST program and 3,000 random programs. Pinned by
+`tests/unit/analysis/test_io_sequence_perform_summaries.py`.
 
 **`CLOSE f REEL` / `CLOSE f UNIT` keep the file open (2026-09-28).** They
 close only the current volume (`close_options[f]["reel"/"unit"]`); treating
@@ -1170,6 +1228,20 @@ report: MoveTypeReport = MoveTypeChecker().check(ast)
 Detects MOVE statements with type-incompatible sending/receiving fields based on
 PICTURE clause categories.
 
+**MOVE CORRESPONDING (2026-10-14, issue #383):** a CORR move was skipped
+outright and not counted anywhere, so a type-mismatched one read as a clean
+all-clear. It is now expanded into its pairs by the IBM rule (same name path
+below the two groups, at least one of the two elementary; FILLER, level
+66/77/88, REDEFINES, OCCURS and INDEX/POINTER subordinates -- and what is
+under a REDEFINES/OCCURS item -- excluded, mirroring
+`field_lineage._corresponding`), and each pair is checked like an ordinary
+MOVE. Violations name the pair qualified (`AMT OF GRP-A` → `AMT OF GRP-B`).
+An operand that does not resolve to exactly one declared *group* (undeclared,
+ambiguous without qualifiers, elementary) adds one to `unresolved_count` per
+receiving operand; a paired item with no category this checker models adds
+one per pair. Pinned by
+`test_move_type_checker.py::TestMoveCorrespondingPairs`.
+
 **Intrinsic FUNCTION sources (2026-10-13, issue #291):** a `MOVE FUNCTION
 x(...) TO y` was always skipped into `unresolved_count` (only the argless
 `CURRENT-DATE` / `WHEN-COMPILED` were known), and lint's caveat then told the
@@ -1224,6 +1296,13 @@ classifies as NUMERIC_EDITED up front — `9(5)CR` was UNKNOWN (silently
 skipped into `unresolved_count`) while `9(5)DB` was NUMERIC_EDITED only
 because its 'B' happened to match the blank-insertion edit char. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA5A6MoveTypePictureClassification`.
+
+**Repeat counts are not symbols (2026-10-14, #336):** inside an edited
+picture, the `9` / `X` / `A` tests that pick NUMERIC_EDITED vs
+ALPHANUMERIC_EDITED run on `pattern_no_reps` (repeat counts stripped), so
+the 9 in `X(9)BX(9)` or `A(9)B` no longer reads as a digit position; these
+classify ALPHANUMERIC_EDITED like `X(10)BX(10)`. Pinned by
+`test_move_type_checker.py::TestPictureVariants::test_nine_in_repeat_count_is_not_a_digit_position`.
 
 **`unresolved_count` (2026-07-09, audit finding H5):** before this field
 existed, an unresolvable source category (`UNKNOWN`/`FIGURATIVE`) caused
@@ -2088,6 +2167,12 @@ F1-VALID` and a simple comparison like `WHEN F1-QTY = 5` both arrive as
 `_parse_relational_text` itself reports any text holding an `AND`/`OR`
 outside a quoted literal as unsupported rather than splitting it on its first
 operator.
+Before matching, `_symbolize_relational_words` spells the word operators
+as symbols (`[IS] [NOT] GREATER|LESS [THAN] [OR EQUAL [TO]]`, `EQUAL[S]
+[TO]`; quoted literals untouched), so `WHEN X GREATER THAN OR EQUAL TO 1`
+yields the same `ge` constraint as `WHEN X >= 1` and its `OR` is not taken
+for a connective (#387). `complexity.py`'s `_BOOL_WORD_RE` likewise skips
+the OR of `OR EQUAL`.
 
 **Two-field comparisons are unsupported in v1** (`IF F1-QTY > F1-STATUS`) --
 stated as a parent-plan limitation, not attempted.
@@ -2880,7 +2965,16 @@ results into one graph with two kinds of edge:
   dynamic `CALL WS-TARGET` resolved through `DynamicCallAnalyzer`. A dynamic
   call whose value set that analyzer could not fully resolve still contributes
   its known targets, each marked `resolved=False`, so the edge set is never
-  mistaken for an exhaustive one.
+  mistaken for an exhaustive one. `EXEC CICS LINK PROGRAM(...)` and `EXEC
+  CICS XCTL PROGRAM(...)` are call edges too (#315), told apart by
+  `CallEdge.kind` (`call` / `cics-link` / `cics-xctl`; `to_dict()` carries
+  it). `PROGRAM('X')` is static (read off `ExecCicsStatement.literal_options`,
+  since `options` holds literals unquoted); `PROGRAM(WS-X)` takes
+  `DynamicCallAnalyzer.resolve_variable("WS-X")`, the same values and
+  incomplete flag `CALL WS-X` would get, or is reported in `unresolved`.
+  `cycles()` skips XCTL edges: XCTL never returns, so a menu loop of XCTLs is
+  not recursion; LINK cycles count. Chosen over a separate `transfer_edges`
+  list so `callers_of` and impact questions see CICS callers with no change.
 * **Copy edges** — `program A copies member X`, and `member X copies member Y`
   for nested copybooks. Collected by **re-scanning** each source with
   `extract_copy_statements()` rather than from an expanded parse, because
@@ -2924,7 +3018,7 @@ report.program_count
 `ProgramNode` holds `program_id` (uppercased; the **file stem** when the file
 would not parse, recorded as such in `unresolved`), `path`, `calls`, `copies`
 and `parse_failed` — with `parse_failed` true, `calls` is "empty and unknown",
-not "empty and known". `CallEdge` carries `is_dynamic` / `resolved`; `CopyEdge`
+not "empty and known". `CallEdge` carries `is_dynamic` / `resolved` / `kind`; `CopyEdge`
 carries `member`, `path` and `nested`, where for a nested edge `program` is the
 *outer member name*, which is what makes a `PROG1 -> OUTER -> INNER` chain
 walkable in either direction.
@@ -3189,6 +3283,11 @@ FILLER records are two buffers, not one with a spurious redefines.
 `MOVE CORRESPONDING` pairs same-path subordinates when at least one of the
 two is elementary (a group against an elementary item is a byte overlay),
 skipping FILLER, REDEFINES and OCCURS items and what is under them.
+`ADD` / `SUBTRACT CORRESPONDING` walk the same pairing
+(`_visit_arith_corresponding`) but keep only elementary pairs whose sending
+item is numeric and receiving item numeric or numeric-edited (`_Item.category`,
+from PICTURE / USAGE), one `arith` edge each; the generic reads-to-writes
+path would join every subordinate to every other one (issue #337).
 
 **Alias edges are never chained with one of their own class**
 (`overlay_class`; summary BFS and `LineageGraph._trace` both carry the

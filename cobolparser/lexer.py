@@ -2254,7 +2254,36 @@ class _CobolLexerPure:
             line_idx -= 1
             if line_idx < prev_line:
                 return False
-            pos = len(lines[line_idx]) if self.free_form else _FF_LINE_END - 1
+            # An earlier line may end in a ``*>`` comment (or be one): only
+            # the program text before it counts.
+            pos = self._code_end(lines[line_idx], lo) - 1
+            if not self.free_form:
+                pos = min(pos, _FF_LINE_END - 1)
+
+    def _code_end(self, line: str, lo: int) -> int:
+        """Index where *line*'s program text ends: at a ``*>`` comment.
+
+        The ``*>`` must sit outside a literal (``"A*>B"`` is text). A
+        fixed-format comment line (``*`` or ``/`` in column 7) has no
+        program text at all.
+        """
+        line = line.rstrip("\n")
+        if not self.free_form and len(line) > _FF_INDICATOR:
+            if line[_FF_INDICATOR] in "*/":
+                return lo
+        if "*>" not in line:
+            return len(line)
+        quote: str | None = None
+        for index in range(lo, len(line)):
+            ch = line[index]
+            if quote is not None:
+                if ch == quote:
+                    quote = None  # a doubled quote reopens on the next char
+            elif ch in "'\"":
+                quote = ch
+            elif line.startswith("*>", index):
+                return index
+        return len(line)
 
     def _merge_concatenated_literals(self) -> None:
         """Join ``lit-1 & lit-2 [& ...]`` into one STRING_LITERAL token.
@@ -2272,7 +2301,7 @@ class _CobolLexerPure:
         if not any("&" in line for line in self.lines):
             return
         merged: list[Token] = []
-        last_index = -1  # index in *merged* of the last non-NEWLINE token
+        last_index = -1  # index in *merged* of the last non-NEWLINE, non-COMMENT token
         for token in tokens:
             prev = merged[last_index] if last_index >= 0 else None
             if (
@@ -2298,7 +2327,9 @@ class _CobolLexerPure:
                     )
                     continue
             merged.append(token)
-            if token.type != TokenType.NEWLINE:
+            # A line break or an inline ``*>`` comment may sit between the
+            # two literals; neither ends the run.
+            if token.type not in (TokenType.NEWLINE, TokenType.COMMENT):
                 last_index = len(merged) - 1
         tokens[:] = merged
 
@@ -2355,7 +2386,7 @@ class _CobolLexerPure:
 
 
 def _fixed_format_comment_tokens(
-    physical_lines: list[str], normalized: str
+    physical_lines: list[str], normalized: str, *, debug_lines_as_comments: bool = True
 ) -> list[Token]:
     """Recover COMMENT tokens for comment lines dropped by normalization.
 
@@ -2368,13 +2399,21 @@ def _fixed_format_comment_tokens(
     produced it (they correspond 1:1, in order), and builds COMMENT tokens
     whose line numbers use the same (normalized) coordinate system as the
     tokens lexed from *normalized* — so the two streams interleave
-    consistently.
+    consistently. With *debug_lines_as_comments* False -- the
+    normalization compiled the ``D`` lines as code -- they are not comments.
     """
     # Deferred import: keeping preprocess out of module scope avoids import
     # cycles (same rationale as the tokenize helper below). The constant is
     # the shared home for the comment-indicator set — see _normalize.py.
     from ._source_directive import free_format_flags
     from .preprocess import ALL_COMMENT_INDICATORS
+    from .preprocess._normalize import DEBUG_INDICATORS
+
+    comment_indicators = (
+        ALL_COMMENT_INDICATORS
+        if debug_lines_as_comments
+        else ALL_COMMENT_INDICATORS - DEBUG_INDICATORS
+    )
 
     physical = [raw.rstrip("\n").expandtabs(8) for raw in physical_lines]
     # Lines after ``>>SOURCE FORMAT IS FREE`` have no indicator column: a
@@ -2392,7 +2431,7 @@ def _fixed_format_comment_tokens(
             # Page eject — same token value the legacy fixed-format
             # lexer path emitted.
             return "/ PAGE BREAK"
-        if indicator in ALL_COMMENT_INDICATORS:
+        if indicator in comment_indicators:
             return line[_FF_INDICATOR:_FF_LINE_END].rstrip()
         return None
 
@@ -2483,6 +2522,7 @@ def _tokenize_source(
     free_form: bool = False,
     keep_comments: bool = True,
     preprocess_fixed: bool | None = None,
+    debug_lines: bool = False,
 ) -> tuple[list[Token], list[LexerError], list[str]]:
     """Tokenize *source* on the same pipeline ``parse_cobol`` uses (M6).
 
@@ -2529,7 +2569,9 @@ def _tokenize_source(
             # never-raising normalization stands in, mirroring
             # CobolParser.parse under COLLECT_ALL.
             normalized, error = normalize_with_recovery(
-                physical_lines, normalize_warnings
+                physical_lines,
+                normalize_warnings,
+                debug_lines_as_comments=not debug_lines,
             )
             assert normalized is not None  # recover=True always yields text
             if error is not None:
@@ -2541,7 +2583,11 @@ def _tokenize_source(
             if keep_comments:
                 tokens = _merge_comment_tokens(
                     tokens,
-                    _fixed_format_comment_tokens(physical_lines, normalized),
+                    _fixed_format_comment_tokens(
+                        physical_lines,
+                        normalized,
+                        debug_lines_as_comments=not debug_lines,
+                    ),
                 )
             errors.extend(lexer.get_errors())
             return tokens, errors, normalize_warnings + lexer.get_warnings()

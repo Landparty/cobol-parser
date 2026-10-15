@@ -371,3 +371,107 @@ class TestSectionPerformRecursion:
            STOP RUN.
 """)
         assert RecursionRiskAnalyzer().analyze(ast).risks == []
+
+
+def _risks_for(procedure: str, extra_data: str = "", env: str = "") -> list:
+    source = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. LOOPS.\n"
+        f"{env}"
+        "       DATA DIVISION.\n"
+        f"{extra_data}"
+        "       WORKING-STORAGE SECTION.\n"
+        "       01 WS-X PIC 9 VALUE 0.\n"
+        "       01 WS-EOF PIC X VALUE 'N'.\n"
+        "       PROCEDURE DIVISION.\n"
+        f"{procedure}"
+    )
+    result = parse_cobol(source)
+    assert result.ast is not None
+    return RecursionRiskAnalyzer().analyze(result.ast).risks
+
+
+class TestEscapeIsCheckedPerComponent:
+    """Issue #393: escape is judged over the strongly connected component,
+    and a SORT RETURN does not count as leaving the program."""
+
+    def test_overlapping_goto_loops_with_no_exit_are_high(self) -> None:
+        risks = _risks_for(
+            "       P1. ADD 1 TO WS-X\n"
+            "           IF WS-X = 1 GO TO P2 END-IF\n"
+            "           GO TO P3.\n"
+            "       P2. GO TO P1.\n"
+            "       P3. GO TO P1.\n"
+            "       P4. STOP RUN.\n"
+        )
+        assert sorted(r.procedures for r in risks) == [["P1", "P2"], ["P1", "P3"]]
+        assert all(r.severity == "HIGH" and not r.has_escape for r in risks)
+
+    def test_overlapping_goto_loops_with_an_exit_stay_medium(self) -> None:
+        risks = _risks_for(
+            "       P1. ADD 1 TO WS-X\n"
+            "           IF WS-X = 1 GO TO P2 END-IF\n"
+            "           GO TO P3.\n"
+            "       P2. GO TO P1.\n"
+            "       P3. IF WS-X = 9 GO TO P4 END-IF\n"
+            "           GO TO P1.\n"
+            "       P4. STOP RUN.\n"
+        )
+        assert len(risks) == 2
+        assert all(r.severity == "MEDIUM" and r.has_escape for r in risks)
+
+    def test_terminator_elsewhere_in_component_is_an_escape(self) -> None:
+        risks = _risks_for(
+            "       P1. ADD 1 TO WS-X\n"
+            "           IF WS-X = 1 GO TO P2 END-IF\n"
+            "           GO TO P3.\n"
+            "       P2. GO TO P1.\n"
+            "       P3. IF WS-X = 9 STOP RUN END-IF\n"
+            "           GO TO P1.\n"
+        )
+        assert len(risks) == 2
+        assert all(r.severity == "MEDIUM" for r in risks)
+
+    def test_sort_return_is_not_a_program_exit(self) -> None:
+        risks = _risks_for(
+            "       M. SORT SW ON ASCENDING KEY SW-REC\n"
+            "              INPUT PROCEDURE IS I1 OUTPUT PROCEDURE IS O1\n"
+            "          STOP RUN.\n"
+            "       I1. RELEASE SW-REC.\n"
+            "       O1. RETURN SW AT END MOVE 'Y' TO WS-EOF END-RETURN\n"
+            "           GO TO O2.\n"
+            "       O2. DISPLAY SW-REC\n"
+            "           GO TO O1.\n",
+            extra_data="       FILE SECTION.\n       SD SW.\n       01 SW-REC PIC X(10).\n",
+            env=(
+                "       ENVIRONMENT DIVISION.\n"
+                "       INPUT-OUTPUT SECTION.\n"
+                "       FILE-CONTROL.\n"
+                "           SELECT SW ASSIGN TO SORTWK.\n"
+            ),
+        )
+        assert [r.procedures for r in risks] == [["O1", "O2"]]
+        assert risks[0].severity == "HIGH"
+        assert risks[0].has_escape is False
+
+    def test_sort_return_loop_with_at_end_exit_stays_medium(self) -> None:
+        risks = _risks_for(
+            "       M. SORT SW ON ASCENDING KEY SW-REC\n"
+            "              INPUT PROCEDURE IS I1 OUTPUT PROCEDURE IS O1 THRU O3\n"
+            "          STOP RUN.\n"
+            "       I1. RELEASE SW-REC.\n"
+            "       O1. RETURN SW AT END GO TO O3 END-RETURN\n"
+            "           GO TO O2.\n"
+            "       O2. DISPLAY SW-REC\n"
+            "           GO TO O1.\n"
+            "       O3. EXIT.\n",
+            extra_data="       FILE SECTION.\n       SD SW.\n       01 SW-REC PIC X(10).\n",
+            env=(
+                "       ENVIRONMENT DIVISION.\n"
+                "       INPUT-OUTPUT SECTION.\n"
+                "       FILE-CONTROL.\n"
+                "           SELECT SW ASSIGN TO SORTWK.\n"
+            ),
+        )
+        assert [r.procedures for r in risks] == [["O1", "O2"]]
+        assert risks[0].severity == "MEDIUM"

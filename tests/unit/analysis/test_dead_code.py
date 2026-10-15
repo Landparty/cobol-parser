@@ -2145,3 +2145,293 @@ class TestThruRangeSkippedMembers:
         )
         dead = [i.name for i in DeadCodeAnalyzer().analyze(prog).dead_items]
         assert dead == ["IN-STUB"]
+
+
+def _dead(source: str) -> list[str]:
+    result = parse_cobol(source, filename="transitive.cbl")
+    assert result.ast is not None
+    return [item.name for item in DeadCodeAnalyzer().analyze(result.ast).dead_items]
+
+
+class TestTransitiveDeadCode:
+    """Dead means unreachable, not merely unreferenced (issue #384): a
+    reference made from dead code never runs, so it keeps nothing alive."""
+
+    HEAD = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TRANS.
+       PROCEDURE DIVISION.
+"""
+
+    def test_paragraphs_performed_only_from_dead_code_are_dead(self) -> None:
+        source = self.HEAD + """\
+       0000-MAIN.
+           PERFORM 1000-INIT
+           PERFORM 2000-PROCESS
+           STOP RUN.
+       1000-INIT.
+           DISPLAY 'I'.
+       2000-PROCESS.
+           DISPLAY 'P'.
+       8000-OLD-REPORT.
+           PERFORM 8100-OLD-HEADER
+           PERFORM 8200-OLD-DETAIL.
+       8100-OLD-HEADER.
+           DISPLAY 'H'.
+       8200-OLD-DETAIL.
+           DISPLAY 'D'.
+"""
+        assert _dead(source) == [
+            "8000-OLD-REPORT",
+            "8100-OLD-HEADER",
+            "8200-OLD-DETAIL",
+        ]
+
+    def test_dead_chain_is_followed_through_every_hop(self) -> None:
+        source = self.HEAD + """\
+       0000-MAIN.
+           STOP RUN.
+       A-PARA.
+           GO TO B-PARA.
+       B-PARA.
+           PERFORM C-PARA
+           GO TO D-PARA.
+       C-PARA.
+           DISPLAY 'C'.
+       D-PARA.
+           STOP RUN.
+"""
+        assert _dead(source) == ["A-PARA", "B-PARA", "C-PARA", "D-PARA"]
+
+    def test_dead_cycle_keeps_itself_dead(self) -> None:
+        source = self.HEAD + """\
+       0000-MAIN.
+           STOP RUN.
+       A-PARA.
+           PERFORM B-PARA
+           STOP RUN.
+       B-PARA.
+           PERFORM A-PARA.
+"""
+        assert _dead(source) == ["A-PARA", "B-PARA"]
+
+    def test_live_multi_hop_chain_stays_live(self) -> None:
+        source = self.HEAD + """\
+       0000-MAIN.
+           PERFORM A-PARA
+           STOP RUN.
+       A-PARA.
+           PERFORM B-PARA.
+       B-PARA.
+           GO TO C-PARA.
+       C-PARA.
+           PERFORM D-PARA THRU E-PARA.
+       D-PARA.
+           DISPLAY 'D'.
+       E-PARA.
+           EXIT.
+"""
+        assert _dead(source) == []
+
+    def test_alter_in_dead_code_redirects_nothing(self) -> None:
+        source = self.HEAD + """\
+       0000-MAIN.
+           GO TO SWITCH-PARA.
+       SWITCH-PARA.
+           GO TO END-PARA.
+       END-PARA.
+           STOP RUN.
+       DEAD-PARA.
+           ALTER SWITCH-PARA TO PROCEED TO NEW-PARA.
+       NEW-PARA.
+           STOP RUN.
+"""
+        assert _dead(source) == ["DEAD-PARA", "NEW-PARA"]
+
+    def test_dead_sections_are_followed_too(self) -> None:
+        source = self.HEAD + """\
+       MAIN-SEC SECTION.
+       MAIN-PARA.
+           PERFORM LIVE-SEC
+           STOP RUN.
+       LIVE-SEC SECTION.
+       LIVE-PARA.
+           DISPLAY 'L'.
+       OLD-SEC SECTION.
+       OLD-PARA.
+           PERFORM OLDER-SEC.
+       OLDER-SEC SECTION.
+       OLDER-PARA.
+           DISPLAY 'O'.
+"""
+        assert _dead(source) == ["OLD-SEC", "OLD-PARA", "OLDER-SEC", "OLDER-PARA"]
+
+    def test_declarative_references_count_as_reachable(self) -> None:
+        source = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DECL.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-FILE ASSIGN TO 'IN'.
+       DATA DIVISION.
+       FILE SECTION.
+       FD IN-FILE.
+       01 IN-REC PIC X(10).
+       PROCEDURE DIVISION.
+       DECLARATIVES.
+       ERR-SEC SECTION.
+           USE AFTER ERROR PROCEDURE ON IN-FILE.
+       ERR-PARA.
+           PERFORM LOG-ERROR.
+       END DECLARATIVES.
+       MAIN-SEC SECTION.
+       MAIN-PARA.
+           STOP RUN.
+       LOG-SEC SECTION.
+       LOG-ERROR.
+           DISPLAY 'E'.
+"""
+        assert _dead(source) == []
+
+    def test_entry_paragraph_references_count_as_reachable(self) -> None:
+        source = self.HEAD + """\
+       0000-MAIN.
+           STOP RUN.
+       ALT-PARA.
+           ENTRY 'ALTENT'
+           PERFORM HELPER
+           GOBACK.
+       HELPER.
+           DISPLAY 'H'.
+"""
+        assert _dead(source) == []
+
+    def test_nist_paragraphs_behind_dead_code_are_dead(self, samples_dir) -> None:
+        """IC222A / IC227A: every paragraph program-flow finds unreachable
+        (it over-approximates reachability) is now reported dead too."""
+        examples = samples_dir.parent.parent / "examples" / "cobol"
+        for name in ("IC222A.CBL", "IC227A.CBL"):
+            path = examples / name
+            result = parse_cobol(path.read_text(errors="replace"), filename=name)
+            assert result.ast is not None
+            dead = {i.name for i in DeadCodeAnalyzer().analyze(result.ast).dead_items}
+            unreachable = set(
+                ProgramFlowAnalyzer().analyze(result.ast).unreachable_nodes
+            )
+            assert unreachable, name
+            assert unreachable <= dead, (name, sorted(unreachable - dead))
+
+
+class TestThruRangeNestedAndSectionExits:
+    """Review follow-ups on issue #381's range walk."""
+
+    def test_goto_inner_range_end_runs_on_in_outer_range(self) -> None:
+        """``GO TO P1-EXIT`` returns from ``PERFORM P1 THRU P1-EXIT`` but,
+        inside ``PERFORM P0 THRU P2-EXIT``, lands in P1-EXIT and falls into
+        P2: P2 is live."""
+        source = _thru_program("""\
+       P-MAIN.
+           PERFORM P0 THRU P2-EXIT
+           PERFORM P1 THRU P1-EXIT
+           STOP RUN.
+       P0.
+           DISPLAY 'P0'.
+       P1.
+           IF WS-X = 1 GO TO P1-EXIT END-IF
+           DISPLAY 'P1'
+           GO TO P1-EXIT.
+       P1-EXIT.
+           EXIT.
+       P2.
+           DISPLAY 'RUNS'.
+       P2-EXIT.
+           EXIT.
+""")
+        assert _dead_names(source) == []
+
+    def test_nested_ranges_still_report_the_skipped_stub(self) -> None:
+        source = _thru_program("""\
+       P-MAIN.
+           PERFORM P0 THRU P2-EXIT
+           STOP RUN.
+       P0.
+           GO TO P1-EXIT.
+       P0-OLD.
+           DISPLAY 'NEVER'.
+       P1-EXIT.
+           EXIT.
+       P2.
+           DISPLAY 'RUNS'.
+       P2-EXIT.
+           EXIT.
+""")
+        assert _dead_names(source) == ["P0-OLD"]
+
+    def test_perform_in_skipped_member_keeps_nothing_alive(self) -> None:
+        """A PERFORM written in a skipped range member never runs, so its
+        target is dead too (the walk runs inside the reachability worklist)."""
+        source = _thru_program("""\
+       P-MAIN.
+           PERFORM A-START THRU A-EXIT
+           STOP RUN.
+       A-START.
+           GO TO A-EXIT.
+       A-OLD.
+           PERFORM ONLY-FROM-OLD.
+       A-EXIT.
+           EXIT.
+       ONLY-FROM-OLD.
+           DISPLAY 'NEVER'.
+""")
+        assert _dead_names(source) == ["A-OLD", "ONLY-FROM-OLD"]
+
+    def test_perform_in_reached_member_keeps_its_target_alive(self) -> None:
+        source = _thru_program("""\
+       P-MAIN.
+           PERFORM A-START THRU A-EXIT
+           STOP RUN.
+       A-START.
+           DISPLAY 'START'.
+       A-MID.
+           PERFORM HELPER.
+       A-EXIT.
+           EXIT.
+       HELPER.
+           DISPLAY 'HELP'.
+""")
+        assert _dead_names(source) == []
+
+    def test_exit_section_resumes_at_next_section_of_range(self) -> None:
+        """EXIT SECTION leaves only its own section: inside ``PERFORM S1 THRU
+        S3`` control carries on at S2. Pinned at the walk itself, so it holds
+        whether or not EXIT SECTION counts as a terminator."""
+        source = _thru_program("""\
+       S0 SECTION.
+       S0-A.
+           PERFORM S1 THRU S3
+           STOP RUN.
+       S1 SECTION.
+       S1-A.
+           EXIT SECTION.
+       S1-B.
+           DISPLAY 'B'.
+       S2 SECTION.
+       S2-A.
+           DISPLAY 'S2'.
+       S3 SECTION.
+       S3-A.
+           EXIT.
+""")
+        result = parse_cobol(source, filename="exitsec.cbl")
+        assert result.ast is not None
+        analyzer = DeadCodeAnalyzer()
+        # Simulate EXIT SECTION terminating its paragraph (issue #454's
+        # semantics), the case where the walk would otherwise stop.
+        original = analyzer._terminates_uncached
+        analyzer._terminates_uncached = lambda name: (  # type: ignore[method-assign]
+            name == "S1-A" or original(name)
+        )
+        dead = [i.name for i in analyzer.analyze(result.ast).dead_items]
+        assert "S2" not in dead
+        assert "S2-A" not in dead

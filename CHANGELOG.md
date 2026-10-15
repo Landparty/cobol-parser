@@ -160,6 +160,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`dead-code` walks `PERFORM A THRU C` ranges instead of marking every
+  member live** (#381). An obsolete stub inside `PERFORM 1000-PROC THRU
+  1000-EXIT` that every path jumps over with `GO TO 1000-EXIT` is now
+  reported dead, within one section or across sections. A range member is
+  live when the one before it runs on into it, or when a GO TO / ALTER /
+  ENTRY / CICS HANDLE lands on it (a nested range's `nnnn-EXIT` included);
+  an `EXIT SECTION` inside the range carries on at the next section. The walk
+  runs inside the transitive-reachability worklist, so a PERFORM written in
+  a skipped member keeps nothing alive.
+
+* **`codebase-graph` now records `EXEC CICS LINK` / `XCTL PROGRAM(...)` edges**
+  (#315). They were skipped with no `unresolved` note, so a CICS program's
+  `calls` read as empty and known. They are now `call_edges` with a new
+  `kind` field (`call` / `cics-link` / `cics-xctl`; every existing edge is
+  `call`), so `callers_of` / `callees_of` see them unchanged. `PROGRAM('X')`
+  is a static edge; `PROGRAM(WS-X)` resolves through `DynamicCallAnalyzer`
+  like `CALL WS-X`, or lands in `unresolved`. `cycles()` leaves XCTL edges
+  out (the `MENU XCTL ORDER XCTL MENU` loop is not recursion). DOT/Mermaid
+  label them `CICS LINK` / `CICS XCTL`. `ExecCicsStatement.literal_options`
+  is new: the option keywords whose argument was one quoted literal, which
+  `options` (unquoted) cannot say.
+
 * **`gen-fixtures --scenarios all`: error-status and empty-input scenarios no
   longer assert the normal path** (#318). A scenario with a status override
   (OPEN status 35, READ INVALID KEY 23, CALL ON EXCEPTION, SQLCODE 100) now
