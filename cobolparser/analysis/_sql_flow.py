@@ -321,11 +321,18 @@ def _from_tables(from_body: str) -> tuple[dict[str, str], list[str], list[str]]:
         if piece.startswith("("):
             caveats.append("a sub-select in FROM is not traced")
             continue
-        words = piece.replace(" AS ", " ").split()
-        table = re.sub(r"\s*\.\s*", ".", words[0])
+        if re.match(r"(?:FINAL|NEW|OLD)\s+TABLE\s*\(", piece):
+            # SELECT ... FROM FINAL TABLE (INSERT ...): the rows come from
+            # the data-change statement inside, not from a table named FINAL.
+            caveats.append("a data-change table reference in FROM is not traced")
+            continue
         if re.match(r"TABLE\s*\(", piece):
             caveats.append("a table function in FROM is not traced")
             continue
+        # ``BANK . ACCOUNT`` is one qualified name: join it before splitting
+        # the piece into table and correlation name.
+        words = re.sub(r"\s*\.\s*", ".", piece).replace(" AS ", " ").split()
+        table = words[0]
         tables.append(table)
         aliases[table] = table
         aliases[table.split(".")[-1]] = table
