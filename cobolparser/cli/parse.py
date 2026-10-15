@@ -226,6 +226,9 @@ def _add_output_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+_DEFAULT_PROFILE_TOP_N = 20
+
+
 def _add_profiling_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--profile",
@@ -235,16 +238,35 @@ def _add_profiling_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--profile-top-n",
         type=int,
-        default=20,
+        default=_DEFAULT_PROFILE_TOP_N,
         metavar="N",
-        help="Number of top functions to include in profiling output (default: 20)",
+        help="Number of top functions to include in profiling output "
+        f"(default: {_DEFAULT_PROFILE_TOP_N}; implies --profile)",
     )
     parser.add_argument(
         "--profile-output",
         default=None,
         metavar="PATH",
-        help="Write cProfile binary to PATH (.prof for single file, directory for batch)",
+        help="Write cProfile binary to PATH (.prof for single file, directory "
+        "for batch; implies --profile)",
     )
+
+
+def _profiling_requested(args: argparse.Namespace) -> bool:
+    """Whether to profile: ``--profile``, or a flag only profiling reads.
+
+    ``--profile-output`` (or a non-default ``--profile-top-n``) on its own
+    used to do nothing and say nothing (#328); asking for the profile's
+    output is asking for the profile. ``args.profile`` is set too, so the
+    callers' "metrics only in --format json" warnings see the same answer.
+    """
+    if (
+        getattr(args, "profile_output", None) is not None
+        or getattr(args, "profile_top_n", _DEFAULT_PROFILE_TOP_N)
+        != _DEFAULT_PROFILE_TOP_N
+    ):
+        args.profile = True
+    return bool(getattr(args, "profile", False))
 
 
 def _get_error_recovery(args: argparse.Namespace) -> ErrorRecoveryMode:
@@ -432,9 +454,13 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
 
     copybook_paths = getattr(args, "copybook_path", [])
     defines = _parse_defines(getattr(args, "define", []))
-    enable_profiling = getattr(args, "profile", False)
-    top_n = getattr(args, "profile_top_n", 20)
+    enable_profiling = _profiling_requested(args)
+    top_n = getattr(args, "profile_top_n", _DEFAULT_PROFILE_TOP_N)
     prof_output = getattr(args, "profile_output", None)
+    if prof_output is not None and os.path.isdir(prof_output):
+        # Checked before the parse: cProfile's dump_stats() would only raise
+        # IsADirectoryError after all the work was done.
+        _fail(f"--profile-output {prof_output} is a directory; give a .prof file path")
 
     # With copybook paths, conditional compilation is left to the expander
     # (process_conditionals below): run here first, it consumed the program's
@@ -739,13 +765,22 @@ def _cmd_batch(args: argparse.Namespace) -> None:
     dialect = _DIALECT_MAP[args.dialect]
     error_recovery = _get_error_recovery(args)
 
-    enable_profiling = getattr(args, "profile", False)
-    top_n = getattr(args, "profile_top_n", 20)
+    enable_profiling = _profiling_requested(args)
+    top_n = getattr(args, "profile_top_n", _DEFAULT_PROFILE_TOP_N)
     prof_output = getattr(args, "profile_output", None)
 
     if prof_output is not None and prof_output.endswith(".prof"):
         _fail(
             "--profile-output in batch mode must be a directory path, not a .prof file"
+        )
+    if (
+        prof_output is not None
+        and os.path.exists(prof_output)
+        and not os.path.isdir(prof_output)
+    ):
+        _fail(
+            f"--profile-output {prof_output} is a file; batch mode writes "
+            "one .prof per input into a directory"
         )
 
     if args.workers is not None and args.workers < 1:

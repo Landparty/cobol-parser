@@ -732,6 +732,8 @@ the existing `TestNewSubcommandsRegistered` and
 same registration/`-o`-silences-stdout coverage the other five analyzer
 subcommands already get.
 
+2026-10-15 (issue #328): +7 in new `tests/unit/cli/test_profile_output_flags.py` (`--profile-output` alone writes the `.prof` and embeds `profiling` for `parse`, `dead-code` and `batch`; a non-default `--profile-top-n` alone turns profiling on; no flag still means no `profiling` key; a single-file `--profile-output` naming a directory, and a batch one naming a regular file, are one-line `error:`s with exit 1). Failed before the fix (flags ignored; `IsADirectoryError` / `FileExistsError` tracebacks).
+
 2026-10-15 (issue #327): +4 in new `tests/unit/cli/test_gen_fixtures_cli.py::TestGenFixturesInvalidOptions` (`gen-fixtures --rows -1`, `--max-occurs 0`, `--max-occurs -1`, and `data: {rows: -5}` in a discovered `cobol.yml` each exit 1 with exactly one `error:` line). Failed before the fix (the `ValueError` from `DataGeneratorOptions` escaped).
 
 2026-10-15 (issue #326): +1 in new `tests/unit/cli/test_jcl_cli.py::TestMissingJclParser` (with `jclparser` blocked in `sys.modules`, `jcl` exits 1 with a one-line `error:` carrying the `pip install 'cobol-parser[jcl]'` hint and no traceback). Failed before the fix (the `ImportError` escaped).

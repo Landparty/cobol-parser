@@ -193,7 +193,11 @@ a specific subtree. `--errors` shows parse errors only. `--stats` appends
 `MoveStatement`), equivalent to `ast.find_all_by_type()`. `--profile` /
 `--profile-top-n` / `--profile-output` wrap the parse in a `ProfilerContext`
 (see [parser.md](parser.md)) and embed timing/memory metrics in the output, or
-write a binary `.prof` to `PATH`.
+write a binary `.prof` to `PATH`. `--profile-output` (or a `--profile-top-n`
+other than the default 20) implies `--profile` -- on its own it used to be
+silently ignored (#328) -- and a `--profile-output` that is an existing
+directory is a one-line `error:` (exit 1) before the parse, not an
+`IsADirectoryError` traceback after it.
 
 **Nested profilers (issue #274, 2026-10-05).** A `ProfilerContext` entered
 while another profiler is active (an outer `ProfilerContext`, a bare
@@ -792,7 +796,9 @@ positionally and/or collected via repeatable `--glob` patterns (e.g.
 count). `--encoding` sets file read encoding (default `utf-8`). Prints one
 JSON result per file. `--errors` includes parse errors/warnings per file;
 `--stats` appends per-file `ParseStatistics`. `--profile-output` in batch mode
-must be a directory (one `.prof` per file), not a single file path.
+must be a directory (one `.prof` per file), not a single file path: a `.prof`
+name or an existing regular file is a one-line `error:` (exit 1). As for
+`parse`, `--profile-output` / a non-default `--profile-top-n` imply `--profile`.
 
 ## IO-Sequence
 
@@ -1282,3 +1288,8 @@ See [jcl.md](jcl.md).
 * `gen-fixtures --rows -1` / `--max-occurs 0` / `data.rows: -5` in
   `cobol.yml` print a one-line `error:` and exit 1 instead of a
   `ValueError` traceback (#327).
+* `--profile-output` (and a non-default `--profile-top-n`) now imply
+  `--profile` on every subcommand that takes them (they were silently
+  ignored without it), and a single-file `--profile-output` naming a
+  directory -- or a batch one naming a regular file -- is a one-line
+  `error:` instead of a traceback (#328).
