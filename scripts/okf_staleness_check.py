@@ -28,6 +28,7 @@ from pathlib import Path
 OKF_MAP = [
     ("cobolparser/lexer.py", [".okf/lexer.md"]),
     ("cobolparser/_lexer_fast.pyx", [".okf/lexer.md"]),
+    ("cobolparser/_accel.py", [".okf/lexer.md", ".okf/parser.md"]),
     ("cobolparser/_literals.py", [".okf/lexer.md"]),
     ("cobolparser/_lines.py", [".okf/lexer.md", ".okf/preprocessing.md"]),
     ("cobolparser/_source_directive.py", [".okf/preprocessing.md"]),

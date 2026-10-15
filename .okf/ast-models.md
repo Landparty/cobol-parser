@@ -3,7 +3,7 @@ type: Module
 title: AST Models
 description: ASTNode hierarchy — CobolProgram, data items, statement nodes, to_dict()/to_json() serialisation.
 tags: [ast, models, cobol-program, data-items, statements]
-timestamp: 2026-10-05T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
@@ -80,7 +80,13 @@ structural skeleton (issue #273, 2026-10-05):
   EXTERNAL/GLOBAL/VOLATILE, BYTE-LENGTH, DYNAMIC LENGTH, OBJECT REFERENCE,
   GROUP-USAGE), subordinate items, level-88 `condition_names` (placed before a
   group's subordinate items, where a group's 88s sit in source) and each
-  section's level-66 `renames_items`.
+  section's level-66 `renames_items`; every FILE-CONTROL `SelectStatement`
+  with all its clauses (organization, access mode, record / alternate /
+  relative keys, FILE STATUS, ...) -- a SELECT dict is flat, so
+  `_select_from()` rebuilds it whole and `ProgramLayoutIndex.file_facts()` of
+  a round-tripped program matches the original (#346, 2026-10-15; SELECTs
+  used to be dropped *and* counted as PROCEDURE DIVISION statements in the
+  warning).
 * **Dropped:** every PROCEDURE DIVISION statement -- there is no generic way to
   rebuild ~100 statement node types from their dicts -- so restored paragraphs
   are empty. Whenever any were dropped, `from_json` emits
@@ -90,7 +96,7 @@ structural skeleton (issue #273, 2026-10-05):
   `usage_explicit` -- inferred as "usage is neither DISPLAY nor what the
   PICTURE implies") cannot come back.
 * Verified over 294 corpus programs: `from_json(p.to_json()).to_dict()` equals
-  `p.to_dict()` with paragraph `statements` emptied, apart from the derived
+  `p.to_dict()` with PROCEDURE DIVISION paragraph `statements` emptied, apart from the derived
   `metadata.statistics`.
 
 Serialization fidelity notes (2026-07-07):
@@ -329,6 +335,16 @@ the new helpers. Group layout follows `layout_offsets._layout_siblings`'
 member); level-66 and level-77 children are excluded for the same reasons
 that module excludes them.
 
+**Group vs. elementary (#345, 2026-10-15):** `is_elementary_item()` is True
+for a childless item that has a PICTURE *or* a usage that never takes one
+(`_storage.PICTURELESS_USAGES`: `COMP-1`/`COMP-2` and their
+`COMPUTATIONAL-n` spellings, `INDEX`, the `POINTER` family, `OBJECT
+REFERENCE`). It used to require a PICTURE, so those items were neither
+group nor elementary and `get_elementary_items()` (and `to_dict()`'s
+`is_elementary_item`) left them out. A childless item with neither (e.g. a
+group whose subordinates are missing) is still neither -- deliberately not
+guessed elementary.
+
 `_storage.py` sits at the package root, next to `_errors.py` and for the same
 reason: `cobolparser.generators.data.__init__` eagerly imports
 `program_layout`, which imports `cobolparser.models`, so a model importing
@@ -411,6 +427,11 @@ takes the type of its main verb, and `tables` lists the base tables the CTE
 bodies and main statement read -- never the CTE names themselves
 (`_split_common_table_expressions()`). Before 2026-09-27 both were
 `"UNKNOWN"` with no tables.
+
+`TRUNCATE [TABLE] t [DROP|REUSE STORAGE] ... [IMMEDIATE]` has
+`sql_type == "TRUNCATE"` (`SQLStatementType.TRUNCATE`) and `tables == [t]`
+(`_SQL_TRUNCATE_TABLE_RE`); the CRUD matrix marks `t` D. Before issue #341
+(2026-10-15) it was `"UNKNOWN"` with no tables.
 
 `into_variables` / `DynamicSQLStatement.using_variables` list every host
 variable of the INTO / USING list, indicators included; before 2026-09-28

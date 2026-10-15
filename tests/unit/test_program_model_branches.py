@@ -443,3 +443,88 @@ class TestGetProcedures:
         result = parse_cobol(src)
         procs = result.ast.get_procedures()
         assert len(procs) >= 2
+
+
+class TestFromJsonSelectEntries:
+    """from_json rebuilds FILE-CONTROL SELECT entries (issue #346)."""
+
+    _SRC = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. SELPROG.\n"
+        "       ENVIRONMENT DIVISION.\n"
+        "       INPUT-OUTPUT SECTION.\n"
+        "       FILE-CONTROL.\n"
+        "           SELECT IN-FILE ASSIGN TO INDD\n"
+        "               ORGANIZATION IS INDEXED\n"
+        "               ACCESS MODE IS DYNAMIC\n"
+        "               RECORD KEY IS IN-KEY\n"
+        "               ALTERNATE RECORD KEY IS IN-ALT WITH DUPLICATES\n"
+        "               FILE STATUS IS WS-IN-STAT.\n"
+        "           SELECT OUT-FILE ASSIGN TO OUTDD\n"
+        "               ORGANIZATION IS RELATIVE\n"
+        "               RELATIVE KEY IS WS-REL.\n"
+        "       DATA DIVISION.\n"
+        "       FILE SECTION.\n"
+        "       FD IN-FILE.\n"
+        "       01 IN-REC.\n"
+        "          05 IN-KEY PIC X(5).\n"
+        "          05 IN-ALT PIC X(5).\n"
+        "       FD OUT-FILE.\n"
+        "       01 OUT-REC PIC X(10).\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "       01 WS-IN-STAT PIC XX.\n"
+        "       01 WS-REL PIC 9(4) COMP.\n"
+        "       PROCEDURE DIVISION.\n"
+        "       MAIN-PARA.\n"
+        "           CONTINUE.\n"
+    )
+
+    def _round_trip(self):
+        ast = parse_cobol(self._SRC).ast
+        with pytest.warns(LossyDeserializationWarning) as record:
+            restored = CobolProgram.from_json(ast.to_json())
+        return ast, restored, [str(w.message) for w in record]
+
+    def test_select_entries_survive_round_trip(self):
+        ast, restored, _ = self._round_trip()
+        env = "ENVIRONMENT"
+        assert restored.to_dict()["divisions"][env] == ast.to_dict()["divisions"][env]
+
+    def test_warning_counts_only_procedure_statements(self):
+        _, _, messages = self._round_trip()
+        assert len(messages) == 1
+        assert "dropped 1 PROCEDURE DIVISION statement(s) from 1 paragraph(s)" in (
+            messages[0]
+        )
+
+    def test_file_facts_match_after_round_trip(self):
+        from cobolparser.generators import ProgramLayoutIndex
+
+        ast, restored, _ = self._round_trip()
+        before = ProgramLayoutIndex.build(ast)
+        after = ProgramLayoutIndex.build(restored)
+        for name in ("IN-FILE", "OUT-FILE"):
+            b, a = before.file_facts(name), after.file_facts(name)
+            assert a is not None and b is not None
+            assert (a.organization, a.access_mode, a.record_key) == (
+                b.organization,
+                b.access_mode,
+                b.record_key,
+            )
+            assert a.alternate_keys == b.alternate_keys
+            assert a.relative_key == b.relative_key
+            assert a.file_status_field == b.file_status_field
+        assert after.file_facts("IN-FILE").organization == "INDEXED"
+        assert after.file_facts("OUT-FILE").relative_key == "WS-REL"
+
+    def test_select_only_program_emits_no_warning(self):
+        src = self._SRC.replace("       MAIN-PARA.\n           CONTINUE.\n", "")
+        ast = parse_cobol(src).ast
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", LossyDeserializationWarning)
+            restored = CobolProgram.from_json(ast.to_json())
+        assert restored.to_dict()["divisions"]["ENVIRONMENT"] == (
+            ast.to_dict()["divisions"]["ENVIRONMENT"]
+        )

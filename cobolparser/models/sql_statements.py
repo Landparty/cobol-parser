@@ -35,6 +35,10 @@ _SQL_FROM_TABLE_RE = re.compile(r"FROM\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
 _SQL_JOIN_TABLE_RE = re.compile(r"JOIN\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
 _SQL_INTO_TABLE_RE = re.compile(r"INTO\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
 _SQL_UPDATE_TABLE_RE = re.compile(r"UPDATE\s+" + _SQL_TABLE_NAME, re.IGNORECASE)
+# ``TRUNCATE [TABLE] name [DROP|REUSE STORAGE] ... [IMMEDIATE]`` (DB2 for z/OS).
+_SQL_TRUNCATE_TABLE_RE = re.compile(
+    r"^TRUNCATE\s+(?:TABLE\s+)?" + _SQL_TABLE_NAME, re.IGNORECASE
+)
 # A host-variable list (``INTO`` / ``USING``): each item is ``:hv``, optionally
 # qualified (``:REC.FIELD``) and optionally followed by its indicator
 # (``:hv:ind`` / ``:hv INDICATOR :ind``). The EXEC text collector writes no
@@ -622,6 +626,8 @@ class SQLStatementType:
     INSERT: ClassVar[str] = "INSERT"
     UPDATE: ClassVar[str] = "UPDATE"
     DELETE: ClassVar[str] = "DELETE"
+    #: ``TRUNCATE [TABLE] t``: deletes every row of its one table.
+    TRUNCATE: ClassVar[str] = "TRUNCATE"
     MERGE: ClassVar[str] = "MERGE"
     DECLARE_CURSOR: ClassVar[str] = "DECLARE CURSOR"
     DECLARE_TABLE: ClassVar[str] = "DECLARE TABLE"
@@ -1000,6 +1006,8 @@ class ExecSQLStatement(CobolStatement):
             return SQLStatementType.UPDATE
         elif upper_sql.startswith("DELETE"):
             return SQLStatementType.DELETE
+        elif re.match(r"TRUNCATE\b", upper_sql):
+            return SQLStatementType.TRUNCATE
         elif upper_sql.startswith("MERGE"):
             return SQLStatementType.MERGE
 
@@ -1067,6 +1075,9 @@ class ExecSQLStatement(CobolStatement):
 
         elif self._sql_type == SQLStatementType.DELETE:
             compiled_patterns.append(_SQL_FROM_TABLE_RE)
+
+        elif self._sql_type == SQLStatementType.TRUNCATE:
+            compiled_patterns.append(_SQL_TRUNCATE_TABLE_RE)
 
         elif self._sql_type == SQLStatementType.MERGE:
             # Tables read by a ``USING (SELECT ... FROM t)`` source.

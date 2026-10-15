@@ -107,8 +107,15 @@ class IMSDLICall:
 
     @property
     def primary_segment(self) -> str | None:
-        """First resolved segment name, or ``None`` if none could be resolved."""
-        return next((s for s in self.segment_names if s), None)
+        """The target segment: the one the call retrieves, inserts or replaces.
+
+        In DL/I the **last** SSA (or ``SEGMENT(...)`` option) names the
+        target; the earlier ones only qualify the path down to it. ``None``
+        when there is no segment, or when the last one could not be resolved
+        statically -- an earlier, resolved name is a parent, never the
+        target, so it is not reported in its place.
+        """
+        return self.segment_names[-1] if self.segment_names else None
 
 
 @dataclass

@@ -903,6 +903,30 @@ class TestPositiveCaseFindings:
         for call in data["dli_calls"]:
             assert required_fields.issubset(call.keys())
 
+    def test_ims_dli_is_ims_program_for_cbltdli_without_dlitcbl(self, capsys, tmp_path):
+        # Issue #398: CBLTDLI calls make an IMS program, ENTRY 'DLITCBL' or not.
+        src = tmp_path / "IMSNOENT.cbl"
+        src.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. IMSNOENT.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01  FUNC-GU             PIC X(4) VALUE 'GU  '.\n"
+            "       01  IO-AREA             PIC X(40).\n"
+            "       LINKAGE SECTION.\n"
+            "       01  IOPCB               PIC X(32).\n"
+            "       01  DBPCB               PIC X(32).\n"
+            "       PROCEDURE DIVISION USING IOPCB DBPCB.\n"
+            "       MAIN-LOGIC.\n"
+            "           CALL 'CBLTDLI' USING FUNC-GU DBPCB IO-AREA.\n"
+            "           GOBACK.\n"
+        )
+        _cmd_ims_dli(_make_args(str(src)))
+        data = json.loads(capsys.readouterr().out)
+        assert data["dli_call_count"] == 1
+        assert data["entry_points"] == []
+        assert data["is_ims_program"] is True
+
 
 # ---------------------------------------------------------------------------
 # --version via _build_parser() directly

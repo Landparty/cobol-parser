@@ -109,3 +109,25 @@ def test_host_var_name_qualification() -> None:
     assert host_var_name("REC.FIELD") == "FIELD OF REC"
     assert host_var_name(":REC.FIELD") == "FIELD OF REC"
     assert host_var_name(":ws-a") == "WS-A"
+
+
+class TestTableFunctionDetection:
+    """Issue #340: only ``TABLE(...)`` is a table function, not ``TABLE_*``."""
+
+    def test_table_prefixed_name_is_an_ordinary_table(self) -> None:
+        sql = "SELECT NAME INTO :WS-NAME FROM TABLE_CUST WHERE ID = :WS-ID"
+        result = analyze_sql(sql, {})
+        assert _flows(sql) == [("WS-NAME", "TABLE_CUST", "NAME", "in", "sql")]
+        assert _keys(sql) == [("WS-ID", "TABLE_CUST", "ID")]
+        assert result.caveats == []
+
+    def test_other_table_prefixed_names_are_traced(self) -> None:
+        for table in ("TABLES_CFG", "TABLEX"):
+            sql = f"SELECT V INTO :WS-V FROM {table}"
+            assert _flows(sql) == [("WS-V", table, "V", "in", "sql")]
+
+    def test_table_function_is_still_skipped(self) -> None:
+        for spelling in ("TABLE(UDF(:WS-A)) AS T", "TABLE (UDF(:WS-A)) T"):
+            result = analyze_sql(f"SELECT C INTO :WS-C FROM {spelling}", {})
+            assert result.flows == []
+            assert "a table function in FROM is not traced" in result.caveats

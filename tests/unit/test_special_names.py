@@ -183,3 +183,52 @@ def test_special_names_then_input_output():
     # Both sections should be present
     assert env_div.has_section("CONFIGURATION"), "CONFIGURATION section missing"
     assert env_div.has_section("INPUT-OUTPUT"), "INPUT-OUTPUT section missing"
+
+
+# ---------------------------------------------------------------------------
+# Separator commas / semicolons (issue #344)
+# ---------------------------------------------------------------------------
+
+
+def test_class_values_omit_separator_commas():
+    src = _program_with_special_names("    CLASS VOWEL IS 'A', 'E'; 'I'.")
+    result = parse_cobol(src, filename="test.cbl")
+    assert result.success, f"Parse errors: {result.errors}"
+    sn = _get_config_special_names(result)
+    assert sn["class_definitions"] == [{"name": "VOWEL", "ranges": ["A", "E", "I"]}]
+
+
+def test_class_thru_range_omits_separator_commas():
+    src = _program_with_special_names("    CLASS DIG IS '0' THRU '9', '-'.")
+    result = parse_cobol(src, filename="test.cbl")
+    sn = _get_config_special_names(result)
+    assert sn["class_definitions"][0]["ranges"] == ["0", "THRU", "9", "-"]
+
+
+def test_alphabet_values_omit_separator_commas():
+    src = _program_with_special_names("    ALPHABET MYALPHA IS 'A', 'B', 'C'.")
+    result = parse_cobol(src, filename="test.cbl")
+    sn = _get_config_special_names(result)
+    assert sn["alphabet_definitions"] == [
+        {"name": "MYALPHA", "values": ["A", "B", "C"]}
+    ]
+
+
+def test_comma_separated_symbolic_characters_keep_every_name():
+    src = _program_with_special_names("    SYMBOLIC CHARACTERS NUL, SOH ARE 1, 2.")
+    result = parse_cobol(src, filename="test.cbl")
+    sn = _get_config_special_names(result)
+    assert [(e["name"], e["ordinal"]) for e in sn["symbolic_characters"]] == [
+        ("NUL", 1),
+        ("SOH", 2),
+    ]
+
+
+def test_comma_between_symbolic_groups_and_next_clause():
+    src = _program_with_special_names(
+        "    SYMBOLIC CHARACTERS NUL IS 1, SOH IS 2, CLASS HEX IS 'A', 'F'."
+    )
+    result = parse_cobol(src, filename="test.cbl")
+    sn = _get_config_special_names(result)
+    assert [e["name"] for e in sn["symbolic_characters"]] == ["NUL", "SOH"]
+    assert sn["class_definitions"] == [{"name": "HEX", "ranges": ["A", "F"]}]

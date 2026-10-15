@@ -77,6 +77,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .._lines import split_source_lines
 from ..batch import BatchResult, parse_files, parse_files_with_copybooks
 from ..models.program import CobolProgram
 from ..models.statements.base import CobolStatement
@@ -129,6 +130,12 @@ CALL_KIND_CICS_XCTL = "cics-xctl"
 
 #: CICS commands that name another program to run, by :attr:`CallEdge.kind`.
 _CICS_TRANSFER_KINDS = {"LINK": CALL_KIND_CICS_LINK, "XCTL": CALL_KIND_CICS_XCTL}
+
+#: A data-item declaration (level number, then name) whose name carries an
+#: IBM ``:TAG:`` REPLACING placeholder, e.g. ``05 :Q:-AMT PIC 9(5).``
+_PLACEHOLDER_DECLARATION = re.compile(
+    r"(?:^|\s)\d{1,2}\s+([^\s.]*:[A-Z0-9_-]+:[^\s.]*)", re.IGNORECASE
+)
 
 #: Below this many files the sequential fast path in :func:`parse_files` beats
 #: paying process-spawn cost.
@@ -1475,10 +1482,24 @@ def _member_fields(member_path: str) -> tuple[list[str], str | None]:
     from ..generators.data.copybook import parse_copybook_records
     from ..models.data_items import CobolDataItem
 
+    # A ``:TAG:``-named item's real name only exists once a COPY ... REPLACING
+    # fills the tag in, so it is reported as a gap rather than silently left
+    # out (#356) -- whether or not the rest of the member parses.
+    placeholders = _placeholder_names(source)
+    placeholder_note = (
+        f"{member_path}: data item(s) {', '.join(placeholders)} are named "
+        "by REPLACING placeholders, so their names depend on each COPY "
+        "... REPLACING and are not listed in fields"
+        if placeholders
+        else None
+    )
+
     try:
         records = parse_copybook_records(source, filename=member_path)
     except Exception as exc:  # noqa: BLE001 -- a member that is not a record
         # layout (procedure-division text, say) is a reported gap, not a crash.
+        if placeholder_note is not None:
+            return [], placeholder_note
         return [], (
             f"{member_path}: data items could not be read "
             f"({type(exc).__name__}: {exc})"
@@ -1494,4 +1515,20 @@ def _member_fields(member_path: str) -> tuple[list[str], str | None]:
     # invention, not something the member contributes, so keep only names the
     # member's own text actually declares.
     declared = source.upper()
-    return sorted(name for name in names if name in declared), None
+    fields = sorted(name for name in names if name in declared)
+    # A ``:TAG:``-named item that does parse comes back under a generated
+    # ANONYMOUS-* name, which the filter above drops; the note says why.
+    return fields, placeholder_note
+
+
+def _placeholder_names(source: str) -> list[str]:
+    """``:TAG:``-placeholder data names a copybook declares, in source order."""
+    found: list[str] = []
+    for line in split_source_lines(source):
+        if len(line) > 6 and line[6] in "*/":
+            continue  # fixed-format comment line
+        for match in _PLACEHOLDER_DECLARATION.finditer(line):
+            name = match.group(1).upper()
+            if name not in found:
+                found.append(name)
+    return found

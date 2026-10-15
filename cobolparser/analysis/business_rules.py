@@ -109,6 +109,7 @@ from ..models.statements.data import (
 )
 from ..models.statements.io import IOReadStatement
 from ..models.statements.misc import ReturnStatement, SelectStatement
+from ._procedures import ProcedureEntry, ProcedureIndex
 from .dead_code import DeadCodeAnalyzer
 from .program_flow.condition_text import render_condition_text
 from .unused_variables import collect_declared_items
@@ -505,6 +506,8 @@ class BusinessRuleExtractor:
         self._raw_conditions = False
         #: (paragraph, rule, branch label) for every PERFORM / GO TO in an arm.
         self._invocations: list[tuple[str, BusinessRule, str]] = []
+        #: Every procedure of the PROCEDURE DIVISION, in source order.
+        self._procedures: list[ProcedureEntry] = []
 
     def analyze(self, ast: CobolProgram) -> BusinessRuleReport:
         """Extract the business rules of *ast* (one program unit)."""
@@ -515,10 +518,12 @@ class BusinessRuleExtractor:
         self._visited = set()
         self._raw_conditions = False
         self._invocations = []
+        self._procedures = []
 
         report = BusinessRuleReport(program_name=ast.program_name or "")
         if ast.procedure_division is None:
             return report
+        self._procedures = ProcedureIndex.build(ast.procedure_division).entries
 
         self._collect_declarations(ast)
         self._collect_technical_items(ast)
@@ -674,8 +679,7 @@ class BusinessRuleExtractor:
                 self._calculation(stmt, procedure, section, guards)
 
             if owner is not None:
-                target = self._invoked_procedure(stmt)
-                if target:
+                for target in self._invoked_procedures(stmt):
                     self._invocations.append((target, owner[0], owner[1]))
 
             if isinstance(stmt, PerformStatement):
@@ -958,6 +962,56 @@ class BusinessRuleExtractor:
         if isinstance(stmt, GoStatement) and stmt.target_paragraph:
             return stmt.target_paragraph.upper()
         return None
+
+    def _invoked_procedures(self, stmt: CobolStatement) -> list[str]:
+        """Every procedure *stmt* transfers control into.
+
+        A ``PERFORM A THRU C`` runs every procedure from A through C in
+        source order, and a ``GO TO A B DEPENDING ON N`` may land on any of
+        its targets.
+        """
+        if isinstance(stmt, GoStatement):
+            names = stmt.target_paragraphs or (
+                [stmt.target_paragraph] if stmt.target_paragraph else []
+            )
+            return list(dict.fromkeys(name.upper() for name in names))
+        target = self._invoked_procedure(stmt)
+        if target is None:
+            return []
+        if isinstance(stmt, PerformStatement) and stmt.thru_paragraph:
+            return self._thru_range(target, stmt.thru_paragraph.upper())
+        return [target]
+
+    def _thru_range(self, start: str, end: str) -> list[str]:
+        """The procedures a ``start THRU end`` range spans, in source order.
+
+        Like ``ProgramFlowAnalyzer``'s ``range_members``, but on the bare
+        names this extractor matches rules by. A section header crossed on
+        the way to a paragraph *inside* that section is left out: only that
+        section's paragraphs up to *end* run, not all of it. Unknown or
+        out-of-order endpoints give just the two endpoints.
+        """
+        if start == end:
+            return [start]
+        names = [entry.name for entry in self._procedures]
+        if start not in names or end not in names:
+            return [start, end]
+        i = names.index(start)
+        j = names.index(end)
+        if j < i:
+            return [start, end]
+        end_entry = self._procedures[j]
+        members: list[str] = []
+        for entry in self._procedures[i : j + 1]:
+            if (
+                entry.procedure_type == "SECTION"
+                and entry is not end_entry
+                and entry.name == end_entry.section
+            ):
+                continue
+            if entry.name not in members:
+                members.append(entry.name)
+        return members
 
     # ------------------------------------------------------------------
     # Rendering

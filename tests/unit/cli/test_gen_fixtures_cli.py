@@ -171,3 +171,34 @@ class TestGenFixturesErrors:
         # Should not raise.
         _run(monkeypatch, str(cbl_path), "--seed", "1", "--strict", "--compact")
         assert capsys.readouterr().out
+
+
+class TestGenFixturesInvalidOptions:
+    """#327: a bad row count / max-occurs is a usage error, not a traceback."""
+
+    @pytest.mark.parametrize(
+        ("flags", "message"),
+        [
+            (("--rows", "-1"), "rows must be non-negative"),
+            (("--max-occurs", "0"), "max_occurs must be at least 1"),
+            (("--max-occurs", "-1"), "max_occurs must be at least 1"),
+        ],
+    )
+    def test_bad_flag_is_a_one_line_error(self, monkeypatch, capsys, flags, message):
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, "--no-config", FILE_OPERATIONS, *flags)
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert err.strip() == f"error: {message}"
+
+    def test_negative_rows_in_project_config_is_a_one_line_error(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        program = os.path.abspath(FILE_OPERATIONS)
+        (tmp_path / "cobol.yml").write_text("data:\n  rows: -5\n")
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, program)
+        assert exc.value.code == 1
+        assert capsys.readouterr().err.strip() == "error: rows must be non-negative"

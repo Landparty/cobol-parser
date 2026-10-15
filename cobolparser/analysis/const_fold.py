@@ -520,6 +520,17 @@ class ConstantFoldResult:
     the same known value -- what the program emitted there."""
 
     known: dict[str, str] = field(default_factory=dict)
+    #: Every keyed READ of an INDEXED file (see :func:`keyed_read_key`),
+    #: keyed by ``(FILE-NAME, line)``: the value of each elementary leaf of
+    #: the key it reads by, the same at every pass of the walk over it, or
+    #: ``None`` when that is not knowable (a READ inside a branch or loop,
+    #: one the walk never reached, a key the program never set). A
+    #: successful keyed READ returns a record carrying exactly this key.
+    #: Not part of :meth:`to_dict` -- it feeds fixture generation, not the
+    #: bundle.
+    read_keys: dict[tuple[str, int | None], dict[str, str] | None] = field(
+        default_factory=dict
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {"known": dict(self.known)}
@@ -575,7 +586,9 @@ class ConstantFolder:
         if state.exhausted:
             # The walk was cut short, so sites past the cut were never
             # observed: no reported value could be shown to be the only one.
-            return ConstantFoldResult(known={})
+            return ConstantFoldResult(
+                known={}, read_keys=_read_key_values(ast, index, None)
+            )
 
         # A DISPLAY/WRITE site the walk never reached (code after a GO TO,
         # code only a GO TO reaches, a DECLARATIVES procedure, ...) may emit
@@ -604,7 +617,87 @@ class ConstantFolder:
             if resolved is None:
                 continue
             known[qname] = _render(first, resolved.spec)
-        return ConstantFoldResult(known=known)
+        return ConstantFoldResult(
+            known=known, read_keys=_read_key_values(ast, index, state)
+        )
+
+
+def keyed_read_key(stmt: IOReadStatement, index: ProgramLayoutIndex) -> str | None:
+    """The data-name a READ looks its record up by, when it is a keyed read
+    of an INDEXED file (RANDOM access, or DYNAMIC access without NEXT /
+    PREVIOUS / FIRST / LAST): the ``KEY IS`` name, else the RECORD KEY.
+    ``None`` for every other READ -- a sequential one returns whatever
+    record comes next, and a RELATIVE file's key is not in its record."""
+    facts = index.file_facts(stmt.file_name) if stmt.file_name else None
+    if facts is None or (facts.organization or "").upper() != "INDEXED":
+        return None
+    if (facts.access_mode or "").upper() not in ("RANDOM", "DYNAMIC"):
+        return None
+    if stmt.access_mode:
+        return None
+    return stmt.key_name or facts.record_key
+
+
+def _key_leaves(key_name: str, index: ProgramLayoutIndex) -> list[str]:
+    leaves: list[str] = []
+    for qpath, exact in _target_paths(key_name, index):
+        if not exact:
+            return []
+        leaves.extend(_facts(index).leaves_under(qpath))
+    return list(dict.fromkeys(leaves))
+
+
+def _note_read_key(
+    stmt: IOReadStatement,
+    index: ProgramLayoutIndex,
+    state: _WalkState,
+    *,
+    unknown: bool = False,
+) -> None:
+    """Record, at a keyed READ, the value its key holds (``None`` if any
+    leaf of it is not known, or the caller cannot vouch for the env here)."""
+    key_name = keyed_read_key(stmt, index)
+    if key_name is None:
+        return
+    values: dict[str, Decimal | str] | None = None
+    leaves = _key_leaves(key_name, index)
+    if leaves and not unknown:
+        found = {leaf: state.env[leaf] for leaf in leaves if leaf in state.env}
+        values = found if len(found) == len(leaves) else None
+    state.read_keys.setdefault(id(stmt), []).append(values)
+
+
+def _read_key_values(
+    ast: CobolProgram, index: ProgramLayoutIndex, state: _WalkState | None
+) -> dict[tuple[str, int | None], dict[str, str] | None]:
+    """`ConstantFoldResult.read_keys`: one entry per keyed READ in the
+    PROCEDURE DIVISION, known only when every pass of the walk over it
+    recorded the same fully-known key (and a READ sharing its file and line
+    agrees)."""
+    result: dict[tuple[str, int | None], dict[str, str] | None] = {}
+    for stmt in _procedure_statements(ast, IOReadStatement):
+        if keyed_read_key(stmt, index) is None:
+            continue
+        site = (
+            (stmt.file_name or "").strip().upper(),
+            stmt.location.line if stmt.location else None,
+        )
+        seen = state.read_keys.get(id(stmt), []) if state is not None else []
+        rendered: dict[str, str] | None = None
+        if seen and all(v is not None and v == seen[0] for v in seen):
+            first = seen[0]
+            assert first is not None
+            rendered = {}
+            for leaf, value in first.items():
+                resolved = _safe_resolve(index, leaf)
+                if resolved is None:
+                    rendered = None
+                    break
+                rendered[leaf] = _render(value, resolved.spec)
+        if site in result and result[site] != rendered:
+            rendered = None
+        result[site] = rendered
+    return result
 
 
 def _fall_through_chain(
@@ -627,6 +720,11 @@ def _observation_sites(ast: CobolProgram) -> list[Any]:
     """Every DISPLAY and WRITE statement of the PROCEDURE DIVISION, nested
     ones (IF/EVALUATE/SEARCH arms, inline PERFORM bodies, handlers)
     included."""
+    return _procedure_statements(ast, (DisplayStatement, IOWriteStatement))
+
+
+def _procedure_statements(ast: CobolProgram, types: Any) -> list[Any]:
+    """Every PROCEDURE DIVISION statement of *types*, nested ones included."""
     procedure = ast.get_division("PROCEDURE")
     if procedure is None:
         return []
@@ -640,7 +738,7 @@ def _observation_sites(ast: CobolProgram) -> list[Any]:
             if id(stmt) in seen:
                 continue
             seen.add(id(stmt))
-            if isinstance(stmt, (DisplayStatement, IOWriteStatement)):
+            if isinstance(stmt, types):
                 sites.append(stmt)
             pending.extend(_nested_statement_lists(stmt))
     return sites
@@ -687,6 +785,7 @@ class _WalkState:
         "exhausted",
         "visited_sites",
         "uncertain",
+        "read_keys",
     )
 
     def __init__(
@@ -722,6 +821,10 @@ class _WalkState:
         #: whether a later statement really ran, so every write it meets
         #: poisons instead of folding.
         self.uncertain = False
+        #: ``id()`` of each keyed READ -> its key's leaf values at every pass
+        #: of the walk over it (``None`` where not knowable); see
+        #: `ConstantFoldResult.read_keys`.
+        self.read_keys: dict[int, list[dict[str, Decimal | str] | None]] = {}
 
 
 # -- entry point / paragraph ordering -----------------------------------------
@@ -881,6 +984,8 @@ def _dispatch_one(
 ) -> tuple[str | None, list[Any]] | None:
     """Per-statement-type fold dispatch for `_walk_one` (which additionally
     poisons conditional handler bodies around whatever happens here)."""
+    if isinstance(stmt, IOReadStatement):
+        _note_read_key(stmt, index, state)
     if state.uncertain and isinstance(
         stmt,
         (
@@ -1081,6 +1186,10 @@ def _poison_statement_writes(
     """
     if isinstance(stmt, IOReadStatement):
         file_name = (stmt.file_name or "").strip().upper()
+        if state is not None:
+            # Not walked as straight-line code here (a branch / loop body):
+            # the key it reads by is not known.
+            _note_read_key(stmt, index, state, unknown=True)
         if state is not None and file_name:
             state.read_files.add(file_name)
         for qpath in _file_record_paths(index, stmt.file_name):

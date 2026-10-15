@@ -1085,6 +1085,11 @@ follows its IS/ARE) and `currency_signs` (`[{sign, picture_symbol}]`, every
 CURRENCY clause; `currency_sign` keeps its last-wins value). `CLASS`/
 `ALPHABET ... FOR ALPHANUMERIC|NATIONAL` and the name-less `UPSI-0 ON STATUS
 IS x` form are accepted. `tests/regression/test_special_names_clause_boundaries.py`.
+Separator `,` / `;` (`TokenType.COMMA` / `SEMICOLON`) are in `_NOISE_TYPES`
+and skipped by `_skip_noise()` (2026-10-15, #344): `CLASS VOWEL IS 'A',
+'E'` gives `ranges == ["A", "E"]`, not `["A", ",", "E"]`, and `SYMBOLIC
+CHARACTERS NUL, SOH ARE 1, 2` keeps both names (SOH used to be lost).
+`tests/unit/test_special_names.py`.
 
 **SELECT short forms (`environment_select.py`, 2026-09-28):** `ORGANIZATION
 IS` is optional in IBM's grammar. A bare `INDEXED` / `SEQUENTIAL` / `LINE

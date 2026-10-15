@@ -215,6 +215,51 @@ class TestClonePriority:
         assert group.clone_type == "TYPE_1"
         assert {m.name for m in group.members} == {"CLONE-A", "CLONE-B"}
 
+    def test_repeated_paragraph_name_does_not_drop_type2_group(self) -> None:
+        """Regression for #353: one ``P1`` in a Type-1 group must not take
+        another section's ``P1`` out of Type-2 grouping -- the exclusion is
+        by paragraph identity, not by bare name."""
+        source = HEADER + """\
+       PROCEDURE DIVISION.
+       SEC-A SECTION.
+       P1.
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           DISPLAY "ALPHA".
+       SEC-B SECTION.
+       P1.
+           MOVE 3 TO WS-B
+           MOVE 4 TO WS-C
+           DISPLAY "BETA"
+           DISPLAY "BETA".
+       Y-PARA.
+           MOVE 3 TO WS-A
+           MOVE 4 TO WS-C
+           DISPLAY "BETA"
+           DISPLAY "BETA".
+       OTHER-SEC SECTION.
+       X-PARA.
+           MOVE 1 TO WS-A
+           MOVE 2 TO WS-B
+           DISPLAY "ALPHA".
+"""
+        _, report = _analyze(source)
+        kinds = sorted(
+            (g.clone_type, sorted(m.name for m in g.members))
+            for g in report.clone_groups
+        )
+        assert kinds == [
+            ("TYPE_1", ["P1", "X-PARA"]),
+            ("TYPE_2", ["P1", "Y-PARA"]),
+        ]
+        p1_lines = {
+            m.location.line
+            for g in report.clone_groups
+            for m in g.members
+            if m.name == "P1"
+        }
+        assert len(p1_lines) == 2
+
 
 class TestMinCloneStatements:
     def test_below_min_size_not_reported(self) -> None:

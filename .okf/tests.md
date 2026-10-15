@@ -8,6 +8,20 @@ timestamp: 2026-10-15T00:00:00Z
 
 # Overview
 
+2026-10-15 (issue #322): +5 in `tests/unit/test_program_fixtures.py`'s new `TestKeyedReadReturnsTheKeyAskedFor` (a literal key MOVEd before a RANDOM / DYNAMIC keyed READ is pinned in every row, in every `mode="all"` scenario; a key set in an IF arm stays generated with one `unresolved` note; a DYNAMIC `READ NEXT` is left alone) and +1 in `tests/unit/analysis/test_const_fold.py::TestReadKeys` (a group RECORD KEY's leaves on the main line, `None` inside a branch, `to_dict()` unchanged). `TestWriteCsvDir`'s manifest and round-trip tests now follow each fixture's `csv_path`: `file_operations.cbl`'s keyed and sequential READs of IDX-FILE now write different rows, so the second is `IDX-FILE-2.csv`.
+
+2026-10-15 (issue #321): +3 in `tests/unit/generators/data/test_encoding.py`'s new `TestDbcsCaveat` -- `PIC G` / `USAGE DISPLAY-1` fields get their own DBCS caveat from `encoding_caveats()` (and on a `DecodeResult`), and a `PIC N USAGE DISPLAY-1` field is no longer listed under the national/UTF-16 caveat.
+
+2026-10-15: `tests/unit/analysis/test_codebase.py::TestHelpers` (+3, #356)
+pins a `:TAG:`-placeholder copybook member reporting its placeholder data
+names in `copybook-impact`'s `unresolved` rather than a silently empty
+`fields`. See `analysis.md`.
+
+2026-10-15: `tests/unit/analysis/test_redundancy.py::TestClonePriority::
+test_repeated_paragraph_name_does_not_drop_type2_group` (#353) pins a
+Type-2 clone group surviving when one of its members shares its name with a
+Type-1 member in another section. See `analysis.md`.
+
 2026-10-14: `tests/unit/analysis/test_exit_section_and_alterable_goto.py`
 (11 tests, #382) pins the alterable `GO TO.` and `EXIT SECTION` as
 terminators in dead-code and program-flow: a PERFORMed section returns at
@@ -152,7 +166,10 @@ formulas incl. GIVING / REMAINDER / INTO; counters skipped; level-88
 glossary quoting by PICTURE; report shape; and a smoke run over every
 `tests/samples/enterprise/` program. `tests/unit/cli/test_business_rules_cli.py`
 (5 tests) pins the `business-rules` subcommand's JSON, text and
-`--include-technical` output.
+`--include-technical` output. `TestNestingAndReachability` also pins
+(#354) that `reached_via` covers every paragraph of a `PERFORM ... THRU`
+range (stopping at the end paragraph even across a section header) and
+every `GO TO ... DEPENDING ON` target.
 
 2026-09-28: `tests/unit/test_exec_sql_fetch_orientation.py` (10 tests) pins
 FETCH cursor name / orientation / rowset size for scroll, sensitive and
@@ -729,9 +746,19 @@ the existing `TestNewSubcommandsRegistered` and
 same registration/`-o`-silences-stdout coverage the other five analyzer
 subcommands already get.
 
+2026-10-15 (issue #328): +7 in new `tests/unit/cli/test_profile_output_flags.py` (`--profile-output` alone writes the `.prof` and embeds `profiling` for `parse`, `dead-code` and `batch`; a non-default `--profile-top-n` alone turns profiling on; no flag still means no `profiling` key; a single-file `--profile-output` naming a directory, and a batch one naming a regular file, are one-line `error:`s with exit 1). Failed before the fix (flags ignored; `IsADirectoryError` / `FileExistsError` tracebacks).
+
+2026-10-15 (issue #327): +4 in new `tests/unit/cli/test_gen_fixtures_cli.py::TestGenFixturesInvalidOptions` (`gen-fixtures --rows -1`, `--max-occurs 0`, `--max-occurs -1`, and `data: {rows: -5}` in a discovered `cobol.yml` each exit 1 with exactly one `error:` line). Failed before the fix (the `ValueError` from `DataGeneratorOptions` escaped).
+
+2026-10-15 (issue #326): +1 in new `tests/unit/cli/test_jcl_cli.py::TestMissingJclParser` (with `jclparser` blocked in `sys.modules`, `jcl` exits 1 with a one-line `error:` carrying the `pip install 'cobol-parser[jcl]'` hint and no traceback). Failed before the fix (the `ImportError` escaped).
+
 2026-10-14 (issue #397): +4 in new `tests/unit/analysis/test_technical_debt.py::TestParseErrorsWithholdTheGrade` (no parse errors keeps the grade and an empty `caveats`; `parse_error_count=4` sets `grade` to `None` with one caveat naming the count; the score is unchanged; `to_dict()` serializes all three) and +3 in new `tests/unit/cli/test_complexity_health_subcommands.py::TestHealthWithParseErrors` (`health` on a non-COBOL file emits `"grade": null`, a nonzero `parse_error_count` and a caveat, still reports a float score and exits 0; a clean sample keeps a letter grade). The CLI tests failed before the fix.
 
 2026-10-13 (issue #291): +4 in new `tests/unit/analysis/test_move_type_checker.py::TestIntrinsicFunctionsWithArguments` (every `MOVE FUNCTION x(...)` form in a parsed program is checked -- spaced args with an `OF` qualifier and TRIM's `LEADING`, subscripted args, quoted literal args, `CURRENT-DATE(1:8)` and a reference-modified result; NUMVAL into `PIC A` and a non-integer MAX into `PIC X` are errors; an unresolved TRIM argument is an ordinary unresolved operand; NATIONAL-OF and an uncatalogued name count in `unresolved_function_count`), and +2 in `tests/unit/analysis/test_lint.py::TestCaveats` (no caveat for a checked function source; an uncheckable one gets its own caveat without the `--copybook-path` hint). All failed before the fix. Review follow-up: +2 in `TestNumericFunctionIntegerness` (SUM / REM / RANGE of integers into `PIC X` are clean; NUMVAL, SUM with a `V99` argument and MAX over a nested NUMVAL into `PIC X` are function caveats, not ERRORs; NUMVAL into `PIC A` stays an ERROR; UPPER-CASE of a `PIC N` item is unresolved) and +1 in `TestCaveats` (an unresolved COPY operand and a function caveat together give two separately worded caveats). Round 2: `TestNumericFunctionIntegerness` also pins one argument rule for SUM / MAX (a `V99` or COMP-2 argument into `PIC X` is an ERROR for both) and counts UPPER-CASE / TRIM of a `PIC N` item as function caveats, not missing COPYs.
+
+2026-10-15 (issue #341): new `tests/unit/test_issue_341_dialect_crud.py` -- `TestComp3NumericPicture` (signed / fraction-only / P-scaled COMP-3 pictures give no warning, alphanumeric and edited ones still do), `TestCommandSets` (the added CICS / DL/I commands are recognised, NOHANDLE / ENQUEUE / DEQUEUE / XDLT / XRPL are not), `TestTruncateTable` (`sql_type` TRUNCATE with its table; the CRUD matrix gives `T15` `---D`). All but the unchanged-behaviour cases failed before the fix.
+
+2026-10-15 (issue #398): `tests/unit/test_ims_segment_analyzer.py` -- `primary_segment` is now the last segment, so `test_primary_segment_first_resolved` became `test_primary_segment_is_last_ssa` (+1 `test_primary_segment_unresolved_target_is_none`) and the two HOSPITAL/PATIENT path-call tests expect `PATIENT`; +2 in new `TestPrimarySegmentIsTarget` (CALL ISRT under a parent SSA, `EXECDLI.cbl`'s two-`SEGMENT` ISRT). `tests/unit/cli/test_new_subcommands.py` +1 `test_ims_dli_is_ims_program_for_cbltdli_without_dlitcbl`.
 
 2026-10-05 (issue #273): `tests/unit/test_models.py` -- `test_ast_from_json_roundtrip` now compares `to_dict()` and asserts no warning for a statement-free program; +1 `test_from_json_restores_structure_and_warns_about_statements` (parsed program: dict equal with paragraph statements emptied, `LossyDeserializationWarning` with the dropped count); +3 in new `TestNodeEquality` (unrelated programs not equal, reparse equal, source position ignored). The existing `from_json` tests in `test_program_model_branches.py` / `test_bug_hunt_r12_misc.py` now expect the warning.
 
@@ -990,7 +1017,7 @@ tests/
       test_decode_cli.py  # decode: CSV/JSON/hex output, --view / --list-views, gen-data -> decode CSV round trip through the CLI, --skip/--max-records paging, trailing-byte warning, --strict exit code; plus dclgen-check as a subcommand and as a lint rule (see cli.md)
       test_gen_fixtures_cli.py  # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes (see cli.md)
     analysis/
-      test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability (IF/EVALUATE/SEARCH), CALL argument-direction ladder, ACCEPT filtering (incl. `FROM DATE YYYYMMDD` qualifiers), IOLogger cross-check (see analysis.md)
+      test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability (IF/EVALUATE/SEARCH), CALL argument-direction ladder, structure-qualified SQL host variables (`:REC-A.AMT`), ACCEPT filtering (incl. `FROM DATE YYYYMMDD` qualifiers), IOLogger cross-check (see analysis.md)
       test_constraints.py  # ConstraintExtractor: relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan, EVALUATE TRUE + 88s, WHEN OTHER, SEARCH WHEN (incl. AND/OR from its condition tree, #348), PERFORM-UNTIL SequenceConstraint (see analysis.md)
       test_domains.py  # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value, TestEnumDomainHonoursRelationalConjuncts: a level-88 pick re-checked against gt/ge/lt/le (#244) (see analysis.md)
       test_dclgen_check.py  # DclgenChecker: DCLGEN column <-> host-variable pairing (the CUST_ID/CUST-VAL underscore-hyphen normalization), every violation kind and its severity, both null-indicator syntaxes, what it declines to check (VARCHAR group binding, BLOB), source ordering, ambiguous columns, and a parametrised "what DCLGEN itself would generate is always clean" table (see analysis.md)
@@ -1448,6 +1475,9 @@ work items. `tests/unit/test_scan.py`'s failing-analyzer stub takes the new
 `TestStoredJoinEdges` (test_lineage_graph.py) pins that a graph rebuilt
 from `join_edges()` answers every query identically; `test_lineage_jcl.py`
 covers `jobs_from_sources` (in-memory JCL + PROCs).
+`TestTableFunctionDetection` (test_sql_flow.py, #340) pins that only
+`TABLE(...)` is a table function: `TABLE_CUST` / `TABLES_CFG` / `TABLEX`
+are traced as ordinary tables.
 Review regressions (2026-10-08) use small inline programs (`_program` in
 test_field_lineage.py, `_source` in test_lineage_graph.py):
 `TestOccursDependingOn` / `TestOccursTables` (None offsets, every

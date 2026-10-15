@@ -193,7 +193,11 @@ a specific subtree. `--errors` shows parse errors only. `--stats` appends
 `MoveStatement`), equivalent to `ast.find_all_by_type()`. `--profile` /
 `--profile-top-n` / `--profile-output` wrap the parse in a `ProfilerContext`
 (see [parser.md](parser.md)) and embed timing/memory metrics in the output, or
-write a binary `.prof` to `PATH`.
+write a binary `.prof` to `PATH`. `--profile-output` (or a `--profile-top-n`
+other than the default 20) implies `--profile` -- on its own it used to be
+silently ignored (#328) -- and a `--profile-output` that is an existing
+directory is a one-line `error:` (exit 1) before the parse, not an
+`IsADirectoryError` traceback after it.
 
 **Nested profilers (issue #274, 2026-10-05).** A `ProfilerContext` entered
 while another profiler is active (an outer `ProfilerContext`, a bare
@@ -490,7 +494,9 @@ CICS, DLI, console ACCEPT) — not just one record's CSV rows.
 * `--rows`/`-n` — rows generated per **READ** boundary's sequence (default
   10); every other IN boundary (SQL SELECT/FETCH, ACCEPT, a CALL argument)
   generates exactly one value, matching one invocation in the "happy path"
-  scenario.
+  scenario. A negative `--rows` (or `data.rows` in `cobol.yml`) or a
+  `--max-occurs` below 1 is a one-line `error:` with exit 1, as in
+  `gen-data` (#327).
 * `--seed` pins the RNG; the same seed and program always produce
   byte-identical JSON (`ProgramFixtureGenerator.generate`'s own per-boundary
   sub-seed scheme -- see generators.md -- means adding one boundary never
@@ -790,7 +796,9 @@ positionally and/or collected via repeatable `--glob` patterns (e.g.
 count). `--encoding` sets file read encoding (default `utf-8`). Prints one
 JSON result per file. `--errors` includes parse errors/warnings per file;
 `--stats` appends per-file `ParseStatistics`. `--profile-output` in batch mode
-must be a directory (one `.prof` per file), not a single file path.
+must be a directory (one `.prof` per file), not a single file path: a `.prof`
+name or an existing regular file is a one-line `error:` (exit 1). As for
+`parse`, `--profile-output` / a non-default `--profile-top-n` imply `--profile`.
 
 ## IO-Sequence
 
@@ -857,6 +865,11 @@ cobol-parser ims-dli <file.cbl>
 ```
 
 Runs `IMSSegmentAnalyzer` and reports IMS DLI segment calls.
+
+`is_ims_program` is `ast.has_ims() or ast.uses_ims_interface()`: a program
+that calls CBLTDLI / AIBTDLI / CEETDLI is an IMS program whether or not it
+declares `ENTRY 'DLITCBL'` (issue #398). Each call's `primary_segment` is its
+**last** segment -- see `IMSSegmentAnalyzer` in `analysis.md`.
 
 ## Data-Items
 
@@ -1246,7 +1259,9 @@ cobol-parser jcl JOB.jcl --strict
 It reads a language other than COBOL, so it shares none of the COBOL parse
 flags: no `--dialect`, no `--source-format`, no `--copybook-path`. `--compact`
 and `-o` work as everywhere else. It needs the `jcl-parser` package
-(`pip install 'cobol-parser[jcl]'`), which does the reading. See [jcl.md](jcl.md).
+(`pip install 'cobol-parser[jcl]'`), which does the reading; without it,
+`jcl` exits 1 with that install hint as a one-line `error:` (no traceback).
+See [jcl.md](jcl.md).
 
 # See Also
 
@@ -1270,3 +1285,16 @@ and `-o` work as everywhere else. It needs the `jcl-parser` package
 * `cobolparser/cli/parse.py` has a `__main__` guard, so `python -m
   cobolparser.cli.parse ...` runs the CLI (it was a silent no-op; only the
   `cobol-parser` console script worked).
+
+## 2026-10-15
+
+* `jcl` without the `[jcl]` extra prints the install hint as a one-line
+  `error:` and exits 1, instead of an `ImportError` traceback (#326).
+* `gen-fixtures --rows -1` / `--max-occurs 0` / `data.rows: -5` in
+  `cobol.yml` print a one-line `error:` and exit 1 instead of a
+  `ValueError` traceback (#327).
+* `--profile-output` (and a non-default `--profile-top-n`) now imply
+  `--profile` on every subcommand that takes them (they were silently
+  ignored without it), and a single-file `--profile-output` naming a
+  directory -- or a batch one naming a regular file -- is a one-line
+  `error:` instead of a traceback (#328).

@@ -858,6 +858,22 @@ def encoding_caveats(
             "COMP-1/COMP-2 are encoded as IEEE 754, not z/OS hexadecimal "
             f"floating point: {', '.join(floats)}"
         )
+    # DBCS (PIC G, or PIC N with USAGE DISPLAY-1) is its own caveat, not
+    # the national one: what a real compiler stores there is double-byte
+    # EBCDIC (e.g. X'42C1' for a DBCS "A"), not UTF-16.
+    dbcs = sorted(
+        {
+            spec.qualified_name
+            for spec in specs
+            if _normalized_usage(spec) == "DISPLAY-1"
+            and spec.category
+            not in (
+                FieldCategory.NUMERIC,
+                FieldCategory.NUMERIC_EDITED,
+                FieldCategory.FLOAT,
+            )
+        }
+    )
     national = sorted(
         {
             spec.qualified_name
@@ -865,6 +881,7 @@ def encoding_caveats(
             if spec.category is FieldCategory.NATIONAL
             or _normalized_usage(spec) == "NATIONAL"
         }
+        - set(dbcs)
     )
     if national:
         caveats.append(
@@ -873,6 +890,14 @@ def encoding_caveats(
             "not as the UTF-16 a real compiler stores (and a real file's "
             "national bytes do not decode back as the same text): "
             f"{', '.join(national)}"
+        )
+    if dbcs:
+        caveats.append(
+            "DBCS data (PIC G / USAGE DISPLAY-1) is written as single-byte "
+            "text in the record's charset, space-padded to the field's width, "
+            "not as the double-byte characters a real compiler stores (and a "
+            "real file's DBCS bytes do not decode back as the same text): "
+            f"{', '.join(dbcs)}"
         )
     fmt = (opts or EncodingOptions()).resolved_format(
         specs, varying=varying is not None

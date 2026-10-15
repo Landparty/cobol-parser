@@ -59,6 +59,11 @@ _NOISE_TYPES: frozenset[TokenType] = frozenset(
         TokenType.WHITESPACE,
         TokenType.COMMENT,
         TokenType.CONTINUATION,
+        # ``,`` / ``;`` are separators, interchangeable with a space wherever
+        # one may appear: ``CLASS VOWEL IS 'A', 'E'`` and ``SYMBOLIC
+        # CHARACTERS NUL, SOH ARE 1, 2`` carry no comma operand.
+        TokenType.COMMA,
+        TokenType.SEMICOLON,
     }
 )
 #: Words that open an I-O-CONTROL entry (IBM, plus COBOL-85's MULTIPLE FILE).
@@ -257,7 +262,12 @@ class ConfigurationSectionParser:
         mnemonic_definitions: list[dict[str, Any]] = []
 
         def _skip_noise() -> None:
-            token_stream.skip_whitespace_and_comments()
+            while True:
+                token_stream.skip_whitespace_and_comments()
+                token = token_stream.peek(0)
+                if token is None or token.type not in _NOISE_TYPES:
+                    return
+                token_stream.consume()
 
         def _meaningful(offset: int = 0) -> Any:
             # The *offset*-th token past layout: any word of a clause may

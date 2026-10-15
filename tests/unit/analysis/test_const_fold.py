@@ -1387,3 +1387,50 @@ class TestInspectAndExecWrites:
             ),
         )
         assert fold.known == {}
+
+
+class TestReadKeys:
+    """Issue #322: the key a keyed READ of an INDEXED file reads by."""
+
+    _SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. KEYRD.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT VS-FILE ASSIGN TO VSFILE
+               ORGANIZATION IS INDEXED
+               ACCESS MODE IS RANDOM
+               RECORD KEY IS VS-KEY.
+       DATA DIVISION.
+       FILE SECTION.
+       FD VS-FILE.
+       01 VS-REC.
+          05 VS-KEY.
+             10 VS-K1 PIC X(2).
+             10 VS-K2 PIC 9(3).
+          05 VS-AMT  PIC 9(5).
+       WORKING-STORAGE SECTION.
+       01 WS-IN PIC X.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           MOVE 'AB' TO VS-K1
+           MOVE 12 TO VS-K2
+           READ VS-FILE INVALID KEY DISPLAY 'NF' END-READ
+           IF WS-IN = 'Y'
+              MOVE 'CD' TO VS-K1
+              READ VS-FILE INVALID KEY DISPLAY 'NF' END-READ
+           END-IF
+           STOP RUN.
+"""
+
+    def test_group_key_known_on_main_line_unknown_in_a_branch(self):
+        result = parse_cobol(self._SOURCE, filename="keyrd.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        read_keys = ConstantFolder().fold(result.ast, index).read_keys
+        assert read_keys[("VS-FILE", 24)] == {
+            "VS-REC.VS-KEY.VS-K1": "AB",
+            "VS-REC.VS-KEY.VS-K2": "12",
+        }
+        assert read_keys[("VS-FILE", 27)] is None
+        assert ConstantFolder().fold(result.ast, index).to_dict().keys() == {"known"}

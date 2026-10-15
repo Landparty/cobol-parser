@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 29 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, DCLGEN/host-variable, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, cross-reference, program signatures, whole-codebase call/copy graph, SQL/CICS lint, structural program diff and business rule extraction.
 tags: [analysis, business-rules, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk, xref, program-signature, codebase-graph, sql-cics-lint, ast-diff]
-timestamp: 2026-09-30T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
@@ -954,7 +954,13 @@ nested trees that happen to serialize the same way; the nested-tuple shape
 encodes tree structure unambiguously). Paragraphs are grouped by exact
 fingerprint equality; Type-1 grouping runs first, and any paragraph already
 in a Type-1 group of size >= 2 is excluded from the Type-2 pass, so a
-paragraph is only ever reported in one clone group. Groups below
+paragraph is only ever reported in one clone group. That exclusion is by
+paragraph *identity*, not by name (#353, 2026-10-15): a paragraph name may
+repeat across sections, and keying it on the bare name used to let one `P1`
+in a Type-1 group silently drop another section's `P1` -- and with it a
+whole Type-2 group -- from the Type-2 pass. `CloneMember.name` is still the
+bare uppercased paragraph name (callers join on it); its `location` tells
+two same-named members apart. Groups below
 `min_clone_statements` (default 3 -- two bare `EXIT.` paragraphs matching
 each other isn't meaningful redundancy) are dropped.
 
@@ -1476,12 +1482,14 @@ or both precomputed, skipping its own collection loop entirely.
 
 ```python
 result: LEAnalysisResult = LanguageEnvironmentAnalyzer().analyze(ast)
-# result.le_functions: list[LEFunctionUsage]   — CEE* calls
-# result.service_calls: list[LEServiceCall]    — IBM LE runtime calls
+# result.intrinsic_usages: list[LEFunctionUsage] — every FUNCTION <name> intrinsic reference
+# result.le_service_calls: list[LEServiceCall]   — CALL "CEExxxx" to IBM LE callable services
+#                                                 (static, or dynamic via possible_values)
 ```
 
-Detects IBM Language Environment function calls (CEEGTST, CEEMGET, etc.) and
-LE service calls.
+Detects COBOL intrinsic function references (`FUNCTION LENGTH`,
+`FUNCTION UPPER-CASE`, ...) and calls to IBM LE callable services
+(`CEEGTST`, `CEEDAYS`, `CEEHDLR`, ...). `to_dict()` uses the same two keys.
 
 **Quoted string literals are never scanned for `FUNCTION <name>`
 (2026-08-16 audit fix):** `_collect_text_fields`'s `_add` skips operands
@@ -1605,6 +1613,11 @@ already use -- instead of an independent copy of the same walk. `_files`'s
 still upper-cases the result itself since `self._file_entries` is keyed by
 upper-case name.
 
+**TRUNCATE (issue #341):** `EXEC SQL TRUNCATE [TABLE] t` marks `t` D, like a
+DELETE (`SQLStatementType.TRUNCATE` is in `_WRITE_SQL_TYPES`). It parsed as
+`UNKNOWN` before and the table got no row. Pinned by
+`tests/unit/test_issue_341_dialect_crud.py::TestTruncateTable`.
+
 **SQL write statements (2026-09-28):** for INSERT/UPDATE/DELETE/MERGE only
 `stmt.tables[0]` (the target -- see [dialects.md](dialects.md)) gets the
 write flag; every other table a subquery / `INSERT ... SELECT` / `MERGE ...
@@ -1710,6 +1723,14 @@ MOVEs into it. `EXEC DLI ... SEGMENT((area))` (doubled parens = a data area)
 resolves through `_resolve_ssa_segment(area)` instead of reporting the text
 `(AREA)`; `None` when unknown. Pinned by
 `tests/unit/analysis/test_ims_ssa_segment_resolution.py`.
+
+**`primary_segment` is the target segment (issue #398):** in DL/I the
+**last** SSA (or `SEGMENT(...)` option of `EXEC DLI`) names the segment
+retrieved / inserted / replaced; the earlier ones only qualify the path. The
+property used to return the first resolved name (a parent). It now returns
+`segment_names[-1]`, and `None` when that last one is unresolved -- a
+resolved parent is never reported in the target's place.
+`TestPrimarySegmentIsTarget` in `tests/unit/test_ims_segment_analyzer.py`.
 
 ## HostVariableResolver
 
@@ -1933,7 +1954,13 @@ variables; it does not). `host_variables` is therefore the only layout
 source used, for every SQL shape; direction comes from `sql_type`
 (`SELECT`/`FETCH` -> IN, `INSERT`/`UPDATE`/`DELETE` -> OUT, else
 `STATUS_ONLY`), independent of which variables are attached.
-`status_field="SQLCODE"` always.
+`status_field="SQLCODE"` always. The parser strips a structure qualifier
+off `host_variables` (`:REC-A.AMT` arrives as `AMT`), so `_classify_sql`
+re-reads the qualifiers from the scrubbed `sql_text` with
+`host_var_resolver._QUALIFIED_HOST_VAR_RE` (the same way
+`HostVariableResolver` does) and resolves the dotted `REC-A.AMT` form; an
+`AMT` declared under two structures would otherwise land in `unresolved`
+(issue #366).
 
 **CICS/DLI** have no fixed INTO/FROM-shaped attributes to key layout
 resolution off -- `ExecCicsStatement.options` is a generic option-keyword ->
@@ -2534,6 +2561,15 @@ internal env) rather than approximating:
   resolved direction to tell them apart (only `BoundaryInventoryAnalyzer`'s
   own richer analysis does) -- deferred to a future version rather than risk
   treating an OUT value as still-known.
+* **Keyed READ sites (`ConstantFoldResult.read_keys`, issue #322).** At
+  every keyed READ of an INDEXED file (`keyed_read_key()`: RANDOM, or
+  DYNAMIC without NEXT/PREVIOUS/FIRST/LAST; the `KEY IS` name, else the
+  RECORD KEY) the walk records each elementary leaf of the key from `env`,
+  before the READ resets the record area. `read_keys[(FILE, line)]` is that
+  rendered dict when every pass over the READ saw the same fully-known key,
+  else `None` -- a READ only poisoned (branch/loop body, uncertain mode) or
+  never reached is `None`. Not in `to_dict()`; `ProgramFixtureGenerator`
+  pins it into the READ's mocked rows (see generators.md).
 * **A subscripted/reference-modified READ INTO or ACCEPT target is poisoned,
   never restored (2026-09-10 fix).** `_target_paths()` used to drop the
   `has_suffix` flag `_base_name()` returns and resolve straight to the base
@@ -3159,7 +3195,13 @@ Two rules hold throughout:
    in `errors` and still contributes its COPY edges (the COPY scan does not need
    a successful parse); a COPY whose member is off the search path, a dynamic
    CALL with no resolvable target, a duplicate `PROGRAM-ID`, a file holding
-   several units — each lands in `unresolved` with a reason.
+   several units — each lands in `unresolved` with a reason. So does a
+   `copybook-impact` member whose data items are named by IBM `:TAG:`
+   REPLACING placeholders (`05 :Q:-AMT ...`, #356): their real names exist
+   only once a `COPY ... REPLACING` fills the tag in, so they are left out of
+   `fields` (the record parser renames them `ANONYMOUS-*`, which the
+   declared-in-the-member filter drops) and named in `unresolved` instead of
+   vanishing.
 2. **Determinism.** The same tree produces byte-identical `to_dict()`,
    `to_dot()` and `to_mermaid()`. Files are parsed in sorted order, every
    emitted list is sorted, and no `ProcessPoolExecutor` completion order reaches
@@ -3303,7 +3345,11 @@ is nested in, within its paragraph (ELSE contributes `NOT (cond)`, WHEN
 OTHER the conjunction of the negated WHENs, an exception clause `AT END
 (READ ...)` / `ON SIZE ERROR (COMPUTE ...)`). `reached_via` links across
 paragraphs: every arm elsewhere that PERFORMs or GOes TO the rule's paragraph
-or section, as `"BR-001 ELSE"` / `"BR-004 WHEN POL-TYPE = 'A'"`. A nested
+or section, as `"BR-001 ELSE"` / `"BR-004 WHEN POL-TYPE = 'A'"`. A
+`PERFORM A THRU C` reaches every procedure from A through C in source order
+(`_thru_range`, on bare names over `ProcedureIndex`; a section header crossed
+on the way to a paragraph inside it is left out), and `GO TO A B DEPENDING
+ON N` reaches every target (#354). A nested
 decision is its own rule; the parent arm lists it as an action whose
 `rule_id` points at it (dropped to `None` if the nested rule was excluded as
 technical, never left dangling). `in_dead_code` comes from
@@ -3339,8 +3385,7 @@ WORKING-STORAGE field -- most rating/pricing logic -- would be missing.
 **Known limits** (the always-present caveat says the kinds are heuristic;
 `classification` on each rule names the signal that decided it):
 single-program scope (like `xref`, contained programs are not walked --
-`--program` picks one); `reached_via` matches a PERFORM's first target only,
-not every paragraph of a `THRU` range; an arithmetic statement inside an
+`--program` picks one); an arithmetic statement inside an
 inline PERFORM *within an arm* is neither a rule nor an action of that arm.
 
 Tests: `tests/unit/analysis/test_business_rules.py`,
@@ -3364,7 +3409,7 @@ the record-relative byte offset/length `layout_offsets` computes) and
 | `file` | DD name (`normalize_ddname`: `UT-S-` / `S-` prefixes stripped, the backend's rule) | READ / WRITE / REWRITE / RELEASE / RETURN / SORT-MERGE USING-GIVING, one byte range per record field |
 | `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`; SPACES / LOW-VALUES / HIGH-VALUES / ZERO candidates are the "no program" sentinel and are dropped by `_names.callee_names`), else `?IDENT#n` plus a caveat |
 | `linkage` | `PROGRAM#n` / `ENTRY#n`, `PROGRAM#RETURNING` (out only) | PROCEDURE DIVISION USING / RETURNING, via `ProgramSignatureExtractor` |
-| `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats) |
+| `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats, as is a FROM sub-select or a `TABLE(...)` table function -- matched on `TABLE` followed by `(`, so an ordinary table named `TABLE_CUST` / `TABLES_CFG` is traced, #340) |
 | `console` | `SYSIN` / `SYSOUT` (or the ACCEPT's `FROM` source) | ACCEPT / DISPLAY; `ACCEPT FROM DATE` / `DAY` / `DAY-OF-WEEK` / `TIME` (with or without a format qualifier) make no port -- the runtime's clock, not data entering the program |
 
 Edge kinds: `move` (group MOVE is a byte overlay; CORRESPONDING pairs by
@@ -3571,6 +3616,13 @@ unmodelled edit over-reports rather than reading as unchanged. (2026-09-28:
 the rendered text is a truncated summary that omits STRING's INTO, READ's
 INTO/KEY, WRITE's FROM, ...; before the `to_dict()` fields were added,
 `STRING ... INTO A` → `INTO B` diffed as no change.)
+
+The dedicated signatures carry the markers a value alone hides (#316): CALL
+includes `is_dynamic` (`CALL 'X'` → `CALL X` is a `call-target-changed`, and
+the detail text quotes a static target), and UNSTRING includes
+`delimiter_all` (`DELIMITED BY ALL ','`) with a detail text spelling out
+source, delimiters and INTO targets. (WHEN selectors carry theirs via
+`_selector_text`'s `FIG:` / `ID:` / quoted renderings, #313.)
 
 Determinism: the same pair always produces byte-identical `to_dict()` — changes
 sorted by category, symbol, kind then remaining fields (`_sort_key` is a total

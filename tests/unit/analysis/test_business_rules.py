@@ -353,6 +353,92 @@ class TestNestingAndReachability:
             "BR-001 WHEN POL-TYPE = 'H'",
         ]
 
+    @staticmethod
+    def _reached(report: BusinessRuleReport) -> dict[str, list[str]]:
+        return {r.procedure: r.reached_via for r in report.rules[1:]}
+
+    def test_every_paragraph_of_a_thru_range_is_reached(self) -> None:
+        # Issue #354: not just the first paragraph of PERFORM ... THRU.
+        report = _report("""\
+       0000-MAIN.
+           IF WS-FLAG = 'Y'
+               PERFORM P-A THRU P-C
+           END-IF
+           STOP RUN.
+       P-A.
+           IF POL-AGE < 25
+               MOVE 'A' TO WS-CLASS
+           END-IF.
+       P-B.
+           IF POL-AGE < 30
+               MOVE 'B' TO WS-CLASS
+           END-IF.
+       P-C.
+           IF POL-AGE < 35
+               MOVE 'C' TO WS-CLASS
+           END-IF.
+       P-D.
+           IF POL-AGE < 40
+               MOVE 'D' TO WS-CLASS
+           END-IF.
+""")
+        assert self._reached(report) == {
+            "P-A": ["BR-001 THEN"],
+            "P-B": ["BR-001 THEN"],
+            "P-C": ["BR-001 THEN"],
+            "P-D": [],
+        }
+
+    def test_a_thru_range_into_a_section_stops_at_its_end(self) -> None:
+        report = _report("""\
+       0000-MAIN SECTION.
+       0000-START.
+           IF WS-FLAG = 'Y'
+               PERFORM P-A THRU P-B
+           END-IF
+           STOP RUN.
+       P-A.
+           IF POL-AGE < 25
+               MOVE 'A' TO WS-CLASS
+           END-IF.
+       1000-NEXT SECTION.
+       P-B.
+           IF POL-AGE < 30
+               MOVE 'B' TO WS-CLASS
+           END-IF.
+       P-C.
+           IF POL-AGE < 35
+               MOVE 'C' TO WS-CLASS
+           END-IF.
+""")
+        assert self._reached(report) == {
+            "P-A": ["BR-001 THEN"],
+            "P-B": ["BR-001 THEN"],
+            "P-C": [],
+        }
+
+    def test_every_go_to_depending_target_is_reached(self) -> None:
+        # Issue #354: not just the first GO TO ... DEPENDING ON target.
+        report = _report("""\
+       0000-MAIN.
+           IF WS-FLAG = 'Y'
+               GO TO P-A P-B DEPENDING ON POL-TIER
+           END-IF
+           STOP RUN.
+       P-A.
+           IF POL-AGE < 25
+               MOVE 'A' TO WS-CLASS
+           END-IF.
+       P-B.
+           IF POL-AGE < 30
+               MOVE 'B' TO WS-CLASS
+           END-IF.
+""")
+        assert self._reached(report) == {
+            "P-A": ["BR-001 THEN"],
+            "P-B": ["BR-001 THEN"],
+        }
+
 
 class TestValidation:
     @pytest.mark.parametrize(
