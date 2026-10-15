@@ -415,6 +415,51 @@ MOVE A OF G1 TO W""",
         assert flagged[("move", "S.X.XB", "T.X")] is False
 
 
+class TestArithmeticCorresponding:
+    WS = """
+01 WS-IN.
+   05 IN-ID PIC X(5).
+   05 IN-AMT PIC 9(5).
+   05 IN-FEE PIC S9(3)V99 COMP-3.
+   05 IN-NOTE PIC 9(3).
+   05 IN-SUB.
+      10 IN-QTY PIC 9(3).
+01 WS-OUT.
+   05 IN-ID PIC X(5).
+   05 IN-AMT PIC 9(5).
+   05 IN-FEE PIC ZZ9.99.
+   05 IN-NOTE PIC X(3).
+   05 IN-SUB.
+      10 IN-QTY PIC 9(3).
+"""
+
+    @pytest.mark.parametrize(
+        ("statement", "verb"),
+        [
+            ("ADD CORRESPONDING WS-IN TO WS-OUT", "ADD"),
+            ("SUBTRACT CORR WS-IN FROM WS-OUT ROUNDED", "SUBTRACT"),
+        ],
+    )
+    def test_pairs_numeric_items_by_name_path_only(self, statement, verb) -> None:
+        report = _program(self.WS, statement)
+        # Same-name numeric pairs (numeric-edited receiver included, nested
+        # groups matched by their full path); IN-ID is alphanumeric on both
+        # sides and IN-NOTE on the receiving one, so neither takes part.
+        assert _edges(report) == {
+            ("arith", "WS-IN.IN-AMT", "WS-OUT.IN-AMT"),
+            ("arith", "WS-IN.IN-FEE", "WS-OUT.IN-FEE"),
+            ("arith", "WS-IN.IN-SUB.IN-QTY", "WS-OUT.IN-SUB.IN-QTY"),
+        }
+        assert all(e.exact for e in report.edges)
+        assert {e.statement for e in report.edges} == {f"{verb} CORRESPONDING"}
+
+    def test_plain_add_of_groups_is_unchanged(self) -> None:
+        report = _program(
+            "01 A PIC 9(3).\n01 B PIC 9(3).\n01 C PIC 9(3).", "ADD A TO B GIVING C"
+        )
+        assert _edges(report) == {("arith", "A", "C"), ("arith", "B", "C")}
+
+
 class TestAccept:
     def test_clock_sources_are_not_a_console_port(self) -> None:
         # The parser keeps the format qualifier in from_source
