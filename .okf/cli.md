@@ -1016,6 +1016,15 @@ every shop's programs open with a near-identical four-statement
 verbatim copy under that boilerplate. Requires the `redundancy` analyzer;
 without it no groups are reported rather than an empty result.
 
+Members, sources and copies (#352): with `--copybook-path`, a paragraph
+expanded from a PROCEDURE DIVISION copybook carries its `origin` (copybook
+file and line). Members sharing an origin are one source included several
+times, not copy-paste, so `--min-clone-members` and the volume ranking count
+*distinct sources* (`source_count` on each group; `statements x
+source_count`), not members. A copybook paragraph that only ever arrives by
+COPY forms no group; one also pasted verbatim into another program does,
+with every inclusion still listed as a member.
+
 `--files-from FILE` reads the list from a file, one path per line (`-` for
 stdin, `#` comments and blank lines skipped, each line stripped so a
 Windows `\r` never becomes part of a path). Not a convenience: a Windows
