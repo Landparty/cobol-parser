@@ -306,7 +306,7 @@ into focused, reusable modules:
   the parser drops the quotes, so the range *looks* integer, but `PIC XX`
   admits `'1A'` and never holds `'1'`). A typed endpoint is kept as written
   (`X'00'`, not a NUL byte). Not caught: `LOW-VALUE THRU HIGH-VALUE`, whose
-  `THRU` the DATA DIVISION parser drops (follow-up issue). Only a range triggers it:
+  `THRU` the DATA DIVISION parser drops (issue #468). Only a range triggers it:
   `VALUE SPACES` is listed as its word, which is the value. `condition_values`
   itself is unchanged (additive change; consumers keep working).
   `LayoutItem.condition_values_complete` carries the verdict and is not
