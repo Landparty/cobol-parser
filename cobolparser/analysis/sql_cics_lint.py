@@ -37,7 +37,7 @@ What it reports, and why each one is a real defect rather than a style note:
 
 ``CICS_NO_RESP_HANDLING``
     An ``EXEC CICS`` command with no ``RESP``/``RESP2``, no ``NOHANDLE`` and
-    no ``HANDLE CONDITION`` in effect.  The default action for most CICS
+    no ``HANDLE CONDITION``/``IGNORE CONDITION`` in effect.  The default action for most CICS
     conditions is to abend the task, so the failure mode is not a wrong
     answer but a dropped transaction, mid-update.
 
@@ -59,11 +59,12 @@ form of an EXEC block are lossy, and each one is answered with an entry in
 * ``STRING`` operands lose their quotes the same way, so a ``STRING`` whose
   operands name nothing declared cannot be told from a ``STRING`` of pure
   literals.
-* A CICS command with a ``HANDLE CONDITION`` in effect that names only
-  specific conditions (``NOTFND``, ``DUPREC``, ...) cannot be graded, because
-  nothing in the AST says which conditions *this* command can raise.  Only
-  the catch-all ``ERROR`` handler counts as coverage; anything narrower is
-  reported as unchecked.
+* A CICS command with a ``HANDLE CONDITION`` (or ``IGNORE CONDITION``) in
+  effect that names only specific conditions (``NOTFND``, ``DUPREC``, ...)
+  cannot be graded, because nothing in the AST says which conditions *this*
+  command can raise.  Only the catch-all ``ERROR`` handler (or ``IGNORE
+  CONDITION ERROR``) counts as coverage; anything narrower is reported as
+  unchecked.
 
 Two conservatisms are worth stating plainly, since they shape the findings:
 
@@ -166,6 +167,10 @@ _DECLARE_NON_EXECUTABLE_RE = re.compile(
 #: resource. They set the state this analyzer tracks; grading them against it
 #: would be circular.
 _CICS_HANDLER_COMMANDS = frozenset({"HANDLE", "IGNORE", "PUSH", "POP"})
+
+#: The "label" recorded for a condition named by ``IGNORE CONDITION``. Not a
+#: valid paragraph name, so it cannot collide with a real one.
+_IGNORED = "(IGNORED)"
 
 #: CICS commands exempt from :data:`KIND_CICS_NO_RESP`, each with the reason
 #: it is exempt. Kept explicit -- an exemption nobody can justify is how a
@@ -393,7 +398,8 @@ class _CicsHandlerState:
 
     Attributes:
         conditions: Condition name -> label, for handlers established by
-            ``HANDLE CONDITION`` with a label.  ``ERROR`` is the catch-all.
+            ``HANDLE CONDITION`` with a label, or ``_IGNORED`` for a condition
+            named by ``IGNORE CONDITION``.  ``ERROR`` is the catch-all.
         abend_handler: Whether a ``HANDLE ABEND`` with a LABEL or PROGRAM is
             in effect.
     """
@@ -610,7 +616,7 @@ class SqlCicsAnalyzer:
         if state.conditions:
             report.unchecked.append(
                 f"line {line}: EXEC CICS {command} has no RESP/NOHANDLE, and the "
-                "HANDLE CONDITION in effect covers only "
+                "HANDLE/IGNORE CONDITION in effect covers only "
                 f"{', '.join(sorted(state.conditions))} -- nothing in the AST "
                 "says which conditions this command can raise, so its error "
                 "handling could not be graded"
@@ -951,10 +957,15 @@ def _apply_cics_handler(
     conditions = [key for key in options if key != "CONDITION"]
     for condition in conditions:
         label = options.get(condition)
-        if command == "IGNORE" or not label:
-            # IGNORE CONDITION cancels the handler; HANDLE CONDITION with a
-            # bare condition name restores the CICS default action. Neither
-            # leaves anything for this analyzer to credit.
+        if command == "IGNORE":
+            # IGNORE CONDITION means "take no action": the condition is
+            # raised, nothing abends, and execution continues at the next
+            # statement. It replaces any label handler for the condition and
+            # counts as handling it, exactly as a HANDLE CONDITION would.
+            state.conditions[condition] = _IGNORED
+        elif not label:
+            # HANDLE CONDITION with a bare condition name restores the CICS
+            # default action, which leaves nothing for this analyzer to credit.
             state.conditions.pop(condition, None)
         else:
             state.conditions[condition] = label

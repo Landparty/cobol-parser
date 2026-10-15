@@ -1434,3 +1434,12 @@ no-keys warning on a file SORT/MERGE (not on a table SORT), and
 SPECIAL-NAMES mnemonic entries and `SYMBOLIC CHARACTERS` without IS.
 `test_initialize_sort_arithmetic_comma_gaps.py`'s two USING/GIVING comma-list
 SORTs gained a key, since a keyless file SORT now warns.
+
+## 2026-10-14 (issue #396)
+
+`tests/unit/analysis/test_sql_cics_lint.py` replaces the test that pinned
+`IGNORE CONDITION` as cancelling a handler with five that pin it as handling:
+`IGNORE CONDITION ERROR` (alone or replacing a label handler) clears
+`CICS_NO_RESP_HANDLING`, a narrower `IGNORE CONDITION NOTFND` goes to
+`unchecked`, a bare `HANDLE CONDITION ERROR` afterwards restores the finding,
+and `PUSH HANDLE` suspends an ignore like any other handler.
