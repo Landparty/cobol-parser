@@ -785,6 +785,14 @@ flowchart arrows. Fixed with a final `else` branch iterating
 `_CLAUSE_BODY_ATTRS`; the `id`-based `visited` set keeps the
 generic pass from double-counting statements the specialized branches already
 handled. Pinned by `tests/regression/test_tier6_silent_drop_audit.py`.
+2026-10-15: that list missed `on_exception` / `not_on_exception`, and the
+XML/JSON PARSE/GENERATE branch (special-cased for its PROCESSING PROCEDURE
+edge) never reached the `else` at all, so a PERFORM / GO TO in an XML/JSON
+or ACCEPT/DISPLAY `ON EXCEPTION` body drew no edge and its target read as
+unreachable (`CICSCHNL`'s `1000-CHECK-CREDIT`, PERFORMed from `JSON PARSE
+... NOT ON EXCEPTION`, once the CICS RETURN/XCTL terminator change removed
+the fall-through that had masked it). Both now queue those bodies. Pinned by
+`tests/unit/analysis/test_program_flow.py::TestProgramFlowExceptionBodies`.
 
 ## RecursionRiskAnalyzer (`recursion_risk.py`, 2026-08-16)
 

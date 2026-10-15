@@ -6271,3 +6271,49 @@ class TestScannerDeepNestingRegression:
         when_2_edge_idx = edges.index(when_edges[1])
 
         assert when_2_edge_idx > nested_if_branch_idx
+
+
+class TestProgramFlowExceptionBodies:
+    """PERFORM / GO TO written in an XML/JSON or ACCEPT ``ON EXCEPTION`` /
+    ``NOT ON EXCEPTION`` body is an edge like one in any other conditional
+    clause. The scanner used to skip those bodies, so the target read as
+    unreachable while dead-code (and GnuCOBOL at runtime) ran it."""
+
+    SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. JSONEXC.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-REC.
+          05 WS-A PIC X(3) VALUE 'ABC'.
+       01 WS-OUT PIC X(80).
+       01 WS-X PIC X(5).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           JSON GENERATE WS-OUT FROM WS-REC
+               ON EXCEPTION
+                   PERFORM ERR-PARA
+               NOT ON EXCEPTION
+                   PERFORM OK-PARA
+           END-JSON
+           ACCEPT WS-X FROM CONSOLE
+               ON EXCEPTION GO TO ACC-PARA
+           END-ACCEPT
+           STOP RUN.
+       OK-PARA.
+           DISPLAY 'OK-PARA RAN'.
+       ERR-PARA.
+           DISPLAY 'ERR-PARA RAN'.
+       ACC-PARA.
+           STOP RUN.
+"""
+
+    def test_exception_bodies_produce_edges(self) -> None:
+        result = parse_cobol(self.SOURCE, filename="<test>")
+        assert result.ast is not None, result.errors
+        report = ProgramFlowAnalyzer().analyze(result.ast)
+        pairs = {(e.source, e.target, e.edge_type) for e in report.edges}
+        assert ("MAIN-PARA", "OK-PARA", FlowEdgeType.PERFORM) in pairs
+        assert ("MAIN-PARA", "ERR-PARA", FlowEdgeType.PERFORM) in pairs
+        assert ("MAIN-PARA", "ACC-PARA", FlowEdgeType.GOTO) in pairs
+        assert report.unreachable_nodes == []

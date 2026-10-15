@@ -40,7 +40,9 @@ from .models import BranchArm, BranchNode, FlowEdge, FlowEdgeType, FlowNode
 from .statement_text import summarize_arm
 
 # Conditional clause-body attributes that may hold nested statements on IO /
-# arithmetic / STRING statements the ``scan()`` dispatch does not special-case.
+# arithmetic / STRING / ACCEPT / DISPLAY statements the ``scan()`` dispatch
+# does not special-case (XML/JSON PARSE and GENERATE are special-cased for
+# their PROCESSING PROCEDURE edge, and queue the same exception bodies there).
 _CLAUSE_BODY_ATTRS: tuple[str, ...] = (
     "at_end_clause",
     "not_at_end_clause",
@@ -52,6 +54,8 @@ _CLAUSE_BODY_ATTRS: tuple[str, ...] = (
     "not_on_size_error",
     "on_overflow",
     "not_on_overflow",
+    "on_exception",
+    "not_on_exception",
 )
 
 
@@ -559,6 +563,15 @@ class ProcedureScanner:
                 self._collector.process_merge(stmt, proc_name)
             elif isinstance(stmt, XmlJsonStatement):
                 self._collector.process_xml_parse(stmt, proc_name)
+                # ON EXCEPTION / NOT ON EXCEPTION bodies run in this
+                # paragraph like any other conditional clause: a PERFORM or
+                # GO TO there is an edge, not dead text.
+                push_sequential(
+                    [
+                        (stmt.on_exception or [], source_id, arm),
+                        (stmt.not_on_exception or [], source_id, arm),
+                    ]
+                )
             elif getattr(stmt, "node_type", None) == "EXEC_CICS":
                 self._collector.process_cics_handle(stmt, proc_name)
                 # Set even when RESP/NOHANDLE lets a failure fall through:
