@@ -922,7 +922,11 @@ compiled against them. Implementation:
   fixed-length and garbled, exit 0.
   `--record-length` is decode-only: an LRECL to cut fixed-length records at
   when the file's records are longer than the copybook describes (trailing
-  slack, or a copybook covering only a prefix).
+  slack, or a copybook covering only a prefix). With no `--record-length`
+  and a whole-program source, it defaults to the FD's LRECL (the largest 01
+  under the FD, or a larger `RECORD CONTAINS n`), so `--record HDR-REC` on a
+  shorter 01 still frames the file right (#362); `gen-data --format
+  record|hex` pads that 01 out to the same LRECL with spaces.
 * **`--max-records`/`--skip`** page a large file. A run stopped by
   `--max-records` does *not* report the rest of the file as trailing bytes.
   A negative `--max-records`/`--skip`, or a `--record-length` that is not

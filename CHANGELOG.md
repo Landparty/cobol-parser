@@ -205,6 +205,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an `EXIT SECTION` inside the range carries on at the next section. The walk
   runs inside the transitive-reachability worklist, so a PERFORM written in
   a skipped member keeps nothing alive.
+* **decode / compare / gen-data: a whole program's RECFM=F file is framed at
+  the FD's LRECL** (#362). `--record X` on a program source used to cut the
+  file at that 01's own length; every 01 under one FD shares the record area,
+  so the LRECL is its largest 01, or the FD's `RECORD CONTAINS n` when that
+  is larger.
+  `decode`/`compare` now frame there by default (`--record-length` still
+  overrides), and `gen-data --format record|hex` pads a shorter 01 out to it
+  with spaces, so the two round-trip.
 
 * **`codebase-graph` now records `EXEC CICS LINK` / `XCTL PROGRAM(...)` edges**
   (#315). They were skipped with no `unresolved` note, so a CICS program's

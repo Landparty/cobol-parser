@@ -990,7 +990,9 @@ class RecordDecoder:
                 when the file's ``LRECL`` is not the layout's own length.
                 A file whose records carry trailing slack (or whose
                 copybook covers only a prefix of them) needs this; without
-                it the layout's length is used.
+                it the layout's length is used.  :meth:`from_copybook_source`
+                defaults it to the FD's ``LRECL`` when the source is a whole
+                program (see :func:`~.copybook.fd_record_length`).
             varying: The FD's ``RECORD VARYING FROM min TO max`` range, when
                 the source was a whole program (or an explicit
                 :attr:`DataGeneratorOptions.record_varying`).  It lives
@@ -1022,10 +1024,14 @@ class RecordDecoder:
             CopybookLayoutError: if the source has no usable record layout,
                 or the requested *record* is not in it.
         """
-        from .copybook import parse_copybook_records, select_record
+        from .copybook import fd_record_length, parse_copybook_records, select_record
 
         records = parse_copybook_records(source, filename=filename)
         chosen = select_record(records, record, filename)
+        if record_length is None:
+            # A whole program's FD frames its file at the LRECL every 01
+            # under it shares, not at the chosen 01's own length.
+            record_length = fd_record_length(records, chosen, options)
         return cls.from_record(
             chosen, opts=opts, options=options, record_length=record_length
         )
