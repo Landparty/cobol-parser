@@ -1419,6 +1419,13 @@ by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
 (`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
 `COMP-5` is still a change.
 
+`tests/unit/cli/test_analyzer_cli_gaps.py::TestDefinitionsAndExitsStampOrigins`
+pins that with `--copybook-path` xref's `definition` gains
+`definition_origin` (a WORKING-STORAGE item and a paragraph after a COPY,
+and an item inside the copybook) and program-flow's
+`exit_statement_location` gains `exit_statement_origin`; none without
+expansion (#367).
+
 `tests/regression/test_optional_keyword_forms.py` (#405) pins the
 optional-keyword forms that used to lose data: `XML PARSE x PROCEDURE IS p`
 without PROCESSING (and dead-code not reporting `p`), SORT bare
