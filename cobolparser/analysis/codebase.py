@@ -297,10 +297,15 @@ class CopyEdge:
 
     def _is_parent(self, parent: CopyEdge) -> bool:
         """Whether *parent* is the edge that pulled in the member this one is
-        nested in -- by name, and by file when both sides know theirs."""
+        nested in -- by name, and by file once this edge knows its parent's.
+
+        A nested edge with a ``parent_path`` came from reading that resolved
+        file, so an unresolved edge of the same name is never its parent. Only
+        a hand-built edge without ``parent_path`` matches by name alone.
+        """
         if parent.member != self.program:
             return False
-        if self.parent_path is None or parent.path is None:
+        if self.parent_path is None:
             return True
         return parent.path == self.parent_path
 
@@ -493,6 +498,19 @@ class CodebaseGraph:
     def _failed_ids(self) -> set[str]:
         return {p.program_id for p in self.programs if p.parse_failed}
 
+    def _rendered_copy_edges(self) -> list[CopyEdge]:
+        """Copy edges as the diagrams draw them: one per (program, member,
+        nested), since a diagram has one node per member *name* and two
+        libraries' members of one name would otherwise draw an edge twice."""
+        seen: set[tuple[str, str, bool]] = set()
+        edges: list[CopyEdge] = []
+        for edge in self.copy_edges:
+            key = (edge.program, edge.member, edge.nested)
+            if key not in seen:
+                seen.add(key)
+                edges.append(edge)
+        return edges
+
     def to_mermaid(self) -> str:
         """Render the graph as a Mermaid ``flowchart LR``.
 
@@ -523,7 +541,7 @@ class CodebaseGraph:
                 f'    {_program_node_id(edge.caller)} -->|"{label}"|'
                 f" {_program_node_id(edge.callee)}"
             )
-        for copy_edge in self.copy_edges:
+        for copy_edge in self._rendered_copy_edges():
             source = (
                 _member_node_id(copy_edge.program)
                 if copy_edge.nested
@@ -589,7 +607,7 @@ class CodebaseGraph:
                 f"    {_program_node_id(edge.caller)} ->"
                 f" {_program_node_id(edge.callee)} [{attrs}];"
             )
-        for copy_edge in self.copy_edges:
+        for copy_edge in self._rendered_copy_edges():
             source = (
                 _member_node_id(copy_edge.program)
                 if copy_edge.nested

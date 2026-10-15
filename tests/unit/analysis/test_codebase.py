@@ -1460,3 +1460,40 @@ class TestLibraryQualifiedCopy:
             ]
         )
         assert graph.programs_using("INNER") == ["P"]
+
+
+class TestLibraryQualifiedCopyReview:
+    """#445 review: unresolved libraries and duplicate diagram edges."""
+
+    @pytest.fixture
+    def two_lib_graph(self, tmp_path) -> CodebaseGraph:
+        books = tmp_path / "cpy"
+        for lib in ("LIBA", "LIBB"):
+            (books / lib).mkdir(parents=True)
+            (books / lib / "REC.cpy").write_text(
+                f"       05 R-{lib} PIC X.\n       COPY INNER.\n"
+            )
+        (books / "INNER.cpy").write_text("       05 RI PIC X.\n")
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "PA.cbl").write_text(_program_copying("REC OF LIBA", "PA"))
+        (src / "PB.cbl").write_text(_program_copying("REC OF LIBB", "PB"))
+        (src / "PX.cbl").write_text(_program_copying("REC OF LIBX", "PX"))
+        # LIBX does not exist; make sure REC does not resolve without it.
+        return CodebaseGraphBuilder(copybook_paths=[str(books)]).build_from_directory(
+            str(src)
+        )
+
+    def test_unresolved_copy_is_not_a_parent_of_a_nested_edge(self, two_lib_graph):
+        px = next(e for e in two_lib_graph.copy_edges if e.program == "PX")
+        assert px.path is None
+        assert two_lib_graph.programs_using("INNER") == ["PA", "PB"]
+        report = CopybookImpactAnalyzer(two_lib_graph).analyze("INNER")
+        assert report.transitive_programs == ["PA", "PB"]
+        assert all(chain[0] != "PX" for chain in report.chains)
+
+    def test_diagrams_draw_one_nested_edge_per_member_name(self, two_lib_graph):
+        nested = [e for e in two_lib_graph.copy_edges if e.nested]
+        assert len(nested) == 2  # one per parent file
+        assert two_lib_graph.to_dot().count("C_REC -> C_INNER") == 1
+        assert two_lib_graph.to_mermaid().count("C_REC -.->") == 1

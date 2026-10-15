@@ -1436,3 +1436,7 @@ codebase-graph, that a nested COPY inside `LIBB/REC` reaches only the programs
 copying `LIBB/REC` (chains `[PB, REC, INNER]`), that `copybook-impact` on a
 member name resolving to several files unions their fields and says so, and
 that a hand-built nested `CopyEdge` without `parent_path` still matches by name.
+`TestLibraryQualifiedCopyReview` (#445 review) pins that a COPY whose library
+did not resolve is never the parent of a nested edge read from a resolved
+file, and that DOT/Mermaid draw `REC -> INNER` once when two libraries' REC
+both copy INNER.

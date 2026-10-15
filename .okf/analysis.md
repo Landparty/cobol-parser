@@ -3006,13 +3006,15 @@ member name: `_member_paths` / `_member_failures` on `(member, library)`, and
 own `library_qualifier`, as the expander does. `CopyEdge` carries `library`
 (the qualifier as written, case kept) and, for a nested edge, `parent_path` --
 the outer member's file. `programs_using()` and `CopybookImpactAnalyzer` walk
-up *edge by edge* (`CopyEdge._is_parent`: same name, and same file when both
-sides know theirs), so `LIBB/REC -> INNER` reaches only the programs whose
-`REC` resolved to `LIBB/REC.cpy`. A hand-built nested edge with no
-`parent_path` matches by name alone (the pre-#351 behaviour). `ImpactReport.paths`
+up *edge by edge* (`CopyEdge._is_parent`: same name, and same file whenever the nested
+edge has a `parent_path`), so `LIBB/REC -> INNER` reaches only the programs
+whose `REC` resolved to `LIBB/REC.cpy` -- never a program whose `REC` did not
+resolve at all. A hand-built nested edge with no `parent_path` matches by name
+alone (the pre-#351 behaviour). `ImpactReport.paths`
 lists every file the member name resolved to; with more than one, `fields` is
 their union and `unresolved` says so. The DOT/Mermaid renderings still draw
-one node per member *name*.
+one node per member *name*, and draw each `(program, member, nested)` edge once
+(`_rendered_copy_edges`), however many files sit behind it.
 
 Two rules hold throughout:
 
