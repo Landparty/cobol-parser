@@ -1096,7 +1096,8 @@ as unparsed. Tests: `test_environment_division_parser.py`
 
 **Condition / expression separators (2026-10-14, issue #386):** the IF and
 PERFORM UNTIL (inline, out-of-line, VARYING) condition collectors, the
-EVALUATE subject collector and the COMPUTE expression collector skip a
+EVALUATE subject and WHEN selector collectors, the SEARCH WHEN condition
+collector and the COMPUTE expression collector skip a
 separator comma/semicolon the way they skip NEWLINE, via
 `_utils.is_bare_separator(token, paren_depth)` / `paren_depth_after()`. Only
 outside parentheses: the comma in `FUNCTION MAX(A, B)` is kept. Before,

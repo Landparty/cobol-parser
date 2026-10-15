@@ -2,8 +2,9 @@
 EVALUATE subject or COMPUTE expression became part of its text.
 
 In COBOL a comma or semicolon used as a separator is a space. The IF and
-PERFORM UNTIL condition collectors, the EVALUATE subject collector and the
-COMPUTE expression collector already dropped NEWLINE but kept the separator,
+PERFORM UNTIL condition collectors, the EVALUATE subject and WHEN selector
+collectors, the SEARCH WHEN condition collector and the COMPUTE expression
+collector already dropped NEWLINE but kept the separator,
 so ``IF X = 1,`` compared X with ``"1 ,"``, ``IF X-ON;`` no longer read as a
 condition-name test, and ``COMPUTE Z = X + Y,`` lost its expression tree.
 A comma inside parentheses (a function's argument list) is still kept.
@@ -120,3 +121,40 @@ def test_comma_inside_function_arguments_is_kept():
     cond = _first(stmts, "IfStatement")["condition"]
     assert "," in str(cond)
     assert cond.get("right_operand") != "1 ,"
+
+
+@pytest.mark.parametrize("sep", [",", ";"])
+def test_evaluate_when_selector_followed_by_separator(sep):
+    stmts = _parse(f"           EVALUATE Y WHEN 1{sep} DISPLAY X END-EVALUATE.\n")
+    when = _first(stmts, "EvaluateStatement")["when_clauses"][0]
+    assert when["selectors"] == [{"type": "Literal", "value": "1"}]
+    assert when["statements"][0]["statement_type"] == "DISPLAY"
+
+
+def test_evaluate_when_condition_followed_by_separator():
+    stmts = _parse("           EVALUATE TRUE WHEN X = 1, DISPLAY X END-EVALUATE.\n")
+    when = _first(stmts, "EvaluateStatement")["when_clauses"][0]
+    assert when["selectors"] == [{"type": "Condition", "text": "X = 1"}]
+
+
+def test_search_when_condition_followed_by_separator():
+    src = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. T.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "       01 X PIC 9.\n"
+        "       01 TR.\n"
+        "          05 TE OCCURS 3 INDEXED BY I.\n"
+        "             10 TC PIC 9 OCCURS 2.\n"
+        "       PROCEDURE DIVISION.\n"
+        "           SEARCH TE WHEN TC(I, 1) = 1; DISPLAY X END-SEARCH.\n"
+        "           STOP RUN.\n"
+    )
+    result = parse_cobol(src)
+    assert result.errors == []
+    search = _first(result.ast.get_all_statements(), "SearchStatement")
+    when = search["when_clauses"][0]
+    # The comma inside the subscript stays; the trailing semicolon goes.
+    assert when["condition"] == "TC ( I , 1 ) = 1"
+    assert when["condition_tree"]["right_operand"] == "1"

@@ -1337,7 +1337,8 @@ telling EXEC<newline>SQL from EXEC<newline>CICS within one parse.
 
 `tests/regression/test_condition_expression_separators.py` (issue #386)
 pins a separator `,` / `;` after an IF condition, a PERFORM UNTIL condition
-(inline, out-of-line, VARYING), an EVALUATE subject and a COMPUTE expression
+(inline, out-of-line, VARYING), an EVALUATE subject or WHEN selector, a SEARCH
+WHEN condition and a COMPUTE expression
 being dropped, and a comma inside `FUNCTION MAX(X, Y)` being kept.
 
 `tests/regression/test_fd_record_after_label_data.py` (issue #401) pins

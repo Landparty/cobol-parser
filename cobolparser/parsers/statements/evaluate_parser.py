@@ -313,6 +313,7 @@ class EvaluateStatementParser(IStatementParser):
         selector_count = 0
         expecting_selector = True
         saw_separator = False
+        paren_depth = 0
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -352,7 +353,12 @@ class EvaluateStatementParser(IStatementParser):
                 token_stream.consume()
                 continue
 
-            if token.type != TokenType.NEWLINE:
+            # A separator comma/semicolon is a space (#386): ``WHEN 1;``
+            # selects ``1``, not ``1 ;``.
+            if token.type != TokenType.NEWLINE and not is_bare_separator(
+                token, paren_depth
+            ):
+                paren_depth = paren_depth_after(token, paren_depth)
                 value = token.value if token.value else ""
                 # The lexer strips quotes off string literals, so a blank
                 # literal (WHEN '  ' — the IMS DL/I "call succeeded" status
