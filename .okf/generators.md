@@ -826,7 +826,7 @@ dispatched on the same `USAGE`-then-category ladder:
 | Storage | Read back as |
 |---|---|
 | DISPLAY text | the charset's characters (ASCII decoded as **latin-1**, so a byte the encoder could not have written is still shown), trailing spaces/NULs stripped |
-| zoned DISPLAY | one digit per byte, sign overpunched or `SIGN IS SEPARATE` |
+| zoned DISPLAY | one digit per byte, sign overpunched or `SIGN IS SEPARATE`. Under `SEPARATE` only the sign byte carries the sign and it must be `+` or `-`: every digit is unsigned, so a sign zone on one is an `error` (never a negation), and a blank sign byte is an `error` too (2026-10-14, #360: x'F1F2D34E' read `-123` clean, and x'F1F2F340' read `123` clean) |
 | `COMP-3` | two BCD nibbles per byte, sign in the final low nibble. With an even digit count the first byte's high nibble is pad, not a digit: a non-zero pad is an `error` and is left out of the value (2026-09-28: it was read as a digit, so `S9(2)V99` x'12345C' decoded as `123.45`, more digits than the PICTURE holds) |
 | `COMP`/`COMP-4`/`COMP-5` | two's-complement, big-endian except COMP-5 which follows `EncodingOptions.endian` |
 | `COMP-1`/`COMP-2` | IEEE 754, rendered to 7 / 15 significant digits |

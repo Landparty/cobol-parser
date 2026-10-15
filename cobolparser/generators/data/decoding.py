@@ -464,22 +464,27 @@ def _decode_zoned(
         )
         sign_char = _decode_text(sign_byte, opts).strip()
         negative = sign_char == "-"
-        if sign_char not in ("+", "-", ""):
+        # Only '+' or '-' is a sign here: a blank sign byte fails the
+        # NUMERIC class test on the host, so it is bad data, not "positive".
+        if sign_char not in ("+", "-"):
             error = f"sign byte {sign_byte.hex().upper()} is neither '+' nor '-'"
 
     # Where the sign lives when it is overpunched onto a digit rather than
     # given a byte of its own: the first digit under SIGN IS LEADING, the
     # last otherwise -- the same two positions :func:`.encoding._encode_zoned`
-    # writes it to.
-    sign_index = (
-        0
-        if (spec.is_signed and not _is_sign_separate(spec) and _is_sign_leading(spec))
-        else len(body) - 1
-    )
+    # writes it to.  Under SIGN IS SEPARATE there is no such position: the
+    # sign byte alone carries the sign, every digit is unsigned, and a sign
+    # zone on one is a corrupt digit -- never a negation of a '+' field.
+    if not spec.is_signed or _is_sign_separate(spec):
+        sign_index = -1
+    elif _is_sign_leading(spec):
+        sign_index = 0
+    else:
+        sign_index = len(body) - 1
     magnitude = 0
     for index, byte in enumerate(body):
         digit, byte_negative, byte_error = _zoned_digit(
-            byte, opts, signed_position=spec.is_signed and index == sign_index
+            byte, opts, signed_position=index == sign_index
         )
         magnitude = magnitude * 10 + digit
         negative = negative or byte_negative
