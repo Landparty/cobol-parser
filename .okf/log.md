@@ -29,6 +29,7 @@ bytes repeated across the field, and decodes back to that cell.
 `PERFORM ... THRU` range and every `GO TO ... DEPENDING ON` target, not just
 the first; the matching "Known limits" entry is gone.
 [tests.md](tests.md): three regressions in `TestNestingAndReachability`.
+
 ## 2026-10-15 -- issue #340: TABLE-prefixed table names are tables
 
 [analysis.md](analysis.md) (field lineage `sql` port row): `_sql_flow`'s
@@ -36,6 +37,7 @@ the first; the matching "Known limits" entry is gone.
 `TABLE` followed by `(`, so `TABLE_CUST` / `TABLES_CFG` / `TABLEX` are
 traced like any other table instead of skipped with the table-function
 caveat.
+
 ## 2026-10-14 -- issue #395: dynamic-SQL trace respects statement order
 
 [analysis.md](analysis.md) (`SQL_DYNAMIC_CONCATENATION` row):
@@ -45,6 +47,7 @@ PREPARE's paragraph cuts off every writer before it and elsewhere;
 `_WriterFlow` in `sql_cics_lint.py` owns the rule. Without such a MOVE the
 trace stays program-wide, so a statement built in a PERFORMed paragraph is
 still found.
+
 ## 2026-10-14 -- issue #402: optional-keyword forms
 
 [parser.md](parser.md): `OCCURS n TO UNBOUNDED` is an unbounded ODO table
@@ -54,17 +57,20 @@ without FROM takes n as the minimum, and a lone `VARYING n` leaves the maximum N
 keeps every operand and records `EntryStatement.parameter_modes`, which
 [analysis.md](analysis.md)'s `ProgramSignatureExtractor` now carries as each
 ENTRY operand's `by_clause`.
+
 ## 2026-10-14 -- issue #403: leading IS in an abbreviated leg
 
 [parser.md](parser.md): `_expand_abbreviated_condition` drops the optional
 `IS` that opens an abbreviated leg (`IF A > 1 AND IS < 5`), so the leg
 expands to `A < 5` instead of an operand-less COMPARISON.
+
 ## 2026-10-14 -- issue #390: special registers are not paragraph headers
 
 [parser.md](parser.md) (the `looks_like_paragraph_boundary()` entry):
 special registers (`RETURN-CODE`, `TALLY`, ...), reserved words that lex as
 identifiers (`RUN`, `TRUE`, ...) and, in fixed-format source, any token in
 Area B are never read as a paragraph header swallowed by a missing period.
+
 ## 2026-10-14 -- issue #394: XML PARSE THRU on the next line
 
 [ast-models.md](ast-models.md), [analysis.md](analysis.md): the
@@ -74,6 +80,7 @@ Area B are never read as a paragraph header swallowed by a missing period.
 `operands`/`clause_items`, leaving `processing_procedure_thru` None, so
 dead-code, program-flow and lint reported the handler range dead. An `IS`
 on its own line was read as the procedure name the same way.
+
 ## 2026-10-15 -- gen-fixtures follow-ups to #364 and #404
 
 [generators.md](generators.md): the scenario planner no longer merges arms
@@ -129,6 +136,7 @@ coded.
 x(...)` as unresolved and lint blamed a missing COPY. Intrinsic results now
 take their category from the intrinsic catalog (or their first argument);
 the rest is counted in `unresolved_function_count` with its own caveat.
+
 ## 2026-10-13 -- compare: LOW-VALUES padding is a difference (#287)
 
 [generators.md](generators.md), [cli.md](cli.md): a values compare treated
@@ -160,6 +168,7 @@ YYYYDDD`), so the commonest date idiom became a console `ACCEPT` boundary:
 `gen-fixtures` generated stdin data for it and mockymock's `generate
 --with-data` warned of a boundary key mismatch. It now compares the first
 word, as mockymock's `mock_surface` does.
+
 ## 2026-10-12 -- FILLER VALUE SPACES in record images
 
 [generators.md](generators.md): a FILLER whose `VALUE` is `SPACES`,
@@ -176,6 +185,7 @@ YYYYMMDD` became a port `console:DATE YYYYMMDD` and a summary row from it
 to every output the date reached. DATE / DAY / DAY-OF-WEEK / TIME
 (matched on the first word, as PR #290 makes `BoundaryInventoryAnalyzer`
 do) now make no port.
+
 ## 2026-10-12 -- multi-line EXEC boundary keys
 
 [analysis.md](analysis.md): `BoundaryInventoryAnalyzer._unique_prefix`
@@ -455,6 +465,7 @@ DCB overrides merge; `DD *,DLM=` keeps `//` cards as data; continued
 strings keep blanks through column 71; CR/LF-only line splitting.
 [cli.md](cli.md): `cobol.yml` reader handles `''` / `\"` escapes, rejects
 content after `...`, ignores a UTF-8 BOM.
+
 ## 2026-09-28 -- accelerator audit: OCCURS count overflow, short-record literals, `*>` in data entries
 
 Differential run (Cython vs forced pure-Python) over tests/samples,
@@ -468,6 +479,7 @@ Cython and the expander). [parser.md](parser.md): `*>` floating comments
 are dropped from the parser's `TokenStream`, so a comment between a data
 clause keyword and its operand no longer drops the operand or fabricates a
 level-number item.
+
 ## 2026-09-28 -- control-flow bug hunt: nested-unit references, PERFORM UNTIL scope terminators, DOT keyword ids, hidden unreachable nodes
 
 [analysis.md](analysis.md): `DeadCodeAnalyzer` and the flow scanner's ENTRY
@@ -478,6 +490,7 @@ enclosing `END-xxx` instead of swallowing it (which re-nested a top-level
 `STOP RUN` into the IF arm). [generators.md](generators.md): DOT quotes
 paragraph ids that are DOT keywords; `show_unreachable=False` also drops the
 hidden paragraph's edges, branch boxes and CALL-only external nodes.
+
 ## 2026-09-28 -- bug hunt round 8: comment-entries, currency symbols, SPECIAL-NAMES, SELECT short forms
 
 [lexer.md](lexer.md): IDENTIFICATION DIVISION comment-entries lex as
@@ -809,6 +822,7 @@ DECLARE GLOBAL TEMPORARY TABLE graded, explicit diff signatures for the
 statement types whose semantics live off `operands`, and the cataloged
 `// PROC` header in JCL. Gaps the review found but this pass did not
 close are listed per module in analysis.md.
+
 ## 2026-09-12 — missing-period check judges the entry, not the line
 
 Found by running the `legacy-application` corpus through the COBOL Analyzer
@@ -991,6 +1005,7 @@ Verified end to end against the VS Code extension's live CLI contract suite
 (`src/integration/cliContract.test.ts`), which exercises `--keep-comments`,
 `--source-map`, lint origins and `--program` through the extension's own
 argument builders and output parsers.
+
 ## 2026-09-07 — repo audit: two fabricated-answer bugs, four lint false positives
 
 Request: "audit the repo, identify potential bugs or gaps", then "fix all of
@@ -1409,6 +1424,7 @@ a real record would be shorter. That caveat was the feature request.
 See "Fixed- and variable-length records" in [generators.md](generators.md);
 `tests/unit/generators/data/test_variable_length.py`,
 `tests/unit/cli/test_gen_data_cli.py::TestRecordFormatFlag`.
+
 ## 2026-09-05 (repo audit: two silent wrong-answer bugs, one rotten corpus)
 
 A deep audit of the repo, starting from a green suite (9,015 passing) and
@@ -3438,6 +3454,7 @@ this same way.
   intentionally left unchanged, out of scope for this fix) refuses instead
   of silently writing a corrupted "durable deliverable" and exiting 0. See
   mocky-mock's own `.okf/log.md` for that side of the fix.
+
 ## 2026-08-02 (generators/data/ package split: final whole-branch-review fixes)
 
 Seven-task, zero-behavior-change refactor split `cobolparser/generators/
@@ -4851,6 +4868,7 @@ each surfaced genuine, runtime-reproduced silent drops. Full audit:
   (COLLECT_ALL via both `parse_cobol` and `CobolParser.parse`; FAIL_FAST still
   aborts). No `.pyx`/`.c` change was needed — both paths already accept
   `merge_continued_literals`.
+
 ## 2026-07-06 (MOVE silently accepted malformed input — audit H3)
 
 * **Updated** [parser.md](parser.md): the MOVE parser accepted incomplete

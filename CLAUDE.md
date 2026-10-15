@@ -25,11 +25,13 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | `normalize_fixed_format`, copybook expansion | `.okf/preprocessing.md` |
 | `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `.okf/ast-models.md` |
 | Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, `LintAnalyzer`, `XrefAnalyzer`, `ProgramSignatureExtractor`, `CodebaseGraphBuilder`, `SqlCicsAnalyzer`, `ProgramDiffer`, etc.) | `.okf/analysis.md` |
-| Flowcharts, copybook → CSV test data (`CopybookDataGenerator`) | `.okf/generators.md` |
-| `parse_files`, `parse_files_with_copybooks`, batch fault isolation | `.okf/batch.md` |
+| Dialects, EXEC SQL/CICS/IMS nodes, LE/intrinsic signature lookups | `.okf/dialects.md` |
+| Flowcharts, copybook → CSV/record-image data (`CopybookDataGenerator`), decode/compare, `gen-fixtures` bundles and scenarios | `.okf/generators.md` |
+| `parse_files`, `parse_files_with_copybooks`, `scan_files`, batch fault isolation | `.okf/batch.md` |
 | z/OS JCL: jobs/steps, DD → dataset bindings (read by jcl-parser) | `.okf/jcl.md` |
 | CLI subcommands and flags, the `cobol.yml` project config | `.okf/cli.md` |
 | Test layout, markers, coverage floor | `.okf/tests.md` |
+| Backend adapter dict shape (summary of `interface-contract.md`) | `.okf/integration.md` |
 
 The OKF is more specific and more current than this file for the above topics. When they conflict, trust the OKF.
 
