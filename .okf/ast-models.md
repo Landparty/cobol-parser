@@ -335,6 +335,16 @@ the new helpers. Group layout follows `layout_offsets._layout_siblings`'
 member); level-66 and level-77 children are excluded for the same reasons
 that module excludes them.
 
+**Group vs. elementary (#345, 2026-10-15):** `is_elementary_item()` is True
+for a childless item that has a PICTURE *or* a usage that never takes one
+(`_storage.PICTURELESS_USAGES`: `COMP-1`/`COMP-2` and their
+`COMPUTATIONAL-n` spellings, `INDEX`, the `POINTER` family, `OBJECT
+REFERENCE`). It used to require a PICTURE, so those items were neither
+group nor elementary and `get_elementary_items()` (and `to_dict()`'s
+`is_elementary_item`) left them out. A childless item with neither (e.g. a
+group whose subordinates are missing) is still neither -- deliberately not
+guessed elementary.
+
 `_storage.py` sits at the package root, next to `_errors.py` and for the same
 reason: `cobolparser.generators.data.__init__` eagerly imports
 `program_layout`, which imports `cobolparser.models`, so a model importing

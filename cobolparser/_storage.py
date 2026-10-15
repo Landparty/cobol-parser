@@ -66,6 +66,9 @@ BINARY_USAGES = BINARY_FIXED_USAGES | BINARY_NATIVE_USAGES
 SINGLE_FLOAT_USAGES = frozenset({"COMP-1", "COMPUTATIONAL-1"})
 DOUBLE_FLOAT_USAGES = frozenset({"COMP-2", "COMPUTATIONAL-2"})
 FLOAT_USAGES = SINGLE_FLOAT_USAGES | DOUBLE_FLOAT_USAGES
+#: Usages whose items never carry a PICTURE: their width comes from the
+#: usage alone, so a childless item with one of them is elementary.
+PICTURELESS_USAGES = FLOAT_USAGES | POINTER_USAGES | frozenset({"INDEX"})
 
 
 def binary_byte_length(digits: int) -> int:

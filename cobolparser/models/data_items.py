@@ -8,7 +8,7 @@ data items, PICTURE clauses, OCCURS clauses, and IBM-specific data types.
 import re
 from typing import Any
 
-from .._storage import storage_size
+from .._storage import PICTURELESS_USAGES, storage_size
 from .ast_base import ASTNode, SourceLocation
 
 # Pre-compiled regex patterns for PictureClause parsing (avoids re-compilation per instance)
@@ -891,11 +891,21 @@ class CobolDataItem(ASTNode):
         return len(cobol_data_children) > 0 and self.picture_clause is None
 
     def is_elementary_item(self) -> bool:
-        """Check if this is an elementary item (has PICTURE, no CobolDataItem children)."""
+        """Check if this is an elementary item: no CobolDataItem children, and
+        either a PICTURE or a USAGE that never takes one (``COMP-1`` /
+        ``COMP-2``, ``INDEX``, the ``POINTER`` family, ``OBJECT REFERENCE``).
+
+        A childless item with neither stays unclassified -- e.g. a group
+        whose subordinate entries are missing -- rather than being guessed
+        elementary."""
         cobol_data_children = [
             child for child in self.children if isinstance(child, CobolDataItem)
         ]
-        return self.picture_clause is not None and len(cobol_data_children) == 0
+        if cobol_data_children:
+            return False
+        if self.picture_clause is not None:
+            return True
+        return (self.usage or "").upper() in PICTURELESS_USAGES
 
     def get_elementary_items(self) -> list["CobolDataItem"]:
         """Get all elementary items under this data item."""

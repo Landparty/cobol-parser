@@ -1358,3 +1358,72 @@ def test_edited_picture_sizes(
 def test_b_in_a_junk_pattern_keeps_the_lenient_fallback():
     # C and D are not PICTURE symbols, so the B here is junk too.
     assert PictureClause("ABCD", SourceLocation(1, 1)).size == 1
+
+
+class TestPicturelessElementaryItems:
+    """Issue #345: COMP-1/COMP-2/POINTER/INDEX items never carry a PICTURE
+    and used to be classed neither group nor elementary."""
+
+    _SRC = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. T.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "       01 G.\n"
+        "          05 F1 COMP-1.\n"
+        "          05 F2 COMP-2.\n"
+        "          05 F3 USAGE IS COMPUTATIONAL-1.\n"
+        "          05 P1 POINTER.\n"
+        "          05 P2 PROCEDURE-POINTER.\n"
+        "          05 P3 FUNCTION-POINTER.\n"
+        "          05 P4 USAGE POINTER-64.\n"
+        "          05 X1 INDEX.\n"
+        "          05 C1 PIC X.\n"
+        "       PROCEDURE DIVISION.\n"
+        "           STOP RUN.\n"
+    )
+    _NAMES = ["F1", "F2", "F3", "P1", "P2", "P3", "P4", "X1", "C1"]
+
+    def _group(self):
+        from cobolparser import parse_cobol
+
+        result = parse_cobol(self._SRC)
+        assert result.success, result.errors
+        return result.ast.get_data_items()[0]
+
+    def test_get_elementary_items_includes_pictureless_items(self):
+        group = self._group()
+        assert [i.name for i in group.get_elementary_items()] == self._NAMES
+
+    def test_each_item_is_elementary_and_not_group(self):
+        items = self._group().get_all_children()
+        assert [i.name for i in items] == self._NAMES
+        for item in items:
+            assert item.is_elementary_item(), item.name
+            assert not item.is_group_item(), item.name
+            d = item.to_dict()
+            assert d["is_elementary_item"] is True
+            assert d["is_group_item"] is False
+
+    @pytest.mark.parametrize(
+        "usage", ["COMP-1", "COMP-2", "POINTER", "INDEX", "OBJECT REFERENCE"]
+    )
+    def test_model_level_pictureless_usage_is_elementary(self, usage):
+        item = CobolDataItem("WS-X", 5, SourceLocation(1, 1))
+        item.set_usage(usage)
+        assert item.is_elementary_item()
+        assert item.get_elementary_items() == [item]
+
+    def test_pictureless_display_item_stays_unclassified(self):
+        # A childless item with neither a PICTURE nor a picture-less usage
+        # (e.g. a group whose subordinate entries are missing) is not guessed.
+        item = CobolDataItem("WS-EMPTY", 1, SourceLocation(1, 1))
+        assert not item.is_elementary_item()
+        assert not item.is_group_item()
+
+    def test_group_with_pictureless_usage_is_still_a_group(self):
+        group = CobolDataItem("WS-G", 1, SourceLocation(1, 1))
+        group.set_usage("COMP-1")
+        group.add_child(CobolDataItem("WS-A", 5, SourceLocation(2, 1)))
+        assert group.is_group_item()
+        assert not group.is_elementary_item()
