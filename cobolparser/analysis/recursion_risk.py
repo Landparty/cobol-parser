@@ -11,9 +11,10 @@ forever (or misbehaving in an equivalent way) at runtime:
   invalid COBOL -- standard COBOL does not support re-entering a paragraph
   while an earlier PERFORM of it is still active, which typically corrupts
   the return address and manifests as an infinite loop or abend. A ``GO TO``
-  cycle is checked for an escape hatch: if every paragraph in the loop has no
-  other way out (no branch to a paragraph outside the cycle, no program-
-  terminating statement), the loop is unconditional.
+  cycle is checked for an escape hatch over its whole strongly connected
+  component, not just the cycle itself: when two loops share a paragraph,
+  each one's "exit" can be the other loop. If no paragraph of the component
+  branches outside it or terminates the program, the loop is unconditional.
 - **Self-recursive CALL statements**: a CALL (static, or dynamic with a
   resolvable target -- see :class:`~.value_tracker.DynamicCallAnalyzer`)
   whose target is the enclosing program's own PROGRAM-ID. COBOL programs are
@@ -120,6 +121,59 @@ def _perform_range(target: str, flow_report: ProgramFlowReport) -> list[str]:
     return [target]
 
 
+def _components(flow_report: ProgramFlowReport) -> dict[str, frozenset[str]]:
+    """Map each procedure to its strongly connected component over the
+    edges a loop can travel (``_ESCAPE_EDGE_TYPES``), by Tarjan's algorithm
+    (iterative, so a long GO TO chain cannot hit the recursion limit)."""
+    succ: dict[str, list[str]] = {}
+    for edge in flow_report.edges:
+        if edge.edge_type in _ESCAPE_EDGE_TYPES:
+            succ.setdefault(edge.source, []).append(edge.target)
+            succ.setdefault(edge.target, [])
+
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on_stack: set[str] = set()
+    stack: list[str] = []
+    result: dict[str, frozenset[str]] = {}
+    counter = 0
+    for root in succ:
+        if root in index:
+            continue
+        work: list[tuple[str, int]] = [(root, 0)]
+        while work:
+            node, i = work.pop()
+            if i == 0:
+                index[node] = low[node] = counter
+                counter += 1
+                stack.append(node)
+                on_stack.add(node)
+            targets = succ[node]
+            if i < len(targets):
+                work.append((node, i + 1))
+                target = targets[i]
+                if target not in index:
+                    work.append((target, 0))
+                elif target in on_stack:
+                    low[node] = min(low[node], index[target])
+                continue
+            if low[node] == index[node]:
+                members: list[str] = []
+                while True:
+                    member = stack.pop()
+                    on_stack.discard(member)
+                    members.append(member)
+                    if member == node:
+                        break
+                component = frozenset(members)
+                for member in members:
+                    result[member] = component
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[node])
+    return result
+
+
 class RecursionRiskAnalyzer:
     """Finds PERFORM/GO TO cycles and self-recursive CALLs that risk an
     infinite loop (or equivalent runtime misbehavior) rather than terminating.
@@ -163,6 +217,7 @@ class RecursionRiskAnalyzer:
         self, flow_report: ProgramFlowReport
     ) -> list[RecursionRisk]:
         risks: list[RecursionRisk] = []
+        component_of = _components(flow_report)
         for detail in flow_report.cycle_details:
             kind = detail.get("kind")
             if kind not in _LOOP_CYCLE_KINDS:
@@ -219,20 +274,23 @@ class RecursionRiskAnalyzer:
 
             mechanism = "GOTO" if kind == "GOTO_LOOP" else "MIXED"
             verb = "GO TO" if kind == "GOTO_LOOP" else "PERFORM/GO TO"
-            has_escape = self._has_escape(nodes, flow_report)
+            component = component_of.get(nodes[0], frozenset(nodes))
+            has_escape = self._has_escape(component, flow_report)
             if has_escape:
                 explanation = (
                     f"{path} forms a {verb} cycle, but at least one paragraph "
-                    "in the loop also has another way out (a branch to a "
-                    "paragraph outside the cycle, or a program-terminating "
-                    "statement) -- confirm that path is actually reachable "
-                    "before ruling out an infinite loop."
+                    "in the loop (or in a loop it shares paragraphs with) also "
+                    "has another way out (a branch to a paragraph outside "
+                    "them, or a program-terminating statement) -- confirm "
+                    "that path is actually reachable before ruling out an "
+                    "infinite loop."
                 )
             else:
                 explanation = (
                     f"{path} forms a {verb} cycle with no paragraph in the "
-                    "loop able to branch elsewhere or terminate the program -- "
-                    "this is an unconditional infinite loop."
+                    "loop, or in any loop it shares paragraphs with, able to "
+                    "branch elsewhere or terminate the program -- this is an "
+                    "unconditional infinite loop."
                 )
             risks.append(
                 RecursionRisk(
@@ -343,25 +401,30 @@ class RecursionRiskAnalyzer:
         return False
 
     @staticmethod
-    def _has_escape(cycle: list[str], flow_report: ProgramFlowReport) -> bool:
-        """True if some paragraph in *cycle* can terminate the program or
-        branch to a paragraph outside the cycle -- i.e. the loop is not
-        unconditionally trapped once entered."""
-        cycle_set = set(cycle)
+    def _has_escape(component: frozenset[str], flow_report: ProgramFlowReport) -> bool:
+        """True if some paragraph in *component* -- the strongly connected
+        component holding the cycle -- can terminate the program or branch to
+        a paragraph outside it, i.e. the loop is not unconditionally trapped
+        once entered.
+
+        Checking the cycle alone is not enough: with ``P1 -> P2 -> P1`` and
+        ``P1 -> P3 -> P1``, each cycle's exit is the other cycle, so both
+        looked escapable while neither can ever leave (2026-10-14, #393).
+
+        ``has_return`` is a SORT/MERGE ``RETURN sd-file``, which reads the
+        next sorted record; it does not end the program, so it is no exit.
+        """
         nodes_by_name = {n.key: n for n in flow_report.nodes}
-        for name in cycle:
+        for name in component:
             node = nodes_by_name.get(name)
             if node is not None and (
-                node.has_stop_run
-                or node.has_goback
-                or node.has_exit_program
-                or node.has_return
+                node.has_stop_run or node.has_goback or node.has_exit_program
             ):
                 return True
         for edge in flow_report.edges:
             if (
-                edge.source in cycle_set
-                and edge.target not in cycle_set
+                edge.source in component
+                and edge.target not in component
                 and edge.edge_type in _ESCAPE_EDGE_TYPES
             ):
                 return True
