@@ -80,7 +80,13 @@ structural skeleton (issue #273, 2026-10-05):
   EXTERNAL/GLOBAL/VOLATILE, BYTE-LENGTH, DYNAMIC LENGTH, OBJECT REFERENCE,
   GROUP-USAGE), subordinate items, level-88 `condition_names` (placed before a
   group's subordinate items, where a group's 88s sit in source) and each
-  section's level-66 `renames_items`.
+  section's level-66 `renames_items`; every FILE-CONTROL `SelectStatement`
+  with all its clauses (organization, access mode, record / alternate /
+  relative keys, FILE STATUS, ...) -- a SELECT dict is flat, so
+  `_select_from()` rebuilds it whole and `ProgramLayoutIndex.file_facts()` of
+  a round-tripped program matches the original (#346, 2026-10-15; SELECTs
+  used to be dropped *and* counted as PROCEDURE DIVISION statements in the
+  warning).
 * **Dropped:** every PROCEDURE DIVISION statement -- there is no generic way to
   rebuild ~100 statement node types from their dicts -- so restored paragraphs
   are empty. Whenever any were dropped, `from_json` emits
@@ -90,7 +96,7 @@ structural skeleton (issue #273, 2026-10-05):
   `usage_explicit` -- inferred as "usage is neither DISPLAY nor what the
   PICTURE implies") cannot come back.
 * Verified over 294 corpus programs: `from_json(p.to_json()).to_dict()` equals
-  `p.to_dict()` with paragraph `statements` emptied, apart from the derived
+  `p.to_dict()` with PROCEDURE DIVISION paragraph `statements` emptied, apart from the derived
   `metadata.statistics`.
 
 Serialization fidelity notes (2026-07-07):

@@ -940,7 +940,10 @@ class CobolProgram(ASTNode):
           program unit (recursively);
         * every division and every section in it;
         * every paragraph (name, location, metadata) -- but **not** its
-          statements;
+          PROCEDURE DIVISION statements;
+        * every FILE-CONTROL ``SELECT`` entry with all its clauses
+          (organization, access mode, record / alternate / relative keys,
+          FILE STATUS, ...), which is flat and so rebuilt whole;
         * every data item with all its serialized clauses (level, USAGE,
           PICTURE, VALUE, OCCURS, REDEFINES, SIGN, SYNC, JUSTIFIED, BLANK
           WHEN ZERO, EXTERNAL / GLOBAL / VOLATILE, BYTE-LENGTH, DYNAMIC
@@ -1035,11 +1038,46 @@ def _restore_metadata(node: ASTNode, data: dict[str, Any]) -> None:
 def _paragraph_from(data: dict[str, Any], dropped: dict[str, int]) -> "CobolParagraph":
     paragraph = CobolParagraph(data.get("paragraph_name", ""), _location_from(data))
     _restore_metadata(paragraph, data)
-    statements = data.get("statements") or []
-    if statements:
-        dropped["statements"] = dropped.get("statements", 0) + len(statements)
+    lost = 0
+    for stmt_data in data.get("statements") or []:
+        if stmt_data.get("statement_type") == "SELECT":
+            paragraph.add_statement(_select_from(stmt_data))
+        else:
+            lost += 1
+    if lost:
+        dropped["statements"] = dropped.get("statements", 0) + lost
         dropped["paragraphs"] = dropped.get("paragraphs", 0) + 1
     return paragraph
+
+
+#: Keys of a statement dict written by ``CobolStatement.to_dict()`` itself;
+#: every other key of a SELECT dict is one ``SelectStatement`` attribute.
+_STATEMENT_BASE_KEYS = frozenset(
+    {"node_type", "statement_type", "operands", "location", "metadata"}
+)
+
+
+def _select_from(data: dict[str, Any]) -> "CobolStatement":
+    """A FILE-CONTROL ``SelectStatement`` from its ``to_dict()`` form.
+
+    Unlike PROCEDURE DIVISION statements a SELECT entry is flat -- every
+    clause is one scalar or list attribute -- so it is rebuilt whole: the
+    file's organization, access mode, keys and FILE STATUS survive a
+    ``to_json()`` / ``from_json()`` round trip (``ProgramLayoutIndex`` and
+    the IO analyzers read them).
+    """
+    from .statements.misc import SelectStatement
+
+    select = SelectStatement(_location_from(data))
+    _restore_metadata(select, data)
+    select.operands = list(data.get("operands") or [])
+    for key, value in data.items():
+        if key in _STATEMENT_BASE_KEYS or not hasattr(select, key):
+            continue
+        if isinstance(value, list):
+            value = [dict(v) if isinstance(v, dict) else v for v in value]
+        setattr(select, key, value)
+    return select
 
 
 def _section_from(data: dict[str, Any], dropped: dict[str, int]) -> CobolSection:
