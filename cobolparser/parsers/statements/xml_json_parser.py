@@ -218,9 +218,10 @@ class XmlJsonStatementParser(IStatementParser):
                 # / arithmetic ``NOT ON SIZE ERROR``: not this statement's
                 # clause text -- keeping it lost the enclosing handler.
                 break
-            if upper == "PROCESSING" and self._consume_processing_procedure(
-                token_stream, stmt, clause_parts
-            ):
+            if upper in (
+                "PROCESSING",
+                "PROCEDURE",
+            ) and self._consume_processing_procedure(token_stream, stmt, clause_parts):
                 continue
             # A new statement keyword ends the clause region -- unless it is
             # one of this construct's own clause words (SUPPRESS ..., NOT ON
@@ -329,15 +330,20 @@ class XmlJsonStatementParser(IStatementParser):
     def _consume_processing_procedure(
         token_stream: ITokenStream, stmt: XmlJsonStatement, clause_parts: list[str]
     ) -> bool:
-        """Consume ``PROCESSING PROCEDURE [IS] name [THRU|THROUGH name]``.
+        """Consume ``[PROCESSING] PROCEDURE [IS] name [THRU|THROUGH name]``.
 
         Records the names on *stmt* and echoes the consumed words into
         *clause_parts* so ``clause_text`` keeps its historical content.
-        Returns False (consuming nothing) when the stream is not actually
-        at that clause."""
-        nxt, _ = peek_past_noise(token_stream, 1)
-        if nxt is None or (nxt.value or "").upper() != "PROCEDURE":
-            return False
+        A bare ``PROCEDURE IS name`` (PROCESSING left out) is accepted too:
+        before 2026-10-14 it left the name in the operands and dead-code
+        reported the procedure as never referenced. Returns False
+        (consuming nothing) when the stream is not actually at that
+        clause."""
+        first = peek_value_upper(token_stream)
+        if first == "PROCESSING":
+            nxt, _ = peek_past_noise(token_stream, 1)
+            if nxt is None or (nxt.value or "").upper() != "PROCEDURE":
+                return False
 
         def take() -> str:
             skip_whitespace(token_stream)
@@ -352,7 +358,8 @@ class XmlJsonStatementParser(IStatementParser):
             token, _ = peek_past_noise(token_stream, 0)
             return (token.value or "").upper() if token else ""
 
-        take()  # PROCESSING
+        if first == "PROCESSING":
+            take()  # PROCESSING
         take()  # PROCEDURE
         if next_word_upper() == "IS":
             take()
