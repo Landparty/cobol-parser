@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-15 -- bug hunt: gen-data `VALUE ALL X'..'` bytes
+
+[generators.md](generators.md) (DISPLAY alphanumeric row): `VALUE ALL
+X'FF'` was filled as Latin-1 text and re-encoded in the record charset
+(`3f 3f` ASCII, `df df` EBCDIC); it is now a `LiteralCell` of the literal's
+bytes repeated across the field, and decodes back to that cell.
+[tests.md](tests.md): four `TestHexLiteralBytes` cases.
+
 ## 2026-10-15 -- issue #354: reached_via covers THRU ranges and GO TO DEPENDING
 
 [analysis.md](analysis.md) (business rules, "Context on every rule"):

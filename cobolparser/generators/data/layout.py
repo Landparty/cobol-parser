@@ -754,6 +754,20 @@ def hex_literal_bytes(value: str) -> bytes | None:
         return None
 
 
+def value_clause_hex_bytes(clause: str, width: int) -> bytes | None:
+    """The bytes a VALUE *clause* writes when it is a hex literal: ``X'..'``
+    as is, ``ALL X'..'`` repeated across the *width* of the field.  ``None``
+    for any other clause."""
+    stripped = clause.strip()
+    if stripped[:3].upper() == "ALL" and stripped[3:4].isspace():
+        unit = hex_literal_bytes(stripped[3:])
+        if not unit:
+            return None
+        size = width if width > 0 else len(unit)
+        return (unit * (size // len(unit) + 1))[:size]
+    return hex_literal_bytes(stripped)
+
+
 def _literal_bytes(item: CobolDataItem, width: int) -> dict[str, bytes]:
     """Every hex literal *item* declares -- its VALUE clause and its level-88
     values -- as ``{text cell: bytes}``; see :attr:`FieldSpec.literal_bytes`.
@@ -762,11 +776,17 @@ def _literal_bytes(item: CobolDataItem, width: int) -> dict[str, bytes]:
     ``ValueFactory`` applies when it writes the literal into a cell, so the
     decoder gives back the cell that was generated.
     """
-    raws: list[str] = [item.value_clause] if item.value_clause else []
+    found: dict[str, bytes] = {}
+    if item.value_clause:
+        # ``ALL X'FF'`` fills the field with the literal's bytes.
+        data = value_clause_hex_bytes(item.value_clause, width)
+        if data:
+            data = data[:width] if width > 0 else data
+            found.setdefault(data.decode("latin-1"), data)
+    raws: list[str] = []
     for child in item.children:
         if isinstance(child, ConditionNameItem):
             raws.extend(str(value) for value in child.values)
-    found: dict[str, bytes] = {}
     for raw in raws:
         data = hex_literal_bytes(raw)
         if not data:
