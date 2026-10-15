@@ -15,6 +15,7 @@ from typing import Any
 
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
+from ..models.sql_statements import ExecSQLStatement
 from ..models.statements.call import EntryStatement
 from ..models.statements.control import (
     GoStatement,
@@ -36,6 +37,7 @@ from ._procedures import (
     qualify,
     statement_qualifier,
 )
+from ._sql_whenever import whenever_coverage
 
 
 @dataclass
@@ -173,6 +175,9 @@ class DeadCodeAnalyzer:
         # another section, or an ENTRY): on that path the section is not
         # running as a PERFORM, so its exit paragraph runs on.
         self._sections_entered_by_jump: set[str] = set()
+        # id(SQL statement) -> procedures its WHENEVER ... GO TO directives
+        # branch to (``_sql_whenever.whenever_coverage``).
+        self._whenever_coverage: dict[int, list[str]] = {}
         # Maps paragraph name -> its CobolParagraph node, for fall-through
         # termination checks. A section has an entry only when sentences sit
         # between its header and its first paragraph (the parser's unnamed
@@ -227,6 +232,7 @@ class DeadCodeAnalyzer:
         self._collect_procedures(proc_division)
         self._collect_declaratives(proc_division)
         statements = self._own_statements(ast)
+        self._whenever_coverage = whenever_coverage(statements)
         by_owner: dict[str | None, list[Any]] = {}
         for stmt in statements:
             owner = None if self._always_counts(stmt) else self._owner(stmt)
@@ -511,6 +517,8 @@ class DeadCodeAnalyzer:
                 self._collect_xml_refs(stmt)
             elif getattr(stmt, "node_type", None) == "EXEC_CICS":
                 self._collect_cics_handle_refs(stmt)
+            elif isinstance(stmt, ExecSQLStatement):
+                self._collect_sql_whenever_refs(stmt)
 
     def _collect_xml_refs(self, stmt: XmlJsonStatement) -> None:
         """``XML PARSE ... PROCESSING PROCEDURE p [THRU q]`` runs p (through
@@ -529,6 +537,17 @@ class DeadCodeAnalyzer:
             if value and self._is_valid_procedure_name(value):
                 for key in self._keys(stmt, value):
                     self._add_goto_ref(key)
+
+    def _collect_sql_whenever_refs(self, stmt: ExecSQLStatement) -> None:
+        """``EXEC SQL WHENEVER SQLERROR|SQLWARNING|NOT FOUND GO TO p``: the
+        precompiler puts a ``GO TO p`` after every SQL statement the
+        directive covers (in source order), so ``p`` is reached like a GO TO
+        written there -- from the covered statement, once that statement's
+        procedure is reached, not from the directive, which never runs."""
+        for target in self._whenever_coverage.get(id(stmt), []):
+            if self._is_valid_procedure_name(target):
+                for key in self._keys(stmt, target):
+                    self._add_goto_ref(key, enclosing_section(stmt))
 
     def _collect_range_end(self, stmt: Any) -> None:
         """Record the closing paragraph of a PERFORM/SORT/MERGE THRU range.

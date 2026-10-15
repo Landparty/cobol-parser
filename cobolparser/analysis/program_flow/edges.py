@@ -45,6 +45,7 @@ INTERNAL_EDGE_TYPES: frozenset[FlowEdgeType] = frozenset(
         FlowEdgeType.XML_PROCESSING_PROCEDURE_THRU,
         FlowEdgeType.ALTER,
         FlowEdgeType.CICS_HANDLE,
+        FlowEdgeType.SQL_WHENEVER,
         FlowEdgeType.IF_BRANCH,
         FlowEdgeType.IF_THEN,
         FlowEdgeType.IF_ELSE,
@@ -77,6 +78,7 @@ GOTO_EDGE_TYPES: frozenset[FlowEdgeType] = frozenset(
         FlowEdgeType.GOTO_DEPENDING,
         FlowEdgeType.ALTER,
         FlowEdgeType.CICS_HANDLE,
+        FlowEdgeType.SQL_WHENEVER,
     }
 )
 
@@ -101,6 +103,8 @@ class EdgeCollector:
         self._external_calls = external_calls
         self._program_cancellations = program_cancellations
         self._index = index
+        self._whenever_coverage: dict[int, list[str]] = {}
+        self._whenever_edges: set[tuple[str, str]] = set()
 
     def set_index(self, index: ProcedureIndex) -> None:
         """Resolve procedure references through *index* (see
@@ -358,6 +362,36 @@ class EdgeCollector:
                         source=source,
                         target=target,
                         edge_type=FlowEdgeType.CICS_HANDLE,
+                        location=stmt.location,
+                    )
+                )
+
+    def set_whenever_coverage(self, coverage: dict[int, list[str]]) -> None:
+        """Which procedures each SQL statement's WHENEVER directives branch
+        to (``_sql_whenever.whenever_coverage``, keyed by ``id``)."""
+        self._whenever_coverage = coverage
+
+    def process_sql_whenever(self, stmt: Any, source: str) -> None:
+        """Create the edges for ``EXEC SQL WHENEVER ... GO TO p``.
+
+        GO TO-shaped like :meth:`process_cics_handle`, but drawn from each
+        procedure holding an SQL statement the directive covers (source
+        order decides which), not from the directive's own procedure: the
+        directive is never executed, and the paragraph holding it may never
+        run (a "SQL setup" paragraph ahead of the SQL it covers). One edge
+        per (procedure, target), however many covered statements it holds.
+        """
+        known = set(self._ordered_procedures)
+        for target_name in self._whenever_coverage.get(id(stmt), []):
+            for target in self.resolve(stmt, target_name):
+                if target not in known or (source, target) in self._whenever_edges:
+                    continue
+                self._whenever_edges.add((source, target))
+                self._edges.append(
+                    FlowEdge(
+                        source=source,
+                        target=target,
+                        edge_type=FlowEdgeType.SQL_WHENEVER,
                         location=stmt.location,
                     )
                 )

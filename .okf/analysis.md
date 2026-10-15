@@ -2743,6 +2743,25 @@ program.
   Both joined `INTERNAL_EDGE_TYPES` and the PERFORM/GOTO sets the cycle
   classifier, complexity and the flowcharts read
   (`flowchart.py`'s label/verbose/perform/goto tables).
+* **SQL WHENEVER handlers** (#349): `EXEC SQL WHENEVER SQLERROR|SQLWARNING|
+  NOT FOUND GO TO p` (also `GOTO`, `:p`; the EXEC text collector leaves
+  `GOTO:P`) is a precompiler directive, not a statement: it puts a `GO TO p`
+  after every *executable* SQL statement that follows it in source order
+  (line, column) until a later WHENEVER for the same condition replaces it
+  (`CONTINUE` switches it off; DECLARE / INCLUDE / BEGIN|END DECLARE SECTION
+  are not covered). `analysis/_sql_whenever.py`'s `whenever_coverage()`
+  maps each covered SQL statement (by `id`) to its targets, once per
+  analysis, and both consumers read it so they cannot disagree:
+  `DeadCodeAnalyzer._collect_sql_whenever_refs` adds a GO TO-shaped
+  reference **from the covered statement** (so it counts only once that
+  statement's procedure is admitted by the #384 worklist; WHENEVER is
+  deliberately *not* in `_always_counts`), and
+  `EdgeCollector.process_sql_whenever` draws a `FlowEdgeType.SQL_WHENEVER`
+  edge from each procedure holding covered SQL (one per procedure/target).
+  The first cut drew the edge from the directive's paragraph; review of #461
+  showed a never-performed "SQL setup" paragraph then made program flow
+  call the handler unreachable while dead-code called it live. Joined the
+  INTERNAL/GOTO sets and flowchart tables like `CICS_HANDLE`. Pinned by `tests/unit/analysis/test_sql_whenever_references.py`.
 * **CICS translator items** (`CICSONLN`, `CICSLINK`): `LinkageChecker`
   marks `DFHEIBLK` and `DFHCOMMAREA` referenced unconditionally
   (`_CICS_TRANSLATOR_ITEMS` -- the translator passes them on the USING it

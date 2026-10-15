@@ -1495,3 +1495,15 @@ now expects an ENTRY operand's `by_clause` to be `"REFERENCE"`, not None.
 `REFERENCE` / `CONTENT` / `VALUE` in `CALL ... USING` (BY omitted) switches
 the passing mode instead of being recorded as an argument, alone and mixed
 with `BY` phrases, literals and figurative constants.
+
+## 2026-10-14 (issue #349)
+
+`tests/unit/analysis/test_sql_whenever_references.py` (28 tests) pins that
+`EXEC SQL WHENEVER SQLERROR|SQLWARNING|NOT FOUND GO TO p` (also `GOTO`,
+`:p`, lowercase) keeps `p` out of dead-code and lint, that `CONTINUE` and an
+unknown target reference nothing, and that program flow carries one
+`SQL_WHENEVER` edge per procedure holding covered SQL. `TestCoverageIsSourceOrder`
+pins the source-order model: a directive in a never-performed setup
+paragraph still covers SQL that runs, SQL before the directive or only in a
+dead paragraph is not a branch, CONTINUE is per condition, declarations are
+not covered, and dead-code and program flow agree on every case.

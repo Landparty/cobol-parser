@@ -64,6 +64,7 @@ _VERBOSE_EDGE_TYPES = {
     "XML_PROCESSING_PROCEDURE",
     "XML_PROCESSING_PROCEDURE_THRU",
     "CICS_HANDLE",
+    "SQL_WHENEVER",
     "ALTER",
     "IF_THEN",
     "IF_ELSE",
@@ -90,7 +91,9 @@ _PERFORM_EDGE_TYPE_VALUES = frozenset(
         "XML_PROCESSING_PROCEDURE_THRU",
     }
 )
-_GOTO_EDGE_TYPE_VALUES = frozenset({"GOTO", "GOTO_DEPENDING", "ALTER", "CICS_HANDLE"})
+_GOTO_EDGE_TYPE_VALUES = frozenset(
+    {"GOTO", "GOTO_DEPENDING", "ALTER", "CICS_HANDLE", "SQL_WHENEVER"}
+)
 
 _RECURSION_LINK_STYLE = "stroke:#e0a800,stroke-width:2px,stroke-dasharray:5 5"
 _GOTO_LINK_STYLE = "stroke:#d6336c,stroke-width:2px,stroke-dasharray:3 3"
@@ -338,6 +341,7 @@ def _short_edge_label(edge_type: str) -> str:
         "XML_PROCESSING_PROCEDURE": "XML PARSE handler",
         "XML_PROCESSING_PROCEDURE_THRU": "XML PARSE handler THRU",
         "CICS_HANDLE": "CICS HANDLE",
+        "SQL_WHENEVER": "SQL WHENEVER",
         "ALTER": "ALTER",
         "FALL_THROUGH": "fall-through",
         "IF_BRANCH": "IF",
