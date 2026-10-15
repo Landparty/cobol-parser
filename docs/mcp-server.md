@@ -39,12 +39,13 @@ Any client that takes a JSON server list (Claude desktop's
 | Flag | Default | Meaning |
 |---|---|---|
 | `--root DIR` | `.` | The directory the server answers about. Paths outside it, and outside its copybook directories, are refused. |
-| `--cache-size N` | 32 | Parsed programs kept in memory. A program is parsed again only when it, or a copybook it expanded, changes on disk. |
+| `--cache-size N` | 32 | Parsed programs kept in memory. A program is parsed again when it, a copybook it expanded, or a copybook directory changes on disk (so a member added after a "COPY not expanded" caveat is picked up). |
 | `--config FILE` / `--no-config` | search from `--root` | Which `cobol.yml` to use. |
 
 Copybook directories, source format and `>>DEFINE` symbols come from the
 project's [`cobol.yml`](project-config.md), found from `--root` the same way
-the CLI finds it. Without copybook paths, every `COPY` is left unexpanded and
+the CLI finds it. It is read once when the server starts; restart the server
+after editing it. Without copybook paths, every `COPY` is left unexpanded and
 each answer says so.
 
 ## Tools

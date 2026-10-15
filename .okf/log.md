@@ -20,6 +20,8 @@ New [mcp.md](mcp.md) for `cobolparser/mcp/` and `cobol-parser mcp`
 (`read_source`, `lint`, `explain_symbol`). [cli.md](cli.md) gains the `mcp`
 row; [analysis/lint.md](analysis/lint.md) documents
 `source_column_offsets()`, moved out of the CLI so the server shares it.
+Review fixes: the parse cache also stamps copybook directories, and `lint`
+grades unused copybook fields as info, matching the CLI.
 
 ## 2026-10-15 -- bundle restructure: history archived, big files split, content guard
 

@@ -81,7 +81,8 @@ class ParsedProgram:
     source_map: dict[int, tuple[str, int]] | None
     column_offset: Callable[[str, int], int | None]
     caveats: list[Caveat]
-    #: (mtime_ns, size) of every file this parse read, for invalidation.
+    #: (mtime_ns, size) of every file this parse read, and of every copybook
+    #: directory, for invalidation.
     stamps: dict[str, tuple[int, int] | None]
     _display: Callable[[str], str] = field(repr=False, default=str)
 
@@ -247,6 +248,18 @@ class Workspace:
             self._cache.popitem(last=False)
         return parsed
 
+    def _copybook_directories(self) -> list[str]:
+        directories: list[str] = []
+        for base in self.config.copybook_path:
+            directories.append(base)
+            try:
+                directories.extend(
+                    str(entry) for entry in Path(base).iterdir() if entry.is_dir()
+                )
+            except OSError:
+                pass
+        return directories
+
     def _format_kwargs(self) -> dict[str, Any]:
         source_format = self.config.source_format or "auto"
         kwargs: dict[str, Any]
@@ -343,6 +356,11 @@ class Workspace:
         files = {filename}
         if source_map:
             files.update(file for file, _ in source_map.values())
+        # A member that was missing, or one that would now shadow the one
+        # used, is a new directory entry: no file the parse read changes,
+        # but its directory's mtime does. ``COPY X OF LIB`` searches one
+        # level down, so library subdirectories are stamped too.
+        files.update(self._copybook_directories())
         return ParsedProgram(
             path=path,
             display_path=self.display(path),

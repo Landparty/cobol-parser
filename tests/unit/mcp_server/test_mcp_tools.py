@@ -183,6 +183,22 @@ class TestCache:
         os.utime(book, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
         assert ws.program("COPYREPL.cbl") is not first
 
+    def test_a_copybook_added_later_is_picked_up(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        # The member was missing, so the parse read no file of it: only its
+        # directory's mtime can say it has arrived.
+        books = tmp_path / "books"
+        (books / "COPYLIB").mkdir(parents=True)
+        tools = tools_for(root, copybook_path=(str(books),))
+        before = tools.explain_symbol("COPYREPL.cbl", "CUST-ID")
+        assert before["answer"]["symbols"][0]["declared"] is False
+        for member in (root / "copybooks").iterdir():
+            shutil.copy(member, books / member.name)
+        after = tools.explain_symbol("COPYREPL.cbl", "CUST-ID")
+        assert after["answer"]["symbols"][0]["declared"] is True
+        assert "unresolved-copybook" not in kinds(after)
+
     def test_least_recently_used_is_evicted(self, root: Path) -> None:
         ws = Workspace(root, ProjectConfig(), cache_size=1)
         first = ws.program("BATCHSEQ.cbl")
@@ -292,6 +308,18 @@ class TestLint:
             # copybook spells it, before COPY ... REPLACING ==:PFX:==.
             assert line[: location["column"] - 1].strip() == ""
             assert re.sub("^(IN|OUT)-", ":PFX:-", finding["symbol"]) in line
+
+    def test_unused_copybook_fields_are_info_as_in_the_cli(self, root: Path) -> None:
+        findings = with_copybooks(root).lint("COPYREPL.cbl", limit=500)["answer"][
+            "findings"
+        ]
+        unused = {f["symbol"]: f for f in findings if f["rule"] == "unused-variables"}
+        # SQLCA is a copybook: a program that never reads SQLERRM is normal.
+        assert unused["SQLERRM"]["severity"] == "info"
+        assert unused["SQLERRM"]["location"]["file"] == "copybooks/SQLCA.cpy"
+        # WS-DONE is the program's own declaration.
+        assert unused["WS-DONE"]["severity"] == "warning"
+        assert unused["WS-DONE"]["location"]["file"] == "COPYREPL.cbl"
 
     def test_worst_first_and_counted(self, root: Path) -> None:
         (root / "BROKEN.cbl").write_text(BROKEN)

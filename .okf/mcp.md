@@ -81,8 +81,15 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   `source_column_offsets()` ([analysis/lint.md](analysis/lint.md)) to a
   known column.
 - **Cache.** LRU keyed by resolved path (`--cache-size`, default 32). An
-  entry is reused only while the `(mtime_ns, size)` of the program **and of
-  every copybook its source map names** is unchanged.
+  entry is reused only while the `(mtime_ns, size)` of the program, of
+  every copybook its source map names, **and of every copybook directory
+  and its immediate subdirectories** is unchanged. The directories are what
+  catch a member that was missing and has since been added: the parse read
+  no file of it. `cobol.yml` itself is read once, at server start.
+- **Lint grading.** `_copybook_item_names()` takes from the source map the
+  data items declared only inside a COPY member, so `lint` grades an unused
+  copybook field as info, as the CLI does (the CLI finds the same set by
+  diffing an unexpanded parse).
 - **stdout.** Over stdio stdout is the protocol; tools run library code
   under `stdout_to_stderr()`, and the server logs at WARNING.
 

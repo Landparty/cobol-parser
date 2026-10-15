@@ -110,7 +110,9 @@ class CobolTools:
         response = Response()
         _carry_parse_caveats(parsed, response)
         with stdout_to_stderr():
-            report = analyzer.analyze(parsed.ast)
+            report = analyzer.analyze(
+                parsed.ast, copybook_item_names=_copybook_item_names(parsed)
+            )
         add_parse_errors(report, list(parsed.result.errors))
 
         for failure in report.failed_rules:
@@ -284,6 +286,33 @@ class CobolTools:
         return response.build(
             {"name": wanted, "found": True, "symbols": symbols}, program_info
         )
+
+
+def _copybook_item_names(parsed: ParsedProgram) -> set[str] | None:
+    """Upper-cased names of data items declared only inside a COPY member.
+
+    What lets lint grade an unused copybook field (every SQLCA field a
+    program never reads) as info rather than warning, as the ``lint`` CLI
+    does. The CLI finds them by diffing an unexpanded parse; the source map
+    already says which file each declaration came from, so no second parse
+    is needed. A name the program also declares itself is the program's.
+    ``None`` -- "not known" -- when nothing was expanded.
+    """
+    from ..analysis.unused_variables import collect_declared_items
+
+    if parsed.source_map is None:
+        return None
+    main = str(parsed.path)
+    copied: set[str] = set()
+    local: set[str] = set()
+    for unit in parsed.ast.program_units():
+        for item in collect_declared_items(unit):
+            location = getattr(item, "location", None)
+            origin = parsed.source_map.get(location.line) if location else None
+            if origin is None:
+                continue
+            (local if origin[0] == main else copied).add(item.name.upper())
+    return copied - local
 
 
 def _worth_showing(value: Any) -> bool:
