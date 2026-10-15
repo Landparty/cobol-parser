@@ -336,8 +336,11 @@ class FieldSpec:
     #: The exact bytes each hex literal (``VALUE X'C1C2'``, a level-88 ``X'FF'``)
     #: declared for this field names, keyed by the text cell that stands for
     #: it (the bytes read as Latin-1, cut to the field's width).  A hex
-    #: literal is bytes, not characters: :func:`.encoding.encode_field` writes
-    #: these verbatim instead of re-encoding the cell in the record charset.
+    #: literal is bytes, not characters.  The encoder does not look a cell up
+    #: here (text alone cannot tell ``X'4142'`` from ``'AB'``): it writes the
+    #: bytes a :class:`LiteralCell` carries.  The decoder reads it the other
+    #: way, so a record holding exactly these bytes decodes back to the cell
+    #: it was generated from (:func:`.encoding.hex_literal_cell_for`).
     literal_bytes: dict[str, bytes] = field(default_factory=dict)
 
     @property
@@ -520,7 +523,7 @@ def expand_condition_values(
                     if filled is not None:
                         values.append(filled)
                 continue
-            cleaned = _strip_literal_quotes(raw)
+            cleaned = hex_literal_cell(raw, width) or _strip_literal_quotes(raw)
             values.append(cleaned)
             previous = cleaned
             continue
@@ -547,7 +550,7 @@ def expand_condition_values(
             values.append(end)
         previous = end
     # Preserve first-seen order while removing duplicates.
-    return list(dict.fromkeys(v for v in values if v != ""))
+    return _dedup_values(values)
 
 
 def condition_values_exhaustive(raw_values: list[str], decimal_digits: int) -> bool:
@@ -629,7 +632,55 @@ def _condition_values(item: CobolDataItem) -> list[str]:
             continue
         values.extend(expand_condition_values(child.values, width))
     # Preserve first-seen order while removing duplicates.
-    return list(dict.fromkeys(v for v in values if v != ""))
+    return _dedup_values(values)
+
+
+class LiteralCell(str):
+    """A generated cell that stands for a hex literal (``VALUE X'C1C2'``, a
+    level-88 ``X'FF'``), carrying the literal's own :attr:`data`.
+
+    The text is those bytes read as Latin-1, so the cell still prints and
+    compares like any other.  The bytes travel with the cell rather than
+    being looked up by its text afterwards: an ordinary value with the same
+    text (``VALUE SPACE`` next to ``88 VALUE X'20'``, ``'AB'`` next to
+    ``X'4142'``, a random ``A`` next to ``X'41'``) is a different literal
+    and must still be written in the record charset.
+    :func:`.encoding.encode_field` writes :attr:`data` verbatim.
+    """
+
+    data: bytes
+
+    def __new__(cls, data: bytes) -> LiteralCell:
+        cell = super().__new__(cls, data.decode("latin-1"))
+        cell.data = data
+        return cell
+
+    def __reduce__(self) -> tuple[type[LiteralCell], tuple[bytes]]:
+        return (LiteralCell, (self.data,))
+
+
+def hex_literal_cell(value: str, width: int | None = None) -> LiteralCell | None:
+    """The cell a hex literal *value* is written as, its bytes cut to
+    *width* when one is known; ``None`` for any other literal."""
+    data = hex_literal_bytes(value)
+    if not data:
+        return None
+    if width is not None and width > 0:
+        data = data[:width]
+    return LiteralCell(data)
+
+
+def _dedup_values(values: list[str]) -> list[str]:
+    """*values* without repeats, first-seen order kept.  A hex literal's cell
+    is not a repeat of an ordinary value with the same text (``X'4142'``
+    and ``'AB'``): they name different bytes in an EBCDIC record."""
+    seen: dict[tuple[str, bytes | None], str] = {}
+    for value in values:
+        if value == "":
+            continue
+        key = (str(value), value.data if isinstance(value, LiteralCell) else None)
+        seen.setdefault(key, value)
+    return list(seen.values())
 
 
 def hex_literal_bytes(value: str) -> bytes | None:
@@ -650,7 +701,7 @@ def _literal_bytes(item: CobolDataItem, width: int) -> dict[str, bytes]:
 
     The key is the literal's Latin-1 text cut to *width*, the same cut
     ``ValueFactory`` applies when it writes the literal into a cell, so the
-    encoder finds the cell it was handed.
+    decoder gives back the cell that was generated.
     """
     raws: list[str] = [item.value_clause] if item.value_clause else []
     for child in item.children:

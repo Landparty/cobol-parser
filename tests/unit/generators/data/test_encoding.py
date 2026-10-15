@@ -36,13 +36,14 @@ from cobolparser.generators.data.encoding import (
     EncodingOptions,
     Endian,
     RecordEncodingError,
+    RecordFormat,
     encode_field,
     encode_record,
     encoding_caveats,
     hex_dump,
     record_length,
 )
-from cobolparser.generators.data.layout import flatten_record
+from cobolparser.generators.data.layout import LiteralCell, flatten_record
 from cobolparser.generators.data.options import DataGeneratorOptions
 
 
@@ -284,16 +285,18 @@ class TestHexLiteralBytes:
     def test_short_literal_is_padded_with_the_charset_space(self, opts, pad):
         spec = one_spec("F PIC X(4) VALUE X'FF00'.")
         assert spec.literal_bytes == {"\xff\x00": b"\xff\x00"}
-        assert encode_field(spec, "\xff\x00", opts) == b"\xff\x00" + pad * 2
+        cell = LiteralCell(b"\xff\x00")
+        assert encode_field(spec, cell, opts) == b"\xff\x00" + pad * 2
 
     def test_justified_literal_is_padded_on_the_left(self):
         spec = one_spec("F PIC X(3) JUSTIFIED RIGHT VALUE X'FF'.")
-        assert encode_field(spec, "\xff", EBCDIC) == b"\x40\x40\xff"
+        assert encode_field(spec, LiteralCell(b"\xff"), EBCDIC) == b"\x40\x40\xff"
 
     def test_oversized_literal_is_cut_to_the_field(self):
         spec = one_spec("F PIC X(2) VALUE X'C1C2C3'.")
         assert spec.literal_bytes == {"\xc1\xc2": b"\xc1\xc2"}
-        assert encode_field(spec, "\xc1\xc2", EBCDIC) == b"\xc1\xc2"
+        cell = LiteralCell(b"\xc1\xc2\xc3")
+        assert encode_field(spec, cell, EBCDIC) == b"\xc1\xc2"
 
     @pytest.mark.parametrize("opts", [EncodingOptions(), EBCDIC])
     def test_level_88_hex_witness_satisfies_its_condition(self, opts):
@@ -315,6 +318,106 @@ class TestHexLiteralBytes:
 
     def test_quoted_literal_has_no_literal_bytes(self):
         assert one_spec("F PIC X(2) VALUE 'AB'.").literal_bytes == {}
+
+    # The bytes travel with the cell (a LiteralCell), not looked up by its
+    # text: an ordinary value whose text equals a hex literal's Latin-1
+    # stand-in is a different literal and stays charset-encoded.
+
+    def test_plain_text_equal_to_a_stand_in_is_charset_encoded(self):
+        spec = specs_for(
+            "       01  R.\n"
+            "           05  SEP  PIC X VALUE SPACE.\n"
+            "               88  ASCII-SP VALUE X'20'.\n"
+        )[0]
+        assert encode_field(spec, " ", EBCDIC) == b"\x40"
+        assert encode_field(spec, LiteralCell(b"\x20"), EBCDIC) == b"\x20"
+
+    def test_quoted_and_hex_literal_with_the_same_text_both_drawn(self):
+        from cobolparser.generators.data.copybook import CopybookDataGenerator
+
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(rows=12, seed=3).for_record_image()
+        ).generate_from_source(
+            "       01  R.\n"
+            "           05  FLAG PIC X(2).\n"
+            "               88  F-A VALUE 'AB'.\n"
+            "               88  F-B VALUE X'4142'.\n"
+        )
+        data = dataset.to_records(EBCDIC)
+        records = {data[i : i + 2] for i in range(0, len(data), 2)}
+        assert records == {b"\xc1\xc2", b"\x41\x42"}
+
+    def test_random_text_equal_to_a_stand_in_is_charset_encoded(self):
+        from cobolparser.generators.data.copybook import CopybookDataGenerator
+
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(
+                rows=200, seed=1, use_condition_values=False
+            ).for_record_image()
+        ).generate_from_source(
+            "       01  R.\n"
+            "           05  F  PIC X.\n"
+            "               88  IS-A VALUE X'41'.\n"
+        )
+        assert "A" in [row[0] for row in dataset.rows]
+        assert b"\x41" not in dataset.to_records(EBCDIC)
+
+    @pytest.mark.parametrize("charset", [Charset.ASCII, Charset.EBCDIC])
+    @pytest.mark.parametrize(
+        ("record_format", "separator"),
+        [
+            (RecordFormat.FIXED, b""),
+            (RecordFormat.FIXED, b"\n"),
+            (RecordFormat.VARIABLE, b""),
+            (RecordFormat.VARIABLE_BARE, b"\n"),
+        ],
+    )
+    def test_decode_of_encode_is_the_row(self, charset, record_format, separator):
+        from cobolparser.generators.data.copybook import CopybookDataGenerator
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        source = self.COPYBOOK + (
+            "           05  SHORT     PIC X(4) VALUE X'C1'.\n"
+            "           05  JR        PIC X(3) JUSTIFIED RIGHT VALUE X'FF'.\n"
+            "           05  SP        PIC X(1) VALUE X'20'.\n"
+            "           05  FLAG      PIC X(2).\n"
+            "               88  F-A   VALUE 'AB'.\n"
+            "               88  F-B   VALUE X'4142'.\n"
+            "               88  F-C   VALUE X'0000'.\n"
+        )
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(rows=12, seed=3).for_record_image()
+        ).generate_from_source(source)
+        opts = EncodingOptions(
+            charset=charset, record_format=record_format, record_separator=separator
+        )
+        result = RecordDecoder.from_copybook_source(source).decode_bytes(
+            dataset.to_records(opts), opts=opts
+        )
+        assert result.error_count == 0
+        assert [list(r.values().values()) for r in result.records] == dataset.rows
+
+    def test_decoder_prefers_an_ordinary_value_with_the_same_bytes(self):
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        source = (
+            "       01  R.\n"
+            "           05  FLAG PIC X(2).\n"
+            "               88  F-A VALUE 'AB'.\n"
+            "               88  F-B VALUE X'C1C2'.\n"
+        )
+        decoder = RecordDecoder.from_copybook_source(source)
+        ebcdic = decoder.decode_bytes(b"\xc1\xc2", opts=EBCDIC).records[0]
+        ascii_ = decoder.decode_bytes(b"\xc1\xc2", opts=EncodingOptions())
+        assert ebcdic.values() == {"FLAG": "AB"}
+        assert ascii_.records[0].values() == {"FLAG": "\xc1\xc2"}
+
+    def test_literal_cell_survives_pickling(self):
+        import pickle
+
+        cell = pickle.loads(pickle.dumps(LiteralCell(b"\xff")))
+        assert isinstance(cell, LiteralCell)
+        assert (cell, cell.data) == ("\xff", b"\xff")
 
 
 class TestJustifiedRight:

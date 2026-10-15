@@ -74,6 +74,7 @@ from .encoding import (
     EncodingOptions,
     Endian,
     RecordFormat,
+    hex_literal_cell_for,
 )
 from .errors import CopybookLayoutError
 from .layout import FieldCategory, FieldSpec, HiddenCounter, VaryingLength
@@ -655,6 +656,12 @@ def decode_field(
         value, error = _decode_edited(raw, spec, opts)
     else:
         value = _decode_text(raw, opts, justified=spec.justified)
+        literal = hex_literal_cell_for(spec, raw, opts)
+        if literal is not None:
+            # A hex literal's bytes read back as the cell they were written
+            # from (``X'FF'`` as ``ÿ``, not EBCDIC ``\x9f``), so
+            # decode(encode(row)) == row in either charset.
+            value = literal
 
     return DecodedField(
         name=spec.column,
