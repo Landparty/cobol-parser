@@ -1,42 +1,128 @@
 ---
 type: Module
 title: Static Analysis
-description: 29 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, DCLGEN/host-variable, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, cross-reference, program signatures, whole-codebase call/copy graph, SQL/CICS lint, structural program diff and business rule extraction.
-tags: [analysis, business-rules, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk, xref, program-signature, codebase-graph, sql-cics-lint, ast-diff]
+description: Static analysis in cobolparser/analysis/ (33 public modules + the program_flow/ package + 6 private helpers) and dialects/le_signatures.py — dead code, unused variables, program flow, recursion risk, complexity, redundancy, technical debt, lint, IO logging/sequence, MOVE type, linkage, LE services, CRUD, dynamic CALL values, IMS DL/I, SQL host variables/DCLGEN, xref, program signatures, codebase call/copy graph, SQL/CICS lint, business rules, field lineage, structural diff, and the gen-fixtures analyses (boundary inventory, constraints, constant folding, invocation counts).
+tags: [analysis, business-rules, dead-code, unused-variables, program-flow, lint, io, crud, boundary-inventory, fixtures, constraints, const-fold, invocation-counts, recursion-risk, complexity, redundancy, technical-debt, xref, program-signature, codebase-graph, sql-cics-lint, field-lineage, ast-diff, le-signatures]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/analysis/` — 29 static-analysis modules. All follow the same
-`<Analyzer>().analyze(ast) -> <Report>` shape, except `HostVariableResolver`
-which uses `.resolve(ast)`; `BoundaryInventoryAnalyzer`, which additionally
-takes a Phase 1 `ProgramLayoutIndex` (`.analyze(ast, index, ...)`); and
-`ConstraintExtractor`, which uses `.extract(ast, index, boundary_report) ->
-ConstraintReport` (Phase 1's index *and* Phase 2's boundary report).
+`cobolparser/analysis/` holds every static analyzer: **33 public modules**
+(one analyzer or helper family each, listed in the [Module File
+Map](#module-file-map)), the **`program_flow/` package** (the control-flow
+graph, 8 modules), and **6 private helpers** (`_procedures.py`,
+`_names.py`, `_files.py`, `_cics.py`, `_sql_whenever.py`, `_sql_flow.py`)
+that the analyzers share so they cannot disagree. This file also covers
+`cobolparser/dialects/le_signatures.py` (LE service / intrinsic call
+signatures, under [LanguageEnvironmentAnalyzer](#languageenvironmentanalyzer)).
+
+**Shape.** Every analyzer takes a parsed `CobolProgram` (`parse_cobol(...).ast`)
+and returns a report dataclass with `to_dict()` (`IMSSegmentAnalyzer`
+returns a plain `list[IMSDLICall]`). Most are
+`<Analyzer>().analyze(ast) -> <Report>`; the exceptions are
+`MoveTypeChecker` / `LinkageChecker` / `DclgenChecker` (`.check(ast)`),
+`HostVariableResolver` (`.resolve(ast)`), `ConstantFolder`
+(`.fold(ast, index, seed_values=...)`), `ProgramDiffer`
+(`.diff(old_ast, new_ast)`), `CodebaseGraphBuilder` (`.build(paths)` /
+`.build_from_directory(root)`, many files), `ConstraintExtractor`
+(`.extract(ast, index, boundary_report)`), `BoundaryInventoryAnalyzer`
+(`.analyze(ast, index, ...)`, needs a `ProgramLayoutIndex`), and
+`DynamicCallAnalyzer` (`.analyze(ast) -> None`: it annotates the AST's CALL
+statements in place).
+
+**Scope.** Most analyzers are program-unit scoped: they examine the unit
+they are given and skip `ast.contained_programs` (iterate
+`ast.program_units()` to cover a file; `LintAnalyzer` and the
+`program-signature` CLI do). `LinkageChecker` is the exception: by default
+(`include_contained_programs=True`) it walks every contained unit too.
+
+**Getting started.** Pick the analyzer from the [Contents](#contents), read
+its section's code block for the API, then its bold-headed paragraphs for
+the rules and known gaps. Rules that span analyzers (same-named procedures,
+terminators, folded operand names) are in [Same-named procedures and data
+items](#same-named-procedures-and-data-items-issue-258) and [Cross-cutting
+notes](#cross-cutting-notes). Most analyzers back a CLI subcommand of the
+same name (see [cli.md](cli.md)); `LintAnalyzer` folds nine of them into
+one finding stream. Dated paragraphs ("2026-08-12 fix", "issue #NNN") give
+the rationale for a rule and the test that pins it; the sentence that
+states the current behaviour comes first.
+
+# Contents
+
+* [Overview](#overview) · [Public API](#public-api)
+* [Analyzer Reference](#analyzer-reference)
+  * Shared rule: [Same-named procedures and data items](#same-named-procedures-and-data-items-issue-258)
+  * Control flow and code quality: [DeadCodeAnalyzer](#deadcodeanalyzer) ·
+    [UnusedVariableAnalyzer](#unusedvariableanalyzer-unused_variablespy-2026-08-13) ·
+    [ProgramFlowAnalyzer](#programflowanalyzer) ·
+    [RecursionRiskAnalyzer](#recursionriskanalyzer-recursion_riskpy-2026-08-16) ·
+    [ComplexityAnalyzer](#complexityanalyzer-complexitypy-2026-08-16) ·
+    [RedundancyAnalyzer](#redundancyanalyzer-redundancypy-2026-08-16) ·
+    [TechnicalDebtAnalyzer](#technicaldebtanalyzer-technical_debtpy-2026-08-16) ·
+    [LintAnalyzer](#lintanalyzer-lintpy-2026-09-07)
+  * IO, data and dialect checks: [IOLogger](#iologger) ·
+    [IOSequenceAnalyzer](#iosequenceanalyzer) ·
+    [MoveTypeChecker](#movetypechecker) · [LinkageChecker](#linkagechecker) ·
+    [LanguageEnvironmentAnalyzer](#languageenvironmentanalyzer) (+ LE call signatures) ·
+    [CRUDMatrixGenerator](#crudmatrixgenerator) ·
+    [DynamicCallAnalyzer](#dynamiccallanalyzer) ·
+    [IMSSegmentAnalyzer](#imssegmentanalyzer) ·
+    [HostVariableResolver](#hostvariableresolver) ·
+    [DclgenChecker](#dclgenchecker-dclgen_checkpy-2026-09-07) ·
+    [SqlCicsAnalyzer](#sqlcicsanalyzer-sql_cics_lintpy)
+  * Program understanding: [XrefAnalyzer](#xrefanalyzer-xrefpy) ·
+    [ProgramSignatureExtractor](#programsignatureextractor-program_signaturepy) ·
+    [CodebaseGraphBuilder / CopybookImpactAnalyzer](#codebasegraphbuilder--copybookimpactanalyzer-codebasepy) ·
+    [BusinessRuleExtractor](#businessruleextractor-business_rulespy-2026-09-30) ·
+    [Field lineage](#field-lineage-field_lineagepy-lineage_graphpy-lineage_jclpy-_sql_flowpy-2026-10-08) ·
+    [ProgramDiffer](#programdiffer-ast_diffpy)
+  * `gen-fixtures` analyses: [BoundaryInventoryAnalyzer](#boundaryinventoryanalyzer) ·
+    [ConstraintExtractor](#constraintextractor) (+ `domains.solve`) ·
+    [ConstantFolder](#constantfolder-const_foldpy) ·
+    [Invocation counts](#invocation-counts-invocation_countspy)
+  * [JCL](#jcl-cobolparserjcl) (pointer to jcl.md)
+* [Module File Map](#module-file-map)
+* [Cross-cutting notes](#cross-cutting-notes): folded references, CICS terminators,
+  program-type corpus fixes, 2026-10-08 bug hunt, doubled-quote literals,
+  silent-failure audit
+* [See Also](#see-also)
 
 # Public API
 
 ```python
+# Importable from the top-level package
 from cobolparser import (
-    DeadCodeAnalyzer,
-    ProgramFlowAnalyzer,
-    IOLogger,
-    IOSequenceAnalyzer,
-    MoveTypeChecker,
-    LinkageChecker,
-    LanguageEnvironmentAnalyzer,
-    CRUDMatrixGenerator,
-    DynamicCallAnalyzer,
-    UnusedVariableAnalyzer,
-    RecursionRiskAnalyzer,
-    ComplexityAnalyzer,
-    RedundancyAnalyzer,
-    TechnicalDebtAnalyzer,
-    LintAnalyzer,
+    DeadCodeAnalyzer, UnusedVariableAnalyzer, ProgramFlowAnalyzer,
+    RecursionRiskAnalyzer, ComplexityAnalyzer, RedundancyAnalyzer,
+    TechnicalDebtAnalyzer, LintAnalyzer, BusinessRuleExtractor, DclgenChecker,
+    IOLogger, IOSequenceAnalyzer, MoveTypeChecker, LinkageChecker,
+    LanguageEnvironmentAnalyzer, CRUDMatrixGenerator, DynamicCallAnalyzer,
 )
+# cobolparser.analysis re-exports all of the above plus
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
+# The rest import from their own module
+from cobolparser.analysis.program_flow import FlowEdgeType, LEADING_SENTENCES_NODE
+from cobolparser.analysis.xref import XrefAnalyzer
+from cobolparser.analysis.program_signature import ProgramSignatureExtractor, extract_signatures
+from cobolparser.analysis.codebase import CodebaseGraphBuilder, CopybookImpactAnalyzer
+from cobolparser.analysis.sql_cics_lint import SqlCicsAnalyzer
+from cobolparser.analysis.ast_diff import ProgramDiffer
+from cobolparser.analysis.field_lineage import FieldFlowAnalyzer
+from cobolparser.analysis.lineage_graph import LineageGraph
+from cobolparser.analysis.lineage_jcl import bindings_from_jobs, load_jobs, jobs_from_sources
+from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+from cobolparser.analysis.constraints import ConstraintExtractor
+from cobolparser.analysis.domains import solve, Witness, Unsatisfiable
+from cobolparser.analysis.const_fold import ConstantFolder
+from cobolparser.analysis.invocation_counts import count_invocations
+from cobolparser.dialects.le_signatures import le_service_signature, intrinsic_signature
 ```
+
+`cobolparser.__all__` lists only the first group (`IOSequenceAnalyzer`,
+`MoveTypeChecker` and `LinkageChecker` import from `cobolparser` but are not
+in its `__all__`); `cobolparser.analysis.__all__` lists the first two
+groups plus their report / item / enum types.
 
 # Analyzer Reference
 
@@ -83,6 +169,47 @@ either by bare name.
 
 ## DeadCodeAnalyzer
 
+```python
+report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
+# report.dead_items: list[DeadCodeItem]   (name/procedure_type/location/qualified_name)
+# report.total_procedures / .referenced_procedures
+```
+
+**What "dead" means now: unreachable from a root.** `analyze()` runs a
+worklist from the roots -- the entry procedure (the first non-declarative
+procedure, or the leading sentences), every DECLARATIVES section and
+paragraph, ENTRY paragraphs and CICS HANDLE labels -- and a procedure's
+statements count only once the procedure itself is reached, so a paragraph
+PERFORMed only from dead code is dead too. A reached procedure references:
+
+* **returning transfers** (`_referenced_names` only): PERFORM / `PERFORM ...
+  THRU` targets, SORT/MERGE INPUT/OUTPUT PROCEDUREs, XML PARSE PROCESSING
+  PROCEDURE -- control comes back, so they never license a fall-through out
+  of their own end;
+* **landing transfers** (also `_fallthrough_sources`): GO TO targets
+  (incl. `DEPENDING ON`, read from `GoStatement.target_paragraphs`), ALTER
+  `TO PROCEED TO` targets (not the ALTER's subject), ENTRY paragraphs, CICS
+  HANDLE labels, and SQL `WHENEVER ... GO TO` targets of each covered SQL
+  statement (`_sql_whenever.py`);
+* **fall-through**: the next procedure in source order after a reached
+  fall-through source that does not `_terminate` (any top-level STOP RUN,
+  GOBACK, EXIT PROGRAM, `EXEC CICS RETURN/XCTL/ABEND` per `_cics.py`,
+  non-DEPENDING GO TO incl. the alterable `GO TO.`, or a top-level EXIT
+  SECTION);
+* **section and range walks**: a referenced section's paragraphs are walked
+  in order up to the first terminator (`_propagate_section_references`); a
+  `p THRU q` range is walked the same way (`_mark_thru_ranges`); a GO TO onto
+  a THRU range end or a PERFORMed section's last paragraph (`_section_exits`)
+  is a reference, not a fall-through source.
+
+Only the unit's own statements are read (contained programs are skipped).
+`_ordered_procedures` matches source order even when top-level paragraphs
+precede the first SECTION. Each rule below is pinned in
+`tests/unit/analysis/test_dead_code.py`; the dated notes give the reason
+for it.
+
+**Recent change notes:**
+
 > 2026-09-27: a referenced section no longer marks *every* paragraph in it
 > live. `_propagate_section_references` walks the section's paragraphs in
 > order and stops after one that `_terminates` (STOP RUN, GOBACK, EXIT
@@ -121,16 +248,7 @@ either by bare name.
 > each round monotone (admitting statements only adds references). Lint's
 > message is now "can never be reached". Pinned by `TestTransitiveDeadCode`.
 
-```python
-report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
-# report.dead_items: list[DeadCodeItem]
-```
-
-Detects unreachable paragraphs and sections (paragraphs/sections never the
-target of a PERFORM, GO TO, or fall-through control flow *from reachable
-code*). The first
-procedure is always referenced (program entry point), and so is any
-paragraph containing an `EntryStatement` (2026-08-11 fix, see below).
+**Earlier fixes** that shaped the rules above (2026-08 onward):
 
 **DeadCodeAnalyzer had no fall-through concept at all (2026-08-11 fix,
 audit finding #1 of 7).** Unlike `ProgramFlowAnalyzer` (which has
@@ -146,7 +264,7 @@ extending) and does not terminate per `_terminates`: any of its own
 top-level statements (not just the last one — see Copilot follow-up below)
 is a hard terminator (`STOP RUN` — not `STOP 'literal'`, which merely
 halts pending operator action; `GOBACK`; `EXIT PROGRAM`; `EXEC CICS
-RETURN` / `XCTL` / `ABEND`, see `_cics.py` below) or an
+RETURN` / `XCTL` / `ABEND`, see [CICS terminators](#cics-terminators-issue-392-_cicspy)) or an
 unconditional (non-`DEPENDING`) `GO TO`. The reachability gate matters:
 without it, a chain of paragraphs that are *all* themselves unreached
 would still credit each other purely for standing next to one another in
@@ -388,9 +506,11 @@ report: UnusedVariableReport = UnusedVariableAnalyzer().analyze(ast)
 
 Detects DATA DIVISION items (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE,
 any level, FILLER and synthetic `ANONYMOUS-<level>-<line>` names always
-excluded) never referenced anywhere in the PROCEDURE DIVISION. Single-program
-scope, same as `DeadCodeAnalyzer`/`ProgramFlowAnalyzer` — does not recurse
-into `ast.contained_programs`.
+excluded) never referenced anywhere in the PROCEDURE DIVISION. Reports the
+items of the unit it is given only (it does not report a contained
+program's items); a contained program's references still count, but only
+for the container's `GLOBAL` items (`_nested_referenced_names`) -- or for
+every item of an OO FACTORY/OBJECT unit, see below.
 
 **Reference collection is `.operands`-first, with per-statement-type
 extras.** Every `CobolStatement` already accumulates most of its own
@@ -458,7 +578,7 @@ leaf identifiers instead of rendering text, falling back to a best-effort
 regex over `operands[0]`/`raw_condition` for a node shape it can't
 decompose structurally (`EVALUATE TRUE` Condition-type selectors, and
 SEARCH WHEN conditions that carry no `condition_tree`, per `constraints.py`'s same documented gap — see
-`ConstraintExtractor`'s section above). The fallback is deliberately
+[ConstraintExtractor](#constraintextractor)). The fallback is deliberately
 over-inclusive: a false positive there only makes the analyzer *miss* an
 unused variable, never wrongly flag a used one.
 
@@ -514,42 +634,32 @@ even when never touched procedurally. Level-66 RENAMES targets
 (`renames_from`/`renames_through`) are marked used the same
 unconditional way.
 
-**Copybook provenance is set-difference, not line-tracking — because the
-line-tracking feature doesn't work.** `expand_copybooks`'s own
-`preserve_source_locations` parameter threads all the way down to
-`_expand_source_recursive` but never actually populates
-`context.source_maps` (a literal `pass` at the write site, with a comment
-admitting it's "disabled by default in the expander" — see
-[preprocessing.md](preprocessing.md) if that file gains its own note, or
-`copybook_expander.py` around the `preserve_locations and
-statement.source_location` check). Discovered empirically while designing
-this analyzer's copybook flag; not fixed here (a different, cached,
-perf-sensitive subsystem). Instead, `analyze()` takes an optional
-`copybook_item_names: set[str]` the caller computes by diffing
-`collect_declared_items()` on an *unexpanded* parse against the expanded
-one — see the `unused-variables` CLI subcommand
-(`_parse_without_copybook_expansion` in `cli/parse.py`) for the reference
-implementation. `include_copybook_variables=False` then excludes any
+**Copybook provenance is set-difference, not line-tracking.** `analyze()`
+takes an optional `copybook_item_names: set[str]` the caller computes by
+diffing `collect_declared_items()` on an *unexpanded* parse against the
+expanded one -- see the `unused-variables` CLI subcommand
+(`_parse_without_copybook_expansion` in `cli/parse.py`; `lint` reuses it via
+`_lint_copybook_item_names`) for the reference implementation. Rationale:
+when this analyzer was written, `expand_copybooks(...,
+preserve_source_locations=True)` never populated its source map. That map
+now exists (`CopybookExpansion.source_location_map` /
+`ParseResult.expansion_source_map`, see [preprocessing.md](preprocessing.md)),
+but the analyzer and CLI were not switched over; the set difference still
+works. `include_copybook_variables=False` then excludes any
 unused item in that set from `report.unused_items` (tallied instead in
 `report.skipped_copybook_count`); the flag is a documented no-op when
 `copybook_item_names` is None.
 
-**SCREEN/REPORT/COMMUNICATION SECTION false-positive noise was fixed
-upstream, not in this module.** This analyzer originally found (empirically,
-against `tests/samples/screen_section_io.cbl` and `report_writer.cbl`
-while validating against the sample corpus) that the DATA DIVISION parser
-mis-parsed SCREEN/REPORT/COMMUNICATION SECTION clauses as nested
-WORKING-STORAGE data items (a SCREEN SECTION `COLUMN 5` clause became an
-item literally named `COLUMN`), spawned as a separate follow-up task
-rather than fixed here. That parser fix has since landed (same day —
-`parsers/divisions/data.py`'s `_skip_section`; see [log.md](log.md)): the
-three section headers are now recognized and their
-content discarded into distinctly-named, always-empty `SCREEN`/`REPORT`/
-`COMMUNICATION` sections. `collect_declared_items` only ever recognized
-FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE, so no analyzer-side change
-was needed — the noise disappeared once the parser stopped corrupting
-WORKING-STORAGE. Confirmed empirically post-fix: `screen_section_io.cbl`'s
-WORKING-STORAGE dropped from 33 spurious items back to its real 5.
+**SCREEN / REPORT / COMMUNICATION SECTION items are out of scope.**
+`collect_declared_items` reads only FILE / WORKING-STORAGE / LOCAL-STORAGE /
+LINKAGE (`_DATA_SECTION_NAMES`). The DATA DIVISION parser skips SCREEN and
+COMMUNICATION SECTION content (`_skip_section`) and, since 2026-09-02, parses
+REPORT SECTION RDs and report groups into a `REPORT` section -- which this
+analyzer still ignores, so report-group items are never reported unused.
+History: the analyzer originally surfaced a parser bug (SCREEN SECTION
+clauses mis-parsed as WORKING-STORAGE items, e.g. an item named `COLUMN` in
+`tests/samples/screen_section_io.cbl`); that was fixed in the parser, not
+here (see [parser.md](parser.md) / [log.md](log.md)).
 
 **The four documented limitations are now tagged inline as `TODO`s
 (2026-08-16 review).** Each spot in the module backing a limitation
@@ -563,24 +673,17 @@ identity; since issue #258 REDEFINES prefers the same-named sibling). No behavio
 codebase surfaces these instead of only living in prose here and in the
 docstring.
 
-**EXEC CICS/DLI arguments fixed, not just documented (2026-08-19 coverage
-audit).** The former `TODO` here was wrong about *why* EXEC CICS/DLI args
-were unscanned: it isn't that the sweep was unimplemented, it's that
-`ExecCicsStatement`/`ExecImsStatement` extend `ASTNode` directly rather
-than `CobolStatement` (unlike `ExecSQLStatement`, which does extend
-`CobolStatement`), so neither ever appears in `ast.get_all_statements()` —
-the per-statement loop in `_collect_referenced_names` that holds the
-`host_variables`/`null_indicators` sweep for EXEC SQL never sees them at
-all, regardless of what fields it reads. Fixed with a separate sweep after
-that loop, using `ast.find_all_by_type("ExecCicsStatement")` /
-`ast.find_all_by_type("ExecImsStatement")` directly (these two classes
-aren't imported into `unused_variables.py` — an analysis -> parsers
-layering dependency for no real type-safety benefit, since `.options`/
-`.arguments` are untyped raw text either way) over `ExecCicsStatement.
+**EXEC CICS/DLI arguments are swept explicitly.** `ExecCicsStatement.
 options` (option keyword -> parenthesized argument text) and
-`ExecImsStatement.arguments` (positional list). A field referenced only
-inside one of these statements is no longer falsely reported unused. See
-`TestExecCicsAndImsArguments` in `test_unused_variables.py`.
+`ExecImsStatement.arguments` (positional list) are raw text the operand loop
+cannot decompose, so a sweep after that loop (one `traverse_depth_first()`
+of the unit, skipping contained programs' nodes, matching by type *name* to
+avoid an analysis -> parsers import) extracts identifiers from them. History:
+the sweep was added (2026-08-19) because neither class then extended
+`CobolStatement`, so neither reached `get_all_statements()`. Both are
+`CobolStatement`s now, so the per-statement loop also visits them and the
+sweep is a harmless set union -- a new analyzer does not need to reproduce
+it. See `TestExecCicsAndImsArguments` in `test_unused_variables.py`.
 
 **OO FACTORY / OBJECT data is shared with its METHODs (issue #379,
 2026-10-14).** A contained unit's references normally count only for the
@@ -603,17 +706,27 @@ CLI: `unused-variables` subcommand — see [cli.md](cli.md).
 
 ```python
 report: ProgramFlowReport = ProgramFlowAnalyzer().analyze(ast)
-# report.edges: list[FlowEdge]  (typed: PERFORM / GO_TO / CALL / FALL_THROUGH)
-# report.nodes: list[FlowNode]
+# report.nodes: list[FlowNode]   report.edges: list[FlowEdge]
+# report.entry_points / .exit_points / .external_calls / .program_cancellations
+# report.cycles / .cycle_details / .unreachable_nodes / .branch_nodes
 ```
 
-Produces a control-flow graph. Edge types:
-- `FlowEdgeType.PERFORM` — PERFORM target
-- `FlowEdgeType.GO_TO` — unconditional/conditional GO TO
-- `FlowEdgeType.CALL` — static CALL (target known at parse time)
-- `FlowEdgeType.FALL_THROUGH` — sequential paragraph fall-through
+Produces a control-flow graph between procedures (paragraphs/sections),
+plus synthetic IF/EVALUATE branch nodes. `FlowEdgeType` members:
+`PERFORM` / `PERFORM_THRU`, `GOTO` / `GOTO_DEPENDING`, `CALL` /
+`CALL_DYNAMIC`, the SORT/MERGE/XML procedure edges
+(`SORT_INPUT_PROCEDURE[_THRU]`, `SORT_OUTPUT_PROCEDURE[_THRU]`,
+`MERGE_OUTPUT_PROCEDURE[_THRU]`, `XML_PROCESSING_PROCEDURE[_THRU]`),
+`CICS_HANDLE`, `SQL_WHENEVER`, `ALTER`, `FALL_THROUGH`, and the branch-node
+edges `IF_BRANCH` / `IF_THEN` / `IF_ELSE` / `EVALUATE_BRANCH` /
+`EVALUATE_WHEN` / `EVALUATE_WHEN_OTHER`. `edges.py` groups them as
+`INTERNAL_EDGE_TYPES` / `PERFORM_EDGE_TYPES` / `GOTO_EDGE_TYPES`.
 
-THRU ranges expand to `range_members`; cycles are classified in `cycle_details`.
+THRU ranges expand to `FlowEdge.range_members`; cycles are classified in
+`cycle_details`. Sentences written before the first paragraph/section
+header become the node `LEADING_SENTENCES_NODE` (`"PROCEDURE DIVISION"`,
+the program's entry; `scanner.leading_sentences()`, also used by
+`ComplexityAnalyzer`).
 
 **THRU range members count as reachable (2026-07-20):** `PERFORM A THRU C`
 (and SORT/MERGE procedure ranges) execute every paragraph the range
@@ -689,7 +802,8 @@ this fix. Pinned by
 **Structure (2026-07-14):** `program_flow` is a package, not a single module.
 `cobolparser/analysis/program_flow/` splits the former god class into
 collaborators — `models.py` (`FlowNode`/`FlowEdge`/`FlowEdgeType`/`BranchArm`/
-`BranchNode`/`ProgramFlowReport`), `scanner.py` (`ProcedureScanner`: procedure
+`BranchNode`/`ProgramFlowReport`), `condition_text.py` / `statement_text.py`
+(text rendering, below), `scanner.py` (`ProcedureScanner`: procedure
 collection + the recursive `scan()` statement walk, `_CLAUSE_BODY_ATTRS`),
 `edges.py` (`EdgeCollector`: PERFORM/GO TO/CALL/SORT/MERGE/CANCEL/ALTER edge
 construction, `INTERNAL_EDGE_TYPES`/`PERFORM_EDGE_TYPES`/`GOTO_EDGE_TYPES`),
@@ -800,7 +914,8 @@ the fall-through that had masked it). Both now queue those bodies. Pinned by
 report: RecursionRiskReport = RecursionRiskAnalyzer().analyze(ast)
 # report.risks: list[RecursionRisk]
 # RecursionRisk.mechanism: "PERFORM" | "GOTO" | "MIXED" | "CALL"
-# RecursionRisk.severity: "HIGH" | "MEDIUM"
+# RecursionRisk.severity: "HIGH" | "MEDIUM" | "LOW" (LOW: CALL into an IS RECURSIVE program)
+# RecursionRisk: mechanism/severity/explanation/procedures/program/is_dynamic/has_escape
 ```
 
 Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
@@ -1061,6 +1176,7 @@ report: TechnicalDebtReport = TechnicalDebtAnalyzer(weights=None, size_threshold
 # report.parse_error_count / report.caveats  -- set from analyze(..., parse_error_count=N)
 # report.components: list[ComponentBreakdown]  -- one per weighted component, each with its own findings
 # report.top_offenders: list[OffenderProcedure]  -- worst procedures, with reasons
+# report.complexity_summary / .redundancy_summary / .weights  -- echoed into to_dict()
 ```
 
 Composite, explainable debt score combining `ComplexityAnalyzer`,
@@ -1070,7 +1186,8 @@ via keyword args to skip redundant passes). Every point on the score traces
 to a named finding in some component's `findings` list -- never a bare,
 unexplained number.
 
-**Four weighted components** (`DebtWeights`, defaults sum to 100 but any
+**Four weighted components** (`DebtWeights`, defaults `complexity=30`,
+`redundancy=30`, `control_flow=30`, `size=10` -- sum 100 -- but any
 positive weights work -- the composite normalizes by the weights' actual
 sum): `complexity` (share of procedures rated MODERATE/HIGH, weighted units
 `moderate*1 + high*3` over `3*total`), `redundancy` (mean of
@@ -1136,7 +1253,8 @@ lint output with no change here.
 
 **Rule ids are the analyzer subcommand names** (`dead-code`,
 `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`,
-`recursion-check`, `complexity`, `dclgen-check`) rather than a second private
+`recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`; the `RULES`
+tuple, in that order) rather than a second private
 vocabulary, so
 `lint --rule dead-code` and `cobol-parser dead-code` are visibly the same
 analyzer. One more id appears in output but not in `RULES`: `parse`, the
@@ -1171,7 +1289,7 @@ underlying analyzer's own category (`READ_BEFORE_OPEN`, `WORKING-STORAGE`,
 so structurally rather than in prose: `caveats` carries what an analyzer could
 not check (MOVE operands whose data category never resolved, most often an
 unresolved COPY), and `failed_rules` records a rule that raised — it costs
-only its own findings, never the other six. A consumer gating on `findings`
+only its own findings, never the other rules'. A consumer gating on `findings`
 alone must still surface both lists.
 
 Two rules (`recursion-check`, `complexity`) need the CFG; `LintAnalyzer`
@@ -1185,21 +1303,79 @@ since #371, so it no longer produces these.)
 CLI: `cobol-parser lint <file.cbl>` (see cli.md), including `--format text`,
 `--min-severity`, and `--fail-on` (exit 3).
 
+### Program units and finding origins (2026-09-07)
+
+Two changes to `LintAnalyzer`, both about a report that was quietly narrower
+than it looked.
+
+**Every program unit is linted, not just the outermost.** A source file can
+hold several `PROGRAM-ID`s (stacked, or nested inside the enclosing program's
+PROCEDURE DIVISION); the parse returns the outermost with the rest on
+`CobolProgram.contained_programs`. Every rule here is program-scoped, so
+running them on the outer program alone left a contained program *entirely
+unexamined* while the report read as clean. `analyze()` now iterates
+`ast.program_units()` and merges: `_analyze_unit` runs the rule set over one
+unit into a shared `LintReport`, `rules_run` and `failed_rules` carry one
+entry per rule however many units it ran on (the reader needs to know the
+concern went unexamined, not the arithmetic), caveats are deduplicated, and
+the sort + dedup happen once at the end. A caller-supplied `flow_report`
+describes the outermost unit only; the others build their own. Passing a
+contained unit directly still lints just that unit, which is what the CLI's
+`--program` does.
+
+**A finding now says where it really is.** `LintFinding` gained
+`origin_file` / `origin_line`, serialized as `"origin": {"file", "line"}` and
+emitted only when BOTH are known (a half-filled `{"file": null, "line": 12}`
+would read as an answer to a consumer checking for the key). `apply_source_map(report, source_map)` fills them
+from `ParseResult.expansion_source_map` (see
+[preprocessing.md](preprocessing.md)): analyzer locations count lines in the
+copybook-*expanded* text, so a finding after an expanded `COPY` is nowhere
+near that line on disk and one *inside* an inlined member is not in that file
+at all. A `None` map (nothing expanded) and a line the map does not cover both
+leave the finding untouched rather than claiming a line nobody vouched for.
+The `lint` CLI applies it whenever `--copybook-path` was given, and its `text`
+format prints the origin's own `file:line:column:` prefix so the output stays
+clickable after expansion. Pinned by
+`tests/regression/test_expansion_source_map_and_comments.py::TestApplySourceMap`
+and `tests/regression/test_nested_program_units.py`.
+`stamp_report_origins(report_dict, source_map)` (2026-09-27) is its twin for
+a serialized analyzer report: every `"location": {"line": N}` mapping gains a
+sibling `"origin"`; xref's `"definition"` gains `"definition_origin"` and
+program-flow's `"exit_statement_location"` gains `"exit_statement_origin"`
+(`_ORIGIN_KEYS`, #367). Used by `scan_one` and every analyzer CLI's
+`_emit_report`.
+
+**And at which column (#301, 2026-10-13).** `LintFinding.origin_column`,
+serialized as `origin.column` only when known, is the column an editor
+shows. `apply_source_map(report, source_map, column_offset)` takes a
+`(file, line) -> int | None` and adds its answer to `location.column`;
+`fixed_format_column_offset()` holds the per-layout table (7 for a
+fixed-format line, whose columns 1-7 never reach the analyzers; 0 for a
+free-form member in a fixed listing; 6 for a fixed-format member in a
+free-form listing). `LintFinding.column_known` (not serialized) is False for
+a parse error that gave only a line; such a finding gets no `origin_column`.
+`stamp_report_origins` leaves an existing `origin` alone so the CLI's dict
+pass does not erase it. Detail in [cli.md](cli.md).
+
 ## IOLogger
 
 ```python
 report: IOLogReport = IOLogger().analyze(ast)
-# report.operations: list[IOOperation]
+# report.operations: list[IOOperation]   report.program_name
 ```
 
-Records every IO statement (OPEN, CLOSE, READ, WRITE, REWRITE, DELETE, START,
-ACCEPT, DISPLAY, UNLOCK) in execution order with file name and paragraph context.
+Lists every input/output operation the program performs, one `IOOperation`
+(`category`/`operation`/`direction`/`variables`/`target`/`line`/`details`)
+each. Categories: `FILE-IO` (OPEN, CLOSE, READ, WRITE, REWRITE, DELETE,
+START, UNLOCK; file names resolved through `_files.py`), `CONSOLE-IO`
+(ACCEPT, DISPLAY), `SQL` (EXEC SQL), `CALL` and `ENTRY` (program linkage);
+`direction` is `INPUT` / `OUTPUT` / `BIDIRECTIONAL`.
 
 ## IOSequenceAnalyzer
 
 ```python
 report: IOSequenceReport = IOSequenceAnalyzer().analyze(ast)
-# report.violations: list[IOSequenceViolation]
+# report.violations: list[IOSequenceViolation]  (kind/file_name/location/message)
 # IOViolationKind: READ_BEFORE_OPEN, WRITE_BEFORE_OPEN, REWRITE_BEFORE_OPEN,
 #                  DELETE_BEFORE_OPEN, START_BEFORE_OPEN, DOUBLE_OPEN,
 #                  CLOSE_NOT_OPEN, DOUBLE_CLOSE, FILE_LEFT_OPEN
@@ -1303,16 +1479,6 @@ gated on `stop_type == "RUN"`, the same distinction `dead_code.py`'s and
 `program_flow/scanner.py`'s `_is_terminator` already draw. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestB1StopLiteralIsNotTermination`.
 
-`_literals.py`'s `quote_literal()` re-emits a decoded literal doubling
-each embedded `"`; its inverse `unquote_literal()` (2026-09-27) strips the
-delimiters *and* collapses the doubled delimiter. Any consumer reading a
-re-emitted literal back must use it: `generators/data/layout.py`
-(`_strip_literal_quotes`, VALUE clauses), `analysis/constraints.py`
-(`_strip_quotes`, branch witnesses) and `analysis/const_fold.py` (MOVE
-sources) each stripped only the delimiters, so `VALUE "A""B"` generated
-`A""B` and `MOVE '"'` folded to two quote characters. Pinned by
-`tests/regression/test_doubled_quote_literal_values.py`.
-
 ## MoveTypeChecker
 
 ```python
@@ -1325,7 +1491,11 @@ report: MoveTypeReport = MoveTypeChecker().check(ast)
 # report.unresolved_function_count: int -- the part of unresolved_count no
 #                                    copybook can fix: a FUNCTION source with
 #                                    a NATIONAL result or an uncatalogued name
-# MoveViolationKind: NUMERIC_TO_ALPHANUMERIC, ALPHANUMERIC_TO_NUMERIC, …
+# MoveTypeViolation: kind/source_name/target_name/source_category/
+#                    target_category/location/message
+# MoveViolationKind: ERROR | WARNING   (the severity; what is wrong is the
+#                    DataCategory pair: NUMERIC, NUMERIC_EDITED, ALPHABETIC,
+#                    ALPHANUMERIC, ALPHANUMERIC_EDITED, FIGURATIVE, UNKNOWN)
 ```
 
 Detects MOVE statements with type-incompatible sending/receiving fields based on
@@ -1439,7 +1609,10 @@ already sets `decimal_digits = P-count + 9-count` for a leading-`P` picture
 ```python
 report: LinkageReport = LinkageChecker().check(ast)   # note: .check(), not .analyze()
 # report.violations: list[LinkageViolation]
-# LinkageViolationKind: MISSING_USING_CLAUSE, UNDEFINED_LINKAGE_ITEM, …
+# report.entry_interfaces / .linkage_items
+# LinkageViolation: kind/call_target/location/message/item_name
+# LinkageViolationKind: TOO_MANY_ARGS, TOO_FEW_ARGS, UNREFERENCED_LINKAGE,
+#                       UNKNOWN_ENTRY, PASSING_MODE_MISMATCH
 # LinkageChecker(include_contained_programs=False).check(ast, interface_scope=root)
 #   — one unit only (what LintAnalyzer does per program unit); the default
 #   still walks every contained program of a whole file.
@@ -1493,6 +1666,8 @@ result: LEAnalysisResult = LanguageEnvironmentAnalyzer().analyze(ast)
 # result.intrinsic_usages: list[LEFunctionUsage] — every FUNCTION <name> intrinsic reference
 # result.le_service_calls: list[LEServiceCall]   — CALL "CEExxxx" to IBM LE callable services
 #                                                 (static, or dynamic via possible_values)
+# properties: uses_intrinsic_functions / uses_language_environment /
+#             unique_functions / unique_services / service_categories
 ```
 
 Detects COBOL intrinsic function references (`FUNCTION LENGTH`,
@@ -1530,14 +1705,21 @@ from cobolparser.dialects.le_signatures import (
 
 sig = le_service_signature("CEEDAYS")     # case-insensitive; None when unknown
 sig.parameters                            # tuple[LEParameter]: name, direction
-                                          # (input/output/input-output), type_id,
+                                          # ("input"/"output"/"input/output" --
+                                          # constants IN/OUT/INOUT), type_id,
                                           # description, optional, repeats
 sig.required_parameters                   # the ones that may not be omitted
 sig.call_example()                        # 'CALL "CEEDAYS" USING ...'
 p.data_type                               # LEDataType: declaration, byte_length,
                                           # snippet (VSTRING / feedback code)
 intrinsic_signature("NUMVAL-C").returns   # "numeric"
+catalog_to_dict()                         # the le-info JSON; CATALOG_VERSION "1"
 ```
+
+Also public: `LEServiceSignature`, `IntrinsicSignature`, `IntrinsicArgument`,
+and `LE_DATA_TYPES` (type id -> `LEDataType`). As of 2026-10-15 the catalogue
+holds 33 service signatures (`services_without_signature()` lists 29 more
+recognised services) and 81 intrinsic signatures.
 
 **Coverage is partial and says so.** `services_without_signature()` lists the
 LE services `IBM_LE_CALLABLE_SERVICES` recognises but this module cannot
@@ -1587,21 +1769,23 @@ which is what the VS Code extension's LE hover reads.
 
 ## CRUDMatrixGenerator
 
+```python
+matrix: CRUDMatrix = CRUDMatrixGenerator().analyze(ast)
+# matrix.file_entries: list[FileEntry]   (file_name/crud/open_modes/organization/access_mode)
+# matrix.table_entries: list[TableEntry] (table_name/crud/cursors) -- EXEC SQL tables
+# matrix.entries: both lists (property); .crud is CRUDFlags(create/read/update/delete)
+matrix.to_csv()
+matrix.to_json()
+```
+
+Generates a program-level CRUD matrix (Create/Read/Update/Delete): one row
+per file and one per DB2 table the program touches.
+
 > 2026-09-28: `SORT`/`MERGE` now mark their files. `USING` files are read
 > (R) and `GIVING` files written (C) -- the sort does the I/O itself, so no
 > READ/WRITE statement ever names them and they used to come out `----`.
 > `RELEASE` marks its SD file C (via the record's FD/SD) and `RETURN` marks
 > it R. Pinned by `test_crud_matrix.py::TestSortMergeFileAccess`.
-
-```python
-matrix: CRUDMatrix = CRUDMatrixGenerator().analyze(ast)
-# matrix.entries: list[CRUDFlags]
-matrix.to_csv()
-matrix.to_json()
-```
-
-Generates a CRUD matrix of file operations (Create/Read/Update/Delete) per
-paragraph.
 
 **Open modes are per-file (2026-08-12 fix, audit A-A3):** `OPEN INPUT
 IN-FILE OUTPUT OUT-FILE` used to record INPUT (the statement's *first* mode
@@ -1691,10 +1875,15 @@ counts. Pinned by `tests/unit/test_value_tracker.py::TestRedefinesOverlap`.
 
 ```python
 from cobolparser.analysis import IMSSegmentAnalyzer
-result = IMSSegmentAnalyzer().analyze(ast)
+calls: list[IMSDLICall] = IMSSegmentAnalyzer().analyze(ast)
+# IMSDLICall: location/interface/function_code/function_code_var/pcb_name/
+#             io_area_name/ssa_names/segment_names, .primary_segment (property)
+# also .get_all_segment_names(calls), .get_entry_points(ast) -> list[IMSEntryPoint]
 ```
 
-Analyses IMS DLI segment calls (EXEC DLI GU/GN/ISRT/DLET/REPL).
+Analyses IMS DL/I calls -- `CALL 'CBLTDLI'/'AIBTDLI'/'CEETDLI'` and `EXEC
+DLI` (GU/GN/GNP/ISRT/DLET/REPL, ...) -- resolving each call's SSAs to segment
+names.
 
 **Group-SSA segment names merge MOVE-tracked child values (2026-08-16
 audit fix):** `_resolve_ssa_segment`'s group branch used to return only
@@ -1744,7 +1933,9 @@ resolved parent is never reported in the target's place.
 
 ```python
 from cobolparser.analysis import HostVariableResolver
-resolved = HostVariableResolver().resolve(ast)   # note: .resolve(), not .analyze()
+report: HostVarResolutionReport = HostVariableResolver().resolve(ast)   # .resolve(), not .analyze()
+# report.resolved / .unresolved / .declare_tables / .column_name_collisions
+# then .get_symbol_table() / .get_column_index() on the resolver
 ```
 
 Resolves SQL host variables (`:var-name`) in EXEC SQL blocks against WORKING-STORAGE
@@ -1762,10 +1953,10 @@ other consumers.
 from cobolparser.analysis import DclgenChecker
 report: DclgenReport = DclgenChecker().check(ast)   # note: .check(), not .analyze()
 # report.violations: list[DclgenViolation]  (kind/severity/host_variable/column/table/
-#                                            expected_picture/expected_usage/
+#                                            message/expected_picture/expected_usage/
 #                                            actual_picture/actual_usage/location)
 # report.checked / .unchecked / .tables / .ambiguous_columns
-# report.has_violations / .worst_severity() / .to_dict()
+# report.has_violations (property) / .worst_severity() / .to_dict()
 ```
 
 Cross-checks every `:host-var` against the DCLGEN `DECLARE TABLE` column of
@@ -1835,6 +2026,754 @@ assumed away.
 The lint rule folds `unchecked` and `ambiguous_columns` into
 `LintReport.caveats` (one line with a count, not one finding per variable)
 rather than emitting findings for them.
+
+## SqlCicsAnalyzer (`sql_cics_lint.py`)
+
+A COBOL program that talks to DB2 and CICS carries two failure surfaces the
+COBOL compiler says nothing about, because neither `EXEC SQL` nor `EXEC CICS`
+is COBOL: the precompiler rewrites the block and moves on. Whether the program
+then looked at what came back is nobody's job to check. This module makes it
+somebody's job.
+
+```python
+from cobolparser.analysis.sql_cics_lint import SqlCicsAnalyzer
+
+report = SqlCicsAnalyzer().analyze(ast)      # SqlCicsReport
+report.violations                 # source-ordered SqlCicsViolation list
+report.worst_severity()           # "error" | "warning" | "info" | None
+report.violations_of_kind(KIND_NO_SQLCODE_CHECK)   # KIND_* constants hold the kind strings below
+report.has_violations
+report.unchecked                  # what this run could not check, and why
+report.sql_statements / report.cics_statements
+```
+
+| Kind | Why it is a defect, not a style note |
+|------|--------------------------------------|
+| `SQL_NO_SQLCODE_CHECK` | An executable `EXEC SQL` whose outcome is never looked at: no `SQLCODE`/`SQLSTATE`/`SQLCA` mention in the statements that follow, no `WHENEVER SQLERROR` in effect. DB2 does not raise — it sets a number and returns, and the program commits whatever it was going to commit. The most common real defect in DB2 COBOL and the cheapest to find. |
+| `SQL_DYNAMIC_CONCATENATION` | A host variable handed to `PREPARE` / `EXECUTE IMMEDIATE` whose content was assembled by `STRING` or moved in from another item — SQL injection with a mainframe accent. Parameter markers (`EXECUTE ... USING :HV`) are the fix and are never flagged. Writers are counted program-wide, except that a `MOVE` written directly in the PREPARE's paragraph, before it, that overwrites the whole item (no reference modification, not `CORRESPONDING`) cuts off everything before it: then only that MOVE, the writers between it and the PREPARE (conditional ones and those in PERFORMed paragraphs included) and, inside an inline `PERFORM` loop, the loop's later writers count (#395). A `STRING` never cuts the trace — it leaves bytes past what it transfers as they were. |
+| `SQL_HARDCODED_CREDENTIALS` | A literal user id or password in `EXEC SQL CONNECT`. It is in the source, the listing, the load library, and every copy anyone took of any of them. |
+| `SQL_SELECT_WITHOUT_INTO` | A singleton `SELECT` with no `INTO` and no cursor. The precompiler accepts it; the row goes nowhere. (`into_variables` is populated from parsed source since 2026-09-28; the `INTO\s*:` text check stays as a backstop.) |
+| `CICS_NO_RESP_HANDLING` | An `EXEC CICS` command with no `RESP`/`RESP2`, no `NOHANDLE`, no `HANDLE CONDITION` in effect. The default action for most CICS conditions is to abend the task, so the failure mode is a dropped transaction mid-update, not a wrong answer. `IGNORE CONDITION` ("take no action": nothing abends, execution continues) counts as handling, the same as a `HANDLE CONDITION` label; only `ERROR` covers every condition, a narrower set goes to `unchecked`. A bare `HANDLE CONDITION X` restores the abend (#396). |
+| `CICS_ABEND_WITHOUT_HANDLER` | `EXEC CICS ABEND` with no `HANDLE ABEND`. **Info** — frequently deliberate, worth seeing rather than worth fixing. |
+
+`SqlCicsViolation` carries `kind`, `severity` (always `SEVERITY_BY_KIND[kind]`),
+`message`, `location`, `symbol` (the SQL statement type, the CICS command verb,
+or for a dynamic-SQL finding the untrusted host variable) and a machine-readable
+`detail` dict — the traced assignment, the option keyword, the active handler.
+
+**It does not guess.** Three things in the parsed form of an EXEC block are
+lossy, and each is answered with an entry in `unchecked` rather than a finding —
+e.g. a CONNECT operand with neither colon nor quotes that matches a declared
+DATA DIVISION item. (Since 2026-09-28 EXEC SQL text keeps a literal's quotes,
+so `USING 'S3CRET'` is always a literal and `USING 'WS-KEY'` is no longer
+mistaken for the data item WS-KEY; before that the two reduced to the same
+tokens.) A quiet report
+with a populated `unchecked` is not a clean program, it is an unexamined one.
+
+The search for a status check after an `EXEC SQL` stops at the next
+executable `EXEC SQL` written directly in a paragraph (also inside a
+PERFORMed one): it resets the SQLCA, so `DELETE` / `COMMIT` / `IF SQLCODE`
+reports the DELETE (2026-09-28; before, the one check was credited to both).
+SQL inside an IF/EVALUATE body may not run and does not end the search;
+neither does a declaration or `WHENEVER`.
+
+`DECLARE GLOBAL TEMPORARY TABLE` is executable and is graded;
+DECLARE CURSOR / TABLE / STATEMENT / VARIABLE are not
+(`_NON_EXECUTABLE_SQL_TYPES`). A `DECLARE TABLE` or `INCLUDE` in the DATA
+DIVISION is not counted in `sql_statements`.
+
+The lint rule id is `sql-cics-check` — the subcommand's own name, per the lint
+convention. Tests: `tests/unit/analysis/test_sql_cics_lint.py`.
+
+**Known gaps** (found in the PR review, not yet fixed): a VARCHAR host structure
+written through its subordinate `49` item is not traced to `PREPARE ... FROM
+:hv`; SQLCODE checked in a `PERFORM UNTIL` guard, or in the calling paragraph
+rather than after the statement, is not seen.
+
+## XrefAnalyzer (`xref.py`)
+
+The classic mainframe compiler cross-reference: for every symbol a program
+declares — data items, level-88 condition names, files, paragraphs and
+sections — where it is *defined* and every place it is *referenced*, each
+reference carrying its location, the statement it sits in, the enclosing
+paragraph, and the **role** it plays there.
+
+> 2026-09-28: two role fixes. (1) `RELEASE rec FROM x` (record and `x`
+> read) and `RETURN sd-file INTO x` (file-operation on the SD, `x` write)
+> have dedicated role mappings; before, `FROM`/`INTO` never reached
+> `.operands` (the model setters now add them, like READ INTO / WRITE
+> FROM), so `x` had no reference at all and `UnusedVariableAnalyzer`
+> reported it unused. (2) A reference modifier's offset/length names are
+> kept apart from the operand (`_split_operand`) and recorded `read` when
+> the operand itself is a `write`: `MOVE A TO WS-B (WS-P:2)` no longer
+> lists WS-P as written. `_partition_operand` still folds them into the
+> base names for its other callers.
+
+**Arithmetic roles (2026-09-27).** With GIVING, only the GIVING/REMAINDER
+items are `write`; the TO/FROM operand is `read` (`SUBTRACT A FROM B GIVING
+C` used to record B as written). Without GIVING, the TO/FROM/BY/INTO target
+is both `read` and `write` (`ADD 1 TO X` used to be `write` only). Sending
+operands come from `ArithmeticStatement.source_operands` (ADD/SUBTRACT) or
+the first two operands (MULTIPLY/DIVIDE), so `ADD A B GIVING B` keeps B's
+read. `program_signature.py` grades LINKAGE directions from these roles:
+an accumulated parameter is now `input-output` (was `output`) and a
+`SUBTRACT ... FROM LK-B GIVING` operand `input` (was `output`). Pinned by
+`test_xref.py::test_giving_leaves_the_from_operand_unwritten` and friends and
+`test_program_signature.py::test_accumulated_and_giving_operands_get_the_right_direction`.
+
+**Counter / pointer / in-place roles (issue #269).** Operands a statement
+advances or rewrites from their current value are both `read` and `write`:
+an INSPECT TALLYING counter, STRING / UNSTRING `WITH POINTER`, UNSTRING
+`TALLYING IN`, and the inspected item of INSPECT REPLACING / CONVERTING /
+TALLYING ... REPLACING (the item of a plain INSPECT TALLYING stays `read`;
+UNSTRING `COUNT IN` / `DELIMITER IN` stay `write`). They were `write` only,
+so `program-signature` graded such a LINKAGE parameter `output` instead of
+`input-output`; `business-rules` now lists them as inputs and outputs.
+Pinned by `test_xref.py::test_counters_pointers_and_inspect_targets_are_read_write`
+and `test_program_signature.py::TestDirection::test_counters_pointers_and_inspected_items_are_input_output`.
+
+This is the natural completion of `unused_variables.py`. That analyzer answers
+"is this name referenced at all?" with a flat `set[str]`; this one keeps the
+locations and roles that set throws away, so "unused" becomes "fully
+cross-referenced". Its reference-collection machinery is *reused*, not
+re-derived: `_extract_identifiers`, `_walk_expression_operands`,
+`_names_from_value`, `collect_declared_items` and the `_STR_ATTR_EXTRAS` /
+`_STR_LIST_EXTRAS` / `_DICT_LIST_EXTRAS` tables all come from there.
+
+```python
+from cobolparser.analysis.xref import XrefAnalyzer
+
+report = XrefAnalyzer().analyze(ast)          # XrefReport
+report.entries                # list[XrefEntry], data items first (_KIND_ORDER)
+report.entry_for("WS-COUNT")  # XrefEntry | None, case-insensitive
+report.entries_of_kind("paragraph")
+report.total_references
+report.undefined              # referenced, never declared
+report.caveats                # what could only be recovered approximately
+report.duplicate_declarations # declared more than once in one namespace
+```
+
+`XrefEntry`: `name`, `kind`, `definition` (`SourceLocation | None`),
+`references`, `level`, `section`, `qualified_name` (set only for a name
+declared in more than one record, issue #258), plus `reference_count` / `is_referenced`.
+`XrefReference`: `location`, `role`, `statement`, `context` (the enclosing
+paragraph).
+
+**Kinds** (`KIND_*`): `data-item`, `condition-name`, `paragraph`, `section`,
+`file`.
+
+**Roles** (`ROLE_*`): `write`, `read`, `condition`, `subscript`, `perform`,
+`goto`, `call-argument`, `host-variable`, `file-operation`, and `reference`
+when the role itself could not be determined.
+
+Things worth knowing before trusting a field:
+
+* **Single-program scope**, like `DeadCodeAnalyzer` and
+  `UnusedVariableAnalyzer`: only *ast* itself. Contained programs are AST
+  children and are skipped in every sweep (`_contained_node_ids`) — otherwise
+  a nested program's statements would read as the outer unit's references.
+  Call `analyze()` separately per unit.
+* **Digit-led paragraph names resolve.** Procedure names (PERFORM / GO TO
+  targets) are credited verbatim and `_COBOL_WORD_RE` allows a leading digit
+  provided there is at least one letter, so `1000-INIT` is one symbol rather
+  than a number and a word.
+* **`undefined` excludes special registers.** `_SPECIAL_REGISTERS`
+  (RETURN-CODE, SQLCODE, SQLCA, `EIB*`, `DFH*`, `XML-*`/`JSON-*`, TALLY, …)
+  are never reported undefined; a caveat names the ones that were seen.
+* **STRING operands are inexact** — the parser strips literal quotes, so a
+  literal word and a data name are indistinguishable there. Reported, with a
+  caveat.
+* **`duplicate_declarations` is a correctness warning for consumers.** Every
+  reference is attributed to the *first* declaration, so nothing downstream may
+  grade *which* declaration was touched. A copybook COPYed into both
+  WORKING-STORAGE and LINKAGE is the common shape.
+* Nothing is guessed: where a role, location or identifier was only
+  approximately recoverable the reference is still reported (role
+  `"reference"`) and the approximation is appended to `caveats`.
+
+Backs the `xref` CLI subcommand, which additionally appends the parser's
+unexpanded-COPY warnings to `caveats` — a member the parser could not expand
+leaves every field it declares looking undeclared. Tests: `tests/unit/analysis/test_xref.py`.
+
+## ProgramSignatureExtractor (`program_signature.py`)
+
+Every other program-scoped analyzer here answers a question about the program
+it is given. This one answers a question about the program *someone else* is
+calling: given `CALL "SUBPGM" USING ...`, what does SUBPGM actually expect —
+how many operands, in what order, of what shape, and which of them it writes
+back.
+
+That is why `LinkageChecker` cannot cover it: that analyzer correlates CALL
+statements against ENTRY statements *in the same source unit*, and on a real
+mainframe a caller and its callee almost never share a file. The answer has to
+be extracted from the callee and carried across, which is what this module
+produces — a small, serializable, source-file-independent description.
+
+Built from three sources that must agree and often do not:
+
+1. `PROCEDURE DIVISION USING` — the primary (implicit) entry point, read from
+   the division's `using_parameters` metadata (same place `LinkageChecker`
+   reads).
+2. `ENTRY "NAME" USING` statements — alternate entry points, each with its own
+   operand list.
+3. The LINKAGE SECTION — where those operands are declared, and therefore the
+   only place a parameter's *shape* lives (PICTURE, USAGE, byte length, group).
+
+```python
+from cobolparser.analysis.program_signature import (
+    ProgramSignatureExtractor, extract_signatures,
+)
+
+sig = ProgramSignatureExtractor().analyze(ast)      # ProgramSignature
+sigs = extract_signatures(ast)                      # one per program_units()
+
+sig.primary                     # the PROCEDURE DIVISION entry — what CALL "PROG"
+                                # hits; None when it has no USING clause
+sig.entry("ALTENTRY")           # look one up, case-insensitively
+sig.entry_points[0].call_example()   # 'CALL "SUBPGM" USING WS-A, WS-B RETURNING WS-RC'
+sig.entry_points[0].returning        # PROCEDURE DIVISION ... RETURNING operand
+sig.undeclared_parameters       # named by USING, absent from LINKAGE
+sig.unreferenced_linkage        # LINKAGE 01-items no USING clause names
+sig.unchecked                   # what could not be determined exactly
+```
+
+`SignatureParameter` carries `name`, `position`, `declared`, `level`,
+`picture`, `usage`, `byte_length`, `is_group`, `occurs`, `direction`,
+`by_clause`, `location`, and a `declaration()` rendering the operand as a
+caller would have to write it (a group item is described by level and length
+rather than a fabricated picture). `EntryPoint.kind` is `"procedure-division"`
+or `"entry-statement"`. `by_clause` is the callee's declared passing mode
+(`"REFERENCE"` / `"VALUE"`, from the division's `using_parameter_modes`
+metadata) on the primary entry, and from `EntryStatement.parameter_modes` on
+an ENTRY statement's operands (issue #402; it used to be `None` there);
+`call_example()` writes a `BY VALUE` / `BY REFERENCE` phrase only where the
+mode changes (`CALL "E1" USING LK-A, BY VALUE LK-B RETURNING LK-R`). The
+RETURNING item counts as named, so it is never `unreferenced_linkage`.
+
+**Direction is graded, never guessed.** It comes from how the PROCEDURE
+DIVISION uses each parameter, reusing xref's role vocabulary:
+
+* `write` plus any read → `input-output`.
+* A reference as a BY REFERENCE CALL argument or SQL host variable
+  (`_AMBIGUOUS_ROLES`), with no write elsewhere → `unknown`, and listed in
+  `unchecked`. A `BY CONTENT` / `BY VALUE` CALL argument is not ambiguous:
+  the callee gets a copy, so xref records it `read` (2026-09-28; it used to
+  be `call-argument`, which graded a parameter only passed on BY CONTENT
+  `unknown`). A caller told "input-only" about a
+  field the callee overwrites has been told something worse than nothing.
+  xref files `ENTRY "X" USING p` itself under the CALL-argument role
+  (`statement == "EntryStatement"`); those refs are dropped before grading,
+  since naming an entry's own parameter neither reads nor writes it.
+* A group whose fields xref reports as duplicated → `unknown`, rather than
+  inferred from a same-named WORKING-STORAGE field.
+
+Operand *order* is preserved verbatim from the USING clause and is sorted
+nowhere in the module — it is the whole point of `call_example()`.
+
+A parameter named in (1)/(2) but absent from (3) is `undeclared_parameters`
+(a caller passing one is passing into nothing); a LINKAGE 01-item named by
+neither is `unreferenced_linkage` (not an error on its own — `SET ADDRESS OF`
+is legitimate — but the other half of the mismatch picture). ENTRY statements
+belonging to *contained* programs are not the outer unit's.
+
+The `program-signature` CLI subcommand reports **every** unit in the file by
+default rather than the outermost: a caller may target a contained program as
+readily as the outer one, and reporting only the outermost would hide the other
+entry points from exactly the consumer that needs them. `--program` still
+narrows. Tests: `tests/unit/analysis/test_program_signature.py`.
+
+## CodebaseGraphBuilder / CopybookImpactAnalyzer (`codebase.py`)
+
+The cross-program module. It walks a whole tree of COBOL source, parses every
+file through `batch.py` (parallel, per-file fault isolation) and aggregates the
+results into one graph with two kinds of edge:
+
+* **Call edges** — `program A calls program B`, from static `CALL "B"` and from
+  dynamic `CALL WS-TARGET` resolved through `DynamicCallAnalyzer`. A dynamic
+  call whose value set that analyzer could not fully resolve still contributes
+  its known targets, each marked `resolved=False`, so the edge set is never
+  mistaken for an exhaustive one. `EXEC CICS LINK PROGRAM(...)` and `EXEC
+  CICS XCTL PROGRAM(...)` are call edges too (#315), told apart by
+  `CallEdge.kind` (`call` / `cics-link` / `cics-xctl`; `to_dict()` carries
+  it). `PROGRAM('X')` is static (read off `ExecCicsStatement.literal_options`,
+  since `options` holds literals unquoted); `PROGRAM(WS-X)` takes
+  `DynamicCallAnalyzer.resolve_variable("WS-X")`, the same values and
+  incomplete flag `CALL WS-X` would get, or is reported in `unresolved`.
+  `cycles()` skips XCTL edges: XCTL never returns, so a menu loop of XCTLs is
+  not recursion; LINK cycles count. Chosen over a separate `transfer_edges`
+  list so `callers_of` and impact questions see CICS callers with no change.
+* **Copy edges** — `program A copies member X`, and `member X copies member Y`
+  for nested copybooks. Collected by **re-scanning** each source with
+  `extract_copy_statements()` rather than from an expanded parse, because
+  expansion *consumes* the COPY statement and discards exactly the edge we are
+  after. Members resolve to real files through the same `PathResolver` the
+  expander uses, so a nested chain is followed to its leaves and a circular pair
+  (`A COPY B`, `B COPY A`) is reported, not looped on.
+  A DB2 `EXEC SQL INCLUDE X END-EXEC` is a copy edge too (the scan passes
+  `sql_include=True`), with the same `COPY` label and the same unresolved-member
+  reporting as a COPY -- it is how SQLCA and DCLGEN members are normally pulled
+  in, and `copybook-impact` on a DCLGEN returned nothing without it (#295).
+  Nothing in the JSON/DOT/Mermaid output tells a COPY edge from an INCLUDE
+  edge. An INCLUDE of `SQLCA` / `SQLDA` (`_PRECOMPILER_MEMBERS`) that is not on
+  the path keeps its edge but adds no `unresolved` note. That is narrower than
+  the expander, which skips *every* unresolvable INCLUDE silently: here a COPY
+  of either, or an INCLUDE of any other missing member (a DCLGEN), is still
+  reported -- once per member and referrer, even when one file both COPYs and
+  INCLUDEs it.
+
+```python
+from cobolparser.analysis.codebase import CodebaseGraphBuilder, CopybookImpactAnalyzer
+
+builder = CodebaseGraphBuilder(copybook_paths=["./copybooks"])   # also workers=, chunk_size=200,
+                                                        # encoding="utf-8", debug_lines=False
+graph = builder.build_from_directory("./src", extensions=(".cbl", "cob"))
+graph = builder.build(["a.cbl", "b.cbl"])       # or an explicit file list
+
+graph.program_ids / graph.members
+graph.callers_of("VALIDATE") / graph.callees_of("MAIN")
+graph.programs_using("CUSTREC", transitive=True)   # through nested COPY chains
+graph.cycles()                                     # CALL cycles
+graph.to_dict() / graph.to_dot() / graph.to_mermaid()
+graph.unresolved / graph.errors
+graph.programs / graph.call_edges / graph.copy_edges   # the raw dataclass fields
+
+report = CopybookImpactAnalyzer(graph).analyze("CUSTREC")   # ImpactReport
+report.direct_programs / report.transitive_programs
+report.chains          # the COPY nesting path to each affected program
+report.fields          # data items the member contributes, when its file resolved
+report.program_count
+```
+
+`ProgramNode` holds `program_id` (uppercased; the **file stem** when the file
+would not parse, recorded as such in `unresolved`), `path`, `calls`, `copies`
+and `parse_failed` — with `parse_failed` true, `calls` is "empty and unknown",
+not "empty and known". `CallEdge` carries `is_dynamic` / `resolved` / `kind`; `CopyEdge`
+carries `member`, `path` and `nested`, where for a nested edge `program` is the
+*outer member name*, which is what makes a `PROG1 -> OUTER -> INNER` chain
+walkable in either direction.
+
+**Library-qualified COPY (#351).** `COPY REC OF LIBA` and `COPY REC IN LIBB`
+are two different files, so the builder's caches are keyed by more than the
+member name: `_member_paths` / `_member_failures` on `(member, library)`, and
+`_member_copies` on the resolved file path. A nested COPY is resolved with its
+own `library_qualifier`, as the expander does. `CopyEdge` carries `library`
+(the qualifier as written, case kept) and, for a nested edge, `parent_path` --
+the outer member's file. `programs_using()` and `CopybookImpactAnalyzer` walk
+up *edge by edge* (`CopyEdge._is_parent`: same name, and same file whenever the nested
+edge has a `parent_path`), so `LIBB/REC -> INNER` reaches only the programs
+whose `REC` resolved to `LIBB/REC.cpy` -- never a program whose `REC` did not
+resolve at all. A hand-built nested edge with no `parent_path` matches by name
+alone (the pre-#351 behaviour). `ImpactReport.paths`
+lists every file the member name resolved to; with more than one, `fields` is
+their union and `unresolved` says so. The DOT/Mermaid renderings still draw
+one node per member *name*, and draw each `(program, member, nested)` edge once
+(`_rendered_copy_edges`), however many files sit behind it.
+
+Two rules hold throughout:
+
+1. **A quiet report is never a complete one.** A file that would not parse lands
+   in `errors` and still contributes its COPY edges (the COPY scan does not need
+   a successful parse); a COPY whose member is off the search path, a dynamic
+   CALL with no resolvable target, a duplicate `PROGRAM-ID`, a file holding
+   several units — each lands in `unresolved` with a reason. So does a
+   `copybook-impact` member whose data items are named by IBM `:TAG:`
+   REPLACING placeholders (`05 :Q:-AMT ...`, #356): their real names exist
+   only once a `COPY ... REPLACING` fills the tag in, so they are left out of
+   `fields` (the record parser renames them `ANONYMOUS-*`, which the
+   declared-in-the-member filter drops) and named in `unresolved` instead of
+   vanishing.
+2. **Determinism.** The same tree produces byte-identical `to_dict()`,
+   `to_dot()` and `to_mermaid()`. Files are parsed in sorted order, every
+   emitted list is sorted, and no `ProcessPoolExecutor` completion order reaches
+   the output.
+
+Paths are keyed by `str(Path(p))` — the spelling `BatchResult.path` returns — so
+`./X.cbl` matches its parsed units instead of yielding a phantom program.
+Extensions are accepted with or without a leading dot (`extensions` is
+keyword-only, defaulting to `DEFAULT_PROGRAM_EXTENSIONS`). `_member_paths` /
+`_member_copies` reset per build. `build_from_directory` raises
+`NotADirectoryError` for a root that is not a directory — a mistyped root must
+not read as "a codebase with no programs".
+
+Backs the `codebase-graph` and `copybook-impact` CLI subcommands. Tests:
+`tests/unit/analysis/test_codebase.py`.
+
+**Not yet joined to JCL.** The graph has `ProgramNode` / `CallEdge` / `CopyEdge`
+and no job, step or dataset node, while `cobolparser/jcl/` already resolves
+DD → dataset and step → program. So "which dataset does this program's INVFILE
+resolve to" is answerable and "which job populates the dataset this program
+reads" is not. See [jcl.md](jcl.md).
+
+## BusinessRuleExtractor (`business_rules.py`, 2026-09-30)
+
+Answers "what are the rules in this program?" -- the question a
+modernization or documentation engagement asks first -- as a catalogue of
+`BusinessRule`s. Backs `cobol-parser business-rules` ([cli.md](cli.md)).
+Feature idea #21 in `docs/feature-ideas.md`.
+
+```python
+from cobolparser import BusinessRuleExtractor
+
+report = BusinessRuleExtractor().analyze(ast)      # BusinessRuleExtractor(include_technical=False)
+report.rules                 # list[BusinessRule], BR-001.. in source order
+report.rules[0].branches     # list[RuleBranch]: label, condition, actions
+report.condition_names       # level-88 glossary: POL-AUTO -> POL-TYPE = 'A'
+report.data_lineage          # {item: {"read_by": [...], "written_by": [...]}}
+report.technical_rules_excluded
+report.caveats               # always holds the "kinds are heuristic" caveat
+report.rule("BR-003") / report.rules_of_kind("validation")
+print(report.to_text())      # IF/THEN/ELSE-shaped catalogue
+```
+
+**Rule kinds.** Every IF / EVALUATE / SEARCH is a `decision`, shaped as a
+decision table: one `RuleBranch` per arm (THEN, ELSE, each WHEN, WHEN OTHER,
+SEARCH AT END) with the condition selecting that arm and its actions. It is
+promoted to `validation` when an arm signals rejection (moves or DISPLAYs an
+error-like literal, writes/SETs an item whose name has an ERR / ERROR /
+INVALID / REJECT / ABEND word, PERFORMs or GOes TO such a procedure, CALLs
+CEE3ABD / ILBOABN0) or the condition is a class test. COMPUTE / ADD /
+SUBTRACT / MULTIPLY / DIVIDE at paragraph level (not inside an arm) is a
+`calculation` with `formula` normalized to `target = expression` (`DIVIDE A
+INTO B GIVING C` -> `C = B / A`); inside an arm it is an action of that
+decision only, never counted twice. Counters (`ADD 1 TO X`, `COMPUTE X = X +
+1`) are not rules at all.
+
+**Stacked WHENs (#314).** `WHEN 'A' WHEN 'B' stmt` is one arm whose
+condition is `WS-T = 'A' OR WS-T = 'B'` (via `EvaluateStatement.when_groups()`);
+the same grouping numbers program-flow `BranchArm`s (one `WHEN_n` arm, label
+`WHEN A / WHEN B`) and constraint arms, where each phrase of a stack is an
+OR-split disjunct of that arm (`WHEN_1#1`, `WHEN_1#2`) and later arms /
+WHEN OTHER negate every phrase.
+
+**Technical vs business.** A decision whose *own* condition reads only
+technical items, or a calculation that writes only technical items, is
+`technical` and excluded by default (counted in `technical_rules_excluded`;
+`include_technical=True` keeps it). Technical items are found from the
+program, not only from names: every SELECT `FILE STATUS` item; everything a
+READ / RETURN `AT END` clause writes (the EOF flag, whatever it is called);
+the level-88s of those items and the items of those 88s; the xref special
+registers (SQLCODE, SQLSTATE, EIB*, RETURN-CODE, ...); plus a narrow name
+pattern (`EOF`, `EOJ`, `FS`, `END-OF-FILE`, `FILE-STAT`, `EIB*`, `DFH*`). A
+SEARCH is never technical (it is a table lookup). CICS `RESP` fields compared
+to `DFHRESP(...)` are deliberately *not* technical: "NOTFND -> CUSTOMER NOT
+FOUND" is a business rule.
+
+**Context on every rule.** `guards` are the conditions of the arms the rule
+is nested in, within its paragraph (ELSE contributes `NOT (cond)`, WHEN
+OTHER the conjunction of the negated WHENs, an exception clause `AT END
+(READ ...)` / `ON SIZE ERROR (COMPUTE ...)`). `reached_via` links across
+paragraphs: every arm elsewhere that PERFORMs or GOes TO the rule's paragraph
+or section, as `"BR-001 ELSE"` / `"BR-004 WHEN POL-TYPE = 'A'"`. A
+`PERFORM A THRU C` reaches every procedure from A through C in source order
+(`_thru_range`, on bare names over `ProcedureIndex`; a section header crossed
+on the way to a paragraph inside it is left out), and `GO TO A B DEPENDING
+ON N` reaches every target (#354). A nested
+decision is its own rule; the parent arm lists it as an action whose
+`rule_id` points at it (dropped to `None` if the nested rule was excluded as
+technical, never left dangling). `in_dead_code` comes from
+`DeadCodeAnalyzer`.
+
+**Inputs / outputs** reuse `XrefAnalyzer`'s per-statement role mapping
+(`_role_assignments` / `_names_for` / `_residual_names`), filtered to
+declared names (+ INDEXED BY names, + data-bearing special registers; not
+`DFHRESP` / `LENGTH` / `ADDRESS`). A decision's are its condition plus its
+*direct* actions (a nested rule's reads/writes are its own). Testing or
+SETting a condition name also counts its item.
+
+**Rendering notes.** Conditions come from `program_flow/condition_text.py`
+then `_tidy()` (`T-K ( IX )` -> `T-K(IX)`, `NOT =` reads `<>`). EVALUATE
+selector literals arrive **unquoted** from the parser, so a non-identifier,
+non-numeric, non-figurative selector is re-quoted -- except the space-joined
+call shape `DFHRESP ( NORMAL )`, which is an expression. A negated range
+selector (`WHEN NOT 0 THRU 17`, a `Condition` dict with `negated` plus
+`start`/`end`) reads `NOT (AGE >= 0 AND AGE <= 17)` from those bounds, not
+from its raw `THRU` text; only a single negated value reads `AGE <> 6`
+(#260). Level-88 values are
+also stored unquoted with `THRU` as `"THROUGH:end"`; `_condition_values`
+quotes them unless the item's PICTURE / USAGE is numeric. STRING sources
+arrive quoted (#330), so they are rendered as is. Actions are
+rendered in full here rather than via `program_flow/statement_text.py`
+(flowchart summaries, truncated to 48 chars).
+
+**Why not `constraints.py`** (as idea #21 proposed): `ConstraintExtractor`
+only models conditions on fields that trace to a mocked boundary (it takes a
+`ProgramLayoutIndex` and a `BoundaryReport`), so a rule on a computed
+WORKING-STORAGE field -- most rating/pricing logic -- would be missing.
+
+**Known limits** (the always-present caveat says the kinds are heuristic;
+`classification` on each rule names the signal that decided it):
+single-program scope (like `xref`, contained programs are not walked --
+`--program` picks one); an arithmetic statement inside an
+inline PERFORM *within an arm* is neither a rule nor an action of that arm.
+
+Tests: `tests/unit/analysis/test_business_rules.py`,
+`tests/unit/cli/test_business_rules_cli.py`.
+
+## Field lineage (`field_lineage.py`, `lineage_graph.py`, `lineage_jcl.py`, `_sql_flow.py`, 2026-10-08)
+
+Answers "if I change this field, what else changes?" at field granularity,
+across programs. Design: `docs/plans/2026-10-08-field-lineage-design.md`.
+Backs `cobol-parser lineage` and `cobol-parser field-impact`
+([cli.md](cli.md)), and `scan --analyzer lineage` ([batch.md](batch.md)).
+
+```python
+from cobolparser.analysis.field_lineage import FieldFlowAnalyzer
+from cobolparser.analysis.lineage_graph import LineageGraph
+from cobolparser.analysis.lineage_jcl import bindings_from_jobs, load_jobs
+
+flow = FieldFlowAnalyzer().analyze(ast)   # FieldFlowReport: program_id/items/ports/
+                                          # edges/summary/key_uses/caveats
+jobs, errors = load_jobs(["JOB1.jcl"], proc_path="procs/")
+bindings, passthroughs = bindings_from_jobs(jobs)
+graph = LineageGraph([flow, ...], bindings, passthroughs)
+hits = graph.impact("CUST-ID", program="PROG1", direction="forward", depth=None)
+graph.impact_table("CUSTOMER.CUST_ID") / graph.impact_dataset("PROD.CUST.MASTER")
+graph.key_relationships() / graph.join_edges() / graph.join_state()
+```
+
+**Layer 1 -- one program (`FieldFlowAnalyzer`).** A may-flow,
+flow-insensitive value graph. Nodes are data items (qualified name, with
+the record-relative byte offset/length `layout_offsets` computes) and
+*ports*, where a value enters or leaves the program:
+
+| Port kind | Key | From |
+|-----------|-----|------|
+| `file` | DD name (`normalize_ddname`: `UT-S-` / `S-` prefixes stripped, the backend's rule) | READ / WRITE / REWRITE / RELEASE / RETURN / SORT-MERGE USING-GIVING, one byte range per record field |
+| `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`; SPACES / LOW-VALUES / HIGH-VALUES / ZERO candidates are the "no program" sentinel and are dropped by `_names.callee_names`), else `?IDENT#n` plus a caveat |
+| `linkage` | `PROGRAM#n` / `ENTRY#n`, `PROGRAM#RETURNING` (out only) | PROCEDURE DIVISION USING / RETURNING, via `ProgramSignatureExtractor` |
+| `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats, as is a FROM sub-select or a `TABLE(...)` table function -- matched on `TABLE` followed by `(`, so an ordinary table named `TABLE_CUST` / `TABLES_CFG` is traced, #340) |
+| `console` | `SYSIN` / `SYSOUT` (or the ACCEPT's `FROM` source) | ACCEPT / DISPLAY; `ACCEPT FROM DATE` / `DAY` / `DAY-OF-WEEK` / `TIME` (with or without a format qualifier) make no port -- the runtime's clock, not data entering the program |
+
+Edge kinds: `move` (group MOVE is a byte overlay; CORRESPONDING pairs by
+name; literal reference modification narrows the range), `arith`,
+`string`, `init`, `set`, `aggregate` / `sql-expr` (SQL `SUM(...)` /
+expressions), `read`, `write`, `redefines` (two-way, including several 01
+records under one FD), `occurrence` (two-way, inexact: a literal-subscript
+occurrence node and its table field), `call`, `linkage`, `sql`, `accept`,
+`display`, `xml`. `LINEAGE_VERSION` is `"2"` (2026-10-08: occurrence nodes,
+`#RETURNING` linkage ports, `#n` item keys). `VALUE_CHANGING_KINDS` (`arith`, `string`, `aggregate`, `sql-expr`)
+make a flow *derived*. Each edge carries `line`, `paragraph`, `guarded`
+(inside IF/EVALUATE/SEARCH) and `exact` (byte ranges coincide).
+`apply_source_map` stamps `origin` on every edge after copybook expansion
+-- edges carry a bare `line`, so `lint.stamp_report_origins` does not
+reach them. `summary` is every input-port field -> output-port field the
+program connects; `key_uses` are items used as READ/START/RECORD KEY or in
+a SQL `WHERE col = :hv`.
+
+**Operands** (`_refs`) go through one path for MOVE, arithmetic, STRING,
+CALL arguments, DISPLAY/ACCEPT, READ INTO / WRITE FROM: xref's
+`_split_operand`, keeping only the base names minus `_qualifier_names`, so
+a subscript, a reference-modifier offset/length or an `OF` qualifier is
+never a value source (`COMPUTE X = Y(I)` does not flow `I` into `X`;
+`LENGTH OF X` / `ADDRESS OF X` flow nothing). A literal reference modifier
+narrows the byte range; literal subscripts are kept (`_constant_subscripts`).
+
+**OCCURS tables.** A table field's node (`T.E`) stands for *any*
+occurrence. Its bytes are every occurrence's (`_placements`: one range per
+occurrence, or a single spanning range past `_PLACEMENT_CAP` = 1024), so a
+group MOVE / READ / WRITE / CALL maps each occurrence where it really lies,
+and every edge through a table field is **inexact** -- never a wrong exact
+field. A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
+OCCURS level, within bounds) on an elementary field gets its own item node
+`R.AMT(3)` at the occurrence's offset, joined both ways to `R.AMT` by
+inexact `occurrence` edges, and an exact edge to its own bytes on every port
+its record or group reaches (`_PortLink`s, resolved after the walk in
+`_link_occurrences`). Nodes order by `LineageNode.sort_key()` (an unknown
+offset -- a field after an `OCCURS DEPENDING ON` -- sorts first; such a field
+maps to a port with no byte range).
+
+**Item keys** are qualified names, except that the n-th item sharing one
+(two `01 FILLER` groups, two same-named subordinates) is keyed `NAME#n`;
+`_index_items` splits the layout into record blocks and finds each item's
+parent by position (a group follows its children in the layout), so two
+FILLER records are two buffers, not one with a spurious redefines.
+`MOVE CORRESPONDING` pairs same-path subordinates when at least one of the
+two is elementary (a group against an elementary item is a byte overlay),
+skipping FILLER, REDEFINES and OCCURS items and what is under them.
+`ADD` / `SUBTRACT CORRESPONDING` walk the same pairing
+(`_visit_arith_corresponding`) but keep only elementary pairs whose sending
+item is numeric and receiving item numeric or numeric-edited (`_Item.category`,
+from PICTURE / USAGE), one `arith` edge each; the generic reads-to-writes
+path would join every subordinate to every other one (issue #337).
+
+**Alias edges are never chained with one of their own class**
+(`overlay_class`; summary BFS and `LineageGraph._trace` both carry the
+class of the edge a node was reached over): two `redefines` in a row would
+carry one field of a record into every other through an alias covering the
+whole record, two `occurrence` edges `T(1)` into `T(3)` through `T`, two
+`table-alias` edges `PROD.T.C` into `TEST.T.C` through `T.C`.
+
+**Layer 2 -- across programs (`LineageGraph`).** Takes the reports (objects
+or their `to_dict()`, which is what the backend stores) plus
+`DatasetBinding`s and `Passthrough`s. Joins: dataset (writer and reader
+ports meet on overlapping byte ranges of the same normalized dataset --
+GDG `(+1)`/`(0)`/`.GnnnnVnn` fold to the base, `&&TEMP`s are job-scoped);
+utility pass-throughs carry ranges both ways to a fixpoint, `SUM FIELDS`
+ranges become `aggregate`, a `reformat` stops the flow with a caveat;
+datasets nothing in scope writes are seeded from their readers' ranges;
+CALL argument *n* meets callee linkage *n* (and `CALLEE#RETURNING` meets
+`PROGRAM#RETURNING`); a callee with no report is an
+*opaque* pass-through (every argument sent reaches every argument back,
+`confidence="opaque"`) unless `_INTERFACE_RE` names it a system interface
+(the MQI verbs by name -- not every `MQ*` -- *TDLI, CEE*, DSN*...). DB2:
+`SCHEMA.TABLE.COLUMN` and an unqualified `TABLE.COLUMN` join both ways by
+`table-alias` edges with `confidence="candidate"`; two schemas never join.
+`NULLFILE` / `DUMMY` bindings and pass-throughs are ignored (the DD counts
+as unbound). A PROGRAM-ID seen in more than one report keeps the first and
+adds a caveat. Queries `impact(field, program, direction,
+depth)`, `impact_table` (schema optional), `impact_dataset` run a 0-1 BFS
+where *depth* counts entries into a program. `key_relationships()` names
+candidate dataset/table key relationships with the program and line as
+evidence. Joins iterate ports in sorted order so output is identical on
+every run (pinned across `PYTHONHASHSEED`s by hand, 2026-10-08).
+`join_edges()` exports every edge the joins added (JSON-shaped); passing
+them back as `LineageGraph(reports, join_edges=...)` skips the joins, so
+the backend joins once at upload and queries later without the JCL.
+Key-relationship labels come from the dataset edges, not the bindings, so
+both forms answer the same (pinned in `TestStoredJoinEdges`).
+`join_state()` -> `{"edges", "caveats", "unjoined"}` adds the joins' own
+caveats (reformat stops, opaque callees; `_join_caveats`) and the unjoined
+DDs; `LineageGraph(reports, join_edges=..., join_caveats=...,
+unjoined=...)` restores them so the rebuilt graph's `to_dict()` equals the
+original's (pinned in `TestStoredJoinState`). Without `join_caveats` only
+the opaque-callee caveat is re-derived and `unjoined` is empty. A rebuilt
+graph records the edges it loads, so its own `join_edges()` re-exports them.
+`ImpactResult.start_found` is False when nothing matched the start.
+
+**Bindings (`lineage_jcl.py`).** `bindings_from_jobs(jobs)` turns
+**jcl-parser** `Job`s (duck-typed; imported only in `load_jobs`, through
+`importlib`, so cobol-parser keeps no runtime or mypy dependency on it)
+into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT/ICETOOL (`SORTIN*`
+-> `SORTOUT` + `OUTFIL FNAMES`), IEBGENER/ICEGENER, IDCAMS REPRO (operands
+in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`. A
+blank-named DD continues the concatenation of the DD before it (`_named`);
+`DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
+referbacks resolve to the earlier step's dataset; quoted literals in
+DFSORT/IEBGENER control statements are blanked before keywords are matched
+(`INCLUDE COND=(...,C'BUILD')` is not a reformat). A `DFSRRC00` step (the IMS region
+controller) binds its DDs to the application program named by the second
+`PARM` positional when the region is `DLI` / `DBB` / `BMP` (2026-10-10; they
+were bound to `DFSRRC00` itself, so an IMS batch program's files never
+joined). `load_jobs(paths, proc_path)` reads a flat PROC
+folder (`NAME.prc`) as well as a JCLLIB base -- jcl-parser's own loader
+only searches `JCLLIB ORDER=` libraries. `jobs_from_sources(jcl, procs)`
+does the same from in-memory text (the backend's stored members). Not built
+on `cobolparser/jcl/`.
+
+Tests: `tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
+`test_lineage_jcl.py`, `test_sql_flow.py`, `tests/unit/cli/test_lineage_cli.py`;
+fixtures in `tests/samples/lineage/`.
+
+## ProgramDiffer (`ast_diff.py`)
+
+A line-based `diff` over COBOL answers "what lines moved", which is almost never
+the question: COBOL is column-sensitive, so a reformat, a renumbered sequence
+area or a re-indented Area B shifts every line without changing anything the
+program does. This module answers the other question — *what changed in the
+program's behavior* — by comparing two `CobolProgram` ASTs into a flat, sorted
+`DiffChange` list.
+
+```python
+from cobolparser.analysis.ast_diff import ProgramDiffer
+
+report = ProgramDiffer(rename_threshold=0.8).diff(old_ast, new_ast)
+report.changes                  # sorted list[DiffChange]
+report.changes_by_category()    # "program" | "file" | "data" | "procedure"
+report.counts_by_kind()
+report.to_text()                # the +/-/~ summary behind --format text
+report.caveats                  # what could not be compared exactly
+```
+
+`DiffChange`: `kind`, `category`, `symbol`, `detail`, `old`, `new`,
+`old_location`, `new_location`, and a `sign` property (`+` for `*-added`, `-`
+for `*-removed`, `~` otherwise).
+
+**What is compared.** Program level (`PROGRAM-ID`, which divisions exist, the
+`PROCEDURE DIVISION USING` interface); files (per `SELECT`/`FD` name:
+ORGANIZATION, ACCESS MODE, RECORD KEY, ALTERNATE keys, RELATIVE KEY, FILE
+STATUS, ASSIGN, OPTIONAL, plus the FD's presence, record size, recording mode
+and FD-vs-SD kind); data items keyed by section plus qualified path
+(`WORKING-STORAGE:WS-TAB.WS-ENT` — PICTURE/USAGE/level/VALUE/OCCURS/REDEFINES
+plus the SIGN / JUSTIFIED / SYNCHRONIZED / BLANK WHEN ZERO / EXTERNAL / GLOBAL
+flags and level-88 names and values — an entry with no data-name, which the
+parser names `ANONYMOUS-<level>-<line>`, is keyed as a positional `FILLER`
+since 2026-09-28, so a line shift no longer reports it removed and re-added);
+procedures (added, removed, renamed,
+**moved** — reordered without a body change, reported separately so a pure
+reshuffle never reads as a rewrite — and body-changed); and statements within
+matched paragraphs.
+
+**Matching, in three stages**, each looking only at what the previous left over:
+
+1. **By name**, case-insensitively (`Main-Para` *is* `MAIN-PARA`). Settles the
+   overwhelming majority.
+2. **By structural similarity.** Each leftover paragraph/section reduces to a
+   *fingerprint* — the ordered sequence of statement kinds plus primary
+   operands, nested branch bodies flattened in and tagged by branch (`IF/THEN`,
+   `EVALUATE/WHEN2`, `READ/AT-END`). Pairs are scored with
+   `difflib.SequenceMatcher`, considered best-score-first (ties broken by name,
+   so the result never depends on dict or set ordering) and greedily paired at
+   or above `rename_threshold` (default 0.8). An identical fingerprint under a
+   different name is a **rename**, not an add plus a remove.
+3. Whatever is still unmatched is a genuine add or remove.
+
+Two deliberate refusals in stage 2: an **empty body never rename-matches**
+(`SequenceMatcher` happily scores two empty sequences 1.0, and two paragraphs
+that both contain nothing are evidence of nothing), and a **below-threshold pair
+is reported as remove + add, never as a speculative rename** — an add+remove for
+a rename is honest and easy to read past, a wrong rename actively misleads. The
+near-miss is not discarded: it goes to `caveats` with its score, so a reader can
+see the pair was considered and declined.
+
+**Positions are relative order, not line numbers.** Matched procedures from both
+sides run through `SequenceMatcher` and only those outside its matching blocks
+are reported moved — so inserting one paragraph at the top does not report every
+following paragraph as moved, and a pure reformat reports nothing at all.
+
+**Spellings are not changes** (2026-10-14 bug hunt). A PICTURE is compared by
+its character positions, repeat factors written out (`_picture_positions`:
+`X(2)` = `XX`, `S9(3)V9(2)` = `S999V99`), and a USAGE by its storage format
+(`_canonical_usage`, the `_storage.py` synonym sets: `COMP` = `BINARY` =
+`COMP-4` = `COMPUTATIONAL`, `COMP-3` = `PACKED-DECIMAL`). `COMP-5` stays
+distinct from `COMP` (no truncation to the PICTURE). The change still reports
+both strings as coded. A VALUE is still compared as written (`+12` vs `12`,
+`'AB'` vs `'AB  '` on `PIC X(4)` read as changes).
+
+Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
+IF, EVALUATE, SEARCH, and (review follow-up) OPEN, EXEC SQL, EXEC CICS, COMPUTE,
+INSPECT, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
+operands, its rendered text *and* its own `to_dict()` fields** (locations and
+nested statement bodies stripped — those are compared on their own), so an
+unmodelled edit over-reports rather than reading as unchanged. (2026-09-28:
+the rendered text is a truncated summary that omits STRING's INTO, READ's
+INTO/KEY, WRITE's FROM, ...; before the `to_dict()` fields were added,
+`STRING ... INTO A` → `INTO B` diffed as no change.)
+
+The dedicated signatures carry the markers a value alone hides (#316): CALL
+includes `is_dynamic` (`CALL 'X'` → `CALL X` is a `call-target-changed`, and
+the detail text quotes a static target), and UNSTRING includes
+`delimiter_all` (`DELIMITED BY ALL ','`) with a detail text spelling out
+source, delimiters and INTO targets. (WHEN selectors carry theirs via
+`_selector_text`'s `FIG:` / `ID:` / quoted renderings, #313.)
+
+Determinism: the same pair always produces byte-identical `to_dict()` — changes
+sorted by category, symbol, kind then remaining fields (`_sort_key` is a total
+order); caveats deduplicated and sorted; no set iterated without sorting.
+
+Anything not compared exactly goes to `caveats`: a contained program unit, an
+unrecognised nested clause, REPORT SECTION group clauses, level-66 RENAMES,
+ENVIRONMENT/IDENTIFICATION content beyond the above, a duplicate procedure name,
+a near-miss rename. Tests: `tests/unit/analysis/test_ast_diff.py`.
+
+A `WHEN` selector's text carries the parser's markers (#313, 2026-10-14):
+`FIG:SPACES` for a figurative constant, `ID:WS-B` for a data name,
+`Literal:'SPACES'` for a quoted literal. The values alone are identical
+once the lexer strips quotes, so `WHEN SPACES` -> `WHEN 'SPACES'` used to
+diff as "No structural changes".
+
+**Known gaps**: statements outside any named paragraph are not compared, and
+neither are contained programs (`diff` has no `--program` flag yet) — both are
+recorded as caveats rather than silently skipped.
 
 ## BoundaryInventoryAnalyzer
 
@@ -2642,9 +3581,8 @@ paragraphs, a higher threshold since it recurses through fewer stack frames
 per paragraph than `_walk_perform`'s three-function call chain did). Both
 now follow the chain via an explicit frame stack -- one entry per open
 paragraph, `visiting` add/discard bracketing the frame's lifetime exactly as
-the recursive version did -- the same fix this file's `ProgramFlowAnalyzer`
-section above documents `program_flow/cycles.py`'s own paragraph-graph
-traversal already applying, for the identical reason. Recursion is still
+the recursive version did -- the same explicit-stack DFS
+`program_flow/cycles.py`'s `detect_cycles` uses, for the identical reason. Recursion is still
 used for genuinely *nested* statement lists (an
 `IF`/`EVALUATE` arm or loop body found within a block already being
 poisoned, and an inline `PERFORM ... END-PERFORM` nested inside another
@@ -2716,68 +3654,62 @@ an AT END handler on the READ's own line cannot blur the READ's count.
 have no count. Tests: `tests/unit/analysis/test_invocation_counts.py`,
 `tests/unit/test_program_fixtures.py::TestCallCountFollowsControlFlow`.
 
-## Module File Map
+## JCL (`cobolparser/jcl/`)
 
-| File | Analyzer |
+The `ddname -> dataset` binding a COBOL `SELECT ... ASSIGN TO` resolves
+through, read from z/OS JCL by the `jcl-parser` package (optional extra
+`cobol-parser[jcl]`); `cobolparser.jcl` is the adapter. It is not an analyzer
+and shares no code with the COBOL pipeline; it has its own OKF file:
+**[jcl.md](jcl.md)**.
+
+# Module File Map
+
+| File | Main public names |
 |------|---------|
-| `value_tracker.py` | `DynamicCallAnalyzer` |
-| `io_coverage_reporter.py` | `CoverageStatus`, `TestType` — machine-readable IO coverage |
-| `io_diagnostics.py` | IO operation diagnostics |
-| `io_logger.py` | `IOLogger` |
-| `io_sequence.py` | `IOSequenceAnalyzer` |
-| `crud_matrix.py` | `CRUDMatrixGenerator` |
-| `dead_code.py` | `DeadCodeAnalyzer` |
-| `host_var_resolver.py` | `HostVariableResolver` |
-| `ims_segment_analyzer.py` | `IMSSegmentAnalyzer` |
-| `language_env_analyzer.py` | `LanguageEnvironmentAnalyzer` |
-| `linkage_checker.py` | `LinkageChecker` |
-| `move_type_checker.py` | `MoveTypeChecker` |
-| `program_flow/` | `ProgramFlowAnalyzer` (package: `models` / `scanner` / `edges` / `cycles` / `graph` / `analyzer`) |
-| `boundary_inventory.py` | `BoundaryInventoryAnalyzer` (Phase 2 of `gen-fixtures`) |
-| `constraints.py` | `ConstraintExtractor` (Phase 4 of `gen-fixtures`) |
-| `domains.py` | `solve()` constraint/witness solver (Phase 4 of `gen-fixtures`) |
-| `const_fold.py` | `ConstantFolder` (Phase 7 of `gen-fixtures`) |
-| `invocation_counts.py` | `count_invocations` -- exact per-statement execution counts for `gen-fixtures`' `call_count` |
-| `dclgen_check.py` | `DclgenChecker` — DCLGEN `DECLARE TABLE` vs. host-variable types |
-| `unused_variables.py` | `UnusedVariableAnalyzer` |
+| `dead_code.py` | `DeadCodeAnalyzer`, `DeadCodeReport`, `DeadCodeItem` |
+| `unused_variables.py` | `UnusedVariableAnalyzer`, `collect_declared_items`, `qualified_data_name` |
+| `program_flow/` | `ProgramFlowAnalyzer` (package: `models` / `scanner` / `edges` / `cycles` / `graph` / `analyzer` / `condition_text` / `statement_text`) |
 | `recursion_risk.py` | `RecursionRiskAnalyzer` |
-| `complexity.py` | `ComplexityAnalyzer` |
-| `redundancy.py` | `RedundancyAnalyzer` |
-| `technical_debt.py` | `TechnicalDebtAnalyzer` |
+| `complexity.py` | `ComplexityAnalyzer`, `ComplexityThresholds` |
+| `redundancy.py` | `RedundancyAnalyzer` (clone groups, paragraph fingerprints) |
+| `technical_debt.py` | `TechnicalDebtAnalyzer`, `DebtWeights` |
+| `lint.py` | `LintAnalyzer`, `RULES`, `filter_by_severity`, `add_parse_errors`, `apply_source_map`, `stamp_report_origins`, `fixed_format_column_offset` |
+| `io_logger.py` | `IOLogger` |
+| `io_sequence.py` | `IOSequenceAnalyzer`, `IOViolationKind` |
+| `io_coverage_reporter.py` | `IOCoverageReporter`, `CoverageStatus`, `TestType`, `IoCoverageArtifact` -- machine-readable IO coverage (`tools/io_coverage/`) |
+| `io_diagnostics.py` | `IOErrorCode`, `IODiagnosticHelper` -- IO operation diagnostics |
+| `move_type_checker.py` | `MoveTypeChecker`, `DataCategory`, `MoveViolationKind` |
+| `linkage_checker.py` | `LinkageChecker`, `LinkageViolationKind` |
+| `language_env_analyzer.py` | `LanguageEnvironmentAnalyzer` (signatures: `dialects/le_signatures.py`) |
+| `crud_matrix.py` | `CRUDMatrixGenerator`, `CRUDMatrix`, `CRUDFlags` |
+| `value_tracker.py` | `DynamicCallAnalyzer` |
+| `ims_segment_analyzer.py` | `IMSSegmentAnalyzer`, `IMSDLICall`, `IMSEntryPoint` |
+| `host_var_resolver.py` | `HostVariableResolver` |
+| `dclgen_check.py` | `DclgenChecker` — DCLGEN `DECLARE TABLE` vs. host-variable types |
+| `xref.py` | `XrefAnalyzer` |
+| `program_signature.py` | `ProgramSignatureExtractor`, `extract_signatures` |
+| `codebase.py` | `CodebaseGraphBuilder`, `CopybookImpactAnalyzer` |
+| `sql_cics_lint.py` | `SqlCicsAnalyzer` |
 | `business_rules.py` | `BusinessRuleExtractor` — decision / validation / calculation rule catalogue |
 | `field_lineage.py` | `FieldFlowAnalyzer` — per-program field-level value flows, ports, key uses |
 | `lineage_graph.py` | `LineageGraph` — cross-program field lineage joins and impact queries |
-| `lineage_jcl.py` | `bindings_from_jobs` / `load_jobs` — DD bindings from jcl-parser jobs |
-| `_sql_flow.py` | `analyze_sql` — embedded SQL host variable <-> column flows |
+| `lineage_jcl.py` | `bindings_from_jobs` / `load_jobs` / `jobs_from_sources` — DD bindings from jcl-parser jobs |
+| `ast_diff.py` | `ProgramDiffer` |
+| `boundary_inventory.py` | `BoundaryInventoryAnalyzer` (Phase 2 of `gen-fixtures`) |
+| `constraints.py` | `ConstraintExtractor` (Phase 4 of `gen-fixtures`) |
+| `domains.py` | `solve()` constraint/witness solver, `NumericDomain` / `TextDomain` / `EnumDomain` (Phase 4) |
+| `const_fold.py` | `ConstantFolder`, `keyed_read_key` (Phase 7 of `gen-fixtures`) |
+| `invocation_counts.py` | `count_invocations`, `is_plain_eof_loop`, `status_sites` -- exact per-statement execution counts for `gen-fixtures`' `call_count` |
+| `_procedures.py` | `ProcedureIndex`, `enclosing_section`, `qualify` -- section-aware procedure-name keys (issue #258) |
+| `_names.py` | `base_data_name`, `qualified_references`, `bare_names`, `callee_names`, `IDENTIFIER_TOKEN_RE` |
+| `_files.py` | `record_to_file_map`, `resolve_file_name` -- FD record -> file name (crud, io_logger, io_sequence) |
+| `_cics.py` | `cics_exit_kind`, `cics_terminator_kind` |
+| `_sql_whenever.py` | `whenever_coverage`, `whenever_goto_target` -- `EXEC SQL WHENEVER ... GO TO` coverage |
+| `_sql_flow.py` | `analyze_sql` — embedded SQL host variable <-> column flows (field lineage) |
 
-# Silent-Failure Audit (2026-07-08)
+# Cross-cutting notes
 
-`IOCoverageReporter.load_pytest_results` (`io_coverage_reporter.py`) called
-`json.load()` on the pytest-results file and then unconditionally
-`data.get("tests", [])` — a syntactically valid JSON file whose root wasn't
-an object (e.g. a bare list) raised an uncaught `AttributeError` deep inside
-the loader instead of a clean error. Now raises `ValueError` immediately
-after the `json.load()` if `data` isn't a `dict`, matching the "artifact
-must be a JSON object" check `IOCoverageReporter`'s CLI callers already
-apply elsewhere (see [cli.md](cli.md) M10). Pinned by
-`tests/unit/analysis/test_io_coverage_reporter.py::test_load_pytest_results_non_object_json_raises_value_error`.
-
-# See Also
-
-* [ast-models.md](ast-models.md) — input AST structure
-* [cli.md](cli.md) — CLI wrappers for the most common analyzers
-* [tests.md](tests.md) — `tests/unit/analysis/` covers each analyzer
-* [generators.md](generators.md) — `ProgramLayoutIndex` (Phase 1), the layout
-  source `BoundaryInventoryAnalyzer`/`ConstraintExtractor`/`ConstantFolder`
-  all resolve record/field names through; `ProgramFixtureGenerator`, which
-  wires `ConstantFolder` into `field_equals` expectations (Phase 7)
-* [`../docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) —
-  the full `Expectation` shape `call_count`/`field_equals`/`stub` produce
-* `docs/plans/2026-08-02-program-data-generation-design.md` and its per-phase
-  implementation plan — the full 9-phase `gen-fixtures` plan this file
-  documents Phases 2, 4, and 7 of
-
-# Folded-reference normalization: `_names.base_data_name` (2026-08-24)
+## Folded-reference normalization: `_names.base_data_name` (2026-08-24)
 
 Statement parsers fold `OF`/`IN` qualifier chains and `( subscript )`
 groups into single operand strings. `analysis/_names.py::base_data_name`
@@ -2789,62 +3721,24 @@ WS-PROG` must find values MOVEd to `WS-PROG OF GRP-1`). Any new analyzer
 keying data items by bare name needs it too. Pinned by
 `tests/regression/test_folded_reference_analyzers.py`.
 
-# Lint: program units and finding origins (2026-09-07)
+## CICS terminators (issue #392, `_cics.py`)
 
-Two changes to `LintAnalyzer`, both about a report that was quietly narrower
-than it looked.
+Two rules. `cics_exit_kind(stmt)`: the command is `RETURN`, `XCTL` or
+`ABEND`, which leave the program whenever they succeed. `cics_terminator_kind
+(stmt)`: the same, minus a `RETURN` / `XCTL` carrying `RESP`, `RESP2` or
+`NOHANDLE` (decision (a) on the issue: a failed command then continues at
+the next statement); `ABEND` always is one. Both `_is_terminator` copies
+(`dead_code.py`, `program_flow/scanner.py`) use `cics_terminator_kind`, so
+neither draws fall-through past such a paragraph. The scanner uses
+`cics_exit_kind` for `FlowNode.has_cics_exit`, `exit_points` and
+`exit_statement_kind` (`"EXEC CICS RETURN"`, ...), and
+`RecursionRiskAnalyzer._has_escape` counts `has_cics_exit` as a way out --
+so a retry loop ending in `RETURN TRANSID(...) RESP(...)`, the usual shop
+form, is `MEDIUM` like the GOBACK equivalent, not a `HIGH` lint error
+(review of PR #453: applying the RESP exemption to the escape flag too left
+that loop HIGH). Pinned in `tests/unit/analysis/test_cics_terminators.py`.
 
-**Every program unit is linted, not just the outermost.** A source file can
-hold several `PROGRAM-ID`s (stacked, or nested inside the enclosing program's
-PROCEDURE DIVISION); the parse returns the outermost with the rest on
-`CobolProgram.contained_programs`. Every rule here is program-scoped, so
-running them on the outer program alone left a contained program *entirely
-unexamined* while the report read as clean. `analyze()` now iterates
-`ast.program_units()` and merges: `_analyze_unit` runs the rule set over one
-unit into a shared `LintReport`, `rules_run` and `failed_rules` carry one
-entry per rule however many units it ran on (the reader needs to know the
-concern went unexamined, not the arithmetic), caveats are deduplicated, and
-the sort + dedup happen once at the end. A caller-supplied `flow_report`
-describes the outermost unit only; the others build their own. Passing a
-contained unit directly still lints just that unit, which is what the CLI's
-`--program` does.
-
-**A finding now says where it really is.** `LintFinding` gained
-`origin_file` / `origin_line`, serialized as `"origin": {"file", "line"}` and
-emitted only when BOTH are known (a half-filled `{"file": null, "line": 12}`
-would read as an answer to a consumer checking for the key). `apply_source_map(report, source_map)` fills them
-from `ParseResult.expansion_source_map` (see
-[preprocessing.md](preprocessing.md)): analyzer locations count lines in the
-copybook-*expanded* text, so a finding after an expanded `COPY` is nowhere
-near that line on disk and one *inside* an inlined member is not in that file
-at all. A `None` map (nothing expanded) and a line the map does not cover both
-leave the finding untouched rather than claiming a line nobody vouched for.
-The `lint` CLI applies it whenever `--copybook-path` was given, and its `text`
-format prints the origin's own `file:line:column:` prefix so the output stays
-clickable after expansion. Pinned by
-`tests/regression/test_expansion_source_map_and_comments.py::TestApplySourceMap`
-and `tests/regression/test_nested_program_units.py`.
-`stamp_report_origins(report_dict, source_map)` (2026-09-27) is its twin for
-a serialized analyzer report: every `"location": {"line": N}` mapping gains a
-sibling `"origin"`; xref's `"definition"` gains `"definition_origin"` and
-program-flow's `"exit_statement_location"` gains `"exit_statement_origin"`
-(`_ORIGIN_KEYS`, #367). Used by `scan_one` and every analyzer CLI's
-`_emit_report`.
-
-**And at which column (#301, 2026-10-13).** `LintFinding.origin_column`,
-serialized as `origin.column` only when known, is the column an editor
-shows. `apply_source_map(report, source_map, column_offset)` takes a
-`(file, line) -> int | None` and adds its answer to `location.column`;
-`fixed_format_column_offset()` holds the per-layout table (7 for a
-fixed-format line, whose columns 1-7 never reach the analyzers; 0 for a
-free-form member in a fixed listing; 6 for a fixed-format member in a
-free-form listing). `LintFinding.column_known` (not serialized) is False for
-a parse error that gave only a line; such a finding gets no `origin_column`.
-`stamp_report_origins` leaves an existing `origin` alone so the CLI's dict
-pass does not erase it. Detail in [cli.md](cli.md).
-
-
-# Program-type corpus fixes (2026-09-15)
+## Program-type corpus fixes (2026-09-15)
 
 What running every analyzer over `tests/samples/enterprise/` (one program
 per IBM Enterprise COBOL program type; `docs/enterprise-program-types.md`)
@@ -2918,749 +3812,6 @@ program.
 `tests/integration/test_enterprise_program_types.py` pins each of these
 through the corpus program that exposed it.
 
-
-## XrefAnalyzer (`xref.py`)
-
-> 2026-09-28: two role fixes. (1) `RELEASE rec FROM x` (record and `x`
-> read) and `RETURN sd-file INTO x` (file-operation on the SD, `x` write)
-> have dedicated role mappings; before, `FROM`/`INTO` never reached
-> `.operands` (the model setters now add them, like READ INTO / WRITE
-> FROM), so `x` had no reference at all and `UnusedVariableAnalyzer`
-> reported it unused. (2) A reference modifier's offset/length names are
-> kept apart from the operand (`_split_operand`) and recorded `read` when
-> the operand itself is a `write`: `MOVE A TO WS-B (WS-P:2)` no longer
-> lists WS-P as written. `_partition_operand` still folds them into the
-> base names for its other callers.
-
-The classic mainframe compiler cross-reference: for every symbol a program
-declares — data items, level-88 condition names, files, paragraphs and
-sections — where it is *defined* and every place it is *referenced*, each
-reference carrying its location, the statement it sits in, the enclosing
-paragraph, and the **role** it plays there.
-
-**Arithmetic roles (2026-09-27).** With GIVING, only the GIVING/REMAINDER
-items are `write`; the TO/FROM operand is `read` (`SUBTRACT A FROM B GIVING
-C` used to record B as written). Without GIVING, the TO/FROM/BY/INTO target
-is both `read` and `write` (`ADD 1 TO X` used to be `write` only). Sending
-operands come from `ArithmeticStatement.source_operands` (ADD/SUBTRACT) or
-the first two operands (MULTIPLY/DIVIDE), so `ADD A B GIVING B` keeps B's
-read. `program_signature.py` grades LINKAGE directions from these roles:
-an accumulated parameter is now `input-output` (was `output`) and a
-`SUBTRACT ... FROM LK-B GIVING` operand `input` (was `output`). Pinned by
-`test_xref.py::test_giving_leaves_the_from_operand_unwritten` and friends and
-`test_program_signature.py::test_accumulated_and_giving_operands_get_the_right_direction`.
-
-**Counter / pointer / in-place roles (issue #269).** Operands a statement
-advances or rewrites from their current value are both `read` and `write`:
-an INSPECT TALLYING counter, STRING / UNSTRING `WITH POINTER`, UNSTRING
-`TALLYING IN`, and the inspected item of INSPECT REPLACING / CONVERTING /
-TALLYING ... REPLACING (the item of a plain INSPECT TALLYING stays `read`;
-UNSTRING `COUNT IN` / `DELIMITER IN` stay `write`). They were `write` only,
-so `program-signature` graded such a LINKAGE parameter `output` instead of
-`input-output`; `business-rules` now lists them as inputs and outputs.
-Pinned by `test_xref.py::test_counters_pointers_and_inspect_targets_are_read_write`
-and `test_program_signature.py::TestDirection::test_counters_pointers_and_inspected_items_are_input_output`.
-
-This is the natural completion of `unused_variables.py`. That analyzer answers
-"is this name referenced at all?" with a flat `set[str]`; this one keeps the
-locations and roles that set throws away, so "unused" becomes "fully
-cross-referenced". Its reference-collection machinery is *reused*, not
-re-derived: `_extract_identifiers`, `_walk_expression_operands`,
-`_names_from_value`, `collect_declared_items` and the `_STR_ATTR_EXTRAS` /
-`_STR_LIST_EXTRAS` / `_DICT_LIST_EXTRAS` tables all come from there.
-
-```python
-from cobolparser.analysis.xref import XrefAnalyzer
-
-report = XrefAnalyzer().analyze(ast)          # XrefReport
-report.entries                # list[XrefEntry], data items first (_KIND_ORDER)
-report.entry_for("WS-COUNT")  # XrefEntry | None, case-insensitive
-report.entries_of_kind("paragraph")
-report.total_references
-report.undefined              # referenced, never declared
-report.caveats                # what could only be recovered approximately
-report.duplicate_declarations # declared more than once in one namespace
-```
-
-`XrefEntry`: `name`, `kind`, `definition` (`SourceLocation | None`),
-`references`, `level`, `section`, plus `reference_count` / `is_referenced`.
-`XrefReference`: `location`, `role`, `statement`, `context` (the enclosing
-paragraph).
-
-**Kinds** (`KIND_*`): `data-item`, `condition-name`, `paragraph`, `section`,
-`file`.
-
-**Roles** (`ROLE_*`): `write`, `read`, `condition`, `subscript`, `perform`,
-`goto`, `call-argument`, `host-variable`, `file-operation`, and `reference`
-when the role itself could not be determined.
-
-Things worth knowing before trusting a field:
-
-* **Single-program scope**, like `DeadCodeAnalyzer` and
-  `UnusedVariableAnalyzer`: only *ast* itself. Contained programs are AST
-  children and are skipped in every sweep (`_contained_node_ids`) — otherwise
-  a nested program's statements would read as the outer unit's references.
-  Call `analyze()` separately per unit.
-* **Digit-led paragraph names resolve.** Procedure names (PERFORM / GO TO
-  targets) are credited verbatim and `_COBOL_WORD_RE` allows a leading digit
-  provided there is at least one letter, so `1000-INIT` is one symbol rather
-  than a number and a word.
-* **`undefined` excludes special registers.** `_SPECIAL_REGISTERS`
-  (RETURN-CODE, SQLCODE, SQLCA, `EIB*`, `DFH*`, `XML-*`/`JSON-*`, TALLY, …)
-  are never reported undefined; a caveat names the ones that were seen.
-* **STRING operands are inexact** — the parser strips literal quotes, so a
-  literal word and a data name are indistinguishable there. Reported, with a
-  caveat.
-* **`duplicate_declarations` is a correctness warning for consumers.** Every
-  reference is attributed to the *first* declaration, so nothing downstream may
-  grade *which* declaration was touched. A copybook COPYed into both
-  WORKING-STORAGE and LINKAGE is the common shape.
-* Nothing is guessed: where a role, location or identifier was only
-  approximately recoverable the reference is still reported (role
-  `"reference"`) and the approximation is appended to `caveats`.
-
-Backs the `xref` CLI subcommand, which additionally appends the parser's
-unexpanded-COPY warnings to `caveats` — a member the parser could not expand
-leaves every field it declares looking undeclared. Tests: `tests/unit/analysis/test_xref.py`.
-
-
-## ProgramSignatureExtractor (`program_signature.py`)
-
-Every other program-scoped analyzer here answers a question about the program
-it is given. This one answers a question about the program *someone else* is
-calling: given `CALL "SUBPGM" USING ...`, what does SUBPGM actually expect —
-how many operands, in what order, of what shape, and which of them it writes
-back.
-
-That is why `LinkageChecker` cannot cover it: that analyzer correlates CALL
-statements against ENTRY statements *in the same source unit*, and on a real
-mainframe a caller and its callee almost never share a file. The answer has to
-be extracted from the callee and carried across, which is what this module
-produces — a small, serializable, source-file-independent description.
-
-Built from three sources that must agree and often do not:
-
-1. `PROCEDURE DIVISION USING` — the primary (implicit) entry point, read from
-   the division's `using_parameters` metadata (same place `LinkageChecker`
-   reads).
-2. `ENTRY "NAME" USING` statements — alternate entry points, each with its own
-   operand list.
-3. The LINKAGE SECTION — where those operands are declared, and therefore the
-   only place a parameter's *shape* lives (PICTURE, USAGE, byte length, group).
-
-```python
-from cobolparser.analysis.program_signature import (
-    ProgramSignatureExtractor, extract_signatures,
-)
-
-sig = ProgramSignatureExtractor().analyze(ast)      # ProgramSignature
-sigs = extract_signatures(ast)                      # one per program_units()
-
-sig.primary                     # the PROCEDURE DIVISION entry — what CALL "PROG"
-                                # hits; None when it has no USING clause
-sig.entry("ALTENTRY")           # look one up, case-insensitively
-sig.entry_points[0].call_example()   # 'CALL "SUBPGM" USING WS-A, WS-B RETURNING WS-RC'
-sig.entry_points[0].returning        # PROCEDURE DIVISION ... RETURNING operand
-sig.undeclared_parameters       # named by USING, absent from LINKAGE
-sig.unreferenced_linkage        # LINKAGE 01-items no USING clause names
-sig.unchecked                   # what could not be determined exactly
-```
-
-`SignatureParameter` carries `name`, `position`, `declared`, `level`,
-`picture`, `usage`, `byte_length`, `is_group`, `occurs`, `direction`,
-`by_clause`, `location`, and a `declaration()` rendering the operand as a
-caller would have to write it (a group item is described by level and length
-rather than a fabricated picture). `EntryPoint.kind` is `"procedure-division"`
-or `"entry-statement"`. `by_clause` is the callee's declared passing mode
-(`"REFERENCE"` / `"VALUE"`, from the division's `using_parameter_modes`
-metadata) on the primary entry, and from `EntryStatement.parameter_modes` on
-an ENTRY statement's operands (issue #402; it used to be `None` there);
-`call_example()` writes a `BY VALUE` / `BY REFERENCE` phrase only where the
-mode changes (`CALL "E1" USING LK-A, BY VALUE LK-B RETURNING LK-R`). The
-RETURNING item counts as named, so it is never `unreferenced_linkage`.
-
-**Direction is graded, never guessed.** It comes from how the PROCEDURE
-DIVISION uses each parameter, reusing xref's role vocabulary:
-
-* `write` plus any read → `input-output`.
-* A reference as a BY REFERENCE CALL argument or SQL host variable
-  (`_AMBIGUOUS_ROLES`), with no write elsewhere → `unknown`, and listed in
-  `unchecked`. A `BY CONTENT` / `BY VALUE` CALL argument is not ambiguous:
-  the callee gets a copy, so xref records it `read` (2026-09-28; it used to
-  be `call-argument`, which graded a parameter only passed on BY CONTENT
-  `unknown`). A caller told "input-only" about a
-  field the callee overwrites has been told something worse than nothing.
-  xref files `ENTRY "X" USING p` itself under the CALL-argument role
-  (`statement == "EntryStatement"`); those refs are dropped before grading,
-  since naming an entry's own parameter neither reads nor writes it.
-* A group whose fields xref reports as duplicated → `unknown`, rather than
-  inferred from a same-named WORKING-STORAGE field.
-
-Operand *order* is preserved verbatim from the USING clause and is sorted
-nowhere in the module — it is the whole point of `call_example()`.
-
-A parameter named in (1)/(2) but absent from (3) is `undeclared_parameters`
-(a caller passing one is passing into nothing); a LINKAGE 01-item named by
-neither is `unreferenced_linkage` (not an error on its own — `SET ADDRESS OF`
-is legitimate — but the other half of the mismatch picture). ENTRY statements
-belonging to *contained* programs are not the outer unit's.
-
-The `program-signature` CLI subcommand reports **every** unit in the file by
-default rather than the outermost: a caller may target a contained program as
-readily as the outer one, and reporting only the outermost would hide the other
-entry points from exactly the consumer that needs them. `--program` still
-narrows. Tests: `tests/unit/analysis/test_program_signature.py`.
-
-
-## CodebaseGraphBuilder / CopybookImpactAnalyzer (`codebase.py`)
-
-The cross-program module. It walks a whole tree of COBOL source, parses every
-file through `batch.py` (parallel, per-file fault isolation) and aggregates the
-results into one graph with two kinds of edge:
-
-* **Call edges** — `program A calls program B`, from static `CALL "B"` and from
-  dynamic `CALL WS-TARGET` resolved through `DynamicCallAnalyzer`. A dynamic
-  call whose value set that analyzer could not fully resolve still contributes
-  its known targets, each marked `resolved=False`, so the edge set is never
-  mistaken for an exhaustive one. `EXEC CICS LINK PROGRAM(...)` and `EXEC
-  CICS XCTL PROGRAM(...)` are call edges too (#315), told apart by
-  `CallEdge.kind` (`call` / `cics-link` / `cics-xctl`; `to_dict()` carries
-  it). `PROGRAM('X')` is static (read off `ExecCicsStatement.literal_options`,
-  since `options` holds literals unquoted); `PROGRAM(WS-X)` takes
-  `DynamicCallAnalyzer.resolve_variable("WS-X")`, the same values and
-  incomplete flag `CALL WS-X` would get, or is reported in `unresolved`.
-  `cycles()` skips XCTL edges: XCTL never returns, so a menu loop of XCTLs is
-  not recursion; LINK cycles count. Chosen over a separate `transfer_edges`
-  list so `callers_of` and impact questions see CICS callers with no change.
-* **Copy edges** — `program A copies member X`, and `member X copies member Y`
-  for nested copybooks. Collected by **re-scanning** each source with
-  `extract_copy_statements()` rather than from an expanded parse, because
-  expansion *consumes* the COPY statement and discards exactly the edge we are
-  after. Members resolve to real files through the same `PathResolver` the
-  expander uses, so a nested chain is followed to its leaves and a circular pair
-  (`A COPY B`, `B COPY A`) is reported, not looped on.
-  A DB2 `EXEC SQL INCLUDE X END-EXEC` is a copy edge too (the scan passes
-  `sql_include=True`), with the same `COPY` label and the same unresolved-member
-  reporting as a COPY -- it is how SQLCA and DCLGEN members are normally pulled
-  in, and `copybook-impact` on a DCLGEN returned nothing without it (#295).
-  Nothing in the JSON/DOT/Mermaid output tells a COPY edge from an INCLUDE
-  edge. An INCLUDE of `SQLCA` / `SQLDA` (`_PRECOMPILER_MEMBERS`) that is not on
-  the path keeps its edge but adds no `unresolved` note. That is narrower than
-  the expander, which skips *every* unresolvable INCLUDE silently: here a COPY
-  of either, or an INCLUDE of any other missing member (a DCLGEN), is still
-  reported -- once per member and referrer, even when one file both COPYs and
-  INCLUDEs it.
-
-```python
-from cobolparser.analysis.codebase import CodebaseGraphBuilder, CopybookImpactAnalyzer
-
-builder = CodebaseGraphBuilder(copybook_paths=["./copybooks"])
-graph = builder.build_from_directory("./src", extensions=(".cbl", "cob"))
-graph = builder.build(["a.cbl", "b.cbl"])       # or an explicit file list
-
-graph.program_ids / graph.members
-graph.callers_of("VALIDATE") / graph.callees_of("MAIN")
-graph.programs_using("CUSTREC", transitive=True)   # through nested COPY chains
-graph.cycles()                                     # CALL cycles
-graph.to_dict() / graph.to_dot() / graph.to_mermaid()
-graph.unresolved / graph.errors
-
-report = CopybookImpactAnalyzer(graph).analyze("CUSTREC")   # ImpactReport
-report.direct_programs / report.transitive_programs
-report.chains          # the COPY nesting path to each affected program
-report.fields          # data items the member contributes, when its file resolved
-report.program_count
-```
-
-`ProgramNode` holds `program_id` (uppercased; the **file stem** when the file
-would not parse, recorded as such in `unresolved`), `path`, `calls`, `copies`
-and `parse_failed` — with `parse_failed` true, `calls` is "empty and unknown",
-not "empty and known". `CallEdge` carries `is_dynamic` / `resolved` / `kind`; `CopyEdge`
-carries `member`, `path` and `nested`, where for a nested edge `program` is the
-*outer member name*, which is what makes a `PROG1 -> OUTER -> INNER` chain
-walkable in either direction.
-
-**Library-qualified COPY (#351).** `COPY REC OF LIBA` and `COPY REC IN LIBB`
-are two different files, so the builder's caches are keyed by more than the
-member name: `_member_paths` / `_member_failures` on `(member, library)`, and
-`_member_copies` on the resolved file path. A nested COPY is resolved with its
-own `library_qualifier`, as the expander does. `CopyEdge` carries `library`
-(the qualifier as written, case kept) and, for a nested edge, `parent_path` --
-the outer member's file. `programs_using()` and `CopybookImpactAnalyzer` walk
-up *edge by edge* (`CopyEdge._is_parent`: same name, and same file whenever the nested
-edge has a `parent_path`), so `LIBB/REC -> INNER` reaches only the programs
-whose `REC` resolved to `LIBB/REC.cpy` -- never a program whose `REC` did not
-resolve at all. A hand-built nested edge with no `parent_path` matches by name
-alone (the pre-#351 behaviour). `ImpactReport.paths`
-lists every file the member name resolved to; with more than one, `fields` is
-their union and `unresolved` says so. The DOT/Mermaid renderings still draw
-one node per member *name*, and draw each `(program, member, nested)` edge once
-(`_rendered_copy_edges`), however many files sit behind it.
-
-Two rules hold throughout:
-
-1. **A quiet report is never a complete one.** A file that would not parse lands
-   in `errors` and still contributes its COPY edges (the COPY scan does not need
-   a successful parse); a COPY whose member is off the search path, a dynamic
-   CALL with no resolvable target, a duplicate `PROGRAM-ID`, a file holding
-   several units — each lands in `unresolved` with a reason. So does a
-   `copybook-impact` member whose data items are named by IBM `:TAG:`
-   REPLACING placeholders (`05 :Q:-AMT ...`, #356): their real names exist
-   only once a `COPY ... REPLACING` fills the tag in, so they are left out of
-   `fields` (the record parser renames them `ANONYMOUS-*`, which the
-   declared-in-the-member filter drops) and named in `unresolved` instead of
-   vanishing.
-2. **Determinism.** The same tree produces byte-identical `to_dict()`,
-   `to_dot()` and `to_mermaid()`. Files are parsed in sorted order, every
-   emitted list is sorted, and no `ProcessPoolExecutor` completion order reaches
-   the output.
-
-Paths are keyed by `str(Path(p))` — the spelling `BatchResult.path` returns — so
-`./X.cbl` matches its parsed units instead of yielding a phantom program.
-Extensions are accepted with or without a leading dot (`extensions` is
-keyword-only, defaulting to `DEFAULT_PROGRAM_EXTENSIONS`). `_member_paths` /
-`_member_copies` reset per build. `build_from_directory` raises
-`NotADirectoryError` for a root that is not a directory — a mistyped root must
-not read as "a codebase with no programs".
-
-Backs the `codebase-graph` and `copybook-impact` CLI subcommands. Tests:
-`tests/unit/analysis/test_codebase.py`.
-
-**Not yet joined to JCL.** The graph has `ProgramNode` / `CallEdge` / `CopyEdge`
-and no job, step or dataset node, while `cobolparser/jcl/` already resolves
-DD → dataset and step → program. So "which dataset does this program's INVFILE
-resolve to" is answerable and "which job populates the dataset this program
-reads" is not. See [jcl.md](jcl.md).
-
-
-## SqlCicsAnalyzer (`sql_cics_lint.py`)
-
-A COBOL program that talks to DB2 and CICS carries two failure surfaces the
-COBOL compiler says nothing about, because neither `EXEC SQL` nor `EXEC CICS`
-is COBOL: the precompiler rewrites the block and moves on. Whether the program
-then looked at what came back is nobody's job to check. This module makes it
-somebody's job.
-
-```python
-from cobolparser.analysis.sql_cics_lint import SqlCicsAnalyzer
-
-report = SqlCicsAnalyzer().analyze(ast)      # SqlCicsReport
-report.violations                 # source-ordered SqlCicsViolation list
-report.worst_severity()           # "error" | "warning" | "info" | None
-report.violations_of_kind(KIND_NO_SQLCODE_CHECK)
-report.unchecked                  # what this run could not check, and why
-report.sql_statements / report.cics_statements
-```
-
-| Kind | Why it is a defect, not a style note |
-|------|--------------------------------------|
-| `SQL_NO_SQLCODE_CHECK` | An executable `EXEC SQL` whose outcome is never looked at: no `SQLCODE`/`SQLSTATE`/`SQLCA` mention in the statements that follow, no `WHENEVER SQLERROR` in effect. DB2 does not raise — it sets a number and returns, and the program commits whatever it was going to commit. The most common real defect in DB2 COBOL and the cheapest to find. |
-| `SQL_DYNAMIC_CONCATENATION` | A host variable handed to `PREPARE` / `EXECUTE IMMEDIATE` whose content was assembled by `STRING` or moved in from another item — SQL injection with a mainframe accent. Parameter markers (`EXECUTE ... USING :HV`) are the fix and are never flagged. Writers are counted program-wide, except that a `MOVE` written directly in the PREPARE's paragraph, before it, that overwrites the whole item (no reference modification, not `CORRESPONDING`) cuts off everything before it: then only that MOVE, the writers between it and the PREPARE (conditional ones and those in PERFORMed paragraphs included) and, inside an inline `PERFORM` loop, the loop's later writers count (#395). A `STRING` never cuts the trace — it leaves bytes past what it transfers as they were. |
-| `SQL_HARDCODED_CREDENTIALS` | A literal user id or password in `EXEC SQL CONNECT`. It is in the source, the listing, the load library, and every copy anyone took of any of them. |
-| `SQL_SELECT_WITHOUT_INTO` | A singleton `SELECT` with no `INTO` and no cursor. The precompiler accepts it; the row goes nowhere. (`into_variables` is populated from parsed source since 2026-09-28; the `INTO\s*:` text check stays as a backstop.) |
-| `CICS_NO_RESP_HANDLING` | An `EXEC CICS` command with no `RESP`/`RESP2`, no `NOHANDLE`, no `HANDLE CONDITION` in effect. The default action for most CICS conditions is to abend the task, so the failure mode is a dropped transaction mid-update, not a wrong answer. `IGNORE CONDITION` ("take no action": nothing abends, execution continues) counts as handling, the same as a `HANDLE CONDITION` label; only `ERROR` covers every condition, a narrower set goes to `unchecked`. A bare `HANDLE CONDITION X` restores the abend (#396). |
-| `CICS_ABEND_WITHOUT_HANDLER` | `EXEC CICS ABEND` with no `HANDLE ABEND`. **Info** — frequently deliberate, worth seeing rather than worth fixing. |
-
-`SqlCicsViolation` carries `kind`, `severity` (always `SEVERITY_BY_KIND[kind]`),
-`message`, `location`, `symbol` (the SQL statement type, the CICS command verb,
-or for a dynamic-SQL finding the untrusted host variable) and a machine-readable
-`detail` dict — the traced assignment, the option keyword, the active handler.
-
-**It does not guess.** Three things in the parsed form of an EXEC block are
-lossy, and each is answered with an entry in `unchecked` rather than a finding —
-e.g. a CONNECT operand with neither colon nor quotes that matches a declared
-DATA DIVISION item. (Since 2026-09-28 EXEC SQL text keeps a literal's quotes,
-so `USING 'S3CRET'` is always a literal and `USING 'WS-KEY'` is no longer
-mistaken for the data item WS-KEY; before that the two reduced to the same
-tokens.) A quiet report
-with a populated `unchecked` is not a clean program, it is an unexamined one.
-
-The search for a status check after an `EXEC SQL` stops at the next
-executable `EXEC SQL` written directly in a paragraph (also inside a
-PERFORMed one): it resets the SQLCA, so `DELETE` / `COMMIT` / `IF SQLCODE`
-reports the DELETE (2026-09-28; before, the one check was credited to both).
-SQL inside an IF/EVALUATE body may not run and does not end the search;
-neither does a declaration or `WHENEVER`.
-
-`DECLARE GLOBAL TEMPORARY TABLE` is executable and is graded;
-DECLARE CURSOR / TABLE / STATEMENT / VARIABLE are not
-(`_NON_EXECUTABLE_SQL_TYPES`). A `DECLARE TABLE` or `INCLUDE` in the DATA
-DIVISION is not counted in `sql_statements`.
-
-The lint rule id is `sql-cics-check` — the subcommand's own name, per the lint
-convention. Tests: `tests/unit/analysis/test_sql_cics_lint.py`.
-
-**Known gaps** (found in the PR review, not yet fixed): a VARCHAR host structure
-written through its subordinate `49` item is not traced to `PREPARE ... FROM
-:hv`; SQLCODE checked in a `PERFORM UNTIL` guard, or in the calling paragraph
-rather than after the statement, is not seen.
-
-
-## BusinessRuleExtractor (`business_rules.py`, 2026-09-30)
-
-Answers "what are the rules in this program?" -- the question a
-modernization or documentation engagement asks first -- as a catalogue of
-`BusinessRule`s. Backs `cobol-parser business-rules` ([cli.md](cli.md)).
-Feature idea #21 in `docs/feature-ideas.md`.
-
-```python
-from cobolparser import BusinessRuleExtractor
-
-report = BusinessRuleExtractor().analyze(ast)      # include_technical=False
-report.rules                 # list[BusinessRule], BR-001.. in source order
-report.rules[0].branches     # list[RuleBranch]: label, condition, actions
-report.condition_names       # level-88 glossary: POL-AUTO -> POL-TYPE = 'A'
-report.data_lineage          # {item: {"read_by": [...], "written_by": [...]}}
-report.technical_rules_excluded
-print(report.to_text())      # IF/THEN/ELSE-shaped catalogue
-```
-
-**Rule kinds.** Every IF / EVALUATE / SEARCH is a `decision`, shaped as a
-decision table: one `RuleBranch` per arm (THEN, ELSE, each WHEN, WHEN OTHER,
-SEARCH AT END) with the condition selecting that arm and its actions. It is
-promoted to `validation` when an arm signals rejection (moves or DISPLAYs an
-error-like literal, writes/SETs an item whose name has an ERR / ERROR /
-INVALID / REJECT / ABEND word, PERFORMs or GOes TO such a procedure, CALLs
-CEE3ABD / ILBOABN0) or the condition is a class test. COMPUTE / ADD /
-SUBTRACT / MULTIPLY / DIVIDE at paragraph level (not inside an arm) is a
-`calculation` with `formula` normalized to `target = expression` (`DIVIDE A
-INTO B GIVING C` -> `C = B / A`); inside an arm it is an action of that
-decision only, never counted twice. Counters (`ADD 1 TO X`, `COMPUTE X = X +
-1`) are not rules at all.
-
-**Stacked WHENs (#314).** `WHEN 'A' WHEN 'B' stmt` is one arm whose
-condition is `WS-T = 'A' OR WS-T = 'B'` (via `EvaluateStatement.when_groups()`);
-the same grouping numbers program-flow `BranchArm`s (one `WHEN_n` arm, label
-`WHEN A / WHEN B`) and constraint arms, where each phrase of a stack is an
-OR-split disjunct of that arm (`WHEN_1#1`, `WHEN_1#2`) and later arms /
-WHEN OTHER negate every phrase.
-
-**Technical vs business.** A decision whose *own* condition reads only
-technical items, or a calculation that writes only technical items, is
-`technical` and excluded by default (counted in `technical_rules_excluded`;
-`include_technical=True` keeps it). Technical items are found from the
-program, not only from names: every SELECT `FILE STATUS` item; everything a
-READ / RETURN `AT END` clause writes (the EOF flag, whatever it is called);
-the level-88s of those items and the items of those 88s; the xref special
-registers (SQLCODE, SQLSTATE, EIB*, RETURN-CODE, ...); plus a narrow name
-pattern (`EOF`, `EOJ`, `FS`, `END-OF-FILE`, `FILE-STAT`, `EIB*`, `DFH*`). A
-SEARCH is never technical (it is a table lookup). CICS `RESP` fields compared
-to `DFHRESP(...)` are deliberately *not* technical: "NOTFND -> CUSTOMER NOT
-FOUND" is a business rule.
-
-**Context on every rule.** `guards` are the conditions of the arms the rule
-is nested in, within its paragraph (ELSE contributes `NOT (cond)`, WHEN
-OTHER the conjunction of the negated WHENs, an exception clause `AT END
-(READ ...)` / `ON SIZE ERROR (COMPUTE ...)`). `reached_via` links across
-paragraphs: every arm elsewhere that PERFORMs or GOes TO the rule's paragraph
-or section, as `"BR-001 ELSE"` / `"BR-004 WHEN POL-TYPE = 'A'"`. A
-`PERFORM A THRU C` reaches every procedure from A through C in source order
-(`_thru_range`, on bare names over `ProcedureIndex`; a section header crossed
-on the way to a paragraph inside it is left out), and `GO TO A B DEPENDING
-ON N` reaches every target (#354). A nested
-decision is its own rule; the parent arm lists it as an action whose
-`rule_id` points at it (dropped to `None` if the nested rule was excluded as
-technical, never left dangling). `in_dead_code` comes from
-`DeadCodeAnalyzer`.
-
-**Inputs / outputs** reuse `XrefAnalyzer`'s per-statement role mapping
-(`_role_assignments` / `_names_for` / `_residual_names`), filtered to
-declared names (+ INDEXED BY names, + data-bearing special registers; not
-`DFHRESP` / `LENGTH` / `ADDRESS`). A decision's are its condition plus its
-*direct* actions (a nested rule's reads/writes are its own). Testing or
-SETting a condition name also counts its item.
-
-**Rendering notes.** Conditions come from `program_flow/condition_text.py`
-then `_tidy()` (`T-K ( IX )` -> `T-K(IX)`, `NOT =` reads `<>`). EVALUATE
-selector literals arrive **unquoted** from the parser, so a non-identifier,
-non-numeric, non-figurative selector is re-quoted -- except the space-joined
-call shape `DFHRESP ( NORMAL )`, which is an expression. A negated range
-selector (`WHEN NOT 0 THRU 17`, a `Condition` dict with `negated` plus
-`start`/`end`) reads `NOT (AGE >= 0 AND AGE <= 17)` from those bounds, not
-from its raw `THRU` text; only a single negated value reads `AGE <> 6`
-(#260). Level-88 values are
-also stored unquoted with `THRU` as `"THROUGH:end"`; `_condition_values`
-quotes them unless the item's PICTURE / USAGE is numeric. STRING sources
-arrive quoted (#330), so they are rendered as is. Actions are
-rendered in full here rather than via `program_flow/statement_text.py`
-(flowchart summaries, truncated to 48 chars).
-
-**Why not `constraints.py`** (as idea #21 proposed): `ConstraintExtractor`
-only models conditions on fields that trace to a mocked boundary (it takes a
-`ProgramLayoutIndex` and a `BoundaryReport`), so a rule on a computed
-WORKING-STORAGE field -- most rating/pricing logic -- would be missing.
-
-**Known limits** (the always-present caveat says the kinds are heuristic;
-`classification` on each rule names the signal that decided it):
-single-program scope (like `xref`, contained programs are not walked --
-`--program` picks one); an arithmetic statement inside an
-inline PERFORM *within an arm* is neither a rule nor an action of that arm.
-
-Tests: `tests/unit/analysis/test_business_rules.py`,
-`tests/unit/cli/test_business_rules_cli.py`.
-
-
-## Field lineage (`field_lineage.py`, `lineage_graph.py`, `lineage_jcl.py`, `_sql_flow.py`, 2026-10-08)
-
-Answers "if I change this field, what else changes?" at field granularity,
-across programs. Design: `docs/plans/2026-10-08-field-lineage-design.md`.
-Backs `cobol-parser lineage` and `cobol-parser field-impact`
-([cli.md](cli.md)), and `scan --analyzer lineage` ([batch.md](batch.md)).
-
-**Layer 1 -- one program (`FieldFlowAnalyzer`).** A may-flow,
-flow-insensitive value graph. Nodes are data items (qualified name, with
-the record-relative byte offset/length `layout_offsets` computes) and
-*ports*, where a value enters or leaves the program:
-
-| Port kind | Key | From |
-|-----------|-----|------|
-| `file` | DD name (`normalize_ddname`: `UT-S-` / `S-` prefixes stripped, the backend's rule) | READ / WRITE / REWRITE / RELEASE / RETURN / SORT-MERGE USING-GIVING, one byte range per record field |
-| `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`; SPACES / LOW-VALUES / HIGH-VALUES / ZERO candidates are the "no program" sentinel and are dropped by `_names.callee_names`), else `?IDENT#n` plus a caveat |
-| `linkage` | `PROGRAM#n` / `ENTRY#n`, `PROGRAM#RETURNING` (out only) | PROCEDURE DIVISION USING / RETURNING, via `ProgramSignatureExtractor` |
-| `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats, as is a FROM sub-select or a `TABLE(...)` table function -- matched on `TABLE` followed by `(`, so an ordinary table named `TABLE_CUST` / `TABLES_CFG` is traced, #340) |
-| `console` | `SYSIN` / `SYSOUT` (or the ACCEPT's `FROM` source) | ACCEPT / DISPLAY; `ACCEPT FROM DATE` / `DAY` / `DAY-OF-WEEK` / `TIME` (with or without a format qualifier) make no port -- the runtime's clock, not data entering the program |
-
-Edge kinds: `move` (group MOVE is a byte overlay; CORRESPONDING pairs by
-name; literal reference modification narrows the range), `arith`,
-`string`, `init`, `set`, `aggregate` / `sql-expr` (SQL `SUM(...)` /
-expressions), `read`, `write`, `redefines` (two-way, including several 01
-records under one FD), `occurrence` (two-way, inexact: a literal-subscript
-occurrence node and its table field), `call`, `linkage`, `sql`, `accept`,
-`display`, `xml`. `LINEAGE_VERSION` is `"2"` (2026-10-08: occurrence nodes,
-`#RETURNING` linkage ports, `#n` item keys). `VALUE_CHANGING_KINDS` (`arith`, `string`, `aggregate`, `sql-expr`)
-make a flow *derived*. Each edge carries `line`, `paragraph`, `guarded`
-(inside IF/EVALUATE/SEARCH) and `exact` (byte ranges coincide).
-`apply_source_map` stamps `origin` on every edge after copybook expansion
--- edges carry a bare `line`, so `lint.stamp_report_origins` does not
-reach them. `summary` is every input-port field -> output-port field the
-program connects; `key_uses` are items used as READ/START/RECORD KEY or in
-a SQL `WHERE col = :hv`.
-
-**Operands** (`_refs`) go through one path for MOVE, arithmetic, STRING,
-CALL arguments, DISPLAY/ACCEPT, READ INTO / WRITE FROM: xref's
-`_split_operand`, keeping only the base names minus `_qualifier_names`, so
-a subscript, a reference-modifier offset/length or an `OF` qualifier is
-never a value source (`COMPUTE X = Y(I)` does not flow `I` into `X`;
-`LENGTH OF X` / `ADDRESS OF X` flow nothing). A literal reference modifier
-narrows the byte range; literal subscripts are kept (`_constant_subscripts`).
-
-**OCCURS tables.** A table field's node (`T.E`) stands for *any*
-occurrence. Its bytes are every occurrence's (`_placements`: one range per
-occurrence, or a single spanning range past `_PLACEMENT_CAP` = 1024), so a
-group MOVE / READ / WRITE / CALL maps each occurrence where it really lies,
-and every edge through a table field is **inexact** -- never a wrong exact
-field. A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
-OCCURS level, within bounds) on an elementary field gets its own item node
-`R.AMT(3)` at the occurrence's offset, joined both ways to `R.AMT` by
-inexact `occurrence` edges, and an exact edge to its own bytes on every port
-its record or group reaches (`_PortLink`s, resolved after the walk in
-`_link_occurrences`). Nodes order by `LineageNode.sort_key()` (an unknown
-offset -- a field after an `OCCURS DEPENDING ON` -- sorts first; such a field
-maps to a port with no byte range).
-
-**Item keys** are qualified names, except that the n-th item sharing one
-(two `01 FILLER` groups, two same-named subordinates) is keyed `NAME#n`;
-`_index_items` splits the layout into record blocks and finds each item's
-parent by position (a group follows its children in the layout), so two
-FILLER records are two buffers, not one with a spurious redefines.
-`MOVE CORRESPONDING` pairs same-path subordinates when at least one of the
-two is elementary (a group against an elementary item is a byte overlay),
-skipping FILLER, REDEFINES and OCCURS items and what is under them.
-`ADD` / `SUBTRACT CORRESPONDING` walk the same pairing
-(`_visit_arith_corresponding`) but keep only elementary pairs whose sending
-item is numeric and receiving item numeric or numeric-edited (`_Item.category`,
-from PICTURE / USAGE), one `arith` edge each; the generic reads-to-writes
-path would join every subordinate to every other one (issue #337).
-
-**Alias edges are never chained with one of their own class**
-(`overlay_class`; summary BFS and `LineageGraph._trace` both carry the
-class of the edge a node was reached over): two `redefines` in a row would
-carry one field of a record into every other through an alias covering the
-whole record, two `occurrence` edges `T(1)` into `T(3)` through `T`, two
-`table-alias` edges `PROD.T.C` into `TEST.T.C` through `T.C`.
-
-**Layer 2 -- across programs (`LineageGraph`).** Takes the reports (objects
-or their `to_dict()`, which is what the backend stores) plus
-`DatasetBinding`s and `Passthrough`s. Joins: dataset (writer and reader
-ports meet on overlapping byte ranges of the same normalized dataset --
-GDG `(+1)`/`(0)`/`.GnnnnVnn` fold to the base, `&&TEMP`s are job-scoped);
-utility pass-throughs carry ranges both ways to a fixpoint, `SUM FIELDS`
-ranges become `aggregate`, a `reformat` stops the flow with a caveat;
-datasets nothing in scope writes are seeded from their readers' ranges;
-CALL argument *n* meets callee linkage *n* (and `CALLEE#RETURNING` meets
-`PROGRAM#RETURNING`); a callee with no report is an
-*opaque* pass-through (every argument sent reaches every argument back,
-`confidence="opaque"`) unless `_INTERFACE_RE` names it a system interface
-(the MQI verbs by name -- not every `MQ*` -- *TDLI, CEE*, DSN*...). DB2:
-`SCHEMA.TABLE.COLUMN` and an unqualified `TABLE.COLUMN` join both ways by
-`table-alias` edges with `confidence="candidate"`; two schemas never join.
-`NULLFILE` / `DUMMY` bindings and pass-throughs are ignored (the DD counts
-as unbound). A PROGRAM-ID seen in more than one report keeps the first and
-adds a caveat. Queries `impact(field, program, direction,
-depth)`, `impact_table` (schema optional), `impact_dataset` run a 0-1 BFS
-where *depth* counts entries into a program. `key_relationships()` names
-candidate dataset/table key relationships with the program and line as
-evidence. Joins iterate ports in sorted order so output is identical on
-every run (pinned across `PYTHONHASHSEED`s by hand, 2026-10-08).
-`join_edges()` exports every edge the joins added (JSON-shaped); passing
-them back as `LineageGraph(reports, join_edges=...)` skips the joins, so
-the backend joins once at upload and queries later without the JCL.
-Key-relationship labels come from the dataset edges, not the bindings, so
-both forms answer the same (pinned in `TestStoredJoinEdges`).
-`join_state()` -> `{"edges", "caveats", "unjoined"}` adds the joins' own
-caveats (reformat stops, opaque callees; `_join_caveats`) and the unjoined
-DDs; `LineageGraph(reports, join_edges=..., join_caveats=...,
-unjoined=...)` restores them so the rebuilt graph's `to_dict()` equals the
-original's (pinned in `TestStoredJoinState`). Without `join_caveats` only
-the opaque-callee caveat is re-derived and `unjoined` is empty. A rebuilt
-graph records the edges it loads, so its own `join_edges()` re-exports them.
-`ImpactResult.start_found` is False when nothing matched the start.
-
-**Bindings (`lineage_jcl.py`).** `bindings_from_jobs(jobs)` turns
-**jcl-parser** `Job`s (duck-typed; imported only in `load_jobs`, through
-`importlib`, so cobol-parser keeps no runtime or mypy dependency on it)
-into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT/ICETOOL (`SORTIN*`
--> `SORTOUT` + `OUTFIL FNAMES`), IEBGENER/ICEGENER, IDCAMS REPRO (operands
-in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`. A
-blank-named DD continues the concatenation of the DD before it (`_named`);
-`DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
-referbacks resolve to the earlier step's dataset; quoted literals in
-DFSORT/IEBGENER control statements are blanked before keywords are matched
-(`INCLUDE COND=(...,C'BUILD')` is not a reformat). A `DFSRRC00` step (the IMS region
-controller) binds its DDs to the application program named by the second
-`PARM` positional when the region is `DLI` / `DBB` / `BMP` (2026-10-10; they
-were bound to `DFSRRC00` itself, so an IMS batch program's files never
-joined). `load_jobs(paths, proc_path)` reads a flat PROC
-folder (`NAME.prc`) as well as a JCLLIB base -- jcl-parser's own loader
-only searches `JCLLIB ORDER=` libraries. `jobs_from_sources(jcl, procs)`
-does the same from in-memory text (the backend's stored members). Not built
-on `cobolparser/jcl/`.
-
-Tests: `tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
-`test_lineage_jcl.py`, `test_sql_flow.py`, `tests/unit/cli/test_lineage_cli.py`;
-fixtures in `tests/samples/lineage/`.
-
-## ProgramDiffer (`ast_diff.py`)
-
-A line-based `diff` over COBOL answers "what lines moved", which is almost never
-the question: COBOL is column-sensitive, so a reformat, a renumbered sequence
-area or a re-indented Area B shifts every line without changing anything the
-program does. This module answers the other question — *what changed in the
-program's behavior* — by comparing two `CobolProgram` ASTs into a flat, sorted
-`DiffChange` list.
-
-```python
-from cobolparser.analysis.ast_diff import ProgramDiffer
-
-report = ProgramDiffer(rename_threshold=0.8).diff(old_ast, new_ast)
-report.changes                  # sorted list[DiffChange]
-report.changes_by_category()    # "program" | "file" | "data" | "procedure"
-report.counts_by_kind()
-report.to_text()                # the +/-/~ summary behind --format text
-report.caveats                  # what could not be compared exactly
-```
-
-`DiffChange`: `kind`, `category`, `symbol`, `detail`, `old`, `new`,
-`old_location`, `new_location`, and a `sign` property (`+` for `*-added`, `-`
-for `*-removed`, `~` otherwise).
-
-**What is compared.** Program level (`PROGRAM-ID`, which divisions exist, the
-`PROCEDURE DIVISION USING` interface); files (per `SELECT`/`FD` name:
-ORGANIZATION, ACCESS MODE, RECORD KEY, ALTERNATE keys, RELATIVE KEY, FILE
-STATUS, ASSIGN, OPTIONAL, plus the FD's presence, record size, recording mode
-and FD-vs-SD kind); data items keyed by section plus qualified path
-(`WORKING-STORAGE:WS-TAB.WS-ENT` — PICTURE/USAGE/level/VALUE/OCCURS/REDEFINES
-plus the SIGN / JUSTIFIED / SYNCHRONIZED / BLANK WHEN ZERO / EXTERNAL / GLOBAL
-flags and level-88 names and values — an entry with no data-name, which the
-parser names `ANONYMOUS-<level>-<line>`, is keyed as a positional `FILLER`
-since 2026-09-28, so a line shift no longer reports it removed and re-added);
-procedures (added, removed, renamed,
-**moved** — reordered without a body change, reported separately so a pure
-reshuffle never reads as a rewrite — and body-changed); and statements within
-matched paragraphs.
-
-**Matching, in three stages**, each looking only at what the previous left over:
-
-1. **By name**, case-insensitively (`Main-Para` *is* `MAIN-PARA`). Settles the
-   overwhelming majority.
-2. **By structural similarity.** Each leftover paragraph/section reduces to a
-   *fingerprint* — the ordered sequence of statement kinds plus primary
-   operands, nested branch bodies flattened in and tagged by branch (`IF/THEN`,
-   `EVALUATE/WHEN2`, `READ/AT-END`). Pairs are scored with
-   `difflib.SequenceMatcher`, considered best-score-first (ties broken by name,
-   so the result never depends on dict or set ordering) and greedily paired at
-   or above `rename_threshold` (default 0.8). An identical fingerprint under a
-   different name is a **rename**, not an add plus a remove.
-3. Whatever is still unmatched is a genuine add or remove.
-
-Two deliberate refusals in stage 2: an **empty body never rename-matches**
-(`SequenceMatcher` happily scores two empty sequences 1.0, and two paragraphs
-that both contain nothing are evidence of nothing), and a **below-threshold pair
-is reported as remove + add, never as a speculative rename** — an add+remove for
-a rename is honest and easy to read past, a wrong rename actively misleads. The
-near-miss is not discarded: it goes to `caveats` with its score, so a reader can
-see the pair was considered and declined.
-
-**Positions are relative order, not line numbers.** Matched procedures from both
-sides run through `SequenceMatcher` and only those outside its matching blocks
-are reported moved — so inserting one paragraph at the top does not report every
-following paragraph as moved, and a pure reformat reports nothing at all.
-
-**Spellings are not changes** (2026-10-14 bug hunt). A PICTURE is compared by
-its character positions, repeat factors written out (`_picture_positions`:
-`X(2)` = `XX`, `S9(3)V9(2)` = `S999V99`), and a USAGE by its storage format
-(`_canonical_usage`, the `_storage.py` synonym sets: `COMP` = `BINARY` =
-`COMP-4` = `COMPUTATIONAL`, `COMP-3` = `PACKED-DECIMAL`). `COMP-5` stays
-distinct from `COMP` (no truncation to the PICTURE). The change still reports
-both strings as coded. A VALUE is still compared as written (`+12` vs `12`,
-`'AB'` vs `'AB  '` on `PIC X(4)` read as changes).
-
-Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
-IF, EVALUATE, SEARCH, and (review follow-up) OPEN, EXEC SQL, EXEC CICS, COMPUTE,
-INSPECT, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
-operands, its rendered text *and* its own `to_dict()` fields** (locations and
-nested statement bodies stripped — those are compared on their own), so an
-unmodelled edit over-reports rather than reading as unchanged. (2026-09-28:
-the rendered text is a truncated summary that omits STRING's INTO, READ's
-INTO/KEY, WRITE's FROM, ...; before the `to_dict()` fields were added,
-`STRING ... INTO A` → `INTO B` diffed as no change.)
-
-The dedicated signatures carry the markers a value alone hides (#316): CALL
-includes `is_dynamic` (`CALL 'X'` → `CALL X` is a `call-target-changed`, and
-the detail text quotes a static target), and UNSTRING includes
-`delimiter_all` (`DELIMITED BY ALL ','`) with a detail text spelling out
-source, delimiters and INTO targets. (WHEN selectors carry theirs via
-`_selector_text`'s `FIG:` / `ID:` / quoted renderings, #313.)
-
-Determinism: the same pair always produces byte-identical `to_dict()` — changes
-sorted by category, symbol, kind then remaining fields (`_sort_key` is a total
-order); caveats deduplicated and sorted; no set iterated without sorting.
-
-Anything not compared exactly goes to `caveats`: a contained program unit, an
-unrecognised nested clause, REPORT SECTION group clauses, level-66 RENAMES,
-ENVIRONMENT/IDENTIFICATION content beyond the above, a duplicate procedure name,
-a near-miss rename. Tests: `tests/unit/analysis/test_ast_diff.py`.
-
-A `WHEN` selector's text carries the parser's markers (#313, 2026-10-14):
-`FIG:SPACES` for a figurative constant, `ID:WS-B` for a data name,
-`Literal:'SPACES'` for a quoted literal. The values alone are identical
-once the lexer strips quotes, so `WHEN SPACES` -> `WHEN 'SPACES'` used to
-diff as "No structural changes".
-
-**Known gaps**: statements outside any named paragraph are not compared, and
-neither are contained programs (`diff` has no `--program` flag yet) — both are
-recorded as caveats rather than silently skipped.
-
-
-## JCL (`cobolparser/jcl/`)
-
-The `ddname -> dataset` binding a COBOL `SELECT ... ASSIGN TO` resolves
-through, read from z/OS JCL by the `jcl-parser` package (optional extra
-`cobol-parser[jcl]`); `cobolparser.jcl` is the adapter. It is not an analyzer
-and shares no code with the COBOL pipeline; it has its own OKF file:
-**[jcl.md](jcl.md)**.
-
-
 ## 2026-10-08 bug hunt (pinned in `tests/regression/test_bug_hunt_2026_10_08.py`)
 
 * **`recursion_risk.py`**: `_has_escape` only counts edges that carry control
@@ -3688,20 +3839,45 @@ and shares no code with the COBOL pipeline; it has its own OKF file:
   2ND-NAME` referenced `ST-NAME` / `ND-NAME`: both items unused, both
   names undefined in xref. Shared with `redundancy.py`'s clone renaming.
 
+## Doubled-quote literals (`cobolparser/_literals.py`)
 
-## CICS terminators (issue #392, `_cics.py`)
+`_literals.py`'s `quote_literal()` re-emits a decoded literal doubling
+each embedded `"`; its inverse `unquote_literal()` (2026-09-27) strips the
+delimiters *and* collapses the doubled delimiter. Any consumer reading a
+re-emitted literal back must use it: `generators/data/layout.py`
+(`_strip_literal_quotes`, VALUE clauses), `analysis/constraints.py`
+(`_strip_quotes`, branch witnesses) and `analysis/const_fold.py` (MOVE
+sources) each stripped only the delimiters, so `VALUE "A""B"` generated
+`A""B` and `MOVE '"'` folded to two quote characters. Pinned by
+`tests/regression/test_doubled_quote_literal_values.py`.
 
-Two rules. `cics_exit_kind(stmt)`: the command is `RETURN`, `XCTL` or
-`ABEND`, which leave the program whenever they succeed. `cics_terminator_kind
-(stmt)`: the same, minus a `RETURN` / `XCTL` carrying `RESP`, `RESP2` or
-`NOHANDLE` (decision (a) on the issue: a failed command then continues at
-the next statement); `ABEND` always is one. Both `_is_terminator` copies
-(`dead_code.py`, `program_flow/scanner.py`) use `cics_terminator_kind`, so
-neither draws fall-through past such a paragraph. The scanner uses
-`cics_exit_kind` for `FlowNode.has_cics_exit`, `exit_points` and
-`exit_statement_kind` (`"EXEC CICS RETURN"`, ...), and
-`RecursionRiskAnalyzer._has_escape` counts `has_cics_exit` as a way out --
-so a retry loop ending in `RETURN TRANSID(...) RESP(...)`, the usual shop
-form, is `MEDIUM` like the GOBACK equivalent, not a `HIGH` lint error
-(review of PR #453: applying the RESP exemption to the escape flag too left
-that loop HIGH). Pinned in `tests/unit/analysis/test_cics_terminators.py`.
+## Silent-Failure Audit (2026-07-08)
+
+`IOCoverageReporter.load_pytest_results` (`io_coverage_reporter.py`) called
+`json.load()` on the pytest-results file and then unconditionally
+`data.get("tests", [])` — a syntactically valid JSON file whose root wasn't
+an object (e.g. a bare list) raised an uncaught `AttributeError` deep inside
+the loader instead of a clean error. Now raises `ValueError` immediately
+after the `json.load()` if `data` isn't a `dict`, matching the "artifact
+must be a JSON object" check `IOCoverageReporter`'s CLI callers already
+apply elsewhere (see [cli.md](cli.md) M10). Pinned by
+`tests/unit/analysis/test_io_coverage_reporter.py::test_load_pytest_results_non_object_json_raises_value_error`.
+
+# See Also
+
+* [ast-models.md](ast-models.md) — input AST structure
+* [cli.md](cli.md) — CLI wrappers for the most common analyzers
+* [tests.md](tests.md) — `tests/unit/analysis/` covers each analyzer
+* [generators.md](generators.md) — `ProgramLayoutIndex` (Phase 1), the layout
+  source `BoundaryInventoryAnalyzer`/`ConstraintExtractor`/`ConstantFolder`
+  all resolve record/field names through; `ProgramFixtureGenerator`, which
+  wires `ConstantFolder` into `field_equals` expectations (Phase 7)
+* [`../docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) —
+  the full `Expectation` shape `call_count`/`field_equals`/`stub` produce
+* `docs/plans/2026-08-02-program-data-generation-design.md` and its per-phase
+  implementation plan — the full 9-phase `gen-fixtures` plan this file
+  documents Phases 2, 4, and 7 of
+* [batch.md](batch.md) — `scan`, which runs these analyzers over many files
+* [jcl.md](jcl.md) — the `cobolparser.jcl` adapter
+* [preprocessing.md](preprocessing.md) — the expansion source map lint/lineage stamp origins from
+* `docs/plans/2026-10-08-field-lineage-design.md` — field lineage design

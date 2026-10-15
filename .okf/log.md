@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-14T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,31 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-10-15 -- whole-bundle audit: every file checked against source
+
+Every topic file was re-verified against the current source (imports,
+signatures, dataclass fields, enum members, `--help` output, test
+collection) and restructured for reading: each now opens with an Overview
+and a Contents list, reference sections lead, dated notes read as rationale.
+Notable corrections: [lexer.md](lexer.md) / [preprocessing.md](preprocessing.md)
+/ [ast-models.md](ast-models.md) still described the Cython fast paths as
+used whenever compiled (now `COBOLPARSER_ACCEL=1` only);
+[analysis.md](analysis.md) counted 29 modules (33 + six private helpers) and
+listed edge/violation kinds that do not exist (`GO_TO`,
+`NUMERIC_TO_ALPHANUMERIC`, `MISSING_USING_CLAUSE`); [tests.md](tests.md)
+described CI as running (`ci.yml` is fully commented out) and had 13,000 /
+464 for 13,689 tests / 483 files; [dialects.md](dialects.md) said EXEC nodes
+build on the dialect's own classes (the parser uses `models/sql_statements`
+and `ibm_exec_statements`); [preprocessing.md](preprocessing.md) had
+`PreprocessingError` extending `ParseError` (it is a plain `Exception`) and
+a wrong pipeline order; [parser.md](parser.md) passed a dialect instance
+where `DialectType` is taken; [cli.md](cli.md) gained a 38-row subcommand
+reference table; [batch.md](batch.md) (last touched 2026-07-08) now covers
+`scan.py`; [integration.md](integration.md) now summarises the whole
+`interface-contract.md`, mocky-mock surface included. `index.md` gained a
+"How each file reads" note; CLAUDE.md's routing table, counts, usage lines
+and module lists were brought in line.
 
 ## 2026-10-15 -- bug hunt: gen-data `VALUE ALL X'..'` bytes
 

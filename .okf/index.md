@@ -25,7 +25,17 @@ mirrored here.)
 | **z/OS JCL: jobs, steps, DD → dataset bindings (via jcl-parser)** | [jcl.md](jcl.md) |
 | CLI subcommands and flags | [cli.md](cli.md) |
 | Test layout, markers, coverage floor | [tests.md](tests.md) |
-| Backend adapter dict shape | [integration.md](integration.md) |
+| Backend adapter dict shape, mocky-mock `ProgramFixtureGenerator` surface, field-lineage contract (summary of `interface-contract.md`) | [integration.md](integration.md) |
+
+## How each file reads
+
+Every topic file opens the same way: frontmatter, an **Overview** (what the
+area is, its entry points, how to get started), then a **Contents** list.
+Current behaviour comes first, as reference sections; dated notes
+("2026-09-05 ...") further down are *rationale* -- why the code is the way it
+is, and the gotchas that bit before -- not a second description of current
+behaviour. When the two seem to disagree, the reference section wins; tell
+the next reader by fixing the dated note.
 
 ## Core Pipeline
 
@@ -36,8 +46,8 @@ mirrored here.)
 
 ## Analysis & Generation
 
-* [Analysis](analysis.md) — 29 static-analysis modules plus the `program_flow/`
-  package. Program-scoped: `DeadCodeAnalyzer`, `UnusedVariableAnalyzer`,
+* [Analysis](analysis.md) — 33 static-analysis modules plus the `program_flow/`
+  package and six private helpers. Program-scoped: `DeadCodeAnalyzer`, `UnusedVariableAnalyzer`,
   `ProgramFlowAnalyzer`, `RecursionRiskAnalyzer`, `ComplexityAnalyzer`,
   `RedundancyAnalyzer`, `TechnicalDebtAnalyzer`, `XrefAnalyzer`,
   `ProgramSignatureExtractor`, `SqlCicsAnalyzer`, `DclgenChecker`,
@@ -49,12 +59,12 @@ mirrored here.)
 * [JCL](jcl.md) — the `ddname -> dataset` binding a COBOL `SELECT ... ASSIGN
   TO` resolves through. The JCL is read by the `jcl-parser` package (optional
   extra `cobol-parser[jcl]`); `cobolparser.jcl` adapts its model.
-* [CLI](cli.md) — `cobol-parser` subcommands and flags
+* [CLI](cli.md) — `cobol-parser` subcommands and flags (one-table reference of all 38), the `cobol.yml` project config
 * [Tests](tests.md) — Test layout, pytest markers, coverage floor (90 %)
 
 ## Integration
 
-* [Integration Contract](integration.md) — Dict shape returned by `cobolparser` and consumed by `backend/src/parsers/cobol/parser.py`; critical relationship paths for graph extraction
+* [Integration Contract](integration.md) — summary of `interface-contract.md`: the dict shape `backend/src/parsers/cobol/parser.py` consumes, the mocky-mock `ProgramFixtureGenerator` / `bundle_version` surface, and the field-lineage contract
 
 ## Change History
 
