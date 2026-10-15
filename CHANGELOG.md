@@ -196,6 +196,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section (program-flow draws that `FALL_THROUGH` edge only then).
   `EXIT SECTION.` written straight after a section header no longer parses
   as an empty section named `EXIT`.
+* **`dead-code` walks `PERFORM A THRU C` ranges instead of marking every
+  member live** (#381). An obsolete stub inside `PERFORM 1000-PROC THRU
+  1000-EXIT` that every path jumps over with `GO TO 1000-EXIT` is now
+  reported dead, within one section or across sections. A range member is
+  live when the one before it runs on into it, or when a GO TO / ALTER /
+  ENTRY / CICS HANDLE lands on it (a nested range's `nnnn-EXIT` included);
+  an `EXIT SECTION` inside the range carries on at the next section. The walk
+  runs inside the transitive-reachability worklist, so a PERFORM written in
+  a skipped member keeps nothing alive.
 
 * **`codebase-graph` now records `EXEC CICS LINK` / `XCTL PROGRAM(...)` edges**
   (#315). They were skipped with no `unresolved` note, so a CICS program's

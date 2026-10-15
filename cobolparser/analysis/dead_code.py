@@ -190,6 +190,15 @@ class DeadCodeAnalyzer:
         # A strict subset of ``_referenced_names``: see the class docstring
         # for why a PERFORM/SORT-procedure target is excluded.
         self._fallthrough_sources: set[str] = set()
+        # (start, end) key pairs of every ``p THRU q`` range, walked by
+        # ``_mark_thru_ranges`` once the fall-through sources are known.
+        self._thru_ranges: list[tuple[str, str]] = []
+        # Every procedure some GO TO / ALTER / CICS HANDLE lands on, range
+        # ends and section exits included. Not fall-through sources (a jump
+        # onto a range end returns), but inside an *enclosing* THRU range the
+        # landing point runs on to the next member: ``GO TO P1-EXIT`` inside
+        # ``PERFORM P0 THRU P2-EXIT`` lands in P1-EXIT and falls into P2.
+        self._jump_targets: set[str] = set()
         # Sections declared between DECLARATIVES. and END DECLARATIVES.
         # (and their paragraphs): USE procedures the runtime invokes, so
         # they are live without any PERFORM naming them, and they are never
@@ -223,6 +232,8 @@ class DeadCodeAnalyzer:
         self._paragraph_nodes = {}
         self._terminates_cache = {}
         self._fallthrough_sources = set()
+        self._thru_ranges = []
+        self._jump_targets = set()
         self._declarative_procs = set()
 
         proc_division = ast.procedure_division
@@ -261,6 +272,11 @@ class DeadCodeAnalyzer:
             for owner in pending:
                 self._collect_references(by_owner.get(owner, []))
             self._collect_fallthrough_refs()
+            # Needs this round's fall-through sources and jump targets: a
+            # THRU range member is reached by running on from the one before
+            # it, or by landing in it. Inside the worklist, so a range
+            # member's own statements are admitted next round.
+            self._mark_thru_ranges()
             # When a section is referenced, all its paragraphs are too
             self._propagate_section_downward()
             pending = [
@@ -864,7 +880,7 @@ class DeadCodeAnalyzer:
             self._add_ref(key)
         for s_key in starts:
             for e_key in ends:
-                self._mark_thru_range(s_key, e_key)
+                self._thru_ranges.append((s_key, e_key))
 
     def _add_ref(self, key: str | None) -> None:
         """Add a procedure key as referenced."""
@@ -915,6 +931,7 @@ class DeadCodeAnalyzer:
         if not key:
             return
         self._note_jump_into(key, from_section)
+        self._jump_targets.add(key)
         if key in self._range_ends:
             self._add_ref(key)
         elif key in self._section_exits:
@@ -925,23 +942,61 @@ class DeadCodeAnalyzer:
         else:
             self._add_jump_ref(key)
 
-    def _mark_thru_range(self, start: str | None, end: str | None) -> None:
-        """Mark all procedures between keys start and end (inclusive) as
-        referenced.
+    def _mark_thru_ranges(self) -> None:
+        """Mark the procedures each ``p THRU q`` range actually runs.
 
-        Uses index-based lookup so that a missing or inverted range does not
-        accidentally mark procedures all the way to the end of the list.
+        A range runs its procedures in source order, so -- like the section
+        walk in ``_propagate_section_references`` -- a member is reached
+        only when the member before it was reached and does not terminate,
+        or when control lands in it some other way (a GO TO / ALTER / ENTRY
+        target, or a procedure fall-through already reached). Marking every
+        procedure between the two ends hid the commonest legacy shape of
+        dead code: an obsolete stub inside ``PERFORM 1000-PROC THRU
+        1000-EXIT`` that every path jumps over with ``GO TO 1000-EXIT``
+        (issue #381). A section inside the range is walked the same way,
+        since its paragraphs follow its header in ``_ordered_procedures``.
+
+        Landing in a member means any jump target, not only a fall-through
+        source: a GO TO onto an *inner* range's end (``GO TO P1-EXIT`` with
+        ``PERFORM P1 THRU P1-EXIT`` nested inside ``PERFORM P0 THRU
+        P2-EXIT``) returns from the inner PERFORM but, on the outer range's
+        path, runs on into the next member. And an ``EXIT SECTION`` leaves
+        only its own section: inside a range spanning sections, control
+        carries on at the next section header in the range.
+
+        Both ends are always referenced (``_collect_range_refs``); a missing
+        or inverted range marks nothing more, rather than running on to the
+        end of the program.
         """
-        if not start or not end:
-            return
-        try:
-            start_index = self._ordered_procedures.index(start)
-            end_index = self._ordered_procedures.index(end)
-        except ValueError:
-            return
+        for start, end in self._thru_ranges:
+            try:
+                start_index = self._ordered_procedures.index(start)
+                end_index = self._ordered_procedures.index(end)
+            except ValueError:
+                continue
+            if start_index > end_index:
+                continue
+            live = True
+            section_exited = False
+            for name in self._ordered_procedures[start_index : end_index + 1]:
+                resumes = section_exited and name in self._section_paragraphs
+                if resumes:
+                    section_exited = False
+                reached = (
+                    live
+                    or resumes
+                    or name in self._fallthrough_sources
+                    or name in self._jump_targets
+                )
+                if reached:
+                    self._referenced_names.add(name)
+                    section_exited = section_exited or self._exits_section(name)
+                live = reached and not self._terminates(name)
 
-        if start_index > end_index:
-            return
-
-        for name in self._ordered_procedures[start_index : end_index + 1]:
-            self._referenced_names.add(name)
+    def _exits_section(self, name: str) -> bool:
+        """Whether procedure *name* has a top-level ``EXIT SECTION``."""
+        para = self._paragraph_nodes.get(name)
+        return para is not None and any(
+            isinstance(stmt, ExitStatement) and stmt.exit_type == "SECTION"
+            for stmt in para.statements
+        )
