@@ -119,7 +119,7 @@ cobol-parser lineage <file.cbl> [--field NAME] [--direction forward|backward] [-
 cobol-parser field-impact [FIELD] PATH... [--program NAME] [--table T.C | --dataset DSN] [--direction forward|backward] [--depth N] [--jcl PATH]... [--proc-path DIR] [--bindings FILE.json] [--key-relationships] [--format json|text] [--copybook-path DIR]
 cobol-parser redundancy <file.cbl> [--min-clone-statements N]
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
-cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR]
+cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables|lineage] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR] [--encoding ENC] [--source-format auto|fixed|free] [--output FILE] [--compact]
 cobol-parser io-sequence <file.cbl>
 cobol-parser move-type-check <file.cbl>
 cobol-parser linkage-check <file.cbl>

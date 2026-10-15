@@ -3,7 +3,7 @@ type: Module
 title: JCL
 description: The ddname -> dataset join a COBOL SELECT resolves through, read from z/OS JCL by the jcl-parser package; cobolparser.jcl is the adapter that shapes its model for this toolchain.
 tags: [jcl, zos, dd, dataset, job, step, proc, bindings, jcl-parser]
-timestamp: 2026-10-08T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
@@ -17,13 +17,19 @@ SELECT INV-FILE ASSIGN TO INVFILE.
 `INVFILE` is a *DD name*; which dataset it is, how it is disposed and what its
 RECFM/LRECL are live in the JCL that runs the program.
 
-**This package does not parse JCL.** Since 2026-10-08 the JCL is read by the
-sibling **`jcl-parser`** package (`jclparser`), the same library the LegacyLens
+**This package does not parse JCL.** The JCL is read by the sibling
+**`jcl-parser`** package (`jclparser`), the same library the LegacyLens
 backend uses. `cobolparser.jcl` converts its `Job` model into the
-`JclParseResult` shape below and adds the bindings. Until then it carried its
-own ~1,800-line card scanner and statement parser (`jcl/lexer.py`, the old
-`jcl/parser.py`), written on 2026-09-08 without reference to jcl-parser; that
-copy is gone, and JCL parsing fixes now belong in jcl-parser.
+`JclParseResult` shape below and adds the bindings. JCL parsing fixes belong
+in jcl-parser. (Until 2026-10-08 this package carried its own ~1,800-line card
+scanner and statement parser, `jcl/lexer.py` and the old `jcl/parser.py`;
+that copy is gone.)
+
+Modules: `jcl/parser.py` (the adapter: `JclParser`, `parse_jcl`),
+`jcl/models.py` (the dataclasses), `jcl/bindings.py` (DD name -> dataset).
+Entry points: `parse_jcl(text, *, filename="<jcl>", proc_paths=None)`,
+`JclParser(proc_paths=None).parse(text, *, filename=...)` / `.parse_file(path)`,
+then `resolve_dd_bindings(result)`. CLI: `cobol-parser jcl` (below).
 
 `jcl-parser` is an **optional extra**: `pip install 'cobol-parser[jcl]'`
 (`jcl-parser>=2.0.0`; the `dev` extra pulls it too). The rest of the library
@@ -50,7 +56,7 @@ result = JclParser(proc_paths=["proclib/"]).parse_file("JOB.jcl")
 result.jobs[0].steps[0].program          # 'INVUPDT'
 result.dd_map()["INVFILE"]               # ['PROD.INVENTORY.MASTER']
 result.steps_running("INVUPDT")          # includes steps expanded from PROCs
-result.success                           # True when errors is empty
+result.success                           # True when errors is empty (says nothing about unresolved)
 result.errors                            # [{line, message}, ...]
 result.unresolved                        # what was read but not resolved
 
@@ -59,11 +65,12 @@ for b in resolve_dd_bindings(result):
 bindings_for_ddname(result, "INVFILE")   # case-insensitive
 ```
 
-The card-level helpers of the old scanner (`scan_cards`, `JclCard`,
-`ScanResult`, `split_top_level`, `find_top_level_equals`, the column
-constants) and `EXEC_KEYWORDS` were removed with it.
+Also exported: `unquote(text)` (strip JCL apostrophe quoting). The card-level
+helpers of the old scanner (`scan_cards`, `JclCard`, `ScanResult`,
+`split_top_level`, `find_top_level_equals`, the column constants) and
+`EXEC_KEYWORDS` no longer exist.
 
-## Model (`jcl/models.py`, unchanged)
+## Model (`jcl/models.py`)
 
 | Class | Holds |
 |-------|-------|
@@ -73,6 +80,24 @@ constants) and `EXEC_KEYWORDS` were removed with it.
 | `DDStatement` | `name`, `dataset`, `disposition`, `sysout`, `is_dummy`, `is_instream`, `instream_lines`, `concatenated`, `record_format`, `record_length`, `parameters`, `procstep`, `line` |
 | `JclParameter` | `keyword`, `value`, `subparameters`, `positional` |
 | `DatasetBinding` | `ddname`, `dataset`, `step`, `job`, `disposition`, `record_format`, `record_length` |
+
+Every class has `to_dict()`. Lookup helpers: `JclParseResult.dd_map()` (DD
+name -> every dataset bound to it, across steps), `.steps_running(program)`,
+`.all_dd_statements()` (`(job, step | None, dd)` triples, `step=None` for
+job-level DDs); `JclJob.step(name)`, `JobStep.dd(name)` (both
+case-insensitive); `DDStatement.flatten()` (the DD then its concatenated
+members) and `.parameter(keyword)`.
+
+## Bindings (`jcl/bindings.py`)
+
+`resolve_dd_bindings(result)` emits one `DatasetBinding` per DD card,
+exhaustive and ordered: job order, step order, card order, each concatenated
+member right after the card that owns it, job-level DDs (JOBLIB, ...) first
+with `step=""`. Steps expanded from a procedure appear under their
+`invocation.procstep` names. SYSOUT / DUMMY / in-stream DDs yield
+`dataset=None` rows, kept rather than dropped (knowing `SYSPRINT` is SYSOUT is
+an answer). `bindings_for_ddname(result, ddname)` filters it
+case-insensitively.
 
 # Conversion (`jcl/parser.py`)
 
@@ -113,7 +138,8 @@ constants) and `EXEC_KEYWORDS` were removed with it.
   visible to every job, with its own (file) line numbers.
 * **Card-level recovery.** jclparser raises on the first card it cannot read;
   the adapter records `{line, message}`, blanks that card and re-reads (up to
-  `JclParser.MAX_RECOVERIES` times), so one bad card costs one card.
+  `JclParser.MAX_RECOVERIES` = 50 times per job), so one bad card costs one
+  card.
 * **Procedure libraries, no guessing.** Lookup order: in-stream, then
   `proc_paths` (directories; one member per file named after it, any
   extension, first directory wins; the member name is what `EXEC` resolves,
@@ -153,14 +179,25 @@ cobol-parser jcl JOB.jcl --strict                 # exit 3 on any error
 
 See [cli.md](cli.md).
 
-# Not yet joined to the codebase graph
+# Other JCL consumers
 
-`analysis/codebase.py` has no job, step or dataset node, so "which dataset
-does this program's `INVFILE` resolve to" is answerable and "which job
-populates the dataset this program reads" is not. See [analysis.md](analysis.md).
+* **Field lineage reads jcl-parser directly, not through this package.**
+  `analysis/lineage_jcl.py` (`load_jobs`, `jobs_from_sources`,
+  `bindings_from_jobs`) is duck-typed over jclparser's own `Job` model and
+  produces `lineage_graph.DatasetBinding` / `Passthrough` objects — a
+  *different* `DatasetBinding` class from `cobolparser.jcl.models.DatasetBinding`
+  — plus utility pass-throughs (DFSORT/ICEMAN, IEBGENER, IDCAMS REPRO,
+  IKJEFT01 `RUN PROGRAM`, DFSRRC00). Backs `field-impact --jcl`. See
+  [analysis.md](analysis.md) (field lineage); tests in
+  `tests/unit/analysis/test_lineage_jcl.py`.
+* **Not joined to the codebase graph.** `analysis/codebase.py` has no job,
+  step or dataset node, so `codebase-graph` cannot answer "which job
+  populates the dataset this program reads"; only field lineage joins
+  programs through datasets.
 
 # Tests
 
 `tests/unit/test_jcl.py` (the shape and semantics through the adapter),
 `tests/unit/test_jcl_adapter.py` (what the adapter adds), the CLI in
 `tests/unit/cli/test_jcl_cli.py`, and `tests/unit/test_bug_hunt_r11_jcl_config.py`.
+Sample decks: `tests/samples/jcl/` (`invupdt.jcl`, `payproc.jcl`).
