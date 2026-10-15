@@ -484,11 +484,13 @@ def _classify_picture(pic: PictureClause) -> DataCategory:
     has_edit_chars = bool(_PIC_EDITED_CHARS_RE.search(pattern_no_reps))
 
     if has_edit_chars:
+        # Test symbols on pattern_no_reps: the 9 in a repeat count such as
+        # X(9)BX(9) is not a digit position.
         # Numeric-edited: contains 9s alongside editing characters
-        if "9" in pattern:
+        if "9" in pattern_no_reps:
             return DataCategory.NUMERIC_EDITED
         # Alphanumeric-edited: X with editing chars
-        if "X" in pattern or "A" in pattern:
+        if "X" in pattern_no_reps or "A" in pattern_no_reps:
             return DataCategory.ALPHANUMERIC_EDITED
         return DataCategory.NUMERIC_EDITED  # default for edited
 
@@ -524,6 +526,71 @@ def _classify_literal(value: str) -> DataCategory:
     return DataCategory.UNKNOWN
 
 
+def _item_entry(node: CobolDataItem) -> tuple[DataCategory, bool, bool] | None:
+    """``(category, non-integer, is-group)`` of a data item, or ``None`` when
+    its description gives it no category this checker models."""
+    pic = node.picture_clause
+    if pic is not None:
+        category = _classify_picture(pic)
+        return (
+            category,
+            category == DataCategory.NUMERIC
+            and (
+                _is_non_integer_picture(pic)
+                or _is_floating_point_usage(getattr(node, "usage", None))
+            ),
+            False,
+        )
+    if _is_floating_point_usage(getattr(node, "usage", None)):
+        # COMP-1/COMP-2 carry no PICTURE: numeric, non-integer.
+        return (DataCategory.NUMERIC, True, False)
+    if any(isinstance(child, CobolDataItem) for child in getattr(node, "children", ())):
+        return (DataCategory.ALPHANUMERIC, False, True)
+    return None
+
+
+#: USAGEs whose items never take part in MOVE CORRESPONDING (IBM Language
+#: Reference, "CORRESPONDING phrase").
+_CORRESPONDING_EXCLUDED_USAGES = frozenset(
+    {"INDEX", "POINTER", "PROCEDURE-POINTER", "FUNCTION-POINTER", "OBJECT-REFERENCE"}
+)
+
+
+def _corresponding_paths(
+    root: CobolDataItem,
+) -> dict[tuple[str, ...], CobolDataItem]:
+    """Each subordinate of *root* that can take part in a CORRESPONDING
+    pairing, keyed by its name path below *root*.
+
+    FILLER, level 66/77/88, REDEFINES, OCCURS and INDEX/POINTER items --
+    and everything beneath a REDEFINES or OCCURS item -- are left out, as
+    the IBM rules require. *root* itself may carry REDEFINES or OCCURS.
+    """
+    out: dict[tuple[str, ...], CobolDataItem] = {}
+
+    def walk(item: CobolDataItem, path: tuple[str, ...]) -> None:
+        for child in item.children:
+            if not isinstance(child, CobolDataItem):
+                continue
+            name = (child.name or "").upper().strip()
+            if (
+                not name
+                or child.is_filler
+                or child.level in (66, 77, 88)
+                or child.redefines
+                or child.occurs_clause is not None
+                or (child.usage or "").upper() in _CORRESPONDING_EXCLUDED_USAGES
+                or child.object_class is not None
+            ):
+                continue
+            child_path = (*path, name)
+            out.setdefault(child_path, child)
+            walk(child, child_path)
+
+    walk(root, ())
+    return out
+
+
 class MoveTypeChecker:
     """Checks MOVE statements for data category incompatibilities.
 
@@ -556,6 +623,10 @@ class MoveTypeChecker:
         self._declarations: dict[
             str, list[tuple[frozenset[str], tuple[DataCategory, bool, bool]]]
         ] = {}
+        # Every named data item node, with its group ancestors -- what a
+        # MOVE CORRESPONDING operand is resolved to so its subordinates can
+        # be paired.
+        self._items: dict[str, list[tuple[frozenset[str], CobolDataItem]]] = {}
         self._unresolved_count = 0
         self._unresolved_function_count = 0
 
@@ -572,6 +643,7 @@ class MoveTypeChecker:
         self._non_integer = set()
         self._groups = set()
         self._declarations = {}
+        self._items = {}
         self._unresolved_count = 0
         self._unresolved_function_count = 0
         violations: list[MoveTypeViolation] = []
@@ -614,32 +686,13 @@ class MoveTypeChecker:
         child_ancestors = ancestors
         if isinstance(node, CobolDataItem):
             name = (node.name or "").upper().strip()
-            entry: tuple[DataCategory, bool, bool] | None = None
-            pic = node.picture_clause
-            if name and pic is not None:
-                category = _classify_picture(pic)
-                entry = (
-                    category,
-                    category == DataCategory.NUMERIC
-                    and (
-                        _is_non_integer_picture(pic)
-                        or _is_floating_point_usage(getattr(node, "usage", None))
-                    ),
-                    False,
-                )
-            elif name and _is_floating_point_usage(getattr(node, "usage", None)):
-                # COMP-1/COMP-2 carry no PICTURE: numeric, non-integer.
-                entry = (DataCategory.NUMERIC, True, False)
-            elif name and any(
-                isinstance(child, CobolDataItem)
-                for child in getattr(node, "children", ())
-            ):
-                entry = (DataCategory.ALPHANUMERIC, False, True)
+            entry = _item_entry(node) if name else None
             if entry is not None:
                 self._declarations.setdefault(name, []).append(
                     (frozenset(ancestors), entry)
                 )
             if name:
+                self._items.setdefault(name, []).append((frozenset(ancestors), node))
                 child_ancestors = (*ancestors, name)
 
         if hasattr(node, "children"):
@@ -687,8 +740,8 @@ class MoveTypeChecker:
         self, stmt: MoveStatement, violations: list[MoveTypeViolation]
     ) -> None:
         """Check a single MOVE statement for category mismatches."""
-        # MOVE CORRESPONDING resolves sub-fields structurally; skip type-checking
         if stmt.is_corresponding:
+            self._validate_corresponding(stmt, violations)
             return
 
         source_name = (stmt.source or "").strip()
@@ -723,7 +776,6 @@ class MoveTypeChecker:
             if source_cat == DataCategory.NUMERIC
             else False
         )
-        source_non_integer = integer_flag is True
 
         for target_name in stmt.targets or []:
             target_name = target_name.strip()
@@ -733,84 +785,122 @@ class MoveTypeChecker:
             if target_cat == DataCategory.UNKNOWN:
                 self._unresolved_count += 1
                 continue  # Cannot validate unknown target
-            if self._is_group(target_name):
-                continue  # A group move is legal from any sending item
+            self._check_pair(
+                source_name,
+                source_cat,
+                integer_flag,
+                figurative,
+                target_name,
+                target_cat,
+                self._is_group(target_name),
+                loc,
+                violations,
+            )
 
-            if figurative is not None:
-                if (
-                    figurative in _FIGURATIVE_ZERO
-                    and target_cat == DataCategory.ALPHABETIC
-                ):
-                    # ZERO is numeric, and a numeric value has no place in
-                    # an alphabetic item (letters and spaces only).
-                    violations.append(
-                        MoveTypeViolation(
-                            kind=MoveViolationKind.ERROR,
-                            source_name=source_name,
-                            target_name=target_name,
-                            source_category=source_cat,
-                            target_category=target_cat,
-                            location=loc,
-                            message=(
-                                f"Illegal MOVE: figurative constant '{source_name}' "
-                                f"is numeric and cannot be moved to ALPHABETIC "
-                                f"item '{target_name}'"
-                            ),
-                        )
-                    )
-                    continue
-                # ZERO has a digit value and is legal everywhere else; a fill
-                # constant (SPACES, HIGH-VALUE, ...) is legal into anything
-                # but a numeric/numeric-edited receiver, which has no room
-                # for it.
-                if (
-                    figurative in _FIGURATIVE_FILL
-                    and target_cat in _FIGURATIVE_FILL_ILLEGAL_TARGETS
-                ):
-                    violations.append(
-                        MoveTypeViolation(
-                            kind=MoveViolationKind.ERROR,
-                            source_name=source_name,
-                            target_name=target_name,
-                            source_category=source_cat,
-                            target_category=target_cat,
-                            location=loc,
-                            message=(
-                                f"Illegal MOVE: figurative constant '{source_name}' "
-                                f"has no digit value and cannot be moved to "
-                                f"{target_cat.name} item '{target_name}'"
-                            ),
-                        )
-                    )
+    def _validate_corresponding(
+        self, stmt: MoveStatement, violations: list[MoveTypeViolation]
+    ) -> None:
+        """Check ``MOVE CORRESPONDING`` as the elementary MOVEs it stands for.
+
+        Subordinates of the two groups with the same name path pair up when
+        at least one of the two is elementary (two groups of one name are not
+        a pair; their own subordinates may be), and each pair is checked like
+        an ordinary MOVE. A group operand that does not resolve to exactly
+        one declared group leaves its pairs unknown, so the receiving
+        operand is counted as unresolved rather than passed as clean.
+        """
+        source_ref = (stmt.source or "").strip()
+        if not source_ref:
+            return
+        source = self._resolve_group_item(source_ref)
+        loc = getattr(stmt, "location", None)
+        for target_ref in stmt.targets or []:
+            target_ref = target_ref.strip()
+            if not target_ref:
                 continue
-
-            pair = (source_cat, target_cat)
-            if pair in _ILLEGAL_MOVES:
-                violations.append(
-                    MoveTypeViolation(
-                        kind=MoveViolationKind.ERROR,
-                        source_name=source_name,
-                        target_name=target_name,
-                        source_category=source_cat,
-                        target_category=target_cat,
-                        location=loc,
-                        message=(
-                            f"Illegal MOVE: cannot move {source_cat.name} item "
-                            f"'{source_name}' to {target_cat.name} item '{target_name}'"
-                        ),
-                    )
-                )
-            elif (
-                integer_flag is None
-                and target_cat in _NON_INTEGER_NUMERIC_ILLEGAL_TARGETS
-            ):
-                # A numeric FUNCTION result (NUMVAL, MEAN, ...) is legal here
-                # only if it is an integer, which the source cannot tell us.
+            target = self._resolve_group_item(target_ref)
+            if source is None or target is None:
                 self._unresolved_count += 1
-                self._unresolved_function_count += 1
-            elif (
-                source_non_integer
-                and target_cat in _NON_INTEGER_NUMERIC_ILLEGAL_TARGETS
+                continue
+            target_paths = _corresponding_paths(target)
+            for path, source_item in sorted(_corresponding_paths(source).items()):
+                target_item = target_paths.get(path)
+                if target_item is None:
+                    continue
+                source_entry = _item_entry(source_item)
+                target_entry = _item_entry(target_item)
+                if source_entry is None or target_entry is None:
+                    self._unresolved_count += 1
+                    continue
+                if source_entry[2] and target_entry[2]:
+                    continue  # two groups: their subordinates pair instead
+                suffix = " OF ".join(reversed(path))
+                self._check_pair(
+                    f"{suffix} OF {source_ref}",
+                    source_entry[0],
+                    source_entry[1],
+                    None,
+                    f"{suffix} OF {target_ref}",
+                    target_entry[0],
+                    target_entry[2],
+                    loc,
+                    violations,
+                )
+
+    def _resolve_group_item(self, ref: str) -> CobolDataItem | None:
+        """The one group item a (possibly qualified) reference names."""
+        candidates = self._items.get(_reference_name(ref).upper(), [])
+        qualifiers = {q.upper() for q in _QUALIFIER_RE.findall(ref)}
+        matches = [item for ancestors, item in candidates if qualifiers <= ancestors]
+        if len(matches) != 1:
+            return None
+        entry = _item_entry(matches[0])
+        return matches[0] if entry is not None and entry[2] else None
+
+    def _check_pair(
+        self,
+        source_name: str,
+        source_cat: DataCategory,
+        integer_flag: bool | None,
+        figurative: str | None,
+        target_name: str,
+        target_cat: DataCategory,
+        target_is_group: bool,
+        loc: SourceLocation | None,
+        violations: list[MoveTypeViolation],
+    ) -> None:
+        """Check one sending item against one resolved receiving item."""
+        if target_is_group:
+            return  # A group move is legal from any sending item
+        source_non_integer = integer_flag is True
+
+        if figurative is not None:
+            if figurative in _FIGURATIVE_ZERO and target_cat == DataCategory.ALPHABETIC:
+                # ZERO is numeric, and a numeric value has no place in
+                # an alphabetic item (letters and spaces only).
+                violations.append(
+                    MoveTypeViolation(
+                        kind=MoveViolationKind.ERROR,
+                        source_name=source_name,
+                        target_name=target_name,
+                        source_category=source_cat,
+                        target_category=target_cat,
+                        location=loc,
+                        message=(
+                            f"Illegal MOVE: figurative constant '{source_name}' "
+                            f"is numeric and cannot be moved to ALPHABETIC "
+                            f"item '{target_name}'"
+                        ),
+                    )
+                )
+                return
+            # ZERO has a digit value and is legal everywhere else; a fill
+            # constant (SPACES, HIGH-VALUE, ...) is legal into anything
+            # but a numeric/numeric-edited receiver, which has no room
+            # for it.
+            if (
+                figurative in _FIGURATIVE_FILL
+                and target_cat in _FIGURATIVE_FILL_ILLEGAL_TARGETS
             ):
                 violations.append(
                     MoveTypeViolation(
@@ -821,29 +911,70 @@ class MoveTypeChecker:
                         target_category=target_cat,
                         location=loc,
                         message=(
-                            f"Illegal MOVE: cannot move non-integer NUMERIC item "
-                            f"'{source_name}' to {target_cat.name} item "
-                            f"'{target_name}' (only an integer may be moved to "
-                            "an alphanumeric or alphanumeric-edited item)"
+                            f"Illegal MOVE: figurative constant '{source_name}' "
+                            f"has no digit value and cannot be moved to "
+                            f"{target_cat.name} item '{target_name}'"
                         ),
                     )
                 )
-            elif pair in _WARN_MOVES:
-                violations.append(
-                    MoveTypeViolation(
-                        kind=MoveViolationKind.WARNING,
-                        source_name=source_name,
-                        target_name=target_name,
-                        source_category=source_cat,
-                        target_category=target_cat,
-                        location=loc,
-                        message=(
-                            f"Suspicious MOVE: moving {source_cat.name} item "
-                            f"'{source_name}' to {target_cat.name} item "
-                            f"'{target_name}' may lose data or cause runtime error"
-                        ),
-                    )
+            return
+
+        pair = (source_cat, target_cat)
+        if pair in _ILLEGAL_MOVES:
+            violations.append(
+                MoveTypeViolation(
+                    kind=MoveViolationKind.ERROR,
+                    source_name=source_name,
+                    target_name=target_name,
+                    source_category=source_cat,
+                    target_category=target_cat,
+                    location=loc,
+                    message=(
+                        f"Illegal MOVE: cannot move {source_cat.name} item "
+                        f"'{source_name}' to {target_cat.name} item '{target_name}'"
+                    ),
                 )
+            )
+        elif (
+            integer_flag is None and target_cat in _NON_INTEGER_NUMERIC_ILLEGAL_TARGETS
+        ):
+            # A numeric FUNCTION result (NUMVAL, MEAN, ...) is legal here
+            # only if it is an integer, which the source cannot tell us.
+            self._unresolved_count += 1
+            self._unresolved_function_count += 1
+        elif source_non_integer and target_cat in _NON_INTEGER_NUMERIC_ILLEGAL_TARGETS:
+            violations.append(
+                MoveTypeViolation(
+                    kind=MoveViolationKind.ERROR,
+                    source_name=source_name,
+                    target_name=target_name,
+                    source_category=source_cat,
+                    target_category=target_cat,
+                    location=loc,
+                    message=(
+                        f"Illegal MOVE: cannot move non-integer NUMERIC item "
+                        f"'{source_name}' to {target_cat.name} item "
+                        f"'{target_name}' (only an integer may be moved to "
+                        "an alphanumeric or alphanumeric-edited item)"
+                    ),
+                )
+            )
+        elif pair in _WARN_MOVES:
+            violations.append(
+                MoveTypeViolation(
+                    kind=MoveViolationKind.WARNING,
+                    source_name=source_name,
+                    target_name=target_name,
+                    source_category=source_cat,
+                    target_category=target_cat,
+                    location=loc,
+                    message=(
+                        f"Suspicious MOVE: moving {source_cat.name} item "
+                        f"'{source_name}' to {target_cat.name} item "
+                        f"'{target_name}' may lose data or cause runtime error"
+                    ),
+                )
+            )
 
     def _resolve_category(self, name: str) -> DataCategory:
         """Look up a data item name in the catalog, falling back to literal classification.

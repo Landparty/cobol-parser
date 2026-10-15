@@ -5,6 +5,9 @@
   (columns 1-6) and the indicator column (7) of a sample of lines, with
   corroborating anchors for shops that stamp change tags into the sequence
   area.
+* ``debug_line_numbers`` lists the debugging lines (``D`` in column 7) a
+  fixed-format source holds -- the lines ``normalize_fixed_format`` drops
+  as comments unless told otherwise.
 * ``normalize_with_recovery`` runs that normalization with the one recovery
   every caller wants: an unterminated literal at EOF is reported, and the
   never-raising ``merge_continued_literals=False`` pass is used instead.
@@ -17,7 +20,13 @@ import re
 
 from .._lines import split_source_lines
 from .._source_directive import free_format_flags
-from ._normalize import ALL_COMMENT_INDICATORS, TEXT_END_COL, TEXT_START_COL
+from ._normalize import (
+    ALL_COMMENT_INDICATORS,
+    DEBUG_INDICATORS,
+    INDICATOR_COL,
+    TEXT_END_COL,
+    TEXT_START_COL,
+)
 
 #: A change-tracking tag as shops stamp it into the sequence area (columns
 #: 1-6): a single unbroken token of letters/digits and the punctuation that
@@ -234,7 +243,11 @@ def detect_fixed_format(source: str) -> bool:
 
 
 def normalize_with_recovery(
-    source_lines: list[str], warnings: list[str], *, recover: bool = True
+    source_lines: list[str],
+    warnings: list[str],
+    *,
+    recover: bool = True,
+    debug_lines_as_comments: bool = True,
 ) -> tuple[str | None, str | None]:
     """Normalize fixed-format *source_lines*; returns ``(text, error)``.
 
@@ -244,7 +257,8 @@ def normalize_with_recovery(
     is always set; with ``recover=False`` *text* is None. Only the
     warnings of the pass whose text is returned reach *warnings* -- the
     failed pass stopped partway through, and its warnings would duplicate
-    the retry's.
+    the retry's. *debug_lines_as_comments* is ``normalize_fixed_format``'s
+    flag of the same name, passed to both passes.
     """
     # The package attribute, not ``_normalize``'s: ``preprocess/__init__``
     # swaps in the Cython-accelerated implementation when it is built.
@@ -252,7 +266,11 @@ def normalize_with_recovery(
 
     pass_warnings: list[str] = []
     try:
-        text = normalize_fixed_format(source_lines, warnings=pass_warnings)
+        text = normalize_fixed_format(
+            source_lines,
+            debug_lines_as_comments=debug_lines_as_comments,
+            warnings=pass_warnings,
+        )
         error = None
     except ValueError as exc:
         error = str(exc)
@@ -260,7 +278,32 @@ def normalize_with_recovery(
             return None, error
         pass_warnings = []
         text = normalize_fixed_format(
-            source_lines, merge_continued_literals=False, warnings=pass_warnings
+            source_lines,
+            merge_continued_literals=False,
+            debug_lines_as_comments=debug_lines_as_comments,
+            warnings=pass_warnings,
         )
     warnings.extend(pass_warnings)
     return text, error
+
+
+def debug_line_numbers(source_lines: list[str]) -> list[int]:
+    """1-based numbers of the fixed-format debugging lines in *source_lines*.
+
+    A debugging line has ``D``/``d`` in the indicator column (7). Lines a
+    ``>>SOURCE FORMAT IS FREE`` directive has switched to free format have
+    no indicator column, so they are never counted -- an indented
+    ``DISPLAY`` there starts with a ``D`` in column 7 and is code.
+    """
+    flags = free_format_flags(source_lines)
+    numbers: list[int] = []
+    for number, (line, free) in enumerate(zip(source_lines, flags, strict=True), 1):
+        if free:
+            continue
+        expanded = line.expandtabs(8)
+        if (
+            len(expanded) >= INDICATOR_COL
+            and expanded[INDICATOR_COL - 1] in DEBUG_INDICATORS
+        ):
+            numbers.append(number)
+    return numbers
