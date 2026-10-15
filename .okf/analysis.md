@@ -898,7 +898,15 @@ by owner decision the `type1`/`type2` digests changed in place, and digests
 stored by earlier scans simply stop matching new ones. Known residual: the
 parser stores some literals unquoted (an INSPECT `'X'`, a STRING
 `DELIMITED BY 'X'`), so under Type-2 only, two such literals still read as a
-consistent rename; Type-1 tells them apart.
+consistent rename. Since #391 folds case outside quotes, `_unquoted_literals`
+and `_selector_text` re-quote the unquoted literals the AST *marks* as
+literals (static CALL target, INVOKE method literal, STOP literal, EVALUATE
+`WHEN` Literal with `quoted` and Range bounds with `start_quoted` /
+`end_quoted`), so a case-only difference there still breaks Type-1. Where the
+AST does not mark them -- CANCEL targets, ACCEPT ... FROM ENVIRONMENT names,
+EXEC CICS option values, literal arguments inside a COMPUTE `expression`,
+XML/JSON `clause_text` -- a case-only literal difference reads as the same
+text, so Type-1 can group them (it could not before #391).
 
 **Reuses `unused_variables.py`'s `_NON_IDENTIFIER_WORDS`/quoted-text
 handling verbatim** rather than re-deriving a second reserved-word list --

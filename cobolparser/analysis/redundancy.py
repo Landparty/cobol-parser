@@ -38,12 +38,15 @@ from .._literals import QUOTED_LITERAL_RE
 from ..lexer import CobolLexer
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
+from ..models.statements.call import CallStatement
 from ..models.statements.control import (
     EvaluateStatement,
     IfStatement,
     PerformStatement,
     SearchStatement,
+    StopStatement,
 )
+from ..models.statements.misc import InvokeStatement
 from ._names import IDENTIFIER_TOKEN_RE
 from .dead_code import DeadCodeAnalyzer, DeadCodeItem
 from .program_flow.condition_text import render_condition_text
@@ -225,16 +228,53 @@ def _normalize_text(
     return "".join(out).strip()
 
 
+def _quote(value: str) -> str:
+    """Re-quote a literal the parser stored without its quotes, so
+    ``_normalize_text`` leaves its case and spelling alone (#391)."""
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _selector_text(selector: Any) -> str:
     """Compact text for one EVALUATE WHEN selector dict."""
     if not isinstance(selector, dict):
         return str(selector)
     sel_type = selector.get("type", "")
     if sel_type == "Range":
-        return f"RANGE:{selector.get('start', '')}..{selector.get('end', '')}"
+        start = str(selector.get("start", ""))
+        end = str(selector.get("end", ""))
+        if selector.get("start_quoted"):
+            start = _quote(start)
+        if selector.get("end_quoted"):
+            end = _quote(end)
+        return f"RANGE:{start}..{end}"
     if sel_type == "Condition":
         return f"COND:{selector.get('text', '')}"
-    return f"{sel_type}:{selector.get('value', '')}"
+    value = str(selector.get("value", ""))
+    if selector.get("quoted"):
+        value = _quote(value)
+    return f"{sel_type}:{value}"
+
+
+def _unquoted_literals(stmt: Any) -> dict[str, str]:
+    """The ``to_dict()`` fields of *stmt* that hold a literal the parser
+    stored without its quotes, keyed by field name.
+
+    Fingerprint text is case-folded outside quotes (#391), so a bare
+    ``subp`` from ``CALL 'subp'`` would otherwise fold into ``CALL 'SUBP'``
+    -- a different program under PGMNAME(LONGMIXED). Only fields the AST
+    marks as literals are listed; ``.okf/analysis.md`` names the spots
+    where the AST cannot tell a literal from a name.
+    """
+    if isinstance(stmt, CallStatement):
+        if not stmt.is_dynamic and stmt.called_program:
+            return {"called_program": stmt.called_program}
+    elif isinstance(stmt, InvokeStatement):
+        if stmt.method_is_literal and stmt.method_name:
+            return {"method_name": stmt.method_name}
+    elif isinstance(stmt, StopStatement):
+        if stmt.stop_type and stmt.stop_type.upper() != "RUN":
+            return {"stop_type": stmt.stop_type}
+    return {}
 
 
 def _subject_text(subject: Any) -> str:
@@ -320,8 +360,16 @@ class _Fingerprinter:
         # COMPUTE formula, ROUNDED, UPON, CORRESPONDING, delimiters, the
         # INSPECT phrase).
         self.leaf_count += 1
-        operands = tuple(self._norm(op) for op in getattr(stmt, "operands", []))
-        return (stype, operands, self._clauses(stmt), self._details(stmt))
+        literals = _unquoted_literals(stmt)
+        operands = list(getattr(stmt, "operands", []))
+        for value in literals.values():
+            # The operand list repeats the literal (CALL's target, INVOKE's
+            # method name): quote its first occurrence there too.
+            if value in operands:
+                operands[operands.index(value)] = _quote(value)
+        normalized = tuple(self._norm(op) for op in operands)
+        details = self._details(stmt, literals=literals)
+        return (stype, normalized, self._clauses(stmt), details)
 
     def _clauses(self, stmt: Any) -> tuple[Any, ...]:
         return tuple(
@@ -330,13 +378,22 @@ class _Fingerprinter:
             if (body := getattr(stmt, attr, None))
         )
 
-    def _details(self, stmt: Any, skip: frozenset[str] = frozenset()) -> Any:
+    def _details(
+        self,
+        stmt: Any,
+        skip: frozenset[str] = frozenset(),
+        literals: dict[str, str] | None = None,
+    ) -> Any:
         """The statement's ``to_dict()`` fields, minus position/bookkeeping
-        and whatever the caller fingerprints itself (*skip*)."""
+        and whatever the caller fingerprints itself (*skip*), with each
+        unquoted literal field (*literals*) re-quoted."""
         to_dict = getattr(stmt, "to_dict", None)
         if to_dict is None:
             return None
         data = to_dict()
+        for key, value in (literals or {}).items():
+            if data.get(key) == value:
+                data[key] = _quote(value)
         return self._detail_value(
             {key: value for key, value in data.items() if key not in skip}
         )

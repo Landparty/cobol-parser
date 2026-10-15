@@ -627,6 +627,10 @@ operator table. Pinned by `tests/regression/test_evaluate_keyword_literal_when.p
 so without these `WHEN SPACES` and `WHEN 'SPACES'` built identical dicts.
 The markers are additive; `type` stays `"Literal"`. Pinned by
 `tests/regression/test_evaluate_figurative_when.py`.
+A `Range` selector likewise carries `"start_quoted": True` /
+`"end_quoted": True` when that bound is one STRING_LITERAL token
+(`WHEN 'a' THRU 'c'`; #391), absent otherwise, so a numeric range's dict is
+unchanged. Pinned by `tests/unit/test_evaluate_variants.py::TestRangeQuotedMarkers`.
 
 **EVALUATE subjects reach `.operands` (`evaluate_parser.py`, 2026-08-17
 review follow-up):** `_parse_subjects` routes each parsed subject through

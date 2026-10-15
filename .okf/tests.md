@@ -15,6 +15,15 @@ unused-variables / complexity all see the jump table.
 `test_go_parser_edge_cases.py`'s `test_depending_without_on_reads_variable`
 replaces the test that pinned the old behavior.
 
+2026-10-15 (#391): `tests/unit/analysis/test_redundancy.py` gains
+`TestLayoutAndCaseDoNotAffectClones` (line breaks, lowercase and spacing
+still give TYPE_1; literal case still breaks it; `scan` digests agree) and
+`TestUnquotedLiteralCaseStillBreaksType1` (EVALUATE WHEN / THRU, static
+CALL, INVOKE and STOP literals differing only in case are never TYPE_1);
+`test_evaluate_variants.py::TestRangeQuotedMarkers` pins the Range
+`start_quoted` / `end_quoted` markers; `test_compute_expression_parsing.py::
+TestComputeExpressionLayout` pins a multi-line COMPUTE's expression text.
+
 2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests,
 #313) pins EVALUATE `WHEN SPACES` / `ZERO` / `LOW-VALUES` as figurative
 selectors and constraints, distinct from a quoted `WHEN 'SPACES'`, through

@@ -10,6 +10,8 @@ Covers:
 - Report serialization shape
 """
 
+import pytest
+
 from cobolparser.analysis.dead_code import DeadCodeAnalyzer
 from cobolparser.analysis.redundancy import RedundancyAnalyzer, _canonical
 from cobolparser.analysis.unused_variables import UnusedVariableAnalyzer
@@ -873,3 +875,60 @@ class TestLayoutAndCaseDoNotAffectClones:
         }
         assert fps[("l", "P1")].type1 == fps[("r", "P2")].type1
         assert fps[("l", "P1")].type2 == fps[("r", "P2")].type2
+
+
+class TestUnquotedLiteralCaseStillBreaksType1:
+    """#391 review: the AST stores some literals without their quotes, so
+    folding case outside quotes must not fold them. Each pair differs only
+    in a literal's case and must never be a TYPE_1 clone."""
+
+    @staticmethod
+    def _pair(first: str, second: str) -> str:
+        return HEADER + f"""\
+       PROCEDURE DIVISION.
+       P1.
+           {first}
+           MOVE 1 TO WS-A
+           DISPLAY WS-A.
+       P2.
+           {second}
+           MOVE 1 TO WS-A
+           DISPLAY WS-A.
+"""
+
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [
+            (
+                "EVALUATE WS-A WHEN 'a' DISPLAY 1 END-EVALUATE",
+                "EVALUATE WS-A WHEN 'A' DISPLAY 1 END-EVALUATE",
+            ),
+            (
+                "EVALUATE WS-A WHEN 'a' THRU 'c' DISPLAY 1 END-EVALUATE",
+                "EVALUATE WS-A WHEN 'A' THRU 'C' DISPLAY 1 END-EVALUATE",
+            ),
+            ("CALL 'subp' USING WS-A", "CALL 'SUBP' USING WS-A"),
+            ("INVOKE WS-A 'meth'", "INVOKE WS-A 'METH'"),
+            ("STOP 'abc'", "STOP 'ABC'"),
+        ],
+    )
+    def test_literal_case_is_not_type1(self, first: str, second: str) -> None:
+        _, report = _analyze(self._pair(first, second))
+        group = _group_with(report, "P1")
+        assert group is None or group.clone_type != "TYPE_1"
+
+    def test_lowercase_static_call_is_still_type1(self) -> None:
+        """Re-quoting the target must not stop the rest of the statement
+        folding: only the literal keeps its case."""
+        _, report = _analyze(
+            self._pair("CALL 'SUBP' USING WS-A", "call 'SUBP' using ws-a")
+        )
+        group = _group_with(report, "P1")
+        assert group is not None
+        assert group.clone_type == "TYPE_1"
+
+    def test_renamed_dynamic_call_is_type2(self) -> None:
+        _, report = _analyze(self._pair("CALL WS-B USING WS-A", "CALL WS-C USING WS-A"))
+        group = _group_with(report, "P1")
+        assert group is not None
+        assert group.clone_type == "TYPE_2"

@@ -222,6 +222,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `program-flow`, edges, entry/exit points, cycles and `unreachable_nodes`
   name such a node by its `qualified_name`. `complexity` now measures each
   same-named paragraph on its own body instead of summing them.
+* **`redundancy` / `scan --clones` missed exact clones that differ only in
+  line layout or keyword case** (#391): a line break inside a COMPUTE hid
+  the clone entirely and a lowercase paragraph dropped to TYPE_2. Both
+  fingerprint types now collapse whitespace and fold case outside literals;
+  literal text is still compared exactly (including the EVALUATE `WHEN`
+  values / `THRU` bounds, static CALL targets, INVOKE method literals and
+  STOP literals the AST stores unquoted -- EVALUATE `Range` selectors gain
+  additive `start_quoted` / `end_quoted` markers for this). COMPUTE's
+  `expression` text no longer contains line breaks. **The `type1` / `type2`
+  digests change in place**: digests stored from an earlier scan stop
+  matching for any paragraph with lowercase words, whitespace runs or a
+  multi-line COMPUTE.
 * **`redundancy` / `scan --clones` / `health` reported paragraphs that
   behave differently as exact clones** (#262): a statement's fingerprint
   covered only its type and operand list, so a different COMPUTE formula,
