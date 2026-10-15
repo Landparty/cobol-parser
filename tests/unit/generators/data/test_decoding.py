@@ -612,6 +612,66 @@ def test_a_record_cut_mid_field_decodes_what_was_there():
     assert fields[1].value == "EF"
     assert fields[1].truncated is True
     assert fields[1].length == 2
+    assert fields[1].error == "2 of 4 bytes: record ends inside the field"
+
+
+SHORT_NUMERIC = (
+    "       01  R.\n"
+    "           05  K PIC 9(2).\n"
+    "           05  A PIC X(4).\n"
+    "           05  N PIC 9(4).\n"
+)
+
+
+def test_a_numeric_field_cut_short_is_an_error_not_a_value():
+    # Regression (#358): N's three bytes '001' are the high-order digits of a
+    # four-digit field, yet decoded clean as the value 1.
+    view = build_record_views(parse_copybook_records(SHORT_NUMERIC)[0]).base
+    fields = decode_record(view, b"01ABCD001", EncodingOptions())
+    assert fields[2].truncated is True
+    assert fields[2].value == ""
+    assert fields[2].raw == b"001"
+    assert fields[2].error == "3 of 4 bytes: record ends inside the field"
+
+
+@pytest.mark.parametrize(
+    "picture", ["S9(7) COMP-3", "S9(9) COMP", "S9(9) COMP-5", "COMP-2"]
+)
+def test_a_binary_field_cut_short_is_an_error_not_a_value(picture):
+    source = f"       01  R.\n           05  K PIC X.\n           05  N {picture}.\n"
+    source = source.replace("PIC COMP-2", "COMP-2")
+    view = build_record_views(parse_copybook_records(source)[0]).base
+    fields = decode_record(view, b"K\x00\x01", EncodingOptions())
+    assert fields[1].truncated is True
+    assert fields[1].value == ""
+    assert fields[1].error is not None
+
+
+def test_a_variable_record_cut_inside_a_field_counts_as_an_error():
+    body = b"01ABCD001"
+    rdw = (len(body) + 4).to_bytes(2, "big") + b"\x00\x00"
+    decoder = RecordDecoder.from_copybook_source(
+        SHORT_NUMERIC, opts=EncodingOptions(record_format=RecordFormat.VARIABLE)
+    )
+    result = decoder.decode_bytes(rdw + body)
+    assert result.error_count == 1
+    assert result.records[0].errors == ["N: 3 of 4 bytes: record ends inside the field"]
+
+
+def test_a_fixed_record_length_shorter_than_the_layout_counts_as_an_error():
+    decoder = RecordDecoder.from_copybook_source(
+        SHORT_NUMERIC, opts=EncodingOptions(), record_length=8
+    )
+    result = decoder.decode_bytes(b"01ABCD0001ABCD00")
+    assert len(result.records) == 2
+    assert result.error_count == 2
+
+
+def test_a_record_ending_on_a_field_boundary_is_not_an_error():
+    view = build_record_views(parse_copybook_records(SHORT_NUMERIC)[0]).base
+    fields = decode_record(view, b"01ABCD", EncodingOptions())
+    assert [item.error for item in fields] == [None, None, None]
+    assert fields[2].present is False
 
 
 def test_a_field_past_the_end_is_absent_rather_than_missing():
