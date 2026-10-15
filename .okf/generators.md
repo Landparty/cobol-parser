@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
-timestamp: 2026-10-14T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
@@ -667,7 +667,7 @@ module docstring — that suite is the regression guard):
 
 | Storage | Bytes |
 |---------|-------|
-| DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte. Under `JUSTIFIED RIGHT` (`FieldSpec.justified`, 2026-09-28) the mirror image: right-aligned behind leading spaces, an oversized value losing its *leftmost* characters; the decoder strips that leading pad (it used to write `AB    ` where the MOVE leaves `    AB`). A hex literal (`VALUE X'C1C2'`, or a level-88 `X'FF'` drawn as the witness) is written as its own bytes, padded/truncated the same way, in either charset: `FieldSpec.literal_bytes` maps the cell's Latin-1 stand-in to those bytes (issue #319; re-encoding the text used to write `3f 3f` in ASCII and `65 62` in EBCDIC) |
+| DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte. Under `JUSTIFIED RIGHT` (`FieldSpec.justified`, 2026-09-28) the mirror image: right-aligned behind leading spaces, an oversized value losing its *leftmost* characters; the decoder strips that leading pad (it used to write `AB    ` where the MOVE leaves `    AB`). A hex literal (`VALUE X'C1C2'`, or a level-88 `X'FF'` drawn as the witness) is written as its own bytes, padded/truncated the same way, in either charset (issue #319; re-encoding the text used to write `3f 3f` in ASCII and `65 62` in EBCDIC). The cell is a `LiteralCell` (a `str` whose text is the bytes as Latin-1, carrying them as `.data`), made by `ValueFactory` from the VALUE clause and by `expand_condition_values` for a level-88; the encoder writes `.data` and never looks a cell up by its text, so an ordinary value with the same text (`VALUE SPACE` next to `88 VALUE X'20'`, `'AB'` next to `X'4142'`, a random `A` next to `X'41'`) stays charset-encoded, and `'AB'`/`X'4142'` are both drawn. `FieldSpec.literal_bytes` (stand-in text to bytes) is the decoder's map: a field holding exactly a hex literal's padded bytes decodes to its cell (`X'FF'` as `ÿ`, not EBCDIC `\x9f`), so `decode(encode(row)) == row` in both charsets, unless one of the field's ordinary declared values encodes to the same bytes (`'AB'` and `X'C1C2'` under EBCDIC), when the charset reading wins (`encoding.hex_literal_cell_for`) |
 | DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is. Under `DECIMAL-POINT IS COMMA` (`FieldSpec.decimal_point_is_comma`, read off the `PictureClause`) both functions take `decimal_point_is_comma=True` and exchange `,`/`.` in the picture and the edited text: `Z.ZZ9,99` writes `1.234,56` (2026-09-28) |
 | DISPLAY numeric (zoned) | one byte per digit; sign as an overpunch, or a real `+`/`-` byte under `SIGN IS SEPARATE` |
 | `COMP-3` / `PACKED-DECIMAL` | two BCD nibbles per byte, sign nibble `C`/`D` signed, `F` unsigned |
@@ -1660,11 +1660,31 @@ picks exactly one record per scenario: the one holding the most of that
 scenario's pinned fields (`witnesses` + every `row_witnesses` row), the first
 in source order on a tie or with no scenario. `bundle.layouts` is keyed by the
 chosen record, so a scenario that picks the second record adds its own key.
-The records left out are reported once in `bundle.unresolved` ("alternate
-view(s) not generated: ..."); a scenario whose pins span two records gets one
-more entry naming the pins its rows cannot honour. Only `READ` boundaries are
-narrowed: an SQL boundary's several names are distinct host variables.
+`bundle.unresolved` carries one note per such READ, naming the records no
+scenario generated ("alternate view(s) not generated: ..."), computed after
+generation from the records actually used (the happy path always uses the
+first). Only `READ` boundaries are narrowed: an SQL boundary's several names
+are distinct host variables.
 Pinned by `tests/unit/test_program_fixtures.py::TestMultipleRecordsUnderOneFd`.
+
+Fields of two such records have different names but share bytes, so
+`ScenarioPlanner` (`_shared_record_areas()` / `_record_areas()`) never merges
+an arm pinning one record into a scenario pinning another, and an arm whose
+own path pins both is `missed` ("pins fields of several 01 records of one
+FD"). As a guard, a scenario that still pins two views (hand-built, or a
+future planner path) has every arm counted `missed` with that reason, the
+way a violated witness demotes (#244), since its dropped pins are never
+generated. Pinned by `TestArmsOnTwoRecordsOfOneFd` (2026-10-15).
+
+**A FILLER that owns a level-88 (2026-10-15).** `05 PIC X. 88 FLAG-ON VALUE
+'Y'.` (or `05 FILLER PIC X. 88 ...`) is a flag the program branches on.
+`ProgramFixtureGenerator` sets `DataGeneratorOptions.include_condition_filler`,
+so `flatten_record` keeps such a FILLER even with `include_filler` off (plain
+gen-data still drops it). Its path segment is `FILLER#<n>` (`layout_segment()`,
+*n* its 1-based position among its group's FILLERs), so two flag FILLERs in
+one group have distinct qualified names, witnesses and columns, and
+`ProgramLayoutIndex` maps each 88 to its own FILLER rather than the group's
+first. Plain FILLERs keep `FILLER`. Pinned by `TestFillerOwningConditionName`.
 
 ## Determinism: per-boundary sub-seeds
 

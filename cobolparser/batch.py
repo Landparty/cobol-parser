@@ -27,6 +27,7 @@ from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from cobolparser.parser import CobolParser, ParseResult, parse_cobol
 from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
@@ -54,7 +55,7 @@ _REUSABLE_PARSER: CobolParser | None = None
 
 
 def _get_reusable_parser(
-    error_recovery: ErrorRecoveryMode, dialect: DialectType
+    error_recovery: ErrorRecoveryMode, dialect: DialectType, debug_lines: bool = False
 ) -> CobolParser:
     """Get or create a reusable parser instance (avoids re-registering parsers)."""
     global _REUSABLE_PARSER
@@ -62,8 +63,11 @@ def _get_reusable_parser(
         _REUSABLE_PARSER is None
         or _REUSABLE_PARSER.error_recovery != error_recovery
         or _REUSABLE_PARSER.dialect != dialect
+        or _REUSABLE_PARSER.debug_lines != debug_lines
     ):
-        _REUSABLE_PARSER = CobolParser(error_recovery=error_recovery, dialect=dialect)
+        _REUSABLE_PARSER = CobolParser(
+            error_recovery=error_recovery, dialect=dialect, debug_lines=debug_lines
+        )
     return _REUSABLE_PARSER
 
 
@@ -99,6 +103,7 @@ def _parse_one(
     top_n: int,
     prof_output_dir: str | None,
     prof_name: str | None = None,
+    debug_lines: bool = False,
 ) -> BatchResult:
     """Read one file and parse it.
 
@@ -121,6 +126,7 @@ def _parse_one(
                 filename=path_str,
                 error_recovery=error_recovery,
                 dialect=dialect,
+                debug_lines=debug_lines,
             )
             return BatchResult(path=path, result=result, read_error=None)
 
@@ -135,6 +141,7 @@ def _parse_one(
             filename=path_str,
             error_recovery=error_recovery,
             dialect=dialect,
+            debug_lines=debug_lines,
             enable_profiling=True,
             top_n=top_n,
             prof_output=prof_output,
@@ -161,6 +168,7 @@ def _parse_one_reuse(
     top_n: int,
     prof_output_dir: str | None,
     prof_name: str | None = None,
+    debug_lines: bool = False,
 ) -> BatchResult:
     """Parse one file reusing a module-level parser (sequential mode only).
 
@@ -173,7 +181,7 @@ def _parse_one_reuse(
         return BatchResult(path=path, result=None, read_error=str(exc))
 
     try:
-        parser = _get_reusable_parser(error_recovery, dialect)
+        parser = _get_reusable_parser(error_recovery, dialect, debug_lines)
 
         if not enable_profiling:
             result = parser.parse(
@@ -226,6 +234,7 @@ def parse_files(
     enable_profiling: bool = False,
     top_n: int = 50,
     prof_output: str | None = None,
+    debug_lines: bool = False,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files in parallel.
 
@@ -246,6 +255,8 @@ def parse_files(
             is written as <stem>.prof inside this directory (<stem>-2.prof,
             ... for a later file sharing a stem). Must not end with ".prof"
             (that would be a file path, not a directory).
+        debug_lines: ``parse_cobol``'s ``debug_lines``: compile fixed-format
+            debugging lines (``D`` in column 7) as code for every file.
 
     Returns:
         list[BatchResult] in input order.
@@ -281,6 +292,7 @@ def parse_files(
             top_n,
             prof_output,
             prof_name,
+            debug_lines,
         )
         for p, prof_name in zip(path_list, _prof_file_names(path_list), strict=True)
     ]
@@ -317,6 +329,17 @@ def _attach_expansion(
     result.expansion_source_map = source_map
 
 
+def _attach_expansion_debug_lines(
+    result: ParseResult, expansion: Any, filename: str
+) -> None:
+    """The dropped-debugging-lines warning the expansion hid from the parser."""
+    if expansion is None:
+        return
+    from cobolparser.preprocess.copybook_expander import warn_dropped_debug_lines
+
+    warn_dropped_debug_lines(result, expansion, filename)
+
+
 def parse_files_with_copybooks(
     paths: Iterable[str | Path],
     copybook_paths: list[str],
@@ -330,6 +353,7 @@ def parse_files_with_copybooks(
     enable_profiling: bool = False,
     top_n: int = 50,
     prof_output: str | None = None,
+    debug_lines: bool = False,
 ) -> list[BatchResult]:
     """Parse multiple COBOL files with shared copybook path resolution.
 
@@ -357,6 +381,8 @@ def parse_files_with_copybooks(
         enable_profiling: When True, attach a ProfilingResult to each BatchResult.
         top_n: Number of top functions to include in each ProfilingResult.
         prof_output: Directory path to write per-file .prof binaries.
+        debug_lines: Compile fixed-format debugging lines (``D`` in column 7)
+            as code, through both the copybook expansion and the parse.
 
     Returns:
         list[BatchResult] in input order.
@@ -388,7 +414,9 @@ def parse_files_with_copybooks(
     path_resolver = PathResolver(search_config)
 
     # Reusable parser to avoid re-registering division parsers per file
-    parser = CobolParser(error_recovery=error_recovery, dialect=dialect)
+    parser = CobolParser(
+        error_recovery=error_recovery, dialect=dialect, debug_lines=debug_lines
+    )
 
     results: list[BatchResult] = []
     for path_str, prof_name in zip(path_list, _prof_file_names(path_list), strict=True):
@@ -406,6 +434,7 @@ def parse_files_with_copybooks(
         expansion_warnings: list[str] = []
         source_map: dict[int, tuple[str, int]] | None = None
         copybook_error: str | None = None
+        expansion: Any = None
         try:
             expansion = expand_copybooks(
                 source_code=source,
@@ -420,6 +449,7 @@ def parse_files_with_copybooks(
                 process_conditionals=True,
                 preserve_source_locations=True,
                 source_file=path_str,
+                debug_lines=debug_lines,
             )
             expanded_source = expansion.expanded_source
             expansion_warnings = list(
@@ -457,6 +487,7 @@ def parse_files_with_copybooks(
                     expanded_source, filename=path_str, error_recovery=error_recovery
                 )
                 _attach_expansion(result, expansion_warnings, source_map)
+                _attach_expansion_debug_lines(result, expansion, path_str)
                 results.append(
                     BatchResult(
                         path=path,
@@ -478,6 +509,7 @@ def parse_files_with_copybooks(
                     prof_output=prof_file,
                 )
                 _attach_expansion(parse_result, expansion_warnings, source_map)
+                _attach_expansion_debug_lines(parse_result, expansion, path_str)
                 results.append(
                     BatchResult(
                         path=path,

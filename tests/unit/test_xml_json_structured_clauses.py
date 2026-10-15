@@ -135,3 +135,78 @@ def test_nested_inside_if_stops_at_end_json():
     assert [s.statement_type for s in json_gen.on_exception] == ["DISPLAY"]
     assert if_stmt.else_statements in (None, [])
     assert isinstance(after, DisplayStatement)
+
+
+# Issue #394: a line break between the clause's words must not hide them.
+# The lookahead for IS / THRU used to read the NEWLINE token, so a THRU on
+# the next line fell through into clause text and the paragraphs it covers
+# were reported dead.
+
+
+def test_processing_procedure_thru_on_next_line_is_captured():
+    _, stmts = _main_statements(
+        "           XML PARSE WS-DOC PROCESSING PROCEDURE HANDLE-XML\n"
+        "               THRU HANDLE-XML-END\n"
+        "           END-XML.\n"
+    )
+    node = stmts[0]
+    assert node.processing_procedure == "HANDLE-XML"
+    assert node.processing_procedure_thru == "HANDLE-XML-END"
+    assert node.clause_text == "PROCESSING PROCEDURE HANDLE-XML THRU HANDLE-XML-END"
+    assert "THRU" not in node.operands
+    assert "HANDLE-XML-END" not in node.operands
+
+
+def test_processing_procedure_is_and_through_each_on_own_line():
+    _, stmts = _main_statements(
+        "           XML PARSE WS-DOC PROCESSING PROCEDURE\n"
+        "               IS\n"
+        "               HANDLE-XML\n"
+        "               THROUGH\n"
+        "               HANDLE-XML-END\n"
+        "           END-XML.\n"
+    )
+    node = stmts[0]
+    assert node.processing_procedure == "HANDLE-XML"
+    assert node.processing_procedure_thru == "HANDLE-XML-END"
+    assert node.clause_text == (
+        "PROCESSING PROCEDURE IS HANDLE-XML THROUGH HANDLE-XML-END"
+    )
+
+
+def test_processing_procedure_thru_on_next_line_keeps_range_live():
+    from cobolparser import DeadCodeAnalyzer
+
+    body = (
+        "           XML PARSE WS-DOC PROCESSING PROCEDURE HANDLE-XML\n"
+        "               THRU HANDLE-XML-END\n"
+        "           END-XML\n"
+        "           STOP RUN.\n"
+    )
+    tail = (
+        "       HANDLE-XML.\n"
+        "           CONTINUE.\n"
+        "       HANDLE-XML-MIDDLE.\n"
+        "           CONTINUE.\n"
+        "       HANDLE-XML-END.\n"
+        "           EXIT.\n"
+        "       TRULY-DEAD.\n"
+        "           CONTINUE.\n"
+    )
+    result = parse_cobol(_HEADER + body + tail, filename="xmlcl.cbl")
+    assert result.success, result.errors
+    dead = [item.name for item in DeadCodeAnalyzer().analyze(result.ast).dead_items]
+    assert dead == ["TRULY-DEAD"]
+
+
+def test_bare_procedure_with_is_and_thru_on_next_lines():
+    _, stmts = _main_statements(
+        "           XML PARSE WS-DOC PROCEDURE\n"
+        "               IS HANDLE-XML\n"
+        "               THRU HANDLE-XML-END\n"
+        "           END-XML.\n"
+    )
+    node = stmts[0]
+    assert node.processing_procedure == "HANDLE-XML"
+    assert node.processing_procedure_thru == "HANDLE-XML-END"
+    assert "IS" not in node.operands

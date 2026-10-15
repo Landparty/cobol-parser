@@ -1598,6 +1598,16 @@ MoveTypeChecker → [analysis.md](analysis.md), H6 PathResolver →
   precedent) before the loop breaks; the existing top-level
   `_is_paragraph_or_section_start()` check then picks the identifier up as
   a normal new paragraph — no separate paragraph-name pre-scan was needed.
+  Issue #390 added three more exclusions: `SPECIAL_REGISTERS`
+  (`RETURN-CODE`, `TALLY`, `SORT-RETURN`, `WHEN-COMPILED`, the `XML-` /
+  `JSON-` registers, ... -- never declared, so (c) could not see them),
+  `NON_PARAGRAPH_RESERVED_WORDS` (`RUN`, `TRUE`, `SENTENCE`, ... -- reserved
+  words that lex as plain `IDENTIFIER`; `DECLARATIVES` / `FACTORY` /
+  `OBJECT` deliberately left out), and, when this parse normalized
+  fixed-format source (`CobolParser.source_is_fixed_format`), any token in
+  Area B (normalized column >= `NORMALIZED_AREA_B_COLUMN` = 5, i.e. old
+  column 12). Before it, `MOVE 0` / `TO` / `RETURN-CODE.` at one column
+  gave a MOVE with no target and a phantom `RETURN-CODE` paragraph.
   `INSPECT`'s `TALLYING` loop is a special case: its own inner check
   breaks without warning, because the outer "consume to period" trailer in
   `InspectStatementParser.parse()` re-checks the same un-consumed token and
@@ -2062,6 +2072,14 @@ every other UNSTRING serializes as before.
   relation of the leg to its left, falling back to the one handed in.
   Pinned in `tests/regression/test_review_2026_09_09_parser.py`
   (`TestFinding08ConditionTrees`).
+- `_conditions.py` (2026-10-14, issue #403): an abbreviated leg may open
+  with the optional `IS` of its relational operator (`A > 1 AND IS < 5`,
+  `A = 1 OR IS EQUAL TO 2`, `A > 1 AND IS NOT > 5`).
+  `_expand_abbreviated_condition` drops a leading `IS` when an operator or
+  `NOT` follows, then expands the leg like the form without `IS`; before,
+  the leg was an operand-less COMPARISON with `raw_condition` `IS < 5`. An
+  `IS` before anything else is left alone. Pinned in
+  `tests/regression/test_issue_403_abbreviated_leading_is.py`.
 - `string_unstring_parsers.py`: `BY` after `DELIMITED` is optional
   (`DELIMITED SIZE`, `DELIMITED "," OR ALL SPACE`). A delimiter is only
   consumed when the next token is operand-shaped (`_next_is_delimiter`), so
@@ -2351,6 +2369,11 @@ need no fix:
   can mutate the caller's data. Fixed by initializing `passing_mode` once
   before the loop instead of inside it, so it only changes when a `BY`
   keyword is actually encountered.
+  **Follow-up (#388):** `BY` is optional in IBM's CALL syntax, so a bare
+  `REFERENCE` / `CONTENT` / `VALUE` now switches the mode too
+  (`USING CONTENT X REFERENCE Y` -> X by content, Y by reference). Before,
+  the bare word was recorded as an argument (and a bare leading `VALUE`
+  dropped every argument). Pinned in `tests/unit/test_call_using_mode_without_by.py`.
 * **`COMPUTE id-1, id-2 = expr` (comma-separated multi-target) was a hard
   parse failure**, not a silent/warned drop (`arithmetic_parsers.py`,
   `ComputeStatementParser.parse`'s additional-target loop): unlike every
@@ -3192,7 +3215,10 @@ byte per symbol).
 ## Statements
 
 `XmlJsonStatement`'s clause loop keeps `JSON` after `TO` (`CONVERTING x
-TO JSON DECIMAL`). `SetStatement.targets_are_address_of` is set by
+TO JSON DECIMAL`). Its `PROCESSING PROCEDURE [IS] p [THRU|THROUGH q]`
+consumer looks past line breaks (`peek_past_noise`) for `IS` and `THRU`
+(issue #394: a THRU on the next line used to fall into clause text and
+leave `processing_procedure_thru` None). `SetStatement.targets_are_address_of` is set by
 `SetStatementParser._collect_targets` for `SET ADDRESS OF x TO p` (it
 returns a third value now). `DeclareTableStatement` accepts a qualified
 `DECLARE SCHEMA.TABLE TABLE` (spaces around the period tolerated, name

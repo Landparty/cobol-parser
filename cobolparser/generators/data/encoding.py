@@ -54,7 +54,10 @@ from .errors import CopybookLayoutError
 from .layout import (
     FieldCategory,
     FieldSpec,
+    LiteralCell,
     VaryingLength,
+    _strip_literal_quotes,
+    hex_literal_bytes,
     present_indexes,
     unresolved_odo_counters,
 )
@@ -611,13 +614,88 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         )
         if edited is not None and len(edited) == width:
             return _encode_text(edited, width, opts)
-    literal = spec.literal_bytes.get(text)
-    if literal is not None:
+    if isinstance(text, LiteralCell):
         # A hex literal (``VALUE X'C1C2'``) names bytes, not characters: the
         # cell is only their Latin-1 stand-in, and re-encoding it in the
         # record charset wrote C1 C2 as ``?``s (ASCII) or 65 62 (EBCDIC).
-        return _place_bytes(literal, width, opts, justified=spec.justified)
+        # The bytes come with the cell, not from a lookup by its text: an
+        # ordinary ``'AB'`` or ``VALUE SPACE`` with the same text as a hex
+        # literal's stand-in is still charset-encoded.
+        return _place_bytes(text.data, width, opts, justified=spec.justified)
     return _encode_text(text, width, opts, justified=spec.justified)
+
+
+#: Figurative constants as the cell :class:`~.values.ValueFactory` writes for
+#: a level-88 (or ``ZERO``/``QUOTE`` VALUE clause) naming them: every
+#: position filled with the character, ``SPACE`` as the empty cell.
+_FIGURATIVE_FILL: dict[str, str] = {
+    "SPACE": "",
+    "SPACES": "",
+    "ZERO": "0",
+    "ZEROS": "0",
+    "ZEROES": "0",
+    "QUOTE": '"',
+    "QUOTES": '"',
+}
+
+#: Every figurative word, writable or not.
+_ALL_FIGURATIVES = frozenset(
+    {*_FIGURATIVE_FILL, "LOW-VALUE", "LOW-VALUES", "HIGH-VALUE", "HIGH-VALUES"}
+    | {"NULL", "NULLS"}
+)
+
+
+def _ordinary_literal_cells(spec: FieldSpec) -> list[str]:
+    """The cells *spec*'s own non-hex declared values are generated as: its
+    level-88 literals and figuratives, and a quoted or ``ZERO``/``QUOTE``
+    VALUE clause.  ``VALUE SPACES``/``LOW-VALUES`` are left out because the
+    generator replaces them with a random value."""
+    raws = [v for v in spec.condition_values if not isinstance(v, LiteralCell)]
+    if spec.value_clause and hex_literal_bytes(spec.value_clause) is None:
+        clause = spec.value_clause.strip()
+        if clause.upper() in ("ZERO", "ZEROS", "ZEROES", "QUOTE", "QUOTES"):
+            raws.append(clause)
+        elif clause.upper() not in _ALL_FIGURATIVES:
+            raws.append(_strip_literal_quotes(clause))
+    width = max(1, spec.character_positions)
+    cells: list[str] = []
+    for raw in raws:
+        fill = _FIGURATIVE_FILL.get(raw.upper())
+        if fill is not None:
+            cells.append(fill * width)
+        elif raw.upper() not in _ALL_FIGURATIVES:
+            cells.append(raw)
+    return cells
+
+
+def hex_literal_cell_for(
+    spec: FieldSpec, raw: bytes, opts: EncodingOptions
+) -> str | None:
+    """The hex literal cell *raw* was written from, for the decoder.
+
+    :func:`encode_field` writes a :class:`LiteralCell` as its own bytes, so
+    reading them back in the record charset gives other text (``X'FF'`` is
+    ``\x9f`` in EBCDIC, ``X'C1C2'`` is ``AB``) and ``decode(encode(row))``
+    would not be *row*.  When *raw* is exactly one of the field's hex
+    literals, padded the way the encoder pads it, this returns that
+    literal's cell.  ``None`` when it is not, or when one of the field's
+    ordinary declared values encodes to the same bytes (``'AB'`` next to
+    ``X'C1C2'`` under EBCDIC): the bytes cannot say which was meant, and the
+    charset reading is the honest one.
+    """
+    if not spec.literal_bytes:
+        return None
+    width = spec.storage_size
+    if len(raw) != width:
+        return None
+    for cell, data in spec.literal_bytes.items():
+        if _place_bytes(data, width, opts, justified=spec.justified) != raw:
+            continue
+        for ordinary in _ordinary_literal_cells(spec):
+            if _encode_text(ordinary, width, opts, justified=spec.justified) == raw:
+                return None
+        return cell
+    return None
 
 
 def encode_record(

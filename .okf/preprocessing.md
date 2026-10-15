@@ -93,9 +93,15 @@ Enterprise COBOL compiles `D` lines as code under `SOURCE-COMPUTER ... WITH
 DEBUGGING MODE`. The parse still drops them by default (the decision on the
 issue was "keep dropping, but say so"), and the flag reaches the parse as
 `debug_lines` on `parse_cobol` / `CobolParser` / `_tokenize_source` /
-`ScanOptions`, the CLI's `--debug-lines` / `--no-debug-lines` (every
-subcommand with `--source-format`, plus `preprocess`), and cobol.yml
-`project.debug_lines`. `normalize_with_recovery(...,
+`ScanOptions` / `parse_files` / `parse_files_with_copybooks` /
+`expand_copybooks` / `parse_cobol_with_expansion` (taken from its parser
+kwargs) / `ProgramLayoutIndex.from_file` / `ProgramFixtureGenerator.analyze_from_file`
+(not `generate*_from_file`, whose signatures are mocky-mock's contract; the
+CLI's `gen-fixtures` calls `analyze_from_file` + `generate_with_scenarios`) /
+`CodebaseGraphBuilder`, the CLI's `--debug-lines` / `--no-debug-lines`
+(every subcommand that parses COBOL; only `gen-data`, `decode`, `compare`,
+`jcl`, `le-info` and `config` lack it, and the first three drop `D` lines in
+a copybook layout as comments), and cobol.yml `project.debug_lines`. `normalize_with_recovery(...,
 debug_lines_as_comments=...)` passes it to both normalization passes.
 With it off, `CobolParser._normalize_fixed_source` records
 `source_format.debug_line_numbers()` (column-7 `D`/`d`, skipping lines a
@@ -107,6 +113,23 @@ parse with debug_lines=True ...`. No clause, or no D lines: no warning.
 With `debug_lines=True` D lines are compiled whether or not the clause is
 present (the caller's switch, like GnuCOBOL's `-fdebugging-line`), and
 `_fixed_format_comment_tokens` stops re-emitting them as COMMENT tokens.
+
+*Through copybook expansion (2026-10-15):* expansion blanks comment lines
+before the parser sees the text, and used to blank `D` lines with them, so
+with any COPY in the program `debug_lines=True` did nothing and the warning
+never fired. `remove_comment_lines(..., keep_debug_lines=)` now leaves them
+in place when `ExpansionContext.debug_lines` is on (main source, members and
+nested members), their `D` back in column 7 after the re-pad for the final
+normalization to compile. With it off they are still blanked, and
+`expand_copybooks` lists the blanked ones as
+`CopybookExpansion.dropped_debug_lines` (`(file, line)`, read off the output
+through the source map, so a member COPYd twice counts twice; only looked
+for when `DEBUGGING` appears in the text). `warn_dropped_debug_lines()`
+(called by `parse_cobol_with_expansion` and `parse_files_with_copybooks`)
+raises the parser's warning from that list -- `FILE: Line N` when the first
+one is in a member -- unless the parser already raised it (nothing was
+expanded, so it saw the raw source). One spelling for both:
+`parser.dropped_debug_lines_warning()`.
 
 **`V`/`v` version-tag lines (added 2026-08-22):** `V`/`v` in column 7 is
 also treated as a comment by default (`version_tag_lines_as_comments`,

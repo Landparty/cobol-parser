@@ -336,8 +336,11 @@ class FieldSpec:
     #: The exact bytes each hex literal (``VALUE X'C1C2'``, a level-88 ``X'FF'``)
     #: declared for this field names, keyed by the text cell that stands for
     #: it (the bytes read as Latin-1, cut to the field's width).  A hex
-    #: literal is bytes, not characters: :func:`.encoding.encode_field` writes
-    #: these verbatim instead of re-encoding the cell in the record charset.
+    #: literal is bytes, not characters.  The encoder does not look a cell up
+    #: here (text alone cannot tell ``X'4142'`` from ``'AB'``): it writes the
+    #: bytes a :class:`LiteralCell` carries.  The decoder reads it the other
+    #: way, so a record holding exactly these bytes decodes back to the cell
+    #: it was generated from (:func:`.encoding.hex_literal_cell_for`).
     literal_bytes: dict[str, bytes] = field(default_factory=dict)
 
     @property
@@ -487,6 +490,30 @@ def _child_items(item: CobolDataItem) -> list[CobolDataItem]:
     return [c for c in item.children if isinstance(c, CobolDataItem)]
 
 
+def owns_condition_name(item: CobolDataItem) -> bool:
+    """Whether *item* has a level-88 condition name of its own."""
+    return any(isinstance(child, ConditionNameItem) for child in item.children)
+
+
+def layout_segment(item: CobolDataItem, parent: CobolDataItem | None) -> str:
+    """The path segment *item* is laid out under, beneath *parent*.
+
+    That is :attr:`CobolDataItem.layout_name`, except for a FILLER that owns
+    a level-88 condition name (``05 FILLER PIC X. 88 FLAG-ON VALUE 'Y'.``,
+    or the same with FILLER omitted). The program tests that FILLER through
+    its 88, so a scenario pins a value on it, and a pin is keyed by the
+    field's qualified name -- which plain ``FILLER`` shares with every other
+    FILLER of the group. Such a FILLER is ``FILLER#<n>``, *n* its 1-based
+    position among the FILLER items of *parent*: unique in the group, and
+    the same in every walk of the record. Plain FILLERs keep ``FILLER``.
+    """
+    if parent is None or not item.is_filler or not owns_condition_name(item):
+        return item.layout_name
+    fillers = [c for c in _child_items(parent) if c.is_filler]
+    position = next(n for n, c in enumerate(fillers, 1) if c is item)
+    return f"FILLER#{position}"
+
+
 def expand_condition_values(
     raw_values: list[str], width: int | None = None
 ) -> list[str]:
@@ -520,7 +547,7 @@ def expand_condition_values(
                     if filled is not None:
                         values.append(filled)
                 continue
-            cleaned = _strip_literal_quotes(raw)
+            cleaned = hex_literal_cell(raw, width) or _strip_literal_quotes(raw)
             values.append(cleaned)
             previous = cleaned
             continue
@@ -547,7 +574,7 @@ def expand_condition_values(
             values.append(end)
         previous = end
     # Preserve first-seen order while removing duplicates.
-    return list(dict.fromkeys(v for v in values if v != ""))
+    return _dedup_values(values)
 
 
 def condition_values_exhaustive(raw_values: list[str], decimal_digits: int) -> bool:
@@ -629,7 +656,55 @@ def _condition_values(item: CobolDataItem) -> list[str]:
             continue
         values.extend(expand_condition_values(child.values, width))
     # Preserve first-seen order while removing duplicates.
-    return list(dict.fromkeys(v for v in values if v != ""))
+    return _dedup_values(values)
+
+
+class LiteralCell(str):
+    """A generated cell that stands for a hex literal (``VALUE X'C1C2'``, a
+    level-88 ``X'FF'``), carrying the literal's own :attr:`data`.
+
+    The text is those bytes read as Latin-1, so the cell still prints and
+    compares like any other.  The bytes travel with the cell rather than
+    being looked up by its text afterwards: an ordinary value with the same
+    text (``VALUE SPACE`` next to ``88 VALUE X'20'``, ``'AB'`` next to
+    ``X'4142'``, a random ``A`` next to ``X'41'``) is a different literal
+    and must still be written in the record charset.
+    :func:`.encoding.encode_field` writes :attr:`data` verbatim.
+    """
+
+    data: bytes
+
+    def __new__(cls, data: bytes) -> LiteralCell:
+        cell = super().__new__(cls, data.decode("latin-1"))
+        cell.data = data
+        return cell
+
+    def __reduce__(self) -> tuple[type[LiteralCell], tuple[bytes]]:
+        return (LiteralCell, (self.data,))
+
+
+def hex_literal_cell(value: str, width: int | None = None) -> LiteralCell | None:
+    """The cell a hex literal *value* is written as, its bytes cut to
+    *width* when one is known; ``None`` for any other literal."""
+    data = hex_literal_bytes(value)
+    if not data:
+        return None
+    if width is not None and width > 0:
+        data = data[:width]
+    return LiteralCell(data)
+
+
+def _dedup_values(values: list[str]) -> list[str]:
+    """*values* without repeats, first-seen order kept.  A hex literal's cell
+    is not a repeat of an ordinary value with the same text (``X'4142'``
+    and ``'AB'``): they name different bytes in an EBCDIC record."""
+    seen: dict[tuple[str, bytes | None], str] = {}
+    for value in values:
+        if value == "":
+            continue
+        key = (str(value), value.data if isinstance(value, LiteralCell) else None)
+        seen.setdefault(key, value)
+    return list(seen.values())
 
 
 def hex_literal_bytes(value: str) -> bytes | None:
@@ -650,7 +725,7 @@ def _literal_bytes(item: CobolDataItem, width: int) -> dict[str, bytes]:
 
     The key is the literal's Latin-1 text cut to *width*, the same cut
     ``ValueFactory`` applies when it writes the literal into a cell, so the
-    encoder finds the cell it was handed.
+    decoder gives back the cell that was generated.
     """
     raws: list[str] = [item.value_clause] if item.value_clause else []
     for child in item.children:
@@ -853,8 +928,12 @@ def _flatten_into(
     redefines_label: str | None = None,
     ignore_own_redefines: bool = False,
     overlays: _OverlayWalk | None = None,
+    segment: str | None = None,
 ) -> None:
     """Recursive worker for :func:`flatten_record`.
+
+    *segment* is this item's path segment (see :func:`layout_segment`);
+    ``None`` means its :attr:`~CobolDataItem.layout_name`.
 
     *ignore_own_redefines* drops *this* item's own ``REDEFINES`` from the
     exclusion test -- passed only for the root, under
@@ -873,7 +952,11 @@ def _flatten_into(
     )
     if inherited_redefines and not opts.include_redefines:
         return
-    if item.is_filler and not opts.include_filler:
+    if (
+        item.is_filler
+        and not opts.include_filler
+        and not (opts.include_condition_filler and owns_condition_name(item))
+    ):
         return
     # Level-66 RENAMES and level-88 condition names are not storage of their
     # own; they are handled via their parent item.
@@ -915,7 +998,7 @@ def _flatten_into(
             ),
         )
 
-    item_path = (*path, item.layout_name)
+    item_path = (*path, segment or item.layout_name)
     for index in indexes:
         occ = (*subscripts, index) if index is not None else subscripts
         children = _child_items(item)
@@ -945,6 +1028,7 @@ def _flatten_into(
                     out,
                     redefines_label=redefines_label,
                     overlays=overlays,
+                    segment=layout_segment(child, item),
                 )
             continue
 
