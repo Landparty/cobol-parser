@@ -845,7 +845,7 @@ dispatched on the same `USAGE`-then-category ladder:
 | Storage | Read back as |
 |---|---|
 | DISPLAY text | the charset's characters (ASCII decoded as **latin-1**, so a byte the encoder could not have written is still shown), trailing spaces/NULs stripped |
-| zoned DISPLAY | one digit per byte, sign overpunched or `SIGN IS SEPARATE` |
+| zoned DISPLAY | one digit per byte, sign overpunched or `SIGN IS SEPARATE`. Under `SEPARATE` only the sign byte carries the sign and it must be `+` or `-`: every digit is unsigned, so a sign zone on one is an `error` (never a negation), and a blank sign byte is an `error` too (2026-10-14, #360: x'F1F2D34E' read `-123` clean, and x'F1F2F340' read `123` clean) |
 | `COMP-3` | two BCD nibbles per byte, sign in the final low nibble. With an even digit count the first byte's high nibble is pad, not a digit: a non-zero pad is an `error` and is left out of the value (2026-09-28: it was read as a digit, so `S9(2)V99` x'12345C' decoded as `123.45`, more digits than the PICTURE holds) |
 | `COMP`/`COMP-4`/`COMP-5` | two's-complement, big-endian except COMP-5 which follows `EncodingOptions.endian` |
 | `COMP-1`/`COMP-2` | IEEE 754, rendered to 7 / 15 significant digits |
@@ -924,7 +924,7 @@ Invalid data that is still *readable* counts too (issue #248, 2026-10-04):
 
 | Format | How the next record is found |
 |---|---|
-| `FIXED` | `record_length` override, else `base.length` |
+| `FIXED` | `record_length` override, else `base.length`. With a `record_separator` set, the separator is *checked*, not just skipped (#359, 2026-10-14): a record not followed by it (and not at end of data), or one with a separator inside non-binary bytes (`_separators_only_in_binary`, judged on the base view), gets a `record_errors` entry -- lines that are not LRECL bytes long used to decode silently misframed |
 | `VARIABLE` | the 4-byte RDW; an RDW longer than the file raises `RecordDecodingError` rather than being guessed at |
 | `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. A tail shorter than the record its own counters describe is `trailing`, not one more truncated row (`_ran_short`, 2026-09-27 — RECFM=F already did this). With a `record_separator` set, the layout still frames first (2026-09-28: a `0x0A` inside COMP/COMP-3 data used to split the record); the layout's length is taken when a separator or end-of-data follows it and every separator inside it falls in binary/packed/float bytes, else it falls back to `find(separator)` (text lines shorter than the layout) |
 
@@ -1390,6 +1390,20 @@ bundle.unresolved                  # every gap from Phases 1-2-3, merged
 bundle.to_json()                   # bundle_version, program_name, seed, ...
 bundle.write_csv_dir("out/")       # out/<scenario-slug>/<KEY>.csv + MANIFEST.json
 ```
+
+**Columns are unique across a fixture's records (#365, 2026-10-14).** A
+fixture can draw fields from several records: a CALL's `USING` arguments, or
+a READ boundary's alternate FD records. `flatten_record()` only makes columns
+unique *within* one record, so `REC-A.AMT` and `REC-B.AMT` both arrived as
+`AMT`, and since a row is keyed by `spec.column` they shared one value (the
+`ELSE` witness for `REC-B.AMT` also landed on `REC-A.AMT`; the CSV header
+read `AMT,CODE-A,AMT,CODE-B`). `_unique_columns()` now de-duplicates the
+combined list on `(qualified_name, subscripts)` (the same argument passed
+twice is one set of fields) and, only on a collision, re-runs
+`layout._assign_columns` over *copies* of the whole list, so the colliding
+names become `REC-A.AMT` / `REC-B.AMT` and every other column keeps its short
+header. Copies, because a spec from `ProgramLayoutIndex.resolve()` is the
+index's own. A fixture with no collision is byte-identical to before.
 
 ## Scenario-mode generation (`generate_with_scenarios`, Phase 6)
 
