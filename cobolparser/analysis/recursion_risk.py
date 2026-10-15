@@ -418,7 +418,10 @@ class RecursionRiskAnalyzer:
         for name in component:
             node = nodes_by_name.get(name)
             if node is not None and (
-                node.has_stop_run or node.has_goback or node.has_exit_program
+                node.has_stop_run
+                or node.has_goback
+                or node.has_exit_program
+                or node.has_cics_exit
             ):
                 return True
         for edge in flow_report.edges:

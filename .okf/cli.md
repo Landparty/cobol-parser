@@ -79,6 +79,15 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   reasons: they work on either side of the subcommand, and the rewrite would
   otherwise take `--config`'s argument for the source file. They are declared
   on the top-level parser for `--help` only; argparse never sees them.
+  Only the exact spellings are stripped, so `extract_config_flags()` also
+  rejects (exit 1, a `ConfigError`) any `--X` / `--X=...` where X is a proper
+  prefix of `config` or `no-config` -- `--no-conf`, `--no`, `--conf=FILE`,
+  `--co` -- on either side of the subcommand (issue #323, 2026-10-14).
+  Otherwise argparse's prefix matching swallowed them at the top level, or
+  after the subcommand read them as one of its own options (`--no` for a
+  `--no-...` flag), and the discovered `cobol.yml` silently stayed in force.
+  Done on the raw argv rather than with `allow_abbrev=False` on every
+  subparser, so abbreviations that cannot mean these two still work.
 * **Telling a typed flag from a defaulted one** — most flags here have a
   non-`None` default (`--charset ascii`, `--dialect ibm-enterprise`,
   `--source-format auto`), so `is None` cannot answer "did the user pass
@@ -233,6 +242,11 @@ Records are split with `_lines.split_source_lines` (\n / \r\n / \r only),
 the same splitter the parser uses. Before 2026-09-28 `preprocess` used
 `str.splitlines()`, so a form feed / NEL / U+2028 inside a comment record
 split it in two and the comment's tail came out as code.
+Normalisation goes through `source_format.normalize_with_recovery()`, like
+`parse` and `tokenize`: an unterminated literal at end of file (a truncated
+upload) prints `warning: Unterminated string literal ...` on stderr and the
+recovered text on stdout, exit 0. Before #372 it escaped as a `ValueError`
+traceback.
 
 ## Source layout (`--source-format`)
 
@@ -265,7 +279,13 @@ code instead of dropping them (see [preprocessing.md](preprocessing.md),
 when set; `scan` forwards it as `ScanOptions.debug_lines`; `preprocess`
 passes it to `normalize_fixed_format` directly. cobol.yml
 `project.debug_lines: true|false` (strictly a boolean) fills it, and
-`--no-debug-lines` is the way to override a `true` there.
+`--no-debug-lines` is the way to override a `true` there. The subcommands
+without `--source-format` that still parse COBOL (`batch`, `expand`,
+`gen-fixtures`, `codebase-graph`, `copybook-impact`, `field-impact`) take it
+through `_add_debug_lines_arg()` (2026-10-15): without the dest, the config
+key was silently ignored by them. `gen-data` / `decode` / `compare` / `jcl` /
+`le-info` / `config` have none (pinned by
+`test_only_record_layout_subcommands_lack_debug_lines`).
 
 Reach for `fixed` when a shop's layout defeats auto-detection — e.g. a
 sequence area holding a tag with an internal space. Auto-detection already
@@ -578,7 +598,11 @@ analyzer subcommand that takes `--copybook-path` (dead-code, complexity,
 health, move-type-check, xref, ...): `_parse_result_or_fail` remembers the
 map on `args._expansion_source_map`. Previously only lint and
 unused-variables said where an expanded-listing line really is. Additive:
-no map (no `--copybook-path`), no `origin`. `gen-fixtures` is *not* stamped
+no map (no `--copybook-path`), no `origin`. Locations not under a
+`location` key get a sibling of their own name (2026-10-14, #367): xref's
+`definition` gains `definition_origin`, program-flow's
+`exit_statement_location` gains `exit_statement_origin`
+(`analysis.lint._ORIGIN_KEYS`). `gen-fixtures` is *not* stamped
 (its bundle uses bare `line` keys under `bundle_version`).
 
 ## Program-Flow
@@ -898,7 +922,11 @@ compiled against them. Implementation:
   fixed-length and garbled, exit 0.
   `--record-length` is decode-only: an LRECL to cut fixed-length records at
   when the file's records are longer than the copybook describes (trailing
-  slack, or a copybook covering only a prefix).
+  slack, or a copybook covering only a prefix). With no `--record-length`
+  and a whole-program source, it defaults to the FD's LRECL (the largest 01
+  under the FD, or a larger `RECORD CONTAINS n`), so `--record HDR-REC` on a
+  shorter 01 still frames the file right (#362); `gen-data --format
+  record|hex` pads that 01 out to the same LRECL with spaces.
 * **`--max-records`/`--skip`** page a large file. A run stopped by
   `--max-records` does *not* report the rest of the file as trailing bytes.
   A negative `--max-records`/`--skip`, or a `--record-length` that is not
@@ -1015,6 +1043,15 @@ every shop's programs open with a near-identical four-statement
 `0000-MAIN-PROCESS`, and ranking on spread buries a sixteen-statement
 verbatim copy under that boilerplate. Requires the `redundancy` analyzer;
 without it no groups are reported rather than an empty result.
+
+Members, sources and copies (#352): with `--copybook-path`, a paragraph
+expanded from a PROCEDURE DIVISION copybook carries its `origin` (copybook
+file and line). Members sharing an origin are one source included several
+times, not copy-paste, so `--min-clone-members` and the volume ranking count
+*distinct sources* (`source_count` on each group; `statements x
+source_count`), not members. A copybook paragraph that only ever arrives by
+COPY forms no group; one also pasted verbatim into another program does,
+with every inclusion still listed as a member.
 
 `--files-from FILE` reads the list from a file, one path per line (`-` for
 stdin, `#` comments and blank lines skipped, each line stripped so a

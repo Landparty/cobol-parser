@@ -17,6 +17,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.generators.data.bundle import BUNDLE_VERSION, _slugify
@@ -1568,3 +1570,214 @@ class TestMultipleRecordsUnderOneFd:
             "HDR-TYPE",
             "HDR-DATE",
         ]
+
+
+# -- arms on two 01 records of one FD: never merged, never overclaimed -------
+
+
+def _two_view_program(*conditions: str) -> str:
+    """HDR-REC and DTL-REC share IN-FILE's record area; one IF per condition."""
+    ifs = "\n".join(
+        f"                       IF {c}\n"
+        "                           ADD 1 TO WS-TOTAL\n"
+        "                       END-IF"
+        for c in conditions
+    )
+    return f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MULTI.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-FILE ASSIGN TO INFILE
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  IN-FILE.
+       01  HDR-REC.
+           05  REC-TYPE    PIC X.
+           05  HDR-DATE    PIC 9(8).
+       01  DTL-REC.
+           05  REC-TYPE    PIC X.
+           05  DTL-AMT     PIC S9(5)V99 COMP-3.
+           05  DTL-NAME    PIC X(20).
+       WORKING-STORAGE SECTION.
+       01  WS-FS           PIC XX.
+       01  WS-TOTAL        PIC S9(7)V99 VALUE 0.
+       01  WS-EOF          PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT IN-FILE
+           PERFORM UNTIL WS-EOF = 'Y'
+               READ IN-FILE
+                   AT END MOVE 'Y' TO WS-EOF
+                   NOT AT END
+{ifs}
+               END-READ
+           END-PERFORM
+           CLOSE IN-FILE
+           DISPLAY WS-TOTAL
+           STOP RUN.
+"""
+
+
+_HDR_AND_DTL = _two_view_program('REC-TYPE OF HDR-REC = "H"', 'DTL-NAME = "BOB"')
+
+
+class TestArmsOnTwoRecordsOfOneFd:
+    """Fields of two 01 records under one FD have different names but share
+    bytes: an HDR-REC arm merged with a DTL-REC arm could only ever be
+    generated through one of the two views."""
+
+    def test_arms_on_different_records_are_not_merged(self):
+        bundle = _bundle_for(_HDR_AND_DTL, mode="all")
+        coverage = bundle.scenario_coverage
+        assert coverage["merged"] == 0
+        assert coverage["missed"] == 0
+        assert coverage["targeted"] == coverage["total_arms"] == 4
+
+    def test_every_branch_scenario_is_generated_through_its_own_view(self):
+        bundle = _bundle_for(_HDR_AND_DTL, mode="all")
+        branch = [s for s in bundle.scenarios if s.name.startswith("MAIN-PARA")]
+        assert len(branch) == 4
+        for scenario in branch:
+            assert scenario.verification["status"] == "verified", scenario.name
+        dtl_then = branch[-1]  # arms sort by line: the DTL-NAME IF's THEN
+        assert dtl_then.name.endswith("THEN")
+        (fixture,) = _read_fixtures(dtl_then)
+        assert all(row["DTL-NAME"].rstrip() == "BOB" for row in fixture.sequence)
+
+    def test_one_arm_pinning_both_records_is_missed_with_reason(self):
+        source = _two_view_program('REC-TYPE OF HDR-REC = "H" AND DTL-NAME = "BOB"')
+        bundle = _bundle_for(source)
+        details = bundle.scenario_coverage["details"]
+        (then,) = [d for d in details if d["arm_key"].endswith("/THEN")]
+        assert then["status"] == "missed"
+        assert "several 01 records of one FD" in then["reason"]
+        assert "DTL-REC" in then["reason"] and "HDR-REC" in then["reason"]
+
+    def test_dropped_pins_demote_the_scenarios_arms(self, monkeypatch):
+        """The generator's own guard: a scenario that does pin two views of
+        one record area (here, by disabling the planner's check) has the pins
+        of the record it leaves out dropped -- so its arms are counted
+        missed, not targeted/merged."""
+        from cobolparser.generators import scenarios as scenarios_module
+
+        monkeypatch.setattr(scenarios_module, "_shared_record_areas", lambda _r: {})
+        bundle = _bundle_for(_HDR_AND_DTL)
+        coverage = bundle.scenario_coverage
+        assert coverage["merged"] + coverage["targeted"] + coverage["missed"] == 4
+        missed = [d for d in coverage["details"] if d["status"] == "missed"]
+        assert len(missed) == 4, coverage
+        for outcome in missed:
+            assert "several 01 records of one FD" in outcome["reason"]
+            assert "DTL-REC.DTL-NAME" in outcome["reason"]
+        assert any(
+            "pins DTL-REC.DTL-NAME in another 01 record" in n for n in bundle.unresolved
+        )
+        assert any(
+            "several 01 records of one FD" in n and "arm MAIN-PARA@" in n
+            for n in bundle.unresolved
+        )
+
+    def test_alternate_view_note_names_only_views_never_generated(self):
+        bundle = _bundle_for(_two_view_program('DTL-NAME = "BOB"'))
+        assert "DTL-REC" in bundle.layouts
+        (note,) = [n for n in bundle.unresolved if "01 records sharing" in n]
+        assert "not generated" not in note
+
+    def test_alternate_view_note_still_names_an_unused_view(self):
+        bundle = _bundle_for(_two_view_program('REC-TYPE OF HDR-REC = "H"'))
+        (note,) = [n for n in bundle.unresolved if "01 records sharing" in n]
+        assert note.endswith("alternate view(s) not generated: DTL-REC")
+
+
+# -- a FILLER that owns a level-88 keeps its column --------------------------
+
+
+def _filler_flag_program(filler: str) -> str:
+    return f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. FLG.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-FILE ASSIGN TO INFILE
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  IN-FILE.
+       01  IN-REC.
+           05  IN-ID       PIC 9(3).
+           05  {filler}PIC X(2).
+           05  {filler}PIC X.
+               88  FLAG-ON VALUE 'Y'.
+           05  {filler}PIC X.
+               88  FLAG-TWO VALUE 'T'.
+       WORKING-STORAGE SECTION.
+       01  WS-FS           PIC XX.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT IN-FILE
+           READ IN-FILE
+           IF FLAG-ON
+               DISPLAY 'ON'
+           ELSE
+               DISPLAY 'OFF'
+           END-IF
+           IF FLAG-TWO
+               DISPLAY 'TWO'
+           END-IF
+           CLOSE IN-FILE
+           STOP RUN.
+"""
+
+
+@pytest.mark.parametrize("filler", ["", "FILLER "], ids=["omitted", "explicit"])
+class TestFillerOwningConditionName:
+    """`05 PIC X. 88 FLAG-ON VALUE 'Y'.` (or with FILLER spelled out) is a
+    flag the program branches on: dropping it from the layout left the
+    branch's witness nowhere to go while coverage still said targeted."""
+
+    def test_flag_fillers_have_their_own_columns(self, filler):
+        bundle = _bundle_for(_filler_flag_program(filler))
+        (fixture,) = _read_fixtures(bundle.scenarios[0])
+        assert [s.qualified_name for s in fixture.layout] == [
+            "IN-REC.IN-ID",
+            "IN-REC.FILLER#2",
+            "IN-REC.FILLER#3",
+        ]
+
+    def test_each_arm_is_pinned_on_its_own_filler_and_verified(self, filler):
+        bundle = _bundle_for(_filler_flag_program(filler))
+        branch = [s for s in bundle.scenarios if s.name.startswith("MAIN-PARA")]
+        assert branch
+        for scenario in branch:
+            assert scenario.verification["status"] == "verified", scenario.name
+        # "MAIN-PARA: IF@<FLAG-ON> THEN + IF@<FLAG-TWO> THEN": disjoint
+        # fields now, so both IFs' arms share a scenario.
+        then = next(s for s in branch if s.name.split(" + ")[0].endswith("THEN"))
+        else_ = next(s for s in branch if s.name.split(" + ")[0].endswith("ELSE"))
+        (then_fixture,) = _read_fixtures(then)
+        (else_fixture,) = _read_fixtures(else_)
+        assert all(r["IN-REC.FILLER#2"] == "Y" for r in then_fixture.sequence)
+        assert all(r["IN-REC.FILLER#3"] == "T" for r in then_fixture.sequence)
+        assert all(r["IN-REC.FILLER#2"] != "Y" for r in else_fixture.sequence)
+        assert all(r["IN-REC.FILLER#3"] != "T" for r in else_fixture.sequence)
+        coverage = bundle.scenario_coverage
+        assert coverage["missed"] == 0
+
+    def test_condition_resolves_to_its_own_filler(self, filler):
+        result = parse_cobol(_filler_flag_program(filler), filename="flg.cbl")
+        index = ProgramLayoutIndex.build(result.ast)
+        assert index.resolve("FLAG-ON").spec.qualified_name == "IN-REC.FILLER#2"
+        assert index.resolve("FLAG-TWO").spec.qualified_name == "IN-REC.FILLER#3"
+
+    def test_plain_gen_data_still_omits_filler(self, filler):
+        from cobolparser.generators.data.layout import flatten_record
+        from cobolparser.generators.data.options import DataGeneratorOptions
+
+        result = parse_cobol(_filler_flag_program(filler), filename="flg.cbl")
+        record = ProgramLayoutIndex.build(result.ast).record_named("IN-REC")
+        specs = flatten_record(record, DataGeneratorOptions())
+        assert [s.column for s in specs] == ["IN-ID"]

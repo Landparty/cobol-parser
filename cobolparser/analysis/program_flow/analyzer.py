@@ -11,6 +11,7 @@ from typing import Any
 
 from ...models.program import CobolProgram, CobolSection
 from .._procedures import ProcedureIndex
+from .._sql_whenever import whenever_coverage
 from .cycles import classify_cycles, detect_cycles
 from .edges import (
     GOTO_EDGE_TYPES,
@@ -101,6 +102,7 @@ class ProgramFlowAnalyzer:
         self._unreachable_nodes = []
         self._branch_nodes = []
         self._terminating_paragraphs = set()
+        exit_section_procedures: dict[str, str] = {}
 
         proc_division = ast.procedure_division
         if proc_division is None:
@@ -121,6 +123,7 @@ class ProgramFlowAnalyzer:
             branch_nodes=self._branch_nodes,
             collector=collector,
             terminating_paragraphs=self._terminating_paragraphs,
+            exit_section_procedures=exit_section_procedures,
         )
 
         # Pass 1: Collect all procedures as nodes
@@ -129,6 +132,20 @@ class ProgramFlowAnalyzer:
         for name in declaratives:
             if name in self._nodes:
                 self._nodes[name].is_declarative = True
+
+        # EXEC SQL WHENEVER applies in source order, so which SQL statements
+        # branch to its handler is settled before the scan (contained
+        # programs' statements belong to their own unit).
+        inner = {
+            id(stmt)
+            for contained in ast.contained_programs
+            for stmt in contained.get_all_statements()
+        }
+        collector.set_whenever_coverage(
+            whenever_coverage(
+                [s for s in ast.get_all_statements() if id(s) not in inner]
+            )
+        )
 
         # Pass 2: Scan statements to build edges and node metrics
         scanner.scan_statements(proc_division)
@@ -142,6 +159,9 @@ class ProgramFlowAnalyzer:
             self._edges,
             self._ordered_procedures,
             self._terminating_paragraphs,
+            exit_section_procedures=exit_section_procedures,
+            section_ends=self._section_ends(scanner.index),
+            sections_entered=self._sections_entered(scanner.index, declaratives),
         )
 
         # Mark the first procedure as entry point before cycle/reachability analysis
@@ -212,6 +232,52 @@ class ProgramFlowAnalyzer:
             for e in index.entries
             if e.key in declarative or e.section in declarative
         }
+
+    @staticmethod
+    def _section_ends(index: ProcedureIndex) -> dict[str, str]:
+        """Each section's last member: its last paragraph, else itself."""
+        ends: dict[str, str] = {}
+        for entry in index.entries:
+            if entry.procedure_type == "SECTION":
+                ends[entry.key] = entry.key
+            elif entry.section is not None:
+                ends[entry.section] = entry.key
+        return ends
+
+    def _sections_entered(
+        self, index: ProcedureIndex, declaratives: set[str]
+    ) -> set[str]:
+        """Sections control can enter other than by PERFORM, so that the end
+        of the section runs on into the next procedure: the one holding the
+        entry point or an ENTRY, and any a GO TO-shaped edge
+        (``GOTO_EDGE_TYPES``) lands in from outside. Only a written GO TO is
+        tied to the section it sits in; every other kind (ALTER, CICS HANDLE,
+        and any handler branch added to ``GOTO_EDGE_TYPES`` later) counts
+        whatever section it is written in, since the runtime can take that
+        branch from anywhere.
+        """
+        entered: set[str] = set()
+        first = next(
+            (p for p in self._ordered_procedures if p not in declaratives), None
+        )
+        for name in [first, *self._entry_points]:
+            section = index.section_of(name)
+            if section is not None:
+                entered.add(section)
+        parent = {bn.node_id: bn.parent_proc for bn in self._branch_nodes}
+        written_goto = (FlowEdgeType.GOTO, FlowEdgeType.GOTO_DEPENDING)
+        for edge in self._edges:
+            if edge.edge_type not in GOTO_EDGE_TYPES:
+                continue
+            section = index.section_of(edge.target)
+            if section is None:
+                continue
+            if edge.edge_type in written_goto:
+                source = parent.get(edge.source, edge.source)
+                if index.section_of(source) == section:
+                    continue
+            entered.add(section)
+        return entered
 
     def _detect_unreachable_nodes(self) -> None:
         """Find nodes not reachable from any entry point via internal edges."""

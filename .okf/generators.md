@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
-timestamp: 2026-10-14T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
@@ -52,6 +52,10 @@ Driven by `cobol-parser program-flow --format mermaid|dot`. Node ids and
 labels come from `FlowNode.key` (the `qualified_name` when two paragraphs
 share a name, issue #258), so `X1 OF S1` and `X1 OF S2` are drawn as two
 nodes (`X1_OF_S1`, `X1_OF_S2`) and edges, which name nodes by key, attach.
+
+`SQL_WHENEVER` edges (#349, `EXEC SQL WHENEVER ... GO TO p`) are drawn like
+`CICS_HANDLE`: in the internal-edge set, the GO TO-family set, and labelled
+`SQL WHENEVER`.
 
 **Black reformat (2026-08-13, no behavior change):** `_escape_mermaid_label`
 and `_is_empty_if_arm` were reformatted to match the CI-pinned
@@ -265,8 +269,8 @@ into focused, reusable modules:
 
   **Task 8: `compute_program_data_items(ast: CobolProgram) -> dict[str, Any]`** —
   the program-wide entry point, returning `{"items": [...], "unresolved":
-  [...]}` (JSON-ready; `unresolved` always present for forward
-  compatibility, though nothing populates it yet). Walks every DATA
+  [...]}` (JSON-ready; `unresolved` always present -- it names SYNCHRONIZED
+  slack and partial level-88 value lists, see below). Walks every DATA
   DIVISION section (FILE, WORKING-STORAGE, LOCAL-STORAGE, LINKAGE) and
   calls `compute_record_layout()` on each section's top-level (01/77)
   records. Also closes a gap `compute_record_layout()` leaves by design:
@@ -287,6 +291,31 @@ into focused, reusable modules:
   offsets are unaffected either way: each top-level record is
   independently record-relative and correctly starts at byte 0 whether or
   not it redefines a section sibling.
+
+  **Level-88 `THRU` ranges: `condition_ranges` (issue #361, 2026-10-14).**
+  `condition_values` comes from `expand_condition_values()`, which lists a
+  range only in part: an integer range up to `_MAX_RANGE_EXPANSION` (`VALUE
+  1 THRU 99999` gave `1`..`65`), any other range just its two endpoints
+  (`'A' THRU 'Z'` gave `A`, `Z`). Read as the whole domain, that told a hover
+  66 or `M` were not values of the condition. Every item now also carries
+  `condition_ranges: [{"from", "to"}]` -- each range as written, quotes
+  stripped, nothing expanded (`layout.condition_ranges()`; empty for a
+  non-88 and an 88 with no range) -- and `compute_program_data_items` adds
+  one `unresolved` line per level-88 whose list is partial
+  (`"<qname>: condition_values lists only part of VALUE 1 THRU 99999;
+  condition_ranges holds the full range"`), judged by
+  `condition_values_exhaustive()` against the parent's decimal digits, so
+  `VALUE 1 THRU 2` on `PIC 9V99` is flagged too, and so is every range
+  under a non-numeric parent (a group, or `PIC XX` with `'01' THRU '12'`:
+  the parser drops the quotes, so the range *looks* integer, but `PIC XX`
+  admits `'1A'` and never holds `'1'`). A typed endpoint is kept as written
+  (`X'00'`, not a NUL byte). Not caught: `LOW-VALUE THRU HIGH-VALUE`, whose
+  `THRU` the DATA DIVISION parser drops (issue #468). Only a range triggers it:
+  `VALUE SPACES` is listed as its word, which is the value. `condition_values`
+  itself is unchanged (additive change; consumers keep working).
+  `LayoutItem.condition_values_complete` carries the verdict and is not
+  serialized. Both 88 construction paths (nested and record-root) go through
+  `_condition_item()` now.
 
   **Final-review fix: root-level level-88s were silently dropped.**
   `compute_record_layout()` builds the record's own root `LayoutItem` on
@@ -667,7 +696,7 @@ module docstring — that suite is the regression guard):
 
 | Storage | Bytes |
 |---------|-------|
-| DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte. Under `JUSTIFIED RIGHT` (`FieldSpec.justified`, 2026-09-28) the mirror image: right-aligned behind leading spaces, an oversized value losing its *leftmost* characters; the decoder strips that leading pad (it used to write `AB    ` where the MOVE leaves `    AB`). A hex literal (`VALUE X'C1C2'`, or a level-88 `X'FF'` drawn as the witness) is written as its own bytes, padded/truncated the same way, in either charset: `FieldSpec.literal_bytes` maps the cell's Latin-1 stand-in to those bytes (issue #319; re-encoding the text used to write `3f 3f` in ASCII and `65 62` in EBCDIC) |
+| DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte. Under `JUSTIFIED RIGHT` (`FieldSpec.justified`, 2026-09-28) the mirror image: right-aligned behind leading spaces, an oversized value losing its *leftmost* characters; the decoder strips that leading pad (it used to write `AB    ` where the MOVE leaves `    AB`). A hex literal (`VALUE X'C1C2'`, or a level-88 `X'FF'` drawn as the witness) is written as its own bytes, padded/truncated the same way, in either charset (issue #319; re-encoding the text used to write `3f 3f` in ASCII and `65 62` in EBCDIC). The cell is a `LiteralCell` (a `str` whose text is the bytes as Latin-1, carrying them as `.data`), made by `ValueFactory` from the VALUE clause and by `expand_condition_values` for a level-88; the encoder writes `.data` and never looks a cell up by its text, so an ordinary value with the same text (`VALUE SPACE` next to `88 VALUE X'20'`, `'AB'` next to `X'4142'`, a random `A` next to `X'41'`) stays charset-encoded, and `'AB'`/`X'4142'` are both drawn. `FieldSpec.literal_bytes` (stand-in text to bytes) is the decoder's map: a field holding exactly a hex literal's padded bytes decodes to its cell (`X'FF'` as `ÿ`, not EBCDIC `\x9f`), so `decode(encode(row)) == row` in both charsets, unless one of the field's ordinary declared values encodes to the same bytes (`'AB'` and `X'C1C2'` under EBCDIC), when the charset reading wins (`encoding.hex_literal_cell_for`) |
 | DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is. Under `DECIMAL-POINT IS COMMA` (`FieldSpec.decimal_point_is_comma`, read off the `PictureClause`) both functions take `decimal_point_is_comma=True` and exchange `,`/`.` in the picture and the edited text: `Z.ZZ9,99` writes `1.234,56` (2026-09-28) |
 | DISPLAY numeric (zoned) | one byte per digit; sign as an overpunch, or a real `+`/`-` byte under `SIGN IS SEPARATE` |
 | `COMP-3` / `PACKED-DECIMAL` | two BCD nibbles per byte, sign nibble `C`/`D` signed, `F` unsigned |
@@ -820,6 +849,26 @@ again rather than a parallel size model.
 `decode_file(path, ...)` is the same in binary mode (a COMP field routinely
 contains 0x0A, which a text-mode read would translate).
 
+**Fixed framing of a whole program is the FD's LRECL, not the chosen 01's
+length** (#362, 2026-10-14). Every 01 under one FD shares the record area,
+so a RECFM=F file of that FD holds LRECL-byte records whichever 01
+`--record` picks. `copybook.fd_record_length(records, chosen, options)`
+returns that LRECL -- the largest sibling 01's `framing_length`, or the FD's
+fixed `RECORD CONTAINS n` when that is larger (a smaller one does not shrink
+the area, so every 01 of one FD gets the same LRECL) -- or `None` when it is
+not longer than `chosen` (no FD/SD, a bare copybook, or `chosen` is the
+longest). `from_copybook_source()` uses it as the default `record_length`
+(`--record-length` still overrides; `from_record()` alone has no siblings to
+look at). `CopybookDataGenerator.generate_from_source()` stores the same
+number as `GeneratedDataset.lrecl`, and under `RecordFormat.FIXED`
+`to_records()` / `record_lengths()` / `to_hex_dump()` pad each record out to it
+with the charset's space (`encode_record(..., pad_to=)`), the dump showing an
+`(FD LRECL slack)` row -- so `gen-data --record HDR-REC --format record`
+writes the file `decode --record HDR-REC` reads. Variable formats are not
+padded. Before, a 9-byte header read off a 16-byte file shredded every
+record after the first, and with an all-text layout and a file length
+divisible by both sizes, silently.
+
 Per storage class, each the exact inverse of `encoding.py`'s encoder and
 dispatched on the same `USAGE`-then-category ladder:
 
@@ -912,8 +961,18 @@ Invalid data that is still *readable* counts too (issue #248, 2026-10-04):
 `EncodingOptions.record_separator` is consumed after each record when it is
 actually there. Fields past the end of a short record come back
 `present=False` (the column stays, so a table has the same shape for every
-row); a record cut mid-field comes back `truncated=True`, decoded from what
-was there. Bytes left after the last whole record are `DecodeResult.trailing`
+row); a record cut mid-field comes back `truncated=True` **with an `error`**
+(`"3 of 4 bytes: record ends inside the field"`, #358, 2026-10-14), so it
+counts in `error_count` and fails `decode --strict`: text keeps the characters
+that were there, every other value is `""` (three of `PIC 9(4)`'s digits,
+`001`, are not the value `1`). The one exemption is a record whose end the
+file states -- an RDW, or a `variable-bare` record separator -- read through
+a per-record range (`VaryingLength.per_record`: `RECORD VARYING ... DEPENDING
+ON`, or an explicit `record_varying`) with its body length inside `n..m`: it
+ends mid-field by design (`decode_record(cut_ok=True)`, via
+`RecordDecoder._cut_by_design`), still flagged `truncated`, no error. A range
+without `DEPENDING ON` bounds the file, not each record, so a cut there is
+still an error. Bytes left after the last whole record are `DecodeResult.trailing`
 — never dropped silently, because a tail that is not a whole record almost
 always means the record length is wrong. `max_records`/`skip` page a large
 file, and a run stopped by `max_records` reports `trailing == b""` rather
@@ -1145,7 +1204,9 @@ bytes each *record* carries.
   metadata. So `gen-data` on a **whole program** picks it up with no flag. A
   bare **copybook** has no FD; `DataGeneratorOptions.record_varying` (CLI
   `--record-varying MIN:MAX`) supplies it, and overrides the FD when both
-  exist.
+  exist. `FROM` itself is optional (`VARYING IN SIZE 47 TO 80` has a
+  minimum of 47, issue #402); with neither FROM nor an integer before TO,
+  the minimum is None.
 * **Only `DEPENDING ON` draws lengths** (#320, 2026-10-14). `RECORD CONTAINS
   47 TO 80` (format 2) and `RECORD VARYING` without `DEPENDING ON` make the
   *file* variable, but IBM COBOL writes each record at the length of the 01
@@ -1648,11 +1709,31 @@ picks exactly one record per scenario: the one holding the most of that
 scenario's pinned fields (`witnesses` + every `row_witnesses` row), the first
 in source order on a tie or with no scenario. `bundle.layouts` is keyed by the
 chosen record, so a scenario that picks the second record adds its own key.
-The records left out are reported once in `bundle.unresolved` ("alternate
-view(s) not generated: ..."); a scenario whose pins span two records gets one
-more entry naming the pins its rows cannot honour. Only `READ` boundaries are
-narrowed: an SQL boundary's several names are distinct host variables.
+`bundle.unresolved` carries one note per such READ, naming the records no
+scenario generated ("alternate view(s) not generated: ..."), computed after
+generation from the records actually used (the happy path always uses the
+first). Only `READ` boundaries are narrowed: an SQL boundary's several names
+are distinct host variables.
 Pinned by `tests/unit/test_program_fixtures.py::TestMultipleRecordsUnderOneFd`.
+
+Fields of two such records have different names but share bytes, so
+`ScenarioPlanner` (`_shared_record_areas()` / `_record_areas()`) never merges
+an arm pinning one record into a scenario pinning another, and an arm whose
+own path pins both is `missed` ("pins fields of several 01 records of one
+FD"). As a guard, a scenario that still pins two views (hand-built, or a
+future planner path) has every arm counted `missed` with that reason, the
+way a violated witness demotes (#244), since its dropped pins are never
+generated. Pinned by `TestArmsOnTwoRecordsOfOneFd` (2026-10-15).
+
+**A FILLER that owns a level-88 (2026-10-15).** `05 PIC X. 88 FLAG-ON VALUE
+'Y'.` (or `05 FILLER PIC X. 88 ...`) is a flag the program branches on.
+`ProgramFixtureGenerator` sets `DataGeneratorOptions.include_condition_filler`,
+so `flatten_record` keeps such a FILLER even with `include_filler` off (plain
+gen-data still drops it). Its path segment is `FILLER#<n>` (`layout_segment()`,
+*n* its 1-based position among its group's FILLERs), so two flag FILLERs in
+one group have distinct qualified names, witnesses and columns, and
+`ProgramLayoutIndex` maps each 88 to its own FILLER rather than the group's
+first. Plain FILLERs keep `FILLER`. Pinned by `TestFillerOwningConditionName`.
 
 ## Determinism: per-boundary sub-seeds
 

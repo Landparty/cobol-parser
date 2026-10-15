@@ -16,19 +16,56 @@ def build_fall_through_edges(
     edges: list[FlowEdge],
     ordered_procedures: list[str],
     terminating_paragraphs: set[str],
+    exit_section_procedures: dict[str, str] | None = None,
+    section_ends: dict[str, str] | None = None,
+    sections_entered: set[str] | None = None,
 ) -> None:
     """Build fall-through edges between sequential paragraphs.
 
     In COBOL, when a paragraph finishes without a GO TO or STOP RUN,
     execution falls through to the next paragraph. This adds those
     implicit edges unless the paragraph ends with a terminator.
+
+    A procedure in *exit_section_procedures* leaves its section by ``EXIT
+    SECTION``: control goes to the end of the section, skipping the rest of
+    it. When the section keeps running there -- it is fallen into (an
+    incoming fall-through edge), or is in *sections_entered* (the entry
+    point, an ENTRY, or a GO TO / ALTER / CICS HANDLE landing in it from
+    outside) -- it gets a fall-through edge to the procedure after the
+    section's last member (*section_ends*). A section that is only
+    PERFORMed returns to its performer, so it gets no onward edge.
     """
+    exits = exit_section_procedures or {}
+    ends = section_ends or {}
+    entered = sections_entered or set()
+    position = {name: i for i, name in enumerate(ordered_procedures)}
+    fallen_into: set[str] = set()
     for i in range(len(ordered_procedures) - 1):
         current = ordered_procedures[i]
         next_proc = ordered_procedures[i + 1]
 
         node = nodes.get(current)
         if not node:
+            continue
+
+        section = exits.get(current)
+        if section is not None:
+            end = position.get(ends.get(section, section))
+            if (
+                end is not None
+                and end + 1 < len(ordered_procedures)
+                and (section in entered or section in fallen_into)
+            ):
+                successor = ordered_procedures[end + 1]
+                fallen_into.add(successor)
+                edges.append(
+                    FlowEdge(
+                        source=current,
+                        target=successor,
+                        edge_type=FlowEdgeType.FALL_THROUGH,
+                        location=node.location,
+                    )
+                )
             continue
 
         # Skip if any of the paragraph's own TOP-LEVEL statements is an
@@ -47,6 +84,7 @@ def build_fall_through_edges(
         if current in terminating_paragraphs:
             continue
 
+        fallen_into.add(next_proc)
         edges.append(
             FlowEdge(
                 source=current,

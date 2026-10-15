@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from ...models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
+from ...models.sql_statements import ExecSQLStatement
 from ...models.statements.base import CobolExpression
 from ...models.statements.call import CallStatement, EntryStatement
 from ...models.statements.control import (
@@ -31,6 +32,7 @@ from ...models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from .._cics import cics_exit_kind, cics_terminator_kind
 from .._procedures import ProcedureIndex, enclosing_section
 from .condition_text import render_condition_text
 from .edges import EdgeCollector
@@ -98,6 +100,7 @@ class ProcedureScanner:
         branch_nodes: list[BranchNode],
         collector: EdgeCollector,
         terminating_paragraphs: set[str],
+        exit_section_procedures: dict[str, str] | None = None,
     ) -> None:
         self._nodes = nodes
         self._ordered_procedures = ordered_procedures
@@ -114,6 +117,13 @@ class ProcedureScanner:
         # conditionally. Populated below; consumed by
         # build_fall_through_edges() to decide fall-through suppression.
         self._terminating_paragraphs = terminating_paragraphs
+        # Procedure -> the section it leaves by a top-level EXIT SECTION
+        # (no unconditional terminator before it). Such a procedure never
+        # falls into the next paragraph; build_fall_through_edges() decides
+        # whether control carries on past the end of the section.
+        self._exit_section_procedures: dict[str, str] = (
+            exit_section_procedures if exit_section_procedures is not None else {}
+        )
         # Current procedure context for statement scanning
         self._current_procedure: str | None = None
         self._branch_seq: int = 0
@@ -551,6 +561,17 @@ class ProcedureScanner:
                 self._collector.process_xml_parse(stmt, proc_name)
             elif getattr(stmt, "node_type", None) == "EXEC_CICS":
                 self._collector.process_cics_handle(stmt, proc_name)
+                # Set even when RESP/NOHANDLE lets a failure fall through:
+                # on success the command still leaves the program, so it is
+                # an exit point and a way out of a loop (_is_terminator
+                # alone applies the RESP exemption).
+                cics_exit = cics_exit_kind(stmt)
+                if cics_exit is not None:
+                    node.has_cics_exit = True
+                    self._exit_points.add(proc_name)
+                    self._record_exit_statement(node, cics_exit, stmt.location)
+            elif isinstance(stmt, ExecSQLStatement):
+                self._collector.process_sql_whenever(stmt, proc_name)
             elif isinstance(stmt, AlterStatement):
                 self._collector.process_alter(stmt, source_id)
             elif isinstance(stmt, CancelStatement):
@@ -624,15 +645,32 @@ class ProcedureScanner:
         # top-level statements either.)
         if any(self._is_terminator(stmt) for stmt in para.statements):
             self._terminating_paragraphs.add(proc_name)
+        # EXIT SECTION passes control to the end of the section, so it never
+        # falls into the next paragraph either. Outside a section the
+        # compiler rejects it, and nothing is assumed of it.
+        section = self._index.section_of(proc_name)
+        if section is not None:
+            for stmt in para.statements:
+                if self._is_terminator(stmt):
+                    break
+                if isinstance(stmt, ExitStatement) and stmt.exit_type == "SECTION":
+                    self._terminating_paragraphs.add(proc_name)
+                    self._exit_section_procedures[proc_name] = section
+                    break
 
     @staticmethod
     def _is_terminator(stmt: Any) -> bool:
         """Check whether *stmt* unconditionally transfers control away when
         reached: STOP RUN (not STOP 'literal', which merely halts pending
-        operator action), GOBACK, EXIT PROGRAM, or a bare (non-DEPENDING)
-        GO TO. Mirrors DeadCodeAnalyzer._is_terminator, kept independent per
-        this package's existing collaborator architecture.
+        operator action), GOBACK, EXIT PROGRAM, a non-DEPENDING GO TO --
+        including the alterable ``GO TO.`` with no operand, which always
+        transfers to whatever an ALTER last set it to -- or EXEC CICS
+        RETURN / XCTL / ABEND (see ``_cics``). Mirrors
+        DeadCodeAnalyzer._is_terminator, kept independent per this package's
+        existing collaborator architecture.
         """
+        if cics_terminator_kind(stmt) is not None:
+            return True
         if isinstance(stmt, GobackStatement):
             return True
         if isinstance(stmt, StopStatement):
@@ -640,7 +678,7 @@ class ProcedureScanner:
         if isinstance(stmt, ExitStatement):
             return stmt.exit_type == "PROGRAM"
         if isinstance(stmt, GoStatement):
-            return bool(stmt.target_paragraph) and not stmt.depending_on_variable
+            return not stmt.depending_on_variable
         return False
 
 

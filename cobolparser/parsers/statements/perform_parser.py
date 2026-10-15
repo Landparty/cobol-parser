@@ -15,9 +15,11 @@ from cobolparser.parsers.statements._utils import (
     consume_procedure_qualifier,
     consume_value_operand,
     get_parse_context,
+    is_bare_separator,
     is_statement_boundary,
     keyword_upper,
     matches_keyword,
+    paren_depth_after,
     peek_past_noise,
     report_parse_error,
     skip_statement_separators,
@@ -741,11 +743,16 @@ class PerformStatementParser(IStatementParser):
         matches known statement keywords (extra guard needed for VARYING context).
         """
         tokens: list = []
+        paren_depth = 0
         while True:
             token = stream.peek()
             if not token:
                 break
             if token.type in _UNTIL_LAYOUT_TOKEN_TYPES:
+                stream.consume()
+                continue
+            # A separator comma/semicolon is a space (#386).
+            if is_bare_separator(token, paren_depth):
                 stream.consume()
                 continue
             if token.type == TokenType.PERIOD:
@@ -779,6 +786,7 @@ class PerformStatementParser(IStatementParser):
                 and token.value.upper() in STATEMENT_KEYWORDS
             ):
                 break
+            paren_depth = paren_depth_after(token, paren_depth)
             tokens.append(condition_token_text(token))
             stream.consume()
         return tokens
@@ -837,11 +845,16 @@ class PerformStatementParser(IStatementParser):
 
             # Parse condition (simplified)
             condition_tokens = []
+            paren_depth = 0
             while True:
                 token = stream.peek()
                 if not token:
                     break
                 if token.type in _UNTIL_LAYOUT_TOKEN_TYPES:
+                    stream.consume()
+                    continue
+                # A separator comma/semicolon is a space (#386).
+                if is_bare_separator(token, paren_depth):
                     stream.consume()
                     continue
                 if token.type == TokenType.PERIOD:
@@ -886,6 +899,7 @@ class PerformStatementParser(IStatementParser):
                     # read into the condition text and the handler was lost.
                     break
 
+                paren_depth = paren_depth_after(token, paren_depth)
                 condition_tokens.append(condition_token_text(token))
                 stream.consume()
 

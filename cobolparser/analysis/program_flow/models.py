@@ -36,6 +36,11 @@ class FlowEdgeType(Enum):
     # EXEC CICS HANDLE AID/CONDITION/ABEND option(paragraph): CICS branches
     # there (a GO TO the runtime performs) when the AID/condition occurs.
     CICS_HANDLE = "CICS_HANDLE"
+    # EXEC SQL WHENEVER SQLERROR|SQLWARNING|NOT FOUND GO TO p: the
+    # precompiler branches to p after any SQL statement the directive covers.
+    # One edge per procedure holding a covered SQL statement (the directive
+    # itself never runs).
+    SQL_WHENEVER = "SQL_WHENEVER"
     ALTER = "ALTER"
     FALL_THROUGH = "FALL_THROUGH"
     IF_BRANCH = "IF_BRANCH"
@@ -69,8 +74,11 @@ class FlowNode:
     has_stop_run: bool = False
     has_goback: bool = False
     has_exit_program: bool = False
+    #: EXEC CICS RETURN / XCTL / ABEND: leaves the program, at least when
+    #: it succeeds (one with RESP / NOHANDLE may also fall through).
+    has_cics_exit: bool = False
     #: A SORT/MERGE ``RETURN sd-file`` (reads the next sorted record) --
-    #: not a program terminator, unlike the three flags above.
+    #: not a program terminator, unlike the four flags above.
     has_return: bool = False
     has_exit_section: bool = False
     has_exit_paragraph: bool = False
@@ -114,6 +122,8 @@ class FlowNode:
             result["has_goback"] = True
         if self.has_exit_program:
             result["has_exit_program"] = True
+        if self.has_cics_exit:
+            result["has_cics_exit"] = True
         if self.has_return:
             result["has_return"] = True
         if self.has_exit_section:

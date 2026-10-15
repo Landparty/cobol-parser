@@ -119,31 +119,43 @@ class EntryStatement(CobolStatement):
 
     ENTRY statements define alternate entry points into a program, commonly
     used in IMS programs. The syntax is:
-        ENTRY literal-name [USING parameter-list]
+        ENTRY literal-name [USING {[BY] {REFERENCE | VALUE}} identifier ...]
 
     Example:
         ENTRY 'DLITCBL' USING LKPCB-IO LKPCB-ALT LKPCB-BPP100MA
+
+    ``parameter_modes`` runs parallel to ``using_parameters``: the passing
+    mode (``"REFERENCE"`` or ``"VALUE"``) each operand is received by.
+    REFERENCE is COBOL's default and holds until a BY phrase switches it.
     """
 
     def __init__(self, location: SourceLocation):
         super().__init__("ENTRY", location)
         self.entry_name: str | None = None
         self.using_parameters: list[str] = []
+        self.parameter_modes: list[str] = []
 
     def set_entry_name(self, name: str) -> None:
         """Set the entry point name (literal)."""
         self.entry_name = name
         self._add_unique_operand(name)
 
-    def add_using_parameter(self, param_name: str) -> None:
-        """Add a parameter to the USING clause."""
+    def add_using_parameter(
+        self, param_name: str, passing_mode: str = "REFERENCE"
+    ) -> None:
+        """Add a parameter to the USING clause, with its passing mode."""
         self.using_parameters.append(param_name)
+        self.parameter_modes.append(passing_mode)
         self._add_unique_operand(param_name)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         base = super().to_dict()
         base.update(
-            {"entry_name": self.entry_name, "using_parameters": self.using_parameters}
+            {
+                "entry_name": self.entry_name,
+                "using_parameters": self.using_parameters,
+                "parameter_modes": self.parameter_modes,
+            }
         )
         return base

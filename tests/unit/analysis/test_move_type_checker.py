@@ -1235,6 +1235,27 @@ class TestMoveCorrespondingPairs:
         found = [(v.source_name, v.target_name) for v in report.violations]
         assert found == [("QTY OF DTL OF GRP-A", "QTY OF DTL OF GRP-C")]
 
+    def test_unknown_category_pair_counts_as_unresolved(self):
+        # PIC N has no category rule here: the pair goes unchecked, so it must
+        # count as unresolved (as the equivalent plain MOVE does), not pass.
+        data = (
+            "       01 GRP-A.\n"
+            "          05 NM   PIC N(5).\n"
+            "          05 AMT  PIC S9(5)V99 COMP-3.\n"
+            "       01 GRP-B.\n"
+            "          05 NM   PIC 9(5)V99.\n"
+            "          05 AMT  PIC X(9).\n"
+        )
+        report = _check_source(data, "MOVE CORRESPONDING GRP-A TO GRP-B")
+        found = [(v.source_name, v.target_name) for v in report.violations]
+        assert found == [("AMT OF GRP-A", "AMT OF GRP-B")]
+        assert report.unresolved_count == 1
+        plain = _check_source(
+            "       01 WS-N PIC N(5).\n       01 WS-D PIC 9(5)V99.\n",
+            "MOVE WS-N TO WS-D",
+        )
+        assert plain.unresolved_count == 1
+
     def test_excluded_subordinates_do_not_pair(self):
         data = (
             "       01 GRP-A.\n"

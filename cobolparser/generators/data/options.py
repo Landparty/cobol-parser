@@ -14,6 +14,11 @@ class DataGeneratorOptions:
         seed: RNG seed; ``None`` draws one at random and records it on the
             resulting dataset.
         include_filler: Emit FILLER items as columns.
+        include_condition_filler: Emit a FILLER that owns a level-88
+            condition name even when ``include_filler`` is off. A program
+            tests such a FILLER through its 88 (``05 PIC X. 88 FLAG-ON``), so
+            program-scoped generation (gen-fixtures) needs its column to pin
+            the branch's value on; a plain copybook CSV does not.
         include_redefines: Emit fields belonging to a REDEFINES group.  Off by
             default because a redefinition aliases bytes already covered by
             another column.
@@ -43,6 +48,7 @@ class DataGeneratorOptions:
     rows: int = 10
     seed: int | None = None
     include_filler: bool = False
+    include_condition_filler: bool = False
     include_redefines: bool = False
     expand_occurs: bool = True
     max_occurs: int | None = None

@@ -652,6 +652,10 @@ operator table. Pinned by `tests/regression/test_evaluate_keyword_literal_when.p
 so without these `WHEN SPACES` and `WHEN 'SPACES'` built identical dicts.
 The markers are additive; `type` stays `"Literal"`. Pinned by
 `tests/regression/test_evaluate_figurative_when.py`.
+A `Range` selector likewise carries `"start_quoted": True` /
+`"end_quoted": True` when that bound is one STRING_LITERAL token
+(`WHEN 'a' THRU 'c'`; #391), absent otherwise, so a numeric range's dict is
+unchanged. Pinned by `tests/unit/test_evaluate_variants.py::TestRangeQuotedMarkers`.
 
 **Word-form operators and class/sign tests are conditions (#387,
 2026-10-14).** `_build_selector` also makes a `Condition` of a WHEN phrase
@@ -817,6 +821,14 @@ string (`"Y + 1 END-READ"`) instead of ending the clause, which the
 (`END-READ` is in neither set — only `SCOPE_TERMINATORS`). Pinned by
 `tests/regression/test_tier2_silent_drop_regressions.py::TestComputeDoesNotSwallowFollowingCall`
 and `::TestComputeDoesNotSwallowEnclosingScopeTerminator`.
+
+**COMPUTE `expression` text carried line breaks (`arithmetic_parsers.py`,
+#391, 2026-10-14):** the expression loop appended `NEWLINE` tokens'
+`"\n"` values, so `COMPUTE X = Y` / `+ 1` on two lines serialized as
+`"Y \n + 1"` and differed from the one-line form (which hid exact clones in
+`redundancy.py`). `NEWLINE` tokens are now consumed without being added to
+the expression text; `build_compute_expression_tree` already ignored them.
+Pinned by `tests/unit/test_compute_expression_parsing.py::TestComputeExpressionLayout`.
 
 **ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE never consumed their own explicit
 scope terminator, causing a phantom paragraph (`arithmetic_parsers.py`,
@@ -1093,6 +1105,18 @@ FILE STATUS variable. `ASSIGN TO INDD,` gave `assign_to == "INDD ,"`, so
 as unparsed. Tests: `test_environment_division_parser.py`
 (`test_separator_comma_and_semicolon_not_kept_in_names`) and
 `test_field_lineage.py` (`test_separator_after_assign_names_the_dd_port`).
+
+**Condition / expression separators (2026-10-14, issue #386):** the IF and
+PERFORM UNTIL (inline, out-of-line, VARYING) condition collectors, the
+EVALUATE subject and WHEN selector collectors, the SEARCH WHEN condition
+collector and the COMPUTE expression collector skip a
+separator comma/semicolon the way they skip NEWLINE, via
+`_utils.is_bare_separator(token, paren_depth)` / `paren_depth_after()`. Only
+outside parentheses: the comma in `FUNCTION MAX(A, B)` is kept. Before,
+`IF X = 1,` gave `right_operand == "1 ,"`, `IF X-ON;` lost its
+CONDITION_NAME shape, `EVALUATE Y;` gave subject `"Y ;"` and
+`COMPUTE Z = X + Y,` had no `expression_tree`. Tests:
+`tests/regression/test_condition_expression_separators.py`.
 
 # Statement-coverage audit (2026-09-02)
 
@@ -1598,6 +1622,16 @@ MoveTypeChecker → [analysis.md](analysis.md), H6 PathResolver →
   precedent) before the loop breaks; the existing top-level
   `_is_paragraph_or_section_start()` check then picks the identifier up as
   a normal new paragraph — no separate paragraph-name pre-scan was needed.
+  Issue #390 added three more exclusions: `SPECIAL_REGISTERS`
+  (`RETURN-CODE`, `TALLY`, `SORT-RETURN`, `WHEN-COMPILED`, the `XML-` /
+  `JSON-` registers, ... -- never declared, so (c) could not see them),
+  `NON_PARAGRAPH_RESERVED_WORDS` (`RUN`, `TRUE`, `SENTENCE`, ... -- reserved
+  words that lex as plain `IDENTIFIER`; `DECLARATIVES` / `FACTORY` /
+  `OBJECT` deliberately left out), and, when this parse normalized
+  fixed-format source (`CobolParser.source_is_fixed_format`), any token in
+  Area B (normalized column >= `NORMALIZED_AREA_B_COLUMN` = 5, i.e. old
+  column 12). Before it, `MOVE 0` / `TO` / `RETURN-CODE.` at one column
+  gave a MOVE with no target and a phantom `RETURN-CODE` paragraph.
   `INSPECT`'s `TALLYING` loop is a special case: its own inner check
   breaks without warning, because the outer "consume to period" trailer in
   `InspectStatementParser.parse()` re-checks the same un-consumed token and
@@ -2062,6 +2096,14 @@ every other UNSTRING serializes as before.
   relation of the leg to its left, falling back to the one handed in.
   Pinned in `tests/regression/test_review_2026_09_09_parser.py`
   (`TestFinding08ConditionTrees`).
+- `_conditions.py` (2026-10-14, issue #403): an abbreviated leg may open
+  with the optional `IS` of its relational operator (`A > 1 AND IS < 5`,
+  `A = 1 OR IS EQUAL TO 2`, `A > 1 AND IS NOT > 5`).
+  `_expand_abbreviated_condition` drops a leading `IS` when an operator or
+  `NOT` follows, then expands the leg like the form without `IS`; before,
+  the leg was an operand-less COMPARISON with `raw_condition` `IS < 5`. An
+  `IS` before anything else is left alone. Pinned in
+  `tests/regression/test_issue_403_abbreviated_leading_is.py`.
 - `string_unstring_parsers.py`: `BY` after `DELIMITED` is optional
   (`DELIMITED SIZE`, `DELIMITED "," OR ALL SPACE`). A delimiter is only
   consumed when the next token is operand-shaped (`_next_is_delimiter`), so
@@ -2351,6 +2393,11 @@ need no fix:
   can mutate the caller's data. Fixed by initializing `passing_mode` once
   before the loop instead of inside it, so it only changes when a `BY`
   keyword is actually encountered.
+  **Follow-up (#388):** `BY` is optional in IBM's CALL syntax, so a bare
+  `REFERENCE` / `CONTENT` / `VALUE` now switches the mode too
+  (`USING CONTENT X REFERENCE Y` -> X by content, Y by reference). Before,
+  the bare word was recorded as an argument (and a bare leading `VALUE`
+  dropped every argument). Pinned in `tests/unit/test_call_using_mode_without_by.py`.
 * **`COMPUTE id-1, id-2 = expr` (comma-separated multi-target) was a hard
   parse failure**, not a silent/warned drop (`arithmetic_parsers.py`,
   `ComputeStatementParser.parse`'s additional-target loop): unlike every
@@ -3178,8 +3225,11 @@ the four words joined `_PICTURE_TERMINATOR_KEYWORDS` so a PICTURE scan
 stops at them. `_parse_occurs_clause` handles `OCCURS UNBOUNDED DEPENDING
 ON` (peeked with `_peek_next_meaningful(offset=0)` so the count read's
 line-crossing guard keeps working; `min_times` 1, `max_times` None,
-`OccursClause.is_unbounded`). The Cython walker in `_data_fast.pyx` bails
-out to the Python path when the word after `OCCURS` is `UNBOUNDED` and when
+`OccursClause.is_unbounded`), and `OCCURS n TO UNBOUNDED [TIMES] DEPENDING
+ON` (Enterprise COBOL 6.x, issue #402): the TO branch takes `UNBOUNDED` as
+the maximum, keeping `min_times` n. The Cython walker in `_data_fast.pyx` bails
+out to the Python path when the word after `OCCURS`, or after `OCCURS n TO`,
+is `UNBOUNDED` and when
 `USAGE [IS]` is followed by `OBJECT` (it used to delegate to
 `parse_usage_clause`, which took `OBJECT` as the usage and left `REFERENCE
 class` as dropped tokens -- the extension-built CI matrix would have caught
@@ -3189,11 +3239,21 @@ byte per symbol).
 ## Statements
 
 `XmlJsonStatement`'s clause loop keeps `JSON` after `TO` (`CONVERTING x
-TO JSON DECIMAL`). `SetStatement.targets_are_address_of` is set by
+TO JSON DECIMAL`). Its `PROCESSING PROCEDURE [IS] p [THRU|THROUGH q]`
+consumer looks past line breaks (`peek_past_noise`) for `IS` and `THRU`
+(issue #394: a THRU on the next line used to fall into clause text and
+leave `processing_procedure_thru` None). `SetStatement.targets_are_address_of` is set by
 `SetStatementParser._collect_targets` for `SET ADDRESS OF x TO p` (it
 returns a third value now). `DeclareTableStatement` accepts a qualified
 `DECLARE SCHEMA.TABLE TABLE` (spaces around the period tolerated, name
 normalized).
+
+**`EXIT SECTION.` straight after a section header (issue #382,
+2026-10-14).** `procedure_boundaries.is_section_marker` treats any token
+followed by `SECTION` as a section header, so `WORK-SEC SECTION.` followed
+by `EXIT SECTION.` produced an empty section named `EXIT` that swallowed
+the paragraphs after it. `EXIT` (a reserved word) is now never a section
+marker. Inside a paragraph the statement loop already parsed it.
 
 ## Pre-header lines
 
@@ -3220,13 +3280,15 @@ latter also breaks on form feed / NEL / U+2028, which put every later
   (signed) literal or figurative constant and records it as
   `ConditionNameItem.false_value`; anything else after `WHEN` is left for
   the old skip.
-* **`INITIALIZE id ... [WITH FILLER] [{ALL | category} TO VALUE] [THEN
+* **`INITIALIZE id ... [[WITH] FILLER] [{ALL | category} TO VALUE] [THEN
   REPLACING ...] [THEN TO DEFAULT]`** (Enterprise COBOL 6): the
   `TO VALUE` / `TO DEFAULT` phrases warned "Unparsed tokens" and were
   dropped. The target loop now also stops at `ALL` / `THEN` / `TO` / a
   category word (`_INITIALIZE_PHRASE_STARTS`); the phrases are recorded as
   `InitializeStatement.to_value_category` / `.to_default`. `THEN` is
-  optional before `REPLACING` / `TO DEFAULT` (`_match_then`).
+  optional before `REPLACING` / `TO DEFAULT` (`_match_then`). `WITH` is
+  optional before `FILLER` (issue #402): a bare `FILLER` also ends the target
+  list and sets `with_filler`.
 
 Pinned by `tests/regression/test_level88_false_and_initialize_phrases.py`.
 # `*>` floating comments never reach the division parsers (2026-09-28)

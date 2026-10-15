@@ -15,6 +15,7 @@ from typing import Any
 
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
+from ..models.sql_statements import ExecSQLStatement
 from ..models.statements.call import EntryStatement
 from ..models.statements.control import (
     GoStatement,
@@ -29,12 +30,14 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ._cics import cics_terminator_kind
 from ._procedures import (
     ProcedureIndex,
     enclosing_section,
     qualify,
     statement_qualifier,
 )
+from ._sql_whenever import whenever_coverage
 
 
 @dataclass
@@ -172,6 +175,9 @@ class DeadCodeAnalyzer:
         # another section, or an ENTRY): on that path the section is not
         # running as a PERFORM, so its exit paragraph runs on.
         self._sections_entered_by_jump: set[str] = set()
+        # id(SQL statement) -> procedures its WHENEVER ... GO TO directives
+        # branch to (``_sql_whenever.whenever_coverage``).
+        self._whenever_coverage: dict[int, list[str]] = {}
         # Maps paragraph name -> its CobolParagraph node, for fall-through
         # termination checks. A section has an entry only when sentences sit
         # between its header and its first paragraph (the parser's unnamed
@@ -184,6 +190,15 @@ class DeadCodeAnalyzer:
         # A strict subset of ``_referenced_names``: see the class docstring
         # for why a PERFORM/SORT-procedure target is excluded.
         self._fallthrough_sources: set[str] = set()
+        # (start, end) key pairs of every ``p THRU q`` range, walked by
+        # ``_mark_thru_ranges`` once the fall-through sources are known.
+        self._thru_ranges: list[tuple[str, str]] = []
+        # Every procedure some GO TO / ALTER / CICS HANDLE lands on, range
+        # ends and section exits included. Not fall-through sources (a jump
+        # onto a range end returns), but inside an *enclosing* THRU range the
+        # landing point runs on to the next member: ``GO TO P1-EXIT`` inside
+        # ``PERFORM P0 THRU P2-EXIT`` lands in P1-EXIT and falls into P2.
+        self._jump_targets: set[str] = set()
         # Sections declared between DECLARATIVES. and END DECLARATIVES.
         # (and their paragraphs): USE procedures the runtime invokes, so
         # they are live without any PERFORM naming them, and they are never
@@ -217,6 +232,8 @@ class DeadCodeAnalyzer:
         self._paragraph_nodes = {}
         self._terminates_cache = {}
         self._fallthrough_sources = set()
+        self._thru_ranges = []
+        self._jump_targets = set()
         self._declarative_procs = set()
 
         proc_division = ast.procedure_division
@@ -226,6 +243,7 @@ class DeadCodeAnalyzer:
         self._collect_procedures(proc_division)
         self._collect_declaratives(proc_division)
         statements = self._own_statements(ast)
+        self._whenever_coverage = whenever_coverage(statements)
         by_owner: dict[str | None, list[Any]] = {}
         for stmt in statements:
             owner = None if self._always_counts(stmt) else self._owner(stmt)
@@ -254,6 +272,11 @@ class DeadCodeAnalyzer:
             for owner in pending:
                 self._collect_references(by_owner.get(owner, []))
             self._collect_fallthrough_refs()
+            # Needs this round's fall-through sources and jump targets: a
+            # THRU range member is reached by running on from the one before
+            # it, or by landing in it. Inside the worklist, so a range
+            # member's own statements are admitted next round.
+            self._mark_thru_ranges()
             # When a section is referenced, all its paragraphs are too
             self._propagate_section_downward()
             pending = [
@@ -510,6 +533,8 @@ class DeadCodeAnalyzer:
                 self._collect_xml_refs(stmt)
             elif getattr(stmt, "node_type", None) == "EXEC_CICS":
                 self._collect_cics_handle_refs(stmt)
+            elif isinstance(stmt, ExecSQLStatement):
+                self._collect_sql_whenever_refs(stmt)
 
     def _collect_xml_refs(self, stmt: XmlJsonStatement) -> None:
         """``XML PARSE ... PROCESSING PROCEDURE p [THRU q]`` runs p (through
@@ -528,6 +553,17 @@ class DeadCodeAnalyzer:
             if value and self._is_valid_procedure_name(value):
                 for key in self._keys(stmt, value):
                     self._add_goto_ref(key)
+
+    def _collect_sql_whenever_refs(self, stmt: ExecSQLStatement) -> None:
+        """``EXEC SQL WHENEVER SQLERROR|SQLWARNING|NOT FOUND GO TO p``: the
+        precompiler puts a ``GO TO p`` after every SQL statement the
+        directive covers (in source order), so ``p`` is reached like a GO TO
+        written there -- from the covered statement, once that statement's
+        procedure is reached, not from the directive, which never runs."""
+        for target in self._whenever_coverage.get(id(stmt), []):
+            if self._is_valid_procedure_name(target):
+                for key in self._keys(stmt, target):
+                    self._add_goto_ref(key, enclosing_section(stmt))
 
     def _collect_range_end(self, stmt: Any) -> None:
         """Record the closing paragraph of a PERFORM/SORT/MERGE THRU range.
@@ -698,6 +734,39 @@ class DeadCodeAnalyzer:
             if current in self._fallthrough_sources and not self._terminates(current):
                 self._add_ref(next_proc)
                 self._fallthrough_sources.add(next_proc)
+            elif current in self._fallthrough_sources:
+                self._collect_exit_section_ref(current)
+
+    def _collect_exit_section_ref(self, name: str) -> None:
+        """Credit the procedure after *name*'s section when *name* leaves
+        the section by ``EXIT SECTION`` and that section keeps running.
+
+        ``EXIT SECTION`` passes control to the end of the section: the rest
+        of the section is skipped, and what happens next is what happens at
+        the end of the section's last paragraph. A PERFORMed section returns
+        to its performer; a section fallen into, gone to or jumped into runs
+        on into the procedure after it. Only the latter is a fall-through
+        edge here, mirroring how ``_section_exit_jumps`` settles a GO TO
+        onto a section's exit paragraph.
+        """
+        section = self._exited_section(name)
+        if section is None:
+            return
+        if (
+            section not in self._fallthrough_sources
+            and section not in self._sections_entered_by_jump
+        ):
+            return
+        paras = self._section_paragraphs.get(section)
+        last = paras[-1] if paras else section
+        try:
+            pos = self._ordered_procedures.index(last)
+        except ValueError:
+            return
+        if pos + 1 < len(self._ordered_procedures):
+            successor = self._ordered_procedures[pos + 1]
+            self._add_ref(successor)
+            self._fallthrough_sources.add(successor)
 
     def _terminates(self, name: str) -> bool:
         """Check whether procedure *name* unconditionally transfers control
@@ -728,15 +797,42 @@ class DeadCodeAnalyzer:
             # whatever comes next. A section with sentences before its first
             # paragraph is keyed here to that unnamed body.
             return False
-        return any(self._is_terminator(stmt) for stmt in para.statements)
+        if any(self._is_terminator(stmt) for stmt in para.statements):
+            return True
+        # EXIT SECTION never falls into the next paragraph: it leaves for
+        # the end of the section (see ``_collect_exit_section_ref``).
+        return self._exited_section(name) is not None
+
+    def _exited_section(self, name: str) -> str | None:
+        """The section procedure *name* leaves by a top-level ``EXIT
+        SECTION``, or ``None``.
+
+        ``None`` too when an unconditional terminator comes first (that one
+        fires instead) or when *name* is not in a section, where the
+        compiler rejects ``EXIT SECTION`` and nothing is assumed of it.
+        """
+        para = self._paragraph_nodes.get(name)
+        section = self._index.section_of(name)
+        if para is None or section is None:
+            return None
+        for stmt in para.statements:
+            if self._is_terminator(stmt):
+                return None
+            if isinstance(stmt, ExitStatement) and stmt.exit_type == "SECTION":
+                return section
+        return None
 
     @staticmethod
     def _is_terminator(stmt: Any) -> bool:
         """Check whether *stmt* unconditionally transfers control away when
         reached: STOP RUN (not STOP 'literal', which merely halts pending
-        operator action), GOBACK, EXIT PROGRAM, or a bare (non-DEPENDING)
-        GO TO.
+        operator action), GOBACK, EXIT PROGRAM, a non-DEPENDING GO TO --
+        including the alterable ``GO TO.`` with no operand, which always
+        transfers to whatever an ALTER last set it to -- or EXEC CICS
+        RETURN / XCTL / ABEND (see ``_cics``).
         """
+        if cics_terminator_kind(stmt) is not None:
+            return True
         if isinstance(stmt, GobackStatement):
             return True
         if isinstance(stmt, StopStatement):
@@ -744,7 +840,7 @@ class DeadCodeAnalyzer:
         if isinstance(stmt, ExitStatement):
             return stmt.exit_type == "PROGRAM"
         if isinstance(stmt, GoStatement):
-            return bool(stmt.target_paragraph) and not stmt.depending_on_variable
+            return not stmt.depending_on_variable
         return False
 
     @staticmethod
@@ -784,7 +880,7 @@ class DeadCodeAnalyzer:
             self._add_ref(key)
         for s_key in starts:
             for e_key in ends:
-                self._mark_thru_range(s_key, e_key)
+                self._thru_ranges.append((s_key, e_key))
 
     def _add_ref(self, key: str | None) -> None:
         """Add a procedure key as referenced."""
@@ -835,6 +931,7 @@ class DeadCodeAnalyzer:
         if not key:
             return
         self._note_jump_into(key, from_section)
+        self._jump_targets.add(key)
         if key in self._range_ends:
             self._add_ref(key)
         elif key in self._section_exits:
@@ -845,23 +942,61 @@ class DeadCodeAnalyzer:
         else:
             self._add_jump_ref(key)
 
-    def _mark_thru_range(self, start: str | None, end: str | None) -> None:
-        """Mark all procedures between keys start and end (inclusive) as
-        referenced.
+    def _mark_thru_ranges(self) -> None:
+        """Mark the procedures each ``p THRU q`` range actually runs.
 
-        Uses index-based lookup so that a missing or inverted range does not
-        accidentally mark procedures all the way to the end of the list.
+        A range runs its procedures in source order, so -- like the section
+        walk in ``_propagate_section_references`` -- a member is reached
+        only when the member before it was reached and does not terminate,
+        or when control lands in it some other way (a GO TO / ALTER / ENTRY
+        target, or a procedure fall-through already reached). Marking every
+        procedure between the two ends hid the commonest legacy shape of
+        dead code: an obsolete stub inside ``PERFORM 1000-PROC THRU
+        1000-EXIT`` that every path jumps over with ``GO TO 1000-EXIT``
+        (issue #381). A section inside the range is walked the same way,
+        since its paragraphs follow its header in ``_ordered_procedures``.
+
+        Landing in a member means any jump target, not only a fall-through
+        source: a GO TO onto an *inner* range's end (``GO TO P1-EXIT`` with
+        ``PERFORM P1 THRU P1-EXIT`` nested inside ``PERFORM P0 THRU
+        P2-EXIT``) returns from the inner PERFORM but, on the outer range's
+        path, runs on into the next member. And an ``EXIT SECTION`` leaves
+        only its own section: inside a range spanning sections, control
+        carries on at the next section header in the range.
+
+        Both ends are always referenced (``_collect_range_refs``); a missing
+        or inverted range marks nothing more, rather than running on to the
+        end of the program.
         """
-        if not start or not end:
-            return
-        try:
-            start_index = self._ordered_procedures.index(start)
-            end_index = self._ordered_procedures.index(end)
-        except ValueError:
-            return
+        for start, end in self._thru_ranges:
+            try:
+                start_index = self._ordered_procedures.index(start)
+                end_index = self._ordered_procedures.index(end)
+            except ValueError:
+                continue
+            if start_index > end_index:
+                continue
+            live = True
+            section_exited = False
+            for name in self._ordered_procedures[start_index : end_index + 1]:
+                resumes = section_exited and name in self._section_paragraphs
+                if resumes:
+                    section_exited = False
+                reached = (
+                    live
+                    or resumes
+                    or name in self._fallthrough_sources
+                    or name in self._jump_targets
+                )
+                if reached:
+                    self._referenced_names.add(name)
+                    section_exited = section_exited or self._exits_section(name)
+                live = reached and not self._terminates(name)
 
-        if start_index > end_index:
-            return
-
-        for name in self._ordered_procedures[start_index : end_index + 1]:
-            self._referenced_names.add(name)
+    def _exits_section(self, name: str) -> bool:
+        """Whether procedure *name* has a top-level ``EXIT SECTION``."""
+        para = self._paragraph_nodes.get(name)
+        return para is not None and any(
+            isinstance(stmt, ExitStatement) and stmt.exit_type == "SECTION"
+            for stmt in para.statements
+        )

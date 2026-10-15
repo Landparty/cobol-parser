@@ -14,6 +14,54 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-14 -- issue #395: dynamic-SQL trace respects statement order
+
+[analysis.md](analysis.md) (`SQL_DYNAMIC_CONCATENATION` row):
+`SqlCicsAnalyzer` no longer blames a PREPARE on a STRING the buffer was
+overwritten after. A whole-item `MOVE` written directly earlier in the
+PREPARE's paragraph cuts off every writer before it and elsewhere;
+`_WriterFlow` in `sql_cics_lint.py` owns the rule. Without such a MOVE the
+trace stays program-wide, so a statement built in a PERFORMed paragraph is
+still found.
+## 2026-10-14 -- issue #402: optional-keyword forms
+
+[parser.md](parser.md): `OCCURS n TO UNBOUNDED` is an unbounded ODO table
+(Python walker and the `_data_fast.pyx` bail-out); `INITIALIZE ... FILLER`
+without WITH sets `with_filler`; FD `RECORD VARYING [IN SIZE] n TO m`
+without FROM takes n as the minimum, and a lone `VARYING n` leaves the maximum None. `ENTRY ... USING [BY] VALUE/REFERENCE`
+keeps every operand and records `EntryStatement.parameter_modes`, which
+[analysis.md](analysis.md)'s `ProgramSignatureExtractor` now carries as each
+ENTRY operand's `by_clause`.
+## 2026-10-14 -- issue #403: leading IS in an abbreviated leg
+
+[parser.md](parser.md): `_expand_abbreviated_condition` drops the optional
+`IS` that opens an abbreviated leg (`IF A > 1 AND IS < 5`), so the leg
+expands to `A < 5` instead of an operand-less COMPARISON.
+## 2026-10-14 -- issue #390: special registers are not paragraph headers
+
+[parser.md](parser.md) (the `looks_like_paragraph_boundary()` entry):
+special registers (`RETURN-CODE`, `TALLY`, ...), reserved words that lex as
+identifiers (`RUN`, `TRUE`, ...) and, in fixed-format source, any token in
+Area B are never read as a paragraph header swallowed by a missing period.
+## 2026-10-14 -- issue #394: XML PARSE THRU on the next line
+
+[ast-models.md](ast-models.md), [analysis.md](analysis.md): the
+`PROCESSING PROCEDURE [IS] p [THRU|THROUGH q]` consumer in
+`xml_json_parser.py` looks past line breaks for `IS` and `THRU`/`THROUGH`
+(`peek_past_noise`). A THRU on its own line used to fall into
+`operands`/`clause_items`, leaving `processing_procedure_thru` None, so
+dead-code, program-flow and lint reported the handler range dead. An `IS`
+on its own line was read as the procedure name the same way.
+## 2026-10-15 -- gen-fixtures follow-ups to #364 and #404
+
+[generators.md](generators.md): the scenario planner no longer merges arms
+on two 01 records of one FD (only one view is generated per scenario, so the
+second record's arm was lost while coverage counted it merged); an arm whose
+own path pins both is missed, and a scenario that still drops pins has its
+arms demoted. The "alternate view(s) not generated" note names only records
+no scenario used. A FILLER that owns a level-88 keeps its gen-fixtures column
+under the path segment `FILLER#<n>`, so its branch witness is generated.
+
 ## 2026-10-14 -- issue #404: an unnamed data entry is FILLER
 
 [ast-models.md](ast-models.md): `05 PIC X(3).` (FILLER omitted) now has

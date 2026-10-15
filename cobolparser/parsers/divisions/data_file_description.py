@@ -170,9 +170,10 @@ class FileDescriptionClauseParser:
                 if "VARYING" in upper:
                     nums = _ints(tokens)
                     low: int | None = nums[0] if nums else None
-                    high: int | None = (
-                        nums[1] if len(nums) > 1 else (nums[0] if nums else None)
-                    )
+                    # A lone integer with neither FROM nor TO is integer-6,
+                    # the minimum (``[[FROM] integer-6] [TO integer-7]``):
+                    # the maximum stays None, the largest record's size.
+                    high: int | None = nums[1] if len(nums) > 1 else None
                     if "FROM" in upper or "TO" in upper:
                         # ``FROM integer`` and ``TO integer`` are each
                         # optional (an omitted bound is the smallest /
@@ -182,6 +183,17 @@ class FileDescriptionClauseParser:
                         # minimum of 80, and ``FROM 20`` a maximum of 20.
                         low = _keyword_int(tokens, upper, "FROM")
                         high = _keyword_int(tokens, upper, "TO")
+                        if low is None and "FROM" not in upper and "TO" in upper:
+                            # The FROM word itself is optional too
+                            # (``[[FROM] integer-6] [TO integer-7]``), so
+                            # ``VARYING IN SIZE 10 TO 30`` has a minimum of
+                            # 10: the integer right before TO.
+                            to_idx = upper.index("TO")
+                            if to_idx > 0:
+                                try:
+                                    low = int(tokens[to_idx - 1])
+                                except (TypeError, ValueError):
+                                    low = None
                     depending = None
                     if "DEPENDING" in upper:
                         # data-name follows DEPENDING [ON]

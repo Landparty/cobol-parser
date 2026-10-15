@@ -56,7 +56,7 @@ either by bare name.
   section (`enclosing_section(stmt)` walks `.parent`), else the unique
   name; an ambiguous reference resolves to *every* candidate (keeps code
   alive, never hides it). Used by `program_flow` (scanner + `EdgeCollector`),
-  `DeadCodeAnalyzer` and `ComplexityAnalyzer`.
+  `DeadCodeAnalyzer`, `ComplexityAnalyzer` and `IOSequenceAnalyzer`.
 - **Flow output contract** — `FlowNode.name` stays the bare name;
   `FlowNode.qualified_name` is set (and emitted by `to_dict`) only for a
   shared name; `FlowNode.key` is the one every edge `source`/`target`,
@@ -145,7 +145,8 @@ the one immediately before it is itself already known to be reachable
 extending) and does not terminate per `_terminates`: any of its own
 top-level statements (not just the last one — see Copilot follow-up below)
 is a hard terminator (`STOP RUN` — not `STOP 'literal'`, which merely
-halts pending operator action; `GOBACK`; `EXIT PROGRAM`) or an
+halts pending operator action; `GOBACK`; `EXIT PROGRAM`; `EXEC CICS
+RETURN` / `XCTL` / `ABEND`, see `_cics.py` below) or an
 unconditional (non-`DEPENDING`) `GO TO`. The reachability gate matters:
 without it, a chain of paragraphs that are *all* themselves unreached
 would still credit each other purely for standing next to one another in
@@ -187,9 +188,33 @@ transfers that land in a procedure and carry on — and then by
 paragraph reached by falling in is itself a fall-through source. PERFORM
 and SORT/MERGE procedure targets are deliberately absent: they stay in
 `_referenced_names` (so they are never reported dead) without licensing an
-edge out of their own end. `_mark_thru_range` still marks a whole
-`PERFORM A THRU C` range referenced, and C still does not escape. Pinned by
+edge out of their own end. A `PERFORM A THRU C` range's end C still does
+not escape. Pinned by
 `tests/unit/analysis/test_dead_code.py::TestFallThroughOnlyEscapesReachableRuns`.
+
+**THRU ranges are walked, not blanket-marked (issue #381, 2026-10-14).**
+`_mark_thru_range` used to mark every procedure between the two ends of a
+`p THRU q` range referenced, so an obsolete stub inside `PERFORM 1000-PROC
+THRU 1000-EXIT` that every path jumps over with `GO TO 1000-EXIT` was never
+reported. Ranges are now recorded during collection (`_thru_ranges`) and
+walked by `_mark_thru_ranges` *after* `_collect_fallthrough_refs`, in source
+order like the section walk: a member is reached when the one before it was
+reached and does not `_terminate`, or when it is a fall-through source (a
+GO TO / ALTER / ENTRY landing) or a section-exit jump target. Sections in the
+range are walked through, since their paragraphs follow the header in
+`_ordered_procedures`. Both ends stay referenced unconditionally. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestThruRangeSkippedMembers`.
+Two refinements from review: "landing in it" means any member in
+`_jump_targets` (every GO TO / ALTER / CICS HANDLE target, *including*
+range ends and section exits, which are not fall-through sources) -- so
+`GO TO P1-EXIT` inside a `PERFORM P0 THRU P2-EXIT` that also nests
+`PERFORM P1 THRU P1-EXIT` still runs on into P2; and an `EXIT SECTION`
+member (`_exits_section`) resumes the walk at the next section header in the
+range, since it leaves only its own section. `_mark_thru_ranges` runs
+*inside* the #384 worklist right after `_collect_fallthrough_refs`, so a
+reached range member's statements are admitted the next round (after the
+loop, a PERFORM in a range member would never be collected). Pinned by
+`TestThruRangeNestedAndSectionExits`.
 
 **Known related over-approximation, deliberately not changed.**
 `ProgramFlowAnalyzer`'s `graph.build_fall_through_edges` still emits a
@@ -214,6 +239,31 @@ statement instead of just the last. Nested statements (inside an
 IF/EVALUATE arm) are still deliberately excluded — same rationale as
 before. Pinned by
 `test_terminator_earlier_in_paragraph_still_cuts_off_fall_through`.
+
+**Alterable `GO TO.` and `EXIT SECTION` are terminators too (issue #382,
+2026-10-14).** Both `_is_terminator`s (here and `program_flow/scanner.py`)
+required `stmt.target_paragraph`, so the operand-less alterable `GO TO.`
+(always jumps wherever an ALTER last pointed it) read as falling through;
+now any non-`DEPENDING` `GoStatement` terminates. `EXIT SECTION` passes
+control to the end of its section, so a paragraph whose first top-level
+transfer is `EXIT SECTION` (and that sits in a section -- outside one the
+compiler rejects it) never falls into the next paragraph
+(`_exited_section`, folded into `_terminates`). What happens after the end
+of the section is what happens off its last paragraph: in dead-code,
+`_collect_exit_section_ref` credits the procedure after the section's last
+member only when the section keeps running (in `_fallthrough_sources` or
+`_sections_entered_by_jump`), so a PERFORMed section returns and credits
+nothing. In program-flow the scanner records the procedure in
+`exit_section_procedures` and `build_fall_through_edges` draws a
+`FALL_THROUGH` edge to the section's successor only when the section is
+fallen into (an incoming fall-through edge, tracked in the same pass) or
+in `ProgramFlowAnalyzer._sections_entered` (entry point / ENTRY, a written
+GO TO from another section, or the target of any other `GOTO_EDGE_TYPES`
+edge -- ALTER, CICS HANDLE, and any handler branch added to that set later
+-- wherever it is written). That gate is
+stricter than the plain last-paragraph fall-through, which stays an
+over-approximation. Pinned by
+`tests/unit/analysis/test_exit_section_and_alterable_goto.py`.
 
 **A paragraph holding an ENTRY statement is always referenced (2026-08-11
 fix, audit finding #5).** `EntryStatement` marks an alternate external entry
@@ -532,6 +582,21 @@ options` (option keyword -> parenthesized argument text) and
 inside one of these statements is no longer falsely reported unused. See
 `TestExecCicsAndImsArguments` in `test_unused_variables.py`.
 
+**OO FACTORY / OBJECT data is shared with its METHODs (issue #379,
+2026-10-14).** A contained unit's references normally count only for the
+container's GLOBAL items. In IBM OO COBOL, though, the data of a FACTORY or
+OBJECT paragraph is visible to every METHOD in it with no GLOBAL clause, so
+when `ast.unit_kind` is in `_OO_DATA_OWNERS` every item is matched against
+`_nested_referenced_names(ast)` too. Instance data that only methods touch
+(all of it, in practice) is no longer reported unused. Factory and object
+scopes stay separate: an OBJECT method's reference does not use a FACTORY
+item of the same name. The whole-group rules (`_whole_group_references`:
+CALL USING, XML/JSON GENERATE/PARSE) and `_corresponding_pairs` read the
+methods' statements too (`_all_contained_units`), since the FACTORY/OBJECT
+unit has none of its own. Known gap, shared with the GLOBAL path: a
+method-local item that shadows an instance item still credits the instance
+item. See `TestObjectOrientedUnitData`.
+
 CLI: `unused-variables` subcommand — see [cli.md](cli.md).
 
 ## ProgramFlowAnalyzer
@@ -743,7 +808,8 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   **strongly connected component** (`_components`, Tarjan over
   `_ESCAPE_EDGE_TYPES`), not the cycle alone: `HIGH` if no paragraph in the
   component has an edge leaving it or a program-terminating statement
-  (`has_stop_run`/`has_goback`/`has_exit_program` on the `FlowNode`),
+  (`has_stop_run`/`has_goback`/`has_exit_program`/`has_cics_exit` on the
+  `FlowNode`),
   `MEDIUM` otherwise. Per-cycle checking (before #393) let two cycles that
   share a paragraph each "escape" into the other, so an inescapable
   `P1 -> P2 -> P1` / `P1 -> P3 -> P1` pair read MEDIUM. `has_return` is a
@@ -866,7 +932,14 @@ window, no near-miss/type-3 similarity scoring, matching the design goal of
 kinds:
 
 - **Type-1 (exact)**: identical statement types, operands, and condition
-  text, verbatim -- and everything else each statement does (#262, below).
+  text -- and everything else each statement does (#262, below). "Identical"
+  is up to what COBOL itself ignores (#391): `_normalize_text` collapses
+  every whitespace run outside a literal to one space and upper-cases all
+  text outside a literal, for *both* types, so a line break inside a
+  COMPUTE or condition, or a paragraph written in lowercase, no longer hides
+  a Type-1 clone (lowercase used to drop to Type-2; a line break used to
+  lose the match entirely). Literal text stays exactly as written:
+  `DISPLAY "Done"` vs `display "DONE"` is not a clone.
 - **Type-2 (renamed)**: identical statement-type/control-flow shape with
   identifier-shaped tokens (data-names, paragraph-names) consistently
   substituted with per-paragraph positional placeholders (`ID1`, `ID2`,
@@ -909,7 +982,15 @@ by owner decision the `type1`/`type2` digests changed in place, and digests
 stored by earlier scans simply stop matching new ones. Known residual: the
 parser stores some literals unquoted (an INSPECT `'X'`, a STRING
 `DELIMITED BY 'X'`), so under Type-2 only, two such literals still read as a
-consistent rename; Type-1 tells them apart.
+consistent rename. Since #391 folds case outside quotes, `_unquoted_literals`
+and `_selector_text` re-quote the unquoted literals the AST *marks* as
+literals (static CALL target, INVOKE method literal, STOP literal, EVALUATE
+`WHEN` Literal with `quoted` and Range bounds with `start_quoted` /
+`end_quoted`), so a case-only difference there still breaks Type-1. Where the
+AST does not mark them -- CANCEL targets, ACCEPT ... FROM ENVIRONMENT names,
+EXEC CICS option values, literal arguments inside a COMPUTE `expression`,
+XML/JSON `clause_text` -- a case-only literal difference reads as the same
+text, so Type-1 can group them (it could not before #391).
 
 **Reuses `unused_variables.py`'s `_NON_IDENTIFIER_WORDS`/quoted-text
 handling verbatim** rather than re-deriving a second reserved-word list --
@@ -1128,6 +1209,17 @@ resolve to their full paragraph range; a re-entrant PERFORM is skipped
 via a range stack; per-chain visited sets keep GO TO cycles finite).
 Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Paragraphs
 unreachable from the entry procedure are no longer walked at all.
+
+**GO TO / PERFORM targets resolve section-first (2026-10-14, issue #335).**
+The walk's name -> paragraph-index maps (`_name_first` / `_name_last`) are
+keyed by `ProcedureIndex` keys, and `_resolve()` applies its rule from the
+section of the paragraph being walked (`_current_section`, restored after
+each PERFORM) plus the `target_qualifier` / `thru_qualifier` metadata. With
+a `SEC-EXIT` in every section, `GO TO SEC-EXIT` used to land on the first
+section's exit -- outside the PERFORMed range, so the PERFORM ended there,
+the real exit's CLOSE was never seen, and FILE_LEFT_OPEN was reported.
+Conditional GO TO targets are resolved when queued. Pinned by
+`tests/unit/analysis/test_io_sequence.py::TestSectionLocalParagraphNames`.
 
 **PERFORM ranges are summarized, not re-inlined (2026-10-14, #371).** Each
 PERFORM used to re-walk its target paragraphs through Python recursion, so a
@@ -1356,8 +1448,9 @@ item's own section. Needs `divisions/base.py`'s new `using_parameter_modes`
 metadata (name → `"VALUE"`/`"REFERENCE"`, alongside the existing
 `using_parameters` name list) to know the callee's declared mode; only
 resolvable for a static CALL to a program in the same source whose implicit
-entry interface was collected — an `ENTRY` statement's own USING carries no
-BY clause in COBOL, so a CALL to one is never checked for this. `BY CONTENT`
+entry interface was collected. A CALL to an `ENTRY` statement is never checked
+for this, even though `EntryStatement.parameter_modes` now records an ENTRY's
+own `USING [BY] VALUE/REFERENCE` modes (issue #402). `BY CONTENT`
 call arguments are never flagged either way (no USING counterpart to compare
 against).
 
@@ -2689,7 +2782,10 @@ clickable after expansion. Pinned by
 and `tests/regression/test_nested_program_units.py`.
 `stamp_report_origins(report_dict, source_map)` (2026-09-27) is its twin for
 a serialized analyzer report: every `"location": {"line": N}` mapping gains a
-sibling `"origin"`. Used by `scan_one` and the `unused-variables` CLI.
+sibling `"origin"`; xref's `"definition"` gains `"definition_origin"` and
+program-flow's `"exit_statement_location"` gains `"exit_statement_origin"`
+(`_ORIGIN_KEYS`, #367). Used by `scan_one` and every analyzer CLI's
+`_emit_report`.
 
 **And at which column (#301, 2026-10-13).** `LintFinding.origin_column`,
 serialized as `origin.column` only when known, is the column an editor
@@ -2733,6 +2829,25 @@ program.
   Both joined `INTERNAL_EDGE_TYPES` and the PERFORM/GOTO sets the cycle
   classifier, complexity and the flowcharts read
   (`flowchart.py`'s label/verbose/perform/goto tables).
+* **SQL WHENEVER handlers** (#349): `EXEC SQL WHENEVER SQLERROR|SQLWARNING|
+  NOT FOUND GO TO p` (also `GOTO`, `:p`; the EXEC text collector leaves
+  `GOTO:P`) is a precompiler directive, not a statement: it puts a `GO TO p`
+  after every *executable* SQL statement that follows it in source order
+  (line, column) until a later WHENEVER for the same condition replaces it
+  (`CONTINUE` switches it off; DECLARE / INCLUDE / BEGIN|END DECLARE SECTION
+  are not covered). `analysis/_sql_whenever.py`'s `whenever_coverage()`
+  maps each covered SQL statement (by `id`) to its targets, once per
+  analysis, and both consumers read it so they cannot disagree:
+  `DeadCodeAnalyzer._collect_sql_whenever_refs` adds a GO TO-shaped
+  reference **from the covered statement** (so it counts only once that
+  statement's procedure is admitted by the #384 worklist; WHENEVER is
+  deliberately *not* in `_always_counts`), and
+  `EdgeCollector.process_sql_whenever` draws a `FlowEdgeType.SQL_WHENEVER`
+  edge from each procedure holding covered SQL (one per procedure/target).
+  The first cut drew the edge from the directive's paragraph; review of #461
+  showed a never-performed "SQL setup" paragraph then made program flow
+  call the handler unreachable while dead-code called it live. Joined the
+  INTERNAL/GOTO sets and flowchart tables like `CICS_HANDLE`. Pinned by `tests/unit/analysis/test_sql_whenever_references.py`.
 * **CICS translator items** (`CICSONLN`, `CICSLINK`): `LinkageChecker`
   marks `DFHEIBLK` and `DFHCOMMAREA` referenced unconditionally
   (`_CICS_TRANSLATOR_ITEMS` -- the translator passes them on the USING it
@@ -2914,7 +3029,8 @@ caller would have to write it (a group item is described by level and length
 rather than a fabricated picture). `EntryPoint.kind` is `"procedure-division"`
 or `"entry-statement"`. `by_clause` is the callee's declared passing mode
 (`"REFERENCE"` / `"VALUE"`, from the division's `using_parameter_modes`
-metadata) on the primary entry, `None` on an ENTRY statement's operands;
+metadata) on the primary entry, and from `EntryStatement.parameter_modes` on
+an ENTRY statement's operands (issue #402; it used to be `None` there);
 `call_example()` writes a `BY VALUE` / `BY REFERENCE` phrase only where the
 mode changes (`CALL "E1" USING LK-A, BY VALUE LK-B RETURNING LK-R`). The
 RETURNING item counts as named, so it is never `unreferenced_linkage`.
@@ -3020,6 +3136,23 @@ carries `member`, `path` and `nested`, where for a nested edge `program` is the
 *outer member name*, which is what makes a `PROG1 -> OUTER -> INNER` chain
 walkable in either direction.
 
+**Library-qualified COPY (#351).** `COPY REC OF LIBA` and `COPY REC IN LIBB`
+are two different files, so the builder's caches are keyed by more than the
+member name: `_member_paths` / `_member_failures` on `(member, library)`, and
+`_member_copies` on the resolved file path. A nested COPY is resolved with its
+own `library_qualifier`, as the expander does. `CopyEdge` carries `library`
+(the qualifier as written, case kept) and, for a nested edge, `parent_path` --
+the outer member's file. `programs_using()` and `CopybookImpactAnalyzer` walk
+up *edge by edge* (`CopyEdge._is_parent`: same name, and same file whenever the nested
+edge has a `parent_path`), so `LIBB/REC -> INNER` reaches only the programs
+whose `REC` resolved to `LIBB/REC.cpy` -- never a program whose `REC` did not
+resolve at all. A hand-built nested edge with no `parent_path` matches by name
+alone (the pre-#351 behaviour). `ImpactReport.paths`
+lists every file the member name resolved to; with more than one, `fields` is
+their union and `unresolved` says so. The DOT/Mermaid renderings still draw
+one node per member *name*, and draw each `(program, member, nested)` edge once
+(`_rendered_copy_edges`), however many files sit behind it.
+
 Two rules hold throughout:
 
 1. **A quiet report is never a complete one.** A file that would not parse lands
@@ -3072,10 +3205,10 @@ report.sql_statements / report.cics_statements
 | Kind | Why it is a defect, not a style note |
 |------|--------------------------------------|
 | `SQL_NO_SQLCODE_CHECK` | An executable `EXEC SQL` whose outcome is never looked at: no `SQLCODE`/`SQLSTATE`/`SQLCA` mention in the statements that follow, no `WHENEVER SQLERROR` in effect. DB2 does not raise — it sets a number and returns, and the program commits whatever it was going to commit. The most common real defect in DB2 COBOL and the cheapest to find. |
-| `SQL_DYNAMIC_CONCATENATION` | A host variable handed to `PREPARE` / `EXECUTE IMMEDIATE` whose content was assembled by `STRING` or moved in from another item — SQL injection with a mainframe accent. Parameter markers (`EXECUTE ... USING :HV`) are the fix and are never flagged. |
+| `SQL_DYNAMIC_CONCATENATION` | A host variable handed to `PREPARE` / `EXECUTE IMMEDIATE` whose content was assembled by `STRING` or moved in from another item — SQL injection with a mainframe accent. Parameter markers (`EXECUTE ... USING :HV`) are the fix and are never flagged. Writers are counted program-wide, except that a `MOVE` written directly in the PREPARE's paragraph, before it, that overwrites the whole item (no reference modification, not `CORRESPONDING`) cuts off everything before it: then only that MOVE, the writers between it and the PREPARE (conditional ones and those in PERFORMed paragraphs included) and, inside an inline `PERFORM` loop, the loop's later writers count (#395). A `STRING` never cuts the trace — it leaves bytes past what it transfers as they were. |
 | `SQL_HARDCODED_CREDENTIALS` | A literal user id or password in `EXEC SQL CONNECT`. It is in the source, the listing, the load library, and every copy anyone took of any of them. |
 | `SQL_SELECT_WITHOUT_INTO` | A singleton `SELECT` with no `INTO` and no cursor. The precompiler accepts it; the row goes nowhere. (`into_variables` is populated from parsed source since 2026-09-28; the `INTO\s*:` text check stays as a backstop.) |
-| `CICS_NO_RESP_HANDLING` | An `EXEC CICS` command with no `RESP`/`RESP2`, no `NOHANDLE`, no `HANDLE CONDITION` in effect. The default action for most CICS conditions is to abend the task, so the failure mode is a dropped transaction mid-update, not a wrong answer. |
+| `CICS_NO_RESP_HANDLING` | An `EXEC CICS` command with no `RESP`/`RESP2`, no `NOHANDLE`, no `HANDLE CONDITION` in effect. The default action for most CICS conditions is to abend the task, so the failure mode is a dropped transaction mid-update, not a wrong answer. `IGNORE CONDITION` ("take no action": nothing abends, execution continues) counts as handling, the same as a `HANDLE CONDITION` label; only `ERROR` covers every condition, a narrower set goes to `unchecked`. A bare `HANDLE CONDITION X` restores the abend (#396). |
 | `CICS_ABEND_WITHOUT_HANDLER` | `EXEC CICS ABEND` with no `HANDLE ABEND`. **Info** — frequently deliberate, worth seeing rather than worth fixing. |
 
 `SqlCicsViolation` carries `kind`, `severity` (always `SEVERITY_BY_KIND[kind]`),
@@ -3494,3 +3627,21 @@ and shares no code with the COBOL pipeline; it has its own OKF file:
   `5E`). The letter-led pattern bit the digit off, so `MOVE 1ST-NAME TO
   2ND-NAME` referenced `ST-NAME` / `ND-NAME`: both items unused, both
   names undefined in xref. Shared with `redundancy.py`'s clone renaming.
+
+
+## CICS terminators (issue #392, `_cics.py`)
+
+Two rules. `cics_exit_kind(stmt)`: the command is `RETURN`, `XCTL` or
+`ABEND`, which leave the program whenever they succeed. `cics_terminator_kind
+(stmt)`: the same, minus a `RETURN` / `XCTL` carrying `RESP`, `RESP2` or
+`NOHANDLE` (decision (a) on the issue: a failed command then continues at
+the next statement); `ABEND` always is one. Both `_is_terminator` copies
+(`dead_code.py`, `program_flow/scanner.py`) use `cics_terminator_kind`, so
+neither draws fall-through past such a paragraph. The scanner uses
+`cics_exit_kind` for `FlowNode.has_cics_exit`, `exit_points` and
+`exit_statement_kind` (`"EXEC CICS RETURN"`, ...), and
+`RecursionRiskAnalyzer._has_escape` counts `has_cics_exit` as a way out --
+so a retry loop ending in `RETURN TRANSID(...) RESP(...)`, the usual shop
+form, is `MEDIUM` like the GOBACK equivalent, not a `HIGH` lint error
+(review of PR #453: applying the RESP exemption to the escape flag too left
+that loop HIGH). Pinned in `tests/unit/analysis/test_cics_terminators.py`.

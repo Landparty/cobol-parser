@@ -757,3 +757,115 @@ class TestCloseReelUnitKeepsFileOpen:
         result = parse_cobol(src)
         kinds = [v.kind for v in IOSequenceAnalyzer().analyze(result.ast).violations]
         assert kinds == [IOViolationKind.FILE_LEFT_OPEN]
+
+
+_SECTIONS_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. T.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT F ASSIGN TO FDD.
+       DATA DIVISION.
+       FILE SECTION.
+       FD F.
+       01 F-REC PIC X(10).
+       PROCEDURE DIVISION.
+"""
+
+
+def _section_violations(procedure: str) -> list[str]:
+    result = parse_cobol(_SECTIONS_HEADER + procedure)
+    assert result.errors == []
+    report = IOSequenceAnalyzer().analyze(result.ast)
+    return [v.kind.name for v in report.violations]
+
+
+class TestSectionLocalParagraphNames:
+    """Every section has its own ``SEC-EXIT``: an unqualified reference means
+    the one in the referencing section, not the first in the program
+    (issue #335)."""
+
+    def test_goto_sec_exit_stays_in_its_own_section(self):
+        # The issue's reproduction: B-1's GO TO used to land on A-SEC's
+        # SEC-EXIT, outside the PERFORMed range, so the CLOSE was never seen.
+        assert _section_violations("""\
+       MAIN SECTION.
+       MAIN-P.
+           PERFORM A-SEC.
+           PERFORM B-SEC.
+           STOP RUN.
+       A-SEC SECTION.
+       A-1.
+           GO TO SEC-EXIT.
+       SEC-EXIT.
+           EXIT.
+       B-SEC SECTION.
+       B-1.
+           OPEN INPUT F.
+           READ F.
+           GO TO SEC-EXIT.
+       B-2.
+           DISPLAY "B2".
+       SEC-EXIT.
+           CLOSE F.
+""") == []
+
+    def test_the_own_section_exit_is_actually_walked(self):
+        # A double CLOSE in B-SEC's own SEC-EXIT is only seen when the GO TO
+        # really lands there.
+        assert _section_violations("""\
+       MAIN SECTION.
+       MAIN-P.
+           PERFORM A-SEC.
+           PERFORM B-SEC.
+           STOP RUN.
+       A-SEC SECTION.
+       A-1.
+           GO TO SEC-EXIT.
+       SEC-EXIT.
+           EXIT.
+       B-SEC SECTION.
+       B-1.
+           OPEN INPUT F.
+           GO TO SEC-EXIT.
+       SEC-EXIT.
+           CLOSE F.
+           CLOSE F.
+""") == ["DOUBLE_CLOSE"]
+
+    def test_qualified_perform_picks_the_named_section(self):
+        assert _section_violations("""\
+       MAIN SECTION.
+       MAIN-P.
+           OPEN INPUT F.
+           PERFORM SEC-EXIT OF B-SEC.
+           STOP RUN.
+       A-SEC SECTION.
+       SEC-EXIT.
+           EXIT.
+       B-SEC SECTION.
+       SEC-EXIT.
+           CLOSE F.
+""") == []
+
+    def test_conditional_goto_resolves_in_its_own_section(self):
+        # The AT END GO TO is walked once the read loop closes on itself;
+        # it used to resume at A-SEC's SEC-EXIT and stop there, file open.
+        assert _section_violations("""\
+       MAIN SECTION.
+       MAIN-P.
+           GO TO B-1.
+       A-SEC SECTION.
+       SEC-EXIT.
+           STOP RUN.
+       B-SEC SECTION.
+       B-1.
+           OPEN INPUT F.
+       B-LOOP.
+           READ F AT END GO TO SEC-EXIT.
+           GO TO B-LOOP.
+       SEC-EXIT.
+           CLOSE F.
+           STOP RUN.
+""") == []

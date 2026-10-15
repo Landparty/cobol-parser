@@ -384,3 +384,25 @@ class TestAddToGiving:
         assert result.ast is not None
         adds = result.ast.find_statements("ADD")
         assert len(adds) >= 1
+
+
+class TestComputeExpressionLayout:
+    """#391: a line break inside the expression is layout, not text."""
+
+    def test_line_break_does_not_appear_in_expression(self):
+        result = parse_cobol("""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTCOMP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-A PIC 9(3).
+       01  WS-B PIC 9(3).
+       PROCEDURE DIVISION.
+           COMPUTE WS-A = WS-B
+               + 1
+               * 2
+           STOP RUN.
+        """)
+        assert result.ast is not None
+        (compute,) = result.ast.find_statements("COMPUTE")
+        assert compute.to_dict()["expression"] == "WS-B + 1 * 2"

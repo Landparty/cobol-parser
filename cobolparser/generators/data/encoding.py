@@ -54,7 +54,10 @@ from .errors import CopybookLayoutError
 from .layout import (
     FieldCategory,
     FieldSpec,
+    LiteralCell,
     VaryingLength,
+    _strip_literal_quotes,
+    hex_literal_bytes,
     present_indexes,
     unresolved_odo_counters,
 )
@@ -611,13 +614,88 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         )
         if edited is not None and len(edited) == width:
             return _encode_text(edited, width, opts)
-    literal = spec.literal_bytes.get(text)
-    if literal is not None:
+    if isinstance(text, LiteralCell):
         # A hex literal (``VALUE X'C1C2'``) names bytes, not characters: the
         # cell is only their Latin-1 stand-in, and re-encoding it in the
         # record charset wrote C1 C2 as ``?``s (ASCII) or 65 62 (EBCDIC).
-        return _place_bytes(literal, width, opts, justified=spec.justified)
+        # The bytes come with the cell, not from a lookup by its text: an
+        # ordinary ``'AB'`` or ``VALUE SPACE`` with the same text as a hex
+        # literal's stand-in is still charset-encoded.
+        return _place_bytes(text.data, width, opts, justified=spec.justified)
     return _encode_text(text, width, opts, justified=spec.justified)
+
+
+#: Figurative constants as the cell :class:`~.values.ValueFactory` writes for
+#: a level-88 (or ``ZERO``/``QUOTE`` VALUE clause) naming them: every
+#: position filled with the character, ``SPACE`` as the empty cell.
+_FIGURATIVE_FILL: dict[str, str] = {
+    "SPACE": "",
+    "SPACES": "",
+    "ZERO": "0",
+    "ZEROS": "0",
+    "ZEROES": "0",
+    "QUOTE": '"',
+    "QUOTES": '"',
+}
+
+#: Every figurative word, writable or not.
+_ALL_FIGURATIVES = frozenset(
+    {*_FIGURATIVE_FILL, "LOW-VALUE", "LOW-VALUES", "HIGH-VALUE", "HIGH-VALUES"}
+    | {"NULL", "NULLS"}
+)
+
+
+def _ordinary_literal_cells(spec: FieldSpec) -> list[str]:
+    """The cells *spec*'s own non-hex declared values are generated as: its
+    level-88 literals and figuratives, and a quoted or ``ZERO``/``QUOTE``
+    VALUE clause.  ``VALUE SPACES``/``LOW-VALUES`` are left out because the
+    generator replaces them with a random value."""
+    raws = [v for v in spec.condition_values if not isinstance(v, LiteralCell)]
+    if spec.value_clause and hex_literal_bytes(spec.value_clause) is None:
+        clause = spec.value_clause.strip()
+        if clause.upper() in ("ZERO", "ZEROS", "ZEROES", "QUOTE", "QUOTES"):
+            raws.append(clause)
+        elif clause.upper() not in _ALL_FIGURATIVES:
+            raws.append(_strip_literal_quotes(clause))
+    width = max(1, spec.character_positions)
+    cells: list[str] = []
+    for raw in raws:
+        fill = _FIGURATIVE_FILL.get(raw.upper())
+        if fill is not None:
+            cells.append(fill * width)
+        elif raw.upper() not in _ALL_FIGURATIVES:
+            cells.append(raw)
+    return cells
+
+
+def hex_literal_cell_for(
+    spec: FieldSpec, raw: bytes, opts: EncodingOptions
+) -> str | None:
+    """The hex literal cell *raw* was written from, for the decoder.
+
+    :func:`encode_field` writes a :class:`LiteralCell` as its own bytes, so
+    reading them back in the record charset gives other text (``X'FF'`` is
+    ``\x9f`` in EBCDIC, ``X'C1C2'`` is ``AB``) and ``decode(encode(row))``
+    would not be *row*.  When *raw* is exactly one of the field's hex
+    literals, padded the way the encoder pads it, this returns that
+    literal's cell.  ``None`` when it is not, or when one of the field's
+    ordinary declared values encodes to the same bytes (``'AB'`` next to
+    ``X'C1C2'`` under EBCDIC): the bytes cannot say which was meant, and the
+    charset reading is the honest one.
+    """
+    if not spec.literal_bytes:
+        return None
+    width = spec.storage_size
+    if len(raw) != width:
+        return None
+    for cell, data in spec.literal_bytes.items():
+        if _place_bytes(data, width, opts, justified=spec.justified) != raw:
+            continue
+        for ordinary in _ordinary_literal_cells(spec):
+            if _encode_text(ordinary, width, opts, justified=spec.justified) == raw:
+                return None
+        return cell
+    return None
 
 
 def encode_record(
@@ -626,6 +704,7 @@ def encode_record(
     opts: EncodingOptions,
     *,
     data_length: int | None = None,
+    pad_to: int | None = None,
 ) -> bytes:
     """Concatenate one generated row into its record image.
 
@@ -651,6 +730,11 @@ def encode_record(
     record that varies.  The length is drawn per row at *generation* time
     (:meth:`~.copybook.CopybookDataGenerator.generate_from_record`) rather
     than here, so this function stays deterministic and RNG-free.
+
+    *pad_to* is the file's ``LRECL`` under :attr:`RecordFormat.FIXED` when
+    it is longer than this layout -- a shorter 01 under an FD that also
+    declares a longer one.  The record is filled out to it with the
+    charset's space, because RECFM=F means every record is that long.
     """
     if len(specs) != len(row):
         raise RecordEncodingError(
@@ -663,6 +747,8 @@ def encode_record(
             encode_field(spec, cell, opts)
             for spec, cell in zip(specs, row, strict=True)
         )
+        if pad_to is not None and pad_to > len(body):
+            body += bytes([opts.space]) * (pad_to - len(body))
     else:
         body = b"".join(
             encode_field(specs[index], row[index], opts)
@@ -709,18 +795,20 @@ def row_record_length(
     opts: EncodingOptions | None = None,
     *,
     data_length: int | None = None,
+    pad_to: int | None = None,
 ) -> int:
     """Byte length one generated *row* occupies, RDW included when framed.
 
     Cheaper than measuring ``len(encode_record(...))`` -- it sums the widths
     the layout already knows rather than building the bytes -- and used
     wherever a length is wanted for reporting rather than for writing.
-    *data_length* means the same thing it does on :func:`encode_record`.
+    *data_length* and *pad_to* mean the same things they do on
+    :func:`encode_record`.
     """
     options = opts or EncodingOptions()
     fmt = options.resolved_format(specs, varying=data_length is not None)
     if fmt is RecordFormat.FIXED:
-        return record_length(specs)
+        return max(record_length(specs), pad_to or 0)
     body = sum(
         field_storage_size(specs[index]) for index in present_indexes(specs, row)
     )
@@ -877,6 +965,22 @@ def _dump_absent_lines(spec: FieldSpec, offset: int) -> list[str]:
     ]
 
 
+def _dump_slack_lines(offset: int, size: int, opts: EncodingOptions) -> list[str]:
+    """The space fill out to the FD's LRECL, shaped like a FILLER's rows."""
+    raw = bytes([opts.space]) * size
+    head = (
+        f"{offset:06X}  {size:>4}  {'(FD LRECL slack)':<24} {'':<14} {'':<9} {'':<18} "
+    )
+    indent = " " * len(head)
+    return [
+        f"{head if start == 0 else indent}"
+        f"{' '.join(f'{b:02X}' for b in chunk):<{_DUMP_BYTES_PER_LINE * 3}} "
+        f"|{_printable(chunk, opts)}|"
+        for start in range(0, size, _DUMP_BYTES_PER_LINE)
+        for chunk in [raw[start : start + _DUMP_BYTES_PER_LINE]]
+    ]
+
+
 def _dump_rdw_lines(rdw: bytes, opts: EncodingOptions) -> list[str]:
     """The RDW's own row in the hex dump, shaped like a field's."""
     head = (
@@ -896,6 +1000,7 @@ def hex_dump(
     data_lengths: list[int] | None = None,
     varying: VaryingLength | None = None,
     extra_caveats: list[str] | None = None,
+    pad_to: int | None = None,
 ) -> str:
     """Render *rows* as an annotated, field-by-field hex dump.
 
@@ -909,9 +1014,12 @@ def hex_dump(
     swallowed: a dump that silently ignored ``SYNCHRONIZED`` would be
     confidently wrong about every offset after the aligned item.  So are
     *extra_caveats* (the dataset's own, e.g. a clamped ``RECORD VARYING``).
+    *pad_to* is :func:`encode_record`'s, and its slack is shown as its own
+    row so the record's length adds up.
     """
     fmt = opts.resolved_format(specs, varying=varying is not None)
     length = record_length(specs)
+    slack = max(0, (pad_to or 0) - length) if fmt is RecordFormat.FIXED else 0
     framing = RDW_SIZE if fmt is RecordFormat.VARIABLE else 0
     out: list[str] = [
         f"* record layout: {record_name or '(unnamed)'}",
@@ -937,7 +1045,10 @@ def hex_dump(
             + (" (RDW included)" if framing else "")
         )
     else:
-        out.append(f"* record length: {length} bytes")
+        out.append(
+            f"* record length: {length + slack} bytes"
+            + (f" (FD LRECL; the layout is {length})" if slack else "")
+        )
     if varying is not None:
         depending = (
             f" DEPENDING ON {varying.depending_on}" if varying.depending_on else ""
@@ -978,7 +1089,10 @@ def hex_dump(
         )
         if declared is not None and fmt.is_variable:
             body = min(body, declared)
-        out.append(f"\n* --- record {index} of {len(rows)}: {body + framing} bytes ---")
+        out.append(
+            f"\n* --- record {index} of {len(rows)}: "
+            f"{body + framing + slack} bytes ---"
+        )
         offset = 0
         if framing:
             # The RDW is not a field, but it is bytes in the file, and a dump
@@ -1009,4 +1123,6 @@ def hex_dump(
             written += len(raw)
             out.extend(_dump_field_lines(spec, cell, offset, raw, opts))
             offset += len(raw)
+        if slack:
+            out.extend(_dump_slack_lines(offset, slack, opts))
     return "\n".join(out) + "\n"

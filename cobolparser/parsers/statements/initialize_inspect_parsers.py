@@ -42,6 +42,9 @@ _INITIALIZE_PHRASE_STARTS = _REPLACING_CATEGORIES | {
     "ALL",
     "THEN",
     "TO",
+    # ``[WITH] FILLER``: IBM 6.x lets WITH go, so a bare FILLER ends the
+    # target list rather than being read as one more target.
+    "FILLER",
 }
 
 
@@ -107,16 +110,16 @@ class InitializeStatementParser(IStatementParser):
                 break
             skip_whitespace(token_stream)
 
-        # Optional WITH FILLER clause
+        # Optional [WITH] FILLER clause (WITH may be omitted)
         token = token_stream.peek()
         if token and _val(token) == "WITH":
             token_stream.consume()
             skip_whitespace(token_stream)
-            nxt = token_stream.peek()
-            if nxt and _val(nxt) == "FILLER":
-                token_stream.consume()
-                stmt.with_filler = True
-                skip_whitespace(token_stream)
+            token = token_stream.peek()
+        if token and _val(token) == "FILLER":
+            token_stream.consume()
+            stmt.with_filler = True
+            skip_whitespace(token_stream)
 
         # Optional ``{ALL | category} TO VALUE`` phrase
         token = token_stream.peek()

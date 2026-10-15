@@ -251,6 +251,7 @@ class ScenarioPlanner:
 
         details: list[ArmOutcome] = []
         candidates: list[tuple[str, PlannedScenario]] = []  # (sort_key, candidate)
+        shared_areas = _shared_record_areas(boundary_report)
 
         for branch in constraint_report.branches:
             branch_node = (
@@ -331,6 +332,25 @@ class ScenarioPlanner:
                     arm_keys=[arm_key],
                     path_gaps=path_gaps,
                 )
+                spanned = _view_conflicts(_record_areas(scenario, shared_areas))
+                if spanned:
+                    # One READ fills its record area through ONE 01 record
+                    # per scenario (the generator cannot write two views of
+                    # the same bytes at once), so an arm whose own path pins
+                    # fields of two of them is never generated as asked.
+                    details.append(
+                        ArmOutcome(
+                            arm_key,
+                            branch.parent_proc,
+                            "missed",
+                            reason=(
+                                "pins fields of several 01 records of one FD "
+                                f"({spanned}); rows are generated through "
+                                "one record view at a time"
+                            ),
+                        )
+                    )
+                    continue
                 sort_key = f"{branch.line or 0:010d}:{branch.column or 0:010d}:{arm_id}"
                 candidates.append((sort_key, scenario))
 
@@ -349,7 +369,7 @@ class ScenarioPlanner:
                 )
 
         candidates.sort(key=lambda pair: pair[0])
-        scenarios, merge_outcomes = _merge_candidates(candidates)
+        scenarios, merge_outcomes = _merge_candidates(candidates, shared_areas)
         details.extend(merge_outcomes)
 
         if mode == "all":
@@ -634,9 +654,63 @@ def _sequence_boundaries(scenario: PlannedScenario) -> dict[str, int | None]:
     }
 
 
-def _compatible(existing: PlannedScenario, candidate: PlannedScenario) -> bool:
+def _shared_record_areas(boundary_report: BoundaryReport) -> dict[str, str]:
+    """01 record name -> the READ boundary whose record area it shares.
+
+    Only a READ with no INTO names several 01 records for one FD: those
+    records are views of ONE record area, and the generator fills a READ's
+    rows through exactly one of them per scenario (issue #364). Records of
+    an FD with a single 01 never appear here.
+    """
+    areas: dict[str, str] = {}
+    for boundary in boundary_report.boundaries:
+        if boundary.ref.category != "READ" or len(boundary.record_names) <= 1:
+            continue
+        area = f"{boundary.ref.category}:{boundary.ref.key}"
+        for name in boundary.record_names:
+            areas.setdefault(name.upper(), area)
+    return areas
+
+
+def _record_areas(
+    scenario: PlannedScenario, shared_areas: dict[str, str]
+) -> dict[str, set[str]]:
+    """Shared record area -> the 01 records whose fields *scenario* pins."""
+    used: dict[str, set[str]] = {}
+    for constraints in scenario.field_constraints.values():
+        for c in constraints:
+            record = c.field.record.name.upper()
+            area = shared_areas.get(record)
+            if area is not None:
+                used.setdefault(area, set()).add(record)
+    return used
+
+
+def _view_conflicts(used: dict[str, set[str]]) -> str:
+    """A description of every area pinned through more than one record,
+    or "" when each area is pinned through one record at most."""
+    return "; ".join(
+        f"{area}: {', '.join(sorted(records))}"
+        for area, records in sorted(used.items())
+        if len(records) > 1
+    )
+
+
+def _compatible(
+    existing: PlannedScenario,
+    candidate: PlannedScenario,
+    shared_areas: dict[str, str] | None = None,
+) -> bool:
     if _touched_fields(existing) & _touched_fields(candidate):
         return False
+    if shared_areas:
+        # Fields of two 01 records under one FD are "disjoint" by name but
+        # share bytes: merged, only one record's pins could be generated.
+        combined = _record_areas(existing, shared_areas)
+        for area, records in _record_areas(candidate, shared_areas).items():
+            combined.setdefault(area, set()).update(records)
+        if _view_conflicts(combined):
+            return False
     existing_seq = _sequence_boundaries(existing)
     for key, length in _sequence_boundaries(candidate).items():
         if key in existing_seq and existing_seq[key] != length:
@@ -646,6 +720,7 @@ def _compatible(existing: PlannedScenario, candidate: PlannedScenario) -> bool:
 
 def _merge_candidates(
     candidates: list[tuple[str, PlannedScenario]],
+    shared_areas: dict[str, str] | None = None,
 ) -> tuple[list[PlannedScenario], list[ArmOutcome]]:
     """Greedily merge scenarios whose constraints touch disjoint fields.
 
@@ -681,7 +756,7 @@ def _merge_candidates(
                 (
                     s
                     for s in open_scenarios
-                    if s.field_constraints and _compatible(s, candidate)
+                    if s.field_constraints and _compatible(s, candidate, shared_areas)
                 ),
                 None,
             )

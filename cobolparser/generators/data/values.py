@@ -9,7 +9,7 @@ import struct
 from decimal import Context, Decimal, InvalidOperation, localcontext
 
 from ...models.data_items import PictureClause
-from .layout import FieldCategory, FieldSpec, _strip_literal_quotes
+from .layout import FieldCategory, FieldSpec, _strip_literal_quotes, hex_literal_cell
 from .options import DataGeneratorOptions
 from .storage import POINTER_USAGES, SINGLE_FLOAT_USAGES
 
@@ -402,6 +402,11 @@ class ValueFactory:
         all_match = _VALUE_ALL_RE.match(raw)
         if all_match:
             return self._fill_all(all_match, spec)
+        cell = hex_literal_cell(raw, spec.character_positions)
+        if cell is not None:
+            # Kept as a LiteralCell (see _fit_text) so the encoder writes the
+            # literal's own bytes, not its Latin-1 text in the record charset.
+            return self._fit_domain_value(cell, spec)
         figurative = _FIGURATIVE_CONSTANTS.get(raw.upper())
         if figurative is not None:
             # SPACES/LOW-VALUES mean "no meaningful initial content"; generate
@@ -463,7 +468,11 @@ class ValueFactory:
         picked *this exact* value to satisfy a constraint, so a random sign
         flip could silently produce a value that no longer does.
         """
-        return self._fit_domain_value(str(value), spec)
+        # A str is passed through as is: str() would turn a LiteralCell
+        # witness (a level-88 ``X'FF'``) back into plain text.
+        return self._fit_domain_value(
+            value if isinstance(value, str) else str(value), spec
+        )
 
     # -- numeric ------------------------------------------------------------
 
@@ -783,4 +792,6 @@ class ValueFactory:
         """
         size = spec.character_positions
         size = size if size > 0 else len(value)
-        return value[:size]
+        # A value that fits is returned as is rather than sliced: slicing a
+        # LiteralCell (a hex literal's cell) would drop the bytes it carries.
+        return value if len(value) <= size else value[:size]

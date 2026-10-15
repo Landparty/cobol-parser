@@ -145,6 +145,11 @@ class CopybookExpansion:
     max_depth_reached: int = 0
     source_location_map: dict[int, tuple[str, int]] | None = None
     statistics: ExpansionStatistics = field(default_factory=ExpansionStatistics)
+    #: ``(file, original line)`` of every debugging line (``D`` in column 7)
+    #: expansion blanked as a comment, in output order; empty when
+    #: ``debug_lines=True`` kept them, or when nothing was expanded (the
+    #: source then passes through untouched and the parser counts them).
+    dropped_debug_lines: list[tuple[str, int]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert expansion result to dictionary for JSON serialization."""
@@ -302,6 +307,9 @@ class ExpansionContext:
     content_origins: dict[str, list[tuple[str, int]]] = field(default_factory=dict)
     total_bytes: int = 0
     defined_symbols: dict[str, str] = field(default_factory=dict)
+    #: Keep debugging lines (``D`` in column 7) as code instead of blanking
+    #: them with the comments (``expand_copybooks(debug_lines=True)``).
+    debug_lines: bool = False
 
     # LRU management (OrderedDict provides O(1) move_to_end/popitem)
     max_cache_size: int = 512

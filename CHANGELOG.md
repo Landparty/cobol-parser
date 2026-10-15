@@ -160,6 +160,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`dead-code` no longer reports the `EXEC SQL WHENEVER ... GO TO` handler
+  as dead** (#349). `WHENEVER SQLERROR | SQLWARNING | NOT FOUND GO TO p`
+  (also `GOTO`, `:p`) now makes `p` a GO TO target of every executable SQL
+  statement the directive covers in source order, until a later WHENEVER for
+  the same condition (or `CONTINUE`) replaces it, so `lint` and `health`
+  stop reporting it too. The branch comes from the covered statement, not
+  the directive, so a handler set up in a never-performed paragraph is still
+  live when the SQL it covers runs. Program flow gains a matching
+  `SQL_WHENEVER` edge (GO TO-shaped, one per procedure holding covered SQL).
+
+* **`scan --clones`: a shared PROCEDURE DIVISION copybook is no longer
+  reported as a clone of itself** (#352). Paragraphs expanded from the same
+  copybook line are one source included by several programs, not copy-paste,
+  so `cross_file_clone_groups` now counts *distinct sources* (new
+  `source_count` on each group) against `min_members` and in the volume
+  ranking. Such a paragraph forms no group on its own; when it has also been
+  pasted into another program the group is still reported, every inclusion
+  listed as a member, but the copybook counts once. A widely included error
+  handler no longer tops every scan.
+* **`EXEC CICS RETURN` / `XCTL` / `ABEND` end control flow** (#392) in
+  `dead-code`, `program-flow` and `recursion-check`. Paragraphs after one
+  were never reported dead, program-flow drew a false `FALL_THROUGH` edge
+  out of it, and a pseudo-conversational retry loop ending in `RETURN
+  TRANSID` was a lint error ("unconditional infinite loop"). A RETURN / XCTL
+  carrying `RESP`, `RESP2` or `NOHANDLE` still falls through (a failed
+  command continues at the next statement) but is still an exit point and a
+  way out of a loop; ABEND always ends the paragraph. New
+  `FlowNode.has_cics_exit`.
+* **dead-code / program-flow: alterable `GO TO.` and `EXIT SECTION` stop
+  fall-through** (#382). An operand-less `GO TO.` (whatever an ALTER last
+  set) is a terminator, so the paragraph after it is no longer kept alive.
+  `EXIT SECTION` skips the rest of its section: a PERFORMed section returns,
+  and one fallen into or branched into runs on to the procedure after the
+  section (program-flow draws that `FALL_THROUGH` edge only then).
+  `EXIT SECTION.` written straight after a section header no longer parses
+  as an empty section named `EXIT`.
+* **`dead-code` walks `PERFORM A THRU C` ranges instead of marking every
+  member live** (#381). An obsolete stub inside `PERFORM 1000-PROC THRU
+  1000-EXIT` that every path jumps over with `GO TO 1000-EXIT` is now
+  reported dead, within one section or across sections. A range member is
+  live when the one before it runs on into it, or when a GO TO / ALTER /
+  ENTRY / CICS HANDLE lands on it (a nested range's `nnnn-EXIT` included);
+  an `EXIT SECTION` inside the range carries on at the next section. The walk
+  runs inside the transitive-reachability worklist, so a PERFORM written in
+  a skipped member keeps nothing alive.
+* **decode / compare / gen-data: a whole program's RECFM=F file is framed at
+  the FD's LRECL** (#362). `--record X` on a program source used to cut the
+  file at that 01's own length; every 01 under one FD shares the record area,
+  so the LRECL is its largest 01, or the FD's `RECORD CONTAINS n` when that
+  is larger.
+  `decode`/`compare` now frame there by default (`--record-length` still
+  overrides), and `gen-data --format record|hex` pads a shorter 01 out to it
+  with spaces, so the two round-trip.
+
 * **`codebase-graph` now records `EXEC CICS LINK` / `XCTL PROGRAM(...)` edges**
   (#315). They were skipped with no `unresolved` note, so a CICS program's
   `calls` read as empty and known. They are now `call_edges` with a new
@@ -234,6 +288,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `program-flow`, edges, entry/exit points, cycles and `unreachable_nodes`
   name such a node by its `qualified_name`. `complexity` now measures each
   same-named paragraph on its own body instead of summing them.
+* **`redundancy` / `scan --clones` missed exact clones that differ only in
+  line layout or keyword case** (#391): a line break inside a COMPUTE hid
+  the clone entirely and a lowercase paragraph dropped to TYPE_2. Both
+  fingerprint types now collapse whitespace and fold case outside literals;
+  literal text is still compared exactly (including the EVALUATE `WHEN`
+  values / `THRU` bounds, static CALL targets, INVOKE method literals and
+  STOP literals the AST stores unquoted -- EVALUATE `Range` selectors gain
+  additive `start_quoted` / `end_quoted` markers for this). COMPUTE's
+  `expression` text no longer contains line breaks. **The `type1` / `type2`
+  digests change in place**: digests stored from an earlier scan stop
+  matching for any paragraph with lowercase words, whitespace runs or a
+  multi-line COMPUTE.
 * **`redundancy` / `scan --clones` / `health` reported paragraphs that
   behave differently as exact clones** (#262): a statement's fingerprint
   covered only its type and operand list, so a different COMPUTE formula,

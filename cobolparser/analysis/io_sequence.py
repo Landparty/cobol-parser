@@ -39,6 +39,7 @@ from ..models.statements import (
     StopStatement,
 )
 from ._files import record_to_file_map, resolve_file_name
+from ._procedures import ProcedureIndex, statement_qualifier
 
 
 class IOViolationKind(Enum):
@@ -227,6 +228,14 @@ class IOSequenceAnalyzer:
         self._linear: list[CobolParagraph] = []
         self._name_first: dict[str, int] = {}
         self._name_last: dict[str, int] = {}
+        # Procedures are keyed the way ``ProcedureIndex`` keys them: a bare
+        # name when it is unique, ``"<para> OF <section>"`` when two sections
+        # share it. ``_section_of`` runs parallel to ``_linear``, and
+        # ``_current_section`` is the section of the paragraph being walked,
+        # which an unqualified GO TO / PERFORM target resolves against.
+        self._procedures: ProcedureIndex | None = None
+        self._section_of: list[str | None] = []
+        self._current_section: str | None = None
         self._perform_stack: list[_PerformKey] = []
         self._perform_set: set[_PerformKey] = set()
         # One entry per PERFORM range currently being run for the first time
@@ -241,7 +250,7 @@ class IOSequenceAnalyzer:
         # GO TO targets met inside a conditional branch (``AT END GO TO
         # 9000-EOF``, ``IF ... GO TO ...``), walked once the fall-through
         # chain has looped back on itself.
-        self._pending_gotos: list[str] = []
+        self._pending_gotos: list[str] = []  # resolved procedure keys
         # True once the walk ended because it looped back to a paragraph it
         # had already run, with no STOP RUN/GOBACK reached: whatever is
         # still open then was open *inside* a loop, not at program end.
@@ -266,6 +275,9 @@ class IOSequenceAnalyzer:
         self._linear = []
         self._name_first = {}
         self._name_last = {}
+        self._procedures = None
+        self._section_of = []
+        self._current_section = None
         self._perform_stack = []
         self._perform_set = set()
         self._recordings = []
@@ -335,6 +347,9 @@ class IOSequenceAnalyzer:
         ]
         entities.sort(key=_line)
 
+        self._procedures = ProcedureIndex.build(proc_division)
+        keys = {id(e.node): e.key for e in self._procedures.entries}
+
         for entity in entities:
             if isinstance(entity, CobolSection):
                 # A DECLARATIVES section is a USE procedure the runtime
@@ -347,22 +362,44 @@ class IOSequenceAnalyzer:
                 sec_name = (entity.section_name or "").upper()
                 start = len(self._linear)
                 for para in entity.paragraphs:
-                    self._register_paragraph(para)
+                    self._register_paragraph(para, keys, sec_name or None)
                 if sec_name and entity.paragraphs:
                     self._name_first.setdefault(sec_name, start)
                     self._name_last[sec_name] = max(
                         self._name_last.get(sec_name, start), len(self._linear) - 1
                     )
             elif isinstance(entity, CobolParagraph):
-                self._register_paragraph(entity)
+                self._register_paragraph(entity, keys, None)
 
-    def _register_paragraph(self, para: CobolParagraph) -> None:
+    def _register_paragraph(
+        self, para: CobolParagraph, keys: dict[int, str], section: str | None
+    ) -> None:
         idx = len(self._linear)
         self._linear.append(para)
-        name = (para.paragraph_name or "").upper()
+        self._section_of.append(section)
+        # A paragraph the index dropped (a second same-named paragraph in
+        # one section, which the compiler rejects) keeps its bare name.
+        name = keys.get(id(para)) or (para.paragraph_name or "").upper()
         if name:
             self._name_first.setdefault(name, idx)
             self._name_last.setdefault(name, idx)
+
+    def _resolve(self, name: str | None, qualifier: str | None = None) -> str:
+        """The procedure key a reference to *name* means from the paragraph
+        being walked.
+
+        COBOL resolves an unqualified paragraph name to the one in the
+        referencing section first, so with a ``SEC-EXIT`` in every section a
+        ``GO TO SEC-EXIT`` stays in its own section (issue #335). A reference
+        the compiler would reject as ambiguous takes the first candidate.
+        """
+        upper = (name or "").upper()
+        if self._procedures is None:
+            return upper
+        for key in self._procedures.resolve(name, qualifier, self._current_section):
+            if key in self._name_first:
+                return key
+        return upper
 
     def _run_chain(self, start_idx: int) -> None:
         """Fall-through execution from *start_idx*, following GO TOs.
@@ -385,7 +422,7 @@ class IOSequenceAnalyzer:
             if idx is None or not 0 <= idx < len(self._linear):
                 return
             visited.add(idx)
-            outcome, target = self._drive(self._run_paragraph(self._linear[idx]))
+            outcome, target = self._drive(self._run_paragraph(idx))
             if self._terminated or outcome == "stop":
                 return
             if outcome == "goto":
@@ -417,12 +454,14 @@ class IOSequenceAnalyzer:
             value = None
         return value
 
-    def _run_paragraph(self, para: CobolParagraph) -> _Step:
-        """Process one paragraph's statements; report how it ends.
+    def _run_paragraph(self, idx: int) -> _Step:
+        """Process paragraph *idx*'s statements; report how it ends.
 
         Returns ``("fall", None)``, ``("stop", None)``, or
-        ``("goto", target-name)``.
+        ``("goto", target-key)``.
         """
+        para = self._linear[idx]
+        self._current_section = self._section_of[idx]
         for stmt in para.statements:
             if self._terminated:
                 break
@@ -431,7 +470,13 @@ class IOSequenceAnalyzer:
                 and stmt.target_paragraph
                 and not stmt.depending_on_variable
             ):
-                return ("goto", stmt.target_paragraph.upper())
+                return (
+                    "goto",
+                    self._resolve(
+                        stmt.target_paragraph,
+                        statement_qualifier(stmt, "target_qualifier"),
+                    ),
+                )
             if self._is_program_end(stmt):
                 yield self._process_statement(stmt)
                 self._terminate_program(getattr(stmt, "location", None))
@@ -477,15 +522,26 @@ class IOSequenceAnalyzer:
             if isinstance(node, GoStatement):
                 # Reached through _visit, so nested in a branch or handler
                 # (a paragraph's own top-level GO TO never gets here).
+                qualifier = statement_qualifier(node, "target_qualifier")
                 for name in node.target_paragraphs:
                     if name:
-                        self._add_pending_goto(name.upper())
+                        self._add_pending_goto(
+                            self._resolve(
+                                name,
+                                qualifier if name == node.target_paragraph else None,
+                            )
+                        )
             if (
                 isinstance(node, PerformStatement)
                 and node.target_paragraph
                 and not node.inline_statements
             ):
-                yield self._run_perform(node.target_paragraph, node.thru_paragraph)
+                yield self._run_perform(
+                    node.target_paragraph,
+                    node.thru_paragraph,
+                    statement_qualifier(node, "target_qualifier"),
+                    statement_qualifier(node, "thru_qualifier"),
+                )
             elif isinstance(node, SortStatement):
                 if node.input_procedure:
                     yield self._run_perform(
@@ -609,7 +665,13 @@ class IOSequenceAnalyzer:
     def _maybe_open_files(self) -> list[str]:
         return sorted(k for k, v in self._status.items() if _OPEN in v)
 
-    def _run_perform(self, target: str, thru: str | None) -> _Step:
+    def _run_perform(
+        self,
+        target: str,
+        thru: str | None,
+        target_qualifier: str | None = None,
+        thru_qualifier: str | None = None,
+    ) -> _Step:
         """Execute a ``PERFORM target [THRU end]`` range at the call site.
 
         The first run of a range from a given entry state (every file's
@@ -617,12 +679,12 @@ class IOSequenceAnalyzer:
         same range from the same state replays the summary instead of
         walking the paragraphs again.
         """
-        start = self._name_first.get(target.upper())
+        target_key = self._resolve(target, target_qualifier)
+        start = self._name_first.get(target_key)
         if start is None:
             return
-        end = self._name_last.get(
-            (thru or target).upper(), self._name_last.get(target.upper(), start)
-        )
+        end_key = self._resolve(thru, thru_qualifier) if thru else target_key
+        end = self._name_last.get(end_key, self._name_last.get(target_key, start))
         if end < start:
             end = start
         key = (start, end)
@@ -650,9 +712,11 @@ class IOSequenceAnalyzer:
         self._recordings.append(rec)
         self._perform_stack.append(key)
         self._perform_set.add(key)
+        caller_section = self._current_section
         try:
             yield self._walk_range(start, end)
         finally:
+            self._current_section = caller_section
             self._perform_stack.pop()
             self._perform_set.discard(key)
             self._recordings.pop()
@@ -684,7 +748,7 @@ class IOSequenceAnalyzer:
         i = start
         while i <= end and not self._terminated and i not in visited:
             visited.add(i)
-            outcome, gtarget = yield self._run_paragraph(self._linear[i])
+            outcome, gtarget = yield self._run_paragraph(i)
             if outcome == "stop":
                 return
             if outcome == "goto":

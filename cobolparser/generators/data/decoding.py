@@ -74,6 +74,7 @@ from .encoding import (
     EncodingOptions,
     Endian,
     RecordFormat,
+    hex_literal_cell_for,
 )
 from .errors import CopybookLayoutError
 from .layout import FieldCategory, FieldSpec, HiddenCounter, VaryingLength
@@ -146,7 +147,8 @@ class DecodedField:
             or a field past a short record's end.  :attr:`value` is empty and
             :attr:`length` is 0.
         truncated: True when the record ended part-way through this field.
-            The value is decoded from the bytes that were there.
+            Always carries an :attr:`error`; a text value keeps the
+            characters that were there, any other value is empty.
         error: What is wrong with these bytes, or ``None``.  A field with an
             error still carries a best-effort :attr:`value`.
     """
@@ -612,6 +614,7 @@ def decode_field(
     opts: EncodingOptions,
     *,
     offset: int | None = None,
+    cut_ok: bool = False,
 ) -> DecodedField:
     """Read one field's bytes back into the value they hold.
 
@@ -619,7 +622,17 @@ def decode_field(
     ``USAGE``-then-category ladder so the two cannot disagree about which
     storage class a field is.  *raw* shorter than the field's width is not an
     error the caller has to pre-empt: the field comes back
-    :attr:`~DecodedField.truncated`, decoded from what was there.
+    :attr:`~DecodedField.truncated` *and* with an
+    :attr:`~DecodedField.error`, because a record that ends inside a field
+    does not hold that field's value (#358).  Text keeps the characters that
+    were there; any other value is left empty, since the bytes present are
+    the high-order part of a number and decode to the wrong one -- three of
+    ``PIC 9(4)``'s four digits, ``001``, are not the value ``1``.
+
+    *cut_ok* is the one exception: an FD ``RECORD VARYING FROM n TO m``
+    record whose length is inside that range ends wherever its length says,
+    mid-field included, by design -- the program reads
+    ``RECORD(1:length)`` -- so the cut is flagged but not an error.
 
     *offset* overrides the view's static placement with where the field was
     really read from, which is not the same number once an ``OCCURS ...
@@ -629,6 +642,7 @@ def decode_field(
     usage = _normalized_usage(spec)
     width = spec.storage_size
     error: str | None = None
+    is_text = False
 
     if usage == "INDEX" or usage in POINTER_USAGES:
         value = "0x" + raw.hex().upper() if raw else ""
@@ -641,6 +655,7 @@ def decode_field(
     elif usage == "NATIONAL":
         # The encoder writes national data as text (see ``encode_field``).
         value = _decode_text(raw, opts, justified=spec.justified)
+        is_text = True
     elif (
         spec.blank_when_zero
         and spec.category in (FieldCategory.NUMERIC, FieldCategory.NUMERIC_EDITED)
@@ -655,6 +670,20 @@ def decode_field(
         value, error = _decode_edited(raw, spec, opts)
     else:
         value = _decode_text(raw, opts, justified=spec.justified)
+        is_text = True
+        literal = hex_literal_cell_for(spec, raw, opts)
+        if literal is not None:
+            # A hex literal's bytes read back as the cell they were written
+            # from (``X'FF'`` as ``ÿ``, not EBCDIC ``\x9f``), so
+            # decode(encode(row)) == row in either charset.
+            value = literal
+
+    truncated = len(raw) < width
+    if truncated and not cut_ok:
+        # Whatever the partial bytes decoded to, the field is not there.
+        error = f"{len(raw)} of {width} bytes: record ends inside the field"
+        if not is_text:
+            value = ""
 
     return DecodedField(
         name=spec.column,
@@ -667,7 +696,7 @@ def decode_field(
         value=value,
         raw=raw,
         present=True,
-        truncated=len(raw) < width,
+        truncated=truncated,
         error=error,
     )
 
@@ -705,6 +734,7 @@ def decode_record(
     opts: EncodingOptions,
     *,
     trim_tables: bool = True,
+    cut_ok: bool = False,
 ) -> list[DecodedField]:
     """Decode *data* through *view*, field by field, in byte order.
 
@@ -725,7 +755,9 @@ def decode_record(
 
     Fields past the end of *data* come back absent rather than raising: a
     short record is a fact about the file, and the fields that *were* there
-    are still worth reading.
+    are still worth reading.  A field *data* ends inside carries an error
+    unless *cut_ok* says the record's length permits it (see
+    :func:`decode_field`).
     """
     counts: _Counts = {}
     out: list[DecodedField] = []
@@ -752,7 +784,7 @@ def decode_record(
             out.append(_absent_field(placed, position))
             continue
         raw = data[position : position + spec.storage_size]
-        decoded = decode_field(placed, raw, opts, offset=position)
+        decoded = decode_field(placed, raw, opts, offset=position, cut_ok=cut_ok)
         if spec.odo_counter_bounds is not None:
             low, high = spec.odo_counter_bounds
             declared = _counter_number(decoded.value)
@@ -958,7 +990,9 @@ class RecordDecoder:
                 when the file's ``LRECL`` is not the layout's own length.
                 A file whose records carry trailing slack (or whose
                 copybook covers only a prefix of them) needs this; without
-                it the layout's length is used.
+                it the layout's length is used.  :meth:`from_copybook_source`
+                defaults it to the FD's ``LRECL`` when the source is a whole
+                program (see :func:`~.copybook.fd_record_length`).
             varying: The FD's ``RECORD VARYING FROM min TO max`` range, when
                 the source was a whole program (or an explicit
                 :attr:`DataGeneratorOptions.record_varying`).  It lives
@@ -990,10 +1024,14 @@ class RecordDecoder:
             CopybookLayoutError: if the source has no usable record layout,
                 or the requested *record* is not in it.
         """
-        from .copybook import parse_copybook_records, select_record
+        from .copybook import fd_record_length, parse_copybook_records, select_record
 
         records = parse_copybook_records(source, filename=filename)
         chosen = select_record(records, record, filename)
+        if record_length is None:
+            # A whole program's FD frames its file at the LRECL every 01
+            # under it shares, not at the chosen 01's own length.
+            record_length = fd_record_length(records, chosen, options)
         return cls.from_record(
             chosen, opts=opts, options=options, record_length=record_length
         )
@@ -1065,6 +1103,19 @@ class RecordDecoder:
             )
         return found
 
+    def _cut_by_design(self, body: bytes, length_framed: bool) -> bool:
+        """Whether a record may end mid-field: the file says where it ends
+        (*length_framed* -- an RDW, or a record separator), and its length
+        is one a per-record ``RECORD VARYING FROM n TO m ... DEPENDING ON``
+        range permits.  A range without ``DEPENDING ON`` bounds the file,
+        not each record, so its records never end inside a field."""
+        return (
+            length_framed
+            and self.varying is not None
+            and self.varying.per_record
+            and self.varying.minimum <= len(body) <= self.varying.maximum
+        )
+
     def decode_bytes(
         self,
         data: bytes,
@@ -1122,7 +1173,20 @@ class RecordDecoder:
                 break
             body, consumed, rdw = frame
             if index >= skip:
-                fields = decode_record(chosen, body, options, trim_tables=trim_tables)
+                fields = decode_record(
+                    chosen,
+                    body,
+                    options,
+                    trim_tables=trim_tables,
+                    cut_ok=self._cut_by_design(
+                        body,
+                        rdw is not None
+                        or (
+                            fmt is RecordFormat.VARIABLE_BARE
+                            and bool(options.record_separator)
+                        ),
+                    ),
+                )
                 record_errors: list[str] = []
                 if rdw is not None:
                     # Where an RDW-framed record ends is the RDW's word, so

@@ -93,8 +93,8 @@ class SignatureParameter:
     direction: str = "unknown"
     #: Passing mode the callee declares for this operand -- ``"REFERENCE"``
     #: or ``"VALUE"`` -- from ``PROCEDURE DIVISION USING [BY VALUE] ...``.
-    #: ``None`` for an ENTRY statement's operands, whose USING phrase the
-    #: parser records no mode for.
+    #: An ENTRY statement's operands carry the mode its own ``USING [BY]
+    #: VALUE/REFERENCE`` phrase declares.
     by_clause: str | None = None
     location: SourceLocation | None = None
 
@@ -539,14 +539,19 @@ class ProgramSignatureExtractor:
                     "its calling interface is not described here"
                 )
                 continue
-            params = [str(p) for p in (stmt.using_parameters or []) if str(p).strip()]
+            entry_modes = list(getattr(stmt, "parameter_modes", None) or [])
+            params = [
+                (str(p), entry_modes[i] if i < len(entry_modes) else None)
+                for i, p in enumerate(stmt.using_parameters or [])
+                if str(p).strip()
+            ]
             entries.append(
                 EntryPoint(
                     name=name.upper(),
                     kind="entry-statement",
                     parameters=[
-                        SignatureParameter(name=n.upper(), position=i)
-                        for i, n in enumerate(params, start=1)
+                        SignatureParameter(name=n.upper(), position=i, by_clause=mode)
+                        for i, (n, mode) in enumerate(params, start=1)
                     ],
                     location=stmt.location,
                 )

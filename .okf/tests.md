@@ -3,10 +3,34 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-10-14T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
+
+2026-10-14: `tests/unit/analysis/test_exit_section_and_alterable_goto.py`
+(11 tests, #382) pins the alterable `GO TO.` and `EXIT SECTION` as
+terminators in dead-code and program-flow: a PERFORMed section returns at
+EXIT SECTION, one fallen into, gone to from another section or entered by a
+CICS HANDLE branch runs on to the next section, a conditional EXIT SECTION still falls through, and
+`EXIT SECTION.` right after a section header is no longer a section named
+EXIT.
+2026-10-14: `tests/regression/test_special_register_paragraph_boundary.py`
+(13 tests, #390) pins `MOVE 0` / `TO` / `RETURN-CODE.` (and TALLY,
+SORT-RETURN, the XML-/JSON- registers, `SET ... TO TRUE`) with each word on
+its own line: one MOVE with the register as target, no phantom paragraph.
+Also pins the fixed-format Area B rule (an undeclared Area B name stays an
+operand) and two controls: an Area A header after a missing period, and an
+indented free-format name, are still boundaries.
+2026-10-14: `tests/regression/test_fd_lrecl_framing_issue_362.py` (18
+tests, #362) pins RECFM=F framing at the FD's LRECL for a whole-program
+source: `fd_record_length` (largest sibling 01, `RECORD CONTAINS`, `None`
+for the longest 01 / WORKING-STORAGE / a bare copybook), `decode`/`compare`
+framing a shorter 01's file, `--record-length` still overriding, and
+`gen-data` space-padding (ASCII and EBCDIC) so the two round-trip, and
+one LRECL per FD when `RECORD CONTAINS` is below the largest 01. Its
+program template puts the RECORD clause on its own line: appended to the
+FD line it ran past column 72, where fixed format drops it.
 
 2026-10-14: `tests/regression/test_evaluate_word_operator_when.py` (38
 tests, #387) pins EVALUATE WHEN phrases with relational words
@@ -15,12 +39,29 @@ single `Condition` selectors (a lone `WHEN ZERO` stays figurative), the
 logical-only `operator: "OR"`, and what business-rules / xref /
 ConstraintExtractor / complexity read from them.
 
+2026-10-14: +6 in `tests/unit/analysis/test_unused_variables.py`'s new
+`TestObjectOrientedUnitData` (issue #379): FACTORY / OBJECT data used only
+by that paragraph's METHODs is not reported unused, data no method touches
+still is, an OBJECT method's reference does not reach FACTORY data, and a
+method's CALL USING / MOVE CORRESPONDING marks the OBJECT group's fields. One
+test runs `tests/samples/enterprise/OOCOBOL.cbl`. See `analysis.md`.
+
 2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
 #377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
 read, no phantom paragraph appears, and dead-code / program-flow /
 unused-variables / complexity all see the jump table.
 `test_go_parser_edge_cases.py`'s `test_depending_without_on_reads_variable`
 replaces the test that pinned the old behavior.
+
+2026-10-15 (#391): `tests/unit/analysis/test_redundancy.py` gains
+`TestLayoutAndCaseDoNotAffectClones` (line breaks, lowercase and spacing
+still give TYPE_1; literal case still breaks it; `scan` digests agree) and
+`TestUnquotedLiteralCaseStillBreaksType1` (EVALUATE WHEN / THRU, static
+CALL, INVOKE and STOP literals differing only in case are never TYPE_1);
+`test_evaluate_variants.py::TestRangeQuotedMarkers` pins the Range
+`start_quoted` / `end_quoted` markers (and
+`test_evaluate_keyword_literal_when.py` now expects them on `'A' THRU 'C'`); `test_compute_expression_parsing.py::
+TestComputeExpressionLayout` pins a multi-line COMPUTE's expression text.
 
 2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests,
 #313) pins EVALUATE `WHEN SPACES` / `ZERO` / `LOW-VALUES` as figurative
@@ -30,6 +71,14 @@ kept). Four selector-shape tests now expect the additive `"quoted": True`.
 `tests/unit/analysis/test_ast_diff.py` adds a parametrized test that
 `WHEN SPACES` -> `WHEN 'SPACES'` and `WHEN WS-B` -> `WHEN 'WS-B'` each diff
 as one `condition-changed`.
+
+2026-10-14 (issue #392): new `tests/unit/analysis/test_cics_terminators.py`
+(36 tests): `EXEC CICS RETURN` / `XCTL` / `ABEND` end a paragraph for
+dead-code (later paragraphs dead), program-flow (no `FALL_THROUGH`,
+`has_cics_exit`, exit point) and recursion-check (a RETURN TRANSID retry
+loop is MEDIUM with an escape, not a HIGH lint error); a RETURN / XCTL with
+`RESP` / `RESP2` / `NOHANDLE` still falls through but stays an exit point
+and a loop escape (the RESP retry loop is MEDIUM too), ABEND never does.
 
 2026-10-14: +9 in `tests/unit/analysis/test_dead_code.py`'s new
 `TestTransitiveDeadCode` (issue #384): paragraphs PERFORMed / GONE TO only
@@ -142,6 +191,11 @@ program-flow "duplicate name across top level and section" tests,
 program-signature's declared-twice test, xref's duplicate-declarations
 test) were updated to the qualified behaviour.
 
+2026-10-14: `tests/regression/test_issue_403_abbreviated_leading_is.py` (13
+tests) pins issue #403: an abbreviated leg opening with `IS` (`A > 1 AND IS
+< 5`, `IS GREATER THAN`, `IS EQUAL TO`, `IS NOT >`) expands exactly as the
+same leg without `IS`, in IF and PERFORM UNTIL.
+
 2026-09-17: `tests/regression/test_audit_2026_09_17_preprocessing.py` (42
 tests) pins the nine preprocessing defects of that date's audit: record-only
 line splitting (`cobolparser/_lines.py`), EBCDIC NL (0x15) copybook
@@ -175,6 +229,11 @@ RELEASE/RETURN). See `analysis.md`.
 `ADD 1 TO WS-COUNT` is now read *and* write) and
 `test_program_signature.py` (+1) pin arithmetic read/write roles and the
 LINKAGE directions derived from them. See `analysis.md`.
+
+2026-10-14: `tests/unit/analysis/test_io_sequence.py::TestSectionLocalParagraphNames`
+(4 tests) pins a `SEC-EXIT` in every section: an unqualified GO TO (direct or
+conditional) lands on its own section's exit, and `PERFORM SEC-EXIT OF B-SEC`
+on the named one (issue #335). See `analysis.md`.
 
 2026-10-14: `tests/unit/analysis/test_io_sequence_perform_summaries.py` (7
 tests, #371) pins io-sequence surviving a 1,500-deep PERFORM chain, walking a
@@ -225,6 +284,12 @@ compare (C vs F sign nibble, slack past the layout), VB records with absent
 `OCCURS DEPENDING ON` occurrences, and the CLI's 0/1/2 exit statuses. Every
 fixture is a record image from `encode_record`, not a hand-built decode
 result. See `generators.md`'s "Record compare".
+
+2026-10-15: `TestHexLiteralBytes` (+12 cases) pins hex-literal bytes keyed by
+the literal, not its text (`LiteralCell`): `VALUE SPACE` text next to
+`88 VALUE X'20'`, `'AB'` next to `X'4142'` and random text next to `X'41'`
+stay charset-encoded, and `decode(encode(row)) == row` for hex-literal fields
+in ASCII and EBCDIC across FIXED/VARIABLE/VARIABLE_BARE (#460 review).
 
 2026-10-14: `tests/unit/generators/data/test_encoding.py::TestHexLiteralBytes`
 (+10 cases) pins `VALUE X'..'` and level-88 hex witnesses written as their
@@ -719,7 +784,9 @@ SOURCE/SUM/GROUP INDICATE/JUSTIFIED, to_dict, missing-RD-period guard,
 FD `REPORT IS` non-header) and +5 in new
 `tests/unit/test_xml_json_structured_clauses.py` (XML PARSE PROCESSING
 PROCEDURE fields, XML/JSON ON EXCEPTION bodies as statements, END-JSON
-inside IF). The 2026-08-13 file's REPORT tests were re-pointed at the parsed
+inside IF); issue #394 added 4 more there (IS / THRU / THROUGH on their
+own lines, bare PROCEDURE with IS on the next line, and the THRU range
+staying live for dead-code). The 2026-08-13 file's REPORT tests were re-pointed at the parsed
 shape (no warning) and `report_writer.cbl` rejoined `test_sample_programs.py`.
 
 2026-08-13: +23 in new `tests/regression/test_screen_report_communication_sections.py`
@@ -915,7 +982,7 @@ tests/
 
     test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244), TestFailurePathExpectations: error-status / empty-input scenarios assert no normal-path call_count and no field_equals (#318) (see generators.md)
 
-    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md); TestCallCountFollowsControlFlow: call_count only where exact -- branches, literal TIMES, UNTIL bodies, the read-to-EOF rule and its early exits, GO TO loops, EOF status checks (#363); TestMultipleRecordsUnderOneFd: an FD's several 01 records give one record's columns per row, never all joined, picked by the scenario's pins (#364)
+    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md); TestCallCountFollowsControlFlow: call_count only where exact -- branches, literal TIMES, UNTIL bodies, the read-to-EOF rule and its early exits, GO TO loops, EOF status checks (#363); TestMultipleRecordsUnderOneFd: an FD's several 01 records give one record's columns per row, never all joined, picked by the scenario's pins (#364); TestArmsOnTwoRecordsOfOneFd: arms on two 01 records of one FD are never merged, an arm pinning both is missed, dropped pins demote the scenario's arms, the alternate-view note names only unused records; TestFillerOwningConditionName: a FILLER (omitted or explicit) owning a level-88 keeps its FILLER#<n> column and witness
     test_scenario_planner.py  # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable-arm handling, fixed families (empty-input/error-status/boundary-values), exact coverage accounting, TestScenarioNamesAreUnique: verb@line + disjunct naming, merged names, uniqueness over tests/samples and enterprise (#267) (see generators.md)
     io_statements/             # IO parser unit tests
     test_extended_verb_parsers.py  # 2026-09-02 statement-coverage audit: INITIATE/TERMINATE/SUPPRESS, SEND/RECEIVE/ENABLE/DISABLE/PURGE, EXHIBIT/EXAMINE/TRANSFORM/ENTER/NOTE/CHAIN, READY/RESET TRACE, SERVICE, TITLE, RAISE/RESUME/VALIDATE -- node, operands, no warnings; UNSUPPORTED_VERBS == {EXECUTE, GOTO, RECOVER}; every STATEMENT_KEYWORDS verb dispatches (see parser.md)
@@ -1127,8 +1194,8 @@ Pythons, so the guard is not in force there; only the `coverage` job skips
 them. The ratio-based overhead assertion is unaffected. Surfaced the moment
 the suite was first wired into CI.
 
-The full suite (~12,300 tests across 439 `test_*.py` files as of
-2026-10-04; ~9,400 at the time) **does** run on every PR, as of the
+The full suite (~13,000 tests across 464 `test_*.py` files as of
+2026-10-14; ~9,400 at the time) **does** run on every PR, as of the
 2026-09-07 audit (on 3.13 only since 2026-10-03 -- see `build` above). It previously ran nowhere: this file used to describe a
 `test` job gated on `if: github.event_name == 'workflow_dispatch'`, and no
 such job was ever in `ci.yml` — the suite and the `--cov-fail-under=90`
@@ -1268,7 +1335,9 @@ a new type has to be added to both. The corpus is parsed with
 program with D lines), so COMPDIR's D-line DISPLAYs are in its AST and it
 stays warning-free; `tests/unit/test_debugging_mode_lines.py` pins the
 default (dropped + warning), the option on every surface (API, CLI,
-cobol.yml, scan, tokenize) and `debug_line_numbers` (#334). `tests/samples/*.cbl` smoke checks
+cobol.yml, scan, tokenize, batch, the copybook expansion -- with a real
+COPY, since a program without one passes through the expander untouched --
+and every subcommand that parses COBOL) and `debug_line_numbers` (#334). `tests/samples/*.cbl` smoke checks
 (`test_all_samples.py`) cover the corpus too, since it lives under
 `tests/samples/`. The same 22 files are copied into
 `mocky-mock/tests/fixtures/enterprise/`, where
@@ -1341,6 +1410,12 @@ ENTRY, EXEC SQL/CICS/DLI, END DECLARATIVES, SPECIAL-NAMES, OBJECT
 REFERENCE, ...) once on one line and once broken across two, and requires
 identical ASTs apart from locations; it also pins the dispatch cache
 telling EXEC<newline>SQL from EXEC<newline>CICS within one parse.
+
+`tests/regression/test_condition_expression_separators.py` (issue #386)
+pins a separator `,` / `;` after an IF condition, a PERFORM UNTIL condition
+(inline, out-of-line, VARYING), an EVALUATE subject or WHEN selector, a SEARCH
+WHEN condition and a COMPUTE expression
+being dropped, and a comma inside `FUNCTION MAX(X, Y)` being kept.
 
 `tests/regression/test_fd_record_after_label_data.py` (issue #401) pins
 RECORD CONTAINS / RECORD VARYING written after LABEL RECORDS or DATA RECORD:
@@ -1426,6 +1501,13 @@ by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
 (`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
 `COMP-5` is still a change.
 
+`tests/unit/cli/test_analyzer_cli_gaps.py::TestDefinitionsAndExitsStampOrigins`
+pins that with `--copybook-path` xref's `definition` gains
+`definition_origin` (a WORKING-STORAGE item and a paragraph after a COPY,
+and an item inside the copybook) and program-flow's
+`exit_statement_location` gains `exit_statement_origin`; none without
+expansion (#367).
+
 `tests/regression/test_optional_keyword_forms.py` (#405) pins the
 optional-keyword forms that used to lose data: `XML PARSE x PROCEDURE IS p`
 without PROCESSING (and dead-code not reporting `p`), SORT bare
@@ -1434,3 +1516,50 @@ no-keys warning on a file SORT/MERGE (not on a table SORT), and
 SPECIAL-NAMES mnemonic entries and `SYMBOLIC CHARACTERS` without IS.
 `test_initialize_sort_arithmetic_comma_gaps.py`'s two USING/GIVING comma-list
 SORTs gained a key, since a keyless file SORT now warns.
+
+## 2026-10-14 (issue #396)
+
+`tests/unit/analysis/test_sql_cics_lint.py` replaces the test that pinned
+`IGNORE CONDITION` as cancelling a handler with five that pin it as handling:
+`IGNORE CONDITION ERROR` (alone or replacing a label handler) clears
+`CICS_NO_RESP_HANDLING`, a narrower `IGNORE CONDITION NOTFND` goes to
+`unchecked`, a bare `HANDLE CONDITION ERROR` afterwards restores the finding,
+and `PUSH HANDLE` suspends an ignore like any other handler.
+## 2026-10-14 (issue #402)
+
+`tests/regression/test_optional_keyword_forms_402.py` pins the four optional-
+keyword forms: `OCCURS n TO UNBOUNDED`, FD `RECORD VARYING n TO m` without
+FROM, `ENTRY ... USING [BY] REFERENCE/VALUE` (operands and
+`parameter_modes`, plus the signature's `by_clause`), and `INITIALIZE ...
+FILLER` without WITH. `test_program_signature.py::test_by_clause_is_set_and_rendered_where_the_mode_changes`
+now expects an ENTRY operand's `by_clause` to be `"REFERENCE"`, not None.
+## 2026-10-14 (issue #388)
+
+`tests/unit/test_call_using_mode_without_by.py` pins that a bare
+`REFERENCE` / `CONTENT` / `VALUE` in `CALL ... USING` (BY omitted) switches
+the passing mode instead of being recorded as an argument, alone and mixed
+with `BY` phrases, literals and figurative constants.
+
+## 2026-10-14 (issue #349)
+
+`tests/unit/analysis/test_sql_whenever_references.py` (28 tests) pins that
+`EXEC SQL WHENEVER SQLERROR|SQLWARNING|NOT FOUND GO TO p` (also `GOTO`,
+`:p`, lowercase) keeps `p` out of dead-code and lint, that `CONTINUE` and an
+unknown target reference nothing, and that program flow carries one
+`SQL_WHENEVER` edge per procedure holding covered SQL. `TestCoverageIsSourceOrder`
+pins the source-order model: a directive in a never-performed setup
+paragraph still covers SQL that runs, SQL before the directive or only in a
+dead paragraph is not a branch, CONTINUE is per condition, declarations are
+not covered, and dead-code and program flow agree on every case.
+## 2026-10-14 (issue #351)
+
+`tests/unit/analysis/test_codebase.py::TestLibraryQualifiedCopy` pins that
+`COPY REC OF LIBA` / `COPY REC IN LIBB` resolve to each library's own file in
+codebase-graph, that a nested COPY inside `LIBB/REC` reaches only the programs
+copying `LIBB/REC` (chains `[PB, REC, INNER]`), that `copybook-impact` on a
+member name resolving to several files unions their fields and says so, and
+that a hand-built nested `CopyEdge` without `parent_path` still matches by name.
+`TestLibraryQualifiedCopyReview` (#445 review) pins that a COPY whose library
+did not resolve is never the parent of a nested edge read from a resolved
+file, and that DOT/Mermaid draw `REC -> INNER` once when two libraries' REC
+both copy INNER.
