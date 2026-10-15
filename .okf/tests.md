@@ -204,6 +204,11 @@ RELEASE/RETURN). See `analysis.md`.
 `test_program_signature.py` (+1) pin arithmetic read/write roles and the
 LINKAGE directions derived from them. See `analysis.md`.
 
+2026-10-14: `tests/unit/analysis/test_io_sequence.py::TestSectionLocalParagraphNames`
+(4 tests) pins a `SEC-EXIT` in every section: an unqualified GO TO (direct or
+conditional) lands on its own section's exit, and `PERFORM SEC-EXIT OF B-SEC`
+on the named one (issue #335). See `analysis.md`.
+
 2026-10-14: `tests/unit/analysis/test_io_sequence_perform_summaries.py` (7
 tests, #371) pins io-sequence surviving a 1,500-deep PERFORM chain, walking a
 2x fan-out 40 levels deep once per level, re-walking a shared range only from

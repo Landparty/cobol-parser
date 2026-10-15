@@ -56,7 +56,7 @@ either by bare name.
   section (`enclosing_section(stmt)` walks `.parent`), else the unique
   name; an ambiguous reference resolves to *every* candidate (keeps code
   alive, never hides it). Used by `program_flow` (scanner + `EdgeCollector`),
-  `DeadCodeAnalyzer` and `ComplexityAnalyzer`.
+  `DeadCodeAnalyzer`, `ComplexityAnalyzer` and `IOSequenceAnalyzer`.
 - **Flow output contract** — `FlowNode.name` stays the bare name;
   `FlowNode.qualified_name` is set (and emitted by `to_dict`) only for a
   shared name; `FlowNode.key` is the one every edge `source`/`target`,
@@ -1156,6 +1156,17 @@ via a range stack; per-chain visited sets keep GO TO cycles finite).
 Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Conditional
 branches still share one state (unchanged conservatism); paragraphs
 unreachable from the entry procedure are no longer walked at all.
+
+**GO TO / PERFORM targets resolve section-first (2026-10-14, issue #335).**
+The walk's name -> paragraph-index maps (`_name_first` / `_name_last`) are
+keyed by `ProcedureIndex` keys, and `_resolve()` applies its rule from the
+section of the paragraph being walked (`_current_section`, restored after
+each PERFORM) plus the `target_qualifier` / `thru_qualifier` metadata. With
+a `SEC-EXIT` in every section, `GO TO SEC-EXIT` used to land on the first
+section's exit -- outside the PERFORMed range, so the PERFORM ended there,
+the real exit's CLOSE was never seen, and FILE_LEFT_OPEN was reported.
+Conditional GO TO targets are resolved when queued. Pinned by
+`tests/unit/analysis/test_io_sequence.py::TestSectionLocalParagraphNames`.
 
 **PERFORM ranges are summarized, not re-inlined (2026-10-14, #371).** Each
 PERFORM used to re-walk its target paragraphs through Python recursion, so a
