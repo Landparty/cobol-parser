@@ -3,7 +3,7 @@ type: Module
 title: Generators
 description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
-timestamp: 2026-10-13T00:00:00Z
+timestamp: 2026-10-14T00:00:00Z
 ---
 
 # Overview
@@ -428,8 +428,9 @@ was the third independent P-scaling check; now reads `decimal_digits`
 alone).
 
 ```python
-VaryingLength:     .minimum .maximum .depending_on
+VaryingLength:     .minimum .maximum .depending_on .per_record
                    .from_fd_clauses(clauses, *, record_size)
+                   .file_range(minimum, maximum, *, record_size)
                    .build(minimum, maximum, depending_on, record_size)
 DataGeneratorOptions:
                    .record_varying ((min, max) | None) — for a copybook
@@ -666,7 +667,7 @@ module docstring — that suite is the regression guard):
 
 | Storage | Bytes |
 |---------|-------|
-| DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte. Under `JUSTIFIED RIGHT` (`FieldSpec.justified`, 2026-09-28) the mirror image: right-aligned behind leading spaces, an oversized value losing its *leftmost* characters; the decoder strips that leading pad (it used to write `AB    ` where the MOVE leaves `    AB`) |
+| DISPLAY alphanumeric / alphanumeric-edited | left-justified, space-padded, truncated; charset's space byte. Under `JUSTIFIED RIGHT` (`FieldSpec.justified`, 2026-09-28) the mirror image: right-aligned behind leading spaces, an oversized value losing its *leftmost* characters; the decoder strips that leading pad (it used to write `AB    ` where the MOVE leaves `    AB`). A hex literal (`VALUE X'C1C2'`, or a level-88 `X'FF'` drawn as the witness) is written as its own bytes, padded/truncated the same way, in either charset: `FieldSpec.literal_bytes` maps the cell's Latin-1 stand-in to those bytes (issue #319; re-encoding the text used to write `3f 3f` in ASCII and `65 62` in EBCDIC) |
 | DISPLAY numeric-edited | the edited form a `MOVE` leaves (`$1,234.56`, `- 12.34`, `012CR`, `12/34/56`) -- `editing.py`'s `edit_numeric()`; the decoder de-edits it back to the logical value with `deedit_numeric()`. A picture using a symbol `editing.py` does not model (`P`, a non-default currency sign) keeps the CSV text as is. Under `DECIMAL-POINT IS COMMA` (`FieldSpec.decimal_point_is_comma`, read off the `PictureClause`) both functions take `decimal_point_is_comma=True` and exchange `,`/`.` in the picture and the edited text: `Z.ZZ9,99` writes `1.234,56` (2026-09-28) |
 | DISPLAY numeric (zoned) | one byte per digit; sign as an overpunch, or a real `+`/`-` byte under `SIGN IS SEPARATE` |
 | `COMP-3` / `PACKED-DECIMAL` | two BCD nibbles per byte, sign nibble `C`/`D` signed, `F` unsigned |
@@ -825,7 +826,7 @@ dispatched on the same `USAGE`-then-category ladder:
 | Storage | Read back as |
 |---|---|
 | DISPLAY text | the charset's characters (ASCII decoded as **latin-1**, so a byte the encoder could not have written is still shown), trailing spaces/NULs stripped |
-| zoned DISPLAY | one digit per byte, sign overpunched or `SIGN IS SEPARATE` |
+| zoned DISPLAY | one digit per byte, sign overpunched or `SIGN IS SEPARATE`. Under `SEPARATE` only the sign byte carries the sign and it must be `+` or `-`: every digit is unsigned, so a sign zone on one is an `error` (never a negation), and a blank sign byte is an `error` too (2026-10-14, #360: x'F1F2D34E' read `-123` clean, and x'F1F2F340' read `123` clean) |
 | `COMP-3` | two BCD nibbles per byte, sign in the final low nibble. With an even digit count the first byte's high nibble is pad, not a digit: a non-zero pad is an `error` and is left out of the value (2026-09-28: it was read as a digit, so `S9(2)V99` x'12345C' decoded as `123.45`, more digits than the PICTURE holds) |
 | `COMP`/`COMP-4`/`COMP-5` | two's-complement, big-endian except COMP-5 which follows `EncodingOptions.endian` |
 | `COMP-1`/`COMP-2` | IEEE 754, rendered to 7 / 15 significant digits |
@@ -904,7 +905,7 @@ Invalid data that is still *readable* counts too (issue #248, 2026-10-04):
 
 | Format | How the next record is found |
 |---|---|
-| `FIXED` | `record_length` override, else `base.length` |
+| `FIXED` | `record_length` override, else `base.length`. With a `record_separator` set, the separator is *checked*, not just skipped (#359, 2026-10-14): a record not followed by it (and not at end of data), or one with a separator inside non-binary bytes (`_separators_only_in_binary`, judged on the base view), gets a `record_errors` entry -- lines that are not LRECL bytes long used to decode silently misframed |
 | `VARIABLE` | the 4-byte RDW; an RDW longer than the file raises `RecordDecodingError` rather than being guessed at |
 | `VARIABLE_BARE` | the layout's own ODO counters — decoding consumes exactly what this record holds, so the next starts where this stopped. A tail shorter than the record its own counters describe is `trailing`, not one more truncated row (`_ran_short`, 2026-09-27 — RECFM=F already did this). With a `record_separator` set, the layout still frames first (2026-09-28: a `0x0A` inside COMP/COMP-3 data used to split the record); the layout's length is taken when a separator or end-of-data follows it and every separator inside it falls in binary/packed/float bytes, else it falls back to `find(separator)` (text lines shorter than the layout) |
 
@@ -1144,8 +1145,18 @@ bytes each *record* carries.
   metadata. So `gen-data` on a **whole program** picks it up with no flag. A
   bare **copybook** has no FD; `DataGeneratorOptions.record_varying` (CLI
   `--record-varying MIN:MAX`) supplies it, and overrides the FD when both
-  exist. `RECORD CONTAINS 47 TO 80` declares the same thing without the
-  `VARYING` keyword and parses identically.
+  exist.
+* **Only `DEPENDING ON` draws lengths** (#320, 2026-10-14). `RECORD CONTAINS
+  47 TO 80` (format 2) and `RECORD VARYING` without `DEPENDING ON` make the
+  *file* variable, but IBM COBOL writes each record at the length of the 01
+  it was written from, never cut mid-field. `from_fd_clauses()` routes those
+  to `VaryingLength.file_range()`: the range is kept unclamped with
+  `per_record=False` (so `AUTO` still resolves to variable and LRECL is still
+  the declared max), `_draw_lengths()` draws nothing, and each record is the
+  layout's full length. A layout outside the range is a caveat, not a cut.
+  `GeneratedDataset._resolved_options()` settles `AUTO` against the dataset,
+  since the encoder only sees a range through a drawn `data_length`. An
+  explicit `record_varying` still opts in to drawn lengths.
 * **`maximum` is clamped to the record's own byte length.** An FD promising
   more than its 01 can hold cannot be honoured by padding — those bytes were
   never declared — so the range is cut to what exists. **Never silently**
@@ -1360,6 +1371,20 @@ bundle.unresolved                  # every gap from Phases 1-2-3, merged
 bundle.to_json()                   # bundle_version, program_name, seed, ...
 bundle.write_csv_dir("out/")       # out/<scenario-slug>/<KEY>.csv + MANIFEST.json
 ```
+
+**Columns are unique across a fixture's records (#365, 2026-10-14).** A
+fixture can draw fields from several records: a CALL's `USING` arguments, or
+a READ boundary's alternate FD records. `flatten_record()` only makes columns
+unique *within* one record, so `REC-A.AMT` and `REC-B.AMT` both arrived as
+`AMT`, and since a row is keyed by `spec.column` they shared one value (the
+`ELSE` witness for `REC-B.AMT` also landed on `REC-A.AMT`; the CSV header
+read `AMT,CODE-A,AMT,CODE-B`). `_unique_columns()` now de-duplicates the
+combined list on `(qualified_name, subscripts)` (the same argument passed
+twice is one set of fields) and, only on a collision, re-runs
+`layout._assign_columns` over *copies* of the whole list, so the colliding
+names become `REC-A.AMT` / `REC-B.AMT` and every other column keeps its short
+header. Copies, because a spec from `ProgramLayoutIndex.resolve()` is the
+index's own. A fixture with no collision is byte-identical to before.
 
 ## Scenario-mode generation (`generate_with_scenarios`, Phase 6)
 
@@ -1610,6 +1635,24 @@ A name may resolve to either an elementary field or a whole record
 (`_fields_for_name`/`_fields_for_names`, private helpers using the same
 `resolve()`-then-`record_named()` fallback `BoundaryInventoryAnalyzer` uses)
 — a CALL argument or SQL host variable can legally be either.
+
+**Several 01 records under one FD (issue #364, 2026-10-14).** A READ with no
+INTO gets every record of its FD in `Boundary.record_names` (Phase 4's
+`ConstraintExtractor` relies on that to know every field the READ feeds), but
+those records are views of ONE record area -- an implicit REDEFINES. The
+generator used to join all their fields into one row, so `HDR-TYPE` and
+`DTL-TYPE` (both offset 0) got two different values, the record grew to the
+sum of the records' lengths, and a field name repeated in the second record
+(the `REC-TYPE` idiom) was dropped by the column de-dup. `_record_view()` now
+picks exactly one record per scenario: the one holding the most of that
+scenario's pinned fields (`witnesses` + every `row_witnesses` row), the first
+in source order on a tie or with no scenario. `bundle.layouts` is keyed by the
+chosen record, so a scenario that picks the second record adds its own key.
+The records left out are reported once in `bundle.unresolved` ("alternate
+view(s) not generated: ..."); a scenario whose pins span two records gets one
+more entry naming the pins its rows cannot honour. Only `READ` boundaries are
+narrowed: an SQL boundary's several names are distinct host variables.
+Pinned by `tests/unit/test_program_fixtures.py::TestMultipleRecordsUnderOneFd`.
 
 ## Determinism: per-boundary sub-seeds
 

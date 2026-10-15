@@ -161,6 +161,45 @@ def _mask_quoted(text: str) -> str:
     return _QUOTED_TEXT_RE.sub("''", text)
 
 
+# ``[IS] [NOT] GREATER|LESS [THAN] [OR EQUAL [TO]]`` and ``[IS] [NOT]
+# EQUAL[S] [TO]``: the word spellings of the relational operators.
+_RELATIONAL_WORDS_RE = re.compile(
+    r"(?<![A-Za-z0-9-])(?:IS\s+)?(NOT\s+)?"
+    r"(?:(GREATER|LESS)(?:\s+THAN)?(\s+OR\s+EQUAL(?:\s+TO)?)?|EQUALS?(?:\s+TO)?)"
+    r"(?![A-Za-z0-9-])",
+    re.IGNORECASE,
+)
+_NEGATED_SYMBOL = {">": "<=", "<": ">=", ">=": "<", "<=": ">", "=": "<>"}
+
+
+def _symbolize_relational_words(text: str) -> str:
+    """*text* with word-form relational operators spelled as symbols.
+
+    ``X GREATER THAN OR EQUAL TO 1`` becomes ``X >= 1``, so the symbol-only
+    text parser below reads it -- and its ``OR`` is no longer mistaken for a
+    logical connective. Quoted literals are left as they are.
+    """
+
+    def repl(match: re.Match[str]) -> str:
+        negated, word, or_equal = match.groups()
+        if word is None:
+            symbol = "="
+        else:
+            symbol = ">" if word.upper() == "GREATER" else "<"
+            if or_equal:
+                symbol += "="
+        return f" {_NEGATED_SYMBOL[symbol] if negated else symbol} "
+
+    pieces: list[str] = []
+    last = 0
+    for quoted in _QUOTED_TEXT_RE.finditer(text):
+        pieces.append(_RELATIONAL_WORDS_RE.sub(repl, text[last : quoted.start()]))
+        pieces.append(quoted.group(0))
+        last = quoted.end()
+    pieces.append(_RELATIONAL_WORDS_RE.sub(repl, text[last:]))
+    return re.sub(r"\s+", " ", "".join(pieces)).strip()
+
+
 _RELATIONAL_TEXT_OP_CANON: dict[str, str] = {
     "=": "eq",
     "<>": "ne",
@@ -1272,6 +1311,7 @@ def _parse_relational_text(
     if not text:
         unsupported.append(f"{origin}: SEARCH WHEN has no condition text")
         return None
+    text = _symbolize_relational_words(text)
 
     if _LOGICAL_CONNECTIVE_RE.search(_mask_quoted(text)):
         # A compound condition: the regex below would take everything after
