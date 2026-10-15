@@ -99,6 +99,9 @@ class ScanOptions:
     #: land here; ``free_form`` alone is only the lexer-mode hint that
     #: auto-detection may still override.
     preprocess_fixed: bool | None = None
+    #: ``parse_cobol``'s ``debug_lines``: compile ``D``-in-column-7 lines as
+    #: code (CLI ``--debug-lines``, cobol.yml ``project.debug_lines``).
+    debug_lines: bool = False
 
 
 @dataclass
@@ -364,6 +367,8 @@ def _parse(
         kwargs["free_form"] = True
     if options.preprocess_fixed is not None:
         kwargs["preprocess_fixed"] = options.preprocess_fixed
+    if options.debug_lines:
+        kwargs["debug_lines"] = True
 
     if options.copybook_paths:
         from cobolparser.preprocess.copybook_expander import parse_cobol_with_expansion

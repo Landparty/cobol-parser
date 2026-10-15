@@ -137,6 +137,9 @@ Three properties it owes its caller, all pinned by `tests/unit/test_scan.py`:
 (the lexer hint) and `preprocess_fixed` (`None` auto-detects, `True`/`False`
 force or disable normalization). The second was missing before 2026-09-28,
 so `scan --source-format fixed|free` silently auto-detected.
+`ScanOptions.debug_lines` (default False, 2026-10-14, #334) is
+`parse_cobol`'s `debug_lines`: compile `D`-in-column-7 lines as code. The
+CLI's `--debug-lines` and cobol.yml `project.debug_lines` land there.
 
 A file whose copybook expansion fails is NOT dropped -- it falls back to the
 unexpanded parse, the same degradation `parse_files_with_copybooks` makes
