@@ -145,7 +145,8 @@ the one immediately before it is itself already known to be reachable
 extending) and does not terminate per `_terminates`: any of its own
 top-level statements (not just the last one — see Copilot follow-up below)
 is a hard terminator (`STOP RUN` — not `STOP 'literal'`, which merely
-halts pending operator action; `GOBACK`; `EXIT PROGRAM`) or an
+halts pending operator action; `GOBACK`; `EXIT PROGRAM`; `EXEC CICS
+RETURN` / `XCTL` / `ABEND`, see `_cics.py` below) or an
 unconditional (non-`DEPENDING`) `GO TO`. The reachability gate matters:
 without it, a chain of paragraphs that are *all* themselves unreached
 would still credit each other purely for standing next to one another in
@@ -743,7 +744,8 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   **strongly connected component** (`_components`, Tarjan over
   `_ESCAPE_EDGE_TYPES`), not the cycle alone: `HIGH` if no paragraph in the
   component has an edge leaving it or a program-terminating statement
-  (`has_stop_run`/`has_goback`/`has_exit_program` on the `FlowNode`),
+  (`has_stop_run`/`has_goback`/`has_exit_program`/`has_cics_exit` on the
+  `FlowNode`),
   `MEDIUM` otherwise. Per-cycle checking (before #393) let two cycles that
   share a paragraph each "escape" into the other, so an inescapable
   `P1 -> P2 -> P1` / `P1 -> P3 -> P1` pair read MEDIUM. `has_return` is a
@@ -3476,3 +3478,21 @@ and shares no code with the COBOL pipeline; it has its own OKF file:
   `5E`). The letter-led pattern bit the digit off, so `MOVE 1ST-NAME TO
   2ND-NAME` referenced `ST-NAME` / `ND-NAME`: both items unused, both
   names undefined in xref. Shared with `redundancy.py`'s clone renaming.
+
+
+## CICS terminators (issue #392, `_cics.py`)
+
+Two rules. `cics_exit_kind(stmt)`: the command is `RETURN`, `XCTL` or
+`ABEND`, which leave the program whenever they succeed. `cics_terminator_kind
+(stmt)`: the same, minus a `RETURN` / `XCTL` carrying `RESP`, `RESP2` or
+`NOHANDLE` (decision (a) on the issue: a failed command then continues at
+the next statement); `ABEND` always is one. Both `_is_terminator` copies
+(`dead_code.py`, `program_flow/scanner.py`) use `cics_terminator_kind`, so
+neither draws fall-through past such a paragraph. The scanner uses
+`cics_exit_kind` for `FlowNode.has_cics_exit`, `exit_points` and
+`exit_statement_kind` (`"EXEC CICS RETURN"`, ...), and
+`RecursionRiskAnalyzer._has_escape` counts `has_cics_exit` as a way out --
+so a retry loop ending in `RETURN TRANSID(...) RESP(...)`, the usual shop
+form, is `MEDIUM` like the GOBACK equivalent, not a `HIGH` lint error
+(review of PR #453: applying the RESP exemption to the escape flag too left
+that loop HIGH). Pinned in `tests/unit/analysis/test_cics_terminators.py`.
