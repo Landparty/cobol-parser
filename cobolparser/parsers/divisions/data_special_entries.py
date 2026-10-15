@@ -187,7 +187,10 @@ class SpecialEntryParser:
                     token_stream.consume()
                 else:
                     break
-            elif t.value == ",":
+            elif t.value == "," or t.type == TokenType.SEMICOLON:
+                # A semicolon separates values exactly as a comma does
+                # (``VALUES 'A', 'B'; 'C'``); it used to end the list and
+                # silently drop every value after it.
                 token_stream.consume()
             elif t.type == TokenType.NEWLINE:
                 token_stream.consume()
