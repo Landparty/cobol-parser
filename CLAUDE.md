@@ -21,17 +21,19 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | Task type | Load |
 |-----------|------|
 | Tokenization, `TokenType`, Cython fast-path | `.okf/lexer.md` |
-| Parser, `DivisionParserFactory`, statement parsers | `.okf/parser.md` |
+| Parser, `DivisionParserFactory`, statement parsers | `.okf/parser.md` (routing page for `.okf/parser/`) |
 | `normalize_fixed_format`, copybook expansion | `.okf/preprocessing.md` |
 | `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `.okf/ast-models.md` |
-| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, `LintAnalyzer`, `XrefAnalyzer`, `ProgramSignatureExtractor`, `CodebaseGraphBuilder`, `SqlCicsAnalyzer`, `ProgramDiffer`, etc.) | `.okf/analysis.md` |
-| Flowcharts, copybook → CSV test data (`CopybookDataGenerator`) | `.okf/generators.md` |
-| `parse_files`, `parse_files_with_copybooks`, batch fault isolation | `.okf/batch.md` |
+| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, `LintAnalyzer`, `XrefAnalyzer`, `ProgramSignatureExtractor`, `CodebaseGraphBuilder`, `SqlCicsAnalyzer`, `ProgramDiffer`, etc.) | `.okf/analysis.md` (routing page for `.okf/analysis/`) |
+| Dialects, EXEC SQL/CICS/IMS nodes, LE/intrinsic signature lookups | `.okf/dialects.md` |
+| Flowcharts, copybook → CSV/record-image data (`CopybookDataGenerator`), decode/compare, `gen-fixtures` bundles and scenarios | `.okf/generators.md` (routing page for `.okf/generators/`) |
+| `parse_files`, `parse_files_with_copybooks`, `scan_files`, batch fault isolation | `.okf/batch.md` |
 | z/OS JCL: jobs/steps, DD → dataset bindings (read by jcl-parser) | `.okf/jcl.md` |
 | CLI subcommands and flags, the `cobol.yml` project config | `.okf/cli.md` |
 | Test layout, markers, coverage floor | `.okf/tests.md` |
+| Backend adapter dict shape (summary of `interface-contract.md`) | `.okf/integration.md` |
 
-The OKF is more specific and more current than this file for the above topics. When they conflict, trust the OKF.
+The OKF is more specific and more current than this file for the above topics. When they conflict, trust the OKF. Point-in-time history lives in `.okf/history/` and `.okf/log.md` and is not loaded by default. The pre-commit hook also runs `scripts/okf_check.py`, which tests what the OKF files (and this one) claim against the code; `python scripts/okf_check.py --write` refreshes its generated `<!-- okf:gen -->` spans.
 
 ## Project Overview
 
@@ -63,7 +65,7 @@ pip install -e ".[fast]"
 COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
 COBOLPARSER_ACCEL=1 python -m pytest tests/ --no-cov   # suite on the fast paths
 
-# Run all tests with coverage (90% minimum; ~12,340 tests across 439 files).
+# Run all tests with coverage (90% minimum; ~13,700 tests across 483 files).
 # Measure coverage on a pure-Python build -- see "Coverage Requirement".
 python -m pytest tests/ -v
 
@@ -93,14 +95,14 @@ python -m mypy cobolparser/
 # the subcommand: [--config FILE] to read a specific cobol.yml, [--no-config]
 # to ignore any of them. See "Project Config" below and docs/project-config.md
 cobol-parser config [--json]
-cobol-parser parse <file.cbl> [path] [--compact] [--source-format auto|fixed|free] [--free-form] [--debug-lines] [--dialect ibm-enterprise] [--errors] [--stats]
+cobol-parser parse <file.cbl> [path] [--compact] [--source-format auto|fixed|free] [--free-form] [--debug-lines] [--dialect ibm-enterprise] [--copybook-path DIR] [--define SYMBOL[=VALUE]] [--errors] [--stats] [--find-type NODE_TYPE] [--profile] [-o out.json]
 cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
-cobol-parser expand <file.cbl> --copybook-path ./copybooks [--keep-comments] [--source-map]
+cobol-parser expand <file.cbl> --copybook-path ./copybooks [--keep-comments] [--source-map] [--max-depth N] [--define SYMBOL[=VALUE]]
 cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--describe] [--format csv|json|record|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-varying MIN:MAX] [--record-separator none|newline] [-o out.csv]
 cobol-parser decode [data-file] --copybook <file.cpy> [--record NAME] [--view NAME] [--list-views] [--format csv|json|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-length N] [--record-separator none|newline] [--max-records N] [--skip N] [--strict] [-o out]
 cobol-parser compare <expected> <actual> --copybook <file.cpy> [--record NAME] [--view NAME] [--key FIELD]... [--ignore FIELD]... [--compare-bytes] [--max-differences N] [--format text|json] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-length N] [--record-separator none|newline] [-o out]   # exit 0 equal / 1 different / 2 trouble
-cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
+cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--max-occurs N] [--scenarios happy|branches|all] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
 cobol-parser lint <file.cbl> [--rule RULE]... [--min-severity error|warning|info] [--fail-on error|warning|info|never] [--format json|text] [--copybook-path DIR] [--program NAME]
 cobol-parser dclgen-check <file.cbl>
 cobol-parser analyze <file.cbl>
@@ -117,7 +119,7 @@ cobol-parser lineage <file.cbl> [--field NAME] [--direction forward|backward] [-
 cobol-parser field-impact [FIELD] PATH... [--program NAME] [--table T.C | --dataset DSN] [--direction forward|backward] [--depth N] [--jcl PATH]... [--proc-path DIR] [--bindings FILE.json] [--key-relationships] [--format json|text] [--copybook-path DIR]
 cobol-parser redundancy <file.cbl> [--min-clone-statements N]
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
-cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR]
+cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables|lineage] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR] [--encoding ENC] [--source-format auto|fixed|free] [--output FILE] [--compact]
 cobol-parser io-sequence <file.cbl>
 cobol-parser move-type-check <file.cbl>
 cobol-parser linkage-check <file.cbl>
@@ -142,14 +144,14 @@ The parser is a multi-stage pipeline: **preprocessing -> lexing -> parsing -> AS
 ```
 COBOL source (.cbl/.cob)
   -> preprocess/          (normalize_fixed_format, copybook expansion, conditional compilation)
-  -> lexer.py             (CobolLexer -> List[Token], 244 TokenType values)
+  -> lexer.py             (CobolLexer -> List[Token])
   -> parser.py            (CobolParser -> ParseResult)
   -> models/              (AST node classes with to_dict()/to_json())
 ```
 
 ### Key Packages
 
-**`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (244 types). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them. Pure Python by default; when `cobolparser._lexer_fast` is compiled *and* `COBOLPARSER_ACCEL=1` is set (see `cobolparser/_accel.py`), the lexer uses the Cython-accelerated subclass for hot-path methods.
+**`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (<!-- okf:gen tokentype-count -->244<!-- /okf:gen --> members). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them. Pure Python by default; when `cobolparser._lexer_fast` is compiled *and* `COBOLPARSER_ACCEL=1` is set (see `cobolparser/_accel.py`), the lexer uses the Cython-accelerated subclass for hot-path methods.
 
 **`cobolparser/_lexer_fast.pyx`** / **`cobolparser/_preprocess_fast.pyx`** / **`cobolparser/_data_fast.pyx`** -- Optional Cython modules that subclass the pure-Python lexer/preprocessor (and accelerate the DATA DIVISION `PICTURE` / data-item clause loops) by overriding the inner hot-path methods with C-typed implementations. Opt-in: built only when `COBOLPARSER_ACCEL=1` is set (`COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace`), and used only when it is set at import time too (`cobolparser/_accel.py`'s `accelerators_enabled()`), so pure Python is the default even with a `.so` present. The corresponding `.c` files are checked in so the extension builds without re-running Cython. `COBOLPARSER_SKIP_EXT=1` (the old opt-out) is still honoured. The PyPI wheels still ship compiled, so wheel users opt in with the variable alone.
 
@@ -158,10 +160,12 @@ COBOL source (.cbl/.cob)
 - `copybook_expander.py` -- `expand_copybooks()` and `parse_cobol_with_expansion()` for recursive COPY statement inlining with circular reference detection, encoding detection, content validation, and caching. Also owns the **source map**: one `(file, original line)` per expanded line, carried through continuation merging, the COPY splice and the width wrap, exposed as `CopybookExpansion.source_location_map` (`preserve_source_locations=True`) and as `ParseResult.expansion_source_map`; and `preserve_comments=True`, which puts each comment line's text back into the listing afterwards (`expand --keep-comments`). See `.okf/preprocessing.md`
 - `source_format.py` -- `detect_fixed_format()` decides whether a source is fixed-format (and so needs `normalize_fixed_format`) from its sequence area / indicator column; `normalize_with_recovery()` normalizes with the unterminated-literal retry. The one copy of both decisions, used by `CobolParser` (and so `parse_cobol`), the lexer and the CLI
 - `copy_statement_parser.py` -- `CopyStatementLexer`, REPLACING clause handling, continuation line normalization
+- `_normalize.py` -- implementation behind `normalize_fixed_format`, directive stripping and the conditional-compilation evaluator (re-exported from `__init__.py`)
+- `replace_statement.py` -- `REPLACE` statement application (incl. IBM `==:TAG:==` partial words)
 - `path_resolver.py` -- Secure copybook path resolution with traversal prevention
 - `models.py` -- `CopybookExpansion`, `CopyStatement`, `CopybookSearchPath`, `ExpansionStatistics`
 
-**`cobolparser/parser.py`** -- `CobolParser` orchestrates parsing via `DivisionParserFactory`. Returns `ParseResult(ast, errors, warnings, statistics)`. Multi-unit compilation units (nested/stacked `PROGRAM-ID`s, and IBM object-oriented `CLASS-ID` units with their `FACTORY` / `OBJECT` / `METHOD-ID` units, `CobolProgram.unit_kind`) parse into `contained_programs`; `program_units()` enumerates them all. Conditional compilation (`>>DEFINE` / `>>IF` / `>>EVALUATE`) and `REPLACE` (including IBM `==:TAG:==` partial words) are applied before lexing.
+**`cobolparser/parser.py`** -- `CobolParser` orchestrates parsing via `DivisionParserFactory`. Returns `ParseResult(ast, errors, warnings, statistics, expansion_source_map)`. `CobolParser` / `parse_cobol` default to `ErrorRecoveryMode.FAIL_FAST`; the CLI defaults to collect-all. Multi-unit compilation units (nested/stacked `PROGRAM-ID`s, and IBM object-oriented `CLASS-ID` units with their `FACTORY` / `OBJECT` / `METHOD-ID` units, `CobolProgram.unit_kind`) parse into `contained_programs`; `program_units()` enumerates them all. Conditional compilation (`>>DEFINE` / `>>IF` / `>>EVALUATE`) and `REPLACE` (including IBM `==:TAG:==` partial words) are applied before lexing.
 
 **`cobolparser/core/`** -- Infrastructure:
 - `interfaces.py` -- `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParseContext` for nested statement parsing
@@ -181,7 +185,7 @@ COBOL source (.cbl/.cob)
 - `divisions/environment.py` -- ENVIRONMENT DIVISION parser
 - `divisions/data.py` -- DATA DIVISION parser (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE / REPORT sections; SCREEN and COMMUNICATION are recognized and skipped with a warning). `data_clauses.py` (data-item clauses incl. REPORT SECTION report-group clauses), `data_file_description.py` (FD/SD clauses), `data_report_description.py` (RD clauses), `data_special_entries.py` (level-88/66, data-division EXEC SQL) are its collaborators
 - `divisions/procedure.py` -- PROCEDURE DIVISION parser with `StatementParserRegistry`
-- `statements/` -- 33 statement parser files (plus the `_utils.py` / `_conditions.py` helpers) (see "Statement Parsers" section below)
+- `statements/` -- <!-- okf:gen statement-parser-file-count -->33<!-- /okf:gen --> statement parser files (plus the `_utils.py` / `_conditions.py` helpers) (see "Statement Parsers" section below)
 - `statements/_utils.py` -- Shared clause collection utilities
 
 **`cobolparser/models/`** -- AST node classes. Every node extends `ASTNode` (from `ast_base.py`) and must implement `to_dict()`:
@@ -197,7 +201,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/le_signatures.py`** -- Call signatures for IBM Language Environment callable services and COBOL intrinsic functions: per operand, its direction, its exact COBOL declaration, whether it may be omitted, and whether it repeats. Coverage of the LE services is partial *and reported* (`services_without_signature()`), so "no signature catalogued" is never mistaken for "not an LE service"; the intrinsic half is complete and pinned by a test. `IBM_LE_SERVICE_INFO` is derived from it. Backs the `le-info` CLI subcommand and the COBOL Analyzer extension's LE hover. See `.okf/analysis.md`
 
-**`cobolparser/analysis/`** -- 29 static analysis modules (plus the `program_flow/` package and two private helpers, `_files.py` / `_names.py`). The list below covers the ones with their own entry here; `.okf/analysis.md` is the complete and current index:
+**`cobolparser/analysis/`** -- <!-- okf:gen analysis-module-count -->33<!-- /okf:gen --> static analysis modules (plus the `program_flow/` package and the private helpers <!-- okf:gen analysis-private-helpers -->`_cics.py`, `_files.py`, `_names.py`, `_procedures.py`, `_sql_flow.py`, `_sql_whenever.py`<!-- /okf:gen -->). The list below covers the ones with their own entry here; `.okf/analysis.md` is the complete and current index:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -212,7 +216,7 @@ COBOL source (.cbl/.cob)
 - `language_env_analyzer.py` -- IBM Language Environment detection
 - `linkage_checker.py` -- LINKAGE SECTION validation
 - `move_type_checker.py` -- MOVE statement type compatibility checking
-- `program_flow/` -- Control flow graph analysis package (`models.py`, `scanner.py`, `edges.py`, `cycles.py`, `graph.py`, `analyzer.py`; public API re-exported from the package `__init__.py`)
+- `program_flow/` -- Control flow graph analysis package (<!-- okf:gen program-flow-modules -->`analyzer.py`, `condition_text.py`, `cycles.py`, `edges.py`, `graph.py`, `models.py`, `scanner.py`, `statement_text.py`<!-- /okf:gen -->; public API re-exported from the package `__init__.py`)
 - `recursion_risk.py` -- `RecursionRiskAnalyzer` detects recursion-driven infinite-loop risks: PERFORM/GO TO cycles (reusing `ProgramFlowAnalyzer`'s `cycle_details`, graded HIGH/MEDIUM by whether the cycle has an escape route) and self-recursive CALL statements (static or dynamic, targeting the program's own PROGRAM-ID). Backs the `recursion-check` CLI subcommand. See `.okf/analysis.md`
 - `complexity.py` -- `ComplexityAnalyzer` computes per-paragraph/section McCabe cyclomatic complexity (from a dedicated statement-tree walk, not the inter-paragraph CFG), an AND/OR-aware `extended_complexity`, max nesting depth, fan-in/fan-out (from `ProgramFlowAnalyzer` edges), and LOW/MODERATE/HIGH ratings. Backs the `complexity` CLI subcommand. See `.okf/analysis.md`
 - `redundancy.py` -- `RedundancyAnalyzer` combines `DeadCodeAnalyzer`/`UnusedVariableAnalyzer` ratios with whole-paragraph Type-1 (exact) / Type-2 (renamed-identifier) duplicate-code clone detection. Also reports `paragraph_fingerprints` -- each clone-eligible paragraph's two structural digests -- which is what lets clone groups be merged *across* programs (`scan.cross_file_clone_groups`); `clone_groups` alone can only ever answer "which paragraphs in this one file duplicate each other", and the commoner shape of COBOL copy-paste is a paragraph cloned into a different program. Backs the `redundancy` CLI subcommand. See `.okf/analysis.md`
@@ -221,13 +225,13 @@ COBOL source (.cbl/.cob)
 - `constraints.py` / `domains.py` -- `ConstraintExtractor` + `domains.solve()` (Phase 4 of the `gen-fixtures` initiative): walks IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards into `FieldConstraint`s (relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan) and `SequenceConstraint`s (the READ/AT-END/loop-flag EOF idiom); `domains.py` is a small zero-dependency domain-propagation solver (numeric interval / text allow-deny / level-88 enum) that picks a deterministic witness always rendered through `ValueFactory.render()`. Takes a Phase 1 `ProgramLayoutIndex` and a Phase 2 `BoundaryReport`. See `.okf/analysis.md`
 - `field_lineage.py` / `lineage_graph.py` / `lineage_jcl.py` / `_sql_flow.py` -- field-level data lineage. `FieldFlowAnalyzer` builds one program's value-flow graph (MOVE byte overlays, arithmetic, READ INTO / WRITE FROM, SORT, CALL arguments, linkage parameters, SQL host variables <-> columns, ACCEPT/DISPLAY) between data items and *ports* (file DD byte ranges, `CALLEE#n`, `PROGRAM#n`, `TABLE.COLUMN`, console), with a port-to-port summary and key uses. `LineageGraph` joins many programs' reports through datasets (bindings from jcl-parser via `lineage_jcl`, or supplied; GDG and `&&` temporaries normalized; DFSORT SUM ranges are aggregates, reformats stop the flow), CALL arguments and DB2 columns, and answers forward/backward impact queries plus candidate key relationships. OCCURS table fields map to every occurrence's bytes, inexactly; a literal subscript (`AMT(3)`) gets its own exact node (`LINEAGE_VERSION` "2"). `graph.join_state()` / `LineageGraph(reports, join_edges=..., join_caveats=..., unjoined=...)` store and restore the joins with their caveats. `field-impact` exits 1 when nothing parsed or the start matches nothing. Backs the `lineage` and `field-impact` CLI subcommands and `scan --analyzer lineage`. Design: `docs/plans/2026-10-08-field-lineage-design.md`. See `.okf/analysis.md`
 - `business_rules.py` -- `BusinessRuleExtractor` extracts the program's business rules: every IF/EVALUATE/SEARCH as a decision table (one `RuleBranch` per arm: condition + actions), promoted to `validation` when an arm rejects (error literal, reject/abend path, class test), and paragraph-level arithmetic as `calculation` rules with a normalized formula. Level-88 names spelled out in a glossary, `guards` (enclosing arm conditions), `reached_via` (the arm elsewhere that PERFORMs the rule's paragraph), inputs/outputs via xref's role mapping, and a `data_lineage` inversion. Technical rules (file status, READ AT END flags, SQLCODE/EIB*) are detected from the program and excluded by default but counted. Backs the `business-rules` CLI subcommand. See `.okf/analysis.md`
-- `lint.py` -- `LintAnalyzer` runs several of the analyzers above over **one** parse and flattens their differently-shaped reports into a single severity-graded `LintFinding` stream (`rule`, `severity`, `message`, `location`, `symbol`, `kind`), ordered by source position. Rule ids are the analyzer subcommand names (`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`, `dclgen-check`); severity is per finding where the underlying analyzer grades itself. Lints **every program unit** in the file (a contained program left unexamined would read as a clean one), and `apply_source_map()` stamps each finding with the file and line it really came from when copybooks were expanded. Re-implements no analysis -- every rule is a mapping from an existing report. `LintReport` also carries `caveats` (what could not be checked, e.g. MOVE operands whose category never resolved) and `failed_rules` (a rule that raised costs only its own findings), so a quiet report is never mistaken for a clean program. Backs the `lint` CLI subcommand. See `.okf/analysis.md`
-- `const_fold.py` -- `ConstantFolder` (Phase 7 of the `gen-fixtures` initiative): a single forward walk of a program's entry paragraph chain, seeded by one scenario's own mock-supplied inputs, tracking which data items hold a knowable literal value after a MOVE or a simple arithmetic/COMPUTE statement -- "exact by construction, or absent" throughout (a loop/branch poisons every field its body could write rather than guess which arm runs; DIVIDE is poisoned unconditionally since the AST does not record BY vs INTO; a numeric result is only kept when it fits its target field's PICTURE with no rounding/truncation/sign coercion). Wired into `ProgramFixtureGenerator` as `Expectation(kind="field_equals")` for every field with one known value at every DISPLAY/WRITE that shows it (the value at that site, not at program end). See `.okf/analysis.md`
+- `lint.py` -- `LintAnalyzer` runs several of the analyzers above over **one** parse and flattens their differently-shaped reports into a single severity-graded `LintFinding` stream (`rule`, `severity`, `message`, `location`, `symbol`, `kind`), ordered by source position. Rule ids are the analyzer subcommand names (<!-- okf:gen lint-rules -->`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`<!-- /okf:gen -->); severity is per finding where the underlying analyzer grades itself. Lints **every program unit** in the file (a contained program left unexamined would read as a clean one), and `apply_source_map()` stamps each finding with the file and line it really came from when copybooks were expanded. Re-implements no analysis -- every rule is a mapping from an existing report. `LintReport` also carries `caveats` (what could not be checked, e.g. MOVE operands whose category never resolved) and `failed_rules` (a rule that raised costs only its own findings), so a quiet report is never mistaken for a clean program. Backs the `lint` CLI subcommand. See `.okf/analysis.md`
+- `const_fold.py` -- `ConstantFolder` (Phase 7 of the `gen-fixtures` initiative): a single forward walk of a program's entry paragraph chain, seeded by one scenario's own mock-supplied inputs, tracking which data items hold a knowable literal value after a MOVE or a simple arithmetic/COMPUTE statement -- "exact by construction, or absent" throughout (a loop/branch poisons every field its body could write rather than guess which arm runs; DIVIDE folds when `DivideStatement.division_mode` says BY vs INTO and is poisoned otherwise; a numeric result is only kept when it fits its target field's PICTURE with no rounding/truncation/sign coercion). Wired into `ProgramFixtureGenerator` as `Expectation(kind="field_equals")` for every field with one known value at every DISPLAY/WRITE that shows it (the value at that site, not at program end). See `.okf/analysis.md`
 
 **`cobolparser/generators/`** -- Code generation utilities:
 - `flowchart.py` -- Generates flowchart representations from parsed AST
 - `copybook_data.py` -- Backwards-compatible re-export shim for copybook → CSV test data generation (implementation in `data/` package). The generator honors PICTURE/USAGE/OCCURS/REDEFINES/level-88/VALUE. Deterministic per `seed`. Backs the `gen-data` CLI subcommand
-- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions, incl. `for_record_image()`), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec incl. `storage_size`, flatten_record), `storage.py` (`storage_size()` / `binary_byte_length()` / `packed_byte_length()` -- the package's single authority on how many bytes a data item occupies; `layout.py`, `layout_offsets.py` and `encoding.py` all defer to it so record images and `data-items` offsets cannot drift apart), `encoding.py` (record-image encoding: COMP-3 packed nibbles, COMP/COMP-4 big-endian binary, COMP-5 and COMP-1/2 in host order, zoned/overpunched signed DISPLAY, ASCII or EBCDIC cp037; `EncodingOptions`, `encode_record()`, `hex_dump()`, `encoding_caveats()` -- every encoding verified against GnuCOBOL, see `.okf/generators.md`. Also owns **fixed vs. variable record length**: `RecordFormat` (`fixed` = RECFM=F/FB, the default; `variable` = RECFM=V/VB with a 4-byte RDW; `variable-bare`; `auto`), `encode_rdw()`, `minimum_record_length()`, `row_record_length()`. Under a variable format only the `OCCURS ... DEPENDING ON` occurrences a row's own counter names are written -- `layout.py`'s `OdoControl` / `present_indexes()` decide which those are, and `ValueFactory` draws the counter from the table's own bounds so it always names a real occurrence. The *other* way a record varies -- `FD ... RECORD VARYING FROM min TO max DEPENDING ON item`, where the layout is flat and nothing in the record says how long it is -- is `layout.py`'s `VaryingLength`: the range is read off the FD when the source is a whole program (or from `DataGeneratorOptions.record_varying` for a bare copybook), one length per row is drawn at generation time from the seeded RNG, and `encode_record(..., data_length=N)` cuts the body to it), `values.py` (ValueFactory), `dataset.py` (GeneratedDataset, incl. `to_records()` / `write_records()` / `to_hex_dump()`), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`), `views.py` (`build_record_views()` -- the offset-annotated byte map a decoder reads a record through, with one `RecordView` per `REDEFINES` so an overlay can be switched without re-parsing the copybook; offsets are a running sum of the same widths `encode_record()` concatenates, so a decoded offset and an encoded byte position cannot drift), `decoding.py` (the inverse of `encoding.py`: `RecordDecoder`, `decode_field()`/`decode_record()`, `DecodedField`/`DecodedRecord`/`DecodeResult`, `decoded_hex_dump()` -- reads a real record image / EBCDIC flat file back through a copybook, `decode(encode(row)) == row`, with bad bytes reported per field rather than silently zeroed; backs the `decode` CLI subcommand), `compare.py` (`compare_records()` / `compare_files()` -- two decoded files through one view compared field by field, paired by key or by position, `CompareResult` with exact changed/missing/extra counts; backs the `compare` CLI subcommand -- Phase 1 of the test-data-environments initiative, design in the backend repo), `layout_offsets.py` (`compute_program_data_items()` -- record-relative byte offset/length, multi-hop REDEFINES chains, and per-entry level-88 condition values for every data item in a program; backs the `data-items` CLI subcommand). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
+- `data/` -- Modular implementation: `options.py` (DataGeneratorOptions, incl. `for_record_image()`), `errors.py` (CopybookLayoutError, ProgramLayoutError), `layout.py` (FieldCategory, FieldSpec incl. `storage_size`, flatten_record), `storage.py` (re-export shim over `cobolparser/_storage.py`: `storage_size()` / `binary_byte_length()` / `packed_byte_length()` -- the package's single authority on how many bytes a data item occupies, also used by `CobolDataItem.calculate_size`; `layout.py`, `layout_offsets.py` and `encoding.py` all defer to it so record images and `data-items` offsets cannot drift apart), `encoding.py` (record-image encoding: COMP-3 packed nibbles, COMP/COMP-4 big-endian binary, COMP-5 and COMP-1/2 in host order, zoned/overpunched signed DISPLAY, ASCII or EBCDIC cp037; `EncodingOptions`, `encode_record()`, `hex_dump()`, `encoding_caveats()` -- every encoding verified against GnuCOBOL, see `.okf/generators.md`. Also owns **fixed vs. variable record length**: `RecordFormat` (`fixed` = RECFM=F/FB, the default; `variable` = RECFM=V/VB with a 4-byte RDW; `variable-bare`; `auto`), `encode_rdw()`, `minimum_record_length()`, `row_record_length()`. Under a variable format only the `OCCURS ... DEPENDING ON` occurrences a row's own counter names are written -- `layout.py`'s `OdoControl` / `present_indexes()` decide which those are, and `ValueFactory` draws the counter from the table's own bounds so it always names a real occurrence. The *other* way a record varies -- `FD ... RECORD VARYING FROM min TO max DEPENDING ON item`, where the layout is flat and nothing in the record says how long it is -- is `layout.py`'s `VaryingLength`: the range is read off the FD when the source is a whole program (or from `DataGeneratorOptions.record_varying` for a bare copybook), one length per row is drawn at generation time from the seeded RNG, and `encode_record(..., data_length=N)` cuts the body to it), `values.py` (ValueFactory), `editing.py` (numeric-edited PICTURE editing/de-editing: `edit_numeric`, `deedit_numeric`), `dataset.py` (GeneratedDataset, incl. `to_records()` / `write_records()` / `to_hex_dump()`), `copybook.py` (parse_copybook_records, CopybookDataGenerator), `program_layout.py` (FileFacts, ResolvedField, ProgramLayoutIndex -- Phase 1 of the `gen-fixtures` program-scoped test-data initiative; resolves a whole program's FD/record/field names to layout facts), `bundle.py` (BUNDLE_VERSION, Expectation, BoundaryFixture, CoverageSummary, Scenario, FixtureBundle -- Phase 3's serializable output shapes, including `FixtureBundle.write_csv_dir()`), `views.py` (`build_record_views()` -- the offset-annotated byte map a decoder reads a record through, with one `RecordView` per `REDEFINES` so an overlay can be switched without re-parsing the copybook; offsets are a running sum of the same widths `encode_record()` concatenates, so a decoded offset and an encoded byte position cannot drift), `decoding.py` (the inverse of `encoding.py`: `RecordDecoder`, `decode_field()`/`decode_record()`, `DecodedField`/`DecodedRecord`/`DecodeResult`, `decoded_hex_dump()` -- reads a real record image / EBCDIC flat file back through a copybook, `decode(encode(row)) == row`, with bad bytes reported per field rather than silently zeroed; backs the `decode` CLI subcommand), `compare.py` (`compare_records()` / `compare_files()` -- two decoded files through one view compared field by field, paired by key or by position, `CompareResult` with exact changed/missing/extra counts; backs the `compare` CLI subcommand -- Phase 1 of the test-data-environments initiative, design in the backend repo), `layout_offsets.py` (`compute_program_data_items()` -- record-relative byte offset/length, multi-hop REDEFINES chains, and per-entry level-88 condition values for every data item in a program; backs the `data-items` CLI subcommand). See `docs/plans/2026-08-02-program-data-generation-*.md` and `.okf/generators.md`
 - `program_fixtures.py` -- `ProgramFixtureGenerator` (Phase 3/6/7 of the `gen-fixtures` initiative): combines a `ProgramLayoutIndex` (Phase 1) and a `BoundaryReport` (Phase 2) into a `FixtureBundle`. `generate`/`generate_from_file` produce one "happy path" `Scenario` with generated in-data per IN/BIDIRECTIONAL boundary and assert-on `Expectation` stubs per OUT boundary, using per-boundary deterministic sub-seeding. `generate_with_scenarios`/`generate_with_scenarios_from_file` (Phase 6) additionally accept `mode="branches"|"all"`, routing through Phase 5's `ScenarioPlanner` and pinning each `PlannedScenario`'s witnesses/sequence-lengths/status-overrides into an otherwise normally-generated fixture set; `mode="happy"` delegates to `generate()` unchanged (byte-identical). Every scenario's `expectations` also carries tier 1 (`Expectation(kind="call_count", ...)`, one per mocked boundary and only when exact: `analysis.invocation_counts` counts the invoking statements on the unconditional path, and a read-until-EOF loop reads the scenario's whole sequence plus one) and tier 2 (`Expectation(kind="field_equals", ...)`, from `analysis.const_fold.ConstantFolder` seeded with the scenario's own single-invocation mocked inputs) -- Phase 7. Backs the `gen-fixtures` CLI subcommand. See `.okf/generators.md`, `.okf/analysis.md`, and `docs/fixture-bundle-schema.md`
 - `scenarios.py` -- `ScenarioPlanner` (Phase 5 of the `gen-fixtures` initiative): turns a Phase 4 `ConstraintReport` and `ProgramFlowAnalyzer`'s CFG into a set of named `PlannedScenario`s -- one (or a merge of several) per reachable, satisfiable branch arm, plus fixed families (empty-input/error-status/boundary-values) for `mode="all"` -- with exact arm-coverage accounting (`ScenarioCoverage`: targeted + merged + missed == total, every miss carrying a reason). Wired into the `gen-fixtures` CLI as of Phase 6 via `program_fixtures.py`'s `generate_with_scenarios`. See `.okf/generators.md`. Arm reachability here is CFG-shaped (`flow_report.unreachable_nodes`), never data-shaped, so an arm reachable only via a *correlation between records* gets a scenario named for it that never reaches it; `PlannedScenario.row_witnesses` is the (unpopulated) groundwork for expressing those -- see `docs/plans/2026-09-04-cross-record-correlation-design.md`
 
@@ -298,7 +302,7 @@ Every COBOL verb now has a registered parser. `procedure_recovery.UNSUPPORTED_VE
 | `data.py` | `MoveStatement`, `DisplayStatement`, `InitializeStatement`, `InspectStatement`, `SetStatement`, `StringStatement`, `UnstringStatement`, `ValidateStatement` |
 | `io.py` | `IOReadStatement`, `IOWriteStatement`, `IOOpenStatement`, `IOCloseStatement`, `IOAcceptStatement`, `IORewriteStatement`, `IODeleteStatement`, `IOStartStatement`, `IOUnlockStatement` |
 | `legacy.py` | `ExhibitStatement`, `ExamineStatement`, `TransformStatement`, `EnterStatement`, `NoteStatement`, `ChainStatement`, `TraceStatement`, `ServiceStatement`, `TitleStatement` |
-| `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `EjectStatement`, `SkipStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `XmlJsonStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement`, `InvokeStatement`, `AllocateStatement`, `FreeStatement` |
+| `misc.py` | `SelectStatement`, `CopyStatement`, `ContinueStatement`, `EjectStatement`, `SkipStatement`, `ExitStatement`, `GobackStatement`, `CancelStatement`, `AlterStatement`, `GenerateStatement`, `XmlJsonStatement`, `ReleaseStatement`, `ReturnStatement`, `UseStatement`, `SortStatement`, `MergeStatement`, `CommitStatement`, `RollbackStatement`, `InvokeStatement`, `AllocateStatement`, `FreeStatement`, `NextSentenceStatement` |
 | `report_writer.py` | `InitiateStatement`, `TerminateStatement`, `SuppressStatement` |
 
 ### Data Flow Detail
@@ -308,7 +312,7 @@ Every COBOL verb now has a registered parser. `procedure_recovery.UNSUPPORTED_VE
 3. `TokenStream(tokens)` wraps the list with lookahead
 4. `CobolParser.parse()` -> `DivisionParserFactory.parse_division()` per division
 5. Each division parser calls `StatementParserRegistry.find_parser()` (first-match) to dispatch statements
-6. Returns `ParseResult(ast, errors, warnings, statistics)`
+6. Returns `ParseResult(ast, errors, warnings, statistics, expansion_source_map)`
 
 ### Public API
 
@@ -576,7 +580,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~12,340 tests across 439 files in 5 directories:
+~13,700 tests across 483 `test_*.py` files (see `.okf/tests.md` for the per-directory breakdown):
 
 ```
 tests/
@@ -585,7 +589,7 @@ tests/
   unit/                  # Unit tests - individual components
     analysis/            # IO coverage reporter, diagnostics, all analyzers
     cli/                 # CLI command tests
-    generators/          # Flowchart generator tests
+    generators/          # Generator tests (data/ encoders, scenario verification, row witnesses)
     io_statements/       # IO parser unit tests
   integration/           # Integration tests - end-to-end parsing
     test_shamrice_examples.py  # Parametrized: all *.cbl in examples/cobol/shamrice/ must parse error-free
@@ -630,7 +634,7 @@ When running only a subset of tests, expect the check to fail -- that is normal 
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`, nightly (`schedule`), and manual `workflow_dispatch`; push/PR skip docs-only changes (`paths-ignore`: `docs/**`, `.okf/**`, `reports/**`, `**/*.md`):
+**Currently disabled:** every line of `.github/workflows/ci.yml` is commented out (commit 315d474), so no CI runs on push or PR -- run lint, typecheck and the suite locally. When enabled, GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`, nightly (`schedule`), and manual `workflow_dispatch`; push/PR skip docs-only changes (`paths-ignore`: `docs/**`, `.okf/**`, `reports/**`, `**/*.md`):
 
 1. **lint** -- `ruff check .` + `black --check .` (Python 3.13, pinned versions matching `.pre-commit-config.yaml`)
 2. **typecheck** -- `mypy cobolparser/` (Python 3.13, pinned version)
@@ -665,7 +669,7 @@ The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather
 - AST models grouped by category (arithmetic, control, data, io, call, misc)
 - All parsers implement `IStatementParser` with `parse()` and `matches()` methods
 - All AST nodes extend `ASTNode` and implement `to_dict()`
-- Exception hierarchy rooted at `ParseError` in `_errors.py`
+- Exception hierarchy rooted at `ParseError` in `_errors.py` (except the preprocessing errors -- `PreprocessingError` and its subclasses extend plain `Exception`)
 
 ## Example COBOL Files
 
@@ -676,7 +680,7 @@ The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather
 
 ## Additional Directories
 
-- `.okf/` -- OKF knowledge bundle (lexer, parser, preprocessing, AST models, analysis, CLI, tests). Load `.okf/index.md` at the start of every session.
+- `.okf/` -- OKF knowledge bundle: topic files (lexer, preprocessing, `parser/`, AST models, `analysis/`, dialects, `generators/`, batch, JCL, CLI, tests, integration), `history/` archives, `log.md`. Load `.okf/index.md` at the start of every session.
 - `tools/` -- Utility scripts grouped by area:
   - `io_catalog/validate_catalog.py` -- Validates the IO operation catalog
   - `io_coverage/` -- `generate_artifact.py` and `render_markdown.py` for IO coverage reports

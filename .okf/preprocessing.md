@@ -1,35 +1,69 @@
 ---
 type: Module
 title: Preprocessing
-description: normalize_fixed_format, copybook expansion, conditional compilation — converts raw COBOL to lexer-ready text.
-tags: [preprocessing, copybook, fixed-format, conditional-compilation]
-timestamp: 2026-10-13T00:00:00Z
+description: Everything ahead of the lexer -- normalize_fixed_format (fixed -> free form, continuation, column-72 warnings, >>SOURCE FORMAT), format detection, copybook expansion (COPY/REPLACING, path resolution, encoding, source map), conditional compilation, REPLACE, and the record-boundary line splitter.
+tags: [preprocessing, copybook, fixed-format, conditional-compilation, replace, source-map]
+timestamp: 2026-10-15T00:00:00Z
 ---
 
-# Overview
+# Preprocessing
 
-`cobolparser/preprocess/` — the first stage of the parse pipeline. Converts
-raw fixed-format COBOL source into free-form text that the lexer can consume,
-and optionally inlines COPY statements recursively.
+`cobolparser/preprocess/` (plus `_lines.py`, `_source_directive.py` and the
+optional Cython mirror `_preprocess_fast.pyx` at the package root) is
+everything done to source text before `CobolLexer` sees it. Entry points:
+`normalize_fixed_format`, `detect_fixed_format` / `normalize_with_recovery`,
+`expand_copybooks` / `parse_cobol_with_expansion`, and the in-parser passes
+(conditional compilation, COPY strip, REPLACE). Every pass **preserves the
+physical line count**. Start with Pipeline and Module map, then the section
+for the stage you are touching.
 
-# Pipeline
+## Contents
+
+* [Pipeline](#pipeline)
+* [Public API](#public-api)
+* [Module map](#module-map)
+* [Line-count invariant and record boundaries](#line-count-invariant-and-record-boundaries)
+* [Fixed-format normalization](#fixed-format-normalization)
+* [Fixed-format detection](#fixed-format-detection)
+* [Compiler directives: PROCESS / CBL](#compiler-directives-process--cbl)
+* [Conditional compilation](#conditional-compilation)
+* [Copybook expansion](#copybook-expansion)
+* [REPLACE and un-expanded COPY](#replace-and-un-expanded-copy)
+* [Copybook path resolution](#copybook-path-resolution)
+* [Error hierarchy](#error-hierarchy)
+* [See also](#see-also)
+
+## Pipeline
+
+What `CobolParser` (and so `parse_cobol`) does to the text, in order
+(`CobolParser._preprocess_source` in `parser.py`):
 
 ```
-raw COBOL (fixed format)
-  ──► normalize_fixed_format()   # columns 8-72, blanks comment/blank lines (preserving line numbers), merges continuations
-  ──► expand_copybooks()         # optionally: inline COPY … REPLACING … statements
-  ──► strip_compiler_directives()# drop compiler control statements (used inside CobolParser)
-  ──► strip_unexpanded_copy_statements() / apply_replace_statements()  # source-text manipulation (inside CobolParser, pre-lex)
-  ──► CobolLexer.tokenize()
+raw COBOL
+  ──► [parse_cobol_with_expansion only] expand_copybooks()   # inline COPY ... REPLACING, before CobolParser runs
+  ──► _skip_to_identification_division()                    # blank banner text ahead of the header (keeps >> lines, REPLACE)
+  ──► strip_compiler_directives()                           # blank PROCESS / CBL records
+  ──► detect_fixed_format() ? normalize_with_recovery()     # -> normalize_fixed_format(); retry without literal merging on an unterminated literal
+  ──► preprocess_conditional_compilation()                  # only when ">>" occurs: >>DEFINE / >>IF / >>EVALUATE
+  ──► strip_unexpanded_copy_statements()                    # blank COPY the pipeline will not expand (no-op after expansion)
+  ──► apply_replace_statements()                            # REPLACE ==a== BY ==b== / REPLACE OFF
+  ──► CobolLexer(...).tokenize()
 ```
 
-# Public API
+Every arrow preserves the line count. Inside `expand_copybooks` each member
+goes through its own sub-pipeline (encoding detection -> `strip_sequence_area`
+-> `remove_comment_lines` -> `normalize_continuation_lines` -> optional
+conditional compilation -> REPLACING -> validation -> recursive COPY scan ->
+splice -> 6-space re-pad with `_fit_fixed_format_width`); see
+[Copybook expansion](#copybook-expansion).
+
+## Public API
 
 ```python
 from cobolparser import (
     normalize_fixed_format,          # raw lines → free-form text
-    expand_copybooks,                # source + copybook paths → expanded source
-    parse_cobol_with_expansion,      # parse + expand in one call
+    expand_copybooks,                # source + copybook paths → CopybookExpansion
+    parse_cobol_with_expansion,      # expand + parse in one call (process_conditionals=True)
     clear_file_cache,                # reset copybook LRU cache
     set_file_cache_size,             # configure cache capacity
     get_file_cache_stats,
@@ -46,30 +80,120 @@ from cobolparser import (
     CopyStatement,
     ExpansionStatistics,
 )
+# Only on the subpackage (not re-exported from the top level):
 from cobolparser.preprocess import (
     preprocess_conditional_compilation,
+    strip_compiler_directives,
     validate_copybook_content,
     validate_level_numbers,
+    CopybookSizeExceededError,
+    CopybookSyntaxError,
+    TotalExpansionSizeExceededError,
+    LevelNumberMismatchWarning,
+    COMMENT_INDICATORS, DEBUG_INDICATORS, VERSION_TAG_INDICATORS, ALL_COMMENT_INDICATORS,
+    INDICATOR_COL, TEXT_START_COL, TEXT_END_COL, IDENTIFICATION_END_COL, DEFAULT_SEQ_COL_END,
 )
+from cobolparser.preprocess.source_format import (
+    detect_fixed_format, normalize_with_recovery, debug_line_numbers, free_format_flags,
+)
+from cobolparser.preprocess.replace_statement import (
+    apply_replace_statements, strip_unexpanded_copy_statements, find_replace_statement_spans,
+)
+from cobolparser.preprocess.copy_statement_parser import CopyStatementLexer, extract_copy_statements
+from cobolparser.preprocess.copybook_expander import warn_dropped_debug_lines, detect_encoding
+from cobolparser.preprocess.path_resolver import PathResolver, validate_path_within_directory
+from cobolparser._lines import split_source_lines
+from cobolparser._source_directive import source_format_directive
 ```
 
-# Module Map
+Key signatures:
+
+```python
+expand_copybooks(source_code, copybook_paths, max_nesting_depth=100,
+    preserve_source_locations=False, validate_content=True, validate_levels=False,
+    process_conditionals=False, defined_symbols=None, max_file_size=10 MiB,
+    max_total_size=100 MiB, path_resolver=None, encoding=None,
+    encoding_errors="replace", source_file="<main>", preserve_comments=False,
+    debug_lines=False) -> CopybookExpansion
+parse_cobol_with_expansion(source_code, filename, copybook_paths,
+    max_nesting_depth=100, process_conditionals=True, defined_symbols=None,
+    **parser_kwargs) -> ParseResult
+```
+
+`CopybookExpansion` fields: `expanded_source`, `included_copybooks`,
+`max_depth_reached`, `source_location_map` (`{expanded line: (file, line)}`,
+filled only with `preserve_source_locations=True`), `statistics`
+(`ExpansionStatistics`: `parse_time_ms`, `file_count`, `total_lines`,
+`peak_memory_bytes`, `warnings`, `total_bytes_processed`),
+`dropped_debug_lines`. `CopybookSearchPath` fields: `directories`,
+`extensions`, `case_sensitive`, `max_nesting_depth`, `max_file_size`,
+`max_total_size`, `max_cache_entries`, `encoding`, `encoding_errors`.
+
+## Module map
 
 | File | Responsibility |
 |------|---------------|
-| `preprocess/__init__.py` | **Thin re-export stub only.** Re-exports everything from `_normalize.py` (including the fixed-format column constants `DEFAULT_SEQ_COL_END` / `INDICATOR_COL` / `TEXT_START_COL` / `TEXT_END_COL` / `IDENTIFICATION_END_COL`, which stay reachable at `cobolparser.preprocess` for external consumers) plus `copybook_expander.py`, and swaps in the `_preprocess_fast` Cython `normalize_fixed_format` when compiled (keeping the pure one reachable as `_normalize_fixed_format_pure`). Deliberately holds no implementation |
-| `preprocess/_normalize.py` | `normalize_fixed_format`, `strip_compiler_directives`, `preprocess_conditional_compilation` (with the `_ConditionParser` / `_evaluate_condition` constant-condition evaluator), `validate_copybook_content`, `validate_level_numbers`, plus the `PreprocessingError` hierarchy. Split out of `__init__.py` on 2026-08-14; every name stays importable from `cobolparser.preprocess` unchanged |
-| `preprocess/source_format.py` | `detect_fixed_format` -- should this source be normalized? (strict sequence-area rule, then the change-tag rule with its Area A header / tagged-line anchors). `normalize_with_recovery` -- `normalize_fixed_format` plus the unterminated-literal retry (`merge_continued_literals=False`), shared by `CobolParser` and the lexer's `_tokenize_source`. Moved out of `parser.py` 2026-10-08; `cobolparser.parser._detect_fixed_format` is kept as an alias |
-| `preprocess/copybook_expander.py` | `expand_copybooks`, `parse_cobol_with_expansion` — recursive COPY inlining with circular-reference detection, encoding detection, content validation, and LRU caching |
-| `preprocess/copy_statement_parser.py` | `CopyStatementLexer`, REPLACING clause handling, continuation line normalisation |
-| `preprocess/path_resolver.py` | Secure copybook path resolution; prevents directory traversal. Found paths are canonicalised to the on-disk basename casing (`_on_disk_casing`, scandir-based) so probe-cased matches on case-insensitive filesystems never leak into reported paths. The member name is folded to uppercase like Enterprise COBOL's COPY text-name (`_member_probe_names`): the name exactly as written first, then for each configured extension in order the uppercased name before the name as written, with the bare uppercased name in the `""` slot -- so `copy errorcd.` finds `ERRORCD.cpy` (and prefers it to `errorcd.cpy`), but extension order still decides before case (`COPY Foo` takes `Foo.cpy` over `FOO.cbl`). A name holding `.`, `/` or `\` can only be a literal file path (`COPY "sub/mem"`) and is not folded. The `OF`/`IN` library-name is folded the same way (`_library_directories`: `MYLIB/`, then `mylib/`, then the search directory itself, so an unrelated `MYLIB/` never hides the member in `mylib/`); directory (SYSLIB) order outranks both (issue #289, `tests/regression/test_copy_member_case_folding.py`) |
-| `preprocess/models.py` | `CopybookExpansion`, `CopyStatement`, `CopybookSearchPath`, `ExpansionStatistics` |
+| `preprocess/__init__.py` | **Re-export stub only, no implementation.** Re-exports `_normalize.py` (incl. the column constants `DEFAULT_SEQ_COL_END` / `INDICATOR_COL` / `TEXT_START_COL` / `TEXT_END_COL` / `IDENTIFICATION_END_COL`) and `copybook_expander.py`'s public functions. Swaps in the Cython `normalize_fixed_format` only when `accelerators_enabled()` (`COBOLPARSER_ACCEL=1` at import) and it is built; `_normalize_fixed_format_pure` always names the Python one |
+| `preprocess/_normalize.py` | `normalize_fixed_format`, `strip_compiler_directives`, `preprocess_conditional_compilation` (with the `_ConditionParser` / `_evaluate_condition` constant-condition evaluator), `validate_copybook_content`, `validate_level_numbers`, the column / indicator constants, `ID_DIVISION_HEADER_RE`, plus the `PreprocessingError` hierarchy. Every name is importable from `cobolparser.preprocess` |
+| `preprocess/source_format.py` | `detect_fixed_format` (see [Fixed-format detection](#fixed-format-detection); alias `cobolparser.parser._detect_fixed_format`), `normalize_with_recovery` (normalize + unterminated-literal retry, shared by `CobolParser` and the lexer's `_tokenize_source`), `debug_line_numbers`; re-exports `free_format_flags` |
+| `preprocess/copybook_expander.py` | `expand_copybooks`, `parse_cobol_with_expansion`, `warn_dropped_debug_lines`; recursive inlining (`_expand_source_recursive`) with cycle detection, encoding detection (`detect_encoding` / `convert_to_utf8`), validation, LRU file cache (`clear_file_cache` / `set_file_cache_size` / `get_file_cache_stats`), the re-pad / width fitter (`_fit_fixed_format_width`) and the source map |
+| `preprocess/copy_statement_parser.py` | `CopyStatementLexer` (COPY / `EXEC SQL INCLUDE` scanner), `extract_copy_statements`, `apply_replacing_clauses`, and the line-preserving member passes `strip_sequence_area` / `remove_comment_lines` / `normalize_continuation_lines`; `is_comment_line` |
+| `preprocess/replace_statement.py` | `apply_replace_statements`, `strip_unexpanded_copy_statements`, `find_replace_statement_spans` (the REPLACE text-word scanner `_ReplaceScanner`) |
+| `preprocess/path_resolver.py` | `PathResolver` (three-tier lookup), `find_copybook_file`, `get_available_copybooks`, `suggest_similar_copybooks`, `validate_path_within_directory` -- see [Copybook path resolution](#copybook-path-resolution) |
+| `preprocess/models.py` | `CopybookExpansion`, `CopyStatement`, `CopybookSearchPath`, `ExpansionStatistics`, `ExpansionContext` (per-expansion stack, byte budget, content/origin cache, `debug_lines`), `ReplacingClause`, `SuppressClause`, `SourceLocationMap` |
+| `_lines.py` (package root) | `split_source_lines(text, keepends=False)` -- the one line splitter for source text (`\n` / `\r\n` / `\r` only) |
+| `_source_directive.py` (package root) | `source_format_directive(text)` (`"FIXED"` / `"FREE"` / `None` for a `>>SOURCE [FORMAT] [IS] ...` record) and `free_format_flags(lines, indicator_position=6)`. Dependency-free so the `.pyx` can import it |
+| `_preprocess_fast.pyx` / `.c` (package root) | Cython mirror of `normalize_fixed_format` (same signature, byte-identical output and warnings). Built only under `COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace`, used only with `COBOLPARSER_ACCEL=1` at run time. Cannot import `preprocess` (circular), so it mirrors the indicator constants as literals -- extend both together |
 
-# normalize_fixed_format
+## Line-count invariant and record boundaries
+
+Every pass in this area emits exactly one output line per input record, so
+`output.count("\n")` equals the input line count, and an expansion has exactly
+`len(source) - len(COPY lines) + len(member lines)` lines. A location the
+parser reports against the processed text is therefore a location in the
+file -- the most important invariant in this area. How each pass keeps it:
+
+* `normalize_fixed_format` appends an empty placeholder for every dropped
+  record (blank/short, comment, debug, version-tag), and emits one placeholder
+  per absorbed continuation record *after* the flushed logical line, so a
+  logical line keeps its first record's number. Whether a logical line was
+  started is tracked explicitly (`has_line`), not inferred from its merged
+  text being non-empty: a full-width record with a blank indicator and blank
+  columns 8-72 (what `remove_comment_lines` leaves of a comment line, which
+  the parser re-normalizes after expansion) must still produce its line.
+* `preprocess_conditional_compilation` blanks directive lines and every line
+  of a skipped block in place.
+* The COPY splice strips exactly one trailing newline from the expanded
+  member (never more -- a genuine blank final line stays) before counting its
+  lines.
+* The only pass allowed to add lines is the expander's width-fitting wrap
+  (see [Output re-pad and width fitting](#output-re-pad-and-width-fitting)),
+  and the source map accounts for it.
+
+Pinned by `tests/regression/test_normalize_line_number_preservation.py`
+(also checks Cython/pure parity).
+
+**A line is a record, nothing else.** `split_source_lines` (`_lines.py`)
+splits on `\n` / `\r\n` / `\r` only and is otherwise `splitlines`-shaped.
+`str.splitlines()` also breaks on form feed, vertical tab, NEL (U+0085),
+U+2028/2029 and `\x1c`-`\x1e`, so a page eject inside a comment (`*\x0c`) or
+a cp1252 `…` decoded through latin-1 would shift every later line number.
+`parse_cobol`, `CobolParser`, `detect_fixed_format`, `CobolLexer.__init__`,
+`normalize_fixed_format` (string form, pure and Cython),
+`preprocess_conditional_compilation`, `strip_compiler_directives`,
+`validate_copybook_content` and the expander's line counts all use it. The
+member passes in `copy_statement_parser.py` (`normalize_continuation_lines`,
+`strip_sequence_area`, `remove_comment_lines`, REPLACING) split through
+`_records()` (`split_source_lines` plus the trailing empty element `str.split`
+gives, so `"\n".join` round-trips); splitting on `\n` alone made a bare-CR
+program one record whose COPY was never expanded. Do not reintroduce
+`splitlines()` or `split("\n")` on source text.
+
+## Fixed-format normalization
 
 ```python
 def normalize_fixed_format(
-    lines: list[str] | str,
+    lines: Iterable[str] | str,   # a str is split with split_source_lines
     *,
     merge_continued_literals: bool = True,
     debug_lines_as_comments: bool = True,
@@ -78,1428 +202,731 @@ def normalize_fixed_format(
 ) -> str: ...
 ```
 
-Each line is tab-expanded (`str.expandtabs(8)`, added 2026-07-09 —
-finding M8) **before** any column-index slicing, so a tab in the source
-doesn't shift the indicator/text-area columns. Extracts columns 8–72 from
-each line, drops comment lines (column-7 is `*`/`/`, or `D`/`d` when
-`debug_lines_as_comments` is true — the default, added 2026-07-09 for
-finding M4 to match `copy_statement_parser.is_comment_line()`, which
-already treated `D`/`d` as a comment; pass `debug_lines_as_comments=False`
-to compile debug lines as live code instead), and merges continuation
-lines (column-7 is `-`). Returns a single free-form text string.
+Each line is tab-expanded (`str.expandtabs(8)`) **before** any column slicing,
+so a tab does not shift the indicator/text-area columns. Columns 8-72 are
+kept; comment lines are dropped; continuation lines (column 7 `-`) are
+merged. Returns one free-form string with exactly one output line per input
+record. Raises `ValueError` for a literal still open on the last code line
+unless `merge_continued_literals=False`. `warnings`, when a list, collects the
+column-72 overflow diagnostics.
 
-**Debugging lines and `WITH DEBUGGING MODE` (#334, 2026-10-14):** IBM
-Enterprise COBOL compiles `D` lines as code under `SOURCE-COMPUTER ... WITH
-DEBUGGING MODE`. The parse still drops them by default (the decision on the
-issue was "keep dropping, but say so"), and the flag reaches the parse as
+The optional Cython `_preprocess_fast` mirrors this function line for line;
+any change to the normalizer must be made in both (and the indicator
+constants extended in both). `_normalize_fixed_format_pure` always names the
+Python one so tests can compare both.
+
+### Comment, debug and version-tag lines
+
+The column-7 indicator characters live in one place, `_normalize.py`:
+`COMMENT_INDICATORS` (`*` `/`), `DEBUG_INDICATORS` (`D` `d`),
+`VERSION_TAG_INDICATORS` (`V` `v`) and their union `ALL_COMMENT_INDICATORS`
+(re-exported from `cobolparser.preprocess`). Consumers:
+`normalize_fixed_format`, `copy_statement_parser.is_comment_line`,
+`source_format.detect_fixed_format`, `lexer._fixed_format_comment_tokens`
+(deferred import). `_preprocess_fast.pyx` keeps mirrored literals.
+
+* `*` / `/` lines are always comments.
+* `D` / `d` lines are comments when `debug_lines_as_comments` (default
+  `True`, matching `is_comment_line`); pass `False` to compile them.
+* `V` / `v` lines are comments when `version_tag_lines_as_comments` (default
+  `True`): a shop change-control convention stamps a short version tag
+  (`V97`, `TFEC`) into Area A with `V` in column 7. Standard COBOL never puts
+  code in column 7, so this is unambiguous; without it the tag reaches the
+  lexer as "Unparsed tokens". Pinned by
+  `tests/regression/test_version_tag_line_handling.py`.
+
+### Debugging lines and `WITH DEBUGGING MODE`
+
+IBM compiles `D` lines as code under `SOURCE-COMPUTER ... WITH DEBUGGING
+MODE`. The parse drops them by default and says so (#334). The switch is
 `debug_lines` on `parse_cobol` / `CobolParser` / `_tokenize_source` /
 `ScanOptions` / `parse_files` / `parse_files_with_copybooks` /
-`expand_copybooks` / `parse_cobol_with_expansion` (taken from its parser
-kwargs) / `ProgramLayoutIndex.from_file` / `ProgramFixtureGenerator.analyze_from_file`
-(not `generate*_from_file`, whose signatures are mocky-mock's contract; the
-CLI's `gen-fixtures` calls `analyze_from_file` + `generate_with_scenarios`) /
-`CodebaseGraphBuilder`, the CLI's `--debug-lines` / `--no-debug-lines`
-(every subcommand that parses COBOL; only `gen-data`, `decode`, `compare`,
-`jcl`, `le-info` and `config` lack it, and the first three drop `D` lines in
-a copybook layout as comments), and cobol.yml `project.debug_lines`. `normalize_with_recovery(...,
-debug_lines_as_comments=...)` passes it to both normalization passes.
+`expand_copybooks` / `parse_cobol_with_expansion` (via parser kwargs) /
+`ProgramLayoutIndex.from_file` / `ProgramFixtureGenerator.analyze_from_file`
+(not `generate*_from_file`, whose signatures are mocky-mock's contract) /
+`CodebaseGraphBuilder`; the CLI's `--debug-lines` / `--no-debug-lines` (every
+COBOL-parsing subcommand; `gen-data`, `decode`, `compare` drop `D` lines in a
+copybook layout); cobol.yml `project.debug_lines`.
+`normalize_with_recovery(..., debug_lines_as_comments=...)` passes it to both
+normalization passes.
+
 With it off, `CobolParser._normalize_fixed_source` records
-`source_format.debug_line_numbers()` (column-7 `D`/`d`, skipping lines a
-`>>SOURCE FORMAT IS FREE` has switched to free format), and after
-`parse_program()` a unit whose CONFIGURATION section's `source_computer`
-metadata has `debugging_mode` gets one warning: `Line N: SOURCE-COMPUTER is
-WITH DEBUGGING MODE, but K debugging line(s) ... were dropped as comments;
-parse with debug_lines=True ...`. No clause, or no D lines: no warning.
-With `debug_lines=True` D lines are compiled whether or not the clause is
-present (the caller's switch, like GnuCOBOL's `-fdebugging-line`), and
-`_fixed_format_comment_tokens` stops re-emitting them as COMMENT tokens.
-
-*Through copybook expansion (2026-10-15):* expansion blanks comment lines
-before the parser sees the text, and used to blank `D` lines with them, so
-with any COPY in the program `debug_lines=True` did nothing and the warning
-never fired. `remove_comment_lines(..., keep_debug_lines=)` now leaves them
-in place when `ExpansionContext.debug_lines` is on (main source, members and
-nested members), their `D` back in column 7 after the re-pad for the final
-normalization to compile. With it off they are still blanked, and
-`expand_copybooks` lists the blanked ones as
-`CopybookExpansion.dropped_debug_lines` (`(file, line)`, read off the output
-through the source map, so a member COPYd twice counts twice; only looked
-for when `DEBUGGING` appears in the text). `warn_dropped_debug_lines()`
-(called by `parse_cobol_with_expansion` and `parse_files_with_copybooks`)
-raises the parser's warning from that list -- `FILE: Line N` when the first
-one is in a member -- unless the parser already raised it (nothing was
-expanded, so it saw the raw source). One spelling for both:
-`parser.dropped_debug_lines_warning()`.
-
-**`V`/`v` version-tag lines (added 2026-08-22):** `V`/`v` in column 7 is
-also treated as a comment by default (`version_tag_lines_as_comments`,
-default `True`), matching a real shop's change-control convention that
-stamps a short version tag (e.g. `V97`, `TFEC`) into Area A with `V` in
-column 7 of its own line. Standard fixed-format COBOL never puts live code
-in column 7 (reserved for `*`/`/`/`-`/`D`/`d`), so this is unambiguous with
-real source. Without it, the tag text reached the lexer as un-normalized
-code and surfaced as "Unparsed tokens" errors. Pass
-`version_tag_lines_as_comments=False` to compile V-lines as live code
-instead. `copy_statement_parser.is_comment_line()` and
-`parser._detect_fixed_format`'s valid-indicator set were updated to match,
-on both the pure-Python and Cython (`_preprocess_fast`) paths. Pinned by
-`tests/regression/test_version_tag_line_handling.py`.
-
-**Change-tracking tags in columns 1-6 (added 2026-08-25):** a related shop
-convention stamps a ticket id (`SAPR24`, `28486`, `GART`, `JSINT`) into the
-*sequence area* rather than column 7. `normalize_fixed_format` always
-handled these — it slices `line[7:72]` regardless of what columns 1-6 hold
-— but `parser._detect_fixed_format`, which decides *whether* to normalize
-at all, counted a line as fixed-format evidence only when columns 1-6 were
-blank or all digits. A tagged program therefore fell below the 60%
-threshold, was classified free-form, skipped normalization entirely, and
-its tag text reached the lexer as code (`No recognizable COBOL division
-found near 'SAPR24'`). Because the detector samples only the first 10
-non-blank lines, the misclassification could also flip as copybook
-expansion changed which lines those were, making it look intermittent.
-
-Detection now applies a second rule: a *tag-like* sequence area (a single
-unbroken `[A-Za-z0-9#@$][A-Za-z0-9_/#@$.-]*` token — the "no internal
-whitespace" property is what excludes ordinary free-form statement text
-like `MOVE A`) also counts, but only when corroborated by an Area A
-division header, i.e. a line whose columns 8+ start with
-`IDENTIFICATION DIVISION`/`PROGRAM-ID`/etc. **at a word boundary** — the
-header must be followed by a period, a space, or end of text, so an
-identifier merely starting with a header string (`PROGRAM-ID-VAL`) can
-never anchor. Free-form source puts real headers at column 1, where the
-`line[7:]` slice lands mid-word and cannot match, so the anchor is what
-keeps rule 2 from dragging free-form input in. The anchor scan is bounded
-(`_HEADER_SCAN_LIMIT` candidate lines), but comment lines (column-7
-indicator) and too-short lines do not consume the budget — tag-stamping
-shops open programs with 100+-line change-history banners, which would
-otherwise push the header out of the window and re-introduce the
-misclassification. The strict blank/digit rule still decides on its own
-and is unchanged, so this only ever *adds* detections. Pinned by
-`tests/regression/test_tagged_sequence_area_detection.py`; the
-`--source-format` escape hatch for layouts neither rule infers is in
-[cli.md](cli.md).
-
-A copybook has no division header, so a tagged member (`BNC#01`, `CHG001`
-in columns 1-6) used to fall through to free-form: its column-7 comment
-lines were spliced in raw and the first `#` in a comment banner surfaced as
-`Lexer error: Invalid character: #` (reported on a nested COPY, 2026-10-04).
-`_has_tagged_line_anchor()` now corroborates rule 2 as well: a tagged line
-with a column-7 comment indicator (`CHG001*...`), or a tagged line whose code
-area is a data-description entry (level number + name + period or clause
-keyword, `_TAGGED_DATA_ENTRY_RE`; the period/clause requirement keeps
-`DIVIDE 10 INTO X` out). `copybook_expander._looks_fixed_format()`'s
-short-member path (< 3 lines) accepts a tagged line on the same anchor.
-Pinned by `tests/regression/test_tagged_copybook_comment_hash.py`.
-
-Continuation-line joining follows the COBOL rule that a continuation line's
-first non-blank character is the successor of the continued line's last
-non-blank character, **without an intervening space**:
-
-* **Alphanumeric literal open at the split** (a quote is unbalanced on the
-  continued line) → the continuation line's leading quote is dropped and the
-  remainder is appended directly, resuming the literal (`pending_literal` path).
-* **Any other continuation** (numeric literal or a word split mid-token, e.g.
-  `-999.777` written one digit per line) → the continuation chunk is
-  `strip()`-ped and appended with no leading space, so the token rejoins
-  intact. Injecting a space here (the pre-2026-07-06 behaviour) spaced out the
-  digits and left the decimal point as a free-standing `.` that the lexer read
-  as a statement terminator — see the [log](log.md) entry and
-  `tests/regression/test_continued_literal_normalization.py`.
-
-**Trailing blanks in a continued literal** (fixed 2026-07-09, finding M5):
-a line's text is only `rstrip()`-ped once it's known no literal is left
-open at end of line. A literal that remains open (continuing to the next
-line) keeps its trailing blanks, since fixed-format continuation rules
-make them part of the literal's value — e.g. opening line `VALUE "ABC   `
-(3 trailing blanks) + continuation `-    "DEF".` now normalizes to
-`VALUE "ABCDEF"` → correctly `"ABC   DEF"`, not the pre-fix `"ABCDEF"`
-(blanks silently dropped). Applies to both the opening-line branch and
-the literal-continuation branch, pure-Python and Cython.
-
-**Short records** (2026-09-28): the M5 rule only kept blanks that were
-*physically present*. A literal open at end of line runs through column 72,
-and a record whose trailing blanks were stripped (editors, file transfers --
-most copies of a deck kept off the mainframe) stops short of it; the columns
-it lost are blanks inside the literal all the same. They were dropped, so
-`DISPLAY 'ERROR: NOT ` + `-    'FOUND'.` read `'ERROR: NOTFOUND'` stripped
-and `'ERROR: NOT FOUND'` unstripped. `_literal_pad()` computes the missing
-columns when a record leaves a literal open; the pad is paid *only when a
-continuation record resumes the literal* (prepended to its chunk), so an
-unterminated literal that nothing continues keeps its historical text.
-Mirrored in `_preprocess_fast.pyx` (`.c` regenerated with Cython 3.3.0) and
-in the expander's `copy_statement_parser.normalize_continuation_lines`, which
-pads per merged record (`tail_width`), so a direct parse and a
-`parse_cobol_with_expansion` parse still agree. Hand-written tests that
-joined short-record pieces with no blanks were updated to the column-72
-rule (or to put the literal's last character in column 72).
-
-**Line numbers survive continuation** (fixed 2026-09-09). A continuation
-record used to vanish from the output — N physical lines became one logical
-line — so every location after the first continued literal in a program was
-off by the number of continuation records seen so far (a `MOVE` on physical
-line 10 reported line 8). The normalizer now counts the continuation records
-a logical line absorbed and emits that many empty placeholder lines *after*
-the flushed logical line, so `output.count("\n") == len(lines)` for every
-input and the logical line keeps its first record's number. The same
-deferred-placeholder mechanism means a comment (or blank) line that
-interrupts an open continued literal no longer severs it: the placeholder is
-deferred, the next `-` record rejoins the literal (the IBM rule — the
-continuation is the next line that is neither a comment nor blank). A
-literal still open on the last *code* line still raises. `*>` inline
-comments are now skipped by the quote-state scan, so an apostrophe inside
-one no longer reads as an unterminated literal. The lexer's
-`_fixed_format_comment_tokens` emits COMMENT tokens at physical line numbers
-whenever that count invariant holds (it always does now).
-
-The optional Cython `_preprocess_fast` fast-path mirrors this logic; the
-pure-Python implementation stays reachable as `_normalize_fixed_format_pure`
-for testing both paths.
-**Unterminated literals.** With the default `merge_continued_literals=True`, a
-string literal still open at end of input raises `ValueError` ("Unterminated
-string literal…"). Passing `merge_continued_literals=False` disables
-continuation-literal merging and never raises — it is the best-effort fallback.
-`CobolParser._parse_core` relies on this: on the raise it records the error and,
-unless in `FAIL_FAST`, re-normalizes with `merge_continued_literals=False` so one
-bad literal no longer collapses the whole parse to `ast=None` under
-`COLLECT_ALL`. `parse_cobol` defers to the parser for this recovery rather than
-returning early. Both the pure-Python and Cython (`_preprocess_fast`) paths accept
-`merge_continued_literals` identically.
-
-**Column 73+ overflow warning** (added 2026-08-03): the `line[TEXT_START_COL
-- 1 : TEXT_END_COL]` slice never bounds-checked the line length, so any
-non-comment line longer than 72 columns had its columns-73+ tail silently
-dropped — no warning, no error. Found via a whole-branch review of
-mocky-mock's `export` command: a hand-written 77-column `DISPLAY "X"
-WS-FIELD.` line (56 columns of indentation) was silently chopped to
-`DISPLAY "X" WS-F` — no closing quote, no period — and mocky-mock still
-wrote it to its "durable deliverable" output and exited 0.
-
-Columns 73–80 are the identification area, and real fixed-format compilers
-ignore them regardless of content — traditional 80-column source
-legitimately puts non-blank sequence/identification text there (e.g. NIST
-CCVS85's `IC1014.2`, repeated on every line of the vendored
-`examples/cobol/` NIST corpus). Flagging every such line would be noise. So
-`normalize_fixed_format` flags a line under either of two rules:
-
-1. **Mid-token split** — column 72 (the last kept character) **and**
-   column 73 (the first dropped character) are *both* non-blank — content
-   actually split mid-token, not merely followed by an unrelated
-   identification field.
-2. **Word-boundary overflow** (added 2026-08-14) — the split lands on a
-   space at column 72/73 (rule 1 misses it), but the line's real content,
-   after trailing whitespace is stripped, extends past column 80 — the
-   traditional maximum width of an 80-column punch-card line (72 code + 8
-   identification). Content that survives past column 80 can never be
-   legitimate identification-area text, wherever exactly it broke. Found
-   via a data-item-layout test fixture: `OCCURS 1 TO 10 TIMES DEPENDING ON
-   WS-COUNT.` written on one line kept `DEPENDING` (it fit by column 72)
-   but silently dropped its ` ON WS-COUNT.` operand — columns 72/73
-   straddle a space, so rule 1 alone never caught it, producing a silently
-   *fixed* `OCCURS 10 TIMES` with no ODO clause and no diagnostic.
-
-Comment lines (column-7 `*`/`/`, or `D`/`d`/`V`/`v` when
-`debug_lines_as_comments`/`version_tag_lines_as_comments` is true) are never
-checked under either rule: their text is discarded whether truncated or
-not, so truncation there changes nothing.
-
-**Sequence-numbered lines gate both rules** (added 2026-08-14, alongside
-rule 2). Wiring the mid-token rule into the real parse pipeline for the
-first time exposed that it's far noisier on genuinely traditional
-80-column source than its own 2026-08-03 tests suggested: measured against
-the vendored NIST CCVS85 corpus, 4434 of 4438 raw column-72/73 "mid-token"
-hits were lines like `examples/cobol/IX209A.CBL:292` —
-`029100          "...".IX2094.2` — where the statement's own closing
-period genuinely lands on column 72 and the file's own per-line
-identification code starts immediately at column 73 with zero authoring
-mistake; nothing was actually split. A real numeric sequence number in
-columns 1-6 (all digits, ignoring surrounding blanks) is independent,
-reliable evidence a line belongs to that convention — hand-typed modern
-source never bothers with sequence numbers — so both rules now skip
-entirely whenever columns 1-6 hold one. Re-measured after the gate: 4
-residual hits across the full vendored corpus, all genuine (harmless)
-truncation of `*>` free-form inline-comment text running past column 72 in
-files the preprocessor doesn't yet parse `*>` semantics for (that
-recognition is lexer-level, not preprocessor-level — a separate, smaller
-gap left as-is).
-
-**Rule 1 has a second, independent gate: a purely-numeric dropped tail
-never warns either** (added 2026-08-22). The columns-1-6 gate above assumes
-the traditional convention stamps a sequence number at the *start* of the
-line; some real shops instead (or additionally) stamp a per-line, purely
-numeric sequence/change-tracking number into columns 73-80 with columns 1-6
-left blank — e.g. IBM Z Open Editor/ISPF-style auto numbering such as
-`03050009`, incrementing on nearly every line. Found via a real vendored
-program (`WS000-D0000022-X PIC X(008) VALUE 'D0000022'.` immediately
-followed, no separating blank, by `03050009`): the VALUE clause's own
-closing period lands exactly on column 72, satisfying rule 1's mid-token
-shape by column position alone even though columns 1-6 are blank and
-nothing was actually split. `normalize_fixed_format` now also skips rule 1
-whenever the dropped tail (`line[TEXT_END_COL:]`, right-stripped) is
-non-empty and entirely digits *and* the line's total width still fits the
-traditional 80-column identification-area boundary
-(`not exceeds_traditional_width`) — a longer numeric run spilling past
-column 80 is no longer plausible identification-area content and still
-warns via rule 2. This is deliberately narrower than "any dropped tail":
-a mixed alphanumeric tail like NIST's own `IX2094.2` test-case id does
-**not** qualify (`.isdigit()` rejects it), so
-`test_blank_sequence_area_with_same_shape_still_warns` — locking in that a
-period-then-identification-text shape with blank columns 1-6 is still
-flagged as a likely authoring mistake — is unaffected. Pinned by
-`test_numeric_identification_stamp_does_not_warn_with_blank_seq_area` and
-`test_numeric_identification_stamp_still_warns_past_traditional_width` in
-`tests/regression/test_normalize_column_overflow_warning.py`.
-
-**A *shorter* numeric stamp is a whole-file question** (added 2026-09-21).
-The gate above only excuses a tail that fills columns 73-80 *exactly*,
-because per line a shorter all-digit tail is indistinguishable from a data
-name's own trailing digits getting cut. Reported against a real mainframe
-program whose change-control tool (Panvalet/Librarian/Endevor style) stamps
-a **5-digit** code at column 73 — non-sequential (`00551`, `00257`,
-`01641`: it stamps physical lines as they change, it does not count them) —
-with columns 1-6 blank. Every line whose statement happened to end exactly
-on column 72 warned, ~19 of them in one program; nothing was split, column
-73 was always the stamp. Downstream that is fatal rather than noisy:
-mockymock refuses a program fail-closed on *any* `ParseResult.warnings`
-entry, so the whole program was rejected.
-
-Per line the shape is genuinely ambiguous; across the file it is not. A file
-using the convention also carries lines where the stamp is preceded by a
-blank at column 72 — there nothing *could* have been split, so the tail is
-provably identification-area content whatever columns 1-6 hold.
-`_has_identification_stamp_convention(lines)` counts those unambiguous lines
-(column 72 blank, non-empty all-digit tail from column 73, total content
-within column 80) and `MIN_ID_STAMP_EVIDENCE_LINES` (3) of them settle it:
-one or two numbers dangling past column 72 is an authoring accident, a whole
-deck of them is a convention. Rule 1 then treats a short all-digit tail the
-same as the full-width one.
-
-Cost and scope: the scan is lazy and computed at most once per
-`normalize_fixed_format` call — only a line that *would* warn about a short
-all-digit tail asks for it, and the scan returns at the third evidence line —
-so a file without the shape never pays. The gate is shaped on the file's own
-stamp, so a non-numeric dropped tail (the reviewer's `WS-PARM-DORM-D` +
-`AYS` split) and a numeric run past column 80 still warn in a stamped file.
-Pinned by `TestShortIdentificationStampConvention` in
-`tests/regression/test_normalize_column_overflow_warning.py` (including
-fast/pure parity over *multi-line* inputs — the older parity cases are all
-single lines, which by construction can never establish the convention) and
-end-to-end by `TestShortChangeStampDeckParsesWarningFree` in
-`tests/regression/test_fixed_format_word_boundary_overflow.py`.
-
-**The stamp shape admits blanks between digits** (added 2026-09-21, same
-day). Re-running the reported program against the fix above took 19 warnings
-down to 3. The residue was a second stamp layout in the same file: the
-identification field is laid out in *sub-fields* — `01636  0`, a 5-digit
-change id, two blanks, a 1-digit level, filling columns 73-80 exactly — and
-both gates tested the tail with a plain `str.isdigit()`, which an embedded
-blank fails. So the shop's own stamp still read as split code on exactly
-those lines.
-
-`_is_numeric_id_stamp_text(tail)` is now the single definition of the shape,
-used by all three sites (the full-width gate, the short-tail gate, and
-`_has_identification_stamp_convention`'s evidence test): **at least one
-digit, and nothing but digits and blanks**. Blanks are part of an
-identification field's layout, not noise around it. Everything the shape
-excludes is unchanged — any letter or punctuation fails it, so NIST's
-`IX2094.2`, the `WS-PARM-DORM-D` + `AYS` split and `ON WS-COUNT.` all still
-warn, as does a sub-fielded run that spills past column 80. Pinned by
-`TestSubfieldedNumericStamp` and
-`TestSubfieldedChangeStampDeckParsesWarningFree`. Note the three reported
-lines are full-80-width, so the full-width gate settles them on its own with
-no file-level evidence needed; the whole-file gate covers the shorter
-sub-fielded case.
-
-When `warnings` is passed a list, each qualifying line appends one message
-to it — `f"Line {n}: content beyond column {TEXT_END_COL} was dropped
-mid-token: {dropped!r}"` for rule 1, or `f"Line {n}: content beyond column
-{TEXT_END_COL} was dropped -- line is {content_len} columns wide, past the
-traditional {IDENTIFICATION_END_COL}-column identification-area width:
-{dropped!r}"` for rule 2 (`n` is the 1-based physical line number). The
-pure-Python and Cython (`_preprocess_fast`) paths produce byte-identical
-warning text; pinned by
-`tests/regression/test_normalize_column_overflow_warning.py` (unit-level,
-both rules, fast/pure parity) and
-`tests/regression/test_fixed_format_word_boundary_overflow.py` (end-to-end
-through `parse_cobol()`/`CobolParser.parse()`).
-
-**Wired into the real parse pipeline (fixed 2026-08-14).** From
-2026-08-03 to 2026-08-14 this was opt-in only — `warnings=None` by default
-meant the check still ran internally but nothing was collected, and *none*
-of the library's own entry points (`CobolParser.parse()`'s fixed-format
-auto-detection in `_parse_core`, the module-level `parse_cobol()`
-convenience function, `lexer.py`'s `_tokenize_source` / `tokenize_cobol()`,
-and the CLI's `preprocess` subcommand) passed `warnings=` — so the
-diagnostic channel existed but was completely unreachable from a normal
-parse, and every one of those callers silently truncated with zero
-indication. All four now collect and surface it: `CobolParser.parse()` and
-`parse_cobol()` add it to `ParseResult.warnings` (`parse_cobol()` used
-to normalize before its `CobolParser` existed and carried the warnings in
-via `initial_warnings=`; since 2026-10-08 the parser does the
-normalization itself), `_tokenize_source` folds it into its
-returned warnings tuple element, and `cobol-parser preprocess` prints it to
-stderr (matching the existing `--define` conditional-warnings pattern).
-It's a warning, not an error, in both `FAIL_FAST` and `COLLECT_ALL` — the
-AST still reflects the (now-diagnosed) truncated source. Callers that want
-to turn this into a hard refusal (mocky-mock's `export` command does, via
-`checks.py` → `mockymock/analysis/refusal.py`'s `check_normalize_warnings`)
-should treat every entry in the returned list as actionable — the filters
-above (mid-token, word-boundary, and the sequence-number gate) already
-exclude the traditional sequence-number/identification-area case, so there
-is no further filtering to do caller-side.
-
-# Copybook Expansion
-
-```python
-# Standalone expansion
-result: CopybookExpansion = expand_copybooks(source, copybook_paths=["/path/to/cpy"])
-
-# Parse + expand in one call
-parse_result = parse_cobol_with_expansion(source, copybook_paths=["/path"])
-```
-
-Features:
-- Recursive inlining with circular-reference detection
-- Encoding detection (`utf-8`, `cp037`, `latin-1`, …)
-- Content validation (`validate_copybook_content`)
-- LRU file cache (configurable via `set_file_cache_size`)
-- REPLACING clause support including multi-token substitution
-
-**Literal REPLACING operands keep their quotes** (2026-09-27).
-`COPY B REPLACING 'ABC' BY 'XYZ'` replaces the *literal* `'ABC'` with the
-literal `'XYZ'` (checked against `cobc -E`). `CopyStatementLexer._read_operand`
-stripped a literal operand's quotes -- right for `COPY 'MEMBER'`, wrong for
-REPLACING -- so the clause searched for the word `ABC`: it never matched the
-literal, and rewrote an identifier `ABC` to a bare `XYZ`. REPLACING operands
-now read with `keep_literal_quotes=True`, and `apply_replacing_clauses`'s
-existing rule (a search text containing a quote may match inside literals)
-does the rest. Pinned by `tests/regression/test_copy_replacing_literal_operand.py`.
-
-**Sequence/identification areas stripped before REPLACING and
-conditional compilation (fixed 2026-07-21):** in `_expand_source_recursive`,
-a copybook's sequence-number (columns 1-6) and identification (columns
-73-80) areas used to be stripped (`strip_sequence_area` +
-`remove_comment_lines`) only *after* `apply_replacing_clauses`,
-`preprocess_conditional_compilation`, `validate_copybook_content`, and
-`validate_level_numbers` had already run on the raw 80-column line. Two
-concrete failures: (1) a length-changing `REPLACING` shifts every character
-after its match point on that raw line, so the column-72 boundary — applied
-afterward — lands in the wrong place: a shrinking replacement pulls
-identification text into the kept code window, a growing one truncates real
-code (including its terminating period); (2) `>>IF`/`>>END-IF` inside a
-copybook with real (non-blank) numeric sequence numbers were never
-recognized as directives, since the raw sequence-number digits sit before
-`>>` on the line. Fixed by moving the strip to run immediately after the
-copybook is read from disk, before any of those four calls.
-`apply_replacing_clauses` gained an `indicator_position: int = 6` parameter
-(same pattern as `normalize_continuation_lines`) so it can locate the
-indicator column correctly whether it's operating on raw (index 6) or
-already-stripped (index 0) content, and `_expand_source_recursive` gained an
-`already_stripped: bool = False` parameter so its own internal strip is
-skipped when the caller already normalized the content (avoiding a
-double-strip that would eat 6 more real characters off each line). Pinned by
-`tests/regression/test_copybook_sequence_area_before_replacing.py`.
-
-**`total_bytes` accounting on cache hits (fixed 2026-07-09, finding
-M14):** `_expand_source_recursive`'s intra-expansion cache (`context.
-content_cache`, keyed by copybook path + REPLACING clauses — for diamond
-dependencies, the same member `COPY`d multiple times within one
-expansion) previously only counted a copybook's bytes toward
-`context.total_bytes` on a cache **miss**. A cache hit still inserts the
-same real content into the expansion, so `max_total_size` was silently
-under-enforced: 3x inclusion of a 76-byte copybook with `max_total_size=
-114` (1.5x) never raised `TotalExpansionSizeExceededError`, despite ~228
-true content bytes. Cache hits now add the cached content's byte length
-to `context.total_bytes` and re-check the limit, identically to a miss.
-
-**REPLACING growth is charged too (2026-09-27, audit S2).** The miss path
-charges the raw member *before* REPLACING, so a `BY` text longer than its
-operand could multiply a member past the limit unchecked (48 KB became
-5.5 MB under `max_total_size=1_000_000`). After `apply_replacing_clauses` the
-growth, when positive, is added to `context.total_bytes` and the limit
-re-checked. The cache-hit path already charged post-REPLACING content.
-
-**`validate_copybook_content` missing-period check now judges the ENTRY, not
-the physical line (fixed 2026-09-12):** `_DATA_DEF_RE` matched a single line
-ending in a `PICTURE` clause with no trailing period. But a data-description
-entry is one COBOL sentence and is routinely written across several lines --
-`05 WS-B PIC X(30)` on one and `VALUE 'TEXT'.` on the next -- so every such
-(correct) entry was reported as unterminated. On the `legacy-application`
-corpus this produced 8 false warnings on every one of the 20 expansions, all
-from one copybook's legal `PIC`/`VALUE` pairs, and those warnings are
-rendered into the banner of the expanded listing by the COBOL Analyzer
-extension, so they are read by users rather than discarded.
-
-The scan is now `_unterminated_data_entries()`: `_DATA_ENTRY_START_RE` marks
-where each entry begins, the entry runs to the line that starts the next one
-(or to an `EXEC` block, or EOF), and the *joined* entry text is checked for a
-trailing period. `_DATA_DEF_RE` survives as the "is this entry a PICTURE
-entry at all" predicate, now matched against the whole entry with `DOTALL`
-rather than against one line.
-
-Both patterns are built from one shared `_ENTRY_HEAD` fragment (`\d{1,2}` +
-name -- single-digit levels included, since `5 FIELD-B` is legal COBOL).
-They must agree on what an entry head looks like, and a first cut of this
-fix had them disagree: entry-start detection took `\d{1,2}` while the
-predicate still carried the original `\d{2}`, so an entry starting at a
-single-digit level closed the entry above it (correct) but could never be
-reported for its own missing period (silently unchecked). Sharing the
-fragment is what makes that class of drift impossible rather than merely
-currently-absent; `test_single_digit_level_entry_is_checked_like_any_other`
-pins both directions.
-
-Blank lines deliberately do NOT close an entry: `remove_comment_lines` blanks
-comment lines to whitespace *before* this runs (see the 2026-07-27 entry
-below), and a comment between an entry's `PIC` line and its `VALUE` line is
-ordinary source -- treating the blank it leaves behind as a terminator would
-reintroduce the same false positive by another route. Both directions are
-pinned by `tests/unit/test_preprocess_init_coverage.py::
-TestValidateCopybookContent` (`test_no_false_positive_when_entry_continues_
-onto_next_line`, `test_missing_period_detected_on_multi_line_entry`,
-`test_multi_line_entry_does_not_swallow_the_entry_below_it`,
-`test_blanked_comment_inside_an_entry_does_not_split_it`), alongside the
-decimal-point-PIC pair from the earlier fix.
-
-**`validate_copybook_content` missing-period regex no longer crosses blanked
-comment lines, and comment-only copybooks report correctly (fixed
-2026-07-27):** `_DATA_DEF_RE` (the "may be missing terminating period"
-check) used bare `\s` for its leading/internal/trailing whitespace, which
-matches newlines. Since `remove_comment_lines` blanks comment lines to
-whitespace-only lines *before* `validate_copybook_content` runs (see the
-sequence/identification-area strip above), `^\s*` could bridge across those
-blanked lines to a later real code line, and `[^\s]+` — not excluding `.` —
-swallowed a data item's trailing period as part of the "value" token.
-Together this produced false "missing terminating period" warnings on
-correctly-terminated lines, misattributed to the wrong line (typically a
-blanked comment line above, not the real code line). Fixed by switching
-every internal `\s`/`\s+`/`\s*` to `[ \t]`/`[ \t]+`/`[ \t]*` (space/tab
-only — can't cross a line) and the value token to `[^\s]*[^\s.]` — "one or
-more non-whitespace characters, the last of which is not a period". This
-excludes only a *trailing* period (the sentence terminator), not an
-*internal* one: a decimal-point PICTURE like `PIC 9(5).99` (no terminator)
-is still correctly flagged, while `PIC 9(5).99.` (terminated) is not. An
-earlier draft of this fix used `[^\s.]+` (excludes periods everywhere in
-the token), which silently stopped detecting missing terminators on any
-decimal-point PIC — caught in review before landing; pinned by
-`test_missing_period_detected_with_decimal_point_pic` /
-`test_no_false_positive_with_decimal_point_pic`.
-
-Separately, the "contains only comments" check
-(`lines = [... not line.strip().startswith("*") ...]`) was dead code when
-reached through the real pipeline: by the time `validate_copybook_content`
-runs, `remove_comment_lines` has already blanked every comment line, so
-`content` can never contain a literal `*`-prefixed line — a genuinely
-comment-only copybook instead falls into the earlier "is empty" branch,
-which is misleading (comment-only is a legitimate documentation-only
-pattern, not an empty file). `validate_copybook_content` gained an optional
-`raw_content: str | None` parameter: when the post-strip `content` is blank
-but `raw_content` (the pre-strip source) is not, the warning is "contains
-only comments" instead of "is empty". `_expand_source_recursive` now
-captures the copybook's raw content before the sequence/comment strip and
-passes it through. Direct callers that omit `raw_content` keep the old
-behavior — exercised by `TestValidateCopybookContent::test_comment_only`,
-which passes raw `*`-comment lines straight in without going through
-`remove_comment_lines` first. Pinned by
-`tests/unit/test_preprocess_init_coverage.py::TestValidateCopybookContent`
-and `tests/unit/test_copybook_expander_coverage.py::TestExpandCopybooks::
-test_content_validation`.
-
-**Caller-supplied `path_resolver` honored (audit 2026-08-12, P-D1):**
-`expand_copybooks(..., path_resolver=...)` used to overwrite the parameter
-unconditionally with a fresh `PathResolver`; a caller-supplied resolver
-(whose warm resolution/directory-index caches are the whole point of
-passing one — `batch.parse_files_with_copybooks` does) is now used as-is,
-and a new one is constructed only when the argument is `None`. Note the
-supplied resolver's own `search_config` governs nesting/size/encoding
-limits during expansion. Pinned by
-`tests/regression/test_audit_2026_08_12_core.py::TestPD1CallerSuppliedPathResolver`.
-
-**`COPY_PATTERN` removed (audit 2026-08-12, S-1):**
-`copy_statement_parser.py` exported a monolithic `COPY_PATTERN` regex that
-was unused by the live expansion path (the real scanner is
-`CopyStatementLexer.tokenize_copy_statements`, a linear hand-written lexer)
-and whose ambiguous REPLACING sub-pattern backtracked exponentially on
-unterminated input (`COPY X REPLACING BY BY ... BY %`). Deleted (and
-removed from `__all__`) rather than de-ambiguated. Guarded by
-`tests/regression/test_audit_2026_08_12_core.py::TestS1CopyPatternRemoved`.
-
-**The scanner skips whole runs (2026-09-27, audit S1).** "Linear" above was
-not true: at a position where `_match_keyword("COPY")` fails the loop
-advanced one character, but `_match_keyword` first skips the whole
-separator run -- so every blank line re-scanned the rest of the run, and a
-file of a few thousand blank lines took minutes (a DoS through a copybook
-too, since gen-data tokenizes every member). On a failed match the loop now
-jumps past the whole separator run (`_SEPARATOR_RUN_RE`) or identifier
-(`_WORD_RUN_RE`): from anywhere inside either, a match fails the same way
-(same landing character; a keyword inside a word fails the left
-word-boundary check). Differentially identical to the old loop over all 641
-corpus files and 40,000 fuzzed inputs, and ~10x faster on NC105A. Pinned by
-`tests/regression/test_audit_2026_09_27.py::TestCopyScannerLinear`.
-
-`parse_cobol_with_expansion` copies `expansion.statistics.warnings` (lossy
-encoding decodes, content-validation and level-number warnings) onto the
-returned `ParseResult.warnings` (2026-07-07). Previously they lived only on
-the discarded `CopybookExpansion` object, so this entry point's callers never
-saw them.
-
-**Dropped-COPY diagnostics (audit 2026-07-07 H6a/H6c):**
-`CopyStatementLexer` records on `lexer.warnings` any COPY it recognized but
-could not tokenize into a complete `CopyStatement` — a missing terminating
-period (`COPY FOO` with no `.`, or `COPY FOO BAR.`) means the COPY is never
-appended and therefore **never expanded**; an unterminated `==pseudo-text==`
-REPLACING operand abandons the clause. Both used to be fully silent — the
-copybook's data items simply did not exist. `_expand_source_recursive`
-routes them into `ExpansionStatistics.warnings`;
-`extract_copy_statements(source, source_file, warnings=None,
-sql_include=False)` exposes the same channel; `sql_include=True` also returns
-each `EXEC SQL INCLUDE member END-EXEC` (marked `sql_include=True`), which is
-how the codebase graph sees INCLUDE edges (#295). The scanner also checks the **left** word boundary so
-`GOODCOPY.` is not probed as a COPY statement (previously only the right
-boundary was checked).
-
-**Conditional-compilation diagnostics (audit 2026-07-07 H7; semantics
-completed 2026-07-20, M10):**
-`preprocess_conditional_compilation(source, defined_symbols, warnings=None)`
-now **evaluates** `>>IF` conditions instead of blanking on anything beyond
-`DEFINED`: comparisons (`=`, `<>`, `>`, `<`, `>=`, `<=`) between symbol
-values and numeric/string literals, `DEFINED(sym)` / `sym IS [NOT]
-DEFINED`, and `AND`/`OR`/`NOT` with parentheses. `defined_symbols` accepts
-the legacy name-only set/list forms *or* a `dict[str, str | int | float |
-bool]` carrying values (values from the CLI's existing `--define
-NAME=VALUE` form now take effect).
-`>>EVALUATE sym` (literal `>>WHEN`s), `>>EVALUATE TRUE` (condition
-`>>WHEN`s), `>>WHEN OTHER`, and `>>END-EVALUATE` are implemented.
-Warnings still appended: a comparison referencing an **undefined symbol**
-(warns, evaluates false), genuinely unparseable `>>IF` conditions
-(warn + skip, as before), malformed `>>DEFINE`, stray `>>ELSE`/`>>END-IF`,
-unknown `>>` directives (passed through to the lexer), and unclosed
-`>>IF` / `>>EVALUATE` at end of input. Directive/skipped lines are still
-blanked in place so line numbers stay stable. The copybook expansion path
-(`process_conditionals=True`) routes warnings into
-`ExpansionStatistics.warnings`; the CLI (`--define`) prints them to
-stderr (without `--copybook-path`; with it -- and always for `expand` --
-they land in the JSON's `warnings`). Pinned by
-`tests/regression/test_tier4_audit_remediations.py::TestH6CopybookSilentChannels`
-/ `::TestH7ConditionalCompilationWarnings` (updated to the new semantics)
-and `tests/regression/test_open_findings_m10_regression.py`.
-
-**`>>DEFINE` reaches the copybooks below it (2026-09-28):** with
-`process_conditionals=True` each COPY's member is processed with the
-symbols in effect *on the COPY's own line* -- the caller's
-`defined_symbols` plus every active `>>DEFINE` above it, in the program or
-in an enclosing member. `preprocess_conditional_compilation(...,
-define_log=[...])` records `(line, symbols)` after each `>>DEFINE`
-(`(0, initial)` first); `_expand_source_recursive(define_log=...)` looks
-the COPY's line up through its origin (`_symbols_at_line`), and those
-symbols join the expansion-cache key, so one member COPYd before and after
-a `>>DEFINE` expands both ways. Before, every member saw only the caller's
-initial symbols. The CLI pre-pass had the same effect from the outside:
-`expand --define` and `parse`/analyzers `--define X --copybook-path`
-ran the program through `preprocess_conditional_compilation` *before*
-expansion, consuming its `>>DEFINE` lines -- and for `parse`, `--define`
-itself never reached a member either (neither the expander nor the
-parser's own directive pass over the expanded text received it), so
-`>>IF DBG DEFINED` in a copybook took the `>>ELSE` branch under
-`--define DBG`. With copybook paths the CLI now leaves conditionals to the
-expander (`parse_cobol_with_expansion(process_conditionals=True,
-defined_symbols=...)`). A `>>DEFINE` *inside* a member still does not
-reach the parent's text after the COPY. Pinned by
-`tests/regression/test_copybook_resolution_2026_09_28.py::TestDefinedSymbolsReachCopybooks`.
-
-**COPY in an excluded `>>IF` block is not resolved (2026-09-28):**
-`parse_cobol_with_expansion(process_conditionals=...)` now defaults to
-**True**, and `parse_files_with_copybooks` and the CLI's
-`--copybook-path` parse path pass it. Expansion used to run before any
-directive was evaluated (the parser's own pass came after), so `COPY
-DFHAID` under `>>IF CICS DEFINED` was resolved even with CICS undefined,
-and a member that exists only for the other branch failed the whole parse
-(CLI exit 1; batch/scan silently fell back to the unexpanded parse).
-The parser runs the same directive pass anyway, so only the *order*
-changes. `expand_copybooks` itself keeps `process_conditionals=False` by
-default (and `expand` processes directives only with `--define`), since
-its output is the text as written. Pinned by
-`tests/regression/test_copybook_resolution_2026_09_28.py::TestCopyInExcludedConditionalBlock`.
-
-A `*>` floating comment on a `>>` directive line (outside a literal) is
-stripped before the directive is read (`_strip_directive_comment`, 2026-09-27):
-`>>DEFINE DEBUG AS 1 *> on` used to define DEBUG as `1 *> ON`, silently
-making `>>IF DEBUG = 1` false, and `>>WHEN OTHER *> x` failed to parse.
-
-`>>DEFINE name AS arithmetic-expression` (IBM; 2026-09-28): an unquoted value
-made of integer literals / already-defined integer compilation variables,
-`+ - * /` and parentheses is evaluated (`_eval_define_arithmetic`), so
-`>>DEFINE V AS 2 + 1` defines V as `3`. It used to store the raw `2 + 1`,
-making `>>IF V = 3` silently false. An expression that cannot be evaluated
-exactly (undefined / non-integer operand, division by zero, inexact
-division) keeps the raw text as before. Arithmetic inside an `>>IF`
-comparison is still unsupported (warns, FALSE).
-
-**Literal contents are case-sensitive; `-1` and `'O''BRIEN'` are operands
-(2026-09-28).** The directive line used to be `line.strip().upper()`-ed as a
-whole, so `>>DEFINE X AS 'abc'` then `>>IF X = 'ABC'` was TRUE.
-`_upper_outside_literals` now folds only keywords / symbol names (text
-outside quotes); `_compare` / `_values_equal` compare non-numeric values
-exactly. A caller-supplied `defined_symbols` value that is *quoted* keeps
-its case; an *unquoted* one is a word and is upper-cased (so
-`{"ENV": "prod"}` still matches `'PROD'`, as before). `_COND_TOKEN_RE`
-accepts a signed number (`[-+]?\d+...`) and literals with a doubled
-delimiter; `_strip_quotes` un-doubles it (`'O''BRIEN'` -> `O'BRIEN`), for
-both `>>DEFINE` values and `>>IF` / `>>WHEN` operands. Both used to make the
-condition unparseable (FALSE + warning). Pinned by
-`tests/regression/test_conditional_compilation_literals.py`.
-
-# Source-Text Manipulation: REPLACE + un-expanded COPY (2026-07-14)
-
-`preprocess/replace_statement.py` implements the two source-text
-pseudo-text-substitution passes the standalone (non-copybook-expanding) parse
-pipeline needs. Both run inside `CobolParser._parse_core` on the normalized
-free-form source, immediately before `CobolLexer`, and both preserve their
-input's physical line count (every newline in a removed/replaced span is
-re-emitted). Each is a cheap no-op when its keyword is absent.
-
-```python
-from cobolparser.preprocess.replace_statement import (
-    apply_replace_statements,          # REPLACE ==a== BY ==b== . / REPLACE OFF.
-    strip_unexpanded_copy_statements,  # blank COPY the pipeline won't expand
-)
-```
-
-* **`apply_replace_statements(source, warnings=None)`** — applies the
-  `REPLACE ==pseudo-text-1== BY ==pseudo-text-2== [ ... ] .` compiler-directing
-  statement (one or more operand pairs) and cancels the active set at
-  `REPLACE OFF.`. A new `REPLACE` **replaces** the active set rather than
-  accumulating. Matching is on a COBOL **text-word** stream (`_tokenize_text_words`):
-  * space / comma / semicolon separators are equivalent and are *not* text
-    words (so `MOVE; "FAIL" , TO` matches `MOVE , "FAIL"; TO`);
-  * a **separator period** is its own text word (so a find of
-    `MOVE WS-A TO WS-B` matches source `MOVE WS-A TO WS-B.` and leaves the
-    sentence period in place);
-  * a literal (`"..."` / `'...'`) is one text word compared case-sensitively;
-    other words compare case-insensitively;
-  * a decimal point inside a numeric literal (`3.14`) stays part of the word.
-
-  Each source segment between REPLACE statements is rewritten by a single
-  left-to-right word scan (first active pair to match at a position wins);
-  the REPLACE statements themselves are blanked. `REPLACE` inside a string
-  literal is ignored. A `warnings` list receives a diagnostic if a set is
-  still active at EOF (no closing `REPLACE OFF.`), and (2026-09-28) one per
-  `REPLACE` keyword that does not start a well-formed statement -- those
-  used to be skipped with no trace, their substitutions silently lost.
-  * `LEADING` / `TRAILING` qualify a pair (2026-09-28; previously the whole
-    statement was silently ignored): pseudo-text-1 must be one non-literal
-    text word, pseudo-text-2 at most one, and it matches the start / end of
-    each non-literal source word (case-insensitively), replacing only that
-    part: `REPLACE LEADING ==XX-== BY ==WS-==.` turns `XX-A` into `WS-A`.
-  * The IBM `==:TAG:==` partial-word form replaces **every** occurrence
-    inside a word (`:P:-A-:P:` -> `XX-A-XX`; it used to stop at the first).
-  Pinned by `tests/unit/test_enterprise_syntax.py::TestReplaceLeadingTrailing`
-  / `TestReplacePartialWord`.
-
-* **`strip_unexpanded_copy_statements(source, warnings=None)`** — blanks
-  `COPY` statements the standalone pipeline is not going to expand
-  (`parse_cobol` does not resolve copybooks). It **reuses `CopyStatementLexer`**
-  (the same pseudo-text-aware scanner the expansion path uses — one COPY
-  parser, not a divergent second one) to find each statement's full span,
-  including a `REPLACING ==pseudo-text==` operand that legally contains COBOL
-  statement keywords and periods. Removing the whole statement mirrors a
-  compiler with the copybook unavailable and stops that pseudo-text from
-  leaking as a malformed statement (e.g. `BY MOVE ==DELETE==` had leaked a
-  `MOVE` with no `TO`). In the **copybook-expansion** pipeline COPY is already
-  inlined before this point, so the strip is a no-op there. `warnings` receives
-  one diagnostic per removed COPY plus any the lexer recorded. `omitted_lines`
-  (optional list) receives each removed COPY's 1-based `(first, last)` line
-  range; `CobolParser` stores them on its `TokenStream` as
-  `omitted_source_lines` so the EVALUATE parser can tell a WHEN whose body was
-  an unexpanded COPY from a stacked WHEN (#314).
-
-These two passes are what let NIST `SM208A` (30x `REPLACE`) and `SM206A`
-(`COPY ... REPLACING` pseudo-text) parse error-free; pinned by
-`tests/regression/test_replace_and_copy_pseudo_text.py`.
-
-# Copybook Path Resolution (`path_resolver.py`)
-
-`PathResolver.resolve(member_name)` finds a copybook file across
-`CopybookSearchPath.directories`, in three tiers of increasing cost:
-
-1. **Tier 1** — a resolution cache keyed by `member_name` (exact repeat
-   lookups are O(1) with no filesystem access).
-2. **Tier 2** — a per-directory index (`_dir_index`, built once via
-   `os.scandir()`) keyed by full filename (uppercased when
-   case-insensitive), for O(1) lookup against every directory without
-   re-scanning. `resolve` probes the member name, then the name plus each
-   configured extension in order, and takes the hit from the
-   first-configured directory (then the first probe) -- exactly Tier 3's
-   order.
-3. **Tier 3** — a full filesystem search (`find_copybook_file`) as the
-   fallback when the index misses.
-
-**Tier precedence is first-configured-directory-wins everywhere (audit
-2026-08-12, P-B6):** when the same copybook name exists in two search
-directories, the first configured directory wins for the Tier-2 stem key,
-the Tier-2 full-filename key, and Tier 3 alike. Previously the Tier-2
-full-filename key alone was *last*-directory-wins (built with an
-unconditional `index[name_upper] = abs_path` instead of `setdefault`), so
-`resolve("SHARED.cpy")` and `resolve("SHARED")` could return files from
-different directories. Pinned by
-`tests/regression/test_audit_2026_08_12_core.py::TestPB6FirstDirectoryWins`.
-
-**Tier-2 stem key removed (2026-09-28):** the index used to carry a
-bare-stem key too (`MEM` for `MEM.bak`), so `COPY MEM` resolved to a file
-of *any* extension -- `MEM.bak`, `NOTES.txt`, `ZZ.exe`, or the program's
-own `SUB.cbl` over `SUB.cpy` -- whichever `os.scandir()` listed first,
-ignoring `CopybookSearchPath.extensions` and disagreeing with Tier 3.
-Pinned by `tests/regression/test_copybook_resolution_2026_09_28.py::
-TestIndexedLookupHonoursConfiguredExtensions`.
-
-All three tiers funnel through `validate_path_within_directory(path,
-search_dir)`, which resolves symlinks (`Path.resolve()`) and confirms the
-resolved path is still inside `search_dir` before it can be returned —
-this is the directory-traversal containment check.
-
-**Tier-2 containment gap (audit 2026-07-08, finding H6, fixed
-2026-07-09):** the Tier-2 fast path returned `self._dir_index[lookup_key]`
-after only an `os.path.getsize()` check — it never called
-`validate_path_within_directory()`, unlike Tier 3. Since the index is
-built via `os.scandir()` + `entry.is_file()` (which follows symlinks), a
-symlink inside a search directory pointing outside the search root would
-have been served with no containment check. Fixed by a new
-`PathResolver._validate_indexed_result(result)` method (iterates
-`search_config.directories`, validating against each, raising
-`PathTraversalError` if none contain the result) called at both Tier-2
-hit points (exact `lookup_key` match and extension-suffixed `ext_key`
-match). A live Windows symlink needs elevated privilege to create in CI,
-so the regression test seeds `_dir_index` directly with an
-escaping absolute path instead — exactly what a followed symlink would
-produce.
-
-Separately (same finding, H6), the `".." in file_path` traversal guard
-(`preprocess/__init__.py`'s `validate_path_within_directory`) was naive
-substring matching — a filename merely *containing* `".."` (e.g.
-`weird..name.cpy`) triggered `PathTraversalError` despite not being a
-traversal attempt. Now a path-segment check: `.replace("\\", "/").split
-("/")` and reject only when a whole segment equals `".."`. Both pinned by
-`tests/regression/test_open_findings_high_regressions.py::TestH6PathResolverContainment`.
-
-**Suggestion pool narrowed to real copybook extensions (2026-09-15):**
-`suggest_similar_copybooks`'s did-you-mean candidate pool used to be
-built from `get_available_copybooks(search_config)` with the search
-config's own `extensions` -- correct for *resolution* (`.cpy`/`.cbl`/
-`.cob`, plus `""` meaning "any extension," so a copybook without an
-extension still resolves) but wrong for a *suggestion*: every file in
-the search directory, including the referencing program's own `.cbl`
-source, became a candidate. A missing copybook sitting next to its own
-program's `.cbl` file suggested that `.cbl` file back. Fixed by a new
-`suggestion_extensions` parameter (default `_SUGGESTION_EXTENSIONS =
-(".cpy", ".CPY")`), applied via `dataclasses.replace(search_config,
-extensions=...)` before calling `get_available_copybooks` -- the
-caller's own `search_config` object is never mutated, and
-`suggestion_extensions=search_config.extensions` restores the old broad
-pool for a caller that wants it. Pinned by
-`tests/regression/test_copybook_suggestion_pool.py`.
-
-Review follow-up (same day): the pool is `(".cpy", ".CPY", "")`, not
-`.cpy`/`.CPY` alone -- a PDS download has no extensions at all, and
-narrowing to `.cpy` would have left every such shop with no suggestion
-ever. That works because `get_available_copybooks`'s `""` branch now
-lists only *extensionless* files (`path.suffix == ""`), which is what
-`""` means for resolution (`COPY X` via `""` looks for a file literally
-named `X`); it used to add every file's stem, so `ACCTMNT.cbl` was
-reported as an available copybook named `ACCTMNT` that `""` could never
-have resolved. `PathResolver.list_available()` is corrected the same way. Reported from
-mocky-mock's real-world example corpus; see mocky-mock's
-`docs/2026-09-15-copybook-discovery-defaults-design.md`.
-
-# Line-Number Preservation (audit 2026-07-08)
-
-`normalize_fixed_format` used to silently *drop* blank/short lines and
-comment lines (indicator `*`/`/`) — no placeholder was appended for them —
-so every subsequent line's number shifted by however many such lines
-preceded it. Every real COBOL program has blank/comment lines, so a "clean"
-parse could report an error several lines away from the actual problem.
-Fixed by appending an empty string to `result` for each dropped line instead
-of a bare `continue`, in both the pure-Python implementation and
-`_preprocess_fast.pyx` (checked-in `.c` regenerated). `output.count("\n")`
-now always equals the input line count.
-
-`preprocess_conditional_compilation` had the same gap for `>>DEFINE`/`>>IF`/
-`>>ELSE`/`>>END-IF` directive lines *and* for source lines inside a skipped
-`>>IF` block (deleted outright rather than blanked) — fixed the same way:
-every non-included physical line contributes an empty placeholder to
-`result_lines`, so `len(output.split("\n"))` always equals the input's
-`splitlines()` length.
-
-Pinned by `tests/regression/test_normalize_line_number_preservation.py`,
-which also confirms the Cython/pure-Python paths agree.
-
-**`flush_parts()` still dropped one line shape (fixed 2026-08-10, issue
-#123):** the 2026-07-08 fix above covers "short/blank physical line" and
-"`*`/`/`/debug comment line" — both explicitly emit an empty placeholder.
-A third shape falls through neither special case: a full-width physical
-line with a blank (non-comment) indicator column whose extracted
-program-text (columns 8-72) is itself entirely blank. This starts a new
-logical line, buffers an empty string into `parts`, and used to only reach
-`result` via `flush_parts()`'s `if combined: result.append(combined)` —
-which is false for an empty string, so the line vanished with **no**
-placeholder at all (not even the correct empty one). This shape never
-arises in a plain fixed-format parse — a blank line is always short, and a
-comment line always has a non-blank indicator — so it went unnoticed until
-copybook expansion: `copy_statement_parser.remove_comment_lines` blanks a
-`*`-comment line to an all-spaces string of the *same length*, indicator
-column included, before `CobolParser._parse_core` re-runs
-`normalize_fixed_format` on the already-expanded source. On that second
-pass the former comment line has nothing left to recognize it as a
-comment, so it takes the buggy generic path instead. Symptom: `program-flow`
-`location.line` (and any other lexer/parser line number) drifted backward
-by exactly one per full-line comment anywhere earlier in the file, but
-only in source with at least one `COPY` statement. Fixed in both
-`normalize_fixed_format` and `_preprocess_fast.pyx` by tracking whether a
-logical line was actually *started* (`has_line`, reset on each flush, set
-whenever a physical line is consumed into `parts`) rather than inferring
-that from whether the merged text happens to be non-empty. Pinned by
-`tests/regression/test_normalize_line_number_preservation.py`
-(`TestNormalizeFixedFormatPreservesFullWidthBlankLines`,
-`TestCopybookCommentDriftIssue123`).
-
-**Formerly a residual, now fixed: +1 phantom line per `COPY`.** The splice
-re-inserted each copybook's own trailing `"\n"` into a span that already
-ended in one, so the expansion carried one blank physical line more than the
-copybooks' real combined content per `COPY` statement, compounding with
-nesting. `_expand_source_recursive` now strips exactly one trailing newline
-from `expanded_copybook` (never more, so a member with a genuine blank final
-line keeps it) *before* `copybook_line_count` is taken, since that count pads
-the spliced-in origins to match. Expanded line counts are now exact:
-`len(source) - len(COPY lines) + len(member lines)`.
-
-**The splice reclaims the whole record when the `COPY` owns it.** The COPY
-statement's own indentation is not the copied text's. Splicing at the `COPY`
-keyword prepended it to the member's first line — pushing a member's `01` out
-of Area A by however far right the `COPY` sat, and, on a far-right `COPY`,
-past column 72, where `_fit_fixed_format_width` then squeezed the line's
-blanks out or wrapped it onto an extra physical line. The splice now starts
-at `head_start` (the beginning of the record) whenever `head_has_text` is
-false — the same flag the origins splice already computed — and still starts
-at the keyword when the parent has real program text before the `COPY` on
-that line. Pinned by
-`tests/regression/test_copy_splice_keeps_member_columns.py`.
-
-# Error Hierarchy
-
-All preprocessing errors extend `PreprocessingError` which extends `ParseError`:
-
-| Exception | When raised |
-|-----------|------------|
-| `CircularReferenceError` | COPY chain forms a cycle |
-| `CopybookNotFoundError` | No matching file on any search path |
-| `PathTraversalError` | COPY target escapes the allowed directory |
-| `EncodingError` | Cannot decode copybook bytes |
-| `NestingDepthError` | COPY nesting exceeds configured limit |
-
-# Context-Aware REPLACING + Encoding Detection (2026-07-20, M13/M15)
-
-**REPLACING is context-aware (M13):** `apply_replacing_clauses`
-(`copy_statement_parser.py`) is a line-based scanner, not whole-text regex.
-Fixed-format comment lines (column-7 `*`/`/`, mask computed once from the
-original content) are never rewritten; text inside string literals (both
-quote styles, doubled-quote escapes, unterminated literal runs to EOL) is
-never rewritten — *unless* the clause's own search text contains a quote
-(quoted pseudo-text deliberately targets literal text). Boundary semantics
-(hyphen-aware word boundaries, longest-first ordering, LEADING/TRAILING,
-case-insensitivity) are unchanged. `CopyStatementLexer._read_operand`
-recognizes `:ABC:` pseudo-text and strips the delimiters, so
-`REPLACING :ABC: BY :XYZ:` substitutes `ABC`→`XYZ` (previously a silent
-no-op — the colons were captured as literal text). No Cython mirror.
-Pinned by `tests/regression/test_open_findings_m13_regression.py`.
-
-**REPLACING matching refinements (2026-09-28).** A line holding a literal
-is no longer matched piece by piece (code vs literal segments): the
-alternation runs over the whole line, so a search text mixing code and a
-literal (`==VALUE 'A'== BY ==VALUE 'B'==`) can match; a match of a clause
-*without* a quote in its search text is rejected when it lies inside a
-literal (and the quote-bearing clauses still get their turn at that
-position) -- `_replace_in_line_with_literals`. The literal words of a search
-text compare **case-sensitively** (`(?-i:...)`; `=='abc'==` no longer
-rewrites `'ABC'`) while its other words stay case-insensitive. Word
-boundaries now count `_` as a word character and treat a decimal point as
-binding (`(?<![0-9]\.)` / `(?!\.[0-9])`), so `==1== BY ==2==` leaves
-`VALUE 1.5` alone. Pinned by
-`tests/unit/test_copy_edge_cases.py::TestReplacingLiteralAndWordBoundaries`.
-
-**Encoding detection + strictness (M15):** `detect_encoding`
-(`copybook_expander.py`) scores ASCII-vs-EBCDIC plausibility over a
-bounded 64 KiB prefix (BOM / strict-UTF-8 checks first, then COBOL-charset
-proportion, EBCDIC newline conventions 0x15/0x25, keyword tiebreaker via
-`_score_cobol_plausibility`) instead of the old single 0x40-vs-0x20
-byte-ratio test — an ASCII file full of `@` (0x40) is no longer
-misdetected. `CopybookSearchPath.encoding_errors` /
-`expand_copybooks(..., encoding_errors=...)` selects decode strictness:
-`"replace"` (default) substitutes U+FFFD and warns with a replacement
-count; `"strict"` raises `EncodingError` with file/offset context. Pinned
-by `tests/regression/test_open_findings_m15_regression.py`.
-
-**8-bit, non-UTF-8 text (2026-09-28):** ASCII-shaped bytes that are not
-valid UTF-8 (a Windows / Micro Focus cp1252 copybook with `VALUE 'CAFÉ'`)
-are detected as `cp1252` -- or `latin-1` when a byte cp1252 leaves
-undefined is present -- by `_single_byte_codec`. They were labelled
-`ascii`, which turned every accented byte into U+FFFD (and failed the
-expansion under `encoding_errors="strict"`). Pinned by
-`tests/regression/test_copybook_resolution_2026_09_28.py::TestEightBitCopybookEncoding`.
-
-# Expansion output: REPLACING width overflow + sequence-area change tags (2026-08-23)
-
-Two `expand_copybooks` *output* defects found in a mainframe corpus retry
-(the raw inputs were valid in both cases — only the re-assembled expansion
-output was broken):
-
-**REPLACING column overflow.** A `COPY ... REPLACING` whose replacement
-text is longer than what it replaces (`==:LKPCB:== BY ==LKPCB-PCB1==`, +3
-chars per occurrence) lengthens the lines it lands on; the expander's
-6-space re-pad then leaves the tail — typically a data item's terminating
-period — past column 72, where the final parse's fixed-format slice
-silently drops it ("content beyond column 72 was dropped mid-token: '.'").
-A dropped period merges the data item into its neighbor. Fixed by
-`_fit_fixed_format_width` (`copybook_expander.py`), applied to every
-re-padded line: interior multi-blank runs *outside quoted literals* are
-squeezed, rightmost first, each to no less than one blank, until the line
-fits — blanks are only separators in COBOL, alignment padding before a PIC
-clause almost always has enough slack, and squeezing keeps the line count
-(and every later line number) unchanged. When squeezing alone cannot fit
-the line, it wraps at the rightmost quote-safe blank onto a fresh Area-B
-continuation line (later line numbers then shift — the cost of not
-corrupting the statement). A line with no safe break outside a literal
-(one giant token) is left untouched so the parse's existing column-72
-warning reports the drop. **A literal open at column 72 is continued**
-(2026-09-28): the expander merges continuation records before splicing, so
-*any* `COPY` in a fixed-format file turned a long continued `VALUE` literal
-back into one >72-column line that the fitter could not break -- the text
-past column 72 was dropped and the parse still reported success.
-`_split_open_literal` now cuts the line at column 72 with the literal left
-open (trailing blanks kept) and resumes it on a `      -    '...` record
-(hyphen in column 7, quote at column 12); it moves the cut one column left
-when column 72 is the first quote of a `''` escape. It is also preferred
-over a blank wrap whose tail would not fit anyway. Wrapped pieces of a line
-merged from continuation records map to those records in the source map
-(`_wrapped_origins`: piece k -> first record + k, capped at the last one
-absorbed); an ordinary wrap still shares its line's origin. Pinned by
-`tests/unit/test_copybook_expander_edge_cases.py::TestContinuedLiteralSurvivesExpansion`. The
-wrap loop anchors its break point *after* the line's first non-blank
-character and bails on any iteration that makes no forward progress — the
-first version broke at any blank past index 7, and a wrapped tail's own
-fresh 11-space prefix re-created such a blank every iteration, so a short
-head followed by an unbreakable 62+-char token looped forever emitting
-empty heads (caught when it hung the full test suite before ever
-shipping).
-
-**Sequence-area change tags.** Shops stamp a short change tag (`P2P`,
-`M1005`, `E1A`, ... — any prefix, unlike the column-7 `V` convention
-`normalize_fixed_format` handles via `version_tag_lines_as_comments`) into
-columns 1-6 of its own line with nothing after it, so the physical line is
-under 7 characters. `strip_sequence_area` (`copy_statement_parser.py`)
-passed short lines through verbatim (rationalized as "might be
-free-format" — incoherent, since the function unconditionally eats 6
-leading chars off every full-width line); the 6-space re-pad then shifted
-the tag's first letter into the indicator column and the rest into columns
-8+ as live code, surfacing as "Unparsed tokens" or silently swallowed
-garbage. Fixed: short lines are now blanked — every character of a
-sub-7-char line lies within columns 1-6, the exact area the function
-exists to strip — with line numbering preserved. (The direct
-`parse_cobol` path was never affected: `normalize_fixed_format` already
-emits a blank placeholder for sub-7-char lines.)
-
-Both pinned by `tests/regression/test_expansion_width_and_tags.py`.
-
-# Review-pass hardening of the expansion-output fixes (2026-08-23, same day)
-
-A `/code-review` pass over the fixes above confirmed three gaps (each
-reproduced before fixing):
-
-1. **`strip_sequence_area` short-line blanking was too eager.** Blanking
-   *every* sub-7-character line silently deleted real code from flush-left
-   copybooks maintained without sequence numbers (`01 A.` vanished from
-   the AST with no warning). Narrowed to tag-shaped content only: a single
-   blank-free token that neither ends with a period nor is a
-   compiler-directing word (EJECT/SKIP1/SKIP2/SKIP3). `01 A.`, `EXIT.`
-   keep the passthrough; `P2P`, `M1005` are still blanked.
-2. **Wrap break-point off-by-one.** `head = stripped[:break_at]` has
-   length `break_at`, so a break at index 72 yields a 72-character head --
-   fully inside the code area -- yet the filter capped at 71, leaving a
-   token ending exactly at column 72 unsplittable and silently dropping
-   its tail past the slice. Now `<= _CODE_AREA_WIDTH`.
-3. **`ExpansionStatistics.total_lines` drift.** The stat was computed from
-   the pre-re-pad line list, but the wrap fallback can add lines after
-   that; recounted from the final emitted source so the documented "total
-   lines in the expanded output" invariant holds.
-
-Also from the same pass: the in-width common case is now guarded at the
-re-pad call site (plain `append`, no helper call/rstrip copy per line),
-the squeeze pass edits the string directly right-to-left (dropping the
-cuts-dict/pieces reassembly), and the dead `not head.strip()` half of the
-wrap progress check was removed (the `content_start` filter already
-guarantees a non-empty head). Pinned by `TestReviewPassRefinements` and
-the updated `TestSequenceAreaChangeTags` in
-`tests/regression/test_expansion_width_and_tags.py`.
-
-# See Also
-
-* [lexer.md](lexer.md) — consumes output of `normalize_fixed_format`
-* [parser.md](parser.md) — `CobolParser` calls `strip_compiler_directives` internally
-
-# Indicator constants, stamp-gate narrowing, bounded wrap scan (2026-08-24)
-
-* The column-7 comment-indicator characters live in ONE place now:
-  `_normalize.py`'s `COMMENT_INDICATORS` (`*` `/`), `DEBUG_INDICATORS`
-  (`D` `d`), `VERSION_TAG_INDICATORS` (`V` `v`), and their union
-  `ALL_COMMENT_INDICATORS` (all re-exported from
-  `cobolparser.preprocess`). Consumers: `normalize_fixed_format` (flag
-  gating unchanged), `copy_statement_parser.is_comment_line`,
-  `parser._detect_fixed_format`, `lexer._fixed_format_comment_tokens`
-  (deferred import). `_preprocess_fast.pyx` keeps mirrored literals with a
-  pointer comment — extend both together.
-* The numeric identification-stamp gate on the column-72 mid-token
-  truncation warning is stricter: the all-digit dropped tail must fill
-  columns 73-80 EXACTLY (`content_len == 80`) — the real ISPF/Z Open
-  Editor auto-number shape. Any shorter all-digit tail (a data name's own
-  trailing digits spilling past 72 on, say, a 75-column line) warns again;
-  the first version suppressed those silently. Both normalizers.
-* `_fit_fixed_format_width`'s wrap loop uses `_rightmost_safe_blank(line,
-  start, after, limit)` — quote-aware scan bounded at column 72 (quote
-  state at an index depends only on the prefix), so a pathologically long
-  REPLACING-expanded line wraps in O(len) total instead of O(len²).
-  `_blank_runs_outside_literals` returns only the squeeze pass's runs now.
-
-**Short-line tag blanking exempts all reserved words (same pass):**
-`strip_sequence_area` blanks a sub-7-char single-token line only when the
-token is not ANY COBOL reserved word (`_cobol_reserved_words()`, lazily
-imported from `CobolLexer.KEYWORDS` -- eager import would be circular).
-The first version excluded only EJECT/SKIP1-3, silently deleting flush-left
-`GOBACK`/`EXIT`/`STOP` lines during expansion. Pinned by
-`tests/regression/test_diff_scan_findings.py`.
-
-**Bare terminal period does not warn (2026-08-24):** the column-72
-mid-token overflow warning's rule 1 gains a third gate (alongside the
-columns-1-6 sequence-number gate and the numeric-identification-stamp
-gate): a dropped tail that is *only* the statement-terminating period
-(`dropped == "."` exactly) never warns. Found via a banner-style `VALUE`
-literal (`VALUE '**** REPORT TITLE ****'.`) whose closing quote lands
-exactly on column 72, immediately followed by the period at column 73 with
-no separating blank -- satisfying the "columns 72 and 73 both non-blank"
-mid-token shape even though nothing was split: the literal closed cleanly,
-and a lone dropped period costs nothing (every statement parser already
-tolerates a missing terminating period). A dropped tail that merely
-*starts* with a period but carries more (`.B`, `. WS-COUNT`) still warns —
-the gate only matches the exact one-character tail. Mirrored in both
-`_normalize.py` and `_preprocess_fast.pyx` (`.c` regenerated). Pinned by
-`TestBareTerminalPeriodDoesNotWarn` in
-`tests/regression/test_normalize_column_overflow_warning.py`.
-
-**Flush-left PROCESS/CBL directive mangled by `strip_sequence_area`
-(2026-08-27):** a PROCESS/CBL compiler-directing statement must start in
-column 1 per the COBOL standard -- even inside an otherwise strictly
-fixed-format program that carries real sequence numbers on every other
-line -- so its own columns 1-6 are never a sequence area. `strip_sequence_area`
-stripped columns 1-6 from every full-width line unconditionally, so
-`PROCESS &CICS-31& &HAUTE-PERFORM-DB2&` was mangled into
-`S &CICS-31& &HAUTE-PERFORM-DB2&` before any later PROCESS-stripping pass
-(e.g. `strip_compiler_directives`, or a downstream consumer's own
-directive handling) ever saw it intact -- the corrupted first line then
-surfaced downstream as a missing PROGRAM-ID header. Fixed: a full-width
-line is exempted from the columns-1-6 strip (passed through untouched,
-not re-sliced at column 7) when its own columns 1-6 do NOT already look
-like a real sequence area (blank or all-digit, the same strict test
-`_sequence_area_is_fixed_like`/`strip_compiler_directives` use) AND the
-line matches `^(?:PROCESS|CBL)(?:[ \t].*)?$` case-insensitively
-(`_COMPILER_DIRECTIVE_RE`). Ordinary numbered/tagged source is
-unaffected -- the sequence-area gate keeps a data name like
-`PROCESS-FLAG` on a real numbered line from being misread as the
-directive. Multi-line PROCESS/CBL continuation is out of scope (not
-reproduced in the corpus). Pinned by `TestFlushLeftCompilerDirective` in
-`tests/regression/test_expansion_width_and_tags.py`.
-
-# Source map and comment preservation (2026-09-07)
-
-Two additions to `expand_copybooks`, both about output that has to be read by
-something other than the lexer.
-
-## `preserve_source_locations` finally means something
-
-The flag existed from the start and returned an always-empty dict:
-`_expand_source_recursive`'s location branch was a literal `pass` with a note
-that "line mapping is approximate or requires new logic". Every consumer
-therefore had to *guess* where a line reported against the expanded text
-belonged in the file on disk — the VS Code extension re-anchored lint findings
-by searching the file for the name each finding was about, which works only
-because most rules report something unreferenced, and cannot work at all for a
-finding inside an inlined member (that name is not in that file).
-
-`expand_copybooks` now carries a `LineOrigin` (`(file, 1-based line)`) per
-expanded line through every step that can move one:
-
-| Step | Effect on lines | How the map survives it |
-|------|-----------------|-------------------------|
-| `remove_comment_lines`, `strip_sequence_area` | blank in place | line-preserving by construction; nothing to track |
-| `normalize_continuation_lines` | merges N records into 1 | new `line_origins` out-parameter records the input line each output line started on |
-| the COPY splice | inserts a member's lines | `origins[:start] + copybook_origins + origins[end+1:]`, the first spliced line credited to the parent only when the parent had real text before the COPY on that line — the same flag that decides whether the text splice reclaims the whole record or starts at the `COPY` keyword, so map and text are spliced identically |
-| the re-pad's `_fit_fixed_format_width` wrap | 1 line becomes several | every wrapped piece inherits the origin of the line it came from |
-
-`ExpansionContext.content_origins` stores origins beside each cached content
-entry (`cache_put(key, value, origins)` / `cache_get_origins`), so a diamond
-dependency's *cache hit* contributes the same map a miss would — evicted
-together with the content entry it belongs to. `_fit_origins` is the defensive
-clamp: a map that ever drifted must mis-attribute nothing and raise nothing.
-
-`expand_copybooks(..., source_file=...)` names the main program in the map
-(default `"<main>"`); `parse_cobol_with_expansion` passes the real filename
-and always requests the map, exposing it as
-**`ParseResult.expansion_source_map`** — `None` when nothing was expanded,
-which is exactly the case where expanded and on-disk line numbers are the
-same thing. `analysis.lint.apply_source_map` stamps it onto every finding
-(`origin_file` / `origin_line`), and the `lint` CLI applies it automatically
-whenever `--copybook-path` was given.
-
-Known residual, unchanged: the `+1` phantom line per `COPY` documented under
-"Line-Number Preservation" is still there, and shows up in the map as one
-extra line attributed to the copybook's own last line + 1.
-
-## `preserve_comments` (`expand --keep-comments`)
-
-Expansion blanks every comment line before it starts, and has to: the COPY
-scanner works on the program-text stream, and a `COPY` written inside a
-comment must not be expanded. That leaves a *listing* with comment line
-numbers and no comment text — throwing away most of what a reader wants.
-
-`preserve_comments=True` puts the original text back afterwards, using the
-same map: `_restore_comment_lines` replaces a line only when it is blank in
-the expansion AND its origin really is a comment line in its origin file, so
-the pass cannot rewrite code. `_origin_sources` reads each member back through
-`_cached_read_file` with the expansion's own encoding settings (no extra disk
-I/O in the normal case, and never a differently-decoded string); a file that
-has become unreadable is skipped rather than failing the expansion. Comment
-restoration happens after every substitution and never changes the line count,
-so `test_a_copy_inside_a_comment_is_still_not_expanded` holds: the comment text
-comes back, the member does not.
-
-Both pinned by `tests/regression/test_expansion_source_map_and_comments.py`
-and, at the CLI level, `tests/unit/cli/test_expand_source_map_cli.py`.
-
-
-# Conditional compilation by default, REPLACE partial words, EXEC SQL INCLUDE (2026-09-15)
-
-* `CobolParser.parse` runs `preprocess_conditional_compilation` on every
-  source that contains `>>` (after normalization, before the COPY strip
-  and REPLACE), so `>>DEFINE` / `>>IF` / `>>EVALUATE` are honoured in
-  `parse_cobol` and after expansion, not only under
-  `expand_copybooks(process_conditionals=True)`. `_DEFINE_RE` accepts
-  hyphenated symbols. An unrecognized `>>` directive is blanked with a
-  warning ("ignored") instead of passed to the lexer.
-  `_skip_to_identification_division` keeps `>>` lines ahead of the header.
-* `apply_replace_statements`: a single pseudo-text word delimited by
-  colons (`==:TAG:==`) is a *partial-word* pattern
-  (`_ReplacePair.partial_word`): it matches inside any non-literal source
-  word and only that substring is replaced.
-* `CopyStatementLexer(sql_include=True)` also recognizes `EXEC SQL INCLUDE
-  member END-EXEC [.]` (`_EXEC_SQL_TAIL_RE` anchors the span at `EXEC`) as
-  a `CopyStatement(sql_include=True)`; `_expand_source_recursive` turns it
-  on and, when the resolver raises `CopybookNotFoundError` for such a
-  statement, leaves it as written (SQLCA/SQLDA come from the
-  precompiler). `strip_unexpanded_copy_statements` keeps the default
-  (off), so the un-expanding parse never touches an INCLUDE.
-
-# Audit 2026-09-17: record boundaries, continuation, text words, EBCDIC NL
-
-Nine defects in the stages ahead of the lexer, all found by reading the
-code against the IBM Enterprise COBOL rules and confirmed by running a
-repro; pinned by `tests/regression/test_audit_2026_09_17_preprocessing.py`
-(42 tests). Every one of them was invisible to the suite because the
-suite's inputs are well-formed ASCII with one statement per line.
-
-**A line is a record, nothing else (`cobolparser/_lines.py`).** Every
-stage split source with `str.splitlines()`, which also breaks on form
-feed, vertical tab, NEL (U+0085), U+2028/2029 and `\x1c`-`\x1e`. A page
-eject inside a comment (`*\x0c`), or a cp1252 `…` decoded through latin-1,
-became two lines and every later `location.line` was +1 against the
-editor and the listing. `split_source_lines(text, keepends=False)` splits
-on `\n` / `\r\n` / `\r` only and is otherwise `splitlines`-shaped; it is
-what `parse_cobol`, `_parse_core`, `_detect_fixed_format`,
-`CobolLexer.__init__`, `normalize_fixed_format` (string form, pure and
-Cython), `preprocess_conditional_compilation`, `strip_compiler_directives`,
-`validate_copybook_content` and the expander's line counts all use now.
-Do not reintroduce `splitlines()` on source text.
-
-**EBCDIC NL records (0x15).** `detect_encoding` scores 0x15 as the EBCDIC
-newline, but cp037 decodes it to U+0085, which `split("\n")` in the
-sequence-area / comment / continuation passes never treated as a break --
-so a z/OS member with NL record separators read as ONE 72-column line and
-lost everything past the first record, silently. `convert_to_utf8` now
-runs `_normalize_record_separators` after an EBCDIC decode (`\r\x85` and
-`\x85` -> `\n`; codec detected by what it does to the bytes of `ABC`,
-`_is_ebcdic_codec`, so an unlisted variant is classified correctly).
-ASCII/UTF-8 text is never rewritten.
-
-**`validate_copybook_content(..., indicator_position=)`.** The expander
-validates the *stripped* member (indicator at index 0) but the continued-
-literal quote discount still looked at `line[6]`, so it never fired and
-every copybook with a continued literal drew a false "Possible unbalanced
-single quotes" (rendered to users by the extension). Same knob
-`apply_replacing_clauses` already had: 6 for raw source, 0 after
-`strip_sequence_area`, `None` for a free-form member (no continuation).
-
-**COPY ... REPLACING compares text words, once each.** Two defects in
-`apply_replacing_clauses`. (1) The search text was a literal regex, so
-`==PIC X(10)==` missed `PIC  X(10)` and `== A ==` (blanks kept by the
-lexer path's `_read_operand`) could never match `01 A.`. Pseudo-text is
-now stripped at the operand and compiled through `_PSEUDO_TEXT_WORD_RE`:
-blanks between words match a run of blanks, a parenthesis is a word of
-its own with optional blanks beside it (`X (10)` too). Comparison still
-stays within one source line -- a pseudo-text split across two source
-lines is not matched, as before. (2) Clauses were applied one full pass
-each over already-rewritten text, so a replacement could be replaced
-again: `==A== BY ==B== ==B== BY ==A==` turned every A *and* B into A.
-All clauses now go into ONE alternation (longest search text first, as
-before) applied in ONE left-to-right pass per segment, so each word is
-replaced at most once. Literal protection is unchanged: only a clause
-whose search text contains a quote is in the alternation used inside
-string literals.
-
-**COPY ... REPLACING: a separator comma / semicolon is a blank
-(2026-09-28).** IBM: when comparing pseudo-text, "a separator comma or
-separator semicolon ... is considered to be a space". `_build_clause_pattern`
-now joins words with `_SEPARATOR_GAP` (a blank, or `,`/`;` followed by a
-blank) instead of `[ \t]`, so `==X(3) VALUE==` finds `X(3), VALUE`; and
-`_pseudo_text_words` drops a `,`/`;` that ends a non-literal search word
-before a blank or the end, so `==A, B==` finds `A B`. A comma not followed
-by a blank (`A,B`, `1,5`) is not a separator and still compares as text.
-Matching still stays within one source line. Pinned by
-`tests/regression/test_fixes_2026_09_28_preprocessing.py`.
-
-**REPLACE: a parenthesis is a text word (`_tokenize_text_words`).** Only
-space/comma/semicolon/newline/quotes/period ended a word, so `WS-A(1)`
-was the single word `WS-A(1)` and `REPLACE ==WS-A== BY ==WS-B==` never
-touched a subscripted or reference-modified reference (`WS-A(1:2)`).
-`(` and `)` are now separators and words of their own; a replacement's
-parentheses stay attached when re-emitted (`WS-B(2)`). The `==:TAG:==`
-partial-word form is unaffected.
-
-**`>>IF name [IS] [NOT] DEFINED`.** `IS` is optional in IBM's diagram;
-`_parse_primary` only looked for `[NOT] DEFINED` after matching `IS`, so
-`>>IF DEBUG DEFINED` warned "unexpected trailing token" and evaluated
-FALSE -- and since conditional compilation runs on every `parse_cobol`,
-the guarded block was silently dropped. A dangling `IS` / `NOT` is still
-a syntax error.
-
-**A continuation line follows a comment for any continued text.** The
-comment and blank/short branches of `normalize_fixed_format` deferred the
-placeholder only while a *literal* was open; otherwise they flushed the
-logical line, so `MOVE WS-CO` / `* note` / `-    UNT TO X.` reached the
-lexer as `WS-CO UNT` (two operands, no diagnostic). IBM: the continuation
-line is the next line that is neither a comment nor blank, whatever is
-being continued. Both branches now look one program-text line ahead
-(`_continuation_follows`, cached so a run of comment lines costs one
-scan; `_next_code_line` in the Cython mirror) and defer when it is a
-`-` record. Line counts are preserved exactly as for the literal case.
-
-**Quotation mark in column 72 + continuation starting with two quotation
-marks.** IBM: the literal did not close; the pair is one doubled quote,
-the value gets a single quotation mark, and the literal continues.
-`_update_quote_state` closed the literal at column 72 and the `''` on the
-continuation opened a new one, leaving an unterminated literal and an
-"Unparsed token dropped" warning on legal source (and `ValueError` from
-`normalize_fixed_format` called directly). `closing_quote_at_72`
-remembers a quote that closed a literal exactly in column 72 (a quote
-there with no literal left open can only be a closing one); the
-continuation branch re-opens the literal and keeps one of the pair so the
-joined text reads `'AB''CD'`. Mirrored in `_preprocess_fast.pyx`; the
-`.c` was regenerated with the same Cython 3.3.0.
-
-**`>>SOURCE FORMAT IS FREE` / `FIXED` inside a fixed-format file
-(2026-09-28).** Was not honoured: every line after the directive still had
-columns 1-7 (and 73+) cut off, and conditional compilation blanked the
-directive as "unknown". Now `normalize_fixed_format` (and the Cython
-mirror, which must agree) recognises `>>SOURCE [FORMAT] [IS] {FREE|FIXED}`
-(`cobolparser/_source_directive.py`, dependency-free so the `.pyx` can
-import it) from column 7 to 72 of a fixed record, or anywhere on a free
-line. The directive record becomes a blank line; each free-format line is
-passed through whole as its own logical line (no continuation merging, no
-column-72 warnings) until `>>SOURCE FIXED`. One output line per physical
-line, so line numbers are unchanged. The copybook expander carries it too:
-`free_format_flags()` makes `remove_comment_lines` / `strip_sequence_area`
-keep free lines whole (behind a blank indicator) and the final re-pad skip
-them (no pad, no width wrap), so the source map stays 1:1; the expander's
-conditional-compilation passes use
+`source_format.debug_line_numbers()` (skipping `>>SOURCE FORMAT IS FREE`
+regions), and a unit whose `source_computer` metadata has `debugging_mode`
+gets one warning: `Line N: SOURCE-COMPUTER is WITH DEBUGGING MODE, but K
+debugging line(s) ... were dropped as comments; parse with debug_lines=True
+...`. With it on, D lines are compiled whether or not the clause is present
+(like GnuCOBOL's `-fdebugging-line`) and `_fixed_format_comment_tokens` stops
+emitting them as COMMENT tokens.
+
+Through expansion: `remove_comment_lines(..., keep_debug_lines=)` keeps `D`
+lines when `ExpansionContext.debug_lines` is on (main source and all
+members), `D` restored to column 7 after the re-pad; otherwise any COPY would
+make `debug_lines=True` a no-op. With it off they are blanked and listed in
+`CopybookExpansion.dropped_debug_lines` (`(file, line)` via the source map; a
+member COPYd twice counts twice; only computed when `DEBUGGING` appears).
+`warn_dropped_debug_lines()` (called by `parse_cobol_with_expansion` and
+`parse_files_with_copybooks`) raises the same warning from that list --
+`FILE: Line N` when the first is in a member -- unless the parser already
+did. One spelling for both: `parser.dropped_debug_lines_warning()`.
+
+### Continuation lines
+
+A continuation line's first non-blank character is the successor of the
+continued line's last non-blank character, **without an intervening space**:
+
+* **Alphanumeric literal open at the split** → the continuation's leading
+  quote is dropped and the rest appended directly (`pending_literal` path).
+* **Anything else** (a numeric literal or word split mid-token, e.g.
+  `-999.777` one digit per line) → the chunk is `strip()`-ped and appended
+  with no space; a space would leave a free-standing `.` that the lexer reads
+  as a terminator. Pinned by `tests/regression/test_continued_literal_normalization.py`.
+
+Further rules (all mirrored in the Cython path):
+
+* **Trailing blanks of an open literal are part of it**: a line is
+  `rstrip()`-ped only once no literal is open at its end (`VALUE "ABC   ` +
+  `-    "DEF".` gives `"ABC   DEF"`).
+* **Short records are padded to column 72**: a literal open at end of line
+  runs through column 72 even when trailing blanks were stripped by an editor
+  or transfer. `_literal_pad()` supplies them, only when a continuation
+  resumes the literal. The expander's `normalize_continuation_lines` pads the
+  same way (`tail_width`) so direct and expanded parses agree. Test fixtures
+  with short-record pieces must follow the column-72 rule.
+* **The continuation is the next line that is neither comment nor blank**,
+  whatever is continued: the comment and blank branches look ahead
+  (`_continuation_follows`, cached; `_next_code_line` in Cython) and defer the
+  placeholder when a `-` record follows, so `MOVE WS-CO` / `* note` /
+  `-    UNT TO X.` gives `WS-COUNT`.
+* **Quote in column 72 + continuation starting `''`** is one doubled quote in
+  a literal that continues (IBM): `closing_quote_at_72` re-opens it and keeps
+  one of the pair (`'AB''CD'`).
+* `*>` inline comments are skipped by the quote-state scan.
+
+### Unterminated literals
+
+With the default `merge_continued_literals=True`, a literal still open at end
+of input raises `ValueError` ("Unterminated string literal…").
+`merge_continued_literals=False` disables continuation-literal merging and
+never raises -- the best-effort fallback. `source_format.normalize_with_recovery`
+packages the retry; `CobolParser._normalize_fixed_source` (called from
+`_preprocess_source`) records the error and, unless in `FAIL_FAST`,
+re-normalizes with `merge_continued_literals=False`, so one bad literal does
+not collapse a `COLLECT_ALL` parse to `ast=None`. `parse_cobol` defers to the
+parser for this. Both paths accept the flag identically.
+
+### `>>SOURCE FORMAT` inside a fixed-format file
+
+`normalize_fixed_format` (and the Cython mirror, which must agree) recognises
+`>>SOURCE [FORMAT] [IS] {FREE|FIXED}` (`_source_directive.py`) from column 7
+to 72 of a fixed record, or anywhere on a free line. The directive record
+becomes a blank line; each free-format line is passed through whole as its
+own logical line (no continuation merging, no column-72 warnings) until
+`>>SOURCE FIXED`. One output line per physical line. The copybook expander
+carries it too: `free_format_flags()` makes `remove_comment_lines` /
+`strip_sequence_area` keep free lines whole (behind a blank indicator) and
+the final re-pad skip them (no pad, no width wrap), so the source map stays
+1:1; the expander's conditional-compilation passes use
 `preprocess_conditional_compilation(..., keep_source_format_directives=True)`
 so the directive survives to the final parse. Not handled: a free-format
 literal continuation, and a `>>SOURCE FIXED` in a file the detector calls
 free (that file never goes through the fixed normalizer). Pinned by
 `tests/regression/test_fixes_2026_09_28_preprocessing.py`.
 
-**Regenerating the Cython mirror.** `COBOLPARSER_ACCEL=1 python setup.py
-build_ext --inplace` re-cythonizes the `.pyx` when Cython is installed and
-rewrites the checked-in `.c`; both files are committed together. Without
-`COBOLPARSER_ACCEL=1` at run time the built `*.so` is ignored (pure Python is
-the default), so coverage measures correctly with it left in place.
+### Column 72 overflow warning
 
+For a non-comment record longer than 72 columns whose columns 1-6 are *not* a
+numeric sequence number, with `dropped = line[72:].rstrip()` and
+`content_len = len(line.rstrip())`:
 
-# Preprocessing fixes 2026-10-04 (issues #251-#256)
+* **Rule 1 (mid-token)** warns when columns 72 and 73 are both non-blank,
+  unless `dropped == "."` (bare terminal period), or `dropped` is
+  numeric-id-stamp text (`_is_numeric_id_stamp_text`: at least one digit,
+  only digits and blanks) and either `content_len == 80` exactly or the file
+  shows the stamp convention (`_has_identification_stamp_convention`, at
+  least `MIN_ID_STAMP_EVIDENCE_LINES` = 3 unambiguous stamp lines) with
+  `content_len <= 80`.
+* **Rule 2 (word boundary)** otherwise warns when `content_len > 80`.
 
-**Comment-entries are opaque to the COPY/REPLACE scanners (#251).** A quote
-in `AUTHOR. JOHN O'BRIEN.` used to open a "literal" in `CopyStatementLexer`
-and `_ReplaceScanner` that ran to the next quote anywhere in the file: a
-later COPY was silently not expanded, a later REPLACE not applied, and the
-quote parity flipped so `VALUE 'COPY NO. 1 OF 2'` was read as a COPY
-statement. Two changes, both scanners: (1) a literal ends at the end of its
-line at the latest (they run after continuation records are merged, so no
-real literal spans a newline); (2) both scan `lexer.mask_comment_entries(source)`
--- the source with every comment-entry's text blanked (same length, same
-line breaks, so offsets stay valid), using the lexer's own
-`_comment_entry_starts` so the two agree on what a comment-entry is. A
-`COPY` written inside a comment-entry (`REMARKS. SEE COPY PAYREC.`) is
-prose and is never expanded (the option #251 recommends). Pinned by
-`tests/regression/test_comment_entry_copy_replace_scan.py`.
+Messages (`n` = 1-based physical line; pure and Cython byte-identical):
+rule 1 `f"Line {n}: content beyond column {TEXT_END_COL} was dropped mid-token: {dropped!r}"`;
+rule 2 `f"Line {n}: content beyond column {TEXT_END_COL} was dropped -- line is {content_len} columns wide, past the traditional {IDENTIFICATION_END_COL}-column identification-area width: {dropped!r}"`.
 
-**Change tag on the header record (#252).** `strip_compiler_directives`
-decided whether a record has a sequence area from columns 1-6 (blank or
-digits only), so `CHG001 IDENTIFICATION DIVISION.` never closed its
-"directive section" and every later code line starting `PROCESS ` / `CBL `
-(`PROCESS SECTION.`) was blanked. It now also ends the section on
-`ID_DIVISION_HEADER_RE` (any six characters, then a blank column 7), the
-regex `CobolParser._skip_to_identification_division` uses too. Pinned by
+Why each gate exists (each was a real false positive or negative):
+
+* Columns 73-80 are the identification area, ignored by compilers whatever it
+  holds (NIST puts `IC1014.2` on every line), so rule 1 needs a split token.
+* Rule 2: `... DEPENDING ON WS-COUNT.` split on a blank at 72/73 silently lost
+  its operand; content past column 80 is never identification text.
+* A numeric sequence number in columns 1-6 marks the traditional convention,
+  where a period on 72 then an id at 73 (NIST `"...".IX2094.2`) is normal.
+* Comment lines (incl. `D`/`V` when comments) are discarded, never checked.
+* A lone dropped `.` (closing quote on 72) splits nothing; `.B` still warns.
+* Numeric stamp (ISPF auto-numbering `03050009`, columns 1-6 blank) is excused
+  at exactly 80 columns. A shorter all-digit tail is per line
+  indistinguishable from a name's trailing digits being cut, so it is excused
+  only when the *file* shows the convention (lines with column 72 blank and a
+  numeric tail; lazy scan, once per call, stops at the third). Blanks inside
+  a stamp are allowed (`01636  0`); any letter or punctuation fails it.
+
+Every gate is narrow on purpose: mockymock refuses a program on *any*
+`ParseResult.warnings` entry. The warning reaches `ParseResult.warnings`
+(`CobolParser.parse()` / `parse_cobol()`), `_tokenize_source`'s returned
+warnings and `cobol-parser preprocess` (stderr); it is never an error.
+Callers wanting a refusal (mocky-mock's `check_normalize_warnings`) treat
+every entry as actionable. Pinned by
+`tests/regression/test_normalize_column_overflow_warning.py` (incl.
+multi-line fast/pure parity) and
+`tests/regression/test_fixed_format_word_boundary_overflow.py` (end-to-end).
+
+### Regenerating the Cython mirror
+
+`COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace` re-cythonizes the
+`.pyx` when Cython is installed and rewrites the checked-in `.c` (the current
+one was generated with Cython 3.3.0); both files are committed together.
+Without `COBOLPARSER_ACCEL=1` at run time the built `*.so` is ignored (pure
+Python is the default), so coverage measures correctly with it left in place.
+
+## Fixed-format detection
+
+`source_format.detect_fixed_format(source)` decides whether to normalize at
+all (alias: `cobolparser.parser._detect_fixed_format`). It samples the first
+10 non-blank lines against a 60% threshold. The `--source-format` escape
+hatch is in [cli.md](cli.md).
+
+* **Rule 1 (strict):** columns 1-6 blank or all digits. Decides on its own;
+  rule 2 only ever *adds* detections.
+* **Rule 2 (change tags `SAPR24`, `28486`, `JSINT` in columns 1-6):** a
+  tag-like sequence area (`_sequence_area_is_fixed_like`, `_CHANGE_TAG_RE`:
+  one unbroken `[A-Za-z0-9#@$][A-Za-z0-9_/#@$.-]*` token -- no internal
+  whitespace, which excludes free text like `MOVE A`) counts only with an
+  anchor:
+  * an Area A division header (`IDENTIFICATION DIVISION`, `PROGRAM-ID`, ...
+    in columns 8+) **at a word boundary** (`PROGRAM-ID-VAL` never anchors).
+    Free-form headers sit at column 1, where `line[7:]` lands mid-word, so the
+    anchor keeps free-form input out. The scan is bounded
+    (`_HEADER_SCAN_LIMIT` = 100) but comment and short lines do not consume
+    it -- tag-stamping shops open with 100+-line change-history banners;
+  * for copybooks, `_has_tagged_line_anchor()`: a tagged line with a column-7
+    comment indicator (`CHG001*...`) or whose code area is a data entry
+    (`_TAGGED_DATA_ENTRY_RE`: level + name + period or clause keyword, which
+    keeps `DIVIDE 10 INTO X` out). `copybook_expander._looks_fixed_format()`'s
+    short-member path (< 3 lines) uses the same anchor.
+
+A misdetected tagged program skips normalization and its tags reach the lexer
+as code (and the result can flip as expansion changes the sampled lines); a
+misdetected tagged copybook splices comments in raw (`Invalid character:
+#`). Pinned by `tests/regression/test_tagged_sequence_area_detection.py` and
+`tests/regression/test_tagged_copybook_comment_hash.py`.
+`normalize_fixed_format` slices `line[7:72]` whatever columns 1-6 hold.
+
+## Compiler directives: PROCESS / CBL
+
+`strip_compiler_directives` blanks PROCESS / CBL records ahead of the
+program. Whether a record has a sequence area is decided from columns 1-6
+(blank or digits); the "directive section" also ends on
+`ID_DIVISION_HEADER_RE` (any six characters, then a blank column 7 -- the
+regex `CobolParser._skip_to_identification_division` uses too), so a
+change-tagged header `CHG001 IDENTIFICATION DIVISION.` ends it and a later
+`PROCESS SECTION.` is not blanked. Pinned by
 `tests/regression/test_sequence_area_tag_header.py`.
 
-**REPLACING operands may be qualified / subscripted identifiers (#253).**
-`CopyStatementLexer._read_replacing_operand` reads each REPLACING operand:
-pseudo-text and literals as before, but a word operand is extended greedily
-with `(OF|IN) word` pairs and parenthesised groups (blank before `(` or not,
-commas inside kept). Once REPLACING has started, `OF`/`IN` can only be
-qualification, so `REPLACING X BY WS-FLD OF WS-GRP` no longer sets the
-library qualifier to `WS-GRP` and drops `OF WS-GRP`, and `WS-TBL (2)` no
-longer loses `(2)`. NIST SM202A / SM206A now expand every COPY. Pinned by
-`tests/regression/test_copy_replacing_identifier_operand.py`.
+In copybook expansion, `strip_sequence_area` passes a full-width line through
+untouched when its columns 1-6 do not look like a real sequence area AND it
+matches `^(?:PROCESS|CBL)(?:[ \t].*)?$` case-insensitively
+(`_COMPILER_DIRECTIVE_RE`): PROCESS/CBL must start in column 1, so its
+columns 1-6 are never a sequence area, and stripping them turns `PROCESS
+&CICS-31& ...` into `S &CICS-31& ...`. The sequence-area gate keeps
+`PROCESS-FLAG` on a numbered line from being misread. Multi-line PROCESS/CBL
+continuation is out of scope. Pinned by `TestFlushLeftCompilerDirective` in
+`tests/regression/test_expansion_width_and_tags.py`.
 
-**`find_replace_statement_spans(source)` (#254).** New helper in
-`replace_statement.py`: the `(start, end)` offsets of every well-formed
-REPLACE statement, from the same `_ReplaceScanner` `apply_replace_statements`
-uses. `CobolParser._skip_to_identification_division` uses it to keep a
-REPLACE written ahead of the IDENTIFICATION DIVISION header.
+## Conditional compilation
 
-**COPY diagnostics name the original line (#256).** `_expand_source_recursive`
-scans for COPY statements after merging continuation records; it now passes
-its `merged_from` origin list to `CopyStatementLexer(line_origins=...)`, and
-the lexer's `_report_line` maps each warning's line through it (two continued
-literals above a broken COPY at file line 12 used to report line 10).
-`parse_cobol_with_expansion` also re-states the parser's own strip-pass COPY
-warnings (`<main>: COPY X at line N`, counted in the expanded text) through
-the expansion source map (`_locate_strip_pass_warning`), so they name the
-file and its line and collapse into the expander's identical diagnostic.
-`CopyStatement.source_location` is unchanged (still merged-text lines).
-Pinned by `tests/regression/test_copy_diagnostic_line_numbers.py`.
+`preprocess_conditional_compilation(source, defined_symbols, warnings=None,
+define_log=None, keep_source_format_directives=False)`. `CobolParser.parse`
+runs it on every source containing `>>` (after normalization, before the COPY
+strip and REPLACE), so `parse_cobol` honours directives too;
+`_skip_to_identification_division` keeps `>>` lines ahead of the header.
+Directive and skipped lines are blanked in place.
 
+* `>>IF` is **evaluated**: `=`, `<>`, `>`, `<`, `>=`, `<=` between symbol
+  values and numeric/string literals; `DEFINED(sym)` / `sym [IS] [NOT]
+  DEFINED` (`IS` optional per IBM; a dangling `IS`/`NOT` is a syntax error);
+  `AND`/`OR`/`NOT` with parentheses.
+* `>>EVALUATE sym` (literal `>>WHEN`s), `>>EVALUATE TRUE` (condition
+  `>>WHEN`s), `>>WHEN OTHER`, `>>END-EVALUATE`.
+* `defined_symbols`: a name set/list or a `dict[str, str | int | float |
+  bool]` (the CLI's `--define NAME=VALUE`). A quoted value keeps its case; an
+  unquoted one is a word and is upper-cased (`{"ENV": "prod"}` matches
+  `'PROD'`).
+* `>>DEFINE` symbols may be hyphenated (`_DEFINE_RE`). `>>DEFINE name AS
+  arithmetic-expression` over integer literals / defined integer variables
+  (`+ - * /`, parentheses) is evaluated exactly (`_eval_define_arithmetic`:
+  `AS 2 + 1` is `3`); otherwise the raw text is kept. Arithmetic inside an
+  `>>IF` comparison is unsupported (warns, FALSE).
+* **Literal contents are case-sensitive**: only text outside quotes is
+  upper-cased (`_upper_outside_literals`); `_compare` / `_values_equal`
+  compare non-numeric values exactly. `_COND_TOKEN_RE` accepts signed
+  numbers and doubled delimiters, un-doubled by `_strip_quotes` (`'O''BRIEN'`
+  -> `O'BRIEN`). Pinned by `tests/regression/test_conditional_compilation_literals.py`.
+* A `*>` comment on a directive line (outside a literal) is stripped first
+  (`_strip_directive_comment`), else `>>DEFINE DEBUG AS 1 *> on` defines
+  `1 *> ON`.
 
-**2026-10-08 bug hunt** (pinned in `tests/regression/test_bug_hunt_2026_10_08.py`):
-`copy_statement_parser.py`'s `normalize_continuation_lines`,
-`strip_sequence_area`, `remove_comment_lines` and the REPLACING pass split
-on `\n` only, so a bare-CR (`\r`) program was one 72-column "record" whose
-COPY was silently never expanded (`_looks_fixed_format` still said fixed);
-they split through `_records()` (`split_source_lines` plus the trailing
-empty element `str.split` gave, so `"\n".join` round-trips). `_normalize.py`'s
-`_NON_ENTRY_LINE_RE` also stops a data entry at a `>>` directive line: a
-copybook wrapping alternative entries in `>>IF` / `>>ELSE` / `>>END-IF` had
-every entry reported "may be missing terminating period", because the
-validator runs before the directives are evaluated and joined `>>ELSE`
-onto the entry.
+Warnings: comparison on an **undefined symbol** (evaluates false),
+unparseable `>>IF` (skipped), malformed `>>DEFINE`, stray `>>ELSE`/`>>END-IF`,
+unclosed `>>IF` / `>>EVALUATE`, and an unrecognized `>>` directive (blanked,
+"ignored"). Expansion routes them into `ExpansionStatistics.warnings`; the CLI
+prints them to stderr without `--copybook-path` and to the JSON's `warnings`
+with it (always for `expand`). Pinned by
+`tests/regression/test_tier4_audit_remediations.py::TestH7ConditionalCompilationWarnings`
+and `tests/regression/test_open_findings_m10_regression.py`. Directives in
+copybooks: [Conditional compilation during expansion](#conditional-compilation-during-expansion).
+
+## Copybook expansion
+
+```python
+# Standalone expansion
+result: CopybookExpansion = expand_copybooks(source, copybook_paths=["/path/to/cpy"])
+
+# Parse + expand in one call (conditional compilation on by default)
+parse_result = parse_cobol_with_expansion(source, "prog.cbl", copybook_paths=["/path"])
+```
+
+Features:
+- Recursive inlining with circular-reference detection and a nesting limit
+- `COPY member [OF|IN library]`, `COPY "literal/path"`, and `EXEC SQL INCLUDE`
+  (members that do not resolve, e.g. SQLCA, are left as written)
+- Encoding detection (BOM / UTF-8 / cp037 and other EBCDIC / cp1252 / latin-1)
+- Content validation (`validate_copybook_content`, optional `validate_level_numbers`)
+- Per-file (`max_file_size`) and whole-expansion (`max_total_size`) byte limits
+- LRU file cache (configurable via `set_file_cache_size`)
+- REPLACING clause support including multi-token pseudo-text, literals,
+  qualified/subscripted identifiers and LEADING/TRAILING
+- Optional source map (`preserve_source_locations`) and comment restoration
+  (`preserve_comments`)
+
+`parse_cobol_with_expansion` copies `expansion.statistics.warnings` (lossy
+decodes, content-validation, level-number and dropped-COPY warnings) onto
+`ParseResult.warnings`.
+
+### Member sub-pipeline order
+
+The sequence (columns 1-6) and identification (73-80) areas are stripped
+(`strip_sequence_area` + `remove_comment_lines`) immediately after a member is
+read, **before** REPLACING, conditional compilation and validation. On the raw
+80-column line a length-changing REPLACING would move the column-72 boundary
+(pulling identification text in, or cutting a terminating period), and `>>IF`
+behind numeric sequence digits would not be recognized.
+`apply_replacing_clauses` and `validate_copybook_content` take
+`indicator_position` (6 for raw source, 0 after `strip_sequence_area`, `None`
+for a free-form member), and `_expand_source_recursive(already_stripped=True)`
+skips its own strip so content is never stripped twice. Pinned by
+`tests/regression/test_copybook_sequence_area_before_replacing.py`.
+
+`remove_comment_lines` blanks comment lines to whitespace of the same length
+(indicator included) and must: the COPY scanner works on program text, and a
+`COPY` inside a comment must not be expanded.
+
+**Short change-tag lines.** Shops stamp a tag (`P2P`, `M1005`, `E1A`) into
+columns 1-6 of its own line, so the line is under 7 characters.
+`strip_sequence_area` blanks a sub-7-char line only when it is one blank-free
+token that does not end with a period and is not ANY COBOL reserved word
+(`_cobol_reserved_words()`, lazily imported from `CobolLexer.KEYWORDS` --
+eager import is circular). Blanking every short line would delete flush-left
+code (`01 A.`, `GOBACK`, `EXIT`); passing tags through lets the re-pad shift
+them into live code. The direct `parse_cobol` path already emits a blank for
+sub-7-char lines. Pinned by `tests/regression/test_expansion_width_and_tags.py`
+and `tests/regression/test_diff_scan_findings.py`.
+
+### COPY statement scanner
+
+`CopyStatementLexer` (`copy_statement_parser.py`) is a linear hand-written
+scanner; there is deliberately no monolithic COPY regex (one backtracked
+exponentially on unterminated REPLACING).
+
+* **Linear**: on a failed match it jumps past the whole separator run
+  (`_SEPARATOR_RUN_RE`) or identifier (`_WORD_RUN_RE`); stepping one
+  character re-scanned every blank run (minutes on blank-line files). Pinned
+  by `tests/regression/test_audit_2026_09_27.py::TestCopyScannerLinear`.
+* **Word boundaries on both sides** (`GOODCOPY.` is not a COPY).
+* **Literals end at end of line** (continuations are merged first), and it
+  scans `lexer.mask_comment_entries(source)` (comment-entry text blanked,
+  offsets kept, via the lexer's `_comment_entry_starts`), so `AUTHOR. JOHN
+  O'BRIEN.` cannot flip quote parity and a `COPY` inside a comment-entry is
+  prose. `_ReplaceScanner` does the same. Pinned by
+  `tests/regression/test_comment_entry_copy_replace_scan.py`.
+* **Dropped COPYs are reported**: a missing period (`COPY FOO`, `COPY FOO
+  BAR.`) or unterminated `==pseudo-text==` goes to `lexer.warnings`, routed
+  into `ExpansionStatistics.warnings`; `extract_copy_statements(source,
+  source_file, warnings=None, sql_include=False)` exposes the same channel.
+* **Diagnostics name the original line**: `_expand_source_recursive` passes
+  its `merged_from` list as `CopyStatementLexer(line_origins=...)`
+  (`_report_line`), and `parse_cobol_with_expansion` maps the parser's
+  strip-pass COPY warnings through the source map
+  (`_locate_strip_pass_warning`) so they collapse into the expander's.
+  `CopyStatement.source_location` stays in merged-text lines. Pinned by
+  `tests/regression/test_copy_diagnostic_line_numbers.py`.
+* **`EXEC SQL INCLUDE member END-EXEC [.]`** is recognized with
+  `sql_include=True` (`_EXEC_SQL_TAIL_RE` anchors the span at `EXEC`) as
+  `CopyStatement(sql_include=True)`. The expander turns it on and leaves the
+  statement as written on `CopybookNotFoundError` (SQLCA/SQLDA come from the
+  precompiler); `strip_unexpanded_copy_statements` keeps it off. The codebase
+  graph sees INCLUDE edges through `extract_copy_statements(...,
+  sql_include=True)` (#295).
+
+### REPLACING
+
+`apply_replacing_clauses` (`copy_statement_parser.py`, no Cython mirror) is a
+line-based scanner:
+
+* **Operands.** `CopyStatementLexer._read_replacing_operand` reads
+  pseudo-text, literals, and word operands extended greedily with `(OF|IN)
+  word` pairs and parenthesised groups (blank before `(` or not, commas kept).
+  Once REPLACING has started `OF`/`IN` can only be qualification, so
+  `REPLACING X BY WS-FLD OF WS-GRP` is not read as a library qualifier (NIST
+  SM202A / SM206A rely on this; pinned by
+  `tests/regression/test_copy_replacing_identifier_operand.py`). Literal
+  operands keep their quotes (`keep_literal_quotes=True`): `REPLACING 'ABC' BY
+  'XYZ'` replaces the *literal* (checked against `cobc -E`), while `COPY
+  'MEMBER'` strips them (pinned by
+  `tests/regression/test_copy_replacing_literal_operand.py`). `:ABC:`
+  pseudo-text has its delimiters stripped, so `REPLACING :ABC: BY :XYZ:`
+  substitutes `ABC`→`XYZ`.
+* **Text-word comparison.** Pseudo-text is stripped at the operand and
+  compiled through `_PSEUDO_TEXT_WORD_RE`: blanks between words match a run of
+  blanks; a parenthesis is a word with optional blanks beside it (`X (10)`
+  matches `X(10)`). A separator comma/semicolon is a blank (IBM):
+  `_build_clause_pattern` joins words with `_SEPARATOR_GAP` (a blank, or `,`/`;`
+  then a blank), and `_pseudo_text_words` drops a `,`/`;` ending a non-literal
+  search word before a blank or the end; `A,B` / `1,5` still compare as text.
+  Matching stays within one source line (a pseudo-text split across lines is
+  not matched).
+* **Each word is replaced at most once.** All clauses go into ONE alternation
+  (longest search text first) applied in ONE left-to-right pass per segment;
+  applying clauses one pass each would let `==A== BY ==B== ==B== BY ==A==`
+  rewrite replacements.
+* **Boundaries.** Hyphen-aware word boundaries, `_` counts as a word
+  character, a decimal point binds (`(?<![0-9]\.)` / `(?!\.[0-9])`, so `==1==
+  BY ==2==` leaves `VALUE 1.5`), LEADING/TRAILING, case-insensitive words.
+* **Context.** Comment lines (column-7 `*`/`/`, mask computed once from the
+  original content) are never rewritten. Text inside literals (both quote
+  styles, doubled-quote escapes, an unterminated literal runs to EOL) is not
+  rewritten unless the clause's search text contains a quote. The alternation
+  runs over the whole line (`_replace_in_line_with_literals`), so a search
+  text mixing code and a literal (`==VALUE 'A'==`) can match; a match of a
+  quote-free clause inside a literal is rejected and quote-bearing clauses
+  still get their turn there. The literal words of a search text compare
+  **case-sensitively** (`(?-i:...)`).
+
+Pinned by `tests/regression/test_open_findings_m13_regression.py`,
+`tests/unit/test_copy_edge_cases.py::TestReplacingLiteralAndWordBoundaries`,
+`tests/regression/test_audit_2026_09_17_preprocessing.py` and
+`tests/regression/test_fixes_2026_09_28_preprocessing.py`.
+
+### Size limits and caching
+
+`context.total_bytes` is charged for every inclusion against `max_total_size`
+(`TotalExpansionSizeExceededError`):
+
+* on a cache miss, the raw member, then any positive REPLACING growth (a `BY`
+  text longer than its operand can otherwise multiply a member past the limit
+  unchecked);
+* on a cache hit (`context.content_cache`, keyed by path + REPLACING clauses
+  + the conditional symbols in effect -- diamond dependencies), the cached
+  post-REPLACING content's length, identically to a miss.
+
+`expand_copybooks(path_resolver=...)` uses a caller-supplied resolver as-is
+(its warm caches are the point -- `batch.parse_files_with_copybooks` passes
+one) and builds a new one only for `None`; the supplied resolver's
+`search_config` then governs nesting/size/encoding limits. Pinned by
+`tests/regression/test_audit_2026_08_12_core.py::TestPD1CallerSuppliedPathResolver`.
+
+### Content validation
+
+`validate_copybook_content(content, ..., raw_content=None,
+indicator_position=6)` raises `CopybookSyntaxError` only for NUL bytes;
+everything else is a warning, shown to users in the COBOL Analyzer's
+expanded-listing banner, so false positives matter.
+
+* **Missing period is judged per entry** (`_unterminated_data_entries`): an
+  entry runs from a `_DATA_ENTRY_START_RE` match to the next entry, an `EXEC`
+  block, a `>>` directive line (`_NON_ENTRY_LINE_RE`; directives are not yet
+  evaluated) or EOF, and the joined text must end in a period. Blank lines do
+  not close an entry (blanked comments). `_DATA_DEF_RE` (is it a PICTURE
+  entry) and the start regex share one `_ENTRY_HEAD` fragment (`\d{1,2}` +
+  name) so they cannot drift apart.
+* Whitespace in the patterns is `[ \t]` (`\s` crosses newlines); the value
+  token is `[^\s]*[^\s.]`, so only a *trailing* period terminates
+  (`PIC 9(5).99` is flagged, `PIC 9(5).99.` is not; `[^\s.]+` would miss
+  every decimal-point PIC).
+* Blank stripped `content` with non-blank `raw_content` warns "contains only
+  comments", not "is empty".
+* The quote-balance check discounts continuation records at
+  `indicator_position`.
+
+Pinned by `tests/unit/test_preprocess_init_coverage.py::TestValidateCopybookContent`
+and `tests/unit/test_copybook_expander_coverage.py::TestExpandCopybooks::test_content_validation`.
+
+### Encoding detection
+
+`detect_encoding` (`copybook_expander.py`) scores ASCII-vs-EBCDIC
+plausibility over a bounded 64 KiB prefix: BOM / strict-UTF-8 checks first,
+then COBOL-charset proportion, EBCDIC newline conventions 0x15/0x25, keyword
+tiebreaker (`_score_cobol_plausibility`). A single 0x40-vs-0x20 ratio would
+misdetect an ASCII file full of `@`. ASCII-shaped bytes that are not valid
+UTF-8 are `cp1252`, or `latin-1` when a byte cp1252 leaves undefined is
+present (`_single_byte_codec`), so accented `VALUE` text survives.
+
+`encoding_errors` (`CopybookSearchPath` / `expand_copybooks`): `"replace"`
+(default) substitutes U+FFFD and warns with a count; `"strict"` raises
+`EncodingError` with file/offset context.
+
+**EBCDIC NL records.** cp037 decodes 0x15 to U+0085, which the member passes
+do not treat as a break, so `convert_to_utf8` runs
+`_normalize_record_separators` after an EBCDIC decode (`\r\x85` and `\x85` ->
+`\n`); the codec is classified by what it does to the bytes of `ABC`
+(`_is_ebcdic_codec`). ASCII/UTF-8 text is never rewritten.
+
+Pinned by `tests/regression/test_open_findings_m15_regression.py`,
+`tests/regression/test_copybook_resolution_2026_09_28.py::TestEightBitCopybookEncoding`
+and `tests/regression/test_audit_2026_09_17_preprocessing.py`.
+
+### The COPY splice
+
+* The member's trailing newline is stripped once before splicing (see the
+  line-count invariant).
+* **The splice reclaims the whole record when the `COPY` owns it**: it starts
+  at `head_start` (beginning of the record) whenever `head_has_text` is false,
+  and at the `COPY` keyword only when the parent has real program text before
+  it on that line. The `COPY`'s own indentation is not the member's; splicing
+  at the keyword pushes a member's `01` out of Area A or past column 72.
+  Pinned by `tests/regression/test_copy_splice_keeps_member_columns.py`.
+
+### Output re-pad and width fitting
+
+Each expanded line is re-padded with 6 spaces. Lines that fit are appended
+directly; longer ones (a growing REPLACING such as `==:LKPCB:== BY
+==LKPCB-PCB1==`) go through `_fit_fixed_format_width`, because a terminating
+period pushed past column 72 is dropped by the final parse and merges a data
+item into its neighbour:
+
+1. **Squeeze**: interior multi-blank runs outside literals
+   (`_blank_runs_outside_literals`) are shrunk rightmost first, each to no
+   less than one blank, editing the string right-to-left. Keeps the line count.
+2. **Continue an open literal**: `_split_open_literal` cuts at column 72 with
+   the literal left open (trailing blanks kept) and resumes it on a `      -
+   '...` record (hyphen in column 7, quote in column 12), moving the cut one
+   column left when column 72 is the first quote of a `''` escape. Preferred
+   over a blank wrap whose tail would not fit anyway. Needed because the
+   expander merges continuation records before splicing, so any COPY in a
+   file turns a long continued `VALUE` back into one >72-column line.
+3. **Wrap** at the rightmost quote-safe blank onto a fresh Area-B line
+   (`_rightmost_safe_blank(line, start, after, limit)`, bounded at column 72,
+   O(len) total). A break at index 72 gives a 72-character head, so the
+   filter is `<= _CODE_AREA_WIDTH`. The break point is anchored *after* the
+   line's first non-blank character and the loop bails on any iteration
+   without forward progress -- a wrapped tail's own 11-space prefix otherwise
+   re-creates a breakable blank forever.
+4. A line with no safe break (one giant token) is left as is, so the parse's
+   column-72 warning reports the drop.
+
+Wrapping adds lines (later line numbers shift -- the price of not corrupting
+the statement); `ExpansionStatistics.total_lines` is counted from the final
+emitted source. Pinned by `tests/regression/test_expansion_width_and_tags.py`
+and `tests/unit/test_copybook_expander_edge_cases.py::TestContinuedLiteralSurvivesExpansion`.
+
+### Source map
+
+With `preserve_source_locations=True`, `expand_copybooks` carries a
+`LineOrigin` (`(file, 1-based line)`) per expanded line through every step
+that can move one:
+
+| Step | Effect on lines | How the map survives it |
+|------|-----------------|-------------------------|
+| `remove_comment_lines`, `strip_sequence_area` | blank in place | line-preserving by construction; nothing to track |
+| `normalize_continuation_lines` | merges N records into 1 | `line_origins` out-parameter records the input line each output line started on |
+| the COPY splice | inserts a member's lines | `origins[:start] + copybook_origins + origins[end+1:]`, the first spliced line credited to the parent only when the parent had real text before the COPY on that line — the same flag that decides where the text splice starts, so map and text are spliced identically |
+| the re-pad's `_fit_fixed_format_width` wrap | 1 line becomes several | each piece inherits its line's origin; pieces of a line merged from continuation records map to those records (`_wrapped_origins`: piece k -> first record + k, capped at the last one absorbed) |
+
+`ExpansionContext.content_origins` stores origins beside each cached content
+entry (`cache_put(key, value, origins)` / `cache_get_origins`), so a cache hit
+contributes the same map a miss would, and both are evicted together.
+`_fit_origins` is a defensive clamp: a map that ever drifted must
+mis-attribute nothing and raise nothing. A member's lines map 1:1 and the
+next parent line maps to its own record.
+
+`expand_copybooks(..., source_file=...)` names the main program (default
+`"<main>"`); `parse_cobol_with_expansion` passes the real filename, always
+requests the map and exposes it as **`ParseResult.expansion_source_map`** --
+`None` when nothing was expanded, exactly when expanded and on-disk line
+numbers coincide. `analysis.lint.apply_source_map` stamps it onto findings
+(`origin_file` / `origin_line`); the `lint` CLI applies it whenever
+`--copybook-path` is given. Consumers must use the map, not guess (searching
+the file for a finding's name cannot work for a finding inside a member).
+
+### Comment preservation
+
+`preserve_comments=True` (`expand --keep-comments`) puts comment text back
+after every substitution, using the source map: `_restore_comment_lines`
+replaces a line only when it is blank in the expansion AND its origin is a
+comment line in its origin file, so it cannot rewrite code or change the line
+count. `_origin_sources` reads members back through `_cached_read_file` with
+the expansion's own encoding settings; an unreadable file is skipped. A `COPY`
+inside a comment comes back as text and is not expanded.
+
+Source map and comments pinned by
+`tests/regression/test_expansion_source_map_and_comments.py` and
+`tests/unit/cli/test_expand_source_map_cli.py`.
+
+### Conditional compilation during expansion
+
+* `parse_cobol_with_expansion(process_conditionals=True)` is the default, and
+  `parse_files_with_copybooks` and the CLI's `--copybook-path` parse path
+  pass it, so a `COPY DFHAID` under a false `>>IF CICS DEFINED` is never
+  resolved (a member that exists only for the other branch would otherwise
+  fail the parse). `expand_copybooks` keeps `process_conditionals=False` by
+  default (its output is the text as written), and `expand` processes
+  directives only with `--define`. Pinned by
+  `tests/regression/test_copybook_resolution_2026_09_28.py::TestCopyInExcludedConditionalBlock`.
+* **`>>DEFINE` reaches the members below it.** Each COPY's member is
+  processed with the symbols in effect on the COPY's own line: the caller's
+  `defined_symbols` plus every active `>>DEFINE` above it, in the program or
+  an enclosing member. `preprocess_conditional_compilation(...,
+  define_log=[...])` records `(line, symbols)` after each `>>DEFINE` (`(0,
+  initial)` first); `_expand_source_recursive(define_log=...)` looks the COPY's
+  line up through its origin (`_symbols_at_line`), and those symbols join the
+  cache key, so one member COPYd before and after a `>>DEFINE` expands both
+  ways. With copybook paths the CLI leaves conditionals to the expander
+  (`parse_cobol_with_expansion(process_conditionals=True,
+  defined_symbols=...)`) rather than pre-processing the program, which would
+  consume its `>>DEFINE` lines before expansion. A `>>DEFINE` *inside* a
+  member does not reach the parent's text after the COPY. Pinned by
+  `tests/regression/test_copybook_resolution_2026_09_28.py::TestDefinedSymbolsReachCopybooks`.
+
+## REPLACE and un-expanded COPY
+
+`preprocess/replace_statement.py` holds the two pseudo-text passes the
+standalone parse runs in `CobolParser._preprocess_source`, on normalized
+free-form text just before the lexer. Both preserve the line count and are
+no-ops when their keyword is absent.
+
+* **`apply_replace_statements(source, warnings=None)`** applies `REPLACE
+  ==pseudo-text-1== BY ==pseudo-text-2== [ ... ] .` and cancels at `REPLACE
+  OFF.`; a new `REPLACE` **replaces** the active set. Matching is on a COBOL
+  **text-word** stream (`_tokenize_text_words`):
+  * space / comma / semicolon are equivalent separators, not words (`MOVE;
+    "FAIL" , TO` matches `MOVE , "FAIL"; TO`);
+  * a **separator period** is its own word (find `MOVE WS-A TO WS-B` matches
+    `MOVE WS-A TO WS-B.` and keeps the period);
+  * `(` and `)` are words of their own, so `==WS-A==` reaches `WS-A(1)` and
+    `WS-A(1:2)`; a replacement's parentheses stay attached (`WS-B(2)`);
+  * a literal is one word compared case-sensitively, other words
+    case-insensitively; `3.14` keeps its decimal point.
+
+  Each segment between REPLACE statements gets one left-to-right scan (first
+  matching pair wins); REPLACE statements are blanked; `REPLACE` inside a
+  literal is ignored (the scanner shares the COPY scanner's comment-entry
+  masking and end-of-line literal rule). Warnings: a set still active at EOF,
+  and each `REPLACE` that does not start a well-formed statement.
+  * `LEADING` / `TRAILING`: pseudo-text-1 one non-literal word, pseudo-text-2
+    at most one; matches the start / end of each non-literal word
+    (`REPLACE LEADING ==XX-== BY ==WS-==.` turns `XX-A` into `WS-A`).
+  * IBM `==:TAG:==` partial words (`_ReplacePair.partial_word`) match inside
+    any non-literal word and replace **every** occurrence (`:P:-A-:P:` ->
+    `XX-A-XX`).
+  Pinned by `tests/unit/test_enterprise_syntax.py::TestReplaceLeadingTrailing`
+  / `TestReplacePartialWord`.
+
+* **`find_replace_statement_spans(source)`**: `(start, end)` of every
+  well-formed REPLACE, from the same `_ReplaceScanner`;
+  `_skip_to_identification_division` uses it to keep a REPLACE written ahead
+  of the IDENTIFICATION DIVISION header.
+
+* **`strip_unexpanded_copy_statements(source, warnings=None)`** blanks COPY
+  statements the standalone pipeline will not expand. It **reuses
+  `CopyStatementLexer`** (one COPY parser, not a second one) to find each full
+  span, including `REPLACING ==pseudo-text==` holding keywords and periods,
+  which would otherwise leak as malformed statements (`BY MOVE ==DELETE==`
+  -> a `MOVE` with no `TO`). A no-op after expansion. `warnings` gets one
+  diagnostic per removed COPY plus the lexer's; `omitted_lines` gets each
+  removed COPY's 1-based `(first, last)`, stored on the `TokenStream` as
+  `omitted_source_lines` so EVALUATE can tell a WHEN whose body was an
+  unexpanded COPY from a stacked WHEN (#314).
+
+These passes let NIST `SM208A` (30x `REPLACE`) and `SM206A` (`COPY ...
+REPLACING` pseudo-text) parse error-free; pinned by
+`tests/regression/test_replace_and_copy_pseudo_text.py`.
+
+## Copybook path resolution
+
+`PathResolver.resolve(member_name)` searches `CopybookSearchPath.directories`
+in three tiers:
+
+1. **Tier 1** — a resolution cache keyed by `member_name` (O(1), no I/O).
+2. **Tier 2** — a per-directory index (`_dir_index`, one `os.scandir()`)
+   keyed by full filename only (uppercased when case-insensitive; built with
+   `setdefault`). `resolve` probes the name, then name + each configured
+   extension in order. A bare-stem key would let `COPY MEM` hit `MEM.bak` or
+   the program's own `SUB.cbl`.
+3. **Tier 3** — a full filesystem search (`find_copybook_file`).
+
+**First-configured directory wins** in every tier, then first probe. Pinned
+by `tests/regression/test_audit_2026_08_12_core.py::TestPB6FirstDirectoryWins`
+and `tests/regression/test_copybook_resolution_2026_09_28.py::TestIndexedLookupHonoursConfiguredExtensions`.
+
+**Case folding** (like Enterprise COBOL's COPY text-name,
+`_member_probe_names`): the name as written first, then per configured
+extension the uppercased name before the name as written (bare uppercased name
+in the `""` slot) -- `copy errorcd.` finds `ERRORCD.cpy` over `errorcd.cpy`,
+but extension order decides before case (`COPY Foo` takes `Foo.cpy` over
+`FOO.cbl`). A name with `.`, `/` or `\` is a literal path and not folded.
+`OF`/`IN` library names fold the same way (`_library_directories`: `MYLIB/`,
+`mylib/`, then the search directory); SYSLIB order outranks both. Found paths
+take the on-disk basename casing (`_on_disk_casing`). See #289,
+`tests/regression/test_copy_member_case_folding.py`.
+
+**Containment**: every tier goes through
+`validate_path_within_directory(path, search_dir)` (symlinks resolved, result
+must stay inside). Tier-2 hits use `_validate_indexed_result` (any configured
+directory, else `PathTraversalError`) because `entry.is_file()` follows
+symlinks. The `..` guard is per path segment, so `weird..name.cpy` is fine.
+Pinned by `tests/regression/test_open_findings_high_regressions.py::TestH6PathResolverContainment`.
+
+**Suggestions**: `suggest_similar_copybooks` uses `suggestion_extensions`
+(default `(".cpy", ".CPY", "")`, applied with `dataclasses.replace`, caller's
+config untouched) rather than the resolution extensions, which would suggest
+the program's own `.cbl` back; `""` stays for extensionless PDS downloads. In
+`get_available_copybooks` / `PathResolver.list_available()`, `""` lists only
+extensionless files. Pinned by `tests/regression/test_copybook_suggestion_pool.py`.
+
+## Error hierarchy
+
+All preprocessing errors extend `PreprocessingError` (`_normalize.py`),
+which extends plain `Exception` -- **not** `cobolparser._errors.ParseError`,
+so `except ParseError` does not catch them:
+
+| Exception | When raised |
+|-----------|------------|
+| `CircularReferenceError` | COPY chain forms a cycle |
+| `CopybookNotFoundError` | No matching file on any search path |
+| `PathTraversalError` | COPY target escapes the allowed directory |
+| `EncodingError` | Cannot decode copybook bytes (`encoding_errors="strict"`) |
+| `NestingDepthError` | COPY nesting exceeds configured limit |
+| `CopybookSizeExceededError` | One copybook exceeds `max_file_size` |
+| `TotalExpansionSizeExceededError` | The whole expansion exceeds `max_total_size` |
+| `CopybookSyntaxError` | `validate_copybook_content` finds binary content (NUL bytes); everything else it checks is a warning |
+
+`LevelNumberMismatchWarning` is a `UserWarning`, not a `PreprocessingError`.
+`CopybookNotFoundError`, `PathTraversalError` and `CopybookSizeExceededError`
+are also importable from `path_resolver`.
+
+## See also
+
+* [lexer.md](lexer.md) — consumes output of `normalize_fixed_format`; `_fixed_format_comment_tokens`, `mask_comment_entries`, the Cython lexer
+* [parser.md](parser.md) — `CobolParser._preprocess_source` runs the in-parser passes (Pipeline above)
+* [batch.md](batch.md) — `parse_files_with_copybooks` and `scan` with copybook expansion
+* [cli.md](cli.md) — `preprocess` / `expand` subcommands, `--copybook-path`, `--define`, `--debug-lines`, `--source-format`, `cobol.yml`
+* [analysis.md](analysis.md) — `lint`'s `apply_source_map` (consumer of `expansion_source_map`)
+* [history](history/preprocessing.md) — archived dated notes (fix write-ups, audits, bug hunts) moved out of this file
