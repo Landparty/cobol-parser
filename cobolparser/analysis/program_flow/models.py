@@ -73,6 +73,8 @@ class FlowNode:
     has_stop_run: bool = False
     has_goback: bool = False
     has_exit_program: bool = False
+    #: A SORT/MERGE ``RETURN sd-file`` (reads the next sorted record) --
+    #: not a program terminator, unlike the three flags above.
     has_return: bool = False
     has_exit_section: bool = False
     has_exit_paragraph: bool = False
