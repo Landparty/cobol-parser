@@ -462,6 +462,30 @@ class TestSql:
         keys = [b.ref.key for b in report.boundaries if b.ref.category == "SQL"]
         assert len(keys) == len(set(keys)), f"SQL keys must be unique: {keys}"
 
+    def test_structure_qualified_host_variable_keeps_its_qualifier(self):
+        """Issue #366: `:REC-A.AMT` resolves to REC-A's AMT, not the bare
+        (ambiguous) AMT the parser leaves in host_variables."""
+        source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. QUALSQL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 REC-A.
+          05 AMT PIC S9(5) COMP-3.
+       01 REC-B.
+          05 AMT PIC S9(5) COMP-3.
+       PROCEDURE DIVISION.
+           EXEC SQL SELECT C1 INTO :REC-A.AMT FROM T1 END-EXEC.
+           IF AMT OF REC-B > 0
+              DISPLAY 'X'
+           END-IF.
+           GOBACK.
+"""
+        _, _, report = _analyze(source)
+        sql = [b for b in report.boundaries if b.ref.category == "SQL"]
+        assert len(sql) == 1
+        assert sql[0].record_names == ["REC-A.AMT"]
+        assert not [u for u in report.unresolved if "SQL host variable" in u]
+
 
 class TestAccept:
     def test_console_accept_is_a_boundary(self):

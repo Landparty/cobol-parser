@@ -21,7 +21,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
-from ..models.sql_statements import ExecSQLStatement, FetchStatement
+from ..models.sql_statements import (
+    ExecSQLStatement,
+    FetchStatement,
+    _strip_sql_literals_and_comments,
+)
 from ..models.statements.arithmetic import ArithmeticStatement, ComputeStatement
 from ..models.statements.base import (
     ArithmeticExpression,
@@ -58,6 +62,7 @@ from ..models.statements.io import (
 )
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement, ExecImsStatement
 from ._names import RELAXED_IDENTIFIER_TOKEN_RE, callee_names
+from .host_var_resolver import _QUALIFIED_HOST_VAR_RE
 from .value_tracker import DynamicCallAnalyzer
 
 if TYPE_CHECKING:
@@ -1076,8 +1081,24 @@ class BoundaryInventoryAnalyzer:
         host_vars = list(statement.host_variables) + list(
             getattr(statement, "into_variables", []) or []
         )
-        record_names: list[str] = []
+        # The parser strips a structure qualifier off host_variables
+        # (`:REC-A.AMT` arrives as `AMT`), which leaves a name declared under
+        # more than one structure unresolvable. Re-read the qualifiers from
+        # the SQL text, as HostVariableResolver does, and resolve the dotted
+        # `REC-A.AMT` form -- `index.resolve()` accepts it directly.
+        qualified: dict[str, list[str]] = {}
+        scrubbed = _strip_sql_literals_and_comments(statement.sql_text or "")
+        for match in _QUALIFIED_HOST_VAR_RE.finditer(scrubbed):
+            if match.group(1):
+                dotted = f"{match.group(1)}{match.group(2)}".upper()
+                forms = qualified.setdefault(match.group(2).upper(), [])
+                if dotted not in forms:
+                    forms.append(dotted)
+        names: list[str] = []
         for var in dict.fromkeys(v.lstrip(":") for v in host_vars if v):
+            names.extend(qualified.get(var.upper(), [var]))
+        record_names: list[str] = []
+        for var in dict.fromkeys(names):
             display_name = self._resolve_display_name(var, index)
             if display_name:
                 record_names.append(display_name)

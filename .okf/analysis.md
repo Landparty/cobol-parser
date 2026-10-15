@@ -1954,7 +1954,13 @@ variables; it does not). `host_variables` is therefore the only layout
 source used, for every SQL shape; direction comes from `sql_type`
 (`SELECT`/`FETCH` -> IN, `INSERT`/`UPDATE`/`DELETE` -> OUT, else
 `STATUS_ONLY`), independent of which variables are attached.
-`status_field="SQLCODE"` always.
+`status_field="SQLCODE"` always. The parser strips a structure qualifier
+off `host_variables` (`:REC-A.AMT` arrives as `AMT`), so `_classify_sql`
+re-reads the qualifiers from the scrubbed `sql_text` with
+`host_var_resolver._QUALIFIED_HOST_VAR_RE` (the same way
+`HostVariableResolver` does) and resolves the dotted `REC-A.AMT` form; an
+`AMT` declared under two structures would otherwise land in `unresolved`
+(issue #366).
 
 **CICS/DLI** have no fixed INTO/FROM-shaped attributes to key layout
 resolution off -- `ExecCicsStatement.options` is a generic option-keyword ->
