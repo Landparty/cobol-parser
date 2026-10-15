@@ -115,7 +115,7 @@ def test_file_left_open_on_one_path_is_reported() -> None:
     assert kinds == [("FILE_LEFT_OPEN", "OUT-FILE")]
 
 
-def test_goback_and_go_to_arms_are_left_out_of_the_merge() -> None:
+def test_goback_arm_is_left_out_and_go_to_arm_is_kept() -> None:
     kinds = _kinds("""\
        0000-MAIN.
            OPEN INPUT OUT-FILE
@@ -201,3 +201,87 @@ def test_no_arm_falls_out() -> None:
 """)
     # Every arm leaves; the walk carries on from the arms' merged state.
     assert IOViolationKind.FILE_LEFT_OPEN.name not in {k for k, _ in kinds}
+
+
+def test_go_to_exit_arm_carries_its_state_through_a_thru_range() -> None:
+    # The GO TO arm's OPEN reaches 1000-EXIT by the THRU range, so the
+    # caller's READ / CLOSE are on a path where the file is open.
+    kinds = _kinds("""\
+       0000-MAIN.
+           PERFORM 1000-INIT THRU 1000-EXIT
+           IF WS-MODE = 'N' READ OUT-FILE CLOSE OUT-FILE END-IF
+           STOP RUN.
+       1000-INIT.
+           IF WS-MODE = 'N' OPEN INPUT OUT-FILE GO TO 1000-EXIT END-IF.
+       1000-EXIT.
+           EXIT.
+""")
+    assert kinds == [("FILE_LEFT_OPEN", "OUT-FILE")]
+
+
+def test_go_to_arm_state_reaches_a_queued_target() -> None:
+    kinds = _kinds("""\
+       P1.
+           IF WS-MODE = 'N' OPEN INPUT OUT-FILE GO TO P9 END-IF.
+       P2.
+           GO TO P1.
+       P9.
+           READ OUT-FILE
+           CLOSE OUT-FILE
+           STOP RUN.
+""")
+    assert kinds == []
+
+
+def test_go_to_arms_that_close_keep_the_file_maybe_closed() -> None:
+    # DB104A's shape: each guard closes the file and jumps away, so a later
+    # OPEN is not a definite double open.
+    kinds = _kinds("""\
+       0000-MAIN.
+           OPEN INPUT OUT-FILE
+           IF WS-MODE = '1' CLOSE OUT-FILE GO TO 9000-END END-IF
+           IF WS-MODE = '2' CLOSE OUT-FILE GO TO 9000-END END-IF
+           CLOSE OUT-FILE.
+       9000-END.
+           OPEN OUTPUT OUT-FILE
+           CLOSE OUT-FILE
+           STOP RUN.
+""")
+    assert ("DOUBLE_OPEN", "OUT-FILE") not in kinds
+
+
+def test_performed_abend_in_an_arm_claims_no_file_left_open() -> None:
+    # Same idiom as a STOP RUN written in the arm: no FILE_LEFT_OPEN.
+    kinds = _kinds("""\
+       0000-MAIN.
+           OPEN INPUT OUT-FILE
+           IF WS-OUT-STAT NOT = '00' PERFORM 9999-ABEND END-IF
+           CLOSE OUT-FILE
+           STOP RUN.
+       9999-ABEND.
+           DISPLAY 'ABEND'
+           STOP RUN.
+""")
+    assert kinds == []
+
+
+def test_performed_abend_outside_an_arm_still_claims_file_left_open() -> None:
+    kinds = _kinds("""\
+       0000-MAIN.
+           OPEN INPUT OUT-FILE
+           IF WS-OUT-STAT NOT = '00' PERFORM 9999-ABEND END-IF
+           PERFORM 9999-ABEND.
+       9999-ABEND.
+           DISPLAY 'ABEND'
+           STOP RUN.
+""")
+    assert kinds == [("FILE_LEFT_OPEN", "OUT-FILE")]
+
+
+def test_statements_after_an_if_whose_arms_all_stop_are_not_walked() -> None:
+    kinds = _kinds("""\
+       0000-MAIN.
+           IF WS-MODE = 'N' STOP RUN ELSE GOBACK END-IF
+           READ OUT-FILE.
+""")
+    assert kinds == []

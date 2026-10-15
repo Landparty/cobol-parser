@@ -1155,10 +1155,14 @@ closed `f` for the normal path too (DOUBLE_CLOSE, WRITE_BEFORE_OPEN) -- all
 states (`open` / `closed` / `unopened`). `_fork` runs each arm (an IF's THEN
 and ELSE, an EVALUATE's `when_groups()` bodies and WHEN OTHER; a missing
 ELSE / WHEN OTHER is an empty arm) from the branch's state and unions the
-arms that fall out. An arm whose own top level hits STOP RUN / GOBACK / EXIT
-PROGRAM / unconditional GO TO, or that PERFORMs a paragraph that does, is
-left out of the merge (and no FILE_LEFT_OPEN is claimed at a nested STOP
-RUN). Violations need to hold on every merged path (READ of a file open on
+arms that do not end the program. An arm whose own top level hits STOP RUN /
+GOBACK / EXIT PROGRAM, or that PERFORMs a paragraph that does, is left out of
+the merge, and no FILE_LEFT_OPEN is claimed at that STOP RUN (a `_fork_depth`
+check in `_terminate_program`, also part of the PERFORM-summary key). An arm
+ending in an unconditional GO TO stays *in* the merge: dropping it lost its
+state at the target (`PERFORM A THRU A-EXIT` with `IF .. OPEN f GO TO
+A-EXIT`, NIST DB104A's `IF .. CLOSE f GO TO ..` guards). A top-level IF whose
+arms all end the program ends the paragraph walk (`_ENDS`). Violations need to hold on every merged path (READ of a file open on
 no path, OPEN of a file open on every path); FILE_LEFT_OPEN is the exception
 and fires for a file open on any path. AT END / INVALID KEY handlers are not
 forked. The PERFORM-summary key (#371) is the whole `_status` map, so a range
