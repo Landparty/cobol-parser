@@ -9,28 +9,35 @@ Three jobs, each the reason a tool can stay a thin question over an analyzer:
 * **The config.** ``cobol.yml`` is found from the root the way the CLI finds
   it, so copybook paths, source format and ``>>DEFINE`` symbols are the ones
   every other tool in the family already uses. No tool takes a copybook
-  path argument: one config, one answer.
+  path argument: one config, one answer. A found file is re-read when it
+  changes (or appears, or goes away), and the cache is dropped with it.
 * **The cache.** A program is parsed once and kept, keyed by its path and
   program unit, and re-parsed only when it -- or a copybook it expanded --
   changes on disk.
 
 Parsing always recovers (``COLLECT_ALL``), as the CLI does, so a program with
 one bad statement still answers; the recovery is a caveat, not a failure. A
-COPY that cannot be expanded does not fail the parse either: the program is
-parsed without expansion and every member left out is named.
+COPY whose member cannot be found is left as written and named in a caveat,
+while every other member is still expanded.
 """
 
 from __future__ import annotations
 
 import contextlib
 import sys
+import threading
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..config.project import ProjectConfig, load_project_config
+from ..config.project import (
+    ConfigError,
+    ProjectConfig,
+    find_config_file,
+    load_project_config,
+)
 from ..models.program import CobolProgram
 from .envelope import Caveat, Response, ToolError
 
@@ -166,7 +173,12 @@ class ParsedProgram:
 
 
 class Workspace:
-    """A root directory, its ``cobol.yml``, and a cache of parsed programs."""
+    """A root directory, its ``cobol.yml``, and a cache of parsed programs.
+
+    Not thread-safe: the cache and :func:`stdout_to_stderr` are shared
+    state. A caller running tools on several threads holds :attr:`lock`
+    around each call (the MCP server does).
+    """
 
     def __init__(
         self,
@@ -177,12 +189,63 @@ class Workspace:
         self.root = Path(root).resolve()
         if not self.root.is_dir():
             raise ToolError(f"workspace root is not a directory: {root}")
-        self.config = config if config is not None else load_project_config(self.root)
+        #: Serializes tool calls made from worker threads.
+        self.lock = threading.Lock()
         self.cache_size = max(1, cache_size)
         self._cache: OrderedDict[str, ParsedProgram] = OrderedDict()
-        self._allowed = [self.root] + [
-            Path(p).resolve() for p in self.config.copybook_path
-        ]
+        # A config handed in (``--config`` / ``--no-config``) is the caller's
+        # choice and stays fixed; a found one follows the file on disk.
+        self._config_fixed = config is not None
+        self._config_source: tuple[Path | None, tuple[int, int] | None] = (
+            None,
+            None,
+        )
+        self._config = ProjectConfig()
+        self._allowed: list[Path] = [self.root]
+        if config is not None:
+            self._use_config(config)
+        else:
+            self._reload_config()
+
+    # -- config --------------------------------------------------------------
+
+    @property
+    def config(self) -> ProjectConfig:
+        """The project config, re-read first if ``cobol.yml`` changed."""
+        self.refresh_config()
+        return self._config
+
+    def refresh_config(self) -> None:
+        """Re-read ``cobol.yml`` if it was edited, added or removed.
+
+        A few ``stat`` calls per tool call: cheap next to a parse, and an
+        agent editing ``cobol.yml`` mid-session sees the change at once
+        instead of after a restart it cannot perform.
+        """
+        if self._config_fixed:
+            return
+        found = find_config_file(self.root)
+        source = (found, _stamp(str(found)) if found else None)
+        if source != self._config_source:
+            self._reload_config()
+
+    def _reload_config(self) -> None:
+        found = find_config_file(self.root)
+        source = (found, _stamp(str(found)) if found else None)
+        try:
+            config = load_project_config(self.root)
+        except ConfigError as exc:
+            # The stamp is not recorded, so the next call tries again once
+            # the file is fixed.
+            raise ToolError(f"cobol.yml could not be read: {exc}") from exc
+        self._config_source = source
+        self._use_config(config)
+
+    def _use_config(self, config: ProjectConfig) -> None:
+        self._config = config
+        self._allowed = [self.root] + [Path(p).resolve() for p in config.copybook_path]
+        # Copybook paths, source format and defines all shape a parse.
+        self._cache.clear()
 
     # -- paths ---------------------------------------------------------------
 
@@ -193,6 +256,8 @@ class Workspace:
         """*file* (relative to the root, or absolute) as a guarded real path."""
         if not file or not file.strip():
             raise ToolError("no file given")
+        # A changed cobol.yml can move the guard (its copybook directories).
+        self.refresh_config()
         candidate = Path(file)
         if not candidate.is_absolute():
             candidate = self.root / candidate
@@ -312,9 +377,14 @@ class Workspace:
                         copybook_paths=copybook_paths,
                         process_conditionals=True,
                         defined_symbols=defines,
+                        # A missing member is named by the parser's "not
+                        # expanded" warning below; the rest still expand.
+                        skip_missing_copybooks=True,
                         **parse_kwargs,
                     )
                 except PreprocessingError as exc:
+                    # What is left: a circular COPY, a nesting or size
+                    # limit, an undecodable member.
                     caveats.append(
                         Caveat(
                             "unresolved-copybook",

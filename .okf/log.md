@@ -22,6 +22,11 @@ row; [analysis/lint.md](analysis/lint.md) documents
 `source_column_offsets()`, moved out of the CLI so the server shares it.
 Review fixes: the parse cache also stamps copybook directories, and `lint`
 grades unused copybook fields as info, matching the CLI.
+Minor follow-ups: `expand_copybooks(skip_missing_copybooks=True)`
+([preprocessing.md](preprocessing.md)) so one missing member no longer drops
+every expansion; xref's `is_special_register()` behind `explain_symbol`'s
+`special_register`; tools run on a worker thread under `Workspace.lock`;
+`cobol.yml` is re-read when it changes; `read_source` streams.
 
 ## 2026-10-15 -- bundle restructure: history archived, big files split, content guard
 

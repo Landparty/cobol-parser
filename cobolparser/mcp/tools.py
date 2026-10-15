@@ -15,7 +15,6 @@ from __future__ import annotations
 import difflib
 from typing import Any
 
-from .._lines import split_source_lines
 from ..models.program import CobolProgram
 from .envelope import Response, ToolError, clamp_limit
 from .workspace import ParsedProgram, Workspace, stdout_to_stderr
@@ -44,15 +43,27 @@ class CobolTools:
     ) -> dict[str, Any]:
         """The lines around ``file:line``, numbered as an editor numbers them."""
         path = self.workspace.resolve(file)
-        lines = split_source_lines(self.workspace.read_text(path))
-        if lines and lines[-1] == "":
-            lines.pop()
-        total = len(lines)
-        if line < 1 or (total and line > total):
-            raise ToolError(f"line {line} is outside {file} (1-{total})")
         before = max(0, before)
         after = max(0, after)
         start = max(1, line - before)
+        # At most MAX_SOURCE_LINES are kept while the file streams past; the
+        # rest is only counted, so a huge file under the root costs no memory.
+        last_kept = min(line + after, start + MAX_SOURCE_LINES - 1)
+        window: list[str] = []
+        total = 0
+        try:
+            # newline="" splits on \n, \r\n and \r only, as
+            # split_source_lines does: never on a form feed inside a record.
+            with path.open(encoding="utf-8", newline="") as handle:
+                for total, text in enumerate(handle, start=1):
+                    if start <= total <= last_kept:
+                        window.append(text.rstrip("\r\n"))
+        except UnicodeDecodeError as exc:
+            raise ToolError(f"{path.name} is not valid UTF-8 text") from exc
+        except OSError as exc:
+            raise ToolError(f"cannot read {path.name}: {exc}") from exc
+        if line < 1 or (total and line > total):
+            raise ToolError(f"line {line} is outside {file} (1-{total})")
         end = min(total, line + after)
         response = Response()
         if end - start + 1 > MAX_SOURCE_LINES:
@@ -71,7 +82,8 @@ class CobolTools:
                 "end_line": end,
                 "total_lines": total,
                 "lines": [
-                    {"line": n, "text": lines[n - 1]} for n in range(start, end + 1)
+                    {"line": n, "text": window[n - start]}
+                    for n in range(start, end + 1)
                 ],
             }
         )
@@ -168,7 +180,7 @@ class CobolTools:
         limit: int | None = None,
     ) -> dict[str, Any]:
         """What *name* is in *file*: declaration, layout, every reference."""
-        from ..analysis.xref import XrefAnalyzer
+        from ..analysis.xref import XrefAnalyzer, is_special_register
 
         wanted = " ".join(name.split()).upper()
         if not wanted:
@@ -196,16 +208,26 @@ class CobolTools:
                 response.caveat("incomplete-analysis", caveat)
         if not matches:
             undeclared = wanted in {u.upper() for u in report.undefined}
+            special = is_special_register(wanted)
             names = sorted({e.name.upper() for e in report.entries})
-            return response.build(
-                {
-                    "name": wanted,
-                    "found": False,
-                    "referenced_but_undeclared": undeclared,
-                    "suggestions": difflib.get_close_matches(wanted, names, n=5),
-                },
-                program_info,
-            )
+            not_found: dict[str, Any] = {
+                "name": wanted,
+                "found": False,
+                "referenced_but_undeclared": undeclared,
+                "special_register": special,
+                # A near-miss spelling is no help for RETURN-CODE or SQLCODE:
+                # the name is right, it is just never declared.
+                "suggestions": (
+                    [] if special else difflib.get_close_matches(wanted, names, n=5)
+                ),
+            }
+            if special:
+                not_found["note"] = (
+                    f"{wanted} is a special register or a precompiler/"
+                    "translator-supplied item: the compiler provides it, so "
+                    "the program never declares it"
+                )
+            return response.build(not_found, program_info)
 
         if len(matches) > 1:
             response.caveat(

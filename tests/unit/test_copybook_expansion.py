@@ -79,6 +79,49 @@ class TestCopybookNotFound:
         # Should mention search paths
         assert "MISSING" in error_msg or "not found" in error_msg.lower()
 
+    def test_skip_missing_leaves_the_copy_and_expands_the_rest(self, tmp_path):
+        """skip_missing_copybooks: one missing member costs only itself."""
+        (tmp_path / "HAVE.cpy").write_text("       01  HAVE-REC PIC X.\n")
+        source = "       COPY NOPE.\n       COPY HAVE.\n"
+
+        result = expand_copybooks(source, [str(tmp_path)], skip_missing_copybooks=True)
+
+        assert "COPY NOPE." in result.expanded_source
+        assert "HAVE-REC" in result.expanded_source
+        assert any(
+            "NOPE" in w and "left as written" in w for w in result.statistics.warnings
+        )
+
+    def test_skip_missing_still_reported_by_the_parse(self, tmp_path):
+        """The parse names the member it could not expand, and keeps the rest."""
+        from cobolparser.plugins.core import ErrorRecoveryMode
+        from cobolparser.preprocess.copybook_expander import (
+            parse_cobol_with_expansion,
+        )
+
+        (tmp_path / "HAVE.cpy").write_text("       01  HAVE-REC PIC X.\n")
+        source = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. P.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       COPY NOPE.\n"
+            "       COPY HAVE.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           GOBACK.\n"
+        )
+        result = parse_cobol_with_expansion(
+            source,
+            "p.cbl",
+            [str(tmp_path)],
+            skip_missing_copybooks=True,
+            error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+        )
+
+        assert any("COPY NOPE was not expanded" in w for w in result.warnings)
+        names = [i.name for i in result.ast.find_all_by_type("CobolDataItem")]
+        assert "HAVE-REC" in names
+
 
 class TestEmptyCopybook:
     """Tests for empty copybook handling (T036)."""

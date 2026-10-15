@@ -44,15 +44,16 @@ Any client that takes a JSON server list (Claude desktop's
 
 Copybook directories, source format and `>>DEFINE` symbols come from the
 project's [`cobol.yml`](project-config.md), found from `--root` the same way
-the CLI finds it. It is read once when the server starts; restart the server
-after editing it. Without copybook paths, every `COPY` is left unexpanded and
-each answer says so.
+the CLI finds it. An edit to it takes effect on the next call, with no
+restart (unless `--config` or `--no-config` was given). Without copybook
+paths, every `COPY` is left unexpanded and each answer says so; a member that
+cannot be found is left unexpanded and named, while the others still expand.
 
 ## Tools
 
 | Tool | Ask it |
 |---|---|
-| `explain_symbol(file, name, program?, limit?)` | "What is `CUST-BAL` and where is it used?" Gives the declaration (PICTURE, USAGE, byte offset and length, REDEFINES, level-88 values) and every reference with its role (read, write, condition, call argument, host variable, ...), statement and paragraph. A name that matches several declarations can be qualified as `X OF Y`. |
+| `explain_symbol(file, name, program?, limit?)` | "What is `CUST-BAL` and where is it used?" Gives the declaration (PICTURE, USAGE, byte offset and length, REDEFINES, level-88 values) and every reference with its role (read, write, condition, call argument, host variable, ...), statement and paragraph. A name that matches several declarations can be qualified as `X OF Y`. A special register such as `RETURN-CODE` is answered as one (`special_register: true`), not as a misspelling. |
 | `lint(file, rules?, min_severity?, limit?)` | "What is wrong with this program?" Dead code, unused data items, MOVE mismatches, I/O sequencing, LINKAGE problems, recursion risks, complexity, DCLGEN and SQL/CICS checks, worst first. |
 | `read_source(file, line, before?, after?)` | "Show me the code at `COPYREPL.cbl:32`." Up to 200 numbered lines. |
 
@@ -87,8 +88,11 @@ Every tool returns the same envelope:
 - **Truncated** lists every list that was cut to `limit` (default 50, at most
   500), with its true total.
 - A request that cannot be answered at all, such as a path outside the
-  workspace or an unknown `program`, comes back as an error result naming the
-  problem.
+  workspace, an unknown `program` or a `cobol.yml` that no longer reads,
+  comes back as an error result naming the problem.
+
+Each call runs on a worker thread, one at a time, so a long parse does not
+stop the server from answering pings or a cancellation.
 
 `surface_version` changes whenever a tool, argument or envelope field changes
 in a way a client could notice.

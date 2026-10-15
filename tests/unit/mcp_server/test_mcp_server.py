@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -67,6 +68,52 @@ class TestServer:
             assert result.structuredContent["surface_version"] == MCP_SURFACE_VERSION
         symbol = results[0].structuredContent["answer"]["symbols"][0]
         assert symbol["declared_at"]["file"] == "copybooks/DCLCUST.cpy"
+
+    def test_a_slow_tool_does_not_block_the_loop(self) -> None:
+        # A parse runs on a worker thread: the session keeps answering while
+        # it does, and concurrent calls are serialized, not interleaved.
+        pytest.importorskip("mcp")
+        from mcp.shared.memory import create_connected_server_and_client_session
+
+        from cobolparser.mcp.server import build_server
+        from cobolparser.mcp.tools import CobolTools
+
+        events: list[str] = []
+        real_lint = CobolTools.lint
+
+        def slow_lint(self: CobolTools, *args: Any) -> dict[str, Any]:
+            events.append("lint-start")
+            time.sleep(0.3)
+            events.append("lint-end")
+            return real_lint(self, *args)
+
+        async def run() -> list[Any]:
+            server = build_server(_workspace())
+            async with create_connected_server_and_client_session(
+                server._mcp_server
+            ) as client:
+
+                async def listing() -> Any:
+                    await asyncio.sleep(0.05)
+                    tools = await client.list_tools()
+                    events.append("listed")
+                    return tools
+
+                return list(
+                    await asyncio.gather(
+                        client.call_tool("lint", {"file": "BATCHSEQ.cbl"}),
+                        client.call_tool("lint", {"file": "SUBPROG.cbl"}),
+                        listing(),
+                    )
+                )
+
+        with patch.object(CobolTools, "lint", slow_lint):
+            first, second, _ = asyncio.run(run())
+        assert first.isError is False and second.isError is False
+        assert events.index("listed") < events.index("lint-end")
+        assert events.count("lint-start") == 2
+        # One call at a time: each lint ends before the next starts.
+        assert events.index("lint-end") < events.index("lint-start", 1)
 
     def test_a_refused_path_is_an_error_result(self) -> None:
         _, (result,) = _session([("read_source", {"file": "../../../pyproject.toml"})])

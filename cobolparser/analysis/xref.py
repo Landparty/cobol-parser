@@ -231,6 +231,17 @@ _SPECIAL_REGISTERS: frozenset[str] = frozenset(
     }
 )
 
+
+def is_special_register(name: str) -> bool:
+    """Whether *name* is a special register or a precompiler/translator item.
+
+    These are never declared in the DATA DIVISION the analyzer sees, so a
+    lookup finds no entry for them; this tells "special register" from
+    "unknown name".
+    """
+    return name.strip().upper() in _SPECIAL_REGISTERS
+
+
 _PAREN_RE = re.compile(r"\(([^()]*)\)")
 _FUNCTION_RE = re.compile(r"\bFUNCTION\b", re.IGNORECASE)
 

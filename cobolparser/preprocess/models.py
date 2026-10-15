@@ -310,6 +310,10 @@ class ExpansionContext:
     #: Keep debugging lines (``D`` in column 7) as code instead of blanking
     #: them with the comments (``expand_copybooks(debug_lines=True)``).
     debug_lines: bool = False
+    #: Leave a COPY whose member cannot be found as written, with a warning,
+    #: instead of failing the whole expansion
+    #: (``expand_copybooks(skip_missing_copybooks=True)``).
+    skip_missing: bool = False
 
     # LRU management (OrderedDict provides O(1) move_to_end/popitem)
     max_cache_size: int = 512

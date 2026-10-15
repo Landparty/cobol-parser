@@ -146,8 +146,15 @@ first library feature this server would pull forward.
   call it. The server maps each location itself (`ParsedProgram.locate`).
 - xref reference columns are the statement's, not the operand's, so
   `explain_symbol` cites references by line only.
-- A missing copybook makes the expander raise; the server re-parses without
-  expansion and says so in an `unresolved-copybook` caveat instead of failing.
+- A missing copybook made the expander raise, costing every other member its
+  expansion. The review follow-up added `skip_missing_copybooks=True` to
+  `expand_copybooks` / `parse_cobol_with_expansion`: the member is left
+  unexpanded and named in a caveat, the rest expand. Other expansion
+  failures (a circular COPY) still fall back to a plain parse with a caveat.
+- Also from the review: tools run on a worker thread one at a time
+  (`Workspace.lock`), `cobol.yml` is re-read when it changes, `read_source`
+  streams the file, and `explain_symbol` flags special registers
+  (`special_register`, through xref's new `is_special_register()`).
 - `cobol-parser mcp` without the extra exits 1 (the CLI's `_fail()`), not 2.
 - `[mcp]` is also in `[dev]`, so CI's coverage job tests the server too; the
   tests live in `tests/unit/mcp_server/` because a test package named `mcp`

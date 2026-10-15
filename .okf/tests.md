@@ -313,7 +313,7 @@ regression files are named for their issue (`test_issue_NNN_*.py`) or audit
 | CLI | `unit/cli/test_output_identification.py`, `test_source_format_flag.py`, `test_profile_output_flags.py`, `test_analyzer_cli_gaps.py`, `test_new_subcommands.py`, `test_lint_subcommand.py`, `test_expand_source_map_cli.py`, `test_gen_data_cli.py`, `test_compare_cli.py`, `test_jcl_cli.py`, `test_project_config_cli.py`; `unit/test_config_yaml.py`, `test_project_config.py` |
 | Program units / models | `regression/test_nested_program_units.py`, `unit/test_models.py` (`from_json` lossy warning, `TestNodeEquality`) |
 | Accelerators | `unit/test_fast_import.py`, `regression/test_data_fast_signature_drift.py` |
-| MCP server | `unit/mcp_server/test_mcp_tools.py` (no SDK: guard, cache incl. a copybook added after a miss, caveats, each tool, copybook fields linted as info like the CLI), `test_mcp_server.py` (in-memory client session, `cobol-parser mcp`). The directory is not `unit/mcp/`: a test package named `mcp` shadows the SDK |
+| MCP server | `unit/mcp_server/test_mcp_tools.py` (no SDK: guard, cache incl. a copybook added after a miss, caveats incl. one missing member among several, `cobol.yml` re-read on edit, each tool, copybook fields linted as info like the CLI, special registers), `test_mcp_server.py` (in-memory client session, a slow tool not blocking the loop, `cobol-parser mcp`). The directory is not `unit/mcp/`: a test package named `mcp` shadows the SDK |
 
 ## Coverage Requirement Detail
 

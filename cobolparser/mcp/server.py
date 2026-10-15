@@ -5,13 +5,19 @@ argument annotations and docstrings become the tool schemas a client sees --
 and nothing else. Keeping the SDK in this one module means a change of SDK
 (its v2 renames ``FastMCP``) touches one file.
 
+A parse can take seconds, so each call runs on a worker thread, one at a
+time (:attr:`Workspace.lock`), and the event loop stays free for pings,
+cancellation and other requests.
+
 Needs the ``[mcp]`` extra: ``pip install 'cobol-parser[mcp]'``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Annotated, Any
 
+import anyio.to_thread
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
@@ -62,7 +68,17 @@ def build_server(workspace: Workspace) -> FastMCP:
     tools = CobolTools(workspace)
     server = FastMCP("cobol-parser", instructions=INSTRUCTIONS, log_level="WARNING")
 
-    def read_source(
+    async def off_loop(call: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        def locked() -> dict[str, Any]:
+            # The parse cache and the stdout redirect are process-wide.
+            with workspace.lock:
+                return call()
+
+        # A cancelled request answers at once; its thread finishes on its
+        # own and only then releases the lock to the next call.
+        return await anyio.to_thread.run_sync(locked, abandon_on_cancel=True)
+
+    async def read_source(
         file: Annotated[
             str, Field(description="File to read, relative to the workspace root")
         ],
@@ -72,9 +88,9 @@ def build_server(workspace: Workspace) -> FastMCP:
     ) -> dict[str, Any]:
         """The source lines around file:line (at most 200), numbered as an
         editor numbers them. Use it to show the code behind a citation."""
-        return tools.read_source(file, line, before, after)
+        return await off_loop(lambda: tools.read_source(file, line, before, after))
 
-    def lint(
+    async def lint(
         file: File,
         rules: Annotated[
             list[str] | None,
@@ -95,9 +111,9 @@ def build_server(workspace: Workspace) -> FastMCP:
         data items, MOVE type mismatches, I/O sequencing, LINKAGE problems,
         recursion risks, complexity, DCLGEN and SQL/CICS checks. Findings are
         worst first, each with its location on disk."""
-        return tools.lint(file, rules, min_severity, limit)
+        return await off_loop(lambda: tools.lint(file, rules, min_severity, limit))
 
-    def explain_symbol(
+    async def explain_symbol(
         file: File,
         name: Annotated[
             str,
@@ -113,7 +129,7 @@ def build_server(workspace: Workspace) -> FastMCP:
         PICTURE, USAGE, byte offset and length, REDEFINES, level-88 values),
         then every reference with its role (read, write, condition, ...),
         statement and paragraph. Suggests close names when it is not found."""
-        return tools.explain_symbol(file, name, program, limit)
+        return await off_loop(lambda: tools.explain_symbol(file, name, program, limit))
 
     for tool in (read_source, lint, explain_symbol):
         server.add_tool(tool, annotations=_READ_ONLY, structured_output=True)

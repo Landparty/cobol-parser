@@ -215,9 +215,9 @@ module = ["jclparser", "jclparser.*"]
 ignore_missing_imports = true
 
 # The MCP SDK is the optional [mcp] extra; only cobolparser/mcp/server.py
-# imports it (with pydantic, which it brings in).
+# imports it (with pydantic and anyio, which it brings in).
 [[tool.mypy.overrides]]
-module = ["mcp", "mcp.*", "pydantic", "pydantic.*"]
+module = ["mcp", "mcp.*", "pydantic", "pydantic.*", "anyio", "anyio.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

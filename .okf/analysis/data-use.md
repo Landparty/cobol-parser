@@ -378,6 +378,8 @@ Things worth knowing before trusting a field:
 * **`undefined` excludes special registers.** `_SPECIAL_REGISTERS`
   (RETURN-CODE, SQLCODE, SQLCA, `EIB*`, `DFH*`, `XML-*`/`JSON-*`, TALLY, …)
   are never reported undefined; a caveat names the ones that were seen.
+  `is_special_register(name)` is the public test (the MCP `explain_symbol`
+  answers a not-found special register with it).
 * **STRING operands are inexact** — the parser strips literal quotes, so a
   literal word and a data name are indistinguishable there. Reported, with a
   caveat.

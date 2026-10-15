@@ -157,6 +157,38 @@ class TestWorkspaceGuard:
         ws = Workspace(root)
         assert ws.config.copybook_path == (str((root / "copybooks").resolve()),)
 
+    def test_edited_config_is_reread(self, root: Path) -> None:
+        ws = Workspace(root)
+        assert ws.config.copybook_path == ()
+        first = ws.program("COPYREPL.cbl")
+        (root / "cobol.yml").write_text(
+            "version: 1\nproject:\n  copybook_path: [copybooks]\n"
+        )
+        tools = CobolTools(ws)
+        result = tools.explain_symbol("COPYREPL.cbl", "CUST-ID")
+        assert ws.program("COPYREPL.cbl") is not first
+        assert result["answer"]["symbols"][0]["declared"] is True
+        # ... and a copybook in the new directory is now inside the guard.
+        assert ws.resolve(str(root / "copybooks" / "CUSTREC.cpy"))
+
+    def test_broken_config_is_an_error_until_fixed(self, root: Path) -> None:
+        config = root / "cobol.yml"
+        config.write_text("version: 1\n")
+        ws = Workspace(root)
+        config.write_text("version: 1\nproject:\n  nonsense: [\n")
+        with pytest.raises(ToolError, match="cobol.yml"):
+            ws.program("BATCHSEQ.cbl")
+        config.write_text("version: 1\nproject:\n  copybook_path: [copybooks]\n")
+        assert ws.program("BATCHSEQ.cbl")
+        assert ws.config.copybook_path
+
+    def test_a_config_given_explicitly_stays_fixed(self, root: Path) -> None:
+        ws = Workspace(root, ProjectConfig())
+        (root / "cobol.yml").write_text(
+            "version: 1\nproject:\n  copybook_path: [copybooks]\n"
+        )
+        assert ws.config.copybook_path == ()
+
     def test_non_utf8_is_an_error(self, root: Path) -> None:
         (root / "BIN.cbl").write_bytes(b"\xff\xfe\x00")
         with pytest.raises(ToolError, match="UTF-8"):
@@ -215,17 +247,46 @@ class TestParseCaveats:
         assert any("CUSTREC" in d for d in details)
         assert any("PROCLIB" in d for d in details)
 
+    def test_one_missing_member_does_not_cost_the_others(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        books = tmp_path / "books"
+        books.mkdir()
+        for member in (root / "copybooks").iterdir():
+            if member.name != "CUSTREC.cpy":
+                shutil.copy(member, books / member.name)
+        tools = tools_for(root, copybook_path=(str(books),))
+        result = tools.explain_symbol("COPYREPL.cbl", "WS-READ-COUNT")
+        assert result["answer"]["symbols"][0]["declared"] is True
+        assert result["answer"]["symbols"][0]["declared_at"]["file"].endswith(
+            "WSCOUNTS.cpy"
+        )
+        details = [
+            c["detail"] for c in result["caveats"] if c["kind"] == "unresolved-copybook"
+        ]
+        assert details and all("CUSTREC" in d for d in details)
+        assert not any("expansion failed" in d for d in details)
+
     def test_failed_expansion_falls_back_with_a_caveat(
         self, root: Path, tmp_path: Path
     ) -> None:
-        empty = tmp_path / "empty"
-        empty.mkdir()
-        result = tools_for(root, copybook_path=(str(empty),)).lint("COPYREPL.cbl")
+        # A circular COPY still fails the expansion as a whole.
+        books = tmp_path / "loop"
+        books.mkdir()
+        (books / "LOOPA.cpy").write_text("           COPY LOOPB.\n")
+        (books / "LOOPB.cpy").write_text("           COPY LOOPA.\n")
+        (root / "LOOP.cbl").write_text(
+            TWO_AMOUNTS.replace(
+                "       PROCEDURE DIVISION.",
+                "           COPY LOOPA.\n" "       PROCEDURE DIVISION.",
+            )
+        )
+        result = tools_for(root, copybook_path=(str(books),)).lint("LOOP.cbl")
         assert any(
             c["kind"] == "unresolved-copybook" and "expansion failed" in c["detail"]
             for c in result["caveats"]
         )
-        assert result["answer"]["summary"]["total"] > 0
+        assert result["program"]["file"] == "LOOP.cbl"
 
     def test_partial_parse(self, root: Path) -> None:
         (root / "BROKEN.cbl").write_text(BROKEN)
@@ -275,6 +336,24 @@ class TestReadSource:
             tools_for(root).read_source("BATCHSEQ.cbl", 100_000)
         with pytest.raises(ToolError, match="outside"):
             tools_for(root).read_source("BATCHSEQ.cbl", 0)
+
+    @pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+    def test_line_endings_as_an_editor_counts_them(
+        self, root: Path, newline: str
+    ) -> None:
+        # A form feed inside a record is text, not a line break
+        # (str.splitlines() would break there and shift every later line).
+        rows = ["first", "sec\x0cond", "third"]
+        (root / "ENDS.cbl").write_bytes(newline.join(rows).encode() + b"\n")
+        answer = tools_for(root).read_source("ENDS.cbl", 2, before=1, after=1)
+        assert answer["answer"]["total_lines"] == 3
+        assert [r["text"] for r in answer["answer"]["lines"]] == rows
+
+    def test_empty_file(self, root: Path) -> None:
+        (root / "EMPTY.cbl").write_text("")
+        answer = tools_for(root).read_source("EMPTY.cbl")["answer"]
+        assert answer["total_lines"] == 0
+        assert answer["lines"] == []
 
     def test_long_window_is_cut_and_says_so(self, root: Path) -> None:
         (root / "LONG.cbl").write_text("".join(f"line {n}\n" for n in range(1000)))
@@ -395,7 +474,15 @@ class TestExplainSymbol:
     def test_not_found_suggests(self, root: Path) -> None:
         answer = tools_for(root).explain_symbol("BATCHSEQ.cbl", "TRAN-DEBT")["answer"]
         assert answer["found"] is False
+        assert answer["special_register"] is False
         assert "TRAN-DEBIT" in answer["suggestions"]
+
+    def test_special_register_is_named_as_one(self, root: Path) -> None:
+        answer = tools_for(root).explain_symbol("BATCHSEQ.cbl", "return-code")["answer"]
+        assert answer["found"] is False
+        assert answer["special_register"] is True
+        assert answer["suggestions"] == []
+        assert "special register" in answer["note"]
 
     def test_undeclared_without_copybooks(self, root: Path) -> None:
         result = tools_for(root).explain_symbol("COPYREPL.cbl", "CUST-ID")
