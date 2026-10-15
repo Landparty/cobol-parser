@@ -834,6 +834,11 @@ class MoveTypeChecker:
                     continue
                 if source_entry[2] and target_entry[2]:
                     continue  # two groups: their subordinates pair instead
+                if DataCategory.UNKNOWN in (source_entry[0], target_entry[0]):
+                    # No rule applies to a category not modelled here (e.g.
+                    # PIC N): count the pair unchecked, as a plain MOVE does.
+                    self._unresolved_count += 1
+                    continue
                 suffix = " OF ".join(reversed(path))
                 self._check_pair(
                     f"{suffix} OF {source_ref}",
