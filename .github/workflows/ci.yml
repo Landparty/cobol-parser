@@ -69,7 +69,10 @@
 #           cache: pip
 #       - run: pip install setuptools
 #       - run: pip install -e ".[dev,fast]"
-#       - run: python setup.py build_ext --inplace
+#       # COBOLPARSER_ACCEL=1 opts in at both ends: setup.py compiles the
+#       # extensions only under it, and they are used only under it (pure
+#       # Python is the default backend; see cobolparser/_accel.py).
+#       - run: COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
 #       # The suite runs here, after build_ext, so it exercises the Cython
 #       # extensions rather than the pure-Python fallback -- CI used to build
 #       # them and never run a line through them. `-p no:randomly` keeps a
@@ -84,15 +87,16 @@
 #       # step rather than on the code. Same reasoning as the cibuildwheel
 #       # test-command's --no-cov in pyproject.toml.
 #       - run: >-
-#           python -m pytest
+#           COBOLPARSER_ACCEL=1 python -m pytest
 #           ${{ (github.event_name == 'pull_request' && matrix.python-version != '3.13')
 #           && 'tests/unit/test_lexer.py tests/test_all_samples.py tests/unit/test_program_fixtures.py'
 #           || 'tests/' }}
 #           -q -p no:randomly -n auto --no-cov
 
-#   # Where the 90% floor is actually enforced: one pure-Python build, so
-#   # coverage.py can see every line the extensions would otherwise hide.
-#   # COBOLPARSER_SKIP_EXT=1 skips the C build entirely (see setup.py).
+#   # Where the 90% floor is actually enforced: the pure-Python backend (the
+#   # default), so coverage.py can see every line the extensions would
+#   # otherwise hide. Nothing is compiled without COBOLPARSER_ACCEL=1, and
+#   # COBOLPARSER_SKIP_EXT=1 is kept as a belt-and-braces opt-out.
 #   coverage:
 #     if: github.event_name != 'push'
 #     runs-on: ubuntu-latest

@@ -56,12 +56,12 @@ There is a *separate* PyPI package, `cobol-parser` (`pip install cobol-parser`),
 # Install for development
 pip install -e ".[dev,docs]"
 
-# Optional: build Cython-accelerated hot-path modules in place
+# Pure Python is the default backend: nothing is compiled and no compiler is
+# needed. The Cython hot-path modules are an opt-in, COBOLPARSER_ACCEL=1, read
+# at build time (setup.py compiles them) AND at import time (they are used):
 pip install -e ".[fast]"
-python setup.py build_ext --inplace
-
-# Skip the C extension build entirely (no compiler / no Cython available)
-COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
+COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
+COBOLPARSER_ACCEL=1 python -m pytest tests/ --no-cov   # suite on the fast paths
 
 # Run all tests with coverage (90% minimum; ~12,340 tests across 439 files).
 # Measure coverage on a pure-Python build -- see "Coverage Requirement".
@@ -149,9 +149,9 @@ COBOL source (.cbl/.cob)
 
 ### Key Packages
 
-**`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (244 types). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them. When `cobolparser._lexer_fast` is compiled (see Cython acceleration below), the lexer transparently uses the Cython-accelerated subclass for hot-path methods; otherwise it falls back to pure Python.
+**`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (244 types). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them. Pure Python by default; when `cobolparser._lexer_fast` is compiled *and* `COBOLPARSER_ACCEL=1` is set (see `cobolparser/_accel.py`), the lexer uses the Cython-accelerated subclass for hot-path methods.
 
-**`cobolparser/_lexer_fast.pyx`** / **`cobolparser/_preprocess_fast.pyx`** / **`cobolparser/_data_fast.pyx`** -- Optional Cython modules that subclass the pure-Python lexer/preprocessor (and accelerate the DATA DIVISION `PICTURE` / data-item clause loops) by overriding the inner hot-path methods with C-typed implementations. Built via `setup.py build_ext --inplace`; the corresponding `.c` files are checked in so the extension builds without re-running Cython. Setting `COBOLPARSER_SKIP_EXT=1` at install time skips the C build and falls back to the pure-Python paths.
+**`cobolparser/_lexer_fast.pyx`** / **`cobolparser/_preprocess_fast.pyx`** / **`cobolparser/_data_fast.pyx`** -- Optional Cython modules that subclass the pure-Python lexer/preprocessor (and accelerate the DATA DIVISION `PICTURE` / data-item clause loops) by overriding the inner hot-path methods with C-typed implementations. Opt-in: built only when `COBOLPARSER_ACCEL=1` is set (`COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace`), and used only when it is set at import time too (`cobolparser/_accel.py`'s `accelerators_enabled()`), so pure Python is the default even with a `.so` present. The corresponding `.c` files are checked in so the extension builds without re-running Cython. `COBOLPARSER_SKIP_EXT=1` (the old opt-out) is still honoured. The PyPI wheels still ship compiled, so wheel users opt in with the variable alone.
 
 **`cobolparser/preprocess/`** -- Preprocessing pipeline:
 - `__init__.py` -- `normalize_fixed_format()` converts fixed-format COBOL to free-form text (comment lines silently dropped). Also: `preprocess_conditional_compilation()`, `validate_copybook_content()`, `validate_level_numbers()`
@@ -622,7 +622,7 @@ tests/
 
 90% line coverage is enforced by `--cov-fail-under=90` in `pyproject.toml`'s `addopts`, and branch coverage is enabled. Full-suite total as of 2026-09-16: **93.04%** (31,613 statements, ~11,100 tests).
 
-**Measure it on a pure-Python build.** coverage.py cannot see into a compiled Cython extension, so once `build_ext --inplace` has run, the pure-Python bodies those extensions shadow read as unexecuted: the same suite, on one commit (2026-09-07), reported 54.32% with the extensions built and 91.76% without. CI splits the two accordingly — the `build` matrix runs the suite `--no-cov` after `build_ext` (its job is to exercise the extensions), and a separate `coverage` job installs with `COBOLPARSER_SKIP_EXT=1` and enforces the floor. Locally, use `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` before trusting a coverage number.
+**Measure it on the pure-Python backend** (the default since 2026-10-15: a built `.so` is ignored unless `COBOLPARSER_ACCEL=1` is set). coverage.py cannot see into a compiled Cython extension, so with the accelerators enabled the pure-Python bodies they shadow read as unexecuted: the same suite, on one commit (2026-09-07), reported 54.32% with the extensions built and 91.76% without. CI splits the two accordingly — the `build` matrix runs the suite `--no-cov` after `build_ext` (its job is to exercise the extensions), and a separate `coverage` job installs with `COBOLPARSER_SKIP_EXT=1` and enforces the floor. Locally, just leave `COBOLPARSER_ACCEL` unset before trusting a coverage number.
 
 When running only a subset of tests, expect the check to fail -- that is normal and unrelated.
 
@@ -632,7 +632,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`, nightly (
 
 1. **lint** -- `ruff check .` + `black --check .` (Python 3.13, pinned versions matching `.pre-commit-config.yaml`)
 2. **typecheck** -- `mypy cobolparser/` (Python 3.13, pinned version)
-3. **build** -- `pip install -e ".[dev,fast]"` + `python setup.py build_ext --inplace` + `python -m pytest tests/ -q -p no:randomly -n auto --no-cov` on matrix: Python 3.11, 3.12, 3.13 (verifies install, the Cython extension build, and the suite against those extensions). Full suite on all three for pushes to `main`, nightly and dispatch; on a PR only 3.13 runs the full suite and 3.11/3.12 run a smoke subset (`tests/unit/test_lexer.py tests/test_all_samples.py tests/unit/test_program_fixtures.py`)
+3. **build** -- `pip install -e ".[dev,fast]"` + `COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace` + `COBOLPARSER_ACCEL=1 python -m pytest tests/ -q -p no:randomly -n auto --no-cov` on matrix: Python 3.11, 3.12, 3.13 (verifies install, the Cython extension build, and the suite against those extensions). Full suite on all three for pushes to `main`, nightly and dispatch; on a PR only 3.13 runs the full suite and 3.11/3.12 run a smoke subset (`tests/unit/test_lexer.py tests/test_all_samples.py tests/unit/test_program_fixtures.py`)
 4. **coverage** -- `COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"` + the full suite on Python 3.13, enforcing `--cov-fail-under=90` (PRs, nightly and dispatch; not on push to `main`)
 
 The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather than the pure-Python fallback -- with `--no-cov`, because coverage.py cannot see into a compiled extension (54.32% with them built vs 91.76% without, measured together on 2026-09-07). The `coverage` job is where `--cov-fail-under=90` is enforced, on a pure-Python install. A push to `main` runs lint, typecheck and the full `build` matrix (no coverage gate). Run the suite locally during development too (`python -m pytest tests/ -v`).
@@ -641,6 +641,7 @@ The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather
 
 `release-please` (`.github/workflows/release-please.yml`, driven by Conventional Commits, config in `release-please-config.json` / `.release-please-manifest.json`) automates versioning and `CHANGELOG.md` on every push to `main`. When it cuts a release, the same workflow also builds and publishes **binary wheels and an sdist** to PyPI as `cobol-parser` (`pip install cobol-parser`):
 
+- The wheels are built with `COBOLPARSER_ACCEL=1` (`[tool.cibuildwheel] environment`), so they ship compiled accelerators, but an installed wheel still runs pure Python unless `COBOLPARSER_ACCEL=1` is set at run time. The sdist builds pure Python by default.
 - Source is **not** hidden: only the 3 hot-path accelerators (`_lexer_fast`, `_preprocess_fast`, `_data_fast`) are Cython-compiled; every other module ships as plain `.py`. `[tool.setuptools.exclude-package-data]` in `pyproject.toml` keeps only the generated `.c`/`.pyx`/`.h` out of wheels.
 - `cibuildwheel` (`[tool.cibuildwheel]` in `pyproject.toml`) builds one wheel each for manylinux x86_64, macOS arm64, and Windows AMD64, across Python 3.11-3.13 (9 wheels total); its `test-command` imports the three accelerators and runs a fast pytest subset against the installed wheel. A `build-sdist` job publishes the sdist alongside them.
 - Use `workflow_dispatch` with `target: testpypi` on `.github/workflows/release-please.yml` to rehearse the whole build-all-9-wheels-and-publish pipeline against test.pypi.org (one-time Trusted Publisher registration required there first) before trusting a real release.
@@ -682,6 +683,6 @@ The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather
 - `scripts/validate_io_coverage.py` -- Standalone IO coverage validator
 - `benchmarks/` -- Performance benchmark programs
 - `reports/` -- Audit reports
-- `setup.py` -- Builds the optional Cython extension modules (`_lexer_fast`, `_preprocess_fast`, `_data_fast`). Compile in place with `python setup.py build_ext --inplace`; both `.pyx` and pre-generated `.c` files are checked into the repo so the build does not require Cython at install time. Set `COBOLPARSER_SKIP_EXT=1` to opt out of the C build entirely.
+- `setup.py` -- Builds the optional Cython extension modules (`_lexer_fast`, `_preprocess_fast`, `_data_fast`) only under `COBOLPARSER_ACCEL=1`; a default install compiles nothing. Compile in place with `COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace`; both `.pyx` and pre-generated `.c` files are checked into the repo so the build does not require Cython at install time.
 - `.pre-commit-config.yaml` -- Hooks for `ruff` (with `--fix`), `ruff-format`, `black`, and `mypy cobolparser/` (with `--ignore-missing-imports`). The CI lint/typecheck jobs duplicate these checks, so running `pre-commit run --all-files` locally catches the same issues.
 - `CHANGELOG.md` -- Keep-a-Changelog history. The Unreleased section is the source of truth for which analyzers and CLI subcommands are wired up beyond the 1.0.0 baseline.

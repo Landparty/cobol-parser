@@ -142,18 +142,30 @@ against stale *builds*, not against a stale checked-in `.c`.
 (documented in `setup.py`). Preprocessor and DATA DIVISION gains are comparable
 but are not separately benchmarked in the checked-in docs.
 
-**Building** — pre-generated `.c` files are checked in so only a C compiler
-(not Cython) is required for a normal install:
+**Pure Python is the default backend (2026-10-15).** The accelerators are an
+opt-in, chosen by one environment variable, `COBOLPARSER_ACCEL=1`
+(`1`/`true`/`yes`/`on`), read at both ends:
+
+* **build time** — `setup.py` compiles the three extensions only when it is
+  set, so a stock `pip install .` builds nothing and needs no compiler.
+  `COBOLPARSER_SKIP_EXT=1` (the old opt-out) is still honoured and wins.
+* **import time** — `cobolparser/_accel.py`'s `accelerators_enabled()` gates
+  each fast-path import site (`lexer.py`, `preprocess/__init__.py`,
+  `parsers/divisions/data_clauses.py`). An installed `.so` is ignored without
+  the variable, so a stale or mismatched binary cannot change what a default
+  install does. It reads `os.environ` on every call (not cached), so a test can
+  flip the variable and `importlib.reload` a module that owns a fast path.
+
+The PyPI wheels still ship compiled (`[tool.cibuildwheel] environment`), so
+wheel users only need the variable at run time.
 
 ```bash
-# Build in-place (development)
-python setup.py build_ext --inplace
+# Build in-place (development); pre-generated .c files are checked in, so
+# only a C compiler is needed (Cython, via the [fast] extra, re-cythonizes)
+COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
 
-# Or via the [fast] extra (recommended)
-pip install -e ".[fast]"
-
-# Opt out entirely (no compiler or Cython needed)
-COBOLPARSER_SKIP_EXT=1 pip install -e ".[dev]"
+# Run with them (the suite too: this is how the fast paths get exercised)
+COBOLPARSER_ACCEL=1 python -m pytest tests/ --no-cov
 ```
 
 **Pure/Cython parity (audit 2026-07-08):** `_lexer_fast.pyx`'s

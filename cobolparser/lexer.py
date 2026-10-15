@@ -15,6 +15,7 @@ import sys
 from dataclasses import dataclass
 from enum import IntEnum, auto
 
+from ._accel import accelerators_enabled
 from ._lines import split_source_lines
 from .models.ast_base import SourceLocation
 from .plugins.core import DialectType, ParseError
@@ -2637,12 +2638,17 @@ def tokenize_cobol(
 
 
 # ---------------------------------------------------------------------------
-# Optional Cython fast path – transparent drop-in for CobolLexer.
+# Optional Cython fast path – opt-in drop-in for CobolLexer.
 # The Cython subclass is defined in _lexer_fast.pyx and overrides the three
-# innermost hot-path methods.  Falls back to the pure-Python class silently
-# if the extension module was not compiled.
+# innermost hot-path methods. The pure-Python class is the default; the
+# compiled one is used only under COBOLPARSER_ACCEL=1 (see cobolparser._accel),
+# and even then falls back silently if the extension was not compiled.
 # ---------------------------------------------------------------------------
-try:
-    from cobolparser._lexer_fast import CobolLexer  # type: ignore[import-not-found]
-except ImportError:
-    CobolLexer = _CobolLexerPure
+CobolLexer = _CobolLexerPure
+if accelerators_enabled():
+    try:
+        from cobolparser._lexer_fast import (  # type: ignore[import-not-found,no-redef]
+            CobolLexer,
+        )
+    except ImportError:
+        pass

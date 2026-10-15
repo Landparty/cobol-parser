@@ -215,6 +215,13 @@ mismatch, sets `_HAS_DATA_FAST = False` and names the rebuild via
 [lexer.md](lexer.md) ("Signature-drift guard");
 `tests/regression/test_data_fast_signature_drift.py`.
 
+Since 2026-10-15 the extension is only looked for under `COBOLPARSER_ACCEL=1`
+(`cobolparser/_accel.py`; pure Python is the default backend), so the probe
+and its warning only ever run under the opt-in. The drift tests reload
+`data_clauses` with the variable set (`_accel_opted_in()`), and
+`test_extension_is_ignored_without_the_opt_in` pins that a default import
+never touches the binary.
+
 **SCREEN/COMMUNICATION SECTION recognition (`data.py`, 2026-08-13) and REPORT SECTION parsing (2026-09-02):**
 `DataDivisionParser` recognizes FILE, WORKING-STORAGE, LOCAL-STORAGE,
 LINKAGE and -- since 2026-09-02 -- REPORT as real sections. SCREEN SECTION
