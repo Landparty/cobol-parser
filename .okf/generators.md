@@ -1,7 +1,7 @@
 ---
 type: Module
 title: Generators
-description: Output generators — flowcharts from a program-flow report, synthetic CSV test data from a copybook record layout, and the gen-fixtures program-scoped test-data initiative (layout index, program fixture bundles, scenario planning, all wired into the CLI).
+description: Output generators — flowcharts from a program-flow report; synthetic CSV test data and real record images (encode, decode, compare, fixed/variable length) from a copybook record layout; and the gen-fixtures program-scoped test-data initiative (layout index, fixture bundles, scenario planning, self-verification, expectations).
 tags: [generators, flowchart, copybook, test-data, csv, mermaid, dot, program-layout, fixtures, scenarios, layout-offsets]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -9,38 +9,68 @@ timestamp: 2026-10-15T00:00:00Z
 # Overview
 
 `cobolparser/generators/` — modules that turn parsed COBOL into an output
-artefact rather than an analysis report.
+artefact rather than an analysis report: diagrams, synthetic test data, real
+record images (and the decoder/comparer that reads them back), and
+program-scoped fixture bundles for the `gen-fixtures` initiative.
 
 | File | Produces |
 |------|----------|
 | `flowchart.py` | Mermaid / Graphviz DOT flowcharts from a `ProgramFlowReport` |
 | `copybook_data.py` | Backwards-compatible re-export shim for copybook → CSV; implementation in `data/` |
-| `data/` | Copybook test data generation — modular internal implementation |
-| `program_fixtures.py` | `ProgramFixtureGenerator` — whole-program `FixtureBundle`s (Phase 3/6) |
+| `data/` | Copybook test data, record-image encoding/decoding/compare, program layout index, fixture-bundle shapes (module list under [Internal Implementation Modules](#internal-implementation-modules)) |
+| `program_fixtures.py` | `ProgramFixtureGenerator` — whole-program `FixtureBundle`s (Phases 3/6/7) |
 | `scenarios.py` | `ScenarioPlanner` — constraints + CFG -> named scenarios (Phase 5) |
-| `verification.py` | `verify_scenario` — does a scenario's own generated data satisfy the branch it is named for? |
+| `verification.py` | `verify_scenario(planned, scenario) -> ScenarioVerification` — does a scenario's own generated data satisfy the branch it is named for? |
+
+**Entry points, by task** (CLI in [cli.md](cli.md)):
+
+| Task | API | CLI |
+|------|-----|-----|
+| Flowchart | `MermaidFlowchartGenerator` / `DotFlowchartGenerator` | `program-flow --format mermaid\|dot` |
+| Copybook → CSV / record image | `CopybookDataGenerator(DataGeneratorOptions(...)).generate_from_file()` → `GeneratedDataset` | `gen-data` |
+| Record image → table | `RecordDecoder.from_copybook_file(...).decode_file()` → `DecodeResult` | `decode` |
+| Expected vs actual file | `compare_files(decoder, expected, actual, key=[...])` → `CompareResult` | `compare` |
+| Byte offsets of every data item | `data.layout_offsets.compute_program_data_items(ast)` | `data-items` |
+| Whole-program fixtures | `ProgramFixtureGenerator().generate_with_scenarios_from_file(path, mode=...)` → `FixtureBundle` | `gen-fixtures` |
+
+Getting started: read the section for your task below; the data-generation
+sections build on each other in order (layout → values → record images →
+views/decoding → variable length). Everything is stdlib-only and
+deterministic per `seed`.
 
 **Import architecture: `__init__.py` is lazy (`__getattr__`-based), not
-eager.** `program_fixtures.py` genuinely depends at runtime on
-`cobolparser.analysis.constraints`/`.domains`/`.program_flow` (Phase 6 added
-the first two), which are themselves reachable from other
-`cobolparser.analysis` modules that need `generators.data.*` utilities
-(`FieldSpec`, `ValueFactory`, `ProgramLayoutIndex`). Eagerly importing every
-submodule at package-init time — the original shape — meant the *first*
-touch of either package from anywhere in the process could fail with
-"partially initialized module", depending on unrelated import order
-elsewhere. This surfaced three separate times as the initiative grew
-(`bundle.py` ↔ `boundary_inventory.py` in Phase 4, `constraints.py` ↔
-`program_fixtures.py` and `domains.py` ↔ `scenarios.py` both in Phase 6)
-before the third occurrence prompted fixing the actual root cause instead of
-patching each edge individually: `__init__.py` now resolves every public name
-through `__getattr__` on first access (mirroring
-`cobolparser.analysis.__init__`'s already-established pattern), so importing
-`cobolparser.generators` itself never touches `program_fixtures.py` (or
-anything else) until a caller actually asks for
-`ProgramFixtureGenerator`/`FixtureBundle`/etc. `__all__` is unchanged — same
-21 public names as before; `__getattr__` does not change `dir()` output, only
-what resolves on attribute access.
+eager.** Importing `cobolparser.generators` touches no submodule; each public
+name is resolved on first attribute access (mirroring
+`cobolparser.analysis.__init__`). `__all__` lists **54** names (copybook
+data, record encoding/decoding/views/compare, layout index, bundle shapes,
+flowcharts, `ProgramFixtureGenerator`). Several helpers live only in
+`cobolparser.generators.data` (its own `__all__`, 61 names): `encode_record`,
+`encode_field`, `hex_dump`, `decode_field`, `decode_record`,
+`occurrence_count`, `unresolved_odo_counters`, `select_record`,
+`ValueFactory`, `binary_byte_length`, `packed_byte_length`. Rationale:
+`program_fixtures.py` depends at runtime on
+`cobolparser.analysis.constraints`/`.domains`/`.program_flow`, which are
+reachable from `cobolparser.analysis` modules that need `generators.data.*`
+(`FieldSpec`, `ValueFactory`, `ProgramLayoutIndex`). Eager package-init
+imports made the first touch of either package fail with "partially
+initialized module" depending on unrelated import order — three times
+(`bundle.py` ↔ `boundary_inventory.py`, `constraints.py` ↔
+`program_fixtures.py`, `domains.py` ↔ `scenarios.py`) before the root cause
+was fixed. (`generators.data.__init__` itself is still eager.)
+
+## Contents
+
+- [Flowcharts (`flowchart.py`)](#flowcharts-flowchartpy)
+- [Copybook Test Data (`data/` package)](#copybook-test-data-data-package-shimmed-via-copybook_datapy)
+  — modules, public API, parsing, flattening, value generation, level-88
+  `VALUE ALL`, record images, views/decoding/compare, fixed vs. variable length
+- [Program Layout Index (`data/program_layout.py`)](#program-layout-index-dataprogram_layoutpy)
+- [Program Fixtures (`program_fixtures.py`, `data/bundle.py`)](#program-fixtures-program_fixturespy-databundlepy)
+  — scenario modes, self-verification, path conditions, expectations,
+  per-category rules, determinism, `write_csv_dir`
+- [Scenario Planning (`scenarios.py`)](#scenario-planning-scenariospy)
+- [Tests](#tests)
+- [See Also](#see-also)
 
 # Flowcharts (`flowchart.py`)
 
@@ -57,13 +87,11 @@ nodes (`X1_OF_S1`, `X1_OF_S2`) and edges, which name nodes by key, attach.
 `CICS_HANDLE`: in the internal-edge set, the GO TO-family set, and labelled
 `SQL WHENEVER`.
 
-**Black reformat (2026-08-13, no behavior change):** `_escape_mermaid_label`
-and `_is_empty_if_arm` were reformatted to match the CI-pinned
-`black==26.3.0` (a local newer black had already reformatted them
-differently) — whitespace-only, no logic change.
-
-**External-call nodes read the analyzer's real shape (2026-08-12 fix, audit
-A-A2).** Both generators used to read `ext.get("target", "")` off
+**External-call nodes.** Module-level `_external_call_target()` reads the
+called program from `report.external_calls[i]["program"]` (falling back to
+`"target"` for hand-built legacy dicts) and uppercases it, so `EXT_*` node ids
+agree with `FlowEdge.target`. Rationale (2026-08-12 fix, audit A-A2): both
+generators used to read `ext.get("target", "")` off
 `report.external_calls`, but `EdgeCollector.process_call`
 (`analysis/program_flow/edges.py`) emits the called program under the
 `"program"` key -- so `EXT_*` nodes NEVER rendered from a real
@@ -71,16 +99,14 @@ A-A2).** Both generators used to read `ext.get("target", "")` off
 case mismatch: `FlowEdge.target` is uppercased by the collector while
 `call_info["program"]` keeps the source's original case, so a lowercase
 `CALL 'subpgm'` literal produced a CALL edge pointing at an `EXT_` id no
-node declared. Module-level `_external_call_target()` now reads
-`"program"` (keeping `"target"` as a fallback for hand-built legacy dicts)
-and uppercases the name so node ids agree with edge endpoints. Pinned by
+node declared. Pinned by
 `tests/unit/test_flowchart_generator.py::TestExternalCallEndToEnd` (real
 COBOL through the analyzer into both renderers, plus the legacy-dict
 fallback).
 
-**Recursion/GO TO edge styling, terminal exit nodes, THRU badges
-(2026-08-11):** both generators now render three things identically in
-substance, differing only in each target format's own attribute syntax:
+**Recursion/GO TO edge styling, terminal exit nodes, THRU badges,
+quoted labels:** both generators render these identically in substance,
+differing only in each target format's own attribute syntax:
 
 - **Recursion / GO TO edge distinction.** Module-level
   `_recursion_pairs(report)` returns every `(source, target)` pair that
@@ -152,7 +178,7 @@ substance, differing only in each target format's own attribute syntax:
   in `legacy-application/cobol/DEPTBMP.cbl`. DOT is unaffected — `_dot_str`
   already quotes every DOT label.
 
-**Label fidelity (2026-08-12):** three fixes driven by how the VS Code
+**Label fidelity and id safety:** rules driven by how the VS Code
 Program Flow webview (Mermaid v11, `htmlLabels:false`,
 `securityLevel:'strict'`) actually renders the emitted text:
 
@@ -262,8 +288,8 @@ dataset.write_csv("customers.csv")
 `cobolparser/generators/data/` decomposes the copybook-data generation logic
 into focused, reusable modules:
 
-- **`options.py`** — `DataGeneratorOptions` configuration (rows, seed, include/exclude flags, value hints).
-- **`errors.py`** — `CopybookLayoutError` exception for layout validation failures.
+- **`options.py`** — `DataGeneratorOptions` configuration: `rows`, `seed`, `include_filler`, `include_condition_filler`, `include_redefines`, `expand_occurs`, `max_occurs`, `respect_values`, `use_condition_values`, `semantic_hints`, `header_style`, `unique_fields`, `blank_rate`, `record_varying`; `for_record_image()` returns the byte-complete variant.
+- **`errors.py`** — `CopybookLayoutError` and `ProgramLayoutError` (both `ValueError` subclasses; `encoding.RecordEncodingError` subclasses `CopybookLayoutError`).
 - **`layout.py`** — `FieldCategory` enum, `FieldSpec` dataclass, `flatten_record()` function; the record flattening rules that turn a nested `CobolDataItem` tree into a flat list of columns. Also exports `expand_condition_values()` for condition-name value expansion.
 - **`layout_offsets.py`** — `LayoutItem` dataclass, `compute_record_layout()` function; byte-offset and byte-length computation for individual records, used by data-item hover details and offset-based lookups (Task 2-6: initial implementation + nested group recursion + REDEFINES-chain slot sharing + OCCURS footprint multiplication + cross-level OCCURS DEPENDING ON ambiguity propagation). Sibling layout (record root and every group) runs through a shared `_layout_siblings()` helper: a "slot" is a contiguous run of `[base item, redefine 1, redefine 2, ...]` — COBOL requires a REDEFINES entry to immediately follow what it redefines — every slot member starts at the same offset, the slot's footprint (`slot_footprint`) is the max footprint across its members, and the running offset advances past the slot once. `_walk_redefines_chain()` resolves a possibly multi-hop REDEFINES chain (A redefines B redefines C) within one sibling list, cycle-guarded. A childless record root (bare 77-level or elementary 01-level) is still special-cased to report its own elementary byte length rather than 0. **Task 5: OCCURS multiplies footprint, never `byte_length`.** `_layout_item()`'s return value (`one_occurrence_length`) is always exactly one occurrence's size and is what gets stored as the emitted `LayoutItem.byte_length` — this fixes a real gap in `CobolDataItem.calculate_size()`, which never applies a *group* item's own OCCURS multiplier. `_layout_siblings()` separately computes each member's `member_footprint` (`one_occurrence_length * (occurs.max_times or occurs.min_times or 1)` for every OCCURS, fixed or `DEPENDING ON` — an ODO table reserves its **maximum**, the storage IBM Enterprise COBOL allocates and the width `encoding.py` writes, so an enclosing group's and the record's `byte_length` equal `GeneratedDataset.record_length()`; until issue #247 (2026-10-04) an ODO table reserved one occurrence only, so a group holding `OCCURS 2 TO 5` reported less than its own minimum. `occurs.depending_on` is also what flips `is_ambiguous = True` for every sibling laid out after it: those offsets move with the counter, the maximum is only the allocation) and folds *that* into `slot_footprint`/`total`/`offset`, so a later sibling's offset correctly advances past every occurrence. `_occurs_dict()` populates the `occurs` field (`{"min": ..., "max": ...}` or `None`) on every non-level-88 `LayoutItem`, elementary or group.
 
@@ -372,12 +398,15 @@ into focused, reusable modules:
   **Task 6: ambiguity propagates across nesting levels, not just within one sibling list.** Task 5's `is_ambiguous` flag was local to each `_layout_siblings()` call — an OCCURS ... DEPENDING ON table nested *inside* a group only made that group's own children ambiguous; the group's own sibling in the *parent* list still got a concrete, wrong offset. `_layout_siblings()`/`_layout_item()` now both return `tuple[int, bool]` (`footprint, trailing_ambiguous`) instead of a bare `int`: a group's nested `_layout_siblings()` call reports whether *it* ended ambiguous, `_layout_item()` passes that straight through for group items (elementary items always report `False` here — their own direct `occurs.depending_on` is already handled by the caller's existing check), and the calling `_layout_siblings()` folds a `True` nested signal into its own `is_ambiguous`, exactly like a direct ODO child would. Propagates through arbitrarily many nesting levels for free (each level only needs its own direct child's signal) — confirmed with a two-level nesting test, not just by inspection. `compute_record_layout()`'s public contract (the `LayoutItem` list and every field on it) is unchanged; only the two private helpers' internal return shape changed. Root cause of the two brief-derived tests initially failing during development: unrelated to this propagation gap — fixed-format COBOL only recognizes columns 8-72 as the code area, and the brief's literal one-line `OCCURS 1 TO 10 TIMES DEPENDING ON WS-COUNT.` fixture at that indentation pushed `ON WS-COUNT.` past column 72, where the lexer silently drops it with no error, so the ODO parsed as a fixed `OCCURS 10` with `depending_on = None`. Test fixtures now wrap `DEPENDING ON <var>` onto a continuation line to stay inside the code area.
 - **`values.py`** — `ValueFactory` class; generates synthetic values for a field, respecting PICTURE/USAGE/level-88 domain/VALUE/semantic hints. `USAGE INDEX`/`POINTER` short-circuit to `"0"` *without drawing from the RNG* — they are storage, not data, and reach the factory PICTURE-less, where they used to fall through to the numeric path's 9-digit default and emit a random number that looked like data. Not drawing is what keeps a copybook with no such field byte-identical for a given seed. A freely drawn number is built exactly, never through float (issue #285): `whole + random()` used to make a `PIC 9(18)` value a float64 and drop every digit past ~15, so most rows ended in `00`. The whole part is an exact `randint`; the fraction is still exactly one `random()` draw (so the RNG stream, and every later field in the record, is unchanged), taken through its repr up to 15 places and as its exact binary value beyond (`_FLOAT_FRACTION_DIGITS`). A field of 11 or fewer total digits is byte-identical for a seed; 12-15 digits can differ, rarely, in the last decimal place, where float was already rounding (0.01% of `9(9)V9(3)` rows, ~3.5% of `9(13)V99`); past 15 digits most rows change (~96% of `9(18)`). `_format_number` and the P-scaled draw run under the module's `_EXACT` 100-digit Decimal context: the default 28 digits rounded 29-31 digit fields, and VALUE / level-88 literals that wide, on the first `abs()` or subtraction.
 - **`storage.py`** — a re-export shim (2026-09-05) for **`cobolparser/_storage.py`**, which the implementation moved to so `cobolparser.models.data_items.CobolDataItem.calculate_size` could defer to it as well: this package's `__init__` eagerly imports `program_layout`, which imports `cobolparser.models`, so a model importing this module directly would close an import cycle. `_storage.py` sits beside `_errors.py` and, like it, has zero internal dependencies. Every existing importer of `storage.py` is unchanged. It remains the package's single authority on **how many bytes a data item occupies**: `storage_size()`, `binary_byte_length()`, `packed_byte_length()`, and the `USAGE` frozensets everything else classifies against. Zero dependencies beyond the stdlib, deliberately — `layout.py`, `layout_offsets.py` and `encoding.py` all import it, which is what stops a record image's field widths from drifting apart from the offsets `data-items` reports. Two cases the older per-module copies of the arithmetic got wrong and this fixes for every caller at once: `USAGE INDEX` (no PICTURE, so it was sized as **zero bytes**, silently collapsing every offset after it) and a DISPLAY item with `SIGN IS SEPARATE` (a byte the PICTURE's character count does not include).
+- **`editing.py`** — numeric-edited pictures: `edit_numeric()` (the display form a `MOVE` leaves, `$1,234.56`), `deedit_numeric()` (its inverse), `deedit_float()`, `is_float_picture()`. Used by `encoding.py` and `decoding.py`; see "Edited pictures" under Value generation.
 - **`encoding.py`** — record-image encoding: the display value from `values.py` rendered into the bytes a COBOL program would actually read, at fixed or variable record length. See "Record images" and "Fixed- and variable-length records" below.
 - **`views.py`** — `PlacedField` / `RecordView` / `RecordViews` / `build_record_views()`: the offset-annotated byte map the *decoder* reads a record through. See "Record views and decoding" below.
 - **`decoding.py`** — the inverse of `encoding.py`: `RecordDecoder`, `decode_field()`, `decode_record()`, `DecodedField` / `DecodedRecord` / `DecodeResult`, `decoded_hex_dump()`. Backs the `decode` CLI subcommand. See "Record views and decoding" below.
 - **`compare.py`** — `compare_records()` / `compare_files()`, `CompareResult`, `RecordDifference`, `FieldDifference`, `CompareError`: two decoded files through one view, compared field by field, paired by key or by position. Backs the `compare` CLI subcommand. See "Record compare" below.
 - **`dataset.py`** — `GeneratedDataset` class; holds rows, fields, seed, and `to_csv()` / `write_csv()` / `to_dicts()` export methods, plus the record-image trio `to_records()` / `write_records()` / `to_hex_dump()` and the length quartet `record_length()` / `minimum_record_length()` / `record_lengths(opts)` / `is_variable_length`.
-- **`copybook.py`** — `parse_copybook_records()` function and `CopybookDataGenerator` class; the public entry points for copybook parsing and CSV generation.
+- **`copybook.py`** — `parse_copybook_records()` function and `CopybookDataGenerator` class; the public entry points for copybook parsing and CSV generation. Also `select_record()` and `fd_record_length()` (see "Decoding").
+- **`program_layout.py`** — `ProgramLayoutIndex` / `FileFacts` / `ResolvedField`; see [Program Layout Index](#program-layout-index-dataprogram_layoutpy).
+- **`bundle.py`** — `BUNDLE_VERSION` (currently `1`), `Expectation`, `BoundaryFixture`, `CoverageSummary`, `Scenario`, `FixtureBundle`; see [Program Fixtures](#program-fixtures-program_fixturespy-databundlepy).
 - **`__init__.py`** — Package exports of the above plus re-exports for backwards compatibility.
 
 All modules are importable from `cobolparser.generators.data`, and
@@ -399,6 +428,8 @@ flatten_record(record, options=None)            -> list[FieldSpec]
 GeneratedDataset:  .record_name .fields .rows .seed .header
                    .varying (VaryingLength | None)
                    .declared_lengths (list[int] | None)
+                   .caveats (list[str])
+                   .lrecl (int | None — FD LRECL padding, see "Decoding")
                    .to_csv(*, line_terminator="\n")
                    .write_csv(path, *, line_terminator="\n")
                    .to_dicts() .to_dict()
@@ -419,9 +450,9 @@ EncodingOptions:   .charset (Charset.ASCII|EBCDIC)
 RecordFormat:      StrEnum — fixed | variable | variable-bare | auto
                    .is_variable
 encode_rdw(body_length) -> bytes        # RDW_SIZE == 4, MAX_VARIABLE_RECORD
-encode_record(specs, row, opts, *, data_length=None)
+encode_record(specs, row, opts, *, data_length=None, pad_to=None)
 record_length(specs) / minimum_record_length(specs)
-row_record_length(specs, row, opts=None, *, data_length=None)
+row_record_length(specs, row, opts=None, *, data_length=None, pad_to=None)
 present_indexes(specs, row) -> list[int]
 occurrence_count(control, cells) -> int
 unresolved_odo_counters(specs) -> list[str]
@@ -429,14 +460,17 @@ RecordEncodingError(CopybookLayoutError)
 FieldSpec:         .name .path .column .level .picture .usage .category
                    .size .integer_digits .decimal_digits .is_signed
                    .value_clause .condition_values .subscripts .redefines
-                   .sign_clause .synchronized .occurs_depending_on
+                   .is_filler .sign_clause .synchronized .blank_when_zero
+                   .justified .occurs_depending_on
                    .odo_controls .odo_counter_bounds
                    .total_digits .scaling_leading (2026-09-10; read straight
                        off the item's own PictureClause at construction --
                        see below)
-                   .qualified_name .storage_size .scaling_positions
-                   .stored_digits .to_dict()
+                   .decimal_point_is_comma .literal_bytes
+                   .qualified_name .storage_size .character_positions
+                   .scaling_positions .stored_digits .to_dict()
 OdoControl:        .depending_on .subscript_index .min_times .max_times
+                   .qualifiers
 ```
 
 **P-scaling: one canonical parse, not a second regex over the raw picture
@@ -469,7 +503,9 @@ FieldCategory:     StrEnum — alphanumeric | alphabetic | national | numeric
 CopybookLayoutError(ValueError)
 ```
 
-All exported from `cobolparser.generators`.
+All importable from `cobolparser.generators.data`; everything except
+`encode_record`, `occurrence_count` and `unresolved_odo_counters` is also
+re-exported (lazily) from `cobolparser.generators`.
 
 ## Parsing a copybook
 
@@ -595,7 +631,7 @@ PICTURE to fit. `_float_value` draws one uniform over ±10,000 and hands it to
 `_render_float(value, single=...)`, which quantises through binary32 for a
 COMP-1 and renders to the 7 / 15 significant digits `decoding._decode_float`
 uses, so the CSV cell is exactly what the record image gives back. See the
-round-trip note under "Reading a record back".
+round-trip note under "Decoding" below.
 
 `_format_number`'s `allow_random_sign` guards a subtle trap: a signed field
 negates a freshly generated magnitude ~25 % of the time so negatives get
@@ -659,6 +695,19 @@ after the fact (surfaced by `gen-data --describe`).
 **`unique_fields`** retries a field up to 32 times for a distinct value, then
 falls back to a deterministic counter — a narrow field (`PIC 9`, ten possible
 values) asked for 40 unique rows must terminate, not spin.
+
+## Level-88 `VALUE ALL` (2026-09-28)
+
+The parser stores a level-88 `VALUE ALL 'X'` as the one value `ALL "X"`
+(`ALL SPACES` for a figurative operand). `layout.all_literal_operand()`
+recognises the form and `layout.fill_all_literal(value, width)` fills it
+(`ALL "AB"` at width 5 is `ABABA`). `expand_condition_values(raw, width)`
+expands it with a width -- `layout._condition_values` passes the item's
+PICTURE size (so `FieldSpec.condition_values` holds `XXX`, which the value
+factory and the solver's enum domain use as is) and `ProgramLayoutIndex`
+passes the owner field's `spec.size`; without a width (`data-items`) it is
+kept as written. `condition_values_exhaustive` counts `ALL "X"` as one exact
+value and `ALL <figurative>` as non-exhaustive.
 
 ## Record images (`data/encoding.py` + `data/storage.py`)
 
@@ -814,7 +863,7 @@ So `build_record_views(record, options) -> RecordViews`:
 | | |
 |---|---|
 | `RecordViews.base` | the record as declared, redefinitions excluded. Its `length` is the record's own length — the LRECL of a fixed-length file |
-| `RecordViews.overlays` | one `RecordView` per `REDEFINES` item anywhere in the tree, in source order. Since #296 (2026-10-13) each is the **whole record with that overlay swapped in** for the item it redefines (`flatten_record(..., substitutions={id(redefined): overlay})`), plus every enclosing overlay for a nested one. So an overlay inside `OCCURS` is read at every occurrence (`T-ALT(1)`, `T-ALT(2)`), and `compare --view X --key K` works for a key outside the redefined area. A shorter overlay is padded with a `FILLER` so later fields keep their offsets. Fields outside the overlay keep the base view's column names (`_align_columns`). An overlay that covers a table's `DEPENDING ON` counter records it as a `HiddenCounter` (from `layout.flatten_overlay_view`), and `decode_record` reads the counter from those bytes when it reaches the overlay. Overlay views are `_LazyOverlayView`s, flattened on first read of `fields`, so a decode through one view does not pay for all of them. A lazy view still takes `RecordView`'s own fields as constructor arguments, so `dataclasses.replace()` works on it. `RecordDecoder._caveats` passes the hidden counters to `encoding_caveats` too, so a covered counter is not reported as missing from the record. `RecordView.offset` is where the overlay itself starts (first occurrence) and `overlay_length` its own span; the fields always start at 0 |
+| `RecordViews.overlays` | one `RecordView` per `REDEFINES` item anywhere in the tree, in source order. Since #296 (2026-10-13) each is the **whole record with that overlay swapped in** for the item it redefines (`layout.flatten_overlay_view(record, substitutions={id(redefined): overlay})`), plus every enclosing overlay for a nested one. So an overlay inside `OCCURS` is read at every occurrence (`T-ALT(1)`, `T-ALT(2)`), and `compare --view X --key K` works for a key outside the redefined area. A shorter overlay is padded with a `FILLER` so later fields keep their offsets. Fields outside the overlay keep the base view's column names (`_align_columns`). An overlay that covers a table's `DEPENDING ON` counter records it as a `HiddenCounter` (also returned by `flatten_overlay_view`), and `decode_record` reads the counter from those bytes when it reaches the overlay. Overlay views are `_LazyOverlayView`s, flattened on first read of `fields`, so a decode through one view does not pay for all of them. A lazy view still takes `RecordView`'s own fields as constructor arguments, so `dataclasses.replace()` works on it. `RecordDecoder._caveats` passes the hidden counters to `encoding_caveats` too, so a covered counter is not reported as missing from the record. `RecordView.offset` is where the overlay itself starts (first occurrence) and `overlay_length` its own span; the fields always start at 0 |
 | `RecordViews.get(name)` | by full name (`CUST-REC.ADDR-OVERSEAS`) or the redefining item's own short name (`ADDR-OVERSEAS`), case-insensitively — a user reading the copybook has the short one in front of them |
 | `RecordView.fields` | `list[PlacedField]` = `(spec, offset)`, contiguous: `placed[n].offset + placed[n].length == placed[n+1].offset` |
 | `RecordView.offset_ambiguous` | base view: the record has an `OCCURS ... DEPENDING ON` table; overlay: one sits before or inside the overlay, so its static offset holds only for a full-length record (the decoder resolves offsets per record). Enclosing fixed `OCCURS` no longer sets it (#296). Set on the **base** view too as of 2026-09-07 — it used to default False there, so `--list-views` presented a maximum-length guess as a fact for the fields `data-items` reports as `byte_offset: null` |
@@ -844,7 +893,7 @@ again rather than a parallel size model.
 
 ### Decoding
 
-`RecordDecoder(views, opts, record_length=None)`, or
+`RecordDecoder(views, opts=None, *, record_length=None, varying=None)`, or
 `.from_copybook_source()` / `.from_copybook_file()` / `.from_record()`.
 `decode_bytes(data, view=..., max_records=..., skip=...) -> DecodeResult`;
 `decode_file(path, ...)` is the same in binary mode (a COMP field routinely
@@ -1296,6 +1345,9 @@ index.resolve("INV-QTY OF INV-REC")    -> ResolvedField | None  # qualified
 index.resolve("INV-REC.INV-QTY")       -> ResolvedField | None  # dotted, same meaning
 index.record_named("INV-REC")          -> CobolDataItem | None  # whole record/group, any section
 index.section_of("WS-EOF")             -> "working_storage"
+index.condition_values("WS-EOF")       -> tuple[str, ...] | None  # this 88's own values (not the parent's union)
+index.condition_raw_values("WS-EOF")   -> tuple[str, ...] | None  # unexpanded ("THROUGH:<end>")
+index.records()                        -> list[CobolDataItem]   # every top-level record, by section
 index.linkage_records()                -> list[CobolDataItem]
 index.working_storage_records()        -> list[CobolDataItem]
 index.ambiguities                      # name -> qualified paths it maps to
@@ -1534,8 +1586,10 @@ actually satisfied the branch the scenario was named for could only be found
 out by running each case under a tracer. `generators/verification.py` closes
 that — `verify_scenario(planned, scenario)` re-reads the scenario's OWN
 emitted fixture data and re-checks every planned conjunct against it, and
-`generate_with_scenarios` stores the verdict on `Scenario.verification`
-(`{"status", "fields", "gaps"}`; additive, `bundle_version` stays `1`;
+`generate_with_scenarios` stores the verdict (a `ScenarioVerification`:
+`status` `"verified"`/`"unverified"`, `fields: list[FieldVerdict]` of
+`field`/`status`/`detail`/`rows`, `gaps`) on `Scenario.verification`
+(serialized `{"status", "fields", "gaps"}`; additive, `bundle_version` stays `1`;
 `None` for a `mode="happy"` scenario, which targets no branch and so has
 nothing to verify).
 
@@ -1668,8 +1722,8 @@ alongside Phase 3's OUT-boundary stubs, via two small helpers in
   where the group's first fixture's expectations start and keeps the old
   `note`, so bundles whose counts were already right are byte-identical
   (`FIXTUREDEMO.bundle.json` unchanged). Error-status scenarios' counts
-  (which take a status-check arm this walk assumes is not taken) are issue
-  #318.
+  (which take a status-check arm this walk assumes is not taken) are
+  trimmed by `_drop_failure_path_counts` (#318, first bullet above).
 * **Tier 2 — `_tier2_expectations`, backed by
   `cobolparser.analysis.const_fold.ConstantFolder`** (see `.okf/analysis.md`
   for the folder's own extensive "exact by construction, or absent" rules).
@@ -1833,17 +1887,25 @@ flow_report = ProgramFlowAnalyzer().analyze(ast)
 plan = ScenarioPlanner().plan(
     constraint_report, flow_report, boundary_report, mode="all"
 )
-plan.scenarios           # list[PlannedScenario]: field_constraints, witnesses,
-                         # sequence_constraints, status_overrides, arm_keys
+plan.scenarios           # list[PlannedScenario]: name, intent, field_constraints,
+                         # witnesses, row_witnesses, sequence_constraints,
+                         # status_overrides, arm_keys, path_gaps
 plan.coverage            # ScenarioCoverage: total_arms == targeted + merged + missed
-plan.coverage.details    # list[ArmOutcome]: one per arm, with a reason on every miss
+plan.coverage.details    # list[ArmOutcome]: arm_key, parent_proc, status,
+                         # merged_into, reason, origin -- a reason on every miss
 ```
 
-**v1 path-condition simplification** (stated up front in the module
-docstring, not discovered later): a scenario targets *one* arm and takes
-only that arm's own conjuncts; enclosing branches on the path to it are not
-accumulated. `ArmOutcome` records "targeted" the same way regardless, so
-this is arm coverage, not full path coverage -- a v2 item.
+`plan(..., *, mode="branches")` — the planner's own default is `"branches"`
+(`ProgramFixtureGenerator.generate_with_scenarios`'s is `"happy"`).
+
+**Path conditions are folded in.** A targeted arm's witness set includes
+the conjuncts of every enclosing arm on its path (`BranchConstraints.enclosing`,
+`_path_constraints`); an enclosing arm the constraint report never modelled
+becomes a `PlannedScenario.path_gaps` entry. Coverage is still *arm*
+coverage, CFG-shaped rather than data-shaped. Full detail in
+[Path conditions](#path-conditions-branchconstraintsenclosing-2026-09-04)
+under Program Fixtures. (The v1 planner took only the arm's own conjuncts;
+that was the largest source of scenarios that never reached their arm.)
 
 **Joining a `BranchConstraints` to its `BranchNode`.** Not by string-matching
 `branch_id` to `BranchNode.node_id` (Phase 4's own docstring already flags
@@ -1968,6 +2030,17 @@ an actual `BoundaryFixture`-populated `bundle.Scenario`, and
   `test_program_layout_corpus.py` uses, purely for "doesn't crash"
   coverage — that corpus was not authored with REDEFINES-chain
   assertions in mind
+* `tests/unit/generators/data/test_layout.py` / `test_values.py` — flattening
+  internals and `ValueFactory`; `test_program_layout_conditions.py` — the
+  index's level-88 lookups (`condition_values`, qualified 88 names)
+* `tests/unit/generators/data/test_editing.py` — numeric-edited
+  `edit_numeric`/`deedit_numeric`, every case checked against GnuCOBOL 3
+* `tests/unit/generators/data/test_views.py` / `test_decoding.py` /
+  `test_compare.py` — record views (offsets match the encoded bytes),
+  decoding per storage class and framing, field-by-field compare; CLI side
+  in `tests/unit/cli/test_decode_cli.py` / `test_compare_cli.py`
+* `tests/contracts/test_copybook_data_module_paths.py` — every `data/`
+  submodule import path and the `copybook_data.py` shim
 * `tests/unit/test_flowchart_generator.py` — flowchart generators
 * `tests/unit/test_program_layout_index.py` — FD/record resolution, FD-vs-SD
   tagging, `FileFacts` merging, bare/qualified/level-88 name resolution,
@@ -1996,6 +2069,11 @@ an actual `BoundaryFixture`-populated `bundle.Scenario`, and
   pins for `generate_with_scenarios`/`_from_file`, happy-mode byte-identity
   with `generate`, `scenario_coverage` population/absence, seed
   reproducibility across `branches`/`all`, unknown-mode `ValueError`
+* `tests/unit/generators/test_scenario_verification.py` — `verify_scenario`
+  verdicts (satisfied/violated/absent/unknown); `test_row_witnesses.py` —
+  `PlannedScenario.row_witnesses` plumbing (populated by nothing yet)
+* `tests/regression/test_fixturedemo_golden.py` — `examples/fixtures/FIXTUREDEMO.cbl`
+  at seed 42 must keep producing the exact golden `FixtureBundle` JSON
 * `tests/unit/test_scenario_planner.py` — single-IF THEN/ELSE targeting with
   differing witnesses, disjoint-field merging, unsatisfiable-arm handling,
   the three fixed families (`mode="all"`), exact coverage accounting
@@ -2008,8 +2086,8 @@ an actual `BoundaryFixture`-populated `bundle.Scenario`, and
 
 * [ast-models.md](ast-models.md) — `CobolDataItem` / `PictureClause` /
   `OccursClause` / `ConditionNameItem`, the inputs to flattening
-* [cli.md](cli.md) — `gen-data` and `gen-fixtures` (Phases 1-3, 5-6) and
-  `program-flow` subcommands
+* [cli.md](cli.md) — `gen-data`, `decode`, `compare`, `data-items`,
+  `gen-fixtures` and `program-flow` subcommands
 * [analysis.md](analysis.md) — `ProgramFlowReport` feeding the flowcharts and
   joined against by `scenarios.py`; `BoundaryInventoryAnalyzer` (Phase 2),
   the input `report` this file's `ProgramFixtureGenerator` (Phase 3) and
@@ -2021,17 +2099,5 @@ an actual `BoundaryFixture`-populated `bundle.Scenario`, and
   full `FixtureBundle` JSON shape, key by key, with a worked example (Phase 6)
 * `docs/plans/2026-08-02-program-data-generation-design.md` and
   `docs/plans/2026-08-02-program-data-generation-implementation.md` — the
-  full 9-phase plan this file documents Phases 1, 3, 5, and 6 of
-
-# Level-88 `VALUE ALL` (2026-09-28)
-
-The parser stores a level-88 `VALUE ALL 'X'` as the one value `ALL "X"`
-(`ALL SPACES` for a figurative operand). `layout.all_literal_operand()`
-recognises the form and `layout.fill_all_literal(value, width)` fills it
-(`ALL "AB"` at width 5 is `ABABA`). `expand_condition_values(raw, width)`
-expands it with a width -- `layout._condition_values` passes the item's
-PICTURE size (so `FieldSpec.condition_values` holds `XXX`, which the value
-factory and the solver's enum domain use as is) and `ProgramLayoutIndex`
-passes the owner field's `spec.size`; without a width (`data-items`) it is
-kept as written. `condition_values_exhaustive` counts `ALL "X"` as one exact
-value and `ALL <figurative>` as non-exhaustive.
+  full 9-phase plan this file documents Phases 1, 3, 5, 6 and 7 of (Phase 2
+  and 4 live in [analysis.md](analysis.md))
