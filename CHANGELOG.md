@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
+  JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never
+  scanned, so the target read as unreachable (and recursion-check / the
+  flowchart lost the edge) while dead-code and the runtime ran it -- e.g.
+  `CICSCHNL`'s `1000-CHECK-CREDIT`, PERFORMed from `JSON PARSE ... NOT ON
+  EXCEPTION`.
+
 * **`dead-code` no longer reports the `EXEC SQL WHENEVER ... GO TO` handler
   as dead** (#349). `WHENEVER SQLERROR | SQLWARNING | NOT FOUND GO TO p`
   (also `GOTO`, `:p`) now makes `p` a GO TO target of every executable SQL
