@@ -1,8 +1,9 @@
 # The MCP server
 
 `cobol-parser mcp` lets an AI agent ask exact questions about COBOL source:
-what a field is and where it is used, what is wrong with a program, and what
-the code at a cited line says. It speaks the
+what a field is and where it is used, what is wrong with a program, what the
+code at a cited line says, and, across the whole workspace, which programs
+call a program and what a copybook or field change reaches. It speaks the
 [Model Context Protocol](https://modelcontextprotocol.io) over stdio, so any
 MCP client can use it: Claude Code, Claude desktop, Cursor, or an Agent SDK
 application.
@@ -55,10 +56,36 @@ cannot be found is left unexpanded and named, while the others still expand.
 |---|---|
 | `program_brief(file, program?, limit?)` | "What is this program?" Size, entry points, the calling interface (USING parameters with direction and a `CALL` example), files with organization, keys and C/R/U/D use, SQL tables, called programs (including the possible targets of a dynamic `CALL` and CICS `LINK`/`XCTL`), CICS and DL/I commands, unreachable paragraphs, health grade and the five worst lint findings. Start here. |
 | `explain_symbol(file, name, program?, limit?)` | "What is `CUST-BAL` and where is it used?" Gives the declaration (PICTURE, USAGE, byte offset and length, REDEFINES, level-88 values) and every reference with its role (read, write, condition, call argument, host variable, ...), statement and paragraph. A name that matches several declarations can be qualified as `X OF Y`. A special register such as `RETURN-CODE` is answered as one (`special_register: true`), not as a misspelling. |
-| `callers_of(file, name, program?, limit?)` | "Who runs `2100-VALIDATE`?" Every `PERFORM` (including a `PERFORM ... THRU` range it sits inside), `GO TO`, SORT/MERGE procedure, CICS `HANDLE`, SQL `WHENEVER` and fall-through into the paragraph or section, and whether it is reachable at all. For a program the file `CALL`s, the call sites. A fall-through is cited at the header of the paragraph that falls in. |
+| `callers_of(name, file?, program?, limit?)` | "Who runs `2100-VALIDATE`?" Every `PERFORM` (including a `PERFORM ... THRU` range it sits inside), `GO TO`, SORT/MERGE procedure, CICS `HANDLE`, SQL `WHENEVER` and fall-through into the paragraph or section, and whether it is reachable at all. A fall-through is cited at the header of the paragraph that falls in. For a program (no `file`, or a name that is no paragraph of `file`): every `CALL`, `EXEC CICS LINK` and `XCTL` to it from any program under the root, with the dynamic `CALL`s whose traced targets include it, the files that declare it, and the dynamic calls whose targets could not be traced. |
 | `record_layout(file, record, program?, limit?)` | "What are the bytes of `CUST-REC`?" Every field in source order with level, PICTURE, USAGE, byte offset and length from the start of the 01 record, OCCURS, REDEFINES and level-88 values, each with where it is declared. A group inside a record, or an FD name for all of the file's records, works too. |
 | `lint(file, rules?, min_severity?, limit?)` | "What is wrong with this program?" Dead code, unused data items, MOVE mismatches, I/O sequencing, LINKAGE problems, recursion risks, complexity, DCLGEN and SQL/CICS checks, worst first. |
 | `read_source(file, line, before?, after?)` | "Show me the code at `COPYREPL.cbl:32`." Up to 200 numbered lines. |
+
+### Across programs
+
+These answer over every program under the root (by `cobol.yml`'s
+`extensions`, default `.cbl`, `.cob` and `.cobol`; hidden directories and the
+copybook directories are skipped).
+
+| Tool | Ask it |
+|---|---|
+| `codebase_overview(limit?)` | "What is in this checkout?" Every program unit with its health grade and how many programs it calls and is called by; the call graph's entry programs, most-called programs, programs called but not present (vendor, system, or kept elsewhere) and call cycles; the most-used and missing copybooks; the worst health scores; and paragraphs duplicated between programs, most duplicated code first. |
+| `impact_of_change(name, file?, program?, depth?, limit?)` | "What breaks if I change `CUSTREC`?" For a copybook member (a name a COPY names, or `CUSTREC.cpy`): every program that COPYs it, with the COPY lines, the programs that reach it through another member (with the chain), and the fields it declares. For a field (with `file`, or a name no COPY names): everything its value flows into, across programs, each hit with the path of statements that carries it. |
+| `where_from(field, file?, program?, depth?, limit?)` | "Where does `FEE-FEE` come from?" The same paths, backward: every field, file, dataset, DB2 column and CALL argument that flows into it. |
+
+Field flows cross programs through `CALL ... USING` arguments, DB2 columns,
+and datasets. Datasets are joined through the JCL under the root (`.jcl` and
+`.job` files), which needs the `[jcl]` extra (`pip install
+'cobol-parser[jcl]'`); without it, or without JCL, a flow stops at the file it
+is written to, and the caveats name each unbound file. `depth` caps how many
+program boundaries a path may cross (`0` stays in the program).
+
+The first cross-program call indexes every program under the root: on a
+root of a few hundred programs that takes on the order of a minute. The
+index is kept and reused until a program or copybook it read changes, or a
+program is added or removed. Who-calls-what, field lineage and health are
+three separate indexes, so asking only who calls a program never pays for
+the other two.
 
 ## Reading an answer
 
@@ -114,6 +141,5 @@ tools.explain_symbol("src/ACCTUPD.cbl", "CUST-BAL")
 
 ## Coming next
 
-Cross-program questions: which programs call this one, what a copybook or
-field change affects, and where a field's value comes from. See
-[the design plan](plans/2026-10-15-mcp-server-design.md).
+Business rules, record decoding, inline test fixtures, program diffs and
+program slicing. See [the design plan](plans/2026-10-15-mcp-server-design.md).

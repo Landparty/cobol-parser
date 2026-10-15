@@ -1327,7 +1327,8 @@ class FieldFlowAnalyzer:
         signature = ProgramSignatureExtractor().analyze(ast)
         for entry in signature.entry_points:
             name = (entry.name or self._program_id).upper().strip("'\"")
-            ctx = _Context(None, False, ast.location)
+            # The USING line itself, so a linkage step cites it, not line 1.
+            ctx = _Context(None, False, entry.location or ast.location)
             verb = (
                 "PROCEDURE DIVISION" if entry.kind == "procedure-division" else "ENTRY"
             )

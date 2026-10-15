@@ -45,6 +45,13 @@ Start with program_brief to learn what a program is and touches; then
 explain_symbol for a data name, callers_of for a paragraph, record_layout for
 a record's bytes, lint for what is wrong, and read_source to show the code at
 a cited line.
+
+Across programs: codebase_overview for the whole workspace, callers_of with a
+program name for every CALL/LINK/XCTL to it, impact_of_change for what a
+change to a copybook or a field reaches, and where_from for where a field's
+value comes from. The first such call indexes every program under the root,
+which takes a while on a large one; later calls reuse the index until a file
+changes.
 """
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
@@ -64,6 +71,20 @@ Limit = Annotated[
     int | None,
     Field(description="Most items to return in a list (default 50, max 500)"),
 ]
+OptionalFile = Annotated[
+    str | None,
+    Field(
+        description="COBOL source file the field is declared in, relative to "
+        "the workspace root (omit it: every program declaring the name)"
+    ),
+]
+Depth = Annotated[
+    int | None,
+    Field(
+        description="Most program boundaries (dataset, CALL, DB2 table) a "
+        "path may cross (default: no limit; 0 stays in the program)"
+    ),
+]
 
 
 def build_server(workspace: Workspace) -> FastMCP:
@@ -79,7 +100,10 @@ def build_server(workspace: Workspace) -> FastMCP:
 
         # A cancelled request answers at once; its thread finishes on its
         # own and only then releases the lock to the next call.
-        return await anyio.to_thread.run_sync(locked, abandon_on_cancel=True)
+        result: dict[str, Any] = await anyio.to_thread.run_sync(
+            locked, abandon_on_cancel=True
+        )
+        return result
 
     async def read_source(
         file: Annotated[
@@ -145,22 +169,29 @@ def build_server(workspace: Workspace) -> FastMCP:
         return await off_loop(lambda: tools.program_brief(file, program, limit))
 
     async def callers_of(
-        file: File,
         name: Annotated[
             str,
             Field(
                 description="Paragraph or section ('PARA OF SECTION' when the "
-                "name repeats), or a program this file CALLs"
+                "name repeats), or a PROGRAM-ID"
             ),
         ],
+        file: Annotated[
+            str | None,
+            Field(
+                description="COBOL source file the paragraph is in, relative "
+                "to the workspace root; omit it to ask about a program"
+            ),
+        ] = None,
         program: Program = None,
         limit: Limit = None,
     ) -> dict[str, Any]:
         """Who transfers control to a paragraph or section: every PERFORM,
         PERFORM THRU range, GO TO, SORT/MERGE procedure, CICS HANDLE, SQL
         WHENEVER and fall-through, with its location, plus whether the
-        paragraph is reachable at all. For a program name, the CALL sites in
-        this file."""
+        paragraph is reachable at all. For a program, every CALL, EXEC CICS
+        LINK and XCTL to it from any program under the root (dynamic CALLs
+        included where their target can be traced)."""
         return await off_loop(lambda: tools.callers_of(file, name, program, limit))
 
     async def record_layout(
@@ -182,10 +213,61 @@ def build_server(workspace: Workspace) -> FastMCP:
         position."""
         return await off_loop(lambda: tools.record_layout(file, record, program, limit))
 
+    async def impact_of_change(
+        name: Annotated[
+            str,
+            Field(
+                description="Copybook member (name or file name) or data "
+                "item ('X OF Y' when it repeats)"
+            ),
+        ],
+        file: OptionalFile = None,
+        program: Program = None,
+        depth: Depth = None,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """What a change reaches. For a copybook member: every program that
+        COPYs it, directly or through another member, with the COPY lines,
+        and the fields it declares. For a field: everything its value flows
+        into, across programs, through MOVEs, arithmetic, files (joined by the
+        JCL under the root), CALL arguments and DB2 columns, each with the
+        path of statements that carries it."""
+        return await off_loop(
+            lambda: tools.impact_of_change(name, file, program, depth, limit)
+        )
+
+    async def where_from(
+        field: Annotated[
+            str, Field(description="Data item ('X OF Y' when it repeats)")
+        ],
+        file: OptionalFile = None,
+        program: Program = None,
+        depth: Depth = None,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """Where a field's value comes from, across programs: every field,
+        file, dataset, DB2 column or CALL argument that flows into it, each
+        with the path of statements that carries it."""
+        return await off_loop(
+            lambda: tools.where_from(field, file, program, depth, limit)
+        )
+
+    async def codebase_overview(limit: Limit = None) -> dict[str, Any]:
+        """The whole workspace on one page: every program with its health
+        grade and how many programs it calls and is called by; the call
+        graph's entry programs, most-called programs, programs called but
+        not present, and call cycles; the most-used and missing copybooks;
+        the worst health scores; and paragraphs duplicated between programs.
+        Start here for a codebase you do not know."""
+        return await off_loop(lambda: tools.codebase_overview(limit))
+
     for tool in (
+        codebase_overview,
         program_brief,
         explain_symbol,
         callers_of,
+        impact_of_change,
+        where_from,
         record_layout,
         lint,
         read_source,

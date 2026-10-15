@@ -180,6 +180,43 @@ first library feature this server would pull forward.
   (`ParsedProgram.report`), as "Session cache" planned.
 - No library change was needed.
 
+## Phase 3 as built
+
+- **Three indexes, not one.** The root-wide cache is three separate builds
+  (`cobolparser/mcp/codebase_index.py`): who calls what and the COPY graph,
+  field lineage, and health with cross-program clones. Each is built on the
+  first call that needs it, so a session that only asks who calls a
+  program never pays for lineage. Each is kept until any file it read, or
+  any directory under the root, changes.
+- **One parse per file per index,** through the workspace's own settings
+  (`>>DEFINE` symbols, skip-missing copybooks), reusing a current cached
+  parse and never filling the LRU. Not `scan_files`: its parse has no
+  `define` symbols and fails a whole expansion on one missing member, and
+  its worker processes would parse with different settings than every
+  other tool. The index is sequential; on 459 NIST programs with copybooks
+  the call graph takes about a minute, most of it in the COPY lexer.
+- **`CodebaseGraphBuilder.build_from_results()`** (library change) lets the
+  index hand the builder its own parses instead of the builder parsing every
+  file again, and `CodebaseGraph.copy_sites` keeps the line of every COPY the
+  builder already scanned.
+- **`callers_of` keeps one name.** `file` became optional: a name that is
+  no paragraph of `file` (or any name, with no `file`) is answered at
+  program level over the whole root, `scope: "workspace"`. The Phase 2
+  "this file only" answer is widened to the root; its rows gained
+  `program` and keep `from` (the paragraph holding the CALL).
+- **`impact_of_change` picks its mode from the name.** A member suffix, or a
+  name a COPY statement names when no `file` is given, is a copybook;
+  anything else is a field. `where_from` is the same field query backward.
+  Both take `depth`, the number of program boundaries a path may cross.
+- **Datasets join through JCL under the root** (`.jcl`, `.job`) when
+  jcl-parser is installed; a flow that stops at an unbound file says so.
+- **Lineage paths are one string per step** (`NODE (STATEMENT at
+  file:line)`), not nested objects: a path runs to a dozen steps and fifty
+  hits of nested dicts cost a model more than the facts.
+- A linkage step used to cite the program's first line; it now cites the
+  `PROCEDURE DIVISION USING` line (library fix in `field_lineage.py`).
+- No new caveat kind; `MCP_SURFACE_VERSION` stays "1".
+
 ## The one library change v1 needs: source-mapped locations everywhere
 
 Today only `LintAnalyzer` (`lint.apply_source_map`) and `FieldFlowAnalyzer`
@@ -256,7 +293,8 @@ Because `tools.py` never imports the SDK, switching later costs one module.
 2. **Rest of v1.** `program_brief`, `callers_of` (paragraph level),
    `record_layout`; docs and OKF.
 3. **v2 cross-program.** Root-wide graph cache, `callers_of` at program level,
-   `impact_of_change`, `where_from`, `codebase_overview`.
+   `impact_of_change`, `where_from`, `codebase_overview`. Built (see "Phase 3
+   as built").
 4. **v3** as listed above, `slice` first once the library has it.
 
 ## Open questions

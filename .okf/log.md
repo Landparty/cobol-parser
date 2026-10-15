@@ -14,6 +14,16 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-15 -- MCP server, Phase 3
+
+[mcp.md](mcp.md) gains the cross-program tools (`codebase_overview`,
+`impact_of_change`, `where_from`, `callers_of` at program level) and
+`codebase_index.py`'s three root-wide indexes. [analysis/codebase.md](analysis/codebase.md)
+documents `CodebaseGraphBuilder.build_from_results()` and
+`CodebaseGraph.copy_sites`. [analysis/lineage.md](analysis/lineage.md): a
+linkage edge now cites the `PROCEDURE DIVISION USING` line rather than the
+program's first line.
+
 ## 2026-10-15 -- MCP server, Phase 2
 
 [mcp.md](mcp.md) gains `program_brief`, `callers_of` (paragraph level, plus

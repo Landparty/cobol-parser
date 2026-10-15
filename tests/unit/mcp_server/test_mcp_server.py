@@ -48,9 +48,12 @@ class TestServer:
         listed, _ = _session([])
         by_name = {tool.name: tool for tool in listed}
         assert set(by_name) == {
+            "codebase_overview",
             "program_brief",
             "explain_symbol",
             "callers_of",
+            "impact_of_change",
+            "where_from",
             "record_layout",
             "lint",
             "read_source",
@@ -61,6 +64,8 @@ class TestServer:
             assert tool.description
             assert tool.outputSchema is not None
         assert by_name["explain_symbol"].inputSchema["required"] == ["file", "name"]
+        assert by_name["callers_of"].inputSchema["required"] == ["name"]
+        assert by_name["where_from"].inputSchema["required"] == ["field"]
 
     def test_calls_return_the_envelope(self) -> None:
         _, results = _session(
@@ -71,6 +76,10 @@ class TestServer:
                 ("program_brief", {"file": "VSAMKSDS.cbl"}),
                 ("callers_of", {"file": "BATCHSEQ.cbl", "name": "1000-INIT"}),
                 ("record_layout", {"file": "COPYREPL.cbl", "record": "WS-COUNTERS"}),
+                ("callers_of", {"name": "LOGGER"}),
+                ("impact_of_change", {"name": "CUSTREC"}),
+                ("where_from", {"field": "WS-EOF-FLAG", "file": "BATCHSEQ.cbl"}),
+                ("codebase_overview", {"limit": 2}),
             ]
         )
         for result in results:
@@ -79,6 +88,13 @@ class TestServer:
         assert results[3].structuredContent["answer"]["files"]
         assert results[4].structuredContent["answer"]["found"] is True
         assert results[5].structuredContent["answer"]["records"][0]["fields"]
+        assert results[6].structuredContent["answer"]["calling_programs"] == [
+            "POSTER",
+            "VALIDATE",
+        ]
+        assert results[7].structuredContent["answer"]["kind"] == "copybook"
+        assert results[8].structuredContent["answer"]["kind"] == "field"
+        assert len(results[9].structuredContent["answer"]["programs"]) == 2
         symbol = results[0].structuredContent["answer"]["symbols"][0]
         assert symbol["declared_at"]["file"] == "copybooks/DCLCUST.cpy"
 

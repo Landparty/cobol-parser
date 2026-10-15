@@ -17,6 +17,7 @@ import functools
 import itertools
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, TypeVar
 
 from ..models.data_items import CobolDataItem, ConditionNameItem
@@ -36,6 +37,13 @@ MAX_SOURCE_LINES = 200
 
 #: Lint findings a program brief shows (worst first); ``lint`` has the rest.
 BRIEF_LINT = 5
+
+#: Length of the "top" lists in a codebase overview (most called, most used
+#: copybooks, worst health, duplicated code); ``limit`` can only lower it.
+OVERVIEW_TOP = 10
+
+#: Notes named one by one in a caveat that summarizes many.
+NOTES_SHOWN = 5
 
 #: DATA DIVISION sections a record can be declared in, as
 #: ``compute_program_data_items`` walks them.
@@ -476,25 +484,29 @@ class CobolTools:
 
     def callers_of(
         self,
-        file: str,
+        file: str | None,
         name: str,
         program: str | None = None,
         limit: int | None = None,
     ) -> dict[str, Any]:
         """Who transfers control to paragraph or section *name*, and from where.
 
-        A program name that *file* CALLs answers with those CALL sites.
+        A name that is no procedure of *file* (or any name, with no *file*)
+        is looked up as a program: which programs under the root CALL, LINK
+        or XCTL to it.
         """
         wanted = " ".join(name.split()).upper()
         if not wanted:
             raise ToolError("no paragraph, section or program name given")
-        parsed = self.workspace.program(file)
+        cap = clamp_limit(limit)
         response = Response()
+        if file is None:
+            return self._program_callers(wanted, response, cap, None, [])
+        parsed = self.workspace.program(file)
         _carry_parse_caveats(parsed, response)
         unit = parsed.unit(program, response)
         program_info = parsed.program_info(unit)
         flow = _flow(parsed, unit)
-        cap = clamp_limit(limit)
 
         wanted = wanted.replace(" IN ", " OF ")
         matches = [
@@ -508,37 +520,10 @@ class CobolTools:
             )
 
         if not matches:
-            sites = [
-                e
-                for e in flow.edges
-                if e.edge_type.value in _CALL_EDGES and e.target.upper() == wanted
-            ]
-            if sites:
-                callers = [_edge_caller(e, parsed, response) for e in sites]
-                return response.build(
-                    {
-                        "name": wanted,
-                        "found": True,
-                        "kind": "program",
-                        "scope": "this file only",
-                        "caller_count": len(callers),
-                        "callers": response.cap(callers, cap, "callers"),
-                    },
-                    program_info,
-                )
+            # Not a procedure here: a program, if any program under the root
+            # is called or named so.
             names = sorted({n.key.upper() for n in flow.nodes})
-            not_found: dict[str, Any] = {
-                "name": wanted,
-                "found": False,
-                "suggestions": difflib.get_close_matches(wanted, names, n=5),
-            }
-            if unit.program_name and wanted == unit.program_name.upper():
-                not_found["note"] = (
-                    f"{wanted} is this program: which other programs CALL it "
-                    "needs a cross-program index, which this server does not "
-                    "build yet"
-                )
-            return response.build(not_found, program_info)
+            return self._program_callers(wanted, response, cap, program_info, names)
 
         unreachable = {u.upper() for u in flow.unreachable_nodes}
         procedures: list[dict[str, Any]] = []
@@ -666,6 +651,515 @@ class CobolTools:
         answer["records"] = records
         answer["offsets_from"] = "the start of each record's 01/77 item"
         return response.build(answer, program_info)
+
+    # -- callers_of, at program level ---------------------------------------
+
+    def _program_callers(
+        self,
+        wanted: str,
+        response: Response,
+        cap: int,
+        program_info: dict[str, Any] | None,
+        procedures: list[str],
+    ) -> dict[str, Any]:
+        """Every CALL, LINK and XCTL to program *wanted* under the root."""
+        from .codebase_index import programs_index
+
+        index = programs_index(self.workspace)
+        _carry_index_caveats(index, response, "CALL statements")
+        callers: list[dict[str, Any]] = []
+        unresolved: list[dict[str, Any]] = []
+        for unit in index.units:
+            for row in unit.calls:
+                target = str(row.get("program") or "").upper()
+                candidates = [str(c).upper() for c in row.get("candidates") or []]
+                if not row.get("dynamic") and target == wanted:
+                    resolved_from = None
+                elif row.get("dynamic") and wanted in candidates:
+                    resolved_from = row.get("program")
+                elif row.get("dynamic") and not row.get("candidates_complete"):
+                    for site in row.get("sites") or []:
+                        unresolved.append(
+                            {
+                                "program": unit.program_id,
+                                "via": row.get("via"),
+                                "target_from": row.get("program"),
+                                "location": site.get("location"),
+                            }
+                        )
+                    continue
+                else:
+                    continue
+                for site in row.get("sites") or []:
+                    caller: dict[str, Any] = {
+                        "program": unit.program_id,
+                        "via": row.get("via"),
+                        "location": site.get("location"),
+                    }
+                    if site.get("paragraph"):
+                        # "from", as a paragraph-level caller names its own.
+                        caller["from"] = site["paragraph"]
+                    if resolved_from is not None:
+                        caller["dynamic"] = True
+                        caller["target_from"] = resolved_from
+                    callers.append(caller)
+
+        declared = []
+        for unit in index.units_named(wanted):
+            where: dict[str, Any] = {"file": unit.file}
+            if unit.depth:
+                where["contained"] = True
+            if unit.unit_kind != "PROGRAM":
+                where["unit_kind"] = unit.unit_kind
+            declared.append(where)
+        if not callers and not declared:
+            known = sorted(
+                {u.program_id.upper() for u in index.units if u.program_id}
+                | {
+                    str(row.get("program") or "").upper()
+                    for u in index.units
+                    for row in u.calls
+                    if not row.get("dynamic")
+                }
+            )
+            return response.build(
+                {
+                    "name": wanted,
+                    "found": False,
+                    "suggestions": difflib.get_close_matches(
+                        wanted, sorted(set(procedures) | set(known)), n=5
+                    ),
+                },
+                program_info,
+            )
+
+        answer: dict[str, Any] = {
+            "name": wanted,
+            "found": True,
+            "kind": "program",
+            "scope": "workspace",
+            "declared_in": declared,
+            "caller_count": len(callers),
+            "calling_programs": sorted({c["program"] for c in callers}),
+            "callers": response.cap(callers, cap, "callers"),
+        }
+        if len(declared) > 1:
+            response.caveat(
+                "duplicate-declaration",
+                f"PROGRAM-ID {wanted} is declared in {len(declared)} places: "
+                + ", ".join(d["file"] for d in declared),
+                "which one a CALL reaches depends on the load library order, "
+                "which the source does not say",
+            )
+        if not declared:
+            answer["note"] = (
+                f"no program under the root has PROGRAM-ID {wanted}: it is "
+                "external to this workspace (a vendor or system program, or "
+                "one kept elsewhere)"
+            )
+        elif not callers:
+            answer["note"] = (
+                "no program under the root CALLs, LINKs or XCTLs to it: it is "
+                "started some other way (a JCL EXEC PGM=, a CICS transaction, "
+                "a scheduler) or is no longer used"
+            )
+        if unresolved:
+            answer["unresolved_dynamic_calls"] = response.cap(
+                unresolved, cap, "unresolved_dynamic_calls"
+            )
+            response.caveat(
+                "incomplete-analysis",
+                f"{len(unresolved)} dynamic CALL/LINK/XCTL site(s) take their "
+                "target from a data item whose values could not all be traced",
+                f"any of them may also reach {wanted}; they are listed in "
+                "unresolved_dynamic_calls",
+            )
+        return response.build(answer, program_info)
+
+    def _relative(self, text: str) -> str:
+        """*text* (a library note) with the root's absolute path cut, so it
+        names files the way every location does."""
+        return text.replace(f"{self.workspace.root.as_posix()}/", "")
+
+    # -- impact_of_change / where_from ---------------------------------------
+
+    def impact_of_change(
+        self,
+        name: str,
+        file: str | None = None,
+        program: str | None = None,
+        depth: int | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """What a change to copybook member or field *name* reaches.
+
+        A copybook member (or, with no *file*, any name a COPY statement
+        names): every program that COPYs it, directly or through another
+        member. A field: everything its value flows into, across programs.
+        """
+        from ..analysis.codebase import _MEMBER_SUFFIXES, _normalize_member
+        from .codebase_index import programs_index
+
+        text = " ".join(name.split())
+        if not text:
+            raise ToolError("no copybook member or field name given")
+        cap = clamp_limit(limit)
+        suffix = Path(text).suffix.lower()
+        if file is None or suffix in _MEMBER_SUFFIXES or "/" in text:
+            member = _normalize_member(text)
+            index = programs_index(self.workspace)
+            if suffix in _MEMBER_SUFFIXES or member in index.graph.members:
+                return self._copybook_impact(member, cap)
+        return self._lineage(text, file, program, depth, cap, "forward")
+
+    def where_from(
+        self,
+        field: str,
+        file: str | None = None,
+        program: str | None = None,
+        depth: int | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Where the value of *field* comes from, across programs."""
+        text = " ".join(field.split())
+        if not text:
+            raise ToolError("no field name given")
+        return self._lineage(text, file, program, depth, clamp_limit(limit), "backward")
+
+    def _copybook_impact(self, member: str, cap: int) -> dict[str, Any]:
+        from ..analysis.codebase import CopybookImpactAnalyzer
+        from .codebase_index import programs_index
+
+        index = programs_index(self.workspace)
+        response = Response()
+        _carry_index_caveats(index, response, "COPY statements")
+        graph = index.graph
+        report = CopybookImpactAnalyzer(graph).analyze(member)
+        if member not in graph.members:
+            return response.build(
+                {
+                    "name": member,
+                    "kind": "copybook",
+                    "found": False,
+                    "suggestions": difflib.get_close_matches(
+                        member, graph.members, n=5
+                    ),
+                }
+            )
+        files = {p.program_id: self.workspace.display(p.path) for p in graph.programs}
+        direct = []
+        for program_id in report.direct_programs:
+            file = files.get(program_id)
+            sites = [
+                {"file": s["file"], "line": s["line"]}
+                for s in index.copy_sites.get(member, [])
+                if s["file"] == file
+            ]
+            direct.append({"program": program_id, "file": file, "copy_sites": sites})
+        through: dict[str, list[list[str]]] = {}
+        for chain in report.chains:
+            if chain and chain[0] in report.transitive_programs:
+                through.setdefault(chain[0], []).append(chain)
+        nested = [
+            {"program": p, "file": files.get(p), "chains": through.get(p, [])}
+            for p in report.transitive_programs
+        ]
+        _notes(
+            response,
+            "incomplete-analysis",
+            [self._relative(note) for note in report.unresolved],
+            "programs or fields reached only through what could not be read "
+            "are missing",
+        )
+        return response.build(
+            {
+                "name": member,
+                "kind": "copybook",
+                "found": True,
+                "resolved_to": [self.workspace.display(p) for p in report.paths],
+                "program_count": report.program_count,
+                "copied_by": response.cap(direct, cap, "copied_by"),
+                "copied_through_other_members": response.cap(
+                    nested, cap, "copied_through_other_members"
+                ),
+                "fields": response.cap(report.fields, cap, "fields"),
+                "next": "for where one of these fields' values go, ask "
+                "impact_of_change with that field and the file of a program "
+                "that copies the member",
+            }
+        )
+
+    def _lineage(
+        self,
+        field: str,
+        file: str | None,
+        program: str | None,
+        depth: int | None,
+        cap: int,
+        direction: str,
+    ) -> dict[str, Any]:
+        from .codebase_index import lineage_index
+
+        if depth is not None and depth < 0:
+            raise ToolError("depth must be 0 or more")
+        response = Response()
+        program_info = None
+        programs: list[str] | None = None
+        if file is not None:
+            parsed = self.workspace.program(file)
+            program_info = parsed.program_info()
+            if program:
+                unit = parsed.unit(program, response)
+                programs = [unit.program_name or ""]
+                program_info = parsed.program_info(unit)
+            else:
+                programs = [u.program_name or "" for u in parsed.ast.program_units()]
+        index = lineage_index(self.workspace)
+        _carry_index_caveats(index, response, "field flows")
+        wanted = field.upper().replace(" IN ", " OF ")
+        result = index.graph.impact(wanted, programs, direction, depth)
+        if not result.start_found:
+            names: set[str] = set()
+            for program_id, data in index.graph.reports.items():
+                if programs and program_id not in {p.upper() for p in programs}:
+                    continue
+                for item in data.get("items") or []:
+                    names.add(str(item.get("qualified_name", "")).split(".")[-1])
+            return response.build(
+                {
+                    "field": wanted,
+                    "kind": "field",
+                    "direction": direction,
+                    "found": False,
+                    "suggestions": difflib.get_close_matches(
+                        wanted.split(" OF ")[0], sorted(names), n=5
+                    ),
+                },
+                program_info,
+            )
+
+        hits = [_hit(hit, index, self.workspace, response) for hit in result.hits]
+        reached = set(result.programs) | {p.upper() for p in programs or []}
+        for caveat in result.caveats:
+            response.caveat(
+                "incomplete-analysis",
+                caveat,
+                "a flow past this point is assumed or unknown",
+            )
+        unjoined = [
+            u for u in index.graph.unjoined if u.split(":", 1)[0].upper() in reached
+        ]
+        if unjoined:
+            how = index.jcl_note or (
+                "no JCL under the root binds them"
+                if not index.jcl_files
+                else "the JCL under the root does not bind them"
+            )
+            _notes(
+                response,
+                "incomplete-analysis",
+                [f"{u} ({how})" for u in unjoined],
+                "a flow through these files stops at the program boundary",
+            )
+        elif index.jcl_note:
+            response.caveat("incomplete-analysis", index.jcl_note)
+        _notes(
+            response,
+            "incomplete-analysis",
+            [self._relative(p) for p in index.problems],
+            "flows through these programs or jobs are missing",
+        )
+        answer: dict[str, Any] = {
+            "field": wanted,
+            "kind": "field",
+            "direction": direction,
+            "found": True,
+            "depth": depth,
+            "programs": result.programs,
+            "tables": result.tables,
+            "datasets": result.datasets,
+            "hit_count": len(hits),
+            "hits": response.cap(hits, cap, "hits"),
+            "legend": (
+                "each hit is a field (or a table column, a dataset byte range, "
+                "or the port where a trail ends) with its path from the start, "
+                "one step per line; location is the statement that reaches it "
+                "(null for a join through a dataset, table or CALL); derived: "
+                "the value is computed on the way, not only copied"
+            ),
+        }
+        return response.build(answer, program_info)
+
+    # -- codebase_overview ---------------------------------------------------
+
+    def codebase_overview(self, limit: int | None = None) -> dict[str, Any]:
+        """The programs under the root, how they call each other and share
+        copybooks, their health, and the code duplicated between them."""
+        from .codebase_index import health_index, programs_index
+
+        cap = clamp_limit(limit)
+        top = min(cap, OVERVIEW_TOP)
+        response = Response()
+        index = programs_index(self.workspace)
+        health = health_index(self.workspace)
+        _carry_index_caveats(index, response, "programs")
+        for caveats in health.file_caveats.values():
+            for caveat in caveats:
+                if caveat.kind == "analyzer-failed":
+                    response.caveat(caveat.kind, caveat.detail, caveat.effect)
+        graph = index.graph
+
+        grades = {(u["program"] or "", u["file"]): u for u in health.units}
+        callers_of: dict[str, set[str]] = {}
+        for edge in graph.call_edges:
+            callers_of.setdefault(edge.callee, set()).add(edge.caller)
+        programs = []
+        for unit in index.units:
+            pid = unit.program_id.upper()
+            graded = grades.get((unit.program_id, unit.file), {})
+            row: dict[str, Any] = {
+                "program": unit.program_id,
+                "file": unit.file,
+                "grade": graded.get("grade"),
+                "score": graded.get("score"),
+                "calls": len({str(r.get("program") or "").upper() for r in unit.calls}),
+                "called_by": len(callers_of.get(pid, set())),
+            }
+            if unit.depth:
+                row["contained"] = True
+            if unit.unit_kind != "PROGRAM":
+                row["unit_kind"] = unit.unit_kind
+            programs.append(row)
+
+        declared = {u.program_id.upper() for u in index.units}
+        external: dict[str, set[str]] = {}
+        for edge in graph.call_edges:
+            if edge.callee not in declared:
+                external.setdefault(edge.callee, set()).add(edge.caller)
+        most_called = sorted(
+            ((p, len(c)) for p, c in callers_of.items() if p in declared),
+            key=lambda pc: (-pc[1], pc[0]),
+        )
+        entry = sorted(
+            u.program_id
+            for u in index.units
+            if not u.depth and u.program_id.upper() not in callers_of
+        )
+        dynamic = sum(
+            1
+            for u in index.units
+            for row in u.calls
+            if row.get("dynamic") and not row.get("candidates_complete")
+            for _ in row.get("sites") or []
+        )
+
+        usage = sorted(
+            (
+                (
+                    m,
+                    len(graph.programs_using(m)),
+                    len(graph.programs_using(m, transitive=False)),
+                )
+                for m in graph.members
+            ),
+            key=lambda mu: (-mu[1], mu[0]),
+        )
+        unresolved_members = sorted(
+            {e.member for e in graph.copy_edges if e.path is None and not e.nested}
+        )
+
+        bands: dict[str, int] = {}
+        for graded_unit in health.units:
+            grade = graded_unit["grade"] or "ungraded"
+            bands[grade] = bands.get(grade, 0) + 1
+        worst = sorted(
+            (u for u in health.units if u["score"] is not None),
+            key=lambda u: (-u["score"], u["program"] or ""),
+        )
+
+        answer: dict[str, Any] = {
+            "index": {
+                **index.summary(),
+                "program_units": len(index.units),
+            },
+            "programs": response.cap(
+                sorted(programs, key=lambda r: (r["program"].upper(), r["file"])),
+                cap,
+                "programs",
+            ),
+            "call_graph": {
+                "edges": len(graph.call_edges),
+                "entry_programs": response.cap(entry, cap, "call_graph.entry_programs"),
+                "most_called": [
+                    {"program": p, "called_by": n} for p, n in most_called[:top]
+                ],
+                "not_in_workspace": response.cap(
+                    [
+                        {"program": p, "called_by": sorted(c)}
+                        for p, c in sorted(external.items())
+                    ],
+                    cap,
+                    "call_graph.not_in_workspace",
+                ),
+                "cycles": response.cap(graph.cycles(), cap, "call_graph.cycles"),
+                "unresolved_dynamic_calls": dynamic,
+            },
+            "copybooks": {
+                "members": len(graph.members),
+                "most_used": [
+                    {"member": m, "programs": n, "copied_directly_by": d}
+                    for m, n, d in usage[:top]
+                ],
+                "not_found": response.cap(
+                    unresolved_members, cap, "copybooks.not_found"
+                ),
+            },
+            "health": {
+                "grades": dict(sorted(bands.items())),
+                "worst": [
+                    {k: u[k] for k in ("program", "file", "grade", "score")}
+                    for u in worst[:top]
+                ],
+                "scale": "score 0-100, higher is more technical debt; "
+                "A <= 10 < B <= 25 < C <= 45 < D <= 70 < F",
+            },
+            "duplicated_code": {
+                "group_count": len(health.clones),
+                "groups": [
+                    {
+                        **group,
+                        "member_count": len(group["members"]),
+                        "members": response.cap(
+                            group["members"],
+                            top,
+                            f"duplicated_code.groups[{number}].members",
+                        ),
+                    }
+                    for number, group in enumerate(
+                        response.cap(health.clones, top, "duplicated_code.groups")
+                    )
+                ],
+                "ranking": "most duplicated statements first (statements x "
+                "copies); a copybook paragraph included by many programs is "
+                "one copy",
+            },
+        }
+        _notes(
+            response,
+            "incomplete-analysis",
+            [self._relative(note) for note in graph.unresolved],
+            "call and COPY edges near these are missing or only approximately "
+            "attributed",
+            lead=f"{len(graph.unresolved)} gap(s) in the call and COPY graph",
+        )
+        if dynamic:
+            response.caveat(
+                "incomplete-analysis",
+                f"{dynamic} dynamic CALL/LINK/XCTL site(s) have targets that "
+                "could not all be traced",
+                "the call graph may miss edges from them",
+            )
+        return response.build(answer)
 
 
 _T = TypeVar("_T")
@@ -1070,6 +1564,109 @@ def _worth_showing(value: Any) -> bool:
     ``byte_offset`` 0 is information; ``0 in (None, [], False)`` is True.
     """
     return value is not None and value is not False and value != []
+
+
+def _carry_index_caveats(index: Any, response: Response, what: str) -> None:
+    """A root-wide index's gaps, as a few caveats rather than one per file."""
+    if index.failed:
+        _notes(
+            response,
+            "incomplete-analysis",
+            [f"{file}: {why}" for file, why in sorted(index.failed.items())],
+            f"{what} in the program files that could not be parsed are missing",
+            lead=f"{len(index.failed)} program file(s) could not be parsed",
+        )
+    by_kind: dict[str, list[str]] = {}
+    for file, caveats in sorted(index.file_caveats.items()):
+        for caveat in caveats:
+            by_kind.setdefault(caveat.kind, []).append(file)
+    effects = {
+        "partial-parse": f"{what} in the statements that did not parse are missing",
+        "unresolved-copybook": f"{what} in the members that were not expanded "
+        "are missing",
+        "analyzer-failed": f"{what} from those files are missing",
+    }
+    for kind, effect in effects.items():
+        files = sorted(set(by_kind.get(kind, [])))
+        if files:
+            response.caveat(
+                kind,
+                f"{len(files)} program file(s): {_listed(files)}",
+                effect,
+            )
+
+
+def _notes(
+    response: Response,
+    kind: str,
+    notes: list[str],
+    effect: str,
+    lead: str | None = None,
+) -> None:
+    """Many notes as one caveat: the first few in full, then a count."""
+    if not notes:
+        return
+    detail = _listed(notes, separator="; ")
+    response.caveat(kind, f"{lead}: {detail}" if lead else detail, effect)
+
+
+def _listed(items: list[str], separator: str = ", ") -> str:
+    shown = separator.join(items[:NOTES_SHOWN])
+    if len(items) > NOTES_SHOWN:
+        shown += f"{separator}and {len(items) - NOTES_SHOWN} more"
+    return shown
+
+
+def _hit(
+    hit: Any, index: Any, workspace: Workspace, response: Response
+) -> dict[str, Any]:
+    """One lineage hit: where the value arrives, and the steps between.
+
+    Each step is one line of text naming the node, the statement and its
+    ``file:line``: a path can run to a dozen steps, and fifty hits of
+    nested objects would spend a model's context on punctuation.
+    """
+    steps = []
+    arrived: dict[str, Any] | None = None
+    for hop in hit.path:
+        location = _hop_location(hop, index, response)
+        how = hop.statement or hop.kind
+        if location is not None:
+            how += f" at {location['file']}:{location['line']}"
+        if hop.confidence != "exact":
+            how += f", {hop.confidence}"
+        steps.append(f"{hop.label} ({how})")
+        arrived = location
+    entry: dict[str, Any] = {
+        "program": hit.program,
+        "field": hit.field,
+        "node_kind": hit.node_kind,
+        "derived": hit.derived,
+        "confidence": hit.confidence,
+    }
+    if hit.program:
+        entry["file"] = index.program_files.get(hit.program.upper())
+    entry["location"] = arrived
+    entry["path"] = steps
+    return entry
+
+
+def _hop_location(hop: Any, index: Any, response: Response) -> dict[str, Any] | None:
+    """Where one hop's statement is, or None for a join (no line of its own)."""
+    if not hop.line or not hop.program:
+        return None
+    program = hop.program.upper()
+    file = index.edge_files.get((program, hop.line, hop.kind, hop.statement))
+    if file is None and program not in index.expanded:
+        file = index.program_files.get(program)
+    if file is None:
+        response.caveat(
+            "unmapped-location",
+            "some locations could not be traced back to a file on disk "
+            "and are reported as null",
+        )
+        return None
+    return {"file": file, "line": hop.line}
 
 
 def _carry_parse_caveats(parsed: ParsedProgram, response: Response) -> None:

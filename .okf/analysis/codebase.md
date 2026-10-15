@@ -139,6 +139,13 @@ keyword-only, defaulting to `DEFAULT_PROGRAM_EXTENSIONS`). `_member_paths` /
 `NotADirectoryError` for a root that is not a directory — a mistyped root must
 not read as "a codebase with no programs".
 
+`build_from_results(paths, results)` is `build()` without the parse: the
+caller hands one `BatchResult` per path (an iterable, consumed one at a time,
+so a generator keeps one AST live). The MCP server's `programs` index feeds
+it its own parses ([../mcp.md](../mcp.md)). `CodebaseGraph.copy_sites` (file
+-> `(member, line)` of each COPY / EXEC SQL INCLUDE written in a program
+file, source order) records the COPY scan's lines; it is not in `to_dict()`.
+
 Backs the `codebase-graph` and `copybook-impact` CLI subcommands. Tests:
 `tests/unit/analysis/test_codebase.py`.
 

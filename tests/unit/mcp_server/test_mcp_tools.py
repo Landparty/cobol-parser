@@ -695,8 +695,9 @@ class TestCallersOf:
     def test_a_called_program(self, root: Path) -> None:
         answer = tools_for(root).callers_of("MQBATCH.cbl", "MQPUT1")["answer"]
         assert answer["kind"] == "program"
-        assert answer["scope"] == "this file only"
+        assert answer["scope"] == "workspace"
         (call,) = answer["callers"]
+        assert call["program"] == "MQBATCH"
         assert call["from"] == "1100-REPLY"
         assert "MQPUT1" in line_of(root, call["location"])
 
@@ -706,8 +707,9 @@ class TestCallersOf:
         assert missing["found"] is False
         assert "3000-WRITE-REPORT" in missing["suggestions"]
         own = tools.callers_of("MQBATCH.cbl", "MQBATCH")["answer"]
-        assert own["found"] is False
-        assert "cross-program" in own["note"]
+        assert own["found"] is True
+        assert own["declared_in"] == [{"file": "MQBATCH.cbl"}]
+        assert own["callers"] == []
         with pytest.raises(ToolError):
             tools.callers_of("MQBATCH.cbl", " ")
 
