@@ -68,6 +68,9 @@ from ._names import QUALIFIER_SEPARATOR, qualified_references
 # first retain their data items before this set could expose them.
 _DATA_SECTION_NAMES = frozenset({"FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE"})
 
+# OO units whose DATA DIVISION every contained METHOD sees, GLOBAL or not.
+_OO_DATA_OWNERS = frozenset({"FACTORY", "OBJECT"})
+
 # Words that can appear as, or inside, an operand's text but are never
 # themselves a data-name reference: figurative constants, connective/
 # qualification keywords the parser leaves joined into an operand string
@@ -495,6 +498,15 @@ class _NameMatcher:
         return matched or list(candidates)
 
 
+def _all_contained_units(ast: CobolProgram) -> list[CobolProgram]:
+    """Every program unit contained in *ast*, at any depth."""
+    units: list[CobolProgram] = []
+    for contained in ast.contained_programs:
+        units.append(contained)
+        units += _all_contained_units(contained)
+    return units
+
+
 class UnusedVariableAnalyzer:
     """Analyzer for detecting unused (never-referenced) DATA DIVISION items.
 
@@ -596,10 +608,14 @@ class UnusedVariableAnalyzer:
         # references count for those alone (``get_all_statements()`` walks
         # into contained programs, and crediting every one of their
         # references here hid the container's genuinely unused items).
+        # The exception is IBM OO COBOL: data declared in a FACTORY or OBJECT
+        # paragraph is visible to every METHOD of that paragraph without a
+        # GLOBAL clause, so there the methods' references count for all of it.
         nested_referenced = self._nested_referenced_names(ast)
+        shares_all_data = getattr(ast, "unit_kind", "PROGRAM") in _OO_DATA_OWNERS
         global_ids: set[int] = set()
         for item in declared_items:
-            if getattr(item, "is_global", False):
+            if shares_all_data or getattr(item, "is_global", False):
                 global_ids.add(id(item))
                 global_ids.update(id(child) for child in item.get_all_children())
 
@@ -647,7 +663,16 @@ class UnusedVariableAnalyzer:
         # any group reference: `MOVE SPACES TO WS-GRP` really does leave its
         # fields never individually referenced, which is a finding worth
         # keeping.
-        for ref in self._whole_group_references(ast):
+        # An OO FACTORY/OBJECT unit has no statements of its own: its METHODs
+        # do the CALL USING / CORRESPONDING work on its data, so read theirs.
+        statement_units = [ast]
+        if shares_all_data:
+            statement_units += _all_contained_units(ast)
+        for ref in {
+            ref
+            for unit in statement_units
+            for ref in self._whole_group_references(unit)
+        }:
             for item in own_refs.resolve(ref):
                 if isinstance(item, CobolDataItem):
                     _mark_subtree_used(item, group_used)
@@ -657,7 +682,9 @@ class UnusedVariableAnalyzer:
         # identifier-2 with the same data-name"), so those -- and only
         # those -- are referenced by the statement. A field with no
         # same-named twin stays assessed.
-        for source_ref, target_ref in self._corresponding_pairs(ast):
+        for source_ref, target_ref in (
+            pair for unit in statement_units for pair in self._corresponding_pairs(unit)
+        ):
             sources = [
                 i for i in own_refs.resolve(source_ref) if isinstance(i, CobolDataItem)
             ]

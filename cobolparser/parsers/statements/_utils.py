@@ -127,6 +127,27 @@ LITERAL_TOKEN_TYPES: frozenset = frozenset(
 #: instead of reporting them as "unparsed tokens".
 SEPARATOR_TOKEN_TYPES: frozenset = frozenset({TokenType.COMMA, TokenType.SEMICOLON})
 
+
+def paren_depth_after(token: Token, depth: int) -> int:
+    """Return the parenthesis nesting depth once *token* has been read."""
+    if token.type == TokenType.LEFT_PAREN:
+        return depth + 1
+    if token.type == TokenType.RIGHT_PAREN:
+        return max(depth - 1, 0)
+    return depth
+
+
+def is_bare_separator(token: Token, paren_depth: int) -> bool:
+    """True for a ``,`` / ``;`` written outside any parentheses (#386).
+
+    Condition, EVALUATE-subject and COMPUTE-expression collectors drop these
+    the way they drop NEWLINE: ``IF X = 1, MOVE ...`` compares X with ``1``,
+    not ``1 ,``. A comma inside parentheses (``FUNCTION MAX(A, B)``) is kept,
+    since there it separates a function's arguments.
+    """
+    return paren_depth == 0 and token.type in SEPARATOR_TOKEN_TYPES
+
+
 #: Explicit scope terminators (END-xxx). These can never begin a statement or
 #: act as an operand, so operand/parameter collection loops must stop on them
 #: rather than swallow them (e.g. ``CALL "X" USING WS-AMT END-READ``).

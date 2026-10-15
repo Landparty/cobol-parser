@@ -6,8 +6,10 @@ from cobolparser.parsers.statements._utils import (
     LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     get_parse_context,
+    is_bare_separator,
     keyword_upper,
     matches_keyword,
+    paren_depth_after,
     report_parse_error,
     skip_statement_separators,
     try_parse_nested_statement,
@@ -259,6 +261,7 @@ class EvaluateStatementParser(IStatementParser):
                 stmt.add_subject(subject)
 
         current_subject: list[str] = []
+        paren_depth = 0
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -284,7 +287,12 @@ class EvaluateStatementParser(IStatementParser):
                 token_stream.consume()
                 continue
 
-            if token.type != TokenType.NEWLINE:
+            # A separator comma/semicolon is a space (#386): ``EVALUATE Y;``
+            # evaluates ``Y``, not ``Y ;``.
+            if token.type != TokenType.NEWLINE and not is_bare_separator(
+                token, paren_depth
+            ):
+                paren_depth = paren_depth_after(token, paren_depth)
                 current_subject.append(condition_token_text(token))
             token_stream.consume()
 
@@ -305,6 +313,7 @@ class EvaluateStatementParser(IStatementParser):
         selector_count = 0
         expecting_selector = True
         saw_separator = False
+        paren_depth = 0
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -344,7 +353,12 @@ class EvaluateStatementParser(IStatementParser):
                 token_stream.consume()
                 continue
 
-            if token.type != TokenType.NEWLINE:
+            # A separator comma/semicolon is a space (#386): ``WHEN 1;``
+            # selects ``1``, not ``1 ;``.
+            if token.type != TokenType.NEWLINE and not is_bare_separator(
+                token, paren_depth
+            ):
+                paren_depth = paren_depth_after(token, paren_depth)
                 value = token.value if token.value else ""
                 # The lexer strips quotes off string literals, so a blank
                 # literal (WHEN '  ' — the IMS DL/I "call succeeded" status
@@ -470,11 +484,21 @@ class EvaluateStatementParser(IStatementParser):
                         "start": start_value,
                         "end": end_value,
                     }
-                return {
+                range_selector: dict[str, Any] = {
                     "type": "Range",
                     "start": start_value,
                     "end": end_value,
                 }
+                # The same additive marker a plain Literal carries: the
+                # lexer strips the quotes, so ``'a' THRU 'c'`` and
+                # ``A THRU C`` would otherwise read alike (#391).
+                for key, bound in (
+                    ("start_quoted", pairs[first:index]),
+                    ("end_quoted", pairs[index + 1 :]),
+                ):
+                    if len(bound) == 1 and bound[0][1] == TokenType.STRING_LITERAL:
+                        range_selector[key] = True
+                return range_selector
 
         if _is_condition_phrase(flat_words):
             selector: dict[str, Any] = {"type": "Condition", "text": condition_text}

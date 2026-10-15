@@ -269,8 +269,8 @@ into focused, reusable modules:
 
   **Task 8: `compute_program_data_items(ast: CobolProgram) -> dict[str, Any]`** —
   the program-wide entry point, returning `{"items": [...], "unresolved":
-  [...]}` (JSON-ready; `unresolved` always present for forward
-  compatibility, though nothing populates it yet). Walks every DATA
+  [...]}` (JSON-ready; `unresolved` always present -- it names SYNCHRONIZED
+  slack and partial level-88 value lists, see below). Walks every DATA
   DIVISION section (FILE, WORKING-STORAGE, LOCAL-STORAGE, LINKAGE) and
   calls `compute_record_layout()` on each section's top-level (01/77)
   records. Also closes a gap `compute_record_layout()` leaves by design:
@@ -291,6 +291,31 @@ into focused, reusable modules:
   offsets are unaffected either way: each top-level record is
   independently record-relative and correctly starts at byte 0 whether or
   not it redefines a section sibling.
+
+  **Level-88 `THRU` ranges: `condition_ranges` (issue #361, 2026-10-14).**
+  `condition_values` comes from `expand_condition_values()`, which lists a
+  range only in part: an integer range up to `_MAX_RANGE_EXPANSION` (`VALUE
+  1 THRU 99999` gave `1`..`65`), any other range just its two endpoints
+  (`'A' THRU 'Z'` gave `A`, `Z`). Read as the whole domain, that told a hover
+  66 or `M` were not values of the condition. Every item now also carries
+  `condition_ranges: [{"from", "to"}]` -- each range as written, quotes
+  stripped, nothing expanded (`layout.condition_ranges()`; empty for a
+  non-88 and an 88 with no range) -- and `compute_program_data_items` adds
+  one `unresolved` line per level-88 whose list is partial
+  (`"<qname>: condition_values lists only part of VALUE 1 THRU 99999;
+  condition_ranges holds the full range"`), judged by
+  `condition_values_exhaustive()` against the parent's decimal digits, so
+  `VALUE 1 THRU 2` on `PIC 9V99` is flagged too, and so is every range
+  under a non-numeric parent (a group, or `PIC XX` with `'01' THRU '12'`:
+  the parser drops the quotes, so the range *looks* integer, but `PIC XX`
+  admits `'1A'` and never holds `'1'`). A typed endpoint is kept as written
+  (`X'00'`, not a NUL byte). Not caught: `LOW-VALUE THRU HIGH-VALUE`, whose
+  `THRU` the DATA DIVISION parser drops (issue #468). Only a range triggers it:
+  `VALUE SPACES` is listed as its word, which is the value. `condition_values`
+  itself is unchanged (additive change; consumers keep working).
+  `LayoutItem.condition_values_complete` carries the verdict and is not
+  serialized. Both 88 construction paths (nested and record-root) go through
+  `_condition_item()` now.
 
   **Final-review fix: root-level level-88s were silently dropped.**
   `compute_record_layout()` builds the record's own root `LayoutItem` on
@@ -823,6 +848,26 @@ again rather than a parallel size model.
 `decode_bytes(data, view=..., max_records=..., skip=...) -> DecodeResult`;
 `decode_file(path, ...)` is the same in binary mode (a COMP field routinely
 contains 0x0A, which a text-mode read would translate).
+
+**Fixed framing of a whole program is the FD's LRECL, not the chosen 01's
+length** (#362, 2026-10-14). Every 01 under one FD shares the record area,
+so a RECFM=F file of that FD holds LRECL-byte records whichever 01
+`--record` picks. `copybook.fd_record_length(records, chosen, options)`
+returns that LRECL -- the largest sibling 01's `framing_length`, or the FD's
+fixed `RECORD CONTAINS n` when that is larger (a smaller one does not shrink
+the area, so every 01 of one FD gets the same LRECL) -- or `None` when it is
+not longer than `chosen` (no FD/SD, a bare copybook, or `chosen` is the
+longest). `from_copybook_source()` uses it as the default `record_length`
+(`--record-length` still overrides; `from_record()` alone has no siblings to
+look at). `CopybookDataGenerator.generate_from_source()` stores the same
+number as `GeneratedDataset.lrecl`, and under `RecordFormat.FIXED`
+`to_records()` / `record_lengths()` / `to_hex_dump()` pad each record out to it
+with the charset's space (`encode_record(..., pad_to=)`), the dump showing an
+`(FD LRECL slack)` row -- so `gen-data --record HDR-REC --format record`
+writes the file `decode --record HDR-REC` reads. Variable formats are not
+padded. Before, a 9-byte header read off a 16-byte file shredded every
+record after the first, and with an all-text layout and a file length
+divisible by both sizes, silently.
 
 Per storage class, each the exact inverse of `encoding.py`'s encoder and
 dispatched on the same `USAGE`-then-category ladder:

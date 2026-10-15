@@ -56,7 +56,7 @@ either by bare name.
   section (`enclosing_section(stmt)` walks `.parent`), else the unique
   name; an ambiguous reference resolves to *every* candidate (keeps code
   alive, never hides it). Used by `program_flow` (scanner + `EdgeCollector`),
-  `DeadCodeAnalyzer` and `ComplexityAnalyzer`.
+  `DeadCodeAnalyzer`, `ComplexityAnalyzer` and `IOSequenceAnalyzer`.
 - **Flow output contract** — `FlowNode.name` stays the bare name;
   `FlowNode.qualified_name` is set (and emitted by `to_dict`) only for a
   shared name; `FlowNode.key` is the one every edge `source`/`target`,
@@ -188,9 +188,33 @@ transfers that land in a procedure and carry on — and then by
 paragraph reached by falling in is itself a fall-through source. PERFORM
 and SORT/MERGE procedure targets are deliberately absent: they stay in
 `_referenced_names` (so they are never reported dead) without licensing an
-edge out of their own end. `_mark_thru_range` still marks a whole
-`PERFORM A THRU C` range referenced, and C still does not escape. Pinned by
+edge out of their own end. A `PERFORM A THRU C` range's end C still does
+not escape. Pinned by
 `tests/unit/analysis/test_dead_code.py::TestFallThroughOnlyEscapesReachableRuns`.
+
+**THRU ranges are walked, not blanket-marked (issue #381, 2026-10-14).**
+`_mark_thru_range` used to mark every procedure between the two ends of a
+`p THRU q` range referenced, so an obsolete stub inside `PERFORM 1000-PROC
+THRU 1000-EXIT` that every path jumps over with `GO TO 1000-EXIT` was never
+reported. Ranges are now recorded during collection (`_thru_ranges`) and
+walked by `_mark_thru_ranges` *after* `_collect_fallthrough_refs`, in source
+order like the section walk: a member is reached when the one before it was
+reached and does not `_terminate`, or when it is a fall-through source (a
+GO TO / ALTER / ENTRY landing) or a section-exit jump target. Sections in the
+range are walked through, since their paragraphs follow the header in
+`_ordered_procedures`. Both ends stay referenced unconditionally. Pinned by
+`tests/unit/analysis/test_dead_code.py::TestThruRangeSkippedMembers`.
+Two refinements from review: "landing in it" means any member in
+`_jump_targets` (every GO TO / ALTER / CICS HANDLE target, *including*
+range ends and section exits, which are not fall-through sources) -- so
+`GO TO P1-EXIT` inside a `PERFORM P0 THRU P2-EXIT` that also nests
+`PERFORM P1 THRU P1-EXIT` still runs on into P2; and an `EXIT SECTION`
+member (`_exits_section`) resumes the walk at the next section header in the
+range, since it leaves only its own section. `_mark_thru_ranges` runs
+*inside* the #384 worklist right after `_collect_fallthrough_refs`, so a
+reached range member's statements are admitted the next round (after the
+loop, a PERFORM in a range member would never be collected). Pinned by
+`TestThruRangeNestedAndSectionExits`.
 
 **Known related over-approximation, deliberately not changed.**
 `ProgramFlowAnalyzer`'s `graph.build_fall_through_edges` still emits a
@@ -558,6 +582,21 @@ options` (option keyword -> parenthesized argument text) and
 inside one of these statements is no longer falsely reported unused. See
 `TestExecCicsAndImsArguments` in `test_unused_variables.py`.
 
+**OO FACTORY / OBJECT data is shared with its METHODs (issue #379,
+2026-10-14).** A contained unit's references normally count only for the
+container's GLOBAL items. In IBM OO COBOL, though, the data of a FACTORY or
+OBJECT paragraph is visible to every METHOD in it with no GLOBAL clause, so
+when `ast.unit_kind` is in `_OO_DATA_OWNERS` every item is matched against
+`_nested_referenced_names(ast)` too. Instance data that only methods touch
+(all of it, in practice) is no longer reported unused. Factory and object
+scopes stay separate: an OBJECT method's reference does not use a FACTORY
+item of the same name. The whole-group rules (`_whole_group_references`:
+CALL USING, XML/JSON GENERATE/PARSE) and `_corresponding_pairs` read the
+methods' statements too (`_all_contained_units`), since the FACTORY/OBJECT
+unit has none of its own. Known gap, shared with the GLOBAL path: a
+method-local item that shadows an instance item still credits the instance
+item. See `TestObjectOrientedUnitData`.
+
 CLI: `unused-variables` subcommand — see [cli.md](cli.md).
 
 ## ProgramFlowAnalyzer
@@ -893,7 +932,14 @@ window, no near-miss/type-3 similarity scoring, matching the design goal of
 kinds:
 
 - **Type-1 (exact)**: identical statement types, operands, and condition
-  text, verbatim -- and everything else each statement does (#262, below).
+  text -- and everything else each statement does (#262, below). "Identical"
+  is up to what COBOL itself ignores (#391): `_normalize_text` collapses
+  every whitespace run outside a literal to one space and upper-cases all
+  text outside a literal, for *both* types, so a line break inside a
+  COMPUTE or condition, or a paragraph written in lowercase, no longer hides
+  a Type-1 clone (lowercase used to drop to Type-2; a line break used to
+  lose the match entirely). Literal text stays exactly as written:
+  `DISPLAY "Done"` vs `display "DONE"` is not a clone.
 - **Type-2 (renamed)**: identical statement-type/control-flow shape with
   identifier-shaped tokens (data-names, paragraph-names) consistently
   substituted with per-paragraph positional placeholders (`ID1`, `ID2`,
@@ -936,7 +982,15 @@ by owner decision the `type1`/`type2` digests changed in place, and digests
 stored by earlier scans simply stop matching new ones. Known residual: the
 parser stores some literals unquoted (an INSPECT `'X'`, a STRING
 `DELIMITED BY 'X'`), so under Type-2 only, two such literals still read as a
-consistent rename; Type-1 tells them apart.
+consistent rename. Since #391 folds case outside quotes, `_unquoted_literals`
+and `_selector_text` re-quote the unquoted literals the AST *marks* as
+literals (static CALL target, INVOKE method literal, STOP literal, EVALUATE
+`WHEN` Literal with `quoted` and Range bounds with `start_quoted` /
+`end_quoted`), so a case-only difference there still breaks Type-1. Where the
+AST does not mark them -- CANCEL targets, ACCEPT ... FROM ENVIRONMENT names,
+EXEC CICS option values, literal arguments inside a COMPUTE `expression`,
+XML/JSON `clause_text` -- a case-only literal difference reads as the same
+text, so Type-1 can group them (it could not before #391).
 
 **Reuses `unused_variables.py`'s `_NON_IDENTIFIER_WORDS`/quoted-text
 handling verbatim** rather than re-deriving a second reserved-word list --
@@ -1156,6 +1210,17 @@ via a range stack; per-chain visited sets keep GO TO cycles finite).
 Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Conditional
 branches still share one state (unchanged conservatism); paragraphs
 unreachable from the entry procedure are no longer walked at all.
+
+**GO TO / PERFORM targets resolve section-first (2026-10-14, issue #335).**
+The walk's name -> paragraph-index maps (`_name_first` / `_name_last`) are
+keyed by `ProcedureIndex` keys, and `_resolve()` applies its rule from the
+section of the paragraph being walked (`_current_section`, restored after
+each PERFORM) plus the `target_qualifier` / `thru_qualifier` metadata. With
+a `SEC-EXIT` in every section, `GO TO SEC-EXIT` used to land on the first
+section's exit -- outside the PERFORMed range, so the PERFORM ended there,
+the real exit's CLOSE was never seen, and FILE_LEFT_OPEN was reported.
+Conditional GO TO targets are resolved when queued. Pinned by
+`tests/unit/analysis/test_io_sequence.py::TestSectionLocalParagraphNames`.
 
 **PERFORM ranges are summarized, not re-inlined (2026-10-14, #371).** Each
 PERFORM used to re-walk its target paragraphs through Python recursion, so a
@@ -3049,6 +3114,23 @@ not "empty and known". `CallEdge` carries `is_dynamic` / `resolved` / `kind`; `C
 carries `member`, `path` and `nested`, where for a nested edge `program` is the
 *outer member name*, which is what makes a `PROG1 -> OUTER -> INNER` chain
 walkable in either direction.
+
+**Library-qualified COPY (#351).** `COPY REC OF LIBA` and `COPY REC IN LIBB`
+are two different files, so the builder's caches are keyed by more than the
+member name: `_member_paths` / `_member_failures` on `(member, library)`, and
+`_member_copies` on the resolved file path. A nested COPY is resolved with its
+own `library_qualifier`, as the expander does. `CopyEdge` carries `library`
+(the qualifier as written, case kept) and, for a nested edge, `parent_path` --
+the outer member's file. `programs_using()` and `CopybookImpactAnalyzer` walk
+up *edge by edge* (`CopyEdge._is_parent`: same name, and same file whenever the nested
+edge has a `parent_path`), so `LIBB/REC -> INNER` reaches only the programs
+whose `REC` resolved to `LIBB/REC.cpy` -- never a program whose `REC` did not
+resolve at all. A hand-built nested edge with no `parent_path` matches by name
+alone (the pre-#351 behaviour). `ImpactReport.paths`
+lists every file the member name resolved to; with more than one, `fields` is
+their union and `unresolved` says so. The DOT/Mermaid renderings still draw
+one node per member *name*, and draw each `(program, member, nested)` edge once
+(`_rendered_copy_edges`), however many files sit behind it.
 
 Two rules hold throughout:
 

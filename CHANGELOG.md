@@ -196,6 +196,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section (program-flow draws that `FALL_THROUGH` edge only then).
   `EXIT SECTION.` written straight after a section header no longer parses
   as an empty section named `EXIT`.
+* **`dead-code` walks `PERFORM A THRU C` ranges instead of marking every
+  member live** (#381). An obsolete stub inside `PERFORM 1000-PROC THRU
+  1000-EXIT` that every path jumps over with `GO TO 1000-EXIT` is now
+  reported dead, within one section or across sections. A range member is
+  live when the one before it runs on into it, or when a GO TO / ALTER /
+  ENTRY / CICS HANDLE lands on it (a nested range's `nnnn-EXIT` included);
+  an `EXIT SECTION` inside the range carries on at the next section. The walk
+  runs inside the transitive-reachability worklist, so a PERFORM written in
+  a skipped member keeps nothing alive.
+* **decode / compare / gen-data: a whole program's RECFM=F file is framed at
+  the FD's LRECL** (#362). `--record X` on a program source used to cut the
+  file at that 01's own length; every 01 under one FD shares the record area,
+  so the LRECL is its largest 01, or the FD's `RECORD CONTAINS n` when that
+  is larger.
+  `decode`/`compare` now frame there by default (`--record-length` still
+  overrides), and `gen-data --format record|hex` pads a shorter 01 out to it
+  with spaces, so the two round-trip.
 
 * **`codebase-graph` now records `EXEC CICS LINK` / `XCTL PROGRAM(...)` edges**
   (#315). They were skipped with no `unresolved` note, so a CICS program's
@@ -271,6 +288,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `program-flow`, edges, entry/exit points, cycles and `unreachable_nodes`
   name such a node by its `qualified_name`. `complexity` now measures each
   same-named paragraph on its own body instead of summing them.
+* **`redundancy` / `scan --clones` missed exact clones that differ only in
+  line layout or keyword case** (#391): a line break inside a COMPUTE hid
+  the clone entirely and a lowercase paragraph dropped to TYPE_2. Both
+  fingerprint types now collapse whitespace and fold case outside literals;
+  literal text is still compared exactly (including the EVALUATE `WHEN`
+  values / `THRU` bounds, static CALL targets, INVOKE method literals and
+  STOP literals the AST stores unquoted -- EVALUATE `Range` selectors gain
+  additive `start_quoted` / `end_quoted` markers for this). COMPUTE's
+  `expression` text no longer contains line breaks. **The `type1` / `type2`
+  digests change in place**: digests stored from an earlier scan stop
+  matching for any paragraph with lowercase words, whitespace runs or a
+  multi-line COMPUTE.
 * **`redundancy` / `scan --clones` / `health` reported paragraphs that
   behave differently as exact clones** (#262): a statement's fingerprint
   covered only its type and operand list, so a different COMPUTE formula,

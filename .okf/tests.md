@@ -22,6 +22,15 @@ its own line: one MOVE with the register as target, no phantom paragraph.
 Also pins the fixed-format Area B rule (an undeclared Area B name stays an
 operand) and two controls: an Area A header after a missing period, and an
 indented free-format name, are still boundaries.
+2026-10-14: `tests/regression/test_fd_lrecl_framing_issue_362.py` (18
+tests, #362) pins RECFM=F framing at the FD's LRECL for a whole-program
+source: `fd_record_length` (largest sibling 01, `RECORD CONTAINS`, `None`
+for the longest 01 / WORKING-STORAGE / a bare copybook), `decode`/`compare`
+framing a shorter 01's file, `--record-length` still overriding, and
+`gen-data` space-padding (ASCII and EBCDIC) so the two round-trip, and
+one LRECL per FD when `RECORD CONTAINS` is below the largest 01. Its
+program template puts the RECORD clause on its own line: appended to the
+FD line it ran past column 72, where fixed format drops it.
 
 2026-10-14: `tests/regression/test_evaluate_word_operator_when.py` (38
 tests, #387) pins EVALUATE WHEN phrases with relational words
@@ -30,12 +39,29 @@ single `Condition` selectors (a lone `WHEN ZERO` stays figurative), the
 logical-only `operator: "OR"`, and what business-rules / xref /
 ConstraintExtractor / complexity read from them.
 
+2026-10-14: +6 in `tests/unit/analysis/test_unused_variables.py`'s new
+`TestObjectOrientedUnitData` (issue #379): FACTORY / OBJECT data used only
+by that paragraph's METHODs is not reported unused, data no method touches
+still is, an OBJECT method's reference does not reach FACTORY data, and a
+method's CALL USING / MOVE CORRESPONDING marks the OBJECT group's fields. One
+test runs `tests/samples/enterprise/OOCOBOL.cbl`. See `analysis.md`.
+
 2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
 #377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
 read, no phantom paragraph appears, and dead-code / program-flow /
 unused-variables / complexity all see the jump table.
 `test_go_parser_edge_cases.py`'s `test_depending_without_on_reads_variable`
 replaces the test that pinned the old behavior.
+
+2026-10-15 (#391): `tests/unit/analysis/test_redundancy.py` gains
+`TestLayoutAndCaseDoNotAffectClones` (line breaks, lowercase and spacing
+still give TYPE_1; literal case still breaks it; `scan` digests agree) and
+`TestUnquotedLiteralCaseStillBreaksType1` (EVALUATE WHEN / THRU, static
+CALL, INVOKE and STOP literals differing only in case are never TYPE_1);
+`test_evaluate_variants.py::TestRangeQuotedMarkers` pins the Range
+`start_quoted` / `end_quoted` markers (and
+`test_evaluate_keyword_literal_when.py` now expects them on `'A' THRU 'C'`); `test_compute_expression_parsing.py::
+TestComputeExpressionLayout` pins a multi-line COMPUTE's expression text.
 
 2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests,
 #313) pins EVALUATE `WHEN SPACES` / `ZERO` / `LOW-VALUES` as figurative
@@ -203,6 +229,11 @@ RELEASE/RETURN). See `analysis.md`.
 `ADD 1 TO WS-COUNT` is now read *and* write) and
 `test_program_signature.py` (+1) pin arithmetic read/write roles and the
 LINKAGE directions derived from them. See `analysis.md`.
+
+2026-10-14: `tests/unit/analysis/test_io_sequence.py::TestSectionLocalParagraphNames`
+(4 tests) pins a `SEC-EXIT` in every section: an unqualified GO TO (direct or
+conditional) lands on its own section's exit, and `PERFORM SEC-EXIT OF B-SEC`
+on the named one (issue #335). See `analysis.md`.
 
 2026-10-14: `tests/unit/analysis/test_io_sequence_perform_summaries.py` (7
 tests, #371) pins io-sequence surviving a 1,500-deep PERFORM chain, walking a
@@ -1156,8 +1187,8 @@ Pythons, so the guard is not in force there; only the `coverage` job skips
 them. The ratio-based overhead assertion is unaffected. Surfaced the moment
 the suite was first wired into CI.
 
-The full suite (~12,300 tests across 439 `test_*.py` files as of
-2026-10-04; ~9,400 at the time) **does** run on every PR, as of the
+The full suite (~13,000 tests across 464 `test_*.py` files as of
+2026-10-14; ~9,400 at the time) **does** run on every PR, as of the
 2026-09-07 audit (on 3.13 only since 2026-10-03 -- see `build` above). It previously ran nowhere: this file used to describe a
 `test` job gated on `if: github.event_name == 'workflow_dispatch'`, and no
 such job was ever in `ci.yml` — the suite and the `--cov-fail-under=90`
@@ -1373,6 +1404,12 @@ REFERENCE, ...) once on one line and once broken across two, and requires
 identical ASTs apart from locations; it also pins the dispatch cache
 telling EXEC<newline>SQL from EXEC<newline>CICS within one parse.
 
+`tests/regression/test_condition_expression_separators.py` (issue #386)
+pins a separator `,` / `;` after an IF condition, a PERFORM UNTIL condition
+(inline, out-of-line, VARYING), an EVALUATE subject or WHEN selector, a SEARCH
+WHEN condition and a COMPUTE expression
+being dropped, and a comma inside `FUNCTION MAX(X, Y)` being kept.
+
 `tests/regression/test_fd_record_after_label_data.py` (issue #401) pins
 RECORD CONTAINS / RECORD VARYING written after LABEL RECORDS or DATA RECORD:
 the `fd_clauses["record"]` length and `ProgramLayoutIndex.file_facts()`
@@ -1507,3 +1544,15 @@ pins the source-order model: a directive in a never-performed setup
 paragraph still covers SQL that runs, SQL before the directive or only in a
 dead paragraph is not a branch, CONTINUE is per condition, declarations are
 not covered, and dead-code and program flow agree on every case.
+## 2026-10-14 (issue #351)
+
+`tests/unit/analysis/test_codebase.py::TestLibraryQualifiedCopy` pins that
+`COPY REC OF LIBA` / `COPY REC IN LIBB` resolve to each library's own file in
+codebase-graph, that a nested COPY inside `LIBB/REC` reaches only the programs
+copying `LIBB/REC` (chains `[PB, REC, INNER]`), that `copybook-impact` on a
+member name resolving to several files unions their fields and says so, and
+that a hand-built nested `CopyEdge` without `parent_path` still matches by name.
+`TestLibraryQualifiedCopyReview` (#445 review) pins that a COPY whose library
+did not resolve is never the parent of a nested edge read from a resolved
+file, and that DOT/Mermaid draw `REC -> INNER` once when two libraries' REC
+both copy INNER.

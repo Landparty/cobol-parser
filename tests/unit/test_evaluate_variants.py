@@ -1,4 +1,4 @@
-from cobolparser import CobolParser, ParseResult
+from cobolparser import CobolParser, ParseResult, parse_cobol
 from cobolparser.models.program import CobolProgram
 from cobolparser.models.statements import EvaluateStatement
 
@@ -134,3 +134,46 @@ def test_evaluate_true_with_conditions_and_or():
     second_when = ev.when_clauses[1]
     assert second_when.selectors[0]["operator"] == "OR"
     assert ev.default_when is not None
+
+
+class TestRangeQuotedMarkers:
+    """#391: a THRU bound that was a string literal says so, like a plain
+    Literal selector's ``quoted`` marker."""
+
+    @staticmethod
+    def _range(when: str) -> dict:
+        result = parse_cobol(f"""
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RNG.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 X PIC X.
+       01 LO PIC X.
+       01 HI PIC X.
+       PROCEDURE DIVISION.
+           EVALUATE X
+             WHEN {when} DISPLAY 1
+           END-EVALUATE
+           STOP RUN.
+""")
+        assert result.ast is not None
+        (stmt,) = result.ast.find_all_by_type("EvaluateStatement")
+        (selector,) = stmt.when_clauses[0].selectors
+        return selector
+
+    def test_quoted_bounds_are_marked(self):
+        assert self._range("'a' THRU 'c'") == {
+            "type": "Range",
+            "start": "a",
+            "end": "c",
+            "start_quoted": True,
+            "end_quoted": True,
+        }
+
+    def test_mixed_bounds_mark_only_the_literal(self):
+        selector = self._range("LO THRU 'c'")
+        assert "start_quoted" not in selector
+        assert selector["end_quoted"] is True
+
+    def test_numeric_range_is_unchanged(self):
+        assert self._range("1 THRU 5") == {"type": "Range", "start": "1", "end": "5"}

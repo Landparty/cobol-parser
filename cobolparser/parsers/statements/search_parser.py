@@ -13,8 +13,10 @@ from ._utils import (
     STATEMENT_KEYWORDS,
     bare_end_starts_at_end_clause,
     consume_optional_qualifiers,
+    is_bare_separator,
     keyword_upper,
     matches_keyword,
+    paren_depth_after,
     previous_meaningful_token,
     skip_statement_separators,
     skip_whitespace,
@@ -127,10 +129,16 @@ class SearchStatementParser(IStatementParser):
                 skip_whitespace(token_stream)
                 # Collect condition text until statement keyword
                 cond_parts: list[str] = []
+                paren_depth = 0
                 while not token_stream.is_empty():
                     t = token_stream.peek()
                     if not t:
                         break
+                    # A separator comma/semicolon is a space (#386).
+                    if is_bare_separator(t, paren_depth):
+                        token_stream.consume()
+                        skip_whitespace(token_stream)
+                        continue
                     # Clause words only as words: WHEN K = "WHEN" compares
                     # against a literal (the lexer strips its quotes).
                     tv = keyword_upper(t)
@@ -143,6 +151,7 @@ class SearchStatementParser(IStatementParser):
                     if t.type not in LITERAL_TOKEN_TYPES and tv in STATEMENT_KEYWORDS:
                         break
                     token_stream.consume()
+                    paren_depth = paren_depth_after(t, paren_depth)
                     # Re-quote string literals so ``= 'X'`` and ``= X`` stay
                     # distinguishable in the recorded condition text.
                     cond_parts.append(condition_token_text(t))

@@ -590,3 +590,97 @@ class TestGroupUsageInheritance:
         assert (by_name["B"].byte_offset, by_name["B"].byte_length) == (3, 2)
         assert (by_name["C"].byte_offset, by_name["C"].byte_length) == (5, 4)
         assert (by_name["Z"].byte_offset, by_name["Z"].byte_length) == (9, 1)
+
+
+class TestConditionRanges:
+    """Issue #361: a level-88 ``THRU`` range is reported in full as
+    ``condition_ranges``, and a ``condition_values`` that lists only part of
+    it is named in ``unresolved`` -- 66, 'M' and 1.75 are values of the
+    conditions below, and nothing used to say so."""
+
+    _BODY = (
+        "       01 REC.\n"
+        "          05 A PIC 9(5).\n"
+        "             88 A-OK     VALUE 1 THRU 99999.\n"
+        "             88 A-SMALL  VALUE 1 THRU 3, 7.\n"
+        "          05 B PIC X.\n"
+        "             88 B-ALPHA  VALUE 'A' THRU 'Z'.\n"
+        "          05 C PIC 9V99.\n"
+        "             88 C-MID    VALUE 1.50 THRU 2.00.\n"
+        "             88 C-ONE    VALUE 1 THRU 2.\n"
+        "          05 D PIC X.\n"
+        "             88 D-BLANK  VALUE SPACES.\n"
+        "             88 D-YES    VALUE 'Y'.\n"
+        "       01 FLAG PIC 9.\n"
+        "          88 FLAG-ON VALUE 1 THRU 5.\n"
+    )
+
+    def _report(self) -> tuple[dict[str, dict], list[str]]:
+        report = _program_items(self._BODY)
+        by_name = {item["name"]: item for item in report["items"]}
+        return by_name, report["unresolved"]
+
+    def test_every_thru_range_is_reported_as_written(self):
+        by_name, _ = self._report()
+        assert by_name["A-OK"]["condition_ranges"] == [{"from": "1", "to": "99999"}]
+        assert by_name["A-SMALL"]["condition_ranges"] == [{"from": "1", "to": "3"}]
+        assert by_name["B-ALPHA"]["condition_ranges"] == [{"from": "A", "to": "Z"}]
+        assert by_name["C-MID"]["condition_ranges"] == [{"from": "1.50", "to": "2.00"}]
+        # A range directly under a 01/77 root goes through the root's path.
+        assert by_name["FLAG-ON"]["condition_ranges"] == [{"from": "1", "to": "5"}]
+
+    def test_no_range_reports_an_empty_list(self):
+        by_name, _ = self._report()
+        assert by_name["D-BLANK"]["condition_ranges"] == []
+        assert by_name["D-YES"]["condition_ranges"] == []
+        # Every item carries the key, not only the level-88s.
+        assert by_name["REC"]["condition_ranges"] == []
+
+    def test_condition_values_is_unchanged(self):
+        by_name, _ = self._report()
+        assert by_name["A-OK"]["condition_values"] == [str(n) for n in range(1, 66)]
+        assert by_name["A-SMALL"]["condition_values"] == ["1", "2", "3", "7"]
+        assert by_name["B-ALPHA"]["condition_values"] == ["A", "Z"]
+
+    def test_only_partial_lists_are_flagged(self):
+        _, unresolved = self._report()
+        flagged = sorted(line.split(":", 1)[0] for line in unresolved)
+        # A-OK is past the expansion cap, B-ALPHA and C-MID list only their
+        # endpoints, and C-ONE's field has decimals (1.5 is also a value).
+        # A-SMALL and FLAG-ON are enumerated in full; VALUE SPACES is no
+        # range at all.
+        assert flagged == ["REC.A.A-OK", "REC.B.B-ALPHA", "REC.C.C-MID", "REC.C.C-ONE"]
+        assert (
+            "REC.A.A-OK: condition_values lists only part of VALUE 1 THRU 99999; "
+            "condition_ranges holds the full range"
+        ) in unresolved
+
+    def test_a_range_over_a_non_numeric_field_is_flagged(self):
+        # The parser drops the quotes of '01' THRU '12', so it reads as an
+        # integer range -- but a PIC XX field also admits '1A' and never
+        # holds '1', so the list is not the condition's whole domain.
+        report = _program_items(
+            "       01 REC.\n"
+            "          05 M PIC XX.\n"
+            "             88 M-OK VALUE '01' THRU '12'.\n"
+            "          05 N PIC 99.\n"
+            "             88 N-OK VALUE 1 THRU 12.\n"
+            "       01 GRP.\n"
+            "          88 GRP-OK VALUE '1' THRU '3'.\n"
+            "          05 G1 PIC X.\n"
+        )
+        flagged = sorted(line.split(":", 1)[0] for line in report["unresolved"])
+        assert flagged == ["GRP.GRP-OK", "REC.M.M-OK"]
+
+    def test_a_hex_range_is_reported_as_written(self):
+        report = _program_items(
+            "       01 REC.\n"
+            "          05 H PIC X.\n"
+            "             88 H-LOW VALUE X'00' THRU X'3F'.\n"
+        )
+        entry = next(i for i in report["items"] if i["name"] == "H-LOW")
+        assert entry["condition_ranges"] == [{"from": "X'00'", "to": "X'3F'"}]
+        assert (
+            "REC.H.H-LOW: condition_values lists only part of VALUE X'00' THRU "
+            "X'3F'; condition_ranges holds the full range"
+        ) in report["unresolved"]
