@@ -1482,12 +1482,14 @@ or both precomputed, skipping its own collection loop entirely.
 
 ```python
 result: LEAnalysisResult = LanguageEnvironmentAnalyzer().analyze(ast)
-# result.le_functions: list[LEFunctionUsage]   — CEE* calls
-# result.service_calls: list[LEServiceCall]    — IBM LE runtime calls
+# result.intrinsic_usages: list[LEFunctionUsage] — every FUNCTION <name> intrinsic reference
+# result.le_service_calls: list[LEServiceCall]   — CALL "CEExxxx" to IBM LE callable services
+#                                                 (static, or dynamic via possible_values)
 ```
 
-Detects IBM Language Environment function calls (CEEGTST, CEEMGET, etc.) and
-LE service calls.
+Detects COBOL intrinsic function references (`FUNCTION LENGTH`,
+`FUNCTION UPPER-CASE`, ...) and calls to IBM LE callable services
+(`CEEGTST`, `CEEDAYS`, `CEEHDLR`, ...). `to_dict()` uses the same two keys.
 
 **Quoted string literals are never scanned for `FUNCTION <name>`
 (2026-08-16 audit fix):** `_collect_text_fields`'s `_add` skips operands

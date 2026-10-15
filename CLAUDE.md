@@ -369,7 +369,7 @@ from cobolparser import (
     IOSequenceAnalyzer,         # report.violations
     MoveTypeChecker,            # report.violations
     LinkageChecker,             # report.violations
-    LanguageEnvironmentAnalyzer,# .le_functions / .service_calls
+    LanguageEnvironmentAnalyzer,# .intrinsic_usages (FUNCTION refs) / .le_service_calls (CALL CEE*)
     CRUDMatrixGenerator,        # matrix.entries, .to_csv(), .to_json()
 )
 from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
@@ -486,8 +486,10 @@ index.unresolved                       # reasons nothing was silently dropped
 # Boundary inventory (Phase 2): every mockable touchpoint of a program
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 report = BoundaryInventoryAnalyzer().analyze(ast, index)
-report.boundaries                      # list[Boundary]: category/key, direction,
-                                        # record_names, status_field, handlers, call_args
+report.boundaries                      # list[Boundary]: ref (.category/.key/.paragraph/.line),
+                                        # direction, record_names, status_field, handlers,
+                                        # call_args, unresolved (category/key are top-level
+                                        # only in to_dict())
 report.boundaries[0].call_args         # CALL/DYNCALL only: per-argument IN/OUT/
                                         # BIDIRECTIONAL direction + provenance
 
