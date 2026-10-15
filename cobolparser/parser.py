@@ -66,6 +66,30 @@ def _debugging_mode_on(unit: CobolProgram) -> bool:
     return False
 
 
+def dropped_debug_lines_warning(location: str, count: int) -> str:
+    """The warning for *count* debugging lines dropped under DEBUGGING MODE.
+
+    *location* names the first of them (``"Line 12"``, or with a file in
+    front when copybook expansion places it in a member). One spelling for
+    the parser and ``parse_cobol_with_expansion``, which both raise it.
+    """
+    return (
+        f"{location}: SOURCE-COMPUTER is WITH DEBUGGING MODE, but {count} "
+        f"{DROPPED_DEBUG_LINES_MARKER} were dropped as comments; parse with "
+        "debug_lines=True (CLI --debug-lines, cobol.yml project.debug_lines: "
+        "true) to compile them as code, as the compiler does"
+    )
+
+
+#: The words every dropped-debugging-lines warning carries (see above).
+DROPPED_DEBUG_LINES_MARKER = "debugging line(s) (D in column 7)"
+
+
+def debugging_mode_on(program: CobolProgram) -> bool:
+    """Whether any unit of *program* declares SOURCE-COMPUTER WITH DEBUGGING MODE."""
+    return any(_debugging_mode_on(unit) for unit in program.program_units())
+
+
 #: Unit kinds whose contained units nest under them (see
 #: ``CobolParser._attach_new_unit``): a class holds its factory and object
 #: units, and those hold their methods.
@@ -484,15 +508,13 @@ class CobolParser:
         """
         if not self._dropped_debug_lines:
             return
-        if not any(_debugging_mode_on(unit) for unit in program.program_units()):
+        if not debugging_mode_on(program):
             return
-        count = len(self._dropped_debug_lines)
         self.add_warning(
-            f"Line {self._dropped_debug_lines[0]}: SOURCE-COMPUTER is WITH "
-            f"DEBUGGING MODE, but {count} debugging line(s) (D in column 7) "
-            "were dropped as comments; parse with debug_lines=True "
-            "(CLI --debug-lines, cobol.yml project.debug_lines: true) to "
-            "compile them as code, as the compiler does"
+            dropped_debug_lines_warning(
+                f"Line {self._dropped_debug_lines[0]}",
+                len(self._dropped_debug_lines),
+            )
         )
 
     def _tokenize(self, cleaned_source: str, filename: str, free_form: bool) -> bool:

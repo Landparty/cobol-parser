@@ -544,6 +544,12 @@ def read_file_with_encoding(
             encoding directly.  Pass via ``CopybookSearchPath.encoding`` to
             force a specific EBCDIC variant for all copybooks in an expansion.
         warnings: Optional list that lossy-decode diagnostics are appended to.
+        debug_lines: Keep debugging lines (``D`` in column 7) as code
+            (default False), for a parse with ``debug_lines=True``: expansion
+            otherwise blanks them with the comments, and the parser never
+            sees them. While False, the ones blanked are listed in
+            ``CopybookExpansion.dropped_debug_lines`` so the parse can still
+            warn about them under ``WITH DEBUGGING MODE``.
         encoding_errors: Decode strictness — ``"replace"`` (default)
             substitutes undecodable bytes with U+FFFD and warns; ``"strict"``
             raises ``EncodingError`` with file/offset context.
@@ -978,6 +984,7 @@ def expand_copybooks(
     encoding_errors: str = "replace",
     source_file: str = "<main>",
     preserve_comments: bool = False,
+    debug_lines: bool = False,
 ) -> CopybookExpansion:
     """
     Expand all COPY statements in COBOL source code by inlining copybook content.
@@ -1010,6 +1017,12 @@ def expand_copybooks(
             text. Restoration happens after every substitution, so it changes
             no line of code; it is for output meant to be *read*, and the
             parse pipeline (which drops comments again) is unaffected.
+        debug_lines: Keep debugging lines (``D`` in column 7) as code
+            (default False), for a parse with ``debug_lines=True``: expansion
+            otherwise blanks them with the comments, and the parser never
+            sees them. While False, the ones blanked are listed in
+            ``CopybookExpansion.dropped_debug_lines`` so the parse can still
+            warn about them under ``WITH DEBUGGING MODE``.
         encoding_errors: Decode strictness for copybook files — "replace"
             (default, backward compatible) substitutes undecodable bytes with
             U+FFFD and records a lossy-decode warning in
@@ -1079,6 +1092,7 @@ def expand_copybooks(
         expansion_stack=[],
         current_depth=0,
         defined_symbols=dict(defined_symbols) if defined_symbols else {},
+        debug_lines=debug_lines,
     )
 
     # Initialize LRU size from search config
@@ -1122,6 +1136,7 @@ def expand_copybooks(
     # to ensure it is valid fixed-format COBOL for the parser/compiler.
     # If is_normalized is False, it means no changes were made (passthrough), so we return as-is.
     final_source = expanded_source
+    dropped_debug_lines: list[LineOrigin] = []
     line_origins = _fit_origins(origins, len(expanded_lines), (source_file, 1))
     if is_normalized:
         final_lines: list[str] = []
@@ -1176,6 +1191,16 @@ def expand_copybooks(
                     )
                 )
         line_origins = final_origins
+        if not debug_lines:
+            dropped_debug_lines = _blanked_debug_lines(
+                final_lines,
+                line_origins,
+                source_file,
+                source_code,
+                included_copybooks,
+                search_config,
+                stats.warnings,
+            )
         if preserve_comments:
             final_lines = _restore_comment_lines(
                 final_lines,
@@ -1210,7 +1235,50 @@ def expand_copybooks(
         max_depth_reached=max_depth,
         source_location_map=context.source_maps if preserve_source_locations else None,
         statistics=stats,
+        dropped_debug_lines=dropped_debug_lines,
     )
+
+
+def _blanked_debug_lines(
+    lines: list[str],
+    origins: list[LineOrigin],
+    source_file: str,
+    source_code: str,
+    included_copybooks: list[str],
+    search_config: CopybookSearchPath,
+    warnings: list[str],
+) -> list[LineOrigin]:
+    """Origins of the debugging lines expansion blanked as comments.
+
+    Read off the output rather than counted while expanding, so a member
+    included twice (a content-cache hit) counts twice, as it compiles. A
+    line counts when it is blank now and its origin is a ``D`` line. Only
+    looked for when a ``DEBUGGING`` clause is anywhere in the expanded
+    text: without one, the parse has nothing to warn about.
+    """
+    if not _DEBUGGING_RE.search("\n".join(lines)):
+        return []
+    from .source_format import debug_line_numbers
+
+    debug_lines: dict[str, set[int]] = {}
+    sources = _origin_sources(
+        source_file, source_code, included_copybooks, search_config, warnings
+    )
+    for name, text in sources.items():
+        numbers = debug_line_numbers(text)
+        if numbers:
+            debug_lines[name] = set(numbers)
+    if not debug_lines:
+        return []
+    return [
+        origin
+        for line, origin in zip(lines, origins, strict=False)
+        if not line.strip() and origin[1] in debug_lines.get(origin[0], ())
+    ]
+
+
+#: Whether a text can hold ``WITH DEBUGGING MODE`` at all.
+_DEBUGGING_RE = re.compile(r"\bDEBUGGING\b", re.IGNORECASE)
 
 
 def _symbols_at_line(
@@ -1324,7 +1392,9 @@ def _expand_source_recursive(
             source_code, indicator_position=0, line_origins=merged_from
         )
     else:
-        source_no_comments = remove_comment_lines(source_code)
+        source_no_comments = remove_comment_lines(
+            source_code, keep_debug_lines=context.debug_lines
+        )
         source_stripped = strip_sequence_area(source_no_comments)
         # We must merge continuation lines to find statements split across lines
         normalized_source = normalize_continuation_lines(
@@ -1458,7 +1528,9 @@ def _expand_source_recursive(
             member_free_form = not _looks_fixed_format(copybook_content)
             if not member_free_form:
                 copybook_content = strip_sequence_area(
-                    remove_comment_lines(copybook_content)
+                    remove_comment_lines(
+                        copybook_content, keep_debug_lines=context.debug_lines
+                    )
                 )
             elif not free_form:
                 # A free-form member spliced into a fixed-format parent: the
@@ -1576,7 +1648,9 @@ def _expand_source_recursive(
             # is always True here; this fixup is kept as a defensive no-op in
             # case that invariant ever changes.
             if not nested_normalized and not (member_free_form and free_form):
-                nested_no_comments = remove_comment_lines(expanded_copybook)
+                nested_no_comments = remove_comment_lines(
+                    expanded_copybook, keep_debug_lines=context.debug_lines
+                )
                 nested_stripped = strip_sequence_area(nested_no_comments)
                 nested_merged_from: list[int] = []
                 expanded_copybook = normalize_continuation_lines(
@@ -1725,6 +1799,39 @@ def _locate_strip_pass_warning(
     return f"{origin_file}: {match.group(1)}{origin_line}{warning[match.end():]}"
 
 
+def warn_dropped_debug_lines(result: Any, expansion: Any, filename: str) -> None:
+    """Warn on *result* about debugging lines *expansion* blanked.
+
+    Expansion blanks ``D`` lines with the comments before the parser sees
+    the text, so the parser's own ``WITH DEBUGGING MODE`` warning cannot
+    count them; this raises the same warning from the expansion's list
+    instead, in the coordinates of the file they were written in. Nothing
+    happens when the expansion kept them (``debug_lines=True``), when no
+    unit declares the clause, or when the parser already warned (nothing
+    was expanded, so the source reached it untouched).
+    """
+    from ..parser import (
+        DROPPED_DEBUG_LINES_MARKER,
+        debugging_mode_on,
+        dropped_debug_lines_warning,
+    )
+
+    # getattr: stand-in expansions in tests carry only the fields they need.
+    dropped = list(getattr(expansion, "dropped_debug_lines", None) or [])
+    if (
+        not dropped
+        or result.ast is None
+        or not debugging_mode_on(result.ast)
+        or any(DROPPED_DEBUG_LINES_MARKER in w for w in result.warnings)
+    ):
+        return
+    first_file, first_line = dropped[0]
+    location = f"Line {first_line}"
+    if first_file != filename:
+        location = f"{first_file}: {location}"
+    result.warnings.append(dropped_debug_lines_warning(location, len(dropped)))
+
+
 def parse_cobol_with_expansion(
     source_code: str,
     filename: str,
@@ -1778,6 +1885,8 @@ def parse_cobol_with_expansion(
     # Import here to avoid circular dependency
     from ..parser import parse_cobol
 
+    debug_lines = bool(parser_kwargs.get("debug_lines", False))
+
     # Expand copybooks first
     expansion = expand_copybooks(
         source_code=source_code,
@@ -1790,6 +1899,9 @@ def parse_cobol_with_expansion(
         process_conditionals=process_conditionals,
         defined_symbols=defined_symbols,
         source_file=filename,
+        # Expansion blanks comment lines before the parser sees the text;
+        # debugging lines compiled as code have to survive it.
+        debug_lines=debug_lines,
     )
 
     # Parse the expanded source
@@ -1816,6 +1928,8 @@ def parse_cobol_with_expansion(
     for warning in expansion_warnings:
         if warning not in result_obj.warnings:
             result_obj.warnings.append(warning)
+
+    warn_dropped_debug_lines(result_obj, expansion, filename)
 
     # getattr, not attribute access: callers monkeypatch `expand_copybooks`
     # with stand-ins that carry only the fields they care about, and a map

@@ -637,6 +637,8 @@ class CodebaseGraphBuilder:
         chunk_size: Files parsed per batch before their ASTs are dropped.
         encoding: Source encoding, passed through to the batch parser and to
             the COPY scan.
+        debug_lines: Compile fixed-format debugging lines (``D`` in column
+            7) as code, so a CALL written on one is an edge.
     """
 
     def __init__(
@@ -646,8 +648,10 @@ class CodebaseGraphBuilder:
         workers: int | None = None,
         chunk_size: int = _DEFAULT_CHUNK_SIZE,
         encoding: str = "utf-8",
+        debug_lines: bool = False,
     ) -> None:
         self.copybook_paths: list[str] = list(copybook_paths or [])
+        self.debug_lines = debug_lines
         self.workers = workers
         self.chunk_size = max(1, chunk_size)
         self.encoding = encoding
@@ -793,11 +797,17 @@ class CodebaseGraphBuilder:
                 chunk,
                 copybook_paths=list(self.copybook_paths),
                 encoding=self.encoding,
+                debug_lines=self.debug_lines,
             )
         workers = self.workers
         if workers is None and len(chunk) < _PARALLEL_THRESHOLD:
             workers = 1
-        return parse_files(chunk, workers=workers, encoding=self.encoding)
+        return parse_files(
+            chunk,
+            workers=workers,
+            encoding=self.encoding,
+            debug_lines=self.debug_lines,
+        )
 
     def _absorb_parse(
         self,

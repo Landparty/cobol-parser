@@ -265,7 +265,13 @@ code instead of dropping them (see [preprocessing.md](preprocessing.md),
 when set; `scan` forwards it as `ScanOptions.debug_lines`; `preprocess`
 passes it to `normalize_fixed_format` directly. cobol.yml
 `project.debug_lines: true|false` (strictly a boolean) fills it, and
-`--no-debug-lines` is the way to override a `true` there.
+`--no-debug-lines` is the way to override a `true` there. The subcommands
+without `--source-format` that still parse COBOL (`batch`, `expand`,
+`gen-fixtures`, `codebase-graph`, `copybook-impact`, `field-impact`) take it
+through `_add_debug_lines_arg()` (2026-10-15): without the dest, the config
+key was silently ignored by them. `gen-data` / `decode` / `compare` / `jcl` /
+`le-info` / `config` have none (pinned by
+`test_only_record_layout_subcommands_lack_debug_lines`).
 
 Reach for `fixed` when a shop's layout defeats auto-detection — e.g. a
 sequence area holding a tag with an internal space. Auto-detection already
