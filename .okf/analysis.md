@@ -932,7 +932,14 @@ window, no near-miss/type-3 similarity scoring, matching the design goal of
 kinds:
 
 - **Type-1 (exact)**: identical statement types, operands, and condition
-  text, verbatim -- and everything else each statement does (#262, below).
+  text -- and everything else each statement does (#262, below). "Identical"
+  is up to what COBOL itself ignores (#391): `_normalize_text` collapses
+  every whitespace run outside a literal to one space and upper-cases all
+  text outside a literal, for *both* types, so a line break inside a
+  COMPUTE or condition, or a paragraph written in lowercase, no longer hides
+  a Type-1 clone (lowercase used to drop to Type-2; a line break used to
+  lose the match entirely). Literal text stays exactly as written:
+  `DISPLAY "Done"` vs `display "DONE"` is not a clone.
 - **Type-2 (renamed)**: identical statement-type/control-flow shape with
   identifier-shaped tokens (data-names, paragraph-names) consistently
   substituted with per-paragraph positional placeholders (`ID1`, `ID2`,
@@ -975,7 +982,15 @@ by owner decision the `type1`/`type2` digests changed in place, and digests
 stored by earlier scans simply stop matching new ones. Known residual: the
 parser stores some literals unquoted (an INSPECT `'X'`, a STRING
 `DELIMITED BY 'X'`), so under Type-2 only, two such literals still read as a
-consistent rename; Type-1 tells them apart.
+consistent rename. Since #391 folds case outside quotes, `_unquoted_literals`
+and `_selector_text` re-quote the unquoted literals the AST *marks* as
+literals (static CALL target, INVOKE method literal, STOP literal, EVALUATE
+`WHEN` Literal with `quoted` and Range bounds with `start_quoted` /
+`end_quoted`), so a case-only difference there still breaks Type-1. Where the
+AST does not mark them -- CANCEL targets, ACCEPT ... FROM ENVIRONMENT names,
+EXEC CICS option values, literal arguments inside a COMPUTE `expression`,
+XML/JSON `clause_text` -- a case-only literal difference reads as the same
+text, so Type-1 can group them (it could not before #391).
 
 **Reuses `unused_variables.py`'s `_NON_IDENTIFIER_WORDS`/quoted-text
 handling verbatim** rather than re-deriving a second reserved-word list --

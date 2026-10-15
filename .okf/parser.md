@@ -652,6 +652,10 @@ operator table. Pinned by `tests/regression/test_evaluate_keyword_literal_when.p
 so without these `WHEN SPACES` and `WHEN 'SPACES'` built identical dicts.
 The markers are additive; `type` stays `"Literal"`. Pinned by
 `tests/regression/test_evaluate_figurative_when.py`.
+A `Range` selector likewise carries `"start_quoted": True` /
+`"end_quoted": True` when that bound is one STRING_LITERAL token
+(`WHEN 'a' THRU 'c'`; #391), absent otherwise, so a numeric range's dict is
+unchanged. Pinned by `tests/unit/test_evaluate_variants.py::TestRangeQuotedMarkers`.
 
 **Word-form operators and class/sign tests are conditions (#387,
 2026-10-14).** `_build_selector` also makes a `Condition` of a WHEN phrase
@@ -817,6 +821,14 @@ string (`"Y + 1 END-READ"`) instead of ending the clause, which the
 (`END-READ` is in neither set — only `SCOPE_TERMINATORS`). Pinned by
 `tests/regression/test_tier2_silent_drop_regressions.py::TestComputeDoesNotSwallowFollowingCall`
 and `::TestComputeDoesNotSwallowEnclosingScopeTerminator`.
+
+**COMPUTE `expression` text carried line breaks (`arithmetic_parsers.py`,
+#391, 2026-10-14):** the expression loop appended `NEWLINE` tokens'
+`"\n"` values, so `COMPUTE X = Y` / `+ 1` on two lines serialized as
+`"Y \n + 1"` and differed from the one-line form (which hid exact clones in
+`redundancy.py`). `NEWLINE` tokens are now consumed without being added to
+the expression text; `build_compute_expression_tree` already ignored them.
+Pinned by `tests/unit/test_compute_expression_parsing.py::TestComputeExpressionLayout`.
 
 **ADD/SUBTRACT/MULTIPLY/DIVIDE/COMPUTE never consumed their own explicit
 scope terminator, causing a phantom paragraph (`arithmetic_parsers.py`,

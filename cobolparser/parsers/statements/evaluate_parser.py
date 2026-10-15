@@ -484,11 +484,21 @@ class EvaluateStatementParser(IStatementParser):
                         "start": start_value,
                         "end": end_value,
                     }
-                return {
+                range_selector: dict[str, Any] = {
                     "type": "Range",
                     "start": start_value,
                     "end": end_value,
                 }
+                # The same additive marker a plain Literal carries: the
+                # lexer strips the quotes, so ``'a' THRU 'c'`` and
+                # ``A THRU C`` would otherwise read alike (#391).
+                for key, bound in (
+                    ("start_quoted", pairs[first:index]),
+                    ("end_quoted", pairs[index + 1 :]),
+                ):
+                    if len(bound) == 1 and bound[0][1] == TokenType.STRING_LITERAL:
+                        range_selector[key] = True
+                return range_selector
 
         if _is_condition_phrase(flat_words):
             selector: dict[str, Any] = {"type": "Condition", "text": condition_text}

@@ -53,6 +53,16 @@ unused-variables / complexity all see the jump table.
 `test_go_parser_edge_cases.py`'s `test_depending_without_on_reads_variable`
 replaces the test that pinned the old behavior.
 
+2026-10-15 (#391): `tests/unit/analysis/test_redundancy.py` gains
+`TestLayoutAndCaseDoNotAffectClones` (line breaks, lowercase and spacing
+still give TYPE_1; literal case still breaks it; `scan` digests agree) and
+`TestUnquotedLiteralCaseStillBreaksType1` (EVALUATE WHEN / THRU, static
+CALL, INVOKE and STOP literals differing only in case are never TYPE_1);
+`test_evaluate_variants.py::TestRangeQuotedMarkers` pins the Range
+`start_quoted` / `end_quoted` markers (and
+`test_evaluate_keyword_literal_when.py` now expects them on `'A' THRU 'C'`); `test_compute_expression_parsing.py::
+TestComputeExpressionLayout` pins a multi-line COMPUTE's expression text.
+
 2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests,
 #313) pins EVALUATE `WHEN SPACES` / `ZERO` / `LOW-VALUES` as figurative
 selectors and constraints, distinct from a quoted `WHEN 'SPACES'`, through
@@ -1177,8 +1187,8 @@ Pythons, so the guard is not in force there; only the `coverage` job skips
 them. The ratio-based overhead assertion is unaffected. Surfaced the moment
 the suite was first wired into CI.
 
-The full suite (~12,300 tests across 439 `test_*.py` files as of
-2026-10-04; ~9,400 at the time) **does** run on every PR, as of the
+The full suite (~13,000 tests across 464 `test_*.py` files as of
+2026-10-14; ~9,400 at the time) **does** run on every PR, as of the
 2026-09-07 audit (on 3.13 only since 2026-10-03 -- see `build` above). It previously ran nowhere: this file used to describe a
 `test` job gated on `if: github.event_name == 'workflow_dispatch'`, and no
 such job was ever in `ci.yml` — the suite and the `--cov-fail-under=90`
