@@ -1448,6 +1448,9 @@ work items. `tests/unit/test_scan.py`'s failing-analyzer stub takes the new
 `TestStoredJoinEdges` (test_lineage_graph.py) pins that a graph rebuilt
 from `join_edges()` answers every query identically; `test_lineage_jcl.py`
 covers `jobs_from_sources` (in-memory JCL + PROCs).
+`TestTableFunctionDetection` (test_sql_flow.py, #340) pins that only
+`TABLE(...)` is a table function: `TABLE_CUST` / `TABLES_CFG` / `TABLEX`
+are traced as ordinary tables.
 Review regressions (2026-10-08) use small inline programs (`_program` in
 test_field_lineage.py, `_source` in test_lineage_graph.py):
 `TestOccursDependingOn` / `TestOccursTables` (None offsets, every

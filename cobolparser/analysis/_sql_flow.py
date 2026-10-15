@@ -323,7 +323,7 @@ def _from_tables(from_body: str) -> tuple[dict[str, str], list[str], list[str]]:
             continue
         words = piece.replace(" AS ", " ").split()
         table = re.sub(r"\s*\.\s*", ".", words[0])
-        if table.startswith("TABLE"):
+        if re.match(r"TABLE\s*\(", piece):
             caveats.append("a table function in FROM is not traced")
             continue
         tables.append(table)
