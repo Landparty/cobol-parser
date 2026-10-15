@@ -95,14 +95,14 @@ python -m mypy cobolparser/
 # the subcommand: [--config FILE] to read a specific cobol.yml, [--no-config]
 # to ignore any of them. See "Project Config" below and docs/project-config.md
 cobol-parser config [--json]
-cobol-parser parse <file.cbl> [path] [--compact] [--source-format auto|fixed|free] [--free-form] [--debug-lines] [--dialect ibm-enterprise] [--errors] [--stats]
+cobol-parser parse <file.cbl> [path] [--compact] [--source-format auto|fixed|free] [--free-form] [--debug-lines] [--dialect ibm-enterprise] [--copybook-path DIR] [--define SYMBOL[=VALUE]] [--errors] [--stats] [--find-type NODE_TYPE] [--profile] [-o out.json]
 cobol-parser tokenize <file.cbl>
 cobol-parser preprocess <file.cbl> [--define DEBUG]
-cobol-parser expand <file.cbl> --copybook-path ./copybooks [--keep-comments] [--source-map]
+cobol-parser expand <file.cbl> --copybook-path ./copybooks [--keep-comments] [--source-map] [--max-depth N] [--define SYMBOL[=VALUE]]
 cobol-parser gen-data <file.cpy> [--rows N] [--seed N] [--record NAME] [--describe] [--format csv|json|record|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-varying MIN:MAX] [--record-separator none|newline] [-o out.csv]
 cobol-parser decode [data-file] --copybook <file.cpy> [--record NAME] [--view NAME] [--list-views] [--format csv|json|hex] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-length N] [--record-separator none|newline] [--max-records N] [--skip N] [--strict] [-o out]
 cobol-parser compare <expected> <actual> --copybook <file.cpy> [--record NAME] [--view NAME] [--key FIELD]... [--ignore FIELD]... [--compare-bytes] [--max-differences N] [--format text|json] [--charset ascii|ebcdic] [--endian auto|big|little|native] [--record-format fixed|variable|variable-bare|auto] [--record-length N] [--record-separator none|newline] [-o out]   # exit 0 equal / 1 different / 2 trouble
-cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
+cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR] [--callee-path DIR] [--rows N] [--seed N] [--max-occurs N] [--scenarios happy|branches|all] [--format json|csv-dir] [--list-boundaries] [--strict] [-o out]
 cobol-parser lint <file.cbl> [--rule RULE]... [--min-severity error|warning|info] [--fail-on error|warning|info|never] [--format json|text] [--copybook-path DIR] [--program NAME]
 cobol-parser dclgen-check <file.cbl>
 cobol-parser analyze <file.cbl>
@@ -160,6 +160,8 @@ COBOL source (.cbl/.cob)
 - `copybook_expander.py` -- `expand_copybooks()` and `parse_cobol_with_expansion()` for recursive COPY statement inlining with circular reference detection, encoding detection, content validation, and caching. Also owns the **source map**: one `(file, original line)` per expanded line, carried through continuation merging, the COPY splice and the width wrap, exposed as `CopybookExpansion.source_location_map` (`preserve_source_locations=True`) and as `ParseResult.expansion_source_map`; and `preserve_comments=True`, which puts each comment line's text back into the listing afterwards (`expand --keep-comments`). See `.okf/preprocessing.md`
 - `source_format.py` -- `detect_fixed_format()` decides whether a source is fixed-format (and so needs `normalize_fixed_format`) from its sequence area / indicator column; `normalize_with_recovery()` normalizes with the unterminated-literal retry. The one copy of both decisions, used by `CobolParser` (and so `parse_cobol`), the lexer and the CLI
 - `copy_statement_parser.py` -- `CopyStatementLexer`, REPLACING clause handling, continuation line normalization
+- `_normalize.py` -- implementation behind `normalize_fixed_format`, directive stripping and the conditional-compilation evaluator (re-exported from `__init__.py`)
+- `replace_statement.py` -- `REPLACE` statement application (incl. IBM `==:TAG:==` partial words)
 - `path_resolver.py` -- Secure copybook path resolution with traversal prevention
 - `models.py` -- `CopybookExpansion`, `CopyStatement`, `CopybookSearchPath`, `ExpansionStatistics`
 
@@ -667,7 +669,7 @@ The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather
 - AST models grouped by category (arithmetic, control, data, io, call, misc)
 - All parsers implement `IStatementParser` with `parse()` and `matches()` methods
 - All AST nodes extend `ASTNode` and implement `to_dict()`
-- Exception hierarchy rooted at `ParseError` in `_errors.py`
+- Exception hierarchy rooted at `ParseError` in `_errors.py` (except the preprocessing errors -- `PreprocessingError` and its subclasses extend plain `Exception`)
 
 ## Example COBOL Files
 

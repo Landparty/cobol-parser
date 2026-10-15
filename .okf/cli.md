@@ -1,25 +1,142 @@
 ---
 type: Module
 title: CLI
-description: cobol-parser command-line subcommands and flags — entry point cobolparser.cli:main.
-tags: [cli, command-line, subcommands, output-identification]
-timestamp: 2026-10-13T00:00:00Z
+description: cobol-parser command-line interface — all 38 subcommands with their flags and defaults, output identification, exit codes, and the cobol.yml project config (cobolparser/cli/, cobolparser/config/, __main__.py).
+tags: [cli, command-line, subcommands, output-identification, cobol-yml, project-config]
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
 
-Entry point: `cobol-parser` → `cobolparser.cli:main`
+The `cobol-parser` command: 38 subcommands that parse, tokenize, preprocess,
+expand, analyze, generate/decode/compare record data for, and graph COBOL
+(plus one for JCL and one for the LE catalogue), all built with `argparse` in
+one module, and the `cobol.yml` project config every subcommand reads.
 
-Source: `cobolparser/cli/parse.py` (all subcommands), `cobolparser/cli/coverage.py` (IO coverage tools).
+**Entry points** (all reach `cobolparser.cli.parse.main`):
 
-Every subcommand's `--help` now shows a `RawDescriptionHelpFormatter` epilog
-with one or two runnable `cobol-parser <name> ...` examples (2026-08-18).
-Purely a `--help` UX addition — no flags, defaults, or output shapes changed;
-`_build_analyzer_parser()` grew a required `examples` kwarg (a
-"cobol-parser <name> ..." block, no leading label) that its 13 callers each
-supply, and the remaining hand-built parsers (`parse`, `batch`, `tokenize`,
-`preprocess`, `expand`, `gen-data`, `gen-fixtures`, `unused-variables`,
-`program-flow`) set their own `epilog=` directly.
+* `cobol-parser ...` — console script, `[project.scripts]` in `pyproject.toml`
+  → `cobolparser.cli:main` (`cli/__init__.py` re-exports `parse.main`).
+* `python -m cobolparser ...` — `cobolparser/__main__.py` calls the same `main()`.
+* `python -m cobolparser.cli.parse ...` — `parse.py` has a `__main__` guard.
+* `python -m cobolparser.cli.coverage ...` — a **separate** argparse program for
+  IO coverage artifacts, not a `cobol-parser` subcommand (see
+  [IO coverage tools](#io-coverage-tools-cobolparserclicoveragepy)).
+
+**Source:** `cobolparser/cli/parse.py` (every subcommand: a `_build_<name>_parser()`
+plus a `_cmd_<name>()` per subcommand, assembled in `_build_parser()`),
+`cobolparser/cli/_project_config.py` (the `cobol.yml` → argv merge),
+`cobolparser/cli/coverage.py`, `cobolparser/config/` (`project.py` schema +
+discovery, `_yaml.py` reader).
+
+**Getting started:** `cobol-parser --help` lists the subcommands,
+`cobol-parser <name> --help` shows each one's flags, defaults and a runnable
+example epilog. The [subcommand reference](#subcommand-reference) table below
+is the one-screen version. To add a single-file analyzer, call
+`_build_analyzer_parser(subparsers, name, help, func, profiling=..., examples=...)`
+in `_build_parser()` — it gives the standard shared flag set — and emit through
+`_emit_report(..., ast=ast)` so the output is identified and origin-stamped.
+
+**Top-level behaviour of `main()`:**
+
+* `--version` prints `cobol-parser <version>`; `--config FILE` / `--no-config`
+  are global and may sit on either side of the subcommand (see
+  [Project config file](#project-config-file-cobolyml)).
+* **Legacy spelling**: if the first non-flag argument is not a subcommand name
+  (`_SUBCOMMANDS`), `parse` is prepended — `cobol-parser prog.cbl` is
+  `cobol-parser parse prog.cbl`. An empty argv also becomes `parse` (and so
+  fails argparse's "file required", exit 2).
+* A closed stdout (`cobol-parser parse x.cbl | head`) exits **141**
+  (128 + SIGPIPE) quietly instead of a `BrokenPipeError` traceback.
+* Errors raised by the CLI itself go through `_fail()`: one `error: ...` line
+  on stderr, exit 1. Argparse usage errors exit 2.
+
+**Shared flag helpers** in `parse.py` (each subcommand composes a subset):
+`_add_compact_arg` (`--compact`), `_add_source_format_args`
+(`--source-format` | `--free-form`, plus `--debug-lines`),
+`_add_debug_lines_arg` (`--debug-lines` alone), `_add_dialect_arg`,
+`_add_error_recovery_arg`, `_add_copybook_args` (`--copybook-path`,
+repeatable), `_add_program_arg`, `_add_define_args` (`--define SYMBOL[=VALUE]`,
+repeatable), `_add_output_arg` (`--output`/`-o FILE`), `_add_profiling_args`
+(`--profile`, `--profile-top-n N` default 20, `--profile-output PATH`),
+`_add_record_file_args` (decode/compare file-format flags),
+`_add_min_clone_statements_arg` (redundancy/scan), `_add_direction_args`
+(lineage/field-impact).
+
+Every subcommand's `--help` has a `RawDescriptionHelpFormatter` epilog with
+runnable `cobol-parser <name> ...` examples: `_build_analyzer_parser()` takes a
+required `examples` kwarg (15 callers), the hand-built parsers set `epilog=`
+themselves.
+
+# Contents
+
+* [Subcommand reference](#subcommand-reference) — every subcommand, its positionals and flags, in one table
+* [Output Identification](#output-identification) — `source_file` / `program_id` / `program_units` headers
+* [Project config file (`cobol.yml`)](#project-config-file-cobolyml) — discovery, precedence, bound dests, the YAML subset; [`config`](#config) subcommand
+* [Subcommand details](#subcommand-details) — one section per subcommand (or family), in roughly the order of the table
+* Shared flags: [`--error-recovery`, `--copybook-path`/`--define`, exit codes](#parse) · [`--source-format` / `--free-form` / `--debug-lines`](#source-layout---source-format) · [`--program`](#selecting-a-program-unit---program) · [origin stamping with `--copybook-path`](#unused-variables)
+* [IO coverage tools](#io-coverage-tools-cobolparserclicoveragepy)
+* [See Also](#see-also), [Recent changes](#recent-changes)
+
+# Subcommand reference
+
+Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
+`_build_parser()`'s. Flag-set legend for the last column:
+
+* **A** — the standard analyzer set from `_build_analyzer_parser()`:
+  `--compact`, `--source-format {auto,fixed,free}` (default `auto`) |
+  `--free-form`, `--debug-lines`/`--no-debug-lines`, `--dialect {ibm-enterprise}`
+  (default), `--error-recovery {fail-fast,collect-all}` (default `collect-all`),
+  `--copybook-path DIR`..., `--program NAME` (default: the outermost unit),
+  `--define SYMBOL[=VALUE]`..., `-o/--output FILE`.
+* **+prof** — also `--profile`, `--profile-top-n N` (default 20; implies
+  `--profile`), `--profile-output PATH` (implies `--profile`).
+* **dl** — `--debug-lines`/`--no-debug-lines` without `--source-format`.
+
+| Subcommand | Positionals | Own flags (default) | Shared flags | Output |
+|---|---|---|---|---|
+| `parse` | `file [path]` | `--errors`, `--stats`, `--find-type NODE_TYPE` | A without `--program`; +prof | AST JSON; exit 2 on a recovered-but-errored parse |
+| `batch` | `[files ...]` | `--glob PATTERN`..., `--workers N` (CPU count), `--encoding` (`utf-8`), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
+| `tokenize` | `file` | — | `--compact`, `--source-format`/`--free-form`, dl, `--dialect`, `-o` | `{source_file, tokens}` |
+| `preprocess` | `file` | `--strip-directives` | `--source-format`/`--free-form`, dl, `--define` (no `--compact`, no `-o`) | free-form source text |
+| `expand` | `file` | `--keep-comments`, `--source-map`, `--max-depth N` (100) | `--copybook-path`, `--compact`, `--define`, `-o`, dl | expansion JSON |
+| `gen-data` | `file` (copybook or program) | `--rows/-n` (10), `--seed`, `--record`, `--list-records`, `--describe`, `--header-style {short,path}`, `--include-filler`, `--include-redefines`, `--no-expand-occurs`, `--max-occurs`, `--no-semantic`, `--ignore-values`, `--unique FIELD`, `--blank-rate`, `--format {csv,json,record,hex}` (csv), `--charset` (ascii), `--endian` (auto), `--record-format` (fixed), `--record-varying MIN:MAX`, `--record-separator` (none) | `--compact`, `-o` | CSV / JSON / record bytes / hex |
+| `decode` | `[file]` | `--copybook FILE` (required), `--record`, `--view`, `--list-views`, `--format {csv,json,hex}` (csv), `--charset`, `--endian`, `--record-format`, `--record-length N`, `--record-separator`, `--max-records N` (all), `--skip N` (0), `--strict` | `--compact`, `-o` | CSV / JSON / hex |
+| `compare` | `expected actual` | `--copybook FILE` (required), `--record`, `--view`, `--key FIELD`..., `--ignore FIELD`..., `--compare-bytes`, `--max-differences N`, `--format {text,json}` (text), the decode file-format flags | `--compact`, `-o` | report; exit 0/1/2 like `cmp` |
+| `gen-fixtures` | `file` | `--callee-path DIR`..., `--rows/-n` (10), `--seed`, `--max-occurs N`, `--scenarios {happy,branches,all}` (happy), `--format {json,csv-dir}` (json), `--list-boundaries`, `--strict` | `--copybook-path`, `--compact`, `-o`, dl | `FixtureBundle` JSON or CSV dir |
+| `analyze` | `file` | — | A; +prof | dynamic CALL targets |
+| `dead-code` | `file` | — | A; +prof | `DeadCodeAnalyzer` |
+| `unused-variables` | `file` | `--exclude-copybook-variables` | A; +prof | `UnusedVariableAnalyzer` |
+| `program-flow` | `file` | `--format {json,mermaid,dot}` (json) | A; +prof | CFG JSON / Mermaid / DOT |
+| `recursion-check` | `file` | — | A; +prof | `RecursionRiskAnalyzer` |
+| `complexity` | `file` | — | A; +prof | `ComplexityAnalyzer` |
+| `health` | `file` | — | A; +prof | `TechnicalDebtAnalyzer` |
+| `io-sequence` | `file` | — | A (no profiling) | `IOSequenceAnalyzer` |
+| `move-type-check` | `file` | — | A (no profiling) | `MoveTypeChecker` |
+| `linkage-check` | `file` | — | A (no profiling) | `LinkageChecker` |
+| `language-env` | `file` | — | A (no profiling) | `LanguageEnvironmentAnalyzer` |
+| `ims-dli` | `file` | — | A (no profiling) | `IMSSegmentAnalyzer` |
+| `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
+| `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
+| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (`utf-8`) | A without `--program`/`--define` | `scan_version` report |
+| `lint` | `file` | `--rule RULE`... (all), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text}` (json) | A (`--program` default: every unit); +prof | findings; exit 3 on `--fail-on` |
+| `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
+| `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
+| `xref` | `file` | — | A; +prof | `XrefReport` |
+| `diff` | `old new` | `--format {json,text}` (json), `--rename-threshold RATIO` (0.8) | A without `--program` | `DiffReport` |
+| `codebase-graph` | `PATH ...` | `--format {json,dot,mermaid}` (json), `--extension EXT`... (`.cbl .cob .cobol`), `--workers N` (by size) | `--compact`, `--copybook-path`, `-o`, dl | graph |
+| `copybook-impact` | `member PATH ...` | `--extension`..., `--workers` | `--compact`, `--copybook-path`, `-o`, dl | `ImpactReport` |
+| `sql-cics-check` | `file` | — | A; +prof | `SqlCicsReport` |
+| `business-rules` | `file` | `--format {json,text}` (json), `--include-technical` | A; +prof | `BusinessRuleReport` |
+| `lineage` | `file` | `--field NAME`, `--direction {forward,backward}` (forward), `--format {json,text}` (json) | A (no profiling) | `FieldFlowReport` |
+| `field-impact` | `[FIELD] PATH ...` | `--program NAME` (every program with that field), `--table T.C`, `--dataset DSN`, `--direction` (forward), `--depth N` (unlimited), `--jcl PATH`..., `--proc-path DIR`, `--bindings FILE.json`, `--key-relationships`, `--workers N`, `--format {json,text}` (json) | `--compact`, `--copybook-path`, `-o`, dl | `ImpactResult`; exit 1 when the start matches nothing |
+| `jcl` | `file` | `--dd-map`, `--bindings`, `--program NAME`, `--proc-path DIR`..., `--strict` | `--compact`, `-o` | job JSON; needs `[jcl]` extra; exit 3 on `--strict` |
+| `le-info` | `[name ...]` | `--kind {service,function,all}` (all) | `--compact`, `-o` | LE / intrinsic signature catalogue |
+| `config` | — | `--json` | `--compact`, `-o` | effective `cobol.yml` |
+
+Subcommands that take none of the COBOL parse flags (`--source-format`,
+`--dialect`, `--debug-lines`, `--define`, `--error-recovery`): `gen-data`,
+`decode`, `compare` (they read a record layout only), `jcl`, `le-info`, `config`.
 
 # Output Identification
 
@@ -55,7 +172,7 @@ pinned by `tests/unit/cli/test_output_identification.py`):
   `program_id` key). `--format csv-dir` writes a directory instead of
   stdout; its `MANIFEST.json` carries the same identification.
 
-# Project config file (`cobol.yml`, 2026-09-16)
+# Project config file (`cobol.yml`)
 
 The **universal** project config the whole tool family reads — this CLI,
 `mockymock`, and the COBOL Analyzer extension. One file per project instead
@@ -64,6 +181,26 @@ User-facing reference: `docs/project-config.md`.
 
 Source: `cobolparser/config/` (`_yaml.py` reader, `project.py` schema +
 discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
+
+**Public API** (`from cobolparser.config import ...`): `load_project_config(start_dir=None,
+path=None) -> ProjectConfig` (an all-default `ProjectConfig()` with
+`source=None` when nothing is found; `path` loads exactly that file, which is
+what `--config` and the VS Code extension use), `find_config_file(start_dir)`,
+`build_config(document, source)`, `resolve(cli_value, config_value,
+hardcoded_default)` (the precedence helper), `parse_yaml` / `YamlError`,
+`ConfigError`, `CONFIG_FILE_NAMES = ("cobol.yml", "cobol.yaml")`,
+`SCHEMA_VERSION = 1`.
+
+**Schema** (frozen dataclasses; every field `None`/empty when not stated, so
+"not stated" stays distinct from "equals the default"):
+
+| Section | Keys → `ProjectConfig` field |
+|---|---|
+| top level | `version`, `project`, `data`, `lint`, `mockymock`, `analyzer` (anything else is an error) |
+| `project:` | `copybook_path`, `callee_path` (lists, resolved against the file's directory), `source_format` (`auto\|fixed\|free`), `debug_lines` (bool), `dialect` (`ibm-enterprise`), `error_recovery` (`collect-all\|fail-fast`), `seed`, `extensions`, `define` (normalized to `SYMBOL=VALUE`) |
+| `data:` → `DataDefaults` | `charset`, `endian`, `record_format`, `record_separator`, `rows` |
+| `lint:` → `LintDefaults` | `rules`, `min_severity`, `fail_on` |
+| `mockymock:` / `analyzer:` | carried verbatim on `ProjectConfig.tools`; `tool_section(name)` returns the mapping or `{}` |
 
 * **Discovery** — `cobol.yml` then `cobol.yaml` in the cwd and each parent,
   first match wins, walk bounded at 32 levels. Finding nothing is the common
@@ -123,14 +260,10 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   strings, and a duplicate key is an error rather than last-one-wins.
 * **Comment stripping tracks quote state, and a backslash escape consumes
   the character after it.** `_strip_comment` runs before the parser, so it
-  has to know which `#` is inside a string. It used to advance *one*
-  character past a `\` escape instead of two, leaving the escaped quote to
-  be read on its own — which closed the string it was meant to sit inside.
-  An even number of escaped quotes re-opened it and hid the damage; an odd
-  number left a later `#` looking unquoted, so `msg: "a \" # b"` lost its
-  tail and then failed with "unterminated quoted string". Fixed 2026-09-16
-  (index-driven loop); pinned by
-  `tests/regression/test_audit_2026_09_16.py`.
+  has to know which `#` is inside a string: `msg: "a \" # b"` keeps its
+  whole value. (Until 2026-09-16 it advanced one character past a `\`
+  instead of two, so an odd number of escaped quotes left a later `#` looking
+  unquoted; pinned by `tests/regression/test_audit_2026_09_16.py`.)
 * **A quote only opens a quoted span at the start of a scalar** (line start,
   or after `:`, `- `, `[`, `{`, `,`) -- `_opens_quote()`, shared by
   `_strip_comment`, `_split_key` and `_is_mapping_entry`. Mid-word it is a
@@ -165,27 +298,45 @@ cobol-parser config [--json] [--compact] [-o FILE]
 Reports which `cobol.yml` is in effect and every setting it supplies.
 Settings the file does not mention are **omitted** rather than shown at their
 built-in default, so what is printed is exactly what the file changes. With
-no file found anywhere, says so and suggests creating one.
+no file found anywhere, says so and suggests creating one (exit 0). `--json`
+emits `{"config_file", "version", "project", "data", "lint", "tools"}`
+(`config_file` is `null` when none was found). Honours the global
+`--config FILE` / `--no-config`.
 
-# Subcommand Reference
+# Subcommand details
+
+Synopses below emphasise each subcommand's own flags; the shared flag sets
+(**A**, **+prof**, **dl**) are listed per subcommand in the
+[reference table](#subcommand-reference).
 
 ## Parse
 
 ```bash
 cobol-parser parse <file.cbl> [json-path] [--compact] \
-    [--source-format auto|fixed|free] [--free-form] \
-    [--dialect ibm-enterprise] [--errors] [--stats] [--find-type NODE_TYPE] \
-    [--error-recovery fail-fast|collect-all] \
+    [--source-format auto|fixed|free | --free-form] [--debug-lines] \
+    [--dialect ibm-enterprise] [--error-recovery fail-fast|collect-all] \
+    [--copybook-path DIR]... [--define SYMBOL[=VALUE]]... [-o FILE] \
+    [--errors] [--stats] [--find-type NODE_TYPE] \
     [--profile] [--profile-top-n N] [--profile-output PATH]
 ```
 
-`--error-recovery` (default `collect-all`) maps to `ErrorRecoveryMode`
+**`--error-recovery`** (default `collect-all`) maps to `ErrorRecoveryMode`
 (`_add_error_recovery_arg()` / `_get_error_recovery()`). It is not
-`parse`-only: `batch`, `scan`, `lint`, `data-items`, `business-rules` and
-every per-file analyzer subcommand (`analyze`, `dead-code`, ..., `xref`,
-`program-signature`, `sql-cics-check`, `diff`) take it too (`gen-data`, `gen-fixtures`, `decode`, `compare`, `expand`, `tokenize`,
-`preprocess`, `codebase-graph`, `copybook-impact`, `jcl`, `le-info` and
-`config` do not). `cobol.yml` can bind it (`error_recovery`).
+`parse`-only: every subcommand built by `_build_analyzer_parser` takes it, as
+do `batch`, `scan`, `lint`, `unused-variables`, `program-flow`, `redundancy`,
+`business-rules`, `lineage` and `diff`. `tokenize`, `preprocess`, `expand`,
+`gen-data`, `decode`, `compare`, `gen-fixtures`, `codebase-graph`,
+`copybook-impact`, `field-impact`, `jcl`, `le-info` and `config` do not.
+`cobol.yml` can bind it (`error_recovery`).
+
+**`--copybook-path` / `--define`** on `parse` and every analyzer go through
+the shared `_do_parse()`: with copybook paths the parse is
+`parse_cobol_with_expansion(..., process_conditionals=True,
+defined_symbols=...)` (so `--define` symbols reach `>>IF`s inside members); a
+missing or circular copybook is a one-line `error: Copybook expansion failed
+...` (exit 1). Without copybook paths, `--define` runs
+`preprocess_conditional_compilation()` on the raw source first (keeping
+`>>SOURCE FORMAT` directives for the normalizer), then `parse_cobol`.
 
 Parses a COBOL file and prints the AST as JSON. `json-path` (dotted) extracts
 a specific subtree. `--errors` shows parse errors only. `--stats` appends
@@ -210,29 +361,38 @@ silently replaced the outer one (whose `top_functions` then held only
 started, leaking the session. An inner context never stops a tracemalloc
 session it did not start.
 
-Exit codes (2026-07-07): `0` clean parse; `1` hard failure (`ast is None`,
-bad arguments); `2` recovered-but-errored parse — the JSON is still printed,
-a summary goes to stderr. `--find-type` follows the same rule (it exited
-`0` on a partial parse until 2026-10-10). Previously the CLI exited `0` whenever an AST
-existed, even with collected errors, so scripts gating on `$?` saw every
-partial parse as success. `batch` likewise exits `2` when any file has a
-`read_error` or `success=false`. Analyzer subcommands still exit `0` on a
-partial parse but print a stderr warning that analysis may be incomplete.
+**Exit codes** (`_exit_if_partial_parse`): `0` clean parse; `1` hard
+failure (`ast is None`, unreadable file); `2` recovered-but-errored parse —
+the JSON is still printed, a summary goes to stderr (also argparse's own exit
+code for bad arguments). `--find-type` follows the same rule (it exited `0` on
+a partial parse until 2026-10-10). `batch` likewise exits `2` when any file
+has a `read_error` or `success=false`. Analyzer subcommands exit `0` on a
+partial parse (`_parse_result_or_fail`) but print `warning: <file> parsed with
+N error(s); analysis may be incomplete` to stderr; `ast is None` is exit 1
+there too. Rationale: before 2026-07-07 the CLI exited `0` whenever an AST
+existed, so scripts gating on `$?` saw every partial parse as success.
 
 ## Tokenize
 
 ```bash
-cobol-parser tokenize <file.cbl>
+cobol-parser tokenize <file.cbl> [--compact] [--source-format auto|fixed|free | --free-form] \
+    [--debug-lines] [--dialect ibm-enterprise] [-o FILE]
 ```
 
 Prints the token stream as JSON:
-`{"source_file": "...", "tokens": [{"type": "...", "value": "...", "line": N, "column": N}]}`.
+`{"source_file": "...", "tokens": [{"type": "...", "value": "...", "line": N, "column": N}]}`
+(`type` is the `TokenType` name). Goes through `lexer._tokenize_source`, the
+same normalize-then-lex pipeline `parse` uses, with fixed-format comment lines
+kept as `COMMENT` tokens; lexer errors are ignored (best-effort dump).
 
 ## Preprocess
 
 ```bash
-cobol-parser preprocess <file.cbl> [--define DEBUG] [--strip-directives]
+cobol-parser preprocess <file.cbl> [--source-format auto|fixed|free | --free-form] \
+    [--debug-lines] [--define SYMBOL[=VALUE]]... [--strip-directives]
 ```
+
+No `--compact` / `-o`: the output is source text on stdout.
 
 Runs fixed-format normalisation and conditional compilation; prints the resulting
 free-form text. `--define` sets compiler flags for conditional blocks.
@@ -254,14 +414,17 @@ traceback.
 
 ## Source layout (`--source-format`)
 
-The subcommands that parse or lex a program directly — `parse`, `tokenize`,
-`preprocess`, every analyzer subcommand built via `_build_analyzer_parser`
-(`analyze`, `dead-code`, `complexity`, `health`, ...), `unused-variables`,
-and `program-flow` — accept `--source-format {auto,fixed,free}` (default
-`auto`). `batch`, `expand`, `gen-data`, and `gen-fixtures` do **not** take
-the flag (their underlying APIs — `parse_files`, `ProgramLayoutIndex`,
-`CopybookDataGenerator` — expose no layout override yet); they always
-auto-detect.
+`--source-format {auto,fixed,free}` (default `auto`; mutually exclusive with
+`--free-form`) is taken by `parse`, `tokenize`, `preprocess`, every subcommand
+built via `_build_analyzer_parser` (`analyze`, `dead-code`, `complexity`,
+`health`, `xref`, ...), and the hand-built `unused-variables`,
+`program-flow`, `redundancy`, `scan`, `lint`, `business-rules`, `lineage` and
+`diff`. `batch`, `expand`, `gen-fixtures`, `codebase-graph`,
+`copybook-impact` and `field-impact` do **not** take it (their underlying APIs
+— `parse_files`, the expander, `ProgramLayoutIndex`, the graph builders —
+expose no layout override); they always auto-detect. `gen-data`, `decode`,
+`compare` read only a record layout. `cobol.yml`'s `project.source_format`
+fills it.
 
 | Value | Behaviour |
 |-------|-----------|
@@ -278,8 +441,8 @@ normalisation. Passing both flags is rejected by argparse.
 
 `--debug-lines` / `--no-debug-lines` (`BooleanOptionalAction`, default off)
 ride along in `_add_source_format_args`: compile fixed-format `D` lines as
-code instead of dropping them (see [preprocessing.md](preprocessing.md),
-#334). `_source_format_kwargs()` adds `debug_lines=True` to its dict only
+code instead of dropping them (see [preprocessing.md](preprocessing.md);
+issue 334). `_source_format_kwargs()` adds `debug_lines=True` to its dict only
 when set; `scan` forwards it as `ScanOptions.debug_lines`; `preprocess`
 passes it to `normalize_fixed_format` directly. cobol.yml
 `project.debug_lines: true|false` (strictly a boolean) fills it, and
@@ -297,11 +460,14 @@ handles the common case of a solid change-tracking tag (`SAPR24`, `28486`)
 in columns 1-6; before that fix such files were silently treated as
 free-form and their tag text lexed as code.
 
-All subcommands that run conditional compilation (`parse`, `preprocess`,
-`expand` with `--define`) print any conditional-compilation diagnostics
+`preprocess`, and `parse` / every analyzer given `--define` without
+`--copybook-path` (the CLI-side `preprocess_conditional_compilation` pass in
+`_do_parse`), print conditional-compilation diagnostics
 (unknown `>>IF` conditions, stray `>>ELSE`/`>>END-IF`, malformed
 `>>DEFINE`, unclosed `>>IF` — audit 2026-07-07 H7) to **stderr** as
-`warning: ...` lines, so deleted guarded blocks are no longer silent.
+`warning: ...` lines, so deleted guarded blocks are not silent. With
+`--copybook-path` the expander runs that pass instead, and `expand` reports
+them in its JSON's `statistics.warnings`.
 `preprocess` evaluates `>>IF` / `>>EVALUATE` / `>>DEFINE` **whether or
 not `--define` is given** (issue #271, 2026-10-05): it used to run the
 conditional pass only under `--define`, so without it every `>>IF ... >>ELSE`
@@ -311,23 +477,23 @@ came out with both arms and an in-source `>>DEFINE` was ignored.
 (2026-08-14 — see [preprocessing.md](preprocessing.md)'s "Column 73+
 overflow warning" section): a non-comment line whose real content ran past
 column 72 and was silently truncated.
-`coverage status` reports malformed artifact JSON (or a non-object
-artifact) with a clean error and exit code 1 instead of an uncaught
-traceback (M10). `coverage generate` had the same gap (a malformed or
-non-object pytest-results JSON file raised uncaught inside
-`IOCoverageReporter.load_pytest_results`) — fixed the same way, audit
-2026-07-08.
 
 ## Expand
 
 ```bash
-cobol-parser expand <file.cbl> --copybook-path ./copybooks [--keep-comments] [--source-map] \
-    [--max-depth N] [--define NAME] [-o out]
+cobol-parser expand <file.cbl> [--copybook-path DIR]... [--keep-comments] [--source-map] \
+    [--max-depth N] [--define SYMBOL[=VALUE]]... [--debug-lines] [--compact] [-o out]
 ```
 
-Runs copybook expansion and prints the expanded source. `--copybook-path` may be
-specified multiple times for multiple search directories. `--max-depth`
-(default 100) caps COPY nesting (`max_nesting_depth`).
+Runs `expand_copybooks()` and prints its result as JSON:
+`{"source_file", **CopybookExpansion.to_dict()}` (the expanded text plus
+statistics). `--copybook-path` is repeatable (search order). `--max-depth`
+(default 100) caps COPY nesting (`max_nesting_depth`). A missing / circular /
+traversing COPY is a one-line `error: Copybook expansion failed ...`, exit 1
+(same as `parse --copybook-path`). Conditional compilation runs inside the
+expander, and only when `--define` is given (`process_conditionals=bool(defines)`),
+so a program's own `>>DEFINE` reaches the copybooks beneath it; its
+diagnostics land in the JSON's `statistics.warnings`, not on stderr.
 
 `--keep-comments` (2026-09-07) puts every comment line's original text back
 into the listing, in the program and in each inlined member. Expansion always
@@ -472,8 +638,9 @@ to `--format record|hex` only (CSV and JSON have no notion of record length).
 
 ```bash
 cobol-parser gen-fixtures <file.cbl> [--copybook-path DIR]... [--callee-path DIR]... \
-    [--rows N] [--seed N] [--scenarios happy|branches|all] [--format json|csv-dir] \
-    [--list-boundaries] [--strict] [--compact] [--output PATH]
+    [--rows N] [--seed N] [--max-occurs N] [--scenarios happy|branches|all] \
+    [--format json|csv-dir] [--list-boundaries] [--strict] [--debug-lines] \
+    [--compact] [--output PATH]
 ```
 
 Phase 3 of the `gen-fixtures` program-scoped test-data initiative (see
@@ -497,6 +664,7 @@ CICS, DLI, console ACCEPT) — not just one record's CSV rows.
   scenario. A negative `--rows` (or `data.rows` in `cobol.yml`) or a
   `--max-occurs` below 1 is a one-line `error:` with exit 1, as in
   `gen-data` (#327).
+* `--max-occurs N` caps the occurrences expanded per OCCURS table.
 * `--seed` pins the RNG; the same seed and program always produce
   byte-identical JSON (`ProgramFixtureGenerator.generate`'s own per-boundary
   sub-seed scheme -- see generators.md -- means adding one boundary never
@@ -539,8 +707,9 @@ program-scoped: it grades a paragraph against the references it can see, so a
 report is about ONE unit. It has always been the outermost, silently; a
 contained program came back "clean" because it was never examined.
 
-`--program NAME` (2026-09-07, on every subcommand built by
-`_build_analyzer_parser`, plus `lint`) selects the unit to report on,
+`--program NAME` (2026-09-07; on every subcommand built by
+`_build_analyzer_parser`, plus `unused-variables`, `program-flow`,
+`redundancy`, `lint`, `business-rules` and `lineage`) selects the unit to report on,
 case-insensitively, via `CobolProgram.find_program_unit`. An unknown name
 fails with the list of units that are there rather than falling back to a
 report about a different program.
@@ -550,8 +719,11 @@ Whenever a file holds more than one unit, every such report also carries
 source order — so a report can say what it did *not* cover. A single-program
 file's output is unchanged, key for key.
 
-`lint` is the deliberate exception to the default: it covers every unit unless
-`--program` narrows it.
+`lint` and `program-signature` are the deliberate exceptions to the default:
+they cover every unit unless `--program` narrows it. `scan` takes no
+`--program` (it reports every unit of every file), and `diff` has none yet.
+`field-impact --program` and `jcl --program` mean something else (the
+PROGRAM-ID owning FIELD; the steps that run a program).
 
 ## Analyze
 
@@ -599,7 +771,8 @@ With `--copybook-path`, each unused item also carries
 (`analysis.lint.stamp_report_origins`, 2026-09-27): `location.line` counts
 lines of the expanded text, so past the first `COPY` it was not the line on
 disk. `location` is left as it was.
-As of 2026-09-28 this stamping is done once, in `_emit_report`, for every
+**Origin stamping applies to every analyzer, not just this one:** since
+2026-09-28 it is done once, in `_emit_report`, for every
 analyzer subcommand that takes `--copybook-path` (dead-code, complexity,
 health, move-type-check, xref, ...): `_parse_result_or_fail` remembers the
 map on `args._expansion_source_map`. Previously only lint and
@@ -680,7 +853,8 @@ then covers only what the parser recovered.
 
 ```bash
 cobol-parser lint <file.cbl> [--rule RULE]... [--min-severity error|warning|info] \
-    [--fail-on error|warning|info|never] [--format json|text] [--copybook-path DIR]
+    [--fail-on error|warning|info|never] [--format json|text] [--copybook-path DIR]... \
+    [--program NAME] [standard analyzer flags (A) + profiling]
 ```
 
 Runs `LintAnalyzer` (see `.okf/analysis.md`) — several analyzers over **one**
@@ -714,7 +888,7 @@ returns a `(file, line) -> offset` function: the program itself is judged
 the way `CobolParser` decides (`--source-format`, else `detect_fixed_format`),
 each copybook the way the expander judged it (`_looks_fixed_format`), and
 within a fixed-format file a line after `>>SOURCE FORMAT FREE`
-(`free_format_flags`) gets no shift. The per-file table lives in
+(`preprocess.source_format.free_format_flags`) gets no shift. The per-file table lives in
 `analysis.lint.fixed_format_column_offset`: fixed listing + fixed file 7,
 fixed listing + free member 0 (the expander re-pads it by exactly 7), free
 listing + fixed member 6 (the expander cuts only the sequence area), free
@@ -786,8 +960,10 @@ unexamined would read as a clean one. `--program NAME` narrows it to one (see
 ## Batch
 
 ```bash
-cobol-parser batch [prog1.cbl prog2.cbl ...] [--glob PATTERN] [--workers N] \
-    [--encoding utf-8] [--stats] [--errors] [--profile ...]
+cobol-parser batch [prog1.cbl prog2.cbl ...] [--glob PATTERN]... [--workers N] \
+    [--encoding utf-8] [--stats] [--errors] [--dialect ibm-enterprise] \
+    [--error-recovery fail-fast|collect-all] [--debug-lines] [--compact] [-o FILE] \
+    [--profile ...]
 ```
 
 Parallel multi-file parsing via `ProcessPoolExecutor`. Files may be given
@@ -882,10 +1058,9 @@ Runs `compute_program_data_items()` (see [generators.md](generators.md)'s
 [...]}` — byte offset, byte length, REDEFINES chain, OCCURS min/max, and
 level-88 condition values for every data item across every DATA DIVISION
 section (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE) of the program.
-Registered the same way as `dead-code`/`io-sequence` (via
-`_build_analyzer_parser(..., profiling=True)`), so it also accepts the
-shared profiling flags. Added 2026-08-14 (Task 9 of the data-item-layout
-plan) as the final wiring step for Tasks 1-8's `layout_offsets.py` module.
+Registered via `_build_analyzer_parser(..., profiling=True)`, so it takes
+the standard analyzer flags plus the profiling flags (added 2026-08-14 as the
+final wiring step of the data-item-layout plan).
 
 ## Decode
 
@@ -1010,11 +1185,12 @@ usage, sign, and missing null indicators. Registered via
 `_build_analyzer_parser(..., profiling=True)` like the other analyzer
 subcommands, and also available as the `dclgen-check` rule of `lint`.
 
-## `redundancy` (2026-09-13)
+## Redundancy
 
-```
+```bash
 cobol-parser redundancy <file.cbl> [--min-clone-statements N] [--program NAME]
                                    [--copybook-path DIR] [--compact] [-o out.json]
+                                   [standard analyzer flags (A) + profiling]
 ```
 
 `RedundancyAnalyzer`'s whole report: `dead_code`, `unused_variables`,
@@ -1026,12 +1202,14 @@ shares with `scan` through `_add_min_clone_statements_arg` so the two cannot
 default differently: a scan and a single-file run that disagreed about what
 counts as a clone would report different groups for the same program.
 
-## `scan` (2026-09-13)
+## Scan
 
-```
+```bash
 cobol-parser scan FILE... [--glob PATTERN]... [--files-from LIST] [--analyzer NAME]... [--clones]
                           [--min-clone-members N] [--min-clone-statements N]
                           [--workers N] [--copybook-path DIR] [--encoding ENC]
+                          [--source-format auto|fixed|free | --free-form] [--debug-lines]
+                          [--dialect ibm-enterprise] [--error-recovery MODE]
                           [--compact] [-o out.json]
 ```
 
@@ -1076,7 +1254,7 @@ all on that platform. An unreadable list file exits 1 rather than scanning
 nothing, since "no input files" would read as an empty workspace.
 
 Output carries `scan_version` (read it before trusting any other key), an
-`analyzers` echo, a `summary` whose `file_count == scanned + failed` by
+`analyzers` echo, the `min_clone_statements` in force, a `summary` whose `file_count == scanned + failed` by
 construction, `files[]` and `failures[]`. A file that cannot be read or
 parsed is a `failures` entry and costs the scan nothing else; an analyzer
 that raises on one unit is named in that unit's `failed_analyzers` with its
@@ -1094,7 +1272,7 @@ forwarded, so `--source-format fixed` still auto-detected and a member with
 a spaced tag in columns 1-6 scanned as an `UNKNOWN` program with no
 paragraphs.
 
-## Business-Rules (2026-09-30)
+## Business-Rules
 
 ```bash
 cobol-parser business-rules <file.cbl> [--format json|text] [--include-technical]
@@ -1111,14 +1289,13 @@ the rules use, and a rule-to-data lineage table.
 | `--include-technical` | Keep file-status / EOF / SQLCODE / EIBRESP rules, flagged `technical`; by default they are left out and only counted in `summary.technical_rules_excluded` |
 
 Builds its own parser (`_build_business_rules_parser`) only because of those
-two flags; otherwise it takes exactly the shared analyzer flags
-(`--program`, `--copybook-path`, `--source-format`, `--dialect`, `--define`,
-`--compact`, `-o`, `--profile`). `--profile` only reaches `--format json`
+two flags; otherwise it takes exactly the standard analyzer set (A) plus the
+profiling flags. `--profile` only reaches `--format json`
 output (a warning says so under `text`), as with `program-flow`. With
 `--copybook-path`, JSON locations are origin-stamped by `_emit_report` like
 every other analyzer; the text format prints expanded-listing line numbers.
 
-## Lineage / Field-Impact (2026-10-08)
+## Lineage / Field-Impact
 
 ```bash
 cobol-parser lineage <file.cbl> [--field NAME] [--direction forward|backward]
@@ -1161,11 +1338,12 @@ parsed stay in `problems` and do not change the exit code.
 
 Seven subcommands landed together in PR #212 (`_cmd_xref`,
 `_cmd_program_signature`, `_cmd_codebase_graph`, `_cmd_copybook_impact`,
-`_cmd_sql_cics_check`, `_cmd_diff`, `_cmd_jcl` in `cli/parse.py`). Four are
-ordinary single-file analyzers built through `_build_analyzer_parser()` and so
-take the usual shared flags (`--program`, `--copybook-path`, `--source-format`,
-`--dialect`, `--define`, `--compact`, `-o`, `--profile`); three build their own
-parser because their arguments do not fit that shape.
+`_cmd_sql_cics_check`, `_cmd_diff`, `_cmd_jcl` in `cli/parse.py`). Three
+(`xref`, `program-signature`, `sql-cics-check`) are ordinary single-file
+analyzers built through `_build_analyzer_parser(..., profiling=True)` and so
+take the standard set (A) plus profiling; four (`diff`, `codebase-graph`,
+`copybook-impact`, `jcl`) build their own parser because their arguments do
+not fit that shape.
 
 ### Ordinary analyzer subcommands
 
@@ -1227,7 +1405,7 @@ Both take **one directory to walk, or any number of COBOL source files**, plus:
 
 | Flag | Meaning |
 |------|---------|
-| `--extension EXT` | Source extension to walk for, repeatable; accepted **with or without** the leading dot (`--extension cbl` and `--extension .cbl` both work) |
+| `--extension EXT` | Source extension to walk for, repeatable (default `.cbl`, `.cob`, `.cobol`); accepted **with or without** the leading dot (`--extension cbl` and `--extension .cbl` both work); `cobol.yml` `project.extensions` fills it |
 | `--workers N` | Worker processes for the batch parse (default: chosen by input size) |
 | `--copybook-path DIR` | Where COPY members are resolved from, as elsewhere |
 | `--format json\|dot\|mermaid` | `codebase-graph` only — `to_dot()` / `to_mermaid()` reuse the flowchart renderer's conventions |
@@ -1263,6 +1441,28 @@ and `-o` work as everywhere else. It needs the `jcl-parser` package
 `jcl` exits 1 with that install hint as a one-line `error:` (no traceback).
 See [jcl.md](jcl.md).
 
+# IO coverage tools (`cobolparser/cli/coverage.py`)
+
+A separate argparse program — **not** a `cobol-parser` subcommand and not a
+console script; run it as `python -m cobolparser.cli.coverage <cmd>`. It
+wraps `analysis.io_coverage_reporter.IOCoverageReporter` (see
+[analysis.md](analysis.md)) for the IO statement coverage artifact.
+
+| Command | Flags (default) |
+|---|---|
+| `status` | `--artifact` (`io-coverage.json`), `--verb`, `--qualifier`, `--format {table,json}` (table) |
+| `generate` | `--pytest-results FILE` (required), `--output` (`io-coverage.json`), `--catalog CSV`, `--schema JSON` |
+| `validate` | `--artifact FILE` (required) |
+| `render` | `--input FILE` (required), `--output` (stdout), `--format {markdown,csv,summary}` (markdown) |
+
+`main()` returns the command's int status (no command: help, exit 1).
+`status` falls back to `./io-coverage.json` only when the requested artifact
+is missing *and* is not already that path (printing a `Note:`), so a stale
+default artifact is never served silently. A malformed or non-object
+artifact (`status`) or pytest-results file (`generate`) is a clean error with
+exit 1, not a traceback (audits M10, 2026-07-08). Tests:
+`tests/unit/cli/test_coverage_cli.py`, `test_coverage_cli_extra.py`.
+
 # See Also
 
 * [analysis.md](analysis.md) — the underlying analyzers, including
@@ -1277,6 +1477,7 @@ See [jcl.md](jcl.md).
 * [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md) — the
   full `FixtureBundle` JSON shape `gen-fixtures --format json` produces
 
+# Recent changes
 
 ## 2026-10-08
 
