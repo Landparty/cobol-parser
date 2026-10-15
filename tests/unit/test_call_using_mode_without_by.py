@@ -69,3 +69,22 @@ def test_by_forms_unchanged() -> None:
         ("X", "CONTENT"),
         ("Z", "VALUE"),
     ]
+
+
+def test_boundary_inventory_direction_without_by() -> None:
+    # The downstream effect #388 named: a CONTENT / VALUE argument is an
+    # OUT argument to the callee whether or not BY is written.
+    from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+    from cobolparser.generators import ProgramLayoutIndex
+
+    result = parse_cobol(_PROGRAM.format(call="CALL 'SUB' USING CONTENT X VALUE Z."))
+    assert result.ast is not None
+    index = ProgramLayoutIndex.build(result.ast)
+    report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+    call = next(b for b in report.boundaries if b.ref.category == "CALL")
+    by_name = {a.name: a for a in call.call_args}
+    assert set(by_name) == {"X", "Z"}
+    assert by_name["X"].passing_mode == "CONTENT"
+    assert by_name["Z"].passing_mode == "VALUE"
+    assert by_name["X"].direction == by_name["Z"].direction == "OUT"
+    assert by_name["X"].provenance == "by-content-rule"
