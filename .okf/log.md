@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-30 -- WHENEVER covers DECLARE GLOBAL TEMPORARY TABLE
+
+[analysis/flow.md](analysis/flow.md) (SQL WHENEVER handlers):
+`_sql_whenever._is_executable` treats `DECLARE GLOBAL TEMPORARY TABLE` as
+executable SQL although the parser files it as `DECLARE TABLE`, so a handler
+reached only from it is no longer dead. Tests:
+`tests/unit/analysis/test_sql_whenever_references.py`.
+
 ## 2026-10-30 -- lineage: FROM FINAL TABLE (...) and `BANK . CUST`
 
 [analysis/lineage.md](analysis/lineage.md) (`sql` port row): `_from_tables`
