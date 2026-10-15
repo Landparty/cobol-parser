@@ -6,13 +6,15 @@ tags: [ast, models, cobol-program, data-items, statements]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
-# Overview
+# AST Models
 
 `cobolparser/models/` holds every AST node class the parser builds. Every node
 extends `ASTNode` (`ast_base.py`) and implements `to_dict()`; `to_json()` is
 `to_dict()` serialized. The root of a parse is a `CobolProgram`
 (`ParseResult.ast`), whose tree is divisions -> sections -> paragraphs ->
 statements (PROCEDURE DIVISION) or sections -> data items (DATA DIVISION).
+Start with [Traversal and query helpers](#traversal-and-query-helpers) to walk a
+tree, or [Data items](#data-items-modelsdata_itemspy) for byte layout.
 
 | Module | Holds |
 |--------|-------|
@@ -35,22 +37,25 @@ hand use `ASTNodeFactory` (see below) or the node's constructor.
 
 ## Contents
 
-* [Base Classes](#base-classes-modelsast_basepy)
-* [Program Structure](#program-structure-modelsprogrampy)
+* [Base classes](#base-classes-modelsast_basepy)
+* [Program structure](#program-structure-modelsprogrampy)
+  * [Program-unit attributes](#program-unit-attributes)
   * [Program units](#program-units)
-  * [Serialization: `to_json()` / `from_json()`](#serialization-to_json--from_json)
+* [Serialization: `to_json()` / `from_json()`](#serialization-to_json--from_json)
 * [Traversal and query helpers](#traversal-and-query-helpers)
 * [ASTNodeFactory](#astnodefactory)
-* [Data Items](#data-items-modelsdata_itemspy)
+* [Data items](#data-items-modelsdata_itemspy)
   * [`PictureClause` sizing](#pictureclause-sizing)
   * [Shapes that surprise consumers](#shapes-that-surprise-consumers)
 * [`calculate_size()` and `_storage.py`](#calculate_size-and-_storagepy)
-* [SQL Statement Nodes](#sql-statement-nodes-modelssql_statementspy)
-* [Statement Models](#statement-models-modelsstatements)
+* [SQL statement nodes](#sql-statement-nodes-modelssql_statementspy)
+* [Statement models](#statement-models-modelsstatements)
+  * [Stacked WHENs](#stacked-whens)
+  * [Expression trees](#expression-trees)
   * [Statement field reference](#statement-field-reference)
-* [See Also](#see-also)
+* [See also](#see-also)
 
-# Base Classes (`models/ast_base.py`)
+## Base classes (`models/ast_base.py`)
 
 ```python
 @dataclass
@@ -86,11 +91,11 @@ matters, content always does: a reparse of the same text is equal, a program
 differing in one PICTURE or one MOVE literal is not.
 `CobolProgram._comparable_dict()` serializes with `include_metadata=False` and
 adds back only the program's own `_metadata`, so the derived statistics block
-(whose `total_lines` comes from locations) does not take part. (Before issue
-#273, 2026-10-05, it compared node types and child counts only, so any two
-programs with the same division count were "equal".)
+(whose `total_lines` comes from locations) does not take part. Comparing node
+types and child counts alone is not enough: any two programs with the same
+division count would be "equal" (see #273).
 
-# Program Structure (`models/program.py`)
+## Program structure (`models/program.py`)
 
 ```python
 class CobolProgram(ASTNode):             # CobolProgram(program_name, location); node_type "Program"
@@ -136,7 +141,11 @@ class CobolParagraph(ASTNode):           # CobolParagraph(paragraph_name, locati
 bodies (INVALID KEY, ON EXCEPTION, ...); the result is cached on the program
 (invalidated by `add_division`).
 
-Program-unit attributes (from the program-type corpus work, 2026-09-15):
+FD/SD entries are `CobolFileDescription(file_name, location, record_type="FD")`
+(`file_name`, `record_type` FD|SD, `data_records`, BLOCK/RECORD CONTAINS,
+`record_varying_depending_on`, LABEL/VALUE OF/LINAGE/CODE-SET clauses).
+
+### Program-unit attributes
 
 * `unit_kind` -- `"PROGRAM"` (default; not serialized) or, for IBM
   object-oriented COBOL, `"CLASS"` / `"FACTORY"` / `"OBJECT"` / `"METHOD"`
@@ -150,11 +159,7 @@ Program-unit attributes (from the program-type corpus work, 2026-09-15):
   `DECLARATIVES.` and `END DECLARATIVES.`.
 * PROCEDURE DIVISION metadata `returning_parameter`.
 
-FD/SD entries are `CobolFileDescription(file_name, location, record_type="FD")`
-(`file_name`, `record_type` FD|SD, `data_records`, BLOCK/RECORD CONTAINS,
-`record_varying_depending_on`, LABEL/VALUE OF/LINAGE/CODE-SET clauses).
-
-## Program units
+### Program units
 
 ```python
 ast.program_units()               # [self, *contained, recursively], source order
@@ -166,7 +171,7 @@ A compilation unit can hold several programs — stacked or nested, delimited by
 (serialized as `contained_programs`). Every analyzer in this package is
 program-scoped (it grades a paragraph against the references it can see), so
 analyzing a multi-program file means running the analyzer once per unit; these
-two methods (2026-09-07) are how to reach the units, and back both
+two methods are how to reach the units, and back both
 `LintAnalyzer`'s per-unit pass and the CLI's `--program NAME` (see
 [cli.md](cli.md)). Pinned by `tests/regression/test_nested_program_units.py`.
 
@@ -179,7 +184,7 @@ node classes are mostly emitted only when non-empty, so adding a field keeps
 older dict output byte-identical.
 
 `CobolProgram.from_json()` is **not** its full inverse -- it restores a
-structural skeleton (issue #273, 2026-10-05):
+structural skeleton (see #273):
 
 * **Restored** (with locations and per-node metadata): program name,
   `unit_kind`, own metadata, contained units (recursively); every division and
@@ -194,9 +199,9 @@ structural skeleton (issue #273, 2026-10-05):
   with all its clauses (organization, access mode, record / alternate /
   relative keys, FILE STATUS, ...) -- a SELECT dict is flat, so
   `_select_from()` rebuilds it whole and `ProgramLayoutIndex.file_facts()` of
-  a round-tripped program matches the original (#346, 2026-10-15; SELECTs
-  used to be dropped *and* counted as PROCEDURE DIVISION statements in the
-  warning).
+  a round-tripped program matches the original. SELECTs are ENVIRONMENT
+  DIVISION nodes: they are neither dropped nor counted as PROCEDURE DIVISION
+  statements in the warning (see #346).
 * **Dropped:** every PROCEDURE DIVISION statement -- there is no generic way to
   rebuild ~100 statement node types from their dicts -- so restored paragraphs
   are empty. Whenever any were dropped, `from_json` emits
@@ -209,8 +214,7 @@ structural skeleton (issue #273, 2026-10-05):
   `p.to_dict()` with PROCEDURE DIVISION paragraph `statements` emptied, apart
   from the derived `metadata.statistics`.
 
-Serialized-shape facts (several were in-memory only until the 2026-07-07
-fidelity audit):
+Serialized-shape facts:
 
 * `CobolDataItem.to_dict()` serializes level-88 children as `condition_names`;
   `CobolSection.to_dict()` serializes level-66 children as `renames_items`.
@@ -220,7 +224,7 @@ fidelity audit):
 * `CobolExpression.to_dict()` includes `operands`, so condition/expression
   text (e.g. PERFORM UNTIL conditions) reaches the JSON.
 
-# Traversal and query helpers
+## Traversal and query helpers
 
 ```python
 ast: CobolProgram = result.ast
@@ -238,22 +242,22 @@ subcommands rely on. Results are cached per `node_type` on the node, but each
 call returns a fresh copy of that cache — mutating the returned list never
 corrupts a later lookup.
 
-**Query helpers (2026-09-28).** `has_sql()` / `has_cics()` / `has_ims()`
+**Dialect query helpers.** `has_sql()` / `has_cics()` / `has_ims()`
 and `get_sql_statements()` / `get_cics_statements()` /
 `get_ims_statements()` classify through `program._exec_kind()`: any
 `sql_statements.ExecSQLStatement` (so `FetchStatement`,
 `DeclareCursorStatement`, `TransactionControlStatement`, ... too) is SQL, and
 `statement_type` `"EXEC CICS"` (parser) or `"EXEC-CICS"` (dialect nodes) is
-CICS, likewise IMS. (They used to test `statement_type == "EXEC-CICS"` alone,
-a spelling no parsed statement carries, so every real CICS / EXEC DLI program
-answered False.) `get_statistics()["statement_count"]` counts `CobolStatement`
+CICS, likewise IMS. Both spellings must be accepted: parsed statements carry
+the spaced one, so testing `"EXEC-CICS"` alone answers False for every real
+CICS / EXEC DLI program. `get_statistics()["statement_count"]` counts `CobolStatement`
 instances, `EXEC_CICS` / `EXEC_IMS` included. `find_statements_using_variable(name)`
 matches a whole COBOL word, case-insensitively, outside quoted literals (not a
 substring: `WS-A` does not match `WS-AMOUNT`). `get_intrinsic_function_usages()`
-delegates to `LanguageEnvironmentAnalyzer` (its own former regex had reported
-`OF` for `DLI-FUNCTION OF REC` and words inside literals).
+delegates to `LanguageEnvironmentAnalyzer` rather than running its own regex,
+which reports `OF` for `DLI-FUNCTION OF REC` and words inside literals.
 
-# ASTNodeFactory
+## ASTNodeFactory
 
 ```python
 from cobolparser.core.ast_factory import get_factory, create_node
@@ -273,7 +277,7 @@ no location / node_type, `NodeTypeError` from a type check, and
 `register_validator()`. Keyword arguments go to the node's constructor, so
 they must be parameters it actually takes.
 
-# Data Items (`models/data_items.py`)
+## Data items (`models/data_items.py`)
 
 ```python
 class CobolDataItem(ASTNode):        # CobolDataItem(name, level, location); node_type "DataItem"
@@ -307,9 +311,9 @@ class OccursClause(ASTNode):         # OccursClause(location)
     depending_on: str | None
     depending_on_qualifiers: list[str]
     indexed_by: str | None     # first index (backward-compatible)
-    index_names: list[str]     # all INDEXED BY names (2026-07-09)
+    index_names: list[str]     # all INDEXED BY names
     key_clauses: list[dict]    # {"direction": "ASCENDING"|"DESCENDING",
-                               #  "keys": [...]} — SEARCH ALL keys (2026-07-09)
+                               #  "keys": [...]} — SEARCH ALL keys
 
 class ConditionNameItem(ASTNode):    # level 88: name, values, false_value
 class RenamesItem(ASTNode):          # level 66: name, renames_from, renames_through
@@ -322,11 +326,9 @@ item's `to_dict()` carries `calculated_size` (below) and `is_elementary_item`.
 `is_dynamic_length` + `dynamic_length_limit`, `object_class`
 (`set_object_reference`; usage `"OBJECT REFERENCE"`) and `group_usage`
 (`GROUP-USAGE NATIONAL|UTF-8`) are each serialized only when set.
-`usage_explicit` is not serialized. (Before 2026-07-09 `ASCENDING/DESCENDING
-KEY` was dropped and `INDEXED BY` kept only its last name; see
-[parser.md](parser.md)'s Silent-Drop Audit.)
+`usage_explicit` is not serialized.
 
-**Inherited USAGE / SIGN (2026-09-28).** `usage_explicit` is True when the
+**Inherited USAGE / SIGN.** `usage_explicit` is True when the
 entry carries its own USAGE (`set_usage` / `set_object_reference`). `usage` /
 `sign_clause` of a subordinate with no clause of its own reflect the enclosing
 group's (see parser.md, `data.py`), so `calculate_size()` counts packed/binary
@@ -335,7 +337,7 @@ entry with no USAGE clause the usage its picture implies -- `NATIONAL` for
 `N`, `DISPLAY-1` for `G` (IBM default `NSYMBOL(NATIONAL)`); `usage_explicit`
 stays False and a later USAGE clause still wins.
 
-**Implicit FILLER (#404, 2026-10-14).** Outside a REPORT SECTION group, an
+**Implicit FILLER (#404).** Outside a REPORT SECTION group, an
 entry with no data-name (`05 PIC X(3).`, FILLER omitted) keeps the synthetic
 `ANONYMOUS-<level>-<line>` `name` but has `is_filler=True`.
 `CobolDataItem.layout_name` is `"FILLER"` for every filler item and `name`
@@ -344,7 +346,7 @@ otherwise; record layouts (`layout.py`, `layout_offsets.py` / `data-items`,
 and lineage keys it positionally like `05 FILLER`. Unnamed report-group
 entries stay non-filler.
 
-**REPORT SECTION (2026-09-02).** Report groups are ordinary `CobolDataItem`
+**REPORT SECTION.** Report groups are ordinary `CobolDataItem`
 trees under a `CobolSection("REPORT")`. Each 01-level group carries
 `metadata["rd_report_name"]` and `metadata["rd_clauses"]` (the RD's
 CODE/CONTROLS/PAGE LIMIT/HEADING/FIRST DETAIL/LAST DETAIL/FOOTING/GLOBAL as a
@@ -353,7 +355,7 @@ TYPE/LINE/NEXT GROUP/COLUMN/SOURCE/SUM/GROUP INDICATE/PRESENT WHEN clauses.
 Anonymous entries (`01 TYPE IS DETAIL.`) get the `ANONYMOUS-<level>-<line>`
 name. See [parser.md](parser.md).
 
-**`ConditionNameItem.false_value: str | None`** (2026-09-28) -- the literal of
+**`ConditionNameItem.false_value: str | None`** -- the literal of
 a level-88 `WHEN SET TO FALSE [IS] literal` phrase (a sign folded into a
 numeric literal as in `values`: `"-0"`; a figurative constant by name:
 `"SPACE"`), `None` when absent. Always present in `to_dict()`.
@@ -361,12 +363,12 @@ numeric literal as in `values`: `"-0"`; a figurative constant by name:
 **OCCURS parsing.** Both OCCURS clause walks that populate `OccursClause` —
 the pure-Python `data_clauses._parse_occurs_clause` and its Cython mirror in
 `_data_fast.pyx` — handle real-deck line splits (count/`TO`/`BY` starting a
-continuation line) and comma-separated `INDEXED BY` / `KEY` name lists
-(2026-08-23). The count read is guarded (`_peek_count_token` /
+continuation line) and comma-separated `INDEXED BY` / `KEY` name lists.
+The count read is guarded (`_peek_count_token` /
 `_peek_count_pos`): a LEVEL_NUMBER reached only by crossing a line break counts
 only when the clause visibly continues after it, so a malformed `OCCURS` with
 no count cannot swallow the next item's own level number as a fabricated table
-size (it used to fabricate a phantom data item while recording
+size (an unguarded read fabricates a phantom data item while recording
 `max_times == 0`). See [parser.md](parser.md).
 
 **`_data_fast.pyx`.** `parse_picture_clause_fast()` /
@@ -384,16 +386,16 @@ clause walk in `data_clauses.py` must be mirrored in `_data_fast.pyx` (and its
 checked-in `.c` regenerated). See [lexer.md](lexer.md) for the accelerator
 build.
 
-## `PictureClause` sizing
+### `PictureClause` sizing
 
 `size` is a **byte** count — it is what `calculate_size()`, `data-items`
 offsets and record images are built from.
 
-* `PIC N(n)` (national) and `PIC G(n)` (DBCS) are **2 bytes per character**
-  (2026-09-09); `U` (UTF-8) is one byte per symbol.
+* `PIC N(n)` (national) and `PIC G(n)` (DBCS) are **2 bytes per character**;
+  `U` (UTF-8) is one byte per symbol.
 * P-scaled pictures (`9(3)PPP`, `SVPP9(3)`) are sized by their stored `9`s (3
   bytes) while `integer_digits`/`decimal_digits` include the `P` positions
-  (6/0 and 0/5). `scaling_leading: bool | None` (2026-09-10) records the P
+  (6/0 and 0/5). `scaling_leading: bool | None` records the P
   run's direction -- `True` for `PPP9(3)` (leading, a fraction), `False` for
   `9(3)PPP` (trailing, a scaled integer), `None` when not P-scaled -- the one
   place this is decided; `generators/data/layout.py`'s
@@ -404,25 +406,25 @@ offsets and record images are built from.
 * Floating-insertion strings (`$$$,$$9`, `$Z,ZZ9`) count their leftmost symbol
   as the sign/currency, not a digit.
 * Simple insertion `B`/`0` make a picture edited and count one byte each
-  (2026-09-27: `999B99` had sized 5, `0009` 1, `XXBXX` 4) -- unless the pattern
+  (`999B99` is 6, `0009` 4, `XXBXX` 5) -- unless the pattern
   also holds characters no PICTURE may contain, which keeps the lenient
-  fallback. An edited picture with a `V` (`Z(3)V99`) is sized by the edited
-  path, not the 9s-only `V` split (it had sized 2, not 5).
+  fallback. An edited picture with a `V` (`Z(3)V99`, 5 bytes) is sized by the
+  edited path, not the 9s-only `V` split.
 * Unedited pictures are sized after expanding every repeat factor
-  (`_parse_plain_pattern`, 2026-09-27): `X(2)X(3)` had sized 2, `AAX(2)` 1,
-  `9(2)9(3)` 2 digits, `NN` 2 bytes instead of 4.
-* **National (2026-09-28).** `is_national` (an `N` or national-edited picture)
+  (`_parse_plain_pattern`): `X(2)X(3)` is 5, `AAX(2)` 4, `9(2)9(3)` 5 digits,
+  `NN` 4 bytes. Counting only the last repeat factor undersizes them.
+* **National.** `is_national` (an `N` or national-edited picture)
   and `is_national_edited` (`N` with `B`/`0`/`/`: `N(2)BN` is 8 bytes, not 4,
   and not numeric-edited).
-* **`currency_symbols`** (2026-09-28): the non-`$` currency symbols a
+* **`currency_symbols`**: the non-`$` currency symbols a
   `SPECIAL-NAMES CURRENCY SIGN` declares that occur in the pattern
   (`PIC £££9.99`). The pattern is sized and validated through its `$`
   spelling, then `pattern` is restored as written; the set is also
   `metadata["currency_symbols"]` when non-empty. The DATA DIVISION passes it
   through `DataItemClauseParser._picture_clause` (also handed to the
   `_data_fast` helper in place of the class), from the non-`$` CURRENCY tokens
-  `parse_picture_clause` saw. (`£` used to be an invalid PICTURE character.)
-* **`decimal_point_is_comma`** (2026-09-28): `SPECIAL-NAMES. DECIMAL-POINT IS
+  `parse_picture_clause` saw; without them `£` is an invalid PICTURE character.
+* **`decimal_point_is_comma`**: `SPECIAL-NAMES. DECIMAL-POINT IS
   COMMA` -- `,` is the decimal point and `.` a simple insertion character.
   Sized and validated through the default spelling (`,`/`.` exchanged,
   alongside the currency `$` translation), then `pattern` is restored as
@@ -431,7 +433,7 @@ offsets and record images are built from.
   `DataItemClauseParser._picture_clause` reads it off the host
   (`CobolParser.decimal_point_is_comma`, set from the lexer).
 
-## Shapes that surprise consumers
+### Shapes that surprise consumers
 
 Both compensated for in [generators.md](generators.md)'s data generator:
 
@@ -450,7 +452,7 @@ Both compensated for in [generators.md](generators.md)'s data generator:
   range end keeps its marker too (`88 X VALUE -5 THRU -1.` →
   `["-5", "THROUGH:-1"]`, distinct from `VALUE -5, -1` → `["-5", "-1"]`).
 
-# `calculate_size()` and `_storage.py`
+## `calculate_size()` and `_storage.py`
 
 `CobolDataItem.calculate_size()` reports the bytes an item occupies, every
 OCCURS occurrence included. It is published as `calculated_size` on every data
@@ -468,15 +470,20 @@ the usage sets (`PACKED_USAGES`, `BINARY_FIXED_USAGES`, `BINARY_NATIVE_USAGES`,
 `FUNCTION-POINTER` / `OBJECT REFERENCE`, `PROCEDURE_POINTER_BYTES` 8 — IBM:
 two words, `POINTER_64_BYTES` 8).
 
-Current rules worth knowing:
+Never give `calculate_size()` its own copy of the byte arithmetic: a private
+copy drifts (usage spellings such as `BINARY` / `COMPUTATIONAL-3` missed,
+PICTURE-less `COMP-1`/`COMP-2`/`INDEX` sized 0, a REDEFINES added to what it
+redefines, OCCURS ignored on groups, `SIGN IS SEPARATE` without its byte), and
+every wrong number lands in a published API.
+
+Rules worth knowing:
 
 * `USAGE NATIONAL` on a numeric / numeric-edited picture is 2 bytes per
   position (`PIC 9(5) NATIONAL` = 10). A signed national decimal item always
   pays a separate sign of one national character (2 bytes): it cannot carry an
   overpunched sign, and with the SIGN clause omitted IBM assumes `SIGN IS
-  TRAILING SEPARATE CHARACTER`, so `PIC S9(5) USAGE NATIONAL` is 12 (it was 10
-  before 2026-10-08, shifting every later offset by 2; pinned in
-  `tests/regression/test_bug_hunt_2026_10_08.py`).
+  TRAILING SEPARATE CHARACTER`, so `PIC S9(5) USAGE NATIONAL` is 12; pinned in
+  `tests/regression/test_bug_hunt_2026_10_08.py`.
 * A DISPLAY item with `SIGN IS SEPARATE` gets the extra byte its PICTURE
   character count does not include.
 * Group layout follows `layout_offsets._layout_siblings`' **slot** rule (a
@@ -484,7 +491,7 @@ Current rules worth knowing:
   OCCURS multiplier applies to groups as well as elementary items; level-66
   and level-77 children are excluded. Helpers: `_occurrence_size()` /
   `_occurs_multiplier()` / `_direct_data_children()`.
-* **Group vs. elementary (#345, 2026-10-15):** `is_elementary_item()` is True
+* **Group vs. elementary (#345):** `is_elementary_item()` is True
   for a childless item that has a PICTURE *or* a usage that never takes one
   (`_storage.PICTURELESS_USAGES`: `COMP-1`/`COMP-2` and their
   `COMPUTATIONAL-n` spellings, `INDEX`, the `POINTER` family, `OBJECT
@@ -507,31 +514,7 @@ the same reason: `cobolparser.generators.data.__init__` eagerly imports
 `generators/data/storage.py` is a re-export shim, so its importers are
 untouched.
 
-**History (2026-09-05 rewrite).** `calculate_size()` used to carry its own copy
-of the arithmetic and had drifted in several ways, all wrong numbers in a
-published API:
-
-| Input | Old | Correct |
-|-------|-----|---------|
-| `PIC S9(9) BINARY` / `COMPUTATIONAL` | 9 | 4 |
-| `PIC S9(7)V99 COMPUTATIONAL-3` | 9 | 5 |
-| `COMP-1` / `COMP-2` (no PICTURE) | 0 | 4 / 8 |
-| `USAGE INDEX` | 0 | 4 |
-| group with `05 B REDEFINES A PIC X(10)` | 20 | 10 |
-| `05 ROW OCCURS 5` of a 4-byte group | 4 | 20 |
-| `PIC S9(5)` with `SIGN IS LEADING SEPARATE` | 5 | 6 |
-
-Causes, in order: the usage branches listed `COMP`/`COMP-4`/`COMP-3` but not
-the `BINARY`/`COMPUTATIONAL`/`COMPUTATIONAL-3` spellings; every usage branch
-sat behind an `is_elementary_item()` guard that then *required* a PICTURE, so
-the `COMP-1`/`COMP-2` branch was unreachable (and `INDEX` had no branch — a
-zero-width item silently collapses every offset after it); the group branch
-summed all children, adding a REDEFINES entry to what it redefines; the OCCURS
-multiplier was applied only in the elementary branch; and `SIGN IS SEPARATE`
-never got its extra byte. Later corrections: `PROCEDURE-POINTER` 4 -> 8 and
-`OBJECT REFERENCE` 0 -> 4 (2026-09-28).
-
-# SQL Statement Nodes (`models/sql_statements.py`)
+## SQL statement nodes (`models/sql_statements.py`)
 
 AST nodes for EXEC SQL blocks: `ExecSQLStatement` (extends `CobolStatement`)
 and its subclasses `DeclareCursorStatement`, `DeclareTableStatement`,
@@ -540,26 +523,24 @@ and its subclasses `DeclareCursorStatement`, `DeclareTableStatement`,
 and the factory `parse_exec_sql(sql_text, location)`. The EXEC CICS / EXEC IMS
 nodes (`ExecCicsStatement` / `ExecImsStatement`) live with their parsers in
 `parsers/statements/ibm_exec_statements.py` (see
-[Statement Models](#statement-models-modelsstatements)).
+[Statement models](#statement-models-modelsstatements)).
 
 * `ExecSQLStatement.tables` holds full, qualified names (`BANK.ACCOUNT`,
   `LOC.SCHEMA.TABLE`); the FROM/INTO/UPDATE/JOIN regexes match qualified names
-  (`_SQL_TABLE_NAME`). (Before 2026-09-23 they stopped at the first `.`, so
-  every qualified table also reported its schema as a table.)
+  (`_SQL_TABLE_NAME`). A regex stopping at the first `.` would report every
+  qualified table's schema as a table too.
 * `MERGE INTO tgt USING src ...` has `sql_type == "MERGE"`; `tables` lists the
   target first, then the `USING` source table or the tables its `USING
   (SELECT ...)` subquery reads (a `USING (VALUES ...)` source adds none). A
   statement led by common table expressions (`WITH x AS (...) SELECT ...`)
   takes the type of its main verb, and `tables` lists the base tables the CTE
   bodies and main statement read -- never the CTE names themselves
-  (`_split_common_table_expressions()`). (Both were `"UNKNOWN"` with no tables
-  before 2026-09-27.)
+  (`_split_common_table_expressions()`).
 * `TRUNCATE [TABLE] t [DROP|REUSE STORAGE] ... [IMMEDIATE]` has
   `sql_type == "TRUNCATE"` (`SQLStatementType.TRUNCATE`) and `tables == [t]`
-  (`_SQL_TRUNCATE_TABLE_RE`); the CRUD matrix marks `t` D (issue #341,
-  2026-10-15).
+  (`_SQL_TRUNCATE_TABLE_RE`); the CRUD matrix marks `t` D (see #341).
 * `into_variables` / `DynamicSQLStatement.using_variables` list every host
-  variable of the INTO / USING list, indicators included (2026-09-28).
+  variable of the INTO / USING list, indicators included.
 * A structure-qualified host variable (`:DCLEMP.EMPNO`) is listed by its last
   component (`EMPNO`).
 * `FetchStatement.cursor_name` / `fetch_direction` / `fetch_count` are read
@@ -569,7 +550,7 @@ nodes (`ExecCicsStatement` / `ExecImsStatement`) live with their parsers in
 
 See [dialects.md](dialects.md) for the SQL details.
 
-# Statement Models (`models/statements/`)
+## Statement models (`models/statements/`)
 
 | File | Node Classes |
 |------|-------------|
@@ -590,24 +571,24 @@ discovery — unused-variables, xref — reads `operands`, which is why most
 fields below are also added there). `ExecCicsStatement` / `ExecImsStatement`
 (`parsers/statements/ibm_exec_statements.py`) also extend `CobolStatement`
 (`statement_type` `"EXEC CICS"` / `"EXEC IMS"`, `node_type` `"EXEC_CICS"` /
-`"EXEC_IMS"`, `to_dict()` shape unchanged since 2026-09-02) so
-`get_all_statements()` returns them.
+`"EXEC_IMS"`) so `get_all_statements()` returns them.
 
 The `communication.py` / `legacy.py` / `report_writer.py` modules plus
-`RaiseStatement`/`ResumeStatement` and `ValidateStatement` (statement-coverage
-audit, 2026-09-02) back the 22 verbs that used to be warned-and-discarded (see
-[parser.md](parser.md)'s "Statement-coverage audit" section).
-`InvokeStatement`/`AllocateStatement`/`FreeStatement` (2026-08-05) back
-`invoke_parser.py`/`allocate_free_parsers.py`.
+`RaiseStatement`/`ResumeStatement` and `ValidateStatement` back the
+COBOL-85 Communication, legacy, Report Writer and COBOL 2002 exception verbs;
+`InvokeStatement`/`AllocateStatement`/`FreeStatement` back
+`invoke_parser.py`/`allocate_free_parsers.py` (see [parser.md](parser.md)).
 
-**`NextSentenceStatement`** (`statement_type` `"NEXT-SENTENCE"`, 2026-08-24)
+**`NextSentenceStatement`** (`statement_type` `"NEXT-SENTENCE"`)
 backs `NEXT SENTENCE`. Deliberately its own node rather than reusing
 `ContinueStatement`: NEXT SENTENCE transfers control past the rest of the
 current sentence, not a true fall-through no-op.
 
-**Stacked WHENs (2026-10-14, #314).** `WHEN 'A' WHEN 'B' stmt` parses into one
+### Stacked WHENs
+
+`WHEN 'A' WHEN 'B' stmt` parses into one
 `WhenClause` per WHEN phrase, so `when_clauses[0]` has no statements; the
-statements after the last WHEN belong to every WHEN of the stack. The AST
+statements after the last WHEN belong to every WHEN of the stack (see #314). The AST
 shape is deliberately unchanged. `EvaluateStatement.when_groups()` returns the
 arms as they execute -- each clause the parser marked `stacked` joined to the
 clause after it, `group[-1].statements` the shared body. `stacked` is decided
@@ -620,7 +601,9 @@ that was in the source but did not reach the AST is not a stack. Not in
 `when_clauses`; per-*phrase* walks (xref, unused variables, complexity's
 decision count, diff) keep `when_clauses`.
 
-**Expression trees (2026-07-20, M12; additive).**
+### Expression trees
+
+Additive to the raw strings:
 
 * `ComputeStatement.expression_tree: CobolExpression | None` — structural
   decomposition of the COMPUTE expression (`set_expression_tree()`); the raw
@@ -638,18 +621,16 @@ decision count, diff) keep `when_clauses`.
   `interface-contract.md`) need no changes — all historical fields/keys are
   untouched.
 
-## Statement field reference
+### Statement field reference
 
-Fields that are easy to miss, grouped by node. Dates mark when a field started
-being populated; the "previously" notes explain what consumers of older output
-may still see.
+Fields that are easy to miss, grouped by node.
 
 **Arithmetic (`arithmetic.py`)**
 
 * `ArithmeticStatement.targets: list[str]` — full ordered list of
   comma/space-separated `TO`/`FROM` targets (`ADD 1 TO a, b, c`); `.target`
-  keeps the first (2026-07-22). `.givings: list[str]` likewise for `GIVING`
-  (`ADD A TO B GIVING C, D`), `.giving` the first (2026-07-24); applies to
+  keeps the first. `.givings: list[str]` likewise for `GIVING`
+  (`ADD A TO B GIVING C, D`), `.giving` the first; applies to
   ADD/SUBTRACT/MULTIPLY/DIVIDE alike.
 * `.rounded: bool` (also on `ComputeStatement`) and `.is_corresponding: bool`
   (ADD/SUBTRACT `CORRESPONDING`).
@@ -659,11 +640,11 @@ may still see.
   does **not** set `.target` — the second operand there is a
   multiplicand/divisor, not a result.
 * `DivideStatement.remainder: str | None` — the `REMAINDER r` target.
-  `DivideStatement.division_mode: str | None` (2026-08-12) — `"BY"` or
+  `DivideStatement.division_mode: str | None` — `"BY"` or
   `"INTO"` as written, in `to_dict()`; the two forms invert dividend/divisor
   order, so this is what lets `const_fold` fold the unambiguous DIVIDE forms
   (see [analysis.md](analysis.md)).
-* `ArithmeticStatement.source_operands: list[str] | None` (2026-09-27) -- the
+* `ArithmeticStatement.source_operands: list[str] | None` -- the
   operands written before TO/FROM/GIVING, duplicates kept, set by the
   ADD/SUBTRACT parsers; `None` on a node built any other way. **Not
   serialized.** `operands` cannot stand in for it: `set_target`/`set_giving`
@@ -671,15 +652,14 @@ may still see.
   leave the same `[A, B]`. Read by `analysis/const_fold.py`.
 * `on_size_error` / `not_on_size_error` lists can contain any statement type
   (registry-dispatched), all registered as AST children.
-* See [parser.md](parser.md) "Statement-Support Verification Sweep" and
-  "Follow-up comma-list sweep".
+* Parsing details: [parser.md](parser.md).
 
 **CALL / ENTRY / INVOKE (`call.py`, `misc.py`)**
 
 * `CallStatement.using_parameters` is a list of `CallParameter` (`name`,
   `passing_mode`); `passing_mode` persists across a comma-separated list
   within one `BY REFERENCE`/`BY CONTENT`/`BY VALUE` group (`CALL 'P' USING BY
-  CONTENT a, b` tags both CONTENT; 2026-07-24).
+  CONTENT a, b` tags both CONTENT).
 * `EntryStatement.using_parameters` (names) plus a parallel `parameter_modes`
   list (`"REFERENCE"`/`"VALUE"`, serialized; #402).
 * `InvokeStatement` — `object_name`, `method_name` + `method_is_literal`,
@@ -705,20 +685,20 @@ may still see.
 **Data (`data.py`)**
 
 * `UnstringStatement.tallying_variable` (`TALLYING IN counter`);
-  `.delimiters` collects every `OR`-joined delimiter (2026-07-22).
+  `.delimiters` collects every `OR`-joined delimiter.
 * `SetStatement.groups` — additional `targets TO/UP/DOWN value` groups of a
   multi-group SET (serialized as `"groups"`); each group dict's
-  `"value_is_entry"` key (2026-09-10) is that group's own `SET p TO ENTRY 'X'`
-  flag (a later group's flag used to leak into the next group).
+  `"value_is_entry"` key is that group's own `SET p TO ENTRY 'X'`
+  flag (kept per group so one group's flag cannot leak into the next).
   `SetStatement.targets_are_address_of` (`SET ADDRESS OF x TO p`).
 * `InitializeStatement.to_value_category: str | None` (`"ALL"` or a category
   name such as `"NUMERIC"`, from Enterprise COBOL 6's `{ALL | category} TO
   VALUE`) and `.to_default: bool` (`[THEN] TO DEFAULT`), both always in
-  `to_dict()` (2026-09-28).
+  `to_dict()`.
 
 **I/O (`io.py`)**
 
-* `IOOpenStatement.file_modes: dict[str, str]` (2026-07-22) — per-file open
+* `IOOpenStatement.file_modes: dict[str, str]` — per-file open
   mode for `OPEN INPUT a OUTPUT b`, where `.open_mode` holds only the first
   mode group. `crud_matrix.py`, `io_logger.py` and `ast_diff.py` consult
   `file_modes` first and fall back to `open_mode`. Also `.no_rewind` /
@@ -741,8 +721,8 @@ may still see.
   statements are registered as children).
 * `ReleaseStatement.set_from_source()` / `ReturnStatement.set_into_target()`
   add the operand to `operands`, like `IOWriteStatement.set_from` /
-  `IOReadStatement.set_into` (2026-09-28; an item used only as `RELEASE ...
-  FROM x` was otherwise reported unused).
+  `IOReadStatement.set_into`, so an item used only as `RELEASE ... FROM x` is
+  not reported unused.
 
 **FILE-CONTROL (`SelectStatement`, `misc.py`)**
 
@@ -750,7 +730,7 @@ may still see.
   `file_status_vsam`, `reserve_areas`, `padding_character`,
   `record_delimiter`, `password`, `lock_mode`/`lock_on`/`lock_with_rollback`,
   `sharing_mode`, `assign_device_type`.
-* `assign_using` (2026-09-28): the data-name of `ASSIGN USING data-name` (also
+* `assign_using`: the data-name of `ASSIGN USING data-name` (also
   in `assign_to`), None for `ASSIGN TO`.
 * `record_key_qualifiers` and each `alternate_keys` entry's `qualifiers`: the
   `OF`/`IN` names of `RECORD KEY IS K6 OF R6`, innermost first; `record_key` /
@@ -766,7 +746,7 @@ may still see.
   `clause_text` (non-handler clauses only), `processing_procedure` /
   `processing_procedure_thru` (XML PARSE's implicit PERFORM target and THRU
   end), `on_exception` / `not_on_exception` (serialized with `omit_empty`), and
-  the structured clause names (2026-09-28) `count_in` (GENERATE's `COUNT
+  the structured clause names `count_in` (GENERATE's `COUNT
   [IN]`), `into_item` (JSON PARSE's receiving item) and `clause_items` (every
   `NAME OF` / `TYPE OF` / `SUPPRESS` / `CONVERTING` subject and `NAMESPACE` /
   `NAMESPACE-PREFIX` / `VALIDATING WITH` identifier) -- all three also in
@@ -777,10 +757,11 @@ may still see.
 * `ReceiveStatement`'s `no_data_clause` / `with_data_clause` register their
   statements as children, so the generic statement walk reaches them.
 
-# See Also
+## See also
 
 * [parser.md](parser.md) — produces AST nodes
 * [analysis.md](analysis.md) — consumes AST via analyzer interfaces
 * [generators.md](generators.md) — record layouts and byte images built on `CobolDataItem` / `_storage.py`
 * [dialects.md](dialects.md) — EXEC SQL / CICS / IMS detail
 * Flow-model enums referencing these nodes (`FlowEdgeType.XML_PROCESSING_PROCEDURE[_THRU]`, `CICS_HANDLE`, `SQL_WHENEVER`; `FlowNode.is_declarative`) are in [analysis.md](analysis.md)
+* [history](history/ast-models.md) — archived dated notes (field introduction dates, the `calculate_size()` rewrite, audit write-ups)

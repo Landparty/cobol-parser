@@ -6,7 +6,7 @@ tags: [jcl, zos, dd, dataset, job, step, proc, bindings, jcl-parser]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
-# Overview
+# JCL
 
 `cobolparser/jcl/` exists for one join nothing in the COBOL source can make:
 
@@ -21,9 +21,8 @@ RECFM/LRECL are live in the JCL that runs the program.
 **`jcl-parser`** package (`jclparser`), the same library the LegacyLens
 backend uses. `cobolparser.jcl` converts its `Job` model into the
 `JclParseResult` shape below and adds the bindings. JCL parsing fixes belong
-in jcl-parser. (Until 2026-10-08 this package carried its own ~1,800-line card
-scanner and statement parser, `jcl/lexer.py` and the old `jcl/parser.py`;
-that copy is gone.)
+in jcl-parser; this package has no card scanner or statement parser of its
+own, and must not grow one.
 
 Modules: `jcl/parser.py` (the adapter: `JclParser`, `parse_jcl`),
 `jcl/models.py` (the dataclasses), `jcl/bindings.py` (DD name -> dataset).
@@ -45,7 +44,7 @@ Two properties hold throughout:
 * **Determinism.** The same input (and the same `proc_paths` contents) always
   produces a byte-identical `to_dict()`.
 
-# Public API
+## Public API
 
 ```python
 from cobolparser.jcl import parse_jcl, JclParser, resolve_dd_bindings, bindings_for_ddname
@@ -65,12 +64,11 @@ for b in resolve_dd_bindings(result):
 bindings_for_ddname(result, "INVFILE")   # case-insensitive
 ```
 
-Also exported: `unquote(text)` (strip JCL apostrophe quoting). The card-level
-helpers of the old scanner (`scan_cards`, `JclCard`, `ScanResult`,
-`split_top_level`, `find_top_level_equals`, the column constants) and
-`EXEC_KEYWORDS` no longer exist.
+Also exported: `unquote(text)` (strip JCL apostrophe quoting). Card-level
+scanning (columns, continuations, top-level `=` splitting) is jcl-parser's job;
+this package exposes none of it.
 
-## Model (`jcl/models.py`)
+### Model (`jcl/models.py`)
 
 | Class | Holds |
 |-------|-------|
@@ -88,7 +86,7 @@ job-level DDs); `JclJob.step(name)`, `JobStep.dd(name)` (both
 case-insensitive); `DDStatement.flatten()` (the DD then its concatenated
 members) and `.parameter(keyword)`.
 
-## Bindings (`jcl/bindings.py`)
+### Bindings (`jcl/bindings.py`)
 
 `resolve_dd_bindings(result)` emits one `DatasetBinding` per DD card,
 exhaustive and ordered: job order, step order, card order, each concatenated
@@ -99,7 +97,7 @@ with `step=""`. Steps expanded from a procedure appear under their
 an answer). `bindings_for_ddname(result, ddname)` filters it
 case-insensitively.
 
-# Conversion (`jcl/parser.py`)
+## Conversion (`jcl/parser.py`)
 
 * **Steps.** `IF`/`ELSE` blocks are flattened; `JobStep.condition` is `COND=`
   when coded, else the enclosing conditions as jclparser keeps them
@@ -128,7 +126,7 @@ case-insensitively.
 * **`procedures`** maps each in-stream PROC to its steps expanded with its own
   defaults (names without the invocation prefix).
 
-# What the adapter adds
+## What the adapter adds
 
 * **Several jobs per deck.** jclparser reads one job (a second JOB card is a
   hard error), so the deck is split at each JOB card (named or not) that is not in-stream
@@ -157,16 +155,16 @@ case-insensitively.
   job (EXEC runs the last definition); a member with no JOB card. A JOB card
   with no name is an error.
 
-## Known gaps (jcl-parser is silent, the old scanner was not)
+### Known gaps
 
-Not reported at all now: IF without THEN, a continuation card in the wrong
+jcl-parser does not report these at all: IF without THEN, a continuation card in the wrong
 columns or missing, `DD DATA` / `DLM=` data never terminated, SET with no
 operands, positional parameters on EXEC, a nameless DD with nothing to
 concatenate to, nested PROC definitions and PEND without PROC. A quoted string
 continued from a trailing-blank-stripped card loses the blanks up to column 71
 (`PARM='ABC` + `DEF'` reads `ABCDEF`). These are jcl-parser's to fix.
 
-# CLI
+## CLI
 
 ```bash
 cobol-parser jcl JOB.jcl                          # the whole job structure
@@ -179,7 +177,7 @@ cobol-parser jcl JOB.jcl --strict                 # exit 3 on any error
 
 See [cli.md](cli.md).
 
-# Other JCL consumers
+## Other JCL consumers
 
 * **Field lineage reads jcl-parser directly, not through this package.**
   `analysis/lineage_jcl.py` (`load_jobs`, `jobs_from_sources`,
@@ -195,9 +193,15 @@ See [cli.md](cli.md).
   populates the dataset this program reads"; only field lineage joins
   programs through datasets.
 
-# Tests
+## Tests
 
 `tests/unit/test_jcl.py` (the shape and semantics through the adapter),
 `tests/unit/test_jcl_adapter.py` (what the adapter adds), the CLI in
 `tests/unit/cli/test_jcl_cli.py`, and `tests/unit/test_bug_hunt_r11_jcl_config.py`.
 Sample decks: `tests/samples/jcl/` (`invupdt.jcl`, `payproc.jcl`).
+
+## See also
+
+* [cli.md](cli.md) — the `jcl` subcommand
+* [analysis.md](analysis.md) — field lineage, which reads jcl-parser directly (`lineage_jcl.py`)
+* [history](history/jcl.md) — archived dated notes (the in-repo JCL scanner that jcl-parser replaced)

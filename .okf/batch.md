@@ -6,7 +6,7 @@ tags: [batch, parallel, process-pool, copybook, scan, clones]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
-# Overview
+# Batch Parsing
 
 Two modules parse many COBOL files (500–5000+) without the caller managing a
 process pool or per-file error handling:
@@ -29,15 +29,15 @@ need grades/findings across a codebase.
 ## Contents
 
 * [Public API (`batch.py`)](#public-api-batchpy)
-* [Per-File Fault Isolation](#per-file-fault-isolation)
+* [Per-file fault isolation](#per-file-fault-isolation)
 * [Multi-file analysis: `scan.py`](#multi-file-analysis-scanpy) —
   [entry points and options](#entry-points-and-options),
   [report shape](#report-shape),
   [properties](#properties-it-owes-its-caller-pinned-by-testsunittest_scanpy),
   [cross-file clone groups](#cross-file-clone-groups)
-* [See Also](#see-also)
+* [See also](#see-also)
 
-# Public API (`batch.py`)
+## Public API (`batch.py`)
 
 ```python
 from cobolparser.batch import parse_files, parse_files_with_copybooks, BatchResult
@@ -110,7 +110,7 @@ each file's cProfile dump is `DIR/<stem>.prof`; inputs sharing a stem
 case-insensitive), so none overwrites another. `profiling.prof_file` names
 each result's own file.
 
-# Per-File Fault Isolation
+## Per-file fault isolation
 
 Both `batch.py` entry points guarantee that **one poisoned file cannot abort
 the whole batch** — every other file's result still comes back. Each
@@ -134,20 +134,18 @@ propagating out of the batch call:
 
 Why degrade instead of failing the file (as `parse_cobol_with_expansion`
 does by raising): `codebase-graph` / `copybook-impact` read a file's CALL
-edges and program id off the unexpanded parse; failing the file made it a
+edges and program id off the unexpanded parse; failing the file would make it a
 `parse_failed` node named after its file. Expansion runs with
 `process_conditionals=True` so a COPY inside an excluded `>>IF` block is
 never resolved — otherwise a member that only exists for the other branch
 (`COPY DFHAID` under `>>IF CICS DEFINED`) would push the whole file onto
 this fallback.
 
-History: until the 2026-07-08 audit `parse_files_with_copybooks` caught only
-`OSError` on the read and had no guard around `parser.parse(...)`, so one
-bad file discarded every other file's result. Pinned by
+Pinned by
 `tests/integration/test_batch_coverage_gaps.py::TestParseFilesWithCopybooksParseException`
 and `::TestParseFilesWithCopybooksDecodeError`.
 
-# Multi-file analysis: `scan.py`
+## Multi-file analysis: `scan.py`
 
 ```python
 from cobolparser import scan_files, ScanOptions, cross_file_clone_groups
@@ -166,7 +164,7 @@ costs far more than the analysis does. `scan.py` inverts it: parse *and*
 analyze inside the worker; only the small report dicts come back, so a
 worker's peak memory is one file's AST.
 
-## Entry points and options
+### Entry points and options
 
 * `scan_files(paths, options=None, workers=None, executor=None) -> ScanReport`
   — same pool rules as `parse_files` (`workers=None` = CPU count, `1` and no
@@ -202,7 +200,7 @@ arguments, so a worker signature cannot drift from its call site):
 | `preprocess_fixed` | `None` | `None` auto-detects, `True`/`False` force/disable fixed-format normalization (CLI `--source-format fixed\|free`, cobol.yml `source_format:`) |
 | `debug_lines` | `False` | compile `D`-in-column-7 lines (CLI `--debug-lines`, cobol.yml `project.debug_lines`) |
 
-## Report shape
+### Report shape
 
 `ScanReport(options, files)`; `to_dict()` gives
 `{scan_version, analyzers, min_clone_statements, summary, files, failures}`.
@@ -221,7 +219,7 @@ consumer can prove every file it handed over was accounted for.
   ...), `reports: {analyzer: dict}`, `failed_analyzers: {analyzer:
   "<ExcType>: <message>"}` (serialized only when non-empty).
 
-## Properties it owes its caller (pinned by `tests/unit/test_scan.py`)
+### Properties it owes its caller (pinned by `tests/unit/test_scan.py`)
 
 * **Fault isolation is per file.** A scan of a real legacy checkout WILL hit
   files that do not parse (a half-migrated member, a JCL file with a `.cbl`
@@ -245,14 +243,14 @@ consumer can prove every file it handed over was accounted for.
 **Copybook expansion failure degrades, as in `batch.py`.** The file falls
 back to the unexpanded parse and keeps the reason as
 `FileScan.copybook_error` (the unexpanded parse is usually error-free, so
-without it the reports would be indistinguishable from an expanded scan's;
-until 2026-09-28 the fallback was a bare `pass`). Copybook paths matter more
+without it the reports would be indistinguishable from an expanded scan's).
+The fallback must never be a bare `pass`. Copybook paths matter more
 than they look: an unexpanded program's WORKING-STORAGE is missing whatever
 its COPY members declare, so `unused-variables` (and therefore `health`'s
 redundancy component, and therefore the portfolio grade) would grade a
 program against a record layout it cannot see.
 
-## Cross-file clone groups
+### Cross-file clone groups
 
 `cross_file_clone_groups(report, *, min_members=2) -> list[CrossFileCloneGroup]`
 merges every scanned paragraph's `redundancy.paragraph_fingerprints` (the
@@ -286,7 +284,7 @@ Backs `cobol-parser scan` (`--analyzer`, `--clones`, `--min-clone-members`,
 `--min-clone-statements`, `--workers`, `--glob`, `--files-from`; see
 [cli.md](cli.md)) and the COBOL Analyzer extension's Analyze Workspace.
 
-# See Also
+## See also
 
 * [parser.md](parser.md) — `CobolParser`/`parse_cobol` used per file;
   `ProfilingResult`
@@ -295,3 +293,4 @@ Backs `cobol-parser scan` (`--analyzer`, `--clones`, `--min-clone-members`,
 * [preprocessing.md](preprocessing.md) — `expand_copybooks`, the source map,
   `warn_dropped_debug_lines`
 * [cli.md](cli.md) — `batch` and `scan` subcommands
+* [history](history/batch.md) — archived dated notes

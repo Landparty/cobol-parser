@@ -8,6 +8,8 @@ resource: ../interface-contract.md
 ---
 # Backend Integration Contract
 
+<!-- okf:external CobolLegacyParser ParserResult CopybookResolver parse_content UnsupportedBundleVersionError -- backend adapter and mocky-mock names, not this package's -->
+
 Two external consumers call into `cobolparser`; changing what they call, or
 the shapes they get back, breaks them:
 
@@ -24,20 +26,32 @@ the shapes they get back, breaks them:
 > a breaking change means bumping the relevant version field
 > (`lineage_version`, `bundle_version`).
 
-**Integration method:** the backend **vendors** `cobolparser` into
+## Contents
+
+* [Integration method](#integration-method)
+* [Entry Points (backend adapter)](#entry-points-backend-adapter)
+* [`CobolProgram` attributes the adapter reads](#cobolprogram-attributes-the-adapter-reads)
+* [`parse_content()` keyword arguments](#parse_content-keyword-arguments)
+* [Output: `program_structure` dict (built by the adapter)](#output-program_structure-dict-built-by-the-adapter)
+* [`ParserResult` container (backend, `backend/src/parsers/base.py`)](#parserresult-container-backend-backendsrcparsersbasepy)
+* [File Extensions Handled](#file-extensions-handled)
+* [Generators Surface (mocky-mock)](#generators-surface-mocky-mock)
+* [See also](#see-also)
+
+## Integration method
+
+The backend **vendors** `cobolparser` into
 `backend/_vendor/cobol-parser/` (it does not install from PyPI). Changes reach
 it only by a manual sync:
 ```bash
 cp -r cobolparser/ ../backend/_vendor/cobol-parser/cobolparser/
 ```
 
-**Import path in backend:**
+Import path in backend:
 ```python
 from ..dependencies import CobolParser, CobolProgram, DialectType, ErrorRecoveryMode, \
     DynamicCallAnalyzer, ProgramFlowAnalyzer, CobolParseError
 ```
-
----
 
 ## Entry Points (backend adapter)
 
@@ -130,8 +144,6 @@ The adapter catches `ParseError` and maps it to a structured error result.
 `CobolParseError` (what the backend's import line names) is a
 backward-compatible alias — the same class.
 
----
-
 ## `CobolProgram` attributes the adapter reads
 
 | Attribute | Expected |
@@ -152,8 +164,6 @@ adapter.parse_content(content, filename=filename, copybook_registry=registry)
 COPY members itself before `parser.parse()`, via any object with
 `resolve(copybook_name: str) -> str | None` (the adapter's `CopybookResolver`
 Protocol).
-
----
 
 ## Output: `program_structure` dict (built by the adapter)
 
@@ -220,8 +230,6 @@ Error prefixes: `EMPTY_CONTENT`, `VALIDATION_FAILED`, `COBOL_PARSE_ERROR`,
 `.cpy`/`.copy` files are copybooks: the adapter wraps them in a synthetic
 COBOL program shell before parsing and shifts line numbers back afterwards.
 
----
-
 ## Generators Surface (mocky-mock)
 
 `mockymock generate --with-data` and `mockymock fixtures` call the
@@ -261,18 +269,20 @@ unchanged name, is breaking — bump `bundle_version` so mocky-mock's gate
 fires. Additive keys and corrected *values* under unchanged meanings are not
 bumps; the contract records two such cases and why:
 
-* **2026-09-07 audit** — fewer scenarios / lower `targeted` counts for
-  programs comparing against subscripted table elements, `IF <PIC X> IS
-  NUMERIC`, or ordering comparisons on alphanumeric fields (arms were
-  previously reported targeted on fabricated constraints). Same keys, same
-  meanings; now true.
+* **Scenario targeting** — an arm whose only witness would rest on a
+  fabricated constraint (comparisons against subscripted table elements,
+  `IF <PIC X> IS NUMERIC`, ordering comparisons on alphanumeric fields) is
+  not reported targeted, so such programs get fewer scenarios / lower
+  `targeted` counts. Same keys, same meanings; truer values.
 * **`PIC N` / `PIC G` width** — such fields are 2 bytes per character (IBM
   national/DBCS), so their `layout` length doubles and later fields' offsets
   shift. Same `int` byte-count keys; corrected values.
 
----
+## See also
 
-# Citations
-- [`interface-contract.md`](../interface-contract.md) (repo root, canonical)
-- [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md)
-- [../../backend/.okf/services/](../../backend/.okf/services/)
+* [`interface-contract.md`](../interface-contract.md) (repo root, canonical)
+* [`docs/fixture-bundle-schema.md`](../docs/fixture-bundle-schema.md)
+* [generators.md](generators.md) — `ProgramFixtureGenerator`, `FixtureBundle`
+* [analysis.md](analysis.md) — `ProgramFlowAnalyzer`, field lineage
+* [../../backend/.okf/services/](../../backend/.okf/services/) — the backend's own OKF (sibling repo)
+* [history](history/integration.md) — archived dated notes
