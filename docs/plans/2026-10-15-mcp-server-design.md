@@ -167,6 +167,9 @@ so `interface-contract.md` is untouched.
 
 ### SDK choice
 
+**Decided 2026-10-15 (Samuel): the official `mcp` SDK**, in the `[mcp]` extra,
+pinned `<2`.
+
 | Option | For | Against |
 |---|---|---|
 | Official `mcp` SDK in the extra (recommended) | Tracks protocol revisions for us; schemas from type hints | Pulls in pydantic and anyio (only for `[mcp]` users); the SDK's main branch renames `FastMCP` to `MCPServer` for v2, so pin `<2` and keep it inside `server.py` |
@@ -210,7 +213,8 @@ Because `tools.py` never imports the SDK, switching later costs one module.
 
 ## Open questions
 
-1. SDK in an extra (recommended) or a zero-dependency hand-rolled server?
+1. ~~SDK in an extra or a zero-dependency hand-rolled server?~~ Decided:
+   the official SDK (see "SDK choice").
 2. stdio only for now, or HTTP too so the backend can host it?
 3. Should the server ship the `cobol-analysis` skill's guidance as MCP
    *prompts*, so clients without skills get the same "run the tool, cite it,
