@@ -19,7 +19,7 @@ entries, including both 2026-09-15 sections, were found there on
 [parser.md](parser.md): `OCCURS n TO UNBOUNDED` is an unbounded ODO table
 (Python walker and the `_data_fast.pyx` bail-out); `INITIALIZE ... FILLER`
 without WITH sets `with_filler`; FD `RECORD VARYING [IN SIZE] n TO m`
-without FROM takes n as the minimum. `ENTRY ... USING [BY] VALUE/REFERENCE`
+without FROM takes n as the minimum, and a lone `VARYING n` leaves the maximum None. `ENTRY ... USING [BY] VALUE/REFERENCE`
 keeps every operand and records `EntryStatement.parameter_modes`, which
 [analysis.md](analysis.md)'s `ProgramSignatureExtractor` now carries as each
 ENTRY operand's `by_clause`.

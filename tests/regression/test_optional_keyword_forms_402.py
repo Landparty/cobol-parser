@@ -172,6 +172,16 @@ class TestRecordVaryingWithoutFrom:
         record = self._record("RECORD IS VARYING IN SIZE FROM 10 TO 30")
         assert (record["min"], record["max"]) == (10, 30)
 
+    def test_minimum_only_has_no_maximum(self) -> None:
+        record = self._record(
+            "RECORD VARYING IN SIZE 10 CHARACTERS\n           DEPENDING RL"
+        )
+        assert (record["min"], record["max"], record["depending_on"]) == (
+            10,
+            None,
+            "RL",
+        )
+
     def test_to_only_still_has_no_minimum(self) -> None:
         record = self._record("RECORD IS VARYING IN SIZE TO 80")
         assert (record["min"], record["max"]) == (None, 80)
