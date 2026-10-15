@@ -28,7 +28,8 @@ still give TYPE_1; literal case still breaks it; `scan` digests agree) and
 `TestUnquotedLiteralCaseStillBreaksType1` (EVALUATE WHEN / THRU, static
 CALL, INVOKE and STOP literals differing only in case are never TYPE_1);
 `test_evaluate_variants.py::TestRangeQuotedMarkers` pins the Range
-`start_quoted` / `end_quoted` markers; `test_compute_expression_parsing.py::
+`start_quoted` / `end_quoted` markers (and
+`test_evaluate_keyword_literal_when.py` now expects them on `'A' THRU 'C'`); `test_compute_expression_parsing.py::
 TestComputeExpressionLayout` pins a multi-line COMPUTE's expression text.
 
 2026-10-14: `tests/regression/test_evaluate_figurative_when.py` (6 tests,

@@ -53,6 +53,14 @@ def test_keywords_as_words_still_classify():
     assert errors == []
     assert selectors == [
         [{"type": "Any"}],
-        [{"type": "Range", "start": "A", "end": "C"}],
+        [
+            {
+                "type": "Range",
+                "start": "A",
+                "end": "C",
+                "start_quoted": True,
+                "end_quoted": True,
+            }
+        ],
         [{"type": "Condition", "text": "NOT 'THRU'"}],
     ]
