@@ -197,3 +197,16 @@ def test_processing_procedure_thru_on_next_line_keeps_range_live():
     assert result.success, result.errors
     dead = [item.name for item in DeadCodeAnalyzer().analyze(result.ast).dead_items]
     assert dead == ["TRULY-DEAD"]
+
+
+def test_bare_procedure_with_is_and_thru_on_next_lines():
+    _, stmts = _main_statements(
+        "           XML PARSE WS-DOC PROCEDURE\n"
+        "               IS HANDLE-XML\n"
+        "               THRU HANDLE-XML-END\n"
+        "           END-XML.\n"
+    )
+    node = stmts[0]
+    assert node.processing_procedure == "HANDLE-XML"
+    assert node.processing_procedure_thru == "HANDLE-XML-END"
+    assert "IS" not in node.operands
