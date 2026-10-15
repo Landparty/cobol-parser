@@ -12,7 +12,14 @@ and aggregates the results into a single graph with two kinds of edge:
   :class:`~.value_tracker.DynamicCallAnalyzer`. A dynamic call whose value
   set that analyzer could not fully resolve still contributes its known
   targets, each marked ``resolved=False`` so the edge set is never mistaken
-  for an exhaustive one.
+  for an exhaustive one. ``EXEC CICS LINK PROGRAM(...)`` and ``EXEC CICS
+  XCTL PROGRAM(...)`` -- the program-to-program edges of a CICS shop -- are
+  call edges too, told apart by :attr:`CallEdge.kind` (``call`` /
+  ``cics-link`` / ``cics-xctl``) so ``callers_of`` and copybook-free impact
+  questions see them with no extra step (#315). A quoted ``PROGRAM('X')`` is
+  a static edge; a data-name operand is resolved through the same
+  :class:`~.value_tracker.DynamicCallAnalyzer` value set a dynamic CALL
+  gets, or reported unresolved.
 - **copy edges** -- ``program A copies member X``, and ``member X copies
   member Y`` for nested copybooks. A DB2 ``EXEC SQL INCLUDE X END-EXEC`` is
   a copy edge too, with the same ``COPY`` label and the same unresolved-member
@@ -74,6 +81,7 @@ from ..batch import BatchResult, parse_files, parse_files_with_copybooks
 from ..models.program import CobolProgram
 from ..models.statements.base import CobolStatement
 from ..models.statements.call import CallStatement
+from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 from ..preprocess.copy_statement_parser import extract_copy_statements
 from ..preprocess.models import CopybookSearchPath
 from ..preprocess.path_resolver import PathResolver
@@ -111,6 +119,16 @@ _DEFAULT_CHUNK_SIZE = 200
 
 #: What the parser names a program whose PROGRAM-ID it could not read.
 _UNNAMED_PROGRAM = "UNKNOWN"
+
+#: :attr:`CallEdge.kind` values. ``call`` is a COBOL ``CALL``; the CICS kinds
+#: are ``EXEC CICS LINK`` (returns to the linking program) and ``EXEC CICS
+#: XCTL`` (transfers control for good -- the linking program is gone).
+CALL_KIND_CALL = "call"
+CALL_KIND_CICS_LINK = "cics-link"
+CALL_KIND_CICS_XCTL = "cics-xctl"
+
+#: CICS commands that name another program to run, by :attr:`CallEdge.kind`.
+_CICS_TRANSFER_KINDS = {"LINK": CALL_KIND_CICS_LINK, "XCTL": CALL_KIND_CICS_XCTL}
 
 #: Below this many files the sequential fast path in :func:`parse_files` beats
 #: paying process-spawn cost.
@@ -166,8 +184,8 @@ class ProgramNode:
             parse this is the file stem instead (recorded as such in
             :attr:`CodebaseGraph.unresolved`).
         path: The file the unit was found in.
-        calls: Program ids this unit CALLs -- static targets plus every
-            resolved dynamic target. Sorted, deduplicated.
+        calls: Program ids this unit CALLs, LINKs or XCTLs to -- static
+            targets plus every resolved dynamic target. Sorted, deduplicated.
         copies: Copybook members this unit COPYs *directly*. Sorted,
             deduplicated.
         parse_failed: True when the file produced no AST; ``calls`` is then
@@ -198,12 +216,18 @@ class CallEdge:
     possible-value set :class:`~.value_tracker.DynamicCallAnalyzer` marked
     incomplete: the edge is real, but the *set* of edges from that call site
     is not exhaustive.
+
+    ``kind`` says how control reaches the callee: ``call`` (a COBOL
+    ``CALL``), ``cics-link`` (``EXEC CICS LINK PROGRAM``) or ``cics-xctl``
+    (``EXEC CICS XCTL PROGRAM``). ``is_dynamic`` means the same for all
+    three: the target came from a data-name, not a literal.
     """
 
     caller: str
     callee: str
     is_dynamic: bool = False
     resolved: bool = True
+    kind: str = CALL_KIND_CALL
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -211,10 +235,11 @@ class CallEdge:
             "callee": self.callee,
             "is_dynamic": self.is_dynamic,
             "resolved": self.resolved,
+            "kind": self.kind,
         }
 
-    def _sort_key(self) -> tuple[str, str, bool, bool]:
-        return (self.caller, self.callee, self.is_dynamic, self.resolved)
+    def _sort_key(self) -> tuple[str, str, str, bool, bool]:
+        return (self.caller, self.callee, self.kind, self.is_dynamic, self.resolved)
 
 
 @dataclass(frozen=True)
@@ -276,12 +301,14 @@ class CodebaseGraph:
         return sorted(names)
 
     def callers_of(self, program_id: str) -> list[str]:
-        """Programs that CALL *program_id*, sorted and deduplicated."""
+        """Programs that CALL, LINK or XCTL to *program_id*, sorted and
+        deduplicated."""
         wanted = _normalize_program_name(program_id)
         return sorted({e.caller for e in self.call_edges if e.callee == wanted})
 
     def callees_of(self, program_id: str) -> list[str]:
-        """Programs *program_id* CALLs, sorted and deduplicated."""
+        """Programs *program_id* CALLs, LINKs or XCTLs to, sorted and
+        deduplicated."""
         wanted = _normalize_program_name(program_id)
         return sorted({e.callee for e in self.call_edges if e.caller == wanted})
 
@@ -325,9 +352,16 @@ class CodebaseGraph:
         program that CALLs itself). A component with more than two members
         may contain several elementary cycles; they are reported as the one
         group they form, which is both bounded and deterministic.
+
+        ``EXEC CICS XCTL`` edges are left out: XCTL ends the transferring
+        program, so ``MENU XCTL ORDER``, ``ORDER XCTL MENU`` is the ordinary
+        CICS menu loop, not recursion. ``LINK`` edges stay in -- a LINKed
+        program returns, so a LINK cycle nests like a CALL cycle does.
         """
         adjacency: dict[str, set[str]] = {}
         for edge in self.call_edges:
+            if edge.kind == CALL_KIND_CICS_XCTL:
+                continue
             adjacency.setdefault(edge.caller, set()).add(edge.callee)
             adjacency.setdefault(edge.callee, set())
 
@@ -573,9 +607,13 @@ def _dot_str(text: str) -> str:
 
 
 def _call_edge_label(edge: CallEdge) -> str:
+    verb = {
+        CALL_KIND_CICS_LINK: "CICS LINK",
+        CALL_KIND_CICS_XCTL: "CICS XCTL",
+    }.get(edge.kind, "CALL")
     if not edge.is_dynamic:
-        return "CALL"
-    return "CALL (dynamic)" if edge.resolved else "CALL (dynamic, partial)"
+        return verb
+    return f"{verb} (dynamic)" if edge.resolved else f"{verb} (dynamic, partial)"
 
 
 # ---------------------------------------------------------------------------
@@ -843,10 +881,29 @@ class CodebaseGraphBuilder:
                 # this file, whatever the parser managed to hand back.
                 parse_failed=bool(parse_errors) and not named,
             )
+            # Built on first need: only a CICS transfer through a data-name
+            # asks for the unit's tracked values.
+            tracker: DynamicCallAnalyzer | None = None
             for statement in _unit_statements(unit):
                 if isinstance(statement, CallStatement):
                     self._absorb_call(
                         statement, program_id, path, node, call_edges, unresolved
+                    )
+                elif (
+                    isinstance(statement, ExecCicsStatement)
+                    and statement.cics_command in _CICS_TRANSFER_KINDS
+                ):
+                    if tracker is None and "PROGRAM" not in statement.literal_options:
+                        tracker = DynamicCallAnalyzer()
+                        tracker.analyze(unit)
+                    self._absorb_cics_transfer(
+                        statement,
+                        program_id,
+                        path,
+                        node,
+                        call_edges,
+                        unresolved,
+                        tracker,
                     )
             nodes.append(node)
 
@@ -899,6 +956,72 @@ class CodebaseGraphBuilder:
                     callee=callee,
                     is_dynamic=True,
                     resolved=not incomplete,
+                )
+            )
+
+    @staticmethod
+    def _absorb_cics_transfer(
+        statement: ExecCicsStatement,
+        program_id: str,
+        path: str,
+        node: ProgramNode,
+        call_edges: list[CallEdge],
+        unresolved: list[str],
+        tracker: DynamicCallAnalyzer | None,
+    ) -> None:
+        """One ``EXEC CICS LINK`` / ``XCTL`` statement's edges (#315).
+
+        ``PROGRAM('X')`` is a static edge. ``PROGRAM(WS-PGM)`` takes the
+        values :class:`~.value_tracker.DynamicCallAnalyzer` tracked for
+        ``WS-PGM``, exactly as ``CALL WS-PGM`` would; with none, the
+        statement is reported unresolved rather than dropped.
+        """
+        command = statement.cics_command
+        kind = _CICS_TRANSFER_KINDS[command]
+        line = statement.location.line if statement.location else 0
+        operand = (statement.options.get("PROGRAM") or "").strip()
+        where = f"{path}: {program_id}: EXEC CICS {command}"
+
+        if not operand:
+            unresolved.append(
+                f"{where} at line {line} has no PROGRAM name, so its edge is missing"
+            )
+            return
+
+        if "PROGRAM" in statement.literal_options:
+            callee = _normalize_program_name(operand)
+            node.calls.append(callee)
+            call_edges.append(CallEdge(caller=program_id, callee=callee, kind=kind))
+            return
+
+        values: list[str] = []
+        incomplete = True
+        if tracker is not None:
+            tracked, incomplete = tracker.resolve_variable(operand)
+            values = sorted(callee_names(tracked))
+
+        if not values:
+            unresolved.append(
+                f"{where} PROGRAM({operand}) at line {line}: no possible target "
+                "could be resolved, so its edges are missing"
+            )
+            return
+
+        if incomplete:
+            unresolved.append(
+                f"{where} PROGRAM({operand}) at line {line}: {len(values)} "
+                "target(s) resolved but the value set is not exhaustive; "
+                "further edges may exist"
+            )
+        for callee in values:
+            node.calls.append(callee)
+            call_edges.append(
+                CallEdge(
+                    caller=program_id,
+                    callee=callee,
+                    is_dynamic=True,
+                    resolved=not incomplete,
+                    kind=kind,
                 )
             )
 

@@ -91,7 +91,10 @@ class TestNistCopybookCorpus:
             except CopybookLayoutError:
                 continue
             generated += 1
-        assert generated >= 20
+        # Most NIST "copybooks" are PROCEDURE DIVISION fragments; before
+        # unnamed entries were treated as FILLER (#404) a dozen of them
+        # "yielded" a layout of bogus ANONYMOUS-<level>-<line> columns.
+        assert generated >= 10
 
     def test_orphan_subordinate_items_get_a_synthesised_record(self):
         # K101A.CPY holds bare level-02 items, meant to be COPY'd inside an
