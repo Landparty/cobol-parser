@@ -1482,10 +1482,24 @@ def _member_fields(member_path: str) -> tuple[list[str], str | None]:
     from ..generators.data.copybook import parse_copybook_records
     from ..models.data_items import CobolDataItem
 
+    # A ``:TAG:``-named item's real name only exists once a COPY ... REPLACING
+    # fills the tag in, so it is reported as a gap rather than silently left
+    # out (#356) -- whether or not the rest of the member parses.
+    placeholders = _placeholder_names(source)
+    placeholder_note = (
+        f"{member_path}: data item(s) {', '.join(placeholders)} are named "
+        "by REPLACING placeholders, so their names depend on each COPY "
+        "... REPLACING and are not listed in fields"
+        if placeholders
+        else None
+    )
+
     try:
         records = parse_copybook_records(source, filename=member_path)
     except Exception as exc:  # noqa: BLE001 -- a member that is not a record
         # layout (procedure-division text, say) is a reported gap, not a crash.
+        if placeholder_note is not None:
+            return [], placeholder_note
         return [], (
             f"{member_path}: data items could not be read "
             f"({type(exc).__name__}: {exc})"
@@ -1502,18 +1516,9 @@ def _member_fields(member_path: str) -> tuple[list[str], str | None]:
     # member's own text actually declares.
     declared = source.upper()
     fields = sorted(name for name in names if name in declared)
-    # A ``:TAG:``-named item is renamed by parse_copybook_records to a
-    # generated ANONYMOUS-* name, which the filter above then drops. Its real
-    # name only exists once a COPY ... REPLACING fills the tag in, so it is
-    # reported as a gap rather than silently left out (#356).
-    placeholders = _placeholder_names(source)
-    if placeholders:
-        return fields, (
-            f"{member_path}: data item(s) {', '.join(placeholders)} are named "
-            "by REPLACING placeholders, so their names depend on each COPY "
-            "... REPLACING and are not listed in fields"
-        )
-    return fields, None
+    # A ``:TAG:``-named item that does parse comes back under a generated
+    # ANONYMOUS-* name, which the filter above drops; the note says why.
+    return fields, placeholder_note
 
 
 def _placeholder_names(source: str) -> list[str]:
