@@ -285,3 +285,22 @@ def test_statements_after_an_if_whose_arms_all_stop_are_not_walked() -> None:
            READ OUT-FILE.
 """)
     assert kinds == []
+
+
+def test_replayed_range_keeps_its_go_to_arm_state() -> None:
+    # The second PERFORM from the same entry state replays the first run's
+    # summary (#371); the GO TO arm's OPEN must survive the replay too.
+    kinds = _kinds("""\
+       0000-MAIN.
+           PERFORM 1000-INIT THRU 1000-EXIT
+           IF WS-MODE = 'N' READ OUT-FILE CLOSE OUT-FILE END-IF
+           PERFORM 1000-INIT THRU 1000-EXIT
+           IF WS-MODE = 'N' READ OUT-FILE CLOSE OUT-FILE END-IF
+           STOP RUN.
+       1000-INIT.
+           IF WS-MODE = 'N' OPEN INPUT OUT-FILE GO TO 1000-EXIT END-IF.
+       1000-EXIT.
+           EXIT.
+""")
+    assert ("READ_BEFORE_OPEN", "OUT-FILE") not in kinds
+    assert ("CLOSE_NOT_OPEN", "OUT-FILE") not in kinds

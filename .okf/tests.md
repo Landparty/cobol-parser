@@ -241,7 +241,7 @@ tests, #371) pins io-sequence surviving a 1,500-deep PERFORM chain, walking a
 a new file state or recursion-guard context, and reporting a violation once
 per location. See `analysis.md`.
 
-2026-10-14: `tests/unit/analysis/test_io_sequence_branches.py` (18 tests)
+2026-10-14: `tests/unit/analysis/test_io_sequence_branches.py` (19 tests)
 pins IF/EVALUATE arms being forked and merged in `IOSequenceAnalyzer`
 (issue #380): mutually exclusive OPENs, the `CLOSE ... STOP RUN` error exit,
 GOBACK/PERFORMed-abend arms left out of the merge, GO TO arms kept (THRU
