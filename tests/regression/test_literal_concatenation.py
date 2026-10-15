@@ -121,3 +121,75 @@ class TestParse:
         move = result.ast.find_all_by_type("MoveStatement")[0]
         assert move.source == '"ABCD"'
         assert move.targets == ["A"]
+
+
+class TestCommentBetweenLiterals:
+    """Issue #389: a ``*>`` comment between ``&``-joined literals.
+
+    The backward scan for the ``&`` stopped on the comment text, and the
+    comment's own token sat between the two literals, so neither join
+    happened: a VALUE kept ``"AB"`` and a MOVE source read ``"AB" "CD"``.
+    """
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            # Comment after the '&'.
+            '"AB" & *> note\n"CD"',
+            # Comment before the '&', which starts the next line.
+            '"AB" *> note\n& "CD"',
+            # A whole comment line between the two.
+            '"AB" &\n*> note\n"CD"',
+            # Comment text that itself holds quotes and an '&'.
+            '"AB" & *> it\'s & "x"\n"CD"',
+        ],
+    )
+    def test_free_form_merges(self, source):
+        assert _literals(source) == [("ABCD", None)]
+
+    def test_ampersand_only_inside_comment_does_not_merge(self):
+        assert _literals('"AB" *> & \n"CD"') == [("AB", None), ("CD", None)]
+
+    def test_comment_marker_inside_literal_is_text(self):
+        assert _literals('"A*>B" &\n"CD"') == [("A*>BCD", None)]
+
+    def test_fixed_format_lexing(self):
+        source = (
+            '000100     MOVE "AB" & *> note\n'
+            "000200*    a full comment line\n"
+            '000300         "CD" TO A.\n'
+        )
+        assert _literals(source, free_form=False) == [("ABCD", None)]
+
+    def test_comment_token_is_kept(self):
+        tokens = CobolLexer('"AB" & *> note\n"CD"', free_form=True).tokenize()
+        assert [t.type for t in tokens][:3] == [
+            TokenType.STRING_LITERAL,
+            TokenType.COMMENT,
+            TokenType.NEWLINE,
+        ]
+
+    def test_value_clause(self):
+        result = parse_cobol(
+            _program(
+                "       01 WS-A PIC X(20) VALUE\n"
+                "              'AB' & *> note\n"
+                "              'CD'.",
+                "",
+            )
+        )
+        assert result.warnings == []
+        item = result.ast.find_all_by_type("CobolDataItem")[0]
+        assert item.to_dict()["value_clause"] == '"ABCD"'
+
+    def test_move_source(self):
+        result = parse_cobol(
+            _program(
+                "       01 WS-A PIC X(20).",
+                "           MOVE 'AB' & *> note\n                'CD' TO WS-A.",
+            )
+        )
+        assert result.warnings == []
+        move = result.ast.find_all_by_type("MoveStatement")[0]
+        assert move.source == '"ABCD"'
+        assert move.targets == ["WS-A"]

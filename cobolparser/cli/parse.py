@@ -875,11 +875,13 @@ def _build_preprocess_parser(
 
 def _cmd_preprocess(args: argparse.Namespace) -> None:
     from ..preprocess import (
-        normalize_fixed_format,
         preprocess_conditional_compilation,
         strip_compiler_directives,
     )
-    from ..preprocess.source_format import detect_fixed_format
+    from ..preprocess.source_format import (
+        detect_fixed_format,
+        normalize_with_recovery,
+    )
 
     source = _read_source(args.file)
 
@@ -916,11 +918,19 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
         # a form feed (a page eject inside a comment record), NEL, U+2028...
         # which split one record in two and emitted the tail of a comment
         # as code -- output `parse` itself never sees.
-        source = normalize_fixed_format(
+        # normalize_with_recovery, not normalize_fixed_format: an
+        # unterminated literal at EOF (a truncated upload) raised ValueError
+        # straight out as a traceback (#372). Like `parse` / `tokenize`, it
+        # is reported and the never-raising pass's text is printed instead.
+        text, error = normalize_with_recovery(
             split_source_lines(source),
+            normalize_warnings,
             debug_lines_as_comments=not getattr(args, "debug_lines", False),
-            warnings=normalize_warnings,
         )
+        assert text is not None  # recover=True always yields text
+        source = text
+        if error is not None:
+            print(f"warning: {error}", file=sys.stderr)
         for nw in normalize_warnings:
             print(f"warning: {nw}", file=sys.stderr)
 
