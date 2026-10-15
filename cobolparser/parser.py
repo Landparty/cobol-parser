@@ -43,12 +43,28 @@ from .preprocess.replace_statement import (
 )
 from .preprocess.source_format import (
     _sequence_area_is_fixed_like,  # noqa: F401
+    debug_line_numbers,
     detect_fixed_format,
     normalize_with_recovery,
 )
 from .profiling import ProfilerContext, ProfilingResult
 
 logger = logging.getLogger(__name__)
+
+
+def _debugging_mode_on(unit: CobolProgram) -> bool:
+    """Whether *unit*'s SOURCE-COMPUTER paragraph says WITH DEBUGGING MODE."""
+    env = unit.environment_division
+    if env is None:
+        return False
+    for section in env.sections:
+        if section.section_name != "CONFIGURATION":
+            continue
+        entry = section.get_metadata("source_computer")
+        if isinstance(entry, dict) and entry.get("debugging_mode"):
+            return True
+    return False
+
 
 #: Unit kinds whose contained units nest under them (see
 #: ``CobolParser._attach_new_unit``): a class holds its factory and object
@@ -118,6 +134,7 @@ class CobolParser:
         free_form: bool = False,
         initial_warnings: list[str] | None = None,
         preprocess_fixed: bool | None = None,
+        debug_lines: bool = False,
     ):
         """Initialize the COBOL parser with required configurations.
 
@@ -134,6 +151,12 @@ class CobolParser:
         regardless of what `detect_fixed_format` would say (the
         `--source-format=fixed` escape hatch for layouts the detector
         declines); False never normalizes.
+
+        `debug_lines` mirrors `parse_cobol`'s parameter of the same name:
+        False (the default) drops fixed-format debugging lines (``D`` in
+        column 7) as comments; True compiles them as code, the way IBM
+        Enterprise COBOL does under ``SOURCE-COMPUTER ... WITH DEBUGGING
+        MODE``.
         """
         self.dialect = dialect
         self.error_recovery = error_recovery
@@ -142,10 +165,14 @@ class CobolParser:
         self.plugin_manager = plugin_manager or PluginManager()
         self.free_form = free_form
         self.preprocess_fixed = preprocess_fixed
+        self.debug_lines = debug_lines
         self._initial_warnings = list(initial_warnings) if initial_warnings else []
 
         # Parser state
         self.tokens: list[Token] = []
+        #: 1-based numbers of the debugging lines the fixed-format
+        #: normalization of the current parse dropped as comments.
+        self._dropped_debug_lines: list[int] = []
         self._omitted_copy_lines: list[tuple[int, int]] = []
         self.errors: list[ParseError] = []
         self.warnings: list[str] = []
@@ -297,6 +324,7 @@ class CobolParser:
             if program is not None:
                 for unit in program.program_units():
                     unit.serialization_config = self.serialization_config
+                self._warn_dropped_debug_lines(program)
 
             logger.info(
                 "Finished parsing %s: success=%s, errors=%d, warnings=%d, "
@@ -440,11 +468,39 @@ class CobolParser:
         source_lines = split_source_lines(source)
         fail_fast = self.error_recovery == ErrorRecoveryMode.FAIL_FAST
         text, error = normalize_with_recovery(
-            source_lines, preprocess_warnings, recover=not fail_fast
+            source_lines,
+            preprocess_warnings,
+            recover=not fail_fast,
+            debug_lines_as_comments=not self.debug_lines,
         )
+        if not self.debug_lines:
+            self._dropped_debug_lines = debug_line_numbers(source_lines)
         if error is not None:
             self.add_error(ParseError(error, line_number=len(source_lines), column=1))
         return text
+
+    def _warn_dropped_debug_lines(self, program: CobolProgram) -> None:
+        """Warn when ``WITH DEBUGGING MODE`` is on but its D-lines were dropped.
+
+        IBM Enterprise COBOL compiles debugging lines as code under
+        ``SOURCE-COMPUTER ... WITH DEBUGGING MODE``. This parser keeps
+        dropping them unless asked (``debug_lines=True``), so the AST then
+        lacks statements the compiled program runs -- and every analyzer
+        reading it (unused variables, xref, lineage) is short of them too.
+        That gap is reported rather than left silent.
+        """
+        if not self._dropped_debug_lines:
+            return
+        if not any(_debugging_mode_on(unit) for unit in program.program_units()):
+            return
+        count = len(self._dropped_debug_lines)
+        self.add_warning(
+            f"Line {self._dropped_debug_lines[0]}: SOURCE-COMPUTER is WITH "
+            f"DEBUGGING MODE, but {count} debugging line(s) (D in column 7) "
+            "were dropped as comments; parse with debug_lines=True "
+            "(CLI --debug-lines, cobol.yml project.debug_lines: true) to "
+            "compile them as code, as the compiler does"
+        )
 
     def _tokenize(self, cleaned_source: str, filename: str, free_form: bool) -> bool:
         """Lex *cleaned_source* into ``self.tokens`` and ``self.stream``.
@@ -976,6 +1032,7 @@ class CobolParser:
         self.errors.clear()
         self.warnings.clear()
         self._error_limit_reached = False
+        self._dropped_debug_lines = []
 
     def _create_result(self, ast: CobolProgram | None) -> ParseResult:
         """Create parse result with current state."""
@@ -1005,6 +1062,7 @@ if TYPE_CHECKING:
         error_recovery: ErrorRecoveryMode = ...,
         free_form: bool = ...,
         preprocess_fixed: bool | None = ...,
+        debug_lines: bool = ...,
         enable_profiling: Literal[False] = ...,
         top_n: int = ...,
         prof_output: str | None = ...,
@@ -1018,6 +1076,7 @@ if TYPE_CHECKING:
         error_recovery: ErrorRecoveryMode = ...,
         free_form: bool = ...,
         preprocess_fixed: bool | None = ...,
+        debug_lines: bool = ...,
         enable_profiling: Literal[True] = ...,
         top_n: int = ...,
         prof_output: str | None = ...,
@@ -1031,6 +1090,7 @@ def parse_cobol(
     error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.FAIL_FAST,
     free_form: bool = False,
     preprocess_fixed: bool | None = None,
+    debug_lines: bool = False,
     enable_profiling: bool = False,
     top_n: int = 50,
     prof_output: str | None = None,
@@ -1050,6 +1110,11 @@ def parse_cobol(
             the detector declines; False never normalizes -- the source is
             lexed as-is in the mode ``free_form`` selects, with no
             auto-detection anywhere on the path
+        debug_lines: Compile fixed-format debugging lines (``D`` in column
+            7) as code instead of dropping them as comments -- what IBM
+            Enterprise COBOL does under ``SOURCE-COMPUTER ... WITH DEBUGGING
+            MODE``. Off by default; a program that declares the clause while
+            it is off gets a warning saying how many lines were dropped
 
     Returns:
         ParseResult with AST and metadata
@@ -1097,6 +1162,7 @@ def parse_cobol(
         error_recovery=error_recovery,
         free_form=free_form and preprocess_fixed is not None,
         preprocess_fixed=preprocess_fixed,
+        debug_lines=debug_lines,
     )
     return parser.parse(  # type: ignore[no-any-return]
         source_str,

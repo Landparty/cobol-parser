@@ -21,6 +21,17 @@ special registers (`RETURN-CODE`, `TALLY`, ...), reserved words that lex as
 identifiers (`RUN`, `TRUE`, ...) and, in fixed-format source, any token in
 Area B are never read as a paragraph header swallowed by a missing period.
 
+## 2026-10-14 -- issue #404: an unnamed data entry is FILLER
+
+[ast-models.md](ast-models.md): `05 PIC X(3).` (FILLER omitted) now has
+`is_filler=True` outside report groups, and the new
+`CobolDataItem.layout_name` names it `FILLER` in record layouts, so gen-data
+no longer writes an `ANONYMOUS-<level>-<line>` column and data-items,
+lineage and host-variable resolution treat it like `05 FILLER`. The NIST
+copybook-corpus floor in `test_copybook_csv_generation.py` drops from 20 to
+10: the twelve layouts lost were all bogus ANONYMOUS columns from
+PROCEDURE DIVISION fragments.
+
 ## 2026-10-14 -- issue #330: literal operands keep their quotes
 
 [parser.md](parser.md) ("Literal Re-Quoting"), [analysis.md](analysis.md):
