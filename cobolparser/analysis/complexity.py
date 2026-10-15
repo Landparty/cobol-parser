@@ -87,7 +87,11 @@ _CLAUSE_ATTRS: tuple[str, ...] = (
 _LOOP_PERFORM_TYPES = frozenset({"TIMES", "UNTIL", "VARYING"})
 
 _QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
-_BOOL_WORD_RE = re.compile(r"(?<![A-Za-z0-9_-])(?:AND|OR)(?![A-Za-z0-9_-])", re.I)
+# The OR of ``GREATER THAN OR EQUAL TO`` belongs to the relational operator.
+_BOOL_WORD_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:AND|OR(?!\s+EQUALS?(?![A-Za-z0-9_-])))(?![A-Za-z0-9_-])",
+    re.I,
+)
 
 
 def _text_bool_ops(text: Any) -> int:

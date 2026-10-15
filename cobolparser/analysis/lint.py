@@ -652,7 +652,7 @@ class LintAnalyzer:
             LintFinding(
                 rule="dead-code",
                 severity="warning",
-                message=f"{item.procedure_type.lower()} {item.name} is never referenced",
+                message=f"{item.procedure_type.lower()} {item.name} can never be reached",
                 location=item.location,
                 symbol=item.name,
                 kind=item.procedure_type,
