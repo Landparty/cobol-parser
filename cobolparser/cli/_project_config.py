@@ -113,12 +113,35 @@ def extract_config_flags(argv: list[str]) -> tuple[list[str], Path | None, bool]
             if not value:
                 raise ConfigError("--config requires a file path")
             path = Path(value)
+        elif _abbreviates_config_flag(arg):
+            raise ConfigError(
+                f"{arg.split('=', 1)[0]} could be an abbreviation of --config or "
+                "--no-config, which are only recognised spelled out in full"
+            )
         else:
             remaining.append(arg)
         index += 1
     if disabled and path is not None:
         raise ConfigError("--config and --no-config cannot be used together")
     return remaining, path, disabled
+
+
+def _abbreviates_config_flag(arg: str) -> bool:
+    """True for ``--no-conf``, ``--no``, ``--conf=FILE`` and the like.
+
+    Only the exact spellings above are stripped, so a shortened one would
+    otherwise reach argparse, whose prefix matching may take it for some
+    *other* option of the subcommand (``--no`` for ``--no-debug-lines``)
+    while the discovered cobol.yml quietly stays in force. Rejected here
+    rather than with ``allow_abbrev=False`` on every subparser, which would
+    also take away abbreviations that cannot be mistaken for these two.
+    """
+    if not arg.startswith("--"):
+        return False
+    name = arg[2:].split("=", 1)[0]
+    return bool(name) and any(
+        flag.startswith(name) and flag != name for flag in ("config", "no-config")
+    )
 
 
 def _iter_parsers(parser: argparse.ArgumentParser) -> Iterator[argparse.ArgumentParser]:

@@ -4191,10 +4191,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cobol-parser",
         description="Parse, tokenize, preprocess, and analyze COBOL source files.",
-        # --config/--no-config are handled by extract_config_flags() on their
-        # exact spellings only. With abbreviations on, argparse would accept
-        # `--no-conf` or `--conf=FILE` here and they would silently do nothing.
-        allow_abbrev=False,
     )
     parser.add_argument(
         "--version",

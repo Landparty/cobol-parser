@@ -9,8 +9,8 @@ Covers:
   the reason `_project_config` parses argv a second time
 - `--config FILE` / `--no-config` work on either side of the subcommand, and
   do not confuse the legacy "bare filename means parse" rewrite, and an
-  abbreviation of either (`--no-conf`, `--conf=FILE`) is an error rather
-  than silently ignored
+  abbreviation of either (`--no-conf`, `--conf=FILE`) on either side is an
+  error rather than silently ignored
 - A malformed or missing config file is a clean exit-1 error naming it,
   never a silent fallback to built-in defaults
 - The `config` subcommand reports the file and only what it actually sets
@@ -24,6 +24,7 @@ from unittest.mock import patch
 import pytest
 
 from cobolparser.cli.parse import _SUBCOMMANDS, _build_parser, main
+from cobolparser.config import ConfigError
 
 CONFIG = """\
 project:
@@ -225,14 +226,21 @@ def test_config_without_a_path_is_an_error(project):
 
 @pytest.mark.parametrize(
     "spelling",
-    [["--no-conf"], ["--no"], ["--conf=other.yml"], ["--conf", "other.yml"]],
+    [
+        ["--no-conf"],
+        ["--no"],
+        ["--conf=other.yml"],
+        ["--conf", "other.yml"],
+        ["--co"],
+    ],
 )
 @pytest.mark.parametrize("side", ["before", "after"])
 def test_abbreviated_config_flags_are_rejected(project, capsys, spelling, side):
     # Only the exact spellings are stripped by extract_config_flags(). An
-    # abbreviation argparse quietly accepted would leave the discovered
-    # cobol.yml in force while the user believed they had switched it off
-    # or replaced it (issue #323).
+    # abbreviation reaching argparse was either swallowed by the top-level
+    # parser or, after the subcommand, prefix-matched to one of its own
+    # options -- either way the discovered cobol.yml stayed in force while
+    # the user believed they had switched it off or replaced it (#323).
     argv = (
         [*spelling, "lint", "PROG.cbl"]
         if side == "before"
@@ -242,13 +250,30 @@ def test_abbreviated_config_flags_are_rejected(project, capsys, spelling, side):
         with patch("sys.argv", ["cobol-parser", *argv]):
             with pytest.raises(SystemExit) as exc:
                 main()
-    assert exc.value.code == 2
-    assert "unrecognized arguments" in capsys.readouterr().err
+    assert exc.value.code == 1
+    assert "spelled out in full" in capsys.readouterr().err
     cmd.assert_not_called()
 
 
-def test_top_level_parser_does_not_accept_abbreviations():
-    assert _build_parser().allow_abbrev is False
+def test_rejected_before_argparse_can_prefix_match_it():
+    # Rejected on the raw argv, so the answer does not depend on which
+    # options the subcommand happens to have: once lint gains, say,
+    # --no-debug-lines, argparse alone would read `--no` as that option.
+    from cobolparser.cli import _project_config
+
+    with pytest.raises(ConfigError):
+        _project_config.extract_config_flags(["lint", "P.cbl", "--no"])
+
+
+@pytest.mark.parametrize(
+    "arg", ["--copybook-path", "--compact", "--no-debug-lines", "--conf-x", "-c"]
+)
+def test_options_that_cannot_mean_config_pass_through(arg):
+    from cobolparser.cli import _project_config
+
+    remaining, path, disabled = _project_config.extract_config_flags(["lint", arg])
+    assert remaining == ["lint", arg]
+    assert path is None and not disabled
 
 
 def test_missing_explicit_config_file_is_a_clean_error(project, capsys):

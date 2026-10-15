@@ -79,11 +79,15 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   reasons: they work on either side of the subcommand, and the rewrite would
   otherwise take `--config`'s argument for the source file. They are declared
   on the top-level parser for `--help` only; argparse never sees them.
-  Only the exact spellings are stripped, so the top-level parser sets
-  `allow_abbrev=False` (issue #323, 2026-10-14): otherwise argparse accepted
-  `--no-conf` / `--conf=FILE` as prefixes and they silently did nothing,
-  leaving the discovered `cobol.yml` in force. They now exit 2
-  ("unrecognized arguments"); `--vers` for `--version` is gone with them.
+  Only the exact spellings are stripped, so `extract_config_flags()` also
+  rejects (exit 1, a `ConfigError`) any `--X` / `--X=...` where X is a proper
+  prefix of `config` or `no-config` -- `--no-conf`, `--no`, `--conf=FILE`,
+  `--co` -- on either side of the subcommand (issue #323, 2026-10-14).
+  Otherwise argparse's prefix matching swallowed them at the top level, or
+  after the subcommand read them as one of its own options (`--no` for a
+  `--no-...` flag), and the discovered `cobol.yml` silently stayed in force.
+  Done on the raw argv rather than with `allow_abbrev=False` on every
+  subparser, so abbreviations that cannot mean these two still work.
 * **Telling a typed flag from a defaulted one** — most flags here have a
   non-`None` default (`--charset ascii`, `--dialect ibm-enterprise`,
   `--source-format auto`), so `is None` cannot answer "did the user pass
