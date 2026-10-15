@@ -253,9 +253,9 @@ class TestFdRecordVarying:
     def test_the_same_seed_reproduces_the_lengths_too(self):
         assert empvl().declared_lengths == empvl().declared_lengths
 
-    def test_record_contains_min_to_max_is_the_same_declaration(self):
-        # RECORD CONTAINS 47 TO 80 says the same thing without the VARYING
-        # keyword, and the parser records it identically.
+    def test_record_contains_min_to_max_bounds_the_file_not_the_record(self):
+        # RECORD CONTAINS 47 TO 80 (format 2) has no DEPENDING ON: each record
+        # is as long as its own 01, so the range is kept but nothing is drawn.
         source = EMPVL_PROGRAM.replace(
             "RECORD VARYING FROM 47 TO 80 CHARACTERS\n"
             "                  DEPENDING ON EMPREC-LEN",
@@ -265,7 +265,90 @@ class TestFdRecordVarying:
         dataset = CopybookDataGenerator(opts).generate_from_source(
             source, filename="EMPVL.cbl"
         )
-        assert dataset.varying == VaryingLength(47, 80, None)
+        assert dataset.varying == VaryingLength(47, 80, None, per_record=False)
+        assert dataset.declared_lengths is None
+        assert dataset.is_variable_length
+        assert dataset.record_lengths(VARIABLE) == [80 + RDW_SIZE] * 4
+
+
+# Two 01s of different lengths under one FD range and no DEPENDING ON: the
+# program writes a 10-byte header or a 20-byte detail, never anything between.
+TWO_RECORD_PROGRAM = """
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. M1.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT F1 ASSIGN TO F1DD.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  F1
+           {clause}.
+       01  HDR-REC.
+           05 HDR-ID   PIC X(10).
+       01  DTL-REC.
+           05 DTL-ID   PIC X(6).
+           05 DTL-NAME PIC X(14).
+       PROCEDURE DIVISION.
+           STOP RUN.
+"""
+
+
+class TestFdRangeWithoutDependingOn:
+    """Issue #320: no DEPENDING ON means no record is cut mid-field."""
+
+    @staticmethod
+    def generate(record: str, clause: str, **extra):
+        opts = DataGeneratorOptions(rows=6, seed=1, **extra).for_record_image()
+        return CopybookDataGenerator(opts).generate_from_source(
+            TWO_RECORD_PROGRAM.format(clause=clause), filename="M1.cbl", record=record
+        )
+
+    @pytest.mark.parametrize(
+        "clause",
+        [
+            "RECORD CONTAINS 10 TO 20 CHARACTERS",
+            "RECORD VARYING FROM 10 TO 20 CHARACTERS",
+        ],
+    )
+    @pytest.mark.parametrize("record,size", [("DTL-REC", 20), ("HDR-REC", 10)])
+    def test_each_record_is_its_own_01s_full_length(self, clause, record, size):
+        dataset = self.generate(record, clause)
+        assert dataset.declared_lengths is None
+        assert dataset.varying == VaryingLength(10, 20, None, per_record=False)
+        assert dataset.minimum_record_length() == size
+        assert dataset.record_lengths(VARIABLE) == [size + RDW_SIZE] * 6
+        dump = dataset.to_hex_dump(VARIABLE)
+        assert "(cut " not in dump
+        assert f"* record length: {size + RDW_SIZE} to {size + RDW_SIZE}" in dump
+
+    def test_auto_still_resolves_to_variable(self):
+        dataset = self.generate("DTL-REC", "RECORD CONTAINS 10 TO 20 CHARACTERS")
+        assert dataset.record_lengths(AUTO) == [20 + RDW_SIZE] * 6
+
+    def test_a_layout_outside_the_range_is_a_caveat_not_a_cut(self):
+        dataset = self.generate("DTL-REC", "RECORD CONTAINS 5 TO 12 CHARACTERS")
+        assert dataset.varying == VaryingLength(5, 12, None, per_record=False)
+        assert dataset.record_lengths(VARIABLE) == [20 + RDW_SIZE] * 6
+        assert any("does not include the 20-byte" in c for c in dataset.caveats)
+
+    def test_depending_on_still_draws_a_length_per_record(self):
+        dataset = self.generate(
+            "DTL-REC",
+            "RECORD VARYING FROM 10 TO 20 CHARACTERS DEPENDING ON WS-LEN",
+        )
+        assert dataset.varying == VaryingLength(10, 20, "WS-LEN")
+        assert dataset.declared_lengths is not None
+        assert all(10 <= n <= 20 for n in dataset.declared_lengths)
+
+    def test_an_explicit_range_still_opts_in_to_drawn_lengths(self):
+        dataset = self.generate(
+            "DTL-REC",
+            "RECORD CONTAINS 10 TO 20 CHARACTERS",
+            record_varying=(12, 18),
+        )
+        assert dataset.varying == VaryingLength(12, 18, None)
+        assert all(12 <= n <= 18 for n in dataset.declared_lengths)
 
 
 class TestExplicitVaryingRange:

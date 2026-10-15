@@ -98,8 +98,15 @@ class VaryingLength:
     handed to the encoder, which is exactly what ``data_length`` on
     :func:`.encoding.encode_record` is for.
 
-    ``RECORD CONTAINS 47 TO 80`` declares the same thing without the
-    ``VARYING`` keyword and is treated identically.
+    Only a range with ``DEPENDING ON`` varies inside one record layout.
+    ``RECORD CONTAINS 47 TO 80`` (RECORD format 2) and ``RECORD VARYING``
+    without ``DEPENDING ON`` declare a variable-length *file*, but each
+    record's length is that of the 01 record description it was written
+    from -- never a cut inside a field. Those ranges are kept (the file is
+    still RECFM=V, and its LRECL is still the declared maximum) with
+    :attr:`per_record` false, so no length is drawn per row. An explicit
+    :attr:`~.options.DataGeneratorOptions.record_varying` remains the way
+    to ask for arbitrary per-record lengths without a ``DEPENDING ON``.
 
     Attributes:
         minimum: Shortest record the FD permits, in bytes.
@@ -109,11 +116,15 @@ class VaryingLength:
         depending_on: The ``DEPENDING ON`` data name, when the clause has
             one.  Usually a WORKING-STORAGE item rather than part of the
             record, which is why it is recorded but rarely writable.
+        per_record: Whether each record's length is drawn from the range.
+            False for an FD range without ``DEPENDING ON``, where the range
+            bounds the file and every record keeps its own 01's length.
     """
 
     minimum: int
     maximum: int
     depending_on: str | None = None
+    per_record: bool = True
 
     @classmethod
     def from_fd_clauses(
@@ -132,14 +143,47 @@ class VaryingLength:
         low, high = block.get("min"), block.get("max")
         if low is None or high is None or low == high:
             return None
+        depending_on = block.get("depending_on")
+        if not depending_on:
+            return cls.file_range(
+                int(low), int(high), record_size=record_size, caveats=caveats
+            )
         return cls.build(
             int(low),
             int(high),
-            block.get("depending_on"),
+            depending_on,
             record_size,
             caveats=caveats,
             source="FD RECORD VARYING",
         )
+
+    @classmethod
+    def file_range(
+        cls,
+        minimum: int,
+        maximum: int,
+        *,
+        record_size: int,
+        caveats: list[str] | None = None,
+    ) -> VaryingLength | None:
+        """An FD range with no ``DEPENDING ON``: bounds the file, not the record.
+
+        IBM COBOL writes such a record at the length of the 01 record named
+        on the WRITE, so the range is not clamped to this one layout (a
+        10-byte header under ``RECORD CONTAINS 10 TO 20`` is as valid as the
+        20-byte detail beside it). A layout outside the range is a mismatch
+        and appended to *caveats*; its records are still written whole.
+        """
+        low, high = sorted((max(0, minimum), max(0, maximum)))
+        if high <= low:
+            return None
+        if record_size > 0 and not low <= record_size <= high and caveats is not None:
+            caveats.append(
+                f"FD RECORD FROM {low} TO {high} does not include the "
+                f"{record_size}-byte record layout; every record is written "
+                f"at the layout's full {record_size} bytes"
+            )
+        return cls(low, high, None, per_record=False)
 
     @classmethod
     def build(
@@ -189,6 +233,7 @@ class VaryingLength:
             "minimum": self.minimum,
             "maximum": self.maximum,
             "depending_on": self.depending_on,
+            "per_record": self.per_record,
         }
 
 
@@ -288,6 +333,12 @@ class FieldSpec:
     #: the decimal point and ``.`` an insertion character, so an edited
     #: field displays ``1.234,56``. Read off the item's own ``PictureClause``.
     decimal_point_is_comma: bool = False
+    #: The exact bytes each hex literal (``VALUE X'C1C2'``, a level-88 ``X'FF'``)
+    #: declared for this field names, keyed by the text cell that stands for
+    #: it (the bytes read as Latin-1, cut to the field's width).  A hex
+    #: literal is bytes, not characters: :func:`.encoding.encode_field` writes
+    #: these verbatim instead of re-encoding the cell in the record charset.
+    literal_bytes: dict[str, bytes] = field(default_factory=dict)
 
     @property
     def scaling_positions(self) -> int:
@@ -581,6 +632,41 @@ def _condition_values(item: CobolDataItem) -> list[str]:
     return list(dict.fromkeys(v for v in values if v != ""))
 
 
+def hex_literal_bytes(value: str) -> bytes | None:
+    """The bytes an ``X'..'`` literal names, or ``None`` for any other text
+    (another typed literal, a quoted one, hex that does not decode)."""
+    stripped = value.strip()
+    if len(stripped) < 3 or stripped[0] not in "xX" or stripped[1] not in "\"'":
+        return None
+    try:
+        return bytes.fromhex(unquote_literal(stripped[1:]))
+    except ValueError:
+        return None
+
+
+def _literal_bytes(item: CobolDataItem, width: int) -> dict[str, bytes]:
+    """Every hex literal *item* declares -- its VALUE clause and its level-88
+    values -- as ``{text cell: bytes}``; see :attr:`FieldSpec.literal_bytes`.
+
+    The key is the literal's Latin-1 text cut to *width*, the same cut
+    ``ValueFactory`` applies when it writes the literal into a cell, so the
+    encoder finds the cell it was handed.
+    """
+    raws: list[str] = [item.value_clause] if item.value_clause else []
+    for child in item.children:
+        if isinstance(child, ConditionNameItem):
+            raws.extend(str(value) for value in child.values)
+    found: dict[str, bytes] = {}
+    for raw in raws:
+        data = hex_literal_bytes(raw)
+        if not data:
+            continue
+        if width > 0:
+            data = data[:width]
+        found.setdefault(data.decode("latin-1"), data)
+    return found
+
+
 def _strip_literal_quotes(value: str) -> str:
     """A COBOL literal's content: delimiters removed and each doubled
     delimiter collapsed (``"A""B"`` is ``A"B``), see ``unquote_literal``.
@@ -829,7 +915,7 @@ def _flatten_into(
             ),
         )
 
-    item_path = (*path, item.name)
+    item_path = (*path, item.layout_name)
     for index in indexes:
         occ = (*subscripts, index) if index is not None else subscripts
         children = _child_items(item)
@@ -870,9 +956,9 @@ def _flatten_into(
         )
         out.append(
             FieldSpec(
-                name=item.name,
+                name=item.layout_name,
                 path=item_path,
-                column=item.name,
+                column=item.layout_name,
                 level=item.level,
                 picture=picture.pattern if picture else None,
                 usage=(item.usage or "DISPLAY").upper(),
@@ -889,6 +975,7 @@ def _flatten_into(
                 is_signed=_is_signed(picture),
                 value_clause=item.value_clause,
                 condition_values=_condition_values(item),
+                literal_bytes=_literal_bytes(item, size),
                 subscripts=occ,
                 redefines=inherited_redefines or redefines_label,
                 is_filler=item.is_filler,
