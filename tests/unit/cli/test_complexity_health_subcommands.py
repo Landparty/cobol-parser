@@ -63,3 +63,39 @@ class TestHealthSubcommand:
         assert "top_offenders" in data
         assert "complexity_summary" in data
         assert "redundancy_summary" in data
+
+
+class TestHealthWithParseErrors:
+    """Issue #397: a file that mostly failed to parse graded "A" (score 0.0,
+    exit 0) with nothing in its JSON to say so. The grade is now withheld
+    and the JSON carries the error count and a caveat."""
+
+    JUNK = "THIS IS NOT COBOL AT ALL\nfoo bar baz.\n"
+
+    @pytest.fixture
+    def junk(self, tmp_path: Path) -> str:
+        path = tmp_path / "junk.cbl"
+        path.write_text(self.JUNK, encoding="utf-8")
+        return str(path)
+
+    def _run(self, path: str, capsys) -> dict:
+        with patch("sys.argv", ["cobol-parser", "health", path, "--compact"]):
+            main()
+        return json.loads(capsys.readouterr().out)
+
+    def test_grade_is_withheld(self, junk: str, capsys) -> None:
+        data = self._run(junk, capsys)
+        assert data["grade"] is None
+        assert data["parse_error_count"] >= 1
+        assert any("parsed with" in c for c in data["caveats"])
+
+    def test_score_is_still_reported(self, junk: str, capsys) -> None:
+        # Option (a) of #397: the number stays, labelled; no hard exit.
+        data = self._run(junk, capsys)
+        assert isinstance(data["score"], float)
+
+    def test_clean_program_keeps_its_grade(self, capsys) -> None:
+        data = self._run(_SIMPLE, capsys)
+        assert data["grade"] in {"A", "B", "C", "D", "F"}
+        assert data["parse_error_count"] == 0
+        assert data["caveats"] == []

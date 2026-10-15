@@ -23,6 +23,47 @@ from ...models.ast_base import SourceLocation
 from ...models.statements import EvaluateStatement, WhenClause
 from ._conditions import condition_token_text
 
+# Words that make a WHEN phrase a condition rather than a value. Symbols
+# and logical connectives count anywhere; the relational words
+# (``X GREATER THAN 1``, ``X EQUAL TO 1``) and the class tests
+# (``X IS NUMERIC``) cannot open a value either, so they count anywhere too.
+_CONDITION_SYMBOLS = frozenset({"AND", "OR", "NOT", "=", "<", ">", "<=", ">=", "<>"})
+_RELATIONAL_WORDS = frozenset({"GREATER", "LESS", "EQUAL", "EQUALS"})
+_CLASS_TEST_WORDS = frozenset(
+    {
+        "NUMERIC",
+        "ALPHABETIC",
+        "ALPHABETIC-LOWER",
+        "ALPHABETIC-UPPER",
+        "DBCS",
+        "KANJI",
+    }
+)
+# A sign test only when it follows a subject: a lone ``WHEN ZERO`` is the
+# figurative constant, a value selector.
+_SIGN_TEST_WORDS = frozenset({"POSITIVE", "NEGATIVE", "ZERO"})
+_CONDITION_WORDS = _CONDITION_SYMBOLS | _RELATIONAL_WORDS | _CLASS_TEST_WORDS
+
+
+def _is_condition_phrase(words: list[str]) -> bool:
+    """Whether a WHEN selector's (unquoted) words spell a condition."""
+    return any(
+        word in _CONDITION_WORDS or (index > 0 and word in _SIGN_TEST_WORDS)
+        for index, word in enumerate(words)
+    )
+
+
+def _has_logical_or(words: list[str]) -> bool:
+    """Whether an OR in *words* joins conditions.
+
+    The OR of ``GREATER THAN OR EQUAL TO`` is part of the relational
+    operator, not a connective.
+    """
+    return any(
+        word == "OR" and words[index + 1 : index + 2] not in (["EQUAL"], ["EQUALS"])
+        for index, word in enumerate(words)
+    )
+
 
 class EvaluateStatementParser(IStatementParser):
     """Parser for EVALUATE statements using IStatementParser interface."""
@@ -443,12 +484,9 @@ class EvaluateStatementParser(IStatementParser):
                     "end": end_value,
                 }
 
-        if any(
-            word in ("AND", "OR", "NOT", "=", "<", ">", "<=", ">=", "<>")
-            for word in flat_words
-        ):
+        if _is_condition_phrase(flat_words):
             selector: dict[str, Any] = {"type": "Condition", "text": condition_text}
-            if "OR" in flat_words:
+            if _has_logical_or(flat_words):
                 selector["operator"] = "OR"
             elif "AND" in flat_words:
                 selector["operator"] = "AND"

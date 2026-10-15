@@ -103,7 +103,9 @@ def _parse(name: str) -> tuple[CobolProgram, list[str]]:
     """Expand copybooks, then parse under FAIL_FAST; return (ast, warnings)."""
     path = CORPUS / f"{name}.cbl"
     expansion = expand_copybooks(path.read_text(encoding="utf-8"), COPYBOOKS)
-    parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST)
+    # debug_lines=True: COMPDIR declares WITH DEBUGGING MODE, so the
+    # compiler reads its D lines as code -- and only COMPDIR has any.
+    parser = CobolParser(error_recovery=ErrorRecoveryMode.FAIL_FAST, debug_lines=True)
     result = parser.parse(expansion.expanded_source, str(path))
     assert result.ast is not None, f"{name}: no AST: {result.errors}"
     assert result.errors == [], f"{name}: parse errors: {result.errors}"
@@ -620,6 +622,10 @@ class TestDataAndText:
         assert ("0", ["WS-ROWS"]) in moves  # REPLACE ==:PFX:== BY ==WS== applied
         limits = [i for i in ast.get_data_items() if i.name == "WS-LIMIT"]
         assert [i.value_clause for i in limits] == ["500"]  # >>IF kept one arm
+        # WITH DEBUGGING MODE + debug_lines=True: both D lines are code
+        displays = [d.display_items for d in ast.find_all_by_type("DisplayStatement")]
+        assert ['"DEBUG: ENVIRONMENT IS "', "WS-ENV"] in displays
+        assert ['"ROW "', "WS-ROWS"] in displays
 
     def test_cobol_6x_data_description(self, corpus_asts) -> None:
         ast, _ = corpus_asts["MODERN63"]
