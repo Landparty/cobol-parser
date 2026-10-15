@@ -514,16 +514,24 @@ class ProgramFixtureGenerator:
         *,
         copybook_paths: list[str] | None = None,
         callee_paths: list[str] | None = None,
+        debug_lines: bool = False,
     ) -> tuple[CobolProgram, ProgramLayoutIndex, BoundaryReport]:
         """Parse *path* and run Phases 1-2 without generating a bundle --
         the shared entry point behind both `generate_from_file` and the
-        CLI's `--list-boundaries` (which has no use for generated values)."""
+        CLI's `--list-boundaries` (which has no use for generated values).
+        ``debug_lines`` compiles ``D``-in-column-7 lines as code in the
+        program and in every callee parsed from ``callee_paths``."""
         index = ProgramLayoutIndex.from_file(
-            path, copybook_paths=copybook_paths, strict_copybooks=True
+            path,
+            copybook_paths=copybook_paths,
+            strict_copybooks=True,
+            debug_lines=debug_lines,
         )
         assert index.ast is not None  # from_file() always sets it on success
         ast = index.ast
-        callee_indexes, callee_asts = self._resolve_callees(ast, callee_paths)
+        callee_indexes, callee_asts = self._resolve_callees(
+            ast, callee_paths, debug_lines=debug_lines
+        )
         report = BoundaryInventoryAnalyzer().analyze(
             ast, index, callee_indexes=callee_indexes, callee_asts=callee_asts
         )
@@ -948,7 +956,11 @@ class ProgramFixtureGenerator:
     # -- callee resolution (Phase 2b rung 2 support) -------------------------
 
     def _resolve_callees(
-        self, ast: CobolProgram, callee_paths: list[str] | None
+        self,
+        ast: CobolProgram,
+        callee_paths: list[str] | None,
+        *,
+        debug_lines: bool = False,
     ) -> tuple[dict[str, ProgramLayoutIndex], dict[str, CobolProgram]]:
         callee_indexes: dict[str, ProgramLayoutIndex] = {}
         callee_asts: dict[str, CobolProgram] = {}
@@ -978,7 +990,9 @@ class ProgramFixtureGenerator:
             if found is None:
                 continue
             try:
-                callee_index = ProgramLayoutIndex.from_file(found)
+                callee_index = ProgramLayoutIndex.from_file(
+                    found, debug_lines=debug_lines
+                )
             except ProgramLayoutError:
                 continue
             assert callee_index.ast is not None

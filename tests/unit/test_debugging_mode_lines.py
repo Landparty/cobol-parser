@@ -269,3 +269,225 @@ def test_config_debug_lines_must_be_a_boolean(tmp_path) -> None:
     assert build_config({}, source).debug_lines is None
     with pytest.raises(ConfigError, match="project.debug_lines"):
         build_config({"project": {"debug_lines": "yes"}}, source)
+
+
+# -- through copybook expansion -----------------------------------------------
+#
+# Expansion blanks comment lines before the parser sees the text, and it used
+# to blank D lines with them: with any COPY in the program, debug_lines=True
+# did nothing and the default warning never fired.
+
+COPY_PROGRAM = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. DBGC.
+       ENVIRONMENT DIVISION.
+       CONFIGURATION SECTION.
+       SOURCE-COMPUTER. IBM-370 WITH DEBUGGING MODE.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-TRACE  PIC X(10).
+       01  WS-CNT    PIC 9(4) VALUE 0.
+           COPY WSC.
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           DISPLAY 'START'
+      D    DISPLAY 'DEBUG ' WS-TRACE
+      D    ADD 1 TO WS-CNT
+      D    CALL 'DBGSUB'
+           STOP RUN.
+"""
+
+COPY_MEMBER = """\
+       01  WS-OTHER  PIC X(4).
+      D01  WS-DBGCPY PIC X(4).
+"""
+
+
+@pytest.fixture
+def copy_program(tmp_path, monkeypatch) -> Path:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "cpy").mkdir()
+    (tmp_path / "cpy" / "WSC.cpy").write_text(COPY_MEMBER)
+    path = tmp_path / "DBGC.cbl"
+    path.write_text(COPY_PROGRAM)
+    return path
+
+
+def _data_names(result) -> set[str]:
+    return {
+        item.name
+        for item in result.ast.find_all_by_type("CobolDataItem")
+        if getattr(item, "name", None)
+    }
+
+
+def test_expansion_keeps_debug_lines_when_asked(copy_program) -> None:
+    result = parse_cobol_with_expansion(
+        COPY_PROGRAM, "DBGC.cbl", copybook_paths=["cpy"], debug_lines=True
+    )
+    assert _statement_types(result) == [
+        "DisplayStatement",
+        "DisplayStatement",
+        "AddStatement",
+        "CallStatement",
+        "StopStatement",
+    ]
+    # ... and a D line inside the copybook is compiled too.
+    assert "WS-DBGCPY" in _data_names(result)
+    assert _debug_warnings(result) == []
+
+
+def test_expansion_default_drops_them_and_still_warns(copy_program) -> None:
+    result = parse_cobol_with_expansion(
+        COPY_PROGRAM, "DBGC.cbl", copybook_paths=["cpy"]
+    )
+    assert _statement_types(result) == ["DisplayStatement", "StopStatement"]
+    assert "WS-DBGCPY" not in _data_names(result)
+    [warning] = _debug_warnings(result)
+    # Two in the program, one in the member -- and the first is placed in
+    # the file it was written in, not in the expanded text.
+    assert "but 4 debugging line(s)" in warning
+    assert "WSC.cpy: Line 2: SOURCE-COMPUTER is WITH DEBUGGING MODE" in warning
+
+
+def test_expansion_without_the_clause_does_not_warn(copy_program) -> None:
+    source = COPY_PROGRAM.replace(" WITH DEBUGGING MODE", "")
+    result = parse_cobol_with_expansion(source, "DBGC.cbl", copybook_paths=["cpy"])
+    assert _debug_warnings(result) == []
+
+
+def test_expand_copybooks_debug_lines(copy_program) -> None:
+    from cobolparser.preprocess.copybook_expander import expand_copybooks
+
+    kept = expand_copybooks(COPY_PROGRAM, ["cpy"], debug_lines=True)
+    assert "      D    ADD 1 TO WS-CNT" in kept.expanded_source
+    assert "      D01  WS-DBGCPY" in kept.expanded_source
+    assert kept.dropped_debug_lines == []
+
+    dropped = expand_copybooks(COPY_PROGRAM, ["cpy"], source_file="DBGC.cbl")
+    assert "ADD 1 TO WS-CNT" not in dropped.expanded_source
+    assert [(Path(f).name, n) for f, n in dropped.dropped_debug_lines] == [
+        ("WSC.cpy", 2),
+        ("DBGC.cbl", 14),
+        ("DBGC.cbl", 15),
+        ("DBGC.cbl", 16),
+    ]
+
+
+def test_parse_files_takes_debug_lines(copy_program) -> None:
+    from cobolparser.batch import parse_files, parse_files_with_copybooks
+
+    def adds(results) -> list[bool]:
+        return ["AddStatement" in _statement_types(r.result) for r in results]
+
+    path = [str(copy_program)]
+    assert adds(parse_files(path, workers=1)) == [False]
+    assert adds(parse_files(path, workers=1, debug_lines=True)) == [True]
+    assert adds(parse_files_with_copybooks(path, ["cpy"])) == [False]
+    [kept] = parse_files_with_copybooks(path, ["cpy"], debug_lines=True)
+    assert "AddStatement" in _statement_types(kept.result)
+    assert "WS-DBGCPY" in _data_names(kept.result)
+    [default] = parse_files_with_copybooks(path, ["cpy"])
+    assert len(_debug_warnings(default.result)) == 1
+
+
+def test_scan_with_copybooks_honours_debug_lines(copy_program) -> None:
+    def unused(debug_lines: bool) -> str:
+        report = scan_files(
+            [str(copy_program)],
+            ScanOptions(
+                analyzers=("unused-variables",),
+                copybook_paths=("cpy",),
+                debug_lines=debug_lines,
+            ),
+            workers=1,
+        )
+        return json.dumps(report.files[0].units[0].reports["unused-variables"])
+
+    assert "WS-CNT" in unused(False)
+    assert "WS-CNT" not in unused(True)
+
+
+def test_program_layout_index_takes_debug_lines(copy_program) -> None:
+    from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+
+    index = ProgramLayoutIndex.from_file(
+        str(copy_program), copybook_paths=["cpy"], debug_lines=True
+    )
+    assert index.resolve("WS-DBGCPY") is not None
+    plain = ProgramLayoutIndex.from_file(str(copy_program), copybook_paths=["cpy"])
+    assert plain.resolve("WS-DBGCPY") is None
+
+
+def test_codebase_graph_builder_takes_debug_lines(copy_program) -> None:
+    from cobolparser.analysis.codebase import CodebaseGraphBuilder
+
+    def callees(**kwargs) -> set[str]:
+        graph = CodebaseGraphBuilder(**kwargs).build([str(copy_program)])
+        return {edge.callee for edge in graph.call_edges}
+
+    assert "DBGSUB" not in callees()
+    assert "DBGSUB" in callees(debug_lines=True)
+    assert "DBGSUB" in callees(debug_lines=True, copybook_paths=["cpy"])
+
+
+def test_cli_copybook_path_and_debug_lines(copy_program, capsys) -> None:
+    argv = ["unused-variables", str(copy_program), "--copybook-path", "cpy"]
+    assert {"WS-TRACE", "WS-CNT"} <= _unused_names(_run(argv, capsys))
+    kept = _unused_names(_run([*argv, "--debug-lines"], capsys))
+    assert not {"WS-TRACE", "WS-CNT"} & kept
+
+
+@pytest.mark.parametrize(
+    "argv, needle",
+    [
+        (["batch", "DBGC.cbl"], '"statement_type": "ADD"'),
+        (["expand", "DBGC.cbl", "--copybook-path", "cpy"], "D    ADD 1 TO WS-CNT"),
+        (["codebase-graph", "DBGC.cbl"], "DBGSUB"),
+        (["gen-fixtures", "DBGC.cbl", "--list-boundaries"], "DBGSUB"),
+        (["gen-fixtures", "DBGC.cbl", "--seed", "1"], '"total_boundaries": 1'),
+    ],
+)
+def test_config_debug_lines_reaches_subcommands_without_source_format(
+    copy_program, capsys, argv, needle
+) -> None:
+    # These subcommands take no --source-format, and used to have no
+    # debug_lines dest either, so cobol.yml's project.debug_lines was
+    # silently ignored by them.
+    assert needle not in _run(argv, capsys)
+    (copy_program.parent / "cobol.yml").write_text("project:\n  debug_lines: true\n")
+    assert needle in _run(argv, capsys)
+    assert needle not in _run([*argv, "--no-debug-lines"], capsys)
+
+
+def test_cli_field_impact_passes_debug_lines(copy_program, capsys) -> None:
+    with patch("cobolparser.scan.scan_files", side_effect=RuntimeError) as scan:
+        with patch(
+            "sys.argv",
+            [
+                "cobol-parser",
+                "field-impact",
+                "WS-CNT",
+                str(copy_program),
+                "--debug-lines",
+            ],
+        ):
+            with pytest.raises(RuntimeError):
+                main()
+    assert scan.call_args.args[1].debug_lines is True
+
+
+def test_only_record_layout_subcommands_lack_debug_lines() -> None:
+    # A subcommand without the dest silently ignores cobol.yml's
+    # project.debug_lines. The ones left read record layouts (copybooks,
+    # data files) or no COBOL at all, and drop D lines as comments.
+    from cobolparser.cli._project_config import _iter_parsers
+    from cobolparser.cli.parse import _build_parser
+
+    top = _build_parser()
+    lacking = {
+        sub.prog.split()[-1]
+        for sub in _iter_parsers(top)
+        if sub is not top and "debug_lines" not in {a.dest for a in sub._actions}
+    }
+    assert lacking == {"gen-data", "decode", "compare", "jcl", "le-info", "config"}

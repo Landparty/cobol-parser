@@ -1297,7 +1297,9 @@ a new type has to be added to both. The corpus is parsed with
 program with D lines), so COMPDIR's D-line DISPLAYs are in its AST and it
 stays warning-free; `tests/unit/test_debugging_mode_lines.py` pins the
 default (dropped + warning), the option on every surface (API, CLI,
-cobol.yml, scan, tokenize) and `debug_line_numbers` (#334). `tests/samples/*.cbl` smoke checks
+cobol.yml, scan, tokenize, batch, the copybook expansion -- with a real
+COPY, since a program without one passes through the expander untouched --
+and every subcommand that parses COBOL) and `debug_line_numbers` (#334). `tests/samples/*.cbl` smoke checks
 (`test_all_samples.py`) cover the corpus too, since it lives under
 `tests/samples/`. The same 22 files are copied into
 `mocky-mock/tests/fixtures/enterprise/`, where

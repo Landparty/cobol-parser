@@ -18,7 +18,7 @@ import re
 from .._lines import split_source_lines
 from .._source_directive import free_format_flags
 from ..lexer import mask_comment_entries
-from ._normalize import ALL_COMMENT_INDICATORS
+from ._normalize import ALL_COMMENT_INDICATORS, DEBUG_INDICATORS
 from .models import CopyStatement, ReplacingClause, SuppressClause
 
 
@@ -449,12 +449,16 @@ def is_within_string_literal(source: str, match_start: int, match_end: int) -> b
     return in_double_quote_string or in_single_quote_string
 
 
-def remove_comment_lines(source: str) -> str:
+def remove_comment_lines(source: str, *, keep_debug_lines: bool = False) -> str:
     """
     Remove comment content from COBOL source code while preserving line count.
 
     Args:
         source: COBOL source code
+        keep_debug_lines: Leave debugging lines (``D`` in column 7) in place
+            rather than blanking them -- for a parse that compiles them as
+            code (``debug_lines=True``); their indicator stays in column 7
+            for the final normalization to read
 
     Returns:
         Source with comment lines blanked out so line positions remain stable
@@ -470,7 +474,9 @@ def remove_comment_lines(source: str) -> str:
     for index, line in enumerate(lines):
         if free is not None and free[index]:
             result.append(line)
-        elif is_comment_line(line):
+        elif is_comment_line(line) and not (
+            keep_debug_lines and line[6] in DEBUG_INDICATORS
+        ):
             result.append(" " * len(line))
         else:
             result.append(line)

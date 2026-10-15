@@ -113,6 +113,13 @@ def _add_source_format_args(parser: argparse.ArgumentParser) -> None:
             "disable normalization outright"
         ),
     )
+    _add_debug_lines_arg(parser)
+
+
+def _add_debug_lines_arg(parser: argparse.ArgumentParser) -> None:
+    """``--debug-lines`` / ``--no-debug-lines``, bound to cobol.yml's
+    ``project.debug_lines``. Every subcommand that parses COBOL takes it --
+    a subcommand without the dest would silently ignore the config key."""
     parser.add_argument(
         "--debug-lines",
         action=argparse.BooleanOptionalAction,
@@ -693,6 +700,7 @@ def _build_batch_parser(
         help="Include parse statistics per file",
     )
     _add_profiling_args(p)
+    _add_debug_lines_arg(p)
     p.set_defaults(func=_cmd_batch)
 
 
@@ -752,6 +760,7 @@ def _cmd_batch(args: argparse.Namespace) -> None:
         enable_profiling=enable_profiling,
         top_n=top_n,
         prof_output=prof_output,
+        debug_lines=bool(getattr(args, "debug_lines", False)),
     )
 
     output = []
@@ -982,6 +991,7 @@ def _build_expand_parser(
     )
     _add_define_args(p)
     _add_output_arg(p)
+    _add_debug_lines_arg(p)
     p.set_defaults(func=_cmd_expand)
 
 
@@ -1008,6 +1018,7 @@ def _cmd_expand(args: argparse.Namespace) -> None:
             preserve_source_locations=getattr(args, "source_map", False),
             source_file=args.file,
             preserve_comments=getattr(args, "keep_comments", False),
+            debug_lines=bool(getattr(args, "debug_lines", False)),
         )
     except PreprocessingError as exc:
         # The same one-line error and exit status `parse --copybook-path`
@@ -1902,6 +1913,7 @@ def _build_gen_fixtures_parser(
     )
     _add_compact_arg(p)
     _add_output_arg(p)
+    _add_debug_lines_arg(p)
     p.set_defaults(func=_cmd_gen_fixtures)
 
 
@@ -1926,11 +1938,15 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
     generator = ProgramFixtureGenerator()
     copybook_paths = args.copybook_path or None
     callee_paths = args.callee_path or None
+    debug_lines = bool(getattr(args, "debug_lines", False))
 
     if args.list_boundaries:
         try:
             _, _, report = generator.analyze_from_file(
-                args.file, copybook_paths=copybook_paths, callee_paths=callee_paths
+                args.file,
+                copybook_paths=copybook_paths,
+                callee_paths=callee_paths,
+                debug_lines=debug_lines,
             )
         except ProgramLayoutError as exc:
             _fail(str(exc))
@@ -1959,12 +1975,17 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
         generator = ProgramFixtureGenerator(
             DataGeneratorOptions(rows=args.rows, max_occurs=args.max_occurs)
         )
-        bundle = generator.generate_with_scenarios_from_file(
+        # analyze + generate rather than generate_with_scenarios_from_file,
+        # whose signature is mocky-mock's contract (interface-contract.md):
+        # the same two steps, with debug_lines reaching the parse.
+        ast, index, report = generator.analyze_from_file(
             args.file,
             copybook_paths=copybook_paths,
             callee_paths=callee_paths,
-            mode=args.scenarios,
-            seed=args.seed,
+            debug_lines=debug_lines,
+        )
+        bundle = generator.generate_with_scenarios(
+            ast, index, report, mode=args.scenarios, seed=args.seed
         )
     except ProgramLayoutError as exc:
         _fail(str(exc))
@@ -3365,6 +3386,7 @@ def _build_field_impact_parser(subparsers: argparse._SubParsersAction) -> None:
     _add_compact_arg(p)
     _add_copybook_args(p)
     _add_output_arg(p)
+    _add_debug_lines_arg(p)
     p.set_defaults(func=_cmd_field_impact)
 
 
@@ -3432,6 +3454,7 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
         ScanOptions(
             analyzers=("lineage",),
             copybook_paths=tuple(args.copybook_path or []),
+            debug_lines=bool(getattr(args, "debug_lines", False)),
         ),
         workers=args.workers,
     )
@@ -3609,6 +3632,7 @@ def _build_codebase_graph_parser(subparsers: argparse._SubParsersAction) -> None
     _add_compact_arg(p)
     _add_copybook_args(p)
     _add_output_arg(p)
+    _add_debug_lines_arg(p)
     p.set_defaults(func=_cmd_codebase_graph)
 
 
@@ -3630,6 +3654,7 @@ def _build_graph(args: argparse.Namespace) -> Any:
     builder = CodebaseGraphBuilder(
         copybook_paths=list(args.copybook_path or []),
         workers=args.workers,
+        debug_lines=bool(getattr(args, "debug_lines", False)),
     )
 
     directories = [p for p in args.paths if os.path.isdir(p)]
@@ -3710,6 +3735,7 @@ def _build_copybook_impact_parser(subparsers: argparse._SubParsersAction) -> Non
     _add_compact_arg(p)
     _add_copybook_args(p)
     _add_output_arg(p)
+    _add_debug_lines_arg(p)
     p.set_defaults(func=_cmd_copybook_impact)
 
 

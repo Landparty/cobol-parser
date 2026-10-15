@@ -199,6 +199,7 @@ class ProgramLayoutIndex:
         *,
         copybook_paths: list[str] | None = None,
         strict_copybooks: bool = True,
+        debug_lines: bool = False,
     ) -> ProgramLayoutIndex:
         """Parse *path* and index it.
 
@@ -210,6 +211,9 @@ class ProgramLayoutIndex:
         :attr:`unresolved` instead, and indexing falls back to parsing
         without expansion (so unexpanded COPY statements contribute nothing
         to the layout, rather than aborting it).
+
+        ``debug_lines`` is ``parse_cobol``'s: compile fixed-format debugging
+        lines (``D`` in column 7) as code, through copybook expansion too.
         """
         if not os.path.isfile(path):
             # parse_cobol() falls back to treating a non-existent "path" as
@@ -224,14 +228,17 @@ class ProgramLayoutIndex:
                 source = handle.read()
             try:
                 result = parse_cobol_with_expansion(
-                    source, filename=str(path), copybook_paths=list(copybook_paths)
+                    source,
+                    filename=str(path),
+                    copybook_paths=list(copybook_paths),
+                    debug_lines=debug_lines,
                 )
             except (CopybookNotFoundError, CircularReferenceError) as exc:
                 if strict_copybooks:
                     raise ProgramLayoutError(
                         f"{path}: unresolved copybook dependency: {exc}"
                     ) from exc
-                result = parse_cobol(path)
+                result = parse_cobol(path, debug_lines=debug_lines)
                 if isinstance(result, tuple):
                     result = result[0]
                 if result.ast is None:
@@ -242,7 +249,7 @@ class ProgramLayoutIndex:
                 index.unresolved.append(f"copybooks not expanded: {exc}")
                 return index
         else:
-            result = parse_cobol(path)
+            result = parse_cobol(path, debug_lines=debug_lines)
 
         if isinstance(result, tuple):  # enable_profiling=True form
             result = result[0]
