@@ -35,6 +35,8 @@ Real-world sample tests (3 programs):
 - ims_order_management.cbl: orders, GNP, DLET, dynamic SSA via MOVE
 """
 
+from pathlib import Path
+
 import pytest
 
 from cobolparser import parse_cobol
@@ -265,9 +267,15 @@ class TestIMSDLICall:
             segment_names=segment_names,
         )
 
-    def test_primary_segment_first_resolved(self):
+    def test_primary_segment_is_last_ssa(self):
+        # Issue #398: the last SSA is the target, the earlier ones are parents.
         call = self._make_call(["EMPLOYEE", "DEPT"])
-        assert call.primary_segment == "EMPLOYEE"
+        assert call.primary_segment == "DEPT"
+
+    def test_primary_segment_unresolved_target_is_none(self):
+        # An unresolved target is unknown; a resolved parent is not it.
+        call = self._make_call(["EMPLOYEE", None])
+        assert call.primary_segment is None
 
     def test_primary_segment_skips_none(self):
         call = self._make_call([None, "DEPT"])
@@ -673,7 +681,8 @@ class TestIMSSegmentAnalyzerIntegration:
         assert len(results) == 1
         call = results[0]
         assert call.segment_names == ["HOSPITAL", "PATIENT"]
-        assert call.primary_segment == "HOSPITAL"
+        # The last SSA names the target; HOSPITAL only qualifies the path.
+        assert call.primary_segment == "PATIENT"
 
     def test_aibtdli_interface(self):
         ast = _parse(_COBOL_AIBTDLI)
@@ -1132,7 +1141,7 @@ class TestRealWorldPatientRecords:
         gu = next(c for c in calls if c.function_code == "GU")
         assert "HOSPITAL" in gu.segment_names
         assert "PATIENT" in gu.segment_names
-        assert gu.primary_segment == "HOSPITAL"
+        assert gu.primary_segment == "PATIENT"
 
     def test_gn_path_call_resolves_ward_and_diagnosi(self, results):
         _, calls = results
@@ -1410,3 +1419,44 @@ class TestParmcountOperand:
         result = parse_cobol(self._SRC.format(iface="CEETDLI"))
         (call,) = IMSSegmentAnalyzer().analyze(result.ast)
         assert call.function_code_var == "PARM-CT"
+
+
+# ── Issue #398: primary_segment is the target (last) segment ─────────────────
+
+_COBOL_ISRT_PATH = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. IMSISRT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  FUNC-ISRT           PIC X(4) VALUE 'ISRT'.
+       01  DBPCB               PIC S9(9) COMP.
+       01  ITEM-IO             PIC X(40).
+       01  ORD-SSA             PIC X(9) VALUE 'ORDSEG   '.
+       01  ITEM-SSA            PIC X(9) VALUE 'ITEMSEG  '.
+       PROCEDURE DIVISION.
+       MAIN-LOGIC.
+           CALL 'CBLTDLI' USING FUNC-ISRT DBPCB ITEM-IO ORD-SSA ITEM-SSA.
+           STOP RUN.
+"""
+
+_EXECDLI_SAMPLE = (
+    Path(__file__).resolve().parents[1] / "samples" / "enterprise" / "EXECDLI.cbl"
+)
+
+
+class TestPrimarySegmentIsTarget:
+    def test_call_isrt_under_parent_targets_child(self):
+        results = IMSSegmentAnalyzer().analyze(_parse(_COBOL_ISRT_PATH))
+        assert results[0].segment_names == ["ORDSEG", "ITEMSEG"]
+        assert results[0].primary_segment == "ITEMSEG"
+
+    def test_exec_dli_isrt_targets_last_segment_option(self):
+        ast = _parse(_EXECDLI_SAMPLE.read_text())
+        isrt = [
+            c
+            for c in IMSSegmentAnalyzer().analyze(ast)
+            if c.function_code == "ISRT" and len(c.segment_names) == 2
+        ]
+        assert isrt, "EXECDLI.cbl's two-segment ISRT not found"
+        assert isrt[0].segment_names == ["CUSTSEG", "NOTESEG"]
+        assert isrt[0].primary_segment == "NOTESEG"

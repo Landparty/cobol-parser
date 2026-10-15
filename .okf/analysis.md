@@ -1719,6 +1719,14 @@ resolves through `_resolve_ssa_segment(area)` instead of reporting the text
 `(AREA)`; `None` when unknown. Pinned by
 `tests/unit/analysis/test_ims_ssa_segment_resolution.py`.
 
+**`primary_segment` is the target segment (issue #398):** in DL/I the
+**last** SSA (or `SEGMENT(...)` option of `EXEC DLI`) names the segment
+retrieved / inserted / replaced; the earlier ones only qualify the path. The
+property used to return the first resolved name (a parent). It now returns
+`segment_names[-1]`, and `None` when that last one is unresolved -- a
+resolved parent is never reported in the target's place.
+`TestPrimarySegmentIsTarget` in `tests/unit/test_ims_segment_analyzer.py`.
+
 ## HostVariableResolver
 
 ```python

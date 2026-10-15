@@ -2772,7 +2772,7 @@ def _cmd_ims_dli(args: argparse.Namespace) -> None:
     ]
 
     output: dict[str, Any] = {
-        "is_ims_program": ast.has_ims(),
+        "is_ims_program": ast.has_ims() or ast.uses_ims_interface(),
         "entry_points": entry_points_out,
         "dli_call_count": len(calls_out),
         "all_segments": all_segments,

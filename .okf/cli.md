@@ -866,6 +866,11 @@ cobol-parser ims-dli <file.cbl>
 
 Runs `IMSSegmentAnalyzer` and reports IMS DLI segment calls.
 
+`is_ims_program` is `ast.has_ims() or ast.uses_ims_interface()`: a program
+that calls CBLTDLI / AIBTDLI / CEETDLI is an IMS program whether or not it
+declares `ENTRY 'DLITCBL'` (issue #398). Each call's `primary_segment` is its
+**last** segment -- see `IMSSegmentAnalyzer` in `analysis.md`.
+
 ## Data-Items
 
 ```bash
