@@ -127,4 +127,10 @@ def test_bare_identifier_after_is_is_left_alone():
     # ``IS`` before something that is not an operator is not this form;
     # nothing is invented for it.
     cond = _if_condition("A = 1 OR IS 2")
-    assert cond["right_condition"].get("left_operand") != "A"
+    assert cond["left_condition"] == _cmp("EQUAL", "A", "1")
+    # Kept as the unexpanded raw leg, exactly as before the fix.
+    assert cond["right_condition"] == {
+        "expression_type": "COMPARISON",
+        "operator": "COMPARISON",
+        "condition_type": "COMPARISON",
+    }

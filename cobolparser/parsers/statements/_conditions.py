@@ -418,13 +418,14 @@ def _expand_abbreviated_condition(
     the operator -- of the preceding relation be omitted: ``A = 1 OR 2 OR
     3`` means ``A = 1 OR A = 2 OR A = 3`` and ``A > 1 AND < 5`` means ``A >
     1 AND A < 5``. Two shapes are expanded: a leg that *starts with a
-    relational operator*, optionally after ``IS`` (subject prepended) and a leg that is *one bare
-    literal* (subject and operator prepended; ``NOT literal`` negates the
-    operator). A bare identifier is left alone: without a symbol table it
-    is indistinguishable from a level-88 condition-name (``A = 1 OR
-    FLAG-ON``), and the CONDITION_NAME reading is the one the analyzers
-    resolve. Anything else is returned unchanged. *subject* is the relation
-    the leg repeats -- see :func:`build_condition_expression`.
+    relational operator*, optionally after ``IS`` (subject prepended) and a
+    leg that is *one bare literal* (subject and operator prepended; ``NOT
+    literal`` negates the operator). A bare identifier is left alone:
+    without a symbol table it is indistinguishable from a level-88
+    condition-name (``A = 1 OR FLAG-ON``), and the CONDITION_NAME reading
+    is the one the analyzers resolve. Anything else is returned unchanged.
+    *subject* is the relation the leg repeats -- see
+    :func:`build_condition_expression`.
     """
     if not rest:
         return rest
