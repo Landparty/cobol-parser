@@ -3085,6 +3085,23 @@ carries `member`, `path` and `nested`, where for a nested edge `program` is the
 *outer member name*, which is what makes a `PROG1 -> OUTER -> INNER` chain
 walkable in either direction.
 
+**Library-qualified COPY (#351).** `COPY REC OF LIBA` and `COPY REC IN LIBB`
+are two different files, so the builder's caches are keyed by more than the
+member name: `_member_paths` / `_member_failures` on `(member, library)`, and
+`_member_copies` on the resolved file path. A nested COPY is resolved with its
+own `library_qualifier`, as the expander does. `CopyEdge` carries `library`
+(the qualifier as written, case kept) and, for a nested edge, `parent_path` --
+the outer member's file. `programs_using()` and `CopybookImpactAnalyzer` walk
+up *edge by edge* (`CopyEdge._is_parent`: same name, and same file whenever the nested
+edge has a `parent_path`), so `LIBB/REC -> INNER` reaches only the programs
+whose `REC` resolved to `LIBB/REC.cpy` -- never a program whose `REC` did not
+resolve at all. A hand-built nested edge with no `parent_path` matches by name
+alone (the pre-#351 behaviour). `ImpactReport.paths`
+lists every file the member name resolved to; with more than one, `fields` is
+their union and `unresolved` says so. The DOT/Mermaid renderings still draw
+one node per member *name*, and draw each `(program, member, nested)` edge once
+(`_rendered_copy_edges`), however many files sit behind it.
+
 Two rules hold throughout:
 
 1. **A quiet report is never a complete one.** A file that would not parse lands

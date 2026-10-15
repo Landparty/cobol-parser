@@ -165,6 +165,18 @@ def _normalize_member(name: str) -> str:
     return base.upper()
 
 
+def _normalize_library(name: str | None) -> str | None:
+    """A ``COPY ... OF/IN`` library name, unquoted (None when absent).
+
+    Case is kept: the resolver matches it against a directory name, as the
+    expander does.
+    """
+    if name is None:
+        return None
+    text = name.strip().strip("\"'").strip()
+    return text or None
+
+
 def _program_id_from_path(path: str) -> str:
     """Fallback program id for a file whose PROGRAM-ID could not be read."""
     return Path(path).stem.upper() or "UNKNOWN"
@@ -249,12 +261,19 @@ class CopyEdge:
     ``program`` is a program id for a direct edge and the *outer member name*
     for a nested one (``nested=True``), which is what makes a chain such as
     ``PROG1 -> OUTER -> INNER`` walkable in either direction.
+
+    ``library`` is the ``OF``/``IN`` qualifier the COPY statement named, and
+    ``parent_path`` (nested edges only) is the file of the outer member. Two
+    libraries can each hold a member of one name, so a member name alone does
+    not say which file a chain runs through; ``path`` / ``parent_path`` do.
     """
 
     program: str
     member: str
     path: str | None = None
     nested: bool = False
+    library: str | None = None
+    parent_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -262,10 +281,33 @@ class CopyEdge:
             "member": self.member,
             "path": self.path,
             "nested": self.nested,
+            "library": self.library,
+            "parent_path": self.parent_path,
         }
 
-    def _sort_key(self) -> tuple[bool, str, str, str]:
-        return (self.nested, self.program, self.member, self.path or "")
+    def _sort_key(self) -> tuple[bool, str, str, str, str, str]:
+        return (
+            self.nested,
+            self.program,
+            self.member,
+            self.path or "",
+            self.library or "",
+            self.parent_path or "",
+        )
+
+    def _is_parent(self, parent: CopyEdge) -> bool:
+        """Whether *parent* is the edge that pulled in the member this one is
+        nested in -- by name, and by file once this edge knows its parent's.
+
+        A nested edge with a ``parent_path`` came from reading that resolved
+        file, so an unresolved edge of the same name is never its parent. Only
+        a hand-built edge without ``parent_path`` matches by name alone.
+        """
+        if parent.member != self.program:
+            return False
+        if self.parent_path is None:
+            return True
+        return parent.path == self.parent_path
 
 
 # ---------------------------------------------------------------------------
@@ -328,18 +370,23 @@ class CodebaseGraph:
         if not transitive:
             return direct
 
+        # Walk up edge by edge rather than name by name: a nested edge reaches
+        # only the programs whose COPY resolved to the *file* it sits in, not
+        # every program copying some member of that name (#351).
         found: set[str] = set(direct)
-        seen: set[str] = {wanted}
-        queue: list[str] = [wanted]
+        queue: list[CopyEdge] = [
+            e for e in self.copy_edges if e.member == wanted and e.nested
+        ]
+        seen: set[CopyEdge] = set(queue)
         while queue:
-            current = queue.pop()
+            child = queue.pop()
             for edge in self.copy_edges:
-                if edge.member != current:
+                if not child._is_parent(edge):
                     continue
                 if edge.nested:
-                    if edge.program not in seen:
-                        seen.add(edge.program)
-                        queue.append(edge.program)
+                    if edge not in seen:
+                        seen.add(edge)
+                        queue.append(edge)
                 else:
                     found.add(edge.program)
         return sorted(found)
@@ -451,6 +498,19 @@ class CodebaseGraph:
     def _failed_ids(self) -> set[str]:
         return {p.program_id for p in self.programs if p.parse_failed}
 
+    def _rendered_copy_edges(self) -> list[CopyEdge]:
+        """Copy edges as the diagrams draw them: one per (program, member,
+        nested), since a diagram has one node per member *name* and two
+        libraries' members of one name would otherwise draw an edge twice."""
+        seen: set[tuple[str, str, bool]] = set()
+        edges: list[CopyEdge] = []
+        for edge in self.copy_edges:
+            key = (edge.program, edge.member, edge.nested)
+            if key not in seen:
+                seen.add(key)
+                edges.append(edge)
+        return edges
+
     def to_mermaid(self) -> str:
         """Render the graph as a Mermaid ``flowchart LR``.
 
@@ -481,7 +541,7 @@ class CodebaseGraph:
                 f'    {_program_node_id(edge.caller)} -->|"{label}"|'
                 f" {_program_node_id(edge.callee)}"
             )
-        for copy_edge in self.copy_edges:
+        for copy_edge in self._rendered_copy_edges():
             source = (
                 _member_node_id(copy_edge.program)
                 if copy_edge.nested
@@ -547,7 +607,7 @@ class CodebaseGraph:
                 f"    {_program_node_id(edge.caller)} ->"
                 f" {_program_node_id(edge.callee)} [{attrs}];"
             )
-        for copy_edge in self.copy_edges:
+        for copy_edge in self._rendered_copy_edges():
             source = (
                 _member_node_id(copy_edge.program)
                 if copy_edge.nested
@@ -660,15 +720,18 @@ class CodebaseGraphBuilder:
             self._resolver = PathResolver(
                 CopybookSearchPath(directories=list(self.copybook_paths))
             )
-        # member -> resolved file path (None when it could not be resolved)
-        self._member_paths: dict[str, str | None] = {}
-        # member -> why it could not be resolved (only for failed members)
-        self._member_failures: dict[str, str] = {}
+        # (member, library) -> resolved file path (None when unresolved). The
+        # library is part of the key: COPY REC OF LIBA and COPY REC OF LIBB
+        # are two different files (#351).
+        self._member_paths: dict[tuple[str, str | None], str | None] = {}
+        # (member, library) -> why it could not be resolved (failures only)
+        self._member_failures: dict[tuple[str, str | None], str] = {}
         # (member, referrer) pairs already reported unresolved this build, so
         # a COPY and an INCLUDE of one missing member give one note, not two
         self._reported_failures: set[tuple[str, str]] = set()
-        # member -> its own direct (member name, is EXEC SQL INCLUDE), sorted
-        self._member_copies: dict[str, list[tuple[str, bool]]] = {}
+        # resolved file path -> its own direct (member name, library, is EXEC
+        # SQL INCLUDE), sorted
+        self._member_copies: dict[str, list[tuple[str, str | None, bool]]] = {}
 
     # -- public API -------------------------------------------------------
 
@@ -1086,19 +1149,28 @@ class CodebaseGraphBuilder:
             member = _normalize_member(statement.member_name)
             if not member:
                 continue
+            library = _normalize_library(statement.library_qualifier)
             member_path = self._resolve_member(
                 member,
-                statement.library_qualifier,
+                library,
                 path,
                 unresolved,
                 sql_include=statement.sql_include,
             )
             copy_edges.append(
-                CopyEdge(program=owner, member=member, path=member_path, nested=False)
+                CopyEdge(
+                    program=owner,
+                    member=member,
+                    path=member_path,
+                    nested=False,
+                    library=library,
+                )
             )
             for node in owner_nodes:
                 node.copies.append(member)
-            self._walk_member(member, [member], copy_edges, unresolved)
+            self._walk_member(
+                member, member_path, [(member, member_path)], copy_edges, unresolved
+            )
 
     def _resolve_member(
         self,
@@ -1119,14 +1191,15 @@ class CodebaseGraphBuilder:
         """
         if self._resolver is None:
             return None
-        if member not in self._member_paths:
+        key = (member, library)
+        if key not in self._member_paths:
             try:
-                self._member_paths[member] = self._resolver.resolve(member, library)
+                self._member_paths[key] = self._resolver.resolve(member, library)
             except Exception as exc:  # noqa: BLE001 -- an unresolvable member
                 # is a finding, not a crash: record why and carry on.
-                self._member_paths[member] = None
-                self._member_failures[member] = f"{type(exc).__name__}: {exc}"
-        resolved = self._member_paths[member]
+                self._member_paths[key] = None
+                self._member_failures[key] = f"{type(exc).__name__}: {exc}"
+        resolved = self._member_paths[key]
         if (
             resolved is None
             and not (sql_include and member in _PRECOMPILER_MEMBERS)
@@ -1134,26 +1207,29 @@ class CodebaseGraphBuilder:
         ):
             self._reported_failures.add((member, referrer))
             kind = "EXEC SQL INCLUDE" if sql_include else "COPY"
+            named = f"{member} OF {library}" if library else member
             unresolved.append(
-                f"{kind} member {member} (referenced by {referrer}) could not be "
+                f"{kind} member {named} (referenced by {referrer}) could not be "
                 "resolved on the copybook search path: "
-                f"{self._member_failures[member]}"
+                f"{self._member_failures[key]}"
             )
         return resolved
 
     def _member_direct_copies(
-        self, member: str, unresolved: list[str]
-    ) -> list[tuple[str, bool]]:
-        """What *member* itself COPYs or INCLUDEs (empty when unresolved).
+        self, member: str, member_path: str | None, unresolved: list[str]
+    ) -> list[tuple[str, str | None, bool]]:
+        """What the file *member_path* itself COPYs or INCLUDEs.
 
-        Each entry is ``(member name, is EXEC SQL INCLUDE)``.
+        Keyed by file, not by member name: two libraries' members of one name
+        are two files with their own nested COPY statements. Each entry is
+        ``(member name, library, is EXEC SQL INCLUDE)``; empty when the member
+        did not resolve.
         """
-        if member in self._member_copies:
-            return self._member_copies[member]
-        self._member_copies[member] = []
-        member_path = self._member_paths.get(member)
         if member_path is None:
             return []
+        if member_path in self._member_copies:
+            return self._member_copies[member_path]
+        self._member_copies[member_path] = []
         source = self._read_source(member_path)
         if source is None:
             unresolved.append(
@@ -1169,40 +1245,67 @@ class CodebaseGraphBuilder:
             unresolved.append(f"{member_path}: COPY statement not usable: {warning}")
         names = sorted(
             {
-                (_normalize_member(s.member_name), s.sql_include)
+                (
+                    _normalize_member(s.member_name),
+                    _normalize_library(s.library_qualifier),
+                    s.sql_include,
+                )
                 for s in statements
                 if _normalize_member(s.member_name)
-            }
+            },
+            key=lambda entry: (entry[0], entry[1] or "", entry[2]),
         )
-        self._member_copies[member] = names
+        self._member_copies[member_path] = names
         return names
 
     def _walk_member(
         self,
         member: str,
-        stack: list[str],
+        member_path: str | None,
+        stack: list[tuple[str, str | None]],
         copy_edges: list[CopyEdge],
         unresolved: list[str],
     ) -> None:
-        """Emit nested member->member edges below *member*, cycle-safe."""
-        seen: set[str] = set()
-        for nested, sql_include in self._member_direct_copies(member, unresolved):
+        """Emit nested member->member edges below *member*, cycle-safe.
+
+        *stack* holds ``(member, file)`` pairs, so ``LIBA/REC`` copying
+        ``LIBB/REC`` is a chain, not a cycle.
+        """
+        seen: set[tuple[str, str | None]] = set()
+        for nested, library, sql_include in self._member_direct_copies(
+            member, member_path, unresolved
+        ):
+            # The nested COPY's own library, as the expander resolves it.
             nested_path = self._resolve_member(
-                nested, None, member, unresolved, sql_include=sql_include
+                nested, library, member, unresolved, sql_include=sql_include
             )
-            if nested in seen:
+            if (nested, library) in seen:
                 # COPY and INCLUDE of one member: one edge, as for a program.
                 continue
-            seen.add(nested)
+            seen.add((nested, library))
             copy_edges.append(
-                CopyEdge(program=member, member=nested, path=nested_path, nested=True)
+                CopyEdge(
+                    program=member,
+                    member=nested,
+                    path=nested_path,
+                    nested=True,
+                    library=library,
+                    parent_path=member_path,
+                )
             )
-            if nested in stack:
+            if (nested, nested_path) in stack:
                 unresolved.append(
-                    "circular COPY chain: " + " -> ".join([*stack, nested])
+                    "circular COPY chain: "
+                    + " -> ".join([name for name, _ in stack] + [nested])
                 )
                 continue
-            self._walk_member(nested, [*stack, nested], copy_edges, unresolved)
+            self._walk_member(
+                nested,
+                nested_path,
+                [*stack, (nested, nested_path)],
+                copy_edges,
+                unresolved,
+            )
 
 
 def _unit_statements(unit: CobolProgram) -> list[CobolStatement]:
@@ -1238,6 +1341,9 @@ class ImpactReport:
     chains: list[list[str]] = field(default_factory=list)
     fields: list[str] = field(default_factory=list)
     unresolved: list[str] = field(default_factory=list)
+    # Every file the member name resolved to. More than one when libraries
+    # (COPY X OF LIB) hold different members of the same name.
+    paths: list[str] = field(default_factory=list)
 
     @property
     def program_count(self) -> int:
@@ -1252,6 +1358,7 @@ class ImpactReport:
             "chains": [list(chain) for chain in self.chains],
             "fields": list(self.fields),
             "unresolved": list(self.unresolved),
+            "paths": list(self.paths),
             "summary": {
                 "direct_count": len(self.direct_programs),
                 "transitive_count": len(self.transitive_programs),
@@ -1294,50 +1401,64 @@ class CopybookImpactAnalyzer:
                 f"no COPY statement in the graph references member {wanted}"
             )
 
-        member_path = self._member_path(wanted)
-        fields: list[str] = []
-        if member_path is None:
+        member_paths = self._member_paths(wanted)
+        fields: set[str] = set()
+        if not member_paths:
             unresolved.append(
                 f"member {wanted} was not resolved to a file, so the data items "
                 "it contributes are unknown"
             )
         else:
-            fields, field_problem = _member_fields(member_path)
-            if field_problem is not None:
-                unresolved.append(field_problem)
+            if len(member_paths) > 1:
+                unresolved.append(
+                    f"member {wanted} resolves to {len(member_paths)} different "
+                    f"files ({', '.join(member_paths)}); its fields are the union "
+                    "of theirs"
+                )
+            for member_path in member_paths:
+                path_fields, field_problem = _member_fields(member_path)
+                fields.update(path_fields)
+                if field_problem is not None:
+                    unresolved.append(field_problem)
 
         return ImpactReport(
             member=wanted,
             direct_programs=direct,
             transitive_programs=transitive,
             chains=chains,
-            fields=fields,
+            fields=sorted(fields),
             unresolved=sorted(set(unresolved)),
+            paths=member_paths,
         )
 
-    def _member_path(self, member: str) -> str | None:
-        for edge in self.graph.copy_edges:
-            if edge.member == member and edge.path:
-                return edge.path
-        return None
+    def _member_paths(self, member: str) -> list[str]:
+        return sorted(
+            {e.path for e in self.graph.copy_edges if e.member == member and e.path}
+        )
 
     def _chains(self, member: str) -> list[list[str]]:
-        """One ``[program, outer, ..., member]`` chain per transitive reach."""
+        """One ``[program, outer, ..., member]`` chain per transitive reach.
+
+        Walked edge by edge, so a chain only continues to the programs whose
+        COPY resolved to the file the nested edge sits in (#351).
+        """
         chains: list[list[str]] = []
 
-        def walk(current: str, tail: list[str]) -> None:
+        def walk(child: CopyEdge, tail: list[str]) -> None:
             for edge in self.graph.copy_edges:
-                if edge.member != current:
+                if not child._is_parent(edge):
                     continue
                 if edge.nested:
                     if edge.program in tail:
                         # Circular COPY chain: already reported by the builder.
                         continue
-                    walk(edge.program, [edge.program, *tail])
-                elif len(tail) > 1:
+                    walk(edge, [edge.program, *tail])
+                else:
                     chains.append([edge.program, *tail])
 
-        walk(member, [member])
+        for edge in self.graph.copy_edges:
+            if edge.member == member and edge.nested:
+                walk(edge, [edge.program, member])
         unique = {tuple(chain) for chain in chains}
         return [list(chain) for chain in sorted(unique)]
 
