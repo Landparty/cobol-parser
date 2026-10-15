@@ -137,6 +137,14 @@ Serialization fidelity notes (2026-07-07):
   TYPE/LINE/NEXT GROUP/COLUMN/SOURCE/SUM/GROUP INDICATE/PRESENT WHEN
   clauses. Anonymous entries (`01 TYPE IS DETAIL.`) get the existing
   `ANONYMOUS-<level>-<line>` name. See [parser.md](parser.md).
+* Implicit FILLER (#404, 2026-10-14): outside a REPORT SECTION group, an
+  entry with no data-name (`05 PIC X(3).`, FILLER omitted) keeps the
+  synthetic `ANONYMOUS-<level>-<line>` `name` but has `is_filler=True`.
+  `CobolDataItem.layout_name` is `"FILLER"` for every filler item and `name`
+  otherwise; record layouts (`layout.py`, `layout_offsets.py` /
+  `data-items`, `program_layout.py`) name and path items by it, so gen-data
+  drops the column and lineage keys it positionally like `05 FILLER`.
+  Unnamed report-group entries stay non-filler.
 * `IOWriteStatement.advancing_clause` is populated by the WRITE parser
   (`{"type": "AFTER", "value": 2, "unit": "LINES"}`), not just
   `advancing_mode`. `unit` is also `"CHANNEL"` for `ADVANCING PAGE`

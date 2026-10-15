@@ -152,7 +152,8 @@ class TestSortMergeKeyCommaList:
 class TestSortUsingGivingCommaFileList:
     def test_sort_using_comma_file_list(self):
         result, stmts = _parse_statement(
-            "           SORT SORT-FILE USING WS-A, WS-B GIVING WS-C.",
+            "           SORT SORT-FILE ASCENDING SORT-REC\n"
+            "               USING WS-A, WS-B GIVING WS-C.",
             extra_ws=_SORT_MERGE_WS,
         )
         stmt = _only(result, stmts, SortStatement)
@@ -163,7 +164,8 @@ class TestSortUsingGivingCommaFileList:
 
     def test_sort_giving_comma_file_list(self):
         result, stmts = _parse_statement(
-            "           SORT SORT-FILE USING WS-A GIVING WS-C, WS-D.",
+            "           SORT SORT-FILE ASCENDING SORT-REC\n"
+            "               USING WS-A GIVING WS-C, WS-D.",
             extra_ws=_SORT_MERGE_WS,
         )
         stmt = _only(result, stmts, SortStatement)

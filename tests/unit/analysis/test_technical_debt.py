@@ -334,3 +334,43 @@ class TestContainedProgramScoping:
         assert inner_unit is not None
         inner = self._control_flow(inner_unit)
         assert "1 ALTER statement(s) in use" in inner.findings
+
+
+class TestParseErrorsWithholdTheGrade:
+    """Issue #397: a mostly-unparsed program's AST is nearly empty and scores
+    as debt-free. Told how many parse errors it came from, the analyzer keeps
+    the score but withholds the grade and says why."""
+
+    SOURCE = HEADER + "       PROCEDURE DIVISION.\n       P1.\n           STOP RUN.\n"
+
+    def _ast(self):
+        result = parse_cobol(self.SOURCE, filename="debttest.cbl")
+        assert result.ast is not None
+        return result.ast
+
+    def test_default_has_no_parse_errors(self) -> None:
+        report = TechnicalDebtAnalyzer().analyze(self._ast())
+        assert report.grade == "A"
+        assert report.parse_error_count == 0
+        assert report.caveats == []
+
+    def test_parse_errors_withhold_the_grade(self) -> None:
+        report = TechnicalDebtAnalyzer().analyze(self._ast(), parse_error_count=4)
+        assert report.grade is None
+        assert report.parse_error_count == 4
+        assert len(report.caveats) == 1
+        assert "4 error(s)" in report.caveats[0]
+
+    def test_score_is_kept(self) -> None:
+        ast = self._ast()
+        clean = TechnicalDebtAnalyzer().analyze(ast)
+        broken = TechnicalDebtAnalyzer().analyze(ast, parse_error_count=1)
+        assert broken.score == clean.score
+
+    def test_serialized(self) -> None:
+        data = (
+            TechnicalDebtAnalyzer().analyze(self._ast(), parse_error_count=2).to_dict()
+        )
+        assert data["grade"] is None
+        assert data["parse_error_count"] == 2
+        assert data["caveats"]

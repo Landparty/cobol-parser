@@ -273,6 +273,7 @@ class ProgramFixtureGenerator:
         )
         layouts: dict[str, list[FieldSpec]] = {}
         unresolved: list[str] = list(report.unresolved)
+        unresolved.extend(self._alternate_view_notes(report))
         counter = _CallCounter.build(ast, index, report)
         anchors: dict[tuple[str, str], int] = {}
 
@@ -511,7 +512,15 @@ class ProgramFixtureGenerator:
             return None, [expectation], unresolved
 
         # IN or BIDIRECTIONAL: generate the value(s) a mock would supply.
-        fields = self._fields_for_names(boundary.record_names, index)
+        record_names, dropped = self._record_view(boundary, index, override)
+        if dropped:
+            unresolved.append(
+                f"{ref.category} {ref.key}: scenario {scenario_name!r} pins "
+                f"{', '.join(dropped)} in another 01 record of the same FD; "
+                f"rows use the {record_names[0]} view, so those pins are not "
+                "applied (one record area cannot hold both views at once)"
+            )
+        fields = self._fields_for_names(record_names, index)
         fixture: BoundaryFixture | None
         if not fields:
             if boundary.record_names:
@@ -528,7 +537,7 @@ class ProgramFixtureGenerator:
                 }
                 for row in range(rows_count)
             ]
-            self._register_layout(layouts, boundary, fields)
+            self._register_layout(layouts, record_names, boundary, fields)
             terminal = None
             if "AT_END" in boundary.handlers:
                 terminal_field = self._resolve_status_field(boundary, index)
@@ -651,7 +660,7 @@ class ProgramFixtureGenerator:
         row = {
             spec.column: self._value_for(spec, factory, 0, override) for spec in fields
         }
-        self._register_layout(layouts, boundary, fields)
+        self._register_layout(layouts, boundary.record_names, boundary, fields)
         fixture = BoundaryFixture(
             ref=ref,
             direction=boundary.direction,
@@ -688,13 +697,73 @@ class ProgramFixtureGenerator:
             return flatten_record(record, self.options)
         return []
 
+    def _record_view(
+        self,
+        boundary: Boundary,
+        index: ProgramLayoutIndex,
+        override: PlannedScenario | None,
+    ) -> tuple[list[str], list[str]]:
+        """The one record a file boundary's rows are generated through.
+
+        A READ with no INTO names every 01 record under the FD (issue #364),
+        but those records are alternative views of ONE record area -- the
+        same bytes, as an implicit REDEFINES. Joining their fields into one
+        row gives a byte two values (`HDR-TYPE` and `DTL-TYPE` both sit at
+        offset 0) and drops a field name the second record repeats.
+
+        So exactly one record is used: the one holding the most of the
+        scenario's pinned fields (the first in source order on a tie, and
+        always the first with no scenario). Returns that record as a
+        one-element list, plus the pinned fields of the records left out --
+        a pin those rows cannot honour, which the caller reports.
+        """
+        names = boundary.record_names
+        # Only a READ names several records for the one FD: an SQL boundary's
+        # several names are distinct host variables, a CALL's distinct args.
+        if len(names) <= 1 or boundary.ref.category != "READ":
+            return list(names), []
+        pinned: set[str] = set()
+        if override is not None:
+            pinned.update(override.witnesses)
+            for row in override.row_witnesses.values():
+                pinned.update(row)
+        per_record = {
+            name: {spec.qualified_name for spec in self._fields_for_name(name, index)}
+            for name in names
+        }
+        chosen = max(names, key=lambda name: len(per_record[name] & pinned))
+        dropped = sorted(
+            {q for name in names if name != chosen for q in per_record[name] & pinned}
+            - per_record[chosen]
+        )
+        return [chosen], dropped
+
+    @staticmethod
+    def _alternate_view_notes(report: BoundaryReport) -> list[str]:
+        """One note per file boundary whose FD's other 01 records are not
+        generated -- see :meth:`_record_view`."""
+        notes = []
+        for boundary in report.boundaries:
+            names = boundary.record_names
+            if len(names) <= 1 or boundary.ref.category != "READ":
+                continue
+            notes.append(
+                f"{boundary.ref.category} {boundary.ref.key}: the FD has "
+                f"{len(names)} 01 records sharing one record area; rows are "
+                "generated through one of them per scenario (the first unless "
+                "the scenario pins fields of another) -- alternate view(s) not "
+                f"generated: {', '.join(names[1:])}"
+            )
+        return notes
+
     @staticmethod
     def _register_layout(
         layouts: dict[str, list[FieldSpec]],
+        record_names: list[str],
         boundary: Boundary,
         fields: list[FieldSpec],
     ) -> None:
-        key = boundary.record_names[0] if boundary.record_names else boundary.ref.key
+        key = record_names[0] if record_names else boundary.ref.key
         layouts.setdefault(key, fields)
 
     @staticmethod
