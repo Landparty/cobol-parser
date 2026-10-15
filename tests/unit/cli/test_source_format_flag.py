@@ -201,3 +201,46 @@ class TestPreprocessRecordBoundaries:
         # One output line per input record: PROCEDURE DIVISION is still
         # the fourth.
         assert out.split("\n")[3] == "PROCEDURE DIVISION."
+
+
+class TestPreprocessUnterminatedLiteral:
+    """`preprocess` called ``normalize_fixed_format`` directly, so an
+    unterminated literal at end of file -- a truncated upload -- escaped as
+    a ``ValueError`` traceback (#372). It now recovers the way `parse` and
+    `tokenize` do: a warning on stderr, the recovered text on stdout."""
+
+    @pytest.fixture
+    def truncated(self, tmp_path):
+        literal_line = "           DISPLAY '"
+        literal_line += "X" * (72 - len(literal_line))
+        path = tmp_path / "trunc.cbl"
+        path.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. TRUNC.\n"
+            "       PROCEDURE DIVISION.\n"
+            f"{literal_line}\n",
+            encoding="utf-8",
+        )
+        return str(path)
+
+    @pytest.mark.parametrize("fmt", ["auto", "fixed"])
+    def test_reported_as_a_warning_not_a_traceback(self, capsys, truncated, fmt):
+        _run_main(["preprocess", truncated, f"--source-format={fmt}"])
+        captured = capsys.readouterr()
+        assert "warning: Unterminated string literal at end of input" in (captured.err)
+        assert "Traceback" not in captured.err
+        lines = captured.out.split("\n")
+        assert lines[2] == "PROCEDURE DIVISION."
+        assert lines[3].strip().startswith("DISPLAY 'XXXX")
+
+    def test_terminated_literal_gets_no_such_warning(self, capsys, tmp_path):
+        path = tmp_path / "ok.cbl"
+        path.write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. OK.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           DISPLAY 'XXXX'.\n",
+            encoding="utf-8",
+        )
+        _run_main(["preprocess", str(path)])
+        assert "Unterminated" not in capsys.readouterr().err
