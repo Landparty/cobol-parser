@@ -6138,7 +6138,7 @@ class TestExitStatementLocation:
 
 class TestScannerDeepNestingRegression:
     """Regression coverage for the explicit work-stack rewrite of
-    ``ProcedureScanner._scan_paragraph_statements`` (see .okf/analysis.md,
+    ``ProcedureScanner._scan_paragraph_statements`` (see .okf/analysis/flow.md,
     ProgramFlowAnalyzer / scanner.py section).
 
     Before the rewrite, the inner ``scan()`` closure recursed through the

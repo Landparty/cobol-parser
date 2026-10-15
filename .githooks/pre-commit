@@ -1,4 +1,10 @@
 #!/bin/sh
-# OKF staleness check — warns when source files change without OKF updates.
+# OKF guard, two halves:
+#   1. staleness -- source changed without its OKF file being touched;
+#   2. content   -- what the OKF files say must hold against the code
+#      (imports, names, paths, links, generated spans). Run
+#      `python scripts/okf_check.py --write` to refresh generated spans.
 # Bypass with: git commit --no-verify
-python "$(git rev-parse --show-toplevel)/scripts/okf_staleness_check.py" --mode=git
+root="$(git rev-parse --show-toplevel)"
+python "$root/scripts/okf_staleness_check.py" --mode=git || exit 1
+python "$root/scripts/okf_check.py" || exit 1

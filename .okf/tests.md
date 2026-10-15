@@ -47,7 +47,7 @@ a column-72 trap, and several registries are pinned by self-maintaining tests.
 - [Where behaviour is pinned](#where-behaviour-is-pinned) -- notable test files by area
 - [Coverage Requirement Detail](#coverage-requirement-detail)
 - [CI/CD](#cicd)
-- [OKF staleness map guard](#okf-staleness-map-guard)
+- [OKF guards](#okf-guards)
 - [See also](#see-also)
 
 ## Directory Layout
@@ -58,7 +58,8 @@ File counts are `test_*.py` files, recursive, as of 2026-10-15.
 tests/
   conftest.py                  # shared fixtures: parser(), samples_dir()
   test_all_samples.py          # smoke-tests every tests/samples/*.cbl program
-  test_okf_staleness_map.py    # OKF_MAP guard (see "OKF staleness map guard")
+  test_okf_staleness_map.py    # OKF_MAP guard (see "OKF guards")
+  test_okf_claims.py           # OKF content guard: the docs' claims vs the code
   unit/                        # 295 files: individual components (200 directly in unit/)
     test_copybook_data_generator.py  # copybook -> CSV: flattening, categories, value constraints, options, dataset surface
     test_program_layout_index.py     # ProgramLayoutIndex: FD/record resolution, FD-vs-SD tagging, FileFacts, name resolution, qualified level-88 names (resolve/condition_values/gen-fixtures arms, #272), record_named(), multi-program units, from_file errors (see generators.md)
@@ -255,7 +256,7 @@ Conventions and traps that have each cost real debugging time:
   `tests/unit/test_procedure_registry_dispatch_order.py`; both fail when a
   parser has no fixture. A new enterprise program type goes in both the
   directory and `PROGRAM_TYPES`. A new `cobolparser/` file needs an
-  `OKF_MAP` entry ([OKF staleness map guard](#okf-staleness-map-guard)).
+  `OKF_MAP` entry ([OKF guards](#okf-guards)).
 * **Contract key sets and goldens.** An additive key on a public shape is
   pinned in the matching `tests/contracts/` key set (e.g.
   `test_copybook_data_generator_contract.py`'s `_FIELD_SPEC_KEYS`), and
@@ -410,7 +411,7 @@ in, then runs `tests/unit/test_lexer.py tests/test_all_samples.py
 tests/unit/test_program_fixtures.py --no-cov` against the installed wheel.
 There is no closed-source release mode; the package is AGPL-3.0-or-later.
 
-## OKF staleness map guard
+## OKF guards
 
 `tests/test_okf_staleness_map.py` pins `scripts/okf_staleness_check.py`'s
 `OKF_MAP`: every tracked `.py`/`.pyx` under `cobolparser/` must map to at
@@ -423,6 +424,15 @@ changes. The directory-slash assertion matters both ways: a prefix such as
 `cobolparser/parsers/` never matches `cobolparser/parser.py` (so that file
 needs its own entry), and dropping the slash would make
 `cobolparser/parsers` swallow `cobolparser/parser.py` instead.
+
+`tests/test_okf_claims.py` runs `scripts/okf_check.py` over every OKF file
+and CLAUDE.md, one test per file: imports written in the docs must run,
+backticked names/paths must exist, links and anchors must resolve, the CLI
+table in `cli.md` must match argparse, and every `<!-- okf:gen NAME -->`
+span must equal its generator's output. A failure after a code change is
+either a doc that needs a real edit or a generated span to refresh with
+`python scripts/okf_check.py --write`. Its `TestCheckerCatchesDrift` class
+pins that each check still flags the drift it exists for.
 
 ## See also
 

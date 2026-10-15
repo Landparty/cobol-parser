@@ -21,19 +21,19 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | Task type | Load |
 |-----------|------|
 | Tokenization, `TokenType`, Cython fast-path | `.okf/lexer.md` |
-| Parser, `DivisionParserFactory`, statement parsers | `.okf/parser.md` |
+| Parser, `DivisionParserFactory`, statement parsers | `.okf/parser.md` (routing page for `.okf/parser/`) |
 | `normalize_fixed_format`, copybook expansion | `.okf/preprocessing.md` |
 | `ASTNode` hierarchy, `CobolProgram`, `to_dict()` | `.okf/ast-models.md` |
-| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, `LintAnalyzer`, `XrefAnalyzer`, `ProgramSignatureExtractor`, `CodebaseGraphBuilder`, `SqlCicsAnalyzer`, `ProgramDiffer`, etc.) | `.okf/analysis.md` |
+| Static analysis (`DeadCodeAnalyzer`, `ProgramFlowAnalyzer`, `LintAnalyzer`, `XrefAnalyzer`, `ProgramSignatureExtractor`, `CodebaseGraphBuilder`, `SqlCicsAnalyzer`, `ProgramDiffer`, etc.) | `.okf/analysis.md` (routing page for `.okf/analysis/`) |
 | Dialects, EXEC SQL/CICS/IMS nodes, LE/intrinsic signature lookups | `.okf/dialects.md` |
-| Flowcharts, copybook → CSV/record-image data (`CopybookDataGenerator`), decode/compare, `gen-fixtures` bundles and scenarios | `.okf/generators.md` |
+| Flowcharts, copybook → CSV/record-image data (`CopybookDataGenerator`), decode/compare, `gen-fixtures` bundles and scenarios | `.okf/generators.md` (routing page for `.okf/generators/`) |
 | `parse_files`, `parse_files_with_copybooks`, `scan_files`, batch fault isolation | `.okf/batch.md` |
 | z/OS JCL: jobs/steps, DD → dataset bindings (read by jcl-parser) | `.okf/jcl.md` |
 | CLI subcommands and flags, the `cobol.yml` project config | `.okf/cli.md` |
 | Test layout, markers, coverage floor | `.okf/tests.md` |
 | Backend adapter dict shape (summary of `interface-contract.md`) | `.okf/integration.md` |
 
-The OKF is more specific and more current than this file for the above topics. When they conflict, trust the OKF.
+The OKF is more specific and more current than this file for the above topics. When they conflict, trust the OKF. Point-in-time history lives in `.okf/history/` and `.okf/log.md` and is not loaded by default. The pre-commit hook also runs `scripts/okf_check.py`, which tests what the OKF files (and this one) claim against the code; `python scripts/okf_check.py --write` refreshes its generated `<!-- okf:gen -->` spans.
 
 ## Project Overview
 
@@ -144,14 +144,14 @@ The parser is a multi-stage pipeline: **preprocessing -> lexing -> parsing -> AS
 ```
 COBOL source (.cbl/.cob)
   -> preprocess/          (normalize_fixed_format, copybook expansion, conditional compilation)
-  -> lexer.py             (CobolLexer -> List[Token], 244 TokenType values)
+  -> lexer.py             (CobolLexer -> List[Token])
   -> parser.py            (CobolParser -> ParseResult)
   -> models/              (AST node classes with to_dict()/to_json())
 ```
 
 ### Key Packages
 
-**`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (244 types). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them. Pure Python by default; when `cobolparser._lexer_fast` is compiled *and* `COBOLPARSER_ACCEL=1` is set (see `cobolparser/_accel.py`), the lexer uses the Cython-accelerated subclass for hot-path methods.
+**`cobolparser/lexer.py`** -- Tokenizes COBOL text into `Token` objects with `TokenType` enum (<!-- okf:gen tokentype-count -->244<!-- /okf:gen --> members). Handles fixed vs. free format, string continuations, figurative constants. Fixed-format comment lines (column 7 `*`/`/`) must be stripped by the preprocessor before the lexer sees them. Pure Python by default; when `cobolparser._lexer_fast` is compiled *and* `COBOLPARSER_ACCEL=1` is set (see `cobolparser/_accel.py`), the lexer uses the Cython-accelerated subclass for hot-path methods.
 
 **`cobolparser/_lexer_fast.pyx`** / **`cobolparser/_preprocess_fast.pyx`** / **`cobolparser/_data_fast.pyx`** -- Optional Cython modules that subclass the pure-Python lexer/preprocessor (and accelerate the DATA DIVISION `PICTURE` / data-item clause loops) by overriding the inner hot-path methods with C-typed implementations. Opt-in: built only when `COBOLPARSER_ACCEL=1` is set (`COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace`), and used only when it is set at import time too (`cobolparser/_accel.py`'s `accelerators_enabled()`), so pure Python is the default even with a `.so` present. The corresponding `.c` files are checked in so the extension builds without re-running Cython. `COBOLPARSER_SKIP_EXT=1` (the old opt-out) is still honoured. The PyPI wheels still ship compiled, so wheel users opt in with the variable alone.
 
@@ -185,7 +185,7 @@ COBOL source (.cbl/.cob)
 - `divisions/environment.py` -- ENVIRONMENT DIVISION parser
 - `divisions/data.py` -- DATA DIVISION parser (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE / REPORT sections; SCREEN and COMMUNICATION are recognized and skipped with a warning). `data_clauses.py` (data-item clauses incl. REPORT SECTION report-group clauses), `data_file_description.py` (FD/SD clauses), `data_report_description.py` (RD clauses), `data_special_entries.py` (level-88/66, data-division EXEC SQL) are its collaborators
 - `divisions/procedure.py` -- PROCEDURE DIVISION parser with `StatementParserRegistry`
-- `statements/` -- 33 statement parser files (plus the `_utils.py` / `_conditions.py` helpers) (see "Statement Parsers" section below)
+- `statements/` -- <!-- okf:gen statement-parser-file-count -->33<!-- /okf:gen --> statement parser files (plus the `_utils.py` / `_conditions.py` helpers) (see "Statement Parsers" section below)
 - `statements/_utils.py` -- Shared clause collection utilities
 
 **`cobolparser/models/`** -- AST node classes. Every node extends `ASTNode` (from `ast_base.py`) and must implement `to_dict()`:
@@ -201,7 +201,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/le_signatures.py`** -- Call signatures for IBM Language Environment callable services and COBOL intrinsic functions: per operand, its direction, its exact COBOL declaration, whether it may be omitted, and whether it repeats. Coverage of the LE services is partial *and reported* (`services_without_signature()`), so "no signature catalogued" is never mistaken for "not an LE service"; the intrinsic half is complete and pinned by a test. `IBM_LE_SERVICE_INFO` is derived from it. Backs the `le-info` CLI subcommand and the COBOL Analyzer extension's LE hover. See `.okf/analysis.md`
 
-**`cobolparser/analysis/`** -- 33 static analysis modules (plus the `program_flow/` package and six private helpers: `_procedures.py`, `_names.py`, `_files.py`, `_cics.py`, `_sql_whenever.py`, `_sql_flow.py`). The list below covers the ones with their own entry here; `.okf/analysis.md` is the complete and current index:
+**`cobolparser/analysis/`** -- <!-- okf:gen analysis-module-count -->33<!-- /okf:gen --> static analysis modules (plus the `program_flow/` package and the private helpers <!-- okf:gen analysis-private-helpers -->`_cics.py`, `_files.py`, `_names.py`, `_procedures.py`, `_sql_flow.py`, `_sql_whenever.py`<!-- /okf:gen -->). The list below covers the ones with their own entry here; `.okf/analysis.md` is the complete and current index:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -216,7 +216,7 @@ COBOL source (.cbl/.cob)
 - `language_env_analyzer.py` -- IBM Language Environment detection
 - `linkage_checker.py` -- LINKAGE SECTION validation
 - `move_type_checker.py` -- MOVE statement type compatibility checking
-- `program_flow/` -- Control flow graph analysis package (`models.py`, `scanner.py`, `edges.py`, `cycles.py`, `graph.py`, `analyzer.py`, `condition_text.py`, `statement_text.py`; public API re-exported from the package `__init__.py`)
+- `program_flow/` -- Control flow graph analysis package (<!-- okf:gen program-flow-modules -->`analyzer.py`, `condition_text.py`, `cycles.py`, `edges.py`, `graph.py`, `models.py`, `scanner.py`, `statement_text.py`<!-- /okf:gen -->; public API re-exported from the package `__init__.py`)
 - `recursion_risk.py` -- `RecursionRiskAnalyzer` detects recursion-driven infinite-loop risks: PERFORM/GO TO cycles (reusing `ProgramFlowAnalyzer`'s `cycle_details`, graded HIGH/MEDIUM by whether the cycle has an escape route) and self-recursive CALL statements (static or dynamic, targeting the program's own PROGRAM-ID). Backs the `recursion-check` CLI subcommand. See `.okf/analysis.md`
 - `complexity.py` -- `ComplexityAnalyzer` computes per-paragraph/section McCabe cyclomatic complexity (from a dedicated statement-tree walk, not the inter-paragraph CFG), an AND/OR-aware `extended_complexity`, max nesting depth, fan-in/fan-out (from `ProgramFlowAnalyzer` edges), and LOW/MODERATE/HIGH ratings. Backs the `complexity` CLI subcommand. See `.okf/analysis.md`
 - `redundancy.py` -- `RedundancyAnalyzer` combines `DeadCodeAnalyzer`/`UnusedVariableAnalyzer` ratios with whole-paragraph Type-1 (exact) / Type-2 (renamed-identifier) duplicate-code clone detection. Also reports `paragraph_fingerprints` -- each clone-eligible paragraph's two structural digests -- which is what lets clone groups be merged *across* programs (`scan.cross_file_clone_groups`); `clone_groups` alone can only ever answer "which paragraphs in this one file duplicate each other", and the commoner shape of COBOL copy-paste is a paragraph cloned into a different program. Backs the `redundancy` CLI subcommand. See `.okf/analysis.md`
@@ -225,7 +225,7 @@ COBOL source (.cbl/.cob)
 - `constraints.py` / `domains.py` -- `ConstraintExtractor` + `domains.solve()` (Phase 4 of the `gen-fixtures` initiative): walks IF/EVALUATE/SEARCH conditions and PERFORM UNTIL loop guards into `FieldConstraint`s (relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan) and `SequenceConstraint`s (the READ/AT-END/loop-flag EOF idiom); `domains.py` is a small zero-dependency domain-propagation solver (numeric interval / text allow-deny / level-88 enum) that picks a deterministic witness always rendered through `ValueFactory.render()`. Takes a Phase 1 `ProgramLayoutIndex` and a Phase 2 `BoundaryReport`. See `.okf/analysis.md`
 - `field_lineage.py` / `lineage_graph.py` / `lineage_jcl.py` / `_sql_flow.py` -- field-level data lineage. `FieldFlowAnalyzer` builds one program's value-flow graph (MOVE byte overlays, arithmetic, READ INTO / WRITE FROM, SORT, CALL arguments, linkage parameters, SQL host variables <-> columns, ACCEPT/DISPLAY) between data items and *ports* (file DD byte ranges, `CALLEE#n`, `PROGRAM#n`, `TABLE.COLUMN`, console), with a port-to-port summary and key uses. `LineageGraph` joins many programs' reports through datasets (bindings from jcl-parser via `lineage_jcl`, or supplied; GDG and `&&` temporaries normalized; DFSORT SUM ranges are aggregates, reformats stop the flow), CALL arguments and DB2 columns, and answers forward/backward impact queries plus candidate key relationships. OCCURS table fields map to every occurrence's bytes, inexactly; a literal subscript (`AMT(3)`) gets its own exact node (`LINEAGE_VERSION` "2"). `graph.join_state()` / `LineageGraph(reports, join_edges=..., join_caveats=..., unjoined=...)` store and restore the joins with their caveats. `field-impact` exits 1 when nothing parsed or the start matches nothing. Backs the `lineage` and `field-impact` CLI subcommands and `scan --analyzer lineage`. Design: `docs/plans/2026-10-08-field-lineage-design.md`. See `.okf/analysis.md`
 - `business_rules.py` -- `BusinessRuleExtractor` extracts the program's business rules: every IF/EVALUATE/SEARCH as a decision table (one `RuleBranch` per arm: condition + actions), promoted to `validation` when an arm rejects (error literal, reject/abend path, class test), and paragraph-level arithmetic as `calculation` rules with a normalized formula. Level-88 names spelled out in a glossary, `guards` (enclosing arm conditions), `reached_via` (the arm elsewhere that PERFORMs the rule's paragraph), inputs/outputs via xref's role mapping, and a `data_lineage` inversion. Technical rules (file status, READ AT END flags, SQLCODE/EIB*) are detected from the program and excluded by default but counted. Backs the `business-rules` CLI subcommand. See `.okf/analysis.md`
-- `lint.py` -- `LintAnalyzer` runs several of the analyzers above over **one** parse and flattens their differently-shaped reports into a single severity-graded `LintFinding` stream (`rule`, `severity`, `message`, `location`, `symbol`, `kind`), ordered by source position. Rule ids are the analyzer subcommand names (`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`); severity is per finding where the underlying analyzer grades itself. Lints **every program unit** in the file (a contained program left unexamined would read as a clean one), and `apply_source_map()` stamps each finding with the file and line it really came from when copybooks were expanded. Re-implements no analysis -- every rule is a mapping from an existing report. `LintReport` also carries `caveats` (what could not be checked, e.g. MOVE operands whose category never resolved) and `failed_rules` (a rule that raised costs only its own findings), so a quiet report is never mistaken for a clean program. Backs the `lint` CLI subcommand. See `.okf/analysis.md`
+- `lint.py` -- `LintAnalyzer` runs several of the analyzers above over **one** parse and flattens their differently-shaped reports into a single severity-graded `LintFinding` stream (`rule`, `severity`, `message`, `location`, `symbol`, `kind`), ordered by source position. Rule ids are the analyzer subcommand names (<!-- okf:gen lint-rules -->`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`<!-- /okf:gen -->); severity is per finding where the underlying analyzer grades itself. Lints **every program unit** in the file (a contained program left unexamined would read as a clean one), and `apply_source_map()` stamps each finding with the file and line it really came from when copybooks were expanded. Re-implements no analysis -- every rule is a mapping from an existing report. `LintReport` also carries `caveats` (what could not be checked, e.g. MOVE operands whose category never resolved) and `failed_rules` (a rule that raised costs only its own findings), so a quiet report is never mistaken for a clean program. Backs the `lint` CLI subcommand. See `.okf/analysis.md`
 - `const_fold.py` -- `ConstantFolder` (Phase 7 of the `gen-fixtures` initiative): a single forward walk of a program's entry paragraph chain, seeded by one scenario's own mock-supplied inputs, tracking which data items hold a knowable literal value after a MOVE or a simple arithmetic/COMPUTE statement -- "exact by construction, or absent" throughout (a loop/branch poisons every field its body could write rather than guess which arm runs; DIVIDE folds when `DivideStatement.division_mode` says BY vs INTO and is poisoned otherwise; a numeric result is only kept when it fits its target field's PICTURE with no rounding/truncation/sign coercion). Wired into `ProgramFixtureGenerator` as `Expectation(kind="field_equals")` for every field with one known value at every DISPLAY/WRITE that shows it (the value at that site, not at program end). See `.okf/analysis.md`
 
 **`cobolparser/generators/`** -- Code generation utilities:
@@ -680,7 +680,7 @@ The suite runs *after* `build_ext`, so CI exercises the Cython extensions rather
 
 ## Additional Directories
 
-- `.okf/` -- OKF knowledge bundle (lexer, parser, preprocessing, AST models, analysis, CLI, tests). Load `.okf/index.md` at the start of every session.
+- `.okf/` -- OKF knowledge bundle: topic files (lexer, preprocessing, `parser/`, AST models, `analysis/`, dialects, `generators/`, batch, JCL, CLI, tests, integration), `history/` archives, `log.md`. Load `.okf/index.md` at the start of every session.
 - `tools/` -- Utility scripts grouped by area:
   - `io_catalog/validate_catalog.py` -- Validates the IO operation catalog
   - `io_coverage/` -- `generate_artifact.py` and `render_markdown.py` for IO coverage reports

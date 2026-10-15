@@ -14,6 +14,24 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-15 -- bundle restructure: history archived, big files split, content guard
+
+Topic files now describe current behaviour only. Dated write-ups, audits and
+before/after tables moved verbatim to per-topic archives in
+[history/](history/); what they established that is still true stays in the
+topic files as present-tense invariants. [analysis.md](analysis.md),
+[parser.md](parser.md) and [generators.md](generators.md) are now short
+routing pages in front of `analysis/` (8 files), `parser/` (6) and
+`generators/` (4); no topic file is over ~55 KB. Every topic file has the
+same shape (title, summary, Contents, topic-named `##` sections, See also).
+`OKF_MAP` maps each module to the one file a reader would load.
+New `scripts/okf_check.py` (run by the pre-commit hook and by
+`tests/test_okf_claims.py`) checks the bundle's claims against the code:
+imports, `cobolparser.*` names, class/function names, repo paths, links and
+anchors, the `cli.md` subcommand table against argparse, and
+`<!-- okf:gen NAME -->` spans for counts and lists the code can answer.
+[index.md](index.md) routes to the new files and documents both guards.
+
 ## 2026-10-15 -- whole-bundle audit: every file checked against source
 
 Every topic file was re-verified against the current source (imports,
