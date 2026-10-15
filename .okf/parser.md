@@ -3195,6 +3195,13 @@ returns a third value now). `DeclareTableStatement` accepts a qualified
 `DECLARE SCHEMA.TABLE TABLE` (spaces around the period tolerated, name
 normalized).
 
+**`EXIT SECTION.` straight after a section header (issue #382,
+2026-10-14).** `procedure_boundaries.is_section_marker` treats any token
+followed by `SECTION` as a section header, so `WORK-SEC SECTION.` followed
+by `EXIT SECTION.` produced an empty section named `EXIT` that swallowed
+the paragraphs after it. `EXIT` (a reserved word) is now never a section
+marker. Inside a paragraph the statement loop already parsed it.
+
 ## Pre-header lines
 
 `CobolParser._skip_to_identification_division` keeps `>>` directive lines

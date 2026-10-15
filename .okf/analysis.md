@@ -216,6 +216,31 @@ IF/EVALUATE arm) are still deliberately excluded — same rationale as
 before. Pinned by
 `test_terminator_earlier_in_paragraph_still_cuts_off_fall_through`.
 
+**Alterable `GO TO.` and `EXIT SECTION` are terminators too (issue #382,
+2026-10-14).** Both `_is_terminator`s (here and `program_flow/scanner.py`)
+required `stmt.target_paragraph`, so the operand-less alterable `GO TO.`
+(always jumps wherever an ALTER last pointed it) read as falling through;
+now any non-`DEPENDING` `GoStatement` terminates. `EXIT SECTION` passes
+control to the end of its section, so a paragraph whose first top-level
+transfer is `EXIT SECTION` (and that sits in a section -- outside one the
+compiler rejects it) never falls into the next paragraph
+(`_exited_section`, folded into `_terminates`). What happens after the end
+of the section is what happens off its last paragraph: in dead-code,
+`_collect_exit_section_ref` credits the procedure after the section's last
+member only when the section keeps running (in `_fallthrough_sources` or
+`_sections_entered_by_jump`), so a PERFORMed section returns and credits
+nothing. In program-flow the scanner records the procedure in
+`exit_section_procedures` and `build_fall_through_edges` draws a
+`FALL_THROUGH` edge to the section's successor only when the section is
+fallen into (an incoming fall-through edge, tracked in the same pass) or
+in `ProgramFlowAnalyzer._sections_entered` (entry point / ENTRY, a written
+GO TO from another section, or the target of any other `GOTO_EDGE_TYPES`
+edge -- ALTER, CICS HANDLE, and any handler branch added to that set later
+-- wherever it is written). That gate is
+stricter than the plain last-paragraph fall-through, which stays an
+over-approximation. Pinned by
+`tests/unit/analysis/test_exit_section_and_alterable_goto.py`.
+
 **A paragraph holding an ENTRY statement is always referenced (2026-08-11
 fix, audit finding #5).** `EntryStatement` marks an alternate external entry
 point (`CALL 'entry-name'`), so `_collect_references` now dispatches it to

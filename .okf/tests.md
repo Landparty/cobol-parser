@@ -8,6 +8,14 @@ timestamp: 2026-10-14T00:00:00Z
 
 # Overview
 
+2026-10-14: `tests/unit/analysis/test_exit_section_and_alterable_goto.py`
+(11 tests, #382) pins the alterable `GO TO.` and `EXIT SECTION` as
+terminators in dead-code and program-flow: a PERFORMed section returns at
+EXIT SECTION, one fallen into, gone to from another section or entered by a
+CICS HANDLE branch runs on to the next section, a conditional EXIT SECTION still falls through, and
+`EXIT SECTION.` right after a section header is no longer a section named
+EXIT.
+
 2026-10-14: `tests/regression/test_evaluate_word_operator_when.py` (38
 tests, #387) pins EVALUATE WHEN phrases with relational words
 (`GREATER THAN`, `EQUAL TO`, `OR EQUAL`), class tests and sign tests as
