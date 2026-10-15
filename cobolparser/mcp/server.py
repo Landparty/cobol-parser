@@ -41,7 +41,10 @@ Every result has the same envelope:
 - truncated: lists that were cut to the limit, with their true totals.
   Narrow the question or raise limit instead of assuming completeness.
 
-Use read_source to show the code at a cited line.
+Start with program_brief to learn what a program is and touches; then
+explain_symbol for a data name, callers_of for a paragraph, record_layout for
+a record's bytes, lint for what is wrong, and read_source to show the code at
+a cited line.
 """
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
@@ -131,7 +134,62 @@ def build_server(workspace: Workspace) -> FastMCP:
         statement and paragraph. Suggests close names when it is not found."""
         return await off_loop(lambda: tools.explain_symbol(file, name, program, limit))
 
-    for tool in (read_source, lint, explain_symbol):
+    async def program_brief(
+        file: File, program: Program = None, limit: Limit = None
+    ) -> dict[str, Any]:
+        """What a program is, on one page: size, entry points, calling
+        interface (USING parameters and a CALL example), files with their
+        organization and C/R/U/D use, SQL tables, called programs (dynamic
+        CALL candidates included), CICS and DL/I commands, unreachable
+        paragraphs, health grade and the worst lint findings. Start here."""
+        return await off_loop(lambda: tools.program_brief(file, program, limit))
+
+    async def callers_of(
+        file: File,
+        name: Annotated[
+            str,
+            Field(
+                description="Paragraph or section ('PARA OF SECTION' when the "
+                "name repeats), or a program this file CALLs"
+            ),
+        ],
+        program: Program = None,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """Who transfers control to a paragraph or section: every PERFORM,
+        PERFORM THRU range, GO TO, SORT/MERGE procedure, CICS HANDLE, SQL
+        WHENEVER and fall-through, with its location, plus whether the
+        paragraph is reachable at all. For a program name, the CALL sites in
+        this file."""
+        return await off_loop(lambda: tools.callers_of(file, name, program, limit))
+
+    async def record_layout(
+        file: File,
+        record: Annotated[
+            str,
+            Field(
+                description="Record or group name ('X OF Y' when it repeats), "
+                "or a file (FD) name for all of its records"
+            ),
+        ],
+        program: Program = None,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """The byte map of a record: every field in source order with level,
+        PICTURE, USAGE, byte offset and length from the start of the 01
+        record, OCCURS, REDEFINES, level-88 values and where it is declared.
+        Use it to read or build a record image or to check a field's
+        position."""
+        return await off_loop(lambda: tools.record_layout(file, record, program, limit))
+
+    for tool in (
+        program_brief,
+        explain_symbol,
+        callers_of,
+        record_layout,
+        lint,
+        read_source,
+    ):
         server.add_tool(tool, annotations=_READ_ONLY, structured_output=True)
     return server
 

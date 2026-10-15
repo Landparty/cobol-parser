@@ -47,7 +47,14 @@ class TestServer:
     def test_tools_are_listed_read_only_with_schemas(self) -> None:
         listed, _ = _session([])
         by_name = {tool.name: tool for tool in listed}
-        assert set(by_name) == {"read_source", "lint", "explain_symbol"}
+        assert set(by_name) == {
+            "program_brief",
+            "explain_symbol",
+            "callers_of",
+            "record_layout",
+            "lint",
+            "read_source",
+        }
         for tool in listed:
             assert tool.annotations is not None
             assert tool.annotations.readOnlyHint is True
@@ -61,11 +68,17 @@ class TestServer:
                 ("explain_symbol", {"file": "COPYREPL.cbl", "name": "CUST-ID"}),
                 ("lint", {"file": "BATCHSEQ.cbl", "limit": 2}),
                 ("read_source", {"file": "BATCHSEQ.cbl", "line": 2, "after": 0}),
+                ("program_brief", {"file": "VSAMKSDS.cbl"}),
+                ("callers_of", {"file": "BATCHSEQ.cbl", "name": "1000-INIT"}),
+                ("record_layout", {"file": "COPYREPL.cbl", "record": "WS-COUNTERS"}),
             ]
         )
         for result in results:
             assert result.isError is False
             assert result.structuredContent["surface_version"] == MCP_SURFACE_VERSION
+        assert results[3].structuredContent["answer"]["files"]
+        assert results[4].structuredContent["answer"]["found"] is True
+        assert results[5].structuredContent["answer"]["records"][0]["fields"]
         symbol = results[0].structuredContent["answer"]["symbols"][0]
         assert symbol["declared_at"]["file"] == "copybooks/DCLCUST.cpy"
 

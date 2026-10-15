@@ -92,6 +92,21 @@ class ParsedProgram:
     #: directory, for invalidation.
     stamps: dict[str, tuple[int, int] | None]
     _display: Callable[[str], str] = field(repr=False, default=str)
+    #: Analyzer reports already computed for this parse, by (analyzer, unit).
+    _reports: dict[tuple[str, int], Any] = field(repr=False, default_factory=dict)
+
+    def report(self, name: str, unit: CobolProgram, build: Callable[[], Any]) -> Any:
+        """*build()*'s result for *unit*, computed once per parse.
+
+        Several tools ask for the same report (the flow graph backs both
+        ``program_brief`` and ``callers_of``); the parse cache already keeps
+        it exactly as long as it stays true.
+        """
+        key = (name, id(unit))
+        if key not in self._reports:
+            with stdout_to_stderr():
+                self._reports[key] = build()
+        return self._reports[key]
 
     @property
     def ast(self) -> CobolProgram:

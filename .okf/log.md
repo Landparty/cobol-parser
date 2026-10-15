@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-15 -- MCP server, Phase 2
+
+[mcp.md](mcp.md) gains `program_brief`, `callers_of` (paragraph level, plus
+CALL sites of a program the file calls) and `record_layout`, and
+`ParsedProgram.report()`, which keeps analyzer reports beside the cached
+parse.
+
 ## 2026-10-15 -- MCP server, Phase 1
 
 New [mcp.md](mcp.md) for `cobolparser/mcp/` and `cobol-parser mcp`

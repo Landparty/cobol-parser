@@ -164,6 +164,22 @@ first library feature this server would pull forward.
   (`incomplete-analysis`, an analyzer's own note that it could not examine
   everything).
 
+## Phase 2 as built
+
+- `program_brief` lints the whole file (`lint.scope: "file"`): lint findings
+  carry no program unit. Everything else in it is about the selected unit,
+  and its statement counts leave out contained programs.
+- Instead of `DeadCodeAnalyzer`, `callers_of` reports `reachable` from the
+  flow graph's `unreachable_nodes`. A `PERFORM A THRU C` is one caller of A,
+  B and C (`via_range`), not the two edges the graph stores.
+- `callers_of` on a program name answers with the CALL sites in this file;
+  which *other* programs call it waits for the Phase 3 cross-program index.
+- `record_layout` cites every field's declaration. The layout emits a group
+  after its members, so fields are re-sorted into source order.
+- Analyzer reports are memoized on the cached parse
+  (`ParsedProgram.report`), as "Session cache" planned.
+- No library change was needed.
+
 ## The one library change v1 needs: source-mapped locations everywhere
 
 Today only `LintAnalyzer` (`lint.apply_source_map`) and `FieldFlowAnalyzer`
