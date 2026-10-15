@@ -696,3 +696,37 @@ class TestNationalCaveat:
     def test_no_national_data_no_caveat(self):
         specs = specs_for("       01  R.\n           05  X1 PIC X(2).\n")
         assert not any("national" in c for c in encoding_caveats(specs))
+
+
+class TestDbcsCaveat:
+    """Issue #321: DBCS was written as single-byte text with no caveat."""
+
+    def test_pic_g_and_display_1_are_flagged(self):
+        specs = specs_for(
+            "       01  R.\n"
+            "           05  G1 PIC G(3).\n"
+            "           05  G2 PIC N(2) USAGE DISPLAY-1.\n"
+            "           05  N1 PIC N(2).\n"
+            "           05  X1 PIC X(2).\n"
+        )
+        caveats = encoding_caveats(specs)
+        dbcs = [c for c in caveats if c.startswith("DBCS")]
+        assert len(dbcs) == 1
+        assert "R.G1" in dbcs[0] and "R.G2" in dbcs[0]
+        assert "N1" not in dbcs[0] and "X1" not in dbcs[0]
+        national = [c for c in caveats if c.startswith("national")]
+        assert len(national) == 1
+        assert "R.N1" in national[0] and "G2" not in national[0]
+
+    def test_decoder_reports_the_dbcs_caveat(self):
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        decoder = RecordDecoder.from_copybook_source(
+            "       01  R.\n           05  G1 PIC G(3).\n"
+        )
+        result = decoder.decode_bytes(b"\x40" * 6)
+        assert any(c.startswith("DBCS") for c in result.caveats)
+
+    def test_no_dbcs_data_no_caveat(self):
+        specs = specs_for("       01  R.\n           05  X1 PIC X(2).\n")
+        assert not any(c.startswith("DBCS") for c in encoding_caveats(specs))

@@ -8,6 +8,8 @@ timestamp: 2026-10-15T00:00:00Z
 
 # Overview
 
+2026-10-15 (issue #321): +3 in `tests/unit/generators/data/test_encoding.py`'s new `TestDbcsCaveat` -- `PIC G` / `USAGE DISPLAY-1` fields get their own DBCS caveat from `encoding_caveats()` (and on a `DecodeResult`), and a `PIC N USAGE DISPLAY-1` field is no longer listed under the national/UTF-16 caveat.
+
 2026-10-15: `tests/unit/analysis/test_codebase.py::TestHelpers` (+3, #356)
 pins a `:TAG:`-placeholder copybook member reporting its placeholder data
 names in `copybook-impact`'s `unresolved` rather than a silently empty
