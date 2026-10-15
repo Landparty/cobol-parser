@@ -285,6 +285,77 @@ CLAUSE_CONTINUATION_KEYWORDS: frozenset = frozenset(
 # line-start period and are not affected by this heuristic.
 SQL_SPECIAL_REGISTERS: frozenset = frozenset({"SQLCODE", "SQLSTATE"})
 
+# COBOL special registers: the compiler supplies them, so -- like SQLCODE
+# above -- they are referenced without any DATA DIVISION declaration and
+# never reach known_data_names, yet a register is a reserved word and can
+# never name a paragraph. ``MOVE 0`` / ``TO`` / ``RETURN-CODE.`` with each
+# word on its own line at the verb's column read as a MOVE with no target
+# followed by a paragraph named RETURN-CODE (issue #390). LENGTH / ADDRESS
+# (``LENGTH OF x``) are never followed by a bare period, so the shape check
+# already passes them; they are listed for completeness.
+SPECIAL_REGISTERS: frozenset = frozenset(
+    {
+        "ADDRESS",
+        "DEBUG-ITEM",
+        "JSON-CODE",
+        "JSON-STATUS",
+        "LENGTH",
+        "LINAGE-COUNTER",
+        "RETURN-CODE",
+        "SHIFT-IN",
+        "SHIFT-OUT",
+        "SORT-CONTROL",
+        "SORT-CORE-SIZE",
+        "SORT-FILE-SIZE",
+        "SORT-MESSAGE",
+        "SORT-MODE-SIZE",
+        "SORT-RETURN",
+        "TALLY",
+        "WHEN-COMPILED",
+        "XML-CODE",
+        "XML-EVENT",
+        "XML-INFORMATION",
+        "XML-NAMESPACE",
+        "XML-NAMESPACE-PREFIX",
+        "XML-NNAMESPACE",
+        "XML-NNAMESPACE-PREFIX",
+        "XML-NTEXT",
+        "XML-TEXT",
+    }
+)
+
+# Reserved words that end a statement's operand list (``STOP RUN``, ``EXIT
+# PROGRAM``, ``SET flag TO TRUE``, ``NEXT SENTENCE``, ...) yet lex as plain
+# IDENTIFIERs, so a statement wrapped one word per line puts them alone on a
+# line before a period -- the paragraph-header shape. A reserved word can
+# never be a paragraph name. DECLARATIVES / FACTORY / OBJECT are left out on
+# purpose: each really does open a new structural unit at that shape.
+NON_PARAGRAPH_RESERVED_WORDS: frozenset = frozenset(
+    {
+        "DOWN",
+        "EXCEPTION",
+        "FALSE",
+        "METHOD",
+        "OFF",
+        "PARAGRAPH",
+        "PROGRAM",
+        "REMOVAL",
+        "RUN",
+        "SECTION",
+        "SELF",
+        "SENTENCE",
+        "SIZE",
+        "SUPER",
+        "TRUE",
+        "UP",
+    }
+)
+
+# First Area B column of fixed-format source once normalize_fixed_format has
+# dropped columns 1-7: old column 8 (Area A) becomes column 1, so old column
+# 12 -- the start of Area B -- becomes column 5.
+NORMALIZED_AREA_B_COLUMN = 5
+
 
 # ---------------------------------------------------------------------------
 # Token value helpers
@@ -403,8 +474,12 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
       check as plain IDENTIFIERs even though a reserved word can never
       legally be a paragraph name) or :data:`SQL_SPECIAL_REGISTERS`
       (``SQLCODE``/``SQLSTATE``, which real programs reference without a
-      WORKING-STORAGE declaration);
+      WORKING-STORAGE declaration), :data:`SPECIAL_REGISTERS`
+      (``RETURN-CODE``, ``TALLY``, ... -- likewise never declared) or
+      :data:`NON_PARAGRAPH_RESERVED_WORDS` (``RUN``, ``TRUE``, ...);
     * it starts a new source line relative to the previously consumed token;
+    * when the source was fixed-format, it starts in Area A -- a paragraph
+      header must, so a token in Area B is an operand whatever it is named;
     * it is immediately followed by a period or SECTION -- required because
       a continuation-line operand named by an *unexpanded* COPY member is
       not in ``known_data_names``, and without this shape check it would be
@@ -428,6 +503,8 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
         value_upper in STATEMENT_KEYWORDS
         or value_upper in CLAUSE_CONTINUATION_KEYWORDS
         or value_upper in SQL_SPECIAL_REGISTERS
+        or value_upper in SPECIAL_REGISTERS
+        or value_upper in NON_PARAGRAPH_RESERVED_WORDS
     ):
         return False
 
@@ -435,6 +512,10 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
     prev_line = getattr(getattr(prev, "location", None), "line", None)
     cur_line = getattr(getattr(token, "location", None), "line", None)
     if prev_line is None or cur_line is None or prev_line == cur_line:
+        return False
+
+    context = get_parse_context(token_stream)
+    if _in_fixed_format_area_b(context, token):
         return False
 
     # The candidate must be immediately followed by a period or SECTION —
@@ -462,9 +543,19 @@ def looks_like_paragraph_boundary(token_stream: ITokenStream) -> bool:
     if not (is_period or is_section):
         return False
 
-    context = get_parse_context(token_stream)
     known_data_names = context.known_data_names if context else frozenset()
     return value_upper not in known_data_names
+
+
+def _in_fixed_format_area_b(context: ParseContext | None, token: Token) -> bool:
+    """True when the parse normalized fixed-format source and *token* starts
+    in Area B, where no paragraph or section header can begin. Free-form
+    source has no areas, so this never fires there."""
+    host = getattr(context, "host", None) if context else None
+    if getattr(host, "source_is_fixed_format", False) is not True:
+        return False
+    col = token_column(token)
+    return col is not None and col >= NORMALIZED_AREA_B_COLUMN
 
 
 def looks_dedented_relative_to(

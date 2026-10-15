@@ -37,6 +37,12 @@ ENTRY operand's `by_clause`.
 [parser.md](parser.md): `_expand_abbreviated_condition` drops the optional
 `IS` that opens an abbreviated leg (`IF A > 1 AND IS < 5`), so the leg
 expands to `A < 5` instead of an operand-less COMPARISON.
+## 2026-10-14 -- issue #390: special registers are not paragraph headers
+
+[parser.md](parser.md) (the `looks_like_paragraph_boundary()` entry):
+special registers (`RETURN-CODE`, `TALLY`, ...), reserved words that lex as
+identifiers (`RUN`, `TRUE`, ...) and, in fixed-format source, any token in
+Area B are never read as a paragraph header swallowed by a missing period.
 
 ## 2026-10-14 -- issue #404: an unnamed data entry is FILLER
 

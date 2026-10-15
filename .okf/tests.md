@@ -15,6 +15,13 @@ EXIT SECTION, one fallen into, gone to from another section or entered by a
 CICS HANDLE branch runs on to the next section, a conditional EXIT SECTION still falls through, and
 `EXIT SECTION.` right after a section header is no longer a section named
 EXIT.
+2026-10-14: `tests/regression/test_special_register_paragraph_boundary.py`
+(13 tests, #390) pins `MOVE 0` / `TO` / `RETURN-CODE.` (and TALLY,
+SORT-RETURN, the XML-/JSON- registers, `SET ... TO TRUE`) with each word on
+its own line: one MOVE with the register as target, no phantom paragraph.
+Also pins the fixed-format Area B rule (an undeclared Area B name stays an
+operand) and two controls: an Area A header after a missing period, and an
+indented free-format name, are still boundaries.
 
 2026-10-14: `tests/regression/test_evaluate_word_operator_when.py` (38
 tests, #387) pins EVALUATE WHEN phrases with relational words
