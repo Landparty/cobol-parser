@@ -419,6 +419,39 @@ class TestHexLiteralBytes:
         assert isinstance(cell, LiteralCell)
         assert (cell, cell.data) == ("\xff", b"\xff")
 
+    # ``VALUE ALL X'FF'`` fills the field with the literal's bytes. The ALL
+    # path built a plain text cell, so the encoder wrote its Latin-1 text in
+    # the record charset: ``3f 3f`` (ASCII) / ``df df`` (EBCDIC).
+    ALL_HEX = (
+        "       01  R.\n"
+        "           05  HI   PIC X(2) VALUE ALL X'FF'.\n"
+        "           05  CRLF PIC X(5) VALUE ALL X'0D25'.\n"
+    )
+
+    @pytest.mark.parametrize("opts", [EncodingOptions(), EBCDIC])
+    def test_value_all_hex_fills_the_field_with_its_bytes(self, opts):
+        from cobolparser.generators.data.copybook import CopybookDataGenerator
+
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(rows=1, seed=1).for_record_image()
+        ).generate_from_source(self.ALL_HEX)
+        assert dataset.to_records(opts) == bytes.fromhex("ffff0d250d250d")
+
+    @pytest.mark.parametrize("opts", [EncodingOptions(), EBCDIC])
+    def test_value_all_hex_decodes_back_to_its_cell(self, opts):
+        from cobolparser.generators.data.copybook import CopybookDataGenerator
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(rows=2, seed=1).for_record_image()
+        ).generate_from_source(self.ALL_HEX)
+        result = RecordDecoder.from_copybook_source(self.ALL_HEX).decode_bytes(
+            dataset.to_records(opts), opts=opts
+        )
+        assert result.error_count == 0
+        assert [list(r.values().values()) for r in result.records] == dataset.rows
+        assert dataset.rows[0] == ["\xff\xff", "\r%\r%\r"]
+
 
 class TestJustifiedRight:
     """``JUSTIFIED RIGHT`` reverses the alphanumeric MOVE: pad on the left,

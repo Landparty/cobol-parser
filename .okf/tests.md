@@ -302,6 +302,10 @@ compare (C vs F sign nibble, slack past the layout), VB records with absent
 fixture is a record image from `encode_record`, not a hand-built decode
 result. See `generators.md`'s "Record compare".
 
+2026-10-15 bug hunt: `TestHexLiteralBytes::test_value_all_hex_*` (+4 cases)
+pins `VALUE ALL X'..'` written as the literal's bytes across the field and
+decoded back to its cell, ASCII and EBCDIC.
+
 2026-10-15: `TestHexLiteralBytes` (+12 cases) pins hex-literal bytes keyed by
 the literal, not its text (`LiteralCell`): `VALUE SPACE` text next to
 `88 VALUE X'20'`, `'AB'` next to `X'4142'` and random text next to `X'41'`

@@ -57,9 +57,9 @@ from .layout import (
     LiteralCell,
     VaryingLength,
     _strip_literal_quotes,
-    hex_literal_bytes,
     present_indexes,
     unresolved_odo_counters,
+    value_clause_hex_bytes,
 )
 from .storage import (
     BINARY_NATIVE_USAGES,
@@ -651,7 +651,10 @@ def _ordinary_literal_cells(spec: FieldSpec) -> list[str]:
     VALUE clause.  ``VALUE SPACES``/``LOW-VALUES`` are left out because the
     generator replaces them with a random value."""
     raws = [v for v in spec.condition_values if not isinstance(v, LiteralCell)]
-    if spec.value_clause and hex_literal_bytes(spec.value_clause) is None:
+    if (
+        spec.value_clause
+        and value_clause_hex_bytes(spec.value_clause, spec.character_positions) is None
+    ):
         clause = spec.value_clause.strip()
         if clause.upper() in ("ZERO", "ZEROS", "ZEROES", "QUOTE", "QUOTES"):
             raws.append(clause)

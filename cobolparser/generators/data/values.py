@@ -9,7 +9,14 @@ import struct
 from decimal import Context, Decimal, InvalidOperation, localcontext
 
 from ...models.data_items import PictureClause
-from .layout import FieldCategory, FieldSpec, _strip_literal_quotes, hex_literal_cell
+from .layout import (
+    FieldCategory,
+    FieldSpec,
+    LiteralCell,
+    _strip_literal_quotes,
+    hex_literal_bytes,
+    hex_literal_cell,
+)
 from .options import DataGeneratorOptions
 from .storage import POINTER_USAGES, SINGLE_FLOAT_USAGES
 
@@ -425,6 +432,14 @@ class ValueFactory:
         figurative = _FIGURATIVE_CONSTANTS.get(raw.upper())
         if figurative is not None:
             return self._fill_figurative(figurative, spec) if figurative else None
+        unit_bytes = hex_literal_bytes(raw)
+        if unit_bytes:
+            # ``ALL X'FF'``: the literal's own bytes across the field, kept
+            # as a LiteralCell so the encoder does not write their Latin-1
+            # text in the record charset (``ff`` came out as ``3f``/``df``).
+            size = spec.character_positions or len(unit_bytes)
+            filled = (unit_bytes * (size // len(unit_bytes) + 1))[:size]
+            return self._fit_domain_value(LiteralCell(filled), spec)
         unit = _strip_literal_quotes(raw)
         if not unit:
             return None
