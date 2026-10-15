@@ -2561,6 +2561,15 @@ internal env) rather than approximating:
   resolved direction to tell them apart (only `BoundaryInventoryAnalyzer`'s
   own richer analysis does) -- deferred to a future version rather than risk
   treating an OUT value as still-known.
+* **Keyed READ sites (`ConstantFoldResult.read_keys`, issue #322).** At
+  every keyed READ of an INDEXED file (`keyed_read_key()`: RANDOM, or
+  DYNAMIC without NEXT/PREVIOUS/FIRST/LAST; the `KEY IS` name, else the
+  RECORD KEY) the walk records each elementary leaf of the key from `env`,
+  before the READ resets the record area. `read_keys[(FILE, line)]` is that
+  rendered dict when every pass over the READ saw the same fully-known key,
+  else `None` -- a READ only poisoned (branch/loop body, uncertain mode) or
+  never reached is `None`. Not in `to_dict()`; `ProgramFixtureGenerator`
+  pins it into the READ's mocked rows (see generators.md).
 * **A subscripted/reference-modified READ INTO or ACCEPT target is poisoned,
   never restored (2026-09-10 fix).** `_target_paths()` used to drop the
   `has_suffix` flag `_base_name()` returns and resolve straight to the base

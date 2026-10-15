@@ -8,6 +8,8 @@ timestamp: 2026-10-15T00:00:00Z
 
 # Overview
 
+2026-10-15 (issue #322): +5 in `tests/unit/test_program_fixtures.py`'s new `TestKeyedReadReturnsTheKeyAskedFor` (a literal key MOVEd before a RANDOM / DYNAMIC keyed READ is pinned in every row, in every `mode="all"` scenario; a key set in an IF arm stays generated with one `unresolved` note; a DYNAMIC `READ NEXT` is left alone) and +1 in `tests/unit/analysis/test_const_fold.py::TestReadKeys` (a group RECORD KEY's leaves on the main line, `None` inside a branch, `to_dict()` unchanged). `TestWriteCsvDir`'s manifest and round-trip tests now follow each fixture's `csv_path`: `file_operations.cbl`'s keyed and sequential READs of IDX-FILE now write different rows, so the second is `IDX-FILE-2.csv`.
+
 2026-10-15 (issue #321): +3 in `tests/unit/generators/data/test_encoding.py`'s new `TestDbcsCaveat` -- `PIC G` / `USAGE DISPLAY-1` fields get their own DBCS caveat from `encoding_caveats()` (and on a `DecodeResult`), and a `PIC N USAGE DISPLAY-1` field is no longer listed under the national/UTF-16 caveat.
 
 2026-10-15: `tests/unit/analysis/test_codebase.py::TestHelpers` (+3, #356)

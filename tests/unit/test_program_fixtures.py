@@ -356,8 +356,12 @@ class TestWriteCsvDir:
                 ):
                     assert fixture_dict["sequence"] == []
                     if fixture.layout and fixture.sequence:
-                        assert (
-                            fixture_dict["csv_path"] == f"{slug}/{fixture.ref.key}.csv"
+                        # `<KEY>.csv`, or `<KEY>-2.csv` when another fixture
+                        # of the same key writes different rows (the keyed
+                        # and the sequential READ of IDX-FILE, issue #322).
+                        assert fixture_dict["csv_path"] in (
+                            f"{slug}/{fixture.ref.key}.csv",
+                            f"{slug}/{fixture.ref.key}-2.csv",
                         )
                         assert os.path.isfile(
                             os.path.join(tmp, fixture_dict["csv_path"])
@@ -373,12 +377,17 @@ class TestWriteCsvDir:
         bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
         with tempfile.TemporaryDirectory() as tmp:
             bundle.write_csv_dir(tmp)
-            for scenario in bundle.scenarios:
-                slug = _slugify(scenario.name)
-                for fixture in scenario.fixtures:
+            with open(os.path.join(tmp, "MANIFEST.json")) as handle:
+                manifest = json.load(handle)
+            for scenario, scenario_dict in zip(
+                bundle.scenarios, manifest["scenarios"], strict=True
+            ):
+                for fixture, fixture_dict in zip(
+                    scenario.fixtures, scenario_dict["fixtures"], strict=True
+                ):
                     if not fixture.layout or not fixture.sequence:
                         continue
-                    csv_path = os.path.join(tmp, slug, f"{fixture.ref.key}.csv")
+                    csv_path = os.path.join(tmp, fixture_dict["csv_path"])
                     with open(csv_path, newline="") as handle:
                         rows = list(csv.reader(handle))
                     header, data_rows = rows[0], rows[1:]
@@ -1781,3 +1790,98 @@ class TestFillerOwningConditionName:
         record = ProgramLayoutIndex.build(result.ast).record_named("IN-REC")
         specs = flatten_record(record, DataGeneratorOptions())
         assert [s.column for s in specs] == ["IN-ID"]
+
+
+def _keyed_read_program(access: str, procedure: str) -> str:
+    return f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. KEYRD.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT VS-FILE ASSIGN TO VSFILE
+               ORGANIZATION IS INDEXED
+               ACCESS MODE IS {access}
+               RECORD KEY IS VS-KEY
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD VS-FILE.
+       01 VS-REC.
+          05 VS-KEY  PIC X(4).
+          05 VS-AMT  PIC 9(5).
+       WORKING-STORAGE SECTION.
+       01 WS-FS PIC XX.
+       01 WS-IN PIC X.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT VS-FILE
+{procedure}
+           DISPLAY VS-AMT
+           CLOSE VS-FILE
+           STOP RUN.
+"""
+
+
+def _keyed_bundle(source: str, mode: str = "happy"):
+    result = parse_cobol(source, filename="keyrd.cbl")
+    assert result.ast is not None, result.errors
+    index = ProgramLayoutIndex.build(result.ast)
+    report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+    return ProgramFixtureGenerator().generate_with_scenarios(
+        result.ast, index, report, mode=mode, seed=7
+    )
+
+
+class TestKeyedReadReturnsTheKeyAskedFor:
+    """Issue #322: a mocked keyed READ returned a record whose key was not
+    the one the program set."""
+
+    _SET_KEY = """\
+           MOVE 'K001' TO VS-KEY
+           READ VS-FILE
+               INVALID KEY DISPLAY 'NOT FOUND'
+           END-READ"""
+
+    @pytest.mark.parametrize("access", ["RANDOM", "DYNAMIC"])
+    def test_literal_key_is_pinned_in_every_row(self, access):
+        bundle = _keyed_bundle(_keyed_read_program(access, self._SET_KEY))
+        (fixture,) = _read_fixtures(bundle.scenarios[0])
+        assert fixture.sequence
+        assert all(row["VS-KEY"] == "K001" for row in fixture.sequence)
+        assert not [u for u in bundle.unresolved if "record key" in u]
+
+    def test_every_scenario_pins_the_key(self):
+        bundle = _keyed_bundle(_keyed_read_program("RANDOM", self._SET_KEY), mode="all")
+        for scenario in bundle.scenarios:
+            for fixture in _read_fixtures(scenario):
+                assert all(r["VS-KEY"] == "K001" for r in fixture.sequence)
+
+    def test_unknown_key_is_generated_and_noted(self):
+        procedure = """\
+           ACCEPT WS-IN
+           IF WS-IN = 'Y'
+              MOVE 'K001' TO VS-KEY
+           ELSE
+              MOVE 'K002' TO VS-KEY
+           END-IF
+           READ VS-FILE
+               INVALID KEY DISPLAY 'NOT FOUND'
+           END-READ"""
+        bundle = _keyed_bundle(_keyed_read_program("RANDOM", procedure))
+        (fixture,) = _read_fixtures(bundle.scenarios[0])
+        assert fixture.sequence
+        notes = [u for u in bundle.unresolved if "record key" in u]
+        assert len(notes) == 1
+        assert notes[0].startswith("READ VS-FILE (line ")
+
+    def test_sequential_read_next_is_left_alone(self):
+        procedure = """\
+           MOVE 'K001' TO VS-KEY
+           READ VS-FILE NEXT
+               AT END DISPLAY 'EOF'
+           END-READ"""
+        bundle = _keyed_bundle(_keyed_read_program("DYNAMIC", procedure))
+        (fixture,) = _read_fixtures(bundle.scenarios[0])
+        assert any(row["VS-KEY"] != "K001" for row in fixture.sequence)
+        assert not [u for u in bundle.unresolved if "record key" in u]

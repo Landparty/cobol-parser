@@ -313,6 +313,7 @@ class ProgramFixtureGenerator:
                 )
             scenario.expectations.extend(expectations)
             unresolved.extend(extra_unresolved)
+        self._pin_read_keys(ast, index, scenario, unresolved)
         counter.insert(report, scenario, anchors)
         scenario.expectations.extend(self._tier2_expectations(ast, index, scenario))
 
@@ -420,6 +421,8 @@ class ProgramFixtureGenerator:
                     )
                 scenario.expectations.extend(expectations)
                 unresolved.extend(extra_unresolved)
+            # Gaps are reported once, by the happy path above.
+            self._pin_read_keys(ast, index, scenario, None)
             counter.insert(report, scenario, anchors)
             if planned.status_overrides:
                 # The fold walks the normal path; a failure path may stop
@@ -907,6 +910,77 @@ class ProgramFixtureGenerator:
         return {field_name: default}
 
     @staticmethod
+    def _single_row_seeds(
+        scenario: Scenario, skip: set[tuple[str, int | None]] | None = None
+    ) -> dict[str, str]:
+        """Every single-row fixture's values, by qualified name -- the
+        scenario's own mocked inputs the constant folder may start from.
+        Fixtures of the READ sites in *skip* are left out."""
+        seed_values: dict[str, str] = {}
+        for fixture in scenario.fixtures:
+            if len(fixture.sequence) != 1:
+                continue
+            if skip and (fixture.ref.key, fixture.ref.line) in skip:
+                continue
+            for spec in fixture.layout:
+                seed_values[spec.qualified_name] = fixture.sequence[0].get(
+                    spec.column, ""
+                )
+        return seed_values
+
+    def _pin_read_keys(
+        self,
+        ast: CobolProgram,
+        index: ProgramLayoutIndex,
+        scenario: Scenario,
+        notes: list[str] | None,
+    ) -> None:
+        """A successful keyed READ of an INDEXED file returns the record
+        whose key the program set, so a mocked record carrying any other key
+        is one no real READ could return. Pin the key into every row of
+        such a READ's fixture when its value at the READ is known (constant-
+        folded from literals and this scenario's other mocked inputs);
+        otherwise leave it generated and, when *notes* is given, say so."""
+        reads = [f for f in scenario.fixtures if f.ref.category == "READ"]
+        if not reads:
+            return
+        folder = ConstantFolder()
+        read_keys = folder.fold(ast, index, seed_values={}).read_keys
+        if not read_keys:
+            return
+        # The READ's own record is not a seed: before the READ its key holds
+        # only what the program put there, never the mocked answer.
+        seeds = self._single_row_seeds(scenario, skip=set(read_keys))
+        if seeds:
+            read_keys = folder.fold(ast, index, seed_values=seeds).read_keys
+        for fixture in reads:
+            site = (fixture.ref.key, fixture.ref.line)
+            if site not in read_keys:
+                continue
+            key_values = read_keys[site]
+            columns = {spec.qualified_name: spec.column for spec in fixture.layout}
+            where = f"READ {fixture.ref.key} (line {fixture.ref.line})"
+            if key_values is None:
+                if notes is not None:
+                    notes.append(
+                        f"{where}: the record key it reads by has no value "
+                        "known at the READ, so each mocked record's key is "
+                        "generated and may not be the key the program asked for"
+                    )
+                continue
+            if not all(leaf in columns for leaf in key_values):
+                if notes is not None:
+                    notes.append(
+                        f"{where}: the record key it reads by is not a field "
+                        "of the generated rows (READ INTO), so each mocked "
+                        "record's key is not pinned to the key the program set"
+                    )
+                continue
+            for row in fixture.sequence:
+                for leaf, value in key_values.items():
+                    row[columns[leaf]] = value
+
+    @staticmethod
     def _tier2_expectations(
         ast: CobolProgram, index: ProgramLayoutIndex, scenario: Scenario
     ) -> list[Expectation]:
@@ -919,14 +993,7 @@ class ProgramFixtureGenerator:
         every field a `PERFORM UNTIL`/`VARYING` loop writes is poisoned by
         the folder's own loop-abort rule anyway, since that is exactly where
         a multi-row READ is read from in practice."""
-        seed_values: dict[str, str] = {}
-        for fixture in scenario.fixtures:
-            if len(fixture.sequence) != 1:
-                continue
-            for spec in fixture.layout:
-                seed_values[spec.qualified_name] = fixture.sequence[0].get(
-                    spec.column, ""
-                )
+        seed_values = ProgramFixtureGenerator._single_row_seeds(scenario)
         fold_result = ConstantFolder().fold(ast, index, seed_values=seed_values)
         return [
             Expectation(

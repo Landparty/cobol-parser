@@ -1506,6 +1506,19 @@ internal `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers:
 * **Status** — `override.status_overrides` (keyed by `"<CATEGORY>:<KEY>"`)
   replaces the default status value (`"00"`/`"0"`) for the fixed
   error-status family and any future status-targeting scenario.
+* **Keyed READ key** (issue #322, every scenario including the happy path)
+  — a successful keyed READ of an INDEXED file (RANDOM access, or DYNAMIC
+  without NEXT/PREVIOUS/FIRST/LAST; `const_fold.keyed_read_key`) returns the
+  record whose key the program set, so `_pin_read_keys` writes the key's
+  value at that READ (`ConstantFoldResult.read_keys`, matched by
+  `(file, line)`; folded from literals plus the scenario's other
+  single-row mocked inputs, never the READ's own record) into every row of
+  its fixture, overriding generated values and witnesses alike. When the key
+  is not known there (set in a branch or loop, never set, or a READ INTO
+  whose rows do not carry the FD key) the key stays generated and the happy
+  path adds one `unresolved` note for that READ. Two READs of one file can
+  now write different rows, so `write_csv_dir` names the second
+  `<KEY>-2.csv` (its existing `_csv_names` rule).
 
 `FixtureBundle.scenario_coverage` (new, additive field —
 `bundle_version` stays `1`) carries `ScenarioPlan.coverage.to_dict()`
