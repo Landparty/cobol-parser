@@ -3215,7 +3215,10 @@ byte per symbol).
 ## Statements
 
 `XmlJsonStatement`'s clause loop keeps `JSON` after `TO` (`CONVERTING x
-TO JSON DECIMAL`). `SetStatement.targets_are_address_of` is set by
+TO JSON DECIMAL`). Its `PROCESSING PROCEDURE [IS] p [THRU|THROUGH q]`
+consumer looks past line breaks (`peek_past_noise`) for `IS` and `THRU`
+(issue #394: a THRU on the next line used to fall into clause text and
+leave `processing_procedure_thru` None). `SetStatement.targets_are_address_of` is set by
 `SetStatementParser._collect_targets` for `SET ADDRESS OF x TO p` (it
 returns a third value now). `DeclareTableStatement` accepts a qualified
 `DECLARE SCHEMA.TABLE TABLE` (spaces around the period tolerated, name

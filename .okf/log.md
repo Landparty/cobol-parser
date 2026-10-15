@@ -43,6 +43,15 @@ expands to `A < 5` instead of an operand-less COMPARISON.
 special registers (`RETURN-CODE`, `TALLY`, ...), reserved words that lex as
 identifiers (`RUN`, `TRUE`, ...) and, in fixed-format source, any token in
 Area B are never read as a paragraph header swallowed by a missing period.
+## 2026-10-14 -- issue #394: XML PARSE THRU on the next line
+
+[ast-models.md](ast-models.md), [analysis.md](analysis.md): the
+`PROCESSING PROCEDURE [IS] p [THRU|THROUGH q]` consumer in
+`xml_json_parser.py` looks past line breaks for `IS` and `THRU`/`THROUGH`
+(`peek_past_noise`). A THRU on its own line used to fall into
+`operands`/`clause_items`, leaving `processing_procedure_thru` None, so
+dead-code, program-flow and lint reported the handler range dead. An `IS`
+on its own line was read as the procedure name the same way.
 
 ## 2026-10-14 -- issue #404: an unnamed data entry is FILLER
 
