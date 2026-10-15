@@ -19,6 +19,7 @@ from cobolparser.generators.data.copybook import (
 from cobolparser.generators.data.encoding import (
     MAX_VARIABLE_RECORD,
     RDW_SIZE,
+    Charset,
     EncodingOptions,
     RecordEncodingError,
     RecordFormat,
@@ -193,6 +194,98 @@ class TestFdRecordVarying:
         assert [r.values()["EMP-ID"] for r in result.records] == [
             row[0] for row in dataset.rows
         ]
+
+    def test_a_varying_record_cut_mid_field_by_its_length_is_not_an_error(self):
+        # #358 made a field the record ends inside an error; a RECORD VARYING
+        # record whose length is inside its FD's range ends there by design.
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        dataset = empvl(rows=40)
+        assert any(47 < length < 80 for length in dataset.declared_lengths)
+        decoder = RecordDecoder.from_copybook_source(
+            EMPVL_PROGRAM, filename="EMPVL.cbl", opts=AUTO
+        )
+        result = decoder.decode_bytes(dataset.to_records(AUTO))
+        assert result.error_count == 0
+        assert any(item.truncated for r in result.records for item in r.fields)
+
+    def test_a_varying_record_below_its_minimum_cut_mid_field_is_an_error(self):
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        decoder = RecordDecoder.from_copybook_source(
+            EMPVL_PROGRAM, filename="EMPVL.cbl", opts=VARIABLE
+        )
+        body = decoder.decode_bytes(empvl().to_records(VARIABLE)).records[0].raw
+        short = body[:3]  # inside the first field, far below the 47 minimum
+        rdw = (len(short) + RDW_SIZE).to_bytes(2, "big") + b"\x00\x00"
+        result = decoder.decode_bytes(rdw + short)
+        assert result.error_count == 1
+
+    @staticmethod
+    def _dtl_program(clause):
+        return (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. M1.\n"
+            "       ENVIRONMENT DIVISION.\n"
+            "       INPUT-OUTPUT SECTION.\n"
+            "       FILE-CONTROL.\n"
+            "           SELECT M-FILE ASSIGN TO MFILE.\n"
+            "       DATA DIVISION.\n"
+            "       FILE SECTION.\n"
+            "       FD  M-FILE\n"
+            f"           {clause}.\n"
+            "       01  DTL-REC.\n"
+            "           05  DTL-TYPE  PIC X.\n"
+            "           05  DTL-AMT   PIC S9(7) COMP-3.\n"
+            "           05  DTL-NAME  PIC X(15).\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01  WS-LEN PIC 9(4) COMP.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           STOP RUN.\n"
+        )
+
+    @pytest.mark.parametrize("charset", [Charset.ASCII, Charset.EBCDIC])
+    def test_a_newline_separated_varying_file_cut_mid_field_round_trips(self, charset):
+        # Review of #447: the exemption keyed on the RDW, so the same
+        # RECORD VARYING records written variable-bare with a newline
+        # separator each decoded with an error on the cut field.
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        source = self._dtl_program("RECORD VARYING FROM 10 TO 20 DEPENDING ON WS-LEN")
+        opts = EncodingOptions(
+            charset=charset,
+            record_format=RecordFormat.VARIABLE_BARE,
+            record_separator=b"\n",
+        )
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(rows=6, seed=1).for_record_image()
+        ).generate_from_source(source, filename="m1.cbl")
+        decoder = RecordDecoder.from_copybook_source(
+            source, filename="m1.cbl", opts=opts
+        )
+        result = decoder.decode_bytes(dataset.to_records(opts))
+        assert [len(r.raw) for r in result.records] == dataset.declared_lengths
+        assert any(item.truncated for r in result.records for item in r.fields)
+        assert result.error_count == 0
+
+    def test_a_range_without_depending_on_never_cuts_a_record(self):
+        # Review of #447 with #458: RECORD CONTAINS n TO m without DEPENDING
+        # ON bounds the file; each record keeps its own 01's length, so a
+        # record that ends inside a field is still an error.
+        from cobolparser.generators.data.decoding import RecordDecoder
+
+        source = self._dtl_program("RECORD CONTAINS 10 TO 20 CHARACTERS")
+        decoder = RecordDecoder.from_copybook_source(
+            source, filename="m1.cbl", opts=VARIABLE
+        )
+        assert decoder.varying is not None and not decoder.varying.per_record
+        body = b"A\x00\x00\x00\x0cNAMEDEXXX"  # 14 bytes: DTL-NAME cut at 9
+        rdw = (len(body) + RDW_SIZE).to_bytes(2, "big") + b"\x00\x00"
+        result = decoder.decode_bytes(rdw + body)
+        name = result.records[0].fields[2]
+        assert name.truncated is True
+        assert name.error == "9 of 15 bytes: record ends inside the field"
+        assert result.error_count == 1
 
     def test_decode_auto_honours_an_explicit_record_varying(self):
         from cobolparser.generators.data.decoding import RecordDecoder

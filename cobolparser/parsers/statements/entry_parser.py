@@ -117,6 +117,11 @@ class EntryStatementParser(IStatementParser):
         # Consume USING keyword
         token_stream.consume()
 
+        # ``[BY] REFERENCE`` / ``[BY] VALUE`` set the passing mode for every
+        # operand after it until the next one, as on PROCEDURE DIVISION
+        # USING. REFERENCE is the default.
+        passing_mode = "REFERENCE"
+
         # Parse parameter list until period or next keyword
         while not token_stream.is_empty():
             # Skip whitespace tokens (including newlines)
@@ -139,8 +144,19 @@ class EntryStatementParser(IStatementParser):
             token_val_upper = next_token.value.upper() if next_token.value else ""
 
             # Stop if we hit a period or another keyword
-            if next_token.value == "." or token_val_upper in ("BY", "GIVING", "ON"):
+            if next_token.value == "." or token_val_upper in ("GIVING", "ON"):
                 break
+
+            # BY is a noise word before the mode; REFERENCE/VALUE switch it.
+            # Recording them as operands (or stopping at BY) dropped every
+            # parameter after the first BY phrase.
+            if token_val_upper == "BY":
+                token_stream.consume()
+                continue
+            if token_val_upper in ("REFERENCE", "VALUE"):
+                passing_mode = token_val_upper
+                token_stream.consume()
+                continue
 
             # No period/keyword before the next statement: stop rather than
             # swallow it as a bogus USING parameter.
@@ -157,9 +173,9 @@ class EntryStatementParser(IStatementParser):
             # Parse parameter name (should be identifier)
             if next_token.type.name in ("IDENTIFIER", "PICTURE"):
                 param_name = next_token.value
-                stmt.add_using_parameter(param_name)
+                stmt.add_using_parameter(param_name, passing_mode)
                 token_stream.consume()
             else:
                 # Try to consume as parameter anyway
-                stmt.add_using_parameter(next_token.value)
+                stmt.add_using_parameter(next_token.value, passing_mode)
                 token_stream.consume()

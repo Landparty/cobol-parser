@@ -69,8 +69,11 @@ class FlowNode:
     has_stop_run: bool = False
     has_goback: bool = False
     has_exit_program: bool = False
+    #: EXEC CICS RETURN / XCTL / ABEND: leaves the program, at least when
+    #: it succeeds (one with RESP / NOHANDLE may also fall through).
+    has_cics_exit: bool = False
     #: A SORT/MERGE ``RETURN sd-file`` (reads the next sorted record) --
-    #: not a program terminator, unlike the three flags above.
+    #: not a program terminator, unlike the four flags above.
     has_return: bool = False
     has_exit_section: bool = False
     has_exit_paragraph: bool = False
@@ -114,6 +117,8 @@ class FlowNode:
             result["has_goback"] = True
         if self.has_exit_program:
             result["has_exit_program"] = True
+        if self.has_cics_exit:
+            result["has_cics_exit"] = True
         if self.has_return:
             result["has_return"] = True
         if self.has_exit_section:

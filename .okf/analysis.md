@@ -145,7 +145,8 @@ the one immediately before it is itself already known to be reachable
 extending) and does not terminate per `_terminates`: any of its own
 top-level statements (not just the last one — see Copilot follow-up below)
 is a hard terminator (`STOP RUN` — not `STOP 'literal'`, which merely
-halts pending operator action; `GOBACK`; `EXIT PROGRAM`) or an
+halts pending operator action; `GOBACK`; `EXIT PROGRAM`; `EXEC CICS
+RETURN` / `XCTL` / `ABEND`, see `_cics.py` below) or an
 unconditional (non-`DEPENDING`) `GO TO`. The reachability gate matters:
 without it, a chain of paragraphs that are *all* themselves unreached
 would still credit each other purely for standing next to one another in
@@ -214,6 +215,31 @@ statement instead of just the last. Nested statements (inside an
 IF/EVALUATE arm) are still deliberately excluded — same rationale as
 before. Pinned by
 `test_terminator_earlier_in_paragraph_still_cuts_off_fall_through`.
+
+**Alterable `GO TO.` and `EXIT SECTION` are terminators too (issue #382,
+2026-10-14).** Both `_is_terminator`s (here and `program_flow/scanner.py`)
+required `stmt.target_paragraph`, so the operand-less alterable `GO TO.`
+(always jumps wherever an ALTER last pointed it) read as falling through;
+now any non-`DEPENDING` `GoStatement` terminates. `EXIT SECTION` passes
+control to the end of its section, so a paragraph whose first top-level
+transfer is `EXIT SECTION` (and that sits in a section -- outside one the
+compiler rejects it) never falls into the next paragraph
+(`_exited_section`, folded into `_terminates`). What happens after the end
+of the section is what happens off its last paragraph: in dead-code,
+`_collect_exit_section_ref` credits the procedure after the section's last
+member only when the section keeps running (in `_fallthrough_sources` or
+`_sections_entered_by_jump`), so a PERFORMed section returns and credits
+nothing. In program-flow the scanner records the procedure in
+`exit_section_procedures` and `build_fall_through_edges` draws a
+`FALL_THROUGH` edge to the section's successor only when the section is
+fallen into (an incoming fall-through edge, tracked in the same pass) or
+in `ProgramFlowAnalyzer._sections_entered` (entry point / ENTRY, a written
+GO TO from another section, or the target of any other `GOTO_EDGE_TYPES`
+edge -- ALTER, CICS HANDLE, and any handler branch added to that set later
+-- wherever it is written). That gate is
+stricter than the plain last-paragraph fall-through, which stays an
+over-approximation. Pinned by
+`tests/unit/analysis/test_exit_section_and_alterable_goto.py`.
 
 **A paragraph holding an ENTRY statement is always referenced (2026-08-11
 fix, audit finding #5).** `EntryStatement` marks an alternate external entry
@@ -743,7 +769,8 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   **strongly connected component** (`_components`, Tarjan over
   `_ESCAPE_EDGE_TYPES`), not the cycle alone: `HIGH` if no paragraph in the
   component has an edge leaving it or a program-terminating statement
-  (`has_stop_run`/`has_goback`/`has_exit_program` on the `FlowNode`),
+  (`has_stop_run`/`has_goback`/`has_exit_program`/`has_cics_exit` on the
+  `FlowNode`),
   `MEDIUM` otherwise. Per-cycle checking (before #393) let two cycles that
   share a paragraph each "escape" into the other, so an inescapable
   `P1 -> P2 -> P1` / `P1 -> P3 -> P1` pair read MEDIUM. `has_return` is a
@@ -1335,8 +1362,9 @@ item's own section. Needs `divisions/base.py`'s new `using_parameter_modes`
 metadata (name → `"VALUE"`/`"REFERENCE"`, alongside the existing
 `using_parameters` name list) to know the callee's declared mode; only
 resolvable for a static CALL to a program in the same source whose implicit
-entry interface was collected — an `ENTRY` statement's own USING carries no
-BY clause in COBOL, so a CALL to one is never checked for this. `BY CONTENT`
+entry interface was collected. A CALL to an `ENTRY` statement is never checked
+for this, even though `EntryStatement.parameter_modes` now records an ENTRY's
+own `USING [BY] VALUE/REFERENCE` modes (issue #402). `BY CONTENT`
 call arguments are never flagged either way (no USING counterpart to compare
 against).
 
@@ -2896,7 +2924,8 @@ caller would have to write it (a group item is described by level and length
 rather than a fabricated picture). `EntryPoint.kind` is `"procedure-division"`
 or `"entry-statement"`. `by_clause` is the callee's declared passing mode
 (`"REFERENCE"` / `"VALUE"`, from the division's `using_parameter_modes`
-metadata) on the primary entry, `None` on an ENTRY statement's operands;
+metadata) on the primary entry, and from `EntryStatement.parameter_modes` on
+an ENTRY statement's operands (issue #402; it used to be `None` there);
 `call_example()` writes a `BY VALUE` / `BY REFERENCE` phrase only where the
 mode changes (`CALL "E1" USING LK-A, BY VALUE LK-B RETURNING LK-R`). The
 RETURNING item counts as named, so it is never `unreferenced_linkage`.
@@ -3476,3 +3505,21 @@ and shares no code with the COBOL pipeline; it has its own OKF file:
   `5E`). The letter-led pattern bit the digit off, so `MOVE 1ST-NAME TO
   2ND-NAME` referenced `ST-NAME` / `ND-NAME`: both items unused, both
   names undefined in xref. Shared with `redundancy.py`'s clone renaming.
+
+
+## CICS terminators (issue #392, `_cics.py`)
+
+Two rules. `cics_exit_kind(stmt)`: the command is `RETURN`, `XCTL` or
+`ABEND`, which leave the program whenever they succeed. `cics_terminator_kind
+(stmt)`: the same, minus a `RETURN` / `XCTL` carrying `RESP`, `RESP2` or
+`NOHANDLE` (decision (a) on the issue: a failed command then continues at
+the next statement); `ABEND` always is one. Both `_is_terminator` copies
+(`dead_code.py`, `program_flow/scanner.py`) use `cics_terminator_kind`, so
+neither draws fall-through past such a paragraph. The scanner uses
+`cics_exit_kind` for `FlowNode.has_cics_exit`, `exit_points` and
+`exit_statement_kind` (`"EXEC CICS RETURN"`, ...), and
+`RecursionRiskAnalyzer._has_escape` counts `has_cics_exit` as a way out --
+so a retry loop ending in `RETURN TRANSID(...) RESP(...)`, the usual shop
+form, is `MEDIUM` like the GOBACK equivalent, not a `HIGH` lint error
+(review of PR #453: applying the RESP exemption to the escape flag too left
+that loop HIGH). Pinned in `tests/unit/analysis/test_cics_terminators.py`.

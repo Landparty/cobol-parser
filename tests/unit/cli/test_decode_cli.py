@@ -248,6 +248,35 @@ def test_strict_exits_non_zero_on_a_mismatched_file(sample, capsys, tmp_path):
     assert excinfo.value.code == 1
 
 
+def test_strict_exits_non_zero_on_a_record_cut_inside_a_field(tmp_path, capsys):
+    # Regression (#358): the cut field decoded clean and --strict exited 0.
+    copybook = tmp_path / "R.cpy"
+    copybook.write_text(
+        "       01  R.\n           05  K PIC 9(2).\n"
+        "           05  A PIC X(4).\n           05  N PIC 9(4).\n",
+        encoding="utf-8",
+    )
+    body = b"01ABCD001"
+    data = tmp_path / "VN.DAT"
+    data.write_bytes((len(body) + 4).to_bytes(2, "big") + b"\x00\x00" + body)
+    with pytest.raises(SystemExit) as excinfo:
+        _run(
+            [
+                "decode",
+                str(data),
+                "--copybook",
+                str(copybook),
+                "--record-format",
+                "variable",
+                "--strict",
+            ]
+        )
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert "did not decode cleanly" in captured.err
+    assert captured.out.splitlines()[1] == "1,ABCD,"
+
+
 def test_decoding_without_a_data_file_fails_cleanly(tmp_path, capsys):
     copybook = tmp_path / "CUST.cpy"
     copybook.write_text(COPYBOOK, encoding="utf-8")

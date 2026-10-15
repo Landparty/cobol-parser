@@ -8,6 +8,14 @@ timestamp: 2026-10-14T00:00:00Z
 
 # Overview
 
+2026-10-14: `tests/unit/analysis/test_exit_section_and_alterable_goto.py`
+(11 tests, #382) pins the alterable `GO TO.` and `EXIT SECTION` as
+terminators in dead-code and program-flow: a PERFORMed section returns at
+EXIT SECTION, one fallen into, gone to from another section or entered by a
+CICS HANDLE branch runs on to the next section, a conditional EXIT SECTION still falls through, and
+`EXIT SECTION.` right after a section header is no longer a section named
+EXIT.
+
 2026-10-14: `tests/regression/test_evaluate_word_operator_when.py` (38
 tests, #387) pins EVALUATE WHEN phrases with relational words
 (`GREATER THAN`, `EQUAL TO`, `OR EQUAL`), class tests and sign tests as
@@ -30,6 +38,14 @@ kept). Four selector-shape tests now expect the additive `"quoted": True`.
 `tests/unit/analysis/test_ast_diff.py` adds a parametrized test that
 `WHEN SPACES` -> `WHEN 'SPACES'` and `WHEN WS-B` -> `WHEN 'WS-B'` each diff
 as one `condition-changed`.
+
+2026-10-14 (issue #392): new `tests/unit/analysis/test_cics_terminators.py`
+(36 tests): `EXEC CICS RETURN` / `XCTL` / `ABEND` end a paragraph for
+dead-code (later paragraphs dead), program-flow (no `FALL_THROUGH`,
+`has_cics_exit`, exit point) and recursion-check (a RETURN TRANSID retry
+loop is MEDIUM with an escape, not a HIGH lint error); a RETURN / XCTL with
+`RESP` / `RESP2` / `NOHANDLE` still falls through but stays an exit point
+and a loop escape (the RESP retry loop is MEDIUM too), ABEND never does.
 
 2026-10-14: +9 in `tests/unit/analysis/test_dead_code.py`'s new
 `TestTransitiveDeadCode` (issue #384): paragraphs PERFORMed / GONE TO only
@@ -1443,3 +1459,11 @@ SORTs gained a key, since a keyless file SORT now warns.
 `CICS_NO_RESP_HANDLING`, a narrower `IGNORE CONDITION NOTFND` goes to
 `unchecked`, a bare `HANDLE CONDITION ERROR` afterwards restores the finding,
 and `PUSH HANDLE` suspends an ignore like any other handler.
+## 2026-10-14 (issue #402)
+
+`tests/regression/test_optional_keyword_forms_402.py` pins the four optional-
+keyword forms: `OCCURS n TO UNBOUNDED`, FD `RECORD VARYING n TO m` without
+FROM, `ENTRY ... USING [BY] REFERENCE/VALUE` (operands and
+`parameter_modes`, plus the signature's `by_clause`), and `INITIALIZE ...
+FILLER` without WITH. `test_program_signature.py::test_by_clause_is_set_and_rendered_where_the_mode_changes`
+now expects an ENTRY operand's `by_clause` to be `"REFERENCE"`, not None.
