@@ -30,6 +30,13 @@ single `Condition` selectors (a lone `WHEN ZERO` stays figurative), the
 logical-only `operator: "OR"`, and what business-rules / xref /
 ConstraintExtractor / complexity read from them.
 
+2026-10-14: +6 in `tests/unit/analysis/test_unused_variables.py`'s new
+`TestObjectOrientedUnitData` (issue #379): FACTORY / OBJECT data used only
+by that paragraph's METHODs is not reported unused, data no method touches
+still is, an OBJECT method's reference does not reach FACTORY data, and a
+method's CALL USING / MOVE CORRESPONDING marks the OBJECT group's fields. One
+test runs `tests/samples/enterprise/OOCOBOL.cbl`. See `analysis.md`.
+
 2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
 #377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
 read, no phantom paragraph appears, and dead-code / program-flow /

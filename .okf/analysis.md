@@ -582,6 +582,21 @@ options` (option keyword -> parenthesized argument text) and
 inside one of these statements is no longer falsely reported unused. See
 `TestExecCicsAndImsArguments` in `test_unused_variables.py`.
 
+**OO FACTORY / OBJECT data is shared with its METHODs (issue #379,
+2026-10-14).** A contained unit's references normally count only for the
+container's GLOBAL items. In IBM OO COBOL, though, the data of a FACTORY or
+OBJECT paragraph is visible to every METHOD in it with no GLOBAL clause, so
+when `ast.unit_kind` is in `_OO_DATA_OWNERS` every item is matched against
+`_nested_referenced_names(ast)` too. Instance data that only methods touch
+(all of it, in practice) is no longer reported unused. Factory and object
+scopes stay separate: an OBJECT method's reference does not use a FACTORY
+item of the same name. The whole-group rules (`_whole_group_references`:
+CALL USING, XML/JSON GENERATE/PARSE) and `_corresponding_pairs` read the
+methods' statements too (`_all_contained_units`), since the FACTORY/OBJECT
+unit has none of its own. Known gap, shared with the GLOBAL path: a
+method-local item that shadows an instance item still credits the instance
+item. See `TestObjectOrientedUnitData`.
+
 CLI: `unused-variables` subcommand — see [cli.md](cli.md).
 
 ## ProgramFlowAnalyzer
