@@ -65,6 +65,7 @@ _BINDINGS: dict[str, Callable[[ProjectConfig], Any]] = {
     "copybook_path": lambda c: list(c.copybook_path) or None,
     "callee_path": lambda c: list(c.callee_path) or None,
     "source_format": lambda c: c.source_format,
+    "debug_lines": lambda c: c.debug_lines,
     "dialect": lambda c: c.dialect,
     "error_recovery": lambda c: c.error_recovery,
     "seed": lambda c: c.seed,

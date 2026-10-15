@@ -1,267 +1,252 @@
-"""Regression tests for issue #402: optional-keyword forms that dropped data.
+"""Optional-keyword forms that used to lose data (issue #405).
 
-1. ``OCCURS n TO UNBOUNDED [TIMES] DEPENDING ON`` -- read as one occurrence.
-2. ``RECORD IS VARYING [IN SIZE] n TO m`` without FROM -- minimum lost.
-3. ``ENTRY ... USING BY REFERENCE / BY VALUE`` -- parameters dropped.
-4. ``INITIALIZE ... FILLER`` without WITH -- FILLER read as a target.
+Each form leaves out a keyword the IBM Enterprise COBOL diagram does not
+underline, and before 2026-10-14 the parser dropped information as a result:
+
+* ``XML PARSE x PROCEDURE IS p`` (PROCESSING left out) kept ``PROCEDURE`` and
+  ``p`` as operands, so dead-code reported the processing procedure as dead.
+* SORT/MERGE: a bare ``DUPLICATES`` and a bare ``SEQUENCE alphabet`` were
+  ignored or folded into the key list, and ``KEY IS k`` dropped every key
+  without a diagnostic.
+* SPECIAL-NAMES: ``C01 TOP-PAGE`` / ``UPSI-0 ON SW0-ON`` (IS left out) and
+  ``SYMBOLIC NUL 1`` (IS/ARE left out) left no entry at all.
 """
 
-from __future__ import annotations
+import pytest
 
-from typing import Any
+from cobolparser import DeadCodeAnalyzer, parse_cobol
+from cobolparser.models.statements import (
+    MergeStatement,
+    SortStatement,
+    XmlJsonStatement,
+)
 
-from cobolparser import parse_cobol
-from cobolparser.analysis.program_signature import ProgramSignatureExtractor
 
-
-def _program(
-    *,
-    file_control: str = "",
-    fd: str = "",
-    working: str = "",
-    linkage: str = "",
-    procedure: str = "",
-) -> str:
-    return f"""       IDENTIFICATION DIVISION.
-       PROGRAM-ID. T402.
+def _program(special_names: str = "", procedure: str = "CONTINUE") -> str:
+    # Fixed format: a long statement is split at "|" so nothing reaches
+    # column 73.
+    procedure = procedure.replace("|", "\n               ")
+    return f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. OPTKW.
        ENVIRONMENT DIVISION.
-       INPUT-OUTPUT SECTION.
-       FILE-CONTROL.
-{file_control}
+       CONFIGURATION SECTION.
+       SPECIAL-NAMES.
+           {special_names or "DECIMAL-POINT IS COMMA"}.
        DATA DIVISION.
-       FILE SECTION.
-{fd}
        WORKING-STORAGE SECTION.
-       01 N  PIC 9(4).
-       01 RL PIC 9(4).
-{working}
-       LINKAGE SECTION.
-       01 X1 PIC X.
-       01 X2 PIC X.
-       01 A  PIC S9(4) COMP.
-       01 B  PIC S9(4) COMP.
-{linkage}
+       01  X1                  PIC X(10).
        PROCEDURE DIVISION.
-{procedure}
-           GOBACK.
+       MAIN-PARA.
+           {procedure}.
+           STOP RUN.
+       XP.
+           CONTINUE.
 """
 
 
-def _find(node: Any, name: str) -> dict[str, Any] | None:
-    if isinstance(node, dict):
-        if node.get("name") == name and "level" in node:
-            return node
-        for value in node.values():
-            found = _find(value, name)
-            if found is not None:
-                return found
-    elif isinstance(node, list):
-        for value in node:
-            found = _find(value, name)
-            if found is not None:
-                return found
-    return None
+def _only(result, cls):
+    found = [s for s in result.ast.get_all_statements() if isinstance(s, cls)]
+    assert len(found) == 1, found
+    return found[0]
 
 
-def _find_key(node: Any, key: str) -> Any:
-    if isinstance(node, dict):
-        if isinstance(node.get(key), dict):
-            return node[key]
-        children = list(node.values())
-    elif isinstance(node, list):
-        children = node
-    else:
-        return None
-    for value in children:
-        found = _find_key(value, key)
-        if found is not None:
-            return found
-    return None
+def _special_names(result) -> dict:
+    for div in result.ast.children:
+        if getattr(div, "division_name", None) == "ENVIRONMENT":
+            section = div.get_section_by_name("CONFIGURATION")
+            return (section.get_metadata("special_names") if section else None) or {}
+    return {}
 
 
-# ---------------------------------------------------------------- OCCURS
+# --- XML PARSE --------------------------------------------------------------
 
 
-class TestOccursToUnbounded:
-    def _occurs(self, clause: str, name: str = "Z") -> tuple[dict[str, Any], Any]:
-        result = parse_cobol(
-            _program(linkage=f"       01 G.\n           05 {name} PIC X {clause}")
+@pytest.mark.parametrize(
+    "keywords", ["PROCEDURE IS", "PROCEDURE", "PROCESSING PROCEDURE"]
+)
+def test_xml_parse_procedure_with_or_without_processing(keywords: str) -> None:
+    result = parse_cobol(
+        _program(procedure=f"XML PARSE X1 {keywords} XP|ON EXCEPTION CONTINUE END-XML")
+    )
+    assert result.success, result.errors
+    stmt = _only(result, XmlJsonStatement)
+    assert stmt.to_dict()["processing_procedure"] == "XP"
+    assert "PROCEDURE" not in stmt.operands
+    assert "XP" not in stmt.operands
+
+
+def test_xml_parse_without_processing_procedure_is_not_dead() -> None:
+    result = parse_cobol(
+        _program(procedure="XML PARSE X1 PROCEDURE IS XP THRU XP END-XML")
+    )
+    dead = {item.name for item in DeadCodeAnalyzer().analyze(result.ast).dead_items}
+    assert "XP" not in dead
+
+
+# --- SORT / MERGE -----------------------------------------------------------
+
+
+def test_sort_bare_duplicates() -> None:
+    result = parse_cobol(
+        _program(procedure="SORT SF ASCENDING SK1 DUPLICATES USING F1 GIVING F2")
+    )
+    stmt = _only(result, SortStatement)
+    assert stmt.duplicates_in_order is True
+    assert stmt.keys == [{"field": "SK1", "order": "ASCENDING"}]
+    assert stmt.using_files == ["F1"] and stmt.giving_files == ["F2"]
+
+
+def test_sort_with_duplicates_in_order_still_works() -> None:
+    result = parse_cobol(
+        _program(
+            procedure="SORT SF ON ASCENDING KEY SK1 WITH DUPLICATES IN ORDER"
+            "|USING F1 GIVING F2"
         )
-        item = _find(result.ast.to_dict(), name)
-        assert item is not None
-        return item, result
+    )
+    stmt = _only(result, SortStatement)
+    assert stmt.duplicates_in_order is True
+    assert stmt.using_files == ["F1"]
 
-    def test_to_unbounded_times_depending_on(self) -> None:
-        item, result = self._occurs("OCCURS 1 TO UNBOUNDED TIMES DEPENDING ON N.")
-        assert result.warnings == []
-        occurs = item["occurs_clause"]
-        assert occurs["min_times"] == 1
-        assert occurs["max_times"] is None
-        assert occurs["depending_on"] == "N"
-        assert occurs["is_unbounded"] is True
 
-    def test_to_unbounded_without_times_keeps_minimum(self) -> None:
-        item, result = self._occurs("OCCURS 3 TO UNBOUNDED DEPENDING ON N.")
-        assert result.warnings == []
-        occurs = item["occurs_clause"]
-        assert occurs["min_times"] == 3
-        assert occurs["max_times"] is None
-        assert occurs["is_unbounded"] is True
+@pytest.mark.parametrize(
+    "phrase", ["SEQUENCE NATIVE", "SEQUENCE IS NATIVE", "COLLATING SEQUENCE NATIVE"]
+)
+def test_sort_collating_sequence_with_or_without_collating(phrase: str) -> None:
+    result = parse_cobol(
+        _program(procedure=f"SORT SF ASCENDING SK1 {phrase}|USING F1 GIVING F2")
+    )
+    stmt = _only(result, SortStatement)
+    assert stmt.collating_sequence == "NATIVE"
+    assert stmt.keys == [{"field": "SK1", "order": "ASCENDING"}]
+    assert stmt.using_files == ["F1"]
 
-    def test_unbounded_on_continuation_line(self) -> None:
-        item, result = self._occurs(
-            "OCCURS 2 TO\n                 UNBOUNDED DEPENDING ON N."
+
+def test_merge_bare_sequence() -> None:
+    result = parse_cobol(
+        _program(
+            procedure="MERGE SF ASCENDING SK1 SEQUENCE NATIVE|USING F1 F3 GIVING F2"
         )
-        assert result.warnings == []
-        assert item["occurs_clause"]["min_times"] == 2
-        assert item["occurs_clause"]["max_times"] is None
+    )
+    stmt = _only(result, MergeStatement)
+    assert stmt.collating_sequence == "NATIVE"
+    assert stmt.keys == [{"field": "SK1", "order": "ASCENDING"}]
+    assert stmt.using_files == ["F1", "F3"]
 
-    def test_bounded_to_form_unchanged(self) -> None:
-        item, _ = self._occurs("OCCURS 1 TO 5 TIMES DEPENDING ON N.")
-        occurs = item["occurs_clause"]
-        assert (occurs["min_times"], occurs["max_times"]) == (1, 5)
-        assert "is_unbounded" not in occurs
 
-    def test_following_item_still_parsed(self) -> None:
-        result = parse_cobol(
-            _program(
-                linkage=(
-                    "       01 G.\n"
-                    "           05 Z PIC X OCCURS 1 TO UNBOUNDED DEPENDING ON N.\n"
-                    "       01 AFTER-Z PIC X."
-                )
-            )
+def test_sort_key_is() -> None:
+    result = parse_cobol(
+        _program(
+            procedure="SORT SF ON ASCENDING KEY IS SK1|ON DESCENDING KEY IS SK2"
+            "|USING F1 GIVING F2"
         )
-        assert result.warnings == []
-        assert _find(result.ast.to_dict(), "AFTER-Z") is not None
+    )
+    stmt = _only(result, SortStatement)
+    assert stmt.keys == [
+        {"field": "SK1", "order": "ASCENDING"},
+        {"field": "SK2", "order": "DESCENDING"},
+    ]
+    assert not any("no sort keys" in w for w in result.warnings)
 
 
-# ---------------------------------------------------------- RECORD VARYING
+def test_merge_key_is() -> None:
+    result = parse_cobol(
+        _program(procedure="MERGE SF ON ASCENDING KEY IS SK1 USING F1 F3 GIVING F2")
+    )
+    assert _only(result, MergeStatement).keys == [
+        {"field": "SK1", "order": "ASCENDING"}
+    ]
 
 
-class TestRecordVaryingWithoutFrom:
-    def _record(self, clause: str) -> dict[str, Any]:
-        result = parse_cobol(
-            _program(
-                file_control="           SELECT F1 ASSIGN TO 'F1'.",
-                fd=f"       FD F1\n           {clause}.\n       01 F1R PIC X(30).",
-            )
-        )
-        assert result.warnings == []
-        record = _find_key(result.ast.to_dict(), "record")
-        assert isinstance(record, dict) and "varying" in record
-        return record
-
-    def test_in_size_without_from(self) -> None:
-        record = self._record(
-            "RECORD IS VARYING IN SIZE 10 TO 30\n"
-            "           CHARACTERS DEPENDING ON RL"
-        )
-        assert record == {
-            "varying": True,
-            "min": 10,
-            "max": 30,
-            "depending_on": "RL",
-        }
-
-    def test_size_without_in_or_from(self) -> None:
-        record = self._record("RECORD VARYING SIZE 10 TO 30 DEPENDING RL")
-        assert (record["min"], record["max"]) == (10, 30)
-
-    def test_with_from_unchanged(self) -> None:
-        record = self._record("RECORD IS VARYING IN SIZE FROM 10 TO 30")
-        assert (record["min"], record["max"]) == (10, 30)
-
-    def test_to_only_still_has_no_minimum(self) -> None:
-        record = self._record("RECORD IS VARYING IN SIZE TO 80")
-        assert (record["min"], record["max"]) == (None, 80)
+@pytest.mark.parametrize(
+    "procedure",
+    ["SORT SF USING F1 GIVING F2", "MERGE SF USING F1 F3 GIVING F2"],
+)
+def test_file_sort_or_merge_without_keys_warns(procedure: str) -> None:
+    result = parse_cobol(_program(procedure=procedure))
+    assert any("no sort keys were recorded" in w for w in result.warnings)
 
 
-# ------------------------------------------------------------------ ENTRY
+def test_table_sort_without_keys_does_not_warn() -> None:
+    # A table SORT may omit its keys (they come from the OCCURS KEY clause).
+    result = parse_cobol(_program(procedure="SORT X1"))
+    assert not any("no sort keys" in w for w in result.warnings)
 
 
-class TestEntryUsingPassingModes:
-    def _entry(self, statement: str) -> tuple[Any, Any]:
-        result = parse_cobol(_program(procedure=f"           {statement}"))
-        entries = result.ast.find_all_by_type("EntryStatement")
-        assert len(entries) == 1
-        return entries[0], result
-
-    def test_by_reference(self) -> None:
-        entry, result = self._entry("ENTRY 'E1' USING BY REFERENCE X1 X2.")
-        assert result.warnings == []
-        assert entry.using_parameters == ["X1", "X2"]
-        assert entry.parameter_modes == ["REFERENCE", "REFERENCE"]
-
-    def test_by_value(self) -> None:
-        entry, result = self._entry("ENTRY 'E1' USING BY VALUE A B.")
-        assert result.warnings == []
-        assert entry.using_parameters == ["A", "B"]
-        assert entry.parameter_modes == ["VALUE", "VALUE"]
-
-    def test_value_without_by_is_not_a_parameter(self) -> None:
-        entry, _ = self._entry("ENTRY 'E1' USING VALUE A B.")
-        assert entry.using_parameters == ["A", "B"]
-        assert entry.parameter_modes == ["VALUE", "VALUE"]
-        assert "VALUE" not in entry.operands
-
-    def test_mode_switches_mid_list(self) -> None:
-        entry, result = self._entry("ENTRY 'E1' USING X1 BY VALUE A B BY REFERENCE X2.")
-        assert result.warnings == []
-        assert entry.using_parameters == ["X1", "A", "B", "X2"]
-        assert entry.parameter_modes == ["REFERENCE", "VALUE", "VALUE", "REFERENCE"]
-
-    def test_plain_using_defaults_to_reference(self) -> None:
-        entry, _ = self._entry("ENTRY 'DLITCBL' USING X1 X2.")
-        assert entry.using_parameters == ["X1", "X2"]
-        assert entry.parameter_modes == ["REFERENCE", "REFERENCE"]
-        assert entry.to_dict()["parameter_modes"] == ["REFERENCE", "REFERENCE"]
-
-    def test_program_signature_carries_entry_modes(self) -> None:
-        result = parse_cobol(
-            _program(procedure="           ENTRY 'E1' USING X1 BY VALUE A.")
-        )
-        signature = ProgramSignatureExtractor().analyze(result.ast)
-        entry = next(e for e in signature.entry_points if e.name == "E1")
-        assert [(p.name, p.by_clause) for p in entry.parameters] == [
-            ("X1", "REFERENCE"),
-            ("A", "VALUE"),
-        ]
+# --- SPECIAL-NAMES ----------------------------------------------------------
 
 
-# ------------------------------------------------------------- INITIALIZE
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("C01 TOP-PAGE", [{"environment_name": "C01", "mnemonic_name": "TOP-PAGE"}]),
+        ("SYSOUT PRT", [{"environment_name": "SYSOUT", "mnemonic_name": "PRT"}]),
+        (
+            "UPSI-0 SW0 ON SW0-ON OFF SW0-OFF",
+            [
+                {
+                    "environment_name": "UPSI-0",
+                    "mnemonic_name": "SW0",
+                    "on_status": "SW0-ON",
+                    "off_status": "SW0-OFF",
+                }
+            ],
+        ),
+        ("UPSI-0 ON SW0-ON", [{"environment_name": "UPSI-0", "on_status": "SW0-ON"}]),
+        (
+            "UPSI-0 OFF SW0-OFF",
+            [{"environment_name": "UPSI-0", "off_status": "SW0-OFF"}],
+        ),
+        (
+            "C01 IS TOP-PAGE C02 P2",
+            [
+                {"environment_name": "C01", "mnemonic_name": "TOP-PAGE"},
+                {"environment_name": "C02", "mnemonic_name": "P2"},
+            ],
+        ),
+        (
+            "C01 TOP-PAGE CONSOLE IS CRT",
+            [
+                {"environment_name": "C01", "mnemonic_name": "TOP-PAGE"},
+                {"environment_name": "CONSOLE", "mnemonic_name": "CRT"},
+            ],
+        ),
+    ],
+)
+def test_mnemonic_entry_without_is(body: str, expected: list[dict]) -> None:
+    result = parse_cobol(_program(special_names=body))
+    assert result.success, result.errors
+    assert _special_names(result).get("mnemonic_definitions") == expected
 
 
-class TestInitializeBareFiller:
-    def _initialize(self, statement: str) -> tuple[Any, Any]:
-        result = parse_cobol(
-            _program(
-                working="       01 W1 PIC X.\n       01 W2 PIC X.",
-                procedure=f"           {statement}",
-            )
-        )
-        stmts = result.ast.find_all_by_type("InitializeStatement")
-        assert len(stmts) == 1
-        return stmts[0], result
+def test_unknown_word_without_is_is_not_a_mnemonic_entry() -> None:
+    # Only a known environment-name can start an entry with IS left out.
+    result = parse_cobol(_program(special_names="MY-DEVICE PRT"))
+    assert "mnemonic_definitions" not in _special_names(result)
 
-    def test_filler_without_with(self) -> None:
-        stmt, result = self._initialize("INITIALIZE W1 FILLER ALL TO VALUE.")
-        assert result.warnings == []
-        assert stmt.targets == ["W1"]
-        assert stmt.with_filler is True
-        assert stmt.to_value_category == "ALL"
 
-    def test_filler_without_with_after_several_targets(self) -> None:
-        stmt, _ = self._initialize("INITIALIZE W1 W2 FILLER.")
-        assert stmt.targets == ["W1", "W2"]
-        assert stmt.with_filler is True
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("SYMBOLIC CHARACTERS NUL 1", [("NUL", 1, None)]),
+        ("SYMBOLIC NUL SOH 1 2", [("NUL", 1, None), ("SOH", 2, None)]),
+        (
+            "ALPHABET AL IS EBCDIC SYMBOLIC NUL 1 IN AL",
+            [("NUL", 1, "AL")],
+        ),
+        ("SYMBOLIC NUL 1 SOH IS 2", [("NUL", 1, None), ("SOH", 2, None)]),
+    ],
+)
+def test_symbolic_characters_without_is(body: str, expected: list[tuple]) -> None:
+    result = parse_cobol(_program(special_names=body))
+    entries = _special_names(result).get("symbolic_characters", [])
+    assert [(e["name"], e["ordinal"], e["alphabet"]) for e in entries] == expected
 
-    def test_with_filler_unchanged(self) -> None:
-        stmt, _ = self._initialize("INITIALIZE W1 WITH FILLER ALL TO VALUE.")
-        assert stmt.targets == ["W1"]
-        assert stmt.with_filler is True
 
-    def test_no_filler(self) -> None:
-        stmt, _ = self._initialize("INITIALIZE W1 W2.")
-        assert stmt.targets == ["W1", "W2"]
-        assert stmt.with_filler is False
+def test_symbolic_without_is_followed_by_mnemonic_entry() -> None:
+    result = parse_cobol(_program(special_names="SYMBOLIC NUL 1 C01 TOP-PAGE"))
+    names = _special_names(result)
+    assert [e["name"] for e in names["symbolic_characters"]] == ["NUL"]
+    assert names["mnemonic_definitions"] == [
+        {"environment_name": "C01", "mnemonic_name": "TOP-PAGE"}
+    ]

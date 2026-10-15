@@ -256,6 +256,67 @@ class TestAlphanumeric:
         assert raw == b"- 12.34"
 
 
+class TestHexLiteralBytes:
+    """Issue #319: ``VALUE X'C1C2'`` names the bytes C1 C2, whatever the
+    record charset.  The cell carries them as Latin-1 text, and re-encoding
+    that text wrote ``3f 3f`` (ASCII, ``?`` replacement) or ``65 62``
+    (EBCDIC) instead."""
+
+    COPYBOOK = (
+        "       01  HX-REC.\n"
+        "           05  EOR-MARK  PIC X(1) VALUE X'FF'.\n"
+        "           05  CRLF      PIC X(2) VALUE X'0D25'.\n"
+        "           05  EBC-AB    PIC X(2) VALUE X'C1C2'.\n"
+    )
+
+    @pytest.mark.parametrize("opts", [EncodingOptions(), EBCDIC])
+    def test_value_clause_bytes_are_written_verbatim(self, opts):
+        from cobolparser.generators.data.copybook import CopybookDataGenerator
+
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(rows=1, seed=1).for_record_image()
+        ).generate_from_source(self.COPYBOOK)
+        assert dataset.to_records(opts) == bytes.fromhex("ff0d25c1c2")
+
+    @pytest.mark.parametrize(
+        ("opts", "pad"), [(EncodingOptions(), b" "), (EBCDIC, b"\x40")]
+    )
+    def test_short_literal_is_padded_with_the_charset_space(self, opts, pad):
+        spec = one_spec("F PIC X(4) VALUE X'FF00'.")
+        assert spec.literal_bytes == {"\xff\x00": b"\xff\x00"}
+        assert encode_field(spec, "\xff\x00", opts) == b"\xff\x00" + pad * 2
+
+    def test_justified_literal_is_padded_on_the_left(self):
+        spec = one_spec("F PIC X(3) JUSTIFIED RIGHT VALUE X'FF'.")
+        assert encode_field(spec, "\xff", EBCDIC) == b"\x40\x40\xff"
+
+    def test_oversized_literal_is_cut_to_the_field(self):
+        spec = one_spec("F PIC X(2) VALUE X'C1C2C3'.")
+        assert spec.literal_bytes == {"\xc1\xc2": b"\xc1\xc2"}
+        assert encode_field(spec, "\xc1\xc2", EBCDIC) == b"\xc1\xc2"
+
+    @pytest.mark.parametrize("opts", [EncodingOptions(), EBCDIC])
+    def test_level_88_hex_witness_satisfies_its_condition(self, opts):
+        from cobolparser.generators.data.copybook import CopybookDataGenerator
+
+        dataset = CopybookDataGenerator(
+            DataGeneratorOptions(rows=3, seed=4).for_record_image()
+        ).generate_from_source(
+            "       01  R.\n"
+            "           05  FLAG  PIC X(1).\n"
+            "               88  IS-EOF  VALUE X'FF'.\n"
+        )
+        assert dataset.to_records(opts) == b"\xff" * 3
+
+    def test_other_text_in_the_field_is_still_charset_encoded(self):
+        spec = one_spec("F PIC X(2) VALUE X'C1C2'.")
+        assert encode_field(spec, "AB", EBCDIC) == b"\xc1\xc2"
+        assert encode_field(spec, "AB", EncodingOptions()) == b"AB"
+
+    def test_quoted_literal_has_no_literal_bytes(self):
+        assert one_spec("F PIC X(2) VALUE 'AB'.").literal_bytes == {}
+
+
 class TestJustifiedRight:
     """``JUSTIFIED RIGHT`` reverses the alphanumeric MOVE: pad on the left,
     truncate on the left.  The encoder used to ignore the clause and write

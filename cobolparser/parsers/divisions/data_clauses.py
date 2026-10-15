@@ -397,6 +397,7 @@ class DataItemClauseParser:
                 self._skip_newlines(token_stream)
                 token = token_stream.peek()
 
+        implicit_filler = False
         if (
             report_group
             and token
@@ -414,9 +415,14 @@ class DataItemClauseParser:
         else:
             # Anonymous data item; ``location`` is always a SourceLocation.
             name = f"ANONYMOUS-{level}-{location.line}"
+            # Outside a report group, an entry with no data-name is FILLER
+            # with the word omitted (``05 PIC X(3).``): set below.
+            implicit_filler = not report_group
 
         # Create data item
         data_item = CobolDataItem(name, level, location)
+        if implicit_filler:
+            data_item.is_filler = True
 
         # Fast path: drive the common-clause loop in Cython. VALUE and
         # USAGE clauses call back into the Python helpers below via

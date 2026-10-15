@@ -115,8 +115,13 @@ class FileDescriptionClauseParser:
             value_upper = t.value.upper() if t.value else ""
             # "RECORD" is also the second word of the LABEL RECORD / DATA RECORD
             # clauses; don't let it start a fresh RECORD clause in that context.
+            # Only the RECORD *immediately* after LABEL/DATA is that second word:
+            # a later one ("LABEL RECORDS ARE STANDARD RECORD CONTAINS 30") is
+            # a RECORD CONTAINS clause of its own.
             starts_clause = value_upper in _FD_CLAUSE_STARTS and not (
-                value_upper == "RECORD" and current_key in ("LABEL", "DATA")
+                value_upper == "RECORD"
+                and current_key in ("LABEL", "DATA")
+                and not raw[current_key]
             )
             if starts_clause:
                 current_key = value_upper
