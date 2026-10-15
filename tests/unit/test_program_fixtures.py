@@ -121,7 +121,12 @@ class TestBundleAssembly:
         # not tied to any one boundary (OPT-FILE has no READ/WRITE/OPEN/CLOSE
         # of its own here), so it does not count against coverage above.
         assert bundle.unresolved == [
-            "file 'OPT-FILE' has a SELECT but no matching FD/SD record"
+            "file 'OPT-FILE' has a SELECT but no matching FD/SD record",
+            # SEQ-FILE's two 01 records share one record area (issue #364).
+            "READ SEQ-FILE: the FD has 2 01 records sharing one record area; "
+            "rows are generated through one of them per scenario (the first "
+            "unless the scenario pins fields of another) -- alternate view(s) "
+            "not generated: SEQ-ALTERNATE",
         ]
 
 
@@ -225,7 +230,8 @@ class TestWriteCsvDir:
             assert "SEQ-FILE.csv" in csv_files
             with open(os.path.join(scenario_dir, "SEQ-FILE.csv")) as handle:
                 lines = handle.read().splitlines()
-            assert lines[0] == "SEQ-RECORD,SEQ-ALTERNATE"
+            # One record of the FD, not both joined (issue #364).
+            assert lines[0] == "SEQ-RECORD"
             assert len(lines) == 1 + 10  # header + default rows=10
 
     def test_manifest_sequence_stays_a_list_not_a_hint_string(self):
@@ -1342,3 +1348,128 @@ class TestFailurePathExpectations:
     def test_empty_input_sequential_read_still_counts_the_eof_call(self):
         scenarios = _all_mode_scenarios(_OPEN_CHECK_SOURCE)
         assert _count_by_ref(scenarios["empty input"])["READ:IN-FILE"] == 1
+
+
+# -- issue #364: several 01 records under one FD ---------------------------
+
+
+def _multi_record_program(condition: str, *, shared_name: bool = False) -> str:
+    hdr_type = "REC-TYPE" if shared_name else "HDR-TYPE"
+    dtl_type = "REC-TYPE" if shared_name else "DTL-TYPE"
+    return f"""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. MULTI.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-FILE ASSIGN TO INFILE
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  IN-FILE.
+       01  HDR-REC.
+           05  {hdr_type}    PIC X.
+           05  HDR-DATE    PIC 9(8).
+       01  DTL-REC.
+           05  {dtl_type}    PIC X.
+           05  DTL-AMT     PIC S9(5)V99 COMP-3.
+           05  DTL-NAME    PIC X(20).
+       WORKING-STORAGE SECTION.
+       01  WS-FS           PIC XX.
+       01  WS-TOTAL        PIC S9(7)V99 VALUE 0.
+       01  WS-EOF          PIC X VALUE 'N'.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT IN-FILE
+           PERFORM UNTIL WS-EOF = 'Y'
+               READ IN-FILE
+                   AT END MOVE 'Y' TO WS-EOF
+                   NOT AT END
+                       IF {condition}
+                           ADD DTL-AMT TO WS-TOTAL
+                       END-IF
+               END-READ
+           END-PERFORM
+           CLOSE IN-FILE
+           DISPLAY WS-TOTAL
+           STOP RUN.
+"""
+
+
+def _read_fixtures(scenario):
+    return [f for f in scenario.fixtures if f.ref.category == "READ"]
+
+
+class TestMultipleRecordsUnderOneFd:
+    """Issue #364: an FD's 01 records are views of ONE record area, so a
+    row is generated through one of them, never their fields joined."""
+
+    def test_rows_use_one_record_never_both(self):
+        bundle = _bundle_for(_multi_record_program("HDR-TYPE = 'D'"))
+        for scenario in bundle.scenarios:
+            for fixture in _read_fixtures(scenario):
+                columns = {spec.column for spec in fixture.layout}
+                assert columns == {"HDR-TYPE", "HDR-DATE"}, scenario.name
+                for row in fixture.sequence:
+                    assert set(row) == columns
+        assert list(bundle.layouts) == ["HDR-REC"]
+        assert [s.column for s in bundle.layouts["HDR-REC"]] == [
+            "HDR-TYPE",
+            "HDR-DATE",
+        ]
+
+    def test_branch_scenario_still_verified_through_first_record(self):
+        bundle = _bundle_for(_multi_record_program("HDR-TYPE = 'D'"))
+        then = next(s for s in bundle.scenarios if s.name.endswith("THEN"))
+        assert then.verification["status"] == "verified"
+        (fixture,) = _read_fixtures(then)
+        assert all(row["HDR-TYPE"] == "D" for row in fixture.sequence)
+
+    def test_scenario_pinning_second_record_uses_its_view(self):
+        bundle = _bundle_for(_multi_record_program("DTL-TYPE = 'Z'"))
+        then = next(s for s in bundle.scenarios if s.name.endswith("THEN"))
+        (fixture,) = _read_fixtures(then)
+        assert [s.column for s in fixture.layout] == [
+            "DTL-TYPE",
+            "DTL-AMT",
+            "DTL-NAME",
+        ]
+        assert all(row["DTL-TYPE"] == "Z" for row in fixture.sequence)
+        assert then.verification["status"] == "verified"
+        assert "DTL-REC" in bundle.layouts
+        # The happy path, pinning nothing, still reads the first record.
+        (happy,) = _read_fixtures(bundle.scenarios[0])
+        assert [s.column for s in happy.layout] == ["HDR-TYPE", "HDR-DATE"]
+
+    def test_record_length_is_one_record_not_their_sum(self):
+        bundle = _bundle_for(_multi_record_program("DTL-TYPE = 'Z'"))
+        for scenario in bundle.scenarios:
+            for fixture in _read_fixtures(scenario):
+                size = sum(spec.storage_size for spec in fixture.layout)
+                assert size in (9, 25), (scenario.name, size)
+
+    def test_shared_field_name_is_not_dropped_from_its_record(self):
+        bundle = _bundle_for(_multi_record_program("DTL-AMT > 0", shared_name=True))
+        then = next(s for s in bundle.scenarios if s.name.endswith("THEN"))
+        (fixture,) = _read_fixtures(then)
+        assert [s.qualified_name for s in fixture.layout] == [
+            "DTL-REC.REC-TYPE",
+            "DTL-REC.DTL-AMT",
+            "DTL-REC.DTL-NAME",
+        ]
+
+    def test_alternate_view_reported_once_in_unresolved(self):
+        bundle = _bundle_for(_multi_record_program("HDR-TYPE = 'D'"))
+        notes = [n for n in bundle.unresolved if "alternate view" in n]
+        assert len(notes) == 1
+        assert "READ IN-FILE" in notes[0] and "DTL-REC" in notes[0]
+
+    def test_explicit_redefines_unchanged(self):
+        source = _multi_record_program("HDR-TYPE = 'D'").replace(
+            "01  DTL-REC.", "01  DTL-REC REDEFINES HDR-REC."
+        )
+        bundle = _bundle_for(source)
+        assert [s.column for s in bundle.layouts["HDR-REC"]] == [
+            "HDR-TYPE",
+            "HDR-DATE",
+        ]

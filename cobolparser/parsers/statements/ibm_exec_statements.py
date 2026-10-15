@@ -115,6 +115,14 @@ def _parse_cics_options(text: str) -> dict[str, str | None]:
     return options
 
 
+def _is_single_literal(argument: str) -> bool:
+    """True when *argument* is exactly one quoted literal (``'X'``, ``"X"``)."""
+    text = argument.strip()
+    if len(text) < 2 or text[0] not in "'\"" or text[-1] != text[0]:
+        return False
+    return _skip_quoted(text, 0) == len(text)
+
+
 def _parse_ims_arguments(text: str) -> list[str]:
     """Split EXEC IMS / EXEC DLI text into top-level positional arguments.
 
@@ -195,6 +203,11 @@ class ExecCicsStatement(CobolStatement):
         #: parentheses, or None for flag options (ERASE, NOHANDLE, ...).
         #: Insertion order matches source order.
         self.options: dict[str, str | None] = {}
+        #: Option keywords whose argument is one quoted literal
+        #: (``PROGRAM('X')``), as opposed to a data-name (``PROGRAM(WS-X)``).
+        #: ``options`` holds both unquoted, so this is the only way to tell
+        #: them apart. Not part of ``to_dict()``.
+        self.literal_options: set[str] = set()
 
     @property
     def cics_command(self) -> str:
@@ -352,10 +365,16 @@ class ExecCicsStatementParser(IStatementParser):
             token_stream.consume()
 
         # Collect remaining CICS text until END-EXEC
-        stmt.cics_text = collect_exec_sql_text(token_stream)
+        quoted: list[str] = []
+        stmt.cics_text = collect_exec_sql_text(token_stream, quoted_text=quoted)
 
         # Structured option list (MAP('M1'), MAPSET('S1'), ERASE, ...)
         stmt.options = _parse_cics_options(stmt.cics_text)
+        stmt.literal_options = {
+            option
+            for option, argument in _parse_cics_options("".join(quoted)).items()
+            if argument is not None and _is_single_literal(argument)
+        }
 
         return stmt
 

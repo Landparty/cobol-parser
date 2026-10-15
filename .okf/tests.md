@@ -3,10 +3,17 @@ type: Reference
 title: Tests
 description: Test layout, pytest markers, coverage floor (90%), and shared fixtures for the cobolparser test suite.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-10-13T00:00:00Z
+timestamp: 2026-10-14T00:00:00Z
 ---
 
 # Overview
+
+2026-10-14: `tests/regression/test_evaluate_word_operator_when.py` (38
+tests, #387) pins EVALUATE WHEN phrases with relational words
+(`GREATER THAN`, `EQUAL TO`, `OR EQUAL`), class tests and sign tests as
+single `Condition` selectors (a lone `WHEN ZERO` stays figurative), the
+logical-only `operator: "OR"`, and what business-rules / xref /
+ConstraintExtractor / complexity read from them.
 
 2026-10-14: `tests/regression/test_go_depending_without_on.py` (6 tests,
 #377) pins `GO TO P-B P-C DEPENDING WS-D` with ON omitted: the variable is
@@ -23,6 +30,13 @@ kept). Four selector-shape tests now expect the additive `"quoted": True`.
 `tests/unit/analysis/test_ast_diff.py` adds a parametrized test that
 `WHEN SPACES` -> `WHEN 'SPACES'` and `WHEN WS-B` -> `WHEN 'WS-B'` each diff
 as one `condition-changed`.
+
+2026-10-14: +9 in `tests/unit/analysis/test_dead_code.py`'s new
+`TestTransitiveDeadCode` (issue #384): paragraphs PERFORMed / GONE TO only
+from dead code are dead (chains, cycles, sections, an ALTER in dead code),
+while declaratives, ENTRY paragraphs and live multi-hop chains keep their
+targets alive; NIST IC222A / IC227A pin that every paragraph program-flow
+finds unreachable is reported dead.
 
 2026-10-14: +10 in `tests/unit/analysis/test_dead_code.py`'s new
 `TestSectionExitGoTo` (issue #312): `GO TO nnnn-EXIT` inside a PERFORMed /
@@ -162,6 +176,12 @@ RELEASE/RETURN). See `analysis.md`.
 `test_program_signature.py` (+1) pin arithmetic read/write roles and the
 LINKAGE directions derived from them. See `analysis.md`.
 
+2026-10-14: `tests/unit/analysis/test_io_sequence_perform_summaries.py` (7
+tests, #371) pins io-sequence surviving a 1,500-deep PERFORM chain, walking a
+2x fan-out 40 levels deep once per level, re-walking a shared range only from
+a new file state or recursion-guard context, and reporting a violation once
+per location. See `analysis.md`.
+
 2026-10-14: `tests/unit/analysis/test_io_sequence_branches.py` (12 tests)
 pins IF/EVALUATE arms being forked and merged in `IOSequenceAnalyzer`
 (issue #380): mutually exclusive OPENs, the `CLOSE ... STOP RUN` error exit,
@@ -204,6 +224,11 @@ compare (C vs F sign nibble, slack past the layout), VB records with absent
 `OCCURS DEPENDING ON` occurrences, and the CLI's 0/1/2 exit statuses. Every
 fixture is a record image from `encode_record`, not a hand-built decode
 result. See `generators.md`'s "Record compare".
+
+2026-10-14: `tests/unit/generators/data/test_encoding.py::TestHexLiteralBytes`
+(+10 cases) pins `VALUE X'..'` and level-88 hex witnesses written as their
+own bytes in ASCII and EBCDIC, padded/justified/truncated like any text
+(issue #319). See `generators.md`.
 
 2026-10-12: `tests/unit/generators/data/test_encoding.py::TestFiller`
 (+10 cases) pins a FILLER `VALUE SPACES` / `LOW-VALUES` / `HIGH-VALUES` /
@@ -638,6 +663,8 @@ the existing `TestNewSubcommandsRegistered` and
 same registration/`-o`-silences-stdout coverage the other five analyzer
 subcommands already get.
 
+2026-10-14 (issue #397): +4 in new `tests/unit/analysis/test_technical_debt.py::TestParseErrorsWithholdTheGrade` (no parse errors keeps the grade and an empty `caveats`; `parse_error_count=4` sets `grade` to `None` with one caveat naming the count; the score is unchanged; `to_dict()` serializes all three) and +3 in new `tests/unit/cli/test_complexity_health_subcommands.py::TestHealthWithParseErrors` (`health` on a non-COBOL file emits `"grade": null`, a nonzero `parse_error_count` and a caveat, still reports a float score and exits 0; a clean sample keeps a letter grade). The CLI tests failed before the fix.
+
 2026-10-13 (issue #291): +4 in new `tests/unit/analysis/test_move_type_checker.py::TestIntrinsicFunctionsWithArguments` (every `MOVE FUNCTION x(...)` form in a parsed program is checked -- spaced args with an `OF` qualifier and TRIM's `LEADING`, subscripted args, quoted literal args, `CURRENT-DATE(1:8)` and a reference-modified result; NUMVAL into `PIC A` and a non-integer MAX into `PIC X` are errors; an unresolved TRIM argument is an ordinary unresolved operand; NATIONAL-OF and an uncatalogued name count in `unresolved_function_count`), and +2 in `tests/unit/analysis/test_lint.py::TestCaveats` (no caveat for a checked function source; an uncheckable one gets its own caveat without the `--copybook-path` hint). All failed before the fix. Review follow-up: +2 in `TestNumericFunctionIntegerness` (SUM / REM / RANGE of integers into `PIC X` are clean; NUMVAL, SUM with a `V99` argument and MAX over a nested NUMVAL into `PIC X` are function caveats, not ERRORs; NUMVAL into `PIC A` stays an ERROR; UPPER-CASE of a `PIC N` item is unresolved) and +1 in `TestCaveats` (an unresolved COPY operand and a function caveat together give two separately worded caveats). Round 2: `TestNumericFunctionIntegerness` also pins one argument rule for SUM / MAX (a `V99` or COMP-2 argument into `PIC X` is an ERROR for both) and counts UPPER-CASE / TRIM of a `PIC N` item as function caveats, not missing COPYs.
 
 2026-10-05 (issue #273): `tests/unit/test_models.py` -- `test_ast_from_json_roundtrip` now compares `to_dict()` and asserts no warning for a statement-free program; +1 `test_from_json_restores_structure_and_warns_about_statements` (parsed program: dict equal with paragraph statements emptied, `LossyDeserializationWarning` with the dropped count); +3 in new `TestNodeEquality` (unrelated programs not equal, reparse equal, source position ignored). The existing `from_json` tests in `test_program_model_branches.py` / `test_bug_hunt_r12_misc.py` now expect the warning.
@@ -886,7 +913,7 @@ tests/
 
     test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244), TestFailurePathExpectations: error-status / empty-input scenarios assert no normal-path call_count and no field_equals (#318) (see generators.md)
 
-    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md); TestCallCountFollowsControlFlow: call_count only where exact -- branches, literal TIMES, UNTIL bodies, the read-to-EOF rule and its early exits, GO TO loops, EOF status checks (#363)
+    test_program_fixtures.py  # ProgramFixtureGenerator: bundle assembly, CALL-argument fixtures (IN/OUT/BIDIRECTIONAL notes), SQL fixtures, determinism, write_csv_dir (csv-dir <-> JSON byte-for-cell round trip, one directory per scenario; a forced name collision still writes distinct CSVs), TestScenarioModes: witness pinning / empty-input / boundary min-max / scenario_coverage presence, TestTier1CallCountExpectations, TestTier2FieldEqualsExpectations: call_count/field_equals wiring end-to-end, TestTargetedArmsAreVerified: a violated scenario's arms are counted missed and land in unresolved (#244) (see generators.md); TestCallCountFollowsControlFlow: call_count only where exact -- branches, literal TIMES, UNTIL bodies, the read-to-EOF rule and its early exits, GO TO loops, EOF status checks (#363); TestMultipleRecordsUnderOneFd: an FD's several 01 records give one record's columns per row, never all joined, picked by the scenario's pins (#364)
     test_scenario_planner.py  # ScenarioPlanner: THEN/ELSE targeting, disjoint-field merging, unsatisfiable-arm handling, fixed families (empty-input/error-status/boundary-values), exact coverage accounting, TestScenarioNamesAreUnique: verb@line + disjunct naming, merged names, uniqueness over tests/samples and enterprise (#267) (see generators.md)
     io_statements/             # IO parser unit tests
     test_extended_verb_parsers.py  # 2026-09-02 statement-coverage audit: INITIATE/TERMINATE/SUPPRESS, SEND/RECEIVE/ENABLE/DISABLE/PURGE, EXHIBIT/EXAMINE/TRANSFORM/ENTER/NOTE/CHAIN, READY/RESET TRACE, SERVICE, TITLE, RAISE/RESUME/VALIDATE -- node, operands, no warnings; UNSUPPORTED_VERBS == {EXECUTE, GOTO, RECOVER}; every STATEMENT_KEYWORDS verb dispatches (see parser.md)
@@ -1234,7 +1261,12 @@ all` and `scan` accepting it; and per-type traits (the CICS commands,
 DL/I function codes, MQ calls, OO unit tree, declarative sections, flow
 edges, 6.x data attributes ... that make the program its kind).
 `TestCorpusShape` fails when the directory and `PROGRAM_TYPES` disagree, so
-a new type has to be added to both. `tests/samples/*.cbl` smoke checks
+a new type has to be added to both. The corpus is parsed with
+`debug_lines=True` (COMPDIR declares `WITH DEBUGGING MODE`; it is the only
+program with D lines), so COMPDIR's D-line DISPLAYs are in its AST and it
+stays warning-free; `tests/unit/test_debugging_mode_lines.py` pins the
+default (dropped + warning), the option on every surface (API, CLI,
+cobol.yml, scan, tokenize) and `debug_line_numbers` (#334). `tests/samples/*.cbl` smoke checks
 (`test_all_samples.py`) cover the corpus too, since it lives under
 `tests/samples/`. The same 22 files are copied into
 `mocky-mock/tests/fixtures/enterprise/`, where
@@ -1280,7 +1312,9 @@ dropping the slash would make `cobolparser/parsers` swallow
   alongside it
 * `tests/unit/generators/data/test_variable_length.py` — fixed vs variable
   record length: ODO layout linking, per-row trimming, counter bounds, RDW
-  framing, and the length reporting built on them
+  framing, and the length reporting built on them.
+  `TestFdRangeWithoutDependingOn` (#320) pins that an FD range with no
+  DEPENDING ON writes every record at its own 01's full length, never cut
 * [cli.md](cli.md) — `tests/unit/cli/` covers CLI subcommands
 * [generators.md](generators.md) — flowchart, copybook → CSV, program layout
   index, and program fixture bundle generator tests
@@ -1305,6 +1339,12 @@ ENTRY, EXEC SQL/CICS/DLI, END DECLARATIVES, SPECIAL-NAMES, OBJECT
 REFERENCE, ...) once on one line and once broken across two, and requires
 identical ASTs apart from locations; it also pins the dispatch cache
 telling EXEC<newline>SQL from EXEC<newline>CICS within one parse.
+
+`tests/regression/test_fd_record_after_label_data.py` (issue #401) pins
+RECORD CONTAINS / RECORD VARYING written after LABEL RECORDS or DATA RECORD:
+the `fd_clauses["record"]` length and `ProgramLayoutIndex.file_facts()`
+record length survive every clause order, and `data_records` holds only the
+record names.
 
 ### Field lineage (2026-10-08)
 
@@ -1381,3 +1421,12 @@ nesting and a bare `NOT SIZE ERROR` (#399).
 by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
 (`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
 `COMP-5` is still a change.
+
+`tests/regression/test_optional_keyword_forms.py` (#405) pins the
+optional-keyword forms that used to lose data: `XML PARSE x PROCEDURE IS p`
+without PROCESSING (and dead-code not reporting `p`), SORT bare
+`DUPLICATES`, SORT/MERGE bare `SEQUENCE name` and `KEY IS k`, the
+no-keys warning on a file SORT/MERGE (not on a table SORT), and
+SPECIAL-NAMES mnemonic entries and `SYMBOLIC CHARACTERS` without IS.
+`test_initialize_sort_arithmetic_comma_gaps.py`'s two USING/GIVING comma-list
+SORTs gained a key, since a keyless file SORT now warns.

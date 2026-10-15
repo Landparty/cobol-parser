@@ -13,9 +13,10 @@ Common bugs caught:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from typing import Any
 
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
@@ -111,6 +112,64 @@ _CLOSED = "closed"
 _UNOPENED = "unopened"
 _NEVER_OPENED: frozenset[str] = frozenset({_UNOPENED})
 
+# Upper-cased file name -> the states it may be in; a file not in the map
+# has never been opened on any path.
+_Status = dict[str, frozenset[str]]
+_FrozenStatus = frozenset[tuple[str, frozenset[str]]]
+
+
+# A step of the execution walk. The walk is written as generators that
+# ``yield`` the sub-step they would otherwise call recursively and receive its
+# return value back; ``_drive`` runs them off an explicit stack, so a long
+# PERFORM chain costs heap, not Python recursion depth.
+_Step = Generator["_Step", Any, Any]
+
+_PerformKey = tuple[int, int]
+_StateKey = tuple[int, int, _FrozenStatus]
+_ViolationKey = tuple[Any, ...]
+
+
+def _violation_key(v: IOSequenceViolation) -> _ViolationKey:
+    loc = v.location
+    where = (
+        None
+        if loc is None
+        else (getattr(loc, "file", None), loc.line, getattr(loc, "column", None))
+    )
+    return (v.kind, v.file_name, where, v.message)
+
+
+@dataclass
+class _Recording:
+    """Effects of one PERFORM range while it runs (see ``_run_perform``).
+
+    Effects land on the innermost recording; a finished range's recording
+    is merged into the one that PERFORMed it.
+    """
+
+    entered: set[_PerformKey] = field(default_factory=set)
+    guarded: set[_PerformKey] = field(default_factory=set)
+    violations: dict[_ViolationKey, IOSequenceViolation] = field(default_factory=dict)
+    gotos: dict[str, None] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _RangeSummary:
+    """What running a PERFORM range from one entry state did.
+
+    Reusable at any later call site with the same entry state, provided the
+    re-entrancy guard would decide the same way: none of ``entered`` is on
+    the PERFORM stack, and every key in ``guarded`` (a PERFORM the run
+    skipped because an enclosing frame was already running it) still is.
+    """
+
+    status_out: _FrozenStatus
+    terminated: bool
+    violations: tuple[IOSequenceViolation, ...]
+    gotos: tuple[str, ...]
+    entered: frozenset[_PerformKey]
+    guarded: frozenset[_PerformKey]
+
 
 class IOSequenceAnalyzer:
     """Analyzes a parsed COBOL AST for file I/O sequencing violations.
@@ -133,6 +192,8 @@ class IOSequenceAnalyzer:
     except FILE_LEFT_OPEN, which a file open on any path still earns.
     Other conditional phrases (AT END, INVALID KEY, ...) are not forked.
     Paragraphs unreachable from the entry procedure are not walked at all.
+    A violation is reported once per source location, however many call
+    sites reach it.
 
     Usage::
 
@@ -147,14 +208,21 @@ class IOSequenceAnalyzer:
     """
 
     def __init__(self) -> None:
-        # Upper-cased file name -> the states it may be in; a file not in the
-        # map has never been opened on any path.
-        self._status: dict[str, frozenset[str]] = {}
+        self._status: _Status = {}
         self._violations: list[IOSequenceViolation] = []
         self._linear: list[CobolParagraph] = []
         self._name_first: dict[str, int] = {}
         self._name_last: dict[str, int] = {}
-        self._perform_stack: list[tuple[int, int]] = []
+        self._perform_stack: list[_PerformKey] = []
+        self._perform_set: set[_PerformKey] = set()
+        # One entry per PERFORM range currently being run for the first time
+        # from its entry state, innermost last.
+        self._recordings: list[_Recording] = []
+        # (range, file states) -> summaries of earlier runs, so a
+        # range PERFORMed from many places is walked once per entry state
+        # instead of once per call path (exponential in nesting depth).
+        self._summaries: dict[_StateKey, list[_RangeSummary]] = {}
+        self._seen_violations: set[_ViolationKey] = set()
         self._terminated = False
         # GO TO targets met inside a conditional branch (``AT END GO TO
         # 9000-EOF``, ``IF ... GO TO ...``), walked once the fall-through
@@ -184,6 +252,10 @@ class IOSequenceAnalyzer:
         self._name_first = {}
         self._name_last = {}
         self._perform_stack = []
+        self._perform_set = set()
+        self._recordings = []
+        self._summaries = {}
+        self._seen_violations = set()
         self._terminated = False
         self._pending_gotos = []
         self._ended_in_cycle = False
@@ -200,7 +272,7 @@ class IOSequenceAnalyzer:
         # point the walk gave up".
         leftover = () if self._ended_in_cycle else self._maybe_open_files()
         for file_name in leftover:
-            self._violations.append(
+            self._emit(
                 IOSequenceViolation(
                     kind=IOViolationKind.FILE_LEFT_OPEN,
                     file_name=file_name,
@@ -224,8 +296,8 @@ class IOSequenceAnalyzer:
     # canonical correct COBOL shape — OPEN/READ in a main paragraph that
     # PERFORMs a WRAP-UP paragraph declared after it — produced
     # CLOSE_NOT_OPEN + FILE_LEFT_OPEN false positives, because the CLOSE was
-    # visited in declaration order before its PERFORM site. Conditional
-    # branches still share one state (see the class docstring); a PERFORM
+    # visited in declaration order before its PERFORM site. IF / EVALUATE
+    # arms are forked and merged (``_fork``, see the class docstring); a PERFORM
     # recursion guard and per-chain visited sets keep GO TO cycles finite.
 
     def _collect_procedures(self, proc_division: CobolDivision) -> None:
@@ -298,7 +370,7 @@ class IOSequenceAnalyzer:
             if idx is None or not 0 <= idx < len(self._linear):
                 return
             visited.add(idx)
-            outcome, target = self._run_paragraph(self._linear[idx])
+            outcome, target = self._drive(self._run_paragraph(self._linear[idx]))
             if self._terminated or outcome == "stop":
                 return
             if outcome == "goto":
@@ -314,7 +386,23 @@ class IOSequenceAnalyzer:
                 return idx
         return None
 
-    def _run_paragraph(self, para: CobolParagraph) -> tuple[str, str | None]:
+    @staticmethod
+    def _drive(step: _Step) -> Any:
+        """Run *step* to completion off an explicit stack; return its value."""
+        stack: list[_Step] = [step]
+        value: Any = None
+        while stack:
+            try:
+                sub = stack[-1].send(value)
+            except StopIteration as done:
+                stack.pop()
+                value = done.value
+                continue
+            stack.append(sub)
+            value = None
+        return value
+
+    def _run_paragraph(self, para: CobolParagraph) -> _Step:
         """Process one paragraph's statements; report how it ends.
 
         Returns ``("fall", None)``, ``("stop", None)``, or
@@ -330,11 +418,11 @@ class IOSequenceAnalyzer:
             ):
                 return ("goto", stmt.target_paragraph.upper())
             if self._is_program_end(stmt):
-                self._process_statement(stmt)
+                yield self._process_statement(stmt)
                 self._terminate_program(getattr(stmt, "location", None))
                 self._terminated = True
                 return ("stop", None)
-            self._process_statement(stmt)
+            yield self._process_statement(stmt)
         return ("fall", None)
 
     @staticmethod
@@ -348,46 +436,52 @@ class IOSequenceAnalyzer:
             return getattr(stmt, "exit_type", None) == "PROGRAM"
         return False
 
-    def _process_statement(self, stmt: ASTNode) -> None:
+    def _process_statement(self, stmt: ASTNode) -> _Step:
         """Dispatch *stmt* and its nested statements in declaration order,
         inlining out-of-line PERFORM targets -- and SORT/MERGE INPUT/OUTPUT
         PROCEDUREs, which the sort runs exactly like a PERFORM of the named
         range -- at their call sites."""
         visited: set[int] = set()
 
-        def _visit(node: ASTNode) -> None:
+        def _visit(node: ASTNode) -> _Step:
             if id(node) in visited or self._terminated:
                 return
             visited.add(id(node))
             if isinstance(node, (IfStatement, EvaluateStatement)):
-                self._fork(node, _visit)
+                yield self._fork(node, _visit)
                 return
             self._dispatch(node)
             if isinstance(node, GoStatement):
                 # Reached through _visit, so nested in a branch or handler
                 # (a paragraph's own top-level GO TO never gets here).
-                self._pending_gotos.extend(
-                    name.upper() for name in node.target_paragraphs if name
-                )
+                for name in node.target_paragraphs:
+                    if name:
+                        self._add_pending_goto(name.upper())
             if (
                 isinstance(node, PerformStatement)
                 and node.target_paragraph
                 and not node.inline_statements
             ):
-                self._run_perform(node.target_paragraph, node.thru_paragraph)
+                yield self._run_perform(node.target_paragraph, node.thru_paragraph)
             elif isinstance(node, SortStatement):
                 if node.input_procedure:
-                    self._run_perform(node.input_procedure, node.input_procedure_thru)
+                    yield self._run_perform(
+                        node.input_procedure, node.input_procedure_thru
+                    )
                 if node.output_procedure:
-                    self._run_perform(node.output_procedure, node.output_procedure_thru)
+                    yield self._run_perform(
+                        node.output_procedure, node.output_procedure_thru
+                    )
             elif isinstance(node, MergeStatement):
                 if node.output_procedure:
-                    self._run_perform(node.output_procedure, node.output_procedure_thru)
+                    yield self._run_perform(
+                        node.output_procedure, node.output_procedure_thru
+                    )
             if hasattr(node, "children"):
                 for child in node.children:
-                    _visit(child)
+                    yield _visit(child)
 
-        _visit(stmt)
+        yield _visit(stmt)
 
     @staticmethod
     def _arms(node: IfStatement | EvaluateStatement) -> list[list[ASTNode]]:
@@ -407,8 +501,8 @@ class IOSequenceAnalyzer:
     def _fork(
         self,
         node: IfStatement | EvaluateStatement,
-        visit: Callable[[ASTNode], None],
-    ) -> bool:
+        visit: Callable[[ASTNode], _Step],
+    ) -> _Step:
         """Run each arm of *node* from the state at the branch, then merge.
 
         Only the arms that fall out of the branch are merged; an arm that
@@ -416,11 +510,11 @@ class IOSequenceAnalyzer:
         statement after it. Returns True when no arm falls out.
         """
         entry = dict(self._status)
-        falls_out: list[dict[str, frozenset[str]]] = []
-        every: list[dict[str, frozenset[str]]] = []
+        falls_out: list[_Status] = []
+        every: list[_Status] = []
         for arm in self._arms(node):
             self._status = dict(entry)
-            leaves = self._run_arm(arm, visit)
+            leaves = yield self._run_arm(arm, visit)
             if self._terminated:
                 # A PERFORMed paragraph ran a top-level STOP RUN / GOBACK:
                 # that ends this arm's path, not every path through here.
@@ -434,22 +528,24 @@ class IOSequenceAnalyzer:
         self._status = self._merge(falls_out or every)
         return not falls_out
 
-    def _run_arm(self, stmts: list[ASTNode], visit: Callable[[ASTNode], None]) -> bool:
+    def _run_arm(
+        self, stmts: list[ASTNode], visit: Callable[[ASTNode], _Step]
+    ) -> _Step:
         """Run one branch arm; True when it leaves without falling out."""
         for stmt in stmts:
             if self._terminated:
                 return True
             if isinstance(stmt, (IfStatement, EvaluateStatement)):
-                if self._fork(stmt, visit):
+                if (yield self._fork(stmt, visit)):
                     return True
                 continue
-            visit(stmt)
+            yield visit(stmt)
             if (
                 isinstance(stmt, GoStatement)
                 and stmt.target_paragraph
                 and not stmt.depending_on_variable
             ):
-                # The target is queued (``_pending_gotos``) by ``visit``.
+                # The target is queued (``_add_pending_goto``) by ``visit``.
                 return True
             if self._is_program_end(stmt):
                 # Not ``_terminate_program``: the arm is the error exit of a
@@ -459,9 +555,9 @@ class IOSequenceAnalyzer:
         return self._terminated
 
     @staticmethod
-    def _merge(states: list[dict[str, frozenset[str]]]) -> dict[str, frozenset[str]]:
+    def _merge(states: list[_Status]) -> _Status:
         """Union of each file's possible states across *states*."""
-        merged: dict[str, frozenset[str]] = {}
+        merged: _Status = {}
         for key in {k for state in states for k in state}:
             merged[key] = frozenset().union(
                 *(state.get(key, _NEVER_OPENED) for state in states)
@@ -474,8 +570,14 @@ class IOSequenceAnalyzer:
     def _maybe_open_files(self) -> list[str]:
         return sorted(k for k, v in self._status.items() if _OPEN in v)
 
-    def _run_perform(self, target: str, thru: str | None) -> None:
-        """Execute a ``PERFORM target [THRU end]`` range at the call site."""
+    def _run_perform(self, target: str, thru: str | None) -> _Step:
+        """Execute a ``PERFORM target [THRU end]`` range at the call site.
+
+        The first run of a range from a given entry state (every file's
+        possible states) is recorded as a ``_RangeSummary``; a later PERFORM of the
+        same range from the same state replays the summary instead of
+        walking the paragraphs again.
+        """
         start = self._name_first.get(target.upper())
         if start is None:
             return
@@ -485,28 +587,101 @@ class IOSequenceAnalyzer:
         if end < start:
             end = start
         key = (start, end)
-        if key in self._perform_stack:
-            return  # re-entrant PERFORM: recursion guard
+        if key in self._perform_set:
+            # Re-entrant PERFORM: recursion guard. The range being recorded
+            # made this decision off the current stack.
+            if self._recordings:
+                self._recordings[-1].guarded.add(key)
+            return
+
+        state: _StateKey = (start, end, frozenset(self._status.items()))
+        for summary in self._summaries.get(state, ()):
+            if summary.entered.isdisjoint(self._perform_set) and (
+                summary.guarded <= self._perform_set
+            ):
+                self._replay(summary)
+                return
+
+        rec = _Recording(entered={key})
+        self._recordings.append(rec)
         self._perform_stack.append(key)
+        self._perform_set.add(key)
         try:
-            visited: set[int] = set()
-            i = start
-            while i <= end and not self._terminated and i not in visited:
-                visited.add(i)
-                outcome, gtarget = self._run_paragraph(self._linear[i])
-                if outcome == "stop":
-                    return
-                if outcome == "goto":
-                    t = self._name_first.get(gtarget or "")
-                    # Follow a GO TO only within the performed range; a jump
-                    # out of the range ends the PERFORM conservatively.
-                    if t is not None and start <= t <= end:
-                        i = t
-                        continue
-                    return
-                i += 1
+            yield self._walk_range(start, end)
         finally:
             self._perform_stack.pop()
+            self._perform_set.discard(key)
+            self._recordings.pop()
+        if self._recordings:
+            # Whatever this range did, the range that PERFORMed it did too.
+            outer = self._recordings[-1]
+            outer.entered |= rec.entered
+            outer.guarded |= rec.guarded
+            for vkey, violation in rec.violations.items():
+                outer.violations.setdefault(vkey, violation)
+            for name in rec.gotos:
+                outer.gotos.setdefault(name)
+        self._summaries.setdefault(state, []).append(
+            _RangeSummary(
+                status_out=frozenset(self._status.items()),
+                terminated=self._terminated,
+                violations=tuple(rec.violations.values()),
+                gotos=tuple(rec.gotos),
+                entered=frozenset(rec.entered),
+                # A guard hit on a range this run itself entered is internal
+                # to it; only the enclosing frames' ranges are a dependency.
+                guarded=frozenset(rec.guarded - rec.entered),
+            )
+        )
+
+    def _walk_range(self, start: int, end: int) -> _Step:
+        """Run paragraphs *start*..*end*, following GO TOs inside the range."""
+        visited: set[int] = set()
+        i = start
+        while i <= end and not self._terminated and i not in visited:
+            visited.add(i)
+            outcome, gtarget = yield self._run_paragraph(self._linear[i])
+            if outcome == "stop":
+                return
+            if outcome == "goto":
+                t = self._name_first.get(gtarget or "")
+                # Follow a GO TO only within the performed range; a jump
+                # out of the range ends the PERFORM conservatively.
+                if t is not None and start <= t <= end:
+                    i = t
+                    continue
+                return
+            i += 1
+
+    def _replay(self, summary: _RangeSummary) -> None:
+        """Apply a recorded range's effects at another call site."""
+        self._status = dict(summary.status_out)
+        for violation in summary.violations:
+            self._emit(violation)
+        for name in summary.gotos:
+            self._add_pending_goto(name)
+        if self._recordings:
+            rec = self._recordings[-1]
+            rec.entered |= summary.entered
+            rec.guarded |= summary.guarded
+        if summary.terminated:
+            self._terminated = True
+
+    def _emit(self, violation: IOSequenceViolation) -> None:
+        """Report *violation* once, and to every range being recorded."""
+        vkey = _violation_key(violation)
+        if self._recordings:
+            self._recordings[-1].violations.setdefault(vkey, violation)
+        if vkey not in self._seen_violations:
+            self._seen_violations.add(vkey)
+            self._violations.append(violation)
+
+    def _add_pending_goto(self, name: str) -> None:
+        """Queue a conditional GO TO target for ``_run_chain``."""
+        if self._recordings:
+            self._recordings[-1].gotos.setdefault(name)
+        if name not in self._pending_gotos:
+            self._pending_gotos.append(name)
 
     def _dispatch(self, node: ASTNode) -> None:
         """Handle a single node if it is an IO-relevant statement."""
@@ -561,7 +736,7 @@ class IOSequenceAnalyzer:
         program_flow/scanner.py's _is_terminator draw).
         """
         for file_name in self._maybe_open_files():
-            self._violations.append(
+            self._emit(
                 IOSequenceViolation(
                     kind=IOViolationKind.FILE_LEFT_OPEN,
                     file_name=file_name,
@@ -582,7 +757,7 @@ class IOSequenceAnalyzer:
                 continue  # Skip empty/whitespace names
             key = file_name.upper()
             if self._states(key) == {_OPEN}:
-                self._violations.append(
+                self._emit(
                     IOSequenceViolation(
                         kind=IOViolationKind.DOUBLE_OPEN,
                         file_name=file_name,
@@ -612,7 +787,7 @@ class IOSequenceAnalyzer:
                 # not reported (see the class docstring).
                 self._status[key] = frozenset({_CLOSED})
             elif _CLOSED in states:
-                self._violations.append(
+                self._emit(
                     IOSequenceViolation(
                         kind=IOViolationKind.DOUBLE_CLOSE,
                         file_name=file_name,
@@ -621,7 +796,7 @@ class IOSequenceAnalyzer:
                     )
                 )
             else:
-                self._violations.append(
+                self._emit(
                     IOSequenceViolation(
                         kind=IOViolationKind.CLOSE_NOT_OPEN,
                         file_name=file_name,
@@ -639,7 +814,7 @@ class IOSequenceAnalyzer:
         key = file_name.upper()
         if _OPEN not in self._states(key):
             kind = _OP_TO_VIOLATION.get(verb, IOViolationKind.READ_BEFORE_OPEN)
-            self._violations.append(
+            self._emit(
                 IOSequenceViolation(
                     kind=kind,
                     file_name=file_name,

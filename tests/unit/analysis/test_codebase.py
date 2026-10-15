@@ -268,6 +268,141 @@ class TestDynamicCalls:
         assert any("no possible target" in note for note in graph.unresolved)
 
 
+def _cics_program(program_id: str, working_storage: str, body: str) -> str:
+    return (
+        "       IDENTIFICATION DIVISION.\n"
+        f"       PROGRAM-ID. {program_id}.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        f"{working_storage}"
+        "       PROCEDURE DIVISION.\n"
+        "       MAIN-LOGIC.\n"
+        f"{body}"
+        "           EXEC CICS RETURN END-EXEC.\n"
+    )
+
+
+class TestCicsTransferEdges:
+    """``EXEC CICS LINK`` / ``XCTL PROGRAM(...)`` are call edges (#315)."""
+
+    def test_enterprise_sample_link_and_xctl_are_edges(self, samples_dir):
+        sample = samples_dir / "enterprise" / "CICSONLN.cbl"
+        graph = CodebaseGraphBuilder().build([str(sample)])
+        assert [(e.callee, e.kind, e.is_dynamic) for e in graph.call_edges] == [
+            ("CMENU", "cics-xctl", False),
+            ("CUSTAUDT", "cics-link", False),
+        ]
+        assert graph.programs[0].calls == ["CMENU", "CUSTAUDT"]
+        assert graph.callers_of("CUSTAUDT") == ["CICSONLN"]
+
+    def test_link_between_two_programs_in_the_tree(self, tmp_path):
+        (tmp_path / "MAINP.cbl").write_text(
+            _cics_program(
+                "MAINP", "", "           EXEC CICS LINK PROGRAM('SUBC') END-EXEC.\n"
+            )
+        )
+        (tmp_path / "SUBC.cbl").write_text(_cics_program("SUBC", "", ""))
+        graph = CodebaseGraphBuilder().build_from_directory(str(tmp_path))
+        assert graph.callers_of("SUBC") == ["MAINP"]
+        assert graph.callees_of("MAINP") == ["SUBC"]
+
+    def test_call_edges_default_to_the_call_kind(self, graph):
+        assert {e.kind for e in graph.call_edges} == {"call"}
+        assert all(d["kind"] == "call" for d in graph.to_dict()["call_edges"])
+
+    def test_data_name_operand_resolves_through_tracked_values(self, tmp_path):
+        program = tmp_path / "D.cbl"
+        program.write_text(
+            _cics_program(
+                "DISPATCH",
+                "       01 WS-PGM PIC X(8) VALUE 'ORDERS'.\n",
+                "           EXEC CICS XCTL PROGRAM(WS-PGM) END-EXEC.\n",
+            )
+        )
+        graph = CodebaseGraphBuilder().build([str(program)])
+        assert [
+            (e.callee, e.kind, e.is_dynamic, e.resolved) for e in graph.call_edges
+        ] == [("ORDERS", "cics-xctl", True, True)]
+        # A data-name is never taken for a program name.
+        assert not _edge(graph.call_edges, "DISPATCH", "WS-PGM")
+
+    def test_partially_resolved_operand_is_reported(self, tmp_path):
+        program = tmp_path / "D.cbl"
+        program.write_text(
+            _cics_program(
+                "DISPATCH",
+                "       01 WS-IN  PIC X(8).\n"
+                "       01 WS-PGM PIC X(8) VALUE 'ORDERS'.\n",
+                "           MOVE WS-IN TO WS-PGM.\n"
+                "           EXEC CICS LINK PROGRAM(WS-PGM) END-EXEC.\n",
+            )
+        )
+        graph = CodebaseGraphBuilder().build([str(program)])
+        assert [(e.callee, e.resolved) for e in graph.call_edges] == [("ORDERS", False)]
+        assert any(
+            "EXEC CICS LINK PROGRAM(WS-PGM)" in note and "not exhaustive" in note
+            for note in graph.unresolved
+        )
+
+    def test_unresolvable_operand_is_reported_not_dropped(self, tmp_path):
+        program = tmp_path / "D.cbl"
+        program.write_text(
+            _cics_program(
+                "DISPATCH",
+                "       01 WS-PGM PIC X(8).\n",
+                "           EXEC CICS LINK PROGRAM(WS-PGM) END-EXEC.\n",
+            )
+        )
+        graph = CodebaseGraphBuilder().build([str(program)])
+        assert graph.call_edges == []
+        assert any(
+            "EXEC CICS LINK PROGRAM(WS-PGM)" in note
+            and "no possible target could be resolved" in note
+            for note in graph.unresolved
+        )
+
+    def test_other_cics_commands_make_no_edge(self, tmp_path):
+        program = tmp_path / "D.cbl"
+        program.write_text(
+            _cics_program(
+                "QUIET",
+                "",
+                "           EXEC CICS START TRANSID('ABCD') END-EXEC.\n"
+                "           EXEC CICS SEND MAP('M1') MAPSET('S1') END-EXEC.\n",
+            )
+        )
+        graph = CodebaseGraphBuilder().build([str(program)])
+        assert graph.call_edges == []
+
+    def test_xctl_menu_loop_is_not_a_cycle(self, tmp_path):
+        for me, other in (("MENU", "ORDER"), ("ORDER", "MENU")):
+            (tmp_path / f"{me}.cbl").write_text(
+                _cics_program(
+                    me, "", f"           EXEC CICS XCTL PROGRAM('{other}') END-EXEC.\n"
+                )
+            )
+        graph = CodebaseGraphBuilder().build_from_directory(str(tmp_path))
+        assert len(graph.call_edges) == 2
+        assert graph.cycles() == []
+
+    def test_link_cycle_is_a_cycle(self, tmp_path):
+        for me, other in (("AAA", "BBB"), ("BBB", "AAA")):
+            (tmp_path / f"{me}.cbl").write_text(
+                _cics_program(
+                    me, "", f"           EXEC CICS LINK PROGRAM('{other}') END-EXEC.\n"
+                )
+            )
+        graph = CodebaseGraphBuilder().build_from_directory(str(tmp_path))
+        assert graph.cycles() == [["AAA", "BBB"]]
+
+    def test_renderers_label_the_cics_kind(self, samples_dir):
+        sample = samples_dir / "enterprise" / "CICSONLN.cbl"
+        graph = CodebaseGraphBuilder().build([str(sample)])
+        assert '"CICS LINK"' in graph.to_dot()
+        assert '"CICS XCTL"' in graph.to_dot()
+        assert '-->|"CICS LINK"|' in graph.to_mermaid()
+
+
 class TestCycles:
     def test_mutual_recursion_is_reported(self, graph):
         assert ["MAINPGM", "SUBPGM"] in graph.cycles()
@@ -796,6 +931,7 @@ class TestSerialization:
             "callee": "B",
             "is_dynamic": False,
             "resolved": True,
+            "kind": "call",
         }
 
     def test_copy_edge_dict_shape(self):
