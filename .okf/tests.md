@@ -158,6 +158,11 @@ program-flow "duplicate name across top level and section" tests,
 program-signature's declared-twice test, xref's duplicate-declarations
 test) were updated to the qualified behaviour.
 
+2026-10-14: `tests/regression/test_issue_403_abbreviated_leading_is.py` (13
+tests) pins issue #403: an abbreviated leg opening with `IS` (`A > 1 AND IS
+< 5`, `IS GREATER THAN`, `IS EQUAL TO`, `IS NOT >`) expands exactly as the
+same leg without `IS`, in IF and PERFORM UNTIL.
+
 2026-09-17: `tests/regression/test_audit_2026_09_17_preprocessing.py` (42
 tests) pins the nine preprocessing defects of that date's audit: record-only
 line splitting (`cobolparser/_lines.py`), EBCDIC NL (0x15) copybook

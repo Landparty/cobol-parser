@@ -32,6 +32,11 @@ without FROM takes n as the minimum, and a lone `VARYING n` leaves the maximum N
 keeps every operand and records `EntryStatement.parameter_modes`, which
 [analysis.md](analysis.md)'s `ProgramSignatureExtractor` now carries as each
 ENTRY operand's `by_clause`.
+## 2026-10-14 -- issue #403: leading IS in an abbreviated leg
+
+[parser.md](parser.md): `_expand_abbreviated_condition` drops the optional
+`IS` that opens an abbreviated leg (`IF A > 1 AND IS < 5`), so the leg
+expands to `A < 5` instead of an operand-less COMPARISON.
 
 ## 2026-10-14 -- issue #404: an unnamed data entry is FILLER
 
