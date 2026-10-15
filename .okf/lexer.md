@@ -539,6 +539,14 @@ merged token keeps the first literal's location; NEWLINEs between the
 parts follow it. Fast path: no `&` in any line -> no work. The
 `_lexer_fast.c` was regenerated with Cython 3.3.0. Pinned by
 `tests/regression/test_literal_concatenation.py`.
+
+**`*>` comments between the parts (issue #389, 2026-10-14).** A floating
+`*>` comment may sit between the two literals (`'AB' & *> note` / `'CD'`),
+or a whole comment line may. The merge loop skips COMMENT tokens as it
+skips NEWLINEs (the comment token is kept, after the merged literal), and
+`_ampersand_joins` reads each *earlier* line only up to `_code_end()`: the
+first `*>` outside a literal, or nothing for a fixed-format `*`/`/`
+comment line. An `&` inside the comment text does not count.
 # IDENTIFICATION DIVISION comment-entries (2026-09-28)
 
 `AUTHOR.` / `INSTALLATION.` / `DATE-WRITTEN.` / `DATE-COMPILED.` /
