@@ -269,8 +269,8 @@ into focused, reusable modules:
 
   **Task 8: `compute_program_data_items(ast: CobolProgram) -> dict[str, Any]`** —
   the program-wide entry point, returning `{"items": [...], "unresolved":
-  [...]}` (JSON-ready; `unresolved` always present for forward
-  compatibility, though nothing populates it yet). Walks every DATA
+  [...]}` (JSON-ready; `unresolved` always present -- it names SYNCHRONIZED
+  slack and partial level-88 value lists, see below). Walks every DATA
   DIVISION section (FILE, WORKING-STORAGE, LOCAL-STORAGE, LINKAGE) and
   calls `compute_record_layout()` on each section's top-level (01/77)
   records. Also closes a gap `compute_record_layout()` leaves by design:
@@ -291,6 +291,31 @@ into focused, reusable modules:
   offsets are unaffected either way: each top-level record is
   independently record-relative and correctly starts at byte 0 whether or
   not it redefines a section sibling.
+
+  **Level-88 `THRU` ranges: `condition_ranges` (issue #361, 2026-10-14).**
+  `condition_values` comes from `expand_condition_values()`, which lists a
+  range only in part: an integer range up to `_MAX_RANGE_EXPANSION` (`VALUE
+  1 THRU 99999` gave `1`..`65`), any other range just its two endpoints
+  (`'A' THRU 'Z'` gave `A`, `Z`). Read as the whole domain, that told a hover
+  66 or `M` were not values of the condition. Every item now also carries
+  `condition_ranges: [{"from", "to"}]` -- each range as written, quotes
+  stripped, nothing expanded (`layout.condition_ranges()`; empty for a
+  non-88 and an 88 with no range) -- and `compute_program_data_items` adds
+  one `unresolved` line per level-88 whose list is partial
+  (`"<qname>: condition_values lists only part of VALUE 1 THRU 99999;
+  condition_ranges holds the full range"`), judged by
+  `condition_values_exhaustive()` against the parent's decimal digits, so
+  `VALUE 1 THRU 2` on `PIC 9V99` is flagged too, and so is every range
+  under a non-numeric parent (a group, or `PIC XX` with `'01' THRU '12'`:
+  the parser drops the quotes, so the range *looks* integer, but `PIC XX`
+  admits `'1A'` and never holds `'1'`). A typed endpoint is kept as written
+  (`X'00'`, not a NUL byte). Not caught: `LOW-VALUE THRU HIGH-VALUE`, whose
+  `THRU` the DATA DIVISION parser drops (issue #468). Only a range triggers it:
+  `VALUE SPACES` is listed as its word, which is the value. `condition_values`
+  itself is unchanged (additive change; consumers keep working).
+  `LayoutItem.condition_values_complete` carries the verdict and is not
+  serialized. Both 88 construction paths (nested and record-root) go through
+  `_condition_item()` now.
 
   **Final-review fix: root-level level-88s were silently dropped.**
   `compute_record_layout()` builds the record's own root `LayoutItem` on
