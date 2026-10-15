@@ -1,16 +1,25 @@
 ---
 type: Module
 title: Dialects
-description: IBMEnterpriseCobol dialect support — EXEC SQL/CICS/IMS node types, IBM data-item validation, and the intrinsic-function / LE callable-service lookups.
+description: IBMEnterpriseCobol dialect tables and lookups (reserved words, intrinsic functions, CICS/IMS command sets, LE callable services, COMP-3 validation), the le_signatures call-signature catalogue, and notes on the EXEC SQL statement model the parser builds.
 tags: [dialects, ibm-enterprise, exec-sql, exec-cics, exec-ims, intrinsic-functions, le-services]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Dialects (`cobolparser/dialects/`)
 
-IBM Enterprise COBOL dialect support: extra AST node types for EXEC
-SQL/CICS/IMS, IBM-specific data-item validation, and the intrinsic-function/
-LE-service lookups the CLI and analyzers read.
+Two modules:
+
+* `ibm_enterprise.py` -- `IBMEnterpriseCobol`: class-level word tables
+  (`IBM_RESERVED_WORDS`, `IBM_INTRINSIC_FUNCTIONS`, `CICS_COMMANDS`,
+  `IMS_COMMANDS`, `IBM_LE_CALLABLE_SERVICES`, `IBM_LE_SERVICE_CATEGORIES`,
+  `IBM_LE_SERVICE_INFO`) plus lookups and light validation. The analyzers read
+  the tables directly (`analysis/xref.py`, `analysis/language_env_analyzer.py`).
+  `cobolparser.dialects` exports only `IBMEnterpriseCobol` (also re-exported
+  from `cobolparser`).
+* `le_signatures.py` -- per-operand call signatures for LE callable services
+  and intrinsic functions (backs `le-info`; see "LE / intrinsic signature
+  catalogue" below).
 
 ```python
 from cobolparser.dialects.ibm_enterprise import IBMEnterpriseCobol
@@ -21,15 +30,28 @@ dialect.is_intrinsic_function(name)                # bool
 dialect.is_cics_command(name) / is_ims_command(name)
 dialect.is_le_callable_service(name)
 dialect.get_le_service_info(name) -> dict | None
-dialect.get_intrinsic_function_signature(name) -> dict | None
+dialect.get_intrinsic_function_signature(name) -> dict[str, Any] | None
 dialect.validate_data_item(item) -> list[str]      # warnings
 dialect.validate_program_structure(program) -> list[str]
-dialect.get_dialect_info() -> dict[str, Any]
+dialect.create_comp3_data_item(name, picture, location) -> IBMDataItem
+dialect.parse_exec_sql / parse_exec_cics / parse_exec_ims(text, location)
+dialect.get_dialect_info() -> dict[str, Any]       # name/version/features + table sizes
 ```
 
-`ibm_enterprise.py` also defines the AST node types EXEC SQL/CICS/IMS
-statements and IBM-specific data items build on: `ExecSQLStatement`,
-`ExecCICSStatement`, `ExecIMSStatement`, `IBMDataItem`, `IBMDataType`.
+`get_le_service_info` covers fewer names than `is_le_callable_service`
+accepts: `IBM_LE_SERVICE_INFO` is the signature catalogue's services plus a
+small hand-written `_UNCATALOGUED_LE_SERVICE_INFO` (37 of the 62 services as
+of 2026-10-15), so it returns `None` for a recognised service with neither.
+
+**The `Exec*Statement` classes here are not what the parser builds.**
+`ibm_enterprise.py` defines its own `ExecSQLStatement`, `ExecCICSStatement`,
+`ExecIMSStatement` (node types `EXEC-SQL`/`EXEC-CICS`/`EXEC-IMS`),
+`IBMDataItem` and `IBMDataType`, returned only by the dialect's own
+`parse_exec_*` / `create_comp3_data_item` helpers. The parser produces
+`models/sql_statements.py`'s `ExecSQLStatement` (and its subclasses) and
+`parsers/statements/ibm_exec_statements.py`'s `ExecCicsStatement` /
+`ExecImsStatement` (node types `EXEC_CICS` / `EXEC_IMS`). The sections from
+"`ExecSQLStatement.null_indicators`" on describe the parser's SQL model.
 
 ## Command sets and COMP-3 validation (issue #341, 2026-10-15)
 
@@ -44,8 +66,11 @@ statements and IBM-specific data items build on: `ExecSQLStatement`,
 * `IMS_COMMANDS` is DL/I call codes only: the hold forms GHU/GHN/GHNP,
   SYNC/ROLB/ROLL/ROLS/SETS/SETU, CHNG/CMD/GCMD, INQY/LOG/STAT were added;
   ENQUEUE/DEQUEUE/XDLT/XRPL (not DL/I calls) were removed. `ROLLB` is kept
-  for compatibility. `ExecIMSStatement.ims_call_type` reads this set, so
-  those commands now classify instead of staying `UNKNOWN`.
+  for compatibility. The dialect's own `ExecIMSStatement.ims_call_type`
+  reads this set, so those commands classify there instead of staying
+  `UNKNOWN`. The parser's `ExecImsStatement` does **not**: it classifies
+  against `ibm_exec_statements._IMS_CALL_TYPES` (GU/GN/GNP/ISRT/REPL/DLET/
+  CHKP/ROLLB/TERM/XRST/XDLT), so e.g. `GHU` still parses as `UNKNOWN` there.
 
 Pinned by `tests/unit/test_issue_341_dialect_crud.py`.
 
@@ -107,6 +132,7 @@ ROWSET forms included) and `fetch_count` the `FOR n ROWS` size. Before
 matrix lost the cursor's read -- and the direction was a substring test
 (`INTO :WS-LAST-NAME` made a FETCH LAST). Pinned by
 `tests/unit/test_exec_sql_fetch_orientation.py`.
+
 ## `ExecSQLStatement.cursor_name` on positioned UPDATE/DELETE
 
 `UPDATE ... WHERE CURRENT OF C1` / `DELETE FROM T WHERE CURRENT OF C1` set
@@ -130,7 +156,27 @@ so the column after it is no longer reported as a table.
 (`SQLStatementType.TRUNCATE`, issue #341) and `tables == [t]`; it was
 `UNKNOWN` with no tables before.
 
-## `get_intrinsic_function_signature` (2026-09-10)
+## LE / intrinsic signature catalogue (`dialects/le_signatures.py`)
+
+```python
+from cobolparser.dialects.le_signatures import (
+    le_service_signature, intrinsic_signature, services_without_signature,
+    catalog_to_dict, LE_SERVICE_SIGNATURES, INTRINSIC_FUNCTION_SIGNATURES,
+)
+sig = le_service_signature("CEEDAYS")   # LEServiceSignature | None
+sig.parameters                          # tuple[LEParameter, ...]: direction, data_type (LEDataType), optional, repeats
+sig.required_parameters; sig.call_example()
+intrinsic_signature("NUMVAL-C")         # IntrinsicSignature | None (.returns, .arguments, .required_arguments)
+services_without_signature()            # [{"name", "category"}] -- known LE services not catalogued
+catalog_to_dict()                       # whole catalogue, CATALOG_VERSION = 1
+```
+
+Coverage on 2026-10-15: 33 of the dialect's 62 LE services have a
+signature (the other 29 are reported by `services_without_signature()`,
+never hidden); all 81 intrinsic functions do (pinned by a test). Full
+API notes: [analysis.md](analysis.md) ("Call signatures").
+
+## `get_intrinsic_function_signature`
 
 Backed by the complete catalogue in `dialects/le_signatures.py` (the one
 `le-info` reads — see [analysis.md](analysis.md)'s "Call signatures"
