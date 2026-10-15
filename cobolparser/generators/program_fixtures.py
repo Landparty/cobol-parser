@@ -227,6 +227,14 @@ def _demote_violated_arms(
     reason = "witness failed verification: " + "; ".join(
         f"{v.field}: {v.detail}" for v in violated
     )
+    return _demote_arms(coverage, planned, reason)
+
+
+def _demote_arms(
+    coverage: ScenarioCoverage, planned: PlannedScenario, reason: str
+) -> list[str]:
+    """Re-count every arm *planned* claims as missed, for *reason*; one
+    `unresolved` entry per arm demoted."""
     keys = set(planned.arm_keys)
     gaps: list[str] = []
     for position, outcome in enumerate(coverage.details):
@@ -244,6 +252,17 @@ def _demote_violated_arms(
     return gaps
 
 
+def _is_shared_area_read(boundary: Boundary) -> bool:
+    """A READ naming several 01 records of its FD: views of one record
+    area. Only a READ does this -- an SQL boundary's several names are
+    distinct host variables, a CALL's distinct arguments."""
+    return boundary.ref.category == "READ" and len(boundary.record_names) > 1
+
+
+def _boundary_id(boundary: Boundary) -> str:
+    return f"{boundary.ref.category} {boundary.ref.key}"
+
+
 class ProgramFixtureGenerator:
     """Generates a :class:`FixtureBundle` for one program.
 
@@ -255,7 +274,12 @@ class ProgramFixtureGenerator:
     """
 
     def __init__(self, options: DataGeneratorOptions | None = None) -> None:
-        self.options = options or DataGeneratorOptions()
+        # A FILLER that owns a level-88 is a flag the program branches on
+        # (``05 PIC X. 88 FLAG-ON VALUE 'Y'.``): without its column a
+        # scenario's witness for that branch has nowhere to go.
+        self.options = dataclasses.replace(
+            options or DataGeneratorOptions(), include_condition_filler=True
+        )
 
     def generate(
         self,
@@ -273,7 +297,7 @@ class ProgramFixtureGenerator:
         )
         layouts: dict[str, list[FieldSpec]] = {}
         unresolved: list[str] = list(report.unresolved)
-        unresolved.extend(self._alternate_view_notes(report))
+        unresolved.extend(self._alternate_view_notes(report, {}))
         counter = _CallCounter.build(ast, index, report)
         anchors: dict[tuple[str, str], int] = {}
 
@@ -357,6 +381,10 @@ class ProgramFixtureGenerator:
         layouts: dict[str, list[FieldSpec]] = dict(happy.layouts)
         unresolved: list[str] = list(happy.unresolved)
         scenarios: list[Scenario] = list(happy.scenarios)
+        # The record each multi-01 READ was generated through, per scenario,
+        # so the "alternate view(s) not generated" note names only the views
+        # no scenario used (the happy path always uses the first).
+        views_used: dict[str, set[str]] = {}
 
         for planned in scenario_plan.scenarios:
             scenario = Scenario(
@@ -365,6 +393,7 @@ class ProgramFixtureGenerator:
                 entry=self._entry_paragraph(ast),
             )
             anchors: dict[tuple[str, str], int] = {}
+            dropped_views: list[str] = []
             for boundary in report.boundaries:
                 fixture, expectations, extra_unresolved = self._build_fixture(
                     boundary,
@@ -374,6 +403,15 @@ class ProgramFixtureGenerator:
                     planned.name,
                     override=planned,
                 )
+                if fixture is not None and _is_shared_area_read(boundary):
+                    chosen, dropped = self._record_view(boundary, index, planned)
+                    views_used.setdefault(_boundary_id(boundary), set()).update(chosen)
+                    if dropped:
+                        dropped_views.append(
+                            f"{_boundary_id(boundary)} rows use the {chosen[0]} "
+                            f"view, so the pins on {', '.join(dropped)} are not "
+                            "generated"
+                        )
                 if fixture is not None:
                     scenario.fixtures.append(fixture)
                     anchors.setdefault(
@@ -405,6 +443,26 @@ class ProgramFixtureGenerator:
             unresolved.extend(
                 _demote_violated_arms(scenario_plan.coverage, planned, verification)
             )
+            if dropped_views:
+                # The scenario pins fields of two 01 records of one FD (the
+                # planner never merges such arms, but a hand-built or
+                # fixed-family scenario can): one record area holds one view,
+                # so at least one of its arms is not reached. Which one cannot
+                # be told once arms are merged, so none is claimed.
+                unresolved.extend(
+                    _demote_arms(
+                        scenario_plan.coverage,
+                        planned,
+                        "pins fields of several 01 records of one FD: "
+                        + "; ".join(dropped_views),
+                    )
+                )
+
+        happy_notes = self._alternate_view_notes(report, {})
+        if happy_notes:
+            at = unresolved.index(happy_notes[0])
+            unresolved = [n for n in unresolved if n not in happy_notes]
+            unresolved[at:at] = self._alternate_view_notes(report, views_used)
 
         unresolved_count = sum(1 for b in report.boundaries if b.unresolved)
         coverage = CoverageSummary(
@@ -743,9 +801,7 @@ class ProgramFixtureGenerator:
         a pin those rows cannot honour, which the caller reports.
         """
         names = boundary.record_names
-        # Only a READ names several records for the one FD: an SQL boundary's
-        # several names are distinct host variables, a CALL's distinct args.
-        if len(names) <= 1 or boundary.ref.category != "READ":
+        if not _is_shared_area_read(boundary):
             return list(names), []
         pinned: set[str] = set()
         if override is not None:
@@ -764,21 +820,32 @@ class ProgramFixtureGenerator:
         return [chosen], dropped
 
     @staticmethod
-    def _alternate_view_notes(report: BoundaryReport) -> list[str]:
-        """One note per file boundary whose FD's other 01 records are not
-        generated -- see :meth:`_record_view`."""
+    def _alternate_view_notes(
+        report: BoundaryReport, views_used: dict[str, set[str]]
+    ) -> list[str]:
+        """One note per file boundary whose FD has several 01 records,
+        naming the ones no scenario generated -- see :meth:`_record_view`.
+
+        *views_used* maps a boundary id to the records branch scenarios
+        generated it through; the first record is always used (the happy
+        path reads through it).
+        """
         notes = []
         for boundary in report.boundaries:
-            names = boundary.record_names
-            if len(names) <= 1 or boundary.ref.category != "READ":
+            if not _is_shared_area_read(boundary):
                 continue
-            notes.append(
+            names = boundary.record_names
+            used = {names[0]} | views_used.get(_boundary_id(boundary), set())
+            unused = [name for name in names if name not in used]
+            note = (
                 f"{boundary.ref.category} {boundary.ref.key}: the FD has "
                 f"{len(names)} 01 records sharing one record area; rows are "
                 "generated through one of them per scenario (the first unless "
-                "the scenario pins fields of another) -- alternate view(s) not "
-                f"generated: {', '.join(names[1:])}"
+                "the scenario pins fields of another)"
             )
+            if unused:
+                note += f" -- alternate view(s) not generated: {', '.join(unused)}"
+            notes.append(note)
         return notes
 
     @staticmethod

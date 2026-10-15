@@ -487,6 +487,30 @@ def _child_items(item: CobolDataItem) -> list[CobolDataItem]:
     return [c for c in item.children if isinstance(c, CobolDataItem)]
 
 
+def owns_condition_name(item: CobolDataItem) -> bool:
+    """Whether *item* has a level-88 condition name of its own."""
+    return any(isinstance(child, ConditionNameItem) for child in item.children)
+
+
+def layout_segment(item: CobolDataItem, parent: CobolDataItem | None) -> str:
+    """The path segment *item* is laid out under, beneath *parent*.
+
+    That is :attr:`CobolDataItem.layout_name`, except for a FILLER that owns
+    a level-88 condition name (``05 FILLER PIC X. 88 FLAG-ON VALUE 'Y'.``,
+    or the same with FILLER omitted). The program tests that FILLER through
+    its 88, so a scenario pins a value on it, and a pin is keyed by the
+    field's qualified name -- which plain ``FILLER`` shares with every other
+    FILLER of the group. Such a FILLER is ``FILLER#<n>``, *n* its 1-based
+    position among the FILLER items of *parent*: unique in the group, and
+    the same in every walk of the record. Plain FILLERs keep ``FILLER``.
+    """
+    if parent is None or not item.is_filler or not owns_condition_name(item):
+        return item.layout_name
+    fillers = [c for c in _child_items(parent) if c.is_filler]
+    position = next(n for n, c in enumerate(fillers, 1) if c is item)
+    return f"FILLER#{position}"
+
+
 def expand_condition_values(
     raw_values: list[str], width: int | None = None
 ) -> list[str]:
@@ -853,8 +877,12 @@ def _flatten_into(
     redefines_label: str | None = None,
     ignore_own_redefines: bool = False,
     overlays: _OverlayWalk | None = None,
+    segment: str | None = None,
 ) -> None:
     """Recursive worker for :func:`flatten_record`.
+
+    *segment* is this item's path segment (see :func:`layout_segment`);
+    ``None`` means its :attr:`~CobolDataItem.layout_name`.
 
     *ignore_own_redefines* drops *this* item's own ``REDEFINES`` from the
     exclusion test -- passed only for the root, under
@@ -873,7 +901,11 @@ def _flatten_into(
     )
     if inherited_redefines and not opts.include_redefines:
         return
-    if item.is_filler and not opts.include_filler:
+    if (
+        item.is_filler
+        and not opts.include_filler
+        and not (opts.include_condition_filler and owns_condition_name(item))
+    ):
         return
     # Level-66 RENAMES and level-88 condition names are not storage of their
     # own; they are handled via their parent item.
@@ -915,7 +947,7 @@ def _flatten_into(
             ),
         )
 
-    item_path = (*path, item.layout_name)
+    item_path = (*path, segment or item.layout_name)
     for index in indexes:
         occ = (*subscripts, index) if index is not None else subscripts
         children = _child_items(item)
@@ -945,6 +977,7 @@ def _flatten_into(
                     out,
                     redefines_label=redefines_label,
                     overlays=overlays,
+                    segment=layout_segment(child, item),
                 )
             continue
 

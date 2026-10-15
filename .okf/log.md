@@ -14,6 +14,16 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-15 -- gen-fixtures follow-ups to #364 and #404
+
+[generators.md](generators.md): the scenario planner no longer merges arms
+on two 01 records of one FD (only one view is generated per scenario, so the
+second record's arm was lost while coverage counted it merged); an arm whose
+own path pins both is missed, and a scenario that still drops pins has its
+arms demoted. The "alternate view(s) not generated" note names only records
+no scenario used. A FILLER that owns a level-88 keeps its gen-fixtures column
+under the path segment `FILLER#<n>`, so its branch witness is generated.
+
 ## 2026-10-14 -- issue #404: an unnamed data entry is FILLER
 
 [ast-models.md](ast-models.md): `05 PIC X(3).` (FILLER omitted) now has
