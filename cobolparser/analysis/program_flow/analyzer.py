@@ -11,6 +11,7 @@ from typing import Any
 
 from ...models.program import CobolProgram, CobolSection
 from .._procedures import ProcedureIndex
+from .._sql_whenever import whenever_coverage
 from .cycles import classify_cycles, detect_cycles
 from .edges import (
     GOTO_EDGE_TYPES,
@@ -129,6 +130,20 @@ class ProgramFlowAnalyzer:
         for name in declaratives:
             if name in self._nodes:
                 self._nodes[name].is_declarative = True
+
+        # EXEC SQL WHENEVER applies in source order, so which SQL statements
+        # branch to its handler is settled before the scan (contained
+        # programs' statements belong to their own unit).
+        inner = {
+            id(stmt)
+            for contained in ast.contained_programs
+            for stmt in contained.get_all_statements()
+        }
+        collector.set_whenever_coverage(
+            whenever_coverage(
+                [s for s in ast.get_all_statements() if id(s) not in inner]
+            )
+        )
 
         # Pass 2: Scan statements to build edges and node metrics
         scanner.scan_statements(proc_division)

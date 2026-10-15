@@ -24,7 +24,6 @@ from .._procedures import (
     statement_qualifier,
     unique,
 )
-from .._sql_whenever import whenever_goto_target
 from .condition_text import render_condition_text
 from .models import FlowEdge, FlowEdgeType
 
@@ -104,6 +103,8 @@ class EdgeCollector:
         self._external_calls = external_calls
         self._program_cancellations = program_cancellations
         self._index = index
+        self._whenever_coverage: dict[int, list[str]] = {}
+        self._whenever_edges: set[tuple[str, str]] = set()
 
     def set_index(self, index: ProcedureIndex) -> None:
         """Resolve procedure references through *index* (see
@@ -365,20 +366,27 @@ class EdgeCollector:
                     )
                 )
 
-    def process_sql_whenever(self, stmt: Any, source: str) -> None:
-        """Create the edge for ``EXEC SQL WHENEVER ... GO TO p``.
+    def set_whenever_coverage(self, coverage: dict[int, list[str]]) -> None:
+        """Which procedures each SQL statement's WHENEVER directives branch
+        to (``_sql_whenever.whenever_coverage``, keyed by ``id``)."""
+        self._whenever_coverage = coverage
 
-        GO TO-shaped like :meth:`process_cics_handle`. Modelled as one edge
-        from the procedure holding the directive rather than one per SQL
-        statement it covers: which statements those are is decided by
-        source order, not flow, and the target is reached either way.
+    def process_sql_whenever(self, stmt: Any, source: str) -> None:
+        """Create the edges for ``EXEC SQL WHENEVER ... GO TO p``.
+
+        GO TO-shaped like :meth:`process_cics_handle`, but drawn from each
+        procedure holding an SQL statement the directive covers (source
+        order decides which), not from the directive's own procedure: the
+        directive is never executed, and the paragraph holding it may never
+        run (a "SQL setup" paragraph ahead of the SQL it covers). One edge
+        per (procedure, target), however many covered statements it holds.
         """
-        target_name = whenever_goto_target(stmt)
-        if not target_name:
-            return
         known = set(self._ordered_procedures)
-        for target in self.resolve(stmt, target_name):
-            if target in known:
+        for target_name in self._whenever_coverage.get(id(stmt), []):
+            for target in self.resolve(stmt, target_name):
+                if target not in known or (source, target) in self._whenever_edges:
+                    continue
+                self._whenever_edges.add((source, target))
                 self._edges.append(
                     FlowEdge(
                         source=source,

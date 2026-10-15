@@ -38,7 +38,8 @@ class FlowEdgeType(Enum):
     CICS_HANDLE = "CICS_HANDLE"
     # EXEC SQL WHENEVER SQLERROR|SQLWARNING|NOT FOUND GO TO p: the
     # precompiler branches to p after any SQL statement the directive covers.
-    # One edge, from the procedure holding the directive.
+    # One edge per procedure holding a covered SQL statement (the directive
+    # itself never runs).
     SQL_WHENEVER = "SQL_WHENEVER"
     ALTER = "ALTER"
     FALL_THROUGH = "FALL_THROUGH"

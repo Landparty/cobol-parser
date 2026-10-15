@@ -133,3 +133,125 @@ class TestWheneverGotoTarget:
 
     def test_non_whenever_statement(self) -> None:
         assert whenever_goto_target(_exec_sql("SELECT 1 FROM T1")) is None
+
+
+def _flow_and_dead(source: str) -> tuple[set[tuple[str, str]], list[str], list[str]]:
+    result = parse_cobol(source)
+    assert result.ast is not None
+    flow = ProgramFlowAnalyzer().analyze(result.ast)
+    edges = {
+        (e.source, e.target)
+        for e in flow.edges
+        if e.edge_type is FlowEdgeType.SQL_WHENEVER
+    }
+    dead = [d.name for d in DeadCodeAnalyzer().analyze(result.ast).dead_items]
+    return edges, sorted(flow.unreachable_nodes), dead
+
+
+def _procedures(body: str) -> str:
+    return f"""       IDENTIFICATION DIVISION.
+       PROGRAM-ID. WH.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 A PIC X(10).
+       PROCEDURE DIVISION.
+{body}       SQL-ERR.
+           DISPLAY 'SQL ERROR'
+           STOP RUN.
+"""
+
+
+class TestCoverageIsSourceOrder:
+    """WHENEVER is a precompiler directive: it covers the SQL statements
+    after it in source order, and the branch comes from those statements,
+    not from the paragraph holding the directive (review of #461)."""
+
+    def test_directive_in_never_performed_setup_paragraph(self) -> None:
+        source = _procedures("""       MAIN-PARA.
+           PERFORM P1
+           STOP RUN.
+       SQL-SETUP.
+           EXEC SQL WHENEVER SQLERROR GO TO SQL-ERR END-EXEC.
+       P1.
+           IF A = SPACES
+              EXEC SQL SELECT C1 INTO :A FROM T1 END-EXEC
+           END-IF
+           GOBACK.
+""")
+        edges, unreachable, dead = _flow_and_dead(source)
+        assert edges == {("P1", "SQL-ERR")}
+        assert unreachable == ["SQL-SETUP"]
+        assert dead == ["SQL-SETUP"]
+
+    def test_sql_before_the_directive_is_not_covered(self) -> None:
+        source = _procedures("""       MAIN-PARA.
+           EXEC SQL SELECT C1 INTO :A FROM T1 END-EXEC
+           EXEC SQL WHENEVER SQLERROR GO TO SQL-ERR END-EXEC
+           STOP RUN.
+""")
+        edges, unreachable, dead = _flow_and_dead(source)
+        assert edges == set()
+        assert unreachable == ["SQL-ERR"]
+        assert dead == ["SQL-ERR"]
+
+    def test_continue_switches_the_condition_off(self) -> None:
+        source = _procedures("""       MAIN-PARA.
+           EXEC SQL WHENEVER SQLERROR GO TO SQL-ERR END-EXEC
+           EXEC SQL WHENEVER SQLERROR CONTINUE END-EXEC
+           EXEC SQL SELECT C1 INTO :A FROM T1 END-EXEC
+           STOP RUN.
+""")
+        edges, _, dead = _flow_and_dead(source)
+        assert edges == set()
+        assert dead == ["SQL-ERR"]
+
+    def test_other_conditions_stay_in_effect(self) -> None:
+        source = _procedures("""       MAIN-PARA.
+           EXEC SQL WHENEVER NOT FOUND GO TO SQL-ERR END-EXEC
+           EXEC SQL WHENEVER SQLERROR CONTINUE END-EXEC
+           EXEC SQL SELECT C1 INTO :A FROM T1 END-EXEC
+           STOP RUN.
+""")
+        edges, _, dead = _flow_and_dead(source)
+        assert edges == {("MAIN-PARA", "SQL-ERR")}
+        assert dead == []
+
+    def test_covered_sql_only_in_dead_paragraph(self) -> None:
+        source = _procedures("""       MAIN-PARA.
+           EXEC SQL WHENEVER SQLERROR GO TO SQL-ERR END-EXEC
+           STOP RUN.
+       OLD-PARA.
+           EXEC SQL SELECT C1 INTO :A FROM T1 END-EXEC
+           STOP RUN.
+""")
+        edges, unreachable, dead = _flow_and_dead(source)
+        assert edges == {("OLD-PARA", "SQL-ERR")}
+        assert unreachable == ["OLD-PARA", "SQL-ERR"]
+        assert dead == ["OLD-PARA", "SQL-ERR"]
+
+    def test_declarations_are_not_covered(self) -> None:
+        source = _procedures("""       MAIN-PARA.
+           EXEC SQL WHENEVER SQLERROR GO TO SQL-ERR END-EXEC
+           EXEC SQL DECLARE C1 CURSOR FOR SELECT C1 FROM T1 END-EXEC
+           EXEC SQL INCLUDE SQLCA END-EXEC
+           STOP RUN.
+""")
+        edges, _, dead = _flow_and_dead(source)
+        assert edges == set()
+        assert dead == ["SQL-ERR"]
+
+    def test_one_edge_per_paragraph(self) -> None:
+        source = _procedures("""       MAIN-PARA.
+           EXEC SQL WHENEVER SQLERROR GO TO SQL-ERR END-EXEC
+           EXEC SQL SELECT C1 INTO :A FROM T1 END-EXEC
+           EXEC SQL SELECT C2 INTO :A FROM T1 END-EXEC
+           STOP RUN.
+""")
+        result = parse_cobol(source)
+        assert result.ast is not None
+        flow = ProgramFlowAnalyzer().analyze(result.ast)
+        assert [
+            (e.source, e.target)
+            for e in flow.edges
+            if e.edge_type is FlowEdgeType.SQL_WHENEVER
+        ] == [("MAIN-PARA", "SQL-ERR")]
