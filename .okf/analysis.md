@@ -739,10 +739,16 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   `PERFORM_RECURSION` cycle (out-of-line paragraphs performing each other in
   a loop — invalid re-entrant PERFORM in standard COBOL) is always `HIGH`,
   independent of any UNTIL/TIMES/VARYING clause on the individual PERFORMs.
-  A `GOTO_LOOP`/`MIXED` cycle is graded by `_has_escape`: `HIGH` if no
-  paragraph in the cycle has an edge leaving it (to a paragraph outside the
-  cycle) or a program-terminating statement (`has_stop_run`/`has_goback`/
-  `has_exit_program`/`has_return` on the `FlowNode`), `MEDIUM` otherwise —
+  A `GOTO_LOOP`/`MIXED` cycle is graded by `_has_escape` over the cycle's
+  **strongly connected component** (`_components`, Tarjan over
+  `_ESCAPE_EDGE_TYPES`), not the cycle alone: `HIGH` if no paragraph in the
+  component has an edge leaving it or a program-terminating statement
+  (`has_stop_run`/`has_goback`/`has_exit_program` on the `FlowNode`),
+  `MEDIUM` otherwise. Per-cycle checking (before #393) let two cycles that
+  share a paragraph each "escape" into the other, so an inescapable
+  `P1 -> P2 -> P1` / `P1 -> P3 -> P1` pair read MEDIUM. `has_return` is a
+  SORT/MERGE `RETURN sd-file`, **not** a terminator (it was, before #393,
+  so every SORT output-procedure loop read MEDIUM) —
   fall-through-only cycles are never reported (fall-through can't actually
   form a cycle).
   A `MIXED` cycle that is a PERFORM of a multi-procedure range (a SECTION

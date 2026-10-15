@@ -2254,7 +2254,36 @@ class _CobolLexerPure:
             line_idx -= 1
             if line_idx < prev_line:
                 return False
-            pos = len(lines[line_idx]) if self.free_form else _FF_LINE_END - 1
+            # An earlier line may end in a ``*>`` comment (or be one): only
+            # the program text before it counts.
+            pos = self._code_end(lines[line_idx], lo) - 1
+            if not self.free_form:
+                pos = min(pos, _FF_LINE_END - 1)
+
+    def _code_end(self, line: str, lo: int) -> int:
+        """Index where *line*'s program text ends: at a ``*>`` comment.
+
+        The ``*>`` must sit outside a literal (``"A*>B"`` is text). A
+        fixed-format comment line (``*`` or ``/`` in column 7) has no
+        program text at all.
+        """
+        line = line.rstrip("\n")
+        if not self.free_form and len(line) > _FF_INDICATOR:
+            if line[_FF_INDICATOR] in "*/":
+                return lo
+        if "*>" not in line:
+            return len(line)
+        quote: str | None = None
+        for index in range(lo, len(line)):
+            ch = line[index]
+            if quote is not None:
+                if ch == quote:
+                    quote = None  # a doubled quote reopens on the next char
+            elif ch in "'\"":
+                quote = ch
+            elif line.startswith("*>", index):
+                return index
+        return len(line)
 
     def _merge_concatenated_literals(self) -> None:
         """Join ``lit-1 & lit-2 [& ...]`` into one STRING_LITERAL token.
@@ -2272,7 +2301,7 @@ class _CobolLexerPure:
         if not any("&" in line for line in self.lines):
             return
         merged: list[Token] = []
-        last_index = -1  # index in *merged* of the last non-NEWLINE token
+        last_index = -1  # index in *merged* of the last non-NEWLINE, non-COMMENT token
         for token in tokens:
             prev = merged[last_index] if last_index >= 0 else None
             if (
@@ -2298,7 +2327,9 @@ class _CobolLexerPure:
                     )
                     continue
             merged.append(token)
-            if token.type != TokenType.NEWLINE:
+            # A line break or an inline ``*>`` comment may sit between the
+            # two literals; neither ends the run.
+            if token.type not in (TokenType.NEWLINE, TokenType.COMMENT):
                 last_index = len(merged) - 1
         tokens[:] = merged
 
