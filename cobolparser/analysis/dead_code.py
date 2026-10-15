@@ -1,12 +1,13 @@
 """
 Dead code detection for COBOL programs.
 
-Analyzes the PROCEDURE DIVISION to find paragraphs and sections that are
-never referenced by any control flow statement (PERFORM, GO TO, ALTER,
-SORT/MERGE procedures) and never implicitly reached by falling through from
-the paragraph immediately preceding them in source order. The first
-procedure in the PROCEDURE DIVISION is always considered referenced as the
-program entry point.
+Analyzes the PROCEDURE DIVISION to find paragraphs and sections control can
+never reach: never referenced by a control flow statement (PERFORM, GO TO,
+ALTER, SORT/MERGE procedures) that itself runs, and never implicitly reached
+by falling through from the paragraph immediately preceding them in source
+order. The first procedure in the PROCEDURE DIVISION is always considered
+reached as the program entry point. A reference written in dead code does
+not count, so dead code is followed transitively (issue #384).
 """
 
 from dataclasses import dataclass, field
@@ -29,12 +30,17 @@ from ..models.statements.misc import (
     XmlJsonStatement,
 )
 from ._cics import cics_terminator_kind
-from ._procedures import ProcedureIndex, enclosing_section, statement_qualifier
+from ._procedures import (
+    ProcedureIndex,
+    enclosing_section,
+    qualify,
+    statement_qualifier,
+)
 
 
 @dataclass
 class DeadCodeItem:
-    """A paragraph or section identified as dead (unreferenced) code."""
+    """A paragraph or section identified as dead (unreachable) code."""
 
     name: str
     procedure_type: str  # "PARAGRAPH" or "SECTION"
@@ -82,11 +88,13 @@ class DeadCodeReport:
 
 
 class DeadCodeAnalyzer:
-    """Analyzer for detecting dead (unreferenced) code in COBOL programs.
+    """Analyzer for detecting dead (unreachable) code in COBOL programs.
 
-    Scans the PROCEDURE DIVISION for paragraphs and sections that are never
-    referenced by control flow statements. A procedure is considered
-    "referenced" if it appears as a target in any of:
+    Scans the PROCEDURE DIVISION for paragraphs and sections that control
+    can never reach. A procedure is considered "referenced" if it appears as
+    a target in any of the following, written in a procedure that is itself
+    referenced (a PERFORM in a dead paragraph never runs, so the paragraphs
+    only it performs are dead too -- issue #384):
 
     - PERFORM target / PERFORM target THRU target
     - GO TO target / GO TO targets DEPENDING ON
@@ -170,6 +178,8 @@ class DeadCodeAnalyzer:
         # between its header and its first paragraph (the parser's unnamed
         # paragraph); a bare SECTION header never blocks fall-through.
         self._paragraph_nodes: dict[str, CobolParagraph] = {}
+        # ``_terminates`` per procedure: asked again on every worklist round.
+        self._terminates_cache: dict[str, bool] = {}
         # Procedures control can arrive at and then *keep running from*, so
         # that reaching the end of one falls into the next in source order.
         # A strict subset of ``_referenced_names``: see the class docstring
@@ -206,6 +216,7 @@ class DeadCodeAnalyzer:
         self._section_exit_jumps = set()
         self._sections_entered_by_jump = set()
         self._paragraph_nodes = {}
+        self._terminates_cache = {}
         self._fallthrough_sources = set()
         self._declarative_procs = set()
 
@@ -215,29 +226,46 @@ class DeadCodeAnalyzer:
 
         self._collect_procedures(proc_division)
         self._collect_declaratives(proc_division)
-        self._collect_references(ast)
+        statements = self._own_statements(ast)
+        by_owner: dict[str | None, list[Any]] = {}
+        for stmt in statements:
+            owner = None if self._always_counts(stmt) else self._owner(stmt)
+            by_owner.setdefault(owner, []).append(stmt)
 
-        # Entry point is always referenced. Marked before the fall-through
-        # pass (which propagates left-to-right and needs to know the first
-        # procedure is reachable) rather than after. Declaratives come
-        # first in source order but are never the entry point: control
-        # enters at the first procedure after END DECLARATIVES.
-        entry = next(
-            (p for p in self._ordered_procedures if p not in self._declarative_procs),
-            None,
-        )
-        leading_stops = self._leading_body is not None and any(
-            self._is_terminator(stmt) for stmt in self._leading_body.statements
-        )
-        if entry is not None and not leading_stops:
-            self._referenced_names.add(entry)
-            self._fallthrough_sources.add(entry)
-        self._referenced_names.update(self._declarative_procs)
+        # THRU range ends and performed-section exits come from *every*
+        # statement, dead ones included, before any GO TO is classified, so a
+        # jump onto one is not mistaken for a jump that keeps running. Taking
+        # them from every statement rather than only reachable ones keeps the
+        # pass below monotone: admitting more statements only ever adds
+        # references, never retracts a fall-through source.
+        for stmt in statements:
+            self._collect_range_end(stmt)
+        self._seed_roots()
 
-        self._collect_fallthrough_refs()
-
-        # When a section is referenced, all its paragraphs are too
-        self._propagate_section_references()
+        # Dead means *unreachable*, not merely unreferenced (issue #384): a
+        # PERFORM written in a dead paragraph never runs, so it must not keep
+        # its targets alive. A worklist from the roots -- the entry point,
+        # the declaratives, the leading body, ENTRY paragraphs and CICS
+        # HANDLE labels -- admits a procedure's statements only once the
+        # procedure itself is reached.
+        admitted: set[str | None] = set()
+        pending: list[str | None] = [None]
+        while pending:
+            admitted.update(pending)
+            for owner in pending:
+                self._collect_references(by_owner.get(owner, []))
+            self._collect_fallthrough_refs()
+            # When a section is referenced, all its paragraphs are too
+            self._propagate_section_downward()
+            pending = [
+                key
+                for key in self._ordered_procedures
+                if key in self._referenced_names and key not in admitted
+            ]
+        # Only once every round is done: a section kept alive merely by one
+        # of its paragraphs must not look *directly* referenced to a later
+        # downward pass (see ``_propagate_section_references``).
+        self._propagate_section_upward()
 
         # Build report
         report = DeadCodeReport()
@@ -259,6 +287,82 @@ class DeadCodeAnalyzer:
                 )
 
         return report
+
+    def _seed_roots(self) -> None:
+        """Mark the entry point and the declaratives as referenced.
+
+        The entry point is marked before the fall-through pass (which
+        propagates left-to-right and needs to know the first procedure is
+        reachable) rather than after. Declaratives come first in source
+        order but are never the entry point: control enters at the first
+        procedure after END DECLARATIVES.
+        """
+        entry = next(
+            (p for p in self._ordered_procedures if p not in self._declarative_procs),
+            None,
+        )
+        leading_stops = self._leading_body is not None and any(
+            self._is_terminator(stmt) for stmt in self._leading_body.statements
+        )
+        if entry is not None and not leading_stops:
+            self._referenced_names.add(entry)
+            self._fallthrough_sources.add(entry)
+        self._referenced_names.update(self._declarative_procs)
+
+    @staticmethod
+    def _own_statements(ast: CobolProgram) -> list[Any]:
+        """*ast*'s own statements, without its contained programs'.
+
+        ``get_all_statements()`` also returns every contained program's, and
+        a nested program's ``PERFORM 100-DO`` names *its own* ``100-DO`` --
+        procedure names are local to a program unit -- so crediting it here
+        kept a same-named dead paragraph of the container alive.
+        """
+        all_statements = ast.get_all_statements()
+        if ast.contained_programs:
+            inner = {
+                id(stmt)
+                for contained in ast.contained_programs
+                for stmt in contained.get_all_statements()
+            }
+            all_statements = [s for s in all_statements if id(s) not in inner]
+        return all_statements
+
+    def _owner(self, stmt: Any) -> str | None:
+        """The key of the procedure *stmt* is written in.
+
+        ``None`` when it sits before the first paragraph header (the leading
+        body, which always runs first) or its paragraph cannot be found --
+        such a statement always counts, so a gap in the parent chain can
+        only keep code alive, never report live code dead.
+        """
+        node = getattr(stmt, "parent", None)
+        while node is not None and not isinstance(node, CobolParagraph):
+            node = getattr(node, "parent", None)
+        if node is None:
+            return None
+        section = node.parent if isinstance(node.parent, CobolSection) else None
+        sec = section.section_name.upper() if section and section.section_name else None
+        if not node.paragraph_name or not self._is_valid_procedure_name(
+            node.paragraph_name
+        ):
+            # A section's sentences before its first paragraph header.
+            return sec if sec in self._procedure_names else None
+        name = node.paragraph_name.upper()
+        for key in (qualify(name, sec) if sec else None, name):
+            if key and key in self._procedure_names:
+                return key
+        return None
+
+    @staticmethod
+    def _always_counts(stmt: Any) -> bool:
+        """An ENTRY (an external CALL lands on its paragraph) or a CICS
+        HANDLE (its labels are handler entry points): roots of reachability
+        wherever they are written."""
+        return isinstance(stmt, EntryStatement) or (
+            getattr(stmt, "node_type", None) == "EXEC_CICS"
+            and (getattr(stmt, "cics_command", "") or "").upper() == "HANDLE"
+        )
 
     def _collect_procedures(self, proc_division: CobolDivision) -> None:
         """Collect every paragraph and section of the PROCEDURE DIVISION.
@@ -346,15 +450,21 @@ class DeadCodeAnalyzer:
         its *own* section from being reported dead (via the upward pass
         below) without resurrecting unrelated siblings.
         """
-        # Downward: a *directly* referenced section makes all its paragraphs
-        # referenced too (must run before the upward pass -- see docstring).
-        #
-        # Entering a section runs its paragraphs in order, so a paragraph is
-        # reached only while the one before it (in the same section) was
-        # reached and does not terminate: a paragraph after one ending in
-        # STOP RUN / GOBACK / an unconditional GO TO is not executed just
-        # because its section is PERFORMed or fallen into. Marking every
-        # paragraph of a referenced section hid exactly that dead code.
+        self._propagate_section_downward()
+        self._propagate_section_upward()
+
+    def _propagate_section_downward(self) -> None:
+        """A *directly* referenced section makes its paragraphs referenced
+        (must run before the upward pass -- see
+        ``_propagate_section_references``).
+
+        Entering a section runs its paragraphs in order, so a paragraph is
+        reached only while the one before it (in the same section) was
+        reached and does not terminate: a paragraph after one ending in
+        STOP RUN / GOBACK / an unconditional GO TO is not executed just
+        because its section is PERFORMed or fallen into. Marking every
+        paragraph of a referenced section hid exactly that dead code.
+        """
         for sec_name, para_names in self._section_paragraphs.items():
             if sec_name in self._referenced_names:
                 # The section's own leading sentences run first.
@@ -365,39 +475,25 @@ class DeadCodeAnalyzer:
                         self._referenced_names.add(pname)
                     live = reached and not self._terminates(pname)
 
-        # Upward: paragraph referenced -> parent section is referenced.
-        # Every section holding a paragraph of that name, not just the last
-        # one registered: a bare ``PERFORM 100-DO`` in a program with a
-        # ``100-DO`` in both ``SEC-A`` and ``SEC-B`` cannot be told apart by
-        # name alone, and reporting one of those sections dead would be
-        # reporting live code -- the over-approximation goes the safe way.
+    def _propagate_section_upward(self) -> None:
+        """A referenced paragraph keeps its parent section(s) referenced.
+
+        Every section holding a paragraph of that name, not just the last
+        one registered: a bare ``PERFORM 100-DO`` in a program with a
+        ``100-DO`` in both ``SEC-A`` and ``SEC-B`` cannot be told apart by
+        name alone, and reporting one of those sections dead would be
+        reporting live code -- the over-approximation goes the safe way.
+        """
         for para_name, sec_names in self._paragraph_sections.items():
             if para_name in self._referenced_names:
                 self._referenced_names.update(sec_names)
 
-    def _collect_references(self, ast: CobolProgram) -> None:
+    def _collect_references(self, all_statements: list[Any]) -> None:
         """Collect all procedure name references from control flow statements.
 
-        Only *ast*'s own statements: ``get_all_statements()`` also returns
-        every contained program's, and a nested program's ``PERFORM 100-DO``
-        names *its own* ``100-DO`` -- procedure names are local to a program
-        unit -- so crediting it here kept a same-named dead paragraph of the
-        container alive.
+        THRU range ends must already be known (``_collect_range_end``), so a
+        GO TO onto one is not mistaken for a jump that keeps running.
         """
-        all_statements = ast.get_all_statements()
-        if ast.contained_programs:
-            inner = {
-                id(stmt)
-                for contained in ast.contained_programs
-                for stmt in contained.get_all_statements()
-            }
-            all_statements = [s for s in all_statements if id(s) not in inner]
-
-        # THRU range ends must be known before any GO TO is classified, so a
-        # jump onto one is not mistaken for a jump that keeps running.
-        for stmt in all_statements:
-            self._collect_range_end(stmt)
-
         for stmt in all_statements:
             if isinstance(stmt, PerformStatement):
                 self._collect_perform_refs(stmt)
@@ -618,6 +714,14 @@ class DeadCodeAnalyzer:
         there only fires conditionally, so it must not suppress
         fall-through whenever that branch isn't the one actually taken.
         """
+        cached = self._terminates_cache.get(name)
+        if cached is not None:
+            return cached
+        result = self._terminates_uncached(name)
+        self._terminates_cache[name] = result
+        return result
+
+    def _terminates_uncached(self, name: str) -> bool:
         para = self._paragraph_nodes.get(name)
         if para is None:
             # A bare section header (and a paragraph with no statements) has

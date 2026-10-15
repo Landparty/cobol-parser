@@ -423,6 +423,12 @@ parameter (see [preprocessing.md](preprocessing.md) and the CHANGELOG
 Unreleased entry). Pinned by
 `tests/regression/test_tagged_sequence_area_detection.py`.
 
+**`debug_lines` (2026-10-14, #334):** `_tokenize_source(...,
+debug_lines=True)` normalizes with `debug_lines_as_comments=False`, and
+`_fixed_format_comment_tokens(..., debug_lines_as_comments=False)` then
+leaves `D`/`d` lines out of the recovered COMMENT tokens (they are code).
+`tokenize --debug-lines` uses it. See [preprocessing.md](preprocessing.md).
+
 **`_fixed_format_comment_tokens` V/v gap (fixed 2026-08-22, caught in PR
 review):** when `normalize_fixed_format` gained `version_tag_lines_as_comments`
 (see [preprocessing.md](preprocessing.md)), `_fixed_format_comment_tokens`'s
