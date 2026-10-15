@@ -1459,3 +1459,11 @@ SORTs gained a key, since a keyless file SORT now warns.
 `CICS_NO_RESP_HANDLING`, a narrower `IGNORE CONDITION NOTFND` goes to
 `unchecked`, a bare `HANDLE CONDITION ERROR` afterwards restores the finding,
 and `PUSH HANDLE` suspends an ignore like any other handler.
+## 2026-10-14 (issue #402)
+
+`tests/regression/test_optional_keyword_forms_402.py` pins the four optional-
+keyword forms: `OCCURS n TO UNBOUNDED`, FD `RECORD VARYING n TO m` without
+FROM, `ENTRY ... USING [BY] REFERENCE/VALUE` (operands and
+`parameter_modes`, plus the signature's `by_clause`), and `INITIALIZE ...
+FILLER` without WITH. `test_program_signature.py::test_by_clause_is_set_and_rendered_where_the_mode_changes`
+now expects an ENTRY operand's `by_clause` to be `"REFERENCE"`, not None.

@@ -1145,7 +1145,9 @@ bytes each *record* carries.
   metadata. So `gen-data` on a **whole program** picks it up with no flag. A
   bare **copybook** has no FD; `DataGeneratorOptions.record_varying` (CLI
   `--record-varying MIN:MAX`) supplies it, and overrides the FD when both
-  exist.
+  exist. `FROM` itself is optional (`VARYING IN SIZE 47 TO 80` has a
+  minimum of 47, issue #402); with neither FROM nor an integer before TO,
+  the minimum is None.
 * **Only `DEPENDING ON` draws lengths** (#320, 2026-10-14). `RECORD CONTAINS
   47 TO 80` (format 2) and `RECORD VARYING` without `DEPENDING ON` make the
   *file* variable, but IBM COBOL writes each record at the length of the 01

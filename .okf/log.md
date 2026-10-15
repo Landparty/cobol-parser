@@ -23,6 +23,15 @@ PREPARE's paragraph cuts off every writer before it and elsewhere;
 `_WriterFlow` in `sql_cics_lint.py` owns the rule. Without such a MOVE the
 trace stays program-wide, so a statement built in a PERFORMed paragraph is
 still found.
+## 2026-10-14 -- issue #402: optional-keyword forms
+
+[parser.md](parser.md): `OCCURS n TO UNBOUNDED` is an unbounded ODO table
+(Python walker and the `_data_fast.pyx` bail-out); `INITIALIZE ... FILLER`
+without WITH sets `with_filler`; FD `RECORD VARYING [IN SIZE] n TO m`
+without FROM takes n as the minimum, and a lone `VARYING n` leaves the maximum None. `ENTRY ... USING [BY] VALUE/REFERENCE`
+keeps every operand and records `EntryStatement.parameter_modes`, which
+[analysis.md](analysis.md)'s `ProgramSignatureExtractor` now carries as each
+ENTRY operand's `by_clause`.
 
 ## 2026-10-14 -- issue #404: an unnamed data entry is FILLER
 

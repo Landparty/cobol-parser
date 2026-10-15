@@ -566,10 +566,11 @@ class TestEntryUsingAndPassingModes:
         assert primary.call_example() == (
             'CALL "E1" USING LK-A, BY VALUE LK-B, BY REFERENCE LK-C RETURNING LK-R'
         )
-        # ENTRY's own USING phrase carries no mode: rendered bare.
+        # ENTRY's own USING phrase carries its mode too (REFERENCE by
+        # default), and a REFERENCE operand is still rendered bare.
         alt = signature.entry("E1ALT")
         assert alt is not None
-        assert alt.parameters[0].by_clause is None
+        assert alt.parameters[0].by_clause == "REFERENCE"
         assert alt.call_example() == 'CALL "E1ALT" USING LK-A'
 
     def test_returning_item_is_not_unreferenced_linkage(self):

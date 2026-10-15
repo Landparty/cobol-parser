@@ -3178,8 +3178,11 @@ the four words joined `_PICTURE_TERMINATOR_KEYWORDS` so a PICTURE scan
 stops at them. `_parse_occurs_clause` handles `OCCURS UNBOUNDED DEPENDING
 ON` (peeked with `_peek_next_meaningful(offset=0)` so the count read's
 line-crossing guard keeps working; `min_times` 1, `max_times` None,
-`OccursClause.is_unbounded`). The Cython walker in `_data_fast.pyx` bails
-out to the Python path when the word after `OCCURS` is `UNBOUNDED` and when
+`OccursClause.is_unbounded`), and `OCCURS n TO UNBOUNDED [TIMES] DEPENDING
+ON` (Enterprise COBOL 6.x, issue #402): the TO branch takes `UNBOUNDED` as
+the maximum, keeping `min_times` n. The Cython walker in `_data_fast.pyx` bails
+out to the Python path when the word after `OCCURS`, or after `OCCURS n TO`,
+is `UNBOUNDED` and when
 `USAGE [IS]` is followed by `OBJECT` (it used to delegate to
 `parse_usage_clause`, which took `OBJECT` as the usage and left `REFERENCE
 class` as dropped tokens -- the extension-built CI matrix would have caught
@@ -3227,13 +3230,15 @@ latter also breaks on form feed / NEL / U+2028, which put every later
   (signed) literal or figurative constant and records it as
   `ConditionNameItem.false_value`; anything else after `WHEN` is left for
   the old skip.
-* **`INITIALIZE id ... [WITH FILLER] [{ALL | category} TO VALUE] [THEN
+* **`INITIALIZE id ... [[WITH] FILLER] [{ALL | category} TO VALUE] [THEN
   REPLACING ...] [THEN TO DEFAULT]`** (Enterprise COBOL 6): the
   `TO VALUE` / `TO DEFAULT` phrases warned "Unparsed tokens" and were
   dropped. The target loop now also stops at `ALL` / `THEN` / `TO` / a
   category word (`_INITIALIZE_PHRASE_STARTS`); the phrases are recorded as
   `InitializeStatement.to_value_category` / `.to_default`. `THEN` is
-  optional before `REPLACING` / `TO DEFAULT` (`_match_then`).
+  optional before `REPLACING` / `TO DEFAULT` (`_match_then`). `WITH` is
+  optional before `FILLER` (issue #402): a bare `FILLER` also ends the target
+  list and sets `with_filler`.
 
 Pinned by `tests/regression/test_level88_false_and_initialize_phrases.py`.
 # `*>` floating comments never reach the division parsers (2026-09-28)

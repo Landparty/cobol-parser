@@ -369,8 +369,9 @@ def parse_data_item_clauses_fast(
         # OCCURS clause -- walk it inline; pure token-driven, no
         # sub-parsing callbacks needed.
         if value_upper == "OCCURS":
-            # ``OCCURS UNBOUNDED DEPENDING ON`` has no count to read; hand
-            # the whole clause to the Python walker, which models it.
+            # ``OCCURS UNBOUNDED DEPENDING ON`` and ``OCCURS n TO UNBOUNDED``
+            # have no maximum to read; hand the whole clause to the Python
+            # walker, which models both.
             look = _skip_layout(tokens, pos + 1, n, newline_type, comma_type, semicolon_type)
             if (
                 look < n
@@ -379,6 +380,21 @@ def parse_data_item_clauses_fast(
                 and tokens[look].value.upper() == "UNBOUNDED"
             ):
                 break
+            look = _skip_layout(tokens, look + 1, n, newline_type, comma_type, semicolon_type)
+            if (
+                look < n
+                and tokens[look] is not None
+                and tokens[look].value
+                and tokens[look].value.upper() == "TO"
+            ):
+                look = _skip_layout(tokens, look + 1, n, newline_type, comma_type, semicolon_type)
+                if (
+                    look < n
+                    and tokens[look] is not None
+                    and tokens[look].value
+                    and tokens[look].value.upper() == "UNBOUNDED"
+                ):
+                    break
             pos += 1  # consume OCCURS
             occurs = occurs_clause_cls(location)
             min_count = 0

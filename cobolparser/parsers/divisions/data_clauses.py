@@ -1125,7 +1125,17 @@ class DataItemClauseParser:
         nxt = token_stream.peek()
         if nxt and nxt.value and nxt.value.upper() == "TO":
             token_stream.consume()  # consume TO
-            max_token, max_offset = self._peek_count_token(token_stream)
+            # ``OCCURS min TO UNBOUNDED`` (Enterprise COBOL 6.x): no declared
+            # maximum, the same as the bare ``OCCURS UNBOUNDED`` form above.
+            after_to = self._peek_next_meaningful(token_stream, offset=0)
+            if after_to is not None and (after_to.value or "").upper() == "UNBOUNDED":
+                self._skip_clause_separators(token_stream)
+                token_stream.consume()
+                unbounded = True
+                max_count = None
+                max_token, max_offset = None, 0
+            else:
+                max_token, max_offset = self._peek_count_token(token_stream)
             if max_token is not None:
                 try:
                     max_count = int(max_token.value)
