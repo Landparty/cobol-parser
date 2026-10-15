@@ -490,7 +490,9 @@ CICS, DLI, console ACCEPT) — not just one record's CSV rows.
 * `--rows`/`-n` — rows generated per **READ** boundary's sequence (default
   10); every other IN boundary (SQL SELECT/FETCH, ACCEPT, a CALL argument)
   generates exactly one value, matching one invocation in the "happy path"
-  scenario.
+  scenario. A negative `--rows` (or `data.rows` in `cobol.yml`) or a
+  `--max-occurs` below 1 is a one-line `error:` with exit 1, as in
+  `gen-data` (#327).
 * `--seed` pins the RNG; the same seed and program always produce
   byte-identical JSON (`ProgramFixtureGenerator.generate`'s own per-boundary
   sub-seed scheme -- see generators.md -- means adding one boundary never
@@ -1277,3 +1279,6 @@ See [jcl.md](jcl.md).
 
 * `jcl` without the `[jcl]` extra prints the install hint as a one-line
   `error:` and exits 1, instead of an `ImportError` traceback (#326).
+* `gen-fixtures --rows -1` / `--max-occurs 0` / `data.rows: -5` in
+  `cobol.yml` print a one-line `error:` and exit 1 instead of a
+  `ValueError` traceback (#327).

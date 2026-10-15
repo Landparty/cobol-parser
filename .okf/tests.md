@@ -732,6 +732,8 @@ the existing `TestNewSubcommandsRegistered` and
 same registration/`-o`-silences-stdout coverage the other five analyzer
 subcommands already get.
 
+2026-10-15 (issue #327): +4 in new `tests/unit/cli/test_gen_fixtures_cli.py::TestGenFixturesInvalidOptions` (`gen-fixtures --rows -1`, `--max-occurs 0`, `--max-occurs -1`, and `data: {rows: -5}` in a discovered `cobol.yml` each exit 1 with exactly one `error:` line). Failed before the fix (the `ValueError` from `DataGeneratorOptions` escaped).
+
 2026-10-15 (issue #326): +1 in new `tests/unit/cli/test_jcl_cli.py::TestMissingJclParser` (with `jclparser` blocked in `sys.modules`, `jcl` exits 1 with a one-line `error:` carrying the `pip install 'cobol-parser[jcl]'` hint and no traceback). Failed before the fix (the `ImportError` escaped).
 
 2026-10-14 (issue #397): +4 in new `tests/unit/analysis/test_technical_debt.py::TestParseErrorsWithholdTheGrade` (no parse errors keeps the grade and an empty `caveats`; `parse_error_count=4` sets `grade` to `None` with one caveat naming the count; the score is unchanged; `to_dict()` serializes all three) and +3 in new `tests/unit/cli/test_complexity_health_subcommands.py::TestHealthWithParseErrors` (`health` on a non-COBOL file emits `"grade": null`, a nonzero `parse_error_count` and a caveat, still reports a float score and exits 0; a clean sample keeps a letter grade). The CLI tests failed before the fix.

@@ -1970,12 +1970,17 @@ def _cmd_gen_fixtures(args: argparse.Namespace) -> None:
         )
         return
 
-    try:
-        from ..generators.data.options import DataGeneratorOptions
+    from ..generators.data.options import DataGeneratorOptions
 
-        generator = ProgramFixtureGenerator(
-            DataGeneratorOptions(rows=args.rows, max_occurs=args.max_occurs)
-        )
+    try:
+        options = DataGeneratorOptions(rows=args.rows, max_occurs=args.max_occurs)
+    except ValueError as exc:
+        # `--rows -1`, `--max-occurs 0` or `data.rows: -5` in cobol.yml: a
+        # usage error on one line, as `gen-data` reports it, not a traceback.
+        _fail(str(exc))
+
+    try:
+        generator = ProgramFixtureGenerator(options)
         # analyze + generate rather than generate_with_scenarios_from_file,
         # whose signature is mocky-mock's contract (interface-contract.md):
         # the same two steps, with debug_lines reaching the parse.
