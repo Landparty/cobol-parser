@@ -86,6 +86,27 @@ def test_exec_cics_to_dict_has_command():
     assert "cics_text" in d
 
 
+def test_exec_cics_literal_options_tell_literal_from_data_name():
+    # options holds both unquoted; literal_options is what tells a program
+    # name (PROGRAM('X')) from a data-name holding one (PROGRAM(WS-X)).
+    src = _minimal_program(
+        "    EXEC CICS LINK PROGRAM('SUBPGM') COMMAREA(WS-RESP)\n"
+        "        LENGTH(4) END-EXEC.\n"
+        "            EXEC CICS XCTL PROGRAM(WS-RESP) END-EXEC."
+    )
+    result = parse_cobol(src, filename="test.cbl")
+    assert result.success
+
+    link, xctl = _find_nodes(result, "EXEC_CICS")
+    assert link.options["PROGRAM"] == "SUBPGM"
+    assert link.literal_options == {"PROGRAM"}
+    assert xctl.options["PROGRAM"] == "WS-RESP"
+    assert xctl.literal_options == set()
+    # The text and the dict keep their historical, unquoted shape.
+    assert "'" not in link.cics_text
+    assert "literal_options" not in link.to_dict()
+
+
 # ---------------------------------------------------------------------------
 # EXEC IMS — new parser
 # ---------------------------------------------------------------------------

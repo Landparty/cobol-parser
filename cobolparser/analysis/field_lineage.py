@@ -513,6 +513,28 @@ class _Item:
     raw: str = ""
     #: ``OCCURS`` count (the maximum for DEPENDING ON); None when not a table.
     occurs: int | None = None
+    #: ``"numeric"``, ``"numeric-edited"`` or ``""`` (anything else), for an
+    #: elementary item: which items ADD/SUBTRACT CORRESPONDING pair up.
+    category: str = ""
+
+
+_FLOAT_USAGES = frozenset(
+    {"COMP-1", "COMP-2", "COMPUTATIONAL-1", "COMPUTATIONAL-2"}
+    | {"FLOAT-SHORT", "FLOAT-LONG", "FLOAT-EXTENDED"}
+)
+
+
+def _category(picture: Any, usage: Any) -> str:
+    """``"numeric"``, ``"numeric-edited"`` or ``""`` for an elementary item's
+    PICTURE / USAGE (only what ADD/SUBTRACT CORRESPONDING needs to know)."""
+    if not picture:
+        return "numeric" if str(usage or "").upper() in _FLOAT_USAGES else ""
+    symbols = set(re.sub(r"\(\d+\)", "", str(picture).upper()))
+    if symbols <= set("9SVP"):
+        return "numeric"
+    if symbols & set("XANGU"):
+        return ""
+    return "numeric-edited"
 
 
 @dataclass(frozen=True)
@@ -737,6 +759,7 @@ class FieldFlowAnalyzer:
                         if isinstance(occurs, dict)
                         else None
                     ),
+                    category=_category(entry.get("picture"), entry.get("usage")),
                 )
                 self._items[item.qname] = item
                 self._by_raw.setdefault(item.raw, []).append(item.qname)
@@ -1365,6 +1388,8 @@ class FieldFlowAnalyzer:
         name = type(stmt).__name__
         if isinstance(stmt, MoveStatement):
             self._visit_move(stmt, ctx)
+        elif isinstance(stmt, ArithmeticStatement) and stmt.is_corresponding:
+            self._visit_arith_corresponding(stmt, ctx)
         elif isinstance(stmt, (ComputeStatement, ArithmeticStatement)):
             self._reads_to_writes(stmt, "arith", ctx)
         elif isinstance(stmt, (StringStatement, UnstringStatement, InspectStatement)):
@@ -1455,12 +1480,48 @@ class FieldFlowAnalyzer:
                     else:
                         self._overlay(src, tgt, "move", ctx, "MOVE")
 
-    def _corresponding(self, source: str, target: str, ctx: _Context) -> None:
+    def _visit_arith_corresponding(
+        self, stmt: ArithmeticStatement, ctx: _Context
+    ) -> None:
+        """``ADD``/``SUBTRACT CORRESPONDING A TO/FROM B``: each numeric
+        elementary item of A adds into the one of the same name path in B,
+        and nothing else flows (B's own value feeds itself, no edge)."""
+        targets = [*stmt.targets, *([stmt.target] if stmt.target else [])]
+        if stmt.source_operands is not None:
+            sources = list(stmt.source_operands)
+        else:
+            consumed = {t.upper() for t in targets}
+            sources = [op for op in stmt.operands if op.upper() not in consumed]
+        verb = f"{stmt.statement_type or type(stmt).__name__} CORRESPONDING"
+        seen: set[tuple[str, str]] = set()
+        for target_text in targets:
+            for tgt in self._refs(target_text, ROLE_WRITE):
+                for source_text in sources:
+                    for src in self._refs(source_text, ROLE_READ):
+                        if (src.qname, tgt.qname) in seen:
+                            continue
+                        seen.add((src.qname, tgt.qname))
+                        self._corresponding(
+                            src.qname, tgt.qname, ctx, arith=True, statement=verb
+                        )
+
+    def _corresponding(
+        self,
+        source: str,
+        target: str,
+        ctx: _Context,
+        arith: bool = False,
+        statement: str = "MOVE CORRESPONDING",
+    ) -> None:
         """``MOVE CORRESPONDING``: subordinates with the same name path below
         the two groups pair up when at least one of the two is elementary
         (two groups of one name are not a pair; their own subordinates may
         be). FILLER, REDEFINES and OCCURS items, and what is under them, do
-        not take part."""
+        not take part.
+
+        With *arith* (``ADD``/``SUBTRACT CORRESPONDING``) only elementary
+        pairs count, the sending item numeric and the receiving one numeric
+        or numeric-edited, and each pair is one ``arith`` edge."""
 
         def paths(root: str) -> dict[tuple[str, ...], str]:
             base = len(self._items[root].raw.split("."))
@@ -1484,9 +1545,19 @@ class FieldFlowAnalyzer:
             t = target_paths.get(rel)
             if t is None:
                 continue
+            if arith:
+                s_item, t_item = self._items[s], self._items[t]
+                if s_item.children or t_item.children:
+                    continue
+                if s_item.category != "numeric" or not t_item.category:
+                    continue
+                self._edge(
+                    self._item_node(s), self._item_node(t), "arith", ctx, statement
+                )
+                continue
             if self._items[s].children and self._items[t].children:
                 continue
-            self._overlay(s, t, "move", ctx, "MOVE CORRESPONDING")
+            self._overlay(s, t, "move", ctx, statement)
 
     def _visit_read(self, stmt: IOReadStatement, ctx: _Context) -> None:
         file_name = (stmt.file_name or "").upper()

@@ -408,6 +408,57 @@ def test_a_sign_zone_outside_the_sign_position_is_an_error_not_a_negation():
     assert field.error is not None and "sign zone" in field.error
 
 
+TRAILING_SEPARATE = (
+    "       01  R.\n           05  A PIC S9(3) SIGN TRAILING SEPARATE.\n"
+)
+LEADING_SEPARATE = "       01  R.\n           05  A PIC S9(3) SIGN LEADING SEPARATE.\n"
+
+
+@pytest.mark.parametrize(
+    ("source", "charset", "raw", "expected"),
+    [
+        (TRAILING_SEPARATE, Charset.EBCDIC, b"\xf1\xf2\xf3\x4e", "123"),
+        (TRAILING_SEPARATE, Charset.EBCDIC, b"\xf1\xf2\xf3\x60", "-123"),
+        (LEADING_SEPARATE, Charset.ASCII, b"+123", "123"),
+        (LEADING_SEPARATE, Charset.ASCII, b"-123", "-123"),
+    ],
+)
+def test_sign_separate_reads_the_sign_from_its_own_byte(source, charset, raw, expected):
+    field = _one_field(source, raw, EncodingOptions(charset=charset))
+    assert field.value == expected
+    assert field.error is None
+
+
+@pytest.mark.parametrize(
+    ("source", "charset", "raw"),
+    [
+        # Issue #360: a D zone on the last digit of a '+' field.
+        (TRAILING_SEPARATE, Charset.EBCDIC, b"\xf1\xf2\xd3\x4e"),
+        # ...and in ASCII, a transcoded -0 overpunch after a '+'.
+        (LEADING_SEPARATE, Charset.ASCII, b"+12}"),
+    ],
+)
+def test_sign_separate_digits_are_unsigned_so_an_overpunch_is_an_error(
+    source, charset, raw
+):
+    field = _one_field(source, raw, EncodingOptions(charset=charset))
+    assert not field.value.startswith("-")
+    assert field.error is not None
+
+
+@pytest.mark.parametrize(
+    ("source", "charset", "raw"),
+    [
+        (TRAILING_SEPARATE, Charset.EBCDIC, b"\xf1\xf2\xf3\x40"),
+        (LEADING_SEPARATE, Charset.ASCII, b" 123"),
+    ],
+)
+def test_a_blank_sign_separate_byte_is_an_error(source, charset, raw):
+    field = _one_field(source, raw, EncodingOptions(charset=charset))
+    assert field.value == "123"
+    assert field.error is not None and "sign byte" in field.error
+
+
 # ---------------------------------------------------------------------------
 # Bytes that are not what the PICTURE says
 # ---------------------------------------------------------------------------
