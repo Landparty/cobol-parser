@@ -374,7 +374,17 @@ def _encode_text(
     characters rather than its rightmost.
     """
     codec = EBCDIC_CODEC if opts.charset is Charset.EBCDIC else "ascii"
-    raw = text.encode(codec, errors="replace")
+    return _place_bytes(
+        text.encode(codec, errors="replace"), size, opts, justified=justified
+    )
+
+
+def _place_bytes(
+    raw: bytes, size: int, opts: EncodingOptions, *, justified: bool = False
+) -> bytes:
+    """*raw* in a *size*-byte alphanumeric field: padded with the charset's
+    space or truncated, left-aligned unless *justified* (see
+    :func:`_encode_text`)."""
     if len(raw) >= size:
         return raw[len(raw) - size :] if justified else raw[:size]
     pad = bytes([opts.space]) * (size - len(raw))
@@ -601,6 +611,12 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         )
         if edited is not None and len(edited) == width:
             return _encode_text(edited, width, opts)
+    literal = spec.literal_bytes.get(text)
+    if literal is not None:
+        # A hex literal (``VALUE X'C1C2'``) names bytes, not characters: the
+        # cell is only their Latin-1 stand-in, and re-encoding it in the
+        # record charset wrote C1 C2 as ``?``s (ASCII) or 65 62 (EBCDIC).
+        return _place_bytes(literal, width, opts, justified=spec.justified)
     return _encode_text(text, width, opts, justified=spec.justified)
 
 
@@ -936,7 +952,11 @@ def hex_dump(
     # The FD range describes this record's length only while it is the thing
     # deciding it. When a table decides, the layout's own bounds are the
     # honest span; the FD clause is still printed below, as metadata.
-    fd_decides = varying is not None and not any(spec.odo_controls for spec in specs)
+    fd_decides = (
+        varying is not None
+        and varying.per_record
+        and not any(spec.odo_controls for spec in specs)
+    )
     if fmt.is_variable:
         low = (
             varying.minimum if fd_decides and varying else minimum_record_length(specs)
@@ -958,6 +978,11 @@ def hex_dump(
         out.append(
             f"* FD RECORD VARYING FROM {varying.minimum} TO "
             f"{varying.maximum}{depending}"
+            + (
+                ""
+                if varying.per_record
+                else " (no DEPENDING ON: each record is its 01's full length)"
+            )
         )
     out.append(
         f"* charset: {opts.charset.value}   "

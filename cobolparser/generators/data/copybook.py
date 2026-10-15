@@ -390,8 +390,16 @@ class CopybookDataGenerator:
         the length.  A drawn length would cut the table-trimmed body at an
         unrelated offset, and ``declared_lengths`` would report a number
         nothing honoured.
+
+        Nothing is drawn either for an FD range without ``DEPENDING ON``
+        (:attr:`VaryingLength.per_record` false): there each record is as
+        long as its own 01, and a drawn length would cut it mid-field.
         """
-        if varying is None or any(spec.odo_controls for spec in fields):
+        if (
+            varying is None
+            or not varying.per_record
+            or any(spec.odo_controls for spec in fields)
+        ):
             return None
         return [
             rng.randint(varying.minimum, varying.maximum)
