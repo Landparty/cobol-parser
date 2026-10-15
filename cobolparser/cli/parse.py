@@ -113,6 +113,18 @@ def _add_source_format_args(parser: argparse.ArgumentParser) -> None:
             "disable normalization outright"
         ),
     )
+    parser.add_argument(
+        "--debug-lines",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Compile fixed-format debugging lines (D in column 7) as code, "
+            "as IBM Enterprise COBOL does under SOURCE-COMPUTER ... WITH "
+            "DEBUGGING MODE. By default they are dropped as comments, with a "
+            "warning when the program declares WITH DEBUGGING MODE. "
+            "--no-debug-lines overrides debug_lines: true in cobol.yml"
+        ),
+    )
 
 
 def _resolve_source_format(args: argparse.Namespace) -> str:
@@ -137,13 +149,20 @@ def _source_format_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     normalization.
     """
     source_format = str(getattr(args, "source_format", "auto"))
+    kwargs: dict[str, Any]
     if source_format == "free":
-        return {"free_form": True, "preprocess_fixed": False}
-    if source_format == "fixed":
-        return {"free_form": False, "preprocess_fixed": True}
-    if getattr(args, "free_form", False):
-        return {"free_form": True, "preprocess_fixed": None}
-    return {"free_form": False, "preprocess_fixed": None}
+        kwargs = {"free_form": True, "preprocess_fixed": False}
+    elif source_format == "fixed":
+        kwargs = {"free_form": False, "preprocess_fixed": True}
+    elif getattr(args, "free_form", False):
+        kwargs = {"free_form": True, "preprocess_fixed": None}
+    else:
+        kwargs = {"free_form": False, "preprocess_fixed": None}
+    # Only when set: the callers splat this into parse_cobol and
+    # _tokenize_source, both of which default it off.
+    if getattr(args, "debug_lines", False):
+        kwargs["debug_lines"] = True
+    return kwargs
 
 
 def _add_error_recovery_arg(parser: argparse.ArgumentParser) -> None:
@@ -898,7 +917,9 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
         # which split one record in two and emitted the tail of a comment
         # as code -- output `parse` itself never sees.
         source = normalize_fixed_format(
-            split_source_lines(source), warnings=normalize_warnings
+            split_source_lines(source),
+            debug_lines_as_comments=not getattr(args, "debug_lines", False),
+            warnings=normalize_warnings,
         )
         for nw in normalize_warnings:
             print(f"warning: {nw}", file=sys.stderr)
@@ -2296,9 +2317,12 @@ def _cmd_complexity(args: argparse.Namespace) -> None:
 def _cmd_health(args: argparse.Namespace) -> None:
     from ..analysis.technical_debt import TechnicalDebtAnalyzer
 
-    ast, prof = _parse_or_fail(args)
+    result, prof = _parse_result_or_fail(args)
+    ast = result.ast
 
-    report = TechnicalDebtAnalyzer().analyze(ast)
+    # A partial AST is a quiet one: a file that mostly failed to parse used
+    # to grade "A". With the error count the grade is withheld (#397).
+    report = TechnicalDebtAnalyzer().analyze(ast, parse_error_count=len(result.errors))
 
     _emit_report(report.to_dict(), args, prof, ast)
 
@@ -2552,6 +2576,7 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         # floor, so a tagged fixed-format member scanned as free-form.
         free_form=bool(source_format["free_form"]),
         preprocess_fixed=source_format["preprocess_fixed"],
+        debug_lines=bool(source_format.get("debug_lines", False)),
     )
 
     try:
@@ -3532,8 +3557,8 @@ def _cmd_diff(args: argparse.Namespace) -> None:
 def _build_codebase_graph_parser(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "codebase-graph",
-        help="Build the cross-program CALL graph and copybook dependency "
-        "graph for a whole source tree",
+        help="Build the cross-program CALL (and CICS LINK/XCTL) graph and "
+        "copybook dependency graph for a whole source tree",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
@@ -4087,6 +4112,7 @@ def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:
                 "copybook_path": list(config.copybook_path),
                 "callee_path": list(config.callee_path),
                 "source_format": config.source_format,
+                "debug_lines": config.debug_lines,
                 "dialect": config.dialect,
                 "error_recovery": config.error_recovery,
                 "seed": config.seed,
@@ -4143,6 +4169,9 @@ def _cmd_config(args: argparse.Namespace) -> None:
             if isinstance(value, list):
                 lines.append(f"  {key}:")
                 lines.extend(f"    - {entry}" for entry in value)
+            elif isinstance(value, bool):
+                # Spelled the way the file spells it, not Python's True.
+                lines.append(f"  {key}: {'true' if value else 'false'}")
             else:
                 lines.append(f"  {key}: {value}")
     for name, section_data in payload["tools"].items():
@@ -4206,7 +4235,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_analyzer_parser(
         subparsers,
         "dead-code",
-        "Detect unreferenced paragraphs/sections (dead code)",
+        "Detect unreachable paragraphs/sections (dead code)",
         _cmd_dead_code,
         profiling=True,
         examples="  cobol-parser dead-code program.cbl",
