@@ -226,6 +226,66 @@ def test_variable_bare_newline_falls_back_to_the_separator_for_short_lines():
     assert [r.fields[0].value for r in result.records] == ["ab", "cd"]
 
 
+X10 = "       01  R.\n           05  A PIC X(10).\n"
+
+
+def test_fixed_newline_reports_lines_shorter_than_the_record_length():
+    # Issue #359: a 4-byte line ran on into the next one, and nothing said so.
+    opts = EncodingOptions(record_separator=b"\n")
+    result = _decoder(X10, opts).decode_bytes(b"BBBB\nCCCCCCCCCCCCCCC\n")
+    first = result.records[0]
+    assert first.fields[0].value == "BBBB\nCCCCC"
+    assert any("expected record separator at offset 10" in e for e in first.errors)
+    assert any("separator at offset 4 inside" in e for e in first.errors)
+    assert result.error_count > 0
+
+
+def test_fixed_newline_flags_a_separator_inside_display_text():
+    # Separators where a 10-byte stride expects them, but one line is short
+    # and the next long: only the newline inside the text gives it away.
+    opts = EncodingOptions(record_separator=b"\n")
+    result = _decoder(X10, opts).decode_bytes(b"AAAA\nAAAAA\nBBBBBBBBBB\n")
+    assert any("inside non-binary data" in e for e in result.records[0].errors)
+    assert not result.records[1].errors
+
+
+def test_fixed_newline_well_formed_lines_decode_clean():
+    opts = EncodingOptions(record_separator=b"\n")
+    decoder = _decoder(X10, opts)
+    for data in (b"AAAAAAAAAA\nBBBBBBBBBB\n", b"AAAAAAAAAA\nBBBBBBBBBB"):
+        result = decoder.decode_bytes(data)
+        assert [r.fields[0].value for r in result.records] == [
+            "AAAAAAAAAA",
+            "BBBBBBBBBB",
+        ]
+        assert result.error_count == 0
+
+
+def test_fixed_newline_accepts_a_0a_inside_binary_data():
+    opts = EncodingOptions(record_separator=b"\n")
+    source = (
+        "       01  R.\n           05  K PIC S9(4) COMP.\n           05  A PIC X(2).\n"
+    )
+    decoder = _decoder(source, opts)
+    specs = [placed.spec for placed in decoder.views.base.fields]
+    data = b"".join(
+        encode_record(specs, row, opts) + b"\n" for row in (["10", "ab"], ["2", "cd"])
+    )
+    result = decoder.decode_bytes(data)
+    assert [r.values()["K"] for r in result.records] == ["10", "2"]
+    assert result.error_count == 0
+
+
+def test_fixed_newline_checks_framing_whatever_the_view():
+    opts = EncodingOptions(record_separator=b"\n")
+    decoder = _decoder(OVERLAID, opts)
+    good = b"000001" + b"MAIN ST  12345"
+    result = decoder.decode_bytes(good + b"\n" + good + b"\n", view="ADDR-OVERSEAS")
+    assert result.error_count == 0
+    bad = decoder.decode_bytes(b"000001MAIN\n" + good + b"\n", view="ADDR-OVERSEAS")
+    assert any("separator" in e for e in bad.records[0].errors)
+
+
 def test_an_odo_counter_outside_an_enclosing_fixed_table_is_found_by_name():
     source = """
        01  R.
