@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **dead-code / program-flow: alterable `GO TO.` and `EXIT SECTION` stop
+  fall-through** (#382). An operand-less `GO TO.` (whatever an ALTER last
+  set) is a terminator, so the paragraph after it is no longer kept alive.
+  `EXIT SECTION` skips the rest of its section: a PERFORMed section returns,
+  and one fallen into or branched into runs on to the procedure after the
+  section (program-flow draws that `FALL_THROUGH` edge only then).
+  `EXIT SECTION.` written straight after a section header no longer parses
+  as an empty section named `EXIT`.
+
 * **`codebase-graph` now records `EXEC CICS LINK` / `XCTL PROGRAM(...)` edges**
   (#315). They were skipped with no `unresolved` note, so a CICS program's
   `calls` read as empty and known. They are now `call_edges` with a new

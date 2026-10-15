@@ -226,3 +226,25 @@ class TestExitSection:
 """)
         assert dead == ["W-2", "TAIL-SEC", "T-1"]
         assert not any(src == "W-1" for src, _ in fall_through)
+
+    def test_section_entered_by_cics_handle_runs_on(self) -> None:
+        # Any GO TO-shaped edge (GOTO_EDGE_TYPES) enters the section, not
+        # only a written GO TO: here the CICS HANDLE branch.
+        dead, fall_through, unreachable = _analyze("""\
+       MAIN SECTION.
+       M-1.
+           EXEC CICS HANDLE CONDITION NOTFND(E-1) END-EXEC
+           STOP RUN.
+       ERR-SEC SECTION.
+       E-1.
+           EXIT SECTION.
+       E-2.
+           DISPLAY 'E2'.
+       AFTER-SEC SECTION.
+       A-1.
+           STOP RUN.
+""")
+        assert dead == ["E-2"]
+        assert ("E-1", "AFTER-SEC") in fall_through
+        assert "AFTER-SEC" not in unreachable
+        assert "E-2" in unreachable

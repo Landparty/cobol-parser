@@ -232,8 +232,10 @@ nothing. In program-flow the scanner records the procedure in
 `exit_section_procedures` and `build_fall_through_edges` draws a
 `FALL_THROUGH` edge to the section's successor only when the section is
 fallen into (an incoming fall-through edge, tracked in the same pass) or
-in `ProgramFlowAnalyzer._sections_entered` (entry point / ENTRY, a GO TO
-from another section, or any ALTER / CICS HANDLE target). That gate is
+in `ProgramFlowAnalyzer._sections_entered` (entry point / ENTRY, a written
+GO TO from another section, or the target of any other `GOTO_EDGE_TYPES`
+edge -- ALTER, CICS HANDLE, and any handler branch added to that set later
+-- wherever it is written). That gate is
 stricter than the plain last-paragraph fall-through, which stays an
 over-approximation. Pinned by
 `tests/unit/analysis/test_exit_section_and_alterable_goto.py`.

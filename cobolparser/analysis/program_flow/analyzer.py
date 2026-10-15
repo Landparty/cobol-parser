@@ -234,10 +234,12 @@ class ProgramFlowAnalyzer:
     ) -> set[str]:
         """Sections control can enter other than by PERFORM, so that the end
         of the section runs on into the next procedure: the one holding the
-        entry point or an ENTRY, and any a GO TO / ALTER / CICS HANDLE lands
-        in from outside. ALTER and CICS HANDLE count whatever section they
-        are written in -- the altered GO TO (or the CICS branch) can fire
-        from anywhere.
+        entry point or an ENTRY, and any a GO TO-shaped edge
+        (``GOTO_EDGE_TYPES``) lands in from outside. Only a written GO TO is
+        tied to the section it sits in; every other kind (ALTER, CICS HANDLE,
+        and any handler branch added to ``GOTO_EDGE_TYPES`` later) counts
+        whatever section it is written in, since the runtime can take that
+        branch from anywhere.
         """
         entered: set[str] = set()
         first = next(
@@ -248,16 +250,18 @@ class ProgramFlowAnalyzer:
             if section is not None:
                 entered.add(section)
         parent = {bn.node_id: bn.parent_proc for bn in self._branch_nodes}
+        written_goto = (FlowEdgeType.GOTO, FlowEdgeType.GOTO_DEPENDING)
         for edge in self._edges:
-            if edge.edge_type in (FlowEdgeType.ALTER, FlowEdgeType.CICS_HANDLE):
-                section = index.section_of(edge.target)
-                if section is not None:
-                    entered.add(section)
-            elif edge.edge_type in (FlowEdgeType.GOTO, FlowEdgeType.GOTO_DEPENDING):
-                section = index.section_of(edge.target)
+            if edge.edge_type not in GOTO_EDGE_TYPES:
+                continue
+            section = index.section_of(edge.target)
+            if section is None:
+                continue
+            if edge.edge_type in written_goto:
                 source = parent.get(edge.source, edge.source)
-                if section is not None and index.section_of(source) != section:
-                    entered.add(section)
+                if index.section_of(source) == section:
+                    continue
+            entered.add(section)
         return entered
 
     def _detect_unreachable_nodes(self) -> None:
