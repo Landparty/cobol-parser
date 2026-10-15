@@ -87,7 +87,7 @@ discovery) and `cobolparser/cli/_project_config.py` (the argv merge).
   get `None`, since argparse's append copies-and-appends to the default and a
   non-list sentinel would raise). Only runs when a config file was found.
 * **Bound dests** — `copybook_path`, `callee_path`, `source_format`,
-  `dialect`, `error_recovery`, `seed`, `extensions`, `define`, `charset`,
+  `debug_lines`, `dialect`, `error_recovery`, `seed`, `extensions`, `define`, `charset`,
   `endian`, `record_format`, `record_separator`, `rows`, `rules`,
   `min_severity`, `fail_on`. Note `extensions`/`rules` are argparse *dests*,
   not the `--extension`/`--rule` flag spellings — getting that wrong is how
@@ -233,6 +233,11 @@ Records are split with `_lines.split_source_lines` (\n / \r\n / \r only),
 the same splitter the parser uses. Before 2026-09-28 `preprocess` used
 `str.splitlines()`, so a form feed / NEL / U+2028 inside a comment record
 split it in two and the comment's tail came out as code.
+Normalisation goes through `source_format.normalize_with_recovery()`, like
+`parse` and `tokenize`: an unterminated literal at end of file (a truncated
+upload) prints `warning: Unterminated string literal ...` on stderr and the
+recovered text on stdout, exit 0. Before #372 it escaped as a `ValueError`
+traceback.
 
 ## Source layout (`--source-format`)
 
@@ -257,6 +262,15 @@ source it classifies as fixed-format (scripts that always passed it
 against conventional fixed-format members relied on that lenience). It is
 **not** an alias for `--source-format=free`, which hard-disables
 normalisation. Passing both flags is rejected by argparse.
+
+`--debug-lines` / `--no-debug-lines` (`BooleanOptionalAction`, default off)
+ride along in `_add_source_format_args`: compile fixed-format `D` lines as
+code instead of dropping them (see [preprocessing.md](preprocessing.md),
+#334). `_source_format_kwargs()` adds `debug_lines=True` to its dict only
+when set; `scan` forwards it as `ScanOptions.debug_lines`; `preprocess`
+passes it to `normalize_fixed_format` directly. cobol.yml
+`project.debug_lines: true|false` (strictly a boolean) fills it, and
+`--no-debug-lines` is the way to override a `true` there.
 
 Reach for `fixed` when a shop's layout defeats auto-detection — e.g. a
 sequence area holding a tag with an internal space. Auto-detection already
@@ -540,7 +554,8 @@ dedicated subcommand below.
 cobol-parser dead-code <file.cbl>
 ```
 
-Runs `DeadCodeAnalyzer` and lists unreferenced paragraphs/sections.
+Runs `DeadCodeAnalyzer` and lists unreachable paragraphs/sections. A
+paragraph referenced only from dead code is dead too (issue #384).
 
 ## Unused-Variables
 
@@ -568,7 +583,11 @@ analyzer subcommand that takes `--copybook-path` (dead-code, complexity,
 health, move-type-check, xref, ...): `_parse_result_or_fail` remembers the
 map on `args._expansion_source_map`. Previously only lint and
 unused-variables said where an expanded-listing line really is. Additive:
-no map (no `--copybook-path`), no `origin`. `gen-fixtures` is *not* stamped
+no map (no `--copybook-path`), no `origin`. Locations not under a
+`location` key get a sibling of their own name (2026-10-14, #367): xref's
+`definition` gains `definition_origin`, program-flow's
+`exit_statement_location` gains `exit_statement_origin`
+(`analysis.lint._ORIGIN_KEYS`). `gen-fixtures` is *not* stamped
 (its bundle uses bare `line` keys under `bundle_version`).
 
 ## Program-Flow
@@ -631,6 +650,10 @@ escape recursion cycle, ...) that put them there. Embeds the underlying
 `redundancy_summary`) rather than the full per-procedure detail -- run
 `complexity` directly for that. Registered the same way as
 `recursion-check`.
+
+A file that parsed with errors still exits 0, but its JSON has `"grade":
+null`, a nonzero `parse_error_count` and a `caveats` entry (#397): the score
+then covers only what the parser recovered.
 
 ## Lint
 
@@ -1001,6 +1024,15 @@ every shop's programs open with a near-identical four-statement
 `0000-MAIN-PROCESS`, and ranking on spread buries a sixteen-statement
 verbatim copy under that boilerplate. Requires the `redundancy` analyzer;
 without it no groups are reported rather than an empty result.
+
+Members, sources and copies (#352): with `--copybook-path`, a paragraph
+expanded from a PROCEDURE DIVISION copybook carries its `origin` (copybook
+file and line). Members sharing an origin are one source included several
+times, not copy-paste, so `--min-clone-members` and the volume ranking count
+*distinct sources* (`source_count` on each group; `statements x
+source_count`), not members. A copybook paragraph that only ever arrives by
+COPY forms no group; one also pasted verbatim into another program does,
+with every inclusion still listed as a member.
 
 `--files-from FILE` reads the list from a file, one path per line (`-` for
 stdin, `#` comments and blank lines skipped, each line stripped so a

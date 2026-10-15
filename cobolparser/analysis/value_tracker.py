@@ -339,22 +339,12 @@ class DynamicCallAnalyzer:
         if isinstance(node, CallStatement):
             if node.is_dynamic and node.called_program:
                 # Look up the variable name in our tracked values
-                var_name = node.called_program.upper()
+                values, incomplete = self.resolve_variable(node.called_program)
                 # Always (re)set: an earlier analysis of an enclosing unit,
                 # or of this one, must not leave its values or its
                 # incomplete flag behind.
-                node.set_possible_values(
-                    sorted(self._variable_values.get(var_name, ()))
-                )
-                if var_name in self._incomplete_variables or (
-                    self._declared_names is not None
-                    and var_name not in self._declared_names
-                ):
-                    # The variable also received at least one value this
-                    # analyzer could not resolve (or is not declared in
-                    # this unit at all -- a container's GLOBAL item), so
-                    # possible_values (even when populated) is not
-                    # exhaustive.
+                node.set_possible_values(values)
+                if incomplete:
                     node.set_metadata("possible_values_incomplete", True)
                 else:
                     node.metadata.pop("possible_values_incomplete", None)
@@ -363,6 +353,23 @@ class DynamicCallAnalyzer:
         if hasattr(node, "children"):
             for child in node.children:
                 self._populate_dynamic_calls(child)
+
+    def resolve_variable(self, variable_name: str) -> tuple[list[str], bool]:
+        """``(possible values, incomplete)`` for a data-name in the last unit
+        :meth:`analyze` tracked -- the same answer a dynamic ``CALL`` on it
+        gets, for any other statement that names a program through a
+        data-name (``EXEC CICS LINK PROGRAM(WS-PGM)``).
+
+        ``incomplete`` is True when the variable also received a value this
+        analyzer could not resolve, or is not declared in this unit at all
+        (a container's GLOBAL item): the values, even when present, are then
+        not exhaustive.
+        """
+        var_name = variable_name.upper()
+        incomplete = var_name in self._incomplete_variables or (
+            self._declared_names is not None and var_name not in self._declared_names
+        )
+        return sorted(self._variable_values.get(var_name, ())), incomplete
 
     @staticmethod
     def _is_definite_literal(source: str) -> bool:

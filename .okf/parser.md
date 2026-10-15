@@ -127,6 +127,15 @@ CobolParser.parse(source)
 as it always has). Before 2026-10-08 it detected and normalized
 fixed-format source itself, a second copy of the parser's own logic.
 
+`debug_lines` (`parse_cobol` and `CobolParser`, default False; #334)
+compiles fixed-format `D` lines as code. With it off,
+`_normalize_fixed_source` records the dropped line numbers and
+`_warn_dropped_debug_lines()` (called after `parse_program()`) warns once
+when any unit's SOURCE-COMPUTER is `WITH DEBUGGING MODE`
+(`_debugging_mode_on()` reads the CONFIGURATION section's
+`source_computer` metadata). Reset per parse in `_begin_parse`. Details in
+[preprocessing.md](preprocessing.md).
+
 `_parse_core` is a thin driver over three stages (split out 2026-10-08,
 behavior unchanged): `_preprocess_source()` -> `(text, free_form)` (skip
 to the header, directive strip, fixed-format detection +
@@ -313,6 +322,16 @@ file a program can `OPEN`. Purely additive metadata; no existing behavior
 changed. Pinned by
 `tests/unit/test_program_layout_index.py::TestFdRecordTypeMetadata`.
 
+**FD clause order and the second RECORD word (`data_file_description.py`,
+issue #401):** `RECORD` is both a clause start (RECORD CONTAINS / VARYING) and
+the second word of `LABEL RECORD(S)` / `DATA RECORD(S)`. `parse_fd_clauses`
+treats it as that second word only while the LABEL/DATA clause has captured
+nothing yet; any later `RECORD` starts its own clause. The guard used to apply
+to every later `RECORD`, so `LABEL RECORDS ARE STANDARD RECORD CONTAINS 30`
+lost the record length (and `DATA RECORD IS X RECORD CONTAINS 30` read
+`data_records=["X","CONTAINS","30"]`). Pinned by
+`tests/regression/test_fd_record_after_label_data.py`.
+
 **LEVEL_NUMBER-as-literal gotcha (`data.py`):** the lexer types every 1-2
 digit integer as `TokenType.LEVEL_NUMBER` regardless of context (even inside
 `PIC 9(4)` or after `VALUE`). Any data-division clause that consumes a numeric
@@ -336,6 +355,12 @@ figurative operand), not `['ALL', 'X']`. Consumers that know the field's
 width fill it -- see `expand_condition_values(raw, width)` in
 [generators.md](generators.md). Pinned by
 `tests/regression/test_level88_value_all.py`.
+
+A semicolon separates level-88 values exactly as a comma does
+(`VALUES 'A', 'B'; 'C'` -> `['A', 'B', 'C']`; `VALUE 'A' THRU 'C'; 'X' THRU
+'Z'` keeps both ranges). Before 2026-10-14 (issue #343) a `;` ended the list
+and the values after it were dropped. Pinned by
+`tests/regression/test_level_88_semicolon_separator.py`.
 
 **Multi-line clauses (`data_clauses.py` + `_data_fast.pyx`):** the lexer
 emits NEWLINE tokens, so any clause reader that peeks for an operand after
@@ -631,6 +656,16 @@ A `Range` selector likewise carries `"start_quoted": True` /
 `"end_quoted": True` when that bound is one STRING_LITERAL token
 (`WHEN 'a' THRU 'c'`; #391), absent otherwise, so a numeric range's dict is
 unchanged. Pinned by `tests/unit/test_evaluate_variants.py::TestRangeQuotedMarkers`.
+
+**Word-form operators and class/sign tests are conditions (#387,
+2026-10-14).** `_build_selector` also makes a `Condition` of a WHEN phrase
+holding a relational word (`GREATER LESS EQUAL EQUALS`) or a class test
+(`NUMERIC ALPHABETIC ALPHABETIC-LOWER ALPHABETIC-UPPER DBCS KANJI`), and of
+one holding a sign test (`POSITIVE NEGATIVE ZERO`) after its first word -- a
+lone `WHEN ZERO` stays the figurative `Literal`. Before, `WHEN X GREATER THAN
+1` / `WHEN X IS NUMERIC` were stored as one `Literal`. `operator: "OR"` is set
+only for a logical OR, never the OR of `OR EQUAL` (`_has_logical_or`). Pinned
+by `tests/regression/test_evaluate_word_operator_when.py`.
 
 **EVALUATE subjects reach `.operands` (`evaluate_parser.py`, 2026-08-17
 review follow-up):** `_parse_subjects` routes each parsed subject through
@@ -3328,3 +3363,22 @@ meaningful token after the verb, besides the raw second token: keyed on
 an earlier `EXEC <newline> SQL`. Pinned by
 `tests/regression/test_keyword_line_breaks.py`, which parses each case with
 the gap joined and broken and requires identical ASTs.
+
+**Optional keywords left out (issue #405, 2026-10-14):** forms that omit a
+keyword the IBM Enterprise COBOL diagram does not underline used to lose
+data. Now accepted: `XML PARSE x PROCEDURE IS p` (PROCESSING left out;
+`xml_json_parser.py::_consume_processing_procedure` starts at either word,
+so `p` is the `processing_procedure`, not an operand dead-code ignores);
+SORT `[WITH] DUPLICATES` and SORT/MERGE `[COLLATING] SEQUENCE [IS] name`
+(`_parse_collating_sequence`; SEQUENCE also ends the key list); `KEY IS k`
+(GnuCOBOL spelling -- the IS used to end the key list, dropping every key).
+A file SORT (USING/GIVING/INPUT/OUTPUT present) or any MERGE that still
+collects no key adds a warning ("no sort keys were recorded"); a table SORT
+may omit keys and does not. SPECIAL-NAMES: `environment-name [IS]
+mnemonic-name` without IS is recognised only after a known IBM
+environment-name (`_ENVIRONMENT_NAMES`: C01-C12, CSP, S01-S05,
+SYSIN/SYSIPT, SYSOUT/SYSLIST/SYSLST, SYSPUNCH/SYSPCH, CONSOLE, UPSI-0..7,
+AFP-5A), since otherwise an entry's start cannot be told apart from an
+operand; `UPSI-0 ON x` without STATUS/IS likewise. `SYMBOLIC CHARACTERS`
+takes IS/ARE as optional: the first integer ends the group's names.
+`tests/regression/test_optional_keyword_forms.py`.
