@@ -3602,6 +3602,13 @@ the rendered text is a truncated summary that omits STRING's INTO, READ's
 INTO/KEY, WRITE's FROM, ...; before the `to_dict()` fields were added,
 `STRING ... INTO A` → `INTO B` diffed as no change.)
 
+The dedicated signatures carry the markers a value alone hides (#316): CALL
+includes `is_dynamic` (`CALL 'X'` → `CALL X` is a `call-target-changed`, and
+the detail text quotes a static target), and UNSTRING includes
+`delimiter_all` (`DELIMITED BY ALL ','`) with a detail text spelling out
+source, delimiters and INTO targets. (WHEN selectors carry theirs via
+`_selector_text`'s `FIG:` / `ID:` / quoted renderings, #313.)
+
 Determinism: the same pair always produces byte-identical `to_dict()` — changes
 sorted by category, symbol, kind then remaining fields (`_sort_key` is a total
 order); caveats deduplicated and sorted; no set iterated without sorting.

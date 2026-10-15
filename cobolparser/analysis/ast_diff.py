@@ -462,6 +462,9 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
         return (
             kind,
             stmt.called_program or "",
+            # CALL 'WS-A' (static, the literal names the program) vs
+            # CALL WS-A (dynamic, the data item's value names it).
+            bool(stmt.is_dynamic),
             tuple(
                 (param.name, getattr(param, "passing_mode", ""))
                 for param in stmt.using_parameters
@@ -526,6 +529,8 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
             kind,
             stmt.source_operand or "",
             tuple(stmt.delimiters),
+            # DELIMITED BY ALL ',' treats a run of delimiters as one.
+            tuple(getattr(stmt, "delimiter_all", []) or []),
             _json_key(stmt.into_targets),
             stmt.pointer_variable or "",
             stmt.tallying_variable or "",
@@ -623,6 +628,33 @@ def _statement_text(stmt: Any) -> str:
         condition = _text_of(stmt.until_condition)
         if condition and condition not in text:
             text = f"{text} UNTIL {condition}"
+    elif (
+        isinstance(stmt, CallStatement)
+        and stmt.called_program
+        and not stmt.is_dynamic
+        and text.startswith(f"CALL {stmt.called_program}")
+    ):
+        # The flowchart renders both CALL 'X' and CALL X as "CALL X"; a
+        # static -> dynamic change would then read identically on both sides.
+        text = (
+            f"CALL '{stmt.called_program}'" + text[len(f"CALL {stmt.called_program}") :]
+        )
+    elif isinstance(stmt, UnstringStatement) and text == "UNSTRING":
+        # The flowchart collapses UNSTRING to its verb.
+        all_flags = list(stmt.delimiter_all) + [False] * len(stmt.delimiters)
+        delimiters = " OR ".join(
+            f"ALL {delimiter}" if is_all else delimiter
+            for delimiter, is_all in zip(stmt.delimiters, all_flags, strict=False)
+        )
+        targets = " ".join(
+            str(target.get("target", "")) for target in stmt.into_targets
+        )
+        parts = ["UNSTRING", stmt.source_operand or ""]
+        if delimiters:
+            parts.append(f"DELIMITED BY {delimiters}")
+        if targets:
+            parts.append(f"INTO {targets}")
+        text = " ".join(part for part in parts if part)
     return text
 
 
@@ -1674,7 +1706,10 @@ class ProgramDiffer:
         elif isinstance(old_node, CallStatement) and isinstance(
             new_node, CallStatement
         ):
-            if (old_node.called_program or "") != (new_node.called_program or ""):
+            if (old_node.called_program or "", bool(old_node.is_dynamic)) != (
+                new_node.called_program or "",
+                bool(new_node.is_dynamic),
+            ):
                 kind, label = "call-target-changed", "CALL target changed"
             else:
                 kind, label = "call-arguments-changed", "CALL arguments changed"

@@ -633,6 +633,35 @@ def test_changed_call_arguments():
     assert _of_kind(report, "call-target-changed") == []
 
 
+def test_static_to_dynamic_call_is_a_call_target_change():
+    # #316: CALL 'WS-A' and CALL WS-A share called_program; only is_dynamic
+    # tells them apart, and it was left out of the signature.
+    report = _statement_diff(
+        "           CALL 'WS-A' USING WS-B\n           STOP RUN.\n",
+        "           CALL WS-A USING WS-B\n           STOP RUN.\n",
+    )
+
+    changes = _of_kind(report, "call-target-changed")
+    assert len(changes) == 1
+    assert changes[0].old == "CALL 'WS-A'"
+    assert changes[0].new == "CALL WS-A"
+    assert _of_kind(report, "call-arguments-changed") == []
+
+
+def test_unstring_delimited_by_all_is_a_change():
+    # #316: DELIMITED BY ALL ',' lives only in delimiter_all.
+    report = _statement_diff(
+        "           UNSTRING WS-B DELIMITED BY ',' INTO WS-A\n           STOP RUN.\n",
+        "           UNSTRING WS-B DELIMITED BY ALL ',' INTO WS-A\n"
+        "           STOP RUN.\n",
+    )
+
+    changes = _of_kind(report, "statement-changed")
+    assert len(changes) == 1
+    assert changes[0].old == 'UNSTRING WS-B DELIMITED BY "," INTO WS-A'
+    assert changes[0].new == 'UNSTRING WS-B DELIMITED BY ALL "," INTO WS-A'
+
+
 def test_changed_move_target_and_source():
     target_changed = _statement_diff(
         "           MOVE 1 TO WS-A\n           STOP RUN.\n",
