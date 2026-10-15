@@ -241,6 +241,13 @@ tests, #371) pins io-sequence surviving a 1,500-deep PERFORM chain, walking a
 a new file state or recursion-guard context, and reporting a violation once
 per location. See `analysis.md`.
 
+2026-10-14: `tests/unit/analysis/test_io_sequence_branches.py` (19 tests)
+pins IF/EVALUATE arms being forked and merged in `IOSequenceAnalyzer`
+(issue #380): mutually exclusive OPENs, the `CLOSE ... STOP RUN` error exit,
+GOBACK/PERFORMed-abend arms left out of the merge, GO TO arms kept (THRU
+...-EXIT, queued targets), while violations
+that hold on every path are still reported. See `analysis.md`.
+
 2026-09-27: `tests/unit/analysis/test_io_sequence.py::TestGoToReadLoop` (3
 tests) pins the READ ... AT END GO TO loop not reporting its file left open,
 while a missing/duplicate CLOSE in its exit paragraph still is. See

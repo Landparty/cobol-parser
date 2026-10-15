@@ -1207,8 +1207,7 @@ paragraph's own top-level unconditional GO TO followed, out-of-line
 `PERFORM target [THRU end]` inlined at the call site (section names
 resolve to their full paragraph range; a re-entrant PERFORM is skipped
 via a range stack; per-chain visited sets keep GO TO cycles finite).
-Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Conditional
-branches still share one state (unchanged conservatism); paragraphs
+Top-level STOP RUN / GOBACK / EXIT PROGRAM ends the walk. Paragraphs
 unreachable from the entry procedure are no longer walked at all.
 
 **GO TO / PERFORM targets resolve section-first (2026-10-14, issue #335).**
@@ -1239,6 +1238,28 @@ per (kind, file, location, message) -- the walk used to repeat them once per
 call path. Output was checked identical (after that dedup) to the old walk
 on every sample/NIST program and 3,000 random programs. Pinned by
 `tests/unit/analysis/test_io_sequence_perform_summaries.py`.
+
+**IF / EVALUATE arms are forked and merged (2026-10-14, issue #380).** The
+arms used to share one open-file state, so `IF .. OPEN OUTPUT f ELSE OPEN
+EXTEND f` was a DOUBLE_OPEN and the `IF bad-status CLOSE f STOP RUN` guard
+closed `f` for the normal path too (DOUBLE_CLOSE, WRITE_BEFORE_OPEN) -- all
+`error` in lint. State is now `_status: dict[file, frozenset]` of possible
+states (`open` / `closed` / `unopened`). `_fork` runs each arm (an IF's THEN
+and ELSE, an EVALUATE's `when_groups()` bodies and WHEN OTHER; a missing
+ELSE / WHEN OTHER is an empty arm) from the branch's state and unions the
+arms that do not end the program. An arm whose own top level hits STOP RUN /
+GOBACK / EXIT PROGRAM, or that PERFORMs a paragraph that does, is left out of
+the merge, and no FILE_LEFT_OPEN is claimed at that STOP RUN (a `_fork_depth`
+check in `_terminate_program`, also part of the PERFORM-summary key). An arm
+ending in an unconditional GO TO stays *in* the merge: dropping it lost its
+state at the target (`PERFORM A THRU A-EXIT` with `IF .. OPEN f GO TO
+A-EXIT`, NIST DB104A's `IF .. CLOSE f GO TO ..` guards). A top-level IF whose
+arms all end the program ends the paragraph walk (`_ENDS`). Violations need to hold on every merged path (READ of a file open on
+no path, OPEN of a file open on every path); FILE_LEFT_OPEN is the exception
+and fires for a file open on any path. AT END / INVALID KEY handlers are not
+forked. The PERFORM-summary key (#371) is the whole `_status` map, so a range
+is re-walked from a new set of possible states. Pinned by
+`tests/unit/analysis/test_io_sequence_branches.py`.
 
 **`CLOSE f REEL` / `CLOSE f UNIT` keep the file open (2026-09-28).** They
 close only the current volume (`close_options[f]["reel"/"unit"]`); treating

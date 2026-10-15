@@ -13,7 +13,7 @@ Common bugs caught:
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any
@@ -21,9 +21,11 @@ from typing import Any
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
 from ..models.statements import (
+    EvaluateStatement,
     ExitStatement,
     GobackStatement,
     GoStatement,
+    IfStatement,
     IOCloseStatement,
     IODeleteStatement,
     IOOpenStatement,
@@ -103,6 +105,19 @@ _OP_TO_VIOLATION: dict[str, IOViolationKind] = {
     "START": IOViolationKind.START_BEFORE_OPEN,
 }
 
+# A file's possible states at a point of the walk. Before an IF/EVALUATE
+# every file has exactly one; after one, it holds every state an arm that
+# falls out of the branch could have left it in.
+_OPEN = "open"
+_CLOSED = "closed"
+_UNOPENED = "unopened"
+_NEVER_OPENED: frozenset[str] = frozenset({_UNOPENED})
+
+# Upper-cased file name -> the states it may be in; a file not in the map
+# has never been opened on any path.
+_Status = dict[str, frozenset[str]]
+_FrozenStatus = frozenset[tuple[str, frozenset[str]]]
+
 
 # A step of the execution walk. The walk is written as generators that
 # ``yield`` the sub-step they would otherwise call recursively and receive its
@@ -111,7 +126,16 @@ _OP_TO_VIOLATION: dict[str, IOViolationKind] = {
 _Step = Generator["_Step", Any, Any]
 
 _PerformKey = tuple[int, int]
-_StateKey = tuple[int, int, frozenset[str], frozenset[str]]
+# (range, file states, inside an IF/EVALUATE arm). The last part decides
+# whether a STOP RUN the range reaches reports FILE_LEFT_OPEN.
+_StateKey = tuple[int, int, _FrozenStatus, bool]
+
+# How an IF/EVALUATE arm ends (``_run_arm``), and how a whole branch does
+# (``_fork``): it falls out to the next statement, jumps away with a GO TO,
+# or ends the program.
+_FALLS = "falls"
+_JUMPS = "jumps"
+_ENDS = "ends"
 _ViolationKey = tuple[Any, ...]
 
 
@@ -149,8 +173,7 @@ class _RangeSummary:
     skipped because an enclosing frame was already running it) still is.
     """
 
-    open_out: frozenset[str]
-    closed_out: frozenset[str]
+    status_out: _FrozenStatus
     terminated: bool
     violations: tuple[IOSequenceViolation, ...]
     gotos: tuple[str, ...]
@@ -168,12 +191,22 @@ class IOSequenceAnalyzer:
     sites.  It emits a violation for each rule broken.
 
     Note: this is a conservative static analysis.  Dynamic file names (variables)
-    are tracked by their variable name string as-is.  Conditional branches are
-    *not* forked — both paths share state — so the report may contain false
-    positives in heavily branched code.  It will not produce false negatives for
-    straight-line programs.  Paragraphs unreachable from the entry procedure
-    are not walked at all.  A violation is reported once per source
-    location, however many call sites reach it.
+    are tracked by their variable name string as-is.  The arms of an IF /
+    EVALUATE are forked: each arm runs from the state at the branch, and the
+    arms are merged afterwards, so a file may be "open on some paths".  An arm
+    that ends in a STOP RUN / GOBACK / EXIT PROGRAM at its own top
+    level (or a PERFORMed paragraph's) never reaches the statement after the
+    branch and is left out of the merge -- the ``IF bad-status CLOSE f STOP
+    RUN`` error exit -- and no FILE_LEFT_OPEN is claimed at that STOP RUN.
+    An arm that ends in a GO TO is kept in the merge: its state is where the
+    walk will meet the GO TO target, whether by fall-through or later.
+    A violation is reported only when it holds on *every* merged path
+    (READ of a file open on no path, OPEN of a file open on every path, ...),
+    except FILE_LEFT_OPEN, which a file open on any path still earns.
+    Other conditional phrases (AT END, INVALID KEY, ...) are not forked.
+    Paragraphs unreachable from the entry procedure are not walked at all.
+    A violation is reported once per source location, however many call
+    sites reach it.
 
     Usage::
 
@@ -188,8 +221,9 @@ class IOSequenceAnalyzer:
     """
 
     def __init__(self) -> None:
-        self._open_files: set[str] = set()
-        self._closed_files: set[str] = set()
+        self._status: _Status = {}
+        # IF/EVALUATE arms being run (``_fork``), innermost last.
+        self._fork_depth = 0
         self._violations: list[IOSequenceViolation] = []
         self._linear: list[CobolParagraph] = []
         self._name_first: dict[str, int] = {}
@@ -207,7 +241,7 @@ class IOSequenceAnalyzer:
         # One entry per PERFORM range currently being run for the first time
         # from its entry state, innermost last.
         self._recordings: list[_Recording] = []
-        # (range, open files, closed files) -> summaries of earlier runs, so a
+        # (range, file states) -> summaries of earlier runs, so a
         # range PERFORMed from many places is walked once per entry state
         # instead of once per call path (exponential in nesting depth).
         self._summaries: dict[_StateKey, list[_RangeSummary]] = {}
@@ -235,8 +269,8 @@ class IOSequenceAnalyzer:
         Returns:
             IOSequenceReport containing all detected violations.
         """
-        self._open_files = set()
-        self._closed_files = set()
+        self._status = {}
+        self._fork_depth = 0
         self._violations = []
         self._linear = []
         self._name_first = {}
@@ -263,7 +297,7 @@ class IOSequenceAnalyzer:
         # the walk never reached the end of the program: it stopped at a
         # loop it could not see out of, so "still open" is only "open at the
         # point the walk gave up".
-        leftover = () if self._ended_in_cycle else sorted(self._open_files)
+        leftover = () if self._ended_in_cycle else self._maybe_open_files()
         for file_name in leftover:
             self._emit(
                 IOSequenceViolation(
@@ -289,8 +323,8 @@ class IOSequenceAnalyzer:
     # canonical correct COBOL shape — OPEN/READ in a main paragraph that
     # PERFORMs a WRAP-UP paragraph declared after it — produced
     # CLOSE_NOT_OPEN + FILE_LEFT_OPEN false positives, because the CLOSE was
-    # visited in declaration order before its PERFORM site. Conditional
-    # branches still share one state (see the class docstring); a PERFORM
+    # visited in declaration order before its PERFORM site. IF / EVALUATE
+    # arms are forked and merged (``_fork``, see the class docstring); a PERFORM
     # recursion guard and per-chain visited sets keep GO TO cycles finite.
 
     def _collect_procedures(self, proc_division: CobolDivision) -> None:
@@ -373,7 +407,7 @@ class IOSequenceAnalyzer:
         When the chain loops back to a paragraph it already ran -- the
         ``READ ... AT END GO TO END-P`` / ``GO TO LOOP-P`` idiom -- the walk
         resumes at a GO TO target it met inside a conditional branch and has
-        not run yet (sharing state, like every other branch here), since
+        not run yet (from the state the walk is in at that point), since
         that is how such a loop is left. Without it, the CLOSE in the loop's
         exit paragraph was never seen and the file was reported left open.
         """
@@ -448,7 +482,13 @@ class IOSequenceAnalyzer:
                 self._terminate_program(getattr(stmt, "location", None))
                 self._terminated = True
                 return ("stop", None)
-            yield self._process_statement(stmt)
+            outcome = yield self._process_statement(stmt)
+            if outcome == _ENDS:
+                # Every arm of this IF/EVALUATE ends the program: what
+                # follows it in the paragraph is never run.
+                self._status = {}
+                self._terminated = True
+                return ("stop", None)
         return ("fall", None)
 
     @staticmethod
@@ -466,13 +506,18 @@ class IOSequenceAnalyzer:
         """Dispatch *stmt* and its nested statements in declaration order,
         inlining out-of-line PERFORM targets -- and SORT/MERGE INPUT/OUTPUT
         PROCEDUREs, which the sort runs exactly like a PERFORM of the named
-        range -- at their call sites."""
+        range -- at their call sites.
+
+        Returns how an IF/EVALUATE *stmt* ends (see ``_fork``), else None.
+        """
         visited: set[int] = set()
 
         def _visit(node: ASTNode) -> _Step:
             if id(node) in visited or self._terminated:
-                return
+                return None
             visited.add(id(node))
+            if isinstance(node, (IfStatement, EvaluateStatement)):
+                return (yield self._fork(node, _visit))
             self._dispatch(node)
             if isinstance(node, GoStatement):
                 # Reached through _visit, so nested in a branch or handler
@@ -514,8 +559,111 @@ class IOSequenceAnalyzer:
             if hasattr(node, "children"):
                 for child in node.children:
                     yield _visit(child)
+            return None
 
-        yield _visit(stmt)
+        return (yield _visit(stmt))
+
+    @staticmethod
+    def _arms(node: IfStatement | EvaluateStatement) -> list[list[ASTNode]]:
+        """The statement lists one execution of *node* may run, one per arm.
+
+        An IF without ELSE, and an EVALUATE without WHEN OTHER, has an empty
+        arm: no WHEN matched / the condition was false.
+        """
+        if isinstance(node, IfStatement):
+            return [list(node.then_statements), list(node.else_statements)]
+        arms: list[list[ASTNode]] = [
+            list(group[-1].statements) for group in node.when_groups()
+        ]
+        arms.append(list(node.default_when.statements) if node.default_when else [])
+        return arms
+
+    def _fork(
+        self,
+        node: IfStatement | EvaluateStatement,
+        visit: Callable[[ASTNode], _Step],
+    ) -> _Step:
+        """Run each arm of *node* from the state at the branch, then merge.
+
+        An arm that ends the program (see ``_run_arm``) is left out of the
+        merge. An arm that jumps away with a GO TO is kept: the walk meets
+        its target later (by fall-through in a ``THRU ...-EXIT`` range, or as
+        a queued GO TO target), and the state it carries there is the
+        merged one. Returns ``_ENDS`` when every arm ends the program,
+        ``_JUMPS`` when none falls out but some jump, else ``_FALLS``.
+        """
+        entry = dict(self._status)
+        kept: list[_Status] = []
+        every: list[_Status] = []
+        endings: set[str] = set()
+        self._fork_depth += 1
+        try:
+            for arm in self._arms(node):
+                self._status = dict(entry)
+                ending = yield self._run_arm(arm, visit)
+                if self._terminated:
+                    # A PERFORMed paragraph ran a top-level STOP RUN /
+                    # GOBACK: that ends this arm's path, not every path
+                    # through here.
+                    self._terminated = False
+                    ending = _ENDS
+                endings.add(ending)
+                every.append(self._status)
+                if ending != _ENDS:
+                    kept.append(self._status)
+        finally:
+            self._fork_depth -= 1
+        # Every arm ends the program: whatever follows is dead from here.
+        # Merge every arm anyway, so the walk carries on from a state it
+        # could be in.
+        self._status = self._merge(kept or every)
+        if _FALLS in endings:
+            return _FALLS
+        return _JUMPS if _JUMPS in endings else _ENDS
+
+    def _run_arm(
+        self, stmts: list[ASTNode], visit: Callable[[ASTNode], _Step]
+    ) -> _Step:
+        """Run one branch arm; return how it ends (``_FALLS`` / ``_JUMPS`` /
+        ``_ENDS``)."""
+        for stmt in stmts:
+            if self._terminated:
+                return _ENDS
+            if isinstance(stmt, (IfStatement, EvaluateStatement)):
+                ending = yield self._fork(stmt, visit)
+                if ending != _FALLS:
+                    return ending
+                continue
+            yield visit(stmt)
+            if (
+                isinstance(stmt, GoStatement)
+                and stmt.target_paragraph
+                and not stmt.depending_on_variable
+            ):
+                # The target is queued (``_add_pending_goto``) by ``visit``.
+                return _JUMPS
+            if self._is_program_end(stmt):
+                # Not ``_terminate_program``: the arm is the error exit of a
+                # guard, and a file it leaves open -- the one whose OPEN just
+                # failed -- is not a finding.
+                return _ENDS
+        return _ENDS if self._terminated else _FALLS
+
+    @staticmethod
+    def _merge(states: list[_Status]) -> _Status:
+        """Union of each file's possible states across *states*."""
+        merged: _Status = {}
+        for key in {k for state in states for k in state}:
+            merged[key] = frozenset().union(
+                *(state.get(key, _NEVER_OPENED) for state in states)
+            )
+        return merged
+
+    def _states(self, key: str) -> frozenset[str]:
+        return self._status.get(key, _NEVER_OPENED)
+
+    def _maybe_open_files(self) -> list[str]:
+        return sorted(k for k, v in self._status.items() if _OPEN in v)
 
     def _run_perform(
         self,
@@ -526,8 +674,8 @@ class IOSequenceAnalyzer:
     ) -> _Step:
         """Execute a ``PERFORM target [THRU end]`` range at the call site.
 
-        The first run of a range from a given entry state (open and closed
-        files) is recorded as a ``_RangeSummary``; a later PERFORM of the
+        The first run of a range from a given entry state (every file's
+        possible states) is recorded as a ``_RangeSummary``; a later PERFORM of the
         same range from the same state replays the summary instead of
         walking the paragraphs again.
         """
@@ -550,8 +698,8 @@ class IOSequenceAnalyzer:
         state: _StateKey = (
             start,
             end,
-            frozenset(self._open_files),
-            frozenset(self._closed_files),
+            frozenset(self._status.items()),
+            self._fork_depth > 0,
         )
         for summary in self._summaries.get(state, ()):
             if summary.entered.isdisjoint(self._perform_set) and (
@@ -583,8 +731,7 @@ class IOSequenceAnalyzer:
                 outer.gotos.setdefault(name)
         self._summaries.setdefault(state, []).append(
             _RangeSummary(
-                open_out=frozenset(self._open_files),
-                closed_out=frozenset(self._closed_files),
+                status_out=frozenset(self._status.items()),
                 terminated=self._terminated,
                 violations=tuple(rec.violations.values()),
                 gotos=tuple(rec.gotos),
@@ -616,8 +763,7 @@ class IOSequenceAnalyzer:
 
     def _replay(self, summary: _RangeSummary) -> None:
         """Apply a recorded range's effects at another call site."""
-        self._open_files = set(summary.open_out)
-        self._closed_files = set(summary.closed_out)
+        self._status = dict(summary.status_out)
         for violation in summary.violations:
             self._emit(violation)
         for name in summary.gotos:
@@ -675,16 +821,12 @@ class IOSequenceAnalyzer:
         elif isinstance(node, IOStartStatement):
             self._check_open(node.file_name or "", "START", loc)
         # GOBACK / STOP RUN are intentionally NOT handled here. _dispatch()
-        # is reached for every nested statement (including ones inside an
-        # IF/EVALUATE branch) via _process_statement's child recursion, but
-        # a GOBACK/STOP RUN nested in a conditional branch is not guaranteed
-        # to execute. Since conditional branches are not forked (see class
-        # docstring), clearing open-file state here would wipe it out for
-        # paths that don't take that branch too -- e.g. the common
-        # `IF NOT WS-FILE-OK STOP RUN END-IF` guard idiom right after an
-        # OPEN would make every later READ/WRITE of that file look
-        # unopened. Only a GOBACK/STOP RUN reached as a paragraph's own
-        # top-level statement is unconditional; that case is handled by
+        # is reached for every nested statement, including ones in an
+        # IF/EVALUATE arm, where it ends only that arm's path: _run_arm
+        # drops the arm from the merge instead (the common
+        # `IF NOT WS-FILE-OK STOP RUN END-IF` guard right after an OPEN).
+        # Only a GOBACK/STOP RUN reached as a paragraph's own top-level
+        # statement ends the walk; that case is handled by
         # _terminate_program(), called from _run_paragraph.
 
     def _file_for(self, file_name: str | None, record_name: str | None) -> str | None:
@@ -696,12 +838,16 @@ class IOSequenceAnalyzer:
 
         Called only when a GOBACK / STOP RUN is a paragraph's own top-level
         statement (see ``_is_program_end``) -- i.e. unconditionally reached.
+        Inside an IF/EVALUATE arm (a PERFORMed abend paragraph under an
+        ``IF bad-status`` guard) no FILE_LEFT_OPEN is claimed, the same as
+        for a STOP RUN written in the arm itself (see ``_run_arm``).
         Only STOP RUN terminates the program -- STOP 'literal' merely pauses
         pending operator action and execution then continues, so it must not
         reset the open-file state (same distinction dead_code.py's and
         program_flow/scanner.py's _is_terminator draw).
         """
-        for file_name in sorted(self._open_files):
+        leftover = [] if self._fork_depth else self._maybe_open_files()
+        for file_name in leftover:
             self._emit(
                 IOSequenceViolation(
                     kind=IOViolationKind.FILE_LEFT_OPEN,
@@ -713,8 +859,7 @@ class IOSequenceAnalyzer:
                     ),
                 )
             )
-        self._open_files.clear()
-        self._closed_files.clear()
+        self._status = {}
 
     def _handle_open(self, node: IOOpenStatement, loc: SourceLocation | None) -> None:
         """Process an OPEN statement."""
@@ -723,7 +868,7 @@ class IOSequenceAnalyzer:
             if not file_name.strip():
                 continue  # Skip empty/whitespace names
             key = file_name.upper()
-            if key in self._open_files:
+            if self._states(key) == {_OPEN}:
                 self._emit(
                     IOSequenceViolation(
                         kind=IOViolationKind.DOUBLE_OPEN,
@@ -732,9 +877,8 @@ class IOSequenceAnalyzer:
                         message=f"File '{file_name}' is already open (duplicate OPEN)",
                     )
                 )
-            else:
-                self._closed_files.discard(key)  # Allow reopen after close
-                self._open_files.add(key)
+            # Open on every path now, whether or not it was before.
+            self._status[key] = frozenset({_OPEN})
 
     def _handle_close(self, node: IOCloseStatement, loc: SourceLocation | None) -> None:
         """Process a CLOSE statement."""
@@ -749,10 +893,12 @@ class IOSequenceAnalyzer:
             if opts.get("reel") or opts.get("unit"):
                 continue
             key = file_name.upper()
-            if key in self._open_files:
-                self._open_files.discard(key)
-                self._closed_files.add(key)
-            elif key in self._closed_files:
+            states = self._states(key)
+            if _OPEN in states:
+                # Closed on every path now; one where it was never open is
+                # not reported (see the class docstring).
+                self._status[key] = frozenset({_CLOSED})
+            elif _CLOSED in states:
                 self._emit(
                     IOSequenceViolation(
                         kind=IOViolationKind.DOUBLE_CLOSE,
@@ -778,7 +924,7 @@ class IOSequenceAnalyzer:
         if not file_name:
             return  # Cannot determine file name statically
         key = file_name.upper()
-        if key not in self._open_files:
+        if _OPEN not in self._states(key):
             kind = _OP_TO_VIOLATION.get(verb, IOViolationKind.READ_BEFORE_OPEN)
             self._emit(
                 IOSequenceViolation(
