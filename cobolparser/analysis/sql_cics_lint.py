@@ -1235,8 +1235,10 @@ class _WriterFlow:
       the same paragraph (conditional ones included);
     * every writer in a paragraph a ``PERFORM`` in that stretch runs,
       transitively;
-    * when the statement sits inside an inline ``PERFORM`` loop, every
-      writer in that loop, since a later pass runs them before it.
+    * when the paragraph-level statement holding it contains an inline
+      ``PERFORM`` loop anywhere, every writer in that statement, since a
+      later pass may run them before it (conservative: the loop need not
+      enclose this statement).
 
     A ``STRING`` never cuts the trace: it leaves the bytes past what it
     transfers untouched, so earlier content can survive it.
