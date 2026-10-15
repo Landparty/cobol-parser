@@ -19,7 +19,7 @@ the Model Context Protocol, on stdin/stdout. Design and later phases:
 |---|---|---|
 | `cobolparser/mcp/envelope.py` | `Response` (caveats + truncation), `Caveat`, `CAVEAT_KINDS`, `ToolError`, `MCP_SURFACE_VERSION`, limits | no |
 | `cobolparser/mcp/workspace.py` | `Workspace` (path guard, `cobol.yml`, LRU parse cache), `ParsedProgram` (unit selection, `locate()`), `stdout_to_stderr()` | no |
-| `cobolparser/mcp/tools.py` | `CobolTools`: `read_source`, `lint`, `explain_symbol` | no |
+| `cobolparser/mcp/tools.py` | `CobolTools`: `program_brief`, `explain_symbol`, `callers_of`, `record_layout`, `lint`, `read_source` | no |
 | `cobolparser/mcp/server.py` | `build_server()`, `run_stdio()`: typed wrappers registered on `FastMCP` | **yes** (`[mcp]` extra) |
 
 ## Contents
@@ -39,6 +39,9 @@ returns a small payload. Every list is capped (`limit`, default 50, max 500).
 |---|---|---|
 | `read_source(file, line, before, after)` | numbered lines around a citation, at most `MAX_SOURCE_LINES` (200) | the file, streamed through the guard (`newline=""`: splits as `split_source_lines` does); only the window is kept |
 | `lint(file, rules, min_severity, limit)` | findings worst first, `summary` counts, `rules_run` | `LintAnalyzer` over **every** unit, `add_parse_errors`; defaults from `cobol.yml`'s `lint:` |
+| `program_brief(file, program, limit)` | `size` (own statements only: `get_all_statements()` walks into contained units), `entry_points`, `interface` (entry points, parameters, `call_example`) and `interface_notes`, `files` (C/R/U/D string, open modes, organization, records, key, status field), `sql_tables`, `calls` (one row per target; dynamic `candidates` from `DynamicCallAnalyzer`; CICS LINK/XCTL `PROGRAM`), `cics_commands` / `exec_dli_commands` counts, `unreachable_procedures`, `perform_cycles`, `health`, `lint` (whole file: summary + `BRIEF_LINT` worst) | `ProgramFlowAnalyzer`, `ProgramSignatureExtractor`, `CRUDMatrixGenerator`, `ProgramLayoutIndex.file_facts`, `TechnicalDebtAnalyzer`, `LintAnalyzer`; each section through `_attempt()`, so one analyzer raising costs only its section (`analyzer-failed`) |
+| `callers_of(file, name, program, limit)` | per matching paragraph/section: `callers` (`from`, `type`, location, `thru`, `via_range`, `perform_type`, `condition`, `loop`), `callers_by_type`, `reachable`, `is_entry_point`; a name the file CALLs answers with its CALL sites (`kind: program`, `scope: this file only`) | flow edges in `_CONTROL_EDGES`; a THRU is two edges (opener + `*_THRU` closer), so only openers count and `range_members` gives `via_range` |
+| `record_layout(file, record, program, limit)` | `records[]`: `qualified_name` (`X OF Y`), `section`, `declared_at`, offset/length, `redefines`, `fields` in source order each with `declared_at`; an FD name gives every record of the file (`file`) | `compute_record_layout` per 01; `_declarations()` matches the n-th layout entry of a qualified name to its n-th declaration (FILLER repeats) and re-sorts, since the layout emits a group after its members |
 | `explain_symbol(file, name, program, limit)` | each declaration matching `name` (or `X OF Y`): `declared_at`, `layout` (PICTURE, USAGE, `byte_offset`, `byte_length`, REDEFINES, level-88 values), `references` with role/statement/paragraph, `references_by_role`; `suggestions` when not found | `XrefAnalyzer`, `compute_program_data_items`; not found: `special_register` from xref's `is_special_register()` (no suggestions then) |
 
 Invariants:
@@ -97,6 +100,9 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   `server.py` runs each tool through `anyio.to_thread.run_sync(...,
   abandon_on_cancel=True)` holding `Workspace.lock`, so the event loop stays
   free and calls run one at a time.
+- **Report memo.** `ParsedProgram.report(name, unit, build)` keeps each
+  analyzer report beside the parse, so `program_brief` and `callers_of`
+  share one flow graph and the cache drops both together.
 - **Lint grading.** `_copybook_item_names()` takes from the source map the
   data items declared only inside a COPY member, so `lint` grades an unused
   copybook field as info, as the CLI does (the CLI finds the same set by

@@ -23,7 +23,8 @@ subcommand over reading source whenever one covers the question.
 ## Setup
 
 When a `cobol` MCP server is connected (`cobol-parser mcp`), prefer its
-`explain_symbol`, `lint` and `read_source` tools for those questions: they
+tools for those questions (`program_brief` first, then `explain_symbol`,
+`callers_of`, `record_layout`, `lint` and `read_source`): they
 answer from one cached parse, cite every fact as `file:line` on disk, and
 list what they could not check under `caveats`.
 

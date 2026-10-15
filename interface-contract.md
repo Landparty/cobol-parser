@@ -337,8 +337,8 @@ methods returning the same dicts. User guide: `docs/mcp-server.md`.
 
 What a client depends on:
 
-- The tool names `read_source`, `lint` and `explain_symbol`, and their
-  argument names.
+- The tool names `program_brief`, `explain_symbol`, `callers_of`,
+  `record_layout`, `lint` and `read_source`, and their argument names.
 - The envelope every tool returns: `surface_version`, `answer`, `caveats`
   (`kind`, `detail`, optional `effect`), `truncated` (`field`, `shown`,
   `total`) and, for tools about a program, `program` (`file`,

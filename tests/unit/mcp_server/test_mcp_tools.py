@@ -526,3 +526,259 @@ class TestExplainSymbol:
     def test_empty_name(self, root: Path) -> None:
         with pytest.raises(ToolError):
             tools_for(root).explain_symbol("BATCHSEQ.cbl", "   ")
+
+
+# -- program_brief ---------------------------------------------------------------
+
+FLOWT = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. FLOWT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  REC-A.
+           05  FILLER            PIC X(2).
+           05  A-CODE            PIC X(3).
+           05  FILLER            PIC X(5).
+       01  REC-B REDEFINES REC-A.
+           05  B-ALL             PIC X(10).
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           PERFORM 1000-A THRU 3000-C.
+           GO TO 9000-END.
+       1000-A.
+           DISPLAY 'A'.
+       2000-B.
+           DISPLAY 'B'.
+       3000-C.
+           DISPLAY 'C'.
+       9000-END.
+           STOP RUN.
+       5000-DEAD.
+           DISPLAY 'DEAD'.
+"""
+
+
+def line_of(root: Path, location: dict) -> str:
+    """The text on disk at a cited location, to check a citation is real."""
+    return (root / location["file"]).read_text().splitlines()[location["line"] - 1]
+
+
+class TestProgramBrief:
+    def test_files_and_their_use(self, root: Path) -> None:
+        answer = tools_for(root).program_brief("VSAMKSDS.cbl")["answer"]
+        files = {f["name"]: f for f in answer["files"]}
+        master = files["CUST-MASTER"]
+        assert master["organization"] == "INDEXED"
+        assert master["access"] == "-RUD"
+        assert master["record_key"] == "CM-CUST-ID"
+        assert master["records"] == ["CUST-MASTER-REC"]
+        assert files["AUDIT-LOG"]["access"] == "C---"
+        assert answer["access_legend"]
+
+    def test_interface_and_calls(self, root: Path) -> None:
+        result = tools_for(root).program_brief("SUBPROG.cbl")
+        answer = result["answer"]
+        primary, entry = answer["interface"]
+        assert primary["call_example"].startswith('CALL "SUBPROG" USING LK-ACCOUNT')
+        days = primary["parameters"][1]
+        assert (days["name"], days["by"], days["direction"]) == (
+            "LK-DAYS",
+            "VALUE",
+            "input",
+        )
+        assert "LK-DAYS" in line_of(root, days["declared_at"])
+        assert entry["kind"] == "entry-statement"
+        calls = {c["program"]: c for c in answer["calls"]}
+        dynamic = calls["WS-DYN-NAME"]
+        assert dynamic["dynamic"] is True
+        assert dynamic["candidates"] == ["RATECALC"]
+        assert "CALL WS-DYN-NAME" in line_of(root, dynamic["sites"][0]["location"])
+        assert calls["FACTORL"]["dynamic"] is False
+
+    def test_sql_tables_and_cics(self, root: Path) -> None:
+        tools = with_copybooks(root)
+        db2 = tools.program_brief("DB2BATCH.cbl")["answer"]
+        assert {"name": "BANK.ACCOUNT", "access": "--U-"} in db2["sql_tables"]
+        cics = tools.program_brief("CICSONLN.cbl")["answer"]
+        assert cics["cics_commands"]["SEND"] == 2
+        linked = {c["program"]: c for c in cics["calls"]}
+        assert linked["CUSTAUDT"]["via"] == "EXEC CICS LINK"
+        assert "CUSTAUDT" in line_of(root, linked["CUSTAUDT"]["sites"][0]["location"])
+        assert "exec_dli_commands" in tools.program_brief("EXECDLI.cbl")["answer"]
+
+    def test_health_lint_and_unreachable(self, root: Path) -> None:
+        (root / "FLOWT.cbl").write_text(FLOWT)
+        answer = tools_for(root).program_brief("FLOWT.cbl")["answer"]
+        assert answer["unreachable_procedures"] == ["5000-DEAD"]
+        assert answer["size"] == {"sections": 0, "paragraphs": 6, "statements": 7}
+        assert answer["health"]["grade"] in "ABCDF"
+        assert answer["lint"]["scope"] == "file"
+        assert len(answer["lint"]["worst"]) <= 5
+
+    def test_nested_unit_counts_only_its_own_statements(self, root: Path) -> None:
+        tools = tools_for(root)
+        outer = tools.program_brief("OOCOBOL.cbl")
+        assert outer["answer"]["unit_kind"] == "CLASS"
+        assert outer["answer"]["size"]["statements"] == 0
+        method = tools.program_brief("OOCOBOL.cbl", program="deposit")["answer"]
+        assert method["size"]["statements"] > 0
+
+    def test_a_failing_analyzer_costs_only_its_section(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cobolparser.analysis.technical_debt import TechnicalDebtAnalyzer
+
+        def boom(self: object, ast: object) -> None:
+            raise RuntimeError("kaboom")
+
+        monkeypatch.setattr(TechnicalDebtAnalyzer, "analyze", boom)
+        result = tools_for(root).program_brief("VSAMKSDS.cbl")
+        assert "health" not in result["answer"]
+        assert result["answer"]["files"]
+        assert any(
+            c["kind"] == "analyzer-failed" and "kaboom" in c["detail"]
+            for c in result["caveats"]
+        )
+
+    def test_every_sample_is_briefed_compactly(self, root: Path) -> None:
+        tools = with_copybooks(root)
+        for path in sorted(root.glob("*.cbl")):
+            result = tools.program_brief(path.name)
+            assert "analyzer-failed" not in kinds(result), path.name
+            assert len(json.dumps(result)) < 16_000, path.name
+
+
+# -- callers_of --------------------------------------------------------------------
+
+
+class TestCallersOf:
+    def test_perform_thru_is_one_caller_per_statement(self, root: Path) -> None:
+        (root / "FLOWT.cbl").write_text(FLOWT)
+        tools = tools_for(root)
+        first = tools.callers_of("FLOWT.cbl", "1000-A")["answer"]["procedures"][0]
+        assert first["callers"] == [
+            {
+                "from": "0000-MAIN",
+                "type": "PERFORM",
+                "location": {"file": "FLOWT.cbl", "line": 13},
+                "thru": "3000-C",
+            }
+        ]
+        middle = tools.callers_of("FLOWT.cbl", "2000-B")["answer"]["procedures"][0]
+        assert middle["callers_by_type"] == {"PERFORM": 1, "FALL_THROUGH": 1}
+        ranged = next(c for c in middle["callers"] if c["type"] == "PERFORM")
+        assert ranged["via_range"] == ["1000-A", "3000-C"]
+
+    def test_goto_and_unreachable(self, root: Path) -> None:
+        (root / "FLOWT.cbl").write_text(FLOWT)
+        tools = tools_for(root)
+        end = tools.callers_of("FLOWT.cbl", "9000-END")["answer"]["procedures"][0]
+        assert {"from": "0000-MAIN", "type": "GOTO"} in [
+            {"from": c["from"], "type": c["type"]} for c in end["callers"]
+        ]
+        dead = tools.callers_of("FLOWT.cbl", "5000-dead")["answer"]["procedures"][0]
+        assert dead["reachable"] is False
+        assert dead["caller_count"] == 0
+        assert "5000-DEAD" in line_of(root, dead["declared_at"])
+
+    def test_sort_procedure_and_sql_whenever(self, root: Path) -> None:
+        tools = with_copybooks(root)
+        sort = tools.callers_of("BATCHSEQ.cbl", "3000-WRITE-REPORT")["answer"]
+        assert "SORT_OUTPUT_PROCEDURE" in sort["procedures"][0]["callers_by_type"]
+        error = tools.callers_of("DB2BATCH.cbl", "9900-SQL-ERROR")["answer"]
+        by_type = error["procedures"][0]["callers_by_type"]
+        assert by_type["SQL_WHENEVER"] >= 1
+        for caller in error["procedures"][0]["callers"]:
+            if caller["type"] == "SQL_WHENEVER":
+                assert "EXEC SQL" in line_of(root, caller["location"])
+
+    def test_a_called_program(self, root: Path) -> None:
+        answer = tools_for(root).callers_of("MQBATCH.cbl", "MQPUT1")["answer"]
+        assert answer["kind"] == "program"
+        assert answer["scope"] == "this file only"
+        (call,) = answer["callers"]
+        assert call["from"] == "1100-REPLY"
+        assert "MQPUT1" in line_of(root, call["location"])
+
+    def test_not_found_and_own_program(self, root: Path) -> None:
+        tools = tools_for(root)
+        missing = tools.callers_of("BATCHSEQ.cbl", "3000-WRITE")["answer"]
+        assert missing["found"] is False
+        assert "3000-WRITE-REPORT" in missing["suggestions"]
+        own = tools.callers_of("MQBATCH.cbl", "MQBATCH")["answer"]
+        assert own["found"] is False
+        assert "cross-program" in own["note"]
+        with pytest.raises(ToolError):
+            tools.callers_of("MQBATCH.cbl", " ")
+
+
+# -- record_layout -----------------------------------------------------------------
+
+
+class TestRecordLayout:
+    def test_fields_in_source_order_cited_in_the_copybook(self, root: Path) -> None:
+        result = with_copybooks(root).record_layout("COPYREPL.cbl", "WS-IN-CUSTOMER")
+        (record,) = result["answer"]["records"]
+        assert record["section"] == "WORKING-STORAGE"
+        assert record["byte_length"] == 105
+        names = [f["name"] for f in record["fields"]]
+        # The layout emits a group after its members; the answer must not.
+        assert names.index("IN-ADDRESS") < names.index("IN-STREET")
+        street = record["fields"][names.index("IN-STREET")]
+        assert (street["byte_offset"], street["byte_length"]) == (45, 30)
+        assert street["declared_at"]["file"] == "copybooks/CUSTREC.cpy"
+        assert ":PFX:-STREET" in line_of(root, street["declared_at"])
+        active = record["fields"][names.index("IN-ACTIVE")]
+        assert active["level"] == 88 and active["condition_values"] == ["A"]
+
+    def test_a_group_inside_a_record(self, root: Path) -> None:
+        answer = with_copybooks(root).record_layout("COPYREPL.cbl", "IN-ADDRESS")[
+            "answer"
+        ]
+        (group,) = answer["records"]
+        assert group["byte_offset"] == 45
+        assert group["qualified_name"] == "IN-ADDRESS OF WS-IN-CUSTOMER"
+        assert [f["name"] for f in group["fields"]] == [
+            "IN-STREET",
+            "IN-CITY",
+            "IN-POSTCODE",
+        ]
+
+    def test_a_file_name_gives_its_records(self, root: Path) -> None:
+        answer = tools_for(root).record_layout("VSAMKSDS.cbl", "CUST-MASTER")["answer"]
+        assert answer["file"]["organization"] == "INDEXED"
+        assert [r["name"] for r in answer["records"]] == ["CUST-MASTER-REC"]
+        assert answer["records"][0]["section"] == "FILE"
+
+    def test_filler_and_redefines(self, root: Path) -> None:
+        (root / "FLOWT.cbl").write_text(FLOWT)
+        tools = tools_for(root)
+        rec_a = tools.record_layout("FLOWT.cbl", "REC-A")["answer"]["records"][0]
+        fillers = [f for f in rec_a["fields"] if f["name"] == "FILLER"]
+        assert [f["declared_at"]["line"] for f in fillers] == [6, 8]
+        assert [f["byte_offset"] for f in fillers] == [0, 5]
+        rec_b = tools.record_layout("FLOWT.cbl", "REC-B")["answer"]["records"][0]
+        assert rec_b["redefines"] == "REC-A"
+
+    def test_ambiguous_qualified_and_missing(self, root: Path) -> None:
+        (root / "TWO.cbl").write_text(TWO_AMOUNTS)
+        tools = tools_for(root)
+        both = tools.record_layout("TWO.cbl", "AMT")
+        assert len(both["answer"]["records"]) == 2
+        assert "ambiguous-name" in kinds(both)
+        one = tools.record_layout("TWO.cbl", "AMT IN OUT-REC")
+        (amt,) = one["answer"]["records"]
+        assert (amt["byte_offset"], amt["byte_length"]) == (3, 5)
+        missing = tools.record_layout("TWO.cbl", "OUT-RECX")["answer"]
+        assert missing["found"] is False
+        assert "OUT-REC" in missing["suggestions"]
+
+    def test_field_limit(self, root: Path) -> None:
+        result = with_copybooks(root).record_layout(
+            "COPYREPL.cbl", "WS-IN-CUSTOMER", limit=2
+        )
+        record = result["answer"]["records"][0]
+        assert len(record["fields"]) == 2
+        assert result["truncated"] == [
+            {"field": "records[0].fields", "shown": 2, "total": record["field_count"]}
+        ]
