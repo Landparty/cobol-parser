@@ -301,7 +301,12 @@ into focused, reusable modules:
   (`"<qname>: condition_values lists only part of VALUE 1 THRU 99999;
   condition_ranges holds the full range"`), judged by
   `condition_values_exhaustive()` against the parent's decimal digits, so
-  `VALUE 1 THRU 2` on `PIC 9V99` is flagged too. Only a range triggers it:
+  `VALUE 1 THRU 2` on `PIC 9V99` is flagged too, and so is every range
+  under a non-numeric parent (a group, or `PIC XX` with `'01' THRU '12'`:
+  the parser drops the quotes, so the range *looks* integer, but `PIC XX`
+  admits `'1A'` and never holds `'1'`). A typed endpoint is kept as written
+  (`X'00'`, not a NUL byte). Not caught: `LOW-VALUE THRU HIGH-VALUE`, whose
+  `THRU` the DATA DIVISION parser drops (follow-up issue). Only a range triggers it:
   `VALUE SPACES` is listed as its word, which is the value. `condition_values`
   itself is unchanged (additive change; consumers keep working).
   `LayoutItem.condition_values_complete` carries the verdict and is not

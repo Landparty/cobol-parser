@@ -20,6 +20,8 @@ from typing import Any
 from ...models.data_items import CobolDataItem, ConditionNameItem
 from ...models.program import CobolProgram, CobolSection
 from .layout import (
+    FieldCategory,
+    _classify,
     condition_ranges,
     condition_values_exhaustive,
     expand_condition_values,
@@ -90,6 +92,13 @@ def _direct_condition_children(item: CobolDataItem) -> list[ConditionNameItem]:
     return [c for c in item.children if isinstance(c, ConditionNameItem)]
 
 
+def _is_numeric_field(item: CobolDataItem) -> bool:
+    """An elementary numeric item; a group is alphanumeric whatever is in it."""
+    if _direct_data_children(item):
+        return False
+    return _classify(item, item.picture_clause) is FieldCategory.NUMERIC
+
+
 def _condition_item(
     cond: ConditionNameItem,
     parent: CobolDataItem,
@@ -120,8 +129,14 @@ def _condition_item(
         condition_ranges=ranges,
         # Only a THRU range makes the list partial here: a figurative
         # constant (VALUE SPACES) is listed as its word, which is the value.
+        # A range over a non-numeric field is never enumerable: the parser
+        # drops the quotes of '01' THRU '12', which then reads as an integer
+        # range, but on PIC XX it also admits '1A' and excludes '1'.
         condition_values_complete=not ranges
-        or condition_values_exhaustive(cond.values, decimal_digits),
+        or (
+            _is_numeric_field(parent)
+            and condition_values_exhaustive(cond.values, decimal_digits)
+        ),
     )
 
 

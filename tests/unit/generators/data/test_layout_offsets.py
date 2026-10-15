@@ -654,3 +654,33 @@ class TestConditionRanges:
             "REC.A.A-OK: condition_values lists only part of VALUE 1 THRU 99999; "
             "condition_ranges holds the full range"
         ) in unresolved
+
+    def test_a_range_over_a_non_numeric_field_is_flagged(self):
+        # The parser drops the quotes of '01' THRU '12', so it reads as an
+        # integer range -- but a PIC XX field also admits '1A' and never
+        # holds '1', so the list is not the condition's whole domain.
+        report = _program_items(
+            "       01 REC.\n"
+            "          05 M PIC XX.\n"
+            "             88 M-OK VALUE '01' THRU '12'.\n"
+            "          05 N PIC 99.\n"
+            "             88 N-OK VALUE 1 THRU 12.\n"
+            "       01 GRP.\n"
+            "          88 GRP-OK VALUE '1' THRU '3'.\n"
+            "          05 G1 PIC X.\n"
+        )
+        flagged = sorted(line.split(":", 1)[0] for line in report["unresolved"])
+        assert flagged == ["GRP.GRP-OK", "REC.M.M-OK"]
+
+    def test_a_hex_range_is_reported_as_written(self):
+        report = _program_items(
+            "       01 REC.\n"
+            "          05 H PIC X.\n"
+            "             88 H-LOW VALUE X'00' THRU X'3F'.\n"
+        )
+        entry = next(i for i in report["items"] if i["name"] == "H-LOW")
+        assert entry["condition_ranges"] == [{"from": "X'00'", "to": "X'3F'"}]
+        assert (
+            "REC.H.H-LOW: condition_values lists only part of VALUE X'00' THRU "
+            "X'3F'; condition_ranges holds the full range"
+        ) in report["unresolved"]

@@ -135,3 +135,6 @@ class TestConditionRanges:
 
     def test_a_range_end_with_no_start_is_skipped(self):
         assert condition_ranges(['ALL "X"', "THROUGH:Z"]) == []
+
+    def test_a_typed_literal_stays_as_written(self):
+        assert condition_ranges(["X'00'", "THROUGH:X'3F'"]) == [("X'00'", "X'3F'")]

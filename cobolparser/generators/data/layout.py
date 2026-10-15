@@ -504,8 +504,9 @@ def condition_ranges(raw_values: list[str]) -> list[tuple[str, str]]:
 
     The parser records ``VALUE 2 THRU 4`` as ``["2", "THROUGH:4"]``; this
     pairs each range end with the literal before it, quotes stripped and
-    nothing expanded. :func:`expand_condition_values` lists a range only in
-    part (an integer range up to the expansion cap, any other range just its
+    nothing expanded. A typed literal stays as written (``X'00'``, not a raw
+    NUL byte). :func:`expand_condition_values` lists a range only in part (an
+    integer range up to the expansion cap, any other range just its
     endpoints), so these pairs are the only full statement of what the
     condition admits.
     """
@@ -515,16 +516,22 @@ def condition_ranges(raw_values: list[str]) -> list[tuple[str, str]]:
         match = _THROUGH_RE.match(raw)
         if match is None:
             previous = (
-                None
-                if all_literal_operand(raw) is not None
-                else _strip_literal_quotes(raw)
+                None if all_literal_operand(raw) is not None else _range_endpoint(raw)
             )
             continue
-        end = _strip_literal_quotes(match.group(1))
+        end = _range_endpoint(match.group(1))
         if previous is not None:
             ranges.append((previous, end))
         previous = end
     return ranges
+
+
+def _range_endpoint(value: str) -> str:
+    """A ``THRU`` endpoint for display: a typed literal (``X'3F'``) as
+    written, any other literal with its quotes stripped."""
+    if typed_literal_content(value) is not None:
+        return value.strip()
+    return _strip_literal_quotes(value)
 
 
 def condition_values_exhaustive(raw_values: list[str], decimal_digits: int) -> bool:
