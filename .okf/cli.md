@@ -899,8 +899,8 @@ compiled against them. Implementation:
   `--record-length` is decode-only: an LRECL to cut fixed-length records at
   when the file's records are longer than the copybook describes (trailing
   slack, or a copybook covering only a prefix). With no `--record-length`
-  and a whole-program source, it defaults to the FD's LRECL (`RECORD
-  CONTAINS n`, else the largest 01 under the FD), so `--record HDR-REC` on a
+  and a whole-program source, it defaults to the FD's LRECL (the largest 01
+  under the FD, or a larger `RECORD CONTAINS n`), so `--record HDR-REC` on a
   shorter 01 still frames the file right (#362); `gen-data --format
   record|hex` pads that 01 out to the same LRECL with spaces.
 * **`--max-records`/`--skip`** page a large file. A run stopped by

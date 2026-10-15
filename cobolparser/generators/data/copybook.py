@@ -216,8 +216,10 @@ def fd_record_length(
     Every 01 under one FD describes the same record area, so in a RECFM=F
     file each record is the file's length, whichever 01 it happens to be --
     not the length of the 01 somebody picked with ``--record``.  That length
-    is the FD's own ``RECORD CONTAINS n`` when it states one, else the
-    largest 01 under the FD (what the compiler sizes the area to).
+    is the largest 01 under the FD (what the compiler sizes the area to), or
+    the FD's own fixed ``RECORD CONTAINS n`` when that is larger still.  A
+    ``RECORD CONTAINS`` smaller than the largest 01 does not shrink the area,
+    so every 01 of one FD gets the same answer.
 
     ``None`` when the layout's own length already is the answer: *chosen*
     belongs to no FD/SD (a bare copybook, a WORKING-STORAGE record), or it
@@ -229,22 +231,20 @@ def fd_record_length(
     if not fd_name:
         return None
     own = build_record_views(chosen, options).framing_length
+    lrecl = max(
+        [
+            own,
+            *(
+                build_record_views(item, options).framing_length
+                for item in records
+                if item is not chosen and item.get_metadata("fd_file_name") == fd_name
+            ),
+        ]
+    )
     block = (chosen.get_metadata("fd_clauses") or {}).get("record") or {}
     declared = block.get("max")
     if declared is not None and block.get("min") is None and not block.get("varying"):
-        lrecl = int(declared)
-    else:
-        lrecl = max(
-            [
-                own,
-                *(
-                    build_record_views(item, options).framing_length
-                    for item in records
-                    if item is not chosen
-                    and item.get_metadata("fd_file_name") == fd_name
-                ),
-            ]
-        )
+        lrecl = max(lrecl, int(declared))
     return lrecl if lrecl > own else None
 
 

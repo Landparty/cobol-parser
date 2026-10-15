@@ -13,7 +13,10 @@ tests, #362) pins RECFM=F framing at the FD's LRECL for a whole-program
 source: `fd_record_length` (largest sibling 01, `RECORD CONTAINS`, `None`
 for the longest 01 / WORKING-STORAGE / a bare copybook), `decode`/`compare`
 framing a shorter 01's file, `--record-length` still overriding, and
-`gen-data` space-padding (ASCII and EBCDIC) so the two round-trip.
+`gen-data` space-padding (ASCII and EBCDIC) so the two round-trip, and
+one LRECL per FD when `RECORD CONTAINS` is below the largest 01. Its
+program template puts the RECORD clause on its own line: appended to the
+FD line it ran past column 72, where fixed format drops it.
 
 2026-10-14: `tests/regression/test_evaluate_word_operator_when.py` (38
 tests, #387) pins EVALUATE WHEN phrases with relational words

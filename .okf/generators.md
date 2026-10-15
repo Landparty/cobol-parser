@@ -824,8 +824,9 @@ contains 0x0A, which a text-mode read would translate).
 length** (#362, 2026-10-14). Every 01 under one FD shares the record area,
 so a RECFM=F file of that FD holds LRECL-byte records whichever 01
 `--record` picks. `copybook.fd_record_length(records, chosen, options)`
-returns that LRECL -- the FD's `RECORD CONTAINS n` (fixed, not a range) when
-stated, else the largest sibling 01's `framing_length` -- or `None` when it is
+returns that LRECL -- the largest sibling 01's `framing_length`, or the FD's
+fixed `RECORD CONTAINS n` when that is larger (a smaller one does not shrink
+the area, so every 01 of one FD gets the same LRECL) -- or `None` when it is
 not longer than `chosen` (no FD/SD, a bare copybook, or `chosen` is the
 longest). `from_copybook_source()` uses it as the default `record_length`
 (`--record-length` still overrides; `from_record()` alone has no siblings to

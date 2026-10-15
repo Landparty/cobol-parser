@@ -55,7 +55,9 @@ DATA = b"H20261014       D123456000012345D654321000000100"
 
 
 def _program(record_clause: str = "") -> str:
-    return PROGRAM.format(record_clause=record_clause)
+    # On its own line: appended to the FD line it would run past column 72,
+    # where fixed format drops it.
+    return PROGRAM.format(record_clause="\n          " + record_clause.strip())
 
 
 def _lrecl(source: str, record: str) -> int | None:
@@ -77,6 +79,25 @@ class TestFdRecordLength:
 
     def test_record_contains_never_shrinks_the_record(self):
         assert _lrecl(_program(" RECORD CONTAINS 5 CHARACTERS"), "DTL-REC") is None
+
+    def test_small_record_contains_still_gives_one_lrecl(self):
+        # RECORD CONTAINS below the largest 01 does not shrink the record
+        # area: every 01 of the FD frames at the same 16 bytes.
+        source = _program(" RECORD CONTAINS 10 CHARACTERS")
+        assert _lrecl(source, "HDR-REC") == 16
+        assert _lrecl(source, "DTL-REC") is None
+
+    def test_range_after_recording_mode_is_not_a_fixed_lrecl(self):
+        # RECORD CONTAINS 5 TO 30 after RECORDING MODE is a range, so the
+        # largest 01 decides rather than a fixed length of 5 or 30.
+        clauses = parse_copybook_records(
+            _program(" RECORD CONTAINS 5 TO 30 CHARACTERS")
+        )[0].get_metadata("fd_clauses")
+        assert clauses["record"]["min"] == 5
+        assert clauses["record"]["max"] == 30
+        source = _program(" RECORD CONTAINS 5 TO 30 CHARACTERS")
+        assert _lrecl(source, "HDR-REC") == 16
+        assert _lrecl(source, "DTL-REC") is None
 
     def test_working_storage_record_has_no_fd(self):
         assert _lrecl(SOURCE, "WS-REC") is None
