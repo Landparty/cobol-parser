@@ -491,6 +491,18 @@ class CrossFileCloneMember:
             out["origin"] = {"file": self.origin_file, "line": self.origin_line}
         return out
 
+    @property
+    def source_key(self) -> tuple[str, int]:
+        """Where this paragraph's text actually lives on disk.
+
+        The copybook position when the paragraph was expanded from one, else
+        its own position in the scanned file. Two members with the same key
+        are one piece of source included twice, not two copies of it (#352).
+        """
+        if self.origin_file is not None and self.origin_line is not None:
+            return (self.origin_file, int(self.origin_line))
+        return (self.path, self.line)
+
 
 @dataclass
 class CrossFileCloneGroup:
@@ -512,12 +524,24 @@ class CrossFileCloneGroup:
         """
         return len({m.path for m in self.members})
 
+    @property
+    def source_count(self) -> int:
+        """Distinct on-disk copies of the paragraph among the members.
+
+        Lower than ``len(members)`` when some members are the same copybook
+        paragraph included by several programs: those inclusions share one
+        source, so they count once. This, not the member count, is how many
+        copies there are to keep in step, and what grouping and ranking use.
+        """
+        return len({m.source_key for m in self.members})
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "clone_type": self.clone_type,
             "statement_count": self.statement_count,
             "fingerprint": self.fingerprint,
             "file_count": self.file_count,
+            "source_count": self.source_count,
             "members": [m.to_dict() for m in self.members],
         }
 
@@ -536,6 +560,13 @@ def cross_file_clone_groups(
     ``RedundancyAnalyzer._find_clone_groups`` applies within one program, for
     the same reason: reporting one duplicated paragraph twice, once under
     each type, would make the count meaningless.
+
+    ONE SOURCE, ONE COPY. *min_members* counts distinct on-disk sources
+    (``CrossFileCloneMember.source_key``), not members: a PROCEDURE DIVISION
+    copybook paragraph included by every program is shared code, not
+    copy-paste, and on its own forms no group (#352). Its inclusions still
+    appear as members of a group that has another real copy, so a reader
+    sees every program the duplicated text reaches.
     """
     exact: dict[str, list[CrossFileCloneMember]] = {}
     renamed: dict[str, list[CrossFileCloneMember]] = {}
@@ -570,8 +601,12 @@ def cross_file_clone_groups(
                 renamed.setdefault(entry.get("type2", ""), []).append(member)
 
     groups: list[CrossFileCloneGroup] = []
+
+    def distinct_sources(members: list[CrossFileCloneMember]) -> int:
+        return len({m.source_key for m in members})
+
     for digest, members in exact.items():
-        if len(members) < min_members:
+        if distinct_sources(members) < min_members:
             continue
         for member in members:
             type1_claimed.add((member.path, member.program_name, member.line))
@@ -588,7 +623,7 @@ def cross_file_clone_groups(
         survivors = [
             m for m in members if (m.path, m.program_name, m.line) not in type1_claimed
         ]
-        if len(survivors) < min_members:
+        if distinct_sources(survivors) < min_members:
             continue
         groups.append(
             CrossFileCloneGroup(
@@ -600,7 +635,10 @@ def cross_file_clone_groups(
         )
 
     # Most duplicated code first, measured the way RedundancyReport already
-    # measures it: statements x members, each member's own share.
+    # measures it: statements x copies, each copy's own share. A copy is a
+    # distinct source, not a member: one copybook included by three hundred
+    # programs is three hundred members and one copy, and ranking on members
+    # would put the shop's shared error handler on top of every scan (#352).
     #
     # NOT by file_count, which is the obvious choice and the wrong one. Every
     # shop's programs open with a near-identical four-statement
@@ -616,7 +654,8 @@ def cross_file_clone_groups(
     # the order is stable across runs and across machines.
     groups.sort(
         key=lambda g: (
-            -g.statement_count * len(g.members),
+            -g.statement_count * g.source_count,
+            -g.source_count,
             -len(g.members),
             g.clone_type,
             g.fingerprint,
