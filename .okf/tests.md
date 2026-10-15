@@ -8,6 +8,11 @@ timestamp: 2026-10-15T00:00:00Z
 
 # Overview
 
+2026-10-15: `tests/unit/analysis/test_codebase.py::TestHelpers` (+3, #356)
+pins a `:TAG:`-placeholder copybook member reporting its placeholder data
+names in `copybook-impact`'s `unresolved` rather than a silently empty
+`fields`. See `analysis.md`.
+
 2026-10-15: `tests/unit/analysis/test_redundancy.py::TestClonePriority::
 test_repeated_paragraph_name_does_not_drop_type2_group` (#353) pins a
 Type-2 clone group surviving when one of its members shares its name with a

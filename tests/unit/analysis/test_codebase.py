@@ -1266,6 +1266,59 @@ class TestHelpers:
         assert fields == []
         assert problem is not None and "could not be read" in problem
 
+    def test_member_fields_reports_placeholder_names(self, tmp_path):
+        """Regression for #356: ``:TAG:``-named items were silently dropped
+        from ``fields`` with no ``unresolved`` note."""
+        member = tmp_path / "INNER.cpy"
+        member.write_text(
+            "      * 05 :X:-COMMENTED PIC X.\n"
+            "       05 :Q:-AMT PIC 9(5).\n"
+            "       05 :Q:-FLAG PIC X.\n"
+            "       05 PLAIN-FIELD PIC X.\n"
+        )
+        fields, problem = _member_fields(str(member))
+        assert fields == ["PLAIN-FIELD"]
+        assert problem is not None
+        assert ":Q:-AMT, :Q:-FLAG" in problem
+        assert "REPLACING placeholders" in problem
+        assert ":X:-COMMENTED" not in problem
+
+    def test_member_fields_without_placeholders_has_no_problem(self, tmp_path):
+        member = tmp_path / "PLAIN.cpy"
+        member.write_text("       01 PLAIN-REC.\n           05 PLAIN-FIELD PIC X.\n")
+        assert _member_fields(str(member)) == (["PLAIN-FIELD", "PLAIN-REC"], None)
+
+    def test_placeholder_copybook_impact_is_not_silently_empty(self, tmp_path):
+        books = tmp_path / "cpy"
+        books.mkdir()
+        (books / "INNER.cpy").write_text(
+            "       05 :Q:-AMT PIC 9(5).\n       05 :Q:-FLAG PIC X.\n"
+        )
+        (books / "OUTER.cpy").write_text(
+            "       01 :P:-REC.\n"
+            "           COPY INNER REPLACING ==:Q:== BY ==CUST==.\n"
+        )
+        (tmp_path / "MAIN.cbl").write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. MAIN.\n"
+            "       DATA DIVISION.\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       COPY OUTER REPLACING ==:P:== BY ==WS==.\n"
+            "       PROCEDURE DIVISION.\n"
+            "           STOP RUN.\n"
+        )
+        graph = CodebaseGraphBuilder(copybook_paths=[str(books)]).build(
+            [str(tmp_path / "MAIN.cbl")]
+        )
+        analyzer = CopybookImpactAnalyzer(graph)
+        inner = analyzer.analyze("INNER")
+        assert inner.transitive_programs == ["MAIN"]
+        assert inner.fields == []
+        assert any(":Q:-AMT" in note for note in inner.unresolved)
+        outer = analyzer.analyze("OUTER")
+        assert outer.fields == []
+        assert any(":P:-REC" in note for note in outer.unresolved)
+
     def test_call_with_no_target_name_is_reported(self):
         builder = CodebaseGraphBuilder()
         statement = CallStatement(SourceLocation(line=7, column=1))
