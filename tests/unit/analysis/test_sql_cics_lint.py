@@ -560,6 +560,154 @@ def test_several_writers_produce_one_finding_that_lists_them_all():
     assert "assembled by" in violations[0].message
 
 
+def test_a_reused_buffer_reset_to_a_constant_is_not_blamed_on_an_earlier_string():
+    """Issue #395: the MOVE of a literal replaces every byte the STRING wrote,
+    so only the first PREPARE receives untrusted text."""
+    report = _analyze("""       MAIN-PARA.
+           STRING 'SELECT * FROM ' DELIMITED BY SIZE
+                  WS-TABLE DELIMITED BY SIZE
+                  INTO WS-STMT
+           END-STRING.
+           EXEC SQL PREPARE S1 FROM :WS-STMT END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           MOVE 'DELETE FROM EMP WHERE EMPNO = ?' TO WS-STMT.
+           EXEC SQL PREPARE S2 FROM :WS-STMT END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           EXEC SQL EXECUTE S2 USING :WS-KEY END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+""")
+    violations = _of_kind(report, KIND_DYNAMIC_CONCATENATION)
+    assert len(violations) == 1
+    assert violations[0].detail["assignments"][0]["kind"] == "STRING"
+    assert violations[0].detail["assignments"][0]["line"] < violations[0].location.line
+    assert report.unchecked == []
+
+
+def test_a_writer_after_the_prepare_does_not_reach_it():
+    report = _analyze("""       MAIN-PARA.
+           MOVE 'SELECT 1 FROM SYSDUMMY1' TO WS-STMT.
+           EXEC SQL PREPARE S1 FROM :WS-STMT END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           MOVE WS-NAME TO WS-STMT.
+           GOBACK.
+""")
+    assert _of_kind(report, KIND_DYNAMIC_CONCATENATION) == []
+
+
+def test_a_string_in_another_paragraph_still_counts_without_a_reset():
+    """No whole-item MOVE in the PREPARE's paragraph: the program-wide trace
+    stands, so a buffer built in a PERFORMed paragraph is still found."""
+    report = _analyze("""       MAIN-PARA.
+           PERFORM BUILD-PARA.
+           EXEC SQL PREPARE S1 FROM :WS-STMT END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+       BUILD-PARA.
+           STRING 'SELECT * FROM ' DELIMITED BY SIZE
+                  WS-TABLE DELIMITED BY SIZE
+                  INTO WS-STMT
+           END-STRING.
+""")
+    assert len(_of_kind(report, KIND_DYNAMIC_CONCATENATION)) == 1
+
+
+def test_a_perform_between_the_reset_and_the_prepare_is_followed():
+    report = _analyze("""       MAIN-PARA.
+           MOVE 'SELECT 1 FROM SYSDUMMY1' TO WS-STMT.
+           PERFORM BUILD-PARA.
+           EXEC SQL PREPARE S1 FROM :WS-STMT END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+       BUILD-PARA.
+           MOVE WS-NAME TO WS-STMT.
+""")
+    violations = _of_kind(report, KIND_DYNAMIC_CONCATENATION)
+    assert len(violations) == 1
+    assert violations[0].detail["sources"] == ["WS-NAME"]
+
+
+def test_a_conditional_writer_after_the_reset_still_reaches_the_prepare():
+    report = _analyze("""       MAIN-PARA.
+           MOVE 'SELECT 1 FROM SYSDUMMY1' TO WS-STMT.
+           IF WS-KEY = SPACES
+               MOVE WS-NAME TO WS-STMT
+           END-IF.
+           EXEC SQL PREPARE S1 FROM :WS-STMT END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+""")
+    violations = _of_kind(report, KIND_DYNAMIC_CONCATENATION)
+    assert len(violations) == 1
+    assert violations[0].detail["sources"] == ["WS-NAME"]
+
+
+def test_a_conditional_reset_does_not_cut_the_trace():
+    """A MOVE inside an IF may not run, so the earlier STRING can survive."""
+    report = _analyze("""       MAIN-PARA.
+           MOVE WS-NAME TO WS-STMT.
+           IF WS-KEY = SPACES
+               MOVE 'SELECT 1 FROM SYSDUMMY1' TO WS-STMT
+           END-IF.
+           EXEC SQL PREPARE S1 FROM :WS-STMT END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+""")
+    assert len(_of_kind(report, KIND_DYNAMIC_CONCATENATION)) == 1
+
+
+@pytest.mark.parametrize("target", ["WS-STMT(1:30)", "CORRESPONDING"])
+def test_a_partial_overwrite_does_not_cut_the_trace(target):
+    """Reference modification leaves the rest of the item as it was."""
+    move = (
+        "MOVE CORRESPONDING WS-KEY TO WS-STMT."
+        if target == "CORRESPONDING"
+        else f"MOVE 'SELECT 1' TO {target}."
+    )
+    report = _analyze(f"""       MAIN-PARA.
+           MOVE WS-NAME TO WS-STMT.
+           {move}
+           EXEC SQL PREPARE S1 FROM :WS-STMT END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+""")
+    violations = _of_kind(report, KIND_DYNAMIC_CONCATENATION)
+    assert len(violations) == 1
+    assert "WS-NAME" in violations[0].detail["sources"]
+
+
+def test_a_string_does_not_cut_the_trace():
+    """STRING leaves the bytes past what it transfers untouched."""
+    report = _analyze("""       MAIN-PARA.
+           MOVE WS-NAME TO WS-STMT.
+           STRING 'SELECT 1 ' DELIMITED BY SIZE
+                  INTO WS-STMT
+           END-STRING.
+           EXEC SQL PREPARE S1 FROM :WS-STMT END-EXEC.
+           IF SQLCODE < 0 DISPLAY 'BAD' END-IF.
+           GOBACK.
+""")
+    violations = _of_kind(report, KIND_DYNAMIC_CONCATENATION)
+    assert len(violations) == 1
+    assert violations[0].detail["sources"] == ["WS-NAME"]
+
+
+def test_a_writer_later_in_an_inline_loop_reaches_the_prepare():
+    """The next pass of the loop runs the later MOVE before the PREPARE."""
+    report = _analyze("""       MAIN-PARA.
+           MOVE 'SELECT 1 FROM SYSDUMMY1' TO WS-STMT.
+           PERFORM UNTIL WS-KEY = SPACES
+               EXEC SQL PREPARE S1 FROM :WS-STMT END-EXEC
+               IF SQLCODE < 0 DISPLAY 'BAD' END-IF
+               MOVE WS-NAME TO WS-STMT
+           END-PERFORM.
+           GOBACK.
+""")
+    violations = _of_kind(report, KIND_DYNAMIC_CONCATENATION)
+    assert len(violations) == 1
+    assert violations[0].detail["sources"] == ["WS-NAME"]
+
+
 def test_an_untraceable_host_variable_lands_in_unchecked_not_in_findings():
     """The house rule: nothing traced means nothing claimed, in either
     direction."""
@@ -827,7 +975,10 @@ def test_a_bare_handle_condition_restores_the_default_action():
     assert len(_of_kind(report, KIND_CICS_NO_RESP)) == 1
 
 
-def test_ignore_condition_cancels_an_established_handler():
+def test_ignore_condition_error_counts_as_handling():
+    # IGNORE CONDITION means "take no action": nothing abends, execution
+    # continues at the next statement. It replaces the label handler and is
+    # credited the same way (issue #396).
     report = _analyze("""       MAIN-PARA.
            EXEC CICS HANDLE CONDITION ERROR(ERR-PARA)
            END-EXEC.
@@ -838,6 +989,61 @@ def test_ignore_condition_cancels_an_established_handler():
            GOBACK.
        ERR-PARA.
            DISPLAY 'CICS FAILED'.
+""")
+    assert _of_kind(report, KIND_CICS_NO_RESP) == []
+    assert report.unchecked == []
+
+
+def test_ignore_condition_without_prior_handler_reports_no_abend():
+    # The reproduction from issue #396.
+    report = _analyze("""       MAIN-PARA.
+           EXEC CICS IGNORE CONDITION NOTFND ERROR END-EXEC.
+           EXEC CICS READ FILE('CUSTFIL')
+                INTO(WS-NAME) RIDFLD(WS-KEY)
+           END-EXEC.
+           GOBACK.
+""")
+    assert _of_kind(report, KIND_CICS_NO_RESP) == []
+    assert report.unchecked == []
+
+
+def test_ignore_condition_of_a_specific_condition_is_unchecked():
+    report = _analyze("""       MAIN-PARA.
+           EXEC CICS IGNORE CONDITION NOTFND END-EXEC.
+           EXEC CICS READ FILE('CUSTFIL')
+                INTO(WS-NAME) RIDFLD(WS-KEY)
+           END-EXEC.
+           GOBACK.
+""")
+    assert _of_kind(report, KIND_CICS_NO_RESP) == []
+    assert len(report.unchecked) == 1
+    assert "NOTFND" in report.unchecked[0]
+
+
+def test_handle_condition_after_ignore_restores_the_default_abend():
+    report = _analyze("""       MAIN-PARA.
+           EXEC CICS IGNORE CONDITION ERROR END-EXEC.
+           EXEC CICS HANDLE CONDITION ERROR END-EXEC.
+           EXEC CICS READ FILE('CUSTFIL')
+                INTO(WS-NAME) RIDFLD(WS-KEY)
+           END-EXEC.
+           GOBACK.
+""")
+    assert len(_of_kind(report, KIND_CICS_NO_RESP)) == 1
+
+
+def test_push_handle_suspends_an_ignore_condition():
+    report = _analyze("""       MAIN-PARA.
+           EXEC CICS IGNORE CONDITION ERROR END-EXEC.
+           EXEC CICS PUSH HANDLE END-EXEC.
+           EXEC CICS READ FILE('CUSTFIL')
+                INTO(WS-NAME) RIDFLD(WS-KEY)
+           END-EXEC.
+           EXEC CICS POP HANDLE END-EXEC.
+           EXEC CICS READ FILE('CUSTFIL')
+                INTO(WS-NAME) RIDFLD(WS-KEY)
+           END-EXEC.
+           GOBACK.
 """)
     assert len(_of_kind(report, KIND_CICS_NO_RESP)) == 1
 

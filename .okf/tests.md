@@ -1419,6 +1419,13 @@ by its character positions (`X(2)` = `XX`) and a USAGE by its storage format
 (`COMP-3` = `PACKED-DECIMAL`, `COMP` = `BINARY` = `COMP-4`), while `COMP` ->
 `COMP-5` is still a change.
 
+`tests/unit/cli/test_analyzer_cli_gaps.py::TestDefinitionsAndExitsStampOrigins`
+pins that with `--copybook-path` xref's `definition` gains
+`definition_origin` (a WORKING-STORAGE item and a paragraph after a COPY,
+and an item inside the copybook) and program-flow's
+`exit_statement_location` gains `exit_statement_origin`; none without
+expansion (#367).
+
 `tests/regression/test_optional_keyword_forms.py` (#405) pins the
 optional-keyword forms that used to lose data: `XML PARSE x PROCEDURE IS p`
 without PROCESSING (and dead-code not reporting `p`), SORT bare
@@ -1427,6 +1434,15 @@ no-keys warning on a file SORT/MERGE (not on a table SORT), and
 SPECIAL-NAMES mnemonic entries and `SYMBOLIC CHARACTERS` without IS.
 `test_initialize_sort_arithmetic_comma_gaps.py`'s two USING/GIVING comma-list
 SORTs gained a key, since a keyless file SORT now warns.
+
+## 2026-10-14 (issue #396)
+
+`tests/unit/analysis/test_sql_cics_lint.py` replaces the test that pinned
+`IGNORE CONDITION` as cancelling a handler with five that pin it as handling:
+`IGNORE CONDITION ERROR` (alone or replacing a label handler) clears
+`CICS_NO_RESP_HANDLING`, a narrower `IGNORE CONDITION NOTFND` goes to
+`unchecked`, a bare `HANDLE CONDITION ERROR` afterwards restores the finding,
+and `PUSH HANDLE` suspends an ignore like any other handler.
 
 ## 2026-10-14 (issue #349)
 

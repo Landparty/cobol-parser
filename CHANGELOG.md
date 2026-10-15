@@ -167,6 +167,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   too. Program flow gains a `SQL_WHENEVER` edge (GO TO-shaped, one edge from
   the procedure holding the directive to `p`); `CONTINUE` adds nothing.
 
+* **`scan --clones`: a shared PROCEDURE DIVISION copybook is no longer
+  reported as a clone of itself** (#352). Paragraphs expanded from the same
+  copybook line are one source included by several programs, not copy-paste,
+  so `cross_file_clone_groups` now counts *distinct sources* (new
+  `source_count` on each group) against `min_members` and in the volume
+  ranking. Such a paragraph forms no group on its own; when it has also been
+  pasted into another program the group is still reported, every inclusion
+  listed as a member, but the copybook counts once. A widely included error
+  handler no longer tops every scan.
+
 * **`codebase-graph` now records `EXEC CICS LINK` / `XCTL PROGRAM(...)` edges**
   (#315). They were skipped with no `unresolved` note, so a CICS program's
   `calls` read as empty and known. They are now `call_edges` with a new
