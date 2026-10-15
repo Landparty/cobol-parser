@@ -1372,6 +1372,20 @@ bundle.to_json()                   # bundle_version, program_name, seed, ...
 bundle.write_csv_dir("out/")       # out/<scenario-slug>/<KEY>.csv + MANIFEST.json
 ```
 
+**Columns are unique across a fixture's records (#365, 2026-10-14).** A
+fixture can draw fields from several records: a CALL's `USING` arguments, or
+a READ boundary's alternate FD records. `flatten_record()` only makes columns
+unique *within* one record, so `REC-A.AMT` and `REC-B.AMT` both arrived as
+`AMT`, and since a row is keyed by `spec.column` they shared one value (the
+`ELSE` witness for `REC-B.AMT` also landed on `REC-A.AMT`; the CSV header
+read `AMT,CODE-A,AMT,CODE-B`). `_unique_columns()` now de-duplicates the
+combined list on `(qualified_name, subscripts)` (the same argument passed
+twice is one set of fields) and, only on a collision, re-runs
+`layout._assign_columns` over *copies* of the whole list, so the colliding
+names become `REC-A.AMT` / `REC-B.AMT` and every other column keeps its short
+header. Copies, because a spec from `ProgramLayoutIndex.resolve()` is the
+index's own. A fixture with no collision is byte-identical to before.
+
 ## Scenario-mode generation (`generate_with_scenarios`, Phase 6)
 
 `generate_with_scenarios(ast, index, report, mode="happy"|"branches"|"all",
