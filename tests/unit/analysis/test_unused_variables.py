@@ -1057,6 +1057,42 @@ class TestObjectOrientedUnitData:
         # reference from an OBJECT method does not use it.
         assert "FACT-USED-BY-OBJECT" in self._unit_unused("FACTORY")
 
+    def test_method_call_using_and_corresponding_reach_object_groups(
+        self,
+    ) -> None:
+        src = """\
+       IDENTIFICATION DIVISION.
+       CLASS-ID. ACCT INHERITS BASE.
+       ENVIRONMENT DIVISION.
+       CONFIGURATION SECTION.
+       REPOSITORY.
+           CLASS BASE IS 'java.lang.Object'.
+       OBJECT.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  OBJ-REC.
+           05  OBJ-A               PIC X.
+           05  OBJ-B               PIC X.
+       01  OBJ-REC2.
+           05  OBJ-A               PIC X.
+           05  OBJ-C               PIC X.
+       PROCEDURE DIVISION.
+       METHOD-ID. "pass".
+       PROCEDURE DIVISION.
+           CALL 'SUB' USING OBJ-REC
+           MOVE CORRESPONDING OBJ-REC TO OBJ-REC2
+           GOBACK.
+       END METHOD "pass".
+       END OBJECT.
+       END CLASS ACCT.
+"""
+        result = parse_cobol(src)
+        assert result.ast is not None, "\n".join(str(e) for e in result.errors)
+        (unit,) = [u for u in result.ast.program_units() if u.unit_kind == "OBJECT"]
+        report = UnusedVariableAnalyzer().analyze(unit)
+        # Same as in a plain program: only OBJ-C has no CALL / CORRESPONDING use.
+        assert [i.name for i in report.unused_items] == ["OBJ-C"]
+
     def test_enterprise_sample_instance_data_is_used(self) -> None:
         from pathlib import Path
 
