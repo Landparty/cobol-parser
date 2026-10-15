@@ -5,6 +5,7 @@ including COMP-3 data types, EXEC SQL statements, EXEC CICS commands, and
 IBM-specific language extensions.
 """
 
+import re
 from enum import Enum
 from typing import Any
 
@@ -13,6 +14,23 @@ from ..models.data_items import CobolDataItem, PictureClause
 from ..models.statements import CobolStatement
 from ..plugins.core import DialectType
 from .le_signatures import LE_SERVICE_SIGNATURES
+
+#: A plain numeric PICTURE, the only kind a COMP-3 item may have: an optional
+#: leading ``S``, then ``9`` / ``P`` / one ``V`` (repeat counts allowed), with
+#: at least one ``9``. ``S9(7)V99``, ``V99`` and ``9(3)PP`` all match.
+_NUMERIC_PICTURE_RE = re.compile(r"^S?(?:9|P|V|\(\d+\))+$")
+_REPEAT_COUNT_RE = re.compile(r"\(\d+\)")
+
+
+def _is_numeric_picture(pattern: str) -> bool:
+    """True when *pattern* is a plain numeric PICTURE (sign/scale allowed)."""
+    text = pattern.replace(" ", "").upper()
+    symbols = _REPEAT_COUNT_RE.sub("", text)
+    return (
+        bool(_NUMERIC_PICTURE_RE.match(text))
+        and "9" in symbols
+        and symbols.count("V") <= 1
+    )
 
 
 class IBMDataType(Enum):
@@ -130,10 +148,10 @@ class ExecIMSStatement(CobolStatement):
         """Set the IMS command."""
         self._ims_command = command.upper()
         # Determine IMS call type. Recognizes every DL/I call type
-        # IBMEnterpriseCobol.IMS_COMMANDS does (GU/GN/GNP/ISRT/REPL/DLET plus
-        # CHKP/ROLLB/TERM/ENQUEUE/DEQUEUE/PURG/XRST/XDLT/XRPL) -- restricting
-        # this to the first six left `ims_call_type` at "UNKNOWN" for a
-        # recognized command.
+        # IBMEnterpriseCobol.IMS_COMMANDS does (GU/GN/GNP and their hold
+        # forms, ISRT/REPL/DLET, plus the checkpoint/recovery, message and
+        # system-service calls) -- restricting this to the first six left
+        # `ims_call_type` at "UNKNOWN" for a recognized command.
         if self._ims_command in IBMEnterpriseCobol.IMS_COMMANDS:
             self.ims_call_type = self._ims_command
 
@@ -388,7 +406,27 @@ class IBMEnterpriseCobol:
         "ENTER",
         "HANDLE",
         "IGNORE",
-        "NOHANDLE",
+        # Temporary storage / transient data queues
+        "READQ",
+        "WRITEQ",
+        "DELETEQ",
+        # Recovery, serialization and task control
+        "SYNCPOINT",
+        "ENQ",
+        "DEQ",
+        "WAIT",
+        "POST",
+        "SIGNAL",
+        # System information and diagnostics
+        "ASSIGN",
+        "INQUIRE",
+        "ADDRESS",
+        "DUMP",
+        "QUERY",
+        # Web, services and JES spool
+        "WEB",
+        "INVOKE",
+        "SPOOLOPEN",
     }
 
     # IBM Language Environment (LE) callable services (CEE* functions)
@@ -578,21 +616,37 @@ class IBMEnterpriseCobol:
 
     # IMS commands (DL/I call types)
     IMS_COMMANDS = {
+        # Database retrieval (plain and hold forms)
         "GU",
         "GN",
-        "GNP",  # Get Unique, Get Next, Get Next in Parent
+        "GNP",
+        "GHU",
+        "GHN",
+        "GHNP",
+        # Database update
         "ISRT",
         "REPL",
-        "DLET",  # Insert, Replace, Delete
+        "DLET",
+        # Checkpoint, restart and recovery
         "CHKP",
-        "ROLLB",
-        "TERM",  # Checkpoint, Rollback, Terminate
-        "ENQUEUE",
-        "DEQUEUE",
-        "PURG",  # Queue operations
         "XRST",
-        "XDLT",
-        "XRPL",  # Extended operations
+        "SYNC",
+        "ROLB",
+        "ROLLB",
+        "ROLL",
+        "ROLS",
+        "SETS",
+        "SETU",
+        "TERM",
+        # Message processing
+        "PURG",
+        "CHNG",
+        "CMD",
+        "GCMD",
+        # System services
+        "INQY",
+        "LOG",
+        "STAT",
     }
 
     def __init__(self) -> None:
@@ -618,7 +672,7 @@ class IBMEnterpriseCobol:
         if data_item.usage == "COMP-3":
             if not data_item.picture_clause:
                 warnings.append("COMP-3 items should have PICTURE clause")
-            elif not data_item.picture_clause.pattern.startswith("9"):
+            elif not _is_numeric_picture(data_item.picture_clause.pattern):
                 warnings.append("COMP-3 items should have numeric PICTURE")
 
         # Check level number restrictions

@@ -3,7 +3,7 @@ type: Module
 title: Static Analysis
 description: 29 static-analysis modules — dead code, unused variables, program flow, IO sequence, move-type, linkage, DCLGEN/host-variable, CRUD, boundary inventory, constraint extraction, constant folding, recursion risk, complexity, redundancy, technical debt, cross-reference, program signatures, whole-codebase call/copy graph, SQL/CICS lint, structural program diff and business rule extraction.
 tags: [analysis, business-rules, dead-code, unused-variables, program-flow, io, crud, boundary-inventory, fixtures, constraints, const-fold, recursion-risk, xref, program-signature, codebase-graph, sql-cics-lint, ast-diff]
-timestamp: 2026-09-30T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
@@ -1612,6 +1612,11 @@ already use -- instead of an independent copy of the same walk. `_files`'s
 (case preserved, for `io_logger`'s human-readable report); this generator
 still upper-cases the result itself since `self._file_entries` is keyed by
 upper-case name.
+
+**TRUNCATE (issue #341):** `EXEC SQL TRUNCATE [TABLE] t` marks `t` D, like a
+DELETE (`SQLStatementType.TRUNCATE` is in `_WRITE_SQL_TYPES`). It parsed as
+`UNKNOWN` before and the table got no row. Pinned by
+`tests/unit/test_issue_341_dialect_crud.py::TestTruncateTable`.
 
 **SQL write statements (2026-09-28):** for INSERT/UPDATE/DELETE/MERGE only
 `stmt.tables[0]` (the target -- see [dialects.md](dialects.md)) gets the

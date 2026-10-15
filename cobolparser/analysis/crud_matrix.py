@@ -210,6 +210,7 @@ _WRITE_SQL_TYPES = frozenset(
         SQLStatementType.INSERT,
         SQLStatementType.UPDATE,
         SQLStatementType.DELETE,
+        SQLStatementType.TRUNCATE,
         SQLStatementType.MERGE,
     }
 )
@@ -238,7 +239,7 @@ class CRUDMatrixGenerator:
         - R (Read)    <- SELECT, DECLARE CURSOR (implicit read path), FETCH,
                          and any table a write statement's subquery reads
         - U (Update)  <- UPDATE
-        - D (Delete)  <- DELETE
+        - D (Delete)  <- DELETE, TRUNCATE [TABLE]
         - MERGE marks its target with the actions its WHEN clauses take
 
     Example:
@@ -491,7 +492,7 @@ class CRUDMatrixGenerator:
                     target.crud.create = True
                 elif sql_type == SQLStatementType.UPDATE:
                     target.crud.update = True
-                elif sql_type == SQLStatementType.DELETE:
+                elif sql_type in (SQLStatementType.DELETE, SQLStatementType.TRUNCATE):
                     target.crud.delete = True
                 else:  # MERGE: whichever actions its WHEN clauses take
                     actions = set(_MERGE_ACTION_RE.findall(stmt.sql_text.upper()))

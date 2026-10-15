@@ -3,7 +3,7 @@ type: Module
 title: AST Models
 description: ASTNode hierarchy — CobolProgram, data items, statement nodes, to_dict()/to_json() serialisation.
 tags: [ast, models, cobol-program, data-items, statements]
-timestamp: 2026-10-05T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
@@ -427,6 +427,11 @@ takes the type of its main verb, and `tables` lists the base tables the CTE
 bodies and main statement read -- never the CTE names themselves
 (`_split_common_table_expressions()`). Before 2026-09-27 both were
 `"UNKNOWN"` with no tables.
+
+`TRUNCATE [TABLE] t [DROP|REUSE STORAGE] ... [IMMEDIATE]` has
+`sql_type == "TRUNCATE"` (`SQLStatementType.TRUNCATE`) and `tables == [t]`
+(`_SQL_TRUNCATE_TABLE_RE`); the CRUD matrix marks `t` D. Before issue #341
+(2026-10-15) it was `"UNKNOWN"` with no tables.
 
 `into_variables` / `DynamicSQLStatement.using_variables` list every host
 variable of the INTO / USING list, indicators included; before 2026-09-28

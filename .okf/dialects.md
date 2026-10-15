@@ -3,7 +3,7 @@ type: Module
 title: Dialects
 description: IBMEnterpriseCobol dialect support — EXEC SQL/CICS/IMS node types, IBM data-item validation, and the intrinsic-function / LE callable-service lookups.
 tags: [dialects, ibm-enterprise, exec-sql, exec-cics, exec-ims, intrinsic-functions, le-services]
-timestamp: 2026-09-15T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Dialects (`cobolparser/dialects/`)
@@ -30,6 +30,24 @@ dialect.get_dialect_info() -> dict[str, Any]
 `ibm_enterprise.py` also defines the AST node types EXEC SQL/CICS/IMS
 statements and IBM-specific data items build on: `ExecSQLStatement`,
 `ExecCICSStatement`, `ExecIMSStatement`, `IBMDataItem`, `IBMDataType`.
+
+## Command sets and COMP-3 validation (issue #341, 2026-10-15)
+
+* `validate_data_item` accepts any plain numeric PICTURE for COMP-3 --
+  optional leading `S`, then `9` / `P` / one `V` with repeat counts
+  (`_is_numeric_picture`). It used to test `pattern.startswith("9")`, so
+  every signed (`S9(7)V99`) or fraction-only (`V99`) item got a false
+  "COMP-3 items should have numeric PICTURE".
+* `CICS_COMMANDS` also holds READQ/WRITEQ/DELETEQ, SYNCPOINT, ENQ/DEQ,
+  WAIT/POST/SIGNAL, ASSIGN/INQUIRE/ADDRESS/DUMP/QUERY, WEB, INVOKE,
+  SPOOLOPEN; `NOHANDLE` (an option, not a command) is gone.
+* `IMS_COMMANDS` is DL/I call codes only: the hold forms GHU/GHN/GHNP,
+  SYNC/ROLB/ROLL/ROLS/SETS/SETU, CHNG/CMD/GCMD, INQY/LOG/STAT were added;
+  ENQUEUE/DEQUEUE/XDLT/XRPL (not DL/I calls) were removed. `ROLLB` is kept
+  for compatibility. `ExecIMSStatement.ims_call_type` reads this set, so
+  those commands now classify instead of staying `UNKNOWN`.
+
+Pinned by `tests/unit/test_issue_341_dialect_crud.py`.
 
 ## `ExecSQLStatement.null_indicators` (`models/sql_statements.py`)
 
@@ -107,6 +125,10 @@ separates function arguments -- `EXTRACT(YEAR FROM D)`, `TRIM(... FROM C)`,
 `SUBSTRING(N FROM 1)` -- is blanked first (`_blank_function_argument_froms`:
 a FROM directly inside a parenthesised group not opening with SELECT/WITH),
 so the column after it is no longer reported as a table.
+
+`TRUNCATE [TABLE] t ...` has `sql_type == "TRUNCATE"`
+(`SQLStatementType.TRUNCATE`, issue #341) and `tables == [t]`; it was
+`UNKNOWN` with no tables before.
 
 ## `get_intrinsic_function_signature` (2026-09-10)
 
