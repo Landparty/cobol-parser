@@ -24,9 +24,10 @@ subcommand over reading source whenever one covers the question.
 
 When a `cobol` MCP server is connected (`cobol-parser mcp`), prefer its
 tools for those questions (`program_brief` first, then `explain_symbol`,
-`callers_of`, `record_layout`, `lint` and `read_source`): they
-answer from one cached parse, cite every fact as `file:line` on disk, and
-list what they could not check under `caveats`.
+`callers_of`, `record_layout`, `lint` and `read_source`; across programs,
+`codebase_overview`, `callers_of` with a program name, `impact_of_change`
+and `where_from`): they answer from cached parses, cite every fact as
+`file:line` on disk, and list what they could not check under `caveats`.
 
 The CLI is `cobol-parser` (entry point `cobolparser.cli:main`). In this repo,
 `pip install -e ".[dev]"`; elsewhere it may be installed already — check with

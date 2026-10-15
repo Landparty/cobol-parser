@@ -81,6 +81,9 @@ NodeKey = tuple[Any, ...]
 #: (node, overlay class of the edge it arrived over: see ``overlay_class``).
 _State = tuple[NodeKey, int]
 
+#: The caveat a second report for one PROGRAM-ID raises, naming the program.
+_DUPLICATE_PROGRAM = re.compile(r"PROGRAM-ID (\S+) appears in more than one report")
+
 
 def normalize_dataset(name: str, job: str | None = None) -> str:
     """The identity a dataset name joins on."""
@@ -952,6 +955,13 @@ class LineageGraph:
             )
         for caveat in self.caveats:
             if caveat.startswith("not in the scan"):
+                continue
+            duplicate = _DUPLICATE_PROGRAM.match(caveat)
+            if duplicate:
+                # Only a query that reaches the duplicated program can be
+                # missing the flows of its other copy.
+                if duplicate.group(1) in reached:
+                    result.caveats.append(caveat)
                 continue
             if any(caveat.startswith(f"{p}:") for p in reached):
                 result.caveats.append(caveat)

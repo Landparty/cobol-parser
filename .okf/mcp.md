@@ -1,7 +1,7 @@
 ---
 type: Module
 title: MCP Server
-description: cobolparser/mcp/ and `cobol-parser mcp` -- an MCP server (stdio) that lets AI agents question COBOL source; tools as plain functions (tools.py), the response envelope and caveat kinds (envelope.py), the workspace guard, cobol.yml and parse cache (workspace.py), and the one SDK-importing module (server.py).
+description: cobolparser/mcp/ and `cobol-parser mcp` -- an MCP server (stdio) that lets AI agents question COBOL source; tools as plain functions (tools.py), the response envelope and caveat kinds (envelope.py), the workspace guard, cobol.yml and parse cache (workspace.py), the root-wide cross-program indexes (codebase_index.py), and the one SDK-importing module (server.py).
 tags: [mcp, ai, agents, tools, stdio, caveats, source-map]
 timestamp: 2026-10-15T00:00:00Z
 ---
@@ -19,7 +19,8 @@ the Model Context Protocol, on stdin/stdout. Design and later phases:
 |---|---|---|
 | `cobolparser/mcp/envelope.py` | `Response` (caveats + truncation), `Caveat`, `CAVEAT_KINDS`, `ToolError`, `MCP_SURFACE_VERSION`, limits | no |
 | `cobolparser/mcp/workspace.py` | `Workspace` (path guard, `cobol.yml`, LRU parse cache), `ParsedProgram` (unit selection, `locate()`), `stdout_to_stderr()` | no |
-| `cobolparser/mcp/tools.py` | `CobolTools`: `program_brief`, `explain_symbol`, `callers_of`, `record_layout`, `lint`, `read_source` | no |
+| `cobolparser/mcp/tools.py` | `CobolTools`: `codebase_overview`, `program_brief`, `explain_symbol`, `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`, `read_source` | no |
+| `cobolparser/mcp/codebase_index.py` | `programs_index` / `lineage_index` / `health_index`: facts about every program under the root, cached by `Workspace.index()` | no |
 | `cobolparser/mcp/server.py` | `build_server()`, `run_stdio()`: typed wrappers registered on `FastMCP` | **yes** (`[mcp]` extra) |
 
 ## Contents
@@ -27,6 +28,7 @@ the Model Context Protocol, on stdin/stdout. Design and later phases:
 - [Tools](#tools)
 - [Envelope](#envelope)
 - [Workspace](#workspace)
+- [Cross-program indexes](#cross-program-indexes)
 - [Packaging and tests](#packaging-and-tests)
 - [See also](#see-also)
 
@@ -40,7 +42,10 @@ returns a small payload. Every list is capped (`limit`, default 50, max 500).
 | `read_source(file, line, before, after)` | numbered lines around a citation, at most `MAX_SOURCE_LINES` (200) | the file, streamed through the guard (`newline=""`: splits as `split_source_lines` does); only the window is kept |
 | `lint(file, rules, min_severity, limit)` | findings worst first, `summary` counts, `rules_run` | `LintAnalyzer` over **every** unit, `add_parse_errors`; defaults from `cobol.yml`'s `lint:` |
 | `program_brief(file, program, limit)` | `size` (own statements only: `get_all_statements()` walks into contained units), `entry_points`, `interface` (entry points, parameters, `call_example`) and `interface_notes`, `files` (C/R/U/D string, open modes, organization, records, key, status field), `sql_tables`, `calls` (one row per target; dynamic `candidates` from `DynamicCallAnalyzer`; CICS LINK/XCTL `PROGRAM`), `cics_commands` / `exec_dli_commands` counts, `unreachable_procedures`, `perform_cycles`, `health`, `lint` (whole file: summary + `BRIEF_LINT` worst) | `ProgramFlowAnalyzer`, `ProgramSignatureExtractor`, `CRUDMatrixGenerator`, `ProgramLayoutIndex.file_facts`, `TechnicalDebtAnalyzer`, `LintAnalyzer`; each section through `_attempt()`, so one analyzer raising costs only its section (`analyzer-failed`) |
-| `callers_of(file, name, program, limit)` | per matching paragraph/section: `callers` (`from`, `type`, location, `thru`, `via_range`, `perform_type`, `condition`, `loop`), `callers_by_type`, `reachable`, `is_entry_point`; a name the file CALLs answers with its CALL sites (`kind: program`, `scope: this file only`) | flow edges in `_CONTROL_EDGES`; a THRU is two edges (opener + `*_THRU` closer), so only openers count and `range_members` gives `via_range` |
+| `callers_of(file, name, program, limit)` | per matching paragraph/section: `callers` (`from`, `type`, location, `thru`, `via_range`, `perform_type`, `condition`, `loop`), `callers_by_type`, `reachable`, `is_entry_point`. `file=None`, or a name that is no procedure of `file`: `_program_callers()` (`kind: program`, `scope: workspace`): `callers` (`program`, `via`, location, `from` (the paragraph), `dynamic`/`target_from`), `calling_programs`, `declared_in`, `unresolved_dynamic_calls`, a `note` when it is external or called by nobody | flow edges in `_CONTROL_EDGES`; a THRU is two edges (opener + `*_THRU` closer), so only openers count and `range_members` gives `via_range`. Program level: the `programs` index's per-unit `_calls` rows: a static target, or a dynamic one whose traced `candidates` include the name; an incomplete dynamic row is listed, not counted |
+| `impact_of_change(name, file, program, depth, limit)` | member mode (a member suffix, or `file=None` and a name in `graph.members`): `copied_by` (program, file, `copy_sites`), `copied_through_other_members` (chains), `fields`, `resolved_to`. Otherwise field mode, as `where_from` but forward | `CopybookImpactAnalyzer` over the `programs` index's `CodebaseGraph`, COPY lines from `graph.copy_sites`; field mode `LineageGraph.impact` |
+| `where_from(field, file, program, depth, limit)` | `programs`, `tables`, `datasets`, `hits` (each: `program`, `field`, `node_kind`, `derived`, `confidence`, `file`, `location` of the statement that reaches it, `path` as one string per step `NODE (STATEMENT at file:line)`) | `LineageGraph.impact(..., "backward")` over the `lineage` index; `file` limits the start to that file's units (`program` to one) |
+| `codebase_overview(limit)` | `index`, `programs` (grade, score, `calls`, `called_by`, `contained`, `unit_kind`), `call_graph` (`entry_programs`, `most_called`, `not_in_workspace`, `cycles`, `unresolved_dynamic_calls`), `copybooks` (`most_used`, `not_found`), `health` (`grades`, `worst`), `duplicated_code` (groups, members capped) | `programs` + `health` indexes; top lists are `OVERVIEW_TOP` (10) long, `limit` only lowers them |
 | `record_layout(file, record, program, limit)` | `records[]`: `qualified_name` (`X OF Y`), `section`, `declared_at`, offset/length, `redefines`, `fields` in source order each with `declared_at`; an FD name gives every record of the file (`file`) | `compute_record_layout` per 01; `_declarations()` matches the n-th layout entry of a qualified name to its n-th declaration (FILLER repeats) and re-sorts, since the layout emits a group after its members |
 | `explain_symbol(file, name, program, limit)` | each declaration matching `name` (or `X OF Y`): `declared_at`, `layout` (PICTURE, USAGE, `byte_offset`, `byte_length`, REDEFINES, level-88 values), `references` with role/statement/paragraph, `references_by_role`; `suggestions` when not found | `XrefAnalyzer`, `compute_program_data_items`; not found: `special_register` from xref's `is_special_register()` (no suggestions then) |
 
@@ -69,7 +74,9 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
 ## Workspace
 
 - **Guard.** `Workspace.resolve()` resolves symlinks, then refuses anything
-  not under the root or a `cobol.yml` copybook directory.
+  not under the root or a `cobol.yml` copybook directory. The index walk
+  (`program_files()`, `files_named()`) applies the same `_within()` check, so
+  a symlink out of the root is never indexed.
 - **Config.** `load_project_config(root)` unless the CLI was given
   `--config`/`--no-config` (`args._config_explicit`), which passes the
   config in and fixes it. Otherwise `refresh_config()` (run by `config` and
@@ -100,6 +107,13 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   `server.py` runs each tool through `anyio.to_thread.run_sync(...,
   abandon_on_cancel=True)` holding `Workspace.lock`, so the event loop stays
   free and calls run one at a time.
+- **Progress.** The cross-program tools take a FastMCP `Context` (annotated
+  with the bare class, `MCPContext`: `Context[...]` is not detected).
+  `off_loop` sets `Workspace.progress` for that one call; `_programs()` in
+  `codebase_index.py` reports `(done, total, "reading FILE")` per file, sent
+  through `anyio.from_thread.run(ctx.report_progress, ...)` at most once a
+  `PROGRESS_INTERVAL`. A listener that raises is dropped, never fails the
+  build.
 - **Report memo.** `ParsedProgram.report(name, unit, build)` keeps each
   analyzer report beside the parse, so `program_brief` and `callers_of`
   share one flow graph and the cache drops both together.
@@ -107,8 +121,41 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   data items declared only inside a COPY member, so `lint` grades an unused
   copybook field as info, as the CLI does (the CLI finds the same set by
   diffing an unexpanded parse).
+- **Indexes.** `Workspace.index(name, build)` keeps one value per name with
+  the stamps its build returned, and rebuilds when any changed; `_use_config`
+  drops them all. `tree_stamps()` stamps every directory under the root, so
+  an added or removed program is noticed without re-reading every file.
 - **stdout.** Over stdio stdout is the protocol; tools run library code
   under `stdout_to_stderr()`, and the server logs at WARNING.
+
+## Cross-program indexes
+
+`codebase_index.py`. Each index is one walk of `Workspace.program_files()`
+(`cobol.yml` `extensions`, default `.cbl`/`.cob`/`.cobol`; hidden
+directories and copybook directories inside the root skipped), parsing each
+file with `cached_or_parse()`: a current cached parse is reused, a fresh one
+never enters the LRU (a walk must not evict what the client asked about).
+Only facts are kept, so one AST is live at a time. Every index records
+`failed` (file -> reason) and `file_caveats`; tools fold them into a few
+aggregated caveats (`_carry_index_caveats`, `_notes`: `NOTES_SHOWN` named,
+then a count), with the root cut from library notes (`_relative`).
+
+| Index | Built on first | Keeps |
+|---|---|---|
+| `programs` | program-level `callers_of`, `impact_of_change`, `codebase_overview` | `UnitFacts` per unit (id, file, depth, `unit_kind`, `_calls` rows with on-disk sites); the `CodebaseGraph` from `CodebaseGraphBuilder.build_from_results()` fed the same parses (no second parse); `copy_sites` |
+| `lineage` | field-mode `impact_of_change`, `where_from` | every unit's `FieldFlowAnalyzer` report (after `apply_source_map`) in one `LineageGraph`; JCL under the root (`.jcl`/`.job`) through `load_jobs` when jcl-parser imports, else `jcl_note`; `edge_files` |
+| `health` | `codebase_overview` | grade/score per unit (`TechnicalDebtAnalyzer` sharing the memoized flow and redundancy reports); `cross_file_clone_groups` over a hand-built `ScanReport`, members placed on disk |
+
+Lineage locations: `LineageGraph` hops carry the origin *line* but not its
+file, so `edge_files` maps `(PROGRAM, line, kind, statement)` to the file
+from the report's own edges; a program parsed without expansion uses its own
+file; anything else is `null` with `unmapped-location`. Join hops (dataset,
+table, CALL) have no line and no `location`.
+
+Cost: on 459 NIST programs with copybooks, the `programs` index takes about
+a minute (56 s measured); `extract_copy_statements` (the COPY lexer) is the largest single cost,
+which is why the index reuses the builder's COPY scan for its COPY lines
+rather than running its own.
 
 ## Packaging and tests
 
@@ -117,7 +164,9 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   registered with `add_tool()` rather than decorators, which
   `disallow_untyped_decorators` would reject when the SDK is untyped.
 - `cobol-parser mcp` without the extra exits 1 naming the install command.
-- Tests: `tests/unit/mcp_server/` (`test_mcp_tools.py` needs no SDK;
+- Tests: `tests/unit/mcp_server/` (`test_mcp_tools.py` and
+  `test_mcp_codebase.py`, the cross-program tools over copies of
+  `tests/samples/enterprise/` and `tests/samples/lineage/`, need no SDK;
   `test_mcp_server.py` drives an in-memory client session and the CLI). The
   directory is not named `mcp`: a test package of that name shadows the SDK.
 

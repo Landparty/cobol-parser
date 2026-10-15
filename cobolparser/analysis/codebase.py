@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -331,6 +332,10 @@ class CodebaseGraph:
     copy_edges: list[CopyEdge] = field(default_factory=list)
     unresolved: list[str] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
+    #: Program file -> ``(member, line)`` of each COPY / EXEC SQL INCLUDE
+    #: statement written in it, in source order: where a change to a member
+    #: lands in each program. Not part of :meth:`to_dict`.
+    copy_sites: dict[str, list[tuple[str, int]]] = field(default_factory=dict)
 
     # -- queries ----------------------------------------------------------
 
@@ -739,17 +744,42 @@ class CodebaseGraphBuilder:
         # resolved file path -> its own direct (member name, library, is EXEC
         # SQL INCLUDE), sorted
         self._member_copies: dict[str, list[tuple[str, str | None, bool]]] = {}
+        # program file -> (member, line) of each COPY written in it
+        self._copy_sites: dict[str, list[tuple[str, int]]] = {}
 
     # -- public API -------------------------------------------------------
 
     def build(self, paths: list[str]) -> CodebaseGraph:
         """Build the graph for *paths* (files; directories are ignored)."""
+        files = self._normalize_paths(paths)
+        return self.build_from_results(
+            files,
+            (
+                result
+                for chunk in self._chunks(files)
+                for result in self._parse_chunk(chunk)
+            ),
+        )
+
+    def build_from_results(
+        self, paths: list[str], results: Iterable[BatchResult]
+    ) -> CodebaseGraph:
+        """Build the graph for *paths* from parses the caller already made.
+
+        *results* holds one :class:`BatchResult` per path, with the same
+        spelling of the path, and is consumed one at a time: a generator that
+        parses on demand keeps a single AST live, as :meth:`build` does. For
+        a caller with its own parse settings (the MCP server's ``>>DEFINE``
+        symbols and cache) that must not parse every file a second time.
+        COPY edges still come from each file's raw text, here.
+        """
         # Per-build caches: a copybook edited between two builds on one
         # long-lived builder must not serve the previous build's chain.
         self._member_paths = {}
         self._member_failures = {}
         self._reported_failures = set()
         self._member_copies = {}
+        self._copy_sites = {}
         files = self._normalize_paths(paths)
 
         nodes: list[ProgramNode] = []
@@ -761,20 +791,16 @@ class CodebaseGraphBuilder:
         units_by_path: dict[str, list[str]] = {}
         seen_program_ids: dict[str, str] = {}
 
-        for chunk in self._chunks(files):
-            batch_results = self._parse_chunk(chunk)
-            for batch_result in batch_results:
-                self._absorb_parse(
-                    batch_result,
-                    nodes,
-                    call_edges,
-                    unresolved,
-                    errors,
-                    units_by_path,
-                    seen_program_ids,
-                )
-            # Facts extracted; let this chunk's ASTs go before the next one.
-            del batch_results
+        for batch_result in results:
+            self._absorb_parse(
+                batch_result,
+                nodes,
+                call_edges,
+                unresolved,
+                errors,
+                units_by_path,
+                seen_program_ids,
+            )
 
         if not self.copybook_paths:
             unresolved.append(
@@ -806,6 +832,7 @@ class CodebaseGraphBuilder:
             copy_edges=sorted(set(copy_edges), key=CopyEdge._sort_key),
             unresolved=sorted(set(unresolved)),
             errors=sorted(errors, key=lambda e: (str(e["path"]), str(e["error"]))),
+            copy_sites=self._copy_sites,
         )
 
     def build_from_directory(
@@ -1156,6 +1183,10 @@ class CodebaseGraphBuilder:
             member = _normalize_member(statement.member_name)
             if not member:
                 continue
+            if statement.source_location is not None:
+                self._copy_sites.setdefault(path, []).append(
+                    (member, statement.source_location[1])
+                )
             library = _normalize_library(statement.library_qualifier)
             member_path = self._resolve_member(
                 member,

@@ -13,7 +13,10 @@ Three jobs, each the reason a tool can stay a thin question over an analyzer:
   changes (or appears, or goes away), and the cache is dropped with it.
 * **The cache.** A program is parsed once and kept, keyed by its path and
   program unit, and re-parsed only when it -- or a copybook it expanded --
-  changes on disk.
+  changes on disk. The cross-program indexes (:mod:`.codebase_index`) are
+  kept the same way: built over every program under the root on first use,
+  and rebuilt once any file one of them read changes, or a program file is
+  added or removed.
 
 Parsing always recovers (``COLLECT_ALL``), as the CLI does, so a program with
 one bad statement still answers; the recovery is a caveat, not a failure. A
@@ -24,6 +27,7 @@ while every other member is still expanded.
 from __future__ import annotations
 
 import contextlib
+import os
 import sys
 import threading
 from collections import OrderedDict
@@ -45,6 +49,12 @@ from .envelope import Caveat, Response, ToolError
 #: so the bound is on entries, and small.
 DEFAULT_CACHE_SIZE = 32
 
+#: What counts as a COBOL program under the root when ``cobol.yml`` names no
+#: ``extensions``: the ``codebase-graph`` subcommand's own default.
+DEFAULT_PROGRAM_EXTENSIONS: tuple[str, ...] = (".cbl", ".cob", ".cobol")
+
+Stamp = tuple[int, int] | None
+
 
 @contextlib.contextmanager
 def stdout_to_stderr() -> Iterator[None]:
@@ -57,7 +67,7 @@ def stdout_to_stderr() -> Iterator[None]:
         yield
 
 
-def _stamp(path: str) -> tuple[int, int] | None:
+def _stamp(path: str) -> Stamp:
     try:
         stat = Path(path).stat()
     except OSError:
@@ -90,7 +100,7 @@ class ParsedProgram:
     caveats: list[Caveat]
     #: (mtime_ns, size) of every file this parse read, and of every copybook
     #: directory, for invalidation.
-    stamps: dict[str, tuple[int, int] | None]
+    stamps: dict[str, Stamp]
     _display: Callable[[str], str] = field(repr=False, default=str)
     #: Analyzer reports already computed for this parse, by (analyzer, unit).
     _reports: dict[tuple[str, int], Any] = field(repr=False, default_factory=dict)
@@ -217,6 +227,12 @@ class Workspace:
         )
         self._config = ProjectConfig()
         self._allowed: list[Path] = [self.root]
+        #: Cross-program indexes by name: (value, stamps of what it read).
+        self._indexes: dict[str, tuple[Any, dict[str, Stamp]]] = {}
+        #: Told ``(done, total, message)`` while a root-wide index is built,
+        #: so a client sees the first cross-program call is alive. Set by the
+        #: server around one call; None when nobody listens.
+        self.progress: Callable[[float, float | None, str], None] | None = None
         if config is not None:
             self._use_config(config)
         else:
@@ -261,6 +277,7 @@ class Workspace:
         self._allowed = [self.root] + [Path(p).resolve() for p in config.copybook_path]
         # Copybook paths, source format and defines all shape a parse.
         self._cache.clear()
+        self._indexes.clear()
 
     # -- paths ---------------------------------------------------------------
 
@@ -327,6 +344,108 @@ class Workspace:
         while len(self._cache) > self.cache_size:
             self._cache.popitem(last=False)
         return parsed
+
+    def cached_or_parse(self, path: Path) -> ParsedProgram:
+        """*path* parsed, from the cache when current, else parsed afresh
+        WITHOUT entering the cache: a walk over the whole root must not evict
+        the programs a client is asking about one at a time."""
+        cached = self._cache.get(str(path))
+        if cached is not None and all(
+            _stamp(name) == stamp for name, stamp in cached.stamps.items()
+        ):
+            return cached
+        return self._parse(path)
+
+    # -- the whole root ------------------------------------------------------
+
+    def _copybook_roots(self) -> list[Path]:
+        return [Path(p).resolve() for p in self.config.copybook_path]
+
+    def _walk(self) -> Iterator[tuple[str, list[str]]]:
+        """``(directory, file names)`` under the root, sorted, skipping hidden
+        directories (``.git``, ``.venv``) and copybook directories inside the
+        root: a member there is not a program, whatever its suffix."""
+        skip = {p for p in self._copybook_roots() if p != self.root}
+        for directory, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = sorted(
+                d
+                for d in dirnames
+                if not d.startswith(".") and Path(directory, d).resolve() not in skip
+            )
+            yield directory, sorted(filenames)
+
+    def program_files(self) -> list[Path]:
+        """Every COBOL program under the root, by ``cobol.yml``'s
+        ``extensions`` (default ``.cbl``, ``.cob``, ``.cobol``), sorted."""
+        wanted = {
+            (e if e.startswith(".") else f".{e}").lower()
+            for e in (self.config.extensions or DEFAULT_PROGRAM_EXTENSIONS)
+        }
+        return self._files_with_suffix(wanted)
+
+    def files_named(self, suffixes: tuple[str, ...]) -> list[Path]:
+        """Files under the root whose suffix is one of *suffixes*, sorted."""
+        return self._files_with_suffix(set(suffixes))
+
+    def _files_with_suffix(self, suffixes: set[str]) -> list[Path]:
+        # A symlink to a file outside the guard is skipped, exactly as
+        # resolve() would refuse it when a client named it.
+        found: list[Path] = []
+        for directory, names in self._walk():
+            for name in names:
+                if Path(name).suffix.lower() not in suffixes:
+                    continue
+                try:
+                    path = Path(directory, name).resolve()
+                except (OSError, RuntimeError):
+                    continue
+                if self._within(path):
+                    found.append(path)
+        return found
+
+    def tree_stamps(self) -> dict[str, Stamp]:
+        """The stamp of every directory under the root: a file added to or
+        removed from one changes its mtime, so an index built over the root
+        notices a new program without re-reading every file."""
+        stamps = {str(self.root): _stamp(str(self.root))}
+        for directory, _names in self._walk():
+            stamps[directory] = _stamp(directory)
+        return stamps
+
+    def index(
+        self, name: str, build: Callable[[], tuple[Any, dict[str, Stamp]]]
+    ) -> Any:
+        """The cross-program index *name*, built by *build()* on first use
+        and again once any file or directory it stamped has changed.
+
+        *build* returns the index and the stamps of everything it read.
+        """
+        self.refresh_config()
+        held = self._indexes.get(name)
+        if held is not None and all(
+            _stamp(path) == stamp for path, stamp in held[1].items()
+        ):
+            return held[0]
+        with stdout_to_stderr():
+            value, stamps = build()
+        self._indexes[name] = (value, stamps)
+        return value
+
+    def report_progress(self, done: float, total: float | None, message: str) -> None:
+        """Pass progress to whoever listens; a listener that fails (a client
+        gone, a closed loop) never fails the work it reports on."""
+        if self.progress is None:
+            return
+        try:
+            self.progress(done, total, message)
+        except Exception:  # noqa: BLE001 -- progress is best-effort
+            self.progress = None
+
+    def built_index(self, name: str) -> Any:
+        """The index *name* as last built, or None when it never was; never
+        builds, and may be stale (for hints, not answers)."""
+        held = self._indexes.get(name)
+        return None if held is None else held[0]
 
     def _copybook_directories(self) -> list[str]:
         directories: list[str] = []
