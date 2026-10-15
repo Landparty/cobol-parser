@@ -575,6 +575,12 @@ exponentially on unterminated REPLACING).
   precompiler); `strip_unexpanded_copy_statements` keeps it off. The codebase
   graph sees INCLUDE edges through `extract_copy_statements(...,
   sql_include=True)` (#295).
+* **`skip_missing_copybooks=True`** (`expand_copybooks`,
+  `parse_cobol_with_expansion`; `ExpansionContext.skip_missing`) does the
+  same for an ordinary COPY: the statement stays as written, a "... the COPY
+  was left as written" warning goes to `statistics.warnings`, every other
+  member still expands, and the parse then warns "COPY X was not expanded".
+  Default False (raise). The MCP workspace turns it on.
 
 ### REPLACING
 
@@ -910,7 +916,7 @@ so `except ParseError` does not catch them:
 | Exception | When raised |
 |-----------|------------|
 | `CircularReferenceError` | COPY chain forms a cycle |
-| `CopybookNotFoundError` | No matching file on any search path |
+| `CopybookNotFoundError` | No matching file on any search path (not with `skip_missing_copybooks=True`) |
 | `PathTraversalError` | COPY target escapes the allowed directory |
 | `EncodingError` | Cannot decode copybook bytes (`encoding_errors="strict"`) |
 | `NestingDepthError` | COPY nesting exceeds configured limit |

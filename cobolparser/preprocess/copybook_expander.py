@@ -985,6 +985,7 @@ def expand_copybooks(
     source_file: str = "<main>",
     preserve_comments: bool = False,
     debug_lines: bool = False,
+    skip_missing_copybooks: bool = False,
 ) -> CopybookExpansion:
     """
     Expand all COPY statements in COBOL source code by inlining copybook content.
@@ -1023,6 +1024,11 @@ def expand_copybooks(
             sees them. While False, the ones blanked are listed in
             ``CopybookExpansion.dropped_debug_lines`` so the parse can still
             warn about them under ``WITH DEBUGGING MODE``.
+        skip_missing_copybooks: Leave a COPY whose member cannot be found as
+            written, with a warning in ``statistics.warnings``, instead of
+            raising ``CopybookNotFoundError`` (default False). Every member
+            that *can* be found is still expanded; the parser then reports
+            the one left behind as not expanded.
         encoding_errors: Decode strictness for copybook files — "replace"
             (default, backward compatible) substitutes undecodable bytes with
             U+FFFD and records a lossy-decode warning in
@@ -1093,6 +1099,7 @@ def expand_copybooks(
         current_depth=0,
         defined_symbols=dict(defined_symbols) if defined_symbols else {},
         debug_lines=debug_lines,
+        skip_missing=skip_missing_copybooks,
     )
 
     # Initialize LRU size from search config
@@ -1442,12 +1449,19 @@ def _expand_source_recursive(
             copybook_path = path_resolver.resolve(
                 statement.member_name, statement.library_qualifier
             )
-        except CopybookNotFoundError:
+        except CopybookNotFoundError as exc:
             if statement.sql_include:
                 # EXEC SQL INCLUDE of a member the precompiler supplies
                 # (SQLCA, SQLDA) or one the shop keeps elsewhere: leave the
                 # statement as written -- the parser handles it as the EXEC
                 # SQL statement it is -- rather than failing the expansion.
+                continue
+            if context.skip_missing:
+                # One missing member must not cost every other one its
+                # expansion. The COPY stays as written; the parser then
+                # reports it as not expanded, like any unexpanded COPY.
+                if stats is not None:
+                    stats.warnings.append(f"{exc}; the COPY was left as written")
                 continue
             raise
 
@@ -1839,6 +1853,7 @@ def parse_cobol_with_expansion(
     max_nesting_depth: int = 100,
     process_conditionals: bool = True,
     defined_symbols: dict[str, str] | None = None,
+    skip_missing_copybooks: bool = False,
     **parser_kwargs: Any,
 ) -> Any:
     """
@@ -1863,6 +1878,9 @@ def parse_cobol_with_expansion(
             parse), and a ``>>DEFINE`` reaches the copybooks below it.
             False keeps the old order.
         defined_symbols: Pre-defined symbols for conditional compilation
+        skip_missing_copybooks: Leave a COPY whose member cannot be found as
+            written instead of failing (default False); see
+            ``expand_copybooks``. The other members are still expanded.
         **parser_kwargs: Additional arguments passed to parse_cobol()
 
     Returns:
@@ -1902,6 +1920,7 @@ def parse_cobol_with_expansion(
         # Expansion blanks comment lines before the parser sees the text;
         # debugging lines compiled as code have to survive it.
         debug_lines=debug_lines,
+        skip_missing_copybooks=skip_missing_copybooks,
     )
 
     # Parse the expanded source

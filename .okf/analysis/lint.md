@@ -142,7 +142,11 @@ int | None` and adds its answer to `location.column`;
 `fixed_format_column_offset()` holds the per-layout table (7 for a
 fixed-format line, whose columns 1-7 never reach the analyzers; 0 for a
 free-form member in a fixed listing; 6 for a fixed-format member in a
-free-form listing). `LintFinding.column_known` (not serialized) is False for a
+free-form listing). `source_column_offsets(main_file, preprocess_fixed)`
+builds that function for one parse -- judging the program the way
+`CobolParser` does and each copybook the way the expander did, and leaving a
+line after `>>SOURCE FORMAT FREE` unshifted -- and is what both the `lint`
+CLI and the MCP server (`cobolparser/mcp/`) pass. `LintFinding.column_known` (not serialized) is False for a
 parse error that gave only a line; such a finding gets no `origin_column`.
 `stamp_report_origins` leaves an existing `origin` alone so the CLI's dict
 pass does not erase it. Detail in [../cli.md](../cli.md).
