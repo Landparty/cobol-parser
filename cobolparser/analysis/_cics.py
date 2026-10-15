@@ -25,18 +25,31 @@ _TERMINATING_COMMANDS: dict[str, bool] = {
 _CONTINUE_ON_ERROR_OPTIONS = frozenset({"RESP", "RESP2", "NOHANDLE"})
 
 
-def cics_terminator_kind(stmt: Any) -> str | None:
+def cics_exit_kind(stmt: Any) -> str | None:
     """``"EXEC CICS RETURN"`` / ``"... XCTL"`` / ``"... ABEND"`` when *stmt*
-    is an EXEC CICS command that never returns control to the next
-    statement, else ``None``."""
+    is one of those commands, else ``None``.
+
+    Such a command leaves the program whenever it succeeds, RESP or not, so
+    it is a way out of a loop and an exit point even when it is not a
+    terminator (:func:`cics_terminator_kind`)."""
     if getattr(stmt, "node_type", None) != "EXEC_CICS":
         return None
     command = (getattr(stmt, "cics_command", "") or "").upper()
-    can_continue = _TERMINATING_COMMANDS.get(command)
-    if can_continue is None:
+    if command not in _TERMINATING_COMMANDS:
         return None
-    if can_continue:
+    return f"EXEC CICS {command}"
+
+
+def cics_terminator_kind(stmt: Any) -> str | None:
+    """:func:`cics_exit_kind` when *stmt* never returns control to the next
+    statement, else ``None``: a RETURN / XCTL carrying RESP, RESP2 or
+    NOHANDLE continues there when it fails."""
+    kind = cics_exit_kind(stmt)
+    if kind is None:
+        return None
+    command = kind.removeprefix("EXEC CICS ")
+    if _TERMINATING_COMMANDS[command]:
         options = getattr(stmt, "options", None) or {}
         if any(key.upper() in _CONTINUE_ON_ERROR_OPTIONS for key in options):
             return None
-    return f"EXEC CICS {command}"
+    return kind

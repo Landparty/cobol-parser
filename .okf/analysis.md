@@ -740,10 +740,17 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   `PERFORM_RECURSION` cycle (out-of-line paragraphs performing each other in
   a loop — invalid re-entrant PERFORM in standard COBOL) is always `HIGH`,
   independent of any UNTIL/TIMES/VARYING clause on the individual PERFORMs.
-  A `GOTO_LOOP`/`MIXED` cycle is graded by `_has_escape`: `HIGH` if no
-  paragraph in the cycle has an edge leaving it (to a paragraph outside the
-  cycle) or a program-terminating statement (`has_stop_run`/`has_goback`/
-  `has_exit_program`/`has_cics_exit`/`has_return` on the `FlowNode`), `MEDIUM` otherwise —
+  A `GOTO_LOOP`/`MIXED` cycle is graded by `_has_escape` over the cycle's
+  **strongly connected component** (`_components`, Tarjan over
+  `_ESCAPE_EDGE_TYPES`), not the cycle alone: `HIGH` if no paragraph in the
+  component has an edge leaving it or a program-terminating statement
+  (`has_stop_run`/`has_goback`/`has_exit_program`/`has_cics_exit` on the
+  `FlowNode`),
+  `MEDIUM` otherwise. Per-cycle checking (before #393) let two cycles that
+  share a paragraph each "escape" into the other, so an inescapable
+  `P1 -> P2 -> P1` / `P1 -> P3 -> P1` pair read MEDIUM. `has_return` is a
+  SORT/MERGE `RETURN sd-file`, **not** a terminator (it was, before #393,
+  so every SORT output-procedure loop read MEDIUM) —
   fall-through-only cycles are never reported (fall-through can't actually
   form a cycle).
   A `MIXED` cycle that is a PERFORM of a multi-procedure range (a SECTION
@@ -1267,6 +1274,13 @@ classifies as NUMERIC_EDITED up front — `9(5)CR` was UNKNOWN (silently
 skipped into `unresolved_count`) while `9(5)DB` was NUMERIC_EDITED only
 because its 'B' happened to match the blank-insertion edit char. Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA5A6MoveTypePictureClassification`.
+
+**Repeat counts are not symbols (2026-10-14, #336):** inside an edited
+picture, the `9` / `X` / `A` tests that pick NUMERIC_EDITED vs
+ALPHANUMERIC_EDITED run on `pattern_no_reps` (repeat counts stripped), so
+the 9 in `X(9)BX(9)` or `A(9)B` no longer reads as a digit position; these
+classify ALPHANUMERIC_EDITED like `X(10)BX(10)`. Pinned by
+`test_move_type_checker.py::TestPictureVariants::test_nine_in_repeat_count_is_not_a_digit_position`.
 
 **`unresolved_count` (2026-07-09, audit finding H5):** before this field
 existed, an unresolvable source category (`UNKNOWN`/`FIGURATIVE`) caused
@@ -3247,6 +3261,11 @@ FILLER records are two buffers, not one with a spurious redefines.
 `MOVE CORRESPONDING` pairs same-path subordinates when at least one of the
 two is elementary (a group against an elementary item is a byte overlay),
 skipping FILLER, REDEFINES and OCCURS items and what is under them.
+`ADD` / `SUBTRACT CORRESPONDING` walk the same pairing
+(`_visit_arith_corresponding`) but keep only elementary pairs whose sending
+item is numeric and receiving item numeric or numeric-edited (`_Item.category`,
+from PICTURE / USAGE), one `arith` edge each; the generic reads-to-writes
+path would join every subordinate to every other one (issue #337).
 
 **Alias edges are never chained with one of their own class**
 (`overlay_class`; summary BFS and `LineageGraph._trace` both carry the
@@ -3460,16 +3479,17 @@ and shares no code with the COBOL pipeline; it has its own OKF file:
 
 ## CICS terminators (issue #392, `_cics.py`)
 
-`cics_terminator_kind(stmt)` is the one rule for which EXEC CICS commands
-never return control to the next statement: `RETURN`, `XCTL` and `ABEND`.
-Both `_is_terminator` copies (`dead_code.py`, `program_flow/scanner.py`)
-call it, so neither draws fall-through past such a paragraph. The scanner
-also sets `FlowNode.has_cics_exit`, adds the paragraph to `exit_points` and
-records `exit_statement_kind` (`"EXEC CICS RETURN"`, ...);
-`RecursionRiskAnalyzer._has_escape` counts `has_cics_exit` as a way out.
-Decision (option (a) on the issue): a `RETURN` / `XCTL` carrying `RESP`,
-`RESP2` or `NOHANDLE` is **not** a terminator, since a failed command then
-continues at the next statement; `ABEND` always is. A pseudo-conversational
-retry loop ending in `RETURN TRANSID` is therefore graded `MEDIUM` (has an
-escape), the same as the GOBACK equivalent, not a `HIGH` lint error.
-Pinned in `tests/unit/analysis/test_cics_terminators.py`.
+Two rules. `cics_exit_kind(stmt)`: the command is `RETURN`, `XCTL` or
+`ABEND`, which leave the program whenever they succeed. `cics_terminator_kind
+(stmt)`: the same, minus a `RETURN` / `XCTL` carrying `RESP`, `RESP2` or
+`NOHANDLE` (decision (a) on the issue: a failed command then continues at
+the next statement); `ABEND` always is one. Both `_is_terminator` copies
+(`dead_code.py`, `program_flow/scanner.py`) use `cics_terminator_kind`, so
+neither draws fall-through past such a paragraph. The scanner uses
+`cics_exit_kind` for `FlowNode.has_cics_exit`, `exit_points` and
+`exit_statement_kind` (`"EXEC CICS RETURN"`, ...), and
+`RecursionRiskAnalyzer._has_escape` counts `has_cics_exit` as a way out --
+so a retry loop ending in `RETURN TRANSID(...) RESP(...)`, the usual shop
+form, is `MEDIUM` like the GOBACK equivalent, not a `HIGH` lint error
+(review of PR #453: applying the RESP exemption to the escape flag too left
+that loop HIGH). Pinned in `tests/unit/analysis/test_cics_terminators.py`.

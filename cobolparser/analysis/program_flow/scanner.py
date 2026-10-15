@@ -31,7 +31,7 @@ from ...models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
-from .._cics import cics_terminator_kind
+from .._cics import cics_exit_kind, cics_terminator_kind
 from .._procedures import ProcedureIndex, enclosing_section
 from .condition_text import render_condition_text
 from .edges import EdgeCollector
@@ -552,7 +552,11 @@ class ProcedureScanner:
                 self._collector.process_xml_parse(stmt, proc_name)
             elif getattr(stmt, "node_type", None) == "EXEC_CICS":
                 self._collector.process_cics_handle(stmt, proc_name)
-                cics_exit = cics_terminator_kind(stmt)
+                # Set even when RESP/NOHANDLE lets a failure fall through:
+                # on success the command still leaves the program, so it is
+                # an exit point and a way out of a loop (_is_terminator
+                # alone applies the RESP exemption).
+                cics_exit = cics_exit_kind(stmt)
                 if cics_exit is not None:
                     node.has_cics_exit = True
                     self._exit_points.add(proc_name)

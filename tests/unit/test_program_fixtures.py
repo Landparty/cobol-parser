@@ -175,6 +175,101 @@ class TestCallFixtures:
         assert "WS-RESULT" in call_fixture.sequence[0]
 
 
+_SAME_NAMED_ARGS = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CALLDUP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  REC-A.
+           05  AMT             PIC 9(5).
+           05  CODE-A          PIC X(3).
+       01  REC-B.
+           05  AMT             PIC 9(5).
+           05  CODE-B          PIC X(3).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           CALL 'SUBX' USING {args}
+           IF AMT OF REC-B > 500
+              DISPLAY 'BIG'
+           ELSE
+              DISPLAY 'SMALL'
+           END-IF
+           GOBACK.
+"""
+
+
+def _subx_fixtures(bundle):
+    return {
+        scenario.name: next(f for f in scenario.fixtures if f.ref.key == "SUBX")
+        for scenario in bundle.scenarios
+    }
+
+
+class TestCallFixtureSameNamedFields:
+    """#365: two USING arguments that both hold an ``AMT`` must get two
+    columns, each with its own value -- not one row entry for both."""
+
+    def test_each_same_named_field_gets_its_own_column(self):
+        bundle = _bundle_for(_SAME_NAMED_ARGS.format(args="REC-A REC-B"))
+        for fixture in _subx_fixtures(bundle).values():
+            columns = [spec.column for spec in fixture.layout]
+            assert len(columns) == len(set(columns)) == 4
+            assert set(fixture.sequence[0]) == set(columns)
+            by_name = {spec.qualified_name: spec.column for spec in fixture.layout}
+            assert by_name["REC-A.AMT"] != by_name["REC-B.AMT"]
+            # Fields whose names never collide keep their short header.
+            assert by_name["REC-A.CODE-A"] == "CODE-A"
+            assert by_name["REC-B.CODE-B"] == "CODE-B"
+
+    def test_branch_witness_lands_on_its_own_field_only(self):
+        bundle = _bundle_for(_SAME_NAMED_ARGS.format(args="REC-A REC-B"))
+        fixtures = _subx_fixtures(bundle)
+        else_fixture = next(f for n, f in fixtures.items() if n.endswith("ELSE"))
+        then_fixture = next(f for n, f in fixtures.items() if n.endswith("THEN"))
+        for fixture, satisfied in (
+            (else_fixture, lambda v: v <= 500),
+            (then_fixture, lambda v: v > 500),
+        ):
+            column = next(
+                s.column for s in fixture.layout if s.qualified_name == "REC-B.AMT"
+            )
+            assert satisfied(int(fixture.sequence[0][column]))
+
+    def test_same_argument_twice_is_not_duplicated(self):
+        bundle = _bundle_for(_SAME_NAMED_ARGS.format(args="REC-A REC-A"))
+        fixture = _subx_fixtures(bundle)["happy path"]
+        assert [s.qualified_name for s in fixture.layout] == [
+            "REC-A.AMT",
+            "REC-A.CODE-A",
+        ]
+        assert [s.column for s in fixture.layout] == ["AMT", "CODE-A"]
+
+    def test_csv_dir_header_is_unique(self, tmp_path):
+        bundle = _bundle_for(_SAME_NAMED_ARGS.format(args="REC-A REC-B"))
+        bundle.write_csv_dir(str(tmp_path))
+        written = list(tmp_path.glob("*/*SUBX*.csv"))
+        assert written
+        for path in written:
+            with open(path, newline="") as handle:
+                header = next(csv.reader(handle))
+            assert len(header) == len(set(header)) == 4
+
+    def test_layout_index_specs_are_not_renamed_in_place(self):
+        result = parse_cobol(
+            _SAME_NAMED_ARGS.format(args="AMT OF REC-A AMT OF REC-B"),
+            filename="calldup.cbl",
+        )
+        assert result.ast is not None, result.errors
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        bundle = ProgramFixtureGenerator().generate(result.ast, index, report, seed=1)
+        fixture = _subx_fixtures(bundle)["happy path"]
+        assert len({s.column for s in fixture.layout}) == 2
+        resolved = index.resolve("AMT OF REC-A")
+        assert resolved is not None
+        assert resolved.spec.column == "AMT"
+
+
 class TestSqlFixtures:
     def test_select_and_fetch_get_generated_rows_insert_does_not(self):
         bundle = ProgramFixtureGenerator().generate_from_file(IBM_EXTENSIONS, seed=5)

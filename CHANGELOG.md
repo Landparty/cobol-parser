@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`EXEC CICS RETURN` / `XCTL` / `ABEND` end control flow** (#392) in
+  `dead-code`, `program-flow` and `recursion-check`. Paragraphs after one
+  were never reported dead, program-flow drew a false `FALL_THROUGH` edge
+  out of it, and a pseudo-conversational retry loop ending in `RETURN
+  TRANSID` was a lint error ("unconditional infinite loop"). A RETURN / XCTL
+  carrying `RESP`, `RESP2` or `NOHANDLE` still falls through (a failed
+  command continues at the next statement) but is still an exit point and a
+  way out of a loop; ABEND always ends the paragraph. New
+  `FlowNode.has_cics_exit`.
+
 * **`codebase-graph` now records `EXEC CICS LINK` / `XCTL PROGRAM(...)` edges**
   (#315). They were skipped with no `unresolved` note, so a CICS program's
   `calls` read as empty and known. They are now `call_edges` with a new

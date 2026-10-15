@@ -7,7 +7,7 @@ command fails, execution continues at the next statement.
 
 import pytest
 
-from cobolparser.analysis._cics import cics_terminator_kind
+from cobolparser.analysis._cics import cics_exit_kind, cics_terminator_kind
 from cobolparser.analysis.dead_code import DeadCodeAnalyzer
 from cobolparser.analysis.lint import LintAnalyzer
 from cobolparser.analysis.program_flow import FlowEdgeType, ProgramFlowAnalyzer
@@ -80,10 +80,22 @@ class TestCicsTerminatorKind:
         ast = _parse(_straight_line(command))
         assert cics_terminator_kind(_first_cics(ast)) is None
 
+    @pytest.mark.parametrize("command", CONTINUING[:4])
+    def test_resp_variants_are_still_exits(self, command: str) -> None:
+        ast = _parse(_straight_line(command))
+        kind = cics_exit_kind(_first_cics(ast))
+        assert kind == "EXEC CICS " + command.split()[0]
+
+    @pytest.mark.parametrize("command", CONTINUING[4:])
+    def test_other_commands_are_not_exits(self, command: str) -> None:
+        ast = _parse(_straight_line(command))
+        assert cics_exit_kind(_first_cics(ast)) is None
+
     def test_non_cics_statement(self) -> None:
         ast = _parse(_straight_line("RETURN"))
         stmt = ast.get_all_statements()[0]
         assert cics_terminator_kind(stmt) is None
+        assert cics_exit_kind(stmt) is None
 
 
 class TestDeadCode:
@@ -135,9 +147,10 @@ class TestProgramFlow:
             if e.edge_type == FlowEdgeType.FALL_THROUGH
         ]
         assert fall == [("MAIN-PARA", "NEXT-PARA")]
+        # Still an exit: on success the RETURN leaves the program.
         main = next(n for n in report.nodes if n.name == "MAIN-PARA")
-        assert not main.has_cics_exit
-        assert "has_cics_exit" not in main.to_dict()
+        assert main.has_cics_exit
+        assert main.is_exit_point
 
 
 _RETRY_LOOP = """\
@@ -161,7 +174,17 @@ class TestRecursionCheck:
         report = LintAnalyzer(["recursion-check"]).analyze(ast)
         assert report.worst_severity() != "error"
 
-    def test_return_with_resp_is_no_escape(self) -> None:
-        ast = _parse(_RETRY_LOOP.format(command="RETURN RESP(WS-RESP)"))
+    def test_retry_loop_with_resp_on_return_has_escape(self) -> None:
+        # The usual shop form: RESP on the RETURN. A failed RETURN falls
+        # through, but a successful one still leaves the loop.
+        ast = _parse(_RETRY_LOOP.format(command="RETURN TRANSID('T001') RESP(WS-RESP)"))
+        risks = RecursionRiskAnalyzer().analyze(ast).risks
+        assert risks
+        assert all(r.has_escape and r.severity == "MEDIUM" for r in risks)
+        report = LintAnalyzer(["recursion-check"]).analyze(ast)
+        assert report.worst_severity() != "error"
+
+    def test_loop_without_any_exit_is_still_high(self) -> None:
+        ast = _parse(_RETRY_LOOP.format(command="LINK PROGRAM('OTHER')"))
         risks = RecursionRiskAnalyzer().analyze(ast).risks
         assert any(r.severity == "HIGH" and not r.has_escape for r in risks)

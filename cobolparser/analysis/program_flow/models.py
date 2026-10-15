@@ -69,8 +69,11 @@ class FlowNode:
     has_stop_run: bool = False
     has_goback: bool = False
     has_exit_program: bool = False
-    #: EXEC CICS RETURN / XCTL / ABEND that never returns control here.
+    #: EXEC CICS RETURN / XCTL / ABEND: leaves the program, at least when
+    #: it succeeds (one with RESP / NOHANDLE may also fall through).
     has_cics_exit: bool = False
+    #: A SORT/MERGE ``RETURN sd-file`` (reads the next sorted record) --
+    #: not a program terminator, unlike the four flags above.
     has_return: bool = False
     has_exit_section: bool = False
     has_exit_paragraph: bool = False
