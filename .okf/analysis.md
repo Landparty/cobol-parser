@@ -3303,7 +3303,11 @@ is nested in, within its paragraph (ELSE contributes `NOT (cond)`, WHEN
 OTHER the conjunction of the negated WHENs, an exception clause `AT END
 (READ ...)` / `ON SIZE ERROR (COMPUTE ...)`). `reached_via` links across
 paragraphs: every arm elsewhere that PERFORMs or GOes TO the rule's paragraph
-or section, as `"BR-001 ELSE"` / `"BR-004 WHEN POL-TYPE = 'A'"`. A nested
+or section, as `"BR-001 ELSE"` / `"BR-004 WHEN POL-TYPE = 'A'"`. A
+`PERFORM A THRU C` reaches every procedure from A through C in source order
+(`_thru_range`, on bare names over `ProcedureIndex`; a section header crossed
+on the way to a paragraph inside it is left out), and `GO TO A B DEPENDING
+ON N` reaches every target (#354). A nested
 decision is its own rule; the parent arm lists it as an action whose
 `rule_id` points at it (dropped to `None` if the nested rule was excluded as
 technical, never left dangling). `in_dead_code` comes from
@@ -3339,8 +3343,7 @@ WORKING-STORAGE field -- most rating/pricing logic -- would be missing.
 **Known limits** (the always-present caveat says the kinds are heuristic;
 `classification` on each rule names the signal that decided it):
 single-program scope (like `xref`, contained programs are not walked --
-`--program` picks one); `reached_via` matches a PERFORM's first target only,
-not every paragraph of a `THRU` range; an arithmetic statement inside an
+`--program` picks one); an arithmetic statement inside an
 inline PERFORM *within an arm* is neither a rule nor an action of that arm.
 
 Tests: `tests/unit/analysis/test_business_rules.py`,

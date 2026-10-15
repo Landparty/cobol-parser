@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-15 -- issue #354: reached_via covers THRU ranges and GO TO DEPENDING
+
+[analysis.md](analysis.md) (business rules, "Context on every rule"):
+`BusinessRuleExtractor`'s `reached_via` now links every procedure of a
+`PERFORM ... THRU` range and every `GO TO ... DEPENDING ON` target, not just
+the first; the matching "Known limits" entry is gone.
+[tests.md](tests.md): three regressions in `TestNestingAndReachability`.
 ## 2026-10-15 -- issue #340: TABLE-prefixed table names are tables
 
 [analysis.md](analysis.md) (field lineage `sql` port row): `_sql_flow`'s

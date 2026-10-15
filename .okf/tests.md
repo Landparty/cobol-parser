@@ -152,7 +152,10 @@ formulas incl. GIVING / REMAINDER / INTO; counters skipped; level-88
 glossary quoting by PICTURE; report shape; and a smoke run over every
 `tests/samples/enterprise/` program. `tests/unit/cli/test_business_rules_cli.py`
 (5 tests) pins the `business-rules` subcommand's JSON, text and
-`--include-technical` output.
+`--include-technical` output. `TestNestingAndReachability` also pins
+(#354) that `reached_via` covers every paragraph of a `PERFORM ... THRU`
+range (stopping at the end paragraph even across a section header) and
+every `GO TO ... DEPENDING ON` target.
 
 2026-09-28: `tests/unit/test_exec_sql_fetch_orientation.py` (10 tests) pins
 FETCH cursor name / orientation / rowset size for scroll, sensitive and
