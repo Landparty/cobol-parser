@@ -204,8 +204,8 @@ text-word / single-pass `COPY ... REPLACING`, parentheses as text words in
 `REPLACE`, `>>IF name DEFINED` without `IS`, a non-literal continuation
 across a comment line, and the column-72 quotation-mark rule. The last two
 are mirrored in `_preprocess_fast.pyx`, so run this file once with the
-extensions built too (`python setup.py build_ext --inplace`, then delete the
-`*.so`). See `preprocessing.md`.
+extensions built and enabled too (`COBOLPARSER_ACCEL=1 python setup.py
+build_ext --inplace`, then the file under `COBOLPARSER_ACCEL=1`). See `preprocessing.md`.
 
 2026-09-16: `tests/regression/test_audit_2026_09_16.py` (12 tests) pins the
 findings of that date's repo audit. Nine cover `ConstantFolder`'s exactness
@@ -1200,6 +1200,14 @@ The full suite (~13,000 tests across 464 `test_*.py` files as of
 `test` job gated on `if: github.event_name == 'workflow_dispatch'`, and no
 such job was ever in `ci.yml` — the suite and the `--cov-fail-under=90`
 floor went unenforced on every push and PR alike.
+
+**Pure Python default (2026-10-15).** The Cython accelerators are now used
+only under `COBOLPARSER_ACCEL=1` (build and import time; `.okf/lexer.md`), so
+a default run takes the pure-Python paths even with `*.so` files present and
+coverage measures correctly. `ci.yml` (currently commented out) sets the
+variable on `build`'s `build_ext` and pytest steps so that job still exercises
+the extensions. Locally: the default run is the pure suite; run it again with
+`COBOLPARSER_ACCEL=1 ... --no-cov` after building to cover the fast paths.
 
 It now runs twice, for two different reasons. In `build`, after `build_ext`,
 so CI exercises the Cython extensions rather than the pure-Python fallback

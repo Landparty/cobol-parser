@@ -18,6 +18,7 @@ import ast
 import contextlib
 import importlib
 import logging
+import os
 import pathlib
 import subprocess
 import sys
@@ -28,6 +29,7 @@ import warnings
 import pytest
 
 from cobolparser import CobolParser
+from cobolparser._accel import ENV_VAR
 from cobolparser.parsers.divisions import data_clauses
 
 MODULE = "cobolparser.parsers.divisions.data_clauses"
@@ -62,15 +64,44 @@ def _data_fast_replaced_by(module):
     # is how a pure-Python install (no extension compiled) looks.
     sys.modules["cobolparser._data_fast"] = module
     try:
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            reloaded = importlib.reload(sys.modules[MODULE])
-        yield reloaded, caught
+        with _accel_opted_in():
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                reloaded = importlib.reload(sys.modules[MODULE])
+            yield reloaded, caught
     finally:
         if saved is None:
             sys.modules.pop("cobolparser._data_fast", None)
         else:
             sys.modules["cobolparser._data_fast"] = saved
+        importlib.reload(sys.modules[MODULE])
+
+
+@contextlib.contextmanager
+def _accel_opted_in():
+    """Set ``COBOLPARSER_ACCEL=1`` for the block, restoring it afterwards.
+
+    The extension is only looked for under the opt-in, so every probe below
+    has to reload ``data_clauses`` with it set to examine anything at all.
+    """
+    saved = os.environ.get(ENV_VAR)
+    os.environ[ENV_VAR] = "1"
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop(ENV_VAR, None)
+        else:
+            os.environ[ENV_VAR] = saved
+
+
+@contextlib.contextmanager
+def _real_extension_opted_in():
+    """Reload ``data_clauses`` with the opt-in set and the real extension."""
+    try:
+        with _accel_opted_in():
+            yield importlib.reload(sys.modules[MODULE])
+    finally:
         importlib.reload(sys.modules[MODULE])
 
 
@@ -103,7 +134,23 @@ def test_probe_accepts_the_real_extension():
         "cobolparser._data_fast", reason="_data_fast extension not compiled"
     )
     assert data_clauses._data_fast_usable(fast.parse_data_item_clauses_fast)
-    assert data_clauses._HAS_DATA_FAST
+    with _real_extension_opted_in() as reloaded:
+        assert reloaded._HAS_DATA_FAST
+
+
+def test_extension_is_ignored_without_the_opt_in(caplog, monkeypatch):
+    """Pure Python is the default: not even a stale binary is looked at."""
+    monkeypatch.delenv(ENV_VAR, raising=False)
+    monkeypatch.setitem(sys.modules, "cobolparser._data_fast", _stale_extension())
+    try:
+        with caplog.at_level(logging.WARNING, logger=MODULE):
+            reloaded = importlib.reload(sys.modules[MODULE])
+            assert reloaded._HAS_DATA_FAST is False
+            assert reloaded._fast_data_item_clauses is None
+        assert not [r for r in caplog.records if "_data_fast" in r.getMessage()]
+    finally:
+        monkeypatch.undo()
+        importlib.reload(sys.modules[MODULE])
 
 
 def test_stale_extension_is_rejected_and_reported(caplog):
@@ -145,6 +192,7 @@ def test_import_survives_warnings_as_errors():
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
+        env={**os.environ, ENV_VAR: "1"},
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "OK" in result.stdout
@@ -212,8 +260,9 @@ def test_fast_and_fallback_agree_on_the_same_program():
     pytest.importorskip(
         "cobolparser._data_fast", reason="_data_fast extension not compiled"
     )
-    assert data_clauses._HAS_DATA_FAST
-    with_fast = CobolParser().parse(PROGRAM).ast.to_json()
+    with _real_extension_opted_in() as reloaded:
+        assert reloaded._HAS_DATA_FAST
+        with_fast = CobolParser().parse(PROGRAM).ast.to_json()
 
     with _data_fast_replaced_by(_stale_extension()) as (reloaded, _):
         assert reloaded._HAS_DATA_FAST is False

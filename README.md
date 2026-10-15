@@ -25,8 +25,20 @@ uv tool install .            # from a clone of this repo
 uv tool install --editable . # dev mode: picks up code changes without reinstalling
 ```
 
-`uv tool install` builds the Cython fast-path extensions as part of the
-install, so the CLI runs at full speed. Verify it worked from anywhere:
+The install is pure Python by default: no C compiler needed. The optional
+Cython accelerators (about 3x lexer throughput) are an opt-in, chosen by one
+environment variable both when building and when running:
+
+```bash
+COBOLPARSER_ACCEL=1 uv tool install . --reinstall   # compile them
+export COBOLPARSER_ACCEL=1                          # and use them
+```
+
+The PyPI wheels already contain the compiled accelerators, so for a
+`pip install cobol-parser` setting `COBOLPARSER_ACCEL=1` at run time is
+enough. Without the variable, a compiled extension is ignored.
+
+Verify it worked from anywhere:
 
 ```bash
 cobol-parser --version

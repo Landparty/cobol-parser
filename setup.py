@@ -1,18 +1,24 @@
-"""Build script for the Cython extension modules.
+"""Build script for the optional Cython extension modules.
 
-The pre-generated ``.c`` files for ``_lexer_fast`` and ``_preprocess_fast``
-are checked into the repository, so a stock ``pip install .`` builds the
-extensions without needing Cython at install time -- a C compiler is the
-only requirement. When Cython *is* available the ``.pyx`` sources are
-re-cythonized first so local edits take effect.
+The pure-Python implementation is the default, so a stock ``pip install .``
+compiles nothing and needs no C compiler. The three accelerators
+(``_lexer_fast``, ``_preprocess_fast``, ``_data_fast``) are an opt-in, chosen
+by one environment variable at both ends:
 
-Compile in-place during development:
-    python setup.py build_ext --inplace
+    COBOLPARSER_ACCEL=1 pip install .                     # compile them
+    COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace  # in a checkout
+    COBOLPARSER_ACCEL=1 python -m cobolparser ...         # and use them
 
-Skip the C extension build (e.g. on a machine without a compiler) by setting:
-    COBOLPARSER_SKIP_EXT=1
-The install then succeeds with the pure-Python fallback paths and only the
-~3x lexer speedup is forfeited.
+The variable is read again at import time (``cobolparser._accel``): an
+installed extension is ignored unless it is set, so building them alone does
+not change which backend runs.
+
+The pre-generated ``.c`` files are checked into the repository, so the opt-in
+build needs only a C compiler; when Cython *is* available the ``.pyx`` sources
+are re-cythonized first so local edits take effect.
+
+``COBOLPARSER_SKIP_EXT=1`` (the old opt-out) is still honoured and wins over
+``COBOLPARSER_ACCEL``.
 """
 
 import os
@@ -26,6 +32,11 @@ _MODULES = ("_lexer_fast", "_preprocess_fast", "_data_fast")
 
 def _build_ext_modules() -> list:
     if os.environ.get("COBOLPARSER_SKIP_EXT") == "1":
+        return []
+    # Same truthy spellings as cobolparser._accel, which setup.py cannot import
+    # (the package is not importable before it is built).
+    accel = os.environ.get("COBOLPARSER_ACCEL", "").strip().lower()
+    if accel not in {"1", "true", "yes", "on"}:
         return []
 
     try:

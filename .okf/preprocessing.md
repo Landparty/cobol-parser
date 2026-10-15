@@ -1429,10 +1429,11 @@ literal continuation, and a `>>SOURCE FIXED` in a file the detector calls
 free (that file never goes through the fixed normalizer). Pinned by
 `tests/regression/test_fixes_2026_09_28_preprocessing.py`.
 
-**Regenerating the Cython mirror.** `python setup.py build_ext --inplace`
-re-cythonizes the `.pyx` when Cython is installed and rewrites the
-checked-in `.c`; both files are committed together. Remove the built
-`*.so` afterwards before measuring coverage.
+**Regenerating the Cython mirror.** `COBOLPARSER_ACCEL=1 python setup.py
+build_ext --inplace` re-cythonizes the `.pyx` when Cython is installed and
+rewrites the checked-in `.c`; both files are committed together. Without
+`COBOLPARSER_ACCEL=1` at run time the built `*.so` is ignored (pure Python is
+the default), so coverage measures correctly with it left in place.
 
 
 # Preprocessing fixes 2026-10-04 (issues #251-#256)

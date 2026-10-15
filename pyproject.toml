@@ -160,13 +160,17 @@ build = "cp311-* cp312-* cp313-*"
 # the published sdist.
 skip = "*-musllinux*"
 test-requires = "pytest pytest-cov"
+# Wheels still ship the compiled accelerators, so `COBOLPARSER_ACCEL=1` works
+# for PyPI users without a compiler; without it they run pure Python like
+# every other install (cobolparser/_accel.py).
+environment = { COBOLPARSER_ACCEL = "1" }
 # Smoke-test against the INSTALLED wheel (not the source tree): confirm the
-# Cython accelerators loaded, then run a fast subset of the suite. --no-cov
+# Cython accelerators loaded and that the opt-in swaps them in, then run a fast subset of the suite. --no-cov
 # disables the repo's --cov-fail-under gate (coverage.py cannot see into
 # compiled extensions). --import-mode=importlib keeps the source tree from
 # shadowing the installed wheel (tests/__init__.py exists, so the default
 # "prepend" mode would put {project} first on sys.path).
-test-command = "python -c \"from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py {project}/tests/unit/test_program_fixtures.py --no-cov -q --import-mode=importlib"
+test-command = "python -c \"from cobolparser._lexer_fast import CobolLexer; from cobolparser._preprocess_fast import normalize_fixed_format; from cobolparser._data_fast import parse_data_item_clauses_fast; import os; os.environ['COBOLPARSER_ACCEL'] = '1'; import cobolparser.lexer as L; assert L.CobolLexer is not L._CobolLexerPure\" && pytest {project}/tests/unit/test_lexer.py {project}/tests/test_all_samples.py {project}/tests/unit/test_program_fixtures.py --no-cov -q --import-mode=importlib"
 
 # NOTE: release CI overrides these per job via CIBW_ARCHS (see
 # .github/workflows/release-please.yml). These values still apply to local

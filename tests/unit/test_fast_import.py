@@ -1,11 +1,18 @@
 """Import-guard tests for the optional Cython extension modules.
 
 These tests run regardless of whether Cython extensions are compiled.
-When compiled, they verify the fast-path classes load and behave correctly.
-When not compiled, they skip gracefully.
+When compiled, they verify the fast-path classes load and behave correctly,
+and that they are swapped in only under the ``COBOLPARSER_ACCEL=1`` opt-in
+(pure Python is the default). When not compiled, they skip gracefully.
 """
 
+import os
+import subprocess
+import sys
+
 import pytest
+
+from cobolparser._accel import ENV_VAR, accelerators_enabled
 
 
 def test_fast_lexer_loads():
@@ -22,28 +29,62 @@ def test_fast_preprocess_loads():
     assert callable(mod.normalize_fixed_format)
 
 
+def _active_backends(env_value):
+    """Which lexer / normalizer a fresh interpreter picks, as two booleans.
+
+    A subprocess, so the module-level choice is made from scratch under the
+    given ``COBOLPARSER_ACCEL`` value (``None`` = unset) rather than reusing
+    whatever this test process imported.
+    """
+    env = {k: v for k, v in os.environ.items() if k != ENV_VAR}
+    if env_value is not None:
+        env[ENV_VAR] = env_value
+    program = (
+        "import cobolparser.lexer as L, cobolparser.preprocess as P\n"
+        "print(L.CobolLexer is not L._CobolLexerPure,"
+        " P.normalize_fixed_format is not P._normalize_fixed_format_pure)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    return result.stdout.split()
+
+
+def test_pure_python_is_the_default_even_when_compiled():
+    """Without the opt-in the extensions are never swapped in."""
+    assert _active_backends(None) == ["False", "False"]
+    assert _active_backends("0") == ["False", "False"]
+
+
 def test_fast_lexer_is_active():
-    """CobolLexer in lexer module should be the Cython class when compiled."""
-    fast = pytest.importorskip(
+    """CobolLexer in lexer module is the Cython class under the opt-in."""
+    pytest.importorskip(
         "cobolparser._lexer_fast", reason="_lexer_fast extension not compiled"
     )
-    from cobolparser.lexer import CobolLexer
-
-    assert (
-        CobolLexer is fast.CobolLexer
-    ), "lexer.CobolLexer should be the Cython class when _lexer_fast is compiled"
+    assert _active_backends("1")[0] == "True"
 
 
 def test_fast_preprocess_is_active():
-    """normalize_fixed_format in preprocess should be the Cython version when compiled."""
-    fast = pytest.importorskip(
+    """normalize_fixed_format is the Cython version under the opt-in."""
+    pytest.importorskip(
         "cobolparser._preprocess_fast", reason="_preprocess_fast extension not compiled"
     )
-    from cobolparser.preprocess import normalize_fixed_format
+    assert _active_backends("1")[1] == "True"
 
-    assert (
-        normalize_fixed_format is fast.normalize_fixed_format
-    ), "preprocess.normalize_fixed_format should be the Cython version when compiled"
+
+def test_accelerators_enabled_spellings(monkeypatch):
+    for value in ("1", "true", "YES", " on "):
+        monkeypatch.setenv(ENV_VAR, value)
+        assert accelerators_enabled()
+    for value in ("", "0", "false", "no", "off", "2"):
+        monkeypatch.setenv(ENV_VAR, value)
+        assert not accelerators_enabled()
+    monkeypatch.delenv(ENV_VAR)
+    assert not accelerators_enabled()
 
 
 def test_fast_lexer_produces_correct_tokens():

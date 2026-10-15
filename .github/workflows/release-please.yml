@@ -53,7 +53,9 @@ jobs:
 
   # Build binary wheels for Linux, macOS, Windows. cibuildwheel compiles the
   # three optional Cython accelerators (_lexer_fast, _preprocess_fast,
-  # _data_fast); everything else ships as ordinary .py source. The sdist job
+  # _data_fast) under COBOLPARSER_ACCEL=1 ([tool.cibuildwheel] environment);
+  # everything else ships as ordinary .py source. Installed wheels still run
+  # pure Python unless COBOLPARSER_ACCEL=1 is set at run time. The sdist job
   # below covers every other platform.
   build-binary-wheels:
     needs: release-please
@@ -96,8 +98,9 @@ jobs:
           name: dist-wheels-${{ matrix.artifact }}
           path: wheelhouse/
 
-  # Source distribution: pure source plus the checked-in .c files, so it
-  # builds anywhere with a C compiler (or with COBOLPARSER_SKIP_EXT=1 without).
+  # Source distribution: pure source plus the checked-in .c files. It builds
+  # pure Python by default; COBOLPARSER_ACCEL=1 compiles the accelerators
+  # (a C compiler is then needed).
   build-sdist:
     needs: release-please
     if: ${{ needs.release-please.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}

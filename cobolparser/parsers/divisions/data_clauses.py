@@ -12,7 +12,8 @@ methods, which the ``DataDivisionParser`` keeps as stable delegating wrappers
 around this class — so the compiled extension's callback surface is unchanged.
 
 That extension is compiled separately from this module and can therefore be
-older than it. ``_data_fast_usable`` probes the compiled helper once at import
+older than it. It is only looked for under ``COBOLPARSER_ACCEL=1``; when it
+is, ``_data_fast_usable`` probes the compiled helper once at import
 and disables the fast path (with a warning naming the rebuild) when it does not
 match, so a stale binary costs speed rather than correctness.
 """
@@ -20,6 +21,7 @@ match, so a stale binary costs speed rather than correctness.
 import logging
 from typing import Any
 
+from cobolparser._accel import accelerators_enabled
 from cobolparser._literals import quote_literal
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import Token, TokenType
@@ -266,8 +268,11 @@ def _data_fast_usable(helper: Any) -> bool:
 # pure-Python implementation in ``parse_picture_clause`` below remains
 # the authoritative behaviour; we only delegate when the extension is
 # available and the token stream is the standard ``TokenStream`` (so we
-# can safely poke its underlying token list and cursor).
+# can safely poke its underlying token list and cursor). Off by default: the
+# extension is looked for only under COBOLPARSER_ACCEL=1 (cobolparser._accel).
 try:
+    if not accelerators_enabled():
+        raise ImportError("Cython accelerators not enabled")
     from cobolparser._data_fast import (  # type: ignore[import-not-found]
         parse_data_item_clauses_fast as _fast_data_item_clauses,
     )
@@ -287,8 +292,9 @@ else:
             "cobolparser._data_fast does not match this version of "
             "cobolparser and has been disabled; parsing falls back to the "
             "pure-Python path (same results, slower). Rebuild the extension "
-            "with `python setup.py build_ext --inplace`, or reinstall "
-            "cobolparser, to restore it."
+            "with `COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace`, "
+            "or reinstall cobolparser, to restore it, or unset "
+            "COBOLPARSER_ACCEL to silence this."
         )
 
 
