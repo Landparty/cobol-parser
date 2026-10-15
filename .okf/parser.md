@@ -1,26 +1,103 @@
 ---
 type: Module
 title: Parser
-description: CobolParser, DivisionParserFactory, StatementParserRegistry — converts Token stream to ParseResult.
+description: CobolParser, ParseResult, DivisionParserFactory, the division parsers, StatementParserRegistry and its 72 statement parsers, core/ infrastructure, plugins/core.py configuration, profiling.py and the _accel.py opt-in -- source text to ParseResult.
 tags: [parser, ast, division, statement, registry]
-timestamp: 2026-10-08T00:00:00Z
+timestamp: 2026-10-15T00:00:00Z
 ---
 
 # Overview
 
-`cobolparser/parser.py` — `CobolParser` orchestrates the full parse pipeline.
-It normalises input, lexes it via `CobolLexer`, wraps tokens in `TokenStream`,
-then delegates to `DivisionParserFactory` for each COBOL division.
+`cobolparser/parser.py` -- `CobolParser` orchestrates the full parse pipeline:
+source-text passes (header skip, `CBL`/`PROCESS` strip, fixed-format
+detection + normalization, conditional compilation, COPY strip, `REPLACE`),
+lexing via `CobolLexer`, a `TokenStream` over the tokens, then
+`DivisionParserFactory` for each COBOL division. The PROCEDURE DIVISION
+dispatches every statement through a `StatementParserRegistry` (first match
+wins) holding 72 statement parsers.
+
+**Entry points:** `parse_cobol(source_or_path, ...)` (convenience) and
+`CobolParser(...).parse(source)` / `.parse_file(path)`; both return a
+`ParseResult`. Copybook-expanding parses go through
+`parse_cobol_with_expansion` (see [preprocessing.md](preprocessing.md)).
+
+**Getting started:** read [Public API](#public-api), [ParseResult](#parseresult)
+and [Architecture](#architecture), then the tables for
+[division parsers](#division-parsers-cobolparserparsersdivisions) and
+[statement parsers](#statement-parsers-cobolparserparsersstatements). Adding a
+verb: [Adding a New Statement Parser](#adding-a-new-statement-parser). Everything
+after [Configuration Classes](#configuration-classes) is per-area rationale and
+fix history (dated sections, roughly in the order they were added) -- search it by
+file name or verb when a behaviour surprises you; the present-tense rule is
+stated first in each entry.
+
+## Contents
+
+**Reference (current behaviour)**
+
+- [Public API](#public-api)
+- [ParseResult](#parseresult)
+  - [Multi-program compilation units (2026-07-07)](#multi-program-compilation-units-2026-07-07)
+- [Architecture](#architecture)
+- [Core Infrastructure (`cobolparser/core/`)](#core-infrastructure-cobolparsercore)
+- [Division Parsers (`cobolparser/parsers/divisions/`)](#division-parsers-cobolparserparsersdivisions)
+- [Statement Parsers (`cobolparser/parsers/statements/`)](#statement-parsers-cobolparserparsersstatements)
+- [Adding a New Statement Parser](#adding-a-new-statement-parser)
+- [Configuration Classes](#configuration-classes)
+- [Accelerator opt-in (`_accel.py`)](#accelerator-opt-in-_accelpy)
+- [Profiling (`profiling.py`)](#profiling-profilingpy)
+- [See Also](#see-also)
+
+**Rationale and fix history** (per-area entries; each states the current rule first)
+
+- [Statement-coverage audit (2026-09-02)](#statement-coverage-audit-2026-09-02)
+- [Silent-Drop Audit (2026-07-08)](#silent-drop-audit-2026-07-08)
+- [Silent-Drop Audit (2026-07-09)](#silent-drop-audit-2026-07-09)
+- [Silent-Drop Audit: unsupported-verb boundary gap (2026-07-08 residual fix)](#silent-drop-audit-unsupported-verb-boundary-gap-2026-07-08-residual-fix)
+- [open-findings.md HIGH-severity fixes (2026-07-09, H1-H10)](#open-findingsmd-high-severity-fixes-2026-07-09-h1-h10)
+- [open-findings.md MEDIUM-severity fixes (2026-07-09)](#open-findingsmd-medium-severity-fixes-2026-07-09)
+- [Section/Paragraph Location Tracking (2026-07-09, user-reported)](#sectionparagraph-location-tracking-2026-07-09-user-reported)
+- [Literal Re-Quoting (`cobolparser/_literals.py`, 2026-08-28)](#literal-re-quoting-cobolparser_literalspy-2026-08-28)
+- [Structured EXEC blocks + expression trees (2026-07-20, M11/M12)](#structured-exec-blocks--expression-trees-2026-07-20-m11m12)
+- [Generic swallow-sweep regression (2026-07-21)](#generic-swallow-sweep-regression-2026-07-21)
+- [Statement-Support Verification Sweep (2026-07-22/23)](#statement-support-verification-sweep-2026-07-2223)
+- [Follow-up comma-list sweep: INITIALIZE, SORT/MERGE KEY/USING/GIVING, arithmetic GIVING + format-1 targets (2026-07-24)](#follow-up-comma-list-sweep-initialize-sortmerge-keyusinggiving-arithmetic-giving--format-1-targets-2026-07-24)
+- [COMPUTE expression precedence (2026-09-10; unary fixed 2026-09-28)](#compute-expression-precedence-2026-09-10-unary-fixed-2026-09-28)
+- [`PROCEDURE DIVISION USING` now captures each parameter's passing mode (2026-09-10)](#procedure-division-using-now-captures-each-parameters-passing-mode-2026-09-10)
+- [`SET`'s multi-group ENTRY-form flag was not reset per group (2026-09-10)](#sets-multi-group-entry-form-flag-was-not-reset-per-group-2026-09-10)
+- [EJECT compiler-directing statement was unrecognized (2026-08-05)](#eject-compiler-directing-statement-was-unrecognized-2026-08-05)
+- [INVOKE / ALLOCATE / FREE now have registered parsers (2026-08-05)](#invoke--allocate--free-now-have-registered-parsers-2026-08-05)
+- [Core audit fixes (2026-08-12)](#core-audit-fixes-2026-08-12)
+- [SKIP1/SKIP2/SKIP3 hardened to match EJECT's boundary-detection coverage (2026-08-21)](#skip1skip2skip3-hardened-to-match-ejects-boundary-detection-coverage-2026-08-21)
+- [H9 dedent disambiguation extended to every operand, not just the first (2026-08-21)](#h9-dedent-disambiguation-extended-to-every-operand-not-just-the-first-2026-08-21)
+- [ADD/SUBTRACT/MULTIPLY/DIVIDE targets and operands dropped their OF/IN qualifier chain (2026-08-22)](#addsubtractmultiplydivide-targets-and-operands-dropped-their-ofin-qualifier-chain-2026-08-22)
+- [OCCURS clause line splits, comma-separated INDEXED BY, bare INDEX usage (2026-08-23)](#occurs-clause-line-splits-comma-separated-indexed-by-bare-index-usage-2026-08-23)
+- [PERFORM VARYING dropped its whole clause on a signed FROM/BY value (2026-08-23)](#perform-varying-dropped-its-whole-clause-on-a-signed-fromby-value-2026-08-23)
+- [Review-pass hardening of the 2026-08-23 corpus fixes (same day)](#review-pass-hardening-of-the-2026-08-23-corpus-fixes-same-day)
+- [Shared operand helpers + SET qualifier folding (2026-08-24, /code-review pass)](#shared-operand-helpers--set-qualifier-folding-2026-08-24-code-review-pass)
+- [Residual corpus findings (2026-08-24)](#residual-corpus-findings-2026-08-24)
+- [Enterprise program-type coverage (2026-09-15)](#enterprise-program-type-coverage-2026-09-15)
+  - [Object-oriented units (`CLASS-ID` / `FACTORY` / `OBJECT` / `METHOD-ID`)](#object-oriented-units-class-id--factory--object--method-id)
+- [Line splitting (2026-09-17)](#line-splitting-2026-09-17)
+- [Level-88 `WHEN SET TO FALSE`, INITIALIZE `TO VALUE` / `TO DEFAULT` (2026-09-28)](#level-88-when-set-to-false-initialize-to-value--to-default-2026-09-28)
+- [`*>` floating comments never reach the division parsers (2026-09-28)](#-floating-comments-never-reach-the-division-parsers-2026-09-28)
+- [DATA DIVISION: bare national usages, GROUP-USAGE, qualified ODO counters (2026-09-28)](#data-division-bare-national-usages-group-usage-qualified-odo-counters-2026-09-28)
+- [Change tag in columns 1-6 of the header record (#252, 2026-10-04)](#change-tag-in-columns-1-6-of-the-header-record-252-2026-10-04)
+- [REPLACE ahead of the IDENTIFICATION DIVISION (#254, 2026-10-04)](#replace-ahead-of-the-identification-division-254-2026-10-04)
+- [Tagged copybooks in format detection (2026-10-04)](#tagged-copybooks-in-format-detection-2026-10-04)
+- [UNSTRING optional noise words (issue #400, 2026-10-14)](#unstring-optional-noise-words-issue-400-2026-10-14)
+- [Line breaks between keywords (2026-10-14, issue #385)](#line-breaks-between-keywords-2026-10-14-issue-385)
 
 # Public API
 
 ```python
 from cobolparser import CobolParser, ParseResult, parse_cobol
 from cobolparser import ErrorRecoveryMode, MemoryConfiguration, SerializationConfig
-from cobolparser.dialects import IBMEnterpriseCobol
+from cobolparser.plugins.core import DialectType
 
-# Convenience
+# Convenience (source may also be a path); error_recovery defaults to FAIL_FAST
 result: ParseResult = parse_cobol(source, filename="prog.cob")
+# enable_profiling=True returns (ParseResult, ProfilingResult) -- see Profiling
 
 # Configurable
 config = MemoryConfiguration(max_memory_mb=256)
@@ -30,10 +107,22 @@ parser = CobolParser(
 )
 result = parser.parse(source)
 
-# With IBM dialect + serialisation options
-dialect = IBMEnterpriseCobol()
-parser = CobolParser(dialect=dialect, serialization_config=SerializationConfig(include_metadata=True))
+# Dialect + serialisation options (`dialect` takes a `DialectType` member,
+# not a dialect object; IBM_ENTERPRISE is the default)
+parser = CobolParser(
+    dialect=DialectType.IBM_ENTERPRISE,
+    serialization_config=SerializationConfig(include_metadata=True),
+)
 ```
+
+`CobolParser.__init__(dialect=DialectType.IBM_ENTERPRISE,
+error_recovery=ErrorRecoveryMode.FAIL_FAST, memory_config=None,
+serialization_config=None, plugin_manager=None, free_form=False,
+initial_warnings=None, preprocess_fixed=None, debug_lines=False)`.
+`parse_cobol(source, filename="<string>", dialect=..., error_recovery=FAIL_FAST,
+free_form=False, preprocess_fixed=None, debug_lines=False,
+enable_profiling=False, top_n=50, prof_output=None)`. Both default to
+**FAIL_FAST**; the CLI defaults to `--error-recovery collect-all`.
 
 # ParseResult
 
@@ -44,6 +133,9 @@ class ParseResult:
     errors: list[ParseError]
     warnings: list[str]
     statistics: ParseStatistics
+    # Expanded line -> (origin file, origin line); set only by
+    # parse_cobol_with_expansion, None otherwise (see preprocessing.md)
+    expansion_source_map: dict[int, tuple[str, int]] | None = None
 
     @property
     def success(self) -> bool:        # ast is not None AND no errors
@@ -100,18 +192,29 @@ nested programs in one source member are each parsed into their own
 attached to `ast.contained_programs` (also reachable via `get_all_statements()`
 and `to_dict()["contained_programs"]`), with one summary warning. Helpers:
 `_peek_is_end_program()` / `_consume_end_program_marker()` consume
-`END PROGRAM [name] [.]` between units. Previously everything after the first
+`END PROGRAM [name] [.]` between units. `CobolProgram.program_units()`
+enumerates every unit (outermost first, in source order); IBM OO `CLASS-ID` / `FACTORY` /
+`OBJECT` / `METHOD-ID` units nest the same way, tagged by
+`CobolProgram.unit_kind` -- see
+[Object-oriented units](#object-oriented-units-class-id--factory--object--method-id). Previously everything after the first
 program was silently dropped (NIST `IC228A` retained ~3% of statements with
 `errors=0`).
 
 # Architecture
 
 ```
-CobolParser.parse(source)
-  ├─ normalize_fixed_format()          # fixed-format → free-form
-  ├─ strip_compiler_directives()       # remove compiler control statements
-  ├─ CobolLexer.tokenize()             # → List[Token]
-  ├─ TokenStream(tokens - COMMENT)     # lookahead abstraction; `*>` comments dropped
+CobolParser.parse(source) -> _parse_core()
+  ├─ _preprocess_source()                   # every pass preserves line count
+  │    ├─ _skip_to_identification_division()  # blank pre-header junk (keeps REPLACE)
+  │    ├─ strip_compiler_directives()       # CBL / PROCESS cards
+  │    ├─ detect_fixed_format() → _normalize_fixed_source()
+  │    │     (normalize_fixed_format via normalize_with_recovery; fixed → free-form)
+  │    ├─ preprocess_conditional_compilation()   # >>DEFINE / >>IF / >>EVALUATE
+  │    ├─ strip_unexpanded_copy_statements()
+  │    └─ apply_replace_statements()        # REPLACE (incl. ==:TAG:== partial words)
+  ├─ _tokenize(): CobolLexer.tokenize()     # → list[Token]
+  │    └─ TokenStream(tokens - COMMENT)     # lookahead abstraction; `*>` comments dropped
+  └─ parse_program()
   └─ DivisionParserFactory
        ├─ IdentificationDivisionParser
        ├─ EnvironmentDivisionParser
@@ -161,10 +264,14 @@ and `_sequence_area_is_fixed_like` stay importable as aliases.
 |------|----------------|
 | `interfaces.py` | `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParseContext` |
 | `token_stream.py` | `TokenStream` — `peek()`, `consume()`, `expect()`, configurable lookahead |
-| `registry.py` | `StatementParserRegistry` — first-match dispatch |
-| `exceptions.py` | `TokenMismatch`, `UnexpectedEndOfInput`, `DivisionNotFoundError`, `UnknownStatementError`, `ValidationError` |
-| `ast_factory.py` | `ASTNodeFactory` — validated node creation; `get_factory()` / `create_node()` |
-| `_errors.py` (root) | `ParseError` base class — zero internal deps (avoids circular imports) |
+| `registry.py` | `StatementParserRegistry` — `register(parser, position=None)` / `unregister` / `clear` / `find_parser(stream)` / `get_all_parsers()`; first-match dispatch (registration order matters) memoised in `_dispatch_cache`, keyed on the first token, the raw second token and the first meaningful token after the verb (so `EXEC <newline> CICS` and `EXEC <newline> SQL` differ), invalidated on every register/unregister/clear |
+| `exceptions.py` | `TokenMismatch`, `UnexpectedEndOfInput`, `DivisionNotFoundError`, `UnknownStatementError`, `ValidationError` (all `ParseError` subclasses) |
+| `ast_factory.py` | `ASTNodeFactory` — validated node creation; `get_factory()` / `set_factory()` / `create_node(node_class, location, **kwargs)`; raises `NodeTypeError` / `FieldValidationError` (both `ValidationError`) |
+| `_errors.py` (root) | `ParseError` base class — zero internal deps (avoids circular imports); re-exported by `plugins/core.py` |
+
+The division layer adds `parsers/divisions/base.py` (`BaseDivisionParser`,
+`at_division_boundary()`) and `factory.py` (`DivisionParserFactory`,
+`DivisionType`, `get_default_factory()` / `reset_default_factory()`).
 
 # Division Parsers (`cobolparser/parsers/divisions/`)
 
@@ -195,7 +302,7 @@ as `parser_self` and calls those three back by name. New clause logic goes in
 
 **`_data_fast` signature-drift guard (`data_clauses.py`, 2026-09-05):** the
 callback surface above is only half the contract; the other half is the
-19-argument positional call `parse_data_item` makes into
+20-argument positional call (`_DATA_FAST_ARG_COUNT = 20`) `parse_data_item` makes into
 `parse_data_item_clauses_fast`. Because the extension is compiled separately
 from its caller, a stale *build* (in-place `.so` older than the tree, cached
 `build/`, an installed wheel shadowing the source) leaves a binary whose arity
@@ -431,9 +538,12 @@ sibling) and a dedicated anonymous-item case.
 
 # Statement Parsers (`cobolparser/parsers/statements/`)
 
+33 verb-parser files plus two shared helpers (`_utils.py`, `_conditions.py`); every class is an `IStatementParser`, and all 72 are registered by `create_statement_registry()` (see the division table above).
+
 | File | COBOL Verbs |
 |------|------------|
 | `accept_parser.py` | ACCEPT |
+| `allocate_free_parsers.py` | ALLOCATE, FREE (`AllocateStatementParser` / `FreeStatementParser`; see [INVOKE / ALLOCATE / FREE](#invoke--allocate--free-now-have-registered-parsers-2026-08-05)) |
 | `arithmetic_parsers.py` | ADD, SUBTRACT, MULTIPLY, DIVIDE, COMPUTE |
 | `call_parser.py` | CALL |
 | `close_parser.py` | CLOSE |
@@ -447,6 +557,7 @@ sibling) and a dedicated anonymous-item case.
 | `ibm_exec_statements.py` | EXEC SQL, EXEC CICS, EXEC IMS DLI |
 | `if_parser.py` | IF |
 | `initialize_inspect_parsers.py` | INITIALIZE, INSPECT |
+| `invoke_parser.py` | INVOKE (OO method invocation) |
 | `legacy_verb_parsers.py` | EXHIBIT, EXAMINE, TRANSFORM (OS/VS), ENTER, NOTE (COBOL-74), CHAIN (Micro Focus), READY TRACE / RESET TRACE, SERVICE LABEL / SERVICE RELOAD, TITLE (IBM compiler-directing; 2026-09-02) |
 | `move_parser.py` | MOVE |
 | `open_parser.py` | OPEN |
@@ -456,7 +567,7 @@ sibling) and a dedicated anonymous-item case.
 | `rewrite_parser.py` | REWRITE |
 | `search_parser.py` | SEARCH (each WHEN also gets a `condition_tree` from the shared `build_condition_expression`, next to its raw `condition` text, so AND/OR conditions are structural; #348, 2026-10-14) |
 | `set_parser.py` | SET |
-| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, EJECT, EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE (RELEASE `FROM` / RETURN `INTO` operands go through `consume_optional_qualifiers`, as MOVE's do: `WS-REC OF GRP`, `TBL ( I )`; before 2026-09-28 only the first word was kept) |
+| `simple_statement_parsers.py` | ALTER, CANCEL, COMMIT, CONTINUE, NEXT SENTENCE (`NextSentenceStatementParser`), EJECT, SKIP1/SKIP2/SKIP3 (`SkipStatementParser`), EXIT, GENERATE, GOBACK, RELEASE, RETURN, ROLLBACK, USE (RELEASE `FROM` / RETURN `INTO` operands go through `consume_optional_qualifiers`, as MOVE's do: `WS-REC OF GRP`, `TBL ( I )`; before 2026-09-28 only the first word was kept) |
 | `sort_merge_parsers.py` | SORT, MERGE |
 | `start_parser.py` | START |
 | `stop_parser.py` | STOP |
@@ -464,7 +575,8 @@ sibling) and a dedicated anonymous-item case.
 | `unlock_parser.py` | UNLOCK |
 | `xml_json_parser.py` | XML GENERATE, XML PARSE, JSON GENERATE, JSON PARSE (clause data names structured into `count_in` / `into_item` / `clause_items` by `_record_clause_items`, 2026-09-28) |
 | `write_parser.py` | WRITE |
-| `_utils.py` | Shared clause-collection utilities |
+| `_utils.py` | Shared clause-collection and operand utilities (`collect_clause_stmts`, `consume_optional_qualifiers`, `consume_value_operand`, `consume_signed_numeric`, `skip_whitespace`, `peek_past_noise`, `looks_dedented_relative_to`, ...) |
+| `_conditions.py` | `build_condition_expression` -- structured condition trees shared by IF, PERFORM UNTIL, EVALUATE and SEARCH WHEN |
 
 **IO clause bodies (`_utils.py` / `read_parser.py` / `write_parser.py` /
 `rewrite_parser.py` / `delete_parser.py` / `start_parser.py`):** the
@@ -1340,6 +1452,13 @@ under `reports/` was ever committed for this sweep).
 
 # Silent-Drop Audit: unsupported-verb boundary gap (2026-07-08 residual fix)
 
+*Current state:* every verb named below that has a statement form now has a
+registered parser (2026-09-02 statement-coverage audit), and
+`UNSUPPORTED_VERBS` holds only `EXECUTE`, `GOTO`, `RECOVER`. What remains
+true from this entry is the invariant: every verb word must be in
+`_utils.STATEMENT_TOKEN_TYPES` / `STATEMENT_KEYWORDS`, or a period-less
+predecessor's operand loop swallows it.
+
 The 2026-07-07 C2 fix (`_warn_unsupported_statement`) only fires when the
 PROCEDURE DIVISION's top-level dispatch loop *sees* the offending token
 directly — which requires a period to hand control back to that loop at the
@@ -1908,13 +2027,52 @@ The `_data_fast` path delegates VALUE to this helper, so both builds agree.
 
 # Configuration Classes
 
+All in `cobolparser/plugins/core.py` (re-exported by `cobolparser.plugins`).
+
 | Class | Purpose |
 |-------|---------|
-| `ErrorRecoveryMode` | `FAIL_FAST` (default) or `COLLECT_ALL` |
-| `MemoryConfiguration` | `max_memory_mb` (64–8192), `enable_streaming`, `chunk_size_kb` |
-| `SerializationConfig` | `include_metadata: bool` |
-| `DialectType` | Enum — `IBM_ENTERPRISE`, others planned |
-| `ParseStatistics` | Wall-clock timings, token counts, node counts |
+| `ErrorRecoveryMode` | `FAIL_FAST` (the `CobolParser` / `parse_cobol` default) or `COLLECT_ALL` (the CLI default) |
+| `MemoryConfiguration` | dataclass: `max_memory_mb=256` (validated 64–8192), `enable_streaming=False`, `chunk_size_kb=512`, `max_error_count=1000`. Only `max_error_count` is enforced (`CobolParser.add_error` stops recording at the limit); the other three are validated and stored but no parse path reads them, so `MemoryLimitExceededError` is never raised -- measure memory with `ProfilerContext` |
+| `SerializationConfig` | dataclass: `include_metadata=True`, `include_source_locations=True`, `compact_format=False`; stamped onto every program unit after the parse |
+| `DialectType` | Enum — `IBM_ENTERPRISE` (default; the only dialect with behaviour behind it), `ANSI_COBOL`, `MICRO_FOCUS` |
+| `ParseStatistics` | `lines_processed`, `lines_parsed`, `tokens_processed`, `memory_peak_mb` (always 0.0), `parse_time_seconds`, `total_time_ms`, `error_count`, `warning_count`; `reset()` / `start_timing()` / `end_timing()` / `copy()` / `to_dict()` |
+| `PluginManager` | `register_plugin` / `unregister_plugin` / `get_plugin` / `get_active_plugins`; nothing in the parse consults it |
+
+Also defined there: `LexerError` -> `UnterminatedStringError`, and
+`MemoryLimitExceededError` (all `ParseError` subclasses).
+
+# Accelerator opt-in (`_accel.py`)
+
+Pure Python is the default backend (since 2026-10-15).
+`cobolparser._accel.accelerators_enabled()` is true only when
+`COBOLPARSER_ACCEL` is `1`/`true`/`yes`/`on`; it is re-read on every call
+(not cached) so a test can flip it and reload a module. Each module that
+owns a fast path (`lexer.py`, the preprocessor, `parsers/divisions/data_clauses.py`
+for `_data_fast`) imports its compiled extension only when it returns
+true, so a built `.so` is ignored without the variable. `setup.py` reads
+the same variable itself to decide whether to compile. Parser-side
+consequence: `data_clauses._HAS_DATA_FAST` is `False` on a default import,
+and the signature-drift probe below only runs under the opt-in.
+
+# Profiling (`profiling.py`)
+
+`ProfilerContext(top_n=50, prof_output=None)` wraps any call with cProfile,
+tracemalloc and (optionally) psutil, and leaves a `ProfilingResult` on
+`.result`: `wall_clock_s`, `cpu_user_s`/`cpu_system_s` (`None` without
+psutil), `peak_memory_mb` + `peak_memory_exact`, `top_functions`
+(`FunctionProfile`: `function`, `calls`, `total_time_s`, `cumul_time_s`,
+`per_call_total_s`, `per_call_cumul_s`), `prof_file`,
+`function_profile_available`, `caveats`. `parse_cobol(...,
+enable_profiling=True, top_n=, prof_output=)` uses it and returns
+`(ParseResult, ProfilingResult)`.
+
+Nesting is safe (issue #274, 2026-10-05): when another profiler is already
+active (`sys.getprofile()` on 3.11, `sys.monitoring` PROFILER_ID on 3.12+)
+the context skips cProfile, so `function_profile_available` is `False`,
+`top_functions` is empty, no `.prof` file is written, and `caveats` says why.
+Wall-clock, CPU and memory are still measured, and the outer profile is left
+alone. tracemalloc is stopped only by the context that started it, including
+when `__enter__` fails. Tests: `tests/unit/test_profiling.py`.
 
 # Structured EXEC blocks + expression trees (2026-07-20, M11/M12)
 
@@ -2440,7 +2598,7 @@ lines rather than changing any parser code — a reminder that this
 column-72 gotcha applies to test fixtures using this repo's usual
 7-space/Area-B indentation, not just to real-world source.
 
-## COMPUTE expression precedence (2026-09-10; unary fixed 2026-09-28)
+# COMPUTE expression precedence (2026-09-10; unary fixed 2026-09-28)
 
 `arithmetic_parsers.py`'s expression grammar, tightest-binding first:
 `_parse_primary` (literal/identifier/parenthesized/FUNCTION) →
@@ -2462,7 +2620,7 @@ parses as before but no longer folds to 50: IBM truncates `2 ** -1` to 0
 decimal places into an integral target; see analysis.md's ConstantFolder
 section.)
 
-## `PROCEDURE DIVISION USING` now captures each parameter's passing mode (2026-09-10)
+# `PROCEDURE DIVISION USING` now captures each parameter's passing mode (2026-09-10)
 
 `BaseDivisionParser.parse()` (`divisions/base.py`) already walked the header
 clause tokens up to the terminating period to collect bare parameter names
@@ -2480,7 +2638,7 @@ USING BY REFERENCE LK-A BY VALUE LK-B LK-C` yields `{"LK-A": "REFERENCE",
 again). Backs `LinkageChecker`'s new `PASSING_MODE_MISMATCH` check — see
 [analysis.md](analysis.md)'s LinkageChecker section.
 
-## `SET`'s multi-group ENTRY-form flag was not reset per group (2026-09-10)
+# `SET`'s multi-group ENTRY-form flag was not reset per group (2026-09-10)
 
 `SetStatementParser._entry_form` (set by `_parse_action` when a value is
 introduced by `ENTRY`, read right after to call `stmt.set_metadata
@@ -3035,7 +3193,8 @@ consolidation:
    72-column line break (`BY -` / newline / `1`). The shared helper does a
    non-destructive lookahead past WHITESPACE/COMMENT/NEWLINE/CONTINUATION
    before composing, and now backs PERFORM VARYING/AFTER FROM/BY, SET's
-   value reads (via `_consume_subscripted_value`), and
+   value reads (today via the shared `_utils.consume_value_operand`, which
+   `set_parser._consume_set_value` and PERFORM VARYING both call), and
    `_consume_arithmetic_operand`. PERFORM's FROM/BY values also fold
    subscripts/qualifiers via `consume_optional_qualifiers` (a subscripted
    `FROM WS-TBL (2)` used to strand `( 2 )` and kill the UNTIL lookahead).
@@ -3047,12 +3206,6 @@ Pinned by new classes in the three 2026-08-23 regression files
 (`TestOccursMissingCountRecovery`, `TestDependingOnLineSplit`,
 `TestSignClauseLineSplit`, `TestSignSplitAcrossLines`,
 `TestSubscriptedFromByValues`, `TestSetSignedValues`).
-
-# See Also
-
-* [lexer.md](lexer.md) — upstream tokenisation
-* [ast-models.md](ast-models.md) — what `ParseResult.ast` contains
-* [preprocessing.md](preprocessing.md) — input normalisation
 
 # Shared operand helpers + SET qualifier folding (2026-08-24, /code-review pass)
 
@@ -3303,6 +3456,7 @@ latter also breaks on form feed / NEL / U+2028, which put every later
   list and sets `with_filler`.
 
 Pinned by `tests/regression/test_level88_false_and_initialize_phrases.py`.
+
 # `*>` floating comments never reach the division parsers (2026-09-28)
 
 `CobolParser._parse_core` builds its `TokenStream` from the lexer's tokens
@@ -3374,7 +3528,7 @@ unchanged. Covers `parse_cobol`, `CobolParser.parse` and
 
 # Tagged copybooks in format detection (2026-10-04)
 
-`_detect_fixed_format`'s tagged-sequence-area rule is corroborated by
+`detect_fixed_format`'s (`preprocess/source_format.py`; `parser._detect_fixed_format` is an alias) tagged-sequence-area rule is corroborated by
 `_has_area_a_division_header` **or** `_has_tagged_line_anchor` (a tagged
 line with a column-7 comment indicator, or a tagged data-description
 entry). The second anchor exists for copybooks, which have no division
@@ -3390,22 +3544,6 @@ already did. `_parse_into_targets` stops at `POINTER` and `OVERFLOW` too, so
 neither is folded into the INTO list; a bare `OVERFLOW` opens the
 `on_overflow` handler; `TALLYING C` sets `tallying_variable` with or without
 `IN`. Tests: `tests/unit/test_unstring_gaps.py::TestUnstringOptionalKeywords`.
-
-## Profiling (`profiling.py`)
-
-`ProfilerContext(top_n=50, prof_output=None)` wraps any call with cProfile,
-tracemalloc and (optionally) psutil, and leaves a `ProfilingResult` on
-`.result`: `wall_clock_s`, `cpu_user_s`/`cpu_system_s` (`None` without
-psutil), `peak_memory_mb` + `peak_memory_exact`, `top_functions`,
-`prof_file`, `function_profile_available`, `caveats`.
-
-Nesting is safe (issue #274, 2026-10-05): when another profiler is already
-active (`sys.getprofile()` on 3.11, `sys.monitoring` PROFILER_ID on 3.12+)
-the context skips cProfile, so `function_profile_available` is `False`,
-`top_functions` is empty, no `.prof` file is written, and `caveats` says why.
-Wall-clock, CPU and memory are still measured, and the outer profile is left
-alone. tracemalloc is stopped only by the context that started it, including
-when `__enter__` fails. Tests: `tests/unit/test_profiling.py`.
 
 # Line breaks between keywords (2026-10-14, issue #385)
 
@@ -3444,3 +3582,12 @@ AFP-5A), since otherwise an entry's start cannot be told apart from an
 operand; `UPSI-0 ON x` without STATUS/IS likewise. `SYMBOLIC CHARACTERS`
 takes IS/ARE as optional: the first integer ends the group's names.
 `tests/regression/test_optional_keyword_forms.py`.
+
+# See Also
+
+* [lexer.md](lexer.md) — upstream tokenisation, `TokenType`, the lexer's
+  warnings channel and the `_lexer_fast` signature-drift guard
+* [preprocessing.md](preprocessing.md) — `normalize_fixed_format`, format
+  detection, copybook expansion and the source map
+* [ast-models.md](ast-models.md) — what `ParseResult.ast` contains
+* [analysis.md](analysis.md) — consumers of the AST
