@@ -13,8 +13,10 @@ from cobolparser.parsers.statements._utils import (
     LITERAL_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     get_parse_context,
+    is_bare_separator,
     keyword_upper,
     matches_keyword,
+    paren_depth_after,
     report_parse_error,
     skip_statement_separators,
     skip_whitespace,
@@ -60,6 +62,7 @@ class IfStatementParser(IStatementParser):
 
         # Parse condition tokens - stop at THEN or statement keyword
         condition_tokens: list[str] = []
+        paren_depth = 0
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token or not token.value:
@@ -76,6 +79,11 @@ class IfStatementParser(IStatementParser):
                 TokenType.CONTINUATION,
                 TokenType.COMMENT,
             ):
+                token_stream.consume()
+                continue
+            # A separator comma/semicolon is a space (#386): ``IF X = 1,``
+            # must not leave ``1 ,`` as the right operand.
+            if is_bare_separator(token, paren_depth):
                 token_stream.consume()
                 continue
 
@@ -104,6 +112,7 @@ class IfStatementParser(IStatementParser):
                 break
 
             # Add token to condition
+            paren_depth = paren_depth_after(token, paren_depth)
             condition_tokens.append(condition_token_text(token))
             token_stream.consume()
 

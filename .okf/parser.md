@@ -1094,6 +1094,18 @@ as unparsed. Tests: `test_environment_division_parser.py`
 (`test_separator_comma_and_semicolon_not_kept_in_names`) and
 `test_field_lineage.py` (`test_separator_after_assign_names_the_dd_port`).
 
+**Condition / expression separators (2026-10-14, issue #386):** the IF and
+PERFORM UNTIL (inline, out-of-line, VARYING) condition collectors, the
+EVALUATE subject and WHEN selector collectors, the SEARCH WHEN condition
+collector and the COMPUTE expression collector skip a
+separator comma/semicolon the way they skip NEWLINE, via
+`_utils.is_bare_separator(token, paren_depth)` / `paren_depth_after()`. Only
+outside parentheses: the comma in `FUNCTION MAX(A, B)` is kept. Before,
+`IF X = 1,` gave `right_operand == "1 ,"`, `IF X-ON;` lost its
+CONDITION_NAME shape, `EVALUATE Y;` gave subject `"Y ;"` and
+`COMPUTE Z = X + Y,` had no `expression_tree`. Tests:
+`tests/regression/test_condition_expression_separators.py`.
+
 # Statement-coverage audit (2026-09-02)
 
 Question asked of the parser: *can a PROCEDURE DIVISION statement leave the
