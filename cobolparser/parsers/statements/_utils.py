@@ -1784,7 +1784,9 @@ def _is_end_exec(token: Token) -> bool:
     )
 
 
-def collect_exec_sql_text(stream: ITokenStream, sql: bool = False) -> str:
+def collect_exec_sql_text(
+    stream: ITokenStream, sql: bool = False, quoted_text: list[str] | None = None
+) -> str:
     """Collect the raw SQL text from a token stream up to (and consuming) END-EXEC.
 
     The stream must be positioned **after** the ``EXEC SQL`` keyword pair has
@@ -1815,11 +1817,17 @@ def collect_exec_sql_text(stream: ITokenStream, sql: bool = False) -> str:
     Args:
         stream: Token stream positioned at the first SQL token after ``SQL``.
 
+        quoted_text: When given (EXEC CICS), the same text with each string
+            literal re-quoted is appended to it -- the returned text keeps its
+            historical unquoted shape, and this one tells ``PROGRAM('X')``
+            from ``PROGRAM(X)``.
+
     Returns:
         The reconstructed SQL text as a single string, without leading/trailing
         whitespace.
     """
     sql_parts: list[str] = []
+    quoted_parts: list[str] = []
     prev_was_colon = False
     prev_token: Token | None = None
     terminated = False
@@ -1884,13 +1892,21 @@ def collect_exec_sql_text(stream: ITokenStream, sql: bool = False) -> str:
                 or _is_split_relational_operator(prev_token, token)
                 or _follows_qualifier_period(prev_token, token)
             )
+            quoted = (
+                _sql_literal_text(token)
+                if token.type == TokenType.STRING_LITERAL
+                else text
+            )
             if no_space_before:
                 if sql_parts:
                     sql_parts[-1] = sql_parts[-1] + text
+                    quoted_parts[-1] = quoted_parts[-1] + quoted
                 else:
                     sql_parts.append(text)
+                    quoted_parts.append(quoted)
             else:
                 sql_parts.append(text)
+                quoted_parts.append(quoted)
             prev_was_colon = token.type == TokenType.COLON
             prev_token = token
         stream.consume()
@@ -1905,6 +1921,8 @@ def collect_exec_sql_text(stream: ITokenStream, sql: bool = False) -> str:
                 token_location(first_token),
             )
 
+    if quoted_text is not None:
+        quoted_text.append(" ".join(quoted_parts))
     return " ".join(sql_parts)
 
 

@@ -28,6 +28,27 @@ _CONFIGURATION_PARAGRAPHS: frozenset[str] = frozenset(
 _SPECIAL_NAMES_CLAUSES: frozenset[str] = frozenset(
     {"CURRENCY", "DECIMAL-POINT", "CLASS", "ALPHABET", "SYMBOLIC", "XML-SCHEMA"}
 )
+# IBM Enterprise COBOL's environment-names. ``IS`` in ``environment-name IS
+# mnemonic-name`` is optional (not underlined in the IBM or COBOL-85
+# diagrams), and without it the only way to tell where a mnemonic entry starts
+# is to know the environment-names: ``C01 TOP-PAGE C02 P2``.
+_ENVIRONMENT_NAMES: frozenset[str] = frozenset(
+    {f"C{n:02d}" for n in range(1, 13)}
+    | {f"S{n:02d}" for n in range(1, 6)}
+    | {f"UPSI-{n}" for n in range(8)}
+    | {
+        "CSP",
+        "SYSIN",
+        "SYSIPT",
+        "SYSOUT",
+        "SYSLIST",
+        "SYSLST",
+        "SYSPUNCH",
+        "SYSPCH",
+        "CONSOLE",
+        "AFP-5A",
+    }
+)
 # Small integers lex as LEVEL_NUMBER tokens.
 _LITERAL_TYPES: frozenset[TokenType] = frozenset(
     {TokenType.STRING_LITERAL, TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER}
@@ -271,7 +292,24 @@ class ConfigurationSectionParser:
             nxt = _word(offset + 1)
             if nxt == "IS":
                 return True
-            return nxt in ("ON", "OFF") and _word(offset + 2) in ("STATUS", "IS")
+            if nxt in ("ON", "OFF") and _word(offset + 2) in ("STATUS", "IS"):
+                return True
+            # IS omitted: ``C01 TOP-PAGE``, ``UPSI-0 ON SW0-ON``. Only a known
+            # environment-name can start such an entry.
+            if token.value.upper() not in _ENVIRONMENT_NAMES:
+                return False
+            if nxt in ("ON", "OFF"):
+                return True
+            return _is_mnemonic_name(offset + 1)
+
+        def _is_mnemonic_name(offset: int = 0) -> bool:
+            # A user-defined word that can follow an environment-name with
+            # IS left out -- not a literal, a period or the next clause.
+            token = _meaningful(offset)
+            if token is None or token.type in _LITERAL_TYPES or token.value == ".":
+                return False
+            v = token.value.upper()
+            return v not in _SPECIAL_NAMES_CLAUSES and v not in ("IS", "ON", "OFF")
 
         def _at_clause_start() -> bool:
             if _at_para_end():
@@ -388,13 +426,19 @@ class ConfigurationSectionParser:
                 # e.g. `C01 IS TOP-OF-PAGE`, `CONSOLE IS CRT`,
                 # `UPSI-0 IS SWITCH-1 ON STATUS IS SW1-ON OFF STATUS IS SW1-OFF`,
                 # or, without a mnemonic-name, `UPSI-0 ON STATUS IS SW1-ON`.
+                # IS is optional after a known environment-name: `C01
+                # TOP-PAGE`, `UPSI-0 SW0 ON SW0-ON OFF SW0-OFF`.
                 environment_name = token.value
                 token_stream.consume()  # implementor-name
                 entry: dict[str, Any] = {"environment_name": environment_name}
                 _skip_noise()
-                if _word() == "IS":
-                    token_stream.consume()  # IS
-                    _skip_noise()
+                if _word() == "IS" or (
+                    environment_name.upper() in _ENVIRONMENT_NAMES
+                    and _is_mnemonic_name()
+                ):
+                    if _word() == "IS":
+                        token_stream.consume()  # IS
+                        _skip_noise()
                     name_tok = token_stream.peek(0)
                     entry["mnemonic_name"] = name_tok.value if name_tok else ""
                     if name_tok:
@@ -458,7 +502,8 @@ class ConfigurationSectionParser:
         alphabet-name]`` -- the n-th name takes the n-th ordinal position.
         A group is only taken when an integer follows its IS/ARE, so a
         following ``C01 IS TOP-OF-PAGE`` mnemonic clause (also ``word IS
-        ...``) is left for the caller.
+        ...``) is left for the caller. IS/ARE is optional (``SYMBOLIC NUL
+        SOH 1 2``): without it the first integer ends the group's names.
         """
         entries: list[dict[str, Any]] = []
         while True:
@@ -482,9 +527,12 @@ class ConfigurationSectionParser:
                 names.append(tok.value)
                 offset += 1
             verb = token_stream.peek(offset)
-            if not names or verb is None or verb.value.upper() not in ("IS", "ARE"):
+            if not names or verb is None:
                 break
-            offset += 1
+            if verb.value.upper() in ("IS", "ARE"):
+                offset += 1
+            elif verb.type not in _LITERAL_TYPES:
+                break
             ordinals: list[int] = []
             while True:
                 tok = token_stream.peek(offset)

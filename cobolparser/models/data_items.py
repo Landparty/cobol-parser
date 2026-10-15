@@ -1010,6 +1010,17 @@ class CobolDataItem(ASTNode):
             if isinstance(child, CobolDataItem) and child.level not in (66, 77)
         ]
 
+    @property
+    def layout_name(self) -> str:
+        """The name this entry is laid out under: FILLER for any FILLER item.
+
+        An entry written without a data-name (``05 PIC X(3).``) keeps the
+        parser's synthetic ``ANONYMOUS-<level>-<line>`` as its ``name``, but
+        it is FILLER with the word omitted, so record layouts, paths and
+        columns name it exactly as they name ``05 FILLER PIC X(3).``.
+        """
+        return "FILLER" if self.is_filler else self.name
+
     def to_dict(self) -> dict[str, Any]:
         """Convert data item to dictionary representation."""
         result = {
