@@ -1090,12 +1090,16 @@ class RecordDecoder:
             )
         return found
 
-    def _cut_by_design(self, body: bytes, rdw: bytes | None) -> bool:
-        """Whether an RDW-framed record may end mid-field: its length is one
-        the FD's ``RECORD VARYING FROM n TO m`` range permits."""
+    def _cut_by_design(self, body: bytes, length_framed: bool) -> bool:
+        """Whether a record may end mid-field: the file says where it ends
+        (*length_framed* -- an RDW, or a record separator), and its length
+        is one a per-record ``RECORD VARYING FROM n TO m ... DEPENDING ON``
+        range permits.  A range without ``DEPENDING ON`` bounds the file,
+        not each record, so its records never end inside a field."""
         return (
-            rdw is not None
+            length_framed
             and self.varying is not None
+            and self.varying.per_record
             and self.varying.minimum <= len(body) <= self.varying.maximum
         )
 
@@ -1161,7 +1165,14 @@ class RecordDecoder:
                     body,
                     options,
                     trim_tables=trim_tables,
-                    cut_ok=self._cut_by_design(body, rdw),
+                    cut_ok=self._cut_by_design(
+                        body,
+                        rdw is not None
+                        or (
+                            fmt is RecordFormat.VARIABLE_BARE
+                            and bool(options.record_separator)
+                        ),
+                    ),
                 )
                 record_errors: list[str] = []
                 if rdw is not None:

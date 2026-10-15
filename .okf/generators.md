@@ -916,10 +916,14 @@ row); a record cut mid-field comes back `truncated=True` **with an `error`**
 (`"3 of 4 bytes: record ends inside the field"`, #358, 2026-10-14), so it
 counts in `error_count` and fails `decode --strict`: text keeps the characters
 that were there, every other value is `""` (three of `PIC 9(4)`'s digits,
-`001`, are not the value `1`). The one exemption is an RDW-framed record of
-an FD `RECORD VARYING FROM n TO m` decoder whose body length is inside
-`n..m` -- it ends mid-field by design (`decode_record(cut_ok=True)`, via
-`RecordDecoder._cut_by_design`), still flagged `truncated`, no error. Bytes left after the last whole record are `DecodeResult.trailing`
+`001`, are not the value `1`). The one exemption is a record whose end the
+file states -- an RDW, or a `variable-bare` record separator -- read through
+a per-record range (`VaryingLength.per_record`: `RECORD VARYING ... DEPENDING
+ON`, or an explicit `record_varying`) with its body length inside `n..m`: it
+ends mid-field by design (`decode_record(cut_ok=True)`, via
+`RecordDecoder._cut_by_design`), still flagged `truncated`, no error. A range
+without `DEPENDING ON` bounds the file, not each record, so a cut there is
+still an error. Bytes left after the last whole record are `DecodeResult.trailing`
 — never dropped silently, because a tail that is not a whole record almost
 always means the record length is wrong. `max_records`/`skip` page a large
 file, and a run stopped by `max_records` reports `trailing == b""` rather
