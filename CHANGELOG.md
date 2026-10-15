@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`dead-code` no longer reports the `EXEC SQL WHENEVER ... GO TO` handler
+  as dead** (#349). `WHENEVER SQLERROR | SQLWARNING | NOT FOUND GO TO p`
+  (also `GOTO`, `:p`) now makes `p` a GO TO target of every executable SQL
+  statement the directive covers in source order, until a later WHENEVER for
+  the same condition (or `CONTINUE`) replaces it, so `lint` and `health`
+  stop reporting it too. The branch comes from the covered statement, not
+  the directive, so a handler set up in a never-performed paragraph is still
+  live when the SQL it covers runs. Program flow gains a matching
+  `SQL_WHENEVER` edge (GO TO-shaped, one per procedure holding covered SQL).
+
 * **`scan --clones`: a shared PROCEDURE DIVISION copybook is no longer
   reported as a clone of itself** (#352). Paragraphs expanded from the same
   copybook line are one source included by several programs, not copy-paste,

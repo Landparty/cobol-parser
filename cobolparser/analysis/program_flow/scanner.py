@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from ...models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
+from ...models.sql_statements import ExecSQLStatement
 from ...models.statements.base import CobolExpression
 from ...models.statements.call import CallStatement, EntryStatement
 from ...models.statements.control import (
@@ -569,6 +570,8 @@ class ProcedureScanner:
                     node.has_cics_exit = True
                     self._exit_points.add(proc_name)
                     self._record_exit_statement(node, cics_exit, stmt.location)
+            elif isinstance(stmt, ExecSQLStatement):
+                self._collector.process_sql_whenever(stmt, proc_name)
             elif isinstance(stmt, AlterStatement):
                 self._collector.process_alter(stmt, source_id)
             elif isinstance(stmt, CancelStatement):

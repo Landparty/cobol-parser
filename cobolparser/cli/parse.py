@@ -2495,7 +2495,11 @@ def _build_scan_parser(subparsers: argparse._SubParsersAction) -> None:
         type=int,
         default=2,
         metavar="N",
-        help="Smallest cross-file clone group to report with --clones. Default: 2.",
+        help=(
+            "Fewest distinct copies a cross-file clone group needs to be "
+            "reported with --clones; one copybook paragraph included by "
+            "several programs counts once. Default: 2."
+        ),
     )
     p.add_argument(
         "--workers",

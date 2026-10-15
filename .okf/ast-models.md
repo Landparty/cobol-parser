@@ -680,7 +680,8 @@ pass and the CLI's `--program NAME` (see [cli.md](cli.md)). Pinned by
 * `DeclareTableStatement.table_name` is `"SCHEMA.TABLE"` for a qualified
   declaration.
 * Flow model: `FlowEdgeType.XML_PROCESSING_PROCEDURE[_THRU]`,
-  `FlowEdgeType.CICS_HANDLE`; `FlowNode.is_declarative`.
+  `FlowEdgeType.CICS_HANDLE`, `FlowEdgeType.SQL_WHENEVER` (#349);
+  `FlowNode.is_declarative`.
 
 # `ConditionNameItem.false_value`, `InitializeStatement.to_value_category` / `.to_default` (2026-09-28)
 
