@@ -14,16 +14,22 @@ Needs the ``[mcp]`` extra: ``pip install 'cobol-parser[mcp]'``.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from typing import Annotated, Any
 
+import anyio.from_thread
 import anyio.to_thread
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from .tools import CobolTools
 from .workspace import Workspace
+
+#: FastMCP finds the parameter to inject the request context into by a bare
+#: ``Context`` annotation; ``Context[...]`` would be taken for an argument.
+MCPContext = Context
 
 INSTRUCTIONS = """\
 Tools for answering questions about COBOL source with an exact parser,
@@ -92,11 +98,17 @@ def build_server(workspace: Workspace) -> FastMCP:
     tools = CobolTools(workspace)
     server = FastMCP("cobol-parser", instructions=INSTRUCTIONS, log_level="WARNING")
 
-    async def off_loop(call: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    async def off_loop(
+        call: Callable[[], dict[str, Any]], ctx: MCPContext | None = None
+    ) -> dict[str, Any]:
         def locked() -> dict[str, Any]:
             # The parse cache and the stdout redirect are process-wide.
             with workspace.lock:
-                return call()
+                workspace.progress = _progress_reporter(ctx) if ctx else None
+                try:
+                    return call()
+                finally:
+                    workspace.progress = None
 
         # A cancelled request answers at once; its thread finishes on its
         # own and only then releases the lock to the next call.
@@ -185,6 +197,7 @@ def build_server(workspace: Workspace) -> FastMCP:
         ] = None,
         program: Program = None,
         limit: Limit = None,
+        ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
         """Who transfers control to a paragraph or section: every PERFORM,
         PERFORM THRU range, GO TO, SORT/MERGE procedure, CICS HANDLE, SQL
@@ -192,7 +205,7 @@ def build_server(workspace: Workspace) -> FastMCP:
         paragraph is reachable at all. For a program, every CALL, EXEC CICS
         LINK and XCTL to it from any program under the root (dynamic CALLs
         included where their target can be traced)."""
-        return await off_loop(lambda: tools.callers_of(file, name, program, limit))
+        return await off_loop(lambda: tools.callers_of(file, name, program, limit), ctx)
 
     async def record_layout(
         file: File,
@@ -225,6 +238,7 @@ def build_server(workspace: Workspace) -> FastMCP:
         program: Program = None,
         depth: Depth = None,
         limit: Limit = None,
+        ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
         """What a change reaches. For a copybook member: every program that
         COPYs it, directly or through another member, with the COPY lines,
@@ -233,7 +247,7 @@ def build_server(workspace: Workspace) -> FastMCP:
         JCL under the root), CALL arguments and DB2 columns, each with the
         path of statements that carries it."""
         return await off_loop(
-            lambda: tools.impact_of_change(name, file, program, depth, limit)
+            lambda: tools.impact_of_change(name, file, program, depth, limit), ctx
         )
 
     async def where_from(
@@ -244,22 +258,25 @@ def build_server(workspace: Workspace) -> FastMCP:
         program: Program = None,
         depth: Depth = None,
         limit: Limit = None,
+        ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
         """Where a field's value comes from, across programs: every field,
         file, dataset, DB2 column or CALL argument that flows into it, each
         with the path of statements that carries it."""
         return await off_loop(
-            lambda: tools.where_from(field, file, program, depth, limit)
+            lambda: tools.where_from(field, file, program, depth, limit), ctx
         )
 
-    async def codebase_overview(limit: Limit = None) -> dict[str, Any]:
+    async def codebase_overview(
+        limit: Limit = None, ctx: MCPContext | None = None
+    ) -> dict[str, Any]:
         """The whole workspace on one page: every program with its health
         grade and how many programs it calls and is called by; the call
         graph's entry programs, most-called programs, programs called but
         not present, and call cycles; the most-used and missing copybooks;
         the worst health scores; and paragraphs duplicated between programs.
         Start here for a codebase you do not know."""
-        return await off_loop(lambda: tools.codebase_overview(limit))
+        return await off_loop(lambda: tools.codebase_overview(limit), ctx)
 
     for tool in (
         codebase_overview,
@@ -274,6 +291,28 @@ def build_server(workspace: Workspace) -> FastMCP:
     ):
         server.add_tool(tool, annotations=_READ_ONLY, structured_output=True)
     return server
+
+
+#: Seconds between two progress notifications while an index is built.
+PROGRESS_INTERVAL = 1.0
+
+
+def _progress_reporter(
+    ctx: MCPContext,
+) -> Callable[[float, float | None, str], None]:
+    """A reporter the worker thread calls, forwarding to *ctx* on the event
+    loop at most once a :data:`PROGRESS_INTERVAL`. Without a progress token
+    from the client, ``report_progress`` sends nothing."""
+    last = [0.0]
+
+    def report(done: float, total: float | None, message: str) -> None:
+        now = time.monotonic()
+        if now - last[0] < PROGRESS_INTERVAL:
+            return
+        last[0] = now
+        anyio.from_thread.run(ctx.report_progress, done, total, message)
+
+    return report
 
 
 def run_stdio(workspace: Workspace) -> None:

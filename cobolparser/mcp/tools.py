@@ -846,24 +846,54 @@ class CobolTools:
                     ),
                 }
             )
-        files = {p.program_id: self.workspace.display(p.path) for p in graph.programs}
+        # One PROGRAM-ID can be declared in several files: keep every file,
+        # so the COPY sites of one are never shown under the other.
+        files: dict[str, list[str]] = {}
+        for node in graph.programs:
+            shown = self.workspace.display(node.path)
+            if shown not in files.setdefault(node.program_id, []):
+                files[node.program_id].append(shown)
+
+        def declared(program_id: str) -> list[str | None]:
+            return [*files.get(program_id, [])] or [None]
+
+        sites_by_file: dict[str, list[dict[str, Any]]] = {}
+        for site in index.copy_sites.get(member, []):
+            sites_by_file.setdefault(site["file"], []).append(
+                {"file": site["file"], "line": site["line"]}
+            )
         direct = []
         for program_id in report.direct_programs:
-            file = files.get(program_id)
-            sites = [
-                {"file": s["file"], "line": s["line"]}
-                for s in index.copy_sites.get(member, [])
-                if s["file"] == file
-            ]
-            direct.append({"program": program_id, "file": file, "copy_sites": sites})
+            declared_in = declared(program_id)
+            for file in declared_in:
+                sites = sites_by_file.get(file or "", [])
+                if len(declared_in) > 1 and not sites:
+                    continue
+                direct.append(
+                    {"program": program_id, "file": file, "copy_sites": sites}
+                )
         through: dict[str, list[list[str]]] = {}
         for chain in report.chains:
             if chain and chain[0] in report.transitive_programs:
                 through.setdefault(chain[0], []).append(chain)
         nested = [
-            {"program": p, "file": files.get(p), "chains": through.get(p, [])}
+            {"program": p, "file": file, "chains": through.get(p, [])}
             for p in report.transitive_programs
+            for file in declared(p)
         ]
+        duplicated = sorted(
+            p
+            for p in {*report.direct_programs, *report.transitive_programs}
+            if len(files.get(p, [])) > 1
+        )
+        for program_id in duplicated:
+            response.caveat(
+                "duplicate-declaration",
+                f"PROGRAM-ID {program_id} is declared in "
+                f"{', '.join(files[program_id])}",
+                "each file is listed on its own; a program name alone does not "
+                "say which one runs",
+            )
         _notes(
             response,
             "incomplete-analysis",
@@ -905,6 +935,7 @@ class CobolTools:
         response = Response()
         program_info = None
         programs: list[str] | None = None
+        parsed: ParsedProgram | None = None
         if file is not None:
             parsed = self.workspace.program(file)
             program_info = parsed.program_info()
@@ -925,18 +956,22 @@ class CobolTools:
                     continue
                 for item in data.get("items") or []:
                     names.add(str(item.get("qualified_name", "")).split(".")[-1])
-            return response.build(
-                {
-                    "field": wanted,
-                    "kind": "field",
-                    "direction": direction,
-                    "found": False,
-                    "suggestions": difflib.get_close_matches(
-                        wanted.split(" OF ")[0], sorted(names), n=5
-                    ),
-                },
-                program_info,
-            )
+            missing: dict[str, Any] = {
+                "field": wanted,
+                "kind": "field",
+                "direction": direction,
+                "found": False,
+                "suggestions": difflib.get_close_matches(
+                    wanted.split(" OF ")[0], sorted(names), n=5
+                ),
+            }
+            if direction == "forward" and self._is_member(wanted, parsed):
+                missing["hint"] = (
+                    f"{wanted} is a copybook member, not a field: ask "
+                    "impact_of_change with it and no file for the programs "
+                    "that copy it"
+                )
+            return response.build(missing, program_info)
 
         hits = [_hit(hit, index, self.workspace, response) for hit in result.hits]
         reached = set(result.programs) | {p.upper() for p in programs or []}
@@ -990,6 +1025,21 @@ class CobolTools:
         }
         return response.build(answer, program_info)
 
+    def _is_member(self, name: str, parsed: ParsedProgram | None) -> bool:
+        """Whether *name* is a copybook member: one *parsed* expanded, or one
+        the programs index (only when already built) saw a COPY name."""
+        from ..analysis.codebase import _normalize_member
+
+        member = _normalize_member(name)
+        if not member or " " in member:
+            return False
+        if parsed is not None and parsed.source_map:
+            expanded = {Path(f).stem.upper() for f, _ in parsed.source_map.values()}
+            if member in expanded - {parsed.path.stem.upper()}:
+                return True
+        built = self.workspace.built_index("programs")
+        return built is not None and member in built.graph.members
+
     # -- codebase_overview ---------------------------------------------------
 
     def codebase_overview(self, limit: int | None = None) -> dict[str, Any]:
@@ -1011,8 +1061,10 @@ class CobolTools:
 
         grades = {(u["program"] or "", u["file"]): u for u in health.units}
         callers_of: dict[str, set[str]] = {}
+        callees_of: dict[str, set[str]] = {}
         for edge in graph.call_edges:
             callers_of.setdefault(edge.callee, set()).add(edge.caller)
+            callees_of.setdefault(edge.caller, set()).add(edge.callee)
         programs = []
         for unit in index.units:
             pid = unit.program_id.upper()
@@ -1022,7 +1074,9 @@ class CobolTools:
                 "file": unit.file,
                 "grade": graded.get("grade"),
                 "score": graded.get("score"),
-                "calls": len({str(r.get("program") or "").upper() for r in unit.calls}),
+                # From the graph, like called_by: a dynamic CALL counts its
+                # resolved targets, not the data name it calls through.
+                "calls": len(callees_of.get(pid, set())),
                 "called_by": len(callers_of.get(pid, set())),
             }
             if unit.depth:
@@ -1266,15 +1320,22 @@ def _calls(
         if command not in ("LINK", "XCTL") or not linked:
             continue
         literal = "PROGRAM" in cics.literal_options
-        row = rows.setdefault(
-            (linked.upper(), command),
-            {
+        row = rows.get((linked.upper(), command))
+        if row is None:
+            row = {
                 "program": linked,
                 "via": f"EXEC CICS {command}",
                 "dynamic": not literal,
                 "sites": [],
-            },
-        )
+            }
+            if not literal:
+                if tracker is None:
+                    tracker = DynamicCallAnalyzer()
+                    tracker.analyze(unit)
+                values, incomplete = tracker.resolve_variable(linked)
+                row["candidates"] = values
+                row["candidates_complete"] = bool(values) and not incomplete
+            rows[(linked.upper(), command)] = row
         row["sites"].append(
             {"location": parsed.locate(cics.location.line, None, response)}
         )

@@ -229,6 +229,10 @@ class Workspace:
         self._allowed: list[Path] = [self.root]
         #: Cross-program indexes by name: (value, stamps of what it read).
         self._indexes: dict[str, tuple[Any, dict[str, Stamp]]] = {}
+        #: Told ``(done, total, message)`` while a root-wide index is built,
+        #: so a client sees the first cross-program call is alive. Set by the
+        #: server around one call; None when nobody listens.
+        self.progress: Callable[[float, float | None, str], None] | None = None
         if config is not None:
             self._use_config(config)
         else:
@@ -377,21 +381,27 @@ class Workspace:
             (e if e.startswith(".") else f".{e}").lower()
             for e in (self.config.extensions or DEFAULT_PROGRAM_EXTENSIONS)
         }
-        return [
-            Path(directory, name).resolve()
-            for directory, names in self._walk()
-            for name in names
-            if Path(name).suffix.lower() in wanted
-        ]
+        return self._files_with_suffix(wanted)
 
     def files_named(self, suffixes: tuple[str, ...]) -> list[Path]:
         """Files under the root whose suffix is one of *suffixes*, sorted."""
-        return [
-            Path(directory, name).resolve()
-            for directory, names in self._walk()
-            for name in names
-            if Path(name).suffix.lower() in suffixes
-        ]
+        return self._files_with_suffix(set(suffixes))
+
+    def _files_with_suffix(self, suffixes: set[str]) -> list[Path]:
+        # A symlink to a file outside the guard is skipped, exactly as
+        # resolve() would refuse it when a client named it.
+        found: list[Path] = []
+        for directory, names in self._walk():
+            for name in names:
+                if Path(name).suffix.lower() not in suffixes:
+                    continue
+                try:
+                    path = Path(directory, name).resolve()
+                except (OSError, RuntimeError):
+                    continue
+                if self._within(path):
+                    found.append(path)
+        return found
 
     def tree_stamps(self) -> dict[str, Stamp]:
         """The stamp of every directory under the root: a file added to or
@@ -420,6 +430,22 @@ class Workspace:
             value, stamps = build()
         self._indexes[name] = (value, stamps)
         return value
+
+    def report_progress(self, done: float, total: float | None, message: str) -> None:
+        """Pass progress to whoever listens; a listener that fails (a client
+        gone, a closed loop) never fails the work it reports on."""
+        if self.progress is None:
+            return
+        try:
+            self.progress(done, total, message)
+        except Exception:  # noqa: BLE001 -- progress is best-effort
+            self.progress = None
+
+    def built_index(self, name: str) -> Any:
+        """The index *name* as last built, or None when it never was; never
+        builds, and may be stale (for hints, not answers)."""
+        held = self._indexes.get(name)
+        return None if held is None else held[0]
 
     def _copybook_directories(self) -> list[str]:
         directories: list[str] = []

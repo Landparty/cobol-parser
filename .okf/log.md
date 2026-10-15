@@ -14,6 +14,15 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-15 -- MCP server, Phase 3 review fixes
+
+[mcp.md](mcp.md): the index walk keeps symlinks out of the root out; a
+dynamic `EXEC CICS LINK/XCTL PROGRAM(var)` gets candidates like a dynamic
+CALL; `codebase_overview`'s `calls` counts graph targets; copybook impact
+keeps every file of a duplicated PROGRAM-ID; a member asked about as a field
+gets a `hint`; index builds send MCP progress. [analysis/lineage.md](analysis/lineage.md):
+the duplicate PROGRAM-ID caveat is only returned to queries that reach it.
+
 ## 2026-10-15 -- MCP server, Phase 3
 
 [mcp.md](mcp.md) gains the cross-program tools (`codebase_overview`,

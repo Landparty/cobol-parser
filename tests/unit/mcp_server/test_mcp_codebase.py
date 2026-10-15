@@ -76,6 +76,18 @@ USESREC = """\
            STOP RUN.
 """
 
+CICSDYN = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CICSDYN.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-PGM               PIC X(8) VALUE 'SUBPROG'.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           EXEC CICS LINK PROGRAM(WS-PGM) END-EXEC
+           EXEC CICS RETURN END-EXEC.
+"""
+
 
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
@@ -178,8 +190,48 @@ class TestIndexes:
         lineage_index(ws)
         assert set(ws._indexes) == {"health", "lineage"}
 
+    # -- callers_of at program level -------------------------------------------------
 
-# -- callers_of at program level -------------------------------------------------
+    def test_a_symlink_out_of_the_root_is_not_indexed(self, tmp_path: Path) -> None:
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "SECRET.cbl").write_text(DYNAMIC.replace("DYNCALL", "SECRET"))
+        (outside / "SECRET.jcl").write_text("//SECRET JOB\n")
+        inside = tmp_path / "root"
+        inside.mkdir()
+        (inside / "DYNCALL.cbl").write_text(DYNAMIC)
+        (inside / "LINKED.cbl").symlink_to(outside / "SECRET.cbl")
+        (inside / "LINKED.jcl").symlink_to(outside / "SECRET.jcl")
+        ws = workspace(inside)
+        assert [p.name for p in ws.program_files()] == ["DYNCALL.cbl"]
+        assert ws.files_named((".jcl",)) == []
+        answer = CobolTools(ws).codebase_overview()["answer"]
+        assert [r["program"] for r in answer["programs"]] == ["DYNCALL"]
+
+    def test_a_symlink_inside_the_root_is_indexed(self, tmp_path: Path) -> None:
+        (tmp_path / "real").mkdir()
+        (tmp_path / "real" / "DYNCALL.cbl").write_text(DYNAMIC)
+        (tmp_path / "ALIAS.cbl").symlink_to(tmp_path / "real" / "DYNCALL.cbl")
+        files = workspace(tmp_path).program_files()
+        assert {p.name for p in files} == {"DYNCALL.cbl"}
+
+    def test_progress_is_reported_while_indexing(self, root: Path) -> None:
+        ws = workspace(root)
+        seen: list[tuple[float, float | None, str]] = []
+        ws.progress = lambda done, total, message: seen.append((done, total, message))
+        programs_index(ws)
+        assert len(seen) == 22
+        assert seen[0][:2] == (0, 22)
+        assert seen[0][2].startswith("reading ")
+
+    def test_a_failing_progress_listener_is_dropped(self, root: Path) -> None:
+        def broken(done: float, total: float | None, message: str) -> None:
+            raise RuntimeError("client gone")
+
+        ws = workspace(root)
+        ws.progress = broken
+        assert programs_index(ws).units
+        assert ws.progress is None
 
 
 class TestProgramCallers:
@@ -226,6 +278,26 @@ class TestProgramCallers:
         assert unknown["target_from"] == "WS-ANY"
         assert "incomplete-analysis" in kinds(result)
 
+    def test_a_dynamic_cics_link_is_resolved(self, root: Path) -> None:
+        (root / "CICSDYN.cbl").write_text(CICSDYN)
+        tools = CobolTools(workspace(root))
+        result = tools.callers_of(None, "SUBPROG")
+        (caller,) = [
+            c for c in result["answer"]["callers"] if c["program"] == "CICSDYN"
+        ]
+        assert caller["via"] == "EXEC CICS LINK"
+        assert caller["dynamic"] is True
+        assert caller["target_from"] == "WS-PGM"
+        assert not [
+            u
+            for u in result["answer"].get("unresolved_dynamic_calls", [])
+            if u["program"] == "CICSDYN"
+        ]
+        brief = tools.program_brief("CICSDYN.cbl")["answer"]
+        (link,) = brief["calls"]
+        assert link["candidates"] == ["SUBPROG"]
+        assert link["candidates_complete"] is True
+
     def test_a_program_id_declared_twice(self, root: Path) -> None:
         (root / "COPY2.cbl").write_text(DYNAMIC.replace("DYNCALL", "BATCHSEQ"))
         result = CobolTools(workspace(root)).callers_of(None, "BATCHSEQ")
@@ -263,6 +335,18 @@ class TestCopybookImpact:
         (through,) = answer["copied_through_other_members"]
         assert through["chains"] == [["COPYREPL", "WSCOUNTS", "WSFLAGS"]]
         assert "WS-EOF-FLAG" in answer["fields"]
+
+    def test_a_program_id_declared_twice_keeps_each_file(self, tmp_path: Path) -> None:
+        (tmp_path / "copy").mkdir()
+        (tmp_path / "copy" / "FIELDREC.cpy").write_text(FIELDREC)
+        (tmp_path / "A.cbl").write_text(USESREC)
+        (tmp_path / "B.cbl").write_text(USESREC.replace("COPY FIELDREC.", ""))
+        tools = CobolTools(workspace(tmp_path, copybook_path=(str(tmp_path / "copy"),)))
+        result = tools.impact_of_change("FIELDREC")
+        (copier,) = result["answer"]["copied_by"]
+        assert copier["file"] == "A.cbl"
+        assert [s["file"] for s in copier["copy_sites"]] == ["A.cbl"]
+        assert "duplicate-declaration" in kinds(result)
 
     def test_an_unknown_member(self, root: Path) -> None:
         answer = with_copybooks(root).impact_of_change("CUSTRECX.cpy")["answer"]
@@ -350,6 +434,30 @@ class TestFieldLineage:
         assert answer["found"] is False
         assert "WS-FEE" in answer["suggestions"]
 
+    def test_a_member_asked_as_a_field_gets_a_hint(self, root: Path) -> None:
+        answer = with_copybooks(root).impact_of_change("CUSTREC", "COPYREPL.cbl")[
+            "answer"
+        ]
+        assert answer["found"] is False
+        assert "copybook member" in answer["hint"]
+
+    def test_an_unknown_field_gets_no_member_hint(self, root: Path) -> None:
+        answer = with_copybooks(root).impact_of_change("NOSUCH", "COPYREPL.cbl")[
+            "answer"
+        ]
+        assert "hint" not in answer
+
+    def test_a_duplicate_program_caveat_only_where_it_is_reached(
+        self, lineage_root: Path
+    ) -> None:
+        (lineage_root / "DUP1.cbl").write_text(CLONE.format(name="DUPPROG"))
+        (lineage_root / "DUP2.cbl").write_text(CLONE.format(name="DUPPROG"))
+        tools = CobolTools(workspace(lineage_root))
+        unrelated = tools.impact_of_change("WS-FEE", "WRITER.cbl")
+        assert not [c for c in unrelated["caveats"] if "DUPPROG" in c["detail"]]
+        related = tools.impact_of_change("WS-A", "DUP1.cbl")
+        assert [c for c in related["caveats"] if "DUPPROG" in c["detail"]]
+
     def test_lines_inside_an_expanded_program(self, tmp_path: Path) -> None:
         (tmp_path / "copy").mkdir()
         (tmp_path / "copy" / "FIELDREC.cpy").write_text(FIELDREC)
@@ -404,6 +512,21 @@ class TestCodebaseOverview:
         for member in group["members"]:
             assert member["paragraph"] == "2000-TOTALS"
             assert "2000-TOTALS." in line_of(tmp_path, member["location"])
+
+    def test_calls_count_resolved_targets(self, tmp_path: Path) -> None:
+        (tmp_path / "DYNCALL.cbl").write_text(
+            DYNAMIC.replace(
+                "           ACCEPT WS-ANY\n           CALL WS-ANY\n",
+                "           MOVE 'OTHER' TO WS-PGM\n           CALL WS-PGM\n",
+            )
+        )
+        for name in ("SUBPROG", "OTHER"):
+            (tmp_path / f"{name}.cbl").write_text(CLONE.format(name=name))
+        answer = CobolTools(workspace(tmp_path)).codebase_overview()["answer"]
+        rows = {r["program"]: r for r in answer["programs"]}
+        assert rows["DYNCALL"]["calls"] == 2
+        assert rows["SUBPROG"]["called_by"] == 1
+        assert rows["OTHER"]["called_by"] == 1
 
     def test_limit_truncates_with_totals(self, root: Path) -> None:
         result = CobolTools(workspace(root)).codebase_overview(limit=3)

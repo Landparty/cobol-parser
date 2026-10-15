@@ -85,7 +85,11 @@ root of a few hundred programs that takes on the order of a minute. The
 index is kept and reused until a program or copybook it read changes, or a
 program is added or removed. Who-calls-what, field lineage and health are
 three separate indexes, so asking only who calls a program never pays for
-the other two.
+the other two. While an index is built the server sends MCP progress
+notifications (one per file read, at most once a second) to a client that
+asked for them, so a client that resets its timeout on progress keeps
+waiting. A symlink under the root that leads outside it is skipped, as
+`read_source` would refuse it.
 
 ## Reading an answer
 

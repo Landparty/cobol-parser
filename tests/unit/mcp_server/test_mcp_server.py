@@ -149,6 +149,38 @@ class TestServer:
         assert result.isError is True
         assert "outside the workspace" in result.content[0].text
 
+    def test_indexing_reports_progress(self) -> None:
+        pytest.importorskip("mcp")
+        from mcp.shared.memory import create_connected_server_and_client_session
+
+        from cobolparser.mcp.server import build_server
+
+        workspace = _workspace()
+        server = build_server(workspace)
+        seen: list[tuple[float, float | None, str | None]] = []
+
+        async def on_progress(
+            done: float, total: float | None, message: str | None
+        ) -> None:
+            seen.append((done, total, message))
+
+        async def run() -> Any:
+            async with create_connected_server_and_client_session(
+                server._mcp_server
+            ) as client:
+                return await client.call_tool(
+                    "codebase_overview", {}, progress_callback=on_progress
+                )
+
+        with patch("cobolparser.mcp.server.PROGRESS_INTERVAL", 0.0):
+            result = asyncio.run(run())
+        assert result.isError is False
+        assert seen
+        assert seen[0][1] == 22
+        assert str(seen[0][2]).startswith("reading ")
+        # The listener belongs to that one call.
+        assert workspace.progress is None
+
 
 class TestCli:
     def _main(self, *argv: str) -> None:

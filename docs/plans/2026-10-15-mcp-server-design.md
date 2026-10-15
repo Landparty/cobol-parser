@@ -194,7 +194,10 @@ first library feature this server would pull forward.
   `define` symbols and fails a whole expansion on one missing member, and
   its worker processes would parse with different settings than every
   other tool. The index is sequential; on 459 NIST programs with copybooks
-  the call graph takes about a minute, most of it in the COPY lexer.
+  the call graph takes about a minute, most of it in the COPY lexer. The
+  build sends MCP progress notifications per file read, so a client that
+  resets its timeout on progress keeps waiting; other calls still queue
+  behind the workspace lock until it finishes.
 - **`CodebaseGraphBuilder.build_from_results()`** (library change) lets the
   index hand the builder its own parses instead of the builder parsing every
   file again, and `CodebaseGraph.copy_sites` keeps the line of every COPY the

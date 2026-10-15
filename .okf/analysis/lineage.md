@@ -127,7 +127,8 @@ CALL argument *n* meets callee linkage *n* (and `CALLEE#RETURNING` meets
 `table-alias` edges with `confidence="candidate"`; two schemas never join.
 `NULLFILE` / `DUMMY` bindings and pass-throughs are ignored (the DD counts
 as unbound). A PROGRAM-ID seen in more than one report keeps the first and
-adds a caveat. Queries `impact(field, program, direction,
+adds a caveat, which `impact()` returns only when the query reaches that
+program. Queries `impact(field, program, direction,
 depth)`, `impact_table` (schema optional), `impact_dataset` run a 0-1 BFS
 where *depth* counts entries into a program. `key_relationships()` names
 candidate dataset/table key relationships with the program and line as

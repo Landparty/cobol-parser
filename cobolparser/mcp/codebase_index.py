@@ -139,8 +139,10 @@ def _programs(
     (recorded in ``survey.failed``). Fills *stamps* with what was read."""
     from .workspace import _stamp
 
-    for path in workspace.program_files():
+    paths = workspace.program_files()
+    for done, path in enumerate(paths):
         display = workspace.display(path)
+        workspace.report_progress(done, len(paths), f"reading {display}")
         survey.files.append(display)
         try:
             parsed = workspace.cached_or_parse(path)

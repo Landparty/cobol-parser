@@ -74,7 +74,9 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
 ## Workspace
 
 - **Guard.** `Workspace.resolve()` resolves symlinks, then refuses anything
-  not under the root or a `cobol.yml` copybook directory.
+  not under the root or a `cobol.yml` copybook directory. The index walk
+  (`program_files()`, `files_named()`) applies the same `_within()` check, so
+  a symlink out of the root is never indexed.
 - **Config.** `load_project_config(root)` unless the CLI was given
   `--config`/`--no-config` (`args._config_explicit`), which passes the
   config in and fixes it. Otherwise `refresh_config()` (run by `config` and
@@ -105,6 +107,13 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   `server.py` runs each tool through `anyio.to_thread.run_sync(...,
   abandon_on_cancel=True)` holding `Workspace.lock`, so the event loop stays
   free and calls run one at a time.
+- **Progress.** The cross-program tools take a FastMCP `Context` (annotated
+  with the bare class, `MCPContext`: `Context[...]` is not detected).
+  `off_loop` sets `Workspace.progress` for that one call; `_programs()` in
+  `codebase_index.py` reports `(done, total, "reading FILE")` per file, sent
+  through `anyio.from_thread.run(ctx.report_progress, ...)` at most once a
+  `PROGRESS_INTERVAL`. A listener that raises is dropped, never fails the
+  build.
 - **Report memo.** `ParsedProgram.report(name, unit, build)` keeps each
   analyzer report beside the parse, so `program_brief` and `callers_of`
   share one flow graph and the cache drops both together.
