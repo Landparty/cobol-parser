@@ -21,7 +21,12 @@ from ...parser import parse_cobol
 from ...preprocess import CircularReferenceError, CopybookNotFoundError
 from ...preprocess.copybook_expander import parse_cobol_with_expansion
 from .errors import ProgramLayoutError
-from .layout import FieldSpec, expand_condition_values, flatten_record
+from .layout import (
+    FieldSpec,
+    expand_condition_values,
+    flatten_record,
+    layout_segment,
+)
 from .options import DataGeneratorOptions
 
 # Canonical section name (as CobolSection.section_name reports it) -> the
@@ -521,16 +526,19 @@ class ProgramLayoutIndex:
             self._name_index.setdefault(spec.name.upper(), []).append(resolved)
             qualified_index.setdefault(spec.qualified_name, []).append(resolved)
 
-        self._index_condition_names(record, (), qualified_index)
+        self._index_condition_names(record, (), qualified_index, None)
 
     def _index_condition_names(
         self,
         item: CobolDataItem,
         path: tuple[str, ...],
         qualified_index: dict[str, list[ResolvedField]],
+        parent: CobolDataItem | None,
     ) -> None:
         """Map each level-88 condition name to its parent field's ResolvedField."""
-        item_path = (*path, item.layout_name)
+        # The same segment flatten_record() gave the field, so a FILLER that
+        # owns the 88 is found as itself, not as the group's first FILLER.
+        item_path = (*path, layout_segment(item, parent))
         qualified = ".".join(item_path)
         for child in item.children:
             if isinstance(child, ConditionNameItem):
@@ -545,7 +553,7 @@ class ProgramLayoutIndex:
                         list(child.values)
                     )
             elif isinstance(child, CobolDataItem):
-                self._index_condition_names(child, item_path, qualified_index)
+                self._index_condition_names(child, item_path, qualified_index, item)
 
     def _collect_file_facts(self, ast: CobolProgram) -> None:
         select_by_name: dict[str, SelectStatement] = {}

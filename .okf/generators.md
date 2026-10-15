@@ -1660,11 +1660,31 @@ picks exactly one record per scenario: the one holding the most of that
 scenario's pinned fields (`witnesses` + every `row_witnesses` row), the first
 in source order on a tie or with no scenario. `bundle.layouts` is keyed by the
 chosen record, so a scenario that picks the second record adds its own key.
-The records left out are reported once in `bundle.unresolved` ("alternate
-view(s) not generated: ..."); a scenario whose pins span two records gets one
-more entry naming the pins its rows cannot honour. Only `READ` boundaries are
-narrowed: an SQL boundary's several names are distinct host variables.
+`bundle.unresolved` carries one note per such READ, naming the records no
+scenario generated ("alternate view(s) not generated: ..."), computed after
+generation from the records actually used (the happy path always uses the
+first). Only `READ` boundaries are narrowed: an SQL boundary's several names
+are distinct host variables.
 Pinned by `tests/unit/test_program_fixtures.py::TestMultipleRecordsUnderOneFd`.
+
+Fields of two such records have different names but share bytes, so
+`ScenarioPlanner` (`_shared_record_areas()` / `_record_areas()`) never merges
+an arm pinning one record into a scenario pinning another, and an arm whose
+own path pins both is `missed` ("pins fields of several 01 records of one
+FD"). As a guard, a scenario that still pins two views (hand-built, or a
+future planner path) has every arm counted `missed` with that reason, the
+way a violated witness demotes (#244), since its dropped pins are never
+generated. Pinned by `TestArmsOnTwoRecordsOfOneFd` (2026-10-15).
+
+**A FILLER that owns a level-88 (2026-10-15).** `05 PIC X. 88 FLAG-ON VALUE
+'Y'.` (or `05 FILLER PIC X. 88 ...`) is a flag the program branches on.
+`ProgramFixtureGenerator` sets `DataGeneratorOptions.include_condition_filler`,
+so `flatten_record` keeps such a FILLER even with `include_filler` off (plain
+gen-data still drops it). Its path segment is `FILLER#<n>` (`layout_segment()`,
+*n* its 1-based position among its group's FILLERs), so two flag FILLERs in
+one group have distinct qualified names, witnesses and columns, and
+`ProgramLayoutIndex` maps each 88 to its own FILLER rather than the group's
+first. Plain FILLERs keep `FILLER`. Pinned by `TestFillerOwningConditionName`.
 
 ## Determinism: per-boundary sub-seeds
 

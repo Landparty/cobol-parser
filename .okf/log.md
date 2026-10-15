@@ -52,6 +52,15 @@ Area B are never read as a paragraph header swallowed by a missing period.
 `operands`/`clause_items`, leaving `processing_procedure_thru` None, so
 dead-code, program-flow and lint reported the handler range dead. An `IS`
 on its own line was read as the procedure name the same way.
+## 2026-10-15 -- gen-fixtures follow-ups to #364 and #404
+
+[generators.md](generators.md): the scenario planner no longer merges arms
+on two 01 records of one FD (only one view is generated per scenario, so the
+second record's arm was lost while coverage counted it merged); an arm whose
+own path pins both is missed, and a scenario that still drops pins has its
+arms demoted. The "alternate view(s) not generated" note names only records
+no scenario used. A FILLER that owns a level-88 keeps its gen-fixtures column
+under the path segment `FILLER#<n>`, so its branch witness is generated.
 
 ## 2026-10-14 -- issue #404: an unnamed data entry is FILLER
 
