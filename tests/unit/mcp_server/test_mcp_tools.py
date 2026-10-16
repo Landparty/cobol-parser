@@ -10,7 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from cobolparser.config.project import LintDefaults, ProjectConfig
+from cobolparser.config.project import (
+    LintDefaults,
+    ProjectConfig,
+    load_project_config,
+)
 from cobolparser.mcp import CAVEAT_KINDS, CobolTools, ToolError, Workspace
 from cobolparser.mcp.envelope import (
     DEFAULT_LIMIT,
@@ -139,6 +143,127 @@ class TestWorkspaceGuard:
         assert ws.resolve(str(books / "A.cpy")) == (books / "A.cpy").resolve()
         assert ws.display(books / "A.cpy") == (books / "A.cpy").resolve().as_posix()
 
+
+class TestConfigCannotWidenTheGuard:
+    """#544: a ``cobol.yml`` in the analysed tree, or above it, must not turn
+    ``read_source`` into a read-anything tool."""
+
+    @pytest.fixture
+    def secret(self, tmp_path: Path) -> Path:
+        path = tmp_path / "secret.txt"
+        path.write_text("secret=hunter2\n")
+        return path
+
+    def test_copybook_path_slash_reads_nothing_outside(
+        self, root: Path, secret: Path
+    ) -> None:
+        (root / "cobol.yml").write_text(
+            "version: 1\nproject:\n  copybook_path:\n    - /\n"
+        )
+        ws = Workspace(root)
+        tools = CobolTools(ws)
+        targets = [str(secret), "../secret.txt"]
+        if Path("/etc/passwd").is_file():
+            targets.append("/etc/passwd")
+        for target in targets:
+            with pytest.raises(ToolError, match="outside the workspace"):
+                tools.read_source(target, 1, 0, 0)
+        assert ws.refused_copybook_dirs == ("/",)
+        assert ws.config.copybook_path == ()
+        # The root itself still answers.
+        assert tools.read_source("BATCHSEQ.cbl", 1, 0, 0)["answer"]["lines"]
+
+    def test_copybook_path_above_the_root_is_dropped(
+        self, root: Path, secret: Path
+    ) -> None:
+        (root / "cobol.yml").write_text(
+            'version: 1\nproject:\n  copybook_path: ["..", copybooks]\n'
+        )
+        ws = Workspace(root)
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve("../secret.txt")
+        # A directory under the root is kept.
+        assert ws.config.copybook_path == (str((root / "copybooks").resolve()),)
+        refused = [Path(p).resolve() for p in ws.refused_copybook_dirs]
+        assert refused == [root.parent.resolve()]
+
+    def test_a_cobol_yml_in_a_parent_is_ignored(self, root: Path, secret: Path) -> None:
+        (root.parent / "cobol.yml").write_text(
+            'version: 1\nproject:\n  copybook_path: [".."]\n'
+        )
+        ws = Workspace(root)
+        assert ws.config.source is None
+        assert ws.config.copybook_path == ()
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve("../secret.txt")
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve("../../secret.txt")
+
+    def test_allow_lets_an_outside_copybook_directory_in(
+        self, root: Path, tmp_path: Path, secret: Path
+    ) -> None:
+        books = tmp_path / "books"
+        shutil.move(str(root / "copybooks"), books)
+        (root / "cobol.yml").write_text(
+            f"version: 1\nproject:\n  copybook_path: [{books}]\n"
+        )
+        ws = Workspace(root, allow=[books])
+        assert ws.refused_copybook_dirs == ()
+        assert ws.resolve(str(books / "CUSTREC.cpy"))
+        result = CobolTools(ws).explain_symbol("COPYREPL.cbl", "CUST-ID")
+        assert result["answer"]["symbols"][0]["declared"] is True
+        # --allow covers the copybook directory, not its parent.
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve(str(secret))
+
+    def test_allow_must_be_a_directory(self, root: Path, tmp_path: Path) -> None:
+        with pytest.raises(ToolError, match="--allow"):
+            Workspace(root, allow=[tmp_path / "missing"])
+
+    def test_a_dropped_directory_is_named_in_the_copy_caveat(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        books = tmp_path / "books"
+        shutil.move(str(root / "copybooks"), books)
+        (root / "cobol.yml").write_text(
+            f"version: 1\nproject:\n  copybook_path: [{books}]\n"
+        )
+        result = CobolTools(Workspace(root)).explain_symbol("COPYREPL.cbl", "CUST-ID")
+        details = [
+            c["detail"] for c in result["caveats"] if c["kind"] == "unresolved-copybook"
+        ]
+        assert any(
+            "outside the workspace root" in d and str(books) in d for d in details
+        )
+        # A program with no COPY at all is not told about it.
+        plain = CobolTools(Workspace(root)).lint("BATCHSEQ.cbl")
+        assert not any(
+            "outside the workspace root" in c["detail"] for c in plain["caveats"]
+        )
+
+    def test_a_config_file_outside_the_root_is_trusted(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        books = tmp_path / "books"
+        shutil.move(str(root / "copybooks"), books)
+        operator = tmp_path / "operator.yml"
+        operator.write_text(f"version: 1\nproject:\n  copybook_path: [{books}]\n")
+        ws = Workspace(root, load_project_config(path=operator))
+        assert ws.refused_copybook_dirs == ()
+        assert ws.resolve(str(books / "CUSTREC.cpy"))
+
+    def test_a_config_file_inside_the_root_is_not_trusted(
+        self, root: Path, secret: Path
+    ) -> None:
+        inside = root / "custom.yml"
+        inside.write_text("version: 1\nproject:\n  copybook_path: [/]\n")
+        ws = Workspace(root, load_project_config(path=inside))
+        assert ws.refused_copybook_dirs == ("/",)
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve(str(secret))
+
+
+class TestWorkspaceFiles:
     def test_missing_and_empty(self, root: Path) -> None:
         ws = Workspace(root, ProjectConfig())
         with pytest.raises(ToolError, match="not found"):

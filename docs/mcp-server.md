@@ -40,15 +40,46 @@ Any client that takes a JSON server list (Claude desktop's
 | Flag | Default | Meaning |
 |---|---|---|
 | `--root DIR` | `.` | The directory the server answers about. Paths outside it, and outside its copybook directories, are refused. |
+| `--allow DIR` | none | Repeatable. Lets a `cobol.yml` copybook directory that lies under `DIR`, outside the root, be searched and read. See [What the server can read](#what-the-server-can-read). |
 | `--cache-size N` | 32 | Parsed programs kept in memory. A program is parsed again when it, a copybook it expanded, or a copybook directory changes on disk (so a member added after a "COPY not expanded" caveat is picked up). |
-| `--config FILE` / `--no-config` | search from `--root` | Which `cobol.yml` to use. |
+| `--config FILE` / `--no-config` | `cobol.yml` in `--root` | Which `cobol.yml` to use. |
 
 Copybook directories, source format and `>>DEFINE` symbols come from the
-project's [`cobol.yml`](project-config.md), found from `--root` the same way
-the CLI finds it. An edit to it takes effect on the next call, with no
+project's [`cobol.yml`](project-config.md) (or `cobol.yaml`) in `--root`.
+Unlike the CLI, the server does not look for one in the directories above
+the root. An edit to it takes effect on the next call, with no
 restart (unless `--config` or `--no-config` was given). Without copybook
 paths, every `COPY` is left unexpanded and each answer says so; a member that
 cannot be found is left unexpanded and named, while the others still expand.
+
+## What the server can read
+
+The server is meant for agents reading code they did not write, where a
+comment in the source can ask the agent to "check `~/.ssh/id_rsa`". So the
+boundary is set by whoever starts the server, never by a file in the tree it
+analyses:
+
+- A path is readable only if, with symlinks resolved, it lies under `--root`
+  or under one of the copybook directories the server kept. Everything else
+  is refused, `../` and absolute paths included.
+- `cobol.yml` is read from `--root` only; one in a parent directory is
+  ignored.
+- A copybook directory that `cobol.yml` names under the root is used as is.
+  One outside the root (a shared copy library, or `/`) is dropped: it is not
+  searched for COPY members and its files are not readable. The server
+  prints a warning on stderr for each, and a program with an unexpanded COPY
+  carries an `unresolved-copybook` caveat naming the dropped directories.
+- To use a shared library outside the root, allow it: `--allow
+  /shared/copylib` keeps every `cobol.yml` copybook directory at or under
+  `/shared/copylib`. Only those copybook directories become readable, not
+  the whole of `DIR`.
+- `--config FILE` is the operator's own choice. When `FILE` lies outside
+  `--root`, its copybook directories are trusted as written, with no
+  `--allow` needed. When `FILE` lies inside `--root`, it is content of the
+  analysed tree and is held to the same rule as a `cobol.yml` found there.
+- A `ProjectConfig` passed to `Workspace` from Python is likewise the
+  caller's choice and trusted; `Workspace(root, allow=[...])` is the
+  equivalent of `--allow`.
 
 ## Tools
 
@@ -139,7 +170,7 @@ script can call them directly and get the same dicts:
 ```python
 from cobolparser.mcp import CobolTools, Workspace
 
-tools = CobolTools(Workspace("/path/to/checkout"))
+tools = CobolTools(Workspace("/path/to/checkout"))  # allow=[...] as --allow
 tools.explain_symbol("src/ACCTUPD.cbl", "CUST-BAL")
 ```
 

@@ -210,6 +210,28 @@ class TestCli:
             self._main("--no-config", "mcp", "--root", str(tmp_path))
         assert served[0].config.source is None
 
+    def test_outside_copybook_dir_needs_allow(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        pytest.importorskip("mcp")
+        root = tmp_path / "repo"
+        books = tmp_path / "books"
+        root.mkdir()
+        books.mkdir()
+        (root / "cobol.yml").write_text(
+            f"version: 1\nproject:\n  copybook_path: [{books}]\n"
+        )
+        served: list[Workspace] = []
+        with patch("cobolparser.mcp.server.run_stdio", served.append):
+            self._main("mcp", "--root", str(root))
+            self._main("mcp", "--root", str(root), "--allow", str(books))
+        refused, allowed = served
+        assert refused.config.copybook_path == ()
+        assert allowed.config.copybook_path == (str(books),)
+        err = capsys.readouterr().err
+        assert err.count("is outside --root") == 1
+        assert str(books) in err
+
     def test_bad_root(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         pytest.importorskip("mcp")
         with pytest.raises(SystemExit) as exc:

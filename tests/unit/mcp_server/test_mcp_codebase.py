@@ -173,7 +173,9 @@ class TestIndexes:
     def test_a_config_change_drops_the_indexes(self, root: Path) -> None:
         ws = workspace(root)
         first = programs_index(ws)
-        ws._use_config(ProjectConfig(copybook_path=(str(root / "copybooks"),)))
+        ws._use_config(
+            ProjectConfig(copybook_path=(str(root / "copybooks"),)), trusted=True
+        )
         assert programs_index(ws) is not first
 
     def test_an_unreadable_program_is_named(self, root: Path) -> None:

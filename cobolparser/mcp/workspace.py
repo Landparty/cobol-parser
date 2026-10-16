@@ -5,9 +5,16 @@ Three jobs, each the reason a tool can stay a thin question over an analyzer:
 * **The guard.** Every path a client names is resolved (symlinks included)
   and refused unless it lies under the workspace root or one of the
   ``cobol.yml`` copybook directories. A model passing ``../../etc/passwd``
-  gets an error, not a file.
-* **The config.** ``cobol.yml`` is found from the root the way the CLI finds
-  it, so copybook paths, source format and ``>>DEFINE`` symbols are the ones
+  gets an error, not a file. A file in the analysed tree must not be able
+  to move that boundary, so a copybook directory a ``cobol.yml`` *inside the
+  root* names is used only when it lies under the root or under a directory
+  the operator allowed (``--allow DIR``); any other is dropped -- neither
+  searched nor readable -- and named (:attr:`Workspace.refused_copybook_dirs`).
+  A config the operator chose (built in code, or ``--config FILE`` naming a
+  file outside the root) is trusted as written.
+* **The config.** ``cobol.yml`` (or ``cobol.yaml``) is read from the root
+  itself -- never from a directory above it, as the CLI's walk-up would --
+  so copybook paths, source format and ``>>DEFINE`` symbols are the ones
   every other tool in the family already uses. No tool takes a copybook
   path argument: one config, one answer. A found file is re-read when it
   changes (or appears, or goes away), and the cache is dropped with it.
@@ -31,15 +38,15 @@ import os
 import sys
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 from ..config.project import (
+    CONFIG_FILE_NAMES,
     ConfigError,
     ProjectConfig,
-    find_config_file,
     load_project_config,
 )
 from ..models.program import CobolProgram
@@ -73,6 +80,24 @@ def _stamp(path: str) -> Stamp:
     except OSError:
         return None
     return (stat.st_mtime_ns, stat.st_size)
+
+
+def _under(path: Path, base: Path) -> bool:
+    return path == base or base in path.parents
+
+
+def _root_config_file(root: Path) -> Path | None:
+    """``cobol.yml`` / ``cobol.yaml`` in *root* itself, or None.
+
+    Unlike the CLI's :func:`~cobolparser.config.project.find_config_file`,
+    this never looks above the root: a server pinned to a root answers
+    from that root's config, not from one some parent directory holds.
+    """
+    for name in CONFIG_FILE_NAMES:
+        candidate = root / name
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _defined_symbols(defines: tuple[str, ...]) -> dict[str, str] | None:
@@ -210,10 +235,20 @@ class Workspace:
         root: str | Path,
         config: ProjectConfig | None = None,
         cache_size: int = DEFAULT_CACHE_SIZE,
+        allow: Iterable[str | Path] = (),
     ) -> None:
         self.root = Path(root).resolve()
         if not self.root.is_dir():
             raise ToolError(f"workspace root is not a directory: {root}")
+        #: Directories outside the root the operator allowed (``--allow``):
+        #: a ``cobol.yml`` copybook directory under one of them is used.
+        self.allow: tuple[Path, ...] = tuple(Path(a).resolve() for a in allow)
+        for allowed in self.allow:
+            if not allowed.is_dir():
+                raise ToolError(f"--allow is not a directory: {allowed}")
+        #: Copybook directories ``cobol.yml`` named that were dropped because
+        #: they lie outside the root and every ``--allow`` directory.
+        self.refused_copybook_dirs: tuple[str, ...] = ()
         #: Serializes tool calls made from worker threads.
         self.lock = threading.Lock()
         self.cache_size = max(1, cache_size)
@@ -234,7 +269,7 @@ class Workspace:
         #: server around one call; None when nobody listens.
         self.progress: Callable[[float, float | None, str], None] | None = None
         if config is not None:
-            self._use_config(config)
+            self._use_config(config, trusted=self._operator_chose(config))
         else:
             self._reload_config()
 
@@ -255,24 +290,58 @@ class Workspace:
         """
         if self._config_fixed:
             return
-        found = find_config_file(self.root)
+        found = _root_config_file(self.root)
         source = (found, _stamp(str(found)) if found else None)
         if source != self._config_source:
             self._reload_config()
 
     def _reload_config(self) -> None:
-        found = find_config_file(self.root)
+        found = _root_config_file(self.root)
         source = (found, _stamp(str(found)) if found else None)
         try:
-            config = load_project_config(self.root)
+            config = (
+                ProjectConfig() if found is None else load_project_config(path=found)
+            )
         except ConfigError as exc:
             # The stamp is not recorded, so the next call tries again once
             # the file is fixed.
             raise ToolError(f"cobol.yml could not be read: {exc}") from exc
         self._config_source = source
-        self._use_config(config)
+        # A file in the analysed tree: it may not widen the guard.
+        self._use_config(config, trusted=False)
 
-    def _use_config(self, config: ProjectConfig) -> None:
+    def _operator_chose(self, config: ProjectConfig) -> bool:
+        """Whether a config handed in is the operator's own, not the tree's.
+
+        Built in code (no source file), or read from a file outside the root
+        (``--config FILE``): trusted. A ``--config`` naming a file inside the
+        root is content the analysed tree wrote, so it is held to the same
+        rule as a ``cobol.yml`` found there. Both the path as given and its
+        symlink-resolved form must lie outside the root.
+        """
+        if config.source is None:
+            return True
+        given = Path(os.path.abspath(config.source))
+        return not (
+            _under(given, self.root) or _under(config.source.resolve(), self.root)
+        )
+
+    def _use_config(self, config: ProjectConfig, *, trusted: bool) -> None:
+        kept: list[str] = []
+        refused: list[str] = []
+        for entry in config.copybook_path:
+            directory = Path(entry).resolve()
+            if (
+                trusted
+                or _under(directory, self.root)
+                or any(_under(directory, allowed) for allowed in self.allow)
+            ):
+                kept.append(entry)
+            else:
+                refused.append(entry)
+        if refused:
+            config = replace(config, copybook_path=tuple(kept))
+        self.refused_copybook_dirs = tuple(refused)
         self._config = config
         self._allowed = [self.root] + [Path(p).resolve() for p in config.copybook_path]
         # Copybook paths, source format and defines all shape a parse.
@@ -282,7 +351,7 @@ class Workspace:
     # -- paths ---------------------------------------------------------------
 
     def _within(self, path: Path) -> bool:
-        return any(path == base or base in path.parents for base in self._allowed)
+        return any(_under(path, base) for base in self._allowed)
 
     def resolve(self, file: str) -> Path:
         """*file* (relative to the root, or absolute) as a guarded real path."""
@@ -546,6 +615,19 @@ class Workspace:
                         "and undeclared names are unreliable",
                     )
                 )
+        if self.refused_copybook_dirs and any(
+            c.kind == "unresolved-copybook" for c in caveats
+        ):
+            caveats.append(
+                Caveat(
+                    "unresolved-copybook",
+                    "cobol.yml names copybook directories outside the "
+                    "workspace root, which were not searched: "
+                    + ", ".join(self.refused_copybook_dirs),
+                    "a member kept there is not expanded; the server's "
+                    "operator can allow such a directory with --allow DIR",
+                )
+            )
         if result.errors:
             first = "; ".join(str(e) for e in result.errors[:3])
             caveats.append(

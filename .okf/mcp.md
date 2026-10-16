@@ -74,13 +74,29 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
 ## Workspace
 
 - **Guard.** `Workspace.resolve()` resolves symlinks, then refuses anything
-  not under the root or a `cobol.yml` copybook directory. The index walk
+  not under the root or a kept copybook directory. The index walk
   (`program_files()`, `files_named()`) applies the same `_within()` check, so
-  a symlink out of the root is never indexed.
-- **Config.** `load_project_config(root)` unless the CLI was given
+  a symlink out of the root is never indexed. No file-type check: the guard
+  is the directory set (#544).
+- **Who may widen the guard (#544).** `_use_config(config, trusted=...)`
+  keeps a `copybook_path` entry only when `trusted`, or it resolves under the
+  root, or under a `Workspace(allow=...)` directory (`cobol-parser mcp
+  --allow DIR`, repeatable, each must be a directory). The rest are removed
+  from the config itself (`dataclasses.replace`), so they are neither
+  searched by the parse / `CodebaseGraphBuilder` nor readable, and listed in
+  `refused_copybook_dirs`. `_parse()` adds an `unresolved-copybook` caveat
+  naming them only when the parse has an unexpanded COPY (no new caveat
+  kind); `_cmd_mcp` prints one stderr warning per dropped directory. Trust:
+  a found `cobol.yml` never; a config handed in (`_operator_chose()`) when it
+  has no `source` (built in code) or its file lies outside the root both as
+  given and symlink-resolved -- so `--config FILE` outside the root is
+  trusted, `--config root/x.yml` is not.
+- **Config.** `_root_config_file(root)`: `cobol.yml`/`cobol.yaml` in the
+  root itself, never the CLI's walk-up (`find_config_file`) -- a parent's
+  file does not count. Unless the CLI was given
   `--config`/`--no-config` (`args._config_explicit`), which passes the
   config in and fixes it. Otherwise `refresh_config()` (run by `config` and
-  `resolve()`) re-finds `cobol.yml` and compares its `(mtime_ns, size)`; a
+  `resolve()`) re-checks the root's `cobol.yml` and compares its `(mtime_ns, size)`; a
   change reloads it, recomputes the guard's directories and clears the
   cache. A `ConfigError` becomes a `ToolError` and is retried next call.
   Copybook paths, source format, `debug_lines` and `define` come from it; no
