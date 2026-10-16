@@ -381,3 +381,150 @@ class TestRedefinesOverlap:
         call = self._calls(source)["WS-PROG"]
         assert call.possible_values == ["PGMA"]
         assert not call.get_metadata("possible_values_incomplete")
+
+
+class TestConditionSetAndMoveSources:
+    """Regression for #511: ``SET cond TO TRUE`` writes the CALL variable,
+    and an untracked write to a MOVE *source* reaches the CALL as well."""
+
+    @staticmethod
+    def _resolve(working_storage: str, procedure: str, name: str = "WS-PGM"):
+        ast = _parse(
+            BOILERPLATE_HEADER + working_storage + BOILERPLATE_PROC + procedure
+        )
+        analyzer = DynamicCallAnalyzer()
+        analyzer.analyze(ast)
+        return analyzer.resolve_variable(name)
+
+    def test_set_condition_to_true_adds_its_value(self):
+        ws = (
+            "       01 WS-PGM PIC X(8) VALUE 'PGMB'.\n"
+            "          88 USE-PGMA VALUE 'PGMA'.\n"
+        )
+        proc = "           SET USE-PGMA TO TRUE\n           CALL WS-PGM\n           GOBACK.\n"
+        assert self._resolve(ws, proc) == (["PGMA", "PGMB"], False)
+
+    def test_set_to_true_moves_the_first_literal(self):
+        ws = (
+            "       01 WS-PGM PIC X(8).\n"
+            "          88 USE-ANY VALUE 'PGMA' 'PGMB'.\n"
+            "          88 USE-RNG VALUE 'PGMC' THRU 'PGMD'.\n"
+        )
+        proc = (
+            "           SET USE-ANY TO TRUE\n"
+            "           SET USE-RNG TO TRUE\n"
+            "           CALL WS-PGM\n"
+            "           GOBACK.\n"
+        )
+        assert self._resolve(ws, proc) == (["PGMA", "PGMC"], False)
+
+    def test_set_to_false(self):
+        ws = (
+            "       01 WS-PGM PIC X(8).\n"
+            "          88 USE-PGMA VALUE 'PGMA' WHEN SET TO FALSE 'PGMF'.\n"
+        )
+        proc = "           SET USE-PGMA TO FALSE\n           CALL WS-PGM\n           GOBACK.\n"
+        assert self._resolve(ws, proc) == (["PGMF"], False)
+
+        ws = "       01 WS-PGM PIC X(8).\n          88 USE-PGMA VALUE 'PGMA'.\n"
+        assert self._resolve(ws, proc) == ([], True)
+
+    def test_set_condition_on_an_overlapping_item_is_incomplete(self):
+        ws = (
+            "       01 WS-CTL.\n"
+            "          88 CTL-RESET VALUE 'PGMAPGMB'.\n"
+            "          05 WS-PGM PIC X(4) VALUE 'PGMC'.\n"
+            "          05 WS-OTHER PIC X(4).\n"
+        )
+        proc = "           SET CTL-RESET TO TRUE\n           CALL WS-PGM\n           GOBACK.\n"
+        assert self._resolve(ws, proc) == (["PGMC"], True)
+
+    def test_condition_name_declared_twice_is_incomplete(self):
+        ws = (
+            "       01 WS-PGM PIC X(8).\n"
+            "          88 USE-IT VALUE 'PGMA'.\n"
+            "       01 WS-OTHER PIC X(8).\n"
+            "          88 USE-IT VALUE 'PGMZ'.\n"
+        )
+        proc = "           SET USE-IT TO TRUE\n           CALL WS-PGM\n           GOBACK.\n"
+        assert self._resolve(ws, proc) == ([], True)
+
+    def test_accepted_move_source_is_incomplete(self):
+        ws = (
+            "       01 WS-DEFAULT PIC X(8) VALUE 'PGMC'.\n"
+            "       01 WS-MID PIC X(8).\n"
+            "       01 WS-PGM PIC X(8).\n"
+        )
+        proc = (
+            "           ACCEPT WS-DEFAULT FROM SYSIN\n"
+            "           MOVE WS-DEFAULT TO WS-MID\n"
+            "           MOVE WS-MID TO WS-PGM\n"
+            "           CALL WS-PGM\n"
+            "           GOBACK.\n"
+        )
+        assert self._resolve(ws, proc) == (["PGMC"], True)
+
+    def test_untracked_move_to_a_source_group_is_incomplete(self):
+        ws = (
+            "       01 WS-IN PIC X(8).\n"
+            "       01 WS-PGM PIC X(8).\n"
+            "       01 WS-CTL.\n"
+            "          05 WS-CTL-PGM PIC X(8) VALUE 'PGMD'.\n"
+        )
+        proc = (
+            "           MOVE WS-IN TO WS-CTL\n"
+            "           MOVE WS-CTL-PGM TO WS-PGM\n"
+            "           CALL WS-PGM\n"
+            "           GOBACK.\n"
+        )
+        assert self._resolve(ws, proc) == (["PGMD"], True)
+
+    def test_literal_move_to_a_source_group_adds_its_slice(self):
+        ws = (
+            "       01 WS-PGM PIC X(8).\n"
+            "       01 WS-CTL.\n"
+            "          05 WS-CTL-HDR PIC X(2).\n"
+            "          05 WS-CTL-PGM PIC X(8) VALUE 'PGMD'.\n"
+        )
+        proc = (
+            "           MOVE 'XXPGMX' TO WS-CTL\n"
+            "           MOVE WS-CTL-PGM TO WS-PGM\n"
+            "           CALL WS-PGM\n"
+            "           GOBACK.\n"
+        )
+        assert self._resolve(ws, proc) == (["PGMD", "PGMX"], False)
+
+    def test_literal_move_to_a_table_group_is_incomplete(self):
+        ws = (
+            "       01 WS-PGM PIC X(8).\n"
+            "       01 WS-CTL.\n"
+            "          05 WS-ENT OCCURS 2 TIMES.\n"
+            "             10 WS-CTL-PGM PIC X(8).\n"
+        )
+        proc = (
+            "           MOVE 'PGMX' TO WS-CTL\n"
+            "           MOVE WS-CTL-PGM (1) TO WS-PGM\n"
+            "           CALL WS-PGM\n"
+            "           GOBACK.\n"
+        )
+        values, incomplete = self._resolve(ws, proc)
+        assert incomplete is True
+        assert "PGMX" not in values
+
+    def test_issue_repro_two(self):
+        ws = (
+            "       01 WS-DEFAULT PIC X(8) VALUE 'PGMC'.\n"
+            "       01 WS-PGM PIC X(8).\n"
+            "       01 WS-CTL.\n"
+            "          05 WS-CTL-PGM PIC X(8) VALUE 'PGMD'.\n"
+        )
+        proc = (
+            "           ACCEPT WS-DEFAULT FROM SYSIN\n"
+            "           MOVE WS-DEFAULT TO WS-PGM\n"
+            "           CALL WS-PGM\n"
+            "           MOVE 'PGMX' TO WS-CTL\n"
+            "           MOVE WS-CTL-PGM TO WS-PGM\n"
+            "           CALL WS-PGM\n"
+            "           GOBACK.\n"
+        )
+        assert self._resolve(ws, proc) == (["PGMC", "PGMD", "PGMX"], True)

@@ -7,15 +7,17 @@ and initial VALUE clauses in data definitions.
 """
 
 import re
+from typing import Any
 
 from ..models.ast_base import ASTNode
-from ..models.data_items import CobolDataItem
+from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolDivision, CobolProgram, CobolSection
 from ..models.statements import (
     CallStatement,
     IOReadStatement,
     MoveStatement,
     ReturnStatement,
+    SetStatement,
 )
 from ._names import base_data_name
 
@@ -67,6 +69,12 @@ class DynamicCallAnalyzer:
         # polluted the value set with a data-name that is not a value at all.
         self._incomplete_variables: set[str] = set()
         self._dynamic_calls: list[CallStatement] = []
+        # Level-88 condition names by name: ``SET cond TO TRUE`` writes the
+        # condition's VALUE into its parent item (#511).
+        self._conditions: dict[str, list[ConditionNameItem]] = {}
+        # id(MoveStatement) -> {item name: value} for a literal MOVE to a
+        # group: the slice of the literal each tracked subordinate receives.
+        self._group_slices: dict[int, dict[str, str]] = {}
         # The program unit being analysed: the walks stop at any other
         # (contained) CobolProgram node.
         self._unit: CobolProgram | None = None
@@ -97,6 +105,8 @@ class DynamicCallAnalyzer:
         self._variable_values = {}
         self._incomplete_variables = set()
         self._dynamic_calls = []
+        self._conditions = {}
+        self._group_slices = {}
         self._unit = ast
         # In a contained unit (analysed on its own or as part of its
         # container), a CALL variable it does not declare itself is a
@@ -121,6 +131,8 @@ class DynamicCallAnalyzer:
         # pass so a MOVE out of such an item carries the flag along.
         self._mark_externally_supplied(ast)
 
+        self._group_slices = self._literal_group_slices(self._walk(ast))
+
         # Second pass: track MOVE statements. The walk is in source order,
         # not execution order (a MOVE in a paragraph PERFORMed earlier may
         # sit later in the source), so it runs to a fixpoint: every MOVE
@@ -137,6 +149,9 @@ class DynamicCallAnalyzer:
         # MOVE to its group or a subordinate item) supplies a value this
         # analyzer cannot know -- the value set is incomplete, not exact.
         self._mark_untracked_writes(ast)
+        # ... and an item those writes made incomplete passes that on to
+        # every item it is MOVEd to (#511).
+        self._propagate_incomplete(self._walk(ast))
 
         # Third pass: find dynamic CALL statements and populate values
         self._populate_dynamic_calls(ast)
@@ -243,6 +258,8 @@ class DynamicCallAnalyzer:
                     if value is None:
                         value = str(node.value_clause).strip("\"'")
                     self._variable_values[var_name].add(value)
+        elif isinstance(node, ConditionNameItem) and node.name:
+            self._conditions.setdefault(node.name.upper(), []).append(node)
 
         # Recursively process children
         if hasattr(node, "children"):
@@ -295,6 +312,10 @@ class DynamicCallAnalyzer:
                             if target_name not in self._variable_values:
                                 self._variable_values[target_name] = set()
                             self._variable_values[target_name].add(source_value)
+                    # A group receiver: each tracked subordinate gets its
+                    # own slice of the literal (#511).
+                    for name, value in self._group_slices.get(id(node), {}).items():
+                        self._variable_values.setdefault(name, set()).add(value)
                 else:
                     # Identifier-shaped source with no tracked values: the
                     # target now holds a value this analyzer cannot know.
@@ -306,23 +327,232 @@ class DynamicCallAnalyzer:
                     # "possible_values_incomplete" metadata flag.
                     for target in targets:
                         self._incomplete_variables.add(base_data_name(target).upper())
+        elif isinstance(node, SetStatement):
+            self._track_condition_set(node)
 
         # Recursively process children
         if hasattr(node, "children"):
             for child in node.children:
                 self._track_move_statements(child)
 
-    def _mark_untracked_writes(self, ast: CobolProgram) -> None:
-        """Mark a dynamic CALL variable incomplete when anything but a MOVE
-        to the item itself writes its storage."""
-        nodes = self._walk(ast)
-        call_vars = {
+    @staticmethod
+    def _condition_sets(stmt: SetStatement) -> list[tuple[str, bool]]:
+        """``(target, to_true)`` for every ``SET ... TO TRUE | FALSE``
+        receiver of *stmt*, across all of its target groups."""
+        found: list[tuple[str, bool]] = []
+        groups = [(stmt.targets, stmt.set_type)] + [
+            (group.get("targets") or [], group.get("set_type")) for group in stmt.groups
+        ]
+        for targets, set_type in groups:
+            if set_type in ("TRUE", "FALSE"):
+                found += [(target, set_type == "TRUE") for target in targets]
+        return found
+
+    def _condition_set_value(
+        self, condition: ConditionNameItem, to_true: bool
+    ) -> str | None:
+        """The value ``SET condition TO TRUE | FALSE`` moves into the
+        condition's parent item, or None when it is not known exactly.
+
+        TO TRUE moves the first literal of the VALUE clause (the low end of
+        a THRU range); TO FALSE moves the ``WHEN SET TO FALSE`` literal. A
+        group parent is not resolved here: its subordinates take slices.
+        """
+        parent = getattr(condition, "parent", None)
+        if not isinstance(parent, CobolDataItem) or any(
+            isinstance(child, CobolDataItem) for child in parent.children
+        ):
+            return None
+        if to_true:
+            raw = condition.values[0] if condition.values else None
+        else:
+            raw = condition.false_value
+        if raw is None or raw.upper().startswith("THROUGH:"):
+            return None
+        value = self._extract_literal_value(raw)
+        return value if value is not None else raw.strip("\"'")
+
+    def _track_condition_set(self, stmt: SetStatement) -> None:
+        """``SET cond TO TRUE | FALSE`` writes the condition's value into
+        its parent item (#511): a known value is a candidate, anything else
+        leaves the parent's value set incomplete."""
+        for target, to_true in self._condition_sets(stmt):
+            conditions = self._conditions.get(base_data_name(target).upper(), [])
+            for condition in conditions:
+                parent = getattr(condition, "parent", None)
+                if not isinstance(parent, CobolDataItem) or not parent.name:
+                    continue
+                parent_name = parent.name.upper()
+                value = self._condition_set_value(condition, to_true)
+                if value is None or len(conditions) > 1:
+                    # Unknown, or an unqualified name several 88s share:
+                    # not resolved to one value here.
+                    self._incomplete_variables.add(parent_name)
+                else:
+                    self._variable_values.setdefault(parent_name, set()).add(value)
+
+    @staticmethod
+    def _identifier_moves(nodes: list[ASTNode]) -> list[tuple[str, list[str]]]:
+        """``(source name, receivers)`` of every MOVE from a data item."""
+        return [
+            (base_data_name(node.source).upper(), node.targets)
+            for node in nodes
+            if isinstance(node, MoveStatement)
+            and node.source
+            and not DynamicCallAnalyzer._is_definite_literal(node.source)
+        ]
+
+    def _value_sources(self, nodes: list[ASTNode]) -> set[str]:
+        """Every dynamic CALL variable, and every item whose value reaches
+        one through a chain of MOVEs: a write this analyzer cannot track to
+        any of them leaves the CALL's candidate list incomplete (#511)."""
+        names = {
             call.called_program.upper()
             for call in nodes
             if isinstance(call, CallStatement)
             and call.is_dynamic
             and call.called_program
         }
+        moves = self._identifier_moves(nodes)
+        changed = bool(names)
+        while changed:
+            changed = False
+            for source, targets in moves:
+                if source not in names and any(
+                    ":" not in t and base_data_name(t).upper() in names for t in targets
+                ):
+                    names.add(source)
+                    changed = True
+        return names
+
+    def _propagate_incomplete(self, nodes: list[ASTNode]) -> None:
+        """Carry an incomplete value set from a MOVE's identifier source to
+        its receivers, to a fixpoint: the MOVE pass ran before
+        :meth:`_mark_untracked_writes` found the source incomplete."""
+        moves = self._identifier_moves(nodes)
+        changed = True
+        while changed:
+            changed = False
+            for source, targets in moves:
+                if source not in self._incomplete_variables:
+                    continue
+                for target in targets:
+                    name = base_data_name(target).upper()
+                    if name not in self._incomplete_variables:
+                        self._incomplete_variables.add(name)
+                        changed = True
+
+    def _literal_group_slices(self, nodes: list[ASTNode]) -> dict[int, dict[str, str]]:
+        """id(MoveStatement) -> {subordinate: value} for every literal MOVE
+        to a group with a tracked subordinate whose bytes are known.
+
+        ``MOVE 'PGMX' TO WS-CTL`` is an alphanumeric MOVE to the group: each
+        subordinate receives the slice of the (space-padded) literal at its
+        own offset, and a figurative constant fills every one of them. A
+        subordinate whose bytes are not exact (under an OCCURS, an ambiguous
+        offset, a name declared twice, a non-DISPLAY usage) gets no slice,
+        and :meth:`_mark_untracked_writes` marks it incomplete instead.
+        """
+        tracked = self._value_sources(nodes)
+        if not tracked:
+            return {}
+        # Imported here: the generators package imports the analysis one.
+        from ..generators.data.layout_offsets import compute_record_layout
+
+        items: dict[str, list[CobolDataItem]] = {}
+        for node in nodes:
+            if isinstance(node, CobolDataItem) and node.name:
+                items.setdefault(node.name.upper(), []).append(node)
+        layouts: dict[int, dict[str, Any]] = {}
+        slices: dict[int, dict[str, str]] = {}
+        for move in nodes:
+            if not isinstance(move, MoveStatement) or not move.source:
+                continue
+            source = move.source.strip()
+            if not self._is_definite_literal(source):
+                continue
+            figurative = source[:1] not in ("'", '"') and not (
+                source[:1].isdigit() or source[:1] in "+-."
+            )
+            text = self._extract_literal_value(source) or ""
+            for target in move.targets:
+                declared = items.get(base_data_name(target).upper(), [])
+                if ":" in target or len(declared) != 1:
+                    continue
+                group = declared[0]
+                for sub in self._walk(group)[1:]:
+                    if not isinstance(sub, CobolDataItem) or not sub.name:
+                        continue
+                    name = sub.name.upper()
+                    if name not in tracked or len(items.get(name, [])) != 1:
+                        continue
+                    if not self._exact_bytes(group, sub):
+                        continue
+                    value = (
+                        text
+                        if figurative
+                        else self._slice_of(
+                            group, sub, text, layouts, compute_record_layout
+                        )
+                    )
+                    if value is not None:
+                        slices.setdefault(id(move), {})[name] = value
+        return slices
+
+    @staticmethod
+    def _exact_bytes(group: CobolDataItem, sub: CobolDataItem) -> bool:
+        """Whether *sub* is one run of DISPLAY bytes at a fixed place in
+        *group* (no OCCURS between them)."""
+        node: Any = sub
+        while node is not group:
+            if not isinstance(node, CobolDataItem) or node.occurs_clause:
+                return False
+            node = node.parent
+        return not group.occurs_clause and (
+            (sub.usage or "DISPLAY").upper() == "DISPLAY"
+        )
+
+    @staticmethod
+    def _slice_of(
+        group: CobolDataItem,
+        sub: CobolDataItem,
+        text: str,
+        layouts: dict[int, dict[str, Any]],
+        compute_record_layout: Any,
+    ) -> str | None:
+        """The part of *text*, MOVEd to *group*, that lands in *sub*."""
+        root: CobolDataItem = group
+        while isinstance(root.parent, CobolDataItem):
+            root = root.parent
+        if id(root) not in layouts:
+            layouts[id(root)] = {
+                item.name.upper(): item
+                for item in compute_record_layout(root)
+                if item.level != 88
+            }
+        layout = layouts[id(root)]
+        whole = layout.get((group.name or "").upper())
+        part = layout.get((sub.name or "").upper())
+        if (
+            whole is None
+            or part is None
+            or whole.byte_offset is None
+            or part.byte_offset is None
+            or whole.offset_ambiguous
+            or part.offset_ambiguous
+        ):
+            return None
+        start = part.byte_offset - whole.byte_offset
+        padded = text.ljust(whole.byte_length)[: whole.byte_length]
+        return padded[start : start + part.byte_length].rstrip() or " "
+
+    def _mark_untracked_writes(self, ast: CobolProgram) -> None:
+        """Mark a dynamic CALL variable incomplete when anything but a MOVE
+        to the item itself writes its storage."""
+        nodes = self._walk(ast)
+        # The CALL variables and every item MOVEd into one (#511): an
+        # untracked write to a MOVE source reaches the CALL just the same.
+        call_vars = self._value_sources(nodes)
         if not call_vars:
             return
         # Imported here: xref imports the analysis package's siblings.
@@ -354,11 +584,31 @@ class DynamicCallAnalyzer:
         for move in nodes:
             if not isinstance(move, MoveStatement):
                 continue
+            sliced = self._group_slices.get(id(move), {})
             for target in move.targets:
                 written = base_data_name(target).upper()
                 for var in call_vars:
+                    if var in sliced:
+                        # A literal MOVE to its group: the slice it
+                        # receives was recorded as a value.
+                        continue
                     if written in overlapping.get(var, ()):
                         self._incomplete_variables.add(var)
+        # SET cond TO TRUE | FALSE writes the condition's parent item: a
+        # parent sharing storage with a tracked item (its group, a
+        # subordinate, a REDEFINES) is a write not tracked as a value.
+        for stmt in nodes:
+            if not isinstance(stmt, SetStatement):
+                continue
+            for target, _ in self._condition_sets(stmt):
+                for condition in self._conditions.get(
+                    base_data_name(target).upper(), []
+                ):
+                    parent = getattr(condition, "parent", None)
+                    written = (getattr(parent, "name", "") or "").upper()
+                    for var in call_vars:
+                        if written in overlapping.get(var, ()):
+                            self._incomplete_variables.add(var)
 
     @staticmethod
     def _walk(root: ASTNode) -> list[ASTNode]:

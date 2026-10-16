@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Dynamic CALL targets no longer read as complete when they are not**
+  (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
+  FALSE`) as a write to the level-88's parent item, adding the value it
+  moves as a candidate; an `ACCEPT` (or any other untracked write) to an
+  item MOVEd into the CALL variable now marks the list incomplete; and a
+  literal MOVE to such an item's group adds the slice of the literal that
+  lands in it. Every consumer (`codebase-graph`, MCP `program_brief` /
+  `callers_of`, recursion-check, boundary inventory, field lineage)
+  inherits the fix.
 * **MCP `callers_of` / `program_brief` no longer call a dead paragraph
   reachable** (#486). Both took reachability from the flow graph, whose
   `FALL_THROUGH` edge out of a paragraph only ever PERFORMed (or out of a

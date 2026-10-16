@@ -136,9 +136,17 @@ def test_dynamic_call_values_incomplete_after_accept_string_initialize():
 
 
 def test_dynamic_call_values_incomplete_after_group_or_partial_move():
-    group_ws = "       01 WS-GRP.\n          05 WS-PROG PIC X(8) VALUE 'PROGA'.\n"
-    call = _dynamic_call("           MOVE 'PROGB' TO WS-GRP\n", group_ws)
+    group_ws = (
+        "       01 WS-GRP.\n          05 WS-PROG PIC X(8) VALUE 'PROGA'.\n"
+        "       01 WS-IN PIC X(8).\n"
+    )
+    call = _dynamic_call("           MOVE WS-IN TO WS-GRP\n", group_ws)
     assert call.get_metadata("possible_values_incomplete") is True
+    # A literal MOVE to the group gives WS-PROG its slice of the literal,
+    # an exact value (#511).
+    call = _dynamic_call("           MOVE 'PROGB' TO WS-GRP\n", group_ws)
+    assert call.possible_values == ["PROGA", "PROGB"]
+    assert call.get_metadata("possible_values_incomplete") is None
 
     call = _dynamic_call("           MOVE SPACES TO WS-PROG(1:4)\n")
     # A reference-modified MOVE is not the item's whole value.
