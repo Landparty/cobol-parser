@@ -10,7 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from cobolparser.config.project import LintDefaults, ProjectConfig
+from cobolparser.config.project import (
+    LintDefaults,
+    ProjectConfig,
+    load_project_config,
+)
 from cobolparser.mcp import CAVEAT_KINDS, CobolTools, ToolError, Workspace
 from cobolparser.mcp.envelope import (
     DEFAULT_LIMIT,
@@ -139,6 +143,195 @@ class TestWorkspaceGuard:
         assert ws.resolve(str(books / "A.cpy")) == (books / "A.cpy").resolve()
         assert ws.display(books / "A.cpy") == (books / "A.cpy").resolve().as_posix()
 
+
+def _yml(root: Path, *dirs: object) -> None:
+    entries = ", ".join(f'"{d}"' for d in dirs)
+    (root / "cobol.yml").write_text(
+        f"version: 1\nproject:\n  copybook_path: [{entries}]\n"
+    )
+
+
+def _refused(ws: Workspace) -> list[Path]:
+    return [Path(entry).resolve() for entry, _ in ws.refused_copybook_dirs]
+
+
+class TestConfigCannotWidenTheGuard:
+    """#544: a ``cobol.yml`` in the analysed tree, or above it, must not turn
+    ``read_source`` into a read-anything tool."""
+
+    @pytest.fixture
+    def secret(self, tmp_path: Path) -> Path:
+        path = tmp_path / "secret.txt"
+        path.write_text("secret=hunter2\n")
+        return path
+
+    @pytest.fixture
+    def books(self, tmp_path: Path) -> Path:
+        """A copybook library outside the root, with things that are not
+        copybooks in it."""
+        books = tmp_path / "books"
+        books.mkdir()
+        (books / "FOO.cpy").write_text("       01  FOO PIC X.\n")
+        (books / "BARMEM").write_text("       01  BAR PIC X.\n")
+        (books / "secret.txt").write_text("secret=in-books\n")
+        (books / ".env").write_text("TOKEN=abc\n")
+        (books / ".git").mkdir()
+        (books / ".git" / "X.cpy").write_text("       01  X PIC X.\n")
+        return books
+
+    def test_copybook_path_slash_reads_nothing_outside(
+        self, root: Path, secret: Path
+    ) -> None:
+        _yml(root, "/")
+        ws = Workspace(root)
+        tools = CobolTools(ws)
+        targets = [str(secret), "../secret.txt"]
+        if Path("/etc/passwd").is_file():
+            targets.append("/etc/passwd")
+        for target in targets:
+            with pytest.raises(ToolError, match="outside the workspace"):
+                tools.read_source(target, 1, 0, 0)
+        assert ws.refused_copybook_dirs == (("/", "the filesystem root"),)
+        assert ws.config.copybook_path == ()
+        # The root itself still answers.
+        assert tools.read_source("BATCHSEQ.cbl", 1, 0, 0)["answer"]["lines"]
+
+    def test_a_cobol_yml_in_a_parent_is_ignored(
+        self, root: Path, books: Path, secret: Path
+    ) -> None:
+        _yml(root.parent, books)
+        ws = Workspace(root)
+        assert ws.config.source is None
+        assert ws.config.copybook_path == ()
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve(str(books / "FOO.cpy"))
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve("../secret.txt")
+
+    def test_outside_directory_serves_members_only(
+        self, root: Path, books: Path
+    ) -> None:
+        _yml(root, books)
+        ws = Workspace(root)
+        assert ws.refused_copybook_dirs == ()
+        assert ws.resolve(str(books / "FOO.cpy")) == books / "FOO.cpy"
+        # An extensionless member resolves for COPY, so it reads too.
+        assert ws.resolve(str(books / "BARMEM")) == books / "BARMEM"
+        for name in ("secret.txt", ".env", ".git/X.cpy"):
+            with pytest.raises(ToolError, match="not a copybook member"):
+                ws.resolve(str(books / name))
+        # A directory is not a member.
+        with pytest.raises(ToolError):
+            ws.resolve(str(books))
+
+    def test_outside_directory_still_expands_copybooks(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        books = tmp_path / "copylib"
+        shutil.move(str(root / "copybooks"), books)
+        _yml(root, books)
+        ws = Workspace(root)
+        result = CobolTools(ws).explain_symbol("COPYREPL.cbl", "CUST-ID")
+        assert result["answer"]["symbols"][0]["declared"] is True
+        assert ws.resolve(str(books / "CUSTREC.cpy"))
+
+    def test_dot_dot_and_symlinks_out_of_a_copybook_dir_are_refused(
+        self, root: Path, books: Path, secret: Path
+    ) -> None:
+        _yml(root, books)
+        (books / "LINK.cpy").symlink_to(secret)
+        (books / "SUB").mkdir()
+        (books / "SUB" / "UP.cpy").symlink_to(books / "secret.txt")
+        ws = Workspace(root)
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve(str(books / ".." / "secret.txt"))
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve(str(books / "LINK.cpy"))
+        with pytest.raises(ToolError, match="not a copybook member"):
+            ws.resolve(str(books / "SUB" / "UP.cpy"))
+
+    def test_a_symlinked_copybook_dir_is_judged_by_its_target(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        (tmp_path / "lib").symlink_to("/")
+        _yml(root, tmp_path / "lib")
+        ws = Workspace(root)
+        assert _refused(ws) == [Path("/")]
+
+    def test_home_and_its_ancestors_are_refused(
+        self, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "users" / "u"
+        (home / "copylib").mkdir(parents=True)
+        (home / "notes.cpy").write_text("x\n")
+        monkeypatch.setenv("HOME", str(home))
+        _yml(root, home, tmp_path / "users", home / "copylib")
+        ws = Workspace(root)
+        assert _refused(ws) == [home.resolve(), (tmp_path / "users").resolve()]
+        reasons = {reason for _, reason in ws.refused_copybook_dirs}
+        assert reasons == {"it is the home directory or contains it"}
+        # A library *under* home is fine (members only).
+        assert ws.config.copybook_path == (str(home / "copylib"),)
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve(str(home / "notes.cpy"))
+
+    def test_hidden_directory_is_refused(
+        self, root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        (home / ".ssh").mkdir(parents=True)
+        (home / ".ssh" / "id_rsa").write_text("PRIVATE\n")
+        monkeypatch.setenv("HOME", str(home))
+        _yml(root, home / ".ssh")
+        ws = Workspace(root)
+        assert ws.refused_copybook_dirs == (
+            (str(home / ".ssh"), "it is a hidden directory"),
+        )
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve(str(home / ".ssh" / "id_rsa"))
+
+    def test_an_ancestor_of_the_root_is_refused(self, root: Path) -> None:
+        _yml(root, "..")
+        ws = Workspace(root)
+        assert _refused(ws) == [root.parent.resolve()]
+        assert ws.refused_copybook_dirs[0][1] == "it contains the workspace root"
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve("../secret.txt")
+
+    @pytest.mark.skipif(not Path("/etc").is_dir(), reason="no /etc")
+    def test_system_directory_is_refused(self, root: Path) -> None:
+        _yml(root, "/etc")
+        ws = Workspace(root)
+        assert ws.refused_copybook_dirs[0][1].startswith("it is a system directory")
+        with pytest.raises(ToolError, match="outside the workspace"):
+            ws.resolve("/etc/hostname")
+
+    def test_an_explicit_config_gets_the_same_rules(
+        self, root: Path, tmp_path: Path, books: Path
+    ) -> None:
+        operator = tmp_path / "operator.yml"
+        operator.write_text(
+            f'version: 1\nproject:\n  copybook_path: ["/", "{books}"]\n'
+        )
+        ws = Workspace(root, load_project_config(path=operator))
+        assert _refused(ws) == [Path("/")]
+        assert ws.resolve(str(books / "FOO.cpy"))
+        with pytest.raises(ToolError, match="not a copybook member"):
+            ws.resolve(str(books / "secret.txt"))
+
+    def test_a_refused_directory_is_named_in_the_copy_caveat(self, root: Path) -> None:
+        _yml(root, "/")
+        result = CobolTools(Workspace(root)).explain_symbol("COPYREPL.cbl", "CUST-ID")
+        details = [
+            c["detail"] for c in result["caveats"] if c["kind"] == "unresolved-copybook"
+        ]
+        assert any("refused" in d and "filesystem root" in d for d in details)
+        # A program with no COPY at all is not told about it.
+        plain = CobolTools(Workspace(root)).lint("BATCHSEQ.cbl")
+        assert not any("refused" in c["detail"] for c in plain["caveats"])
+
+
+class TestWorkspaceFiles:
     def test_missing_and_empty(self, root: Path) -> None:
         ws = Workspace(root, ProjectConfig())
         with pytest.raises(ToolError, match="not found"):
@@ -557,6 +750,40 @@ FLOWT = """\
            DISPLAY 'DEAD'.
 """
 
+AFTER_PERFORMED = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AFTERP.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           PERFORM A-PARA
+           STOP RUN.
+       A-PARA.
+           DISPLAY 'A'.
+       B-PARA.
+           DISPLAY 'B'.
+"""
+
+AFTER_THRU = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AFTERT.
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           PERFORM 1000-READ THRU 1000-EXIT
+           PERFORM 2000-SEC
+           STOP RUN.
+       1000-READ.
+           DISPLAY 'R'.
+       1000-EXIT.
+           EXIT.
+       9999-UNUSED.
+           DISPLAY 'U'.
+       2000-SEC SECTION.
+       2000-A.
+           DISPLAY 'A'.
+       2000-B.
+           DISPLAY 'B'.
+"""
+
 
 def line_of(root: Path, location: dict) -> str:
     """The text on disk at a cited location, to check a citation is real."""
@@ -681,6 +908,59 @@ class TestCallersOf:
         assert dead["caller_count"] == 0
         assert "5000-DEAD" in line_of(root, dead["declared_at"])
 
+    def test_paragraph_after_a_performed_one_is_unreachable(self, root: Path) -> None:
+        # Issue #486: the flow graph's fall-through out of A-PARA (only ever
+        # PERFORMed, so its end returns) made B-PARA look reachable.
+        (root / "AFTERP.cbl").write_text(AFTER_PERFORMED)
+        tools = tools_for(root)
+        dead = tools.callers_of("AFTERP.cbl", "B-PARA")["answer"]["procedures"][0]
+        assert dead["reachable"] is False
+        assert dead["caller_count"] == 0
+        assert dead["callers"] == []
+        brief = tools.program_brief("AFTERP.cbl")["answer"]
+        assert brief["unreachable_procedures"] == ["B-PARA"]
+        assert any(f["symbol"] == "B-PARA" for f in brief["lint"]["worst"])
+
+    def test_paragraph_after_a_thru_range_is_unreachable(self, root: Path) -> None:
+        (root / "AFTERT.cbl").write_text(AFTER_THRU)
+        tools = tools_for(root)
+        dead = tools.callers_of("AFTERT.cbl", "9999-UNUSED")["answer"]
+        assert dead["procedures"][0]["reachable"] is False
+        assert dead["procedures"][0]["callers"] == []
+        assert tools.program_brief("AFTERT.cbl")["answer"][
+            "unreachable_procedures"
+        ] == ["9999-UNUSED"]
+
+    def test_fall_throughs_that_happen_are_still_callers(self, root: Path) -> None:
+        (root / "AFTERT.cbl").write_text(AFTER_THRU)
+        tools = tools_for(root)
+
+        def callers(name: str) -> list[tuple[str, str]]:
+            procedure = tools.callers_of("AFTERT.cbl", name)["answer"]["procedures"][0]
+            assert procedure["reachable"] is True
+            return [(c["from"], c["type"]) for c in procedure["callers"]]
+
+        # Inside a THRU range, and inside a PERFORMed section.
+        assert ("1000-READ", "FALL_THROUGH") in callers("1000-EXIT")
+        assert callers("2000-A") == [("2000-SEC", "FALL_THROUGH")]
+        assert callers("2000-B") == [("2000-A", "FALL_THROUGH")]
+        # Out of the entry paragraph, which control keeps running from.
+        assert callers("1000-READ") == [("0000-MAIN", "PERFORM")]
+
+    def test_a_failing_dead_code_analyzer_falls_back_to_the_flow_graph(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cobolparser.analysis.dead_code import DeadCodeAnalyzer
+
+        def boom(self: object, ast: object) -> None:
+            raise RuntimeError("kaboom")
+
+        monkeypatch.setattr(DeadCodeAnalyzer, "analyze", boom)
+        (root / "FLOWT.cbl").write_text(FLOWT)
+        result = tools_for(root).callers_of("FLOWT.cbl", "5000-dead")
+        assert result["answer"]["procedures"][0]["reachable"] is False
+        assert "analyzer-failed" in kinds(result)
+
     def test_sort_procedure_and_sql_whenever(self, root: Path) -> None:
         tools = with_copybooks(root)
         sort = tools.callers_of("BATCHSEQ.cbl", "3000-WRITE-REPORT")["answer"]
@@ -784,3 +1064,65 @@ class TestRecordLayout:
         assert result["truncated"] == [
             {"field": "records[0].fields", "shown": 2, "total": record["field_count"]}
         ]
+
+
+class TestExplainSymbolFillerAndRenames:
+    """Issue #485: a level-88 under a FILLER and a level-66 RENAMES item."""
+
+    SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. F88.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-SW.
+           05  FILLER   PIC X VALUE 'N'.
+               88  SW-ON  VALUE 'Y'.
+               88  SW-OFF VALUE 'N'.
+       01  WS-REC.
+           05  R-A PIC X(3).
+           05  R-B PIC 9(2).
+       66  R-AB RENAMES R-A THRU R-B.
+       PROCEDURE DIVISION.
+           SET SW-ON TO TRUE
+           IF SW-ON DISPLAY R-AB END-IF
+           GOBACK.
+"""
+
+    def test_unreferenced_condition_name_under_filler_is_found(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "F88.cbl").write_text(self.SOURCE)
+        answer = tools_for(tmp_path).explain_symbol("F88.cbl", "SW-OFF")["answer"]
+        assert answer["found"] is True
+        symbol = answer["symbols"][0]
+        assert symbol["kind"] == "condition-name"
+        assert symbol["declared"] is True
+        assert symbol["declared_at"]["line"] == 8
+
+    def test_renames_item_is_declared(self, tmp_path: Path) -> None:
+        (tmp_path / "F88.cbl").write_text(self.SOURCE)
+        answer = tools_for(tmp_path).explain_symbol("F88.cbl", "R-AB")["answer"]
+        symbol = answer["symbols"][0]
+        assert symbol["declared"] is True
+        assert symbol["level"] == 66
+        assert symbol["declared_at"]["line"] == 12
+        # R-A THRU R-B: bytes 0-4 of WS-REC.
+        assert symbol["layout"] == {
+            "qualified_name": "R-AB",
+            "byte_offset": 0,
+            "byte_length": 5,
+        }
+
+    def test_renames_item_that_cannot_be_placed_is_a_caveat(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "F88.cbl").write_text(
+            self.SOURCE.replace("RENAMES R-A THRU R-B", "RENAMES R-A THRU NOPE")
+        )
+        result = tools_for(tmp_path).explain_symbol("F88.cbl", "R-AB")
+        symbol = result["answer"]["symbols"][0]
+        assert "layout" not in symbol
+        assert any(
+            c["kind"] == "incomplete-analysis" and "RENAMES item R-AB" in c["detail"]
+            for c in result["caveats"]
+        )

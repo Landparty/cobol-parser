@@ -84,6 +84,28 @@ def _entry_text(tokens: list[Any]) -> str:
     return " ".join(words)
 
 
+def _same_area_entry(tokens: list[Any]) -> dict[str, Any]:
+    """The structured form of one ``SAME [RECORD | SORT | SORT-MERGE] AREA
+    FOR file-1 file-2 ...`` entry: ``area`` is the qualifier word (``""``
+    for plain ``SAME AREA``) and ``files`` the upper-cased file names.
+
+    The analyzers need it: under ``SAME RECORD AREA`` the records of every
+    named file share one storage area, so a MOVE to one file's field
+    changes what another file's field reads -- kept as text only, that was
+    invisible to constant folding and lineage. Plain ``SAME AREA`` shares
+    only the I/O buffer, not the records, and must not be read as aliasing.
+    """
+    words = [str(t.value).upper() for t in tokens[1:]]
+    area = ""
+    if words and words[0] in ("RECORD", "SORT", "SORT-MERGE"):
+        area = words.pop(0)
+    if words and words[0] == "AREA":
+        words.pop(0)
+    if words and words[0] == "FOR":
+        words.pop(0)
+    return {"area": area, "files": [w for w in words if w not in (",", ";")]}
+
+
 def _computer_paragraph(name: str, tokens: list[Any]) -> dict[str, Any]:
     """SOURCE-COMPUTER / OBJECT-COMPUTER entry as metadata.
 
@@ -691,13 +713,14 @@ class InputOutputSectionParser:
         def _flush() -> None:
             if current:
                 first = current[0]
-                entries.append(
-                    {
-                        "clause": str(first.value).upper(),
-                        "text": _entry_text(current),
-                        "line": first.location.line if first.location else None,
-                    }
-                )
+                entry: dict[str, Any] = {
+                    "clause": str(first.value).upper(),
+                    "text": _entry_text(current),
+                    "line": first.location.line if first.location else None,
+                }
+                if entry["clause"] == "SAME":
+                    entry.update(_same_area_entry(current))
+                entries.append(entry)
                 current.clear()
 
         stop_words = {

@@ -63,11 +63,13 @@ copybook-parsed one; the program-scoped fixture generator reuses them as is.
 
 ```python
 CopybookDataGenerator(options: DataGeneratorOptions | None)
-    .generate_from_file(path, *, record=None)   -> GeneratedDataset
-    .generate_from_source(src, *, filename=..., record=None) -> GeneratedDataset
+    .generate_from_file(path, *, record=None, copybook_paths=None) -> GeneratedDataset
+    .generate_from_source(src, *, filename=..., record=None,
+                          copybook_paths=None)  -> GeneratedDataset
     .generate_from_record(item: CobolDataItem)  -> GeneratedDataset
 
-parse_copybook_records(source, *, filename=...) -> list[CobolDataItem]
+parse_copybook_records(source, *, filename=..., copybook_paths=None,
+                       warnings=None)           -> list[CobolDataItem]
 flatten_record(record, options=None)            -> list[FieldSpec]
 
 GeneratedDataset:  .record_name .fields .rows .seed .header
@@ -171,6 +173,22 @@ Two shapes are detected first:
   early to be fixed format. Ties resolve to **fixed** — mis-indenting a
   fixed-format copybook pushes real code past column 72 and truncates it,
   which is worse than leaving an already-indented free-form copybook alone.
+
+**`COPY` inside the layout** (#592) — a copybook nesting another (`COPY
+INNER.` inside the 01), or a whole program whose FD record is `COPY CUSTREC.`.
+With `copybook_paths` the (wrapped) text goes through
+`parse_cobol_with_expansion(..., skip_missing_copybooks=True)`, the way
+`parse` and `gen-fixtures` expand; a circular COPY (any `PreprocessingError`)
+is a `CopybookLayoutError`. A COPY left unexpanded — no paths, or its member
+not found there — is blanked by the parser with a "COPY X was not expanded"
+warning; `parse_copybook_records` appends each one to the caller's
+`warnings` list, `generate_from_source` prepends them to
+`GeneratedDataset.caveats`, and `RecordDecoder` keeps them as
+`layout_warnings`. Invariant: never drop that warning. The hole makes the
+record short, so decode frames every record wrongly and gen-data writes
+records of the wrong length, and nothing else says why. The CLI
+(`gen-data`, `decode`, `compare`, all with `--copybook-path` and
+`project.copybook_path`) prints each one as `warning:` on stderr.
 
 Record roots are the **top-level** data items (`_top_level_items` excludes
 anything nested under another item) at level 01/77. A copybook containing
@@ -276,7 +294,12 @@ PICTURE to fit. `_float_value` draws one uniform over ±10,000 and hands it to
 `_render_float(value, single=...)`, which quantises through binary32 for a
 COMP-1 and renders to the 7 / 15 significant digits `decoding._decode_float`
 uses, so the CSV cell is exactly what the record image gives back (see
-[decode-compare.md](decode-compare.md)).
+[decode-compare.md](decode-compare.md)). A *declared* float value (VALUE
+clause, level-88, a solver witness via `render()`) takes the same route from
+`_fit_domain_value`, with `quantize=False` so `VALUE 2.5E-07` is not rounded
+to the 4-decimal grid. The layout's `integer_digits=9, decimal_digits=0`,
+unsigned shape for a float is a placeholder, never a domain: sent through
+`_format_number` it wrote `VALUE -2.5E-02` as 0 and `-1.5` as 2 (#551).
 
 `_format_number`'s `allow_random_sign` guards a subtle trap: a signed field
 negates a freshly generated magnitude ~25 % of the time so negatives get

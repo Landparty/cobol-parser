@@ -81,8 +81,13 @@ again rather than a parallel size model.
 
 ## Decoding
 
-`RecordDecoder(views, opts=None, *, record_length=None, varying=None)`, or
-`.from_copybook_source()` / `.from_copybook_file()` / `.from_record()`.
+`RecordDecoder(views, opts=None, *, record_length=None, varying=None,
+layout_warnings=None)`, or `.from_copybook_source()` / `.from_copybook_file()`
+(both take `copybook_paths=` to expand a `COPY` in the layout; see
+[record-data.md](record-data.md#parsing-a-copybook)) / `.from_record()`.
+`layout_warnings` names each `COPY` left unexpanded, and is the first entry
+of every `DecodeResult.caveats` (and so of compare's); the CLI prints them
+once as `warning:` and skips them in decode's `note:` loop.
 `decode_bytes(data, view=..., max_records=..., skip=...) -> DecodeResult`;
 `decode_file(path, ...)` is the same in binary mode (a COMP field routinely
 contains 0x0A, which a text-mode read would translate).

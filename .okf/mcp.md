@@ -3,7 +3,7 @@ type: Module
 title: MCP Server
 description: cobolparser/mcp/ and `cobol-parser mcp` -- an MCP server (stdio) that lets AI agents question COBOL source; tools as plain functions (tools.py), the response envelope and caveat kinds (envelope.py), the workspace guard, cobol.yml and parse cache (workspace.py), the root-wide cross-program indexes (codebase_index.py), and the one SDK-importing module (server.py).
 tags: [mcp, ai, agents, tools, stdio, caveats, source-map]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-10-16T00:00:00Z
 ---
 
 # MCP Server
@@ -41,13 +41,13 @@ returns a small payload. Every list is capped (`limit`, default 50, max 500).
 |---|---|---|
 | `read_source(file, line, before, after)` | numbered lines around a citation, at most `MAX_SOURCE_LINES` (200) | the file, streamed through the guard (`newline=""`: splits as `split_source_lines` does); only the window is kept |
 | `lint(file, rules, min_severity, limit)` | findings worst first, `summary` counts, `rules_run` | `LintAnalyzer` over **every** unit, `add_parse_errors`; defaults from `cobol.yml`'s `lint:` |
-| `program_brief(file, program, limit)` | `size` (own statements only: `get_all_statements()` walks into contained units), `entry_points`, `interface` (entry points, parameters, `call_example`) and `interface_notes`, `files` (C/R/U/D string, open modes, organization, records, key, status field), `sql_tables`, `calls` (one row per target; dynamic `candidates` from `DynamicCallAnalyzer`; CICS LINK/XCTL `PROGRAM`), `cics_commands` / `exec_dli_commands` counts, `unreachable_procedures`, `perform_cycles`, `health`, `lint` (whole file: summary + `BRIEF_LINT` worst) | `ProgramFlowAnalyzer`, `ProgramSignatureExtractor`, `CRUDMatrixGenerator`, `ProgramLayoutIndex.file_facts`, `TechnicalDebtAnalyzer`, `LintAnalyzer`; each section through `_attempt()`, so one analyzer raising costs only its section (`analyzer-failed`) |
-| `callers_of(file, name, program, limit)` | per matching paragraph/section: `callers` (`from`, `type`, location, `thru`, `via_range`, `perform_type`, `condition`, `loop`), `callers_by_type`, `reachable`, `is_entry_point`. `file=None`, or a name that is no procedure of `file`: `_program_callers()` (`kind: program`, `scope: workspace`): `callers` (`program`, `via`, location, `from` (the paragraph), `dynamic`/`target_from`), `calling_programs`, `declared_in`, `unresolved_dynamic_calls`, a `note` when it is external or called by nobody | flow edges in `_CONTROL_EDGES`; a THRU is two edges (opener + `*_THRU` closer), so only openers count and `range_members` gives `via_range`. Program level: the `programs` index's per-unit `_calls` rows: a static target, or a dynamic one whose traced `candidates` include the name; an incomplete dynamic row is listed, not counted |
+| `program_brief(file, program, limit)` | `size` (own statements only: `get_all_statements()` walks into contained units), `entry_points`, `interface` (entry points, parameters, `call_example`) and `interface_notes`, `files` (C/R/U/D string, open modes, organization, records, key, status field), `sql_tables`, `calls` (one row per target; dynamic `candidates` from `DynamicCallAnalyzer`; CICS LINK/XCTL `PROGRAM`), `cics_commands` / `exec_dli_commands` counts, `unreachable_procedures` (`DeadCodeAnalyzer`'s, via `_reachability()`; the flow graph's only if it raises), `perform_cycles`, `health`, `lint` (whole file: summary + `BRIEF_LINT` worst) | `ProgramFlowAnalyzer`, `DeadCodeAnalyzer`, `ProgramSignatureExtractor`, `CRUDMatrixGenerator`, `ProgramLayoutIndex.file_facts`, `TechnicalDebtAnalyzer`, `LintAnalyzer`; each section through `_attempt()`, so one analyzer raising costs only its section (`analyzer-failed`) |
+| `callers_of(file, name, program, limit)` | per matching paragraph/section: `callers` (`from`, `type`, location, `thru`, `via_range`, `perform_type`, `condition`, `loop`), `callers_by_type`, `reachable`, `is_entry_point`. `file=None`, or a name that is no procedure of `file`: `_program_callers()` (`kind: program`, `scope: workspace`): `callers` (`program`, `via`, location, `from` (the paragraph), `dynamic`/`target_from`), `calling_programs`, `declared_in`, `unresolved_dynamic_calls`, a `note` when it is external or called by nobody | flow edges in `_CONTROL_EDGES`; a THRU is two edges (opener + `*_THRU` closer), so only openers count and `range_members` gives `via_range`. `reachable` is `DeadCodeAnalyzer`'s (memoized `_reachability()`), not `flow.unreachable_nodes`, which misses the paragraph after a PERFORMed one; a `FALL_THROUGH` edge is a caller only when it is in `DeadCodeReport.fall_through_edges` or leaves the first entry point (#486). Program level: the `programs` index's per-unit `_calls` rows: a static target, or a dynamic one whose traced `candidates` include the name; an incomplete dynamic row is listed, not counted |
 | `impact_of_change(name, file, program, depth, limit)` | member mode (a member suffix, or `file=None` and a name in `graph.members`): `copied_by` (program, file, `copy_sites`), `copied_through_other_members` (chains), `fields`, `resolved_to`. Otherwise field mode, as `where_from` but forward | `CopybookImpactAnalyzer` over the `programs` index's `CodebaseGraph`, COPY lines from `graph.copy_sites`; field mode `LineageGraph.impact` |
 | `where_from(field, file, program, depth, limit)` | `programs`, `tables`, `datasets`, `hits` (each: `program`, `field`, `node_kind`, `derived`, `confidence`, `file`, `location` of the statement that reaches it, `path` as one string per step `NODE (STATEMENT at file:line)`) | `LineageGraph.impact(..., "backward")` over the `lineage` index; `file` limits the start to that file's units (`program` to one) |
 | `codebase_overview(limit)` | `index`, `programs` (grade, score, `calls`, `called_by`, `contained`, `unit_kind`), `call_graph` (`entry_programs`, `most_called`, `not_in_workspace`, `cycles`, `unresolved_dynamic_calls`), `copybooks` (`most_used`, `not_found`), `health` (`grades`, `worst`), `duplicated_code` (groups, members capped) | `programs` + `health` indexes; top lists are `OVERVIEW_TOP` (10) long, `limit` only lowers them |
 | `record_layout(file, record, program, limit)` | `records[]`: `qualified_name` (`X OF Y`), `section`, `declared_at`, offset/length, `redefines`, `fields` in source order each with `declared_at`; an FD name gives every record of the file (`file`) | `compute_record_layout` per 01; `_declarations()` matches the n-th layout entry of a qualified name to its n-th declaration (FILLER repeats) and re-sorts, since the layout emits a group after its members |
-| `explain_symbol(file, name, program, limit)` | each declaration matching `name` (or `X OF Y`): `declared_at`, `layout` (PICTURE, USAGE, `byte_offset`, `byte_length`, REDEFINES, level-88 values), `references` with role/statement/paragraph, `references_by_role`; `suggestions` when not found | `XrefAnalyzer`, `compute_program_data_items`; not found: `special_register` from xref's `is_special_register()` (no suggestions then) |
+| `explain_symbol(file, name, program, limit)` | each declaration matching `name` (or `X OF Y`): `declared_at`, `layout` (PICTURE, USAGE, `byte_offset`, `byte_length`, REDEFINES, level-88 values; a level-66 RENAMES item gets its THRU byte range, or an `incomplete-analysis` caveat when it cannot be placed, #485), `references` with role/statement/paragraph, `references_by_role`; `suggestions` when not found | `XrefAnalyzer`, `compute_program_data_items`; not found: `special_register` from xref's `is_special_register()` (no suggestions then) |
 
 Invariants:
 
@@ -73,14 +73,34 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
 
 ## Workspace
 
-- **Guard.** `Workspace.resolve()` resolves symlinks, then refuses anything
-  not under the root or a `cobol.yml` copybook directory. The index walk
-  (`program_files()`, `files_named()`) applies the same `_within()` check, so
-  a symlink out of the root is never indexed.
-- **Config.** `load_project_config(root)` unless the CLI was given
+- **Guard.** `Workspace.resolve()` resolves symlinks, then `_within()`
+  accepts anything under the root and, under a kept copybook directory
+  outside the root (`_outside`), only a *member* (`_member_of`): suffix in
+  `COPYBOOK_MEMBER_SUFFIXES` (lower-cased `CopybookSearchPath().extensions`:
+  `.cpy`, `.cbl`, `.cob`, `""`) and no dot-named component below the
+  directory. A non-member there gets "not a copybook member"; anything else
+  "outside the workspace". The index walk (`program_files()`,
+  `files_named()`) applies the same `_within()`, so a symlink out of the
+  root is never indexed (#544).
+- **Refused copybook directories (#544).** `_use_config()` asks
+  `_refusal(dir)` of each resolved `copybook_path` entry: under the root is
+  always fine; refused are the filesystem root, an ancestor of the root, the
+  home directory or an ancestor of it (`Path.home()`), anything under
+  `REFUSED_SYSTEM_DIRS` (`/etc`, `/proc`, `/sys`, `/dev`, `/boot`, `/run`,
+  `/var/run`), and a path with a dot-named component. Refused entries are
+  removed from the config itself (`dataclasses.replace`), so the parse and
+  `CodebaseGraphBuilder` never search them, and listed as `(entry, reason)`
+  in `refused_copybook_dirs`. `_parse()` adds an `unresolved-copybook`
+  caveat naming them only when the parse has an unexpanded COPY (no new
+  caveat kind); `_cmd_mcp` prints one stderr warning per refused directory.
+  The same rules apply to every config source (found, `--config`, built in
+  code).
+- **Config.** `_root_config_file(root)`: `cobol.yml`/`cobol.yaml` in the
+  root itself, never the CLI's walk-up (`find_config_file`) -- a parent's
+  file does not count. Unless the CLI was given
   `--config`/`--no-config` (`args._config_explicit`), which passes the
   config in and fixes it. Otherwise `refresh_config()` (run by `config` and
-  `resolve()`) re-finds `cobol.yml` and compares its `(mtime_ns, size)`; a
+  `resolve()`) re-checks the root's `cobol.yml` and compares its `(mtime_ns, size)`; a
   change reloads it, recomputes the guard's directories and clears the
   cache. A `ConfigError` becomes a `ToolError` and is retried next call.
   Copybook paths, source format, `debug_lines` and `define` come from it; no

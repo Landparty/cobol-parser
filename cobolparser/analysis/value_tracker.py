@@ -6,13 +6,30 @@ variables used in dynamic CALL statements by analyzing MOVE statements
 and initial VALUE clauses in data definitions.
 """
 
+import re
 from typing import Any
 
 from ..models.ast_base import ASTNode
 from ..models.data_items import CobolDataItem, ConditionNameItem
-from ..models.program import CobolDivision, CobolProgram
-from ..models.statements import CallStatement, MoveStatement, SetStatement
+from ..models.program import CobolDivision, CobolProgram, CobolSection
+from ..models.statements import (
+    CallStatement,
+    IOReadStatement,
+    MoveStatement,
+    ReturnStatement,
+    SetStatement,
+)
 from ._names import base_data_name
+
+#: ``:HV =`` in an ``EXEC SQL SET`` / ``GET DIAGNOSTICS`` statement: the host
+#: variable on the left of the ``=`` receives the value.
+_SQL_ASSIGNED_HOST_VAR_RE = re.compile(
+    r":(?:[A-Za-z][A-Za-z0-9_-]*\.)*([A-Za-z][A-Za-z0-9_-]*)\s*="
+)
+#: EXEC CICS options whose data-name argument CICS writes, on any command.
+_CICS_RECEIVING_OPTIONS = frozenset({"INTO", "SET", "RESP", "RESP2"})
+#: EXEC CICS commands every data-name option of which is a receiver.
+_CICS_ALL_RECEIVING_COMMANDS = frozenset({"ASSIGN"})
 
 
 class DynamicCallAnalyzer:
@@ -108,10 +125,24 @@ class DynamicCallAnalyzer:
         # First pass: collect initial values from data definitions
         self._collect_initial_values(ast)
 
+        # Storage the program does not fill itself -- the caller's (LINKAGE),
+        # a READ/RETURN's (FD/SD records), DB2's (SQL INTO) or CICS's (INTO /
+        # SET) -- holds values no MOVE here shows. Marked before the MOVE
+        # pass so a MOVE out of such an item carries the flag along.
+        self._mark_externally_supplied(ast)
+
         self._group_slices = self._literal_group_slices(self._walk(ast))
 
-        # Second pass: track MOVE statements
-        self._track_move_statements(ast)
+        # Second pass: track MOVE statements. The walk is in source order,
+        # not execution order (a MOVE in a paragraph PERFORMed earlier may
+        # sit later in the source), so it runs to a fixpoint: every MOVE
+        # then copies its source's complete value set. The sets only grow,
+        # so an unchanged size means nothing changed.
+        while True:
+            before = self._tracked_size()
+            self._track_move_statements(ast)
+            if self._tracked_size() == before:
+                break
 
         # Every other way a CALL variable's storage can change (ACCEPT,
         # STRING/UNSTRING INTO, INITIALIZE, READ INTO, CALL ... USING, a
@@ -124,6 +155,87 @@ class DynamicCallAnalyzer:
 
         # Third pass: find dynamic CALL statements and populate values
         self._populate_dynamic_calls(ast)
+
+    def _tracked_size(self) -> tuple[int, int]:
+        """How much the MOVE pass has recorded (values, incomplete names)."""
+        return (
+            sum(len(values) for values in self._variable_values.values()),
+            len(self._incomplete_variables),
+        )
+
+    def _mark_externally_supplied(self, ast: CobolProgram) -> None:
+        """Mark incomplete every item whose storage overlaps one the program
+        does not write itself: a LINKAGE item (the caller supplies it), a
+        record of a file the program READs or RETURNs, an EXEC SQL ``INTO``
+        (or ``SET :hv =``, or ``CALL`` argument) host variable, and an EXEC
+        CICS ``INTO`` / ``SET`` receiver."""
+        nodes = self._walk(ast)
+        supplied: set[str] = set()
+        read_files: set[str] = set()
+        for node in nodes:
+            if isinstance(node, IOReadStatement | ReturnStatement):
+                if node.file_name:
+                    read_files.add(base_data_name(node.file_name).upper())
+            elif getattr(node, "node_type", None) == "EXEC_CICS":
+                supplied.update(self._cics_receivers(node))
+            elif isinstance(getattr(node, "sql_text", None), str):
+                supplied.update(self._sql_receivers(node))
+        data_division = getattr(ast, "data_division", None)
+        sections = (
+            data_division.sections if isinstance(data_division, CobolDivision) else []
+        )
+        for section in sections:
+            if not isinstance(section, CobolSection):
+                continue
+            linkage = "LINKAGE" in (section.section_name or "").upper()
+            for item in section.data_items:
+                if not isinstance(item, CobolDataItem) or not item.name:
+                    continue
+                fd_file = item.get_metadata("fd_file_name")
+                if linkage or (fd_file and str(fd_file).upper() in read_files):
+                    supplied.add(item.name.upper())
+        if not supplied:
+            return
+        overlapping = self._overlapping_names(
+            [node for node in nodes if isinstance(node, CobolDataItem)]
+        )
+        for node in nodes:
+            if isinstance(node, CobolDataItem) and node.name:
+                name = node.name.upper()
+                if name in supplied or overlapping.get(name, set()) & supplied:
+                    self._incomplete_variables.add(name)
+        # A receiver the data walk did not see (a hand-built tree) still counts.
+        self._incomplete_variables.update(supplied)
+
+    @staticmethod
+    def _cics_receivers(node: ASTNode) -> set[str]:
+        """Data-names an EXEC CICS command writes."""
+        command = (getattr(node, "cics_command", "") or "").upper()
+        literal = {o.upper() for o in getattr(node, "literal_options", None) or ()}
+        names: set[str] = set()
+        for option, argument in (getattr(node, "options", None) or {}).items():
+            key = option.upper()
+            if not argument or key in literal:
+                continue
+            if (
+                key in _CICS_RECEIVING_OPTIONS
+                or command in _CICS_ALL_RECEIVING_COMMANDS
+            ):
+                names.add(base_data_name(argument).upper())
+        return names
+
+    @staticmethod
+    def _sql_receivers(node: ASTNode) -> set[str]:
+        """Host variables an EXEC SQL statement writes."""
+        names = {v.upper() for v in getattr(node, "into_variables", None) or ()}
+        text = (getattr(node, "sql_text", "") or "").lstrip().upper()
+        if text.startswith(("SET", "GET")):
+            names.update(_SQL_ASSIGNED_HOST_VAR_RE.findall(text))
+        elif text.startswith("CALL"):
+            # A stored procedure's OUT / INOUT parameters: which ones they
+            # are is declared in DB2, not in the program.
+            names.update(v.upper() for v in getattr(node, "host_variables", None) or ())
+        return names
 
     def _collect_initial_values(self, node: ASTNode) -> None:
         """Collect initial values from VALUE clauses in data items."""

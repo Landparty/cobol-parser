@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
-from ..models.data_items import CobolDataItem, ConditionNameItem
+from ..models.data_items import CobolDataItem, ConditionNameItem, RenamesItem
 from ..models.program import CobolProgram, CobolSection
 from .envelope import Response, ToolError, clamp_limit
 from .workspace import ParsedProgram, Workspace, stdout_to_stderr
@@ -294,6 +294,15 @@ class CobolTools:
                 ],
             }
             item = _layout_for(entry.name, entry.qualified_name, layout)
+            if item is None and entry.level == 66:
+                item = _renames_layout(unit, entry.name, layout)
+                if item is None:
+                    response.caveat(
+                        "incomplete-analysis",
+                        f"RENAMES item {entry.name}: the bytes it renames "
+                        "could not be placed",
+                        "no layout is reported for it",
+                    )
             if item is not None:
                 symbol["layout"] = {
                     key: item.get(key)
@@ -343,7 +352,10 @@ class CobolTools:
                 "statements": len(_own_statements(unit)),
             }
             answer["entry_points"] = list(flow.entry_points)
-            answer["unreachable_procedures"] = list(flow.unreachable_nodes)
+            reach = _reachability(parsed, unit, response)
+            answer["unreachable_procedures"] = (
+                list(flow.unreachable_nodes) if reach is None else reach.unreachable
+            )
             answer["perform_cycles"] = len(flow.cycles)
 
         signature = _attempt(
@@ -525,7 +537,19 @@ class CobolTools:
             names = sorted({n.key.upper() for n in flow.nodes})
             return self._program_callers(wanted, response, cap, program_info, names)
 
-        unreachable = {u.upper() for u in flow.unreachable_nodes}
+        # Reachability is DeadCodeAnalyzer's (the same answer as the brief's
+        # lint section): the flow graph draws a fall-through out of every
+        # non-terminating procedure, PERFORM targets included, so its
+        # ``unreachable_nodes`` misses the paragraph after a performed one.
+        reach = _reachability(parsed, unit, response)
+        if reach is None:
+            unreachable = {u.upper() for u in flow.unreachable_nodes}
+        else:
+            unreachable = {u.upper() for u in reach.unreachable}
+        # Where control starts runs on: the first paragraph, or the
+        # sentences before it (``PROCEDURE DIVISION``, a node of the flow
+        # graph only).
+        start = flow.entry_points[0].upper() if flow.entry_points else None
         procedures: list[dict[str, Any]] = []
         for index, node in enumerate(matches):
             key = node.key.upper()
@@ -537,6 +561,17 @@ class CobolTools:
             for edge in flow.edges:
                 kind = edge.edge_type.value
                 if kind not in _CONTROL_EDGES or kind.endswith("_THRU"):
+                    continue
+                if (
+                    kind == "FALL_THROUGH"
+                    and reach is not None
+                    and edge.source.upper() != start
+                    and (edge.source.upper(), edge.target.upper())
+                    not in reach.fall_throughs
+                ):
+                    # Out of a procedure only ever PERFORMed (its end returns
+                    # to the performer), or out of one never reached: control
+                    # never runs on along this edge.
                     continue
                 if edge.target.upper() == key:
                     callers.append(_edge_caller(edge, parsed, response))
@@ -1244,6 +1279,47 @@ def _flow(parsed: ParsedProgram, unit: CobolProgram) -> Any:
     return parsed.report("flow", unit, lambda: ProgramFlowAnalyzer().analyze(unit))
 
 
+@dataclass(frozen=True)
+class _Reachability:
+    """Which procedures of a unit can run, and which fall-throughs happen."""
+
+    #: Procedure keys (``X OF S`` when the name repeats) control never reaches.
+    unreachable: list[str]
+    #: Upper-cased ``(from, to)`` keys of the fall-throughs that can happen.
+    fall_throughs: frozenset[tuple[str, str]]
+
+
+def _reachability(
+    parsed: ParsedProgram, unit: CobolProgram, response: Response
+) -> _Reachability | None:
+    """DeadCodeAnalyzer's reachability for *unit*, memoized beside the parse.
+
+    The root-based fixpoint the OKF calls authoritative (issue #486), rather
+    than ``ProgramFlowAnalyzer.unreachable_nodes``. None, with an
+    ``analyzer-failed`` caveat, when the analyzer raises: callers then fall
+    back to the flow graph's answer.
+    """
+    from ..analysis.dead_code import DeadCodeAnalyzer
+
+    def build() -> _Reachability:
+        report = DeadCodeAnalyzer().analyze(unit)
+        return _Reachability(
+            unreachable=[
+                item.qualified_name or item.name for item in report.dead_items
+            ],
+            fall_throughs=frozenset(
+                (source.upper(), target.upper())
+                for source, target in report.fall_through_edges
+            ),
+        )
+
+    return _attempt(
+        response,
+        "reachability",
+        lambda: parsed.report("reachability", unit, build),
+    )
+
+
 def _signature(parsed: ParsedProgram, unit: CobolProgram) -> Any:
     from ..analysis.program_signature import ProgramSignatureExtractor
 
@@ -1755,6 +1831,53 @@ def _layout_index(
     for item in items:
         index.setdefault(str(item["name"]).upper(), []).append(item)
     return index
+
+
+def _renames_layout(
+    unit: CobolProgram,
+    name: str,
+    layout: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any] | None:
+    """The byte range a level-66 ``RENAMES`` item names, or None (#485).
+
+    ``66 R-AB RENAMES R-A THRU R-B`` covers its record from the start of
+    ``R-A`` to the end of ``R-B``; the layout itself has no entry for it.
+    """
+    data_div = unit.data_division
+    if data_div is None:
+        return None
+    for section in data_div.sections:
+        if not isinstance(section, CobolSection):
+            continue
+        for node in section.children:
+            if not isinstance(node, RenamesItem) or node.name.upper() != name.upper():
+                continue
+            ends: list[dict[str, Any]] = []
+            operands = [(node.renames_from, node.renames_from_qualifiers)]
+            if node.renames_through:
+                operands.append((node.renames_through, node.renames_through_qualifiers))
+            for operand, qualifiers in operands:
+                qualified = " OF ".join([str(operand), *qualifiers])
+                found = _layout_for(str(operand), qualified, layout)
+                if found is None:
+                    return None
+                ends.append(found)
+            first, last = ends[0], ends[-1]
+            record = str(first.get("qualified_name", "")).upper().split(".")[0]
+            if str(last.get("qualified_name", "")).upper().split(".")[0] != record:
+                return None
+            start, end_at = first.get("byte_offset"), last.get("byte_offset")
+            if start is None or end_at is None:
+                return None
+            length = int(end_at) + int(last.get("byte_length") or 0) - int(start)
+            if length <= 0:
+                return None
+            return {
+                "qualified_name": name.upper(),
+                "byte_offset": start,
+                "byte_length": length,
+            }
+    return None
 
 
 def _layout_for(

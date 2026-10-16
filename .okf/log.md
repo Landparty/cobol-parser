@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-10-16T00:00:00Z
 ---
 
 # OKF Update Log
@@ -21,6 +21,20 @@ entries, including both 2026-09-15 sections, were found there on
 untracked writes on every MOVE source feeding a CALL variable (and carries
 the incompleteness along the MOVEs), and gives a literal MOVE to a source's
 group the slice that lands in the source.
+## 2026-10-16 -- MCP reachability from dead-code (#486)
+
+[mcp.md](mcp.md), [analysis/flow.md](analysis/flow.md): `callers_of`'s
+`reachable` and `program_brief`'s `unreachable_procedures` come from
+`DeadCodeAnalyzer`; new `DeadCodeReport.fall_through_edges` filters the
+flow graph's phantom `FALL_THROUGH` callers.
+## 2026-10-16 -- xref declares FILLER level-88s and level-66 RENAMES (#485)
+
+[analysis/data-use.md](analysis/data-use.md): `XrefAnalyzer` now declares
+the level-88s under a FILLER and every level-66 `RENAMES` item, so they no
+longer read as undefined in `xref`, `explain_symbol` and `lineage`.
+[analysis/lineage.md](analysis/lineage.md): lineage maps a RENAMES item onto
+the fields of its THRU range (else a caveat); [mcp.md](mcp.md):
+`explain_symbol` gives it a byte range (else a caveat).
 
 ## 2026-10-15 -- MCP server, Phase 3 review fixes
 

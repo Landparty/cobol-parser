@@ -31,7 +31,7 @@ from ..analysis.constraints import (
     FieldConstraint,
     SequenceConstraint,
 )
-from ..analysis.domains import Unsatisfiable, Witness, solve
+from ..analysis.domains import FLOAT_LIMIT, Unsatisfiable, Witness, solve
 from ..analysis.program_flow import BranchArm, BranchNode, ProgramFlowReport
 from .data.bundle import _unique_names
 from .data.layout import FieldCategory, FieldSpec
@@ -208,11 +208,20 @@ class PlannedScenario:
 class ScenarioPlan:
     scenarios: list[PlannedScenario] = field(default_factory=list)
     coverage: ScenarioCoverage = field(default_factory=ScenarioCoverage)
+    #: One note per arm the planner could not target because of a gap in
+    #: the tool rather than a fact about the program -- today, an arm whose
+    #: precondition the constraint extractor did not model
+    #: (`BranchConstraints.unmodeled_arms`). An unreachable or unsatisfiable
+    #: arm is the program's own business and is not listed. The fixture
+    #: generator carries these into `FixtureBundle.unresolved`, so
+    #: `gen-fixtures --strict` refuses the bundle (#509).
+    unresolved: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "scenarios": [s.to_dict() for s in self.scenarios],
             "coverage": self.coverage.to_dict(),
+            "unresolved": list(self.unresolved),
         }
 
 
@@ -250,6 +259,7 @@ class ScenarioPlanner:
         }
 
         details: list[ArmOutcome] = []
+        unresolved: list[str] = []
         candidates: list[tuple[str, PlannedScenario]] = []  # (sort_key, candidate)
         shared_areas = _shared_record_areas(boundary_report)
 
@@ -286,6 +296,20 @@ class ScenarioPlanner:
                             arm_key, branch.parent_proc, "missed", reason="unreachable"
                         )
                     )
+                    continue
+
+                unmodeled = branch.unmodeled_arms.get(arm_id)
+                if unmodeled is not None:
+                    # Its `[]` means "precondition unknown", not "anything
+                    # goes": solving it would target the arm with random
+                    # rows that usually (for a level-88 field drawn from its
+                    # own condition values, always) run an earlier WHEN, and
+                    # verification would then call zero conjuncts "verified".
+                    reason = f"precondition not modeled: {unmodeled}"
+                    details.append(
+                        ArmOutcome(arm_key, branch.parent_proc, "missed", reason=reason)
+                    )
+                    unresolved.append(f"arm {arm_key} not targeted: {reason}")
                     continue
 
                 options, path_gaps = _path_options(branch, arms_by_key)
@@ -390,7 +414,9 @@ class ScenarioPlanner:
             missed=sum(1 for d in details if d.status == "missed"),
             details=details,
         )
-        return ScenarioPlan(scenarios=scenarios, coverage=coverage)
+        return ScenarioPlan(
+            scenarios=scenarios, coverage=coverage, unresolved=unresolved
+        )
 
 
 def _path_options(
@@ -895,7 +921,7 @@ def _boundary_value_scenarios(
     for qualified_name, sample in numeric_fields.items():
         spec = sample.field.spec
         ceiling = _picture_ceiling(spec)
-        floor = f"-{ceiling}" if spec.is_signed else "0"
+        floor = f"-{ceiling}" if spec.is_signed or _is_float(spec) else "0"
         # eq pins the domain to a single point -- ge/le alone only narrow the
         # interval, and solve()'s witness is always the interval's midpoint,
         # not either edge (found writing this family's own test).
@@ -930,10 +956,17 @@ def _bound_constraint(sample: FieldConstraint, op: str, value: str) -> FieldCons
     return FieldConstraint(sample.field, op, (value,), origin="boundary-values-family")
 
 
+def _is_float(spec: FieldSpec) -> bool:
+    return spec.category is FieldCategory.FLOAT
+
+
 def _picture_ceiling(spec: FieldSpec) -> str:
     """Exact decimal text, never float: ``str(float(10**18 - 1))`` is
     ``'1e+18'`` -- scientific notation the solver would then mis-handle,
     and one past the field's actual ceiling."""
+    if _is_float(spec):
+        # COMP-1/COMP-2: no PICTURE, so the solver's own float bound.
+        return str(int(FLOAT_LIMIT))
     digits = spec.integer_digits
     decimals = spec.decimal_digits
     if decimals == 0:
