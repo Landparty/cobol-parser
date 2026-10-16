@@ -401,6 +401,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dynamic `CALL` reads, but `possible_values` was still reported as complete.
   Such a CALL is now flagged `possible_values_incomplete`, so consumers no
   longer treat its target list as exhaustive.
+* **`DynamicCallAnalyzer` reported targets as complete that the program does
+  not fill itself, and propagated MOVEs in source order** (#564): a CALL
+  variable overlapping a LINKAGE item, a record of a file the program READs
+  or RETURNs, an EXEC SQL `INTO` / `SET :hv =` / `CALL` host variable, or an
+  EXEC CICS `INTO` / `SET` (or `ASSIGN`) receiver is now flagged
+  `possible_values_incomplete`, and the flag follows a MOVE out of such an
+  item. The MOVE pass runs to a fixpoint, so a MOVE in a paragraph PERFORMed
+  earlier but written later in the source reaches the CALL
+  (`codebase-graph` and MCP `callers_of` no longer drop the edge).
 * **`business-rules` rendered `WHEN NOT 0 THRU 17` as `AGE <> 0 THRU 17`**
   (#260): a negated range selector now reads
   `NOT (AGE >= 0 AND AGE <= 17)`, and the derived `WHEN OTHER` condition is

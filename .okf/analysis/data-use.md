@@ -742,6 +742,27 @@ redefinitions of one area join). `MOVE 'PGMZ' TO WS-AREA` therefore marks a
 No byte-range precision: like the hierarchy rule, any write to the overlay
 counts. Pinned by `tests/unit/test_value_tracker.py::TestRedefinesOverlap`.
 
+**Storage the program does not fill itself is incomplete (#564).**
+`_mark_externally_supplied()` runs *before* the MOVE pass and marks
+incomplete every item overlapping (via `_overlapping_names()`) a LINKAGE
+item (the caller supplies it), a record under the FD/SD of a file the unit
+READs (with or without INTO) or RETURNs (`fd_file_name` metadata), an EXEC
+SQL receiver (`into_variables`, `SET :hv =` / `GET DIAGNOSTICS :hv =`, every
+host variable of an SQL `CALL`), or an EXEC CICS receiver (`INTO`, `SET`,
+`RESP`, `RESP2`, every option of `ASSIGN`; `literal_options` skipped). Seeding
+before the MOVE pass is what carries the flag through `MOVE LK-PGM TO
+WS-PGM`. A WHERE-clause input host variable or a CICS input option
+(`LINK PROGRAM(x)`) is not a write.
+
+**The MOVE pass runs to a fixpoint.** `_track_move_statements()` walks in
+source order, and a MOVE in a paragraph PERFORMed earlier may be written
+later (`MOVE WS-DEFAULT TO WS-PGM` before the `MOVE 'PGMB' TO WS-DEFAULT`
+that executes first). `_analyze_unit()` repeats the pass until
+`_tracked_size()` (total values, incomplete names; both only grow) stops
+changing, so the analysis is flow-insensitive: every MOVE copies its source's
+complete value set. Pinned by
+`tests/unit/test_issue_564_dynamic_call_incomplete.py`.
+
 ## IO coverage and diagnostics helpers
 
 `io_coverage_reporter.py` (`IOCoverageReporter`, `CoverageStatus`, `TestType`,
