@@ -826,3 +826,23 @@ class TestExplainSymbolFillerAndRenames:
         assert symbol["declared"] is True
         assert symbol["level"] == 66
         assert symbol["declared_at"]["line"] == 12
+        # R-A THRU R-B: bytes 0-4 of WS-REC.
+        assert symbol["layout"] == {
+            "qualified_name": "R-AB",
+            "byte_offset": 0,
+            "byte_length": 5,
+        }
+
+    def test_renames_item_that_cannot_be_placed_is_a_caveat(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "F88.cbl").write_text(
+            self.SOURCE.replace("RENAMES R-A THRU R-B", "RENAMES R-A THRU NOPE")
+        )
+        result = tools_for(tmp_path).explain_symbol("F88.cbl", "R-AB")
+        symbol = result["answer"]["symbols"][0]
+        assert "layout" not in symbol
+        assert any(
+            c["kind"] == "incomplete-analysis" and "RENAMES item R-AB" in c["detail"]
+            for c in result["caveats"]
+        )

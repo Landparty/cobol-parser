@@ -3,7 +3,7 @@ type: Module
 title: Field Lineage
 description: Field-level data lineage -- FieldFlowAnalyzer (field_lineage.py, one program's value-flow graph between data items and ports), LineageGraph (lineage_graph.py, cross-program joins through datasets, CALL arguments and DB2 columns, impact queries), lineage_jcl.py (DD bindings from jcl-parser jobs) and _sql_flow.py (embedded SQL host variable <-> column flows).
 tags: [analysis, field-lineage, lineage-graph, impact, jcl, sql-flow, ports]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-10-16T00:00:00Z
 ---
 
 # Field Lineage
@@ -72,6 +72,15 @@ a subscript, a reference-modifier offset/length or an `OF` qualifier is
 never a value source (`COMPUTE X = Y(I)` does not flow `I` into `X`;
 `LENGTH OF X` / `ADDRESS OF X` flow nothing). A literal reference modifier
 narrows the byte range; literal subscripts are kept (`_constant_subscripts`).
+
+**Level-66 RENAMES** (#485, `_index_renames`). `66 R-AB RENAMES R-A THRU
+R-B` becomes an item keyed `R-AB` (level 66, `record` = the renamed record,
+no parent) whose children are the elementary fields lying in the run from
+the start of `R-A` to the end of `R-B`, so a MOVE to or from it flows
+through them like a group. `_redefines_edges` skips it (its bytes are its
+record's). One that cannot be placed (operand not found or ambiguous, in
+another record, unknown offset, empty range) gets a `RENAMES item X not
+traced: ...` caveat -- never a silent drop now that xref declares it.
 
 **OCCURS tables.** A table field's node (`T.E`) stands for *any*
 occurrence. Its bytes are every occurrence's (`_placements`: one range per

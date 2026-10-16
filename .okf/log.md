@@ -19,6 +19,9 @@ entries, including both 2026-09-15 sections, were found there on
 [analysis/data-use.md](analysis/data-use.md): `XrefAnalyzer` now declares
 the level-88s under a FILLER and every level-66 `RENAMES` item, so they no
 longer read as undefined in `xref`, `explain_symbol` and `lineage`.
+[analysis/lineage.md](analysis/lineage.md): lineage maps a RENAMES item onto
+the fields of its THRU range (else a caveat); [mcp.md](mcp.md):
+`explain_symbol` gives it a byte range (else a caveat).
 
 ## 2026-10-15 -- MCP server, Phase 3 review fixes
 

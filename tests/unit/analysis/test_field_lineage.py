@@ -566,3 +566,53 @@ def test_condition_names_under_a_filler_and_renames_are_not_undeclared() -> None
     assert result.ast is not None
     report = FieldFlowAnalyzer().analyze(result.ast)
     assert not any("not declared in this program" in c for c in report.caveats)
+
+
+def _source_report(source: str) -> FieldFlowReport:
+    result = parse_cobol(source)
+    assert result.ast is not None
+    return FieldFlowAnalyzer().analyze(result.ast)
+
+
+_RENAMES_SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. R66.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-OUT PIC X(5).
+       01  WS-IN  PIC X(5).
+       01  WS-REC.
+           05  R-A PIC X(3).
+           05  R-B PIC 9(2).
+           05  R-C PIC X(4).
+       66  R-AB RENAMES R-A THRU R-B.
+       PROCEDURE DIVISION.
+           MOVE WS-IN TO R-AB
+           MOVE R-AB TO WS-OUT
+           GOBACK.
+"""
+
+
+def test_renames_item_flows_through_the_fields_it_renames() -> None:
+    # Issue #485 review: once xref declared R-AB, lineage must trace it
+    # (R-A THRU R-B) rather than drop it with no caveat.
+    report = _source_report(_RENAMES_SOURCE)
+    edges = _edges(report)
+    assert ("move", "WS-REC.R-A", "WS-OUT") in edges
+    assert ("move", "WS-REC.R-B", "WS-OUT") in edges
+    assert ("move", "WS-IN", "WS-REC.R-A") in edges
+    assert ("move", "WS-IN", "WS-REC.R-B") in edges
+    assert not any("R-C" in label for _k, s, t in edges for label in (s, t))
+    assert not any("not traced" in c for c in report.caveats)
+    alias = next(i for i in report.items if i["name"] == "R-AB")
+    assert (alias["level"], alias["offset"], alias["length"]) == (66, 0, 5)
+    assert alias["record"] == "WS-REC"
+
+
+def test_renames_item_that_cannot_be_placed_is_a_caveat() -> None:
+    report = _source_report(
+        _RENAMES_SOURCE.replace("RENAMES R-A THRU R-B", "RENAMES R-A THRU NOPE")
+    )
+    assert any(
+        c.startswith("RENAMES item R-AB not traced") and "NOPE" in c
+        for c in report.caveats
+    )

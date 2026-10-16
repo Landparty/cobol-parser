@@ -167,6 +167,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `declared: false` (or `found: false` for an unreferenced one), and
   `lineage` caveated them as "not declared ... not traced". They are now
   declared as condition-names / level-66 data items at their own lines.
+  `lineage` now traces a RENAMES item through the fields of its `THRU`
+  range, and MCP `explain_symbol` reports its byte range; one that cannot
+  be placed gets a caveat in both.
 
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never
