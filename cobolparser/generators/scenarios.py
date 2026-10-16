@@ -31,7 +31,7 @@ from ..analysis.constraints import (
     FieldConstraint,
     SequenceConstraint,
 )
-from ..analysis.domains import Unsatisfiable, Witness, solve
+from ..analysis.domains import FLOAT_LIMIT, Unsatisfiable, Witness, solve
 from ..analysis.program_flow import BranchArm, BranchNode, ProgramFlowReport
 from .data.bundle import _unique_names
 from .data.layout import FieldCategory, FieldSpec
@@ -921,7 +921,7 @@ def _boundary_value_scenarios(
     for qualified_name, sample in numeric_fields.items():
         spec = sample.field.spec
         ceiling = _picture_ceiling(spec)
-        floor = f"-{ceiling}" if spec.is_signed else "0"
+        floor = f"-{ceiling}" if spec.is_signed or _is_float(spec) else "0"
         # eq pins the domain to a single point -- ge/le alone only narrow the
         # interval, and solve()'s witness is always the interval's midpoint,
         # not either edge (found writing this family's own test).
@@ -956,10 +956,17 @@ def _bound_constraint(sample: FieldConstraint, op: str, value: str) -> FieldCons
     return FieldConstraint(sample.field, op, (value,), origin="boundary-values-family")
 
 
+def _is_float(spec: FieldSpec) -> bool:
+    return spec.category is FieldCategory.FLOAT
+
+
 def _picture_ceiling(spec: FieldSpec) -> str:
     """Exact decimal text, never float: ``str(float(10**18 - 1))`` is
     ``'1e+18'`` -- scientific notation the solver would then mis-handle,
     and one past the field's actual ceiling."""
+    if _is_float(spec):
+        # COMP-1/COMP-2: no PICTURE, so the solver's own float bound.
+        return str(int(FLOAT_LIMIT))
     digits = spec.integer_digits
     decimals = spec.decimal_digits
     if decimals == 0:

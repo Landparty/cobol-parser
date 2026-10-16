@@ -3,7 +3,7 @@ type: Module
 title: Data Use, IO and Call Analyzers
 description: How a program uses its data, files and CALL targets -- UnusedVariableAnalyzer, XrefAnalyzer, MoveTypeChecker, LinkageChecker, IOLogger, IOSequenceAnalyzer, CRUDMatrixGenerator, DynamicCallAnalyzer (value_tracker.py), the IO coverage/diagnostics helpers, and the shared name helpers (_names.py, _files.py).
 tags: [analysis, unused-variables, xref, move-type, linkage, io, io-sequence, crud, dynamic-call, value-tracker]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-10-16T00:00:00Z
 ---
 
 # Data Use, IO and Call Analyzers
@@ -99,6 +99,14 @@ sentinels.
 argument verbatim (case preserved, for `io_logger`'s human-readable report);
 `CRUDMatrixGenerator` upper-cases the result itself since its entries are keyed
 by upper-case name.
+
+`same_record_area_groups(ast)` reads the INPUT-OUTPUT section's
+`io_control` metadata and returns the files of each `SAME RECORD AREA`
+clause (upper-cased, groups sharing a file merged). Their records share one
+storage area across FDs, so `const_fold._link_file_records` and
+`FieldFlowAnalyzer._redefines_edges` alias them like the records of one FD
+(#497). Plain `SAME AREA` / `SAME SORT[-MERGE] AREA` share no records and are
+not returned.
 
 ## UnusedVariableAnalyzer
 
@@ -371,6 +379,15 @@ Things worth knowing before trusting a field:
   children and are skipped in every sweep (`_contained_node_ids`) — otherwise
   a nested program's statements would read as the outer unit's references.
   Call `analyze()` separately per unit.
+* **Level-88s under a FILLER and level-66 RENAMES items are declared**
+  (#485). `collect_declared_items` drops every FILLER, but
+  `_collect_data_definitions` still walks a FILLER for its `ConditionNameItem`
+  children (the `05 FILLER PIC X. 88 SW-ON ...` switch idiom) and its
+  `INDEXED BY` names, and declares each section's `RenamesItem` children as
+  `data-item`, level 66. All in source order, so the first declaration of a
+  name still wins. Before, they read as `undefined` in `xref`, as
+  `declared: false` / `found: false` in MCP `explain_symbol`, and as "not
+  declared ... not traced" in the `lineage` caveats.
 * **Digit-led paragraph names resolve.** Procedure names (PERFORM / GO TO
   targets) are credited verbatim and `_COBOL_WORD_RE` allows a leading digit
   provided there is at least one letter, so `1000-INIT` is one symbol rather

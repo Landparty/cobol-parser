@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import struct
 from decimal import Decimal
 from pathlib import Path
 
@@ -379,6 +380,37 @@ class TestGeneration:
         generator = CopybookDataGenerator(DataGeneratorOptions(rows=1, seed=1))
         with pytest.raises(CopybookLayoutError, match="no generatable fields"):
             generator.generate_from_source(source)
+
+
+class TestFloatValueClauses:
+    """Issue #551: COMP-1/COMP-2 VALUE clauses were rendered through the
+    layout's placeholder ``PIC 9(9)``: ``VALUE -2.5E-02`` was written as 0
+    and ``-1.5`` as 2."""
+
+    SOURCE = (
+        "01 R.\n"
+        "  05 B COMP-1 VALUE 2.5E-02.\n"
+        "  05 C COMP-2 VALUE -2.5E-02.\n"
+        "  05 E COMP-2 VALUE -1.5.\n"
+        "  05 F COMP-1 VALUE 3.25.\n"
+    )
+
+    def _dataset(self):
+        options = DataGeneratorOptions(rows=1, seed=1).for_record_image()
+        return CopybookDataGenerator(options).generate_from_source(self.SOURCE)
+
+    def test_csv_cells_keep_sign_and_fraction(self):
+        assert self._dataset().rows[0] == ["0.025", "-0.025", "-1.5", "3.25"]
+
+    def test_record_image_holds_the_declared_floats(self):
+        from cobolparser.generators import EncodingOptions, Endian
+
+        image = self._dataset().to_records(EncodingOptions(endian=Endian.BIG))
+        b, c, e, f = struct.unpack(">fddf", image)
+        assert b == pytest.approx(0.025)
+        assert c == -0.025
+        assert e == -1.5
+        assert f == 3.25
 
 
 class TestValueConstraints:

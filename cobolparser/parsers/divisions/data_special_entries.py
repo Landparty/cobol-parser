@@ -17,6 +17,7 @@ from cobolparser.lexer import TokenType
 from cobolparser.models.ast_base import SourceLocation
 from cobolparser.models.data_items import ConditionNameItem, RenamesItem
 from cobolparser.models.sql_statements import ExecSQLStatement, parse_exec_sql
+from cobolparser.parsers.divisions.data_clauses import data_entry_ending_header
 from cobolparser.parsers.statements._utils import collect_exec_sql_text
 
 
@@ -70,15 +71,25 @@ class SpecialEntryParser:
             TokenType.LEVEL_NUMBER,
         ):
             return
-        if offset and token.type == TokenType.IDENTIFIER:
-            # A missing period followed by a new line: a section header or
-            # the next entry, not content of this one.
-            return
         host = getattr(self._parser, "host", None)
         add_warning = getattr(host, "add_warning", None)
+        line = getattr(getattr(token, "location", None), "line", None)
+        where = f" at line {line}" if line else ""
+        header = data_entry_ending_header(token_stream, offset)
+        if header:
+            # The header is left for the section loop, which parses it;
+            # only the period is missing (issue #559).
+            if callable(add_warning):
+                add_warning(
+                    f"Data item '{item.name}' missing its terminating period: "
+                    f"a period was assumed before '{header}'{where}"
+                )
+            return
+        if offset and token.type == TokenType.IDENTIFIER:
+            # A missing period followed by a new line: the next entry, not
+            # content of this one.
+            return
         if callable(add_warning):
-            line = getattr(getattr(token, "location", None), "line", None)
-            where = f" at line {line}" if line else ""
             add_warning(
                 f"Unparsed token '{token.value}'{where} in condition-name "
                 f"'{item.name}' skipped: clause not fully supported; content "

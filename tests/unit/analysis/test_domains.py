@@ -76,6 +76,49 @@ def _constraint(
     )
 
 
+def _float_spec(name: str = "WS-FLT", usage: str = "COMP-2") -> FieldSpec:
+    """A PICTURE-less float the way layout.py builds one: 9 integer digits,
+    no decimals, unsigned -- a placeholder the solver must not use (#551)."""
+    return FieldSpec(
+        name=name,
+        path=(name,),
+        column=name,
+        level=5,
+        picture=None,
+        usage=usage,
+        category=FieldCategory.FLOAT,
+        size=4 if usage == "COMP-1" else 8,
+        integer_digits=9,
+        decimal_digits=0,
+        is_signed=False,
+    )
+
+
+class TestFloatDomain:
+    @pytest.mark.parametrize("usage", ["COMP-1", "COMP-2"])
+    def test_negative_bound_is_satisfiable(self, usage):
+        spec = _float_spec(usage=usage)
+        result = solve(spec, [_constraint(spec, "lt", ("-100",))])
+        assert isinstance(result, Witness), result
+        assert float(result.value) < -100
+
+    @pytest.mark.parametrize("usage", ["COMP-1", "COMP-2"])
+    def test_fractional_interval_is_satisfiable(self, usage):
+        spec = _float_spec(usage=usage)
+        result = solve(
+            spec,
+            [_constraint(spec, "gt", ("0.25",)), _constraint(spec, "lt", ("0.75",))],
+        )
+        assert isinstance(result, Witness), result
+        assert 0.25 < float(result.value) < 0.75
+
+    def test_negative_fraction_equality_is_kept_exactly(self):
+        spec = _float_spec()
+        result = solve(spec, [_constraint(spec, "eq", ("-2.5",))])
+        assert isinstance(result, Witness), result
+        assert float(result.value) == -2.5
+
+
 class TestNumericInterval:
     def test_gt_lt_produces_witness_in_range(self):
         spec = _numeric_spec(integer_digits=3)
