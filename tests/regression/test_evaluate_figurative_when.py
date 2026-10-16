@@ -135,7 +135,11 @@ class TestGenFixtures:
             for detail in data["scenario_coverage"]["details"]
             if detail["status"] == "missed"
         ]
-        assert missed == []
+        # Both WHEN SPACES arms are targeted. WHEN OTHER's negation of a
+        # figurative arm is not modeled, so it is honestly missed (#509)
+        # rather than "verified" with no constraint at all.
+        assert [d["arm_key"].rsplit("/", 1)[1] for d in missed] == ["WHEN_OTHER"]
+        assert "not modeled" in missed[0]["reason"]
 
 
 class TestBusinessRules:

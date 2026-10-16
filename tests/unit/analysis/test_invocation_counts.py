@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cobolparser import parse_cobol
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
 from cobolparser.analysis.invocation_counts import count_invocations
@@ -27,7 +29,9 @@ _HEADER = """\
        WORKING-STORAGE SECTION.
        01  WS-FS               PIC XX.
            88  WS-FS-OK        VALUE '00'.
-       01  WS-IN               PIC X.
+           88  WS-FS-GOOD      VALUE '00' THRU '09'.
+           88  WS-FS-BAD       VALUE '10' '23' '35'.
+       01  WS-IN              PIC X.
        01  WS-N                PIC 9.
        01  WS-RATE             PIC 9(3).
        PROCEDURE DIVISION.
@@ -262,3 +266,98 @@ def test_go_to_an_unknown_target_reports_nothing():
            GO TO NO-SUCH-PARA.
 """)
     assert found["CALL:FIRST"] == [None]
+
+
+# -- issue #590: the arm a success status takes is not exempt -------------
+
+_STATUS_CHECK = """\
+       MAIN-PARA.
+           OPEN INPUT IN-FILE
+           IF {condition}
+              {then_arm}
+           ELSE
+              {else_arm}
+           END-IF
+           CALL 'ERRLOG' USING WS-IN
+           STOP RUN.
+"""
+
+
+def _status_check(condition: str, goback_arm: str) -> dict[str, list[int | None]]:
+    arms = {"then_arm": "CONTINUE", "else_arm": "CONTINUE"}
+    arms[f"{goback_arm}_arm"] = "GOBACK"
+    return _counts(_STATUS_CHECK.format(condition=condition, **arms))
+
+
+@pytest.mark.parametrize(
+    ("condition", "success_arm"),
+    [
+        ("WS-FS = '00'", "then"),
+        ("WS-FS-OK", "then"),
+        ("WS-FS NOT = '00'", "else"),
+        ("NOT WS-FS-OK", "else"),
+        ("'00' = WS-FS", "then"),
+        ("WS-FS = ZEROS", "then"),
+        ("WS-FS = '00' OR WS-FS = '97'", "then"),
+        ("WS-FS > '09'", "else"),
+        ("WS-FS-GOOD", "then"),
+        ("WS-FS-BAD", "else"),
+    ],
+)
+def test_success_arm_that_ends_the_run_hides_what_follows(condition, success_arm):
+    found = _status_check(condition, success_arm)
+    assert found["OPEN:IN-FILE"] == [1]
+    # On success the GOBACK runs, so ERRLOG runs 0 times: never "once".
+    assert found["CALL:ERRLOG"] == [None]
+
+
+@pytest.mark.parametrize(
+    ("condition", "error_arm"),
+    [
+        ("WS-FS = '00'", "else"),
+        ("WS-FS-OK", "else"),
+        ("WS-FS NOT = '00'", "then"),
+        ("WS-FS > '09'", "then"),
+        ("WS-FS-GOOD", "else"),
+        ("WS-FS-BAD", "then"),
+    ],
+)
+def test_error_arm_that_ends_the_run_stays_exempt(condition, error_arm):
+    assert _status_check(condition, error_arm)["CALL:ERRLOG"] == [1]
+
+
+def test_status_check_that_cannot_be_evaluated_exempts_neither_arm():
+    # A class test: which arm success takes is not worked out, so a transfer
+    # in either arm makes what follows uncertain.
+    found = _status_check("WS-FS IS NUMERIC", "else")
+    assert found["CALL:ERRLOG"] == [None]
+
+
+def test_sqlcode_success_arm_that_ends_the_run_hides_what_follows():
+    found = _counts("""\
+       MAIN-PARA.
+           EXEC SQL
+               SELECT RATE INTO :WS-RATE FROM RATES
+           END-EXEC
+           IF SQLCODE = 0
+              GOBACK
+           END-IF
+           CALL 'ERRLOG' USING WS-IN
+           STOP RUN.
+""")
+    assert found["CALL:ERRLOG"] == [None]
+
+
+def test_sqlcode_error_arm_that_ends_the_run_stays_exempt():
+    found = _counts("""\
+       MAIN-PARA.
+           EXEC SQL
+               SELECT RATE INTO :WS-RATE FROM RATES
+           END-EXEC
+           IF SQLCODE < 0
+              GOBACK
+           END-IF
+           CALL 'ERRLOG' USING WS-IN
+           STOP RUN.
+""")
+    assert found["CALL:ERRLOG"] == [1]

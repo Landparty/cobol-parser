@@ -228,8 +228,12 @@ first. Node fields are in [ast-models.md](../ast-models.md).
 - `XmlJsonStatementParser` matches bare `XML` / `JSON` by value. Its clause loop
   keeps its own clause words even where they are verbs elsewhere (`SUPPRESS`,
   `NOT`, `ON`, and `WHEN` once a SUPPRESS was seen -- `XML GENERATE ... SUPPRESS
-  WHEN SPACES` is one statement), and keeps `JSON` after `TO` (`CONVERTING x TO
-  JSON DECIMAL`). Clause data names are structured into `count_in` /
+  WHEN SPACES` is one statement), and keeps `JSON` when the next word is
+  `BOOLEAN` / `DECIMAL` (`CONVERTING x [TO|FROM] JSON BOOLEAN|DECIMAL`,
+  `_is_json_type_word`). Keyed on the word *after* JSON because TO / FROM are
+  optional: keying on a preceding `TO` cut JSON PARSE's `FROM JSON BOOLEAN`
+  and the bare forms at JSON, dropping `ON EXCEPTION` and hoisting its
+  handler into the paragraph (#574). Clause data names are structured into `count_in` /
   `into_item` / `clause_items` (`_record_clause_items`).
 - `_consume_processing_procedure` reads `[PROCESSING] PROCEDURE [IS] p
   [THRU|THROUGH q]` starting at either word (`XML PARSE x PROCEDURE IS p` sets
