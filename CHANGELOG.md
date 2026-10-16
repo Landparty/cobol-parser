@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`xref` declares level-88s under a FILLER and level-66 `RENAMES` items**
+  (#485). The `05 FILLER PIC X VALUE 'N'. 88 SW-ON VALUE 'Y'.` switch was
+  dropped together with its FILLER, and `RENAMES` items were never declared,
+  so both were listed in `undefined`, MCP `explain_symbol` answered
+  `declared: false` (or `found: false` for an unreferenced one), and
+  `lineage` caveated them as "not declared ... not traced". They are now
+  declared as condition-names / level-66 data items at their own lines.
+  `lineage` now traces a RENAMES item through the fields of its `THRU`
+  range, and MCP `explain_symbol` reports its byte range; one that cannot
+  be placed gets a caveat in both.
 * **COMP-1 / COMP-2 are no longer modelled as unsigned 9-digit integers**
   (#551). A float item has no PICTURE, and its declared or solved values went
   through the PICTURE-shaped numeric path: `gen-data` wrote `VALUE -2.5E-02`
