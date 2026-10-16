@@ -73,7 +73,7 @@ tests/
       test_domains.py          # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value, level-88 pick re-checked against gt/ge/lt/le (#244)
       test_dclgen_check.py     # DclgenChecker: column <-> host-variable pairing, every violation kind/severity, both null-indicator syntaxes, what it declines to check, "DCLGEN's own output is always clean" table
       test_const_fold.py       # ConstantFolder: MOVE/arithmetic/COMPUTE folding, GIVING, loop/branch poisoning, DIVIDE poison, PERFORM chaining, GO TO/STOP RUN, observation points; TestStorageAliasing (#245), TestValueAtObservationPoint (#246), TestWalkBudget, TestInspectAndExecWrites (#317), TestReadKeys (#322)
-      test_invocation_counts.py  # count_invocations (#363): status-check exemption, unknown-count bodies, EXIT PARAGRAPH, literal TIMES, fall-through + PERFORM, GO TO following
+      test_invocation_counts.py  # count_invocations (#363): status-check exemption (success-arm evaluation, #590), unknown-count bodies, EXIT PARAGRAPH, literal TIMES, fall-through + PERFORM, GO TO following
     cli/                       # 26 files: CLI subcommands
       test_decode_cli.py       # decode: CSV/JSON/hex, --view / --list-views, gen-data -> decode round trip, paging, trailing bytes, --strict; dclgen-check subcommand and lint rule
       test_gen_fixtures_cli.py # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes

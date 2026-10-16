@@ -29,8 +29,14 @@ after the first OPEN: an IF whose condition reads nothing but boundary
 status fields (FILE STATUS fields, their level-88s, SQLCODE / SQLSTATE /
 EIBRESP), and an INVALID KEY handler or a CALL's ON EXCEPTION / ON OVERFLOW,
 is decided by the status the scenario's own fixtures supply. A scenario that
-supplies a success status never takes those arms, so a STOP RUN inside one
-does not make the code after it uncertain. A FILE STATUS field counts only
+supplies a success status never takes those handlers, so a STOP RUN inside
+one does not make the code after it uncertain. For the IF, which arm success
+takes is worked out by evaluating the condition with every status field at
+its success value ('00', SQLCODE 0, SQLSTATE '00000', EIBRESP 0, a level-88
+by testing its own VALUEs against those): only the arm success provably does
+*not* take is exempt. ``IF WS-FS = '00' ... GOBACK`` ends the run on success,
+so what follows it is uncertain, as after any other conditional transfer; a
+condition that cannot be evaluated exempts neither arm. A FILE STATUS field counts only
 while the last boundary that set it ran on the certain path and could not
 hit end of file: after a READ that reads to the end, the field holds '10' in
 every scenario (and at once for empty input), so a check on it is data.
@@ -46,10 +52,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 from ..models.program import CobolProgram
 from ..models.sql_statements import ExecSQLStatement
+from ..models.statements.base import ConditionalExpression, LogicalExpression
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
     EvaluateStatement,
@@ -120,6 +128,30 @@ _STATUS_REGISTERS = frozenset({"SQLCODE", "SQLSTATE", "EIBRESP", "EIBRESP2"})
 #: Handlers that fire only on an error status the scenario's fixture supplies.
 _STATUS_HANDLERS = frozenset({"invalid_key_clause"})
 _CALL_STATUS_HANDLERS = frozenset({"on_exception", "on_overflow"})
+
+#: What each status register holds when its boundary succeeds.
+_REGISTER_SUCCESS: dict[str, str | Decimal] = {
+    "SQLCODE": Decimal(0),
+    "SQLSTATE": "00000",
+    "EIBRESP": Decimal(0),
+    "EIBRESP2": Decimal(0),
+}
+#: The success FILE STATUS a scenario's fixture supplies.
+_FILE_STATUS_SUCCESS = "00"
+
+_RELATIONS = frozenset(
+    {"EQUAL", "NOT_EQUAL", "GREATER", "LESS", "GREATER_OR_EQUAL", "LESS_OR_EQUAL"}
+)
+#: ``'00' < WS-FS`` reads as ``WS-FS > '00'``.
+_FLIPPED = {
+    "GREATER": "LESS",
+    "LESS": "GREATER",
+    "GREATER_OR_EQUAL": "LESS_OR_EQUAL",
+    "LESS_OR_EQUAL": "GREATER_OR_EQUAL",
+}
+_NUMBER_RE = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)$")
+#: Characters whose relative order is the same in ASCII and EBCDIC.
+_PORTABLE_ORDER = frozenset("0123456789 ")
 
 _LITERAL_RE = re.compile(r"""^(['"].*|[+-]?\d[\d.,]*)$""", re.DOTALL)
 _FIGURATIVES = frozenset(
@@ -278,7 +310,13 @@ class _Walk:
             self.stack.append(_Frame(iter(body), None))
 
     def end_region(self, end: _RegionEnd) -> None:
-        if self.region_transfer and not end.exempt:
+        if end.exempt:
+            # A success status never runs these arms, so a transfer in one
+            # says nothing about the code around them either -- nor about a
+            # sibling arm pushed below this region.
+            self.region_transfer = end.saved_transfer
+            return
+        if self.region_transfer:
             self.uncertain = True
         self.region_transfer = self.region_transfer or end.saved_transfer
 
@@ -332,10 +370,7 @@ class _Walk:
         if isinstance(stmt, PerformStatement):
             self.visit_perform(stmt, frame, multiplier)
         elif isinstance(stmt, IfStatement):
-            self.push_region(
-                [stmt.then_statements, stmt.else_statements],
-                exempt=self.status_only(stmt.condition),
-            )
+            self.push_if(stmt)
         else:
             self.push_handlers(stmt)
             if isinstance(stmt, (EvaluateStatement, SearchStatement)):
@@ -353,6 +388,28 @@ class _Walk:
                 self.uncertain = True
             else:
                 self.push_region([body], exempt=False)
+
+    def push_if(self, stmt: IfStatement) -> None:
+        """An IF's arms; only the arm a success status never takes is exempt.
+
+        A condition reading nothing but boundary status fields is decided by
+        the scenario's fixtures, so it is evaluated with every one of them at
+        success. The arm success *takes* is walked like any conditional arm:
+        a transfer in it (``IF WS-FS = '00' ... GOBACK``) makes what follows
+        uncertain. When the condition cannot be evaluated, neither is exempt.
+        """
+        selected = (
+            self.success_selects(stmt.condition)
+            if self.status_only(stmt.condition)
+            else None
+        )
+        arms = [
+            (stmt.then_statements, selected is False),
+            (stmt.else_statements, selected is True),
+        ]
+        # Pushed last arm first, so the THEN arm is still walked first.
+        for body, exempt in reversed(arms):
+            self.push_region([body], exempt=exempt)
 
     def follow_go_to(self, stmt: GoStatement) -> None:
         """A GO TO on the certain path: keep walking at its target.
@@ -474,6 +531,115 @@ class _Walk:
             return False
         return saw_status
 
+    def success_selects(self, condition: Any) -> bool | None:
+        """*condition*'s value with every status field it reads at success.
+
+        ``None`` when that cannot be worked out exactly: an operand that is
+        neither a status field nor a literal, a literal of the wrong kind for
+        the field, an ordering between characters whose collating order
+        differs between ASCII and EBCDIC, a class test, ...
+        """
+        if isinstance(condition, LogicalExpression):
+            left = self.success_selects(condition.left_condition)
+            if condition.operator == "NOT":
+                if condition.right_condition is not None or left is None:
+                    return None
+                return not left
+            right = self.success_selects(condition.right_condition)
+            if condition.operator == "AND":
+                if left is False or right is False:
+                    return False
+                return True if left and right else None
+            if condition.operator == "OR":
+                if left is True or right is True:
+                    return True
+                return False if left is False and right is False else None
+            return None
+        if not isinstance(condition, ConditionalExpression):
+            return None
+        first = condition.left_operand
+        second = condition.right_operand
+        if condition.operator == "CONDITION_NAME":
+            if not isinstance(first, str):
+                return None
+            return self._condition_name_holds(first)
+        if (
+            condition.operator not in _RELATIONS
+            or not isinstance(first, str)
+            or not isinstance(second, str)
+        ):
+            return None
+        operator = condition.operator
+        value = self._success_value(first)
+        literal_text = second
+        if value is None:
+            value = self._success_value(second)
+            literal_text = first
+            operator = _FLIPPED.get(operator, operator)
+        if value is None:
+            return None
+        return _compare(value, operator, _literal_like(literal_text, value))
+
+    def _success_value(self, name: str) -> str | Decimal | None:
+        """What status field *name* holds on success; None if not one."""
+        upper = name.strip().upper()
+        if upper in _REGISTER_SUCCESS:
+            return _REGISTER_SUCCESS[upper]
+        if not self.status_ok.get(self._qualified(name)):
+            return None
+        if self.index is not None:
+            try:
+                resolved = self.index.resolve(name.strip())
+            except Exception:  # noqa: BLE001 - same policy as _qualified
+                resolved = None
+            if resolved is not None and str(resolved.spec.category) == "numeric":
+                return Decimal(0)
+        return _FILE_STATUS_SUCCESS
+
+    def _condition_name_holds(self, name: str) -> bool | None:
+        """Whether level-88 *name* is true with its field at success."""
+        if self.index is None:
+            return None
+        try:
+            resolved = self.index.resolve(name.strip())
+            raw_values = self.index.condition_raw_values(name.strip())
+        except Exception:  # noqa: BLE001 - same policy as _qualified
+            return None
+        if resolved is None or not raw_values:
+            return None
+        value = self._success_value(str(resolved.spec.qualified_name))
+        if value is None:
+            return None
+        # ``VALUE '04' THRU '09'`` arrives as ('04', 'THROUGH:09').
+        ranges: list[tuple[str, str | None]] = []
+        for raw in raw_values:
+            if raw.upper().startswith("THROUGH:"):
+                if not ranges or ranges[-1][1] is not None:
+                    return None
+                ranges[-1] = (ranges[-1][0], raw[len("THROUGH:") :])
+            else:
+                ranges.append((raw, None))
+        outcomes: list[bool | None] = []
+        for low, high in ranges:
+            if high is None:
+                outcomes.append(
+                    _compare(value, "EQUAL", _literal_like(low, value, unquoted=True))
+                )
+                continue
+            above = _compare(
+                value, "GREATER_OR_EQUAL", _literal_like(low, value, unquoted=True)
+            )
+            below = _compare(
+                value, "LESS_OR_EQUAL", _literal_like(high, value, unquoted=True)
+            )
+            if above is False or below is False:
+                outcomes.append(False)
+            else:
+                outcomes.append(True if above and below else None)
+        if any(outcome is True for outcome in outcomes):
+            return True
+        return False if all(outcome is False for outcome in outcomes) else None
+
     def _qualified(self, name: str) -> str:
         if self.index is not None:
             try:
@@ -509,6 +675,71 @@ class _Walk:
                         self.site_of[id(stmt)] = (name, line)
                 for nested in _nested_statement_lists(stmt):
                     pending.extend(nested)
+
+
+def _literal_like(
+    text: str, like: str | Decimal, *, unquoted: bool = False
+) -> str | Decimal | None:
+    """*text* as a value comparable with *like*, or None when it is not one.
+
+    A quoted literal compares only with a character field and an unquoted
+    number only with a numeric one. *unquoted* marks a level-88 VALUE as the
+    layout index keeps it, quotes already gone, so either kind reads.
+    """
+    stripped = text.strip()
+    upper = stripped.upper()
+    if upper in ("ZERO", "ZEROS", "ZEROES"):
+        return Decimal(0) if isinstance(like, Decimal) else "0" * max(len(like), 1)
+    if upper in ("SPACE", "SPACES"):
+        return None if isinstance(like, Decimal) else " "
+    if upper in _FIGURATIVES:
+        return None
+    if not unquoted and stripped[:1] in ("'", '"'):
+        quote = stripped[0]
+        if isinstance(like, Decimal) or len(stripped) < 2 or stripped[-1] != quote:
+            return None
+        return stripped[1:-1].replace(quote * 2, quote)
+    if isinstance(like, Decimal):
+        number = re.sub(r"^([+-])\s+", r"\1", stripped)
+        if not _NUMBER_RE.match(number):
+            return None
+        try:
+            return Decimal(number)
+        except InvalidOperation:  # pragma: no cover - the regex vets it
+            return None
+    return stripped if unquoted else None
+
+
+def _compare(
+    value: str | Decimal, operator: str, literal: str | Decimal | None
+) -> bool | None:
+    """``value <operator> literal`` the way COBOL compares them, or None."""
+    if isinstance(value, Decimal) and isinstance(literal, Decimal):
+        a: Any = value
+        b: Any = literal
+    elif isinstance(value, str) and isinstance(literal, str):
+        # Character comparison pads the shorter operand with spaces.
+        width = max(len(value), len(literal))
+        a, b = value.ljust(width), literal.ljust(width)
+        if operator not in ("EQUAL", "NOT_EQUAL") and not set(a + b) <= (
+            _PORTABLE_ORDER
+        ):
+            return None
+    else:
+        return None
+    if operator == "EQUAL":
+        return bool(a == b)
+    if operator == "NOT_EQUAL":
+        return bool(a != b)
+    if operator == "GREATER":
+        return bool(a > b)
+    if operator == "LESS":
+        return bool(a < b)
+    if operator == "GREATER_OR_EQUAL":
+        return bool(a >= b)
+    if operator == "LESS_OR_EQUAL":
+        return bool(a <= b)
+    return None
 
 
 def _literal_times(stmt: PerformStatement) -> int | None:
