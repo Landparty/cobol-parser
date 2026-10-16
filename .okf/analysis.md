@@ -81,7 +81,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `crud_matrix.py` | `CRUDMatrixGenerator`, `CRUDMatrix`, `CRUDFlags` | [data-use](analysis/data-use.md) |
 | `value_tracker.py` | `DynamicCallAnalyzer` | [data-use](analysis/data-use.md) |
 | `_names.py` | `base_data_name`, `qualified_references`, `bare_names`, `callee_names`, `IDENTIFIER_TOKEN_RE` | [data-use](analysis/data-use.md) |
-| `_files.py` | `record_to_file_map`, `resolve_file_name` | [data-use](analysis/data-use.md) |
+| `_files.py` | `record_to_file_map`, `resolve_file_name`, `same_record_area_groups` | [data-use](analysis/data-use.md) |
 | `host_var_resolver.py` | `HostVariableResolver` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `dclgen_check.py` | `DclgenChecker` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `sql_cics_lint.py` | `SqlCicsAnalyzer` | [sql-cics-ims](analysis/sql-cics-ims.md) |

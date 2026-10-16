@@ -39,7 +39,7 @@ _FLOAT_FRACTION_DIGITS = 15
 _EXACT = Context(prec=100)
 
 
-def _render_float(value: float, *, single: bool) -> str:
+def _render_float(value: float, *, single: bool, quantize: bool = True) -> str:
     """Render *value* as the float field it is about to be stored in.
 
     ``decode(encode(row)) == row`` is the generator's contract with
@@ -57,11 +57,20 @@ def _render_float(value: float, *, single: bool) -> str:
     Either way the CSV disagreed with the record image built from it.
     Quantising through the field's own storage and rendering to the digit
     count the decoder uses makes the value a fixed point of the round trip.
+
+    *quantize* off keeps a declared value (``VALUE 2.5E-05``, a solved
+    witness) from being rounded to :data:`_FLOAT_DECIMALS` -- that grid is
+    for freely drawn values only. A value too large for binary32 is left
+    unconverted, so the encoder reports it as out of range rather than this
+    raising from inside value generation.
     """
     digits = _SINGLE_FLOAT_DIGITS if single else _DOUBLE_FLOAT_DIGITS
-    stored = round(value, _FLOAT_DECIMALS)
+    stored = round(value, _FLOAT_DECIMALS) if quantize else value
     if single:
-        stored = struct.unpack("<f", struct.pack("<f", stored))[0]
+        try:
+            stored = struct.unpack("<f", struct.pack("<f", stored))[0]
+        except OverflowError:
+            pass
     return f"{stored:.{digits}g}"
 
 
@@ -469,6 +478,14 @@ class ValueFactory:
                 return self._fit_text(value, spec)
             if not number.is_finite():
                 return self._fit_text(value, spec)
+            if spec.category is FieldCategory.FLOAT:
+                # COMP-1/COMP-2 have no PICTURE: the 9-digit unsigned integer
+                # shape the layout gives them is a placeholder, and
+                # _format_number would round ``VALUE -2.5E-02`` to 0 and
+                # ``-1.5`` to 2. Render through the field's own storage.
+                return _render_float(
+                    float(number), single=self._is_single_float(spec), quantize=False
+                )
             return self._format_number(number, spec, allow_random_sign=False)
         return self._fit_text(value, spec)
 
@@ -615,8 +632,11 @@ class ValueFactory:
     def _float_value(self, spec: FieldSpec) -> str:
         # COMP-1/COMP-2 carry no picture to constrain the value.
         value = self._rng.uniform(-10_000, 10_000)
-        single = (spec.usage or "").upper() in SINGLE_FLOAT_USAGES
-        return _render_float(value, single=single)
+        return _render_float(value, single=self._is_single_float(spec))
+
+    @staticmethod
+    def _is_single_float(spec: FieldSpec) -> bool:
+        return (spec.usage or "").upper() in SINGLE_FLOAT_USAGES
 
     def _format_number(
         self,
