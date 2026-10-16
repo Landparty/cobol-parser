@@ -241,3 +241,68 @@ class TestStrictRefusesTheBundle:
         )
         main()
         assert capsys.readouterr().out
+
+
+# The subject is working storage no boundary feeds: every WHEN is missed as
+# "not boundary-fed", which is a fact about the program, not a gap in the
+# tool. WHEN OTHER shares that cause, so it is missed for the same reason
+# and -- like its siblings -- adds no unresolved note (--strict exits 0).
+EVALUATE_WS_SUBJECT = (
+    _EVALUATE_HEADER.replace(
+        "       01  WS-OUT       PIC X(10).\n",
+        "       01  WS-MODE      PIC 9 VALUE 1.\n       01  WS-OUT       PIC X(10).\n",
+    )
+    + """\
+           EVALUATE WS-MODE
+              WHEN 1
+                 MOVE 'ONE' TO WS-OUT
+              WHEN 2
+                 MOVE 'TWO' TO WS-OUT
+              WHEN OTHER
+                 MOVE 'OTH' TO WS-OUT
+           END-EVALUATE
+"""
+    + _TRAILER
+)
+
+
+class TestWhenOtherAfterUnfedSiblings:
+    def test_every_arm_missed_for_the_same_reason(self):
+        bundle = _bundle(EVALUATE_WS_SUBJECT)
+        details = bundle.scenario_coverage["details"]
+        assert sorted(d["arm_key"].rsplit("/", 1)[1] for d in details) == [
+            "WHEN_1",
+            "WHEN_2",
+            "WHEN_OTHER",
+        ]
+        for detail in details:
+            assert detail["status"] == "missed"
+            assert "field not boundary-fed: WS-MODE" in detail["reason"]
+        assert not any("precondition not modeled" in n for n in bundle.unresolved)
+
+    def test_extractor_does_not_call_it_unmodeled(self):
+        ast, index, report = _analyze(EVALUATE_WS_SUBJECT)
+        (branch,) = ConstraintExtractor().extract(ast, index, report).branches
+        assert "WHEN_OTHER" not in branch.arms
+        assert branch.unmodeled_arms == {}
+
+    def test_strict_exits_0(self, monkeypatch, capsys, tmp_path):
+        path = tmp_path / "prog.cbl"
+        path.write_text(EVALUATE_WS_SUBJECT)
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "cobol-parser",
+                "--no-config",
+                "gen-fixtures",
+                str(path),
+                "--scenarios",
+                "branches",
+                "--seed",
+                "1",
+                "--strict",
+                "--compact",
+            ],
+        )
+        main()
+        assert capsys.readouterr().out

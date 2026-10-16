@@ -171,7 +171,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BranchConstraints.unmodeled_arms` now names those arms with the
   extractor's reason; `ScenarioPlanner` counts them `missed` with that
   reason and lists them in `ScenarioPlan.unresolved`, which reaches
-  `FixtureBundle.unresolved`, so `gen-fixtures --strict` exits 2.
+  `FixtureBundle.unresolved`, so `gen-fixtures --strict` exits 2. A `WHEN
+  OTHER` after a WHEN that is itself unsupported (a working-storage subject
+  no boundary feeds) is missed for that WHEN's own reason and, like it, does
+  not fail `--strict`.
 
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never

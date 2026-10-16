@@ -607,7 +607,11 @@ copies into `FixtureBundle.unresolved` so `--strict` exits 2. Solving the
 `[]` instead targeted the arm with random rows that ran an earlier WHEN
 (always, for a level-88 field), and verification of zero conjuncts said
 `verified`. Unreachable/unsatisfiable misses are facts about the program
-and do not go to `unresolved`; an unmodeled arm is a gap in the tool.
+and do not go to `unresolved`; an unmodeled arm is a gap in the tool. A
+`WHEN OTHER` after an unsupported WHEN (e.g. a working-storage subject no
+boundary feeds) is not in `unmodeled_arms` and not in `arms` at all: it is
+missed for that WHEN's reason (`_reason_for_missing_arm`) and, like it,
+adds no `unresolved` note.
 
 **Unsatisfiable arms.** Every distinct field an arm's conjuncts touch is
 solved independently via `domains.solve()`; if *any* field's constraint set

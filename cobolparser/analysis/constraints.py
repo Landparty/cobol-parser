@@ -527,13 +527,15 @@ class ConstraintExtractor:
         if statement.default_when is not None:
             other_origin = f"EVALUATE@{line}/WHEN_OTHER"
             if any_when_unsupported:
-                reason = (
+                # Left out of `arms`, exactly like the unsupported WHEN it
+                # follows: the planner then reports it missed for that
+                # sibling's own reason (`WHEN#1: field not boundary-fed:
+                # WS-MODE`) -- not as an unmodeled arm that fails --strict
+                # while the WHENs it shares a cause with do not.
+                unsupported.append(
                     f"{other_origin}: not modeled -- a prior WHEN arm was "
                     "itself unsupported"
                 )
-                unsupported.append(reason)
-                arms["WHEN_OTHER"] = []
-                unmodeled_arms["WHEN_OTHER"] = reason
             else:
                 negation = _negate_prior_arms(own_arms, other_origin, unsupported)
                 if negation is None:
