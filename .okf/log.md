@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
+
+[analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
+`SET cond TO TRUE | FALSE` as a write to the condition's parent, checks for
+untracked writes on every MOVE source feeding a CALL variable (and carries
+the incompleteness along the MOVEs), and gives a literal MOVE to a source's
+group the slice that lands in the source.
+
 ## 2026-10-15 -- MCP server, Phase 3 review fixes
 
 [mcp.md](mcp.md): the index walk keeps symlinks out of the root out; a

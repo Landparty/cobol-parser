@@ -725,6 +725,25 @@ redefinitions of one area join). `MOVE 'PGMZ' TO WS-AREA` therefore marks a
 No byte-range precision: like the hierarchy rule, any write to the overlay
 counts. Pinned by `tests/unit/test_value_tracker.py::TestRedefinesOverlap`.
 
+**`SET cond TO TRUE` and MOVE sources (#511).** Level-88s are
+`ConditionNameItem`s, so the data-item overlap never saw them: now
+`SET cond TO TRUE` adds the condition's *first* VALUE literal (the low end of
+a THRU range, as the compiler moves it) to its parent item, and `TO FALSE`
+the `WHEN SET TO FALSE` literal; no such value, a group parent, or a 88 name
+declared twice marks the parent incomplete, and a SET whose parent overlaps a
+tracked item marks that item incomplete. `_mark_untracked_writes()` checks
+not just the CALL variables but every item whose value reaches one through
+MOVEs (`_value_sources()`, a fixpoint), and `_propagate_incomplete()` then
+carries that incompleteness forward along the MOVEs -- `ACCEPT WS-DEFAULT`
+then `MOVE WS-DEFAULT TO WS-PGM` is incomplete. A literal MOVE to a tracked
+item's group adds the slice of the space-padded literal at the item's offset
+(`_literal_group_slices()`, offsets from `compute_record_layout`) as an exact
+value; under an OCCURS, at an ambiguous offset, non-DISPLAY or with a
+duplicated name it marks the item incomplete instead. Values are still
+collected flow-insensitively (the VALUE clause stays a candidate after a
+SET). Pinned by
+`tests/unit/test_value_tracker.py::TestConditionSetAndMoveSources`.
+
 ## IO coverage and diagnostics helpers
 
 `io_coverage_reporter.py` (`IOCoverageReporter`, `CoverageStatus`, `TestType`,
