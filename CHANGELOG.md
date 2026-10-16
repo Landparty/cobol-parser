@@ -160,6 +160,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`gen-fixtures`: an EVALUATE `WHEN OTHER` or SEARCH `AT END` arm whose
+  precondition was not modeled is reported `missed`, not `targeted` /
+  `verified`** (#509). The constraint extractor leaves such an arm's
+  conjuncts empty (`WHEN OTHER` after a `THRU`, `>`, compound or
+  different-field arm; every `AT END`), and the planner solved that `[]` as
+  "anything goes" -- so the scenario named for the arm got random rows that
+  usually ran an earlier `WHEN` (for SEARCH, the WHEN arm every time), while
+  verification called zero conjuncts `verified` and `--strict` exited 0.
+  `BranchConstraints.unmodeled_arms` now names those arms with the
+  extractor's reason; `ScenarioPlanner` counts them `missed` with that
+  reason and lists them in `ScenarioPlan.unresolved`, which reaches
+  `FixtureBundle.unresolved`, so `gen-fixtures --strict` exits 2. A `WHEN
+  OTHER` after a WHEN that is itself unsupported (a working-storage subject
+  no boundary feeds) is missed for that WHEN's own reason and, like it, does
+  not fail `--strict`.
 * **`xref` declares level-88s under a FILLER and level-66 `RENAMES` items**
   (#485). The `05 FILLER PIC X VALUE 'N'. 88 SW-ON VALUE 'Y'.` switch was
   dropped together with its FILLER, and `RENAMES` items were never declared,
