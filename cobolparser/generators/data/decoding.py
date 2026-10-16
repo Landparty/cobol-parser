@@ -979,6 +979,7 @@ class RecordDecoder:
         *,
         record_length: int | None = None,
         varying: VaryingLength | None = None,
+        layout_warnings: list[str] | None = None,
     ) -> None:
         """
         Args:
@@ -999,11 +1000,17 @@ class RecordDecoder:
                 outside the layout, so ``--record-format auto`` could not see
                 it otherwise; with it, auto reads the RDW-framed file
                 ``gen-data --record-format auto`` writes for the same source.
+            layout_warnings: Ways the layout itself is known to be short --
+                a ``COPY`` that was not expanded, so its fields are missing
+                and every record is framed too short.  Set by
+                :meth:`from_copybook_source`; carried into every decode's
+                ``caveats``.
         """
         self.views = views
         self.options = opts or EncodingOptions()
         self.record_length = record_length
         self.varying = varying
+        self.layout_warnings = list(layout_warnings or [])
 
     # -- construction -------------------------------------------------------
 
@@ -1017,8 +1024,13 @@ class RecordDecoder:
         opts: EncodingOptions | None = None,
         options: DataGeneratorOptions | None = None,
         record_length: int | None = None,
+        copybook_paths: list[str] | None = None,
     ) -> RecordDecoder:
         """Build a decoder from copybook (or whole-program) text.
+
+        ``copybook_paths`` are the directories ``COPY`` statements are
+        expanded from (see :func:`~.copybook.parse_copybook_records`); a
+        ``COPY`` left unexpanded is named in :attr:`layout_warnings`.
 
         Raises:
             CopybookLayoutError: if the source has no usable record layout,
@@ -1026,15 +1038,20 @@ class RecordDecoder:
         """
         from .copybook import fd_record_length, parse_copybook_records, select_record
 
-        records = parse_copybook_records(source, filename=filename)
+        warnings: list[str] = []
+        records = parse_copybook_records(
+            source, filename=filename, copybook_paths=copybook_paths, warnings=warnings
+        )
         chosen = select_record(records, record, filename)
         if record_length is None:
             # A whole program's FD frames its file at the LRECL every 01
             # under it shares, not at the chosen 01's own length.
             record_length = fd_record_length(records, chosen, options)
-        return cls.from_record(
+        decoder = cls.from_record(
             chosen, opts=opts, options=options, record_length=record_length
         )
+        decoder.layout_warnings = warnings
+        return decoder
 
     @classmethod
     def from_copybook_file(
@@ -1045,6 +1062,7 @@ class RecordDecoder:
         opts: EncodingOptions | None = None,
         options: DataGeneratorOptions | None = None,
         record_length: int | None = None,
+        copybook_paths: list[str] | None = None,
     ) -> RecordDecoder:
         """Read a copybook from *path* and build a decoder from it."""
         with open(path, encoding="utf-8") as handle:
@@ -1056,6 +1074,7 @@ class RecordDecoder:
             opts=opts,
             options=options,
             record_length=record_length,
+            copybook_paths=copybook_paths,
         )
 
     @classmethod
@@ -1428,7 +1447,7 @@ class RecordDecoder:
         from .encoding import encoding_caveats
 
         specs = [placed.spec for placed in view.fields]
-        caveats = list(self.views.caveats)
+        caveats = [*self.layout_warnings, *self.views.caveats]
         # A counter the overlay covers is still read (see decode_record), so
         # it counts as part of the record: leaving it out claimed it was not.
         counters = [counter.spec for counter in view.hidden_counters]

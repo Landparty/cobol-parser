@@ -1237,8 +1237,21 @@ def _build_gen_data_parser(
         ),
     )
     _add_compact_arg(p)
+    _add_copybook_args(p)
     _add_output_arg(p)
     p.set_defaults(func=_cmd_gen_data)
+
+
+def _warn_layout(warnings: list[str]) -> None:
+    """Say on stderr that a record layout is short a ``COPY`` member.
+
+    ``gen-data``, ``decode`` and ``compare`` frame every record by the
+    layout's length, so a ``COPY`` left unexpanded (no ``--copybook-path``,
+    or its member not found there) silently drops fields and shortens every
+    record. Never silent: this is the one place that says so.
+    """
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
 
 
 def _encoding_options(args: argparse.Namespace) -> Any:
@@ -1273,12 +1286,20 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
     )
 
     source = _read_source(args.file)
+    copybook_paths = args.copybook_path or None
 
     if args.list_records:
+        layout_warnings: list[str] = []
         try:
-            records = parse_copybook_records(source, filename=args.file)
+            records = parse_copybook_records(
+                source,
+                filename=args.file,
+                copybook_paths=copybook_paths,
+                warnings=layout_warnings,
+            )
         except CopybookLayoutError as exc:
             _fail(str(exc))
+        _warn_layout(layout_warnings)
         _json_out(
             {
                 "source_file": args.file,
@@ -1330,7 +1351,10 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
 
     try:
         dataset = CopybookDataGenerator(options).generate_from_source(
-            source, filename=args.file, record=args.record
+            source,
+            filename=args.file,
+            record=args.record,
+            copybook_paths=copybook_paths,
         )
     except CopybookLayoutError as exc:
         _fail(str(exc))
@@ -1600,6 +1624,7 @@ def _build_decode_parser(
             "bytes -- the copybook probably does not match the data"
         ),
     )
+    _add_copybook_args(p)
     _add_compact_arg(p)
     _add_output_arg(p)
     p.set_defaults(func=_cmd_decode)
@@ -1647,11 +1672,13 @@ def _cmd_decode(args: argparse.Namespace) -> None:
             record=args.record,
             opts=encoding,
             record_length=args.record_length,
+            copybook_paths=args.copybook_path or None,
         )
     except CopybookLayoutError as exc:
         _fail(str(exc))
     except OSError as exc:
         _fail(f"Cannot read copybook: {exc}")
+    _warn_layout(decoder.layout_warnings)
 
     output_path = getattr(args, "output", None)
 
@@ -1682,7 +1709,8 @@ def _cmd_decode(args: argparse.Namespace) -> None:
         _fail(f"Cannot read data file: {exc}")
 
     for caveat in result.caveats:
-        print(f"note: {caveat}", file=sys.stderr)
+        if caveat not in decoder.layout_warnings:  # already said, as a warning
+            print(f"note: {caveat}", file=sys.stderr)
     if result.trailing:
         # Never silent: a tail that is not a whole record almost always means
         # the record length is wrong, and a table of plausible rows above it
@@ -1803,6 +1831,7 @@ def _build_compare_parser(
         help="text (default) is a report to read; json is every difference in full",
     )
     _add_record_file_args(p)
+    _add_copybook_args(p)
     _add_compact_arg(p)
     _add_output_arg(p)
     p.set_defaults(func=_cmd_compare)
@@ -1829,7 +1858,9 @@ def _cmd_compare(args: argparse.Namespace) -> None:
             record=args.record,
             opts=_decode_encoding_options(args),
             record_length=args.record_length,
+            copybook_paths=args.copybook_path or None,
         )
+        _warn_layout(decoder.layout_warnings)
         result = compare_files(
             decoder,
             args.expected,
