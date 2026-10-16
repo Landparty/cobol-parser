@@ -498,6 +498,16 @@ would pick 4.5, which `ValueFactory.render()` rounds back to the excluded "4".
 Fully deterministic. Pinned by
 `tests/regression/test_audit_2026_08_12_analysis.py::TestA6WitnessOnTheDecimalGrid`.
 
+**A COMP-1/COMP-2 field is solved over a float domain, not its PICTURE.**
+It has none; `_picture_domain` gives `FieldCategory.FLOAT` a signed
+`[-FLOAT_LIMIT, FLOAT_LIMIT]` (1E15) on a `FLOAT_DECIMALS` (4) grid, and
+`scenarios._picture_ceiling` / the boundary-values family use the same bound.
+The layout's placeholder `PIC 9(9)` shape made `IF F < -100` and
+`IF F > 0.25 AND F < 0.75` unsatisfiable (#551). A float equality literal with
+more than 4 decimals is off the grid and so still unsatisfiable. Pinned by
+`tests/unit/analysis/test_domains.py::TestFloatDomain` and
+`tests/unit/test_program_fixtures.py::TestFloatFieldArms`.
+
 **The whole numeric pipeline is Decimal, never float.** `NumericDomain`'s
 bounds/exclusions, `_apply_numeric`'s literal parsing, `_rendered_numeric_ok`,
 `scenarios._picture_ceiling`, and `ValueFactory._format_number` /
@@ -729,7 +739,10 @@ internal env) rather than approximating:
   `_link_file_records` unions the leaves of every
   `index.records_for_file(f)` (`ProgramLayoutIndex.file_names()`) into one
   alias class: `MOVE 1234 TO B. MOVE 'ABCD' TO A. DISPLAY B.` (B in R2, A in
-  R1, both under `FD F`) leaves B unknown.
+  R1, both under `FD F`) leaves B unknown. `I-O-CONTROL. SAME RECORD AREA
+  FOR f1 f2` (#497) widens the class across FDs to every record of every
+  file in the group (`_files.same_record_area_groups()`); plain `SAME AREA`
+  shares no records and widens nothing.
   `WRITE rec FROM id` is folded as `MOVE id TO rec` before the WRITE is
   observed (a group record is poisoned whole); `REWRITE ... FROM` takes the
   generic poison path, which already covers the record. A field source

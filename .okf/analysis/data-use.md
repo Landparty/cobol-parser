@@ -100,6 +100,14 @@ argument verbatim (case preserved, for `io_logger`'s human-readable report);
 `CRUDMatrixGenerator` upper-cases the result itself since its entries are keyed
 by upper-case name.
 
+`same_record_area_groups(ast)` reads the INPUT-OUTPUT section's
+`io_control` metadata and returns the files of each `SAME RECORD AREA`
+clause (upper-cased, groups sharing a file merged). Their records share one
+storage area across FDs, so `const_fold._link_file_records` and
+`FieldFlowAnalyzer._redefines_edges` alias them like the records of one FD
+(#497). Plain `SAME AREA` / `SAME SORT[-MERGE] AREA` share no records and are
+not returned.
+
 ## UnusedVariableAnalyzer
 
 ```python
