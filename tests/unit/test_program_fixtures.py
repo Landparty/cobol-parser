@@ -684,6 +684,46 @@ class TestTier1CallCountExpectations:
         assert counts["OPEN:IDX-FILE"] == [1]
         assert counts["OPEN:REL-FILE"] == [1]
 
+    def test_success_arm_ending_the_run_gives_no_count_after_it(self, tmp_path):
+        # Issue #590: on the happy path WS-FS is '00', so the THEN arm's
+        # GOBACK runs and ERRLOG never does -- asserting it runs once would
+        # fail against a correct program.
+        source = tmp_path / "st2.cbl"
+        source.write_text("""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. STOK2.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-F ASSIGN TO INDD
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD IN-F.
+       01 IN-REC PIC X(10).
+       WORKING-STORAGE SECTION.
+       01 WS-FS PIC XX.
+       01 WS-MSG PIC X(20).
+       01 WS-RC PIC S9(4) COMP.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT IN-F
+           IF WS-FS = '00'
+              CLOSE IN-F
+              GOBACK
+           END-IF
+           MOVE 'OPEN FAILED' TO WS-MSG
+           CALL 'ERRLOG' USING WS-MSG WS-RC
+           DISPLAY 'ERRLOG RC ' WS-RC
+           GOBACK.
+""")
+        bundle = ProgramFixtureGenerator().generate_from_file(
+            str(source), seed=1, callee_paths=[]
+        )
+        counts = _counts(bundle.scenarios[0])
+        assert counts["OPEN:IN-F"] == [1]
+        assert "CALL:ERRLOG" not in counts
+
     def test_straight_line_read_with_at_end_counts_one_not_rows_plus_one(self):
         bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
         seq_file_read = next(

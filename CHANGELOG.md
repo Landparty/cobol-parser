@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`gen-fixtures`: no `call_count` after a status check whose success arm
+  ends the run** (#590). An IF reading only status fields was exempt in both
+  arms, so `IF WS-FS = '00' ... GOBACK` (or `IF WS-FS-OK`, `IF SQLCODE = 0`,
+  `IF WS-FS NOT = '00' ... ELSE GOBACK`) still gave the CALL after it an
+  exact count of 1 on the happy path, where it never runs. The condition is
+  now evaluated with every status field at success ('00', SQLCODE 0, a
+  level-88's own VALUEs, ...): only the arm success never takes is exempt,
+  and a condition that cannot be evaluated exempts neither arm.
 * **`gen-fixtures`: an EVALUATE `WHEN OTHER` or SEARCH `AT END` arm whose
   precondition was not modeled is reported `missed`, not `targeted` /
   `verified`** (#509). The constraint extractor leaves such an arm's

@@ -830,6 +830,17 @@ and gives each statement it reaches an exact execution count or "unknown":
   only while the last boundary that set it (`status_sites`) ran on the
   certain path and is not a READ that can reach end of file: after one, the
   field is '10' in every read-to-EOF scenario and at once for empty input.
+  For the IF only the arm success provably does *not* take is exempt
+  (#590): `push_if` evaluates the condition (`success_selects`, three-valued
+  over AND / OR / NOT) with each status field at its success value -- '00'
+  (0 for a numeric FILE STATUS), SQLCODE / EIBRESP 0, SQLSTATE '00000', a
+  level-88 by its own VALUEs incl. THRU ranges. The arm success takes is an
+  ordinary conditional region, so `IF WS-FS = '00' ... GOBACK` blanks what
+  follows; an unevaluable condition (class test, a literal of the wrong
+  kind, an ordering over non-digit characters, whose collating order differs
+  ASCII vs EBCDIC) exempts neither arm. An exempt region's transfer never
+  propagates (`end_region` restores the saved flag), so it cannot leak into
+  the sibling arm or handler pushed below it.
 
 `is_plain_eof_loop(ast, perform, index)` backs `_CallCounter`'s EOF rule:
 the UNTIL tests exactly one field, and the body (followed through PERFORMs
