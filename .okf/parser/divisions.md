@@ -82,6 +82,14 @@ Individual statement parsers are in [statements.md](statements.md).
   `procedure.py` reads `section_info.get("location", start_location)`.
   `_create_ast_node` reads each per-section location. Pinned by
   `tests/regression/test_section_location_tracking.py`.
+- **`I-O-CONTROL` entries** are the INPUT-OUTPUT section's `io_control`
+  metadata, one `{clause, text, line}` per RERUN / SAME / MULTIPLE FILE /
+  APPLY entry (`_parse_io_control_paragraph`). A `SAME` entry also carries
+  `area` (`RECORD` / `SORT` / `SORT-MERGE`, `""` for plain `SAME AREA`) and
+  `files` (upper-cased): `analysis/_files.same_record_area_groups()` reads
+  them so constant folding and lineage alias the records of a `SAME RECORD
+  AREA` group (#497). Pinned by
+  `tests/regression/test_same_record_area_issue_497.py`.
 - **`PROCEDURE DIVISION USING` / `RETURNING`.** `BaseDivisionParser.parse()`
   walks the header clause tokens to the period: bare parameter names go to
   metadata `using_parameters` (what makes the entry interface visible to

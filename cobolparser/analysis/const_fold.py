@@ -96,6 +96,7 @@ from ..models.statements.misc import (
     NextSentenceStatement,
     SortStatement,
 )
+from ._files import same_record_area_groups
 
 if TYPE_CHECKING:
     # Same shape as constraints.py's own guard: cobolparser.generators
@@ -445,12 +446,27 @@ def _link_file_records(index: ProgramLayoutIndex, facts: _LayoutFacts) -> None:
     """Union every leaf of every 01 record under one FD/SD into one alias
     class: the records of a file all implicitly redefine the same record
     area, so writing a field of one changes the bytes the others read --
-    with no ``REDEFINES`` clause for `_link_redefines` to see."""
+    with no ``REDEFINES`` clause for `_link_redefines` to see.
+
+    ``I-O-CONTROL. SAME RECORD AREA FOR f1 f2`` widens the class to every
+    record of every file in the group: those records share one area too,
+    across FDs, so a MOVE to an ``f1`` field changes what an ``f2`` field
+    reads. (Plain ``SAME AREA`` shares no records and widens nothing.)"""
     file_names = getattr(index, "file_names", None)
     if not callable(file_names):
         return
+    group_of: dict[str, int] = {}
+    for position, group in enumerate(
+        same_record_area_groups(getattr(index, "ast", None))
+    ):
+        for member in group:
+            group_of[member] = position
+    areas: dict[Any, list[CobolDataItem]] = {}
     for file_name in file_names():
-        records = index.records_for_file(file_name)
+        upper = file_name.upper()
+        key: Any = ("same", group_of[upper]) if upper in group_of else upper
+        areas.setdefault(key, []).extend(index.records_for_file(file_name))
+    for records in areas.values():
         if len(records) < 2:
             continue
         members: set[str] = set()
