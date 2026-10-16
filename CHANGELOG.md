@@ -169,6 +169,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the STOP RUN / GOBACK, and complexity / business-rules / gen-fixtures lost
   those statements. The procedure-division top loop now consumes a bare
   period as a sentence end.
+* **JSON PARSE / GENERATE `CONVERTING x [FROM|TO] JSON BOOLEAN` no longer ends
+  the statement at `JSON`** (#574). Only `TO JSON` was recognised, so JSON
+  PARSE's `FROM JSON BOOLEAN` and the forms without FROM/TO dropped the rest
+  of the statement with an "Unparsed tokens" warning, `ON EXCEPTION`
+  included: the handler's CALL / PERFORM became an unconditional statement
+  of the paragraph, program-flow drew it as an unconditional edge, and
+  `gen-fixtures` asserted an exact `call_count` for it.
 
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never

@@ -9,6 +9,8 @@ boundary gate among them). `PROCESSING PROCEDURE` was likewise only text,
 so the implicit PERFORM edge it represents could not be followed.
 """
 
+import pytest
+
 from cobolparser import parse_cobol
 from cobolparser.models.statements import (
     CallStatement,
@@ -210,3 +212,100 @@ def test_bare_procedure_with_is_and_thru_on_next_lines():
     assert node.processing_procedure == "HANDLE-XML"
     assert node.processing_procedure_thru == "HANDLE-XML-END"
     assert "IS" not in node.operands
+
+
+# --- #574: CONVERTING item [TO|FROM] JSON BOOLEAN|DECIMAL -------------------
+#
+# The clause loop exempted the word JSON only after TO (JSON GENERATE's
+# form), so JSON PARSE's ``FROM JSON BOOLEAN`` and both bare forms ended the
+# statement at JSON: the rest, ON EXCEPTION included, was dropped with an
+# "Unparsed tokens" warning and the handler's CALL became an unconditional
+# statement of the paragraph.
+
+_CONVERTING_HEADER = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. JSONCV.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-J                PIC X(100).
+       01  WS-REC.
+           05  WS-FLAG         PIC X.
+       01  WS-MSG              PIC X(10).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           ACCEPT WS-J
+"""
+
+
+def _converting_program(head: str, word: str) -> str:
+    return _CONVERTING_HEADER + (
+        f"           {head}\n"
+        f"               CONVERTING WS-FLAG {word}JSON BOOLEAN USING 'Y' AND 'N'\n"
+        "               ON EXCEPTION\n"
+        "                   CALL 'ERRLOG' USING WS-MSG\n"
+        "           END-JSON\n"
+        "           STOP RUN.\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "head",
+    ["JSON PARSE WS-J INTO WS-REC", "JSON GENERATE WS-J FROM WS-REC"],
+    ids=["parse", "generate"],
+)
+@pytest.mark.parametrize("word", ["FROM ", "TO ", ""], ids=["from", "to", "bare"])
+def test_converting_json_boolean_keeps_exception_handler(head, word):
+    result = parse_cobol(_converting_program(head, word), filename="jsoncv.cbl")
+    assert result.success, result.errors
+    assert not result.warnings, result.warnings
+    stmts = result.ast.get_division("PROCEDURE").paragraphs[0].statements
+    assert [type(s).__name__ for s in stmts] == [
+        "IOAcceptStatement",
+        "XmlJsonStatement",
+        "StopStatement",
+    ]
+    node = stmts[1]
+    assert f"CONVERTING WS-FLAG {word}JSON BOOLEAN USING" in node.clause_text
+    assert [type(s) for s in node.on_exception] == [CallStatement]
+    assert node.on_exception[0].called_program == "ERRLOG"
+
+
+def test_json_converting_does_not_swallow_a_following_json_statement():
+    # The lookahead keys on the word after JSON, so a new JSON statement
+    # (JSON GENERATE / JSON PARSE) still ends the clause region.
+    result = parse_cobol(
+        _CONVERTING_HEADER + "           JSON GENERATE WS-J FROM WS-REC\n"
+        "               CONVERTING WS-FLAG TO JSON BOOLEAN USING 'Y' AND 'N'\n"
+        "           JSON PARSE WS-J INTO WS-REC\n"
+        "               CONVERTING WS-FLAG FROM JSON BOOLEAN USING 'Y' AND 'N'\n"
+        "           STOP RUN.\n",
+        filename="jsoncv.cbl",
+    )
+    assert result.success, result.errors
+    assert not result.warnings, result.warnings
+    stmts = result.ast.get_division("PROCEDURE").paragraphs[0].statements
+    assert [getattr(s, "action", None) for s in stmts[1:3]] == ["GENERATE", "PARSE"]
+    assert "TO JSON BOOLEAN USING" in stmts[1].clause_text
+    assert "FROM JSON BOOLEAN USING" in stmts[2].clause_text
+
+
+def test_gen_fixtures_counts_no_call_inside_json_exception_handler():
+    from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
+    from cobolparser.generators.data.program_layout import ProgramLayoutIndex
+    from cobolparser.generators.program_fixtures import ProgramFixtureGenerator
+
+    result = parse_cobol(
+        _converting_program("JSON PARSE WS-J INTO WS-REC", "FROM "),
+        filename="jsoncv.cbl",
+    )
+    assert result.ast is not None, result.errors
+    index = ProgramLayoutIndex.build(result.ast)
+    report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+    bundle = ProgramFixtureGenerator().generate(result.ast, index, report, seed=1)
+    counts = {
+        e.ref: e.value
+        for e in bundle.scenarios[0].expectations
+        if e.kind == "call_count"
+    }
+    assert "CALL:ERRLOG" not in counts
+    assert counts.get("ACCEPT:WS-J") == 1
