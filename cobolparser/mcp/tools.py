@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
-from ..models.data_items import CobolDataItem, ConditionNameItem
+from ..models.data_items import CobolDataItem, ConditionNameItem, RenamesItem
 from ..models.program import CobolProgram, CobolSection
 from .envelope import Response, ToolError, clamp_limit
 from .workspace import ParsedProgram, Workspace, stdout_to_stderr
@@ -294,6 +294,15 @@ class CobolTools:
                 ],
             }
             item = _layout_for(entry.name, entry.qualified_name, layout)
+            if item is None and entry.level == 66:
+                item = _renames_layout(unit, entry.name, layout)
+                if item is None:
+                    response.caveat(
+                        "incomplete-analysis",
+                        f"RENAMES item {entry.name}: the bytes it renames "
+                        "could not be placed",
+                        "no layout is reported for it",
+                    )
             if item is not None:
                 symbol["layout"] = {
                     key: item.get(key)
@@ -1822,6 +1831,53 @@ def _layout_index(
     for item in items:
         index.setdefault(str(item["name"]).upper(), []).append(item)
     return index
+
+
+def _renames_layout(
+    unit: CobolProgram,
+    name: str,
+    layout: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any] | None:
+    """The byte range a level-66 ``RENAMES`` item names, or None (#485).
+
+    ``66 R-AB RENAMES R-A THRU R-B`` covers its record from the start of
+    ``R-A`` to the end of ``R-B``; the layout itself has no entry for it.
+    """
+    data_div = unit.data_division
+    if data_div is None:
+        return None
+    for section in data_div.sections:
+        if not isinstance(section, CobolSection):
+            continue
+        for node in section.children:
+            if not isinstance(node, RenamesItem) or node.name.upper() != name.upper():
+                continue
+            ends: list[dict[str, Any]] = []
+            operands = [(node.renames_from, node.renames_from_qualifiers)]
+            if node.renames_through:
+                operands.append((node.renames_through, node.renames_through_qualifiers))
+            for operand, qualifiers in operands:
+                qualified = " OF ".join([str(operand), *qualifiers])
+                found = _layout_for(str(operand), qualified, layout)
+                if found is None:
+                    return None
+                ends.append(found)
+            first, last = ends[0], ends[-1]
+            record = str(first.get("qualified_name", "")).upper().split(".")[0]
+            if str(last.get("qualified_name", "")).upper().split(".")[0] != record:
+                return None
+            start, end_at = first.get("byte_offset"), last.get("byte_offset")
+            if start is None or end_at is None:
+                return None
+            length = int(end_at) + int(last.get("byte_length") or 0) - int(start)
+            if length <= 0:
+                return None
+            return {
+                "qualified_name": name.upper(),
+                "byte_offset": start,
+                "byte_length": length,
+            }
+    return None
 
 
 def _layout_for(

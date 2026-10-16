@@ -597,6 +597,22 @@ unique within a plan (two IFs in one paragraph get distinct names).
 `ArmOutcome.merged_into` carries the *final* name. `name` stays free text (no
 `bundle_version` bump).
 
+**Unmodeled arms** (see #509). An arm listed in `BranchConstraints.
+unmodeled_arms` -- a `WHEN OTHER` whose earlier arms do not negate to one
+`not_in_set`, every SEARCH `AT_END` -- carries `[]` meaning "precondition
+unknown", not "anything goes". The planner counts it `missed` with reason
+`"precondition not modeled: <extractor's reason>"` before any solving, and
+adds a note to `ScenarioPlan.unresolved`, which `generate_with_scenarios`
+copies into `FixtureBundle.unresolved` so `--strict` exits 2. Solving the
+`[]` instead targeted the arm with random rows that ran an earlier WHEN
+(always, for a level-88 field), and verification of zero conjuncts said
+`verified`. Unreachable/unsatisfiable misses are facts about the program
+and do not go to `unresolved`; an unmodeled arm is a gap in the tool. A
+`WHEN OTHER` after an unsupported WHEN (e.g. a working-storage subject no
+boundary feeds) is not in `unmodeled_arms` and not in `arms` at all: it is
+missed for that WHEN's reason (`_reason_for_missing_arm`) and, like it,
+adds no `unresolved` note.
+
 **Unsatisfiable arms.** Every distinct field an arm's conjuncts touch is
 solved independently via `domains.solve()`; if *any* field's constraint set
 is `Unsatisfiable`, the whole arm is unsatisfiable (all of an arm's
@@ -614,7 +630,9 @@ conjuncts must hold simultaneously) and lands in `coverage.missed` with
   -> `"35"`.
 * **boundary values** — two combined scenarios (`"minimum"`/`"maximum"`),
   every numeric field any constraint touches pinned to its picture's true
-  extreme (`-ceiling` for a signed field, `0` otherwise, vs. `ceiling`).
+  extreme (`-ceiling` for a signed field, `0` otherwise, vs. `ceiling`). A
+  COMP-1/COMP-2 field has no picture: its extremes are the solver's float
+  bound, `-/+domains.FLOAT_LIMIT` (#551).
   Pinned via an `eq` constraint, not `ge`/`le`: `domains.solve()`'s witness
   is always the interval's (grid) *midpoint*, so a `ge("0")` constraint alone
   produces a mid-range witness, not `0`.

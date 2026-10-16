@@ -684,6 +684,46 @@ class TestTier1CallCountExpectations:
         assert counts["OPEN:IDX-FILE"] == [1]
         assert counts["OPEN:REL-FILE"] == [1]
 
+    def test_success_arm_ending_the_run_gives_no_count_after_it(self, tmp_path):
+        # Issue #590: on the happy path WS-FS is '00', so the THEN arm's
+        # GOBACK runs and ERRLOG never does -- asserting it runs once would
+        # fail against a correct program.
+        source = tmp_path / "st2.cbl"
+        source.write_text("""\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. STOK2.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-F ASSIGN TO INDD
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD IN-F.
+       01 IN-REC PIC X(10).
+       WORKING-STORAGE SECTION.
+       01 WS-FS PIC XX.
+       01 WS-MSG PIC X(20).
+       01 WS-RC PIC S9(4) COMP.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT IN-F
+           IF WS-FS = '00'
+              CLOSE IN-F
+              GOBACK
+           END-IF
+           MOVE 'OPEN FAILED' TO WS-MSG
+           CALL 'ERRLOG' USING WS-MSG WS-RC
+           DISPLAY 'ERRLOG RC ' WS-RC
+           GOBACK.
+""")
+        bundle = ProgramFixtureGenerator().generate_from_file(
+            str(source), seed=1, callee_paths=[]
+        )
+        counts = _counts(bundle.scenarios[0])
+        assert counts["OPEN:IN-F"] == [1]
+        assert "CALL:ERRLOG" not in counts
+
     def test_straight_line_read_with_at_end_counts_one_not_rows_plus_one(self):
         bundle = ProgramFixtureGenerator().generate_from_file(FILE_OPERATIONS, seed=1)
         seq_file_read = next(
@@ -1885,3 +1925,74 @@ class TestKeyedReadReturnsTheKeyAskedFor:
         (fixture,) = _read_fixtures(bundle.scenarios[0])
         assert any(row["VS-KEY"] != "K001" for row in fixture.sequence)
         assert not [u for u in bundle.unresolved if "record key" in u]
+
+
+_FLOAT_ARMS_PROGRAM = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GF2.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-FILE ASSIGN TO INFILE.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  IN-FILE.
+       01  IN-REC.
+           05  IN-R COMP-2.
+           05  IN-S COMP-1.
+       PROCEDURE DIVISION.
+           OPEN INPUT IN-FILE
+           READ IN-FILE
+           END-READ
+           IF IN-R > 0.25 AND IN-R < 0.75  DISPLAY 'MID' END-IF
+           IF IN-S < -100                  DISPLAY 'NEG' END-IF
+           CLOSE IN-FILE
+           GOBACK.
+"""
+
+
+class TestFloatFieldArms:
+    """Issue #551: a COMP-1/COMP-2 field has no PICTURE and was solved over
+    the layout's placeholder ``PIC 9(9)`` domain, so a negative or fractional
+    bound made its THEN arm "unsatisfiable" and the ELSE rows held 0 /
+    499999999 / 500000000."""
+
+    def _bundle(self, mode: str = "branches"):
+        result = parse_cobol(_FLOAT_ARMS_PROGRAM, filename="gf2.cbl")
+        assert result.ast is not None, result.errors
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        return ProgramFixtureGenerator().generate_with_scenarios(
+            result.ast, index, report, mode=mode, seed=1
+        )
+
+    def test_boundary_minimum_is_negative_for_a_float(self):
+        """The minimum of a signed float is not 0, the floor of the
+        unsigned placeholder PICTURE."""
+        bundle = self._bundle(mode="all")
+        (scenario,) = [
+            s for s in bundle.scenarios if s.name == "boundary values: minimum"
+        ]
+        (fixture,) = _read_fixtures(scenario)
+        assert all(
+            float(row["IN-R"]) < 0 and float(row["IN-S"]) < 0
+            for row in fixture.sequence
+        )
+
+    def test_negative_and_fractional_then_arms_are_not_missed(self):
+        coverage = self._bundle().scenario_coverage
+        assert coverage is not None
+        assert [d for d in coverage["details"] if d["status"] == "missed"] == []
+
+    def test_scenario_rows_satisfy_their_float_conditions(self):
+        bundle = self._bundle()
+        checks = {
+            "IF@17 THEN": lambda row: 0.25 < float(row["IN-R"]) < 0.75,
+            "IF@18 THEN": lambda row: float(row["IN-S"]) < -100,
+            "IF@17 ELSE [IN-R <= 0.25]": lambda row: float(row["IN-R"]) <= 0.25,
+        }
+        for marker, check in checks.items():
+            (scenario,) = [s for s in bundle.scenarios if marker in s.name]
+            (fixture,) = _read_fixtures(scenario)
+            assert fixture.sequence
+            assert all(check(row) for row in fixture.sequence), fixture.sequence

@@ -41,6 +41,11 @@ from ...models.statements import XmlJsonStatement
 _CLAUSE_CONTINUATION_WORDS = frozenset({"SUPPRESS", "NOT", "ON"})
 _SUPPRESS_CONTINUATION_WORDS = frozenset({"WHEN"})
 
+#: The words that may follow ``JSON`` in a CONVERTING phrase
+#: (``CONVERTING item [TO|FROM] JSON BOOLEAN|DECIMAL``); a new JSON
+#: statement has ``GENERATE`` / ``PARSE`` there instead.
+_JSON_CONVERSION_TYPES = frozenset({"BOOLEAN", "DECIMAL"})
+
 #: The fixed vocabulary of the XML/JSON GENERATE/PARSE clauses. Any other
 #: identifier in the clause region is a data name the statement references
 #: (see :meth:`XmlJsonStatementParser._record_clause_items`).
@@ -229,14 +234,11 @@ class XmlJsonStatementParser(IStatementParser):
             is_clause_word = (
                 upper in _CLAUSE_CONTINUATION_WORDS
                 or (seen_suppress and upper in _SUPPRESS_CONTINUATION_WORDS)
-                # JSON GENERATE ... CONVERTING item TO JSON DECIMAL|BOOLEAN
-                # (Enterprise COBOL 6.3): the word JSON after TO is the
-                # target type, not the start of a new JSON statement.
-                or (
-                    upper == "JSON"
-                    and bool(clause_parts)
-                    and clause_parts[-1].upper() == "TO"
-                )
+                # CONVERTING item [TO] JSON BOOLEAN|DECIMAL (JSON GENERATE)
+                # and CONVERTING item [FROM] JSON BOOLEAN (JSON PARSE),
+                # Enterprise COBOL 6.3+: that JSON is the conversion type,
+                # not the start of a new JSON statement.
+                or (upper == "JSON" and self._is_json_type_word(token_stream))
             )
             if is_statement_boundary(token) and not is_clause_word:
                 break
@@ -253,6 +255,20 @@ class XmlJsonStatementParser(IStatementParser):
         self._parse_exception_clauses(token_stream, stmt, terminator)
         consume_end_keyword_and_period(token_stream, terminator)
         return stmt
+
+    @staticmethod
+    def _is_json_type_word(token_stream: ITokenStream) -> bool:
+        """True when the ``JSON`` at the head of the stream is CONVERTING's
+        ``JSON BOOLEAN`` / ``JSON DECIMAL`` type, not a new JSON statement.
+
+        Decided by the word after it rather than the one before: the
+        ``TO`` / ``FROM`` in front is optional, and keying on ``TO`` alone
+        (JSON GENERATE's form) cut JSON PARSE's ``FROM JSON BOOLEAN`` and
+        both bare forms at ``JSON`` -- the rest, ``ON EXCEPTION`` included,
+        was dropped and the handler's statements were hoisted into the
+        paragraph as unconditional ones (#574)."""
+        nxt, _ = peek_past_noise(token_stream, 1)
+        return nxt is not None and (nxt.value or "").upper() in _JSON_CONVERSION_TYPES
 
     @staticmethod
     def _record_clause_items(tokens: list[Token], stmt: XmlJsonStatement) -> None:
