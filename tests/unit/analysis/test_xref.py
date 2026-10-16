@@ -1934,3 +1934,60 @@ def test_reference_modifier_of_a_receiving_operand_is_read_not_written():
     assert _roles(report, "WS-P") == [ROLE_READ]
     assert _roles(report, "WS-L") == [ROLE_READ]
     assert _roles(report, "WS-A") == [ROLE_READ]
+
+
+_FILLER_88_SOURCE = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. F88.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-SW.
+           05  FILLER   PIC X VALUE 'N'.
+               88  SW-ON  VALUE 'Y'.
+               88  SW-OFF VALUE 'N'.
+       01  WS-X PIC X.
+           88  X-ON VALUE 'Y'.
+       01  WS-REC.
+           05  R-A PIC X(3).
+           05  R-B PIC 9(2).
+       66  R-AB RENAMES R-A THRU R-B.
+       PROCEDURE DIVISION.
+           SET SW-ON TO TRUE
+           IF SW-ON AND X-ON DISPLAY R-AB END-IF
+           GOBACK.
+"""
+
+
+def test_condition_names_under_a_filler_are_declared():
+    # Issue #485: the FILLER itself is no name, but its level-88s are.
+    report = _analyze_source(_FILLER_88_SOURCE)
+    assert report.undefined == []
+    sw_on = report.entry_for("SW-ON")
+    sw_off = report.entry_for("SW-OFF")
+    assert sw_on is not None and sw_off is not None
+    assert (sw_on.kind, sw_on.level, sw_on.section) == (
+        KIND_CONDITION_NAME,
+        88,
+        "WORKING-STORAGE",
+    )
+    assert sw_on.definition is not None and sw_on.definition.line == 7
+    assert sw_off.kind == KIND_CONDITION_NAME
+    assert sw_off.definition is not None and sw_off.definition.line == 8
+    assert sw_on.reference_count == 2
+    assert sw_off.references == []
+    assert report.entry_for("FILLER") is None
+    assert report.duplicate_declarations == []
+
+
+def test_level_66_renames_item_is_declared():
+    # Issue #485: a RenamesItem is a section child, not a CobolDataItem.
+    report = _analyze_source(_FILLER_88_SOURCE)
+    r_ab = report.entry_for("R-AB")
+    assert r_ab is not None
+    assert (r_ab.kind, r_ab.level, r_ab.section) == (
+        KIND_DATA_ITEM,
+        66,
+        "WORKING-STORAGE",
+    )
+    assert r_ab.definition is not None and r_ab.definition.line == 14
+    assert [ref.role for ref in r_ab.references] == [ROLE_READ]
+    assert "R-AB" not in report.undefined

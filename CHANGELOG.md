@@ -168,6 +168,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now evaluated with every status field at success ('00', SQLCODE 0, a
   level-88's own VALUEs, ...): only the arm success never takes is exempt,
   and a condition that cannot be evaluated exempts neither arm.
+* **`gen-fixtures`: an EVALUATE `WHEN OTHER` or SEARCH `AT END` arm whose
+  precondition was not modeled is reported `missed`, not `targeted` /
+  `verified`** (#509). The constraint extractor leaves such an arm's
+  conjuncts empty (`WHEN OTHER` after a `THRU`, `>`, compound or
+  different-field arm; every `AT END`), and the planner solved that `[]` as
+  "anything goes" -- so the scenario named for the arm got random rows that
+  usually ran an earlier `WHEN` (for SEARCH, the WHEN arm every time), while
+  verification called zero conjuncts `verified` and `--strict` exited 0.
+  `BranchConstraints.unmodeled_arms` now names those arms with the
+  extractor's reason; `ScenarioPlanner` counts them `missed` with that
+  reason and lists them in `ScenarioPlan.unresolved`, which reaches
+  `FixtureBundle.unresolved`, so `gen-fixtures --strict` exits 2. A `WHEN
+  OTHER` after a WHEN that is itself unsupported (a working-storage subject
+  no boundary feeds) is missed for that WHEN's own reason and, like it, does
+  not fail `--strict`.
+* **`xref` declares level-88s under a FILLER and level-66 `RENAMES` items**
+  (#485). The `05 FILLER PIC X VALUE 'N'. 88 SW-ON VALUE 'Y'.` switch was
+  dropped together with its FILLER, and `RENAMES` items were never declared,
+  so both were listed in `undefined`, MCP `explain_symbol` answered
+  `declared: false` (or `found: false` for an unreferenced one), and
+  `lineage` caveated them as "not declared ... not traced". They are now
+  declared as condition-names / level-66 data items at their own lines.
+  `lineage` now traces a RENAMES item through the fields of its `THRU`
+  range, and MCP `explain_symbol` reports its byte range; one that cannot
+  be placed gets a caveat in both.
+* **COMP-1 / COMP-2 are no longer modelled as unsigned 9-digit integers**
+  (#551). A float item has no PICTURE, and its declared or solved values went
+  through the PICTURE-shaped numeric path: `gen-data` wrote `VALUE -2.5E-02`
+  as 0 and `VALUE -1.5` as 2, and `gen-fixtures` reported `IF F < -100` or
+  `IF F > 0.25 AND F < 0.75` unsatisfiable (ELSE rows 0 / 499999999). VALUE
+  clauses and solver witnesses are now rendered through the field's own
+  binary32 / binary64 storage, the solver gives a float a signed +/-1E15
+  domain on a 4-decimal grid, and the `all` mode's boundary-values family
+  uses the same bounds.
+* **`I-O-CONTROL. SAME RECORD AREA FOR f1 f2` now aliases the files'
+  records in constant folding and lineage** (#497). The clause was kept as
+  text only, so `gen-fixtures` asserted a `field_equals` value an `f2` field
+  never held after a MOVE to an `f1` field, and `lineage` / `field-impact`
+  lost the `READ f1` / `WRITE f2-rec` copy idiom's input-to-output flow. Each
+  `SAME` entry of the INPUT-OUTPUT section's `io_control` metadata now also
+  carries `area` (`RECORD` / `SORT` / `SORT-MERGE`, `""` for plain `SAME
+  AREA`) and `files`; the records of every file in one `SAME RECORD AREA`
+  group form one alias class / one buffer, as the records under one FD
+  already did. Plain `SAME AREA` aliases nothing.
+* **A missing period before a header no longer swallows the header.** A
+  SELECT entry with no period ate `DATA DIVISION` (the whole DATA DIVISION
+  was lost) or the next `SELECT` (that file disappeared, its ASSIGN replacing
+  the first one's), and a data item or level-88 entry with no period ate the
+  next `... SECTION` header or `FD`, so every item after it landed in the
+  wrong section (LINKAGE items read as WORKING-STORAGE, USING parameters as
+  undeclared) -- all with `success=True`. As IBM does, a period is now
+  assumed before any DIVISION / SECTION header, `FILE-CONTROL` /
+  `I-O-CONTROL`, a new `SELECT` or `FD` / `SD` / `RD`, with a "missing its
+  terminating period" warning (#559).
+* **No phantom paragraph named `.` after `END-EXEC.` / `END-EVALUATE.` /
+  `END-CALL.` in an unnamed paragraph** (#503). At the top of the PROCEDURE
+  DIVISION or the start of a SECTION, before any paragraph header, the period
+  those verbs leave behind (and a doubled `..`) was read as a paragraph name;
+  the rest of the code moved into a paragraph named `.`, so dead-code missed
+  dead sections, program-flow drew a FALL_THROUGH for a PERFORM and dropped
+  the STOP RUN / GOBACK, and complexity / business-rules / gen-fixtures lost
+  those statements. The procedure-division top loop now consumes a bare
+  period as a sentence end.
+* **JSON PARSE / GENERATE `CONVERTING x [FROM|TO] JSON BOOLEAN` no longer ends
+  the statement at `JSON`** (#574). Only `TO JSON` was recognised, so JSON
+  PARSE's `FROM JSON BOOLEAN` and the forms without FROM/TO dropped the rest
+  of the statement with an "Unparsed tokens" warning, `ON EXCEPTION`
+  included: the handler's CALL / PERFORM became an unconditional statement
+  of the paragraph, program-flow drew it as an unconditional edge, and
+  `gen-fixtures` asserted an exact `call_count` for it.
 
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never

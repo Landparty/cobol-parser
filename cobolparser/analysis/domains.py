@@ -51,6 +51,12 @@ _ZERO_FIGURATIVES = frozenset({"ZERO", "ZEROS", "ZEROES"})
 _UNREPRESENTABLE_FIGURATIVES = frozenset(
     {"LOW-VALUE", "LOW-VALUES", "HIGH-VALUE", "HIGH-VALUES", "NULL", "NULLS"}
 )
+#: The domain a COMP-1/COMP-2 field is solved over: signed, +/-1E15 (the
+#: largest magnitude a COMP-2 still holds to the unit), on a grid of
+#: ``FLOAT_DECIMALS`` places -- the same quantisation ``values.py`` gives a
+#: freely drawn float value.
+FLOAT_LIMIT = Decimal("1E15")
+FLOAT_DECIMALS = 4
 #: A sign token detached from its digits by the lexer: ``- 5`` / ``+ 7``.
 _SIGN_SPACE_RE = re.compile(r"^([+-])\s+")
 
@@ -303,11 +309,12 @@ def _rendered_numeric_ok(rendered: str, domain: NumericDomain) -> bool:
 def _picture_domain(spec: FieldSpec) -> Domain:
     """The field's real domain, from its PICTURE -- what it can actually hold,
     independent of any level-88 names declared on it."""
-    if spec.category in (
-        FieldCategory.NUMERIC,
-        FieldCategory.NUMERIC_EDITED,
-        FieldCategory.FLOAT,
-    ):
+    if spec.category is FieldCategory.FLOAT:
+        # COMP-1/COMP-2 have no PICTURE; the layout's 9-digit unsigned
+        # integer shape is a placeholder that made `IF F < -100` or
+        # `IF F > 0.25 AND F < 0.75` "unsatisfiable".
+        return NumericDomain(lo=-FLOAT_LIMIT, hi=FLOAT_LIMIT, decimals=FLOAT_DECIMALS)
+    if spec.category in (FieldCategory.NUMERIC, FieldCategory.NUMERIC_EDITED):
         return _initial_numeric_domain(spec)
     return TextDomain(
         allowed=None, forbidden=set(), size=max(1, spec.character_positions)

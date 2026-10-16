@@ -193,6 +193,18 @@ class ProcedureDivisionParser(BaseDivisionParser):
             if token.type == TokenType.EOF:
                 break
 
+            # A bare period ends a sentence, exactly as in
+            # ``_parse_paragraph_statements``. Statements before the first
+            # paragraph header (an implicit paragraph, or the start of a
+            # SECTION) are dispatched one at a time from this loop, and the
+            # EXEC / EVALUATE / CALL parsers leave the period after their
+            # scope terminator (``END-EXEC.``) in the stream; it then fell
+            # through to the paragraph-name branch and opened a phantom
+            # paragraph named ``.`` holding the rest of the code (#503).
+            if token.type == TokenType.PERIOD or token.value == ".":
+                token_stream.consume()
+                continue
+
             token_value = token.value.upper() if token.value else ""
 
             # Check for next division start or END PROGRAM/DIVISION

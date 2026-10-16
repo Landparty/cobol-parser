@@ -60,6 +60,7 @@ from typing import Any
 
 from .._literals import is_quoted_literal
 from ..models.ast_base import ASTNode, SourceLocation
+from ..models.data_items import RenamesItem
 from ..models.program import CobolProgram, CobolSection
 from ..models.statements.arithmetic import ArithmeticStatement, ComputeStatement
 from ..models.statements.base import (
@@ -95,6 +96,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ._files import same_record_area_groups
 from ._names import callee_names
 from ._sql_flow import analyze_sql
 from .value_tracker import DynamicCallAnalyzer
@@ -611,6 +613,9 @@ class FieldFlowAnalyzer:
         self._file_records: dict[str, list[str]] = {}
         self._record_file: dict[str, str] = {}
         self._record_keys: dict[str, list[str]] = {}
+        #: File -> the first file of its ``SAME RECORD AREA`` group: the
+        #: records of every file in a group share one area.
+        self._record_area: dict[str, str] = {}
         self._ports: dict[tuple[str, str], Port] = {}
         self._edges: dict[tuple[Any, ...], LineageEdge] = {}
         self._key_uses: list[KeyUse] = []
@@ -632,6 +637,7 @@ class FieldFlowAnalyzer:
         # can reach, from the MOVEs and VALUE clauses of its identifier.
         DynamicCallAnalyzer().analyze(ast)
         self._index_items(ast)
+        self._index_renames(ast)
         self._index_files(ast)
         inner = _contained_node_ids(ast)
         statements = [
@@ -777,6 +783,82 @@ class FieldFlowAnalyzer:
             item.root = root.qname
         for message in data.get("unresolved") or []:
             self._caveat(f"byte layout: {message}")
+
+    def _index_renames(self, ast: CobolProgram) -> None:
+        """Map each level-66 ``RENAMES`` item onto the bytes it names (#485).
+
+        ``66 R-AB RENAMES R-A THRU R-B`` is an alias for the contiguous run
+        of its record from the start of ``R-A`` to the end of ``R-B``. It
+        becomes an item of its own whose children are the elementary fields
+        inside that run, so a MOVE to or from it flows through them like
+        through a group. One that cannot be placed (an operand not found,
+        found twice, in another record, or at an unknown offset) is named in
+        a caveat rather than silently left untraced.
+        """
+        data_div = ast.data_division
+        if data_div is None:
+            return
+        for section in data_div.sections:
+            if not isinstance(section, CobolSection):
+                continue
+            for node in section.children:
+                if isinstance(node, RenamesItem) and node.name:
+                    reason = self._place_renames(node)
+                    if reason:
+                        self._caveat(
+                            f"RENAMES item {node.name.upper()} not traced: {reason}"
+                        )
+
+    def _place_renames(self, node: RenamesItem) -> str | None:
+        """Add the alias item for *node*; the reason it could not be, else None."""
+        name = node.name.upper()
+        if name in self._items or name in self._by_name:
+            return "its name is also a data item's"
+        ends: list[_Item] = []
+        operands = [(node.renames_from, node.renames_from_qualifiers)]
+        if node.renames_through:
+            operands.append((node.renames_through, node.renames_through_qualifiers))
+        for operand, qualifiers in operands:
+            text = " OF ".join([str(operand), *qualifiers])
+            found = self._resolve(text)
+            if len(found) != 1:
+                what = "not found" if not found else "ambiguous"
+                return f"{text.upper()} is {what}"
+            ends.append(self._items[found[0]])
+        first, last = ends[0], ends[-1]
+        if first.root != last.root:
+            return "its operands are in different records"
+        if first.offset is None or last.offset is None:
+            return "its byte offset is unknown"
+        start, end = first.offset, last.offset + last.length
+        if end <= start:
+            return "its THRU operand precedes its first operand"
+        leaves = [
+            leaf.qname
+            for leaf in self._leaves(first.root)
+            if leaf.offset is not None
+            and leaf.offset >= start
+            and leaf.offset + leaf.length <= end
+        ]
+        if not leaves:
+            return "no elementary field lies in its byte range"
+        alias = _Item(
+            qname=name,
+            name=name,
+            level=66,
+            is_group=True,
+            offset=start,
+            length=end - start,
+            parent=None,
+            redefines_chain=[],
+            root=first.root,
+            children=leaves,
+            raw=name,
+        )
+        self._items[name] = alias
+        self._by_raw.setdefault(name, []).append(name)
+        self._by_name.setdefault(name, []).append(name)
+        return None
 
     def _leaves(self, qname: str) -> list[_Item]:
         cached = self._leaves_cache.get(qname)
@@ -1016,6 +1098,9 @@ class FieldFlowAnalyzer:
 
     def _index_files(self, ast: CobolProgram) -> None:
         inner = _contained_node_ids(ast)
+        for group in same_record_area_groups(ast):
+            for member in group:
+                self._record_area[member] = group[0]
         for node in ast.traverse_depth_first():
             if id(node) in inner or not isinstance(node, SelectStatement):
                 continue
@@ -1277,10 +1362,13 @@ class FieldFlowAnalyzer:
 
     def _redefines_edges(self) -> None:
         """Two-way edges between elementary fields that share bytes:
-        ``REDEFINES``, and the 01 records of one FD (one buffer)."""
+        ``REDEFINES``, the 01 records of one FD (one buffer), and the
+        records of every file one ``SAME RECORD AREA`` clause names (one
+        area, across FDs)."""
         buffers: dict[str, list[str]] = {}
         for item in self._items.values():
-            if item.parent is None:
+            # A RENAMES alias is a view of bytes its record already holds.
+            if item.parent is None and item.level != 66:
                 anchor = item.qname
                 if item.redefines_chain:
                     raw = item.redefines_chain[-1].upper()
@@ -1288,6 +1376,8 @@ class FieldFlowAnalyzer:
                 file_name = self._record_file.get(item.qname) or self._record_file.get(
                     anchor
                 )
+                if file_name:
+                    file_name = self._record_area.get(file_name, file_name)
                 key = f"FD:{file_name}" if file_name else anchor
                 buffers.setdefault(key, []).append(item.qname)
         for roots in buffers.values():

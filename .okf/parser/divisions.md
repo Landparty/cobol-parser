@@ -56,6 +56,22 @@ Individual statement parsers are in [statements.md](statements.md).
   meaningful token it drops (NEWLINE / WHITESPACE / COMMENT / CONTINUATION are
   skipped silently), symmetric with the ENVIRONMENT parser's
   `_warn_dropped_select_token`.
+- **A header ends an entry whose period was left off** (IBM: "a period was
+  assumed before ..."), with a "missing its terminating period: a period was
+  assumed before '<header>'" warning and the header left unconsumed for the
+  enclosing loop. The SELECT clause loop stops at another `SELECT`,
+  `FILE-CONTROL` / `I-O-CONTROL`, any `<word> DIVISION` and any ENVIRONMENT /
+  DATA `<word> SECTION` (`_entry_ending_header`); the data-item clause loop
+  and the level-88 entry stop at any DIVISION token, a DATA DIVISION
+  `<word> SECTION` (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE / REPORT
+  / SCREEN / COMMUNICATION) and `FD` / `SD` / `RD` (`data_entry_ending_header`
+  in `data_clauses.py`). Section words need the following `SECTION`: `FILE`
+  lexes as FILE_SECTION even in `FILE STATUS`. Issue #559: the SELECT loop
+  stopped only at `.`, so a period-less SELECT ate `DATA DIVISION` (the whole
+  DATA DIVISION lost) or the next `SELECT`; the data-item loop stopped only at
+  DIVISION tokens, so `01 A PIC X` + `LINKAGE SECTION.` put every LINKAGE item
+  in WORKING-STORAGE -- all with `success=True`. `_data_fast` needs no change:
+  it hands any token it does not handle back to the Python loop.
 - **Container locations.** Each `CobolSection` / `CobolParagraph` carries the
   location of its *own* header token, never the division's `start_location`:
   `environment.py`'s `_parse_configuration_section`,
@@ -66,6 +82,14 @@ Individual statement parsers are in [statements.md](statements.md).
   `procedure.py` reads `section_info.get("location", start_location)`.
   `_create_ast_node` reads each per-section location. Pinned by
   `tests/regression/test_section_location_tracking.py`.
+- **`I-O-CONTROL` entries** are the INPUT-OUTPUT section's `io_control`
+  metadata, one `{clause, text, line}` per RERUN / SAME / MULTIPLE FILE /
+  APPLY entry (`_parse_io_control_paragraph`). A `SAME` entry also carries
+  `area` (`RECORD` / `SORT` / `SORT-MERGE`, `""` for plain `SAME AREA`) and
+  `files` (upper-cased): `analysis/_files.same_record_area_groups()` reads
+  them so constant folding and lineage alias the records of a `SAME RECORD
+  AREA` group (#497). Pinned by
+  `tests/regression/test_same_record_area_issue_497.py`.
 - **`PROCEDURE DIVISION USING` / `RETURNING`.** `BaseDivisionParser.parse()`
   walks the header clause tokens to the period: bare parameter names go to
   metadata `using_parameters` (what makes the entry interface visible to
@@ -465,6 +489,15 @@ PROCEDURE DIVISION caller reports it -- see [statements-io.md](statements-io.md)
   or `""` at the end of the AST (`procedure_count` one too high) means some
   parser left a period or EOF unconsumed; `STOP`, `DISPLAY ... UPON` and the EOF
   check above have each been a cause.
+- **A bare period is a sentence end in the top loop too** (#503). Statements
+  before the first paragraph header (top of the division, or the start of a
+  SECTION) are dispatched one at a time from the top loop, not from
+  `_parse_paragraph_statements`. EXEC SQL/CICS, EVALUATE and CALL leave the
+  period after `END-EXEC` / `END-EVALUATE` / `END-CALL` in the stream (so does
+  a doubled `..`); the top loop now consumes it, where it used to open a
+  paragraph named `.` holding the rest of the code -- mid-AST, so the analyzers
+  lost its PERFORMs/terminators. Pinned by
+  `tests/regression/test_implicit_paragraph_trailing_period.py`.
 - **DECLARATIVES.** `DECLARATIVES.` and `END DECLARATIVES.` are consumed as
   markers (no pseudo-paragraphs), and every section opened in between is flagged:
   section dict key `declarative` -> `CobolSection` metadata `declarative` /
