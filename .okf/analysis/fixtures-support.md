@@ -739,7 +739,10 @@ internal env) rather than approximating:
   `_link_file_records` unions the leaves of every
   `index.records_for_file(f)` (`ProgramLayoutIndex.file_names()`) into one
   alias class: `MOVE 1234 TO B. MOVE 'ABCD' TO A. DISPLAY B.` (B in R2, A in
-  R1, both under `FD F`) leaves B unknown.
+  R1, both under `FD F`) leaves B unknown. `I-O-CONTROL. SAME RECORD AREA
+  FOR f1 f2` (#497) widens the class across FDs to every record of every
+  file in the group (`_files.same_record_area_groups()`); plain `SAME AREA`
+  shares no records and widens nothing.
   `WRITE rec FROM id` is folded as `MOVE id TO rec` before the WRITE is
   observed (a group record is poisoned whole); `REWRITE ... FROM` takes the
   generic poison path, which already covers the record. A field source

@@ -95,6 +95,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ._files import same_record_area_groups
 from ._names import callee_names
 from ._sql_flow import analyze_sql
 from .value_tracker import DynamicCallAnalyzer
@@ -611,6 +612,9 @@ class FieldFlowAnalyzer:
         self._file_records: dict[str, list[str]] = {}
         self._record_file: dict[str, str] = {}
         self._record_keys: dict[str, list[str]] = {}
+        #: File -> the first file of its ``SAME RECORD AREA`` group: the
+        #: records of every file in a group share one area.
+        self._record_area: dict[str, str] = {}
         self._ports: dict[tuple[str, str], Port] = {}
         self._edges: dict[tuple[Any, ...], LineageEdge] = {}
         self._key_uses: list[KeyUse] = []
@@ -1016,6 +1020,9 @@ class FieldFlowAnalyzer:
 
     def _index_files(self, ast: CobolProgram) -> None:
         inner = _contained_node_ids(ast)
+        for group in same_record_area_groups(ast):
+            for member in group:
+                self._record_area[member] = group[0]
         for node in ast.traverse_depth_first():
             if id(node) in inner or not isinstance(node, SelectStatement):
                 continue
@@ -1277,7 +1284,9 @@ class FieldFlowAnalyzer:
 
     def _redefines_edges(self) -> None:
         """Two-way edges between elementary fields that share bytes:
-        ``REDEFINES``, and the 01 records of one FD (one buffer)."""
+        ``REDEFINES``, the 01 records of one FD (one buffer), and the
+        records of every file one ``SAME RECORD AREA`` clause names (one
+        area, across FDs)."""
         buffers: dict[str, list[str]] = {}
         for item in self._items.values():
             if item.parent is None:
@@ -1288,6 +1297,8 @@ class FieldFlowAnalyzer:
                 file_name = self._record_file.get(item.qname) or self._record_file.get(
                     anchor
                 )
+                if file_name:
+                    file_name = self._record_area.get(file_name, file_name)
                 key = f"FD:{file_name}" if file_name else anchor
                 buffers.setdefault(key, []).append(item.qname)
         for roots in buffers.values():

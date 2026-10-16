@@ -45,6 +45,30 @@ _SELECT_CLAUSE_KEYWORDS: frozenset[str] = frozenset(
     }
 )
 
+#: Words that open a header no SELECT entry can contain, so they end an
+#: entry whose period was left off (issue #559).
+_SELECT_ENDING_WORDS: frozenset[str] = frozenset(
+    {"SELECT", "FILE-CONTROL", "I-O-CONTROL"}
+)
+#: ``<word> DIVISION`` headers.
+_DIVISION_WORDS: frozenset[str] = frozenset(
+    {"IDENTIFICATION", "ID", "ENVIRONMENT", "DATA", "PROCEDURE"}
+)
+#: ``<word> SECTION`` headers of the ENVIRONMENT and DATA divisions.
+_SECTION_WORDS: frozenset[str] = frozenset(
+    {
+        "CONFIGURATION",
+        "INPUT-OUTPUT",
+        "FILE",
+        "WORKING-STORAGE",
+        "LOCAL-STORAGE",
+        "LINKAGE",
+        "REPORT",
+        "SCREEN",
+        "COMMUNICATION",
+    }
+)
+
 #: Device words recognized in ASSIGN TO clauses (populates assign_device).
 _ASSIGN_DEVICE_WORDS: frozenset[str] = frozenset(
     {
@@ -166,6 +190,15 @@ class SelectClauseParser:
                 token_stream.consume()
                 continue
 
+            # A header or the next SELECT ends an entry whose period was
+            # left off, as IBM assumes one (issue #559: the clause loop ate
+            # ``DATA DIVISION`` and the whole DATA DIVISION was lost, or ate
+            # the next ``SELECT`` and that file disappeared).
+            header = self._entry_ending_header(token_stream)
+            if header:
+                self._warn_missing_period(token, header, select_data)
+                break
+
             token_value = token.value.upper()
 
             # ASSIGN TO clause
@@ -239,6 +272,46 @@ class SelectClauseParser:
                 token_stream.consume()
 
         return select_data
+
+    @staticmethod
+    def _entry_ending_header(token_stream: ITokenStream) -> str | None:
+        """The header text when the current token opens something no SELECT
+        clause can contain: another ``SELECT``, the ``FILE-CONTROL`` /
+        ``I-O-CONTROL`` paragraph, an ENVIRONMENT DIVISION section header,
+        or any DIVISION header. ``None`` otherwise."""
+        token = token_stream.peek(0)
+        if token is None or not token.value:
+            return None
+        word = str(token.value).strip().upper()
+        if word in _SELECT_ENDING_WORDS:
+            return word
+        # Composite header tokens (``DATA DIVISION`` as one value).
+        if word.endswith((" DIVISION", " SECTION")):
+            if word.split()[0] in _DIVISION_WORDS | _SECTION_WORDS:
+                return word
+            return None
+        following = SelectClauseParser._next_word(token_stream)
+        if following == "DIVISION" and word in _DIVISION_WORDS:
+            return f"{word} DIVISION"
+        if following == "SECTION" and word in _SECTION_WORDS:
+            return f"{word} SECTION"
+        return None
+
+    def _warn_missing_period(
+        self, token: Any, header: str, select_data: dict[str, Any]
+    ) -> None:
+        """Record that a SELECT entry was closed by *header* instead of its
+        terminating period (IBM: "a period was assumed before ...")."""
+        line = getattr(getattr(token, "location", None), "line", None)
+        where = f" at line {line}" if line else ""
+        file_name = select_data.get("file_name", "?")
+        host = getattr(self._parser, "host", None)
+        add_warning = getattr(host, "add_warning", None)
+        if callable(add_warning):
+            add_warning(
+                f"SELECT {file_name} missing its terminating period: a period "
+                f"was assumed before '{header}'{where}"
+            )
 
     def _warn_dropped_select_token(
         self, token: Any, select_data: dict[str, Any]
