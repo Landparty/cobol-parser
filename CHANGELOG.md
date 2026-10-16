@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **COMP-1 / COMP-2 are no longer modelled as unsigned 9-digit integers**
+  (#551). A float item has no PICTURE, and its declared or solved values went
+  through the PICTURE-shaped numeric path: `gen-data` wrote `VALUE -2.5E-02`
+  as 0 and `VALUE -1.5` as 2, and `gen-fixtures` reported `IF F < -100` or
+  `IF F > 0.25 AND F < 0.75` unsatisfiable (ELSE rows 0 / 499999999). VALUE
+  clauses and solver witnesses are now rendered through the field's own
+  binary32 / binary64 storage, the solver gives a float a signed +/-1E15
+  domain on a 4-decimal grid, and the `all` mode's boundary-values family
+  uses the same bounds.
 * **`I-O-CONTROL. SAME RECORD AREA FOR f1 f2` now aliases the files'
   records in constant folding and lineage** (#497). The clause was kept as
   text only, so `gen-fixtures` asserted a `field_equals` value an `f2` field

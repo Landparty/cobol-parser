@@ -614,7 +614,9 @@ conjuncts must hold simultaneously) and lands in `coverage.missed` with
   -> `"35"`.
 * **boundary values** — two combined scenarios (`"minimum"`/`"maximum"`),
   every numeric field any constraint touches pinned to its picture's true
-  extreme (`-ceiling` for a signed field, `0` otherwise, vs. `ceiling`).
+  extreme (`-ceiling` for a signed field, `0` otherwise, vs. `ceiling`). A
+  COMP-1/COMP-2 field has no picture: its extremes are the solver's float
+  bound, `-/+domains.FLOAT_LIMIT` (#551).
   Pinned via an `eq` constraint, not `ge`/`le`: `domains.solve()`'s witness
   is always the interval's (grid) *midpoint*, so a `ge("0")` constraint alone
   produces a mid-range witness, not `0`.
