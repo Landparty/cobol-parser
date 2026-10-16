@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`gen-data`, `decode` and `compare` expand `COPY` in the record layout**
+  (#592). A copybook nesting another (`COPY INNER.` inside the 01), or a
+  program whose FD record is `COPY CUSTREC.`, lost the nested member's fields
+  without a word: the record came out too short, so `decode` framed every
+  record wrongly and `gen-data` fell back to another record. All three now
+  take `--copybook-path` (and `project.copybook_path` from `cobol.yml`), and
+  `parse_copybook_records`, `CopybookDataGenerator.generate_from_*` and
+  `RecordDecoder.from_copybook_*` take `copybook_paths`. A COPY that is still
+  not expanded is printed as a `warning:` on stderr and carried in the
+  dataset's / decode's `caveats`.
 * **MCP server: a `cobol.yml` can no longer widen the path guard** (#544).
   The workspace read `cobol.yml` from the root *or any parent directory* and
   added its `copybook_path` entries to the guard verbatim, so a checkout

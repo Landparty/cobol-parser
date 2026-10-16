@@ -11,6 +11,8 @@ from ...models.data_items import CobolDataItem
 from ...models.program import CobolProgram
 from ...parser import parse_cobol
 from ...plugins.core import ErrorRecoveryMode
+from ...preprocess import PreprocessingError
+from ...preprocess.copybook_expander import parse_cobol_with_expansion
 from .dataset import GeneratedDataset
 from .encoding import record_length
 from .errors import CopybookLayoutError
@@ -107,6 +109,8 @@ def parse_copybook_records(
     source: str,
     *,
     filename: str = "<copybook>",
+    copybook_paths: list[str] | None = None,
+    warnings: list[str] | None = None,
 ) -> list[CobolDataItem]:
     """Parse *source* and return its record roots (the level-01/77 items).
 
@@ -115,18 +119,48 @@ def parse_copybook_records(
     ``COLLECT_ALL`` recovery so an unrelated defect elsewhere in a program
     still yields the data items that did parse.
 
+    With ``copybook_paths``, every ``COPY`` -- one nested in the copybook,
+    or one under a whole program's FD -- is expanded from those directories
+    first, the way ``parse`` and ``gen-fixtures`` do.  A ``COPY`` that is not
+    expanded (no paths given, or its member not found in them) leaves a hole
+    in the record: its fields are missing and the record is too short.  Each
+    such ``COPY`` appends one sentence saying so to *warnings*, so a caller
+    can report the short layout rather than silently generate or decode
+    through it.
+
     Raises:
-        CopybookLayoutError: if the source yields no usable record layout.
+        CopybookLayoutError: if the source yields no usable record layout,
+            or copybook expansion fails outright (a circular ``COPY``).
     """
     if not source.strip():
         raise CopybookLayoutError(f"{filename}: copybook is empty")
 
     text = source if _looks_like_program(source) else _wrap_fragment(source)
-    result = parse_cobol(
-        text,
-        filename=filename,
-        error_recovery=ErrorRecoveryMode.COLLECT_ALL,
-    )
+    if copybook_paths:
+        try:
+            result = parse_cobol_with_expansion(
+                text,
+                filename=filename,
+                copybook_paths=list(copybook_paths),
+                # A missing member is reported below like an unexpanded one,
+                # not raised: the rest of the layout is still worth having.
+                skip_missing_copybooks=True,
+                error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+            )
+        except PreprocessingError as exc:
+            raise CopybookLayoutError(
+                f"{filename}: could not expand copybooks ({exc})"
+            ) from exc
+    else:
+        result = parse_cobol(
+            text,
+            filename=filename,
+            error_recovery=ErrorRecoveryMode.COLLECT_ALL,
+        )
+    if warnings is not None:
+        for warning in result.warnings:
+            if _is_unexpanded_copy(warning) and warning not in warnings:
+                warnings.append(warning)
     ast = result.ast
     if ast is None:
         detail = result.errors[0] if result.errors else "no AST produced"
@@ -148,6 +182,16 @@ def parse_copybook_records(
     raise CopybookLayoutError(
         f"{filename}: no level-01 record layout found in copybook"
     )
+
+
+def _is_unexpanded_copy(warning: str) -> bool:
+    """True for the parser's "COPY X was not expanded" warning.
+
+    The parser blanks a ``COPY`` it was not given the text of and says so in
+    exactly this form (see ``strip_unexpanded_copy_statements``); every other
+    parse warning on a copybook fragment is noise to a record-layout caller.
+    """
+    return warning.startswith("COPY ") and " was not expanded" in warning
 
 
 def _all_data_items(ast: CobolProgram) -> list[CobolDataItem]:
@@ -268,11 +312,14 @@ class CopybookDataGenerator:
         path: str | os.PathLike[str],
         *,
         record: str | None = None,
+        copybook_paths: list[str] | None = None,
     ) -> GeneratedDataset:
         """Read a copybook from *path* and generate a dataset from it."""
         with open(path, encoding="utf-8") as handle:
             source = handle.read()
-        return self.generate_from_source(source, filename=str(path), record=record)
+        return self.generate_from_source(
+            source, filename=str(path), record=record, copybook_paths=copybook_paths
+        )
 
     def generate_from_source(
         self,
@@ -280,6 +327,7 @@ class CopybookDataGenerator:
         *,
         filename: str = "<copybook>",
         record: str | None = None,
+        copybook_paths: list[str] | None = None,
     ) -> GeneratedDataset:
         """Parse *source* and generate a dataset from one of its records.
 
@@ -287,15 +335,22 @@ class CopybookDataGenerator:
             source: Copybook text, or a full COBOL program.
             filename: Name used in error messages.
             record: Which level-01 record to use.  Defaults to the first.
+            copybook_paths: Directories to expand ``COPY`` statements from
+                (see :func:`parse_copybook_records`).  A ``COPY`` left
+                unexpanded is named in the dataset's ``caveats``.
 
         Raises:
             CopybookLayoutError: if the copybook has no usable layout, or the
                 requested *record* is not present.
         """
-        records = parse_copybook_records(source, filename=filename)
+        warnings: list[str] = []
+        records = parse_copybook_records(
+            source, filename=filename, copybook_paths=copybook_paths, warnings=warnings
+        )
         chosen = self._select_record(records, record, filename)
         dataset = self.generate_from_record(chosen)
         dataset.lrecl = fd_record_length(records, chosen, self.options)
+        dataset.caveats[:0] = warnings
         return dataset
 
     def generate_from_record(self, record: CobolDataItem) -> GeneratedDataset:
