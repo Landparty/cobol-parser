@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`xref` declares level-88s under a FILLER and level-66 `RENAMES` items**
+  (#485). The `05 FILLER PIC X VALUE 'N'. 88 SW-ON VALUE 'Y'.` switch was
+  dropped together with its FILLER, and `RENAMES` items were never declared,
+  so both were listed in `undefined`, MCP `explain_symbol` answered
+  `declared: false` (or `found: false` for an unreferenced one), and
+  `lineage` caveated them as "not declared ... not traced". They are now
+  declared as condition-names / level-66 data items at their own lines.
+
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never
   scanned, so the target read as unreachable (and recursion-check / the

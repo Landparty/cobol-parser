@@ -37,7 +37,7 @@ from typing import Any
 from ..dialects.ibm_enterprise import IBMEnterpriseCobol
 from ..lexer import CobolLexer
 from ..models.ast_base import ASTNode, SourceLocation
-from ..models.data_items import ConditionNameItem
+from ..models.data_items import CobolDataItem, ConditionNameItem, RenamesItem
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram, CobolSection
 from ..models.statements.arithmetic import (
     ArithmeticStatement,
@@ -85,6 +85,7 @@ from ..models.statements.misc import (
 )
 from ._names import QUALIFIER_SEPARATOR
 from .unused_variables import (
+    _DATA_SECTION_NAMES,
     _DICT_LIST_EXTRAS,
     _STR_ATTR_EXTRAS,
     _STR_LIST_EXTRAS,
@@ -471,8 +472,10 @@ class XrefAnalyzer:
     - ``data-item`` -- every non-FILLER item of the FILE, WORKING-STORAGE,
       LOCAL-STORAGE and LINKAGE sections (the same set
       ``collect_declared_items`` feeds ``UnusedVariableAnalyzer``), with its
-      level number and owning section.
-    - ``condition-name`` -- every level-88 item, carrying its parent's section.
+      level number and owning section; plus every level-66 ``RENAMES`` item
+      (level 66).
+    - ``condition-name`` -- every level-88 item, carrying its parent's section
+      -- including the level-88s under a FILLER (issue #485).
     - ``file`` -- every file named by a ``SELECT`` or by an ``FD``/``SD``.
     - ``paragraph`` / ``section`` -- every PROCEDURE DIVISION procedure.
 
@@ -501,7 +504,8 @@ class XrefAnalyzer:
       undeclared symbol.
     - The declared-symbol set is the one ``collect_declared_items`` defines
       (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE), plus files,
-      procedures, level-88 condition names and ``INDEXED BY`` index names.
+      procedures, level-88 condition names (FILLER parents included),
+      level-66 ``RENAMES`` items and ``INDEXED BY`` index names.
       SCREEN / COMMUNICATION / REPORT SECTION items and special registers are
       outside it, so a reference to one reads as undefined -- reported, with
       a caveat saying so, rather than silently swallowed.
@@ -705,51 +709,96 @@ class XrefAnalyzer:
         return self._data
 
     def _collect_data_definitions(self, ast: CobolProgram) -> None:
-        """Every DATA DIVISION item and level-88 condition name."""
-        for item in collect_declared_items(ast):
-            section = UnusedVariableAnalyzer._section_of(item)
-            self._define(
-                item.name,
-                KIND_DATA_ITEM,
-                item.location,
-                level=item.level,
-                section=section,
-                item=item,
-            )
-            for child in item.children:
-                if isinstance(child, ConditionNameItem):
+        """Every DATA DIVISION item, level-88 condition name and level-66
+        RENAMES item, in source order (the first declaration of a name wins).
+
+        The data items are exactly ``collect_declared_items``'. Two kinds of
+        name sit beside, rather than among, those items (issue #485):
+
+        - A FILLER is never a name, but the level-88s under it are: the
+          ``05 FILLER PIC X VALUE 'N'. 88 SW-ON VALUE 'Y'.`` switch is a
+          common batch idiom, and dropping the FILLER together with its
+          children listed every such switch in ``undefined``.
+        - A level-66 ``RENAMES`` item is a section child of its own
+          (``RenamesItem``, not a ``CobolDataItem``), so the data-item walk
+          never sees it.
+        """
+        declared = {id(item) for item in collect_declared_items(ast)}
+        data_div = ast.data_division
+        if data_div is None:
+            return
+        for data_section in data_div.sections:
+            if not isinstance(data_section, CobolSection):
+                continue
+            section = data_section.section_name or "UNKNOWN"
+            if section.upper() not in _DATA_SECTION_NAMES:
+                continue
+            for top_item in data_section.data_items:
+                for item in [top_item, *top_item.get_all_children()]:
+                    if id(item) in declared:
+                        self._define(
+                            item.name,
+                            KIND_DATA_ITEM,
+                            item.location,
+                            level=item.level,
+                            section=section,
+                            item=item,
+                        )
+                    elif not item.is_filler:
+                        continue
+                    self._define_condition_names(item, section)
+                    # `OCCURS ... INDEXED BY ix` declares `ix` as a name in
+                    # its own right -- it is not a data item of its own (no
+                    # level number, no PICTURE), but SET/SEARCH/subscript
+                    # references to it are real references a
+                    # cross-reference listing must resolve.
+                    self._define_index_names(item, section)
+            for child in data_section.children:
+                if isinstance(child, RenamesItem) and child.name:
                     self._define(
                         child.name,
-                        KIND_CONDITION_NAME,
+                        KIND_DATA_ITEM,
                         child.location,
-                        level=88,
+                        level=66,
                         section=section,
                         item=child,
                     )
-            # `OCCURS ... INDEXED BY ix` declares `ix` as a name in its own
-            # right -- it is not a data item of its own (no level number, no
-            # PICTURE), but SET/SEARCH/subscript references to it are real
-            # references a cross-reference listing must resolve.
-            occurs = item.occurs_clause
-            if occurs is None:
-                continue
-            # ``indexed_by`` is the first of ``index_names`` (kept for
-            # backward compatibility), not another index: declaring it again
-            # listed every INDEXED BY name in ``duplicate_declarations``.
-            index_names = list(occurs.index_names)
-            if occurs.indexed_by and occurs.indexed_by.upper() not in {
-                name.upper() for name in index_names
-            }:
-                index_names.append(occurs.indexed_by)
-            for index_name in index_names:
-                if index_name:
-                    self._define(
-                        index_name,
-                        KIND_DATA_ITEM,
-                        item.location,
-                        level=None,
-                        section=section,
-                    )
+
+    def _define_condition_names(self, item: CobolDataItem, section: str) -> None:
+        """The level-88 condition names written directly under *item*."""
+        for child in item.children:
+            if isinstance(child, ConditionNameItem):
+                self._define(
+                    child.name,
+                    KIND_CONDITION_NAME,
+                    child.location,
+                    level=88,
+                    section=section,
+                    item=child,
+                )
+
+    def _define_index_names(self, item: CobolDataItem, section: str) -> None:
+        """The ``INDEXED BY`` names of *item*'s OCCURS clause."""
+        occurs = item.occurs_clause
+        if occurs is None:
+            return
+        # ``indexed_by`` is the first of ``index_names`` (kept for
+        # backward compatibility), not another index: declaring it again
+        # listed every INDEXED BY name in ``duplicate_declarations``.
+        index_names = list(occurs.index_names)
+        if occurs.indexed_by and occurs.indexed_by.upper() not in {
+            name.upper() for name in index_names
+        }:
+            index_names.append(occurs.indexed_by)
+        for index_name in index_names:
+            if index_name:
+                self._define(
+                    index_name,
+                    KIND_DATA_ITEM,
+                    item.location,
+                    level=None,
+                    section=section,
+                )
 
     def _collect_file_definitions(self, ast: CobolProgram) -> None:
         """Every file named by a SELECT (ENVIRONMENT) or an FD/SD record.

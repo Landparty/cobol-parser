@@ -541,3 +541,28 @@ class TestDynamicCallFigurativeCandidates:
         assert callee_names([" ", "\x00", "\xff", "0", "'suba'", "SUBA", "''"]) == [
             "SUBA"
         ]
+
+
+def test_condition_names_under_a_filler_and_renames_are_not_undeclared() -> None:
+    # Issue #485: xref used to drop the level-88s under a FILLER and every
+    # level-66 RENAMES item, and lineage reported them as undeclared.
+    source = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. F88.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-SW.
+           05  FILLER   PIC X VALUE 'N'.
+               88  SW-ON  VALUE 'Y'.
+       01  WS-REC.
+           05  R-A PIC X(3).
+           05  R-B PIC 9(2).
+       66  R-AB RENAMES R-A THRU R-B.
+       PROCEDURE DIVISION.
+           SET SW-ON TO TRUE
+           IF SW-ON DISPLAY R-AB END-IF
+           GOBACK.
+"""
+    result = parse_cobol(source)
+    assert result.ast is not None
+    report = FieldFlowAnalyzer().analyze(result.ast)
+    assert not any("not declared in this program" in c for c in report.caveats)

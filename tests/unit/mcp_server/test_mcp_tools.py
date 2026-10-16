@@ -784,3 +784,45 @@ class TestRecordLayout:
         assert result["truncated"] == [
             {"field": "records[0].fields", "shown": 2, "total": record["field_count"]}
         ]
+
+
+class TestExplainSymbolFillerAndRenames:
+    """Issue #485: a level-88 under a FILLER and a level-66 RENAMES item."""
+
+    SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. F88.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-SW.
+           05  FILLER   PIC X VALUE 'N'.
+               88  SW-ON  VALUE 'Y'.
+               88  SW-OFF VALUE 'N'.
+       01  WS-REC.
+           05  R-A PIC X(3).
+           05  R-B PIC 9(2).
+       66  R-AB RENAMES R-A THRU R-B.
+       PROCEDURE DIVISION.
+           SET SW-ON TO TRUE
+           IF SW-ON DISPLAY R-AB END-IF
+           GOBACK.
+"""
+
+    def test_unreferenced_condition_name_under_filler_is_found(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "F88.cbl").write_text(self.SOURCE)
+        answer = tools_for(tmp_path).explain_symbol("F88.cbl", "SW-OFF")["answer"]
+        assert answer["found"] is True
+        symbol = answer["symbols"][0]
+        assert symbol["kind"] == "condition-name"
+        assert symbol["declared"] is True
+        assert symbol["declared_at"]["line"] == 8
+
+    def test_renames_item_is_declared(self, tmp_path: Path) -> None:
+        (tmp_path / "F88.cbl").write_text(self.SOURCE)
+        answer = tools_for(tmp_path).explain_symbol("F88.cbl", "R-AB")["answer"]
+        symbol = answer["symbols"][0]
+        assert symbol["declared"] is True
+        assert symbol["level"] == 66
+        assert symbol["declared_at"]["line"] == 12

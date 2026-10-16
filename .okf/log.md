@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-10-16T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,12 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-10-16 -- xref declares FILLER level-88s and level-66 RENAMES (#485)
+
+[analysis/data-use.md](analysis/data-use.md): `XrefAnalyzer` now declares
+the level-88s under a FILLER and every level-66 `RENAMES` item, so they no
+longer read as undefined in `xref`, `explain_symbol` and `lineage`.
 
 ## 2026-10-15 -- MCP server, Phase 3 review fixes
 

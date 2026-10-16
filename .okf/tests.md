@@ -3,7 +3,7 @@ type: Reference
 title: Tests
 description: Test suite layout (tests/ directories, corpora, conftest fixtures), pytest markers and their per-directory enforcement, the 90% coverage floor and why it is measured on pure Python, the CI jobs in .github/workflows/ci.yml (currently disabled), and the conventions a new test must follow.
 tags: [tests, pytest, coverage, fixtures, markers]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-10-16T00:00:00Z
 ---
 
 # Tests
@@ -307,7 +307,7 @@ regression files are named for their issue (`test_issue_NNN_*.py`) or audit
 | Parser statements | `regression/test_swallow_sweep.py`, `test_keyword_line_breaks.py` (#385), `test_condition_expression_separators.py` (#386), `test_optional_keyword_forms.py` / `_402.py`, `test_evaluate_*` (stacked / figurative / word-operator WHEN), `test_arithmetic_qualifier_chain.py`, `test_move_qualifier_chain.py`, `test_tier8_arithmetic_scope_terminator.py`, `test_special_register_paragraph_boundary.py`, `test_go_depending_without_on.py`, `test_issue_258_same_named_items.py`; `unit/test_perform_until_newline.py`, `test_call_using_mode_without_by.py`, `test_compute_bare_size_error.py`, `test_report_section.py`, `test_xml_json_structured_clauses.py`, `test_extended_verb_parsers.py` |
 | EXEC SQL | `unit/test_exec_sql_fetch_orientation.py`, `_host_variable_lists.py`, `_literals_comments.py`, `_merge_cte.py`, `_qualified_tables.py` |
 | Dead code / program flow | `unit/analysis/test_dead_code.py` (`TestTransitiveDeadCode`, `TestSectionExitGoTo`, `TestFallThroughReferences`), `test_program_flow.py`, `test_exit_section_and_alterable_goto.py`, `test_cics_terminators.py`, `test_sql_whenever_references.py` |
-| Other analyzers | `unit/analysis/test_unused_variables.py`, `test_io_sequence*.py`, `test_move_type_checker.py`, `test_xref.py`, `test_business_rules.py`, `test_redundancy.py`, `test_technical_debt.py`, `test_codebase.py`, `test_ast_diff.py`, `test_sql_cics_lint.py`, `test_ims_ssa_segment_resolution.py`, `test_linkage_checker.py`, `test_lint.py`; `unit/test_ims_segment_analyzer.py` |
+| Other analyzers | `unit/analysis/test_unused_variables.py`, `test_io_sequence*.py`, `test_move_type_checker.py`, `test_xref.py` (incl. level-88s under a FILLER and level-66 RENAMES, #485, also pinned in `test_field_lineage.py` and the MCP `explain_symbol` tests), `test_business_rules.py`, `test_redundancy.py`, `test_technical_debt.py`, `test_codebase.py`, `test_ast_diff.py`, `test_sql_cics_lint.py`, `test_ims_ssa_segment_resolution.py`, `test_linkage_checker.py`, `test_lint.py`; `unit/test_ims_segment_analyzer.py` |
 | Field lineage | `unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`, `test_lineage_jcl.py`, `test_sql_flow.py`; `unit/cli/test_lineage_cli.py`; samples in `tests/samples/lineage/` |
 | Record data | `unit/generators/data/test_encoding.py` (`TestHexLiteralBytes`, `TestFiller`, `TestDbcsCaveat`), `test_editing.py`, `test_variable_length.py`, `test_layout_offsets.py`, `test_compare.py`, `test_views.py`, `test_decoding.py`; `regression/test_fd_lrecl_framing_issue_362.py` |
 | CLI | `unit/cli/test_output_identification.py`, `test_source_format_flag.py`, `test_profile_output_flags.py`, `test_analyzer_cli_gaps.py`, `test_new_subcommands.py`, `test_lint_subcommand.py`, `test_expand_source_map_cli.py`, `test_gen_data_cli.py`, `test_compare_cli.py`, `test_jcl_cli.py`, `test_project_config_cli.py`; `unit/test_config_yaml.py`, `test_project_config.py` |
