@@ -97,7 +97,7 @@ tests/
   contracts/                   # 21 files: API contract tests (`contract` marker)
     test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version, generator signatures, to_dict() key sets, reproducibility, scenario-mode contract (see docs/fixture-bundle-schema.md)
     io_statements/             # 1 file (`io` too)
-  regression/                  # 132 files: pinned bug fixes, typically named for the issue/finding, e.g.
+  regression/                  # 133 files: pinned bug fixes, typically named for the issue/finding, e.g.
                                #   test_swallow_sweep.py: one period-less snippet per registered statement
                                #     parser x a DISPLAY 'MARKER'. sentinel; fails if a new parser is
                                #     registered without a fixture (see parser.md)
@@ -308,7 +308,7 @@ regression files are named for their issue (`test_issue_NNN_*.py`) or audit
 | EXEC SQL | `unit/test_exec_sql_fetch_orientation.py`, `_host_variable_lists.py`, `_literals_comments.py`, `_merge_cte.py`, `_qualified_tables.py` |
 | Dead code / program flow | `unit/analysis/test_dead_code.py` (`TestTransitiveDeadCode`, `TestSectionExitGoTo`, `TestFallThroughReferences`), `test_program_flow.py`, `test_exit_section_and_alterable_goto.py`, `test_cics_terminators.py`, `test_sql_whenever_references.py` |
 | Other analyzers | `unit/analysis/test_unused_variables.py`, `test_io_sequence*.py`, `test_move_type_checker.py`, `test_xref.py`, `test_business_rules.py`, `test_redundancy.py`, `test_technical_debt.py`, `test_codebase.py`, `test_ast_diff.py`, `test_sql_cics_lint.py`, `test_ims_ssa_segment_resolution.py`, `test_linkage_checker.py`, `test_lint.py`; `unit/test_ims_segment_analyzer.py` |
-| Field lineage | `unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`, `test_lineage_jcl.py`, `test_sql_flow.py`; `unit/cli/test_lineage_cli.py`; samples in `tests/samples/lineage/` |
+| Field lineage | `unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`, `test_lineage_jcl.py`, `test_sql_flow.py`; `unit/cli/test_lineage_cli.py`; `regression/test_same_record_area_issue_497.py` (SAME RECORD AREA aliasing, lineage + constant folding); samples in `tests/samples/lineage/` |
 | Record data | `unit/generators/data/test_encoding.py` (`TestHexLiteralBytes`, `TestFiller`, `TestDbcsCaveat`), `test_editing.py`, `test_variable_length.py`, `test_layout_offsets.py`, `test_compare.py`, `test_views.py`, `test_decoding.py`; `regression/test_fd_lrecl_framing_issue_362.py` |
 | CLI | `unit/cli/test_output_identification.py`, `test_source_format_flag.py`, `test_profile_output_flags.py`, `test_analyzer_cli_gaps.py`, `test_new_subcommands.py`, `test_lint_subcommand.py`, `test_expand_source_map_cli.py`, `test_gen_data_cli.py`, `test_compare_cli.py`, `test_jcl_cli.py`, `test_project_config_cli.py`; `unit/test_config_yaml.py`, `test_project_config.py` |
 | Program units / models | `regression/test_nested_program_units.py`, `unit/test_models.py` (`from_json` lossy warning, `TestNodeEquality`) |

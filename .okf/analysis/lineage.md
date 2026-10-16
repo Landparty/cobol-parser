@@ -53,7 +53,8 @@ Edge kinds: `move` (group MOVE is a byte overlay; CORRESPONDING pairs by
 name; literal reference modification narrows the range), `arith`,
 `string`, `init`, `set`, `aggregate` / `sql-expr` (SQL `SUM(...)` /
 expressions), `read`, `write`, `redefines` (two-way, including several 01
-records under one FD), `occurrence` (two-way, inexact: a literal-subscript
+records under one FD, and the records of every file one `I-O-CONTROL. SAME
+RECORD AREA` clause names, #497 -- one buffer across FDs), `occurrence` (two-way, inexact: a literal-subscript
 occurrence node and its table field), `call`, `linkage`, `sql`, `accept`,
 `display`, `xml`. `LINEAGE_VERSION` is `"2"` (occurrence nodes,
 `#RETURNING` linkage ports, `#n` item keys). `VALUE_CHANGING_KINDS` (`arith`, `string`, `aggregate`, `sql-expr`)

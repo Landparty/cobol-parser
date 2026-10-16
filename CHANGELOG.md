@@ -160,6 +160,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`I-O-CONTROL. SAME RECORD AREA FOR f1 f2` now aliases the files'
+  records in constant folding and lineage** (#497). The clause was kept as
+  text only, so `gen-fixtures` asserted a `field_equals` value an `f2` field
+  never held after a MOVE to an `f1` field, and `lineage` / `field-impact`
+  lost the `READ f1` / `WRITE f2-rec` copy idiom's input-to-output flow. Each
+  `SAME` entry of the INPUT-OUTPUT section's `io_control` metadata now also
+  carries `area` (`RECORD` / `SORT` / `SORT-MERGE`, `""` for plain `SAME
+  AREA`) and `files`; the records of every file in one `SAME RECORD AREA`
+  group form one alias class / one buffer, as the records under one FD
+  already did. Plain `SAME AREA` aliases nothing.
+
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never
   scanned, so the target read as unreachable (and recursion-check / the
