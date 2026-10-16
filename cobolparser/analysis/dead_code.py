@@ -69,6 +69,15 @@ class DeadCodeReport:
     dead_items: list[DeadCodeItem] = field(default_factory=list)
     total_procedures: int = 0
     referenced_procedures: int = 0
+    #: ``(from, to)`` procedure keys of every fall-through this analysis
+    #: found can actually happen: control runs off the end of *from*, once
+    #: it is reached, into *to* (the next procedure in source order, or the
+    #: one after *from*'s section on an ``EXIT SECTION``). The runtime
+    #: counterpart of ``ProgramFlowAnalyzer``'s ``FALL_THROUGH`` edges, which
+    #: are drawn out of every non-terminating procedure -- including one
+    #: only ever PERFORMed, whose end returns to the performer instead
+    #: (issue #486). Not part of ``to_dict()``.
+    fall_through_edges: set[tuple[str, str]] = field(default_factory=set)
 
     @property
     def dead_count(self) -> int:
@@ -199,6 +208,9 @@ class DeadCodeAnalyzer:
         # landing point runs on to the next member: ``GO TO P1-EXIT`` inside
         # ``PERFORM P0 THRU P2-EXIT`` lands in P1-EXIT and falls into P2.
         self._jump_targets: set[str] = set()
+        # ``DeadCodeReport.fall_through_edges``: each (from, to) pair a
+        # fall-through, section walk or THRU range walk below ran on along.
+        self._fall_through_edges: set[tuple[str, str]] = set()
         # Sections declared between DECLARATIVES. and END DECLARATIVES.
         # (and their paragraphs): USE procedures the runtime invokes, so
         # they are live without any PERFORM naming them, and they are never
@@ -232,6 +244,7 @@ class DeadCodeAnalyzer:
         self._paragraph_nodes = {}
         self._terminates_cache = {}
         self._fallthrough_sources = set()
+        self._fall_through_edges = set()
         self._thru_ranges = []
         self._jump_targets = set()
         self._declarative_procs = set()
@@ -295,6 +308,7 @@ class DeadCodeAnalyzer:
         report.referenced_procedures = len(
             self._referenced_names & set(self._procedure_names.keys())
         )
+        report.fall_through_edges = set(self._fall_through_edges)
 
         for key in self._ordered_procedures:
             if key not in self._referenced_names:
@@ -491,11 +505,15 @@ class DeadCodeAnalyzer:
             if sec_name in self._referenced_names:
                 # The section's own leading sentences run first.
                 live = not self._terminates(sec_name)
+                previous = sec_name
                 for pname in para_names:
+                    if live:
+                        self._fall_through_edges.add((previous, pname))
                     reached = live or pname in self._fallthrough_sources
                     if reached:
                         self._referenced_names.add(pname)
                     live = reached and not self._terminates(pname)
+                    previous = pname
 
     def _propagate_section_upward(self) -> None:
         """A referenced paragraph keeps its parent section(s) referenced.
@@ -734,6 +752,7 @@ class DeadCodeAnalyzer:
             if current in self._fallthrough_sources and not self._terminates(current):
                 self._add_ref(next_proc)
                 self._fallthrough_sources.add(next_proc)
+                self._fall_through_edges.add((current, next_proc))
             elif current in self._fallthrough_sources:
                 self._collect_exit_section_ref(current)
 
@@ -767,6 +786,7 @@ class DeadCodeAnalyzer:
             successor = self._ordered_procedures[pos + 1]
             self._add_ref(successor)
             self._fallthrough_sources.add(successor)
+            self._fall_through_edges.add((name, successor))
 
     def _terminates(self, name: str) -> bool:
         """Check whether procedure *name* unconditionally transfers control
@@ -978,7 +998,11 @@ class DeadCodeAnalyzer:
                 continue
             live = True
             section_exited = False
+            previous: str | None = None
             for name in self._ordered_procedures[start_index : end_index + 1]:
+                if live and previous is not None:
+                    self._fall_through_edges.add((previous, name))
+                previous = name
                 resumes = section_exited and name in self._section_paragraphs
                 if resumes:
                     section_exited = False

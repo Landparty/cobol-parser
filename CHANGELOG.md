@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **MCP `callers_of` / `program_brief` no longer call a dead paragraph
+  reachable** (#486). Both took reachability from the flow graph, whose
+  `FALL_THROUGH` edge out of a paragraph only ever PERFORMed (or out of a
+  `PERFORM ... THRU` range end) made the paragraph after it look live,
+  contradicting the brief's own dead-code lint finding. Reachability and
+  `unreachable_procedures` now come from `DeadCodeAnalyzer`, and a
+  fall-through it found cannot happen is no longer listed as a caller
+  (`DeadCodeReport.fall_through_edges`). The CFG itself is unchanged.
 * **`gen-data`, `decode` and `compare` expand `COPY` in the record layout**
   (#592). A copybook nesting another (`COPY INNER.` inside the 01), or a
   program whose FD record is `COPY CUSTREC.`, lost the nested member's fields

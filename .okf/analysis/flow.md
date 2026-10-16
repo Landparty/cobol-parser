@@ -3,7 +3,7 @@ type: Module
 title: Control Flow and Code Quality Analyzers
 description: ProgramFlowAnalyzer (the program_flow/ package CFG), DeadCodeAnalyzer, RecursionRiskAnalyzer, ComplexityAnalyzer, RedundancyAnalyzer (clones, paragraph fingerprints) and TechnicalDebtAnalyzer, plus the shared procedure-name index (_procedures.py), CICS terminators (_cics.py) and SQL WHENEVER handlers (_sql_whenever.py).
 tags: [analysis, program-flow, dead-code, recursion-risk, complexity, redundancy, technical-debt, cfg]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-10-16T00:00:00Z
 ---
 
 # Control Flow and Code Quality Analyzers
@@ -163,7 +163,17 @@ that loop HIGH). Pinned in `tests/unit/analysis/test_cics_terminators.py`.
 report: DeadCodeReport = DeadCodeAnalyzer().analyze(ast)
 # report.dead_items: list[DeadCodeItem]   (name/procedure_type/location/qualified_name)
 # report.total_procedures / .referenced_procedures
+# report.fall_through_edges: set[(from, to)]  -- not in to_dict()
 ```
+
+`fall_through_edges` holds the procedure-key pairs along which control can
+actually run off one procedure into the next: recorded where the analysis
+credits a fall-through (`_collect_fallthrough_refs`,
+`_collect_exit_section_ref`, the in-section walk of
+`_propagate_section_downward`, the in-range walk of `_mark_thru_ranges`).
+The MCP `callers_of` keeps a flow-graph `FALL_THROUGH` caller only when its
+pair is here (or its source is the flow graph's first entry point, e.g. the
+`PROCEDURE DIVISION` leading-sentences node), issue #486.
 
 **What "dead" means: unreachable from a root.** `analyze()` runs a
 worklist from the roots -- the entry procedure (the first non-declarative
@@ -274,7 +284,9 @@ adjacent non-terminating procedures, PERFORM targets included, so
 `flow_report.unreachable_nodes` under-reports the same way. Changing that is a
 CFG-shape question with a much wider blast radius (flowcharts,
 `ScenarioPlanner` arm reachability, `TechnicalDebtAnalyzer`'s
-unreachable-node smell), so the two modules are allowed to disagree.
+unreachable-node smell), so the two modules are allowed to disagree. A
+consumer answering "can this paragraph run?" must ask `DeadCodeAnalyzer`:
+the MCP tools do (`_reachability()` in `mcp/tools.py`, issue #486).
 
 ## ProgramFlowAnalyzer
 

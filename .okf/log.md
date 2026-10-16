@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-16 -- MCP reachability from dead-code (#486)
+
+[mcp.md](mcp.md), [analysis/flow.md](analysis/flow.md): `callers_of`'s
+`reachable` and `program_brief`'s `unreachable_procedures` come from
+`DeadCodeAnalyzer`; new `DeadCodeReport.fall_through_edges` filters the
+flow graph's phantom `FALL_THROUGH` callers.
 ## 2026-10-16 -- xref declares FILLER level-88s and level-66 RENAMES (#485)
 
 [analysis/data-use.md](analysis/data-use.md): `XrefAnalyzer` now declares
