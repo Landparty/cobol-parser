@@ -5,13 +5,14 @@ Three jobs, each the reason a tool can stay a thin question over an analyzer:
 * **The guard.** Every path a client names is resolved (symlinks included)
   and refused unless it lies under the workspace root or one of the
   ``cobol.yml`` copybook directories. A model passing ``../../etc/passwd``
-  gets an error, not a file. A file in the analysed tree must not be able
-  to move that boundary, so a copybook directory a ``cobol.yml`` *inside the
-  root* names is used only when it lies under the root or under a directory
-  the operator allowed (``--allow DIR``); any other is dropped -- neither
-  searched nor readable -- and named (:attr:`Workspace.refused_copybook_dirs`).
-  A config the operator chose (built in code, or ``--config FILE`` naming a
-  file outside the root) is trusted as written.
+  gets an error, not a file. Since ``cobol.yml`` may come from the analysed
+  tree itself, a copybook directory outside the root opens only copybook
+  members (:data:`COPYBOOK_MEMBER_SUFFIXES`, no dot-named file or
+  subdirectory), and a directory that could only be a trick -- ``/``, the
+  home directory, an ancestor of either or of the root, a hidden directory,
+  a system directory (:data:`REFUSED_SYSTEM_DIRS`) -- is refused outright:
+  neither searched nor readable, and named
+  (:attr:`Workspace.refused_copybook_dirs`).
 * **The config.** ``cobol.yml`` (or ``cobol.yaml``) is read from the root
   itself -- never from a directory above it, as the CLI's walk-up would --
   so copybook paths, source format and ``>>DEFINE`` symbols are the ones
@@ -38,7 +39,7 @@ import os
 import sys
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,7 @@ from ..config.project import (
     load_project_config,
 )
 from ..models.program import CobolProgram
+from ..preprocess.models import CopybookSearchPath
 from .envelope import Caveat, Response, ToolError
 
 #: Programs kept parsed at once. A 20,000-line program's AST is tens of MB,
@@ -61,6 +63,28 @@ DEFAULT_CACHE_SIZE = 32
 DEFAULT_PROGRAM_EXTENSIONS: tuple[str, ...] = (".cbl", ".cob", ".cobol")
 
 Stamp = tuple[int, int] | None
+
+#: Suffixes (lower-cased) a file in a copybook directory outside the root
+#: must have to be readable: the ones COPY resolution itself tries
+#: (``CopybookSearchPath.extensions``), so every member the parse could have
+#: expanded can be cited, and nothing else. ``""`` is among them, because
+#: mainframe members are often downloaded without a suffix.
+COPYBOOK_MEMBER_SUFFIXES: frozenset[str] = frozenset(
+    e.lower() for e in CopybookSearchPath().extensions
+)
+
+#: Directories never accepted as copybook directories (nor anything under
+#: them): system configuration and process state, where extensionless files
+#: such as ``/etc/shadow`` or ``/proc/self/environ`` are secrets.
+REFUSED_SYSTEM_DIRS: tuple[str, ...] = (
+    "/etc",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/boot",
+    "/run",
+    "/var/run",
+)
 
 
 @contextlib.contextmanager
@@ -84,6 +108,18 @@ def _stamp(path: str) -> Stamp:
 
 def _under(path: Path, base: Path) -> bool:
     return path == base or base in path.parents
+
+
+def _home() -> Path | None:
+    try:
+        return Path.home().resolve()
+    except (OSError, RuntimeError, KeyError):
+        return None
+
+
+def _hidden_part(path: Path, base: Path) -> bool:
+    """Whether any component of *path* below *base* is dot-named."""
+    return any(part.startswith(".") for part in path.relative_to(base).parts)
 
 
 def _root_config_file(root: Path) -> Path | None:
@@ -235,20 +271,17 @@ class Workspace:
         root: str | Path,
         config: ProjectConfig | None = None,
         cache_size: int = DEFAULT_CACHE_SIZE,
-        allow: Iterable[str | Path] = (),
     ) -> None:
         self.root = Path(root).resolve()
         if not self.root.is_dir():
             raise ToolError(f"workspace root is not a directory: {root}")
-        #: Directories outside the root the operator allowed (``--allow``):
-        #: a ``cobol.yml`` copybook directory under one of them is used.
-        self.allow: tuple[Path, ...] = tuple(Path(a).resolve() for a in allow)
-        for allowed in self.allow:
-            if not allowed.is_dir():
-                raise ToolError(f"--allow is not a directory: {allowed}")
-        #: Copybook directories ``cobol.yml`` named that were dropped because
-        #: they lie outside the root and every ``--allow`` directory.
-        self.refused_copybook_dirs: tuple[str, ...] = ()
+        #: Copybook directories the config named that were refused outright
+        #: (see :meth:`_refusal`), each with why: neither searched nor
+        #: readable.
+        self.refused_copybook_dirs: tuple[tuple[str, str], ...] = ()
+        #: Kept copybook directories outside the root: only copybook
+        #: members are readable under these.
+        self._outside: list[Path] = []
         #: Serializes tool calls made from worker threads.
         self.lock = threading.Lock()
         self.cache_size = max(1, cache_size)
@@ -269,7 +302,7 @@ class Workspace:
         #: server around one call; None when nobody listens.
         self.progress: Callable[[float, float | None, str], None] | None = None
         if config is not None:
-            self._use_config(config, trusted=self._operator_chose(config))
+            self._use_config(config)
         else:
             self._reload_config()
 
@@ -307,43 +340,42 @@ class Workspace:
             # the file is fixed.
             raise ToolError(f"cobol.yml could not be read: {exc}") from exc
         self._config_source = source
-        # A file in the analysed tree: it may not widen the guard.
-        self._use_config(config, trusted=False)
+        self._use_config(config)
 
-    def _operator_chose(self, config: ProjectConfig) -> bool:
-        """Whether a config handed in is the operator's own, not the tree's.
+    def _refusal(self, directory: Path) -> str | None:
+        """Why *directory* (resolved) can never be a copybook directory, or
+        None when it can. A directory under the root always can."""
+        if _under(directory, self.root):
+            return None
+        if directory == Path(directory.anchor):
+            return "the filesystem root"
+        if _under(self.root, directory):
+            return "it contains the workspace root"
+        home = _home()
+        if home is not None and _under(home, directory):
+            return "it is the home directory or contains it"
+        for system in REFUSED_SYSTEM_DIRS:
+            if _under(directory, Path(system)):
+                return f"it is a system directory ({system})"
+        if any(part.startswith(".") for part in directory.parts):
+            return "it is a hidden directory"
+        return None
 
-        Built in code (no source file), or read from a file outside the root
-        (``--config FILE``): trusted. A ``--config`` naming a file inside the
-        root is content the analysed tree wrote, so it is held to the same
-        rule as a ``cobol.yml`` found there. Both the path as given and its
-        symlink-resolved form must lie outside the root.
-        """
-        if config.source is None:
-            return True
-        given = Path(os.path.abspath(config.source))
-        return not (
-            _under(given, self.root) or _under(config.source.resolve(), self.root)
-        )
-
-    def _use_config(self, config: ProjectConfig, *, trusted: bool) -> None:
+    def _use_config(self, config: ProjectConfig) -> None:
         kept: list[str] = []
-        refused: list[str] = []
+        refused: list[tuple[str, str]] = []
         for entry in config.copybook_path:
-            directory = Path(entry).resolve()
-            if (
-                trusted
-                or _under(directory, self.root)
-                or any(_under(directory, allowed) for allowed in self.allow)
-            ):
+            reason = self._refusal(Path(entry).resolve())
+            if reason is None:
                 kept.append(entry)
             else:
-                refused.append(entry)
+                refused.append((entry, reason))
         if refused:
             config = replace(config, copybook_path=tuple(kept))
         self.refused_copybook_dirs = tuple(refused)
         self._config = config
         self._allowed = [self.root] + [Path(p).resolve() for p in config.copybook_path]
+        self._outside = [d for d in self._allowed if not _under(d, self.root)]
         # Copybook paths, source format and defines all shape a parse.
         self._cache.clear()
         self._indexes.clear()
@@ -351,7 +383,20 @@ class Workspace:
     # -- paths ---------------------------------------------------------------
 
     def _within(self, path: Path) -> bool:
-        return any(_under(path, base) for base in self._allowed)
+        """Whether *path* (resolved) may be read: anything under the root;
+        under a copybook directory outside it, a copybook member only."""
+        if _under(path, self.root):
+            return True
+        return any(self._member_of(path, base) for base in self._outside)
+
+    @staticmethod
+    def _member_of(path: Path, base: Path) -> bool:
+        return (
+            path != base
+            and base in path.parents
+            and path.suffix.lower() in COPYBOOK_MEMBER_SUFFIXES
+            and not _hidden_part(path, base)
+        )
 
     def resolve(self, file: str) -> Path:
         """*file* (relative to the root, or absolute) as a guarded real path."""
@@ -367,6 +412,15 @@ class Workspace:
         except (OSError, RuntimeError) as exc:
             raise ToolError(f"cannot resolve {file}: {exc}") from exc
         if not self._within(resolved):
+            if any(_under(resolved, base) for base in self._outside):
+                suffixes = ", ".join(
+                    sorted(s or "none" for s in COPYBOOK_MEMBER_SUFFIXES)
+                )
+                raise ToolError(
+                    f"{file} is not a copybook member: in a copybook directory "
+                    "outside the workspace only files named like one (suffix "
+                    f"{suffixes}; no dot-named file or directory) are readable"
+                )
             raise ToolError(
                 f"{file} is outside the workspace ({self.root}) and its "
                 "copybook directories"
@@ -621,11 +675,13 @@ class Workspace:
             caveats.append(
                 Caveat(
                     "unresolved-copybook",
-                    "cobol.yml names copybook directories outside the "
-                    "workspace root, which were not searched: "
-                    + ", ".join(self.refused_copybook_dirs),
-                    "a member kept there is not expanded; the server's "
-                    "operator can allow such a directory with --allow DIR",
+                    "copybook directories refused, and not searched: "
+                    + "; ".join(
+                        f"{entry} ({reason})"
+                        for entry, reason in self.refused_copybook_dirs
+                    ),
+                    "a member kept there is not expanded; name a directory "
+                    "holding only copybooks instead",
                 )
             )
         if result.errors:

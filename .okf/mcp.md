@@ -73,24 +73,28 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
 
 ## Workspace
 
-- **Guard.** `Workspace.resolve()` resolves symlinks, then refuses anything
-  not under the root or a kept copybook directory. The index walk
-  (`program_files()`, `files_named()`) applies the same `_within()` check, so
-  a symlink out of the root is never indexed. No file-type check: the guard
-  is the directory set (#544).
-- **Who may widen the guard (#544).** `_use_config(config, trusted=...)`
-  keeps a `copybook_path` entry only when `trusted`, or it resolves under the
-  root, or under a `Workspace(allow=...)` directory (`cobol-parser mcp
-  --allow DIR`, repeatable, each must be a directory). The rest are removed
-  from the config itself (`dataclasses.replace`), so they are neither
-  searched by the parse / `CodebaseGraphBuilder` nor readable, and listed in
-  `refused_copybook_dirs`. `_parse()` adds an `unresolved-copybook` caveat
-  naming them only when the parse has an unexpanded COPY (no new caveat
-  kind); `_cmd_mcp` prints one stderr warning per dropped directory. Trust:
-  a found `cobol.yml` never; a config handed in (`_operator_chose()`) when it
-  has no `source` (built in code) or its file lies outside the root both as
-  given and symlink-resolved -- so `--config FILE` outside the root is
-  trusted, `--config root/x.yml` is not.
+- **Guard.** `Workspace.resolve()` resolves symlinks, then `_within()`
+  accepts anything under the root and, under a kept copybook directory
+  outside the root (`_outside`), only a *member* (`_member_of`): suffix in
+  `COPYBOOK_MEMBER_SUFFIXES` (lower-cased `CopybookSearchPath().extensions`:
+  `.cpy`, `.cbl`, `.cob`, `""`) and no dot-named component below the
+  directory. A non-member there gets "not a copybook member"; anything else
+  "outside the workspace". The index walk (`program_files()`,
+  `files_named()`) applies the same `_within()`, so a symlink out of the
+  root is never indexed (#544).
+- **Refused copybook directories (#544).** `_use_config()` asks
+  `_refusal(dir)` of each resolved `copybook_path` entry: under the root is
+  always fine; refused are the filesystem root, an ancestor of the root, the
+  home directory or an ancestor of it (`Path.home()`), anything under
+  `REFUSED_SYSTEM_DIRS` (`/etc`, `/proc`, `/sys`, `/dev`, `/boot`, `/run`,
+  `/var/run`), and a path with a dot-named component. Refused entries are
+  removed from the config itself (`dataclasses.replace`), so the parse and
+  `CodebaseGraphBuilder` never search them, and listed as `(entry, reason)`
+  in `refused_copybook_dirs`. `_parse()` adds an `unresolved-copybook`
+  caveat naming them only when the parse has an unexpanded COPY (no new
+  caveat kind); `_cmd_mcp` prints one stderr warning per refused directory.
+  The same rules apply to every config source (found, `--config`, built in
+  code).
 - **Config.** `_root_config_file(root)`: `cobol.yml`/`cobol.yaml` in the
   root itself, never the CLI's walk-up (`find_config_file`) -- a parent's
   file does not count. Unless the CLI was given

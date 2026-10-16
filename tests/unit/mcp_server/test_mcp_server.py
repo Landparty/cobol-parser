@@ -210,7 +210,7 @@ class TestCli:
             self._main("--no-config", "mcp", "--root", str(tmp_path))
         assert served[0].config.source is None
 
-    def test_outside_copybook_dir_needs_allow(
+    def test_refused_copybook_dir_is_warned_about(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         pytest.importorskip("mcp")
@@ -219,18 +219,16 @@ class TestCli:
         root.mkdir()
         books.mkdir()
         (root / "cobol.yml").write_text(
-            f"version: 1\nproject:\n  copybook_path: [{books}]\n"
+            f'version: 1\nproject:\n  copybook_path: ["/", "{books}"]\n'
         )
         served: list[Workspace] = []
         with patch("cobolparser.mcp.server.run_stdio", served.append):
             self._main("mcp", "--root", str(root))
-            self._main("mcp", "--root", str(root), "--allow", str(books))
-        refused, allowed = served
-        assert refused.config.copybook_path == ()
-        assert allowed.config.copybook_path == (str(books),)
+        (workspace,) = served
+        assert workspace.config.copybook_path == (str(books),)
         err = capsys.readouterr().err
-        assert err.count("is outside --root") == 1
-        assert str(books) in err
+        assert err.count("is refused") == 1
+        assert "the filesystem root" in err
 
     def test_bad_root(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         pytest.importorskip("mcp")

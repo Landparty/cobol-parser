@@ -4134,15 +4134,14 @@ def _build_mcp_parser(subparsers: argparse._SubParsersAction) -> None:
             "explain_symbol. Every location in an answer is a file and line "
             "on disk, and every answer names what could not be checked. "
             "cobol.yml is read from --root itself (never from a parent "
-            "directory), and a copybook directory it names outside --root is "
-            "neither searched nor readable unless it lies under an --allow "
-            "directory. A --config FILE outside --root is trusted as written. "
-            "Needs the [mcp] extra."
+            "directory). Under a copybook directory outside --root only "
+            "copybook members are readable, and /, the home directory, their "
+            "ancestors, hidden and system directories are refused as copybook "
+            "directories. Needs the [mcp] extra."
         ),
         epilog=(
             "Examples:\n"
             "  cobol-parser mcp --root /path/to/checkout\n"
-            "  cobol-parser mcp --root /path/to/checkout --allow /shared/copylib\n"
             "  claude mcp add cobol -- cobol-parser mcp --root /path/to/checkout"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -4160,16 +4159,6 @@ def _build_mcp_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Parsed programs to keep in memory (default: 32)",
     )
-    p.add_argument(
-        "--allow",
-        action="append",
-        default=[],
-        metavar="DIR",
-        help="Let a cobol.yml copybook directory under DIR, outside --root, be "
-        "searched and read (repeatable). Without it such a directory is dropped "
-        "with a warning: a file in the analysed tree cannot widen what the "
-        "server reads",
-    )
     p.set_defaults(func=_cmd_mcp)
 
 
@@ -4186,17 +4175,15 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
 
     config = args._project_config if getattr(args, "_config_explicit", False) else None
     try:
-        workspace = Workspace(
-            args.root, config, cache_size=args.cache_size, allow=args.allow
-        )
+        workspace = Workspace(args.root, config, cache_size=args.cache_size)
     except (ToolError, ConfigError) as exc:
         _fail(str(exc))
-    for directory in workspace.refused_copybook_dirs:
+    for directory, reason in workspace.refused_copybook_dirs:
         # stderr: over stdio, stdout is the protocol channel.
         print(
             f"warning: copybook directory {directory} (from "
-            f"{workspace.config.source}) is outside --root and is not searched "
-            "or readable; pass --allow DIR to permit it",
+            f"{workspace.config.source}) is refused, so it is not searched or "
+            f"readable: {reason}",
             file=sys.stderr,
         )
     run_stdio(workspace)

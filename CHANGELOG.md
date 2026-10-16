@@ -165,14 +165,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   added its `copybook_path` entries to the guard verbatim, so a checkout
   shipping `copybook_path: [/]` (or `["../.."]`) made `read_source` return
   `/etc/passwd` or files above the root. `cobol-parser mcp` now reads
-  `cobol.yml` from `--root` only, and a copybook directory it names outside
-  the root is dropped -- neither searched for COPY members nor readable --
-  with a warning on stderr and an `unresolved-copybook` caveat naming it on
-  programs with an unexpanded COPY. The new repeatable `--allow DIR` lets the
-  operator opt such a directory back in. A `--config FILE` that lies outside
-  the root (or a `ProjectConfig` built in code) is the operator's choice and
-  trusted as written; one inside the root is held to the same rule as a
-  found `cobol.yml`.
+  `cobol.yml` from `--root` only. Under a copybook directory outside the
+  root only copybook members are readable (`.cpy`, `.cbl`, `.cob` or no
+  suffix, no dot-named file or subdirectory). `/`, the home directory, any
+  ancestor of it or of the root, hidden directories and system directories
+  (`/etc`, `/proc`, ...) are refused as copybook directories: neither searched
+  nor readable, with a stderr warning and an `unresolved-copybook` caveat
+  naming them on programs with an unexpanded COPY.
 
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never
