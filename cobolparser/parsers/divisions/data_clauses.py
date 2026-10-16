@@ -220,6 +220,24 @@ _DIVISION_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     }
 )
 
+#: ``<word> SECTION`` headers of the DATA DIVISION. Matched by value (and a
+#: following ``SECTION``) since REPORT / SCREEN / COMMUNICATION lex as plain
+#: identifiers and ``FILE`` lexes as FILE_SECTION even in ``FILE STATUS``.
+_DATA_SECTION_HEADER_WORDS: frozenset[str] = frozenset(
+    {
+        "FILE",
+        "WORKING-STORAGE",
+        "LOCAL-STORAGE",
+        "LINKAGE",
+        "REPORT",
+        "SCREEN",
+        "COMMUNICATION",
+    }
+)
+
+#: File/sort/report description entries open with these level indicators.
+_LEVEL_INDICATOR_WORDS: frozenset[str] = frozenset({"FD", "SD", "RD"})
+
 # Non-meaningful tokens (layout only) that the clause loop skips silently —
 # warning on these would be noise.
 _WHITESPACE_TOKEN_TYPES: frozenset[TokenType] = frozenset(
@@ -230,6 +248,34 @@ _WHITESPACE_TOKEN_TYPES: frozenset[TokenType] = frozenset(
         TokenType.CONTINUATION,
     }
 )
+
+
+def data_entry_ending_header(token_stream: ITokenStream, offset: int = 0) -> str | None:
+    """The header text when the token *offset* ahead opens something no
+    data-description entry can contain -- a DIVISION header, a DATA DIVISION
+    section header (``FILE`` / ``WORKING-STORAGE`` / ``LOCAL-STORAGE`` /
+    ``LINKAGE`` / ``REPORT`` / ``SCREEN`` / ``COMMUNICATION SECTION``) or an
+    FD / SD / RD level indicator -- so it ends an entry whose period was
+    left off (issue #559). ``None`` otherwise."""
+    token = token_stream.peek(offset)
+    if token is None:
+        return None
+    word = (token.value or "").strip().upper()
+    if token.type in _DIVISION_TOKEN_TYPES:
+        return word if word.endswith(" DIVISION") else f"{word} DIVISION"
+    if word in _LEVEL_INDICATOR_WORDS:
+        return word
+    if word in _DATA_SECTION_HEADER_WORDS:
+        i = offset + 1
+        while True:
+            nxt = token_stream.peek(i)
+            if nxt is None or nxt.type not in _WHITESPACE_TOKEN_TYPES:
+                break
+            i += 1
+        if nxt is not None and (nxt.value or "").upper() == "SECTION":
+            return f"{word} SECTION"
+    return None
+
 
 # Number of positional arguments ``parse_data_item`` passes to the compiled
 # clause helper. Keep in sync with the call site below; ``_data_fast_usable``
@@ -495,8 +541,14 @@ class DataItemClauseParser:
                 token_stream.consume()
                 continue
 
-            # Division tokens end this data item (don't consume them)
-            if tok_type in _DIVISION_TOKEN_TYPES:
+            # A DIVISION or DATA DIVISION section header ends this data item
+            # (don't consume it): its period was left off, and IBM assumes
+            # one. Issue #559: the loop used to stop at DIVISION tokens only,
+            # so ``01 A PIC X`` + ``LINKAGE SECTION.`` ate the header and
+            # every LINKAGE item landed in the previous section.
+            header = data_entry_ending_header(token_stream)
+            if header:
+                self._warn_item_missing_period(token, header, data_item)
                 break
 
             # An EXEC SQL block ends this data item without consuming it.
@@ -1268,6 +1320,22 @@ class DataItemClauseParser:
 
         if occurs.max_times is not None:
             data_item.set_occurs_clause(occurs)
+
+    def _warn_item_missing_period(
+        self, token: Any, header: str, data_item: Any
+    ) -> None:
+        """Record that a data item was closed by *header* instead of its
+        terminating period (IBM: "a period was assumed before ...")."""
+        line = getattr(getattr(token, "location", None), "line", None)
+        where = f" at line {line}" if line else ""
+        item_name = getattr(data_item, "name", None) or "?"
+        host = getattr(self._parser, "host", None)
+        add_warning = getattr(host, "add_warning", None)
+        if callable(add_warning):
+            add_warning(
+                f"Data item '{item_name}' missing its terminating period: a "
+                f"period was assumed before '{header}'{where}"
+            )
 
     def _warn_dropped_data_token(self, token: Any, data_item: Any) -> None:
         """Record a warning for an unrecognized data-item clause token."""

@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A missing period before a header no longer swallows the header.** A
+  SELECT entry with no period ate `DATA DIVISION` (the whole DATA DIVISION
+  was lost) or the next `SELECT` (that file disappeared, its ASSIGN replacing
+  the first one's), and a data item or level-88 entry with no period ate the
+  next `... SECTION` header or `FD`, so every item after it landed in the
+  wrong section (LINKAGE items read as WORKING-STORAGE, USING parameters as
+  undeclared) -- all with `success=True`. As IBM does, a period is now
+  assumed before any DIVISION / SECTION header, `FILE-CONTROL` /
+  `I-O-CONTROL`, a new `SELECT` or `FD` / `SD` / `RD`, with a "missing its
+  terminating period" warning (#559).
 * **No phantom paragraph named `.` after `END-EXEC.` / `END-EVALUATE.` /
   `END-CALL.` in an unnamed paragraph** (#503). At the top of the PROCEDURE
   DIVISION or the start of a SECTION, before any paragraph header, the period

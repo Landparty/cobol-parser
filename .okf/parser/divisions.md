@@ -56,6 +56,22 @@ Individual statement parsers are in [statements.md](statements.md).
   meaningful token it drops (NEWLINE / WHITESPACE / COMMENT / CONTINUATION are
   skipped silently), symmetric with the ENVIRONMENT parser's
   `_warn_dropped_select_token`.
+- **A header ends an entry whose period was left off** (IBM: "a period was
+  assumed before ..."), with a "missing its terminating period: a period was
+  assumed before '<header>'" warning and the header left unconsumed for the
+  enclosing loop. The SELECT clause loop stops at another `SELECT`,
+  `FILE-CONTROL` / `I-O-CONTROL`, any `<word> DIVISION` and any ENVIRONMENT /
+  DATA `<word> SECTION` (`_entry_ending_header`); the data-item clause loop
+  and the level-88 entry stop at any DIVISION token, a DATA DIVISION
+  `<word> SECTION` (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE / REPORT
+  / SCREEN / COMMUNICATION) and `FD` / `SD` / `RD` (`data_entry_ending_header`
+  in `data_clauses.py`). Section words need the following `SECTION`: `FILE`
+  lexes as FILE_SECTION even in `FILE STATUS`. Issue #559: the SELECT loop
+  stopped only at `.`, so a period-less SELECT ate `DATA DIVISION` (the whole
+  DATA DIVISION lost) or the next `SELECT`; the data-item loop stopped only at
+  DIVISION tokens, so `01 A PIC X` + `LINKAGE SECTION.` put every LINKAGE item
+  in WORKING-STORAGE -- all with `success=True`. `_data_fast` needs no change:
+  it hands any token it does not handle back to the Python loop.
 - **Container locations.** Each `CobolSection` / `CobolParagraph` carries the
   location of its *own* header token, never the division's `start_location`:
   `environment.py`'s `_parse_configuration_section`,
