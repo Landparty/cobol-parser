@@ -343,7 +343,10 @@ class CobolTools:
                 "statements": len(_own_statements(unit)),
             }
             answer["entry_points"] = list(flow.entry_points)
-            answer["unreachable_procedures"] = list(flow.unreachable_nodes)
+            reach = _reachability(parsed, unit, response)
+            answer["unreachable_procedures"] = (
+                list(flow.unreachable_nodes) if reach is None else reach.unreachable
+            )
             answer["perform_cycles"] = len(flow.cycles)
 
         signature = _attempt(
@@ -525,7 +528,19 @@ class CobolTools:
             names = sorted({n.key.upper() for n in flow.nodes})
             return self._program_callers(wanted, response, cap, program_info, names)
 
-        unreachable = {u.upper() for u in flow.unreachable_nodes}
+        # Reachability is DeadCodeAnalyzer's (the same answer as the brief's
+        # lint section): the flow graph draws a fall-through out of every
+        # non-terminating procedure, PERFORM targets included, so its
+        # ``unreachable_nodes`` misses the paragraph after a performed one.
+        reach = _reachability(parsed, unit, response)
+        if reach is None:
+            unreachable = {u.upper() for u in flow.unreachable_nodes}
+        else:
+            unreachable = {u.upper() for u in reach.unreachable}
+        # Where control starts runs on: the first paragraph, or the
+        # sentences before it (``PROCEDURE DIVISION``, a node of the flow
+        # graph only).
+        start = flow.entry_points[0].upper() if flow.entry_points else None
         procedures: list[dict[str, Any]] = []
         for index, node in enumerate(matches):
             key = node.key.upper()
@@ -537,6 +552,17 @@ class CobolTools:
             for edge in flow.edges:
                 kind = edge.edge_type.value
                 if kind not in _CONTROL_EDGES or kind.endswith("_THRU"):
+                    continue
+                if (
+                    kind == "FALL_THROUGH"
+                    and reach is not None
+                    and edge.source.upper() != start
+                    and (edge.source.upper(), edge.target.upper())
+                    not in reach.fall_throughs
+                ):
+                    # Out of a procedure only ever PERFORMed (its end returns
+                    # to the performer), or out of one never reached: control
+                    # never runs on along this edge.
                     continue
                 if edge.target.upper() == key:
                     callers.append(_edge_caller(edge, parsed, response))
@@ -1242,6 +1268,47 @@ def _flow(parsed: ParsedProgram, unit: CobolProgram) -> Any:
     from ..analysis.program_flow import ProgramFlowAnalyzer
 
     return parsed.report("flow", unit, lambda: ProgramFlowAnalyzer().analyze(unit))
+
+
+@dataclass(frozen=True)
+class _Reachability:
+    """Which procedures of a unit can run, and which fall-throughs happen."""
+
+    #: Procedure keys (``X OF S`` when the name repeats) control never reaches.
+    unreachable: list[str]
+    #: Upper-cased ``(from, to)`` keys of the fall-throughs that can happen.
+    fall_throughs: frozenset[tuple[str, str]]
+
+
+def _reachability(
+    parsed: ParsedProgram, unit: CobolProgram, response: Response
+) -> _Reachability | None:
+    """DeadCodeAnalyzer's reachability for *unit*, memoized beside the parse.
+
+    The root-based fixpoint the OKF calls authoritative (issue #486), rather
+    than ``ProgramFlowAnalyzer.unreachable_nodes``. None, with an
+    ``analyzer-failed`` caveat, when the analyzer raises: callers then fall
+    back to the flow graph's answer.
+    """
+    from ..analysis.dead_code import DeadCodeAnalyzer
+
+    def build() -> _Reachability:
+        report = DeadCodeAnalyzer().analyze(unit)
+        return _Reachability(
+            unreachable=[
+                item.qualified_name or item.name for item in report.dead_items
+            ],
+            fall_throughs=frozenset(
+                (source.upper(), target.upper())
+                for source, target in report.fall_through_edges
+            ),
+        )
+
+    return _attempt(
+        response,
+        "reachability",
+        lambda: parsed.report("reachability", unit, build),
+    )
 
 
 def _signature(parsed: ParsedProgram, unit: CobolProgram) -> Any:

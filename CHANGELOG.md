@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **MCP `callers_of` / `program_brief` no longer call a dead paragraph
+  reachable** (#486). Both took reachability from the flow graph, whose
+  `FALL_THROUGH` edge out of a paragraph only ever PERFORMed (or out of a
+  `PERFORM ... THRU` range end) made the paragraph after it look live,
+  contradicting the brief's own dead-code lint finding. Reachability and
+  `unreachable_procedures` now come from `DeadCodeAnalyzer`, and a
+  fall-through it found cannot happen is no longer listed as a caller
+  (`DeadCodeReport.fall_through_edges`). The CFG itself is unchanged.
+
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never
   scanned, so the target read as unreachable (and recursion-check / the

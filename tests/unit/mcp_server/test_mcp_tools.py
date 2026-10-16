@@ -557,6 +557,40 @@ FLOWT = """\
            DISPLAY 'DEAD'.
 """
 
+AFTER_PERFORMED = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AFTERP.
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           PERFORM A-PARA
+           STOP RUN.
+       A-PARA.
+           DISPLAY 'A'.
+       B-PARA.
+           DISPLAY 'B'.
+"""
+
+AFTER_THRU = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AFTERT.
+       PROCEDURE DIVISION.
+       0000-MAIN.
+           PERFORM 1000-READ THRU 1000-EXIT
+           PERFORM 2000-SEC
+           STOP RUN.
+       1000-READ.
+           DISPLAY 'R'.
+       1000-EXIT.
+           EXIT.
+       9999-UNUSED.
+           DISPLAY 'U'.
+       2000-SEC SECTION.
+       2000-A.
+           DISPLAY 'A'.
+       2000-B.
+           DISPLAY 'B'.
+"""
+
 
 def line_of(root: Path, location: dict) -> str:
     """The text on disk at a cited location, to check a citation is real."""
@@ -680,6 +714,59 @@ class TestCallersOf:
         assert dead["reachable"] is False
         assert dead["caller_count"] == 0
         assert "5000-DEAD" in line_of(root, dead["declared_at"])
+
+    def test_paragraph_after_a_performed_one_is_unreachable(self, root: Path) -> None:
+        # Issue #486: the flow graph's fall-through out of A-PARA (only ever
+        # PERFORMed, so its end returns) made B-PARA look reachable.
+        (root / "AFTERP.cbl").write_text(AFTER_PERFORMED)
+        tools = tools_for(root)
+        dead = tools.callers_of("AFTERP.cbl", "B-PARA")["answer"]["procedures"][0]
+        assert dead["reachable"] is False
+        assert dead["caller_count"] == 0
+        assert dead["callers"] == []
+        brief = tools.program_brief("AFTERP.cbl")["answer"]
+        assert brief["unreachable_procedures"] == ["B-PARA"]
+        assert any(f["symbol"] == "B-PARA" for f in brief["lint"]["worst"])
+
+    def test_paragraph_after_a_thru_range_is_unreachable(self, root: Path) -> None:
+        (root / "AFTERT.cbl").write_text(AFTER_THRU)
+        tools = tools_for(root)
+        dead = tools.callers_of("AFTERT.cbl", "9999-UNUSED")["answer"]
+        assert dead["procedures"][0]["reachable"] is False
+        assert dead["procedures"][0]["callers"] == []
+        assert tools.program_brief("AFTERT.cbl")["answer"][
+            "unreachable_procedures"
+        ] == ["9999-UNUSED"]
+
+    def test_fall_throughs_that_happen_are_still_callers(self, root: Path) -> None:
+        (root / "AFTERT.cbl").write_text(AFTER_THRU)
+        tools = tools_for(root)
+
+        def callers(name: str) -> list[tuple[str, str]]:
+            procedure = tools.callers_of("AFTERT.cbl", name)["answer"]["procedures"][0]
+            assert procedure["reachable"] is True
+            return [(c["from"], c["type"]) for c in procedure["callers"]]
+
+        # Inside a THRU range, and inside a PERFORMed section.
+        assert ("1000-READ", "FALL_THROUGH") in callers("1000-EXIT")
+        assert callers("2000-A") == [("2000-SEC", "FALL_THROUGH")]
+        assert callers("2000-B") == [("2000-A", "FALL_THROUGH")]
+        # Out of the entry paragraph, which control keeps running from.
+        assert callers("1000-READ") == [("0000-MAIN", "PERFORM")]
+
+    def test_a_failing_dead_code_analyzer_falls_back_to_the_flow_graph(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cobolparser.analysis.dead_code import DeadCodeAnalyzer
+
+        def boom(self: object, ast: object) -> None:
+            raise RuntimeError("kaboom")
+
+        monkeypatch.setattr(DeadCodeAnalyzer, "analyze", boom)
+        (root / "FLOWT.cbl").write_text(FLOWT)
+        result = tools_for(root).callers_of("FLOWT.cbl", "5000-dead")
+        assert result["answer"]["procedures"][0]["reachable"] is False
+        assert "analyzer-failed" in kinds(result)
 
     def test_sort_procedure_and_sql_whenever(self, root: Path) -> None:
         tools = with_copybooks(root)

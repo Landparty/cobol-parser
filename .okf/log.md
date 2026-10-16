@@ -3,7 +3,7 @@ type: Log
 title: OKF Update Log
 description: Dated log of OKF bundle updates, newest first.
 tags: [log, changelog, history]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-10-16T00:00:00Z
 ---
 
 # OKF Update Log
@@ -13,6 +13,13 @@ follows up on even when a day or two out of order -- that adjacency is
 deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
+
+## 2026-10-16 -- MCP reachability from dead-code (#486)
+
+[mcp.md](mcp.md), [analysis/flow.md](analysis/flow.md): `callers_of`'s
+`reachable` and `program_brief`'s `unreachable_procedures` come from
+`DeadCodeAnalyzer`; new `DeadCodeReport.fall_through_edges` filters the
+flow graph's phantom `FALL_THROUGH` callers.
 
 ## 2026-10-15 -- MCP server, Phase 3 review fixes
 

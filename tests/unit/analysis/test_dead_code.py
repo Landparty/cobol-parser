@@ -2435,3 +2435,77 @@ class TestThruRangeNestedAndSectionExits:
         dead = [i.name for i in analyzer.analyze(result.ast).dead_items]
         assert "S2" not in dead
         assert "S2-A" not in dead
+
+
+class TestFallThroughEdges:
+    """``DeadCodeReport.fall_through_edges``: the fall-throughs that can
+    happen at runtime, which the MCP ``callers_of`` keeps out of the flow
+    graph's ``FALL_THROUGH`` edges (issue #486)."""
+
+    def _edges(self, procedure: str) -> set[tuple[str, str]]:
+        source = (
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. FTE.\n"
+            "       PROCEDURE DIVISION.\n" + procedure
+        )
+        result = parse_cobol(source, filename="fte.cbl")
+        assert result.ast is not None
+        return DeadCodeAnalyzer().analyze(result.ast).fall_through_edges
+
+    def test_no_fall_through_out_of_a_performed_paragraph(self) -> None:
+        edges = self._edges("""\
+       MAIN-PARA.
+           PERFORM A-PARA
+           STOP RUN.
+       A-PARA.
+           DISPLAY 'A'.
+       B-PARA.
+           DISPLAY 'B'.
+""")
+        assert edges == set()
+
+    def test_straight_line_and_goto_target_fall_through(self) -> None:
+        edges = self._edges("""\
+       MAIN-PARA.
+           DISPLAY 'M'.
+       TWO-PARA.
+           GO TO FOUR-PARA.
+       THREE-PARA.
+           DISPLAY '3'.
+       FOUR-PARA.
+           DISPLAY '4'.
+       FIVE-PARA.
+           STOP RUN.
+""")
+        assert edges == {
+            ("MAIN-PARA", "TWO-PARA"),
+            ("FOUR-PARA", "FIVE-PARA"),
+        }
+
+    def test_thru_range_and_performed_section_run_on_inside(self) -> None:
+        edges = self._edges("""\
+       0000-MAIN.
+           PERFORM 1000-READ THRU 1000-EXIT
+           PERFORM 2000-SEC
+           STOP RUN.
+       1000-READ.
+           DISPLAY 'R'.
+       1000-EXIT.
+           EXIT.
+       9999-UNUSED.
+           DISPLAY 'U'.
+       2000-SEC SECTION.
+       2000-A.
+           DISPLAY 'A'.
+       2000-B.
+           DISPLAY 'B'.
+""")
+        assert edges == {
+            ("1000-READ", "1000-EXIT"),
+            ("2000-SEC", "2000-A"),
+            ("2000-A", "2000-B"),
+        }
+
+    def test_not_serialized(self) -> None:
+        report = DeadCodeReport(fall_through_edges={("A", "B")})
+        assert "fall_through_edges" not in report.to_dict()
