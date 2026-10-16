@@ -465,6 +465,15 @@ PROCEDURE DIVISION caller reports it -- see [statements-io.md](statements-io.md)
   or `""` at the end of the AST (`procedure_count` one too high) means some
   parser left a period or EOF unconsumed; `STOP`, `DISPLAY ... UPON` and the EOF
   check above have each been a cause.
+- **A bare period is a sentence end in the top loop too** (#503). Statements
+  before the first paragraph header (top of the division, or the start of a
+  SECTION) are dispatched one at a time from the top loop, not from
+  `_parse_paragraph_statements`. EXEC SQL/CICS, EVALUATE and CALL leave the
+  period after `END-EXEC` / `END-EVALUATE` / `END-CALL` in the stream (so does
+  a doubled `..`); the top loop now consumes it, where it used to open a
+  paragraph named `.` holding the rest of the code -- mid-AST, so the analyzers
+  lost its PERFORMs/terminators. Pinned by
+  `tests/regression/test_implicit_paragraph_trailing_period.py`.
 - **DECLARATIVES.** `DECLARATIVES.` and `END DECLARATIVES.` are consumed as
   markers (no pseudo-paragraphs), and every section opened in between is flagged:
   section dict key `declarative` -> `CobolSection` metadata `declarative` /
