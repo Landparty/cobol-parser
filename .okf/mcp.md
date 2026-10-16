@@ -3,7 +3,7 @@ type: Module
 title: MCP Server
 description: cobolparser/mcp/ and `cobol-parser mcp` -- an MCP server (stdio) that lets AI agents question COBOL source; tools as plain functions (tools.py), the response envelope and caveat kinds (envelope.py), the workspace guard, cobol.yml and parse cache (workspace.py), the root-wide cross-program indexes (codebase_index.py), and the one SDK-importing module (server.py).
 tags: [mcp, ai, agents, tools, stdio, caveats, source-map]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-10-16T00:00:00Z
 ---
 
 # MCP Server
@@ -47,7 +47,7 @@ returns a small payload. Every list is capped (`limit`, default 50, max 500).
 | `where_from(field, file, program, depth, limit)` | `programs`, `tables`, `datasets`, `hits` (each: `program`, `field`, `node_kind`, `derived`, `confidence`, `file`, `location` of the statement that reaches it, `path` as one string per step `NODE (STATEMENT at file:line)`) | `LineageGraph.impact(..., "backward")` over the `lineage` index; `file` limits the start to that file's units (`program` to one) |
 | `codebase_overview(limit)` | `index`, `programs` (grade, score, `calls`, `called_by`, `contained`, `unit_kind`), `call_graph` (`entry_programs`, `most_called`, `not_in_workspace`, `cycles`, `unresolved_dynamic_calls`), `copybooks` (`most_used`, `not_found`), `health` (`grades`, `worst`), `duplicated_code` (groups, members capped) | `programs` + `health` indexes; top lists are `OVERVIEW_TOP` (10) long, `limit` only lowers them |
 | `record_layout(file, record, program, limit)` | `records[]`: `qualified_name` (`X OF Y`), `section`, `declared_at`, offset/length, `redefines`, `fields` in source order each with `declared_at`; an FD name gives every record of the file (`file`) | `compute_record_layout` per 01; `_declarations()` matches the n-th layout entry of a qualified name to its n-th declaration (FILLER repeats) and re-sorts, since the layout emits a group after its members |
-| `explain_symbol(file, name, program, limit)` | each declaration matching `name` (or `X OF Y`): `declared_at`, `layout` (PICTURE, USAGE, `byte_offset`, `byte_length`, REDEFINES, level-88 values), `references` with role/statement/paragraph, `references_by_role`; `suggestions` when not found | `XrefAnalyzer`, `compute_program_data_items`; not found: `special_register` from xref's `is_special_register()` (no suggestions then) |
+| `explain_symbol(file, name, program, limit)` | each declaration matching `name` (or `X OF Y`): `declared_at`, `layout` (PICTURE, USAGE, `byte_offset`, `byte_length`, REDEFINES, level-88 values; a level-66 RENAMES item gets its THRU byte range, or an `incomplete-analysis` caveat when it cannot be placed, #485), `references` with role/statement/paragraph, `references_by_role`; `suggestions` when not found | `XrefAnalyzer`, `compute_program_data_items`; not found: `special_register` from xref's `is_special_register()` (no suggestions then) |
 
 Invariants:
 

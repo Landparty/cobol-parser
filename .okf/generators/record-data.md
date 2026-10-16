@@ -276,7 +276,12 @@ PICTURE to fit. `_float_value` draws one uniform over ±10,000 and hands it to
 `_render_float(value, single=...)`, which quantises through binary32 for a
 COMP-1 and renders to the 7 / 15 significant digits `decoding._decode_float`
 uses, so the CSV cell is exactly what the record image gives back (see
-[decode-compare.md](decode-compare.md)).
+[decode-compare.md](decode-compare.md)). A *declared* float value (VALUE
+clause, level-88, a solver witness via `render()`) takes the same route from
+`_fit_domain_value`, with `quantize=False` so `VALUE 2.5E-07` is not rounded
+to the 4-decimal grid. The layout's `integer_digits=9, decimal_digits=0`,
+unsigned shape for a float is a placeholder, never a domain: sent through
+`_format_number` it wrote `VALUE -2.5E-02` as 0 and `-1.5` as 2 (#551).
 
 `_format_number`'s `allow_random_sign` guards a subtle trap: a signed field
 negates a freshly generated magnitude ~25 % of the time so negatives get

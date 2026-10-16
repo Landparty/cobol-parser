@@ -380,7 +380,7 @@ class ProgramFixtureGenerator:
         counter = _CallCounter.build(ast, index, report)
 
         layouts: dict[str, list[FieldSpec]] = dict(happy.layouts)
-        unresolved: list[str] = list(happy.unresolved)
+        unresolved: list[str] = list(happy.unresolved) + scenario_plan.unresolved
         scenarios: list[Scenario] = list(happy.scenarios)
         # The record each multi-01 READ was generated through, per scenario,
         # so the "alternate view(s) not generated" note names only the views
