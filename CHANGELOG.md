@@ -170,6 +170,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assumed before any DIVISION / SECTION header, `FILE-CONTROL` /
   `I-O-CONTROL`, a new `SELECT` or `FD` / `SD` / `RD`, with a "missing its
   terminating period" warning (#559).
+* **No phantom paragraph named `.` after `END-EXEC.` / `END-EVALUATE.` /
+  `END-CALL.` in an unnamed paragraph** (#503). At the top of the PROCEDURE
+  DIVISION or the start of a SECTION, before any paragraph header, the period
+  those verbs leave behind (and a doubled `..`) was read as a paragraph name;
+  the rest of the code moved into a paragraph named `.`, so dead-code missed
+  dead sections, program-flow drew a FALL_THROUGH for a PERFORM and dropped
+  the STOP RUN / GOBACK, and complexity / business-rules / gen-fixtures lost
+  those statements. The procedure-division top loop now consumes a bare
+  period as a sentence end.
+* **JSON PARSE / GENERATE `CONVERTING x [FROM|TO] JSON BOOLEAN` no longer ends
+  the statement at `JSON`** (#574). Only `TO JSON` was recognised, so JSON
+  PARSE's `FROM JSON BOOLEAN` and the forms without FROM/TO dropped the rest
+  of the statement with an "Unparsed tokens" warning, `ON EXCEPTION`
+  included: the handler's CALL / PERFORM became an unconditional statement
+  of the paragraph, program-flow drew it as an unconditional edge, and
+  `gen-fixtures` asserted an exact `call_count` for it.
 
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never
