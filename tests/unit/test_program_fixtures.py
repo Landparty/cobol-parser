@@ -1885,3 +1885,74 @@ class TestKeyedReadReturnsTheKeyAskedFor:
         (fixture,) = _read_fixtures(bundle.scenarios[0])
         assert any(row["VS-KEY"] != "K001" for row in fixture.sequence)
         assert not [u for u in bundle.unresolved if "record key" in u]
+
+
+_FLOAT_ARMS_PROGRAM = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GF2.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-FILE ASSIGN TO INFILE.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  IN-FILE.
+       01  IN-REC.
+           05  IN-R COMP-2.
+           05  IN-S COMP-1.
+       PROCEDURE DIVISION.
+           OPEN INPUT IN-FILE
+           READ IN-FILE
+           END-READ
+           IF IN-R > 0.25 AND IN-R < 0.75  DISPLAY 'MID' END-IF
+           IF IN-S < -100                  DISPLAY 'NEG' END-IF
+           CLOSE IN-FILE
+           GOBACK.
+"""
+
+
+class TestFloatFieldArms:
+    """Issue #551: a COMP-1/COMP-2 field has no PICTURE and was solved over
+    the layout's placeholder ``PIC 9(9)`` domain, so a negative or fractional
+    bound made its THEN arm "unsatisfiable" and the ELSE rows held 0 /
+    499999999 / 500000000."""
+
+    def _bundle(self, mode: str = "branches"):
+        result = parse_cobol(_FLOAT_ARMS_PROGRAM, filename="gf2.cbl")
+        assert result.ast is not None, result.errors
+        index = ProgramLayoutIndex.build(result.ast)
+        report = BoundaryInventoryAnalyzer().analyze(result.ast, index)
+        return ProgramFixtureGenerator().generate_with_scenarios(
+            result.ast, index, report, mode=mode, seed=1
+        )
+
+    def test_boundary_minimum_is_negative_for_a_float(self):
+        """The minimum of a signed float is not 0, the floor of the
+        unsigned placeholder PICTURE."""
+        bundle = self._bundle(mode="all")
+        (scenario,) = [
+            s for s in bundle.scenarios if s.name == "boundary values: minimum"
+        ]
+        (fixture,) = _read_fixtures(scenario)
+        assert all(
+            float(row["IN-R"]) < 0 and float(row["IN-S"]) < 0
+            for row in fixture.sequence
+        )
+
+    def test_negative_and_fractional_then_arms_are_not_missed(self):
+        coverage = self._bundle().scenario_coverage
+        assert coverage is not None
+        assert [d for d in coverage["details"] if d["status"] == "missed"] == []
+
+    def test_scenario_rows_satisfy_their_float_conditions(self):
+        bundle = self._bundle()
+        checks = {
+            "IF@17 THEN": lambda row: 0.25 < float(row["IN-R"]) < 0.75,
+            "IF@18 THEN": lambda row: float(row["IN-S"]) < -100,
+            "IF@17 ELSE [IN-R <= 0.25]": lambda row: float(row["IN-R"]) <= 0.25,
+        }
+        for marker, check in checks.items():
+            (scenario,) = [s for s in bundle.scenarios if marker in s.name]
+            (fixture,) = _read_fixtures(scenario)
+            assert fixture.sequence
+            assert all(check(row) for row in fixture.sequence), fixture.sequence

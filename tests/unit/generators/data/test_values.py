@@ -9,9 +9,12 @@ sign/ceiling clamping in _format_number) had no dedicated coverage.
 
 from __future__ import annotations
 
+import dataclasses
 import random
 import re
 from decimal import Decimal
+
+import pytest
 
 from cobolparser.generators.data.layout import FieldCategory, FieldSpec
 from cobolparser.generators.data.options import DataGeneratorOptions
@@ -241,6 +244,41 @@ class TestFloatValues:
         value = factory.value_for(spec, 0)
         parsed = float(value)
         assert -10_000 <= parsed <= 10_000
+
+    @staticmethod
+    def _float_spec(usage: str, value_clause: str | None = None) -> FieldSpec:
+        # The shape layout.py gives a PICTURE-less float: 9 integer digits,
+        # no decimals, unsigned -- a placeholder, not a domain (#551).
+        return dataclasses.replace(
+            _spec(
+                "WS-FLT",
+                category=FieldCategory.FLOAT,
+                size=4 if usage == "COMP-1" else 8,
+                integer_digits=9,
+                value_clause=value_clause,
+            ),
+            usage=usage,
+        )
+
+    @pytest.mark.parametrize(
+        ("usage", "clause", "expected"),
+        [
+            ("COMP-1", "2.5E-02", "0.025"),
+            ("COMP-2", "-2.5E-02", "-0.025"),
+            ("COMP-2", "-1.5", "-1.5"),
+            ("COMP-1", "3.25", "3.25"),
+            ("COMP-2", "1.5E+3", "1500"),
+            ("COMP-2", "2.5E-07", "2.5e-07"),
+        ],
+    )
+    def test_value_clause_keeps_its_sign_and_fraction(self, usage, clause, expected):
+        """Issue #551: ``VALUE -2.5E-02`` came out as 0 and ``-1.5`` as 2."""
+        spec = self._float_spec(usage, clause)
+        assert _factory().value_for(spec, 0) == expected
+
+    def test_render_keeps_a_solved_negative_fraction(self):
+        spec = self._float_spec("COMP-2")
+        assert _factory().render(spec, "-100.0001") == "-100.0001"
 
 
 class TestFormatNumberSignAndClamping:

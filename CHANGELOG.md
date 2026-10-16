@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **COMP-1 / COMP-2 are no longer modelled as unsigned 9-digit integers**
+  (#551). A float item has no PICTURE, and its declared or solved values went
+  through the PICTURE-shaped numeric path: `gen-data` wrote `VALUE -2.5E-02`
+  as 0 and `VALUE -1.5` as 2, and `gen-fixtures` reported `IF F < -100` or
+  `IF F > 0.25 AND F < 0.75` unsatisfiable (ELSE rows 0 / 499999999). VALUE
+  clauses and solver witnesses are now rendered through the field's own
+  binary32 / binary64 storage, the solver gives a float a signed +/-1E15
+  domain on a 4-decimal grid, and the `all` mode's boundary-values family
+  uses the same bounds.
+
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never
   scanned, so the target read as unreachable (and recursion-check / the
