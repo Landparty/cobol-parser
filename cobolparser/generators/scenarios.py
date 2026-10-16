@@ -208,11 +208,20 @@ class PlannedScenario:
 class ScenarioPlan:
     scenarios: list[PlannedScenario] = field(default_factory=list)
     coverage: ScenarioCoverage = field(default_factory=ScenarioCoverage)
+    #: One note per arm the planner could not target because of a gap in
+    #: the tool rather than a fact about the program -- today, an arm whose
+    #: precondition the constraint extractor did not model
+    #: (`BranchConstraints.unmodeled_arms`). An unreachable or unsatisfiable
+    #: arm is the program's own business and is not listed. The fixture
+    #: generator carries these into `FixtureBundle.unresolved`, so
+    #: `gen-fixtures --strict` refuses the bundle (#509).
+    unresolved: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "scenarios": [s.to_dict() for s in self.scenarios],
             "coverage": self.coverage.to_dict(),
+            "unresolved": list(self.unresolved),
         }
 
 
@@ -250,6 +259,7 @@ class ScenarioPlanner:
         }
 
         details: list[ArmOutcome] = []
+        unresolved: list[str] = []
         candidates: list[tuple[str, PlannedScenario]] = []  # (sort_key, candidate)
         shared_areas = _shared_record_areas(boundary_report)
 
@@ -286,6 +296,20 @@ class ScenarioPlanner:
                             arm_key, branch.parent_proc, "missed", reason="unreachable"
                         )
                     )
+                    continue
+
+                unmodeled = branch.unmodeled_arms.get(arm_id)
+                if unmodeled is not None:
+                    # Its `[]` means "precondition unknown", not "anything
+                    # goes": solving it would target the arm with random
+                    # rows that usually (for a level-88 field drawn from its
+                    # own condition values, always) run an earlier WHEN, and
+                    # verification would then call zero conjuncts "verified".
+                    reason = f"precondition not modeled: {unmodeled}"
+                    details.append(
+                        ArmOutcome(arm_key, branch.parent_proc, "missed", reason=reason)
+                    )
+                    unresolved.append(f"arm {arm_key} not targeted: {reason}")
                     continue
 
                 options, path_gaps = _path_options(branch, arms_by_key)
@@ -390,7 +414,9 @@ class ScenarioPlanner:
             missed=sum(1 for d in details if d.status == "missed"),
             details=details,
         )
-        return ScenarioPlan(scenarios=scenarios, coverage=coverage)
+        return ScenarioPlan(
+            scenarios=scenarios, coverage=coverage, unresolved=unresolved
+        )
 
 
 def _path_options(

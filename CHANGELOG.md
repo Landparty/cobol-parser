@@ -160,6 +160,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`gen-fixtures`: an EVALUATE `WHEN OTHER` or SEARCH `AT END` arm whose
+  precondition was not modeled is reported `missed`, not `targeted` /
+  `verified`** (#509). The constraint extractor leaves such an arm's
+  conjuncts empty (`WHEN OTHER` after a `THRU`, `>`, compound or
+  different-field arm; every `AT END`), and the planner solved that `[]` as
+  "anything goes" -- so the scenario named for the arm got random rows that
+  usually ran an earlier `WHEN` (for SEARCH, the WHEN arm every time), while
+  verification called zero conjuncts `verified` and `--strict` exited 0.
+  `BranchConstraints.unmodeled_arms` now names those arms with the
+  extractor's reason; `ScenarioPlanner` counts them `missed` with that
+  reason and lists them in `ScenarioPlan.unresolved`, which reaches
+  `FixtureBundle.unresolved`, so `gen-fixtures --strict` exits 2.
+
 * **`program-flow` follows PERFORM / GO TO in `ON EXCEPTION` bodies of XML /
   JSON PARSE / GENERATE and ACCEPT / DISPLAY.** Those bodies were never
   scanned, so the target read as unreachable (and recursion-check / the
