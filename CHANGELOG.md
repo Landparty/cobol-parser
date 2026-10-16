@@ -160,6 +160,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **MCP server: a `cobol.yml` can no longer widen the path guard** (#544).
+  The workspace read `cobol.yml` from the root *or any parent directory* and
+  added its `copybook_path` entries to the guard verbatim, so a checkout
+  shipping `copybook_path: [/]` (or `["../.."]`) made `read_source` return
+  `/etc/passwd` or files above the root. `cobol-parser mcp` now reads
+  `cobol.yml` from `--root` only. Under a copybook directory outside the
+  root only copybook members are readable (`.cpy`, `.cbl`, `.cob` or no
+  suffix, no dot-named file or subdirectory). `/`, the home directory, any
+  ancestor of it or of the root, hidden directories and system directories
+  (`/etc`, `/proc`, ...) are refused as copybook directories: neither searched
+  nor readable, with a stderr warning and an `unresolved-copybook` caveat
+  naming them on programs with an unexpanded COPY.
 * **`gen-fixtures`: no `call_count` after a status check whose success arm
   ends the run** (#590). An IF reading only status fields was exempt in both
   arms, so `IF WS-FS = '00' ... GOBACK` (or `IF WS-FS-OK`, `IF SQLCODE = 0`,

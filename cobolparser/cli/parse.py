@@ -4133,7 +4133,11 @@ def _build_mcp_parser(subparsers: argparse._SubParsersAction) -> None:
             "questions about the COBOL under --root: read_source, lint and "
             "explain_symbol. Every location in an answer is a file and line "
             "on disk, and every answer names what could not be checked. "
-            "cobol.yml is found from --root. Needs the [mcp] extra."
+            "cobol.yml is read from --root itself (never from a parent "
+            "directory). Under a copybook directory outside --root only "
+            "copybook members are readable, and /, the home directory, their "
+            "ancestors, hidden and system directories are refused as copybook "
+            "directories. Needs the [mcp] extra."
         ),
         epilog=(
             "Examples:\n"
@@ -4174,6 +4178,14 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
         workspace = Workspace(args.root, config, cache_size=args.cache_size)
     except (ToolError, ConfigError) as exc:
         _fail(str(exc))
+    for directory, reason in workspace.refused_copybook_dirs:
+        # stderr: over stdio, stdout is the protocol channel.
+        print(
+            f"warning: copybook directory {directory} (from "
+            f"{workspace.config.source}) is refused, so it is not searched or "
+            f"readable: {reason}",
+            file=sys.stderr,
+        )
     run_stdio(workspace)
 
 

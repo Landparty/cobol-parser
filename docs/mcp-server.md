@@ -39,16 +39,58 @@ Any client that takes a JSON server list (Claude desktop's
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--root DIR` | `.` | The directory the server answers about. Paths outside it, and outside its copybook directories, are refused. |
+| `--root DIR` | `.` | The directory the server answers about. Paths outside it, and outside its copybook directories, are refused; see [What the server can read](#what-the-server-can-read). |
 | `--cache-size N` | 32 | Parsed programs kept in memory. A program is parsed again when it, a copybook it expanded, or a copybook directory changes on disk (so a member added after a "COPY not expanded" caveat is picked up). |
-| `--config FILE` / `--no-config` | search from `--root` | Which `cobol.yml` to use. |
+| `--config FILE` / `--no-config` | `cobol.yml` in `--root` | Which `cobol.yml` to use. |
 
 Copybook directories, source format and `>>DEFINE` symbols come from the
-project's [`cobol.yml`](project-config.md), found from `--root` the same way
-the CLI finds it. An edit to it takes effect on the next call, with no
+project's [`cobol.yml`](project-config.md) (or `cobol.yaml`) in `--root`.
+Unlike the CLI, the server does not look for one in the directories above
+the root. An edit to it takes effect on the next call, with no
 restart (unless `--config` or `--no-config` was given). Without copybook
 paths, every `COPY` is left unexpanded and each answer says so; a member that
 cannot be found is left unexpanded and named, while the others still expand.
+
+## What the server can read
+
+The server is meant for agents reading code they did not write, where a
+comment in the source can ask the agent to "check `~/.ssh/id_rsa`". And
+`cobol.yml` is often part of that same code. So a file in the analysed tree
+cannot make arbitrary files readable. The boundary is:
+
+- **Under `--root`**: every file is readable. Paths are resolved first
+  (symlinks included), so `../` and a symlink that leads out of the root are
+  judged by where they really point.
+- **`cobol.yml` is read from `--root` only.** A `cobol.yml` in a parent
+  directory is ignored, unlike the CLI, which walks up to find one.
+- **Under a copybook directory outside `--root`** (a shared copy library),
+  only copybook members are readable. A member is a file named with one of
+  the suffixes COPY resolution itself tries: `.cpy`, `.cbl`, `.cob` (any
+  case), or no suffix at all, since COPY resolves extensionless members and
+  mainframe downloads often have none. A file or subdirectory whose name
+  starts with `.` is refused, so `.env` or `.git/` inside the library are not
+  readable. Anything else there (`secret.txt`, `notes.md`) is refused with a
+  "not a copybook member" error.
+- **Some copybook directories are refused outright**: neither searched for
+  COPY members nor readable. These are the filesystem root `/`; the home
+  directory, or any directory that contains it; any directory that contains
+  `--root`; any hidden directory (one with a `.`-named component, such as
+  `~/.ssh`); and the system directories `/etc`, `/proc`, `/sys`, `/dev`,
+  `/boot`, `/run` and `/var/run`, along with anything under them. The
+  server prints one warning on stderr per refused directory. Every program
+  with an unexpanded COPY gets an `unresolved-copybook` caveat naming the
+  refused directories and why each was refused.
+- **A library under the home directory is fine**, for example
+  `~/copylib`. It still serves members only, and a dotfile beside it is
+  outside it.
+
+Extensionless members carry a cost. In a copybook directory outside the
+root, any file without a suffix is readable. Point `copybook_path` only at
+directories that hold copybooks.
+
+The rules are the same whoever wrote the config: a `cobol.yml` in `--root`, a
+`--config FILE` anywhere, or a `ProjectConfig` passed to `Workspace` from
+Python.
 
 ## Tools
 
