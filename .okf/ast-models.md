@@ -333,6 +333,9 @@ class ConditionNameItem(ASTNode):    # level 88: name, values, false_value
 class RenamesItem(ASTNode):          # level 66: name, renames_from, renames_through
 ```
 
+`index_names` / `key_clauses` are filled whichever order the source writes
+the INDEXED BY and KEY phrases in (#542).
+
 Serialization: `index_names`, `key_clauses` and `depending_on_qualifiers` are
 serialized only when non-empty, `is_unbounded` only when True; every data
 item's `to_dict()` carries `calculated_size` (below) and `is_elementary_item`.
