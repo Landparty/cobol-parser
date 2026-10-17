@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`gen-fixtures --format csv-dir` writes the "empty input" scenario's
+  file** (#568). A CSV was written only for a fixture with rows, so the
+  zero-record READ of `--scenarios all`'s "empty input" scenario got no
+  file and `csv_path: null` in `MANIFEST.json`, exactly like the STATUS_ONLY
+  OPEN / CLOSE beside it. An IN or BIDIRECTIONAL fixture with a layout and
+  no rows now gets a header-only CSV and its `csv_path`, so a consumer binds
+  an empty dataset with no special case.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
