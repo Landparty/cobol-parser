@@ -18,6 +18,13 @@ entries, including both 2026-09-15 sections, were found there on
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
 program's own `>>DEFINE` selects one arm, as `preprocess` does since #271.
+
+## 2026-10-17 -- >>IF word-form operators and arithmetic (#512)
+
+[preprocessing.md](preprocessing.md): `_ConditionParser` maps `GREATER /
+LESS [THAN] [OR EQUAL [TO]]` and `EQUAL [TO]` to symbols and evaluates
+arithmetic operands through `_eval_define_arithmetic`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
