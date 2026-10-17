@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- recursion-check knows the program's ENTRY names (#515)
+
+[analysis/flow.md](analysis/flow.md): a CALL to an own (or enclosing)
+`ENTRY 'name'` is a self-recursive CALL risk.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

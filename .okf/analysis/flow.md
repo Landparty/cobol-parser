@@ -467,7 +467,10 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   `tests/regression/test_issue_373_recursion_check_restart_idiom.py`.
 - **Self-recursive CALL** — a CALL (static, or dynamic and resolved via
   `DynamicCallAnalyzer`, which this analyzer runs internally) whose target
-  equals the program's own `PROGRAM-ID`. `HIGH`, or `LOW` when the
+  is a name the program answers to (`_names_answered_to`: its `PROGRAM-ID`
+  plus every `ENTRY 'name'` in its own code -- a CALL to an alternate entry
+  re-enters the same load module, #515; the container check below uses the
+  same set). `HIGH`, or `LOW` when the
   `PROGRAM-ID` is declared `IS RECURSIVE` (re-entry legal; base case
   unverifiable). Only the unit's *own* statements are walked
   (`_own_statements`: `get_all_statements()` minus every node of
