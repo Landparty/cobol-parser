@@ -345,6 +345,11 @@ orchestrator). All public names import from `cobolparser.analysis.program_flow`.
   deliberately uses explicit edges only -- member hops have no
   `(source, target)` edge record and would misclassify cycles as `MIXED`.
   Pinned by `tests/unit/analysis/test_program_flow_thru_reachability.py`.
+  When the THRU end is a SECTION, `range_members` runs through that
+  section's last paragraph (`_section_last_member`), not just its header:
+  stopping at the header left the section's paragraphs out of reachability,
+  `recursion_risk`, the flowchart's `[THRU n]` and MCP `callers_of` (#577;
+  `const_fold._range_statements` already did this).
 * **Fall-through suppression reads `terminating_paragraphs` only.**
   `ProcedureScanner._scan_paragraph_statements` fills it with every paragraph
   holding a top-level terminator (`ProcedureScanner._is_terminator`, mirroring
