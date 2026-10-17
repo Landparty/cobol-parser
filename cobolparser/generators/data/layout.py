@@ -342,6 +342,10 @@ class FieldSpec:
     #: way, so a record holding exactly these bytes decodes back to the cell
     #: it was generated from (:func:`.encoding.hex_literal_cell_for`).
     literal_bytes: dict[str, bytes] = field(default_factory=dict)
+    #: Fixed character-length UTF-8 (``PIC U(n)``): the n characters a value
+    #: holds, while :attr:`size` counts the 4 x n bytes reserved for them.
+    #: ``None`` for every other field (``PIC U BYTE-LENGTH n`` included).
+    utf8_characters: int | None = None
 
     @property
     def scaling_positions(self) -> int:
@@ -372,7 +376,9 @@ class FieldSpec:
 
         :attr:`size` counts bytes for a national (``PIC N``) or DBCS
         (``PIC G`` / ``USAGE DISPLAY-1``) picture -- two per character -- so
-        a ``PIC N(2)`` value is two characters long, not four.  Every other
+        a ``PIC N(2)`` value is two characters long, not four; and for a
+        fixed character-length UTF-8 picture -- four per character -- so a
+        ``PIC U(4)`` value is four characters long, not sixteen.  Every other
         field holds :attr:`size` characters.
         """
         double_byte = self.category is FieldCategory.NATIONAL or (
@@ -386,6 +392,9 @@ class FieldSpec:
         )
         if double_byte and self.size > 1:
             return self.size // 2
+        if self.utf8_characters is not None:
+            # ``PIC U(n)``: n characters in 4 x n bytes.
+            return self.utf8_characters
         return self.size
 
     @property
@@ -1126,6 +1135,11 @@ def _flatten_into(
                     inherited_controls[0].depending_on if inherited_controls else None
                 ),
                 odo_controls=inherited_controls,
+                utf8_characters=(
+                    picture.utf8_characters
+                    if picture is not None and item.byte_length is None
+                    else None
+                ),
             )
         )
 
