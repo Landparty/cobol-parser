@@ -72,7 +72,7 @@ _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
 # Clause-list attributes holding statements that run only when the clause
 # fires. Each present body is part of what its statement *does*, so it is
-# fingerprinted (#262). The same set ``complexity.py``'s ``_CLAUSE_ATTRS``
+# fingerprinted (#262). The same set ``complexity.py``'s ``_CLAUSE_PAIRS``
 # names, re-derived here per the analysis package's convention (one walker's
 # needs never silently change another's).
 _CLAUSE_ATTRS: tuple[str, ...] = (
