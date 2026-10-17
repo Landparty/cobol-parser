@@ -213,6 +213,11 @@ special register.
 [analysis/business-rules.md](analysis/business-rules.md): GIVING form records
 `source_operands`; statement text renders BY / INTO.
 
+## 2026-10-17 -- decode: non-UTF-8 copybook is a one-line error (#496)
+
+[cli.md](cli.md): `decode` catches `UnicodeDecodeError` like `compare`.
+[tests.md](tests.md): `test_decode_cli.py`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

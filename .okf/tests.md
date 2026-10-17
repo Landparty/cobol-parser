@@ -75,7 +75,7 @@ tests/
       test_const_fold.py       # ConstantFolder: MOVE/arithmetic/COMPUTE folding, GIVING, loop/branch poisoning, DIVIDE poison, PERFORM chaining, GO TO/STOP RUN, observation points; TestStorageAliasing (#245), TestValueAtObservationPoint (#246), TestWalkBudget, TestInspectAndExecWrites (#317), TestReadKeys (#322), run enders inside an arm (#591, TestControlFlowStops)
       test_invocation_counts.py  # count_invocations (#363): status-check exemption (success-arm evaluation, #590), unknown-count bodies, EXIT PARAGRAPH, literal TIMES, fall-through + PERFORM, GO TO following
     cli/                       # 27 files: CLI subcommands
-      test_decode_cli.py       # decode: CSV/JSON/hex, --view / --list-views, gen-data -> decode round trip, paging, trailing bytes, --strict; dclgen-check subcommand and lint rule
+      test_decode_cli.py       # decode: CSV/JSON/hex, --view / --list-views, gen-data -> decode round trip, paging, trailing bytes, --strict, non-UTF-8 copybook one-line error (#496); dclgen-check subcommand and lint rule
       test_gen_fixtures_cli.py # gen-fixtures: flags, --list-boundaries, --format json|csv-dir, --strict exit codes
     test_flowchart_generator.py      # Mermaid/DOT flowcharts: label fidelity, quoting, escaping (see generators.md)
     generators/                # 14 files (3 here: bug-hunt r11, row witnesses, scenario verification; + data/)
