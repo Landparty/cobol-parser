@@ -160,6 +160,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **MCP `read_source` always includes the line asked for** (#537). Its
+  200-line cap kept the head of the window, so `line=800, before=500`
+  returned lines 300-499 and never line 800. The cap now trims context
+  only: the line and its `after` lines first, the rest of the budget from
+  `before`; `truncated` still records the cut.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

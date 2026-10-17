@@ -96,46 +96,49 @@ class CobolTools:
         path = self.workspace.resolve(file)
         before = max(0, before)
         after = max(0, after)
-        start = max(1, line - before)
-        # At most MAX_SOURCE_LINES are kept while the file streams past; the
-        # rest is only counted, so a huge file under the root costs no memory.
-        last_kept = min(line + after, start + MAX_SOURCE_LINES - 1)
-        window: list[str] = []
+        # The cap trims context, never the cited line (#537): lines are kept
+        # from at most MAX_SOURCE_LINES - 1 either side of *line* while the
+        # file streams past (the rest is only counted, so a huge file under
+        # the root costs no memory), then cut to the budget once the end of
+        # the file is known -- *line* and its ``after`` lines first, the
+        # rest of the budget from ``before``.
+        first_kept = max(1, line - min(before, MAX_SOURCE_LINES - 1))
+        last_kept = line + min(after, MAX_SOURCE_LINES - 1)
+        kept: dict[int, str] = {}
         total = 0
         try:
             # newline="" splits on \n, \r\n and \r only, as
             # split_source_lines does: never on a form feed inside a record.
             with path.open(encoding="utf-8", newline="") as handle:
                 for total, text in enumerate(handle, start=1):
-                    if start <= total <= last_kept:
-                        window.append(text.rstrip("\r\n"))
+                    if first_kept <= total <= last_kept:
+                        kept[total] = text.rstrip("\r\n")
         except UnicodeDecodeError as exc:
             raise ToolError(f"{path.name} is not valid UTF-8 text") from exc
         except OSError as exc:
             raise ToolError(f"cannot read {path.name}: {exc}") from exc
         if line < 1 or (total and line > total):
             raise ToolError(f"line {line} is outside {file} (1-{total})")
-        end = min(total, line + after)
+        requested_start = max(1, line - before)
+        requested_end = min(total, line + after)
+        end = min(requested_end, line + MAX_SOURCE_LINES - 1)
+        start = max(requested_start, end - MAX_SOURCE_LINES + 1)
         response = Response()
-        if end - start + 1 > MAX_SOURCE_LINES:
+        if requested_end - requested_start + 1 > MAX_SOURCE_LINES:
             response.truncated.append(
                 {
                     "field": "lines",
-                    "shown": MAX_SOURCE_LINES,
-                    "total": end - start + 1,
+                    "shown": end - start + 1,
+                    "total": requested_end - requested_start + 1,
                 }
             )
-            end = start + MAX_SOURCE_LINES - 1
         return response.build(
             {
                 "file": self.workspace.display(path),
                 "start_line": start,
                 "end_line": end,
                 "total_lines": total,
-                "lines": [
-                    {"line": n, "text": window[n - start]}
-                    for n in range(start, end + 1)
-                ],
+                "lines": [{"line": n, "text": kept[n]} for n in range(start, end + 1)],
             }
         )
 
