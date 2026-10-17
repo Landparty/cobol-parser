@@ -50,7 +50,11 @@ the record-relative byte offset/length `layout_offsets` computes) and
 | `console` | `SYSIN` / `SYSOUT` (or the ACCEPT's `FROM` source) | ACCEPT / DISPLAY; `ACCEPT FROM DATE` / `DAY` / `DAY-OF-WEEK` / `TIME` (with or without a format qualifier) make no port -- the runtime's clock, not data entering the program |
 
 Edge kinds: `move` (group MOVE is a byte overlay; CORRESPONDING pairs by
-name; literal reference modification narrows the range), `arith`,
+name; literal reference modification narrows the range; a non-literal
+start or length -- `REC(WS-POS:10)` -- is `_Ref.loose_window`: the operand
+reaches every field under it, every pair inexact (`_pieces` marks its
+pieces inexact, so STRING / DISPLAY / arithmetic operands too), with a
+caveat naming it, #527 -- it used to be read as `REC(1:10)`), `arith`,
 `string`, `init`, `set`, `aggregate` / `sql-expr` (SQL `SUM(...)` /
 expressions), `read`, `write`, `redefines` (two-way, including several 01
 records under one FD, and the records of every file one `I-O-CONTROL. SAME

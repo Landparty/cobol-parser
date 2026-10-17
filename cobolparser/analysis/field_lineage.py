@@ -142,6 +142,8 @@ _ASSIGN_PREFIX_TOKENS = frozenset(
 )
 
 _REFMOD_RE = re.compile(r"\(\s*(\d+)\s*:\s*(\d+)?\s*\)\s*$")
+#: Any trailing reference modifier, literal or not: ``(WS-POS:10)``.
+_ANY_REFMOD_RE = re.compile(r"\(\s*([^():]+?)\s*:\s*([^():]*?)\s*\)\s*$")
 #: One data reference: a (qualified) name, an optional subscript group and an
 #: optional reference modifier -- nothing else (no operator, no second name).
 _SINGLE_REF_RE = re.compile(
@@ -542,11 +544,15 @@ def _category(picture: Any, usage: Any) -> str:
 @dataclass(frozen=True)
 class _Ref:
     """One operand: the item, a literal reference modifier ``(start, length)``
-    (0-based) and literal subscripts, when the operand has them."""
+    (0-based) and literal subscripts, when the operand has them.
+    ``loose_window``: the reference modifier's start (or length) is a data
+    name, so the bytes it names may be anywhere in the item; ``window`` then
+    holds ``(0, length)`` when the length is a literal (#527)."""
 
     qname: str
     window: tuple[int, int | None] | None = None
     subscripts: tuple[int, ...] | None = None
+    loose_window: bool = False
 
 
 @dataclass(frozen=True)
@@ -998,10 +1004,23 @@ class FieldFlowAnalyzer:
                 names = sorted(base)
             single = _SINGLE_REF_RE.match(value)
         window = self._refmod(value) if single else None
+        loose = False
+        if single and window is None and isinstance(value, str):
+            variable = _ANY_REFMOD_RE.search(value)
+            if variable:
+                loose = True
+                length = variable.group(2)
+                window = (0, int(length)) if length.isdigit() else None
+                shown = re.sub(r"\s*([():])\s*", r"\1", " ".join(value.split()))
+                self._caveat(
+                    f"{shown}: reference modifier with a "
+                    "non-literal start or length; mapped inexactly to every "
+                    "field it can reach"
+                )
         subscripts = _constant_subscripts(value) if single else None
         for name in names:
             for qname in self._resolve(name):
-                ref = _Ref(qname, window, self._occurrence(qname, subscripts))
+                ref = _Ref(qname, window, self._occurrence(qname, subscripts), loose)
                 if ref not in out:
                     out.append(ref)
         return out
@@ -1069,14 +1088,15 @@ class FieldFlowAnalyzer:
 
     def _pieces(self, ref: _Ref) -> list[_Piece] | None:
         """Elementary fields inside the operand, relative to its start;
-        None when its offset is unknown."""
+        None when its offset is unknown. A reference modifier with a
+        non-literal start makes every piece inexact (#527)."""
         item = self._items[ref.qname]
         if not item.children:
             if ref.subscripts is not None:
                 node = self._occ_node(ref.qname, ref.subscripts)
                 if node is not None:
-                    return [_Piece(node, 0, item.length, True)]
-            exact = self._table(ref.qname) is None
+                    return [_Piece(node, 0, item.length, not ref.loose_window)]
+            exact = self._table(ref.qname) is None and not ref.loose_window
             return [_Piece(self._item_node(ref.qname), 0, item.length, exact)]
         base = self._ref_base(ref)
         if base is None:
@@ -1088,7 +1108,7 @@ class FieldFlowAnalyzer:
             if placements is None:
                 continue
             node = self._item_node(leaf.qname)
-            exact = self._table(leaf.qname) is None
+            exact = self._table(leaf.qname) is None and not ref.loose_window
             for offset, length in placements:
                 if offset + length > base and offset < end:
                     out.append(_Piece(node, offset - base, length, exact))
@@ -1224,9 +1244,11 @@ class FieldFlowAnalyzer:
         src, tgt = self._items[src_ref.qname], self._items[tgt_ref.qname]
         sources = self._pieces(src_ref)
         targets = self._pieces(tgt_ref)
+        loose = src_ref.loose_window or tgt_ref.loose_window
         if not src.children and not tgt.children and sources and targets:
             s, t = sources[0], targets[0]
-            self._edge(s.node, t.node, kind, ctx, statement, s.exact and t.exact)
+            exact = s.exact and t.exact and not loose
+            self._edge(s.node, t.node, kind, ctx, statement, exact)
             return
         if sources is None or targets is None:
             for s_leaf in self._leaves(src_ref.qname):
@@ -1249,6 +1271,32 @@ class FieldFlowAnalyzer:
             t_start = tgt_ref.window[0]
             t_len = tgt_ref.window[1] or max(t_len - t_start, 0)
         span = min(s_len, t_len)
+        if loose:
+            # A side whose window may start anywhere can reach every field
+            # under it; how it lines up with the other side is unknown, so
+            # every pair is an inexact edge (#527).
+            s_reach = (
+                sources
+                if src_ref.loose_window
+                else [
+                    p
+                    for p in sources
+                    if p.rel + p.length > s_start and p.rel < s_start + span
+                ]
+            )
+            t_reach = (
+                targets
+                if tgt_ref.loose_window
+                else [
+                    p
+                    for p in targets
+                    if p.rel + p.length > t_start and p.rel < t_start + span
+                ]
+            )
+            for s in s_reach:
+                for t in t_reach:
+                    self._edge(s.node, t.node, kind, ctx, statement, False)
+            return
         # Both sides relative to the start of the bytes actually moved.
         moved_s = [
             replace(p, rel=p.rel - s_start)
