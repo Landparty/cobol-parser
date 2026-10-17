@@ -318,6 +318,8 @@ picks the 01 a `--record` name means. Both halves of the package use it and
 must *agree*: generating from `--record CUST-REC` and decoding through
 `--record CUST-REC` must land on the same 01, or a round trip through the
 record image silently changes layout.
+The rest of `copybook.py` is generation-only (value drawing, `unique_fields`
+caveats, #526) and never reaches the decoder.
 
 ## Tests
 
