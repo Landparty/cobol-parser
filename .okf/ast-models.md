@@ -263,7 +263,12 @@ and `get_sql_statements()` / `get_cics_statements()` /
 CICS, likewise IMS. Both spellings must be accepted: parsed statements carry
 the spaced one, so testing `"EXEC-CICS"` alone answers False for every real
 CICS / EXEC DLI program. `get_statistics()["statement_count"]` counts `CobolStatement`
-instances, `EXEC_CICS` / `EXEC_IMS` included. `find_statements_using_variable(name)`
+instances, `EXEC_CICS` / `EXEC_IMS` included; `procedure_count` counts only
+PROCEDURE DIVISION sections and paragraphs (a node whose `division_name` is
+another division -- WORKING-STORAGE, LINKAGE, ... -- is not one, #508).
+`to_dict()["metadata"]["parser_version"]` is `cobolparser.__version__`, and
+there is no `created_at`: the JSON of one input is byte-identical run to run
+(`from_json` still skips a `created_at` from older output). `find_statements_using_variable(name)`
 matches a whole COBOL word, case-insensitively, outside quoted literals (not a
 substring: `WS-A` does not match `WS-AMOUNT`). `get_intrinsic_function_usages()`
 delegates to `LanguageEnvironmentAnalyzer` rather than running its own regex,

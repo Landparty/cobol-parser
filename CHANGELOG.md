@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`CobolProgram.to_dict()` metadata** (#508). `metadata.parser_version`
+  was hard-coded `"1.0.0"`; it is now the package version. The placeholder
+  `metadata.created_at` (`"2024-01-01T00:00:00Z"`) is dropped rather than made
+  real, so the JSON of one input stays byte-identical run to run. And
+  `statistics.procedure_count` counted the DATA DIVISION's WORKING-STORAGE /
+  LOCAL-STORAGE / LINKAGE / FILE sections as procedures; it now counts PROCEDURE
+  DIVISION sections and paragraphs only.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
