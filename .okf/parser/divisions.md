@@ -372,6 +372,10 @@ suite: `tests/regression/test_value_all_clause.py`.
   helper.
 
 **USAGE.**
+- `parse_usage_clause` warns `Unsupported USAGE 'X' ...` for an IDENTIFIER
+  usage word outside `_storage.KNOWN_USAGES` (#524; the word is still
+  stored), and consumes `SIGNED` / `UNSIGNED` after `BINARY-CHAR` /
+  `-SHORT` / `-LONG` / `-DOUBLE`.
 - `USAGE` consumes an optional `IS` before the usage word (`USAGE IS NATIONAL`
   / `INDEX` / `DISPLAY-1`); `DISPLAY-1` lexes as its own `TokenType`, which the
   keyword set must include.

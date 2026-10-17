@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **COBOL 2002 USAGE words are sized, unknown ones are reported** (#524).
+  `FLOAT-SHORT` / `FLOAT-LONG` / `FLOAT-EXTENDED` / `BINARY-CHAR` /
+  `-SHORT` / `-LONG` / `-DOUBLE` and typos such as `USAGE IS COMPX` were
+  stored silently and sized 0 bytes by `data-items` but 9 by `gen-data`, so
+  the record length and every later offset disagreed. The COBOL 2002 words
+  now get their real sizes (4 / 8 / 16 / 1 / 2 / 4 / 8) in both paths
+  (`FLOAT-SHORT` / `FLOAT-LONG` encode as `COMP-1` / `COMP-2`; the others
+  are written as zeros with a caveat). Any other word gets a parse warning,
+  a `data-items` `unresolved` line with `offset_ambiguous` offsets, and a
+  `gen-data` caveat.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

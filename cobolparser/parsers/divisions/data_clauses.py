@@ -23,6 +23,7 @@ from typing import Any
 
 from cobolparser._accel import accelerators_enabled
 from cobolparser._literals import quote_literal
+from cobolparser._storage import FIXED_SIZE_USAGES, is_known_usage
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
@@ -1343,6 +1344,18 @@ class DataItemClauseParser:
                 f"period was assumed before '{header}'{where}"
             )
 
+    def _warn_unknown_usage(self, token: Any, usage: str) -> None:
+        """Record that *usage* is not a USAGE this parser can size."""
+        line = getattr(getattr(token, "location", None), "line", None)
+        where = f" at line {line}" if line else ""
+        host = getattr(self._parser, "host", None)
+        add_warning = getattr(host, "add_warning", None)
+        if callable(add_warning):
+            add_warning(
+                f"Unsupported USAGE '{usage}'{where}: its storage size is "
+                "unknown, so record offsets from this item on are unreliable"
+            )
+
     def _warn_dropped_data_token(self, token: Any, data_item: Any) -> None:
         """Record a warning for an unrecognized data-item clause token."""
         if token is None or token.type in _WHITESPACE_TOKEN_TYPES:
@@ -1841,6 +1854,20 @@ class DataItemClauseParser:
         if token.type == TokenType.IDENTIFIER:
             usage = token.value.upper()
             token_stream.consume()
+            if usage in FIXED_SIZE_USAGES and usage.startswith("BINARY-"):
+                # ``BINARY-LONG [SIGNED|UNSIGNED]``: the sign does not
+                # change the width.
+                self._skip_newlines(token_stream)
+                nxt = token_stream.peek()
+                if nxt is not None and (nxt.value or "").upper() in (
+                    "SIGNED",
+                    "UNSIGNED",
+                ):
+                    token_stream.consume()
+            elif not is_known_usage(usage):
+                # A word nothing here can size (``USAGE IS COMPX``, a vendor
+                # extension): say so instead of storing it silently (#524).
+                self._warn_unknown_usage(token, usage)
             return usage
 
         # Check for COMP variations that are tokenized differently

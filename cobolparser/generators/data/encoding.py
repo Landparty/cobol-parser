@@ -64,11 +64,13 @@ from .layout import (
 from .storage import (
     BINARY_NATIVE_USAGES,
     BINARY_USAGES,
+    FIXED_SIZE_USAGES,
     FLOAT_USAGES,
     PACKED_USAGES,
     POINTER_USAGES,
     SINGLE_FLOAT_USAGES,
     binary_byte_length,
+    is_known_usage,
 )
 
 
@@ -573,6 +575,11 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
     if filled is not None:
         return filled
 
+    if usage in FIXED_SIZE_USAGES or not is_known_usage(usage):
+        # COBOL 2002 FLOAT-EXTENDED / BINARY-CHAR..DOUBLE (sized exactly,
+        # bytes not modelled) or a USAGE word nothing here knows: zeros of
+        # the field's width, named in ``encoding_caveats`` (#524).
+        return bytes(width)
     if usage == "INDEX" or usage in POINTER_USAGES:
         # Neither is file data: an index is a compiler-managed occurrence
         # number and a pointer is an address, both meaningless in a record
@@ -849,6 +856,31 @@ def encoding_caveats(
             "SYNCHRONIZED alignment is not modelled -- these items may sit at "
             "a higher offset under a real compiler, shifting everything after "
             f"them: {', '.join(synchronized)}"
+        )
+    unmodelled = sorted(
+        {
+            f"{spec.qualified_name} ({_normalized_usage(spec)})"
+            for spec in specs
+            if _normalized_usage(spec) in FIXED_SIZE_USAGES
+        }
+    )
+    if unmodelled:
+        caveats.append(
+            "these USAGEs are sized but their bytes are not modelled; written "
+            f"as binary zeros: {', '.join(unmodelled)}"
+        )
+    unknown = sorted(
+        {
+            f"{spec.qualified_name} ({_normalized_usage(spec)})"
+            for spec in specs
+            if not is_known_usage(spec.usage)
+        }
+    )
+    if unknown:
+        caveats.append(
+            "unsupported USAGE: the field's byte length is unknown, so it and "
+            "every later offset in the record may be wrong (written as binary "
+            f"zeros): {', '.join(unknown)}"
         )
     floats = sorted(
         {

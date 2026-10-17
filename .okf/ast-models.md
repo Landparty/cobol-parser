@@ -490,7 +490,13 @@ the usage sets (`PACKED_USAGES`, `BINARY_FIXED_USAGES`, `BINARY_NATIVE_USAGES`,
 `FLOAT_USAGES`, `POINTER_USAGES`, `PICTURELESS_USAGES`) and the fixed widths
 (`INDEX_BYTES` 4, `POINTER_BYTES` 4 for `POINTER` / `POINTER-32` /
 `FUNCTION-POINTER` / `OBJECT REFERENCE`, `PROCEDURE_POINTER_BYTES` 8 — IBM:
-two words, `POINTER_64_BYTES` 8).
+two words, `POINTER_64_BYTES` 8). COBOL 2002 words (#524): `FLOAT-SHORT` /
+`FLOAT-LONG` are in the single / double float sets; `FIXED_SIZE_USAGES` sizes
+`FLOAT-EXTENDED` 16, `BINARY-CHAR` 1, `BINARY-SHORT` 2, `BINARY-LONG` 4,
+`BINARY-DOUBLE` 8. `KNOWN_USAGES` / `is_known_usage()` name every USAGE
+word the package can size; any other word is warned about by the parser and
+reported by the layout paths (an unknown word still falls through to the
+DISPLAY/PICTURE arithmetic).
 
 Never give `calculate_size()` its own copy of the byte arithmetic: a private
 copy drifts (usage spellings such as `BINARY` / `COMPUTATIONAL-3` missed,
