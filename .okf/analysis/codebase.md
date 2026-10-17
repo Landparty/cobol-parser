@@ -369,7 +369,7 @@ both strings as coded. A VALUE is still compared as written (`+12` vs `12`,
 
 Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
 IF, EVALUATE, SEARCH, OPEN, EXEC SQL, EXEC CICS, COMPUTE,
-INSPECT, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
+INSPECT, STRING, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
 operands, its rendered text *and* its own `to_dict()` fields** (locations and
 nested statement bodies stripped — those are compared on their own), so an
 unmodelled edit over-reports rather than reading as unchanged. The rendered
@@ -385,7 +385,9 @@ The dedicated signatures carry the markers a value alone hides (#316): CALL
 includes `is_dynamic` (`CALL 'X'` → `CALL X` is a `call-target-changed`, and
 the detail text quotes a static target), and UNSTRING includes
 `delimiter_all` (`DELIMITED BY ALL ','`) with a detail text spelling out
-source, delimiters and INTO targets. (WHEN selectors carry theirs via
+source, delimiters and INTO targets. STRING compares `groups` (which sources
+each `DELIMITED BY` applies to, #576) and its detail text spells them out, so
+moving a source between delimiter groups is a `statement-changed`. (WHEN selectors carry theirs via
 `_selector_text`'s `FIG:` / `ID:` / quoted renderings, #313.)
 
 Determinism: the same pair always produces byte-identical `to_dict()` — changes
