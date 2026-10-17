@@ -106,7 +106,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `ims-dli` | `file` | — | A (no profiling) | `IMSSegmentAnalyzer` |
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
-| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (`utf-8`) | A without `--program`/`--define` | `scan_version` report |
+| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (`utf-8`) | A without `--program` | `scan_version` report |
 | `lint` | `file` | `--rule RULE`... (all), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text}` (json) | A (`--program` default: every unit); +prof | findings; exit 3 on `--fail-on` |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
@@ -117,7 +117,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `sql-cics-check` | `file` | — | A; +prof | `SqlCicsReport` |
 | `business-rules` | `file` | `--format {json,text}` (json), `--include-technical` | A; +prof | `BusinessRuleReport` |
 | `lineage` | `file` | `--field NAME`, `--direction {forward,backward}` (forward), `--format {json,text}` (json) | A (no profiling) | `FieldFlowReport` |
-| `field-impact` | `[FIELD] PATH ...` | `--program NAME` (every program with that field), `--table T.C`, `--dataset DSN`, `--direction` (forward), `--depth N` (unlimited), `--jcl PATH`..., `--proc-path DIR`, `--bindings FILE.json`, `--key-relationships`, `--workers N`, `--format {json,text}` (json) | `--compact`, `--copybook-path`, `-o`, dl | `ImpactResult`; exit 1 when the start matches nothing |
+| `field-impact` | `[FIELD] PATH ...` | `--program NAME` (every program with that field), `--table T.C`, `--dataset DSN`, `--direction` (forward), `--depth N` (unlimited), `--jcl PATH`..., `--proc-path DIR`, `--bindings FILE.json`, `--key-relationships`, `--workers N`, `--format {json,text}` (json) | `--compact`, `--copybook-path`, `--source-format`, `--define`, `-o`, dl | `ImpactResult`; exit 1 when the start matches nothing |
 | `jcl` | `file` | `--dd-map`, `--bindings`, `--program NAME`, `--proc-path DIR`..., `--strict` | `--compact`, `-o` | job JSON; needs `[jcl]` extra; exit 3 on `--strict` |
 | `le-info` | `[name ...]` | `--kind {service,function,all}` (all) | `--compact`, `-o` | LE / intrinsic signature catalogue |
 | `config` | — | `--json` | `--compact`, `-o` | effective `cobol.yml` |
@@ -227,8 +227,20 @@ stated" stays distinct from "equals the default"):
   `charset`, `endian`, `record_format`, `record_separator`, `rows`, `rules`,
   `min_severity`, `fail_on`. `extensions`/`rules` are argparse *dests*, not
   the `--extension`/`--rule` spellings — getting that wrong silently binds
-  nothing. A subcommand without the dest silently ignores the key, which is
-  why every subcommand that parses COBOL has `--debug-lines`.
+  nothing. A subcommand without the dest skips the key; for the keys that
+  change *which program* is parsed (`project.define`, a non-`auto`
+  `source_format`, a true `debug_lines`) `unapplied_parse_settings()` names
+  each one it skipped and `main()` prints `warning: <file> sets
+  project.define, but `batch` has no flag for it and parses without it` on
+  stderr (#324). It returns nothing for a subcommand with none of `define` /
+  `source_format` / `debug_lines` / `copybook_path` (`config`, `le-info`,
+  `jcl`, `mcp`), and nothing for `dialect`, which has one value. For
+  `gen-data` / `decode` / `compare` / `expand` (`_SOURCE_FORMAT_NOT_WARNED`)
+  it leaves out `source_format`, which auto-detection settles for a
+  copybook; their `define` warning stays. Every
+  subcommand that parses COBOL has `--debug-lines`; `batch`, `gen-fixtures`,
+  `codebase-graph`, `copybook-impact`, `gen-data`, `decode`, `compare`,
+  `tokenize` and `expand` still lack `--define` and/or `--source-format`.
 * **`--free-form`** passed by the user suppresses filling `source_format`:
   `_source_format_kwargs()` reads `--source-format` first, so a config value
   would override the layout stated on the command line.
@@ -304,7 +316,9 @@ then `parse_cobol`. Conditional-compilation diagnostics (unknown `>>IF`
 conditions, stray `>>ELSE`/`>>END-IF`, malformed `>>DEFINE`, unclosed `>>IF`)
 are printed as `warning:` lines on stderr — by `preprocess`, and by `parse` /
 analyzers given `--define` without `--copybook-path` — so deleted guarded
-blocks are never silent. With `--copybook-path` the expander runs that pass
+blocks are never silent. `scan` and `field-impact` take `--define` too
+(`ScanOptions.defined_symbols`, same two paths inside the worker; the
+directive warnings land in each unit's parse warnings) (#324). With `--copybook-path` the expander runs that pass
 and `expand` reports them in `statistics.warnings`.
 
 ### Source layout (`--source-format`)
@@ -313,9 +327,10 @@ and `expand` reports them in `statistics.warnings`.
 `--free-form`; `cobol.yml` `project.source_format`) is taken by `parse`,
 `tokenize`, `preprocess`, every `_build_analyzer_parser` subcommand, and the
 hand-built `unused-variables`, `program-flow`, `redundancy`, `scan`, `lint`,
-`business-rules`, `lineage`, `diff`. `batch`, `expand`, `gen-fixtures`,
-`codebase-graph`, `copybook-impact` and `field-impact` always auto-detect
-(their APIs expose no layout override).
+`business-rules`, `lineage`, `diff`, `field-impact`. `batch`, `expand`,
+`gen-fixtures`, `codebase-graph` and `copybook-impact` always auto-detect
+(their APIs expose no layout override; a config value is warned about, see
+Bound dests).
 
 | Value | Behaviour |
 |-------|-----------|

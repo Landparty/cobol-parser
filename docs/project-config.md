@@ -119,6 +119,18 @@ define: ["DEBUG=TRUE", "TRACE"]
 In the mapping shape each value is a single string, number or `true`/`false`
 (or empty); a list or mapping as a symbol's value is an error.
 
+A key fills a command's flag only when the command has that flag. A few
+commands still have no `--define` or `--source-format` (`batch`,
+`gen-fixtures`, `codebase-graph`, `copybook-impact`, `gen-data`, `decode`,
+`compare`; `tokenize` has no `--define`, `expand` no `--source-format`).
+When the config sets `define`, a non-`auto` `source_format` or `debug_lines:
+true` and the command cannot apply it, the command prints a `warning:` on
+stderr naming the key rather than quietly parsing a different program.
+`gen-data`, `decode`, `compare` and `expand` do not warn about
+`source_format`: they read copybooks, where auto-detection settles the
+format, so the warning would fire on every run for nothing. They still warn
+about `define`, which can change a record layout.
+
 ### `data:` — record layout and encoding
 
 Defaults for the record-data subcommands. An EBCDIC shop states these once

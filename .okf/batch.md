@@ -199,6 +199,7 @@ arguments, so a worker signature cannot drift from its call site):
 | `free_form` | `False` | lexer hint (auto-detection may still normalize) |
 | `preprocess_fixed` | `None` | `None` auto-detects, `True`/`False` force/disable fixed-format normalization (CLI `--source-format fixed\|free`, cobol.yml `source_format:`) |
 | `debug_lines` | `False` | compile `D`-in-column-7 lines (CLI `--debug-lines`, cobol.yml `project.debug_lines`) |
+| `defined_symbols` | `()` | conditional-compilation `(name, value)` pairs (CLI `--define`, cobol.yml `project.define`): handed to the expander with copybook paths, else evaluated by `preprocess_conditional_compilation` before `parse_cobol` (#324) |
 
 ### Report shape
 
