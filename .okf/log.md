@@ -336,6 +336,11 @@ new `unused_variables.inherited_data_records`; xref defines inherited GLOBAL
 records and folds contained references into the outer unit; lineage indexes
 them; MoveTypeChecker stays inside its own unit plus inherited GLOBALs.
 
+## 2026-10-17 -- diff reports reordered data items (#545)
+
+[analysis/codebase.md](analysis/codebase.md): `ProgramDiffer` compares the
+order of each group's subordinates (`data-item-moved`, with byte offsets).
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

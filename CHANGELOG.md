@@ -602,6 +602,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the outer's. All now scope by the same rule: the unit's own data plus
   every enclosing program's GLOBAL records, nearer names hiding farther
   ones.
+* **`diff` no longer reports "No structural changes" when a record's fields
+  are reordered** (#545). Swapping two fields moves every byte offset after
+  them -- a breaking change to a file, CALL interface or host structure --
+  but only each item's own attributes were compared. A subordinate item
+  whose position in its group changed is now a `data-item-moved` change,
+  with its position and byte offset before and after; as for procedures,
+  an inserted or removed field moves nothing else.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
