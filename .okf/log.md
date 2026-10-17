@@ -168,6 +168,11 @@ both read it, xref recording each at its entry.
 line (option (b)); line-count invariant and source-map table updated.
 [tests.md](tests.md): `test_expansion_source_map_and_comments.py`.
 
+## 2026-10-17 -- gen-data --unique on narrow text fields (#526)
+
+[generators/record-data.md](generators/record-data.md): the unique fallback
+counter keeps its digits and skips used values; gaps become caveats.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
