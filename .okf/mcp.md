@@ -179,7 +179,7 @@ then a count), with the root cut from library notes (`_relative`).
 |---|---|---|
 | `programs` | program-level `callers_of`, `impact_of_change`, `codebase_overview` | `UnitFacts` per unit (id, file, depth, `unit_kind`, `graph_id` (the graph's id, `OUTER/INNER` for a nested unit), `entries`, `_calls` rows with on-disk sites); the `CodebaseGraph` from `CodebaseGraphBuilder.build_from_results()` fed the same parses (no second parse); `copy_sites` |
 | `lineage` | field-mode `impact_of_change`, `where_from` | every unit's `FieldFlowAnalyzer` report (after `apply_source_map`) in one `LineageGraph`; JCL under the root (`.jcl`/`.job`) through `load_jobs` when jcl-parser imports (the steps `bindings_from_jobs` could not read become the graph's `join_caveats`), else `jcl_note`; `edge_files` |
-| `health` | `codebase_overview` | grade/score per unit (`TechnicalDebtAnalyzer` sharing the memoized flow and redundancy reports); `cross_file_clone_groups` over a hand-built `ScanReport`, members placed on disk |
+| `health` | `codebase_overview` | grade/score per unit (`TechnicalDebtAnalyzer` sharing the memoized flow and redundancy reports); `cross_file_clone_groups` over a hand-built `ScanReport` (fingerprints stamped with `origin` and, as `scan` does, `body_origin`, #470), members placed on disk |
 
 Lineage locations: a `LineageGraph` hop carries its edge's origin line and,
 when the report was source-mapped, its origin file (`Hop.origin_file`, from
