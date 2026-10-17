@@ -839,7 +839,13 @@ class UnusedVariableAnalyzer:
           identifier-1 and identifier-2 with the same data-name");
         * ``XML GENERATE doc FROM group`` / ``JSON GENERATE doc FROM group``
           emit one element per subordinate, by name; ``XML PARSE`` /
-          ``JSON PARSE doc INTO group`` store into each subordinate by name.
+          ``JSON PARSE doc INTO group`` store into each subordinate by name;
+        * EXEC SQL host variables and null indicators (#531): DB2 reads or
+          writes a host structure one column per elementary field, and a
+          VARCHAR group through both 49-level parts -- removing one breaks
+          the precompile or shifts the column mapping. Includes the EXEC
+          SQL of the program's own DATA DIVISION (a DECLARE CURSOR in
+          WORKING-STORAGE), which no PROCEDURE DIVISION walk reaches.
 
         ``MOVE SPACES TO group`` deliberately stays a plain group reference:
         its fields really are never individually referenced.
@@ -849,6 +855,26 @@ class UnusedVariableAnalyzer:
             if isinstance(stmt, XmlJsonStatement):
                 for operand in (stmt.from_item, stmt.into_item):
                     names |= _extract_identifiers(operand)
+        names |= UnusedVariableAnalyzer._sql_host_variable_names(ast)
+        return names
+
+    @staticmethod
+    def _sql_host_variable_names(ast: CobolProgram) -> set[str]:
+        """Every EXEC SQL host variable and null indicator of *ast*'s own
+        PROCEDURE and DATA DIVISION statements."""
+        statements: list[Any] = list(UnusedVariableAnalyzer._own_statements(ast))
+        data_div = ast.get_division("DATA")
+        if data_div is not None:
+            statements += [
+                node
+                for node in data_div.traverse_depth_first()
+                if hasattr(node, "host_variables")
+            ]
+        names: set[str] = set()
+        for stmt in statements:
+            for attr in ("host_variables", "null_indicators"):
+                for value in getattr(stmt, attr, None) or []:
+                    names |= _extract_identifiers(value)
         return names
 
     @staticmethod

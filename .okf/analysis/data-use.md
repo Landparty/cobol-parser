@@ -220,7 +220,12 @@ TIMES` (`times_count`), `WRITE ... AFTER ADVANCING WS-N LINES`
 (`advancing_clause["value"]`), `INITIALIZE ... REPLACING ... BY WS-ZERO`
 (`replacing_clauses[].by_value`, via `_DICT_LIST_EXTRAS`), `XML GENERATE doc
 FROM group` / `JSON PARSE doc INTO group` (every subordinate, by name, through
-`_whole_group_references`, which also folds in the CALL USING marking), and
+`_whole_group_references`, which also folds in the CALL USING marking), EXEC
+SQL host variables and null indicators (`_sql_host_variable_names`, #531: DB2
+reads/writes a host structure one column per field and a VARCHAR group
+through both 49-levels, so the whole subtree is used; the program's own DATA
+DIVISION EXEC SQL, e.g. a WORKING-STORAGE DECLARE CURSOR, is read too, #378.
+Pinned by `tests/regression/test_sql_host_structure_unused_issue_531.py`), and
 `MOVE / ADD / SUBTRACT CORRESPONDING A TO B` (`_corresponding_pairs` +
 `_mark_corresponding_used`: only the same-named subordinates of the two groups;
 the others keep their own standing). An INITIALIZE target's fields stay
@@ -295,7 +300,8 @@ is in `_OO_DATA_OWNERS` every item is matched against
 `_nested_referenced_names(ast)` too; instance data only methods touch is not
 reported unused. Factory and object scopes stay separate: an OBJECT method's
 reference does not use a FACTORY item of the same name. The whole-group rules
-(`_whole_group_references`: CALL USING, XML/JSON GENERATE/PARSE) and
+(`_whole_group_references`: CALL USING, XML/JSON GENERATE/PARSE, SQL host
+variables) and
 `_corresponding_pairs` read the methods' statements too
 (`_all_contained_units`), since the FACTORY/OBJECT unit has none of its own.
 Known gap, shared with the GLOBAL path: a method-local item that shadows an
