@@ -270,6 +270,13 @@ table `PROD.CUST` (CRUD matrix, lineage, MCP).
 cursor and SQL passes, so a WORKING-STORAGE `DECLARE CURSOR` table is
 listed (R, with the cursor) and MCP `sql_tables` shows it.
 
+## 2026-10-17 -- CRUD matrix: EXEC CICS file control (#538)
+
+[analysis/data-use.md](analysis/data-use.md), [mcp.md](mcp.md), [tests.md](tests.md):
+`CRUDMatrixGenerator` marks files from EXEC CICS READ/WRITE/REWRITE/DELETE/
+browse `FILE(...)`; a data-item file name lands in new `CRUDMatrix.caveats`,
+which `program_brief` reports.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

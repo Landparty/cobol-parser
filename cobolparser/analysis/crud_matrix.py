@@ -4,6 +4,8 @@ CRUD Matrix Generator for COBOL programs.
 For each program × file/table, marks C/R/U/D based on:
 - OPEN mode + READ/WRITE/REWRITE/DELETE for VSAM/sequential files
 - EXEC SQL verbs (SELECT/INSERT/UPDATE/DELETE/FETCH) for DB2 tables
+- EXEC CICS file control (READ/WRITE/REWRITE/DELETE/STARTBR/READNEXT/
+  READPREV FILE(...) | DATASET(...)) for the files a CICS program reaches
 
 Standard deliverable in mainframe modernization engagements.
 """
@@ -35,6 +37,7 @@ from ..models.statements.misc import (
     ReturnStatement,
     SortStatement,
 )
+from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 from ._files import record_to_file_map, resolve_file_name
 
 
@@ -123,6 +126,10 @@ class CRUDMatrix:
     program_name: str | None
     file_entries: list[FileEntry] = field(default_factory=list)
     table_entries: list[TableEntry] = field(default_factory=list)
+    #: Accesses the matrix could not attribute to a resource (an EXEC CICS
+    #: file command naming its file through a data item), so an absent row
+    #: is never mistaken for an untouched file.
+    caveats: list[str] = field(default_factory=list)
 
     @property
     def entries(self) -> list[FileEntry | TableEntry]:
@@ -143,6 +150,7 @@ class CRUDMatrix:
             "program_name": self.program_name,
             "files": [e.to_dict() for e in self.file_entries],
             "tables": [e.to_dict() for e in self.table_entries],
+            "caveats": list(self.caveats),
             "summary": {
                 "total_files": len(self.file_entries),
                 "total_tables": len(self.table_entries),
@@ -214,6 +222,17 @@ _WRITE_SQL_TYPES = frozenset(
         SQLStatementType.MERGE,
     }
 )
+#: EXEC CICS file-control commands and the access each one makes. A browse
+#: (STARTBR/READNEXT/READPREV) reads; RESETBR/ENDBR/UNLOCK touch no record.
+_CICS_FILE_ACCESS = {
+    "READ": "read",
+    "READNEXT": "read",
+    "READPREV": "read",
+    "STARTBR": "read",
+    "WRITE": "create",
+    "REWRITE": "update",
+    "DELETE": "delete",
+}
 #: ``WHEN [NOT] MATCHED [AND ...] THEN INSERT|UPDATE|DELETE`` in a MERGE.
 _MERGE_ACTION_RE = re.compile(r"\bTHEN\s+(INSERT|UPDATE|DELETE)\b")
 
@@ -253,6 +272,12 @@ class CRUDMatrixGenerator:
         - U (Update)  <- UPDATE
         - D (Delete)  <- DELETE, TRUNCATE [TABLE]
         - MERGE marks its target with the actions its WHEN clauses take
+
+    EXEC CICS file control (``FILE(name)`` or the older ``DATASET(name)``):
+        - C <- WRITE, R <- READ / READNEXT / READPREV / STARTBR,
+          U <- REWRITE, D <- DELETE
+        A file named through a data item (``FILE(WS-FNAME)``) cannot be
+        attributed; it is reported in ``CRUDMatrix.caveats`` instead.
 
     Example:
         ```python
@@ -316,11 +341,13 @@ class CRUDMatrixGenerator:
         # Fifth pass: mark CRUD operations
         self._mark_file_crud(all_statements)
         self._mark_sql_crud(sql_statements)
+        caveats = self._mark_cics_file_crud(all_statements)
 
         return CRUDMatrix(
             program_name=self._program_name,
             file_entries=list(self._file_entries.values()),
             table_entries=list(self._table_entries.values()),
+            caveats=caveats,
         )
 
     # ------------------------------------------------------------------
@@ -474,6 +501,38 @@ class CRUDMatrixGenerator:
     # ------------------------------------------------------------------
     # SQL CRUD marking
     # ------------------------------------------------------------------
+
+    def _mark_cics_file_crud(self, statements: list) -> list[str]:
+        """Mark C/R/U/D for EXEC CICS file control; return the caveats.
+
+        Every CICS program reaches its VSAM data this way, so skipping these
+        left such a program with no file rows at all (#538). Organization and
+        access mode stay unknown: they live in the CICS file definition, not
+        in the program.
+        """
+        caveats: list[str] = []
+        for stmt in statements:
+            if not isinstance(stmt, ExecCicsStatement):
+                continue
+            flag = _CICS_FILE_ACCESS.get(stmt.cics_command.upper())
+            if flag is None:
+                continue
+            option = next((o for o in ("FILE", "DATASET") if o in stmt.options), None)
+            if option is None:
+                # ``WRITE OPERATOR`` / ``WRITE JOURNALNAME`` etc.: no file.
+                continue
+            name = stmt.options.get(option)
+            if not name or option not in stmt.literal_options:
+                line = stmt.location.line if stmt.location else "?"
+                caveats.append(
+                    f"EXEC CICS {stmt.cics_command.upper()} at line {line} "
+                    f"names its file through a data item ({option}({name or ''}))"
+                    f"; which file it {flag}s is not in the CRUD matrix"
+                )
+                continue
+            entry = self._get_or_create_file_entry(name.upper())
+            setattr(entry.crud, flag, True)
+        return caveats
 
     def _mark_sql_crud(self, statements: list) -> None:
         """Mark C/R/U/D for SQL table operations."""

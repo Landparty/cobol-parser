@@ -509,6 +509,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now listed `-R--` with the cursor name, and a `FOR UPDATE` cursor used
   with `WHERE CURRENT OF` gives `-RU-`, the same as a PROCEDURE DIVISION
   DECLARE.
+* **The CRUD matrix and MCP `program_brief` see EXEC CICS file control**
+  (#538). A CICS program reaching its VSAM files through `EXEC CICS READ /
+  WRITE / REWRITE / DELETE / STARTBR / READNEXT / READPREV FILE(...)` (or
+  `DATASET(...)`) had no file rows, and `program_brief` answered `files: []`
+  with no caveat. Each such file now gets a row (R for the reads and
+  browses, C for WRITE, U for REWRITE, D for DELETE; the sample
+  `CICSLINK.cbl` shows `CUSTMST` as `-RU-`). A file named through a data
+  item (`FILE(WS-FNAME)`) is reported in the new `CRUDMatrix.caveats` (and
+  as an `incomplete-analysis` caveat in `program_brief`) instead of being
+  dropped.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
