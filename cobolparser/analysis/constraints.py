@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 
-from .._literals import unquote_literal
+from .._literals import is_quoted_literal, typed_literal_content, unquote_literal
 from ..generators.data.layout import all_literal_operand, condition_values_exhaustive
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
@@ -1416,6 +1416,11 @@ def _figurative_name(text: str) -> str | None:
 def _strip_quotes(text: str) -> str:
     # Delimiters off and doubled delimiters collapsed: `IF X = '"'` reaches
     # here as `""""` (see `quote_literal`) and means the one character `"`.
+    # A typed literal stands for its decoded characters: `X'0000'` is two
+    # bytes, `X'C1'` one (#331).
+    typed = typed_literal_content(text)
+    if typed is not None:
+        return typed
     return unquote_literal(text)
 
 
@@ -1471,6 +1476,9 @@ def _is_literal_operand(text: str, *, quoted: bool = True) -> bool:
     """
     t = text.strip()
     if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'":
+        return True
+    if is_quoted_literal(t):
+        # A typed literal: `X'00'`, `Z'AB'` (#331).
         return True
     if _NUMERIC_LITERAL_RE.match(t):
         return True

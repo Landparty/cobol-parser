@@ -72,7 +72,10 @@ arm.
 - **Single-token selectors say what they were** (#313): a one-token `Literal`
   carries `"identifier": True`, `"figurative": True` (`WHEN SPACES`) or
   `"quoted": True` (`WHEN 'SPACES'`); a `Range` carries `"start_quoted"` /
-  `"end_quoted"` when that bound is one STRING_LITERAL (#391). Additive markers;
+  `"end_quoted"` when that bound is one STRING_LITERAL (#391). A typed literal
+  (`WHEN X'00'`, #331) keeps its source spelling as `value` / bound, prefix and
+  quotes included, and carries `"typed": True` instead of `"quoted"` (no
+  `start_quoted` / `end_quoted` on a typed bound). Additive markers;
   `type` stays `"Literal"` / `"Range"`. Pinned by
   `tests/regression/test_evaluate_figurative_when.py`,
   `tests/unit/test_evaluate_variants.py::TestRangeQuotedMarkers`.
