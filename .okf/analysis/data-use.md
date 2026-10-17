@@ -662,7 +662,8 @@ states. Pinned by `tests/unit/analysis/test_io_sequence_branches.py`.
 the mode from `IOOpenStatement.file_modes` (`open:` when unknown). READ /
 START need INPUT or I-O (else status 47, `READ_WRONG_MODE` /
 `START_WRONG_MODE`); WRITE needs OUTPUT, EXTEND or -- on a non-sequential
-SELECT `ORGANIZATION` -- I-O (48, `WRITE_WRONG_MODE`); REWRITE / DELETE need
+SELECT `ORGANIZATION`, or a file whose SELECT is not in the AST (an
+unexpanded COPY member) -- I-O (48, `WRITE_WRONG_MODE`); REWRITE / DELETE need
 I-O (49). `CLOSE f WITH LOCK` leaves `f` `locked`; an OPEN of a file locked
 on every path is `OPEN_AFTER_LOCK` (38) and leaves it closed, so no
 FILE_LEFT_OPEN follows. Like every other kind, a mode error needs every

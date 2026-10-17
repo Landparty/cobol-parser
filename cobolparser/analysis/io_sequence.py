@@ -322,8 +322,11 @@ class IOSequenceAnalyzer:
         # and REWRITE name a record, never a file, so without this map they
         # could never be checked against the open-file set at all.
         self._record_to_file: dict[str, str] = {}
-        # SELECT file name -> ORGANIZATION (upper-cased; absent means the
-        # default, SEQUENTIAL). Only WRITE under I-O depends on it.
+        # SELECT file name -> ORGANIZATION (upper-cased; a SELECT without
+        # the clause is the default, SEQUENTIAL). Only WRITE under I-O
+        # depends on it. A file whose SELECT is not in the AST (one in a
+        # COPY member that was not expanded) is absent: its organization is
+        # unknown, so its WRITE under I-O is not judged.
         self._organization: dict[str, str] = {}
 
     def analyze(self, ast: CobolProgram) -> IOSequenceReport:
@@ -1055,7 +1058,10 @@ class IOSequenceAnalyzer:
             return
         allowed, kind, status = rule
         if verb == "WRITE" and (
-            self._organization.get(key, "SEQUENTIAL") in _SEQUENTIAL_ORGANIZATIONS
+            # No SELECT in sight: I-O may be an indexed / relative file's
+            # legal WRITE mode, so it is not refused.
+            self._organization.get(key, "")
+            in _SEQUENTIAL_ORGANIZATIONS
         ):
             # A sequential file open I-O can be READ and REWRITten, never
             # written to: WRITE needs OUTPUT or EXTEND.

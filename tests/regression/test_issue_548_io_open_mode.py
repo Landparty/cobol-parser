@@ -113,6 +113,19 @@ def test_write_under_io_depends_on_organization():
     assert _violations(indexed) == []
 
 
+def test_write_under_io_with_no_select_in_sight_is_not_judged():
+    # The SELECT lives in a COPY member that was not expanded: the file may
+    # be indexed, where WRITE under I-O is legal, so no error is claimed.
+    source = _program(
+        "    OPEN I-O F2",
+        "    WRITE R2",
+        "    CLOSE F2",
+        "    STOP RUN.",
+        selects=("    COPY FSELECTS.",),
+    )
+    assert _violations(source) == []
+
+
 def test_delete_and_start_on_input_or_output():
     source = _program(
         "    OPEN INPUT F2",
