@@ -27,7 +27,10 @@ Utility steps understood:
 A concatenated DD (a DD statement with a blank name after a named one) is
 part of the DD before it: every dataset of ``//SORTIN DD DSN=A`` /
 ``//  DD DSN=B`` is an input. ``DD DUMMY`` and ``DSN=NULLFILE`` bind nothing.
-A ``DSN=*.STEP.DD`` referback is replaced by the dataset it names.
+A ``DSN=*.STEP.DD`` referback is replaced by the dataset it names, including
+one into or inside a PROC (``*.INVOKE.PROCSTEP.DD``, or ``*.PROCSTEP.DD``
+from another step of the same PROC); one that names no earlier DD binds
+nothing and is a caveat.
 Quoted literals in utility control statements (``INCLUDE COND=(...,
 C'BUILD')``) are blanked before keywords are looked for.
 - IKJEFT01 / IKJEFT1A / IKJEFT1B: the program named by ``RUN PROGRAM(x)``
@@ -173,9 +176,16 @@ def _sum_ranges(control: str) -> tuple[tuple[int, int], ...]:
 
 def bindings_from_jobs(
     jobs: Iterable[Any],
+    caveats: list[str] | None = None,
 ) -> tuple[list[DatasetBinding], list[Passthrough]]:
     """DD -> dataset bindings per program, and utility pass-throughs, for
-    every step of every (already PROC-expanded) jcl-parser ``Job``."""
+    every step of every (already PROC-expanded) jcl-parser ``Job``.
+
+    ``caveats``, when given, receives one line per step whose flow could not
+    be read (pass them on as ``LineageGraph(join_caveats=...)``), so a step
+    left out is never mistaken for a step that moves nothing.
+    """
+    notes: list[str] = caveats if caveats is not None else []
     bindings: list[DatasetBinding] = []
     passthroughs: list[Passthrough] = []
     for job in jobs:
@@ -185,7 +195,11 @@ def bindings_from_jobs(
             program = (getattr(step, "program", None) or "").upper()
             step_name = (getattr(step, "name", None) or "").upper() or None
             dds = _resolve_referbacks(
-                list(getattr(step, "dd_statements", None) or []), step_name, earlier
+                list(getattr(step, "dd_statements", None) or []),
+                step_name,
+                earlier,
+                notes,
+                job_name,
             )
             if not program:
                 continue
@@ -248,25 +262,56 @@ def _ims_program(step: Any) -> str | None:
     return None
 
 
+def _referback_keys(parts: list[str], step: str | None) -> list[str]:
+    """Where ``*.parts`` may be remembered, most specific first: a referback
+    from a step of an expanded PROC (``RUNA.S2``) to ``*.S1.DD`` means that
+    PROC's own ``RUNA.S1``; ``*.RUNB.S1.DD`` is the whole path."""
+    if len(parts) == 1:
+        return [f"{step}.{parts[0]}"]
+    keys: list[str] = []
+    if step and "." in step:
+        keys.append(f"{step.rsplit('.', 1)[0]}.{'.'.join(parts)}")
+    keys += [".".join(parts), ".".join(parts[-2:])]
+    return list(dict.fromkeys(keys))
+
+
 def _resolve_referbacks(
-    dds: list[Any], step: str | None, earlier: dict[str, str]
+    dds: list[Any],
+    step: str | None,
+    earlier: dict[str, str],
+    notes: list[str] | None = None,
+    job: str | None = None,
 ) -> list[Any]:
     """Replace ``DSN=*.STEP.DD`` / ``DSN=*.DD`` referbacks with the dataset
-    they name, and remember this step's DDs for the steps after it."""
+    they name, and remember this step's DDs for the steps after it. A
+    referback naming no earlier DD binds nothing (never the ``*.`` text) and
+    is noted in ``notes``."""
     out: list[Any] = []
     for dd_name, dd in _named(dds):
         dsn = str(getattr(dd, "dataset_name", None) or "")
         if dsn.startswith("*."):
             parts = dsn[2:].upper().split(".")
-            key = ".".join(parts[-2:]) if len(parts) > 1 else f"{step}.{parts[0]}"
-            resolved = earlier.get(key)
-            if resolved is not None:
-                dd = SimpleNamespace(
-                    name=getattr(dd, "name", None),
-                    dataset_name=resolved,
-                    inline_data=getattr(dd, "inline_data", None),
-                    parameters=getattr(dd, "parameters", None),
+            resolved = next(
+                (
+                    earlier[key]
+                    for key in _referback_keys(parts, step)
+                    if key in earlier
+                ),
+                None,
+            )
+            if resolved is None and notes is not None:
+                notes.append(
+                    f"step {step or '?'}"
+                    + (f" in job {job}" if job else "")
+                    + f": DD {dd_name or '?'} refers back to {dsn}, which names "
+                    "no earlier DD; it is not bound to any dataset"
                 )
+            dd = SimpleNamespace(
+                name=getattr(dd, "name", None),
+                dataset_name=resolved,
+                inline_data=getattr(dd, "inline_data", None),
+                parameters=getattr(dd, "parameters", None),
+            )
         out.append(dd)
         found = _dataset(dd)
         if dd_name and found and f"{step}.{dd_name}" not in earlier:
@@ -296,6 +341,10 @@ def _repro_passthroughs(
             for dst in outputs
         ]
     return out
+
+
+def _step_label(program: str, step: str | None, job: str | None) -> str:
+    return f"{program} step {step or '?'}" + (f" in job {job}" if job else "")
 
 
 def _sort_passthroughs(

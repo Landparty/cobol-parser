@@ -163,7 +163,7 @@ then a count), with the root cut from library notes (`_relative`).
 | Index | Built on first | Keeps |
 |---|---|---|
 | `programs` | program-level `callers_of`, `impact_of_change`, `codebase_overview` | `UnitFacts` per unit (id, file, depth, `unit_kind`, `_calls` rows with on-disk sites); the `CodebaseGraph` from `CodebaseGraphBuilder.build_from_results()` fed the same parses (no second parse); `copy_sites` |
-| `lineage` | field-mode `impact_of_change`, `where_from` | every unit's `FieldFlowAnalyzer` report (after `apply_source_map`) in one `LineageGraph`; JCL under the root (`.jcl`/`.job`) through `load_jobs` when jcl-parser imports, else `jcl_note`; `edge_files` |
+| `lineage` | field-mode `impact_of_change`, `where_from` | every unit's `FieldFlowAnalyzer` report (after `apply_source_map`) in one `LineageGraph`; JCL under the root (`.jcl`/`.job`) through `load_jobs` when jcl-parser imports (the steps `bindings_from_jobs` could not read become the graph's `join_caveats`), else `jcl_note`; `edge_files` |
 | `health` | `codebase_overview` | grade/score per unit (`TechnicalDebtAnalyzer` sharing the memoized flow and redundancy reports); `cross_file_clone_groups` over a hand-built `ScanReport`, members placed on disk |
 
 Lineage locations: `LineageGraph` hops carry the origin *line* but not its

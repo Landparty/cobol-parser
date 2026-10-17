@@ -168,7 +168,12 @@ into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT/ICETOOL (`SORTIN*`
 in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`. A
 blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
-referbacks resolve to the earlier step's dataset; quoted literals in
+referbacks resolve to the earlier step's dataset (`_referback_keys`: the
+current step's PROC-invocation prefix + the referback first, so an in-PROC
+`*.S1.DD` from `RUNA.S2` is `RUNA.S1`; then the full path, so
+`*.RUNB.S1.DD` works from outside; then the last two parts), and one that
+names no earlier DD binds nothing -- never the literal `*.` text -- and is
+a caveat (#565); quoted literals in
 DFSORT/IEBGENER control statements are blanked before keywords are matched
 (`INCLUDE COND=(...,C'BUILD')` is not a reformat). A `DFSRRC00` step (the IMS region
 controller) binds its DDs to the application program named by the second
@@ -178,6 +183,14 @@ folder (`NAME.prc`) as well as a JCLLIB base -- jcl-parser's own loader
 only searches `JCLLIB ORDER=` libraries. `jobs_from_sources(jcl, procs)`
 does the same from in-memory text (the backend's stored members). Not built
 on `cobolparser/jcl/`.
+
+**JCL caveats.** `bindings_from_jobs(jobs, caveats)` appends one line per
+step whose flow it could not read (`<PROGRAM> step <STEP> in job <JOB>:
+...`), so a step left out never reads as a step that moves nothing. `field-impact --jcl` and the MCP lineage index pass them as
+`LineageGraph(join_caveats=...)`, which -- without `join_edges` -- adds them
+to the joins' caveats (so `join_state()` exports them too). Invariant: a
+caveat there must not start with `PROGRAM:`, or `impact()` would show it
+only to queries reaching that program.
 
 Tests: `tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
 `test_lineage_jcl.py`, `test_sql_flow.py`, `tests/unit/cli/test_lineage_cli.py`;
