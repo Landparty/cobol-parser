@@ -315,12 +315,18 @@ parser names `ANONYMOUS-<level>-<line>`, is keyed as a positional `FILLER`,
 so a line shift does not report it removed and re-added; and the **order of
 each group's subordinates**, #545: a field reordered within its group is
 `data-item-moved`, with its position and record-relative byte offset before
-and after -- swapping two fields moves every offset after them, so it must not
-diff clean. Same `SequenceMatcher` rule as procedures: an inserted or removed
-field moves nothing, a swap reports one item; level-88 order is not
+and after -- swapping two fields moves every offset after them, so it must
+not diff clean. Same `SequenceMatcher` rule as procedures: an inserted or
+removed field moves nothing, a swap reports one item; level-88 order is not
 compared. Offsets come from `layout_offsets.compute_record_layout`, omitted
-when ambiguous. Pinned by `tests/regression/test_issue_545_diff_data_item_order.py`);
-procedures (added, removed, renamed,
+when ambiguous. Pinned by
+`tests/regression/test_issue_545_diff_data_item_order.py`); procedures (the
+unnamed paragraph holding statements before the first header, or a whole
+header-less PROCEDURE DIVISION, is compared as `(PROCEDURE DIVISION)`
+(`ast_diff.UNNAMED_PARAGRAPH`) -- skipped, every edit there diffed clean, #516;
+adding a header to it reads as a rename; pinned by
+`tests/regression/test_issue_516_diff_unnamed_paragraph.py`) (added,
+removed, renamed,
 **moved** — reordered without a body change, reported separately so a pure
 reshuffle never reads as a rewrite — and body-changed); and statements within
 matched paragraphs.

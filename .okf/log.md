@@ -341,6 +341,11 @@ them; MoveTypeChecker stays inside its own unit plus inherited GLOBALs.
 [analysis/codebase.md](analysis/codebase.md): `ProgramDiffer` compares the
 order of each group's subordinates (`data-item-moved`, with byte offsets).
 
+## 2026-10-17 -- diff compares the unnamed leading paragraph (#516)
+
+[analysis/codebase.md](analysis/codebase.md): `ProgramDiffer` compares
+statements before the first paragraph header as `(PROCEDURE DIVISION)`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
