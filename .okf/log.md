@@ -131,6 +131,11 @@ read in either order, in `data_clauses.py` and `_data_fast.pyx` alike.
 [batch.md](batch.md), [analysis/flow.md](analysis/flow.md): fingerprints
 carry `body_lines`; `scan` stamps `body_origin` and `source_key` prefers it.
 
+## 2026-10-17 -- VALUE initial values ignore JUSTIFIED / BWZ (#558)
+
+[generators/record-data.md](generators/record-data.md): `InitialValueCell`
+marks a VALUE-clause cell; `encode_field` skips both clauses for it.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

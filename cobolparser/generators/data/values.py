@@ -12,6 +12,7 @@ from ...models.data_items import PictureClause
 from .layout import (
     FieldCategory,
     FieldSpec,
+    InitialValueCell,
     LiteralCell,
     _strip_literal_quotes,
     hex_literal_bytes,
@@ -263,6 +264,17 @@ def _name_tokens(name: str) -> set[str]:
     return {t for t in _WORD_SPLIT_RE.split(name.upper()) if t}
 
 
+def _mark_initial_value(cell: str | None) -> str | None:
+    """*cell* marked as a VALUE-clause initial value, which the encoder
+    writes without JUSTIFIED / BLANK WHEN ZERO (#558)."""
+    if cell is None:
+        return None
+    if isinstance(cell, LiteralCell):
+        cell.initial_value = True
+        return cell
+    return InitialValueCell(cell)
+
+
 class ValueFactory:
     """Builds one field's value for one row.
 
@@ -366,7 +378,7 @@ class ValueFactory:
                     return self._fill_figurative(figurative, spec)
                 return self._fit_domain_value(choice, spec)
         if self._opts.respect_values and spec.value_clause:
-            return self._from_value_clause(spec)
+            return _mark_initial_value(self._from_value_clause(spec))
         return None
 
     def _fill_figurative(self, character: str, spec: FieldSpec) -> str:
