@@ -212,6 +212,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through it (`ImpactResult.notes`); `field-impact` exits 0. A name that
   matches no declared item still exits 1, and MCP never suggests the name
   that was asked for.
+* **Field lineage no longer hides the flow between same-named fields**
+  (#540). A bare name shared by several fields (`AMT` in IN-REC and
+  OUT-REC) started the trace from all of them at once, so `COMPUTE AMT OF
+  OUT-REC = AMT OF IN-REC * 100` was missing from `field-impact AMT`,
+  `lineage --field AMT`, and MCP `impact_of_change` / `where_from`, and
+  nothing said the name was ambiguous. Each matched field is now traced on
+  its own, and a caveat names every match (`AMT matches 2 fields: ...;
+  qualify with OF to trace one`); MCP reports it as `ambiguous-name`.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

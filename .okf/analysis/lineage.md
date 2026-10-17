@@ -159,9 +159,16 @@ graph records the edges it loads, so its own `join_edges()` re-exports them.
 `ImpactResult.start_found` is False when nothing matched the start. A
 declared item that no edge touches (set only from literals / VALUE, or only
 tested in a condition) is found: `impact()` returns no hits and a
-`notes` entry saying no value flows through it (#546; `_matched_items`
-answers "declared?", `_nodes_of` "in the graph?"). `ImpactResult.notes`
-is in `to_dict()` and a `Notes:` block of `to_text()`.
+`notes` entry saying no value flows through it (#546; `_start_groups`
+answers "declared?" in its `matched` half and "in the graph?" in its groups).
+`ImpactResult.notes` is in `to_dict()` and a `Notes:` block of `to_text()`.
+A bare name matching several items of one program (`AMT` in IN-REC and
+OUT-REC) is traced once per matched qualified name (`_start_groups`; a
+copybook field is one group across every program that COPYs it), so a
+field one match reaches is a hit even when it is another match -- one
+multi-source trace never reported a start. `impact()` adds the caveat
+`PROG: AMT matches N fields: ...; qualify with OF to trace one`, also
+listed in `ImpactResult.ambiguous` (#540) -- on the no-flow path too.
 
 ## Bindings from JCL
 
