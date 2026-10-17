@@ -65,11 +65,15 @@ _REPRO_IN_RE = re.compile(
 _REPRO_OUT_RE = re.compile(
     r"\b(OUTFILE|OUTDATASET|OFILE|ODS)\s*\(\s*'?([A-Z0-9@#$.()+-]+?)'?\s*\)"
 )
-#: IDCAMS commands: where one REPRO's operands end.
+#: IDCAMS commands: where one REPRO's operands end. A command word starts a
+#: command only at the start of a statement (after a newline or ``;``, or
+#: after ``IF ... THEN`` / ``ELSE`` / ``DO``), outside parentheses and not
+#: inside a dataset name: ``PROD.DELETE.MASTER`` holds no DELETE (#338).
 _IDCAMS_COMMAND_RE = re.compile(
-    r"\b(REPRO|DEFINE|DELETE|PRINT|LISTCAT|ALTER|VERIFY|EXPORT|IMPORT|SET|IF"
-    r"|BLDINDEX|EXAMINE|DIAGNOSE)\b"
+    r"(?<![\w.@#$])(REPRO|DEFINE|DELETE|PRINT|LISTCAT|ALTER|VERIFY|EXPORT|IMPORT"
+    r"|SET|IF|BLDINDEX|EXAMINE|DIAGNOSE)(?![\w.@#$])"
 )
+_IDCAMS_LEAD_RE = re.compile(r"(?:^|\b(?:THEN|ELSE|DO))\s*$")
 #: A quoted literal (``C'...'``, ``X'...'``, ``'...'``) in a control statement.
 _LITERAL_RE = re.compile(r"(?:\b[CXZ])?'(?:[^']|'')*'")
 _NULL_DSNS = frozenset({"NULLFILE"})
@@ -145,14 +149,23 @@ def _repro_commands(control: str) -> list[str]:
     (``-`` at the end of a line) joined."""
     joined = re.sub(r"[-+]\s*\n", " ", control)
     commands: list[str] = []
-    for line in joined.splitlines():
-        marks = list(_IDCAMS_COMMAND_RE.finditer(line))
+    for statement in re.split(r"[\n;]", joined):
+        marks = [
+            mark
+            for mark in _IDCAMS_COMMAND_RE.finditer(statement)
+            if _paren_depth(statement, mark.start()) == 0
+            and _IDCAMS_LEAD_RE.search(statement[: mark.start()])
+        ]
         for index, mark in enumerate(marks):
             if mark.group(1) != "REPRO":
                 continue
-            end = marks[index + 1].start() if index + 1 < len(marks) else len(line)
-            commands.append(line[mark.end() : end])
+            end = marks[index + 1].start() if index + 1 < len(marks) else None
+            commands.append(statement[mark.end() : end])
     return commands
+
+
+def _paren_depth(text: str, index: int) -> int:
+    return text.count("(", 0, index) - text.count(")", 0, index)
 
 
 def _sum_ranges(control: str) -> tuple[tuple[int, int], ...]:
