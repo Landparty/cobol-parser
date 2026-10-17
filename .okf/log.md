@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Complexity counts a clause pair once (#553)
+
+[analysis/flow.md](analysis/flow.md): `_CLAUSE_PAIRS` -- AT END / NOT AT END
+(and the other NOT- twins) add one decision; SEARCH AT END adds none.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
