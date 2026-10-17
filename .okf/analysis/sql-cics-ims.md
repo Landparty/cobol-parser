@@ -215,6 +215,15 @@ Analyses IMS DL/I calls -- `CALL 'CBLTDLI'/'AIBTDLI'/'CEETDLI'` and `EXEC
 DLI` (GU/GN/GNP/ISRT/DLET/REPL, ...) -- resolving each call's SSAs to segment
 names.
 
+**Function code.** A function-code variable resolves to every value its VALUE
+clause and MOVEs give it, joined by the "/" convention (`CHNG/GU/ROLB`); only
+values that cannot be a function code -- blank, or a figurative such as
+`VALUE SPACES` -- are dropped. An unquoted literal is recognised against
+`IBMEnterpriseCobol.IMS_COMMANDS`, the one DL/I call-code list. Keeping only
+candidates in a (then incomplete) local list reported `GU` at every call of a
+variable also set to `CHNG` / `ROLB` (#595). The candidates are the union over
+the whole program, not per call site.
+
 **Optional parmcount.** `CALL 'CBLTDLI' USING parmcount, function, pcb, ...`
 (also AIBTDLI; CEETDLI takes none): a first operand that is a numeric literal
 or a data item with a purely numeric PICTURE (function codes are always `PIC
