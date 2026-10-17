@@ -91,3 +91,20 @@ def test_trailing_first_replaces_only_the_end(library: str) -> None:
 )
 def test_copy_and_replace_agree(library: str, first: str, second: str) -> None:
     assert _via_copy(library, first, second) == _via_replace(library, first, second)
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        # Clause order, not search-text length, decides: the longer
+        # TRAILING ==XX== written second must not beat LEADING ==X==.
+        ("LEADING ==X== BY ==A==", "TRAILING ==XX== BY ==B==", "AX-NAME-XX"),
+        ("TRAILING ==X== BY ==B==", "LEADING ==XX== BY ==A==", "XX-NAME-XB"),
+    ],
+)
+def test_written_order_decides_between_different_lengths(
+    library: str, first: str, second: str, expected: str
+) -> None:
+    copied = _via_copy(library, first, second)
+    assert copied[2] == expected
+    assert copied == _via_replace(library, first, second)

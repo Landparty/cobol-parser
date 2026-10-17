@@ -1326,7 +1326,12 @@ def apply_replacing_clauses(
     literal_alternatives: list[str] = []
     # LEADING / TRAILING clauses, in clause order, each with its own pattern:
     # a word one of them matches is settled by the first that fits (#513).
+    # Written order, not the longest-first order above: with
+    # LEADING ==X== ... TRAILING ==XX== the standard (and REPLACE) let the
+    # LEADING clause settle X-NAME-XX because it is written first.
     partial_clauses: list[tuple[str, str, re.Pattern[str]]] = []
+    written_order = {id(clause): i for i, clause in enumerate(clauses)}
+    partial_order: list[int] = []
     for index, clause in enumerate(sorted_clauses):
         source = _build_clause_pattern(clause)
         if source is None:
@@ -1338,12 +1343,20 @@ def apply_replacing_clauses(
             partial_clauses.append(
                 (name, clause.mode, re.compile(source, re.IGNORECASE))
             )
+            partial_order.append(written_order[id(clause)])
         code_alternatives.append(alternative)
         # A search text that itself contains a quote deliberately targets
         # literal text; only such clauses may match inside string literals.
         if '"' in clause.find_text or "'" in clause.find_text:
             quoted.add(name)
             literal_alternatives.append(alternative)
+    partial_clauses = [
+        partial
+        for _, partial in sorted(
+            zip(partial_order, partial_clauses, strict=True),
+            key=lambda pair: pair[0],
+        )
+    ]
     if not code_alternatives:
         if line_origins is not None:
             line_origins[:] = range(1, len(lines) + 1)
