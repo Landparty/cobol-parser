@@ -93,6 +93,12 @@ _NEGATED_RELATIONAL = {
 }
 _RELATIONAL_OPERATORS = frozenset(_NEGATED_RELATIONAL)
 
+#: Attribute set on a relation whose operator a leading ``NOT`` was folded
+#: into (``NOT A = 1`` built as ``A NOT_EQUAL 1``): the operator as written,
+#: before the fold. An abbreviated leg after it repeats *that* operator --
+#: IBM defines ``NOT a = b OR c`` as ``(NOT a = b) OR (a = c)`` (#329).
+_WRITTEN_OPERATOR_ATTR = "_abbreviation_operator"
+
 # Figurative constants that can stand alone as the object of a relation
 # (``IF A = 1 OR SPACES``); a bare one of these after AND/OR is a literal
 # leg of an abbreviated combined condition, never a condition-name.
@@ -365,6 +371,8 @@ def _negate_condition(
     """Apply a leading ``NOT`` to an already-built condition."""
     if isinstance(expr, ConditionalExpression):
         if expr.operator in _NEGATED_RELATIONAL:
+            if not hasattr(expr, _WRITTEN_OPERATOR_ATTR):
+                setattr(expr, _WRITTEN_OPERATOR_ATTR, expr.operator)
             expr.operator = _NEGATED_RELATIONAL[expr.operator]
             return expr
         if expr.operator.startswith("IS NOT "):
@@ -431,6 +439,9 @@ def _expand_abbreviated_condition(
         return rest
     if not isinstance(subject.left_operand, str):
         return rest
+    # The relation's operator as written: a leading NOT negates only its own
+    # relation, never the legs that abbreviate it (#329).
+    operator = getattr(subject, _WRITTEN_OPERATOR_ATTR, subject.operator)
     if len(rest) > 1 and rest[0].upper() == "IS":
         # ``A > 1 AND IS < 5``: the optional IS that opens a relational
         # operator survives cleaning when the leg has no subject before it.
@@ -441,9 +452,9 @@ def _expand_abbreviated_condition(
     if first in COMPARISON_OPS or first in _RELATIONAL_OPERATORS:
         return [subject.left_operand, *rest]
     if _is_literal_leg(rest):
-        return [subject.left_operand, subject.operator, *rest]
+        return [subject.left_operand, operator, *rest]
     if first == "NOT" and _is_literal_leg(rest[1:]):
-        return [subject.left_operand, _NEGATED_RELATIONAL[subject.operator], *rest[1:]]
+        return [subject.left_operand, _NEGATED_RELATIONAL[operator], *rest[1:]]
     return rest
 
 
