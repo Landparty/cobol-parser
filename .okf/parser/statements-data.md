@@ -105,7 +105,9 @@ first. Node fields are in [ast-models.md](../ast-models.md).
 - **Expression collection.** At `paren_depth == 0` the loop stops at a period,
   `ON` / `NOT` / `SIZE`, and any `STATEMENT_KEYWORDS` /
   `CONTROL_FLOW_BOUNDARIES` / `SCOPE_TERMINATORS` value (an enclosing `END-READ`
-  must end the clause, not join the expression). At non-zero depth it still
+  must end the clause, not join the expression), or any `STATEMENT_TOKEN_TYPES`
+  token (the legacy verbs CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM are
+  boundaries by type only, #525). At non-zero depth it still
   breaks on `is_statement_boundary`, and an unclosed parenthesis is reported
   ("COMPUTE statement has unbalanced parentheses in expression") -- a depth that
   never returns to zero must not swallow the rest of the program. Bare

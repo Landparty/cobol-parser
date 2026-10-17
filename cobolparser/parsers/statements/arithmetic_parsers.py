@@ -29,6 +29,7 @@ from ._utils import (
     CONTROL_FLOW_BOUNDARIES,
     SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
+    STATEMENT_TOKEN_TYPES,
     _skip_newlines,
     consume_keyword_and_operand,
     consume_optional_qualifiers,
@@ -967,10 +968,14 @@ class ComputeStatementParser(IStatementParser):
                     # into the expression string — mirrors the stop set
                     # parse_arithmetic_operands() uses for ADD/SUBTRACT/
                     # MULTIPLY/DIVIDE.
+                    # The TokenType check catches the legacy verbs (CHAIN,
+                    # NOTE, EXHIBIT, ...), which are boundaries by type only
+                    # so that a data item of that name is an operand (#525).
                     if (
                         upper in STATEMENT_KEYWORDS
                         or upper in CONTROL_FLOW_BOUNDARIES
                         or upper in SCOPE_TERMINATORS
+                        or tok_type in STATEMENT_TOKEN_TYPES
                     ):
                         break
                 if (

@@ -126,3 +126,38 @@ def test_undeclared_legacy_words_stay_verbs(statement: str, node: str) -> None:
     assert len(result.ast.find_all_by_type(node)) == 1
     (move,) = result.ast.find_all_by_type("MoveStatement")
     assert move.targets == ["WS-A"]
+
+
+@pytest.mark.parametrize(
+    ("statement", "node"),
+    [
+        ("EXHIBIT NAMED WS-A", "ExhibitStatement"),
+        ("EXAMINE WS-A TALLYING ALL 'A'", "ExamineStatement"),
+        ("TRANSFORM WS-A CHARACTERS FROM 'A' TO 'B'", "TransformStatement"),
+        ("CHAIN 'NEXTPGM'", "ChainStatement"),
+        ("NOTE THIS IS A COMMENT", "NoteStatement"),
+    ],
+)
+def test_undeclared_legacy_verb_ends_a_compute_expression(
+    statement: str, node: str
+) -> None:
+    # Out of STATEMENT_KEYWORDS, the verbs are boundaries by TokenType only:
+    # COMPUTE's value-only stop check folded them into the expression.
+    source = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. LEGACY.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "       01 WS-A PIC X(5).\n"
+        "       01 WS-N PIC 9.\n"
+        "       PROCEDURE DIVISION.\n"
+        "       MAIN-PARA.\n"
+        "           COMPUTE WS-N = WS-N + 1\n"
+        f"           {statement}.\n"
+        "           STOP RUN.\n"
+    )
+    result = parse_cobol(source, filename="legacy.cbl")
+    assert result.ast is not None and result.errors == [], result.errors
+    (compute,) = result.ast.find_all_by_type("ComputeStatement")
+    assert compute.to_dict()["expression"] == "WS-N + 1"
+    assert len(result.ast.find_all_by_type(node)) == 1
