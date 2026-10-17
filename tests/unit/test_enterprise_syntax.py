@@ -231,6 +231,7 @@ class TestDeclaratives:
 
 class TestData6x:
     def test_pic_u_sizes_in_bytes(self):
+        # PIC U(n) is fixed character-length: 4 x n reserved bytes (#554).
         data = (
             "       01  A PIC U(40).\n"
             "       01  B PIC U BYTE-LENGTH 120.\n"
@@ -240,10 +241,12 @@ class TestData6x:
         result = _parse(_program(data))
         assert result.warnings == []
         ast = result.ast
-        assert _item(ast, "A").picture_clause.size == 40
+        assert _item(ast, "A").picture_clause.size == 160
+        assert _item(ast, "A").picture_clause.utf8_characters == 40
         assert _item(ast, "A").picture_clause.is_valid
         assert _item(ast, "B").byte_length == 120
         assert _item(ast, "B").picture_clause.size == 120
+        assert _item(ast, "B").picture_clause.utf8_characters is None
         assert _item(ast, "B").to_dict()["byte_length"] == 120
         c = _item(ast, "C")
         assert c.is_dynamic_length and c.dynamic_length_limit == 4000

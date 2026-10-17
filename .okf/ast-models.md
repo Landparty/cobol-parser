@@ -403,8 +403,12 @@ build.
 `size` is a **byte** count — it is what `calculate_size()`, `data-items`
 offsets and record images are built from.
 
-* `PIC N(n)` (national) and `PIC G(n)` (DBCS) are **2 bytes per character**;
-  `U` (UTF-8) is one byte per symbol.
+* `PIC N(n)` (national) and `PIC G(n)` (DBCS) are **2 bytes per character**.
+* `PIC U(n)` (UTF-8, fixed character-length) is **4 bytes per character**:
+  `size == 4n`, and `utf8_characters == n` keeps the character count
+  (`FieldSpec.character_positions` reads it). `PIC U BYTE-LENGTH n` (fixed
+  byte-length) is `size == n`, `utf8_characters is None`. Sizing `U(n)` at n
+  bytes put every later offset 3n short (#554).
 * P-scaled pictures (`9(3)PPP`, `SVPP9(3)`) are sized by their stored `9`s (3
   bytes) while `integer_digits`/`decimal_digits` include the `P` positions
   (6/0 and 0/5). `scaling_leading: bool | None` records the P

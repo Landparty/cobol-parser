@@ -894,6 +894,16 @@ def encoding_caveats(
             "national bytes do not decode back as the same text): "
             f"{', '.join(national)}"
         )
+    utf8 = sorted(
+        {spec.qualified_name for spec in specs if spec.utf8_characters is not None}
+    )
+    if utf8:
+        caveats.append(
+            "UTF-8 data (PIC U(n)) is written as single-byte text in the "
+            "record's charset, space-padded to the 4 x n bytes the field "
+            "reserves, not as the UTF-8 a real compiler stores: "
+            f"{', '.join(utf8)}"
+        )
     if dbcs:
         caveats.append(
             "DBCS data (PIC G / USAGE DISPLAY-1) is written as single-byte "
