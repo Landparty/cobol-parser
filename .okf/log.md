@@ -255,6 +255,14 @@ GOBACK / EXIT PROGRAM inside a branch arm, loop or handler puts
 `ConstantFolder` in uncertain mode, like a conditional GO TO -- except in a
 body a success status never runs (`InvocationCounts.success_skipped`).
 
+## 2026-10-17 -- EXEC SQL delimited identifiers (#597)
+
+[dialects.md](dialects.md), [lexer.md](lexer.md), [ast-models.md](ast-models.md),
+[parser/statements.md](parser/statements.md), [tests.md](tests.md):
+`Token.quote` records a literal's delimiter; EXEC SQL text keeps `"X"`, and
+the SQL scrubber reads it as identifier `X`, so `FROM "PROD"."CUST"` names
+table `PROD.CUST` (CRUD matrix, lineage, MCP).
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
