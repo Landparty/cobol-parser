@@ -286,6 +286,13 @@ is kept (FILE SECTION `report_files`); INITIATE/GENERATE/TERMINATE write the
 report file in CRUD, IOLogger, io-sequence; GENERATE is an OUT boundary;
 lineage carries SOURCE/SUM operands to the report file port.
 
+## 2026-10-17 -- unused-variables: SQL host structures used whole (#531, #378)
+
+[analysis/data-use.md](analysis/data-use.md), [tests.md](tests.md):
+`_whole_group_references` adds every EXEC SQL host variable and null
+indicator (PROCEDURE and own DATA DIVISION), so host-structure fields and
+VARCHAR 49-levels are not reported unused.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
