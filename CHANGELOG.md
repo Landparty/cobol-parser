@@ -166,6 +166,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both arms of every `>>IF ... >>ELSE`, in the program and in every inlined
   copybook, disagreeing with `parse`, `data-items` and (since #271)
   `preprocess`. It now always evaluates them; `--define` only adds symbols.
+* **`>>IF` / `>>WHEN` accept word-form relational operators and arithmetic**
+  (#512). `X GREATER THAN 5`, `X IS NOT LESS THAN 7`, `X GREATER OR EQUAL
+  7`, `X IS EQUAL TO 7` and arithmetic operands such as `X + 1 = 8` or `X * 2
+  = 14` were "unsupported ... treated as FALSE", so the `>>ELSE` or a later
+  `>>WHEN` was compiled in instead and the AST described a program the
+  compiler would never build. They are now evaluated, arithmetic the same
+  way `>>DEFINE ... AS 2 * 3` already was.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
