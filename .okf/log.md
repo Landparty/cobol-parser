@@ -273,6 +273,11 @@ counts the bindings, xref records them and declares `screen-item`s.
 [analysis/fixtures-support.md](analysis/fixtures-support.md):
 `ConstraintReport.transfer_sites` and `scenarios._ParagraphReach`.
 
+## 2026-10-17 -- long AND/OR chains, too-deep nesting (#375)
+
+[parser/statements.md](parser/statements.md): chains built in one pass
+(`_fold_logical`); a RecursionError from nesting is an error.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

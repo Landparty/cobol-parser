@@ -129,6 +129,16 @@ class StatementRecoveryHandler:
         loc = getattr(token, "location", None) if token is not None else None
         line = getattr(loc, "line", None) if loc is not None else None
         column = getattr(loc, "column", None) if loc is not None else None
+        if isinstance(exc, RecursionError):
+            # Statements nested hundreds deep (#375): the whole outermost
+            # statement is dropped, so say why in words a user can act on.
+            return ParseError(
+                "Statement nested too deeply to parse (Python recursion limit "
+                f"reached: {exc}); the statement starting here was dropped",
+                line_number=line,
+                column=column,
+                location=loc,
+            )
         return ParseError(
             f"Unexpected error parsing statement: {exc}",
             line_number=line,
