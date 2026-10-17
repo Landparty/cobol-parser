@@ -234,6 +234,12 @@ is the source of truth, rebuilt from SA38-0683; 24 non-services removed.
 class, alphabet and symbolic-character kinds plus UPSI condition names, at the
 CONFIGURATION SECTION; a class test credits its declared class-name.
 
+## 2026-10-17 -- COBOL 2002 and unknown USAGE words (#524)
+
+[ast-models.md](ast-models.md), [parser/divisions.md](parser/divisions.md),
+[generators/record-data.md](generators/record-data.md): FLOAT-*/BINARY-*
+sizes in `_storage.py`; unknown words warned and reported unresolved.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

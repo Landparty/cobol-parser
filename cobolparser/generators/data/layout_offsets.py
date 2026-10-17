@@ -26,7 +26,13 @@ from .layout import (
     condition_values_exhaustive,
     expand_condition_values,
 )
-from .storage import BINARY_USAGES, FLOAT_USAGES, POINTER_USAGES, storage_size
+from .storage import (
+    BINARY_USAGES,
+    FLOAT_USAGES,
+    POINTER_USAGES,
+    is_known_usage,
+    storage_size,
+)
 
 _SECTION_NAMES = ("FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE")
 
@@ -538,6 +544,7 @@ def flag_record_layout(record: CobolDataItem, layout: list[LayoutItem]) -> list[
     """
     unresolved: list[str] = []
     _flag_sync_slack(record, layout, unresolved)
+    _flag_unknown_usage(layout, unresolved)
     _flag_partial_condition_values(layout, unresolved)
     _flag_unbounded_occurs(layout, unresolved)
     return unresolved
@@ -556,6 +563,23 @@ def _flag_unbounded_occurs(layout: list[LayoutItem], unresolved: list[str]) -> N
             f"{entry.qualified_name}: OCCURS UNBOUNDED has no maximum; sized "
             f"as {times} occurrence(s), so its occurs.max and the byte_length "
             "of every group holding it are a lower bound"
+        )
+
+
+def _flag_unknown_usage(layout: list[LayoutItem], unresolved: list[str]) -> None:
+    """A USAGE word nothing here can size (``USAGE IS COMPX``) leaves its
+    item's length a guess: mark it and every later offset in the record
+    ``offset_ambiguous`` and say so, rather than a quiet 0-byte item (#524)."""
+    for entry in layout:
+        if entry.level == 88 or is_known_usage(entry.usage):
+            continue
+        for other in layout:
+            if other is entry or (other.byte_offset or 0) > (entry.byte_offset or 0):
+                other.offset_ambiguous = True
+        unresolved.append(
+            f"{entry.qualified_name}: USAGE {entry.usage} is not supported; its "
+            "byte length is unknown, so it and every later offset in the record "
+            "may be wrong"
         )
 
 
