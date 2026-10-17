@@ -386,6 +386,12 @@ one-character sign is edited like `$`, anything unmodelled gets a caveat.
 fragment through `wrap_copybook_fragment`; MCP maps lines back; `data-items`
 with no DATA DIVISION exits 1.
 
+## 2026-10-17 -- MCP record_layout keeps the SYNCHRONIZED caveat (#488)
+
+[mcp.md](mcp.md), [generators/record-data.md](generators/record-data.md):
+new `flag_record_layout()`; `record_layout` / `explain_symbol` report
+`offset_ambiguous` and an `incomplete-analysis` caveat like `data-items`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

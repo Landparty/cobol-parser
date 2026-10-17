@@ -328,6 +328,7 @@ class CobolTools:
                         "no layout is reported for it",
                     )
             if item is not None:
+                _layout_caveats(item, layout, response)
                 symbol["layout"] = {
                     key: item.get(key)
                     for key in (
@@ -704,7 +705,9 @@ class CobolTools:
         records = []
         for index, found in enumerate(items):
             layout = _attempt(
-                response, "byte layout", functools.partial(_record_layout, found.root)
+                response,
+                "byte layout",
+                functools.partial(_record_layout, found.root, response),
             )
             if layout is not None:
                 records.append(
@@ -1606,10 +1609,19 @@ def _data_items_named(unit: CobolProgram, wanted: str) -> list[_FoundItem]:
     return found
 
 
-def _record_layout(root: CobolDataItem) -> list[dict[str, Any]]:
-    from ..generators.data.layout_offsets import compute_record_layout
+def _record_layout(root: CobolDataItem, response: Response) -> list[dict[str, Any]]:
+    """*root*'s byte layout, with what it cannot vouch for (``SYNCHRONIZED``
+    slack, partial level-88 values) flagged and carried as caveats -- the
+    same flags ``data-items`` reports (#488)."""
+    from ..generators.data.layout_offsets import (
+        compute_record_layout,
+        flag_record_layout,
+    )
 
-    return [item.to_dict() for item in compute_record_layout(root)]
+    layout = compute_record_layout(root)
+    for line in flag_record_layout(root, layout):
+        response.caveat("incomplete-analysis", line, _unresolved_layout_effect(line))
+    return [item.to_dict() for item in layout]
 
 
 def _declarations(root: CobolDataItem) -> dict[str, list[tuple[int, Any]]]:
@@ -1916,15 +1928,34 @@ def _carry_parse_caveats(parsed: ParsedProgram, response: Response) -> None:
         response.caveat(caveat.kind, caveat.detail, caveat.effect)
 
 
+def _unresolved_layout_effect(line: str) -> str:
+    """The effect of one byte-layout ``unresolved`` *line*: only SYNC slack
+    puts offsets in doubt; a partial level-88 list leaves them exact."""
+    if "condition_values lists only part" in line:
+        return (
+            "a value missing from condition_values may still satisfy the "
+            "condition; read condition_ranges"
+        )
+    return (
+        "offsets marked offset_ambiguous may be short; do not build a record "
+        "image from them"
+    )
+
+
 def _layout_index(
     unit: CobolProgram, response: Response
 ) -> dict[str, list[dict[str, Any]]]:
-    """Every data item's byte layout, by upper-cased name."""
+    """Every data item's byte layout, by upper-cased name.
+
+    The layout's ``unresolved`` lines are kept under :data:`_UNRESOLVED_KEY`
+    for :func:`_layout_caveats` to carry the ones that bear on an answer.
+    """
     from ..generators.data.layout_offsets import compute_program_data_items
 
     try:
         with stdout_to_stderr():
-            items = compute_program_data_items(unit)["items"]
+            computed = compute_program_data_items(unit)
+            items = computed["items"]
     except Exception as exc:  # noqa: BLE001 -- one analyzer must not sink the answer
         response.caveat(
             "analyzer-failed",
@@ -1935,7 +1966,27 @@ def _layout_index(
     index: dict[str, list[dict[str, Any]]] = {}
     for item in items:
         index.setdefault(str(item["name"]).upper(), []).append(item)
+    index[_UNRESOLVED_KEY] = [{"line": line} for line in computed["unresolved"]]
     return index
+
+
+#: Not a COBOL name (it has a space), so it cannot collide with an item.
+_UNRESOLVED_KEY = " unresolved"
+
+
+def _layout_caveats(
+    item: dict[str, Any],
+    layout: dict[str, list[dict[str, Any]]],
+    response: Response,
+) -> None:
+    """Carry the layout's ``unresolved`` lines about *item*'s record."""
+    record = str(item.get("qualified_name") or "").split(".")[0]
+    for entry in layout.get(_UNRESOLVED_KEY, []):
+        line = str(entry["line"])
+        if line.split(":", 1)[0].split(".")[0] == record:
+            response.caveat(
+                "incomplete-analysis", line, _unresolved_layout_effect(line)
+            )
 
 
 def _renames_layout(
