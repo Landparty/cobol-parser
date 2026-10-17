@@ -16,7 +16,7 @@ from ...models.data_items import (
     PictureClause,
 )
 from .options import DataGeneratorOptions
-from .storage import storage_size
+from .storage import FLOAT_USAGES, storage_size
 
 
 class FieldCategory(StrEnum):
@@ -944,7 +944,7 @@ def _strip_literal_quotes(value: str) -> str:
 def _classify(item: CobolDataItem, picture: PictureClause | None) -> FieldCategory:
     """Determine the data category used to pick a value generator."""
     usage = (item.usage or "DISPLAY").upper()
-    if usage in ("COMP-1", "COMPUTATIONAL-1", "COMP-2", "COMPUTATIONAL-2"):
+    if usage in FLOAT_USAGES:
         return FieldCategory.FLOAT
     if picture is None:
         # INDEX/POINTER and friends carry no picture; treat as small integers.
