@@ -259,15 +259,23 @@ class _ProgramWalk:
     READ and DISPLAY/WRITE sites and recomputed every statement's nested
     lists: quadratic in program size.  The statement tree does not change
     between folds (the same assumption ``_FACTS_CACHE`` makes of the index).
+
+    Kept per *index*, not per AST: everything here leads back to the AST
+    (a statement's ``parent`` chain, ``index.ast``), so a weak-keyed entry
+    on the AST would hold its own key alive and no folded program would ever
+    be freed.  Nothing in the AST leads to the index, so an entry keyed on
+    the index goes when the index does.  :attr:`program` is a weak
+    reference, checked on every lookup, so an index folded with a different
+    AST does not reuse this one's walk.
     """
 
-    __slots__ = ("nested", "statements", "unseeded")
+    __slots__ = ("nested", "program", "statements", "unseeded")
 
-    def __init__(self) -> None:
-        #: The fold with no seed values, by index (kept beside its result so
-        #: a reused id cannot match): the same for every scenario, and
+    def __init__(self, ast: CobolProgram) -> None:
+        self.program: weakref.ref[CobolProgram] = weakref.ref(ast)
+        #: The fold with no seed values: the same for every scenario, and
         #: ``gen-fixtures`` asks for it once per scenario.
-        self.unseeded: dict[int, tuple[Any, ConstantFoldResult]] = {}
+        self.unseeded: ConstantFoldResult | None = None
         #: ``_procedure_statements`` results, by the *types* asked for.
         self.statements: dict[Any, list[Any]] = {}
         #: ``_nested_statement_lists`` results, by ``id(stmt)``; the
@@ -282,15 +290,15 @@ _CURRENT_WALK: ContextVar[_ProgramWalk | None] = ContextVar(
 )
 
 
-def _program_walk(ast: CobolProgram) -> _ProgramWalk:
+def _program_walk(ast: CobolProgram, index: ProgramLayoutIndex) -> _ProgramWalk:
     try:
-        cached = _WALK_CACHE.get(ast)
-    except TypeError:  # a program that cannot be weakly referenced
+        cached = _WALK_CACHE.get(index)
+    except TypeError:  # an index that cannot be weakly referenced
         cached = None
-    if cached is None:
-        cached = _ProgramWalk()
+    if cached is None or cached.program() is not ast:
+        cached = _ProgramWalk(ast)
         try:
-            _WALK_CACHE[ast] = cached
+            _WALK_CACHE[index] = cached
         except TypeError:
             pass
     return cached
@@ -609,18 +617,16 @@ class ConstantFolder:
         *,
         seed_values: dict[str, str] | None = None,
     ) -> ConstantFoldResult:
-        walk = _program_walk(ast)
-        if not seed_values:
-            found = walk.unseeded.get(id(index))
-            if found is not None and found[0] is index:
-                return _copy_result(found[1])
+        walk = _program_walk(ast, index)
+        if not seed_values and walk.unseeded is not None:
+            return _copy_result(walk.unseeded)
         token = _CURRENT_WALK.set(walk)
         try:
             result = self._fold(ast, index, seed_values)
         finally:
             _CURRENT_WALK.reset(token)
         if not seed_values:
-            walk.unseeded[id(index)] = (index, _copy_result(result))
+            walk.unseeded = _copy_result(result)
         return result
 
     def _fold(

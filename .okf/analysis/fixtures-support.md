@@ -580,11 +580,14 @@ one program twice per scenario, and each fold used to re-walk the whole
 PROCEDURE DIVISION for its READ / DISPLAY / WRITE sites and recompute every
 statement's nested lists -- quadratic in program size (300 IFs / 40 I/O
 statements: 13.3s, 600/60: 50.8s). `_ProgramWalk` holds those, one per
-program (`_WALK_CACHE`, a weak-keyed dictionary on the AST, like
-`_FACTS_CACHE` on the index), and is reached through the `_CURRENT_WALK`
+program (`_WALK_CACHE`, a weak-keyed dictionary on the *index*, like
+`_FACTS_CACHE`; keyed on the AST it held its own key alive -- a statement's
+`parent` chain and `index.ast` lead back to it -- so no folded program was
+ever freed; the entry's weak `program` reference is checked so an index
+folded with another AST gets a fresh walk), and is reached through the `_CURRENT_WALK`
 context variable set only for the duration of `fold()`, so the module-level
 helpers keep their signatures and nothing is cached outside a fold. The
-unseeded fold (`seed_values` empty) is memoised per (program, index) and
+unseeded fold (`seed_values` empty) is memoised on the same entry and
 handed out as a copy (`_copy_result`). Both assume the AST is not mutated
 between folds. Output is byte-identical (same bundle SHA-256; 2.5s / 7.3s
 for the two programs above); the bundle's size, which still grows with

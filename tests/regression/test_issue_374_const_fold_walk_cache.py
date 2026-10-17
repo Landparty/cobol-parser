@@ -11,6 +11,9 @@ result is never shared with a caller, and nothing leaks outside a fold.
 
 from __future__ import annotations
 
+import gc
+import weakref
+
 from cobolparser import parse_cobol
 from cobolparser.analysis import const_fold
 from cobolparser.analysis.boundary_inventory import BoundaryInventoryAnalyzer
@@ -122,3 +125,28 @@ def test_fixture_bundle_is_unchanged_by_the_cache(monkeypatch):
 
     monkeypatch.setattr(ConstantFolder, "fold", uncached)
     assert _bundle_json() == cached
+
+
+def test_the_cache_does_not_keep_a_folded_program_alive():
+    # Everything the walk holds leads back to the AST (statement ``parent``
+    # chains, ``index.ast``): keyed weakly on the AST, the entry kept its
+    # own key alive and no folded program was ever freed.
+    ast, index = _program()
+    folder = ConstantFolder()
+    folder.fold(ast, index)
+    folder.fold(ast, index, seed_values={"R1-AMT": "00099"})
+    ast_ref, index_ref = weakref.ref(ast), weakref.ref(index)
+    del ast, index
+    gc.collect()
+    assert ast_ref() is None
+    assert index_ref() is None
+
+
+def test_an_index_folded_with_another_ast_does_not_reuse_its_walk():
+    ast, index = _program()
+    other_ast, _ = _program()
+    ConstantFolder().fold(ast, index)
+    walk = const_fold._WALK_CACHE[index]
+    ConstantFolder().fold(other_ast, index)
+    assert const_fold._WALK_CACHE[index] is not walk
+    assert const_fold._WALK_CACHE[index].program() is other_ast
