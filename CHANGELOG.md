@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`language-env` / `le-info` recognise the real LE callable services**
+  (#529). The service list missed CEERAN0, CEEDCOD, CEENCOD, CEE3INF,
+  CEEMGET, CEE3DLY and others from the LE Programming Reference (SA38-0683),
+  which were reported `is_known_service: false`, and carried 24 names that
+  are not LE services (CEEDUMP, CEEABND, CEETIME, CEESG, ...), which were
+  reported known -- so a typo such as CEEDUMP for CEE3DMP read as valid. The
+  list is rebuilt from the reference with a category for each service (new
+  categories `locale` and `math`), and CEETREC is no longer described as
+  removing a condition handler.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

@@ -297,8 +297,19 @@ catalog_to_dict()                         # the le-info JSON; CATALOG_VERSION "1
 
 Also public: `LEServiceSignature`, `IntrinsicSignature`, `IntrinsicArgument`,
 and `LE_DATA_TYPES` (type id -> `LEDataType`). As of 2026-10-15 the catalogue
-holds 33 service signatures (`services_without_signature()` lists 29 more
-recognised services) and 81 intrinsic signatures.
+holds 33 service signatures (`services_without_signature()` lists 44 more
+recognised services since #529) and 81 intrinsic signatures.
+
+**The recognised-service list is SA38-0683's.** `IBM_LE_SERVICE_CATEGORIES`
+(name -> category) is the source of truth and `IBM_LE_CALLABLE_SERVICES` is
+its key set; categories are `datetime` / `storage` / `condition` / `runtime` /
+`environment` / `locale` / `math` / `ims`. Rebuilt from the reference's
+service list in #529: it had missed CEERAN0 / CEEDCOD / CEENCOD / CEE3INF /
+CEEMGET / CEE3DLY / ... (reported `is_known_service: false`) and carried 24
+names that are not LE services (CEEDUMP for CEE3DMP, CEEABND for CEE3ABD,
+CEETIME, CEESG, ...), so a typo read as valid. The CEESxyyy math services are
+not listed. Pinned against a checked-in copy in
+`tests/regression/test_le_callable_services_issue_529.py`.
 
 **Coverage is partial and says so.** `services_without_signature()` lists the
 LE services `IBM_LE_CALLABLE_SERVICES` recognises but this module cannot
