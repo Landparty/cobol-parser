@@ -757,9 +757,10 @@ of `DatasetBinding` / `Passthrough`). `--depth` caps the joins a path crosses
 `ImpactResult.to_dict()` + `graph` (statistics, opaque callees, unjoined DDs,
 caveats) + `problems` (files with no report, JCL that did not parse or
 expand). Text groups hits by program with their paths, then `Unjoined:` and
-`Problems:`. Exit 0 when the start was found (hits or not); 1 when no source
-produced a report (problems printed first), the start matches nothing (report
-still printed with `"start_found": false`), or on an argument error. Files
+`Problems:`. Exit 0 when the start was found (hits or not, including a
+declared field no value flows through, #546); 1 when no source
+produced a report (problems printed first), the start matches no declared
+item (report still printed with `"start_found": false`), or on an argument error. Files
 that failed while others parsed stay in `problems` only.
 
 ## diff, codebase-graph, copybook-impact, jcl, le-info

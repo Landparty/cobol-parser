@@ -229,6 +229,9 @@ class ImpactResult:
     caveats: list[str] = field(default_factory=list)
     #: False when nothing in any report matched the start.
     start_found: bool = True
+    #: Facts about the answer that are not gaps in it (a declared field
+    #: with no value flow at all).
+    notes: list[str] = field(default_factory=list)
 
     @property
     def programs(self) -> list[str]:
@@ -255,6 +258,7 @@ class ImpactResult:
             "hits": [h.to_dict() for h in self.hits],
             "caveats": list(self.caveats),
             "start_found": self.start_found,
+            "notes": list(self.notes),
         }
 
     def to_text(self) -> str:
@@ -292,6 +296,10 @@ class ImpactResult:
                     f"  {hit.field}{where}  [{', '.join(tags)}]"
                     + (f"\n      via {via}" if via else "")
                 )
+        if self.notes:
+            lines.append("")
+            lines.append("Notes:")
+            lines += [f"  - {n}" for n in self.notes]
         if self.caveats:
             lines.append("")
             lines.append("Caveats:")
@@ -753,9 +761,16 @@ class LineageGraph:
     def _items_named(
         self, field_name: str, programs: Sequence[str] | None
     ) -> list[NodeKey]:
+        return self._nodes_of(self._matched_items(field_name, programs))
+
+    def _matched_items(
+        self, field_name: str, programs: Sequence[str] | None
+    ) -> dict[str, list[str]]:
+        """Program -> the qualified names of its declared items *field_name*
+        names, whether or not any value flows through them."""
         parts = [p.strip().upper() for p in field_name.split(" OF ") if p.strip()]
         if not parts:
-            return []
+            return {}
         name, qualifiers = parts[0], parts[1:]
         wanted = [p.upper() for p in programs] if programs else list(self.reports)
         matched: dict[str, list[str]] = {}
@@ -769,6 +784,11 @@ class LineageGraph:
                 if qname == name or segments[-1] == name:
                     if all(q in segments[:-1] for q in qualifiers):
                         matched.setdefault(prog, []).append(qname)
+        return matched
+
+    def _nodes_of(self, matched: dict[str, list[str]]) -> list[NodeKey]:
+        """The graph nodes of *matched* items: only an item some edge
+        touches has one."""
         starts: list[NodeKey] = []
         seen: set[NodeKey] = set()
         for node in (*self._out, *self._in):
@@ -798,11 +818,22 @@ class LineageGraph:
         table) a path may cross; ``None`` follows every one.
         """
         programs = [program] if isinstance(program, str) else program
-        starts = self._items_named(field_name, programs)
+        matched = self._matched_items(field_name, programs)
+        starts = self._nodes_of(matched)
         if programs:
             label = [f"{p.upper()}:{field_name.upper()}" for p in programs]
         else:
             label = [field_name.upper()]
+        if matched and not starts:
+            # Declared, but no edge touches it: set only from literals or
+            # VALUE, or only tested in a condition. That is "feeds nothing",
+            # not "no such field" (which is for a name matching no item).
+            result = ImpactResult(start=label, direction=direction, depth=depth)
+            result.notes.append(
+                f"{', '.join(label)}: declared, but no value flows into or out "
+                "of it (only literals, VALUE clauses or conditions use it)"
+            )
+            return result
         return self._trace(starts, label, direction, depth)
 
     def impact_table(

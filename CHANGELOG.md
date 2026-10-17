@@ -203,6 +203,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot apply is now a `warning:` on stderr naming the key (except
   `source_format` for `gen-data`, `decode`, `compare` and `expand`, where
   auto-detection settles a copybook's format).
+* **A declared field with no value flow is no longer "no such field"**
+  (#546). A field set only from literals or `VALUE`, or only tested in a
+  condition, made `field-impact` print `no such field in any report` and
+  exit 1, `lineage --field` show the same caveat, and MCP `where_from` /
+  `impact_of_change` answer `found: false` suggesting the very name asked
+  for. It is now found, with no hits and a note that no value flows
+  through it (`ImpactResult.notes`); `field-impact` exits 0. A name that
+  matches no declared item still exits 1, and MCP never suggests the name
+  that was asked for.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
