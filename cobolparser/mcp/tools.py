@@ -224,12 +224,9 @@ class CobolTools:
         with stdout_to_stderr():
             report = XrefAnalyzer().analyze(unit)
 
-        qualified = " OF " in wanted or " IN " in wanted
-        if qualified:
-            entry = report.entry_for(wanted.replace(" IN ", " OF "))
-            matches = [entry] if entry is not None else []
-        else:
-            matches = [e for e in report.entries if e.name.upper() == wanted]
+        # A qualified name is resolved as the compiler resolves it: partial
+        # chains, ``IN`` for ``OF``, and no need to qualify a unique name.
+        matches = report.entries_named(wanted)
 
         program_info = parsed.program_info(unit)
         undeclared_asked = not matches or any(e.definition is None for e in matches)

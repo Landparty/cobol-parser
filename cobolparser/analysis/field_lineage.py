@@ -101,7 +101,7 @@ from ._files import (
     report_writer_files,
     same_record_area_groups,
 )
-from ._names import callee_names
+from ._names import callee_names, split_qualified_name
 from ._sql_flow import analyze_sql
 from .unused_variables import inherited_data_records
 from .value_tracker import DynamicCallAnalyzer
@@ -971,7 +971,7 @@ class FieldFlowAnalyzer:
 
     def _resolve(self, text: str) -> list[str]:
         """Qualified names a (possibly ``A OF B``-qualified) name means."""
-        parts = [p.strip().upper() for p in text.split(" OF ") if p.strip()]
+        parts = split_qualified_name(text)
         if not parts:
             return []
         name, qualifiers = parts[0], parts[1:]

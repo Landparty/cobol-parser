@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- qualified names resolved as COBOL does (#541)
+
+[analysis/data-use.md](analysis/data-use.md), [mcp.md](mcp.md),
+[analysis/lineage.md](analysis/lineage.md): `XrefReport.entries_named` and
+`_names.split_qualified_name` (IN = OF, partial chains).
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

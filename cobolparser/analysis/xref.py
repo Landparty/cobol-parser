@@ -85,7 +85,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
-from ._names import QUALIFIER_SEPARATOR
+from ._names import QUALIFIER_SEPARATOR, split_qualified_name
 from .unused_variables import (
     _DATA_SECTION_NAMES,
     _DICT_LIST_EXTRAS,
@@ -297,6 +297,10 @@ class XrefEntry:
     #: such item then has an entry of its own, and ``name`` alone no longer
     #: identifies it.
     qualified_name: str | None = None
+    #: Names of the enclosing data items, innermost first (data items and
+    #: condition names only). Not serialized; it is what resolves a
+    #: qualified name the way the compiler does (#541).
+    ancestors: list[str] = field(default_factory=list, repr=False, compare=False)
 
     @property
     def reference_count(self) -> int:
@@ -344,11 +348,30 @@ class XrefReport:
         ``_KIND_ORDER``) is returned. A qualified name (``"AMT OF OUT-REC"``)
         picks out one of several same-named data items.
         """
-        upper = " ".join(name.upper().split())
+        matches = self.entries_named(name)
+        return matches[0] if matches else None
+
+    def entries_named(self, name: str) -> list[XrefEntry]:
+        """Every entry *name* can mean, resolved as the compiler resolves it.
+
+        A bare name matches every entry of that name. A qualified one (``X OF
+        Y``, ``X IN Y``, partial chains allowed) matches the data items named
+        X whose enclosing items include each qualifier, in order (#541).
+        """
+        parts = split_qualified_name(name)
+        if not parts:
+            return []
+        bare, qualifiers = parts[0], parts[1:]
+        matches = []
         for entry in self.entries:
-            if entry.name == upper or entry.qualified_name == upper:
-                return entry
-        return None
+            if entry.name != bare:
+                continue
+            if qualifiers:
+                ancestors = iter(entry.ancestors)
+                if not all(q in ancestors for q in qualifiers):
+                    continue
+            matches.append(entry)
+        return matches
 
     def entries_of_kind(self, kind: str) -> list[XrefEntry]:
         """Every entry of one kind, in ``entries`` order."""
@@ -676,6 +699,7 @@ class XrefAnalyzer:
                     references=[],
                     level=level,
                     section=section,
+                    ancestors=path,
                 )
                 namesakes.append((entry, item))
                 self._entries.append(entry)
@@ -702,6 +726,7 @@ class XrefAnalyzer:
         table[upper] = entry
         self._entries.append(entry)
         if item is not None:
+            entry.ancestors = _ancestor_names(item)
             self._data_items.setdefault(upper, []).append((entry, item))
         return entry
 

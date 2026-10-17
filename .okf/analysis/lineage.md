@@ -191,6 +191,9 @@ field one match reaches is a hit even when it is another match -- one
 multi-source trace never reported a start. `impact()` adds the caveat
 `PROG: AMT matches N fields: ...; qualify with OF to trace one`, also
 listed in `ImpactResult.ambiguous` (#540) -- on the no-flow path too.
+The start name is split by `_names.split_qualified_name`, so `IN` works
+wherever `OF` does (`field-impact "AMT IN IN-REC"`, #541; `FieldFlowAnalyzer`
+`_resolve` shares it).
 `ImpactResult.to_text()` lists every hit `to_dict()` does: items and ports
 (prefixed `port `) under their program, tables and datasets on their own
 lines (#528: ports were dropped, so a DISPLAY-only field read as feeding
