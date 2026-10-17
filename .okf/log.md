@@ -143,6 +143,13 @@ SYSTSIN is `unresolved`; `jcl --program` matching nothing exits 1.
 `SET p TO ENTRY 'X'` as a value of `p` and `SET p TO [ENTRY] identifier` as
 a copy, so `CALL p` and codebase-graph resolve the target.
 
+## 2026-10-17 -- codebase-graph resolves COPY members as written (#580)
+
+[analysis/codebase.md](analysis/codebase.md),
+[preprocessing.md](preprocessing.md): the builder resolves each COPY member
+as written (cache keyed on it), and a not-found note no longer suggests the
+name it looked up, saying a case variant exists instead.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
