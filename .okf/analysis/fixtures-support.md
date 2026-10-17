@@ -88,6 +88,15 @@ record); INITIATE / TERMINATE add none (#499).
 **CALL/DYNCALL argument-direction ladder (Phase 2b)**, first rung wins,
 `CallArg.provenance` records which:
 
+0. Before the ladder (#582): an `OMITTED` argument is `direction="NONE"`,
+   `provenance="omitted"` -- kept in its position so later arguments still
+   pair with the right callee LINKAGE 01. A constant passed BY REFERENCE (a
+   literal, figurative, `LENGTH OF x`, `FUNCTION f(...)`) is **OUT**,
+   `provenance="constant"`. `call_argument_data_name()` is the one classifier
+   (None for those constants and `OMITTED`, `x` for `ADDRESS OF x`); rung 3's
+   dataflow, `constraints._boundary_fed_names` and `program_fixtures` resolve
+   that name, never the raw argument text.
+
 1. `passing_mode` in `CONTENT`/`VALUE` -> **OUT**, always (language rule --
    the callee cannot write back through either mode).
 2. Callee source available (`callee_indexes`/`callee_asts`, keyed by

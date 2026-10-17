@@ -16,12 +16,12 @@ import os
 import random
 import zlib
 
-from .._literals import is_quoted_literal
 from ..analysis.boundary_inventory import (
     Boundary,
     BoundaryInventoryAnalyzer,
     BoundaryRef,
     BoundaryReport,
+    call_argument_data_name,
 )
 from ..analysis.const_fold import ConstantFolder
 from ..analysis.constraints import ConstraintExtractor
@@ -701,15 +701,13 @@ class ProgramFixtureGenerator:
         expectations: list[Expectation] = []
 
         for arg in boundary.call_args:
-            if is_quoted_literal(arg.name):
-                # ``BY CONTENT 'A'`` / ``X'00'``: a constant the caller
-                # supplies, not a data item the layout index could hold.
+            data_name = call_argument_data_name(arg.name)
+            if data_name is None:
+                # ``OMITTED``, a literal / figurative constant, ``LENGTH OF x``
+                # or ``FUNCTION f(...)`` (#579, #582): no data item the layout
+                # index could hold. ``ADDRESS OF x`` resolves against ``x``.
                 continue
-            if arg.name.upper().startswith("FUNCTION "):
-                # ``BY CONTENT FUNCTION UPPER-CASE(X)`` (#579): a value the
-                # caller computes, like a literal -- no layout to resolve.
-                continue
-            arg_fields = self._fields_for_names([arg.name], index)
+            arg_fields = self._fields_for_names([data_name], index)
             if not arg_fields:
                 unresolved.append(
                     f"{ref.category} {ref.key}: argument {arg.name} not resolvable "
