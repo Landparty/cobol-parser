@@ -263,6 +263,13 @@ body a success status never runs (`InvocationCounts.success_skipped`).
 the SQL scrubber reads it as identifier `X`, so `FROM "PROD"."CUST"` names
 table `PROD.CUST` (CRUD matrix, lineage, MCP).
 
+## 2026-10-17 -- CRUD matrix reads WORKING-STORAGE cursors (#518)
+
+[analysis/data-use.md](analysis/data-use.md), [tests.md](tests.md):
+`CRUDMatrixGenerator` also feeds the DATA DIVISION's EXEC SQL nodes to its
+cursor and SQL passes, so a WORKING-STORAGE `DECLARE CURSOR` table is
+listed (R, with the cursor) and MCP `sql_tables` shows it.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
