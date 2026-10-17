@@ -61,6 +61,11 @@ column index, shared with `DclgenChecker`; `:CUST-ID` links to `CUST_ID`.
 [generators/fixtures.md](generators/fixtures.md): `call_argument_data_name()`
 classifies CALL arguments; `OMITTED` is `direction="NONE"`.
 
+## 2026-10-17 -- >>DEFINE B AS A copies A's value (#567)
+
+[preprocessing.md](preprocessing.md): a lone-word `AS` operand is a variable
+reference; undefined warns. [tests.md](tests.md): `test_define_as_variable.py`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
