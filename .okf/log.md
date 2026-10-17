@@ -30,6 +30,12 @@ arithmetic operands through `_eval_define_arithmetic`.
 [preprocessing.md](preprocessing.md): `_CondFrame.when_pending` lets a
 `>>WHEN` stacked on a matching one keep the shared text selected.
 
+## 2026-10-17 -- COPY REPLACING across lines, and its source map (#560, #561)
+
+[preprocessing.md](preprocessing.md): `apply_replacing_clauses` matches over
+the whole member (a line break is a separator) and returns `line_origins`,
+which the expander passes down as `initial_origins`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

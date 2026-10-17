@@ -1316,6 +1316,7 @@ def _expand_source_recursive(
     already_stripped: bool = False,
     free_form: bool | None = None,
     define_log: list[tuple[int, dict[str, str]]] | None = None,
+    initial_origins: list[LineOrigin] | None = None,
 ) -> tuple[str, int, bool, list[LineOrigin]]:
     """
     Recursively expand COPY statements in source code.
@@ -1347,6 +1348,10 @@ def _expand_source_recursive(
             processing of *source_code* produced (``process_conditionals``
             only): each COPY's member is processed with the symbols in effect
             on the COPY's own line, not the ones the caller started with.
+        initial_origins: Where each line of *source_code* really came from,
+            when that is not simply its own line of *source_file* -- a
+            copybook rewritten by a REPLACING whose BY text added or removed
+            lines (#561). None means identity origins.
 
     Returns:
         Tuple of (expanded_source, max_depth_reached, is_normalized, origins)
@@ -1360,6 +1365,16 @@ def _expand_source_recursive(
         NestingDepthError: If max nesting depth exceeded
         TotalExpansionSizeExceededError: If total size exceeds limit
     """
+    source_origins: list[LineOrigin] = _fit_origins(
+        (
+            list(initial_origins)
+            if initial_origins is not None
+            else _identity_origins(source_file, source_code)
+        ),
+        source_code.count("\n") + 1,
+        (source_file, 1),
+    )
+
     # Check nesting depth
     if context.current_depth > path_resolver.search_config.max_nesting_depth:
         raise NestingDepthError(
@@ -1427,7 +1442,7 @@ def _expand_source_recursive(
             source_code,
             context.current_depth,
             already_stripped and not free_form,
-            _identity_origins(source_file, source_code),
+            source_origins,
         )
 
     # Push current file onto stack
@@ -1439,7 +1454,10 @@ def _expand_source_recursive(
     # We use the NORMALIZED source as the base for expansion because we need valid indices
     expanded_source = normalized_source
     origins: list[LineOrigin] = _fit_origins(
-        [(source_file, n) for n in merged_from],
+        [
+            source_origins[n - 1] if 0 < n <= len(source_origins) else (source_file, n)
+            for n in merged_from
+        ],
         normalized_source.count("\n") + 1,
         (source_file, 1),
     )
@@ -1607,13 +1625,20 @@ def _expand_source_recursive(
 
             # Apply REPLACING clause if present (using enhanced function).
             # copybook_content is already stripped (indicator at index 0).
+            replaced_origins: list[LineOrigin] | None = None
             if statement.replacing_clauses:
                 pre_replacing_size = len(copybook_content.encode("utf-8"))
+                replaced_from: list[int] = []
                 copybook_content = apply_replacing_clauses(
                     copybook_content,
                     statement.replacing_clauses,
                     indicator_position=0,
+                    line_origins=replaced_from,
                 )
+                # The recursion below numbers its input from line 1; after a
+                # BY text that added or removed lines that numbering is not
+                # the copybook's, so hand it the real one (#561).
+                replaced_origins = [(copybook_path, n) for n in replaced_from]
                 # The raw-content charge above is taken before REPLACING, and
                 # a REPLACING BY text longer than its operand multiplies the
                 # member: a 48 KB copybook grew to 5.5 MB under a 1 MB
@@ -1655,6 +1680,7 @@ def _expand_source_recursive(
                     # just given the stripped fixed shape above.
                     free_form=member_free_form and free_form,
                     define_log=member_define_log,
+                    initial_origins=replaced_origins,
                 )
             )
 
