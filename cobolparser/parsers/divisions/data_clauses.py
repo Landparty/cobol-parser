@@ -51,6 +51,12 @@ _COMP_KEYWORDS: frozenset[str] = frozenset(
         "COMPUTATIONAL-5",
         "BINARY",
         "PACKED-DECIMAL",
+        # COBOL 2002 usages, which may also be written without the USAGE
+        # keyword (``05 X BINARY-LONG.``), #524. ``_data_fast`` receives
+        # this set as an argument, so both clause loops accept them.
+        "FLOAT-SHORT",
+        "FLOAT-LONG",
+        *FIXED_SIZE_USAGES,
     }
 )
 
@@ -671,6 +677,14 @@ class DataItemClauseParser:
             # POINTER, PROCEDURE-POINTER, FUNCTION-POINTER without USAGE keyword
             elif value_upper in _POINTER_KEYWORDS:
                 data_item.set_usage(value_upper)
+                token_stream.consume()
+
+            # ``BINARY-LONG [SIGNED|UNSIGNED]`` written without the USAGE
+            # keyword: the sign does not change the width (#524). The fast
+            # clause loop hands this word back here, so one branch serves both.
+            elif value_upper in ("SIGNED", "UNSIGNED") and (
+                data_item.usage or ""
+            ).upper().startswith("BINARY-"):
                 token_stream.consume()
 
             # DISPLAY without the USAGE keyword (``05 X PIC X(3) DISPLAY.``).

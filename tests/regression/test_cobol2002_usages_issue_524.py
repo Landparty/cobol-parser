@@ -102,3 +102,26 @@ def test_unknown_usage_warns_and_is_unresolved_in_both_paths() -> None:
     assert items["A"]["offset_ambiguous"] is False
     _, caveats = _image_length(source)
     assert any("unsupported USAGE" in c and "COMPX" in c for c in caveats)
+
+
+@pytest.mark.parametrize(
+    "clause, size",
+    [
+        ("FLOAT-SHORT", 4),
+        ("FLOAT-LONG", 8),
+        ("FLOAT-EXTENDED", 16),
+        ("BINARY-CHAR UNSIGNED", 1),
+        ("BINARY-SHORT", 2),
+        ("BINARY-LONG SIGNED", 4),
+        ("BINARY-DOUBLE", 8),
+    ],
+)
+def test_usage_keyword_is_optional(clause: str, size: int) -> None:
+    # ``USAGE [IS]`` is optional: ``05 H BINARY-LONG.`` is the same item.
+    source = _program(f"    05  H  {clause}.")
+    items, unresolved, warnings = _items(source)
+    assert (warnings, unresolved) == ([], [])
+    assert items["H"]["usage"] == clause.split()[0]
+    assert items["B"]["byte_offset"] == 2 + size
+    length, _ = _image_length(source)
+    assert length == 4 + size
