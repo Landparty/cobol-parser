@@ -716,6 +716,9 @@ Fields that are easy to miss, grouped by node.
 
 * `UnstringStatement.tallying_variable` (`TALLYING IN counter`);
   `.delimiters` collects every `OR`-joined delimiter.
+* `StringStatement.groups` — `[{"sources": [...], "delimiter": d}]`, which
+  sources each `DELIMITED BY` applies to (serialized as `"groups"`, #576);
+  the flat `operands` / `delimiters` stay for compatibility.
 * `SetStatement.groups` — additional `targets TO/UP/DOWN value` groups of a
   multi-group SET (serialized as `"groups"`); each group dict's
   `"value_is_entry"` key is that group's own `SET p TO ENTRY 'X'`
