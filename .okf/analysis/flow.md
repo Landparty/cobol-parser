@@ -397,7 +397,8 @@ Clause fidelity matters because `cobol-parser diff` compares this text: `SET x
 UP BY v` / `DOWN BY v` / `TO FALSE` are rendered as written, ADD/SUBTRACT take
 their sources from `source_operands` and append ` GIVING ...`, PERFORM renders
 ` VARYING v FROM x BY y` / ` n TIMES` (the UNTIL guard is the diff renderer's
-job, `ast_diff._statement_text`) and COMPUTE renders `ROUNDED` (see #274).
+job, `ast_diff._statement_text`) and COMPUTE / ADD / SUBTRACT render each
+receiver with its own `ROUNDED [MODE IS m]` (`rounding_of`; #274, #517).
 An EVALUATE subject is narrowed with `isinstance(s, CobolExpression)` (not
 `hasattr`, which mypy cannot narrow on).
 
@@ -588,7 +589,8 @@ each other isn't meaningful redundancy) are dropped.
 **A leaf statement's fingerprint is its whole behaviour, not its operand
 list** (see #262). `operands` is often just the identifier list (COMPUTE's is
 `['A']`; the formula lives in `expression`), so `(type, operands)` alone would
-call paragraphs differing only in a COMPUTE formula, ROUNDED, an AT END /
+call paragraphs differing only in a COMPUTE formula, ROUNDED (which receiver,
+and its mode -- rounding modes are `_DETAIL_KEYWORDS`, never renamed; #517), an AT END /
 INVALID KEY / ON SIZE ERROR / ON EXCEPTION body, `UPON`, `CORRESPONDING`, a
 STRING delimiter or the INSPECT phrase Type-1 clones. A leaf is `(type,
 operands, clauses, details)`: `clauses` fingerprints every present clause body

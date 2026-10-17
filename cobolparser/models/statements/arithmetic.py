@@ -7,8 +7,76 @@ from typing import Any, Union
 from ..ast_base import ASTNode, SourceLocation
 from .base import CobolExpression, CobolStatement
 
+#: The rounding modes of ``ROUNDED MODE IS mode`` (IBM Enterprise COBOL 6.x,
+#: COBOL 2002).
+ROUNDING_MODES: frozenset[str] = frozenset(
+    {
+        "AWAY-FROM-ZERO",
+        "NEAREST-AWAY-FROM-ZERO",
+        "NEAREST-EVEN",
+        "NEAREST-TOWARD-ZERO",
+        "PROHIBITED",
+        "TOWARD-GREATER",
+        "TOWARD-LESSER",
+        "TRUNCATION",
+    }
+)
 
-class ArithmeticStatement(CobolStatement):
+
+class _Rounding:
+    """Per-receiver ROUNDED bookkeeping shared by the arithmetic nodes (#517).
+
+    ``rounded`` stays the backward-compatible "ROUNDED appeared on some
+    receiver" flag; ``rounded_targets`` names the receivers that carry it, in
+    source order, and ``rounding_modes`` the ``ROUNDED MODE IS mode`` of
+    those that name one. ``COMPUTE B ROUNDED C = ...`` and ``COMPUTE B C
+    ROUNDED = ...`` store different values, so they must not share an AST.
+    """
+
+    rounded: bool
+    rounded_targets: list[str]
+    rounding_modes: dict[str, str]
+
+    def _init_rounding(self) -> None:
+        self.rounded = False  # True if ROUNDED appeared on any target
+        self.rounded_targets = []
+        self.rounding_modes = {}
+
+    def set_rounded(
+        self, rounded: bool = True, target: str | None = None, mode: str | None = None
+    ) -> None:
+        """Record ROUNDED (on *target*, with ``MODE IS`` *mode* when given)."""
+        self.rounded = rounded
+        if rounded and target is not None:
+            if target not in self.rounded_targets:
+                self.rounded_targets.append(target)
+            if mode:
+                self.rounding_modes[target] = mode
+
+    def rounding_of(self, receiver: str) -> str:
+        """The rounding phrase on *receiver*: ``""``, ``"ROUNDED"`` or
+        ``"ROUNDED MODE IS mode"``. A node built without per-receiver
+        information (``rounded`` set, no ``rounded_targets``) reports
+        ``"ROUNDED"`` for every receiver, as before."""
+        if not self.rounded:
+            return ""
+        if self.rounded_targets and receiver not in self.rounded_targets:
+            return ""
+        mode = self.rounding_modes.get(receiver)
+        return f"ROUNDED MODE IS {mode}" if mode else "ROUNDED"
+
+    def _rounding_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        if self.rounded:
+            result["rounded"] = self.rounded
+        if self.rounded_targets:
+            result["rounded_targets"] = list(self.rounded_targets)
+        if self.rounding_modes:
+            result["rounding_modes"] = dict(self.rounding_modes)
+        return result
+
+
+class ArithmeticStatement(_Rounding, CobolStatement):
     """Base AST node for arithmetic statements (ADD, SUBTRACT, MULTIPLY, DIVIDE)."""
 
     def __init__(self, statement_type: str, location: SourceLocation):
@@ -19,7 +87,7 @@ class ArithmeticStatement(CobolStatement):
         self.targets: list[str] = []  # All TO/FROM targets, in order
         self.giving: str | None = None  # First/primary GIVING target (back-compat)
         self.givings: list[str] = []  # All GIVING targets, in order
-        self.rounded: bool = False  # True if ROUNDED appeared on any target
+        self._init_rounding()
         self.is_corresponding: bool = False  # For CORRESPONDING/CORR clause
         # The operands written before TO/FROM/GIVING, duplicates kept, in
         # source order -- set by the ADD/SUBTRACT parsers. ``operands`` cannot
@@ -59,10 +127,6 @@ class ArithmeticStatement(CobolStatement):
         self.givings.append(giving)
         self._add_unique_operand(giving)
 
-    def set_rounded(self, rounded: bool = True) -> None:
-        """Set whether the ROUNDED clause was present."""
-        self.rounded = rounded
-
     def set_on_size_error_clause(self, statements: list["CobolStatement"]) -> None:
         self._set_clause("on_size_error", statements)
 
@@ -79,8 +143,7 @@ class ArithmeticStatement(CobolStatement):
             result["giving"] = self.giving
         if self.givings:
             result["givings"] = self.givings
-        if self.rounded:
-            result["rounded"] = self.rounded
+        result.update(self._rounding_dict())
         if self.is_corresponding:
             result["is_corresponding"] = self.is_corresponding
         result.update(
@@ -143,13 +206,13 @@ class DivideStatement(ArithmeticStatement):
         return result
 
 
-class ComputeStatement(CobolStatement):
+class ComputeStatement(_Rounding, CobolStatement):
     """AST node for COMPUTE statements."""
 
     def __init__(self, location: SourceLocation):
         super().__init__("COMPUTE", location)
         self.targets: list[str] = []
-        self.rounded: bool = False  # True if ROUNDED appeared on any target
+        self._init_rounding()
         self.expression: str | CobolExpression | None = None
         # M12: structural decomposition of the expression. `expression`
         # stays the raw space-joined token string for backward
@@ -163,10 +226,6 @@ class ComputeStatement(CobolStatement):
         """Add a target variable for the computation."""
         self.targets.append(target)
         self._add_unique_operand(target)
-
-    def set_rounded(self, rounded: bool = True) -> None:
-        """Set whether ROUNDED was present on any target."""
-        self.rounded = rounded
 
     def set_expression(self, expression: Union[str, "CobolExpression"]) -> None:
         """Set the arithmetic expression for the computation.
@@ -217,8 +276,7 @@ class ComputeStatement(CobolStatement):
                 ),
             }
         )
-        if self.rounded:
-            result["rounded"] = self.rounded
+        result.update(self._rounding_dict())
         result.update(
             self._serialize_clauses(
                 "on_size_error", "not_on_size_error", omit_empty=True

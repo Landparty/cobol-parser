@@ -645,7 +645,13 @@ Fields that are easy to miss, grouped by node.
   (`ADD A TO B GIVING C, D`), `.giving` the first; applies to
   ADD/SUBTRACT/MULTIPLY/DIVIDE alike.
 * `.rounded: bool` (also on `ComputeStatement`) and `.is_corresponding: bool`
-  (ADD/SUBTRACT `CORRESPONDING`).
+  (ADD/SUBTRACT `CORRESPONDING`). `.rounded` is the back-compat "ROUNDED on
+  some receiver" flag; `.rounded_targets: list[str]` names the receivers that
+  carry it and `.rounding_modes: dict[str, str]` their `ROUNDED MODE IS`
+  mode (both in `to_dict()` only when non-empty). `rounding_of(receiver)`
+  answers `""` / `"ROUNDED"` / `"ROUNDED MODE IS m"` -- every receiver for a
+  node built with only `rounded` set. Shared mixin `_Rounding` (#517):
+  `COMPUTE B ROUNDED C` and `COMPUTE B C ROUNDED` store different values.
 * `MultiplyStatement`/`DivideStatement` format 1 (no `GIVING`) populate
   `.target`/`.targets`: `MULTIPLY x BY id-2, id-3` / `DIVIDE x INTO id-2, id-3`
   overwrite their second operand(s) in place. Format 2 (`GIVING`) deliberately

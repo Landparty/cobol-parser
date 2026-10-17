@@ -44,7 +44,8 @@ INVALID / REJECT / ABEND word, PERFORMs or GOes TO such a procedure, CALLs
 CEE3ABD / ILBOABN0) or the condition is a class test. COMPUTE / ADD /
 SUBTRACT / MULTIPLY / DIVIDE at paragraph level (not inside an arm) is a
 `calculation` with `formula` normalized to `target = expression` (`DIVIDE A
-INTO B GIVING C` -> `C = B / A`); inside an arm it is an action of that
+INTO B GIVING C` -> `C = B / A`; each receiver keeps its own `ROUNDED [MODE IS
+m]`, `ADD A TO B ROUNDED C` -> `B ROUNDED = B + A; C = C + A`, #517); inside an arm it is an action of that
 decision only, never counted twice. Counters (`ADD 1 TO X`, `COMPUTE X = X +
 1`) are not rules at all.
 
