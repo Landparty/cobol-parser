@@ -446,6 +446,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported the USE paragraph as a caller. A USE procedure returns to the
   runtime when its section ends; its last member (and an EXIT SECTION in it)
   now has no onward edge.
+* **`xref` and MCP `explain_symbol` know the SPECIAL-NAMES declarations**
+  (#519). UPSI `ON/OFF STATUS` condition names and `SYMBOLIC CHARACTERS` were
+  listed as undefined data items, and mnemonic names (`C01 IS TOP-PAGE`) and
+  `CLASS` names were not found at all. Each is now declared (at the
+  CONFIGURATION SECTION, the parser keeps no line per entry) with kind
+  `mnemonic-name`, `condition-name`, `class-name`, `alphabet-name` or
+  `symbolic-character`, and its uses resolve to it, a class test
+  `X IS HEX-CHARS` included.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
