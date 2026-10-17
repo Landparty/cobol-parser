@@ -78,3 +78,17 @@ def test_literal_refmod_is_unchanged() -> None:
 def test_elementary_variable_refmod_is_inexact() -> None:
     report = _report("MOVE WS-WORD(WS-POS:2) TO WS-LEN")
     assert _hits(report, "WS-LEN", "backward") == {"WS-WORD": "overlap"}
+
+
+def test_variable_refmod_outside_move_is_inexact() -> None:
+    # STRING / DISPLAY / arithmetic do not go through the MOVE overlay, but
+    # the caveat promises an inexact mapping there too: no exact edge may
+    # come out of an operand whose window is unknown.
+    report = _report(
+        "STRING WS-REC(WS-POS:10) DELIMITED BY SIZE INTO WS-WORD\n"
+        "DISPLAY WS-REC(WS-POS:5)"
+    )
+    hits = _hits(report, "WS-WORD", "backward")
+    assert set(hits) == FIELDS
+    assert set(hits.values()) == {"overlap"}
+    assert not any(edge.exact for edge in report.edges if edge.line in (15, 16))

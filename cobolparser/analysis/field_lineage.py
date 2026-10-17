@@ -1088,14 +1088,15 @@ class FieldFlowAnalyzer:
 
     def _pieces(self, ref: _Ref) -> list[_Piece] | None:
         """Elementary fields inside the operand, relative to its start;
-        None when its offset is unknown."""
+        None when its offset is unknown. A reference modifier with a
+        non-literal start makes every piece inexact (#527)."""
         item = self._items[ref.qname]
         if not item.children:
             if ref.subscripts is not None:
                 node = self._occ_node(ref.qname, ref.subscripts)
                 if node is not None:
-                    return [_Piece(node, 0, item.length, True)]
-            exact = self._table(ref.qname) is None
+                    return [_Piece(node, 0, item.length, not ref.loose_window)]
+            exact = self._table(ref.qname) is None and not ref.loose_window
             return [_Piece(self._item_node(ref.qname), 0, item.length, exact)]
         base = self._ref_base(ref)
         if base is None:
@@ -1107,7 +1108,7 @@ class FieldFlowAnalyzer:
             if placements is None:
                 continue
             node = self._item_node(leaf.qname)
-            exact = self._table(leaf.qname) is None
+            exact = self._table(leaf.qname) is None and not ref.loose_window
             for offset, length in placements:
                 if offset + length > base and offset < end:
                     out.append(_Piece(node, offset - base, length, exact))
