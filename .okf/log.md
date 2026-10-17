@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- SELECT key and padding items are references (#549, #556)
+
+[analysis/data-use.md](analysis/data-use.md): xref's `_visit_select_clauses`
+adds RECORD / ALTERNATE / RELATIVE KEY and PADDING CHARACTER; unused-variables
+counts PADDING CHARACTER.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

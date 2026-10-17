@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Data items named only in a SELECT clause are no longer unreferenced**
+  (#549, #556). `xref` and MCP `explain_symbol` gave a RECORD KEY, ALTERNATE
+  RECORD KEY, RELATIVE KEY or PADDING CHARACTER item that the PROCEDURE
+  DIVISION never names 0 references; they now carry a `reference` at the
+  SELECT, like FILE STATUS. `unused-variables` and `lint` reported a
+  `PADDING CHARACTER IS ws-item` item as never referenced; it now counts as
+  used (a literal padding character names nothing).
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

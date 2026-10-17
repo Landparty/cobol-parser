@@ -432,6 +432,14 @@ Things worth knowing before trusting a field:
   name still wins. Before, they read as `undefined` in `xref`, as
   `declared: false` / `found: false` in MCP `explain_symbol`, and as "not
   declared ... not traced" in the `lineage` caveats.
+* **SELECT clause items are references at the SELECT** (#549, #556).
+  `_visit_select_clauses` records FILE STATUS (both items), RECORD KEY (and
+  its `SOURCE IS`), each ALTERNATE RECORD KEY and its PASSWORD, RELATIVE
+  KEY, PASSWORD, ASSIGN USING and PADDING CHARACTER items with role
+  `reference`, the same set `UnusedVariableAnalyzer._file_control_references`
+  counts as used (a literal `PADDING CHARACTER IS '*'` names nothing). The
+  roles a READ / START gives the keys are unchanged. Pinned by
+  `tests/regression/test_issue_549_556_select_clause_references.py`.
 * **Digit-led paragraph names resolve.** Procedure names (PERFORM / GO TO
   targets) are credited verbatim and `_COBOL_WORD_RE` allows a leading digit
   provided there is at least one letter, so `1000-INIT` is one symbol rather

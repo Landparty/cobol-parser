@@ -969,24 +969,30 @@ class XrefAnalyzer:
                         target.references.extend(entry.references)
 
     def _visit_select_clauses(self, select: SelectStatement) -> None:
-        """Data items a ``SELECT`` names: FILE STATUS, PASSWORD, ASSIGN USING.
+        """Data items a ``SELECT`` names: FILE STATUS, RECORD / ALTERNATE /
+        RELATIVE KEY, PASSWORD, ASSIGN USING, PADDING CHARACTER.
 
-        The runtime stores into the FILE STATUS item after every I/O whether
-        or not the PROCEDURE DIVISION ever names it (a program that tests
-        its status only through a level-88 never does) --
-        ``UnusedVariableAnalyzer._file_control_references`` counts it as
-        used, and listing it unreferenced here contradicted that. Recorded
-        with role ``"reference"``. The RECORD / ALTERNATE / RELATIVE KEY
-        items are not recorded here (yet): their roles on READ / START are
-        pinned by the existing role tests.
+        The runtime stores into the FILE STATUS item after every I/O, reads
+        the key items on every keyed READ / START / WRITE / DELETE (and
+        writes the RELATIVE KEY on a sequential READ), and reads the padding
+        item on every WRITE, whether or not the PROCEDURE DIVISION ever names
+        them -- ``UnusedVariableAnalyzer._file_control_references`` counts
+        them as used, and listing them unreferenced here contradicted that
+        (#549, #556). Recorded with role ``"reference"`` at the SELECT; the
+        roles a READ / START gives the keys are unchanged.
         """
         values: list[str | None] = [
             select.file_status,
             select.file_status_vsam,
+            select.record_key,
+            select.record_key_source,
+            select.relative_key,
             select.password,
             select.assign_using,
+            select.padding_character,
         ]
         for alternate in select.alternate_keys:
+            values.append(alternate.get("key"))
             values.append(alternate.get("password"))
         self._record_structural(
             [value for value in values if value], select.location, "SelectStatement"

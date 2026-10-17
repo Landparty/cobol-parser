@@ -1270,7 +1270,9 @@ def test_rewrite_delete_start_and_unlock_file_operations():
     # MERGE USING, DELETE, START, UNLOCK
     assert out_file.count(ROLE_FILE_OPERATION) == 4
     assert _roles(report, "OUT-REC") == [ROLE_READ]  # REWRITE source record
-    assert _roles(report, "OUT-KEY") == [ROLE_READ]  # START KEY IS
+    # The SELECT's RECORD KEY is a structural reference (#549); START KEY IS
+    # keeps its read.
+    assert _roles(report, "OUT-KEY") == [ROLE_REFERENCE, ROLE_READ]
 
 
 def test_entry_using_parameters_are_call_arguments():
@@ -1478,7 +1480,8 @@ _IO_AND_STRINGS = """
 def test_read_into_and_key_roles():
     report = _analyze_source(_IO_AND_STRINGS)
     assert _roles(report, "WS-TEXT")[0] == ROLE_WRITE  # READ ... INTO
-    assert _roles(report, "IX-KEY") == [ROLE_READ]  # READ ... KEY IS
+    # SELECT ... RECORD KEY (#549), then READ ... KEY IS
+    assert _roles(report, "IX-KEY") == [ROLE_REFERENCE, ROLE_READ]
     assert _roles(report, "IX-FILE") == [ROLE_FILE_OPERATION]
 
 
