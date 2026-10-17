@@ -415,6 +415,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `move-type-check` operand that `lint` blamed on an unresolved COPY. The
   argument is now dropped before names are extracted, and the call is a
   numeric MOVE source. `JNIENVPTR` joins xref's special registers.
+* **MULTIPLY / DIVIDE ... GIVING keep both operands; `diff` shows INTO vs
+  BY** (#495). When the BY/INTO operand was also the GIVING target
+  (`MULTIPLY RATE BY PREM GIVING PREM`, `DIVIDE B INTO A GIVING A`), the
+  deduped operand list lost it, so business-rules printed `compute MULTIPLY
+  RATE GIVING PREM` instead of `PREM = RATE * PREM` (and `MULTIPLY A BY A
+  GIVING C` made xref read C). The parser now records both operands of the
+  GIVING form in `source_operands`, which business-rules, xref and constant
+  folding read. Program-flow's statement text renders `MULTIPLY x BY y GIVING
+  z` / `DIVIDE x INTO|BY y GIVING z [REMAINDER r]`, so `diff` reports `DIVIDE
+  A INTO B GIVING C -> DIVIDE A BY B GIVING C` rather than `DIVIDE A B C ->
+  DIVIDE A B C`.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

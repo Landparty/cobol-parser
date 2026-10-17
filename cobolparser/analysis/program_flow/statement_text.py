@@ -136,6 +136,25 @@ def summarize_statement(stmt: Any) -> str:
                 givings = [_with_rounding(stmt, g) for g in stmt.givings]
                 text += f" GIVING {_join(givings)}"
             return _truncate(text)
+    if isinstance(stmt, (MultiplyStatement, DivideStatement)) and stmt.givings:
+        # Format 2: ``MULTIPLY x BY y GIVING z`` / ``DIVIDE x {INTO|BY} y
+        # GIVING z [REMAINDER r]``. INTO vs BY reverses the quotient, so the
+        # generic ``VERB operands...`` text (which drops it) would make that
+        # change invisible to ``diff`` (#495).
+        results = [*stmt.givings, getattr(stmt, "remainder", None)]
+        sources = list(stmt.source_operands or []) or [
+            o for o in stmt.operands if o not in results
+        ]
+        if len(sources) == 2:
+            if isinstance(stmt, MultiplyStatement):
+                verb, prep = "MULTIPLY", "BY"
+            else:
+                verb, prep = "DIVIDE", stmt.division_mode or "INTO"
+            givings = [_with_rounding(stmt, g) for g in stmt.givings]
+            text = f"{verb} {sources[0]} {prep} {sources[1]} GIVING {_join(givings)}"
+            if isinstance(stmt, DivideStatement) and stmt.remainder:
+                text += f" REMAINDER {stmt.remainder}"
+            return _truncate(text)
     if isinstance(stmt, MultiplyStatement) and stmt.operands and stmt.target:
         return _truncate(f"MULTIPLY {stmt.operands[0]} BY {stmt.target}")
     if isinstance(stmt, DivideStatement) and stmt.operands and stmt.target:

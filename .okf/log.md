@@ -207,6 +207,12 @@ IMSSegmentAnalyzer read them; function-code candidates are no longer filtered.
 `_split_operand`; MoveTypeChecker classifies the call NUMERIC; JNIENVPTR is a
 special register.
 
+## 2026-10-17 -- MULTIPLY / DIVIDE GIVING keep both operands (#495)
+
+[ast-models.md](ast-models.md), [analysis/flow.md](analysis/flow.md),
+[analysis/business-rules.md](analysis/business-rules.md): GIVING form records
+`source_operands`; statement text renders BY / INTO.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
