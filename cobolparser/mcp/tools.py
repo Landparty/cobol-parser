@@ -996,8 +996,11 @@ class CobolTools:
                 "kind": "field",
                 "direction": direction,
                 "found": False,
+                # Never the very name asked for (#546): it reads as "you
+                # meant this". A wrongly qualified name still gets its bare
+                # one suggested.
                 "suggestions": difflib.get_close_matches(
-                    wanted.split(" OF ")[0], sorted(names), n=5
+                    wanted.split(" OF ")[0], sorted(names - {wanted}), n=5
                 ),
             }
             if direction == "forward" and self._is_member(wanted, parsed):
@@ -1050,6 +1053,7 @@ class CobolTools:
             "datasets": result.datasets,
             "hit_count": len(hits),
             "hits": response.cap(hits, cap, "hits"),
+            "notes": list(result.notes),
             "legend": (
                 "each hit is a field (or a table column, a dataset byte range, "
                 "or the port where a trail ends) with its path from the start, "

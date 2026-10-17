@@ -42,6 +42,13 @@ which the expander passes down as `initial_origins`.
 `--define` (`ScanOptions.defined_symbols`); `unapplied_parse_settings()`
 warns about a program-shaping config key the subcommand has no flag for.
 
+## 2026-10-17 -- Lineage: a declared field with no value flow is found (#546)
+
+[analysis/lineage.md](analysis/lineage.md), [cli.md](cli.md), [mcp.md](mcp.md):
+`LineageGraph.impact()` reports a declared field no edge touches as found,
+with no hits and an `ImpactResult.notes` entry; `field-impact` exits 0 for it
+and MCP `where_from` / `impact_of_change` answer `found: true`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
