@@ -540,6 +540,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument, and a host variable named only in a WORKING-STORAGE `DECLARE
   CURSOR` -- the standard IBM layout -- counts as referenced (#378; the
   sample `DB2BATCH.cbl`'s `PARM-BRANCH` was reported unused).
+* **`PERFORM 1000-INIT` no longer counts as a use of data item `INIT`**
+  (#487). The shared identifier tokenizer could not match a digit-then-hyphen
+  word from its first character and took its tail instead, so with the
+  dominant `1000-xxx` paragraph convention any data item sharing a
+  paragraph's tail (`INIT`, `CUST-TOTAL`) read as used in
+  `unused-variables` and `lint` and got phantom references in `xref`. The
+  tokenizer now takes whole words, and `unused-variables` also ignores
+  PERFORM / GO TO / ALTER / SORT-procedure targets, so a paragraph named
+  like a data item (`PERFORM INIT`) no longer uses it either.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

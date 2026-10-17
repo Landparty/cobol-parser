@@ -293,6 +293,12 @@ lineage carries SOURCE/SUM operands to the report file port.
 indicator (PROCEDURE and own DATA DIVISION), so host-structure fields and
 VARCHAR 49-levels are not reported unused.
 
+## 2026-10-17 -- Identifier tokens take whole words (#487)
+
+[analysis/data-use.md](analysis/data-use.md), [tests.md](tests.md):
+`IDENTIFIER_TOKEN_RE` no longer matches the tail of a digit-led word
+(`1000-INIT` -> `INIT`); unused-variables skips procedure-name operands.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
