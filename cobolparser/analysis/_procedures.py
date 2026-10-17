@@ -17,11 +17,12 @@ ambiguous resolves to every candidate, so it can never make live code look
 dead.
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from ..models.program import CobolDivision, CobolParagraph, CobolSection
+from ..models.statements.control import EvaluateStatement, IfStatement
 
 
 def qualify(name: str, section: str) -> str:
@@ -199,3 +200,75 @@ def statement_qualifier(stmt: Any, key: str) -> str | None:
 def unique(keys: Iterable[str]) -> list[str]:
     """*keys* with duplicates removed, order kept."""
     return list(dict.fromkeys(keys))
+
+
+def _exhaustive_arms(stmt: Any) -> list[list[Any]] | None:
+    """The arms of an exhaustive IF / EVALUATE *stmt*, else ``None``.
+
+    Exhaustive means an IF with an ELSE or an EVALUATE with a WHEN OTHER:
+    without one some value takes no arm and falls through. A WHEN with no
+    statements of its own shares the next WHEN's (``WHEN 1 WHEN 2 STOP
+    RUN``), so it is folded into it; a trailing empty one is an arm that
+    does nothing.
+    """
+    if isinstance(stmt, IfStatement):
+        if not stmt.else_statements:
+            return None
+        return [list(stmt.then_statements or []), list(stmt.else_statements)]
+    if isinstance(stmt, EvaluateStatement):
+        if stmt.default_when is None:
+            return None
+        clauses = list(stmt.when_clauses)
+        if clauses and not clauses[-1].statements:
+            return None
+        arms = [list(c.statements) for c in clauses if c.statements]
+        arms.append(list(stmt.default_when.statements or []))
+        return arms
+    return None
+
+
+def branch_terminates(stmt: Any, is_terminator: Callable[[Any], bool]) -> bool:
+    """Whether *stmt* is an exhaustive IF / EVALUATE every arm of which
+    reaches a terminator.
+
+    The ``IF c GO TO A ELSE GO TO B END-IF`` dispatch is the common legacy
+    shape: treated as falling through, it kept the paragraph after it live
+    (#586). Nested branches are evaluated here, bottom-up with an explicit
+    stack (a deeply nested IF chain must not hit the recursion limit);
+    *is_terminator* is only asked about the other statements in an arm.
+    ``False`` for anything that is not an IF / EVALUATE.
+    """
+    if _exhaustive_arms(stmt) is None:
+        return False
+    result: dict[int, bool] = {}
+    stack: list[tuple[Any, bool]] = [(stmt, False)]
+    while stack:
+        node, expanded = stack.pop()
+        if id(node) in result:
+            continue
+        arms = _exhaustive_arms(node)
+        if arms is None:
+            result[id(node)] = False
+            continue
+        nested = [
+            s
+            for arm in arms
+            for s in arm
+            if isinstance(s, (IfStatement, EvaluateStatement))
+        ]
+        if not expanded:
+            stack.append((node, True))
+            stack.extend((s, False) for s in nested if id(s) not in result)
+            continue
+        result[id(node)] = all(
+            any(
+                (
+                    result[id(s)]
+                    if isinstance(s, (IfStatement, EvaluateStatement))
+                    else is_terminator(s)
+                )
+                for s in arm
+            )
+            for arm in arms
+        )
+    return result[id(stmt)]

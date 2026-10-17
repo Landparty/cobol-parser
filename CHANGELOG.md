@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A paragraph whose IF/ELSE or EVALUATE ... WHEN OTHER ends every arm in
+  GOBACK / STOP RUN / EXIT PROGRAM / GO TO no longer falls through** (#586).
+  `dead-code` and `program-flow` counted only top-level terminators, so the
+  `IF c GO TO A ELSE GO TO B END-IF` dispatch drew a `FALL_THROUGH` edge into
+  the next paragraph and kept a dead paragraph live in `dead-code`, `lint`,
+  `health` and the MCP reachability answers. An exhaustive branch whose every
+  arm terminates (recursively) now ends the paragraph; an IF with no ELSE or
+  an EVALUATE with no WHEN OTHER still falls through.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

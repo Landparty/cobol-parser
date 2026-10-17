@@ -112,9 +112,16 @@ step deliberately.
   (not `STOP 'literal'`, which only pauses for the operator), `GOBACK`, `EXIT
   PROGRAM`, a CICS terminator (below), any non-`DEPENDING` `GoStatement`
   (including the operand-less alterable `GO TO.`, which always jumps wherever
-  an ALTER last pointed it), or `EXIT SECTION`. Statements nested in an
-  IF/EVALUATE arm never count: a conditional GO TO or STOP RUN still lets the
-  paragraph fall through when the condition is false. A bare `SECTION` header
+  an ALTER last pointed it), or `EXIT SECTION`. A terminator nested in one
+  IF/EVALUATE arm does not count: a conditional GO TO or STOP RUN still lets
+  the paragraph fall through when the condition is false. An **exhaustive**
+  branch whose every arm terminates does (`_procedures.branch_terminates`,
+  used by both `_is_terminator` copies, recursively): an IF with an ELSE, or
+  an EVALUATE with a WHEN OTHER, every arm reaching a terminator -- the
+  legacy `IF c GO TO A ELSE GO TO B END-IF` dispatch (#586). An empty WHEN
+  shares the next WHEN's statements (`WHEN 1 WHEN 2 STOP RUN`); a trailing
+  empty one counts as falling through. Pinned in
+  `tests/regression/test_issue_586_exhaustive_branch_terminator.py`. A bare `SECTION` header
   has no statements of its own, so it never terminates. Known boundary: a
   terminator inside an unconditional inline `PERFORM ... END-PERFORM` is not a
   top-level statement and is not seen.

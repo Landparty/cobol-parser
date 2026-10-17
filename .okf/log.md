@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Exhaustive IF/EVALUATE branches terminate a paragraph (#586)
+
+[analysis/flow.md](analysis/flow.md): both `_is_terminator` copies count an
+IF with ELSE / EVALUATE with WHEN OTHER whose every arm terminates
+(`_procedures.branch_terminates`), so no fall-through is drawn past it.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
