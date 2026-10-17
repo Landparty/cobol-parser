@@ -226,7 +226,7 @@ class FixtureBundle:
             scenario_dir = os.path.join(root, slug)
             os.makedirs(scenario_dir, exist_ok=True)
             for fixture, safe_key in zip(scenario.fixtures, names, strict=True):
-                if not fixture.layout or not fixture.sequence:
+                if not _writes_csv(fixture):
                     continue
                 header = [f.column for f in fixture.layout]
                 rows = [
@@ -252,7 +252,7 @@ class FixtureBundle:
             for fixture, fixture_dict, safe_key in zip(
                 scenario.fixtures, scenario_dict["fixtures"], names, strict=True
             ):
-                wrote_csv = bool(fixture.layout and fixture.sequence)
+                wrote_csv = _writes_csv(fixture)
                 # Keep `sequence`'s type identical to the normal bundle schema
                 # (always a list) rather than overwriting it with a hint
                 # string -- a consumer that runs MANIFEST.json through the
@@ -313,11 +313,27 @@ def _unique_names(names: list[str]) -> list[str]:
     return out
 
 
+def _writes_csv(fixture: BoundaryFixture) -> bool:
+    """Whether :meth:`FixtureBundle.write_csv_dir` writes a CSV for *fixture*.
+
+    Any fixture with a layout and at least one row; and also an IN or
+    BIDIRECTIONAL one with a layout and **no** rows, as a header-only CSV
+    (#568): that is the "empty input" scenario's zero-record file, and
+    writing nothing left it indistinguishable in the manifest from a
+    STATUS_ONLY boundary (``csv_path: null``) and its scenario directory
+    empty. STATUS_ONLY and OUT fixtures have nothing to bind and still get
+    none.
+    """
+    if not fixture.layout:
+        return False
+    return bool(fixture.sequence) or fixture.direction in ("IN", "BIDIRECTIONAL")
+
+
 def _csv_names(fixtures: list[BoundaryFixture]) -> list[str]:
     """One CSV base name per fixture: ``<KEY>`` unless another fixture that
     writes *different* rows already took it.
 
-    Only fixtures that get a CSV at all (both a `layout` and a `sequence`)
+    Only fixtures that get a CSV at all (see :func:`_writes_csv`)
     compete for a name, so the OPEN/CLOSE of a file never displaces its
     READ. Two fixtures with the same key and byte-identical content (the
     same READ boundary reached from two places) keep sharing one file, as
@@ -326,7 +342,7 @@ def _csv_names(fixtures: list[BoundaryFixture]) -> list[str]:
     names = [_sanitize_key(f.ref.key) for f in fixtures]
     taken: dict[str, tuple[Any, ...]] = {}
     for i, fixture in enumerate(fixtures):
-        if not fixture.layout or not fixture.sequence:
+        if not _writes_csv(fixture):
             continue
         header = tuple(f.column for f in fixture.layout)
         content = (
