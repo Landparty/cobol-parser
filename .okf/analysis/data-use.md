@@ -675,6 +675,7 @@ matrix: CRUDMatrix = CRUDMatrixGenerator().analyze(ast)
 # matrix.file_entries: list[FileEntry]   (file_name/crud/open_modes/organization/access_mode)
 # matrix.table_entries: list[TableEntry] (table_name/crud/cursors) -- EXEC SQL tables
 # matrix.entries: both lists (property); .crud is CRUDFlags(create/read/update/delete)
+# matrix.caveats: list[str] -- accesses it could not attribute (also in to_dict())
 matrix.to_csv()
 matrix.to_json()
 ```
@@ -691,6 +692,17 @@ per file and one per DB2 table the program touches.
   files written (C) -- the sort does the I/O itself, so no READ/WRITE names
   them. `RELEASE` marks its SD file C (via the record's FD/SD) and `RETURN`
   marks it R. Pinned by `test_crud_matrix.py::TestSortMergeFileAccess`.
+* **EXEC CICS file control marks files.** `READ` / `READNEXT` /
+  `READPREV` / `STARTBR` give R, `WRITE` C, `REWRITE` U, `DELETE` D, on the
+  file its `FILE(...)` (or older `DATASET(...)`) names -- how every CICS
+  program reaches its VSAM data (`_mark_cics_file_crud`,
+  `_CICS_FILE_ACCESS`). Organization / access mode stay None (they live in
+  the CICS file definition). A command without FILE/DATASET (`WRITEQ`,
+  `WRITE OPERATOR`) adds nothing; one naming its file through a data item
+  (`FILE(WS-FNAME)`, not in `literal_options`) adds no row and a line to
+  `CRUDMatrix.caveats`, which MCP `program_brief` reports as
+  `incomplete-analysis`. Pinned by
+  `tests/regression/test_crud_cics_file_control_issue_538.py` (#538).
 * **Record → file resolution** goes through `_files.py` (see [Data names and
   references](#data-names-and-references)).
 * **SQL writes.** For INSERT/UPDATE/DELETE/MERGE only `stmt.tables[0]` (the

@@ -406,6 +406,10 @@ class CobolTools:
 
         crud = _attempt(response, "file and table use", lambda: _crud(parsed, unit))
         if crud is not None:
+            # An EXEC CICS file command naming its file through a data item
+            # has no row; say so rather than let ``files`` read as complete.
+            for caveat in crud.caveats:
+                response.caveat("incomplete-analysis", caveat)
             facts = _attempt(
                 response, "file descriptions", lambda: _file_facts(parsed, unit)
             )

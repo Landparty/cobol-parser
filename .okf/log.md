@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- CRUD matrix: EXEC CICS file control (#538)
+
+[analysis/data-use.md](analysis/data-use.md), [mcp.md](mcp.md), [tests.md](tests.md):
+`CRUDMatrixGenerator` marks files from EXEC CICS READ/WRITE/REWRITE/DELETE/
+browse `FILE(...)`; a data-item file name lands in new `CRUDMatrix.caveats`,
+which `program_brief` reports.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
