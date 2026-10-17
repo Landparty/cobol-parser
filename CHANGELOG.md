@@ -327,6 +327,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names to their program). The names a program answers to are now its
   PROGRAM-ID plus its own ENTRY names, for the self-call and the
   enclosing-program checks alike; the risk is graded as for the PROGRAM-ID.
+* **`diff` no longer reports equivalent VALUE spellings as changes** (#543).
+  `ZERO` -> `ZEROES`, `HIGH-VALUE` -> `HIGH-VALUES`, `SPACES` -> `SPACE`,
+  `7` -> `007` and `+5` -> `5.0` were each a `value-changed`; VALUE clauses
+  are now compared in a canonical form (figurative plurals folded, numeric
+  literals as decimals) and the message still quotes them as coded. A
+  quoted literal's case is now significant (`'ab'` -> `'AB'` was silently
+  equal).
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

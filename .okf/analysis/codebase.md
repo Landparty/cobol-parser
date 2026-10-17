@@ -364,8 +364,15 @@ its character positions, repeat factors written out (`_picture_positions`:
 (`_canonical_usage`, the `_storage.py` synonym sets: `COMP` = `BINARY` =
 `COMP-4` = `COMPUTATIONAL`, `COMP-3` = `PACKED-DECIMAL`). `COMP-5` stays
 distinct from `COMP` (no truncation to the PICTURE). The change still reports
-both strings as coded. A VALUE is still compared as written (`+12` vs `12`,
-`'AB'` vs `'AB  '` on `PIC X(4)` read as changes).
+both strings as coded. A VALUE is compared by `_canonical_value` (#543):
+figurative constants fold singular/plural (`ZERO` = `ZEROS` = `ZEROES`,
+`HIGH-VALUE` = `HIGH-VALUES`, ...; `ALL` is kept and significant), a numeric
+literal compares as a `Decimal` (`7` = `007`, `+5` = `5.0`), hex digits
+case-insensitively, and a quoted literal's text case-sensitively (`'ab'` vs
+`'AB'` is a change; before #543 it was not). Padding is still not modelled:
+`'AB'` vs `'AB  '` on `PIC X(4)` reads as a change. Procedure-side
+condition text is not canonicalized: `IF A = ZERO` -> `IF A = ZEROS` is a
+`condition-changed`.
 
 Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
 IF, EVALUATE, SEARCH, OPEN, EXEC SQL, EXEC CICS, COMPUTE,

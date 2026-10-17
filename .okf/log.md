@@ -146,6 +146,11 @@ follows an unconditional single-target `GO TO`, like a PERFORM.
 [analysis/flow.md](analysis/flow.md): a CALL to an own (or enclosing)
 `ENTRY 'name'` is a self-recursive CALL risk.
 
+## 2026-10-17 -- diff VALUE canonical form (#543)
+
+[analysis/codebase.md](analysis/codebase.md): `_canonical_value` folds
+figurative plurals and numeric spellings before comparing `value_clause`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
