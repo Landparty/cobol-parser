@@ -36,6 +36,12 @@ arithmetic operands through `_eval_define_arithmetic`.
 the whole member (a line break is a separator) and returns `line_origins`,
 which the expander passes down as `initial_origins`.
 
+## 2026-10-17 -- cobol.yml define for scan / field-impact; unapplied keys warn (#324)
+
+[cli.md](cli.md), [batch.md](batch.md): `scan` / `field-impact` take
+`--define` (`ScanOptions.defined_symbols`); `unapplied_parse_settings()`
+warns about a program-shaping config key the subcommand has no flag for.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
