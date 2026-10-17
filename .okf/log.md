@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- xref records REPORT SECTION operands (#571)
+
+[analysis/data-use.md](analysis/data-use.md): `report_entry_operands()` lists
+each report entry's SOURCE / SUM / CONTROL(S) texts; unused-variables and xref
+both read it, xref recording each at its entry.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

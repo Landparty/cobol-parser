@@ -996,7 +996,8 @@ class XrefAnalyzer:
         """References that live in the DATA DIVISION itself.
 
         ``OCCURS ... DEPENDING ON`` counters and the data items an FD's own
-        clauses name (``RECORD VARYING ... DEPENDING ON``, ``LINAGE``):
+        clauses name (``RECORD VARYING ... DEPENDING ON``, ``LINAGE``), and
+        the REPORT SECTION's ``SOURCE`` / ``SUM`` / ``CONTROL(S)`` operands:
         ``UnusedVariableAnalyzer`` counts them as used, so a cross-reference
         that listed them unreferenced contradicted it. Recorded with role
         ``"reference"`` at the declaring entry's location.
@@ -1010,6 +1011,13 @@ class XrefAnalyzer:
                 self._record_structural(
                     [occurs.depending_on], item.location, "OCCURS DEPENDING ON"
                 )
+        # REPORT SECTION SOURCE / SUM / CONTROL(S) operands: a Report Writer
+        # program prints, totals and breaks on these fields without the
+        # PROCEDURE DIVISION ever naming them (#571).
+        data_div = ast.data_division
+        if data_div is not None:
+            for node, values in UnusedVariableAnalyzer.report_entry_operands(data_div):
+                self._record_structural(values, node.location, "REPORT SECTION")
 
     def _record_structural(
         self, values: list[str], location: SourceLocation, statement: str

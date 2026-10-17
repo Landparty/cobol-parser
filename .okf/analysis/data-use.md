@@ -277,7 +277,13 @@ unused item in that set from `report.unused_items` (tallied instead in
 LINKAGE (`_DATA_SECTION_NAMES`). The DATA DIVISION parser skips SCREEN and
 COMMUNICATION SECTION content (`_skip_section`) and parses REPORT SECTION RDs
 and report groups into a `REPORT` section, which this analyzer ignores, so
-report-group items are never reported unused.
+report-group items are never reported unused. The fields a report group
+names (`SOURCE`, `SUM`, the RD's `CONTROL(S)`) *are* references:
+`UnusedVariableAnalyzer.report_entry_operands(data_div)` lists each entry
+with its operand texts, and both this analyzer and xref read it (xref records
+each at its entry with statement `"REPORT SECTION"`, #571). The RD is no node
+-- the parser copies its clauses onto every 01 group it owns -- so its
+CONTROLS are taken once per report, at the first group.
 
 **Known limitations are tagged inline.** Each limitation called out in the
 class docstring carries a `TODO(known limitation)` comment so a `grep` sweep

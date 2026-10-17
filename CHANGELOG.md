@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`xref` and MCP `explain_symbol` count the fields a Report Writer report
+  prints, totals and breaks on** (#571). REPORT SECTION `SOURCE`, `SUM` and
+  RD `CONTROL(S)` operands were references for `unused-variables` but not for
+  `xref`, so every such field showed `reference_count: 0`. Each is now a
+  `reference` at its report entry (statement `REPORT SECTION`); the RD's
+  CONTROLS are recorded once per report.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
