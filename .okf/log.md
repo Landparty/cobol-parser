@@ -189,6 +189,13 @@ technical set, like CICS RESP); PCB status / MQ CompCode stay business too.
 [analysis/lineage.md](analysis/lineage.md): `XrefReport.entries_named` and
 `_names.split_qualified_name` (IN = OF, partial chains).
 
+## 2026-10-17 -- One DL/I vocabulary (#481, #595)
+
+[dialects.md](dialects.md), [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md),
+[parser/statements-io.md](parser/statements-io.md):
+`IMS_COMMANDS` completed (no ROLLB), `EXEC_DLI_COMMANDS` added; the parser and
+IMSSegmentAnalyzer read them; function-code candidates are no longer filtered.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

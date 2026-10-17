@@ -6,6 +6,7 @@ Support for embedded SQL and CICS statements in COBOL procedures.
 from typing import Any
 
 from ...core.interfaces import IStatementParser, ITokenStream
+from ...dialects.ibm_enterprise import IBMEnterpriseCobol
 from ...lexer import TokenType
 from ...models.ast_base import ASTNode, SourceLocation
 from ...models.sql_statements import parse_exec_sql
@@ -17,9 +18,10 @@ from ._utils import (
     skip_whitespace,
 )
 
-_IMS_CALL_TYPES = frozenset(
-    {"GU", "GN", "GNP", "ISRT", "REPL", "DLET", "CHKP", "ROLLB", "TERM", "XRST", "XDLT"}
-)
+# The EXEC DLI command words, read from the dialect so the two cannot drift
+# apart again (#481): this copy had lost ROLB / LOAD / SCHD and kept the
+# non-command XDLT.
+_IMS_CALL_TYPES = IBMEnterpriseCobol.EXEC_DLI_COMMANDS
 
 
 def _skip_quoted(text: str, start: int) -> int:

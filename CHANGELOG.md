@@ -384,6 +384,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lineage --field` rejected `AMT IN IN-REC` as "no such field". Names are
   now matched on the bare name and then the enclosing items, in order
   (`XrefReport.entries_named`), and `IN` is accepted wherever `OF` is.
+* **One DL/I vocabulary for the parser, the dialect and `ims-dli`** (#481,
+  #595). `EXEC DLI ROLB` / `LOAD` / `SCHD` parsed with `ims_call_type`
+  `UNKNOWN` while the non-command `XDLT` was accepted: the parser kept its own
+  list. It now reads the new `IBMEnterpriseCobol.EXEC_DLI_COMMANDS` (the
+  command-level vocabulary: no hold forms, so `EXEC DLI GHU` stays
+  `UNKNOWN`), and so does the dialect's own `ExecIMSStatement`
+  (`parse_exec_ims`), which had classified against the CALL function codes
+  (`GHU` known, `LOAD` unknown). `IMS_COMMANDS`, the DL/I call function codes, gained FLD / POS
+  / AUTH / SETO / APSB / DPSB / PCB / INIT / ICAL / ... and lost the non-call
+  `ROLLB`. `ims-dli` reads it too, and no longer drops a function-code
+  candidate missing from its list: a variable with `VALUE 'GU'` later set to
+  `CHNG` and `ROLB` is reported `CHNG/GU/ROLB` instead of `GU`, and
+  `VALUE SPACES` is no longer reported as the word `SPACES`.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
