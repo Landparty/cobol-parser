@@ -27,7 +27,12 @@ from ..models.statements import (
     IOUnlockStatement,
     IOWriteStatement,
 )
-from ._files import record_to_file_map, resolve_file_name
+from ._files import (
+    record_to_file_map,
+    report_to_file_map,
+    report_writer_files,
+    resolve_file_name,
+)
 
 
 @dataclass
@@ -187,6 +192,8 @@ class IOLogger:
         # FILE SECTION record name -> owning FD/SD name. WRITE/REWRITE name
         # a record, never a file, so their target is resolved through it.
         self._record_to_file: dict[str, str] = {}
+        # Report Writer report / report-group name -> its report file.
+        self._report_to_file: dict[str, str] = {}
 
     def analyze(self, ast: CobolProgram) -> IOLogReport:
         """Analyze AST and return structured I/O report.
@@ -199,6 +206,7 @@ class IOLogger:
         """
         self._operations = []
         self._record_to_file = record_to_file_map(ast)
+        self._report_to_file = report_to_file_map(ast)
 
         # Collect all statements once to avoid repeated AST traversal
         all_statements = ast.get_all_statements()
@@ -543,6 +551,25 @@ class IOLogger:
                         details={"key_condition": stmt.key_condition},
                     )
                 )
+
+            elif report_files := report_writer_files(stmt, self._report_to_file):
+                # INITIATE / GENERATE / TERMINATE write the report file
+                # (headings, detail lines, footings) -- #499.
+                operand = getattr(stmt, "report_name", None) or ", ".join(
+                    getattr(stmt, "report_names", None) or []
+                )
+                for file_name in report_files:
+                    self._operations.append(
+                        IOOperation(
+                            category="FILE-IO",
+                            operation="WRITE",
+                            direction="OUTPUT",
+                            variables=[],
+                            target=file_name,
+                            line=line,
+                            details={"verb": stmt.statement_type, "report": operand},
+                        )
+                    )
 
             elif isinstance(stmt, IOUnlockStatement):
                 self._operations.append(

@@ -38,7 +38,12 @@ from ..models.statements.misc import (
     SortStatement,
 )
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
-from ._files import record_to_file_map, resolve_file_name
+from ._files import (
+    record_to_file_map,
+    report_to_file_map,
+    report_writer_files,
+    resolve_file_name,
+)
 
 
 @dataclass
@@ -263,6 +268,8 @@ class CRUDMatrixGenerator:
         - SORT/MERGE ``USING`` files are read (R) and ``GIVING`` files are
           written (C); ``RELEASE`` writes (C) and ``RETURN`` reads (R) the
           SD work file
+        - Report Writer ``INITIATE`` / ``GENERATE`` / ``TERMINATE`` write
+          (C) the file whose ``FD ... REPORT IS`` names the report
         OPEN modes (INPUT/OUTPUT/I-O/EXTEND) are recorded as metadata.
 
     SQL table mapping:
@@ -300,6 +307,8 @@ class CRUDMatrixGenerator:
         self._cursor_tables: dict[str, set[str]] = {}
         # record_name (upper) -> file_name (upper) built from FD metadata
         self._record_to_file: dict[str, str] = {}
+        # report / report-group name (upper) -> report file (FD REPORT IS)
+        self._report_to_file: dict[str, str] = {}
         self._program_name: str | None = None
 
     def analyze(self, ast: CobolProgram) -> CRUDMatrix:
@@ -315,6 +324,7 @@ class CRUDMatrixGenerator:
         self._table_entries = {}
         self._cursor_tables = {}
         self._record_to_file = {}
+        self._report_to_file = {}
         self._program_name = ast.program_name
 
         all_statements = ast.get_all_statements()
@@ -387,6 +397,7 @@ class CRUDMatrixGenerator:
         analyzers cannot disagree about which file a record belongs to.
         """
         self._record_to_file = record_to_file_map(ast)
+        self._report_to_file = report_to_file_map(ast)
 
     # ------------------------------------------------------------------
     # OPEN mode tracking
@@ -497,6 +508,12 @@ class CRUDMatrixGenerator:
                 fn = self._resolve_file_name(stmt.file_name, None)
                 if fn:
                     self._get_or_create_file_entry(fn).crud.read = True
+
+            else:
+                # Report Writer: INITIATE / GENERATE / TERMINATE write the
+                # file whose ``FD ... REPORT IS`` names the report (#499).
+                for fn in report_writer_files(stmt, self._report_to_file):
+                    self._get_or_create_file_entry(fn).crud.create = True
 
     # ------------------------------------------------------------------
     # SQL CRUD marking

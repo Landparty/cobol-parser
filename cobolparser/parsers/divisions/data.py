@@ -286,6 +286,11 @@ class DataDivisionParser(BaseDivisionParser):
         current_rd_name: str | None = None
         current_rd_clauses: dict[str, Any] = {}
         report_group = section_name == "REPORT"
+        # FILE SECTION: report name (upper) -> the FD whose ``REPORT IS``
+        # names it. A report file has no record description, so this is the
+        # only place the link survives into the AST (section metadata
+        # ``report_files``).
+        report_files: dict[str, str] = {}
 
         while not token_stream.is_empty():
             token = token_stream.peek()
@@ -360,6 +365,9 @@ class DataDivisionParser(BaseDivisionParser):
                 # file's physical layout (block/record sizes, recording mode,
                 # labels, code set, EXTERNAL/GLOBAL) is preserved in the AST.
                 current_fd_clauses = self._parse_fd_clauses(token_stream)
+                if current_fd_name is not None:
+                    for report in current_fd_clauses.get("report_names", []):
+                        report_files[report.upper()] = current_fd_name
                 continue
 
             # In REPORT SECTION, an RD entry introduces the report the
@@ -456,6 +464,8 @@ class DataDivisionParser(BaseDivisionParser):
             "data_items": hierarchical_items,
             "exec_sql_items": exec_sql_items,
         }
+        if report_files:
+            result["report_files"] = report_files
         if section_location is not None:
             result["location"] = section_location
         return result
@@ -733,6 +743,9 @@ class DataDivisionParser(BaseDivisionParser):
                     # EXEC SQL blocks (DECLARE TABLE, INCLUDE SQLCA, etc.)
                     for sql_node in division_content[key].get("exec_sql_items", []):
                         section.add_child(sql_node)
+                    report_files = division_content[key].get("report_files")
+                    if report_files:
+                        section.set_metadata("report_files", dict(report_files))
 
                 division_node.add_section(section)
 

@@ -277,6 +277,15 @@ listed (R, with the cursor) and MCP `sql_tables` shows it.
 browse `FILE(...)`; a data-item file name lands in new `CRUDMatrix.caveats`,
 which `program_brief` reports.
 
+## 2026-10-17 -- Report Writer output reaches the I/O analyzers (#499)
+
+[parser/divisions.md](parser/divisions.md), [analysis/data-use.md](analysis/data-use.md),
+[analysis/fixtures-support.md](analysis/fixtures-support.md),
+[analysis/lineage.md](analysis/lineage.md), [tests.md](tests.md): FD `REPORT IS`
+is kept (FILE SECTION `report_files`); INITIATE/GENERATE/TERMINATE write the
+report file in CRUD, IOLogger, io-sequence; GENERATE is an OUT boundary;
+lineage carries SOURCE/SUM operands to the report file port.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
