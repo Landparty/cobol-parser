@@ -813,7 +813,10 @@ after every substitution, using the source map: `_restore_comment_lines`
 replaces a line only when it is blank in the expansion AND its origin is a
 comment line in its origin file, so it cannot rewrite code or change the line
 count. `_origin_sources` reads members back through `_cached_read_file` with
-the expansion's own encoding settings; an unreadable file is skipped. A `COPY`
+the expansion's own encoding settings; an unreadable file is skipped. It
+splits each file with `split_source_lines`, the splitter the source map counts
+with: a `split("\n")` read a CR-only member as one line (pasted whole over its
+first comment) and left `\r` on every CRLF comment (#581). A `COPY`
 inside a comment comes back as text and is not expanded.
 
 Source map and comments pinned by
