@@ -527,9 +527,13 @@ with `"1244"` computed from whatever value that scenario's own mocked
   would both write with *different* rows becomes `<KEY>-2.csv` for the
   later one -- same-key fixtures with identical rows still share one file.
   Always read the path from the manifest's `csv_path`.
-* **Which fixtures get a CSV**: only those with both a non-empty `layout` and
-  a non-empty `sequence` — `STATUS_ONLY` fixtures and OUT-direction
-  expectation-only boundaries produce nothing to write (there are no rows).
+* **Which fixtures get a CSV**: those with both a non-empty `layout` and
+  a non-empty `sequence`, plus an IN or BIDIRECTIONAL fixture with a
+  `layout` and an **empty** `sequence`, which gets a **header-only** CSV --
+  the `--scenarios all` "empty input" scenario's zero-record file, so a
+  consumer binds an empty dataset with no special case (#568).
+  `STATUS_ONLY` fixtures and OUT-direction expectation-only boundaries
+  produce nothing to write.
 * **CSV shape**: header row is `[f.column for f in fixture.layout]`; each
   data row looks up every header column in that invocation's `sequence[i]`
   dict (missing keys become `""`). Written with `\n` line endings via the

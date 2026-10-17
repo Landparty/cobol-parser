@@ -88,6 +88,11 @@ records which sources each DELIMITED BY applies to; diff compares it.
 [ast-models.md](ast-models.md): `procedure_count` counts PROCEDURE DIVISION
 procedures only; `parser_version` is the package version; `created_at` dropped.
 
+## 2026-10-17 -- csv-dir header-only CSV for an empty IN fixture (#568)
+
+[generators/fixtures.md](generators/fixtures.md): `bundle._writes_csv` adds
+IN/BIDIRECTIONAL fixtures with a layout and no rows (header-only CSV).
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

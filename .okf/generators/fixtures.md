@@ -500,8 +500,11 @@ to parse is skipped (falls through to the caller-dataflow rung), not a hard
 error — one bad `--callee-path` entry should not sink the whole bundle.
 
 **`write_csv_dir`.** One `GeneratedDataset`-shaped CSV per fixture whose
-`layout`/`sequence` are both non-empty (file-shaped boundaries only —
-`STATUS_ONLY`/OUT/expectation-only fixtures produce nothing to write), under
+`layout`/`sequence` are both non-empty, or whose `layout` is non-empty with
+an empty `sequence` and direction IN/BIDIRECTIONAL (`_writes_csv`): that is
+the "empty input" scenario's READ, written **header-only** so its
+`csv_path` is not `null` like a STATUS_ONLY boundary's (#568).
+`STATUS_ONLY`/OUT/expectation-only fixtures produce nothing to write. Under
 `<path>/<scenario-slug>/<KEY>.csv`. A `MANIFEST.json` at the root is the full
 bundle with each fixture's `sequence` emptied to `[]` (never replaced with a
 pointer string — a consumer running the manifest through the same
