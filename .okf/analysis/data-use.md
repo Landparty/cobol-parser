@@ -633,7 +633,10 @@ Lists every input/output operation the program performs, one `IOOperation`
 each. Categories: `FILE-IO` (OPEN, CLOSE, READ, WRITE, REWRITE, DELETE,
 START, UNLOCK; file names resolved through `_files.py`), `CONSOLE-IO`
 (ACCEPT, DISPLAY), `SQL` (EXEC SQL), `CALL` and `ENTRY` (program linkage);
-`direction` is `INPUT` / `OUTPUT` / `BIDIRECTIONAL`.
+`direction` is `INPUT` / `OUTPUT` / `BIDIRECTIONAL`. `variables` for WRITE
+and REWRITE is the `FROM` item when there is one, else the record; for READ
+it is the `INTO` item, else every 01 record under the file's FD (they share
+the record area the READ fills; #573).
 
 ## IOSequenceAnalyzer
 
