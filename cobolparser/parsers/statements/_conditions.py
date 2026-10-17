@@ -11,6 +11,8 @@ M12). The IF parser's methods now delegate here.
 """
 
 import re
+from dataclasses import dataclass
+from typing import Any
 
 from ...lexer import Token, TokenType
 from ...models.ast_base import SourceLocation
@@ -122,6 +124,51 @@ _FIGURATIVE_WORDS = frozenset(
 _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$")
 
 
+@dataclass(frozen=True)
+class ConditionSymbols:
+    """What the already-parsed DATA DIVISION says about a bare name (#562).
+
+    The PROCEDURE DIVISION is parsed after the DATA DIVISION, so the
+    condition builder can tell a level-88 condition-name from an ordinary
+    data item: the leg ``WS-B`` of ``IF A = 'X' OR WS-B`` is an abbreviated
+    relation (``A = WS-B``) when WS-B is a plain data item, and a
+    condition-name test when it is a level-88 name. Both sets hold
+    upper-cased names; a name in neither (an unexpanded COPY member, a
+    SPECIAL-NAMES switch condition) keeps the CONDITION_NAME reading.
+    """
+
+    data_names: frozenset[str] = frozenset()
+    condition_names: frozenset[str] = frozenset()
+
+    def is_data_reference(self, tokens: list[str]) -> bool:
+        """True when *tokens* is one reference (``name [OF|IN q]...
+        [(subscripts)]``) to a declared data item that is not also a
+        level-88 condition-name anywhere in the program."""
+        if not tokens or not _is_condition_name_reference(
+            tokens, [t.upper() for t in tokens]
+        ):
+            return False
+        name = tokens[0].upper()
+        return name in self.data_names and name not in self.condition_names
+
+
+def condition_symbols(context: Any) -> ConditionSymbols | None:
+    """The :class:`ConditionSymbols` a statement parser's ParseContext
+    carries, or None when there is no context (a standalone parse)."""
+    if context is None:
+        return None
+    data_names = getattr(context, "known_data_names", None)
+    condition_names = getattr(context, "condition_names", None)
+    if not isinstance(data_names, frozenset) or not data_names:
+        return None
+    return ConditionSymbols(
+        data_names=data_names,
+        condition_names=(
+            condition_names if isinstance(condition_names, frozenset) else frozenset()
+        ),
+    )
+
+
 def condition_token_text(token: Token) -> str:
     """Text for one condition token, re-quoting string literals.
 
@@ -143,6 +190,7 @@ def build_condition_expression(
     location: SourceLocation,
     *,
     subject: ConditionalExpression | None = None,
+    symbols: ConditionSymbols | None = None,
 ) -> CobolExpression | None:
     """Convert a flat list of condition token strings into an expression tree.
 
@@ -158,6 +206,10 @@ def build_condition_expression(
     ``A = 1 OR 2 AND 3`` is ``A = 1 OR (A = 2 AND A = 3)``, and ``A = 1 OR
     (2 AND 3)`` the same; expanding only the whole right-hand leg left both
     with two operand-less COMPARISON nodes.
+
+    *symbols* (from the parsed DATA DIVISION) lets a bare data-name leg
+    expand like a literal one: ``A = B OR C`` is ``A = B OR A = C`` when C
+    is a plain data item, not a level-88 condition-name (#562).
     """
     # Normalise multi-word operators ("NOT LESS", "NOT EQUAL", etc.) and
     # two-character symbolic operators the lexer emits as separate
@@ -235,7 +287,7 @@ def build_condition_expression(
         idx = find_top_level_operator(cleaned, logical_op)
         if idx is not None:
             left_expr = build_condition_expression(
-                cleaned[:idx], location, subject=subject
+                cleaned[:idx], location, subject=subject, symbols=symbols
             )
             # ``IF A = 1 OR 2`` / ``IF A > 1 AND < 5``: an abbreviated
             # combined relation condition repeats the subject (and, for a
@@ -244,7 +296,7 @@ def build_condition_expression(
             # itself abbreviated all the way down, the one handed in.
             right_subject = _rightmost_relation(left_expr) or subject
             right_expr = build_condition_expression(
-                cleaned[idx + 1 :], location, subject=right_subject
+                cleaned[idx + 1 :], location, subject=right_subject, symbols=symbols
             )
             if left_expr and right_expr:
                 logical = LogicalExpression(logical_op, location)
@@ -256,7 +308,7 @@ def build_condition_expression(
     # starts with a relational operator, a bare literal, ``NOT literal``)
     # against the relation to the left. Anything else is left alone.
     if subject is not None:
-        cleaned = _expand_abbreviated_condition(subject, cleaned)
+        cleaned = _expand_abbreviated_condition(subject, cleaned, symbols)
 
     # Leading NOT: ``NOT A = 1``, ``NOT (A = 1 AND B = 2)``, ``NOT FLAG-ON``.
     # NOT binds tighter than AND/OR, so this runs after the split above
@@ -266,7 +318,7 @@ def build_condition_expression(
     # Previously the word was swallowed into the left operand text
     # (``left_operand="NOT ( A"``).
     if len(cleaned) > 1 and cleaned[0].upper() == "NOT":
-        inner = build_condition_expression(cleaned[1:], location)
+        inner = build_condition_expression(cleaned[1:], location, symbols=symbols)
         if inner is not None and not _is_raw_fallback(inner):
             return _negate_condition(inner, location)
 
@@ -418,7 +470,9 @@ def _is_literal_leg(tokens: list[str]) -> bool:
 
 
 def _expand_abbreviated_condition(
-    subject: ConditionalExpression, rest: list[str]
+    subject: ConditionalExpression,
+    rest: list[str],
+    symbols: ConditionSymbols | None = None,
 ) -> list[str]:
     """Rebuild one leg of an AND/OR when it has no subject of its own.
 
@@ -428,10 +482,12 @@ def _expand_abbreviated_condition(
     1 AND A < 5``. Two shapes are expanded: a leg that *starts with a
     relational operator*, optionally after ``IS`` (subject prepended) and a
     leg that is *one bare literal* (subject and operator prepended; ``NOT
-    literal`` negates the operator). A bare identifier is left alone:
-    without a symbol table it is indistinguishable from a level-88
-    condition-name (``A = 1 OR FLAG-ON``), and the CONDITION_NAME reading
-    is the one the analyzers resolve. Anything else is returned unchanged.
+    literal`` negates the operator). A bare identifier expands the same way
+    only when *symbols* says it is a declared data item that is not a
+    level-88 condition-name (#562); otherwise it is left alone -- without
+    a symbol table it is indistinguishable from a condition-name (``A = 1
+    OR FLAG-ON``), and the CONDITION_NAME reading is the one the analyzers
+    resolve. Anything else is returned unchanged.
     *subject* is the relation the leg repeats -- see
     :func:`build_condition_expression`.
     """
@@ -455,6 +511,16 @@ def _expand_abbreviated_condition(
         return [subject.left_operand, operator, *rest]
     if first == "NOT" and _is_literal_leg(rest[1:]):
         return [subject.left_operand, _NEGATED_RELATIONAL[operator], *rest[1:]]
+    if symbols is not None:
+        # The written operator (#329) for a data-name leg too (#562).
+        if symbols.is_data_reference(rest):
+            return [subject.left_operand, operator, *rest]
+        if first == "NOT" and symbols.is_data_reference(rest[1:]):
+            return [
+                subject.left_operand,
+                _NEGATED_RELATIONAL[operator],
+                *rest[1:],
+            ]
     return rest
 
 

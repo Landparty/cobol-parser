@@ -15,7 +15,9 @@ Rules and gotchas for the statement parsers that branch, loop, call or end:
 control verbs of `simple_statement_parsers.py`. The invariants every parser keeps
 (boundaries, separators, layout, literals) are in [statements.md](statements.md);
 read that first. Condition trees are built by `_conditions.py`
-([statements.md](statements.md#condition-trees-_conditionspy)).
+([statements.md](statements.md#condition-trees-_conditionspy)); IF, PERFORM
+UNTIL and SEARCH WHEN pass it `condition_symbols(context)` so a bare data-name
+leg of an abbreviated relation expands (#562).
 
 ## Contents
 

@@ -269,7 +269,7 @@ and keeps the case. Every division parser stops at these markers (see
 
 | File | Class / Purpose |
 |------|----------------|
-| `interfaces.py` | `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParseContext` (nested statement parsing; carries `host`, the registry and `known_data_names`) |
+| `interfaces.py` | `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParseContext` (nested statement parsing; carries `host`, the registry, `known_data_names` and `condition_names` -- the level-88 names, #562) |
 | `token_stream.py` | `TokenStream` — `peek()`, `consume()`, `expect()`, configurable lookahead; `omitted_source_lines` |
 | `registry.py` | `StatementParserRegistry` — `register(parser, position=None)` / `unregister` / `clear` / `find_parser(stream)` / `get_all_parsers()`; first-match dispatch (registration order matters) memoised in `_dispatch_cache`, keyed on the first token, the raw second token and the first meaningful token after the verb (so `EXEC <newline> CICS` and `EXEC <newline> SQL` differ), invalidated on every register/unregister/clear |
 | `exceptions.py` | `TokenMismatch`, `UnexpectedEndOfInput`, `DivisionNotFoundError`, `UnknownStatementError`, `ValidationError` (all `ParseError` subclasses) |

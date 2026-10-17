@@ -216,6 +216,12 @@ decodes are warnings or caveats, never silent.
 [parser/statements.md](parser/statements.md): `NOT A = 1 OR 2` is
 `A <> 1 OR A = 2`; the abbreviated leg repeats the operator as written.
 
+## 2026-10-17 -- Abbreviated relation with a data-name leg (#562)
+
+[parser/statements.md](parser/statements.md): a bare leg that the DATA
+DIVISION declares as a plain (non-88) data item expands to a relation
+against the subject; `ParseContext.condition_names` / `ConditionSymbols`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
