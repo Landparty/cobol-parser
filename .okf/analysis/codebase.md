@@ -103,7 +103,7 @@ results into one graph with two kinds of edge:
 from cobolparser.analysis.codebase import CodebaseGraphBuilder, CopybookImpactAnalyzer
 
 builder = CodebaseGraphBuilder(copybook_paths=["./copybooks"])   # also workers=, chunk_size=200,
-                                                        # encoding="utf-8", debug_lines=False
+                                                        # encoding=None (detected, #522), debug_lines=False
 graph = builder.build_from_directory("./src", extensions=(".cbl", "cob"))
 graph = builder.build(["a.cbl", "b.cbl"])       # or an explicit file list
 

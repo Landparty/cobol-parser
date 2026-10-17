@@ -707,6 +707,17 @@ misdetect an ASCII file full of `@`. ASCII-shaped bytes that are not valid
 UTF-8 are `cp1252`, or `latin-1` when a byte cp1252 leaves undefined is
 present (`_single_byte_codec`), so accented `VALUE` text survives.
 
+**Program sources are read the same way** (#522):
+`read_program_source(path, encoding=None, *, warnings=None,
+encoding_errors="replace")` wraps `read_file_with_encoding` -- `None` /
+`""` / `"auto"` detects, a named codec is used as given (an unknown one is an
+`EncodingError`, never a silent ASCII fallback), and a lossy decode lands in
+*warnings* naming `--encoding`. The CLI's `_read_source`, `batch`, `scan`,
+`CodebaseGraphBuilder` and the MCP workspace all read a main program through
+it, so they cannot disagree about a cp1252 program's text. CR LF and a lone
+CR come back as LF, as the text-mode reads it replaced returned them (a
+copybook read keeps its CRs; `split_source_lines` numbers both alike).
+
 `encoding_errors` (`CopybookSearchPath` / `expand_copybooks`): `"replace"`
 (default) substitutes U+FFFD and warns with a count; `"strict"` raises
 `EncodingError` with file/offset context.

@@ -374,6 +374,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not exist (`codebase-graph ./typo-dir/`) is now reported as
   `no such file or directory` instead of being graphed as a phantom
   `parse_failed` program named after it.
+* **A cp1252 / Latin-1 program is read, not refused or mangled** (#522).
+  `parse`, `lint`, the analyzer subcommands and the MCP server used to refuse
+  it as "not valid UTF-8", while `batch`, `scan` and `codebase-graph` turned
+  every accented byte into U+FFFD without a word. A program's encoding is
+  now detected the way a copybook's always was (`read_program_source`), every
+  single-file subcommand takes `--encoding ENC` to name it, the `batch` /
+  `scan` `--encoding` and the `encoding=` of `parse_files`,
+  `parse_files_with_copybooks`, `ScanOptions` and `CodebaseGraphBuilder`
+  default to detection instead of `utf-8`, and a lossy decode is reported (a
+  stderr warning, a parse warning, `decode_warnings` in `scan`, an
+  `incomplete-analysis` MCP caveat).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

@@ -31,6 +31,8 @@ from typing import Any
 
 from cobolparser.parser import CobolParser, ParseResult, parse_cobol
 from cobolparser.plugins.core import DialectType, ErrorRecoveryMode
+from cobolparser.preprocess import PreprocessingError
+from cobolparser.preprocess.copybook_expander import read_program_source
 from cobolparser.profiling import ProfilingResult
 
 logger = logging.getLogger(__name__)
@@ -93,9 +95,28 @@ def _prof_file_names(path_list: list[str]) -> list[str]:
     return names
 
 
+def _read_program(
+    path_str: str, encoding: str | None, errors: str, warnings: list[str]
+) -> str:
+    """One program's text, decoded the way a copybook is (#522): the
+    encoding detected unless named, a lossy decode noted in *warnings*."""
+    return read_program_source(
+        path_str, encoding, warnings=warnings, encoding_errors=errors
+    )
+
+
+def _with_decode_warnings(batch: BatchResult, warnings: list[str]) -> BatchResult:
+    """Put a lossy-decode warning on the parse result, where a caller looks."""
+    if batch.result is not None:
+        for warning in warnings:
+            if warning not in batch.result.warnings:
+                batch.result.warnings.append(warning)
+    return batch
+
+
 def _parse_one(
     path_str: str,
-    encoding: str,
+    encoding: str | None,
     errors: str,
     error_recovery: ErrorRecoveryMode,
     dialect: DialectType,
@@ -111,9 +132,10 @@ def _parse_one(
     Note: parse_cobol default is FAIL_FAST; we always pass error_recovery explicitly.
     """
     path = Path(path_str)
+    decode_warnings: list[str] = []
     try:
-        source = path.read_text(encoding=encoding, errors=errors)
-    except (OSError, ValueError) as exc:
+        source = _read_program(path_str, encoding, errors, decode_warnings)
+    except (OSError, ValueError, PreprocessingError) as exc:
         # ValueError covers UnicodeDecodeError under errors="strict" — before
         # this, a single undecodable file aborted the entire batch instead of
         # becoming a per-file failure.
@@ -128,7 +150,10 @@ def _parse_one(
                 dialect=dialect,
                 debug_lines=debug_lines,
             )
-            return BatchResult(path=path, result=result, read_error=None)
+            return _with_decode_warnings(
+                BatchResult(path=path, result=result, read_error=None),
+                decode_warnings,
+            )
 
         prof_output: str | None = None
         if prof_output_dir is not None:
@@ -146,8 +171,11 @@ def _parse_one(
             top_n=top_n,
             prof_output=prof_output,
         )
-        return BatchResult(
-            path=path, result=parse_result, read_error=None, profiling=prof
+        return _with_decode_warnings(
+            BatchResult(
+                path=path, result=parse_result, read_error=None, profiling=prof
+            ),
+            decode_warnings,
         )
     except Exception as exc:  # noqa: BLE001 — one poisoned file must not
         # abort the batch; the exception is recorded per-file instead.
@@ -160,7 +188,7 @@ def _parse_one(
 
 def _parse_one_reuse(
     path_str: str,
-    encoding: str,
+    encoding: str | None,
     errors: str,
     error_recovery: ErrorRecoveryMode,
     dialect: DialectType,
@@ -175,9 +203,10 @@ def _parse_one_reuse(
     Avoids re-creating CobolParser and re-registering division parsers for each file.
     """
     path = Path(path_str)
+    decode_warnings: list[str] = []
     try:
-        source = path.read_text(encoding=encoding, errors=errors)
-    except (OSError, ValueError) as exc:
+        source = _read_program(path_str, encoding, errors, decode_warnings)
+    except (OSError, ValueError, PreprocessingError) as exc:
         return BatchResult(path=path, result=None, read_error=str(exc))
 
     try:
@@ -187,7 +216,10 @@ def _parse_one_reuse(
             result = parser.parse(
                 source, filename=path_str, error_recovery=error_recovery
             )
-            return BatchResult(path=path, result=result, read_error=None)
+            return _with_decode_warnings(
+                BatchResult(path=path, result=result, read_error=None),
+                decode_warnings,
+            )
 
         prof_output: str | None = None
         if prof_output_dir is not None:
@@ -203,8 +235,11 @@ def _parse_one_reuse(
             top_n=top_n,
             prof_output=prof_output,
         )
-        return BatchResult(
-            path=path, result=parse_result, read_error=None, profiling=prof
+        return _with_decode_warnings(
+            BatchResult(
+                path=path, result=parse_result, read_error=None, profiling=prof
+            ),
+            decode_warnings,
         )
     except Exception as exc:  # noqa: BLE001 — record per-file, don't abort batch
         return BatchResult(
@@ -228,7 +263,7 @@ def parse_files(
     workers: int | None = None,
     error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.COLLECT_ALL,
     dialect: DialectType = DialectType.IBM_ENTERPRISE,
-    encoding: str = "utf-8",
+    encoding: str | None = None,
     errors: str = "replace",
     executor: ProcessPoolExecutor | None = None,
     enable_profiling: bool = False,
@@ -244,8 +279,11 @@ def parse_files(
             Ignored when *executor* is provided.
         error_recovery: Passed to parse_cobol for each file.
         dialect: COBOL dialect, passed to parse_cobol for each file.
-        encoding: Passed to Path.read_text(). Override for EBCDIC/Latin-1.
-        errors: Passed to Path.read_text(). 'replace' avoids crashes on legacy files.
+        encoding: Source encoding. None (the default) detects it the way a
+            copybook's is detected; name one to override (#522).
+        errors: 'replace' (default) substitutes U+FFFD for undecodable bytes
+            and adds a warning to the result; 'strict' makes such a file a
+            read error.
         executor: Optional pre-created ProcessPoolExecutor to reuse.  When
             provided the caller owns the executor lifecycle (shutdown/cleanup).
             Useful for amortising spawn overhead across many consecutive batches.
@@ -346,7 +384,7 @@ def parse_files_with_copybooks(
     workers: int | None = None,
     error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.COLLECT_ALL,
     dialect: DialectType = DialectType.IBM_ENTERPRISE,
-    encoding: str = "utf-8",
+    encoding: str | None = None,
     errors: str = "replace",
     max_nesting_depth: int = 100,
     copybook_cache_size: int = 1024,
@@ -374,8 +412,8 @@ def parse_files_with_copybooks(
         workers: Unused (reserved for future parallel copybook expansion).
         error_recovery: Passed to parser for each file.
         dialect: COBOL dialect, passed to parser for each file.
-        encoding: File encoding for reading source files.
-        errors: Error handling for file reads ('replace' avoids crashes).
+        encoding: Source encoding; None (default) detects it (#522).
+        errors: 'replace' (default, lossy decode warned) or 'strict'.
         max_nesting_depth: Maximum copybook nesting depth.
         copybook_cache_size: Maximum entries in the shared expansion cache.
         enable_profiling: When True, attach a ProfilingResult to each BatchResult.
@@ -421,9 +459,10 @@ def parse_files_with_copybooks(
     results: list[BatchResult] = []
     for path_str, prof_name in zip(path_list, _prof_file_names(path_list), strict=True):
         path = Path(path_str)
+        decode_warnings: list[str] = []
         try:
-            source = path.read_text(encoding=encoding, errors=errors)
-        except (OSError, ValueError) as exc:
+            source = _read_program(path_str, encoding, errors, decode_warnings)
+        except (OSError, ValueError, PreprocessingError) as exc:
             # ValueError covers UnicodeDecodeError under errors="strict".
             results.append(BatchResult(path=path, result=None, read_error=str(exc)))
             continue
@@ -452,7 +491,7 @@ def parse_files_with_copybooks(
                 debug_lines=debug_lines,
             )
             expanded_source = expansion.expanded_source
-            expansion_warnings = list(
+            expansion_warnings = decode_warnings + list(
                 getattr(expansion.statistics, "warnings", []) or []
             )
             source_map = getattr(expansion, "source_location_map", None)
@@ -471,7 +510,7 @@ def parse_files_with_copybooks(
                 exc_info=True,
             )
             copybook_error = f"{type(exc).__name__}: {exc}"
-            expansion_warnings = [
+            expansion_warnings = decode_warnings + [
                 f"copybook expansion failed ({copybook_error}); "
                 "the file was parsed without expanding any COPY statement"
             ]

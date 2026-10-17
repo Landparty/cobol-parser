@@ -12,6 +12,7 @@ Performance features for large batch scenarios (3000+ programs, 50+ copybooks):
 - Directory index in PathResolver for instant file lookups
 """
 
+import codecs
 import os
 import re
 import time
@@ -496,6 +497,56 @@ def convert_to_utf8(
         )
 
     return _normalize_record_separators(text, detected_encoding)
+
+
+def read_program_source(
+    file_path: str,
+    encoding: str | None = None,
+    *,
+    warnings: list[str] | None = None,
+    encoding_errors: str = "replace",
+) -> str:
+    """Read a *program* source the way a copybook is read (#522).
+
+    *encoding* None (or ``"auto"``) detects it (:func:`detect_encoding`), so a
+    cp1252 / Latin-1 program decodes like a cp1252 copybook instead of being
+    refused as "not valid UTF-8" by one entry point and silently mangled to
+    U+FFFD by another. A named *encoding* is used as given. A lossy decode
+    appends a warning to *warnings*; ``encoding_errors="strict"`` raises
+    ``EncodingError`` instead. Every entry point that reads a main program
+    (the CLI, ``batch``, ``scan``, ``codebase-graph``, the MCP server) goes
+    through here, so they cannot disagree about a file's text or lines.
+    """
+    override = None if encoding in (None, "", "auto") else encoding
+    if override is not None:
+        try:
+            codecs.lookup(override)
+        except LookupError as exc:
+            # convert_to_utf8 would quietly fall back to ASCII on a typo.
+            raise EncodingError(file_path, f"unknown encoding {override!r}") from exc
+    collected: list[str] = []
+    text = read_file_with_encoding(
+        file_path,
+        override,
+        warnings=collected,
+        encoding_errors=encoding_errors,
+    )
+    if warnings is not None:
+        warnings.extend(
+            warning.replace(
+                "Set CopybookSearchPath.encoding explicitly",
+                "Name the source encoding explicitly (--encoding)",
+            )
+            for warning in collected
+        )
+    # Every reader this replaced opened the file in text mode, which turns
+    # CR LF and a lone CR into LF; keep that, so a Windows-edited program's
+    # text (``expand``'s ``expanded_source``, the MCP parse, a COPY scan) does
+    # not start carrying CRs. Line numbers are unchanged: split_source_lines
+    # breaks on all three the same way.
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text
 
 
 def _is_ebcdic_codec(encoding: str) -> bool:

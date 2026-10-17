@@ -297,16 +297,42 @@ def _defined_symbol_pairs(args: argparse.Namespace) -> tuple[tuple[str, str], ..
     return tuple((_parse_defines(getattr(args, "define", [])) or {}).items())
 
 
-def _read_source(filepath: str) -> str:
-    try:
-        with open(filepath, encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
+def _read_source(filepath: str, encoding: str | None = None) -> str:
+    """Read a program source, decoded the way a copybook is (#522).
+
+    *encoding* None detects it (a cp1252 / Latin-1 program reads as such, not
+    "not valid UTF-8"); a named one is used as given. Bytes the encoding
+    cannot map become U+FFFD with a ``warning:`` on stderr.
+    """
+    from ..preprocess import PreprocessingError
+    from ..preprocess.copybook_expander import read_program_source
+
+    if not os.path.exists(filepath):
         _fail(f"File not found: {filepath}")
-    except UnicodeDecodeError:
-        _fail(f"Cannot read file (not valid UTF-8): {filepath}")
+    warnings: list[str] = []
+    try:
+        text = read_program_source(filepath, encoding, warnings=warnings)
+    except LookupError:
+        _fail(f"Unknown encoding: {encoding}")
+    except PreprocessingError as e:
+        _fail(f"Cannot read file: {e}")
     except OSError as e:
         _fail(f"Cannot read file: {e}")
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    return text
+
+
+def _add_encoding_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--encoding",
+        default=None,
+        metavar="ENC",
+        help=(
+            "Source encoding (e.g. cp1252, latin-1, cp037). Default: detected, "
+            "the same way a copybook's encoding is"
+        ),
+    )
 
 
 def _json_out(data: Any, compact: bool, output_path: str | None = None) -> None:
@@ -418,6 +444,7 @@ def _build_parse_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     p.add_argument(
         "path",
         nargs="?",
@@ -455,7 +482,7 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     """Shared parse logic used by parse and analyze subcommands."""
     from ..profiling import ProfilerContext
 
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
     dialect = _DIALECT_MAP[args.dialect]
     error_recovery = _get_error_recovery(args)
 
@@ -715,8 +742,11 @@ def _build_batch_parser(
     )
     p.add_argument(
         "--encoding",
-        default="utf-8",
-        help="File encoding (default: utf-8)",
+        default=None,
+        help=(
+            "Source encoding (default: detected per file, the same way a "
+            "copybook's is)"
+        ),
     )
     _add_compact_arg(p)
     _add_dialect_arg(p)
@@ -860,6 +890,7 @@ def _build_tokenize_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -870,7 +901,7 @@ def _build_tokenize_parser(
 def _cmd_tokenize(args: argparse.Namespace) -> None:
     from ..lexer import _tokenize_source
 
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
     dialect = _DIALECT_MAP[args.dialect]
 
     # Unified pipeline (M6): fixed-format source is normalized and lexed
@@ -914,6 +945,7 @@ def _build_preprocess_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_source_format_args(p)
     _add_define_args(p)
     p.add_argument(
@@ -934,7 +966,7 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
         normalize_with_recovery,
     )
 
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
 
     if args.strip_directives:
         source = strip_compiler_directives(source)
@@ -1005,6 +1037,7 @@ def _build_expand_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_copybook_args(p)
     _add_compact_arg(p)
     p.add_argument(
@@ -1041,7 +1074,7 @@ def _cmd_expand(args: argparse.Namespace) -> None:
     from ..preprocess import PreprocessingError
     from ..preprocess.copybook_expander import expand_copybooks
 
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
 
     # Conditional compilation is left to expand_copybooks (process_conditionals
     # below): it must see the program's own >>DEFINE lines to hand them to the
@@ -1094,6 +1127,7 @@ def _build_gen_data_parser(
         ),
     )
     p.add_argument("file", help="Path to the copybook (or COBOL source) file")
+    _add_encoding_arg(p)
     p.add_argument(
         "--rows",
         "-n",
@@ -1293,7 +1327,7 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
         parse_copybook_records,
     )
 
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
     copybook_paths = args.copybook_path or None
 
     if args.list_records:
@@ -2146,6 +2180,7 @@ def _build_analyzer_parser(
         epilog=f"{label}\n{examples}",
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -2218,6 +2253,7 @@ def _build_unused_variables_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -2252,7 +2288,7 @@ def _parse_without_copybook_expansion(args: argparse.Namespace) -> Any:
     determined by set-difference -- names declared in the expanded AST but
     not in this unexpanded one must have come from an expanded COPY.
     """
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
     dialect = _DIALECT_MAP[args.dialect]
     error_recovery = _get_error_recovery(args)
     defines = _parse_defines(getattr(args, "define", []))
@@ -2342,6 +2378,7 @@ def _build_program_flow_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     p.add_argument(
         "--format",
         choices=["json", "mermaid", "dot"],
@@ -2457,6 +2494,7 @@ def _build_redundancy_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -2591,8 +2629,11 @@ def _build_scan_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--encoding",
-        default="utf-8",
-        help="File encoding (default: utf-8)",
+        default=None,
+        help=(
+            "Source encoding (default: detected per file, the same way a "
+            "copybook's is)"
+        ),
     )
     _add_compact_arg(p)
     _add_source_format_args(p)
@@ -2860,6 +2901,7 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -3199,6 +3241,7 @@ def _build_business_rules_parser(subparsers: argparse._SubParsersAction) -> None
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     p.add_argument(
         "--format",
         choices=["json", "text"],
@@ -3276,6 +3319,7 @@ def _build_lineage_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     p.add_argument(
         "--field",
         default=None,
