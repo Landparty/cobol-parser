@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- HostVariableResolver keys columns by DCLGEN name (#572)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md): `dclgen_name()` keys the
+column index, shared with `DclgenChecker`; `:CUST-ID` links to `CUST_ID`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
