@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Nested programs are scoped, stacked ones are top-level (#532)
+
+[parser/orchestration.md](parser/orchestration.md),
+[ast-models.md](ast-models.md), [analysis/codebase.md](analysis/codebase.md),
+[mcp.md](mcp.md), [batch.md](batch.md): the parser records
+`enclosing_program`; codebase-graph qualifies nested ids (`OUTER/INNER`) and
+resolves CALLs by COBOL scope; MCP and `scan` report the source nesting.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

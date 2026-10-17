@@ -160,6 +160,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Nested programs are no longer treated as globally CALL-able** (#532).
+  The parser now records each unit's `enclosing_program` (with
+  `is_nested`, `nesting_depth`, `is_common` and `nested_program_called()`),
+  so a stacked program is a top-level unit, not a contained one.
+  `codebase-graph` names a nested program by its container
+  (`OUTER/INNER`), and a CALL reaches it only by COBOL scope. A
+  `CALL 'INNER'` in another file no longer draws an edge to it, and two
+  files' nested `ERRHAND`s are no longer a duplicate PROGRAM-ID. MCP
+  `callers_of` stops listing out-of-scope callers and drops the false
+  load-order `duplicate-declaration` caveat. MCP `contained` and `scan`'s
+  `depth` now follow the real nesting.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

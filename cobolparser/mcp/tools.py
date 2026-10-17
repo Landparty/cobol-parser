@@ -704,14 +704,25 @@ class CobolTools:
         _carry_index_caveats(index, response, "CALL statements")
         callers: list[dict[str, Any]] = []
         unresolved: list[dict[str, Any]] = []
+        # A nested program can only be CALLed from its own compilation unit
+        # (#532): when every declaration of *wanted* is nested, a CALL that
+        # COBOL scope does not send to one reaches a separately compiled
+        # program of the same name, not any declared here.
+        declared_units = index.units_named(wanted)
+        only_nested = bool(declared_units) and all(u.depth for u in declared_units)
+        out_of_scope: set[str] = set()
         for unit in index.units:
             for row in unit.calls:
                 target = str(row.get("program") or "").upper()
                 candidates = [str(c).upper() for c in row.get("candidates") or []]
                 if not row.get("dynamic") and target == wanted:
                     resolved_from = None
+                    reaches_nested = bool(row.get("nested"))
                 elif row.get("dynamic") and wanted in candidates:
                     resolved_from = row.get("program")
+                    reaches_nested = wanted in {
+                        str(c).upper() for c in row.get("nested_candidates") or []
+                    }
                 elif row.get("dynamic") and not row.get("candidates_complete"):
                     for site in row.get("sites") or []:
                         unresolved.append(
@@ -725,12 +736,17 @@ class CobolTools:
                     continue
                 else:
                     continue
+                if only_nested and not reaches_nested:
+                    out_of_scope.add(unit.program_id)
+                    continue
                 for site in row.get("sites") or []:
                     caller: dict[str, Any] = {
                         "program": unit.program_id,
                         "via": row.get("via"),
                         "location": site.get("location"),
                     }
+                    if reaches_nested:
+                        caller["nested"] = True
                     if site.get("paragraph"):
                         # "from", as a paragraph-level caller names its own.
                         caller["from"] = site["paragraph"]
@@ -740,7 +756,7 @@ class CobolTools:
                     callers.append(caller)
 
         declared = []
-        for unit in index.units_named(wanted):
+        for unit in declared_units:
             where: dict[str, Any] = {"file": unit.file}
             if unit.depth:
                 where["contained"] = True
@@ -778,11 +794,17 @@ class CobolTools:
             "calling_programs": sorted({c["program"] for c in callers}),
             "callers": response.cap(callers, cap, "callers"),
         }
-        if len(declared) > 1:
+        if out_of_scope:
+            answer["out_of_scope_callers"] = sorted(out_of_scope)
+        # Only outermost (or stacked) declarations share one load-module
+        # namespace: a nested program is reached from its own compilation
+        # unit, whatever else is in the load library (#532).
+        top_level = [d for d in declared if not d.get("contained")]
+        if len(top_level) > 1:
             response.caveat(
                 "duplicate-declaration",
-                f"PROGRAM-ID {wanted} is declared in {len(declared)} places: "
-                + ", ".join(d["file"] for d in declared),
+                f"PROGRAM-ID {wanted} is declared in {len(top_level)} places: "
+                + ", ".join(d["file"] for d in top_level),
                 "which one a CALL reaches depends on the load library order, "
                 "which the source does not say",
             )
@@ -791,6 +813,13 @@ class CobolTools:
                 f"no program under the root has PROGRAM-ID {wanted}: it is "
                 "external to this workspace (a vendor or system program, or "
                 "one kept elsewhere)"
+            )
+        elif not callers and out_of_scope:
+            answer["note"] = (
+                f"every {wanted} under the root is a nested program, which "
+                "only its own compilation unit can CALL; the CALLs from "
+                "out_of_scope_callers reach a separately compiled program "
+                "of that name"
             )
         elif not callers:
             answer["note"] = (
@@ -1102,7 +1131,8 @@ class CobolTools:
             callees_of.setdefault(edge.caller, set()).add(edge.callee)
         programs = []
         for unit in index.units:
-            pid = unit.program_id.upper()
+            # The graph's id: a nested program's is qualified (#532).
+            pid = (unit.graph_id or unit.program_id).upper()
             graded = grades.get((unit.program_id, unit.file), {})
             row: dict[str, Any] = {
                 "program": unit.program_id,
@@ -1120,7 +1150,7 @@ class CobolTools:
                 row["unit_kind"] = unit.unit_kind
             programs.append(row)
 
-        declared = {u.program_id.upper() for u in index.units}
+        declared = {(u.graph_id or u.program_id).upper() for u in index.units}
         external: dict[str, set[str]] = {}
         for edge in graph.call_edges:
             if edge.callee not in declared:
@@ -1378,6 +1408,13 @@ def _calls(
                 values, incomplete = tracker.resolve_variable(target)
                 row["candidates"] = values
                 row["candidates_complete"] = bool(values) and not incomplete
+                nested = [v for v in values if unit.nested_program_called(v)]
+                if nested:
+                    row["nested_candidates"] = nested
+            elif unit.nested_program_called(target) is not None:
+                # COBOL scope: the CALL reaches the program nested here,
+                # not a separately compiled one of that name (#532).
+                row["nested"] = True
             rows[(target.upper(), "CALL")] = row
         location = call.get("location")
         line = location.get("line") if isinstance(location, dict) else None

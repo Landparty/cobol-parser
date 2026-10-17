@@ -47,10 +47,14 @@ class UnitFacts:
 
     program_id: str
     file: str
-    #: 0 for the outermost unit of its file, 1 for one contained in it, ...
+    #: 0 for an outermost (or stacked) unit of its file, 1 for one nested in
+    #: it, ...
     depth: int
     #: ``PROGRAM``, or ``CLASS`` / ``FACTORY`` / ``OBJECT`` / ``METHOD``.
     unit_kind: str = "PROGRAM"
+    #: Its id in the codebase graph: the PROGRAM-ID, qualified by the
+    #: programs it is nested in for a nested one (``OUTER/INNER``, #532).
+    graph_id: str = ""
     #: ``program_brief``'s ``calls`` rows: target, via, dynamic, candidates
     #: and the sites (on-disk locations) of every CALL / LINK / XCTL.
     calls: list[dict[str, Any]] = field(default_factory=list)
@@ -129,7 +133,9 @@ def _units_with_depth(
 ) -> Iterator[tuple[CobolProgram, int]]:
     yield program, depth
     for contained in program.contained_programs:
-        yield from _units_with_depth(contained, depth + 1)
+        # The source nesting: a stacked unit is outermost, not contained
+        # (#532).
+        yield from _units_with_depth(contained, contained.nesting_depth)
 
 
 def _programs(
@@ -187,7 +193,7 @@ def programs_index(workspace: Workspace) -> ProgramsIndex:
 
 
 def _build_programs(workspace: Workspace) -> tuple[ProgramsIndex, dict[str, Stamp]]:
-    from ..analysis.codebase import CodebaseGraphBuilder
+    from ..analysis.codebase import CodebaseGraphBuilder, program_graph_ids
     from ..batch import BatchResult
     from .tools import _calls, _flow
 
@@ -205,12 +211,16 @@ def _build_programs(workspace: Workspace) -> tuple[ProgramsIndex, dict[str, Stam
                 )
                 continue
             response = Response()
+            graph_ids = program_graph_ids(
+                parsed.ast.program_units(), str(Path(str(path)))
+            )
             for unit, depth in _units_with_depth(parsed.ast):
                 facts = UnitFacts(
                     program_id=unit.program_name or "",
                     file=display,
                     depth=depth,
                     unit_kind=unit.unit_kind,
+                    graph_id=graph_ids.get(id(unit), ""),
                 )
                 try:
                     facts.calls = _calls(parsed, unit, _flow(parsed, unit), response)
