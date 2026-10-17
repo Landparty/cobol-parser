@@ -95,6 +95,12 @@ line in a copybook that has a statement of the same kind at that line;
 `bindings_from_jobs(jobs, caveats)` reports a sort step it cannot read, and a
 fresh `LineageGraph` keeps `join_caveats`.
 
+## 2026-10-17 -- Lineage JCL: control statements in a dataset (#339)
+
+[analysis/lineage.md](analysis/lineage.md): a SORT / IEBGENER step whose
+SYSIN (or DFSPARM) is a dataset is a `reformat` with a caveat, through
+`bindings_from_jobs(jobs, caveats)`; a fresh `LineageGraph` keeps `join_caveats`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

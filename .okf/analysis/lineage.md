@@ -209,7 +209,11 @@ blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
 referbacks resolve to the earlier step's dataset; quoted literals in
 DFSORT/IEBGENER control statements are blanked before keywords are matched
-(`INCLUDE COND=(...,C'BUILD')` is not a reformat). A `DFSRRC00` step (the IMS region
+(`INCLUDE COND=(...,C'BUILD')` is not a reformat). Control statements that
+live in a dataset (`SYSIN DD DSN=PROD.CNTL(X)`, a `DFSPARM` dataset) are not
+read, so a SORT / IEBGENER step with one is a `reformat` plus a caveat naming
+it, never an assumed copy (#339, option (a)); an in-stream `DFSPARM` is read
+with `SYSIN`. A `DFSRRC00` step (the IMS region
 controller) binds its DDs to the application program named by the second
 `PARM` positional when the region is `DLI` / `DBB` / `BMP`, not to
 `DFSRRC00` itself, so an IMS batch program's files join. `load_jobs(paths, proc_path)` reads a flat PROC
@@ -219,10 +223,11 @@ does the same from in-memory text (the backend's stored members). Not built
 on `cobolparser/jcl/`.
 
 **JCL caveats.** `bindings_from_jobs(jobs, caveats)` appends one line per
-step whose flow it could not read (a sort step with no recognised input or
-output DD: `SORT step S2 in job J1: outputs not recognised; the flow through
-it is not traced`), so a step left out never reads as a step that moves
-nothing. `field-impact --jcl` and the MCP lineage index pass them as
+step whose flow it could not read (`<PROGRAM> step <STEP> in job <JOB>:
+...`; e.g. a sort step with no recognised input or output DD: `SORT step S2
+in job J1: outputs not recognised; the flow through it is not traced`), so a
+step left out never reads as a step that moves nothing. `field-impact
+--jcl` and the MCP lineage index pass them as
 `LineageGraph(join_caveats=...)`, which -- without `join_edges` -- adds them
 to the joins' caveats (so `join_state()` exports them too). Invariant: a
 caveat there must not start with `PROGRAM:`, or `impact()` would show it
