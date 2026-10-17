@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **The argument of `DFHRESP(cond)` / `DFHVALUE(cvda)` is no longer read as a
+  data name** (#594). It went through the subscript splitter, so `xref`
+  listed CICS conditions and CVDAs (`NORMAL`, `LENGERR`, `ACQUIRED`) as
+  undefined, a data item sharing a condition's name (a flag called `NOTFND`)
+  was credited with a use by `unused-variables` and listed as a rule input by
+  `business-rules`, and `MOVE DFHVALUE(ACQUIRED) TO WS-ST` was an unresolved
+  `move-type-check` operand that `lint` blamed on an unresolved COPY. The
+  argument is now dropped before names are extracted, and the call is a
+  numeric MOVE source. `JNIENVPTR` joins xref's special registers.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

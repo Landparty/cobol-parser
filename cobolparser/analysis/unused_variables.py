@@ -49,7 +49,11 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
-from ._names import QUALIFIER_SEPARATOR, qualified_references
+from ._names import (
+    QUALIFIER_SEPARATOR,
+    qualified_references,
+    strip_translator_arguments,
+)
 
 # DATA DIVISION section names whose data items are in scope for this
 # analysis. Matches the exact names the DATA DIVISION parser assigns (see
@@ -384,7 +388,7 @@ def _extract_identifiers(operand: Any) -> set[str]:
     if not isinstance(operand, str) or not operand:
         return set()
 
-    stripped = _QUOTED_TEXT_RE.sub(" ", operand)
+    stripped = strip_translator_arguments(_QUOTED_TEXT_RE.sub(" ", operand))
     return qualified_references(stripped, _NON_IDENTIFIER_WORDS)
 
 

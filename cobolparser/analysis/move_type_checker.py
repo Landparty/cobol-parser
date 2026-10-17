@@ -31,7 +31,7 @@ from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import CobolDataItem, PictureClause
 from ..models.program import CobolProgram
 from ..models.statements import MoveStatement
-from ._names import base_data_name
+from ._names import base_data_name, is_translator_function
 from .unused_variables import inherited_data_records
 
 
@@ -1001,8 +1001,12 @@ class MoveTypeChecker:
         intrinsic FUNCTION results have a category fixed by the COBOL
         standard itself -- neither ever shows up as a CobolDataItem with a
         PICTURE clause, so the catalog built from the DATA DIVISION can never
-        resolve them on its own.
+        resolve them on its own. Nor can ``DFHRESP(cond)`` /
+        ``DFHVALUE(cvda)``, which the CICS translator replaces with a
+        fullword binary constant (#594).
         """
+        if is_translator_function(name):
+            return DataCategory.NUMERIC
         function = _function_source(name)
         if function is not None:
             return self._resolve_function(function)[0]

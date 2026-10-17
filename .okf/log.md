@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- DFHRESP / DFHVALUE arguments are no data names (#594)
+
+[analysis/data-use.md](analysis/data-use.md), [analysis.md](analysis.md):
+`_names.strip_translator_arguments` runs in `_extract_identifiers` and xref's
+`_split_operand`; MoveTypeChecker classifies the call NUMERIC; JNIENVPTR is a
+special register.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

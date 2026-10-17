@@ -85,7 +85,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
-from ._names import QUALIFIER_SEPARATOR
+from ._names import QUALIFIER_SEPARATOR, strip_translator_arguments
 from .unused_variables import (
     _DATA_SECTION_NAMES,
     _DICT_LIST_EXTRAS,
@@ -208,6 +208,8 @@ _SPECIAL_REGISTERS: frozenset[str] = frozenset(
         "XML-INFORMATION",
         "JSON-CODE",
         "JSON-STATUS",
+        # IBM Java interoperability: the JNI environment pointer.
+        "JNIENVPTR",
         "SQLCODE",
         "SQLSTATE",
         "SQLCA",
@@ -406,6 +408,8 @@ def _split_operand(text: str) -> tuple[set[str], set[str], set[str], bool]:
     """
     if not text:
         return set(), set(), set(), True
+    # DFHRESP(cond) / DFHVALUE(cvda): the argument is no subscript (#594).
+    text = strip_translator_arguments(text)
 
     if _FUNCTION_RE.search(text):
         return _extract_identifiers(text), set(), set(), False

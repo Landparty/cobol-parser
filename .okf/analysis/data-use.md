@@ -69,6 +69,19 @@ WS-PROG` must find values MOVEd to `WS-PROG OF GRP-1`). Any new analyzer
 keying data items by bare name needs it too. Pinned by
 `tests/regression/test_folded_reference_analyzers.py`.
 
+### CICS translator functions: `_names.strip_translator_arguments`
+
+The argument of `DFHRESP(cond)` / `DFHVALUE(cvda)` is a CICS condition or
+CVDA name (`NORMAL`, `NOTFND`, `ACQUIRED`), not a data name; the translator
+replaces the whole call with a fullword binary constant.
+`strip_translator_arguments` drops the argument (keeping the function word,
+a special register) and runs first in `_extract_identifiers` and xref's
+`_split_operand`, so unused-variables, xref and business-rules never credit a
+same-named item (a flag called `NOTFND`) or list a condition as undefined.
+`is_translator_function` lets `MoveTypeChecker._resolve_category` classify
+such a MOVE source as NUMERIC. Pinned by
+`tests/regression/test_issue_594_dfhresp_arguments.py` (#594).
+
 ### Identifier tokens: `_names.IDENTIFIER_TOKEN_RE`
 
 `IDENTIFIER_TOKEN_RE` accepts a digit-led user word (`1ST-NAME`, IBM-legal as
@@ -437,7 +450,8 @@ Things worth knowing before trusting a field:
   provided there is at least one letter, so `1000-INIT` is one symbol rather
   than a number and a word.
 * **`undefined` excludes special registers.** `_SPECIAL_REGISTERS`
-  (RETURN-CODE, SQLCODE, SQLCA, `EIB*`, `DFH*`, `XML-*`/`JSON-*`, TALLY, …)
+  (RETURN-CODE, SQLCODE, SQLCA, `EIB*`, `DFH*`, `XML-*`/`JSON-*`, TALLY,
+  JNIENVPTR, …)
   are never reported undefined; a caveat names the ones that were seen.
   `is_special_register(name)` is the public test (the MCP `explain_symbol`
   answers a not-found special register with it).
