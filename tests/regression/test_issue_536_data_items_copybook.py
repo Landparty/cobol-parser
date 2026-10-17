@@ -94,3 +94,27 @@ def test_mcp_record_layout_answers_for_a_copybook(tmp_path: Path) -> None:
     assert fields["TAIL"]["declared_at"]["file"].endswith("rd.cpy")
     assert fields["TAIL"]["declared_at"]["line"] == 7
     assert "partial-parse" not in [c["kind"] for c in result["caveats"]]
+
+
+def test_mcp_says_a_wrapped_copybook_is_not_a_program(tmp_path: Path) -> None:
+    # The skeleton's PROGRAM-ID, empty PROCEDURE DIVISION and "every field
+    # unused" are not facts about any program: every answer says so.
+    (tmp_path / "rd.cpy").write_text(COPYBOOK)
+    tools = CobolTools(Workspace(tmp_path, ProjectConfig()))
+    for result in (
+        tools.lint("rd.cpy"),
+        tools.program_brief("rd.cpy"),
+        tools.record_layout("rd.cpy", "REC"),
+    ):
+        kinds = [c["kind"] for c in result["caveats"]]
+        assert "incomplete-analysis" in kinds
+        assert any("is a copybook" in c["detail"] for c in result["caveats"])
+
+
+def test_mcp_does_not_wrap_a_program_file(tmp_path: Path) -> None:
+    # A .cbl with no division header is a broken program, not a copybook:
+    # the codebase indexes must not list a made-up COPYBOOK-LAYOUT program.
+    (tmp_path / "frag.cbl").write_text(COPYBOOK)
+    tools = CobolTools(Workspace(tmp_path, ProjectConfig()))
+    programs = tools.codebase_overview()["answer"]["programs"]
+    assert "COPYBOOK-LAYOUT" not in [p["program"] for p in programs]

@@ -526,11 +526,14 @@ class Workspace:
     def program_files(self) -> list[Path]:
         """Every COBOL program under the root, by ``cobol.yml``'s
         ``extensions`` (default ``.cbl``, ``.cob``, ``.cobol``), sorted."""
-        wanted = {
+        return self._files_with_suffix(self._program_suffixes())
+
+    def _program_suffixes(self) -> set[str]:
+        """The suffixes :meth:`program_files` counts as programs, lowercase."""
+        return {
             (e if e.startswith(".") else f".{e}").lower()
             for e in (self.config.extensions or DEFAULT_PROGRAM_EXTENSIONS)
         }
-        return self._files_with_suffix(wanted)
 
     def files_named(self, suffixes: tuple[str, ...]) -> list[Path]:
         """Files under the root whose suffix is one of *suffixes*, sorted."""
@@ -637,8 +640,15 @@ class Workspace:
         filename = str(path)
         # A bare copybook (``record_layout`` on a .cpy) is parsed inside the
         # same program skeleton gen-data uses, so it has records at all; its
-        # lines are mapped back below (#536).
-        wrapped = wrap_copybook_fragment(source)
+        # lines are mapped back below (#536).  Not a program file, though: a
+        # ``.cbl`` with no division header is a broken program, and wrapping
+        # it would list a made-up ``COPYBOOK-LAYOUT`` program in the
+        # codebase indexes instead of a file that failed to parse.
+        wrapped = (
+            None
+            if path.suffix.lower() in self._program_suffixes()
+            else wrap_copybook_fragment(source)
+        )
         head_lines = fragment_lines = 0
         if wrapped is not None:
             fragment_lines = len(split_source_lines(source))
@@ -653,6 +663,19 @@ class Workspace:
         defines = _defined_symbols(self.config.define)
         copybook_paths = list(self.config.copybook_path)
         caveats: list[Caveat] = []
+        if head_lines:
+            caveats.append(
+                Caveat(
+                    "incomplete-analysis",
+                    f"{self.display(path)} is a copybook, not a program: it was "
+                    "parsed inside a program skeleton (PROGRAM-ID "
+                    "COPYBOOK-LAYOUT, an empty PROCEDURE DIVISION)",
+                    "its record layouts and declarations are exact; anything "
+                    "about the program (its PROGRAM-ID, procedures, unused "
+                    "variables, health) describes the skeleton, not code that "
+                    "uses the copybook",
+                )
+            )
 
         def parse_plain() -> Any:
             text = source

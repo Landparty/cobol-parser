@@ -99,7 +99,12 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   (`wrap_copybook_fragment`, the gen-data skeleton) so `record_layout` on a
   `.cpy` finds its records, and `_unwrap_source_map()` maps the wrapped lines
   back to the file's own (skeleton lines map to nothing) -- through the
-  expansion source map when copybook dirs are set (#536).
+  expansion source map when copybook dirs are set (#536). Only a file that is
+  not a program file by suffix is wrapped (a `.cbl` with no division header
+  stays a failed program, not a `COPYBOOK-LAYOUT` one in the codebase
+  indexes), and every answer on a wrapped file carries an
+  `incomplete-analysis` caveat: the skeleton's PROGRAM-ID, procedures and
+  "every field unused" are not facts about a program.
 - **Config.** `_root_config_file(root)`: `cobol.yml`/`cobol.yaml` in the
   root itself, never the CLI's walk-up (`find_config_file`) -- a parent's
   file does not count. Unless the CLI was given
