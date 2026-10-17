@@ -399,6 +399,11 @@ new `flag_record_layout()`; `record_layout` / `explain_symbol` report
 on the `Boundary` too; OCCURS host variables / ACCEPT targets are named
 unsupported; the bundle's `unresolved` lists each gap once.
 
+## 2026-10-17 -- SORT/MERGE USING/GIVING files reported unresolved (#498)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md): option (b) --
+each USING/GIVING file is a `report.unresolved` entry, not a boundary.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
