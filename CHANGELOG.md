@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A data item named CHAIN, NOTE, EXHIBIT, EXAMINE or TRANSFORM keeps its
+  name** (#525). These legacy verbs are not reserved under IBM Enterprise
+  COBOL, but were always lexed as verbs: the item became an anonymous FILLER
+  (gen-data dropped its column, data-items called it FILLER, dclgen-check
+  missed a DCLGEN `NOTE` column) and `MOVE x TO CHAIN` failed to parse. A
+  word the program declares as a data name is now an identifier everywhere
+  in it; undeclared, it is still the verb (option 1 of the issue, as TITLE
+  and VALIDATE already behave).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

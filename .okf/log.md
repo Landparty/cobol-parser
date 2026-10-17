@@ -14,6 +14,10 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Legacy verbs as data names (#525)
+
+[lexer.md](lexer.md), [parser/statements.md](parser/statements.md), [parser/statements-control.md](parser/statements-control.md), [tests.md](tests.md): a declared data item named CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM lexes as an IDENTIFIER (`_retype_legacy_verb_data_names`); the five verbs match by TokenType only and left `STATEMENT_KEYWORDS`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

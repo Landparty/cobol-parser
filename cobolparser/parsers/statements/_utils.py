@@ -183,6 +183,12 @@ SCOPE_TERMINATORS: frozenset = frozenset(
     }
 )
 
+#: Verb spellings that begin a statement, matched by value. The legacy verbs
+#: CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM are deliberately absent: the
+#: lexer gives them their own TokenType (so :data:`STATEMENT_TOKEN_TYPES`
+#: still makes them boundaries) except where the program declares one as a
+#: data name, and then it is an IDENTIFIER that must read as an operand
+#: (``MOVE 'ACME' TO CHAIN``, #525).
 STATEMENT_KEYWORDS: frozenset = frozenset(
     {
         "ACCEPT",
@@ -191,7 +197,6 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
         "ALTER",
         "CALL",
         "CANCEL",
-        "CHAIN",
         "CLOSE",
         "COMMIT",
         "COMPUTE",
@@ -205,10 +210,8 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
         "ENTER",
         "ENTRY",
         "EVALUATE",
-        "EXAMINE",
         "EXEC",
         "EXECUTE",
-        "EXHIBIT",
         "EXIT",
         "FREE",
         "GENERATE",
@@ -225,7 +228,6 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
         "MOVE",
         "MULTIPLY",
         "NEXT",
-        "NOTE",
         "OPEN",
         "PERFORM",
         "PURGE",
@@ -254,7 +256,6 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
         "SUBTRACT",
         "SUPPRESS",
         "TERMINATE",
-        "TRANSFORM",
         "UNLOCK",
         "UNSTRING",
         "USE",

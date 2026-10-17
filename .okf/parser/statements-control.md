@@ -250,6 +250,11 @@ arm.
 - **NOTE** (COBOL-74 comment statement) runs to the sentence period but stops
   early at a following line that starts with a verb, so a period-less NOTE cannot
   eat the rest of the program.
+- **CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM** match by their dedicated
+  TokenType only (`_matches_legacy_verb`), and are not in `STATEMENT_KEYWORDS`:
+  where the program declares one as a data name the lexer retypes it to
+  IDENTIFIER, and it is then an ordinary operand (`MOVE 'ACME' TO CHAIN`,
+  #525). Pinned by `tests/regression/test_legacy_verb_data_names.py`.
 - `TITLE`, `VALIDATE`, `READY` / `RESET TRACE`, `SERVICE LABEL` / `RELOAD`,
   `RAISE`, `RESUME`, `PURGE` are matched by value under the conditions in
   [statements.md](statements.md#registration-and-matching). Node classes are in

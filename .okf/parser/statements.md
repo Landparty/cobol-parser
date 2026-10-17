@@ -116,7 +116,10 @@ must stop at a boundary *without consuming it*. The rules:
 1. **Every verb is a boundary.** Each verb word must be in
    `_utils.STATEMENT_TOKEN_TYPES` (its `TokenType`, when it has one) **and**
    `STATEMENT_KEYWORDS` (its string, including verbs with no `TokenType` such as
-   `PURGE` / `RAISE` / `RESUME`, which only a value check can catch). Includes
+   `PURGE` / `RAISE` / `RESUME`, which only a value check can catch). The
+   legacy verbs CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM are the
+   exception: type only, since a declared data name of that spelling lexes as
+   IDENTIFIER and must not read as a boundary (#525). Includes
    no-op and handler-only verbs (`COMMIT`, `ROLLBACK`, `EJECT`, `SKIP1-3`,
    `NEXT`, ...). Pure clause words that never start a statement (`ON`,
    `OTHERWISE`, `THEN`, `END-*` terminators) are deliberately left out.

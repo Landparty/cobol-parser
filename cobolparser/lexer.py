@@ -2151,6 +2151,73 @@ class _CobolLexerPure:
         self._merge_concatenated_literals()
         self._flag_stray_sql_chars()
         self._retype_operator_currency_symbols()
+        self._retype_legacy_verb_data_names()
+
+    #: Legacy verbs (Micro Focus CHAIN, COBOL-74 NOTE, OS/VS EXHIBIT /
+    #: EXAMINE / TRANSFORM) that no default-dialect program reserves.
+    _LEGACY_VERB_TYPES = frozenset(
+        {
+            TokenType.CHAIN,
+            TokenType.NOTE,
+            TokenType.EXHIBIT,
+            TokenType.EXAMINE,
+            TokenType.TRANSFORM,
+        }
+    )
+    _LAYOUT_TYPES = frozenset(
+        {
+            TokenType.WHITESPACE,
+            TokenType.NEWLINE,
+            TokenType.COMMENT,
+            TokenType.CONTINUATION,
+        }
+    )
+
+    def _retype_legacy_verb_data_names(self) -> None:
+        """Lex a legacy verb the program declares as a data name as an
+        IDENTIFIER, everywhere in the source (#525).
+
+        ``05 CHAIN PIC X(10)`` / ``05 NOTE PIC X(30)`` (a DCLGEN for a table
+        with a NOTE column) are legal under IBM Enterprise COBOL, where none
+        of these words is reserved; lexed as verbs the item became an
+        anonymous FILLER and ``MOVE x TO CHAIN`` started a CHAIN statement.
+        A word counts as declared when it directly follows a level number
+        that starts its line outside the PROCEDURE DIVISION -- the
+        data-name slot. Undeclared, the words stay verbs, as TITLE and
+        VALIDATE already behave.
+        """
+        tokens = self.tokens
+        legacy = self._LEGACY_VERB_TYPES
+        if not any(token.type in legacy for token in tokens):
+            return
+        layout = self._LAYOUT_TYPES
+        declared: set[str] = set()
+        in_procedure = False
+        # An entry starts a line or follows a period; only a level number
+        # there opens a data-name slot (``IF 1 = 1 EXHIBIT ...`` must not).
+        entry_start = True
+        after_level = False
+        for token in tokens:
+            kind = token.type
+            if kind == TokenType.PROCEDURE_DIVISION:
+                in_procedure = True
+            elif kind == TokenType.DATA_DIVISION:
+                in_procedure = False
+            if kind in layout:
+                if kind == TokenType.NEWLINE:
+                    entry_start = True
+                continue
+            if kind in legacy and after_level and not in_procedure:
+                declared.add(token.value.upper())
+            after_level = kind == TokenType.LEVEL_NUMBER and entry_start
+            entry_start = kind == TokenType.PERIOD
+        if not declared:
+            return
+        for index, token in enumerate(tokens):
+            if token.type in legacy and token.value.upper() in declared:
+                tokens[index] = Token(
+                    TokenType.IDENTIFIER, token.value, token.location, token.raw_value
+                )
 
     #: Single-character operator tokens a SPECIAL-NAMES ``CURRENCY SIGN``
     #: clause can declare as a PICTURE symbol (``CURRENCY SIGN IS "<"``).
