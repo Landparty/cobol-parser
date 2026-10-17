@@ -281,6 +281,23 @@ def _flatten(item: CobolDataItem) -> list[CobolDataItem]:
     return out
 
 
+def _as_passed(direction: str, by_clause: str | None) -> str:
+    """*direction* as the caller sees it, given the entry point's passing
+    mode for the operand.
+
+    A ``BY VALUE`` operand is a copy: nothing the callee writes to it
+    reaches the caller, so from the caller's side it is input only (#490).
+    ``unknown`` stays ``unknown``. Graded per entry point, since the same
+    item can be BY VALUE on one entry and BY REFERENCE on another.
+    """
+    if (by_clause or "").upper() == "VALUE" and direction in (
+        "input-output",
+        "output",
+    ):
+        return "input"
+    return direction
+
+
 def _subordinate_names(item: CobolDataItem) -> list[tuple[str, str]]:
     """``(name, qualified name)`` of every data item and level-88 condition
     name beneath *item*, plus *item*'s own level-88s (not *item* itself).
@@ -350,8 +367,9 @@ class ProgramSignatureExtractor:
                         signature.undeclared_parameters.append(key)
                     continue
                 self._apply_declaration(parameter, declaration)
-                parameter.direction = self._direction_for(
-                    key, declaration, directions, signature
+                parameter.direction = _as_passed(
+                    self._direction_for(key, declaration, directions, signature),
+                    parameter.by_clause,
                 )
             signature.entry_points.append(entry)
 

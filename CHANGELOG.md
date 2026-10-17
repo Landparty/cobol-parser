@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`program-signature` grades a BY VALUE parameter as `input`** (#490).
+  Direction came from xref roles alone, so `PROCEDURE DIVISION USING BY
+  VALUE LK-N` with `ADD 1 TO LK-N` reported `input-output`, in
+  `program-signature` and MCP `program_brief`'s interface -- though the
+  callee only changes its own copy. A BY VALUE operand's `input-output` /
+  `output` is now `input` (`unknown` stays), per entry point, so the same
+  item BY REFERENCE on an ENTRY keeps `input-output` there.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

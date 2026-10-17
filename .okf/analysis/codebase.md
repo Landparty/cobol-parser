@@ -263,6 +263,10 @@ DIVISION uses each parameter, reusing xref's role vocabulary:
   since naming an entry's own parameter neither reads nor writes it.
 * A group whose fields xref reports as duplicated → `unknown`, rather than
   inferred from a same-named WORKING-STORAGE field.
+* An operand the entry point takes `BY VALUE` is graded from the caller's
+  side (`_as_passed`): `input-output` / `output` become `input`, since the
+  callee writes only its own copy (#490); `unknown` stays. Per entry point:
+  the same item BY REFERENCE on an ENTRY keeps `input-output` there.
 
 Operand *order* is preserved verbatim from the USING clause and is sorted
 nowhere in the module — it is the whole point of `call_example()`.

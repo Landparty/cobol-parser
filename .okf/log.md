@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- program-signature grades BY VALUE parameters as input (#490)
+
+[analysis/codebase.md](analysis/codebase.md): `_as_passed` maps a BY VALUE
+operand's `input-output` / `output` to `input`, per entry point.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
