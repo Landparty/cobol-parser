@@ -218,6 +218,11 @@ special register.
 [cli.md](cli.md): `decode` catches `UnicodeDecodeError` like `compare`.
 [tests.md](tests.md): `test_decode_cli.py`.
 
+## 2026-10-17 -- LE callable service list rebuilt (#529)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md), [dialects.md](dialects.md): `IBM_LE_SERVICE_CATEGORIES`
+is the source of truth, rebuilt from SA38-0683; 24 non-services removed.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
