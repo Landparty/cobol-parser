@@ -94,6 +94,12 @@ class ParseResult:
     def has_warnings(self) -> bool:
 ```
 
+- **`ast` is `None` only on a lexer/preprocessing/I/O/internal failure** (or a
+  `FAIL_FAST` stop). Text with no recognisable division (`"hello world"`, `""`)
+  gives an empty `CobolProgram("UNKNOWN")` with no divisions plus a "No
+  recognizable COBOL division found" error, under both recovery modes; `lint`
+  and `health` report on that shape. "Something usable" is `ast.divisions`, not
+  `ast is not None` (#368; documented in `interface-contract.md`).
 - **`statistics` is an independent snapshot.** `_create_result` hands each
   `ParseResult` `self.statistics.copy()` (`ParseStatistics.copy()`), never the
   parser's live object: the next `parse()` call `reset()`s that object in place,

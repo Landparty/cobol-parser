@@ -284,6 +284,11 @@ counts the bindings, xref records them and declares `screen-item`s.
 `renames_layout()` emits a level-66 entry per RENAMES (or an `unresolved`
 line); MCP `record_layout` answers a RENAMES name via `_renames_records`.
 
+## 2026-10-17 -- ast contract for unrecognised input (#368)
+
+[integration.md](integration.md): no division recognised gives an empty
+`CobolProgram("UNKNOWN")`, not `ast=None`; the contract now says so.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
