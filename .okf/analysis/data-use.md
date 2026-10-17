@@ -75,7 +75,17 @@ keying data items by bare name needs it too. Pinned by
 long as a letter is present) and refuses to start inside another word or after
 a decimal point (so `1.5E+3` yields no `5E`). A letter-led pattern bites the
 digit off, so `MOVE 1ST-NAME TO 2ND-NAME` would reference `ST-NAME` /
-`ND-NAME`. Shared with `redundancy.py`'s clone renaming; the sibling
+`ND-NAME`. It takes **whole words**: a token may not start right after a
+hyphen either, and a digit run may be followed by a hyphen, so `1000-INIT`
+is one token (a paragraph name, matching no data item) -- the old
+pattern could not match it from its first character and took the tail
+`INIT`, so `PERFORM 1000-INIT` "used" data item `INIT` in unused-variables,
+lint and xref (#487). unused-variables also skips a statement's
+procedure-name operands (`_procedure_operands`: PERFORM target / THRU, GO TO
+targets, ALTER, SORT/MERGE procedures), so `PERFORM INIT` does not use a data
+item `INIT` either; xref already resolves those by role. Pinned by
+`tests/regression/test_digit_led_paragraph_tail_issue_487.py`.
+Shared with `redundancy.py`'s clone renaming; the sibling
 `RELAXED_IDENTIFIER_TOKEN_RE` (used by `boundary_inventory.py`'s `EVALUATE
 TRUE` selector scan) also accepts a token starting with a digit.
 
