@@ -820,6 +820,8 @@ class LiteralCell(str):
     """
 
     data: bytes
+    #: Set on the cell of a VALUE clause (see :class:`InitialValueCell`).
+    initial_value: bool = False
 
     def __new__(cls, data: bytes) -> LiteralCell:
         cell = super().__new__(cls, data.decode("latin-1"))
@@ -828,6 +830,27 @@ class LiteralCell(str):
 
     def __reduce__(self) -> tuple[type[LiteralCell], tuple[bytes]]:
         return (LiteralCell, (self.data,))
+
+
+class InitialValueCell(str):
+    """A generated cell that is a field's VALUE-clause initial value.
+
+    COBOL initialisation by VALUE is not affected by ``JUSTIFIED`` or
+    ``BLANK WHEN ZERO`` (IBM LRM, VALUE clause): ``PIC X(5) JUST VALUE 'AB'``
+    holds ``AB   `` and ``PIC 9(3) BLANK WHEN ZERO VALUE 0`` holds ``000``.
+    Both clauses still apply to every other cell, which stands for the
+    result of a MOVE.  :func:`.encoding.encode_field` reads the marker
+    through :func:`is_initial_value` (#558).  A hex literal's
+    :class:`LiteralCell` carries the same marker as its ``initial_value``.
+    """
+
+    initial_value = True
+
+
+def is_initial_value(cell: str) -> bool:
+    """Whether *cell* is a VALUE-clause initial value (see
+    :class:`InitialValueCell`)."""
+    return bool(getattr(cell, "initial_value", False))
 
 
 def hex_literal_cell(value: str, width: int | None = None) -> LiteralCell | None:

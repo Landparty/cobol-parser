@@ -306,6 +306,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `body_lines`, a scan with copybooks expanded stamps `body_origin` when the
   whole body comes from one file, and `CrossFileCloneMember.source_key`
   prefers it.
+* **gen-data writes a VALUE-clause initial value without JUSTIFIED or BLANK
+  WHEN ZERO** (#558). `PIC X(5) JUSTIFIED RIGHT VALUE 'AB'` was written
+  `   AB` and `PIC 9(3) BLANK WHEN ZERO VALUE 0` as spaces, but COBOL
+  initialisation by VALUE is not affected by either clause: the item holds
+  `AB   ` and `000`. A VALUE-derived cell is now marked and written as
+  declared; generated and level-88 values, which stand for MOVE results,
+  are still justified and blanked.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
