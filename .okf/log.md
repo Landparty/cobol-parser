@@ -34,6 +34,11 @@ like WRITE; a READ with no INTO logs the FD's records.
 [analysis/flow.md](analysis/flow.md): `CloneMember.qualified_name`; `health`
 top offenders match clone membership by `qualified_name or name`.
 
+## 2026-10-17 -- SQL edges through a table field are inexact (#507)
+
+[analysis/lineage.md](analysis/lineage.md): `_visit_sql` marks a host
+variable under an OCCURS inexact, like every other edge through a table.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

@@ -2048,12 +2048,16 @@ class FieldFlowAnalyzer:
             for qname in self._resolve(flow.host_var):
                 for leaf in self._leaves(qname):
                     node = self._item_node(leaf.qname)
+                    # A table field's node stands for any occurrence (a
+                    # multi-row FETCH writes them all), so the edge is
+                    # inexact like every other edge through a table (#507).
+                    exact = flow.exact and self._table(leaf.qname) is None
                     if flow.direction == "out":
                         port.directions.add("out")
-                        self._edge(node, column, flow.kind, ctx, "EXEC SQL", flow.exact)
+                        self._edge(node, column, flow.kind, ctx, "EXEC SQL", exact)
                     else:
                         port.directions.add("in")
-                        self._edge(column, node, flow.kind, ctx, "EXEC SQL", flow.exact)
+                        self._edge(column, node, flow.kind, ctx, "EXEC SQL", exact)
         line = ctx.location.line if ctx.location is not None else 0
         for key in result.keys:
             node = LineageNode(PORT_SQL, f"{key.table}.{key.column}")
