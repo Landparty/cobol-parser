@@ -175,7 +175,9 @@ bundle = generator.generate_from_file(
 bundle.scenarios[0].fixtures       # list[BoundaryFixture]: mock in-data
 bundle.scenarios[0].expectations   # list[Expectation]: assert-on stubs
 bundle.coverage                    # CoverageSummary (boundary-level, v1)
-bundle.unresolved                  # every gap from Phases 1-2-3, merged
+bundle.unresolved                  # every gap from Phases 1-2-3, merged (each once:
+                                   # a boundary gap also in report.unresolved is
+                                   # not repeated, #505)
 bundle.to_json()                   # bundle_version, program_name, seed, ...
 bundle.write_csv_dir("out/")       # out/<scenario-slug>/<KEY>.csv + MANIFEST.json
 ```

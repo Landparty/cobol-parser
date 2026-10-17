@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **gen-fixtures coverage no longer counts a boundary resolved when it is
+  not** (#505). An unresolvable SQL host variable, ACCEPT target, READ
+  record layout or WRITE record went only into the report-level
+  `unresolved`, so `CoverageSummary` counted the boundary resolved though it
+  got no fixture (`SELECT ... INTO :NOPE` was 2/2 resolved, 0 fixtures). The
+  gap now goes on the boundary too; a host-variable array or table element
+  (`OCCURS`, e.g. a rowset `FETCH ... INTO :ARRAY`, `ACCEPT TB(I)`) is named
+  unsupported; and the bundle's `unresolved` lists each gap once.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

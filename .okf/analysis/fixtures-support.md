@@ -163,6 +163,16 @@ re-reads the qualifiers from the scrubbed `sql_text` with
 `AMT` declared under two structures would otherwise land in `unresolved`
 (issue #366).
 
+**A gap goes on the boundary too.** An unresolvable SQL host variable,
+ACCEPT target, READ record layout or WRITE/REWRITE record is appended to the
+`Boundary`'s own `unresolved` as well as `report.unresolved`: coverage
+(`CoverageSummary`) counts a boundary resolved by its own list, so a SELECT
+whose host variables all failed -- and so got no fixture -- read as resolved
+(#505). An item inside an `OCCURS` table never resolves in
+`ProgramLayoutIndex`; `_is_table_item()` names it instead ("host-variable
+array (OCCURS): unsupported" / "table element (OCCURS)"), so a DB2 rowset
+`FETCH ... INTO :ARRAY` or `ACCEPT TB(I)` says why it has no fixture.
+
 **CICS/DLI** have no fixed INTO/FROM-shaped attributes to key layout
 resolution off -- `ExecCicsStatement.options` is a generic option-keyword ->
 argument-text dict, and `ExecImsStatement.arguments` is a positional list

@@ -718,16 +718,19 @@ class BoundaryInventoryAnalyzer:
             # elementary leaves). record_named() looks up the group itself.
             record = index.record_named(record_name)
             record_names = [record.name] if record else []
+            gaps: list[str] = []
             if not record:
-                report.unresolved.append(
+                gaps.append(
                     f"{category} {record_name}: record not resolvable in layout index"
                 )
+                report.unresolved.extend(gaps)
             report.boundaries.append(
                 Boundary(
                     ref=ref(category, record_name.upper()),
                     direction="OUT",
                     record_names=record_names,
                     handlers=handlers,
+                    unresolved=gaps,
                 )
             )
             return
@@ -754,10 +757,10 @@ class BoundaryInventoryAnalyzer:
                     record_names = [into_record.name]
             if not record_names:
                 record_names = [r.name for r in index.records_for_file(file_name)]
+            gaps = []
             if not record_names:
-                report.unresolved.append(
-                    f"READ {file_name}: no record layout resolvable"
-                )
+                gaps.append(f"READ {file_name}: no record layout resolvable")
+                report.unresolved.extend(gaps)
             report.boundaries.append(
                 Boundary(
                     ref=ref(category, file_name.upper()),
@@ -765,6 +768,7 @@ class BoundaryInventoryAnalyzer:
                     record_names=record_names,
                     status_field=status_field,
                     handlers=handlers,
+                    unresolved=gaps,
                 )
             )
             return
@@ -1098,14 +1102,22 @@ class BoundaryInventoryAnalyzer:
         for var in dict.fromkeys(v.lstrip(":") for v in host_vars if v):
             names.extend(qualified.get(var.upper(), [var]))
         record_names: list[str] = []
+        gaps: list[str] = []
         for var in dict.fromkeys(names):
             display_name = self._resolve_display_name(var, index)
             if display_name:
                 record_names.append(display_name)
-            else:
-                report.unresolved.append(
-                    f"SQL host variable {var} not resolvable in layout index"
+            elif _is_table_item(var, index):
+                gaps.append(
+                    f"SQL host variable {var} is a host-variable array (OCCURS): "
+                    "unsupported, no fixture generated for it"
                 )
+            else:
+                gaps.append(f"SQL host variable {var} not resolvable in layout index")
+        # On the boundary too, not only the report: coverage counts a
+        # boundary resolved by its own `unresolved`, and one whose host
+        # variables all failed has no fixture (#505).
+        report.unresolved.extend(gaps)
 
         if sql_type in _SQL_IN_TYPES or isinstance(statement, FetchStatement):
             direction = "IN"
@@ -1126,6 +1138,7 @@ class BoundaryInventoryAnalyzer:
                 direction=direction,
                 record_names=record_names,
                 status_field="SQLCODE",
+                unresolved=gaps,
             )
         )
 
@@ -1241,18 +1254,47 @@ class BoundaryInventoryAnalyzer:
 
         display_name = self._resolve_display_name(target, index)
         record_names = [display_name] if display_name else []
+        gaps: list[str] = []
         if not display_name:
-            report.unresolved.append(
-                f"ACCEPT target {target} not resolvable in layout index"
-            )
+            if _is_table_item(target, index):
+                gaps.append(
+                    f"ACCEPT target {target} is a table element (OCCURS): "
+                    "unsupported, no fixture generated for it"
+                )
+            else:
+                gaps.append(f"ACCEPT target {target} not resolvable in layout index")
+            report.unresolved.extend(gaps)
 
         report.boundaries.append(
             Boundary(
                 ref=ref("ACCEPT", target),
                 direction="IN",
                 record_names=record_names,
+                unresolved=gaps,
             )
         )
+
+
+def _is_table_item(name: str, index: ProgramLayoutIndex) -> bool:
+    """Whether *name* (subscript and qualifiers dropped) is a data item
+    inside an ``OCCURS`` table -- which ``ProgramLayoutIndex.resolve`` never
+    finds, so a host-variable array or ``ACCEPT TB(I)`` gets an explicit
+    "unsupported" note rather than a bare "not resolvable"."""
+    wanted = name.split("(")[0].split()[0].split(".")[-1].upper() if name else ""
+    if not wanted:
+        return False
+
+    def walk(item: Any, in_table: bool) -> bool:
+        in_table = in_table or getattr(item, "occurs_clause", None) is not None
+        if in_table and str(getattr(item, "name", "")).upper() == wanted:
+            return True
+        return any(
+            walk(child, in_table)
+            for child in getattr(item, "children", [])
+            if hasattr(child, "occurs_clause")
+        )
+
+    return any(walk(record, False) for record in index.records())
 
 
 __all__ = [
