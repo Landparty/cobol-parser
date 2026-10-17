@@ -756,7 +756,9 @@ of `DatasetBinding` / `Passthrough`). `--depth` caps the joins a path crosses
 (dataset or table hop into another program, or a CALL). JSON:
 `ImpactResult.to_dict()` + `graph` (statistics, opaque callees, unjoined DDs,
 caveats) + `problems` (files with no report, JCL that did not parse or
-expand). Text groups hits by program with their paths, then `Unjoined:` and
+expand). Text groups hits by program with their paths -- item hits and port
+hits (`port console:SYSOUT@0+4 line 23 [display]`, an unbound DD, a CALL
+argument), the same hits as the JSON (#528) -- then `Unjoined:` and
 `Problems:`. Exit 0 when the start was found (hits or not, including a
 declared field no value flows through, #546); 1 when no source
 produced a report (problems printed first), the start matches no declared

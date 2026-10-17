@@ -275,7 +275,10 @@ class ImpactResult:
         lines.append(f"Programs ({len(self.programs)}): " + ", ".join(self.programs))
         by_program: dict[str, list[ImpactHit]] = {}
         for hit in self.hits:
-            if hit.node_kind == "item" and hit.program:
+            # Ports too (console, an unbound DD, a CALL, a LINKAGE
+            # parameter): that is where the trail leaves the program, and
+            # the JSON lists them (#528).
+            if hit.node_kind in ("item", "port") and hit.program:
                 by_program.setdefault(hit.program, []).append(hit)
         for program in sorted(by_program):
             lines.append("")
@@ -295,8 +298,9 @@ class ImpactResult:
                     for h in reversed(hit.path[:-1])
                     if h.kind not in ("redefines", "occurrence")
                 )
+                label = f"port {hit.field}" if hit.node_kind == "port" else hit.field
                 lines.append(
-                    f"  {hit.field}{where}  [{', '.join(tags)}]"
+                    f"  {label}{where}  [{', '.join(tags)}]"
                     + (f"\n      via {via}" if via else "")
                 )
         if self.notes:
