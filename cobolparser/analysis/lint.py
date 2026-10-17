@@ -931,7 +931,7 @@ class LintAnalyzer:
         if result.unchecked:
             report.caveats.append(
                 f"dclgen-check: {len(result.unchecked)} host variable(s) could "
-                "not be checked against a DECLARE TABLE column -- run "
+                "not be (fully) checked against a DECLARE TABLE column -- run "
                 "`cobol-parser dclgen-check` for the reason per variable"
             )
         for column, tables in sorted(result.ambiguous_columns.items()):

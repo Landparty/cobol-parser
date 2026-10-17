@@ -299,6 +299,12 @@ VARCHAR 49-levels are not reported unused.
 `IDENTIFIER_TOKEN_RE` no longer matches the tail of a digit-led word
 (`1000-INIT` -> `INIT`); unused-variables skips procedure-name operands.
 
+## 2026-10-17 -- dclgen-check: null-indicator only on outputs (#530)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md), [analysis/lint.md](analysis/lint.md),
+[tests.md](tests.md): the `null-indicator` warning needs an output host variable (INTO, `SET :hv
+=`); an unknown-direction one (SQL CALL argument) is `unchecked` for it.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
