@@ -309,6 +309,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   statement (after a newline or `;`, or after `THEN` / `ELSE` / `DO`),
   outside parentheses, and never inside a dataset name (`/* ... */`
   comments are dropped first, so a command after one is still seen).
+* **`jcl --bindings` output feeds `field-impact --bindings`** (#547). Rows
+  now carry the `program` their step runs (`cobolparser.jcl.DatasetBinding.
+  program`), so the obvious pipeline no longer dies with `KeyError:
+  'program'`; rows that bind nothing (SYSOUT/DUMMY, `EXEC proc` steps) are
+  skipped, and a malformed `--bindings` row is a one-line `error:` naming it
+  instead of a traceback. An `EXEC proc` step no longer lists every DD
+  override a second time: an override (or added DD) the expansion applied
+  appears once, under the procedure step it reaches; one that reached no
+  step (procedure not found) stays on the invocation.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

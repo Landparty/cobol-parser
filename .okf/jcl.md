@@ -77,7 +77,7 @@ this package exposes none of it.
 | `JobStep` | `name`, `program`, `procedure`, `parm`, `dd_statements`, `condition`, `parameters`, `line` |
 | `DDStatement` | `name`, `dataset`, `disposition`, `sysout`, `is_dummy`, `is_instream`, `instream_lines`, `concatenated`, `record_format`, `record_length`, `parameters`, `procstep`, `line` |
 | `JclParameter` | `keyword`, `value`, `subparameters`, `positional` |
-| `DatasetBinding` | `ddname`, `dataset`, `step`, `job`, `disposition`, `record_format`, `record_length` |
+| `DatasetBinding` | `ddname`, `dataset`, `step`, `job`, `disposition`, `record_format`, `record_length`, `program` (the step's `PGM=`; `None` for job-level DDs and `EXEC proc` steps) |
 
 Every class has `to_dict()`. Lookup helpers: `JclParseResult.dd_map()` (DD
 name -> every dataset bound to it, across steps), `.steps_running(program)`,
@@ -94,8 +94,10 @@ member right after the card that owns it, job-level DDs (JOBLIB, ...) first
 with `step=""`. Steps expanded from a procedure appear under their
 `invocation.procstep` names. SYSOUT / DUMMY / in-stream DDs yield
 `dataset=None` rows, kept rather than dropped (knowing `SYSPRINT` is SYSOUT is
-an answer). `bindings_for_ddname(result, ddname)` filters it
-case-insensitively.
+an answer). Each row names its step's `program`, so `jcl --bindings` output
+is directly a `field-impact --bindings` file (rows with no program or no
+dataset bind nothing there and are skipped, #547).
+`bindings_for_ddname(result, ddname)` filters it case-insensitively.
 
 ## Conversion (`jcl/parser.py`)
 
@@ -105,7 +107,10 @@ case-insensitively.
   ones each parenthesised and joined with ` AND `). jclparser normalises
   unparenthesised expressions (`RC = 0` reads `RC=0`).
 * **Procedure invocations** keep their own step (`program=None`,
-  `procedure=NAME`, the invocation's override DDs with `procstep` set),
+  `procedure=NAME`, and only the override / added DDs that reached no
+  expanded step, with `procstep` set: `_drop_applied_overrides` removes the
+  ones the expansion applied, which would otherwise bind the same DD twice,
+  #547),
   followed by one step per procedure step, named `invocation.procstep` (nested:
   `RUN.S2.S1`), with both `program` and `procedure` (the innermost procedure)
   set. Each invocation is exploded on its own (`explode_job` over a one-step

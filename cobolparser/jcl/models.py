@@ -321,6 +321,10 @@ class DatasetBinding:
     ``SELECT INV-FILE ASSIGN TO INVFILE``, look ``INVFILE`` up here and get the
     dataset it is bound to in this job, which step binds it, how it is
     disposed, and (when the JCL says so) its RECFM and LRECL.
+
+    ``program`` is the ``PGM=`` the binding step runs (``None`` for a
+    job-level DD and for an ``EXEC proc`` step, which runs no program
+    itself), so ``to_dict()`` rows feed ``field-impact --bindings`` as-is.
     """
 
     ddname: str
@@ -330,6 +334,7 @@ class DatasetBinding:
     disposition: str | None = None
     record_format: str | None = None
     record_length: int | None = None
+    program: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -340,4 +345,5 @@ class DatasetBinding:
             "disposition": self.disposition,
             "record_format": self.record_format,
             "record_length": self.record_length,
+            "program": self.program,
         }

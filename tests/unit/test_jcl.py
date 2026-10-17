@@ -190,12 +190,12 @@ class TestProcedureSample:
         assert payrpt.record_format == "FBA"
         assert payrpt.record_length == 133
 
-    def test_override_cards_stay_on_the_invocation_step(self, payproc):
+    def test_applied_override_cards_leave_the_invocation_step(self, payproc):
+        # An override belongs to the procedure step it reaches; kept on the
+        # EXEC proc step too, it was a second binding for a step that runs
+        # no program (#547).
         invocation = payproc.jobs[0].steps[0]
-        assert [(dd.procstep, dd.name) for dd in invocation.dd_statements] == [
-            ("EXTRACT", "PAYMAST"),
-            ("REPORT", "PAYRPT"),
-        ]
+        assert invocation.procedure and invocation.dd_statements == []
 
     def test_temporary_dataset_ampersands_are_not_symbols(self, payproc):
         extract = payproc.jobs[0].step("RUNPAY.EXTRACT")
@@ -893,7 +893,6 @@ class TestDatasetBindings:
     def test_bindings_resolve_through_a_procedure(self, payproc):
         found = bindings_for_ddname(payproc, "PAYMAST")
         assert [(b.step, b.dataset) for b in found] == [
-            ("RUNPAY", "PROD.PAY.MASTER.WEEKLY"),
             ("RUNPAY.EXTRACT", "PROD.PAY.MASTER.WEEKLY"),
         ]
 
@@ -907,6 +906,7 @@ class TestDatasetBindings:
             "disposition": "(NEW,CATLG,DELETE)",
             "record_format": "FB",
             "record_length": 200,
+            "program": "INVEDIT",
         }
 
 

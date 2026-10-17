@@ -752,7 +752,9 @@ data item (a single-report `LineageGraph`). See [analysis.md](analysis.md).
 [SCHEMA.]TABLE.COLUMN` or `--dataset DSN` — exactly one. Bindings: `--jcl`
 (needs jcl-parser; `--proc-path` is a flat PROC folder or a JCLLIB base)
 and/or `--bindings` (`{"bindings": [...], "passthroughs": [...]}`, dict forms
-of `DatasetBinding` / `Passthrough`). `--depth` caps the joins a path crosses
+of `DatasetBinding` / `Passthrough`; `jcl --bindings` output works as-is: a
+row with no `program` or `dataset` is skipped, and a malformed row is a
+one-line `error: --bindings: ...` naming it, exit 1, never a traceback). `--depth` caps the joins a path crosses
 (dataset or table hop into another program, or a CALL). JSON:
 `ImpactResult.to_dict()` + `graph` (statistics, opaque callees, unjoined DDs,
 caveats, incl. JCL steps `bindings_from_jobs` could not read, passed as
@@ -804,7 +806,7 @@ flowchart renderer's conventions). `copybook-impact` takes the member first
 | Flag | Meaning |
 |------|---------|
 | `--dd-map` | Only the `ddname -> datasets` mapping (what `SELECT ... ASSIGN TO ddname` resolves through) |
-| `--bindings` | One row per DD binding (ddname, dataset, step, job, DISP, RECFM, LRECL) instead of the job structure |
+| `--bindings` | One row per DD binding (ddname, dataset, step, job, DISP, RECFM, LRECL, program) instead of the job structure; usable as `field-impact --bindings` input |
 | `--program NAME` | Only the steps that run this program; filters `--dd-map` and `--bindings` to the same steps |
 | `--proc-path DIR` | Cataloged procedures and INCLUDE members (one per file, named after it; repeatable, in order). Without it only in-stream procedures expand; other `EXEC proc`s go to `unresolved` |
 | `--strict` | **Exit 3** when any card could not be parsed (exit 1 still means the run failed) |
