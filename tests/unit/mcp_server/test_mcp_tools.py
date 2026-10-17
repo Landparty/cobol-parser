@@ -556,6 +556,34 @@ class TestReadSource:
         assert result["truncated"] == [
             {"field": "lines", "shown": MAX_SOURCE_LINES, "total": 801}
         ]
+        assert 500 in [row["line"] for row in result["answer"]["lines"]]
+
+    def test_a_large_before_still_shows_the_line(self, root: Path) -> None:
+        # #537: the cut kept the head of the window, so line=800 before=500
+        # showed lines 300-499 and never the line asked for.
+        (root / "BIG.cbl").write_text(
+            "".join(f"      * line {n}\n" for n in range(1, 1001))
+        )
+        result = tools_for(root).read_source("BIG.cbl", 800, before=500, after=5)
+        answer = result["answer"]
+        assert (answer["start_line"], answer["end_line"]) == (606, 805)
+        assert answer["lines"][194] == {"line": 800, "text": "      * line 800"}
+        assert result["truncated"] == [
+            {"field": "lines", "shown": MAX_SOURCE_LINES, "total": 506}
+        ]
+
+    def test_the_after_lines_come_before_the_before_lines(self, root: Path) -> None:
+        (root / "BIG.cbl").write_text("".join(f"line {n}\n" for n in range(1, 1001)))
+        tools = tools_for(root)
+        answer = tools.read_source("BIG.cbl", 800, before=5, after=500)["answer"]
+        assert (answer["start_line"], answer["end_line"]) == (800, 999)
+        # After the end of the file, the unused budget goes to ``before``.
+        near_end = tools.read_source("BIG.cbl", 990, before=500, after=500)
+        assert (near_end["answer"]["start_line"], near_end["answer"]["end_line"]) == (
+            801,
+            1000,
+        )
+        assert near_end["truncated"][0]["total"] == 511
 
 
 # -- lint ------------------------------------------------------------------------
