@@ -218,6 +218,18 @@ _WRITE_SQL_TYPES = frozenset(
 _MERGE_ACTION_RE = re.compile(r"\bTHEN\s+(INSERT|UPDATE|DELETE)\b")
 
 
+def _data_division_sql(ast: CobolProgram) -> list[ExecSQLStatement]:
+    """Every EXEC SQL statement node in *ast*'s own DATA DIVISION, in order."""
+    data_div = ast.get_division("DATA")
+    if data_div is None:
+        return []
+    return [
+        node
+        for node in data_div.traverse_depth_first()
+        if isinstance(node, ExecSQLStatement)
+    ]
+
+
 class CRUDMatrixGenerator:
     """Generates a CRUD matrix for a parsed COBOL program.
 
@@ -291,12 +303,19 @@ class CRUDMatrixGenerator:
         # Third pass: collect OPEN modes (must precede CRUD marking so metadata is ready)
         self._collect_open_modes(all_statements)
 
+        # EXEC SQL in the DATA DIVISION: the DB2 precompiler accepts
+        # ``DECLARE c CURSOR FOR SELECT ...`` in WORKING-STORAGE (a common
+        # shop style), and ``get_all_statements()`` walks the PROCEDURE
+        # DIVISION only -- without these the cursor's tables were missing
+        # and a FETCH from it marked nothing (#518).
+        sql_statements = _data_division_sql(ast) + all_statements
+
         # Fourth pass: collect DECLARE CURSOR table associations for FETCH tracking
-        self._collect_cursor_declarations(all_statements)
+        self._collect_cursor_declarations(sql_statements)
 
         # Fifth pass: mark CRUD operations
         self._mark_file_crud(all_statements)
-        self._mark_sql_crud(all_statements)
+        self._mark_sql_crud(sql_statements)
 
         return CRUDMatrix(
             program_name=self._program_name,

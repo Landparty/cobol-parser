@@ -501,6 +501,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sql_text` keeps `"..."`, and the scrubber reads an identifier-shaped
   `"..."` as that name, unquoted (`PROD.CUST`), with the same C/R/U/D marks
   as the undelimited form.
+* **The CRUD matrix no longer misses a cursor DECLAREd in WORKING-STORAGE**
+  (#518). The DB2 precompiler accepts `EXEC SQL DECLARE c CURSOR FOR SELECT
+  ... END-EXEC` in the DATA DIVISION, but the matrix read only PROCEDURE
+  DIVISION statements, so the cursor's tables were missing (also from MCP
+  `program_brief`'s `sql_tables`) and a `FETCH c` marked nothing. They are
+  now listed `-R--` with the cursor name, and a `FOR UPDATE` cursor used
+  with `WHERE CURRENT OF` gives `-RU-`, the same as a PROCEDURE DIVISION
+  DECLARE.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
