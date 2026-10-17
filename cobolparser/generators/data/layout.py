@@ -676,6 +676,74 @@ _FIGURATIVE_WORDS = frozenset(
 )
 
 
+#: Field categories whose DISPLAY bytes are one character per byte, so a
+#: slice of a group VALUE's text is exactly the field's own value.
+_TEXT_SLICE_CATEGORIES = frozenset(
+    {
+        FieldCategory.ALPHANUMERIC,
+        FieldCategory.ALPHABETIC,
+        FieldCategory.ALPHANUMERIC_EDITED,
+        FieldCategory.NUMERIC,
+        FieldCategory.NUMERIC_EDITED,
+    }
+)
+_GROUP_VALUE_ALL_RE = re.compile(r"ALL\s+(.+)$", re.IGNORECASE | re.DOTALL)
+
+
+def _apply_group_value(clause: str, specs: list[FieldSpec]) -> None:
+    """Give each field of a group the part of the group's VALUE it holds.
+
+    A group VALUE is an alphanumeric literal laid over the group's bytes
+    (``05 HDR VALUE 'HDR0001'`` puts ``HDR`` in a leading ``X(3)`` and
+    ``0001`` in the ``9(4)`` after it), padded with spaces when shorter; a
+    figurative constant, or ``ALL`` a literal, fills every byte.  Each field
+    gets the matching slice as its own VALUE clause, so ``ValueFactory``
+    honours it -- or not, under ``respect_values=False`` -- exactly as it
+    does an elementary VALUE.  A field that already declares one keeps it.
+
+    Only DISPLAY fields of one byte per character are given a text slice:
+    the bytes a literal leaves in a COMP / COMP-3 / national field are not
+    a value of its own type, so those keep being generated.  A figurative
+    is the exception -- it names a value every type has.
+    """
+    raw = clause.strip()
+    all_match = _GROUP_VALUE_ALL_RE.match(raw)
+    unit = all_match.group(1).strip() if all_match else raw
+    if unit.upper() in _FIGURATIVE_WORDS:
+        for spec in specs:
+            if spec.value_clause is None:
+                spec.value_clause = unit
+        return
+    data = hex_literal_bytes(unit)
+    text = data.decode("latin-1") if data is not None else _strip_literal_quotes(unit)
+    if not text:
+        return
+    total = sum(spec.storage_size for spec in specs)
+    if all_match:
+        text = (text * (total // len(text) + 1))[:total]
+    offset = 0
+    for spec in specs:
+        width = spec.storage_size
+        piece = text[offset : offset + width]
+        offset += width
+        if (
+            spec.value_clause is not None
+            or spec.usage != "DISPLAY"
+            or spec.category not in _TEXT_SLICE_CATEGORIES
+            or width != spec.character_positions
+        ):
+            continue
+        if data is not None and piece:
+            # A hex literal is bytes: its slice stays a hex literal, so the
+            # encoder writes those bytes rather than their Latin-1 text.
+            spec.value_clause = "X'" + piece.encode("latin-1").hex().upper() + "'"
+            spec.literal_bytes.setdefault(piece, piece.encode("latin-1"))
+        else:
+            # Past the literal's end the group holds spaces (the encoder
+            # pads a short value with them).
+            spec.value_clause = "'" + (piece or " ").replace("'", "''") + "'"
+
+
 def _condition_values(item: CobolDataItem) -> list[str]:
     """Collect level-88 VALUEs under *item*, merged across all its
     level-88 children -- FieldSpec.condition_values needs "any value that
@@ -1058,6 +1126,7 @@ def _flatten_into(
         occ = (*subscripts, index) if index is not None else subscripts
         children = _child_items(item)
         if children:
+            start = len(out)
             for child in children:
                 overlay = overlays.substitutions.get(id(child)) if overlays else None
                 if overlay is not None and overlays is not None:
@@ -1084,6 +1153,14 @@ def _flatten_into(
                     redefines_label=redefines_label,
                     overlays=overlays,
                     segment=layout_segment(child, item),
+                )
+            if item.value_clause:
+                # A group VALUE initialises the group's bytes, not one field:
+                # carry it down to the fields that make them up (#552).
+                own = inherited_redefines or redefines_label
+                _apply_group_value(
+                    item.value_clause,
+                    [spec for spec in out[start:] if spec.redefines == own],
                 )
             continue
 

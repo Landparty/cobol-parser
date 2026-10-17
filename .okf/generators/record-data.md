@@ -323,6 +323,16 @@ record image re-encodes the characters, not the original bytes (hex literals
 in a record image are handled separately, see [Record images](#record-images);
 also [lexer.md](../lexer.md) "Literal round trip").
 
+**Group VALUE.** A VALUE on a group (`05 HDR VALUE 'HDR0001'`, `05 NUMS
+VALUE ZEROES`) is carried down by `_flatten_into` / `_apply_group_value`: the
+literal is laid over the group's fields by byte offset (space-padded past
+its end, repeated for `ALL`) and each field gets its slice as its own
+`value_clause` (a hex literal's slice stays `X'..'`); a figurative is given
+to every field as is. Only one-byte-per-character DISPLAY fields take a text
+slice -- COMP / COMP-3 / national fields keep being generated, a figurative
+excepted. A field with its own VALUE keeps it; `respect_values=False` still
+ignores all of it. Before #552 the group's bytes were random.
+
 **Signedness.** `PictureClause.is_signed` only reports an explicit `S`, so
 `_is_signed()` additionally treats a numeric-edited picture carrying `+`,
 `-`, `CR`, or `DB` as signed — `PIC -ZZ,ZZ9.99` is the canonical signed

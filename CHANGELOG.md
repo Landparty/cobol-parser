@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **gen-data honours a VALUE clause on a group item** (#552). `05 HDR
+  VALUE 'HDR0001'` and `05 NUMS VALUE ZEROES` never reached their
+  subordinates, so a constant header / trailer group got random data. The
+  literal is now laid over the group's DISPLAY fields by byte offset
+  (space-padded, `ALL` repeated, hex kept as bytes) and a figurative fills
+  every field, in the CSV and the record image alike;
+  `respect_values=False` still ignores it.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
