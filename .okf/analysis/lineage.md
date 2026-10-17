@@ -200,10 +200,13 @@ hop's line is in; it is not in `Hop.to_dict()` (#489, used by the MCP server).
 **Bindings (`lineage_jcl.py`).** `bindings_from_jobs(jobs)` turns
 **jcl-parser** `Job`s (duck-typed; imported only in `load_jobs`, through
 `importlib`, so cobol-parser keeps no runtime or mypy dependency on it)
-into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT/ICETOOL (`SORTIN*`
+into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT (`SORTIN*`
 -> `SORTOUT` + `OUTFIL FNAMES` + `OUTFIL FILES=nn` as DD `SORTOFnn`; a
 `JOINKEYS` step reads `SORTJNF1`/`SORTJNF2` or its `F1=`/`F2=` DDs and is
-always a `reformat`, #585), IEBGENER/ICEGENER, IDCAMS REPRO (operands
+always a `reformat`, #585), ICETOOL (each `TOOLIN` `COPY` / `SORT` /
+`MERGE` / `SELECT` / `SUBSET` / `DATASORT` operator `FROM(dd)` -> `TO(dd...)`
++ `DISCARD(dd)`, classified through its `USING(xxxx)` `xxxxCNTL` statements;
+`SPLICE` / `RESIZE` are reformats, #566), IEBGENER/ICEGENER, IDCAMS REPRO (operands
 in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`. A
 blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
@@ -224,9 +227,12 @@ on `cobolparser/jcl/`.
 
 **JCL caveats.** `bindings_from_jobs(jobs, caveats)` appends one line per
 step whose flow it could not read (`<PROGRAM> step <STEP> in job <JOB>:
-...`; e.g. a sort step with no recognised input or output DD: `SORT step S2
-in job J1: outputs not recognised; the flow through it is not traced`), so a
-step left out never reads as a step that moves nothing. `field-impact
+...`), so a step left out never reads as a step that moves nothing: a sort
+step with no recognised input or output DD (`SORT step S2 in job J1:
+outputs not recognised; the flow through it is not traced`), an ICETOOL
+`TOOLIN` (or `USING` `xxxxCNTL`, then read as a reformat) that is not
+in-stream, an operator whose DDs bind nothing, and an IKJEFT01 step whose
+`SYSTSIN` is a dataset (its programs are unknown, #566). `field-impact
 --jcl` and the MCP lineage index pass them as
 `LineageGraph(join_caveats=...)`, which -- without `join_edges` -- adds them
 to the joins' caveats (so `join_state()` exports them too). Invariant: a
