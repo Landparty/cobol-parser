@@ -501,6 +501,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kept only the name text, so a literal program name (cancel program X) and
   a data name (cancel the program X's value names) were one node and diff
   reported no change. `program_names_literal` now records which is which.
+* **gen-fixtures scenarios carry the guard on the PERFORM that reaches their
+  paragraph** (#310). A branch in a paragraph PERFORMed from inside another
+  paragraph's IF / EVALUATE arm got a `verified` scenario whose data never
+  ran it (`IN-CODE` never `'QQ'`, so `DEEP-PARA` was never PERFORMed): path
+  conditions stopped at the top of the branch's own paragraph. A paragraph
+  reached from exactly one guarded place now takes that place's arms into
+  the scenario's path condition; one reached from several guarded places
+  (or through GO TO ... DEPENDING ON, a SORT procedure, a handler or a
+  cycle) gets a `path_gaps` reason, so its scenario is `unverified` instead.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
