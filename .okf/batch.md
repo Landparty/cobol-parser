@@ -242,6 +242,11 @@ consumer can prove every file it handed over was accounted for.
   `location` — so `_run_analyzer` receives the source map and applies
   `field_lineage.apply_source_map` itself.
 
+**The `scan` CLI exits 2 when any file is in `failures`** (#325, as
+`batch`): the JSON is still written, with a `warning: N of M file(s) could
+not be scanned` on stderr, so a script gating on `$?` never reads "nothing
+scanned" as success. `scan_files()` itself is unchanged.
+
 **Copybook expansion failure degrades, as in `batch.py`.** The file falls
 back to the unexpanded parse and keeps the reason as
 `FileScan.copybook_error` (the unexpanded parse is usually error-free, so

@@ -123,7 +123,9 @@ report.program_count
 ```
 
 `ProgramNode` holds `program_id` (uppercased; the **file stem** when the file
-would not parse, recorded as such in `unresolved`), `path`, `calls`, `copies`
+would not parse, recorded as such in `unresolved`; a path that does not exist
+is an input error -- `errors` entry `no such file or directory`, an
+`unresolved` note, no node and no COPY scan, #325), `path`, `calls`, `copies`
 and `parse_failed` — with `parse_failed` true, `calls` is "empty and unknown",
 not "empty and known". `CallEdge` carries `is_dynamic` / `resolved` / `kind`; `CopyEdge`
 carries `member`, `path` and `nested`, where for a nested edge `program` is the

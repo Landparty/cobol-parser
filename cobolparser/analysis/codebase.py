@@ -920,6 +920,8 @@ class CodebaseGraphBuilder:
             nodes_by_path.setdefault(node.path, []).append(node)
 
         for path in files:
+            if units_by_path.get(path) == [] and not os.path.exists(path):
+                continue  # reported above as a missing path
             self._collect_copy_edges(
                 path,
                 units_by_path.get(path, [_program_id_from_path(path)]),
@@ -1083,6 +1085,16 @@ class CodebaseGraphBuilder:
         parse_result = batch_result.result
         ast = parse_result.ast if parse_result is not None else None
         parse_errors = list(parse_result.errors) if parse_result is not None else []
+
+        if ast is None and not os.path.exists(path):
+            # A mistyped path is an input error, not a program that failed to
+            # parse: no phantom node named after it (#325).
+            errors.append({"path": path, "error": "no such file or directory"})
+            unresolved.append(
+                f"{path}: no such file or directory; it is not in the graph"
+            )
+            units_by_path[path] = []
+            return
 
         if ast is None:
             reason = batch_result.read_error or (

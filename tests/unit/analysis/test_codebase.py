@@ -796,14 +796,16 @@ class TestFailureHandling:
         assert node.program_id == "BROKEN"  # assumed from the file name
         assert any("assumed from the file name" in n for n in graph.unresolved)
 
-    def test_unreadable_file_is_recorded(self, tmp_path):
+    def test_missing_file_is_an_error_not_a_program(self, tmp_path):
+        # A path that does not exist is an input error, not a program that
+        # failed to parse: no phantom node named after it (#325).
         missing = tmp_path / "GONE.cbl"
         graph = CodebaseGraphBuilder().build([str(missing)])
-        assert graph.programs[0].parse_failed is True
-        assert any(e["path"] == str(missing) for e in graph.errors)
-        assert any(
-            "COPY statements could not be scanned" in n for n in graph.unresolved
-        )
+        assert graph.programs == []
+        assert graph.errors == [
+            {"path": str(missing), "error": "no such file or directory"}
+        ]
+        assert any("no such file or directory" in n for n in graph.unresolved)
 
     def test_unparseable_file_still_contributes_copy_edges(self, tmp_path, copybooks):
         # A COPY scan does not need a successful parse.

@@ -169,6 +169,12 @@ resolves CALLs by COBOL scope; MCP and `scan` report the source nesting.
 codebase-graph sends a CALL to an ENTRY name to the declaring program
 (`CallEdge.entry`), and MCP `callers_of` / `codebase_overview` count it.
 
+## 2026-10-17 -- scan / codebase-graph / copybook-impact exit 2 on failed files (#325)
+
+[cli.md](cli.md), [batch.md](batch.md), [analysis/codebase.md](analysis/codebase.md):
+any failed input file exits 2 like `batch`; a missing path is an `errors`
+entry, never a phantom `parse_failed` program.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
