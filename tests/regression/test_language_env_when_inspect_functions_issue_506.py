@@ -120,9 +120,24 @@ def test_inspect_parser_keeps_a_function_operand_whole():
     tally, replace, convert = [
         s for s in ast.get_all_statements() if s.statement_type == "INSPECT"
     ]
-    assert [c["value"] for c in tally.tallying_clauses] == [
-        "FUNCTION LOWER-CASE ( A )"
-    ]
+    assert [c["value"] for c in tally.tallying_clauses] == ["FUNCTION LOWER-CASE ( A )"]
     assert replace.replacing_clauses[0]["to_value"] == "FUNCTION CHAR ( 66 )"
     assert convert.converting_from == "FUNCTION TRIM ( A )"
     assert convert.converting_to == '"abc"'
+
+
+def test_function_text_inside_a_when_literal_is_prose():
+    # A WHEN condition's text keeps its literals inline, so the whole-literal
+    # check alone let ``'FUNCTION LENGTH(A)'`` read as a call.
+    body = """\
+           EVALUATE TRUE ALSO N
+             WHEN A = 'FUNCTION LENGTH(A)' ALSO FUNCTION ORD(A)
+               DISPLAY 'X'
+           END-EVALUATE.
+           SET IX TO 1.
+           SEARCH TE
+             WHEN TE(IX) = "FUNCTION TRIM(A)"
+               DISPLAY 'HIT'
+           END-SEARCH.
+"""
+    assert _functions(body) == [("ORD", "EVALUATE")]

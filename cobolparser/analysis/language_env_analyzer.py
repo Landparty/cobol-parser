@@ -53,6 +53,11 @@ _FUNCTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A quoted literal embedded in a longer text (``A = 'FUNCTION LENGTH(B)'``),
+# with COBOL's doubled-quote escape. Whole-literal texts are skipped by
+# ``_add``; a WHEN condition's text carries its literals inline (#506).
+_EMBEDDED_LITERAL_RE = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
+
 # Single source of truth: reference the dialect class attributes directly.
 _IBM_INTRINSIC_FUNCTIONS: frozenset[str] = frozenset(
     IBMEnterpriseCobol.IBM_INTRINSIC_FUNCTIONS
@@ -282,12 +287,17 @@ def _collect_text_fields(stmt: CobolStatement) -> list[str]:
     # EVALUATE WHEN selectors and SEARCH WHEN conditions (#506). An EVALUATE
     # arm is a WhenClause node with ``selectors`` dicts; a SEARCH arm is a
     # plain dict with its ``condition`` text. A quoted selector literal is
-    # prose (its quotes are stripped, so the flag is the only tell).
+    # prose (its quotes are stripped, so the flag is the only tell); a literal
+    # inside a condition's text keeps its quotes and is blanked out, so
+    # ``WHEN A = 'FUNCTION LENGTH(B)'`` names no function.
+    def _add_unquoted(text: str) -> None:
+        _add(_EMBEDDED_LITERAL_RE.sub("''", text))
+
     for clause in getattr(stmt, "when_clauses", None) or []:
         if isinstance(clause, dict):
             condition_text = clause.get("condition")
             if isinstance(condition_text, str):
-                _add(condition_text)
+                _add_unquoted(condition_text)
             continue
         for selector in getattr(clause, "selectors", None) or []:
             if not isinstance(selector, dict):
@@ -302,7 +312,7 @@ def _collect_text_fields(stmt: CobolStatement) -> list[str]:
                 if isinstance(value, str) and not (
                     quoted_key and selector.get(quoted_key)
                 ):
-                    _add(value)
+                    _add_unquoted(value)
 
     # INSPECT operands: TALLYING FOR / REPLACING BY / CONVERTING FROM-TO and
     # every BEFORE / AFTER delimiter (#506).

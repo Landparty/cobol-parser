@@ -267,8 +267,9 @@ IF / PERFORM UNTIL conditions (their operands live on the condition tree) and
 STRING's split `"FUNCTION"`, `"UPPER-CASE ( X )"` operands are scanned too,
 and so are EVALUATE WHEN selectors (`text`, `value`, range `start`/`end`; a
 quoted selector literal is skipped by its `quoted` flag), SEARCH WHEN
-`condition` text, and every INSPECT TALLYING / REPLACING / CONVERTING operand
-and BEFORE / AFTER delimiter (#506,
+`condition` text (in both, a literal embedded in the text, `A = 'FUNCTION
+LENGTH(B)'`, is blanked out first: the text keeps its quotes), and every
+INSPECT TALLYING / REPLACING / CONVERTING operand and BEFORE / AFTER delimiter (#506,
 `tests/regression/test_language_env_when_inspect_functions_issue_506.py`).
 Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA3FunctionInsideLiteralIsProse`
