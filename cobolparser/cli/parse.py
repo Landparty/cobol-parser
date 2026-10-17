@@ -1041,7 +1041,9 @@ def _cmd_expand(args: argparse.Namespace) -> None:
     # below): it must see the program's own >>DEFINE lines to hand them to the
     # copybooks COPYd beneath them. Running it here first consumed those
     # lines, so every copybook saw only the --define symbols. Its diagnostics
-    # land in the JSON's statistics.warnings.
+    # land in the JSON's statistics.warnings. Always evaluated, --define or
+    # not: gating it on --define printed both arms of every >>IF ... >>ELSE
+    # and ignored the program's own >>DEFINE (#583, as #271 for preprocess).
     defines = _parse_defines(args.define)
 
     try:
@@ -1049,8 +1051,8 @@ def _cmd_expand(args: argparse.Namespace) -> None:
             source,
             copybook_paths=args.copybook_path,
             max_nesting_depth=args.max_depth,
-            process_conditionals=bool(defines),
-            defined_symbols=defines,
+            process_conditionals=True,
+            defined_symbols=defines or {},
             preserve_source_locations=getattr(args, "source_map", False),
             source_file=args.file,
             preserve_comments=getattr(args, "keep_comments", False),

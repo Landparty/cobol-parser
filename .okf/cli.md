@@ -438,9 +438,11 @@ Prints the normalised, conditionally compiled free-form text on stdout.
 Prints `{"source_file", **CopybookExpansion.to_dict()}`. `--copybook-path` is
 repeatable (search order); `--max-depth` (100) caps nesting (`max_nesting_depth`). A missing /
 circular / traversing COPY is `error: Copybook expansion failed ...`, exit 1.
-Conditional compilation runs in the expander only with `--define`
-(`process_conditionals=bool(defines)`), so a program's own `>>DEFINE`
-reaches its copybooks; diagnostics go to `statistics.warnings`.
+Conditional compilation always runs in the expander, `--define` or not
+(`process_conditionals=True`), so a program's own `>>DEFINE` reaches its
+copybooks and only one arm of each `>>IF` survives; diagnostics go to
+`statistics.warnings`. Gating it on `--define` printed both arms (#583, the
+`expand` twin of #271).
 
 * `--keep-comments` puts each comment line's text back, in the program and in
   every inlined member. Expansion always blanks comments first (a `COPY`
