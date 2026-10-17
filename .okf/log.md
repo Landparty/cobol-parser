@@ -63,6 +63,12 @@ draws edges between the self-accumulating receivers of one statement
 (ADD/SUBTRACT/MULTIPLY/DIVIDE without GIVING, INSPECT counters, STRING /
 UNSTRING POINTER and TALLYING IN).
 
+## 2026-10-17 -- Impact text lists port hits (#528)
+
+[analysis/lineage.md](analysis/lineage.md), [cli.md](cli.md):
+`ImpactResult.to_text()` renders port hits under their program, as the JSON
+already listed them.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

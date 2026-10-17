@@ -227,6 +227,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   POINTER or TALLYING IN item), in `lineage`, `field-impact` and MCP
   `impact_of_change` / `where_from`. Each receiver is now fed only by the
   sending operands; COMPUTE and GIVING forms are unchanged.
+* **`field-impact` / `lineage --field` text output lists port hits**
+  (#528). The text rendering dropped every hit that was not a field --
+  console `SYSIN` / `SYSOUT`, an unbound file DD, a CALL argument -- so a
+  field that is only DISPLAYed, ACCEPTed or written to a file read as
+  feeding / fed by nothing, while the JSON listed the port. Ports now
+  appear under their program (`port console:SYSOUT@0+4 line 23
+  [display]`).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
