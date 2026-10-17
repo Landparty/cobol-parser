@@ -711,18 +711,33 @@ class CobolTools:
         declared_units = index.units_named(wanted)
         only_nested = bool(declared_units) and all(u.depth for u in declared_units)
         out_of_scope: set[str] = set()
+        # A CALL to one of the program's alternate ENTRY names reaches it
+        # too (#521); a PROGRAM-ID of that spelling would win instead.
+        program_ids = {u.program_id.upper() for u in index.units}
+        entries = {
+            entry
+            for u in index.units
+            if u.program_id.upper() == wanted
+            for entry in u.entries
+            if entry not in program_ids
+        }
+        names = {wanted} | entries
         for unit in index.units:
             for row in unit.calls:
                 target = str(row.get("program") or "").upper()
                 candidates = [str(c).upper() for c in row.get("candidates") or []]
-                if not row.get("dynamic") and target == wanted:
+                via_entry: str | None = None
+                if not row.get("dynamic") and target in names:
                     resolved_from = None
                     reaches_nested = bool(row.get("nested"))
-                elif row.get("dynamic") and wanted in candidates:
+                    via_entry = target if target in entries else None
+                elif row.get("dynamic") and names & set(candidates):
                     resolved_from = row.get("program")
                     reaches_nested = wanted in {
                         str(c).upper() for c in row.get("nested_candidates") or []
                     }
+                    if wanted not in candidates:
+                        via_entry = sorted(names & set(candidates))[0]
                 elif row.get("dynamic") and not row.get("candidates_complete"):
                     for site in row.get("sites") or []:
                         unresolved.append(
@@ -750,6 +765,8 @@ class CobolTools:
                     if site.get("paragraph"):
                         # "from", as a paragraph-level caller names its own.
                         caller["from"] = site["paragraph"]
+                    if via_entry is not None:
+                        caller["entry"] = via_entry
                     if resolved_from is not None:
                         caller["dynamic"] = True
                         caller["target_from"] = resolved_from
@@ -758,6 +775,9 @@ class CobolTools:
         declared = []
         for unit in declared_units:
             where: dict[str, Any] = {"file": unit.file}
+            if unit.program_id.upper() != wanted:
+                # Found through an ENTRY name it declares (#521).
+                where["program"] = unit.program_id
             if unit.depth:
                 where["contained"] = True
             if unit.unit_kind != "PROGRAM":
