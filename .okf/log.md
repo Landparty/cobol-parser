@@ -323,6 +323,12 @@ IF with ELSE / EVALUATE with WHEN OTHER whose every arm terminates
 mode; six new `IOViolationKind`s (`*_WRONG_MODE`, `OPEN_AFTER_LOCK`); pending
 conditional GO TO targets carry the state at the GO TO.
 
+## 2026-10-17 -- recursion-check linear per cycle (#373)
+
+[analysis/flow.md](analysis/flow.md): `RecursionRiskAnalyzer` builds its
+edge maps once (`_FlowIndex`), checks each cycle in O(len) and caches the
+escape test per component; same output.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

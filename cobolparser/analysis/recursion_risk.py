@@ -174,6 +174,66 @@ def _components(flow_report: ProgramFlowReport) -> dict[str, frozenset[str]]:
     return result
 
 
+class _FlowIndex:
+    """Lookups over one ``ProgramFlowReport``, built once per analysis.
+
+    Every cycle in ``cycle_details`` is checked against the same edges, and
+    the "GO TO restart" idiom (every paragraph may jump back to the first)
+    yields one cycle per paragraph, each nearly as long as the program:
+    rebuilding these per cycle made ``recursion-check`` (and ``lint`` /
+    ``health``) cubic -- 17 s at 800 paragraphs (#373).
+    """
+
+    def __init__(self, flow_report: ProgramFlowReport) -> None:
+        self.flow_report = flow_report
+        self.pair_edges: dict[tuple[str, str], list[Any]] = {}
+        pair_types: dict[tuple[str, str], set[FlowEdgeType]] = {}
+        self.escape_targets: dict[str, set[str]] = {}
+        for edge in flow_report.edges:
+            if edge.edge_type not in INTERNAL_EDGE_TYPES:
+                continue
+            pair = (edge.source, edge.target)
+            self.pair_edges.setdefault(pair, []).append(edge)
+            pair_types.setdefault(pair, set()).add(edge.edge_type)
+            if edge.edge_type in _ESCAPE_EDGE_TYPES:
+                self.escape_targets.setdefault(edge.source, set()).add(edge.target)
+        self.pair_types: dict[tuple[str, str], frozenset[FlowEdgeType]] = {
+            pair: frozenset(types) for pair, types in pair_types.items()
+        }
+        self.nodes_by_name = {node.key: node for node in flow_report.nodes}
+        self._ranges: dict[str, list[str]] = {}
+        self._escapes: dict[frozenset[str], bool] = {}
+
+    def types(self, hop: tuple[str, str]) -> frozenset[FlowEdgeType]:
+        return self.pair_types.get(hop, frozenset())
+
+    def perform_range(self, target: str) -> list[str]:
+        cached = self._ranges.get(target)
+        if cached is None:
+            cached = self._ranges[target] = _perform_range(target, self.flow_report)
+        return cached
+
+    def has_escape(self, component: frozenset[str]) -> bool:
+        cached = self._escapes.get(component)
+        if cached is None:
+            cached = self._escapes[component] = self._has_escape(component)
+        return cached
+
+    def _has_escape(self, component: frozenset[str]) -> bool:
+        for name in component:
+            node = self.nodes_by_name.get(name)
+            if node is not None and (
+                node.has_stop_run
+                or node.has_goback
+                or node.has_exit_program
+                or node.has_cics_exit
+            ):
+                return True
+            if not self.escape_targets.get(name, set()) <= component:
+                return True
+        return False
+
+
 class RecursionRiskAnalyzer:
     """Finds PERFORM/GO TO cycles and self-recursive CALLs that risk an
     infinite loop (or equivalent runtime misbehavior) rather than terminating.
@@ -218,6 +278,7 @@ class RecursionRiskAnalyzer:
     ) -> list[RecursionRisk]:
         risks: list[RecursionRisk] = []
         component_of = _components(flow_report)
+        index = _FlowIndex(flow_report)
         for detail in flow_report.cycle_details:
             kind = detail.get("kind")
             if kind not in _LOOP_CYCLE_KINDS:
@@ -226,11 +287,11 @@ class RecursionRiskAnalyzer:
             nodes: list[str] = list(detail.get("nodes", []))
             if not nodes:
                 continue
-            if self._closed_by_perform_range_end(nodes, flow_report):
+            if self._closed_by_perform_range_end(nodes, index):
                 continue
             path = " -> ".join([*nodes, nodes[0]])
 
-            if kind == "MIXED" and self._reenters_own_perform_range(nodes, flow_report):
+            if kind == "MIXED" and self._reenters_own_perform_range(nodes, index):
                 risks.append(
                     RecursionRisk(
                         mechanism="PERFORM",
@@ -275,7 +336,7 @@ class RecursionRiskAnalyzer:
             mechanism = "GOTO" if kind == "GOTO_LOOP" else "MIXED"
             verb = "GO TO" if kind == "GOTO_LOOP" else "PERFORM/GO TO"
             component = component_of.get(nodes[0], frozenset(nodes))
-            has_escape = self._has_escape(component, flow_report)
+            has_escape = self._has_escape(component, index)
             if has_escape:
                 explanation = (
                     f"{path} forms a {verb} cycle, but at least one paragraph "
@@ -304,9 +365,7 @@ class RecursionRiskAnalyzer:
         return risks
 
     @staticmethod
-    def _closed_by_perform_range_end(
-        cycle: list[str], flow_report: ProgramFlowReport
-    ) -> bool:
+    def _closed_by_perform_range_end(cycle: list[str], index: _FlowIndex) -> bool:
         """True if *cycle* only closes by falling off the end of a PERFORM
         range the cycle itself entered by PERFORM -- an edge that cannot fire.
 
@@ -329,38 +388,34 @@ class RecursionRiskAnalyzer:
         is also reachable by fall-through or GO TO (the hop into it is not
         PERFORM-only) keeps its fall-through exit, and a range left by a
         ``GO TO`` rather than by running off its end is still a loop.
-        """
-        pair_edges: dict[tuple[str, str], list[Any]] = {}
-        for edge in flow_report.edges:
-            if edge.edge_type in INTERNAL_EDGE_TYPES:
-                pair_edges.setdefault((edge.source, edge.target), []).append(edge)
 
+        Linear in the cycle: the range ends of its PERFORM-only hops are
+        collected first, then each fall-through-only hop is one set lookup
+        (a hop cannot be both, so "some *other* hop" needs no check).
+        """
         n = len(cycle)
         hops = [(cycle[i], cycle[(i + 1) % n]) for i in range(n)]
-        hop_edges = [pair_edges.get(hop, []) for hop in hops]
-        hop_types = [{e.edge_type for e in edges} for edges in hop_edges]
-
-        for i, (src, _tgt) in enumerate(hops):
-            if hop_types[i] != {FlowEdgeType.FALL_THROUGH}:
+        range_ends: set[str] = set()
+        for hop in hops:
+            types = index.types(hop)
+            if not types or not types <= PERFORM_EDGE_TYPES:
                 continue
-            for j in range(n):
-                if j == i or not hop_types[j] or not hop_types[j] <= PERFORM_EDGE_TYPES:
-                    continue
-                for edge in hop_edges[j]:
-                    # ``PERFORM A`` returns from the end of A; ``PERFORM A
-                    # THRU C`` (and its ``*_THRU`` edge, whose target is C)
-                    # from C; ``PERFORM S`` of a SECTION from S's last
-                    # paragraph -- the header's fall-through into its first
-                    # paragraph is the range executing, not leaving.
-                    end = _perform_range(edge.thru_target or edge.target, flow_report)
-                    if end[-1] == src:
-                        return True
-        return False
+            for edge in index.pair_edges[hop]:
+                # ``PERFORM A`` returns from the end of A; ``PERFORM A THRU
+                # C`` (and its ``*_THRU`` edge, whose target is C) from C;
+                # ``PERFORM S`` of a SECTION from S's last paragraph -- the
+                # header's fall-through into its first paragraph is the
+                # range executing, not leaving.
+                range_ends.add(index.perform_range(edge.thru_target or edge.target)[-1])
+        if not range_ends:
+            return False
+        return any(
+            src in range_ends and index.types((src, tgt)) == {FlowEdgeType.FALL_THROUGH}
+            for src, tgt in hops
+        )
 
     @staticmethod
-    def _reenters_own_perform_range(
-        cycle: list[str], flow_report: ProgramFlowReport
-    ) -> bool:
+    def _reenters_own_perform_range(cycle: list[str], index: _FlowIndex) -> bool:
         """True if *cycle* is a PERFORM of a multi-procedure range made from
         inside that range: one hop is a PERFORM (or PERFORM THRU) whose
         range -- a SECTION and its paragraphs, or a THRU span -- holds every
@@ -371,37 +426,31 @@ class RecursionRiskAnalyzer:
         + PERFORM), but it is the range-level twin of ``P. PERFORM P.``: the
         PERFORM always re-enters a range that is still active, whatever
         other exits its paragraphs have.
-        """
-        pair_types: dict[tuple[str, str], set[FlowEdgeType]] = {}
-        perform_edges: dict[tuple[str, str], list[Any]] = {}
-        for edge in flow_report.edges:
-            if edge.edge_type not in INTERNAL_EDGE_TYPES:
-                continue
-            pair = (edge.source, edge.target)
-            pair_types.setdefault(pair, set()).add(edge.edge_type)
-            if edge.edge_type in PERFORM_EDGE_TYPES:
-                perform_edges.setdefault(pair, []).append(edge)
 
+        Every hop but the PERFORM must be fall-through only, so at most one
+        hop may be anything else -- found in one pass, not one per hop.
+        """
         n = len(cycle)
         hops = [(cycle[i], cycle[(i + 1) % n]) for i in range(n)]
+        others = [
+            hop for hop in hops if index.types(hop) != {FlowEdgeType.FALL_THROUGH}
+        ]
+        # A hop that is fall-through only carries no PERFORM edge, so the
+        # PERFORM hop is the one exception (none means no PERFORM at all).
+        if len(others) != 1:
+            return False
+        hop = others[0]
         cycle_set = set(cycle)
-        for i, hop in enumerate(hops):
-            for edge in perform_edges.get(hop, []):
-                members = set(
-                    edge.range_members or _perform_range(edge.target, flow_report)
-                )
-                if len(members) < 2 or not cycle_set <= members:
-                    continue
-                if all(
-                    pair_types.get(other) == {FlowEdgeType.FALL_THROUGH}
-                    for k, other in enumerate(hops)
-                    if k != i
-                ):
-                    return True
+        for edge in index.pair_edges.get(hop, []):
+            if edge.edge_type not in PERFORM_EDGE_TYPES:
+                continue
+            members = set(edge.range_members or index.perform_range(edge.target))
+            if len(members) >= 2 and cycle_set <= members:
+                return True
         return False
 
     @staticmethod
-    def _has_escape(component: frozenset[str], flow_report: ProgramFlowReport) -> bool:
+    def _has_escape(component: frozenset[str], index: _FlowIndex) -> bool:
         """True if some paragraph in *component* -- the strongly connected
         component holding the cycle -- can terminate the program or branch to
         a paragraph outside it, i.e. the loop is not unconditionally trapped
@@ -413,25 +462,11 @@ class RecursionRiskAnalyzer:
 
         ``has_return`` is a SORT/MERGE ``RETURN sd-file``, which reads the
         next sorted record; it does not end the program, so it is no exit.
+
+        Answered once per component (``_FlowIndex.has_escape``): every
+        cycle in it shares the answer.
         """
-        nodes_by_name = {n.key: n for n in flow_report.nodes}
-        for name in component:
-            node = nodes_by_name.get(name)
-            if node is not None and (
-                node.has_stop_run
-                or node.has_goback
-                or node.has_exit_program
-                or node.has_cics_exit
-            ):
-                return True
-        for edge in flow_report.edges:
-            if (
-                edge.source in component
-                and edge.target not in component
-                and edge.edge_type in _ESCAPE_EDGE_TYPES
-            ):
-                return True
-        return False
+        return index.has_escape(component)
 
     @staticmethod
     def _call_recursion_risks(ast: CobolProgram) -> list[RecursionRisk]:
