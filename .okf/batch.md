@@ -270,9 +270,17 @@ contributes nothing.
 
 * `CrossFileCloneMember` — `path`, `program_name`, `paragraph`, `line`,
   `origin_file` / `origin_line` (where the paragraph really is when
-  copybooks were expanded; serialized as `"origin"`). `source_key` is the
-  on-disk position: the copybook position when the paragraph came from one,
-  else `(path, line)`.
+  copybooks were expanded; serialized as `"origin"`), `body_origin_file` /
+  `body_origin_line` (the fingerprint's `body_origin`, below). `source_key`
+  is the on-disk position: the body's origin when there is one, else the
+  copybook position when the header came from one, else `(path, line)`.
+* `body_origin` (#470): the scan worker (`_stamp_body_origins`) maps each
+  fingerprint's `body_lines` span through the expansion source map and, when
+  every expanded line of it lies in one file, stamps that file and the first
+  statement's line there. A program that writes `ERR-PARA.` itself and
+  `COPY BODY.` under it then shares `BODY.cpy`'s key with every other such
+  program; a body mixing the copybook with its own statements gets none, so
+  it is still a copy.
 * `CrossFileCloneGroup` — `clone_type` (`"TYPE_1"` / `"TYPE_2"`),
   `statement_count`, `fingerprint`, `members`; properties `file_count`
   (distinct files) and `source_count` (distinct `source_key`s).
@@ -280,8 +288,9 @@ contributes nothing.
   as a renamed match (same precedence as `RedundancyAnalyzer` within one
   program).
 * **One source, one copy** (#352): `min_members` counts distinct
-  `source_key`s, so a PROCEDURE DIVISION copybook paragraph included by
-  every program is shared code and forms no group on its own; its
+  `source_key`s, so a PROCEDURE DIVISION copybook paragraph (or paragraph
+  body, #470) included by every program is shared code and forms no group
+  on its own; its
   inclusions still appear as members of a group that has another real copy.
 * **Ranking**: by duplicated volume, `statement_count x source_count`
   descending, then `source_count`, member count, `TYPE_1` before `TYPE_2`,

@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`scan --clones`: a paragraph body copied from a shared copybook is not a
+  clone** (#470). When each program wrote the paragraph header itself and
+  copied in only the statements (`ERR-PARA.` / `COPY BODY.`), the members
+  were keyed on their own header lines and the one copybook was reported as
+  a cross-file clone. Redundancy's `paragraph_fingerprints` now carry
+  `body_lines`, a scan with copybooks expanded stamps `body_origin` when the
+  whole body comes from one file, and `CrossFileCloneMember.source_key`
+  prefers it.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

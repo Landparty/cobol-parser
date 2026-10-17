@@ -653,7 +653,10 @@ user word (`1ST-NAME`); see [data-use.md](data-use.md).
 `report.paragraph_fingerprints: list[ParagraphFingerprint]` -- per paragraph:
 `name`, `location`, `statement_count`, and both digests (`type1`, `type2`) as
 16-hex-character blake2b over a canonical serialization of the same
-`_Fingerprinter` tuple the grouping uses.
+`_Fingerprinter` tuple the grouping uses; plus `body_lines` `[first, last]`,
+the source lines the paragraph's statements span (header excluded, nested
+statements included), which `scan` maps through a copybook source map into
+`body_origin` (#470).
 
 The reason it exists: `clone_groups` can only answer "which paragraphs in
 *this* program duplicate each other". The commoner shape of COBOL
