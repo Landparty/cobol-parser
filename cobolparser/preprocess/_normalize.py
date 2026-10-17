@@ -1124,6 +1124,7 @@ _COND_TOKEN_RE = re.compile(
     | (?P<string>'(?:[^']|'')*'|"(?:[^"]|"")*")
     | (?P<number>[-+]?\d+(?:\.\d+)?)
     | (?P<word>[A-Z_][A-Z0-9_-]*)
+    | (?P<arith>[-+*/])
     """,
     re.VERBOSE,
 )
@@ -1132,6 +1133,28 @@ _COND_TOKEN_RE = re.compile(
 _DIRECTIVE_LINE_RE = re.compile(r"^>>\s*([A-Z][A-Z0-9-]*)(?:\s+(.*?))?\s*$")
 
 _OPERAND_KINDS = frozenset({"word", "string", "number", "boollit"})
+
+#: Words a condition gives meaning to; never a compile-time arithmetic
+#: operand after the first (so ``X = 1 AND Y`` is not read as an expression).
+_CONDITION_KEYWORDS = frozenset(
+    {
+        "AND",
+        "OR",
+        "NOT",
+        "IS",
+        "DEFINED",
+        "GREATER",
+        "LESS",
+        "EQUAL",
+        "THAN",
+        "TO",
+        "TRUE",
+        "FALSE",
+        "THRU",
+        "THROUGH",
+        "OTHER",
+    }
+)
 
 
 def _strip_directive_comment(text: str) -> str:
@@ -1337,10 +1360,19 @@ class _ConditionParser:
         primary    := '(' expression ')'
                     | DEFINED '(' symbol ')'
                     | operand IS [NOT] DEFINED
-                    | operand [IS [NOT]] (= | <> | > | < | >= | <=) operand
+                    | operand [IS [NOT]] relop operand
                     | operand                    -- interpreted as a boolean
-        operand    := symbol | number | 'string' | "string" | B'0' | B'1'
-                    | TRUE | FALSE
+        relop      := = | <> | > | < | >= | <=
+                    | GREATER [THAN] [OR EQUAL [TO]]
+                    | LESS [THAN] [OR EQUAL [TO]]
+                    | EQUAL [TO]
+        operand    := 'string' | "string" | B'0' | B'1' | TRUE | FALSE
+                    | arith      -- integers / symbols with + - * / ( )
+
+    A compile-time arithmetic operand (``X + 1``) is evaluated exactly as
+    ``>>DEFINE ... AS`` evaluates one (``_eval_define_arithmetic``), so the
+    two directives agree. Word-form operators and arithmetic used to be
+    "unsupported ... treated as FALSE", compiling the wrong branch (#512).
     """
 
     def __init__(self, tokens: list[tuple[str, str]], defined: dict[str, str]) -> None:
@@ -1377,11 +1409,37 @@ class _ConditionParser:
         return None
 
     def _match_op(self) -> str | None:
+        """A relational operator, symbolic or in its word form."""
         token = self._peek()
         if token is not None and token[0] == "op":
             self._pos += 1
             return token[1]
-        return None
+        if self._match_word("EQUAL"):
+            self._match_word("TO")
+            return "="
+        word = self._match_word("GREATER", "LESS")
+        if word is None:
+            return None
+        self._match_word("THAN")
+        op = ">" if word == "GREATER" else "<"
+        # ``OR EQUAL [TO]`` belongs to the operator; any other OR is boolean.
+        if self._peek() == ("word", "OR") and self._peek(1) == ("word", "EQUAL"):
+            self._pos += 2
+            self._match_word("TO")
+            op += "="
+        return op
+
+    def _follows_operand(self) -> bool:
+        """Whether the next token continues a comparison whose left operand
+        just ended: a relational operator (or IS / NOT before one), or an
+        arithmetic operator extending the operand."""
+        token = self._peek()
+        return token is not None and (
+            token[0] in ("op", "arith")
+            or (token[0] == "number" and token[1][0] in "+-")
+            or token in (("word", "IS"), ("word", "NOT"))
+            or token in (("word", "GREATER"), ("word", "LESS"), ("word", "EQUAL"))
+        )
 
     # -- grammar ----------------------------------------------------------
 
@@ -1411,13 +1469,21 @@ class _ConditionParser:
         kind, text = token
 
         if kind == "lparen":
-            self._advance()
-            value = self._parse_or()
-            closing = self._peek()
-            if closing is None or closing[0] != "rparen":
-                raise _ConditionSyntaxError("missing closing parenthesis")
-            self._advance()
-            return value
+            start = self._pos
+            try:
+                self._advance()
+                value = self._parse_or()
+                closing = self._peek()
+                if closing is None or closing[0] != "rparen":
+                    raise _ConditionSyntaxError("missing closing parenthesis")
+                self._advance()
+                if not self._follows_operand():
+                    return value
+            except (_ConditionSyntaxError, _UndefinedSymbolError):
+                pass
+            # Not a parenthesized condition: an arithmetic operand such as
+            # ``(X + 1) * 2 = 16``. Re-read it as one.
+            self._pos = start
 
         # DEFINED(symbol) function form
         if kind == "word" and text == "DEFINED":
@@ -1465,11 +1531,67 @@ class _ConditionParser:
 
     def _parse_operand(self) -> tuple[str, str]:
         token = self._peek()
-        if token is None or token[0] not in _OPERAND_KINDS:
+        if token is not None and token[0] in ("string", "boollit"):
+            self._pos += 1
+            return token
+        parts = self._arith_parts()
+        atoms = [part for part in parts if part[0] not in ("lparen", "rparen")]
+        if len(atoms) == 1 and atoms[0][0] != "arith":
+            return atoms[0]  # ``X`` or ``(X)``
+        # A compile-time arithmetic expression: evaluated the way >>DEFINE
+        # ... AS evaluates one, to an integer operand.
+        for kind, text in parts:
+            if kind == "word" and text not in self._defined:
+                raise _UndefinedSymbolError(text)
+        value = _eval_define_arithmetic(
+            " ".join(text for _kind, text in parts), self._defined
+        )
+        if value is None:
+            raise _ConditionSyntaxError(
+                "arithmetic operand is not an exact integer expression"
+            )
+        return ("number", str(value))
+
+    def _arith_parts(self) -> list[tuple[str, str]]:
+        """The tokens of one operand: a single symbol / number / TRUE /
+        FALSE, or an arithmetic expression over integers and symbols."""
+        parts: list[tuple[str, str]] = []
+        depth = 0
+        expect_atom = True
+        token = self._peek()
+        while token is not None:
+            kind, text = token
+            if expect_atom:
+                if kind == "arith" and text in "+-":
+                    parts.append(token)  # unary sign
+                elif kind == "lparen":
+                    depth += 1
+                    parts.append(token)
+                elif kind == "number" or (
+                    kind == "word" and (text not in _CONDITION_KEYWORDS or not parts)
+                ):
+                    parts.append(token)
+                    expect_atom = False
+                else:
+                    break
+            elif kind == "arith":
+                parts.append(token)
+                expect_atom = True
+            elif kind == "number" and text[0] in "+-":
+                # ``X -1`` / ``X+1``: the tokenizer read the sign into the
+                # number; between two operands it is the binary operator.
+                parts.extend([("arith", text[0]), ("number", text[1:])])
+            elif kind == "rparen" and depth:
+                depth -= 1
+                parts.append(token)
+            else:
+                break
+            self._pos += 1
+            token = self._peek()
+        if not parts or expect_atom or depth:
             found = "end of condition" if token is None else repr(token[1])
             raise _ConditionSyntaxError(f"expected an operand, got {found}")
-        self._pos += 1
-        return token
+        return parts
 
     # -- evaluation -------------------------------------------------------
 

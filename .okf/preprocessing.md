@@ -450,10 +450,16 @@ strip and REPLACE), so `parse_cobol` honours directives too;
 `_skip_to_identification_division` keeps `>>` lines ahead of the header.
 Directive and skipped lines are blanked in place.
 
-* `>>IF` is **evaluated**: `=`, `<>`, `>`, `<`, `>=`, `<=` between symbol
-  values and numeric/string literals; `DEFINED(sym)` / `sym [IS] [NOT]
-  DEFINED` (`IS` optional per IBM; a dangling `IS`/`NOT` is a syntax error);
-  `AND`/`OR`/`NOT` with parentheses.
+* `>>IF` is **evaluated**: `=`, `<>`, `>`, `<`, `>=`, `<=` and their word
+  forms (`[IS] [NOT] GREATER [THAN]`, `LESS [THAN]`, `EQUAL [TO]`, `... OR
+  EQUAL [TO]`; an `OR` is part of the operator only when `EQUAL` follows it)
+  between symbol values and numeric/string literals; `DEFINED(sym)` / `sym
+  [IS] [NOT] DEFINED` (`IS` optional per IBM; a dangling `IS`/`NOT` is a
+  syntax error); `AND`/`OR`/`NOT` with parentheses. A `(` that turns out to
+  open an arithmetic operand (`(X + 1) * 2 = 16`) is re-read as one. Word
+  forms used to be "unsupported ... treated as FALSE", compiling the `>>ELSE`
+  instead (#512); pinned by
+  `tests/regression/test_conditional_compilation_word_operators.py`.
 * `>>EVALUATE sym` (literal `>>WHEN`s), `>>EVALUATE TRUE` (condition
   `>>WHEN`s), `>>WHEN OTHER`, `>>END-EVALUATE`.
 * `defined_symbols`: a name set/list or a `dict[str, str | int | float |
@@ -463,8 +469,11 @@ Directive and skipped lines are blanked in place.
 * `>>DEFINE` symbols may be hyphenated (`_DEFINE_RE`). `>>DEFINE name AS
   arithmetic-expression` over integer literals / defined integer variables
   (`+ - * /`, parentheses) is evaluated exactly (`_eval_define_arithmetic`:
-  `AS 2 + 1` is `3`); otherwise the raw text is kept. Arithmetic inside an
-  `>>IF` comparison is unsupported (warns, FALSE).
+  `AS 2 + 1` is `3`); otherwise the raw text is kept. An `>>IF` / `>>WHEN`
+  comparison operand may be the same arithmetic (`X + 1 = 8`), evaluated by
+  the same function so the two directives agree; an inexact or non-integer
+  one warns and is FALSE (#512). `_COND_TOKEN_RE` reads `X -1` as `X`, `-1`;
+  between two operands the sign is taken as the binary operator.
 * **Literal contents are case-sensitive**: only text outside quotes is
   upper-cased (`_upper_outside_literals`); `_compare` / `_values_equal`
   compare non-numeric values exactly. `_COND_TOKEN_RE` accepts signed
