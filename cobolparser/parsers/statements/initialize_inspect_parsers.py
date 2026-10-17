@@ -390,43 +390,42 @@ class InspectStatementParser(IStatementParser):
             ts.consume()
             skip_statement_separators(ts)
 
-            # Parse FOR type
-            nxt = ts.peek()
-            if not nxt:
-                break
-            for_type = _val(nxt)
-            if for_type in ("CHARACTERS", "ALL", "LEADING"):
+            # One FOR takes any number of phrases (#332): ``FOR ALL 'A'
+            # LEADING 'C' CHARACTERS AFTER '*'`` -- each a clause of this
+            # counter. Matched by value: ALL lexes as a FIGURATIVE_CONSTANT.
+            took_phrase = False
+            while True:
+                # A ``,`` / ``;`` between phrases is a space (#569).
+                skip_statement_separators(ts)
+                nxt = ts.peek()
+                for_type = _val(nxt) if nxt else ""
+                if for_type not in ("CHARACTERS", "ALL", "LEADING"):
+                    break
+                took_phrase = True
                 ts.consume()
                 skip_statement_separators(ts)
-
-                value = None
-                if for_type != "CHARACTERS":
-                    value = self._consume_inspect_value(ts)
-
-                # Optional BEFORE [INITIAL] ... AFTER [INITIAL] ... -- a single
-                # FOR-phrase may carry both qualifiers simultaneously.
-                before, after = self._parse_before_after(ts)
-
-                stmt.add_tallying_clause(counter, for_type, value, before, after)
-
-                # ``FOR ALL 'X' 'Y'``: further *literal* values under the same
-                # ALL/LEADING each get their own clause. Only literals are
-                # taken -- an IDENTIFIER here is the next counter name.
-                while for_type != "CHARACTERS":
-                    extra = ts.peek()
-                    if not (extra and extra.type in _INSPECT_LITERAL_TOKEN_TYPES):
-                        break
-                    ts.consume()
-                    skip_statement_separators(ts)
+                if for_type == "CHARACTERS":
+                    # Optional BEFORE [INITIAL] ... AFTER [INITIAL] ... -- a
+                    # single FOR-phrase may carry both qualifiers.
                     before, after = self._parse_before_after(ts)
-                    stmt.add_tallying_clause(
-                        counter,
-                        for_type,
-                        literal_operand_text(extra),
-                        before,
-                        after,
-                    )
-            else:
+                    stmt.add_tallying_clause(counter, for_type, None, before, after)
+                    continue
+                # ``ALL 'X' 'Y' WS-Z``: each operand under the same ALL /
+                # LEADING is its own clause. The first is always this
+                # phrase's; a later identifier is the next counter only when
+                # FOR follows it.
+                value = self._consume_inspect_value(ts)
+                before, after = self._parse_before_after(ts)
+                stmt.add_tallying_clause(counter, for_type, value, before, after)
+                while value is not None:
+                    # Separators first, so ``ALL 'A', 'B'`` keeps 'B' (#569).
+                    skip_statement_separators(ts)
+                    if not self._starts_further_operand(ts, reference_column):
+                        break
+                    value = self._consume_inspect_value(ts)
+                    before, after = self._parse_before_after(ts)
+                    stmt.add_tallying_clause(counter, for_type, value, before, after)
+            if not took_phrase:
                 break
 
     def _parse_replacing(self, ts: ITokenStream, stmt: InspectStatement) -> None:
@@ -508,11 +507,40 @@ class InspectStatementParser(IStatementParser):
         skip_statement_separators(ts)
         return self._consume_inspect_value(ts) or ""
 
+    def _starts_further_operand(
+        self, ts: ITokenStream, reference_column: int | None
+    ) -> bool:
+        """True when the next token is one more TALLYING ``ALL`` / ``LEADING``
+        operand: a value that is not a phrase keyword (``ALL``, ``LEADING``,
+        ``CHARACTERS``, ``REPLACING`` ...), not the next statement's verb or
+        paragraph, and -- for an identifier -- not the next counter (one
+        that ``FOR`` follows)."""
+        token = ts.peek()
+        if not (token and token.type in _INSPECT_VALUE_TOKEN_TYPES):
+            return False
+        if _val(token) in _INSPECT_KEYWORDS:
+            return False
+        if token.type != TokenType.IDENTIFIER:
+            return True
+        if is_statement_boundary(token):
+            return False
+        if looks_like_paragraph_boundary(ts) and looks_dedented_relative_to(
+            ts, reference_column
+        ):
+            return False
+        return not self._keyword_follows_value(ts, "FOR")
+
     @staticmethod
     def _by_follows_value(ts: ITokenStream) -> bool:
         """True when the value at the current position (possibly subscripted
         or qualified) is followed by ``BY`` -- i.e. it starts another
         ``from BY to`` pair rather than something else."""
+        return InspectStatementParser._keyword_follows_value(ts, "BY")
+
+    @staticmethod
+    def _keyword_follows_value(ts: ITokenStream, keyword: str) -> bool:
+        """True when the value at the current position (possibly subscripted
+        or qualified) is followed by *keyword*."""
         i = 1
         depth = 0
         while True:
@@ -533,7 +561,7 @@ class InspectStatementParser(IStatementParser):
                     if tok is None:
                         return False
                 else:
-                    return _val(tok) == "BY"
+                    return _val(tok) == keyword
             elif depth < 0:
                 return False
             i += 1

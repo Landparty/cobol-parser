@@ -195,6 +195,10 @@ decodes are warnings or caveats, never silent.
 
 [parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): a separator `,` / `;` is skipped like a space in MOVE's source, every INSPECT phrase, INITIALIZE REPLACING and after the ACCEPT operand.
 
+## 2026-10-17 -- INSPECT TALLYING: several phrases per FOR (#332)
+
+[parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): one TALLYING `FOR` takes any number of CHARACTERS / ALL / LEADING phrases; an identifier is a new counter only when FOR follows it.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
