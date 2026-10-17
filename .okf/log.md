@@ -136,6 +136,11 @@ carry `body_lines`; `scan` stamps `body_origin` and `source_key` prefers it.
 [generators/record-data.md](generators/record-data.md): `InitialValueCell`
 marks a VALUE-clause cell; `encode_field` skips both clauses for it.
 
+## 2026-10-17 -- SQLCODE check reached by GO TO (#557)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md): the status-check search
+follows an unconditional single-target `GO TO`, like a PERFORM.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
