@@ -50,6 +50,7 @@ from ..models.statements import (
     EntryStatement,
     SetStatement,
 )
+from ._cics import cics_identifier_options
 
 #: LINKAGE items the CICS command-level translator itself passes on the
 #: PROCEDURE DIVISION USING it generates; a source that declares them is a
@@ -402,11 +403,10 @@ class LinkageChecker:
                 for target in node.targets:
                     self._mark_referenced(_bare_name(target))
             elif getattr(node, "node_type", None) == "EXEC_CICS":
-                for value in (getattr(node, "options", None) or {}).values():
-                    if value:
-                        based = _ADDRESS_OF_RE.match(value)
-                        if based:
-                            self._mark_referenced(_bare_name(based.group(1)))
+                for value in cics_identifier_options(node).values():
+                    based = _ADDRESS_OF_RE.match(value)
+                    if based:
+                        self._mark_referenced(_bare_name(based.group(1)))
 
         # 4. Warn on unreferenced LINKAGE items
         self._check_unreferenced_linkage()

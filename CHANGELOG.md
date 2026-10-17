@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **An EXEC CICS literal operand no longer counts as a reference to a
+  same-named data item** (#588). The option arguments are stored with their
+  quotes stripped, so `FILE('CUSTFIL')` / `PROGRAM('SUBPGM')` credited a
+  WORKING-STORAGE item named `CUSTFIL` / `SUBPGM` in `unused-variables`,
+  `lint` and `xref`, and a truly unused item went unreported. The options the
+  parser records as single literals (`literal_options`) are now skipped by
+  those sweeps and by `linkage-check` (`_cics.cics_identifier_options()`).
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
