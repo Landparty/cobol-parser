@@ -14,6 +14,10 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- SORT/MERGE USING/GIVING files reported unresolved (#498)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md): option (b) --
+each USING/GIVING file is a `report.unresolved` entry, not a boundary.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

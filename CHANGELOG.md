@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **gen-fixtures no longer reports full coverage for a SORT/MERGE-only
+  program** (#498). A file a `SORT`/`MERGE` reads (`USING`) or writes
+  (`GIVING`) is not a boundary, and nothing said so: `SORT ... USING
+  IN-FILE GIVING OUT-FILE` gave an empty bundle with `unresolved: []`. Each
+  such file is now an `unresolved` entry (so `--strict` fails), pending a
+  decision on modelling them as boundaries.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

@@ -173,6 +173,14 @@ defaults to `BIDIRECTIONAL`, and an unresolved entry on the `Boundary` itself
 (not the report-level list) notes the limitation rather than claiming
 precision this phase does not have.
 
+**SORT / MERGE files are not boundaries** (#498, option b, pending a
+key/category agreed with mockymock's `mock_surface`). Each `USING` and
+`GIVING` file of a SORT or MERGE is one `report.unresolved` entry ("SORT
+USING file IN-FILE in MAIN-PARA is not modelled as a boundary ..."), so a
+program whose only I/O is `SORT ... USING ... GIVING` no longer reports an
+empty bundle with nothing unresolved, and `gen-fixtures --strict` fails on
+it. No `Boundary` is emitted, so coverage counts are unchanged.
+
 **ACCEPT.** Non-interactive sources (`DATE`, `DAY`, `DAY-OF-WEEK`, `TIME`,
 `COMMAND-LINE`, `ENVIRONMENT`, `ENVIRONMENT-VALUE`, `ARGUMENT-NUMBER`,
 `ARGUMENT-VALUE`) are not boundaries at all -- resolved without touching
