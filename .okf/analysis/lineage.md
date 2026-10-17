@@ -210,7 +210,12 @@ always a `reformat`, #585), ICETOOL (each `TOOLIN` `COPY` / `SORT` /
 in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`. A
 blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
-referbacks resolve to the earlier step's dataset; quoted literals in
+referbacks resolve to the earlier step's dataset (`_referback_keys`: the
+current step's PROC-invocation prefix + the referback first, so an in-PROC
+`*.S1.DD` from `RUNA.S2` is `RUNA.S1`; then the full path, so
+`*.RUNB.S1.DD` works from outside; then the last two parts), and one that
+names no earlier DD binds nothing -- never the literal `*.` text -- and is
+a caveat (#565); quoted literals in
 DFSORT/IEBGENER control statements are blanked before keywords are matched
 (`INCLUDE COND=(...,C'BUILD')` is not a reformat). Control statements that
 live in a dataset (`SYSIN DD DSN=PROD.CNTL(X)`, a `DFSPARM` dataset) are not
@@ -231,13 +236,13 @@ step whose flow it could not read (`<PROGRAM> step <STEP> in job <JOB>:
 step with no recognised input or output DD (`SORT step S2 in job J1:
 outputs not recognised; the flow through it is not traced`), an ICETOOL
 `TOOLIN` (or `USING` `xxxxCNTL`, then read as a reformat) that is not
-in-stream, an operator whose DDs bind nothing, and an IKJEFT01 step whose
-`SYSTSIN` is a dataset (its programs are unknown, #566). `field-impact
---jcl` and the MCP lineage index pass them as
-`LineageGraph(join_caveats=...)`, which -- without `join_edges` -- adds them
-to the joins' caveats (so `join_state()` exports them too). Invariant: a
-caveat there must not start with `PROGRAM:`, or `impact()` would show it
-only to queries reaching that program.
+in-stream, an operator whose DDs bind nothing, an IKJEFT01 step whose
+`SYSTSIN` is a dataset (its programs are unknown, #566), and a referback
+that names no earlier DD (#565). `field-impact --jcl` and the MCP lineage
+index pass them as `LineageGraph(join_caveats=...)`, which -- without
+`join_edges` -- adds them to the joins' caveats (so `join_state()` exports
+them too). Invariant: a caveat there must not start with `PROGRAM:`, or
+`impact()` would show it only to queries reaching that program.
 
 Tests: `tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
 `test_lineage_jcl.py`, `test_sql_flow.py`, `tests/unit/cli/test_lineage_cli.py`;

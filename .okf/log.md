@@ -107,6 +107,13 @@ SYSIN (or DFSPARM) is a dataset is a `reformat` with a caveat, through
 pass-throughs; `bindings_from_jobs(jobs, caveats)` reports what it cannot read
 (dataset TOOLIN / SYSTSIN), and a fresh `LineageGraph` keeps `join_caveats`.
 
+## 2026-10-17 -- Lineage JCL: PROC-step referbacks resolve (#565)
+
+[analysis/lineage.md](analysis/lineage.md): `*.INVOKE.PROCSTEP.DD` and in-PROC
+`*.PROCSTEP.DD` referbacks resolve; an unresolved one binds nothing and is a
+caveat through `bindings_from_jobs(jobs, caveats)` (a fresh `LineageGraph` keeps
+`join_caveats`).
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

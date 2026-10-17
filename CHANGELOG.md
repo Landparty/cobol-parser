@@ -286,6 +286,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caveat (`bindings_from_jobs(jobs, caveats)`, passed by `field-impact --jcl`
   and the MCP server as `LineageGraph(join_caveats=...)`, which a graph built
   without stored join edges no longer ignores) instead of vanishing.
+* **Field lineage resolves JCL referbacks into and inside a PROC** (#565).
+  `DSN=*.RUNB.S1.OUT` (from outside the PROC) and `DSN=*.S1.OUT` (from
+  another step of the same PROC) never matched the expanded step names
+  (`RUNB.S1`), so the DD was bound to the literal `*.` text and the join was
+  silently lost. Both now resolve. A referback that names no earlier DD binds
+  nothing and adds a caveat (`bindings_from_jobs(jobs, caveats)`, passed by
+  `field-impact --jcl` and the MCP server as `LineageGraph(join_caveats=...)`,
+  which a graph built without stored join edges no longer ignores).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
