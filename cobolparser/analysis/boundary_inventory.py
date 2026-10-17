@@ -60,6 +60,7 @@ from ..models.statements.io import (
     IOUnlockStatement,
     IOWriteStatement,
 )
+from ..models.statements.misc import MergeStatement, SortStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement, ExecImsStatement
 from ._files import report_to_file_map, report_writer_files
 from ._names import RELAXED_IDENTIFIER_TOKEN_RE, callee_names
@@ -638,6 +639,24 @@ class BoundaryInventoryAnalyzer:
             if isinstance(statement, statement_type):
                 self._classify_file_op(statement, category, ref, index, report)
                 return
+
+        if isinstance(statement, (SortStatement, MergeStatement)):
+            # SORT/MERGE USING reads whole files and GIVING writes them, but
+            # neither is a boundary mockymock's mock surface knows (#498,
+            # pending a decision on its key/category).  Say so, rather than
+            # report full coverage for a program whose only I/O this is.
+            verb = "SORT" if isinstance(statement, SortStatement) else "MERGE"
+            for phrase, files in (
+                ("USING", statement.using_files),
+                ("GIVING", statement.giving_files),
+            ):
+                for file_name in files:
+                    report.unresolved.append(
+                        f"{verb} {phrase} file {file_name.upper()} in "
+                        f"{paragraph_name} is not modelled as a boundary: no "
+                        "fixture or expectation is generated for it"
+                    )
+            return
 
         if isinstance(statement, CallStatement):
             self._classify_call(

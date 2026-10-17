@@ -30,6 +30,9 @@ _EXPECTED_UNRESOLVED = {
     # test_program_layout_corpus.py, which pins the same gap at the index
     # level.
     "report_test.cbl": ["FD-REPORT-FILE"],
+    # SORT/MERGE USING/GIVING files are not boundaries yet; each is named
+    # in `unresolved` instead of being silently left out (#498).
+    "merge_sort_test.cbl": ["is not modelled as a boundary"],
 }
 
 
