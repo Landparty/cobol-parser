@@ -45,7 +45,12 @@ from ..models.statements.arithmetic import (
     DivideStatement,
     MultiplyStatement,
 )
-from ..models.statements.base import CobolExpression, CobolStatement
+from ..models.statements.base import (
+    CobolExpression,
+    CobolStatement,
+    ConditionalExpression,
+    LogicalExpression,
+)
 from ..models.statements.call import CallStatement, EntryStatement
 from ..models.statements.control import (
     EvaluateStatement,
@@ -139,6 +144,12 @@ KIND_CONDITION_NAME = "condition-name"
 KIND_PARAGRAPH = "paragraph"
 KIND_SECTION = "section"
 KIND_FILE = "file"
+#: SPECIAL-NAMES declarations (#519). An UPSI switch's ON/OFF STATUS name is
+#: a ``condition-name``.
+KIND_MNEMONIC_NAME = "mnemonic-name"
+KIND_CLASS_NAME = "class-name"
+KIND_ALPHABET_NAME = "alphabet-name"
+KIND_SYMBOLIC_CHARACTER = "symbolic-character"
 
 #: Kind ordering used when sorting ``XrefReport.entries``; unknown kinds sort
 #: last, then alphabetically, so the ordering is total and deterministic.
@@ -148,6 +159,10 @@ _KIND_ORDER: dict[str, int] = {
     KIND_FILE: 2,
     KIND_PARAGRAPH: 3,
     KIND_SECTION: 4,
+    KIND_MNEMONIC_NAME: 5,
+    KIND_CLASS_NAME: 6,
+    KIND_ALPHABET_NAME: 7,
+    KIND_SYMBOLIC_CHARACTER: 8,
 }
 
 # Roles that name a procedure rather than a data item, and roles that name a
@@ -372,6 +387,28 @@ class XrefReport:
         }
 
 
+def _class_test_names(expr: CobolExpression | None) -> set[str]:
+    """The word after ``IS [NOT]`` in every class-test operator of *expr*
+    (``IS HEX-CHARS`` / ``IS NOT HEX-CHARS``) -- a class-name candidate."""
+    if isinstance(expr, LogicalExpression):
+        return _class_test_names(expr.left_condition) | _class_test_names(
+            expr.right_condition
+        )
+    names: set[str] = set()
+    if isinstance(expr, ConditionalExpression):
+        words = str(expr.operator or "").upper().split()
+        if words[:1] == ["IS"]:
+            words = words[1:]
+            if words[:1] == ["NOT"]:
+                words = words[1:]
+            if len(words) == 1:
+                names.add(words[0])
+    tree = getattr(expr, "condition_tree", None)
+    if isinstance(tree, CobolExpression) and tree is not expr:
+        names |= _class_test_names(tree)
+    return names
+
+
 def _partition_operand(text: str) -> tuple[set[str], set[str], bool]:
     """Split one operand's raw text into (base names, subscript names, exact).
 
@@ -481,6 +518,10 @@ class XrefAnalyzer:
       -- including the level-88s under a FILLER (issue #485).
     - ``file`` -- every file named by a ``SELECT`` or by an ``FD``/``SD``.
     - ``paragraph`` / ``section`` -- every PROCEDURE DIVISION procedure.
+    - ``mnemonic-name`` / ``class-name`` / ``alphabet-name`` /
+      ``symbolic-character`` -- every SPECIAL-NAMES declaration, plus an
+      UPSI switch's ON/OFF STATUS names as ``condition-name`` (#519),
+      declared at the CONFIGURATION SECTION.
 
     Each reference records the role the symbol plays (see ``XREF_ROLES``).
     The role also decides which namespace a name resolves against: a
@@ -508,7 +549,8 @@ class XrefAnalyzer:
     - The declared-symbol set is the one ``collect_declared_items`` defines
       (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE), plus files,
       procedures, level-88 condition names (FILLER parents included),
-      level-66 ``RENAMES`` items and ``INDEXED BY`` index names.
+      level-66 ``RENAMES`` items, ``INDEXED BY`` index names and the
+      SPECIAL-NAMES names.
       SCREEN / COMMUNICATION / REPORT SECTION items and special registers are
       outside it, so a reference to one reads as undefined -- reported, with
       a caveat saying so, rather than silently swallowed.
@@ -573,6 +615,7 @@ class XrefAnalyzer:
         self._duplicates = set()
 
         self._collect_data_definitions(ast)
+        self._collect_special_names(ast)
         self._collect_file_definitions(ast)
         self._collect_procedure_definitions(ast)
         self._collect_references(ast)
@@ -852,6 +895,46 @@ class XrefAnalyzer:
                 if fd_file:
                     self._define_file(str(fd_file), record.location)
 
+    def _collect_special_names(self, ast: CobolProgram) -> None:
+        """Every name the SPECIAL-NAMES paragraph declares (#519).
+
+        Mnemonic names (``C01 IS TOP-PAGE``), UPSI ON/OFF STATUS condition
+        names, CLASS, ALPHABET and SYMBOLIC CHARACTERS names, from the
+        ``special_names`` metadata on the CONFIGURATION SECTION. The metadata
+        carries no line per entry, so each is declared at the CONFIGURATION
+        SECTION's location. They share the data namespace (a reference in
+        a condition or an operand resolves to them); a name a DATA DIVISION
+        item already declares is left to that item.
+        """
+        env_div = ast.get_division("ENVIRONMENT")
+        if env_div is None:
+            return
+        for section in env_div.sections:
+            if not isinstance(section, CobolSection):
+                continue
+            special = section.get_metadata("special_names")
+            if not isinstance(special, dict):
+                continue
+            declared: list[tuple[str, str]] = []
+            for entry in special.get("mnemonic_definitions") or []:
+                if entry.get("mnemonic_name"):
+                    declared.append((entry["mnemonic_name"], KIND_MNEMONIC_NAME))
+                for key in ("on_status", "off_status"):
+                    if entry.get(key):
+                        declared.append((entry[key], KIND_CONDITION_NAME))
+            for key, kind in (
+                ("class_definitions", KIND_CLASS_NAME),
+                ("alphabet_definitions", KIND_ALPHABET_NAME),
+                ("symbolic_characters", KIND_SYMBOLIC_CHARACTER),
+            ):
+                for entry in special.get(key) or []:
+                    if entry.get("name"):
+                        declared.append((entry["name"], kind))
+            for name, kind in declared:
+                if str(name).upper() in self._data:
+                    continue
+                self._define(str(name), kind, section.location, section="SPECIAL-NAMES")
+
     def _define_file(self, name: str, location: SourceLocation) -> None:
         """Declare a file once, from whichever half is seen first.
 
@@ -1124,9 +1207,19 @@ class XrefAnalyzer:
                 (name, role, False) for name in sorted(_extract_identifiers(value.text))
             ]
         if isinstance(value, CobolExpression):
-            return [
+            triples = [
                 (name, role, True) for name in sorted(_walk_expression_operands(value))
             ]
+            # ``X IS [NOT] HEX-CHARS``: the class-name sits in the operator,
+            # which the operand walk deliberately skips (#539); a declared
+            # SPECIAL-NAMES class is referenced there (#519).
+            triples += [
+                (name, role, True)
+                for name in sorted(_class_test_names(value))
+                if (entry := self._data.get(name)) is not None
+                and entry.kind == KIND_CLASS_NAME
+            ]
+            return triples
         if not isinstance(value, str):
             # Clause values read out of a dict (a PERFORM AFTER's
             # ``until_condition``, ...) may be an expression *or* raw operand

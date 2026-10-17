@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- xref declares SPECIAL-NAMES (#519)
+
+[analysis/data-use.md](analysis/data-use.md), [mcp.md](mcp.md): mnemonic,
+class, alphabet and symbolic-character kinds plus UPSI condition names, at the
+CONFIGURATION SECTION; a class test credits its declared class-name.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
