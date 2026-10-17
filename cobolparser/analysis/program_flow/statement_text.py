@@ -109,7 +109,9 @@ def summarize_statement(stmt: Any) -> str:
             return _truncate(f"SET {_join(stmt.targets)} TO {stmt.value}")
         return _truncate(f"SET {_join(stmt.targets)}")
     if isinstance(stmt, ComputeStatement) and stmt.targets:
-        target = stmt.targets[0] + (" ROUNDED" if stmt.rounded else "")
+        # Every target with its own rounding phrase (#517): ``COMPUTE B
+        # ROUNDED C`` and ``COMPUTE B C ROUNDED`` are different statements.
+        target = _join([_with_rounding(stmt, t) for t in stmt.targets])
         if stmt.expression:
             return _truncate(f"COMPUTE {target} = {stmt.expression}")
         return _truncate(f"COMPUTE {target}")
@@ -128,9 +130,11 @@ def summarize_statement(stmt: Any) -> str:
             )
             text = f"{verb} {_join(sources)}"
             if stmt.targets:
-                text += f" {prep} {_join(stmt.targets)}"
+                receivers = [_with_rounding(stmt, t) for t in stmt.targets]
+                text += f" {prep} {_join(receivers)}"
             if stmt.givings:
-                text += f" GIVING {_join(stmt.givings)}"
+                givings = [_with_rounding(stmt, g) for g in stmt.givings]
+                text += f" GIVING {_join(givings)}"
             return _truncate(text)
     if isinstance(stmt, MultiplyStatement) and stmt.operands and stmt.target:
         return _truncate(f"MULTIPLY {stmt.operands[0]} BY {stmt.target}")
@@ -173,3 +177,9 @@ def summarize_arm(statements: list[Any]) -> str | None:
     if not statements:
         return None
     return summarize_statement(statements[0])
+
+
+def _with_rounding(stmt: Any, receiver: str) -> str:
+    """*receiver* followed by its own ``ROUNDED [MODE IS m]`` phrase."""
+    phrase = stmt.rounding_of(receiver)
+    return f"{receiver} {phrase}" if phrase else receiver

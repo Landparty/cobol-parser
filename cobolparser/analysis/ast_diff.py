@@ -510,7 +510,9 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
             kind,
             tuple(stmt.targets),
             " ".join(_text_of(stmt.expression).split()),
-            bool(stmt.rounded),
+            # Which target is rounded, and how: ``COMPUTE B ROUNDED C`` and
+            # ``COMPUTE B C ROUNDED`` store different values (#517).
+            tuple(stmt.rounding_of(target) for target in stmt.targets),
         )
     if isinstance(stmt, InspectStatement):
         return (

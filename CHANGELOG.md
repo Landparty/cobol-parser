@@ -425,6 +425,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receiver feeding the next (`A -> B`) for a GIVING-less ADD / SUBTRACT /
   MULTIPLY / DIVIDE with several receivers; each receiver is now fed by
   itself and the sending operands only.
+* **Arithmetic ROUNDED is recorded per receiver, with its `MODE`** (#517).
+  `rounded` was one statement-wide flag and `ROUNDED MODE IS ...` was
+  discarded, so `COMPUTE B ROUNDED C = A / 3` and `COMPUTE B C ROUNDED = A /
+  3` -- which store different values -- had the same AST: `diff` reported no
+  change, `business-rules` showed every target as rounded and `redundancy`
+  called the two a TYPE_1 clone. ADD / SUBTRACT / MULTIPLY / DIVIDE / COMPUTE
+  nodes now carry `rounded_targets` and `rounding_modes` (and
+  `rounding_of(receiver)`); `rounded` keeps its meaning. diff, business-rules
+  formulas, statement summaries and clone fingerprints use them.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
