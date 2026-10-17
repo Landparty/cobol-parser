@@ -46,9 +46,17 @@ _CONDITION_WORDS = _CONDITION_SYMBOLS | _RELATIONAL_WORDS | _CLASS_TEST_WORDS
 
 
 def _is_condition_phrase(words: list[str]) -> bool:
-    """Whether a WHEN selector's (unquoted) words spell a condition."""
+    """Whether a WHEN selector's (unquoted) words spell a condition.
+
+    ``IS`` after a subject (``WHEN X IS VALID-CODE``, a SPECIAL-NAMES class
+    test; ``WHEN L IS OMITTED``) and ``OMITTED`` cannot appear in a value
+    selector either (#539); without them a user class test read as the
+    literal ``'X IS VALID-CODE'``.
+    """
     return any(
-        word in _CONDITION_WORDS or (index > 0 and word in _SIGN_TEST_WORDS)
+        word in _CONDITION_WORDS
+        or (index > 0 and word in _SIGN_TEST_WORDS)
+        or (index > 0 and word in ("IS", "OMITTED"))
         for index, word in enumerate(words)
     )
 

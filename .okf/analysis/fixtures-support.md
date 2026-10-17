@@ -319,7 +319,9 @@ forms narrow nothing;
 class tests (`IS NUMERIC`/`IS ALPHABETIC`) become `class_numeric`/
 `class_alphabetic`; sign/zero tests (`IS POSITIVE`/`NEGATIVE`/`ZERO`) fold
 directly into the relational vocabulary (`gt 0`/`lt 0`/`eq 0`) rather than
-getting their own domain-handling branch. `negated` only carries meaning for
+getting their own domain-handling branch. A SPECIAL-NAMES class test (`IS
+VALID-CODE`) and `IS [NOT] OMITTED` are reported unsupported with their own
+reason (#539) -- the latter depends on the caller's argument list, not data. `negated` only carries meaning for
 `class_numeric`/`class_alphabetic`/`figurative`, which have no separate "not"
 op name (unlike `eq`/`ne` or `in_set`/`not_in_set`, which absorb negation
 directly into the op choice).

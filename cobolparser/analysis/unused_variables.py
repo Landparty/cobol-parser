@@ -395,6 +395,14 @@ def _walk_expression_operands(expr: CobolExpression | None) -> set[str]:
             names |= _names_from_value(operand)
         return names
 
+    tree = getattr(expr, "condition_tree", None)
+    if isinstance(tree, CobolExpression):
+        # A PERFORM UNTIL guard: the raw joined text sits in `operands`, the
+        # structural tree next to it. Walk the tree -- the text would also
+        # yield a SPECIAL-NAMES class-name (``UNTIL X IS NOT VALID-CODE``)
+        # as if it were a data item (#539).
+        return _walk_expression_operands(tree)
+
     # Unrecognized/opaque expression shape: fall back to the raw text this
     # codebase always keeps around for exactly this situation. Scan every
     # operand, not just the first -- a programmatically built expression may

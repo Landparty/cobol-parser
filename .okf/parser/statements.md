@@ -328,6 +328,14 @@ populated. Its token-cleaning pass:
   an operator or `NOT` follows. Pinned by
   `tests/regression/test_review_2026_09_09_parser.py` (`TestFinding08ConditionTrees`)
   and `tests/regression/test_issue_403_abbreviated_leading_is.py`.
+- **User class and OMITTED tests** (#539): `operand IS [NOT] word` -- `word` a
+  SPECIAL-NAMES class-name, recognised by shape since the builder cannot see
+  SPECIAL-NAMES -- and `operand [IS] [NOT] OMITTED` build `IS [NOT] <word>`
+  nodes with the tested field as `left_operand`
+  (`_build_user_class_or_omitted`), like `IS NUMERIC`. The operand must be one
+  data reference; the class form needs its `IS` (`IF X VALID-CODE` stays a raw
+  COMPARISON). Pinned by
+  `tests/regression/test_issue_539_user_class_and_omitted_conditions.py`.
 - Condition collectors drop layout tokens and bare separators (rule 6); a
   condition ending at a line break must not keep a trailing `"\n"`, or a bare
   condition-name / `NOT cond` / class test / `( ... )` falls back to a raw

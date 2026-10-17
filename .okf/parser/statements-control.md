@@ -80,7 +80,10 @@ arm.
   test (`POSITIVE NEGATIVE ZERO`) after its first word, is a `Condition`; a lone
   `WHEN ZERO` stays the figurative `Literal`. `operator: "OR"` is set only for a
   logical OR, never the OR of `OR EQUAL` (`_has_logical_or`). Pinned by
-  `tests/regression/test_evaluate_word_operator_when.py`.
+  `tests/regression/test_evaluate_word_operator_when.py`. `IS` or `OMITTED`
+  after the first word also makes a `Condition` (#539): `WHEN WS-C IS
+  VALID-CODE` (a SPECIAL-NAMES class test) used to be the literal
+  `'WS-C IS VALID-CODE'`.
 - **Subjects reach `.operands`.** `_parse_subjects` calls
   `EvaluateStatement.add_subject()`, which also calls `add_operand()`, so
   `find_statements_using_variable`, intrinsic-function detection,
