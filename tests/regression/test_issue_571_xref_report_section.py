@@ -9,7 +9,11 @@ branch: every such field showed 0 references in ``xref`` and MCP
 from __future__ import annotations
 
 from cobolparser import UnusedVariableAnalyzer, parse_cobol
-from cobolparser.analysis.xref import ROLE_REFERENCE, XrefAnalyzer
+from cobolparser.analysis.xref import (
+    ROLE_REFERENCE,
+    XrefAnalyzer,
+    is_special_register,
+)
 
 SOURCE = "".join(
     f"       {line}\n"
@@ -87,3 +91,22 @@ def test_xref_agrees_with_unused_variables():
     xref = XrefAnalyzer().analyze(ast)
     for name in ("WS-TITLE", "WS-NAME", "WS-AMT", "WS-DEPT", "WS-IDLE"):
         assert (name in unused) == (not xref.entry_for(name).is_referenced)
+
+
+def test_report_writer_counters_are_special_registers():
+    # ``SOURCE PAGE-COUNTER`` is the usual page-number idiom: now that report
+    # operands are recorded, the Report Writer counters must not read as
+    # undefined data items.
+    heading = "   05 LINE 1 COLUMN 1 PIC X(20) SOURCE WS-TITLE."
+    source = SOURCE.replace(
+        f"       {heading}\n",
+        f"       {heading}\n"
+        "          05 COLUMN 30 PIC ZZ9 SOURCE PAGE-COUNTER.\n"
+        "          05 COLUMN 40 PIC ZZ9 SOURCE LINE-COUNTER.\n",
+    )
+    assert "PAGE-COUNTER" in source
+    result = parse_cobol(source)
+    assert result.success, result.errors
+    assert XrefAnalyzer().analyze(result.ast).undefined == []
+    assert is_special_register("PAGE-COUNTER")
+    assert is_special_register("LINE-COUNTER")

@@ -443,7 +443,8 @@ Things worth knowing before trusting a field:
   provided there is at least one letter, so `1000-INIT` is one symbol rather
   than a number and a word.
 * **`undefined` excludes special registers.** `_SPECIAL_REGISTERS`
-  (RETURN-CODE, SQLCODE, SQLCA, `EIB*`, `DFH*`, `XML-*`/`JSON-*`, TALLY, …)
+  (RETURN-CODE, SQLCODE, SQLCA, `EIB*`, `DFH*`, `XML-*`/`JSON-*`, TALLY,
+  the Report Writer PAGE-COUNTER / LINE-COUNTER a `SOURCE` names, …)
   are never reported undefined; a caveat names the ones that were seen.
   `is_special_register(name)` is the public test (the MCP `explain_symbol`
   answers a not-found special register with it).

@@ -195,6 +195,10 @@ _SPECIAL_REGISTERS: frozenset[str] = frozenset(
         "SHIFT-IN",
         "SHIFT-OUT",
         "LINAGE-COUNTER",
+        # Report Writer: a report group's SOURCE PAGE-COUNTER / LINE-COUNTER
+        # is now recorded (#571), and these are registers, not data items.
+        "PAGE-COUNTER",
+        "LINE-COUNTER",
         "ADDRESS",
         "LENGTH",
         "XML-CODE",
