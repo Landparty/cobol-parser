@@ -212,10 +212,20 @@ class SpecialEntryParser:
                 # THROUGH marker and degraded the range to its endpoints.
                 _skip_newlines(token_stream)
                 end_token = token_stream.peek()
-                if end_token and end_token.type in (
-                    TokenType.STRING_LITERAL,
-                    TokenType.NUMERIC_LITERAL,
-                    TokenType.LEVEL_NUMBER,
+                # A figurative end (``LOW-VALUE THRU HIGH-VALUE``) is a range
+                # end like any literal; it used to fall through as a second
+                # discrete value, dropping the THROUGH marker (#468).
+                if end_token and (
+                    end_token.type
+                    in (
+                        TokenType.STRING_LITERAL,
+                        TokenType.NUMERIC_LITERAL,
+                        TokenType.LEVEL_NUMBER,
+                    )
+                    or (
+                        end_token.type == TokenType.FIGURATIVE_CONSTANT
+                        and (end_token.value or "").upper() != "ALL"
+                    )
                 ):
                     item.add_value(f"THROUGH:{_condition_literal(end_token)}")
                     token_stream.consume()

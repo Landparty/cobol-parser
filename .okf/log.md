@@ -251,6 +251,11 @@ named in dataset / view caveats and `ProgramLayoutIndex.unresolved`.
 [analysis/flow.md](analysis/flow.md): `range_members` extends a SECTION end
 to its last paragraph.
 
+## 2026-10-17 -- level-88 THRU with a figurative end (#468)
+
+[ast-models.md](ast-models.md): `LOW-VALUE THRU HIGH-VALUE` keeps its
+`THROUGH:` marker.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
