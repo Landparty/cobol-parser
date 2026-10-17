@@ -461,6 +461,14 @@ _MAX_RANGE_EXPANSION = 64
 # otherwise materialize one FieldSpec per occurrence per field, exhausting
 # memory well before any caller-supplied cap kicks in.
 _MAX_OCCURS_HARD_CAP = 10_000
+# Hard ceiling on the occurrences one elementary item is expanded into across
+# *all* its enclosing tables (#376). The per-table cap alone still let nested
+# tables multiply: ``OCCURS 1000`` inside ``OCCURS 1000`` is a million
+# FieldSpecs, and a mistyped ``OCCURS 99999999`` around ``OCCURS 9999``
+# capped at 10,000 x 10,000 ran gen-fixtures, lineage and field-impact for
+# minutes. An inner table is cut to what the enclosing ones leave of this
+# budget; :func:`occurs_expansion_caveats` names every table either cap cuts.
+_MAX_EXPANDED_OCCURRENCES = 100_000
 
 _REPEAT_COUNT_RE = re.compile(r"\(\d+\)")
 _THROUGH_RE = re.compile(r"^THROUGH:(.*)$", re.IGNORECASE)
@@ -1096,8 +1104,12 @@ def _flatten_into(
     ignore_own_redefines: bool = False,
     overlays: _OverlayWalk | None = None,
     segment: str | None = None,
+    occurs_product: int = 1,
 ) -> None:
     """Recursive worker for :func:`flatten_record`.
+
+    *occurs_product* is how many occurrences the enclosing tables already
+    expand this item into (see ``_MAX_EXPANDED_OCCURRENCES``).
 
     *segment* is this item's path segment (see :func:`layout_segment`);
     ``None`` means its :attr:`~CobolDataItem.layout_name`.
@@ -1135,7 +1147,8 @@ def _flatten_into(
     # to carry where that assumption came from -- and, for variable-length
     # output, which of its subscripts the counter governs.
     occurs = item.occurs_clause
-    indexes = _occurrence_indexes(item, opts)
+    indexes = _occurrence_indexes(item, opts, occurs_product)
+    child_product = occurs_product * len(indexes)
     inherited_controls = odo_controls
     if occurs is not None and occurs.depending_on:
         inherited_controls = (
@@ -1184,6 +1197,7 @@ def _flatten_into(
                         opts,
                         out,
                         overlays,
+                        child_product,
                     )
                     continue
                 _flatten_into(
@@ -1197,6 +1211,7 @@ def _flatten_into(
                     redefines_label=redefines_label,
                     overlays=overlays,
                     segment=layout_segment(child, item),
+                    occurs_product=child_product,
                 )
             if item.value_clause:
                 # A group VALUE initialises the group's bytes, not one field:
@@ -1267,6 +1282,7 @@ def _flatten_overlay(
     opts: DataGeneratorOptions,
     out: list[FieldSpec],
     overlays: _OverlayWalk,
+    occurs_product: int = 1,
 ) -> None:
     """Emit *overlay*'s fields in *target*'s place, padded to its width.
 
@@ -1291,10 +1307,20 @@ def _flatten_overlay(
         redefines_label=overlay.redefines,
         ignore_own_redefines=True,
         overlays=overlays,
+        occurs_product=occurs_product,
     )
     own = sum(spec.storage_size for spec in out[start:])
     probe: list[FieldSpec] = []
-    _flatten_into(target, path, subscripts, redefines, odo_controls, opts, probe)
+    _flatten_into(
+        target,
+        path,
+        subscripts,
+        redefines,
+        odo_controls,
+        opts,
+        probe,
+        occurs_product=occurs_product,
+    )
     at = 0
     for spec in probe:
         overlays.hidden.append(HiddenCounter(index=start, offset=at, spec=spec))
@@ -1325,20 +1351,77 @@ def _flatten_overlay(
 
 
 def _occurrence_indexes(
-    item: CobolDataItem, opts: DataGeneratorOptions
+    item: CobolDataItem, opts: DataGeneratorOptions, occurs_product: int = 1
 ) -> list[int | None]:
     """Return the subscripts to emit for *item* (``[None]`` when not a table)."""
     occurs = item.occurs_clause
     if occurs is None:
         return [None]
+    times = _requested_occurrences(item, opts)
+    if opts.expand_occurs:
+        times = min(times, _occurrence_cap(occurs_product))
+    return list(range(1, max(1, times) + 1))
+
+
+def _requested_occurrences(item: CobolDataItem, opts: DataGeneratorOptions) -> int:
+    """*item*'s occurrences after ``expand_occurs`` / ``max_occurs``, before
+    the hard caps."""
+    occurs = item.occurs_clause
+    if occurs is None:
+        return 1
     times = occurs.max_times or occurs.min_times or 1
     if not opts.expand_occurs:
+        return 1
+    if opts.max_occurs is not None:
+        times = min(times, opts.max_occurs)
+    return max(1, times)
+
+
+def _occurrence_cap(occurs_product: int) -> int:
+    """The most occurrences a table inside *occurs_product* enclosing
+    occurrences may expand to (see ``_MAX_EXPANDED_OCCURRENCES``)."""
+    return max(
+        1, min(_MAX_OCCURS_HARD_CAP, _MAX_EXPANDED_OCCURRENCES // occurs_product)
+    )
+
+
+def occurs_expansion_caveats(
+    record: CobolDataItem, options: DataGeneratorOptions | None = None
+) -> list[str]:
+    """One sentence per OCCURS table under *record* that the expansion caps
+    cut short (#376) -- a mistyped or pathological count that the layout
+    materializes only partly, so the fields, record images and byte offsets
+    built from it cover fewer occurrences than the copybook declares.
+
+    A cut made by the caller's own ``max_occurs`` is not reported: that was
+    asked for.  Walks the declarations only, never the expansion.
+    """
+    opts = options or DataGeneratorOptions()
+    caveats: list[str] = []
+    if not opts.expand_occurs:
+        return caveats
+
+    def walk(item: CobolDataItem, product: int, root: bool) -> None:
+        if item.level in (66, 88):
+            return
+        if item.redefines and not root and not opts.include_redefines:
+            return
         times = 1
-    else:
-        if opts.max_occurs is not None:
-            times = min(times, opts.max_occurs)
-        times = min(times, _MAX_OCCURS_HARD_CAP)
-    return list(range(1, max(1, times) + 1))
+        if item.occurs_clause is not None:
+            requested = _requested_occurrences(item, opts)
+            times = min(requested, _occurrence_cap(product))
+            if times < requested:
+                caveats.append(
+                    f"OCCURS table {item.name} expanded to {times} of its "
+                    f"{requested} occurrences: the layout caps expansion at "
+                    f"{_MAX_OCCURS_HARD_CAP:,} per table and "
+                    f"{_MAX_EXPANDED_OCCURRENCES:,} across nested tables"
+                )
+        for child in _child_items(item):
+            walk(child, product * times, False)
+
+    walk(record, 1, True)
+    return caveats
 
 
 def _assign_columns(specs: list[FieldSpec], opts: DataGeneratorOptions) -> None:

@@ -16,7 +16,12 @@ from ...preprocess.copybook_expander import parse_cobol_with_expansion
 from .dataset import GeneratedDataset
 from .encoding import record_length
 from .errors import CopybookLayoutError
-from .layout import FieldSpec, VaryingLength, flatten_record
+from .layout import (
+    FieldSpec,
+    VaryingLength,
+    flatten_record,
+    occurs_expansion_caveats,
+)
 from .options import DataGeneratorOptions
 from .values import ValueFactory
 from .views import build_record_views
@@ -399,7 +404,7 @@ class CopybookDataGenerator:
         # After the rows, deliberately: a copybook that declares no varying
         # range draws nothing here, and so generates byte-identical output to
         # a version of this package that had never heard of one.
-        caveats: list[str] = []
+        caveats = occurs_expansion_caveats(record, self.options)
         varying = self._varying_for(record, fields, caveats)
         lengths = self._draw_lengths(varying, fields, rng)
         if lengths is not None:
