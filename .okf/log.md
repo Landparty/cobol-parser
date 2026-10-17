@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- ConstantFolder caches its program walk (#374)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md): `_ProgramWalk`
+/ `_CURRENT_WALK` and the unseeded-fold memo; `gen-fixtures --scenarios all`
+5-7x faster on large programs, output byte-identical.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

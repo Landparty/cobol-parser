@@ -575,6 +575,22 @@ visits) budget; past it the fold reports nothing (`_WalkState.exhausted`),
 never a partial answer. `test_const_fold_corpus.py`'s non-triviality check
 folds `tests/samples/file_operations.cbl` and `enterprise/COMPDIR.cbl`.
 
+**The program walk is cached** (#374). `gen-fixtures --scenarios all` folds
+one program twice per scenario, and each fold used to re-walk the whole
+PROCEDURE DIVISION for its READ / DISPLAY / WRITE sites and recompute every
+statement's nested lists -- quadratic in program size (300 IFs / 40 I/O
+statements: 13.3s, 600/60: 50.8s). `_ProgramWalk` holds those, one per
+program (`_WALK_CACHE`, a weak-keyed dictionary on the AST, like
+`_FACTS_CACHE` on the index), and is reached through the `_CURRENT_WALK`
+context variable set only for the duration of `fold()`, so the module-level
+helpers keep their signatures and nothing is cached outside a fold. The
+unseeded fold (`seed_values` empty) is memoised per (program, index) and
+handed out as a copy (`_copy_result`). Both assume the AST is not mutated
+between folds. Output is byte-identical (same bundle SHA-256; 2.5s / 7.3s
+for the two programs above); the bundle's size, which still grows with
+scenarios x fixtures, is untouched -- shrinking it would change the bundle
+shape (`bundle_version`).
+
 **Every site, and only control flow the walk really follows** (each case
 checked against GnuCOBOL 3.2 output):
 

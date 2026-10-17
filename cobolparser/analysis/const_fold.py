@@ -60,6 +60,7 @@ from __future__ import annotations
 import re
 import weakref
 from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, localcontext
 from fractions import Fraction
@@ -247,6 +248,52 @@ class _LayoutFacts:
 
 
 _FACTS_CACHE: weakref.WeakKeyDictionary[Any, _LayoutFacts] = weakref.WeakKeyDictionary()
+
+
+class _ProgramWalk:
+    """What a fold reads off the program's statement tree and nothing else,
+    computed once per program instead of once per fold (#374).
+
+    ``gen-fixtures --scenarios all`` folds the same program twice per
+    scenario, and every fold re-walked the whole PROCEDURE DIVISION for its
+    READ and DISPLAY/WRITE sites and recomputed every statement's nested
+    lists: quadratic in program size.  The statement tree does not change
+    between folds (the same assumption ``_FACTS_CACHE`` makes of the index).
+    """
+
+    __slots__ = ("nested", "statements", "unseeded")
+
+    def __init__(self) -> None:
+        #: The fold with no seed values, by index (kept beside its result so
+        #: a reused id cannot match): the same for every scenario, and
+        #: ``gen-fixtures`` asks for it once per scenario.
+        self.unseeded: dict[int, tuple[Any, ConstantFoldResult]] = {}
+        #: ``_procedure_statements`` results, by the *types* asked for.
+        self.statements: dict[Any, list[Any]] = {}
+        #: ``_nested_statement_lists`` results, by ``id(stmt)``; the
+        #: statement is kept beside its lists so a reused id cannot match.
+        self.nested: dict[int, tuple[Any, list[list[Any]]]] = {}
+
+
+_WALK_CACHE: weakref.WeakKeyDictionary[Any, _ProgramWalk] = weakref.WeakKeyDictionary()
+#: The program walk of the fold running now; ``None`` outside one.
+_CURRENT_WALK: ContextVar[_ProgramWalk | None] = ContextVar(
+    "_CURRENT_WALK", default=None
+)
+
+
+def _program_walk(ast: CobolProgram) -> _ProgramWalk:
+    try:
+        cached = _WALK_CACHE.get(ast)
+    except TypeError:  # a program that cannot be weakly referenced
+        cached = None
+    if cached is None:
+        cached = _ProgramWalk()
+        try:
+            _WALK_CACHE[ast] = cached
+        except TypeError:
+            pass
+    return cached
 
 
 def _facts(index: ProgramLayoutIndex) -> _LayoutFacts:
@@ -562,6 +609,26 @@ class ConstantFolder:
         *,
         seed_values: dict[str, str] | None = None,
     ) -> ConstantFoldResult:
+        walk = _program_walk(ast)
+        if not seed_values:
+            found = walk.unseeded.get(id(index))
+            if found is not None and found[0] is index:
+                return _copy_result(found[1])
+        token = _CURRENT_WALK.set(walk)
+        try:
+            result = self._fold(ast, index, seed_values)
+        finally:
+            _CURRENT_WALK.reset(token)
+        if not seed_values:
+            walk.unseeded[id(index)] = (index, _copy_result(result))
+        return result
+
+    def _fold(
+        self,
+        ast: CobolProgram,
+        index: ProgramLayoutIndex,
+        seed_values: dict[str, str] | None,
+    ) -> ConstantFoldResult:
         env: dict[str, Decimal | str] = {}
         seeds: dict[str, str] = seed_values if seed_values is not None else {}
         for name, raw in seeds.items():
@@ -636,6 +703,18 @@ class ConstantFolder:
         return ConstantFoldResult(
             known=known, read_keys=_read_key_values(ast, index, state)
         )
+
+
+def _copy_result(result: ConstantFoldResult) -> ConstantFoldResult:
+    """*result* with its own dicts, so a caller changing one cannot change
+    the cached fold."""
+    return ConstantFoldResult(
+        known=dict(result.known),
+        read_keys={
+            site: dict(values) if values is not None else None
+            for site, values in result.read_keys.items()
+        },
+    )
 
 
 def keyed_read_key(stmt: IOReadStatement, index: ProgramLayoutIndex) -> str | None:
@@ -741,6 +820,16 @@ def _observation_sites(ast: CobolProgram) -> list[Any]:
 
 def _procedure_statements(ast: CobolProgram, types: Any) -> list[Any]:
     """Every PROCEDURE DIVISION statement of *types*, nested ones included."""
+    walk = _CURRENT_WALK.get()
+    if walk is not None:
+        cached = walk.statements.get(types)
+        if cached is None:
+            cached = walk.statements[types] = _collect_statements(ast, types)
+        return cached
+    return _collect_statements(ast, types)
+
+
+def _collect_statements(ast: CobolProgram, types: Any) -> list[Any]:
     procedure = ast.get_division("PROCEDURE")
     if procedure is None:
         return []
@@ -1425,6 +1514,18 @@ def _write_targets(stmt: Any) -> list[str]:
 
 
 def _nested_statement_lists(stmt: Any) -> list[list[Any]]:
+    walk = _CURRENT_WALK.get()
+    if walk is None:
+        return _collect_nested_lists(stmt)
+    found = walk.nested.get(id(stmt))
+    if found is not None and found[0] is stmt:
+        return found[1]
+    lists = _collect_nested_lists(stmt)
+    walk.nested[id(stmt)] = (stmt, lists)
+    return lists
+
+
+def _collect_nested_lists(stmt: Any) -> list[list[Any]]:
     lists: list[list[Any]] = []
     for attr in _NESTED_STATEMENT_ATTRS:
         value = getattr(stmt, attr, None)
