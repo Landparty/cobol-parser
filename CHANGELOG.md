@@ -276,6 +276,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MCP server as `LineageGraph(join_caveats=...)` (which a graph built without
   stored join edges no longer ignores). An in-stream `DFSPARM` is now read
   along with `SYSIN`.
+* **Field lineage follows ICETOOL steps, and says when a TSO step's SYSTSIN
+  is a dataset** (#566). ICETOOL was read as a plain DFSORT step, so its
+  `TOOLIN` operators were never seen: `COPY` / `SORT` / `MERGE` / `SELECT` /
+  `SUBSET` / `DATASORT FROM(dd) TO(dd...)` (and `DISCARD(dd)`) are now
+  pass-throughs, classified through their `USING(xxxx)` control statements,
+  and `SPLICE` / `RESIZE` stop the flow as reformats. An IKJEFT01 step whose
+  `SYSTSIN` is a dataset, and an ICETOOL step whose `TOOLIN` is, now add a
+  caveat (`bindings_from_jobs(jobs, caveats)`, passed by `field-impact --jcl`
+  and the MCP server as `LineageGraph(join_caveats=...)`, which a graph built
+  without stored join edges no longer ignores) instead of vanishing.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
