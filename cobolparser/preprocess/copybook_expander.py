@@ -1004,7 +1004,10 @@ def _origin_sources(
     different string. A file that has become unreadable since is skipped: a
     listing missing one member's comments beats an expansion that fails.
     """
-    sources: dict[str, list[str]] = {source_file: source_code.split("\n")}
+    # split_source_lines, not split("\n"): the source map numbers lines the
+    # same way, so a CR-only file must not read back as one line, and a CRLF
+    # file must not hand back each comment with a stray "\r" (#581).
+    sources: dict[str, list[str]] = {source_file: split_source_lines(source_code)}
     for path in included_copybooks:
         try:
             content = _cached_read_file(
@@ -1015,7 +1018,7 @@ def _origin_sources(
             )
         except (OSError, EncodingError):
             continue
-        sources[path] = content.split("\n")
+        sources[path] = split_source_lines(content)
     return sources
 
 
