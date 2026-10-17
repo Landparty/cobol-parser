@@ -187,6 +187,10 @@ decodes are warnings or caveats, never silent.
 
 [parser/statements-control.md](parser/statements-control.md), [analysis/lineage.md](analysis/lineage.md), [generators/fixtures.md](generators/fixtures.md), [tests.md](tests.md): a `FUNCTION` argument in a CALL USING list is one parameter, flows into the callee only, and is no gen-fixtures gap.
 
+## 2026-10-17 -- INITIALIZE phrases across a line break (#575)
+
+[parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): INITIALIZE's `TO VALUE`, `THEN` and `TO DEFAULT` lookaheads look past layout, so a line break inside a phrase no longer drops it.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

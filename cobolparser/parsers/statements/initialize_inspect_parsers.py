@@ -121,14 +121,19 @@ class InitializeStatementParser(IStatementParser):
             stmt.with_filler = True
             skip_whitespace(token_stream)
 
-        # Optional ``{ALL | category} TO VALUE`` phrase
+        # Optional ``{ALL | category} TO VALUE`` phrase. Every lookahead in
+        # this parser looks past layout: a line break inside a multi-word
+        # phrase (``ALL`` / ``TO VALUE``, ``THEN`` / ``TO DEFAULT``) is
+        # legal, and a raw ``peek(1)`` saw the NEWLINE and dropped the
+        # phrase (#575).
         token = token_stream.peek()
         if token and _val(token) in _REPLACING_CATEGORIES | {"ALL"}:
-            nxt = token_stream.peek(1)
-            after = token_stream.peek(2)
+            nxt, nxt_idx = peek_past_noise(token_stream, 1)
+            after, _ = peek_past_noise(token_stream, nxt_idx + 1)
             if nxt and _val(nxt) == "TO" and after and _val(after) == "VALUE":
                 stmt.to_value_category = _val(token)
                 for _ in range(3):
+                    skip_whitespace(token_stream)
                     token_stream.consume()
                 skip_whitespace(token_stream)
 
@@ -140,9 +145,10 @@ class InitializeStatementParser(IStatementParser):
 
         # Optional [THEN] TO DEFAULT
         if self._match_then(token_stream, "TO"):
-            nxt = token_stream.peek(1)
+            nxt, _ = peek_past_noise(token_stream, 1)
             if nxt and _val(nxt) == "DEFAULT":
                 token_stream.consume()
+                skip_whitespace(token_stream)
                 token_stream.consume()
                 stmt.to_default = True
                 skip_whitespace(token_stream)
@@ -156,7 +162,7 @@ class InitializeStatementParser(IStatementParser):
         whether *keyword* is now the next token (left unconsumed)."""
         token = ts.peek()
         if token and _val(token) == "THEN":
-            nxt = ts.peek(1)
+            nxt, _ = peek_past_noise(ts, 1)
             if not nxt or _val(nxt) != keyword:
                 return False
             ts.consume()
