@@ -56,6 +56,13 @@ and MCP `where_from` / `impact_of_change` answer `found: true`.
 (a flow from one into another is a hit) and adds an ambiguity caveat; MCP
 reports it as `ambiguous-name`.
 
+## 2026-10-17 -- Lineage: receivers of one statement are not linked (#535)
+
+[analysis/lineage.md](analysis/lineage.md): `_reads_to_writes` no longer
+draws edges between the self-accumulating receivers of one statement
+(ADD/SUBTRACT/MULTIPLY/DIVIDE without GIVING, INSPECT counters, STRING /
+UNSTRING POINTER and TALLYING IN).
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

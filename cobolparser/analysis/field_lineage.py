@@ -1542,13 +1542,45 @@ class FieldFlowAnalyzer:
             elif role == ROLE_WRITE:
                 writes += [r for r in self._refs(value, ROLE_WRITE) if r not in writes]
         statement = stmt.statement_type or type(stmt).__name__
+        self_only = self._self_feeding(stmt, reads, writes)
         for src in reads:
             for s in self._pieces(src) or self._loose_pieces(src):
                 for tgt in writes:
+                    if src.qname in self_only and src.qname != tgt.qname:
+                        continue
                     for t in self._pieces(tgt) or self._loose_pieces(tgt):
                         self._edge(
                             s.node, t.node, kind, ctx, statement, s.exact and t.exact
                         )
+
+    def _self_feeding(
+        self, stmt: CobolStatement, reads: list[_Ref], writes: list[_Ref]
+    ) -> set[str]:
+        """Receivers that only accumulate into themselves (#535):
+        ``ADD 1 TO A B`` is ``A = A + 1; B = B + 1``, so A feeds nothing
+        else the statement writes. The same holds for SUBTRACT / MULTIPLY /
+        DIVIDE without GIVING, INSPECT TALLYING counters and a STRING /
+        UNSTRING POINTER or TALLYING IN item. COMPUTE (``COMPUTE A B = A +
+        1`` does feed B) and a GIVING form keep every edge; a receiver that
+        is also a sending operand (``ADD A TO A B``) feeds the others too."""
+        if isinstance(stmt, ComputeStatement):
+            return set()
+        if isinstance(stmt, ArithmeticStatement):
+            if stmt.givings or stmt.giving:
+                return set()
+            receivers = [*stmt.targets, *([stmt.target] if stmt.target else [])]
+            out = {r.qname for text in receivers for r in self._refs(text, ROLE_WRITE)}
+            for text in stmt.source_operands or []:
+                out -= {r.qname for r in self._refs(text, ROLE_READ)}
+            return out
+        if isinstance(stmt, (StringStatement, UnstringStatement, InspectStatement)):
+            out = {r.qname for r in reads} & {w.qname for w in writes}
+            if isinstance(stmt, InspectStatement) and stmt.target:
+                # The inspected item is the sending operand, even when
+                # REPLACING also writes it.
+                out -= {r.qname for r in self._refs(stmt.target, ROLE_READ)}
+            return out
+        return set()
 
     def _loose_pieces(self, ref: _Ref) -> list[_Piece]:
         """Every elementary field of an operand whose offset is unknown."""
