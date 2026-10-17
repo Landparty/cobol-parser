@@ -96,7 +96,11 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
-from ._files import same_record_area_groups
+from ._files import (
+    report_to_file_map,
+    report_writer_files,
+    same_record_area_groups,
+)
 from ._names import callee_names
 from ._sql_flow import analyze_sql
 from .value_tracker import DynamicCallAnalyzer
@@ -623,6 +627,11 @@ class FieldFlowAnalyzer:
         self._caveat_set: set[str] = set()
         self._cursors: dict[str, str] = {}
         self._program_id = ""
+        #: Report Writer: report / report-group name -> report file, and
+        #: each REPORT SECTION 01 group's report, DETAIL-ness and the
+        #: ``SOURCE`` / ``SUM`` operands it (and its subordinates) print.
+        self._report_to_file: dict[str, str] = {}
+        self._report_groups: dict[str, tuple[str, bool, list[str]]] = {}
 
     # -- entry point -------------------------------------------------------
 
@@ -639,6 +648,7 @@ class FieldFlowAnalyzer:
         self._index_items(ast)
         self._index_renames(ast)
         self._index_files(ast)
+        self._index_reports(ast)
         inner = _contained_node_ids(ast)
         statements = [
             node
@@ -1143,6 +1153,34 @@ class FieldFlowAnalyzer:
                             KeyUse(port, qname, 0, "SELECT RECORD KEY")
                         )
 
+    def _index_reports(self, ast: CobolProgram) -> None:
+        self._report_to_file = report_to_file_map(ast)
+        data_div = ast.get_division("DATA")
+        section = data_div._sections.get("REPORT") if data_div is not None else None
+        if section is None:
+            return
+        for group in section.data_items:
+            report = group.get_metadata("rd_report_name")
+            if not group.name or not report:
+                continue
+            clauses = group.get_metadata("report_clauses") or {}
+            detail = str(clauses.get("type", "")).upper() in ("DETAIL", "DE")
+            operands: list[str] = []
+            for node in group.traverse_depth_first():
+                get_metadata = getattr(node, "get_metadata", None)
+                rc = get_metadata("report_clauses") if callable(get_metadata) else None
+                if not rc:
+                    continue
+                if rc.get("source"):
+                    operands.append(str(rc["source"]))
+                for entry in rc.get("sum") or []:
+                    operands.extend(str(o) for o in entry.get("operands") or [])
+            self._report_groups[group.name.upper()] = (
+                str(report).upper(),
+                detail,
+                operands,
+            )
+
     def _file_port(self, file_name: str) -> Port:
         upper = file_name.upper()
         dd = self._file_dd.get(upper, upper)
@@ -1523,6 +1561,8 @@ class FieldFlowAnalyzer:
                     )
         elif isinstance(stmt, CallStatement):
             self._visit_call(stmt, ctx)
+        elif stmt.statement_type in ("GENERATE", "TERMINATE"):
+            self._visit_report_writer(stmt, ctx)
         elif hasattr(stmt, "sql_text"):
             self._visit_sql(stmt, ctx)
         elif name == "ExecCicsStatement":
@@ -1702,6 +1742,53 @@ class FieldFlowAnalyzer:
                 into_program=False,
                 out_of_program=True,
             )
+
+    def _visit_report_writer(self, stmt: CobolStatement, ctx: _Context) -> None:
+        """GENERATE / TERMINATE: the ``SOURCE`` / ``SUM`` operands of the
+        report groups they print flow to the report file (#499).
+
+        ``GENERATE detail`` prints that DETAIL group; any GENERATE can also
+        trigger the report's headings, footings and control breaks, as does
+        TERMINATE (final footings), so those non-DETAIL groups count for
+        every site. Where on the line each value lands (COLUMN, edited
+        PICTURE) is not modelled: the edges carry no offset and are inexact.
+        """
+        files = report_writer_files(stmt, self._report_to_file)
+        if not files:
+            return
+        verb = stmt.statement_type
+        names = (
+            [getattr(stmt, "report_name", None) or ""]
+            if verb == "GENERATE"
+            else list(getattr(stmt, "report_names", None) or [])
+        )
+        groups: list[str] = []
+        for name in names:
+            upper = name.upper()
+            entry = self._report_groups.get(upper)
+            report = entry[0] if entry is not None else upper
+            if entry is not None:
+                groups.append(upper)
+            groups.extend(
+                group
+                for group, (owner, detail, _ops) in self._report_groups.items()
+                if owner == report and not detail
+            )
+        for file_name in files:
+            port = self._file_port(file_name)
+            port.directions.add("out")
+            for group in dict.fromkeys(groups):
+                for operand in self._report_groups[group][2]:
+                    for ref in self._refs(operand, ROLE_READ):
+                        for leaf in self._leaves(ref.qname):
+                            self._edge(
+                                self._item_node(leaf.qname),
+                                LineageNode(port.kind, port.key, None, leaf.length),
+                                "write",
+                                ctx,
+                                verb,
+                                exact=False,
+                            )
 
     def _visit_accept(self, stmt: IOAcceptStatement, ctx: _Context) -> None:
         source = (stmt.from_source or "SYSIN").upper()

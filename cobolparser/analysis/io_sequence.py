@@ -38,7 +38,12 @@ from ..models.statements import (
     SortStatement,
     StopStatement,
 )
-from ._files import record_to_file_map, resolve_file_name
+from ._files import (
+    record_to_file_map,
+    report_to_file_map,
+    report_writer_files,
+    resolve_file_name,
+)
 from ._procedures import ProcedureIndex, statement_qualifier
 
 
@@ -103,6 +108,10 @@ _OP_TO_VIOLATION: dict[str, IOViolationKind] = {
     "REWRITE": IOViolationKind.REWRITE_BEFORE_OPEN,
     "DELETE": IOViolationKind.DELETE_BEFORE_OPEN,
     "START": IOViolationKind.START_BEFORE_OPEN,
+    # Report Writer verbs write the report file (#499).
+    "INITIATE": IOViolationKind.WRITE_BEFORE_OPEN,
+    "GENERATE": IOViolationKind.WRITE_BEFORE_OPEN,
+    "TERMINATE": IOViolationKind.WRITE_BEFORE_OPEN,
 }
 
 # A file's possible states at a point of the walk. Before an IF/EVALUATE
@@ -259,6 +268,8 @@ class IOSequenceAnalyzer:
         # and REWRITE name a record, never a file, so without this map they
         # could never be checked against the open-file set at all.
         self._record_to_file: dict[str, str] = {}
+        # Report Writer report / report-group name -> its report file.
+        self._report_to_file: dict[str, str] = {}
 
     def analyze(self, ast: CobolProgram) -> IOSequenceReport:
         """Analyze the AST and return an IOSequenceReport.
@@ -287,6 +298,7 @@ class IOSequenceAnalyzer:
         self._pending_gotos = []
         self._ended_in_cycle = False
         self._record_to_file = record_to_file_map(ast)
+        self._report_to_file = report_to_file_map(ast)
 
         proc_division = ast.procedure_division
         if proc_division is not None:
@@ -820,6 +832,11 @@ class IOSequenceAnalyzer:
             self._check_open(node.file_name or "", "DELETE", loc)
         elif isinstance(node, IOStartStatement):
             self._check_open(node.file_name or "", "START", loc)
+        else:
+            # INITIATE / GENERATE / TERMINATE write the file whose
+            # ``FD ... REPORT IS`` names the report: it must be open.
+            for file_name in report_writer_files(node, self._report_to_file):
+                self._check_open(file_name, getattr(node, "statement_type", ""), loc)
         # GOBACK / STOP RUN are intentionally NOT handled here. _dispatch()
         # is reached for every nested statement, including ones in an
         # IF/EVALUATE arm, where it ends only that arm's path: _run_arm

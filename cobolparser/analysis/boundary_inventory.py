@@ -61,6 +61,7 @@ from ..models.statements.io import (
     IOWriteStatement,
 )
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement, ExecImsStatement
+from ._files import report_to_file_map, report_writer_files
 from ._names import RELAXED_IDENTIFIER_TOKEN_RE, callee_names
 from .host_var_resolver import _QUALIFIED_HOST_VAR_RE
 from .value_tracker import DynamicCallAnalyzer
@@ -465,6 +466,8 @@ class BoundaryInventoryAnalyzer:
         # made keys depend on walk order and let an early site keep a key
         # that was a prefix of a later sibling's text.
         self._exec_texts: dict[str, list[str]] = {}
+        # Report Writer report / report-group name -> its report file.
+        self._report_to_file: dict[str, str] = {}
 
     def analyze(
         self,
@@ -488,6 +491,7 @@ class BoundaryInventoryAnalyzer:
         DynamicCallAnalyzer().analyze(ast)
 
         self._exec_texts = self._collect_exec_texts(procedure)
+        self._report_to_file = report_to_file_map(ast)
 
         for paragraph in self._all_paragraphs(procedure):
             statements = paragraph.statements
@@ -662,6 +666,22 @@ class BoundaryInventoryAnalyzer:
 
         if isinstance(statement, IOAcceptStatement):
             self._classify_accept(statement, ref, index, report)
+            return
+
+        if getattr(statement, "statement_type", None) == "GENERATE" and (
+            report_writer_files(statement, self._report_to_file)
+        ):
+            # Report Writer: GENERATE writes a report line (or a whole
+            # report) to the file whose ``FD ... REPORT IS`` names it -- the
+            # program's output, so an OUT boundary keyed on the group or
+            # report it names, like WRITE on its record (#499). A report
+            # group is no FILE SECTION record, so no record layout.
+            report.boundaries.append(
+                Boundary(
+                    ref=ref("WRITE", str(statement.report_name).upper()),
+                    direction="OUT",
+                )
+            )
             return
 
         # DisplayStatement and everything else: not a mockable boundary.

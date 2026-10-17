@@ -160,6 +160,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Report Writer output is no longer invisible to the file analyzers**
+  (#499). A report file (`FD f REPORT IS r`) is written only by `INITIATE`
+  / `GENERATE` / `TERMINATE`, which no analyzer handled: the CRUD matrix
+  showed `----`, IOLogger logged only OPEN/CLOSE, `gen-fixtures
+  --list-boundaries` had no OUT boundary, `lineage` had no port, and
+  `io-sequence` let a GENERATE on an unopened file pass. The FD's `REPORT
+  IS` clause is now kept in the AST (FILE SECTION metadata `report_files`),
+  and the three verbs write that file: C in the CRUD matrix, an IOLogger
+  `WRITE`, a `WRITE_BEFORE_OPEN` check in io-sequence, an OUT `WRITE`
+  boundary per GENERATE, and lineage edges from every `SOURCE` / `SUM`
+  operand of the printed groups to the report file's port.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
