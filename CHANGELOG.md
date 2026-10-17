@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`unused-variables` / `lint` no longer report an item a SCREEN SECTION
+  binds as never referenced** (#501). The DATA DIVISION parser skipped the
+  SCREEN SECTION whole, so every WORKING-STORAGE item named in a screen
+  field's `USING` / `FROM` / `TO` read as unused, and `xref` listed the screen
+  itself (`DISPLAY MAIN-SCREEN`) as an undefined data item. The skip now keeps
+  each named screen entry and each bound operand in the section's metadata;
+  unused-variables counts the operands as used, and xref records them
+  (`FROM` read, `TO` write, `USING` both) and declares the screen entries
+  (kind `screen-item`). The rest of the screen grammar is still not modelled.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

@@ -99,6 +99,7 @@ from .unused_variables import (
     _walk_expression_operands,
     collect_declared_items,
     inherited_data_records,
+    screen_section_references,
 )
 
 # --------------------------------------------------------------------------
@@ -139,6 +140,8 @@ KIND_CONDITION_NAME = "condition-name"
 KIND_PARAGRAPH = "paragraph"
 KIND_SECTION = "section"
 KIND_FILE = "file"
+#: A SCREEN SECTION entry (#501): the parser keeps only its name and line.
+KIND_SCREEN_ITEM = "screen-item"
 
 #: Kind ordering used when sorting ``XrefReport.entries``; unknown kinds sort
 #: last, then alphabetically, so the ordering is total and deterministic.
@@ -148,6 +151,7 @@ _KIND_ORDER: dict[str, int] = {
     KIND_FILE: 2,
     KIND_PARAGRAPH: 3,
     KIND_SECTION: 4,
+    KIND_SCREEN_ITEM: 5,
 }
 
 # Roles that name a procedure rather than a data item, and roles that name a
@@ -508,8 +512,9 @@ class XrefAnalyzer:
     - The declared-symbol set is the one ``collect_declared_items`` defines
       (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE), plus files,
       procedures, level-88 condition names (FILLER parents included),
-      level-66 ``RENAMES`` items and ``INDEXED BY`` index names.
-      SCREEN / COMMUNICATION / REPORT SECTION items and special registers are
+      level-66 ``RENAMES`` items, ``INDEXED BY`` index names and the named
+      SCREEN SECTION entries (``screen-item``, #501).
+      COMMUNICATION / REPORT SECTION items and special registers are
       outside it, so a reference to one reads as undefined -- reported, with
       a caveat saying so, rather than silently swallowed.
     - Symbols are resolved by uppercased name, not by structural identity, so
@@ -573,6 +578,7 @@ class XrefAnalyzer:
         self._duplicates = set()
 
         self._collect_data_definitions(ast)
+        self._collect_screen_definitions(ast)
         self._collect_file_definitions(ast)
         self._collect_procedure_definitions(ast)
         self._collect_references(ast)
@@ -852,6 +858,38 @@ class XrefAnalyzer:
                 if fd_file:
                     self._define_file(str(fd_file), record.location)
 
+    def _collect_screen_definitions(self, ast: CobolProgram) -> None:
+        """Every named SCREEN SECTION entry, from the section's
+        ``screen_items`` metadata (#501): ``DISPLAY MAIN-SCREEN`` /
+        ``ACCEPT MAIN-SCREEN`` then resolve instead of reading as undefined.
+        A name a DATA DIVISION item already declares is left to that item.
+        """
+        data_div = ast.data_division
+        if data_div is None:
+            return
+        for section in data_div.sections:
+            if not isinstance(section, CobolSection):
+                continue
+            if (section.section_name or "").upper() != "SCREEN":
+                continue
+            for entry in section.get_metadata("screen_items") or []:
+                name = str(entry.get("name") or "")
+                if not name or name.upper() in self._data:
+                    continue
+                line = entry.get("line")
+                location = (
+                    SourceLocation(line, entry.get("column") or 1)
+                    if line
+                    else section.location
+                )
+                self._define(
+                    name,
+                    KIND_SCREEN_ITEM,
+                    location,
+                    level=entry.get("level"),
+                    section="SCREEN",
+                )
+
     def _define_file(self, name: str, location: SourceLocation) -> None:
         """Declare a file once, from whichever half is seen first.
 
@@ -1010,6 +1048,26 @@ class XrefAnalyzer:
                 self._record_structural(
                     [occurs.depending_on], item.location, "OCCURS DEPENDING ON"
                 )
+        # SCREEN SECTION USING / FROM / TO operands (#501): FROM is shown,
+        # TO is stored by ACCEPT, USING is both.
+        data_div = ast.data_division
+        if data_div is not None:
+            for reference in screen_section_references(data_div):
+                line = reference.get("line")
+                if not line:
+                    continue
+                location = SourceLocation(line, reference.get("column") or 1)
+                clause = str(reference.get("clause") or "").upper()
+                roles = {
+                    "FROM": [ROLE_READ],
+                    "TO": [ROLE_WRITE],
+                    "USING": [ROLE_READ, ROLE_WRITE],
+                }.get(clause, [ROLE_REFERENCE])
+                for name in sorted(_extract_identifiers(reference.get("text"))):
+                    for role in roles:
+                        self._record(
+                            name, role, location, "SCREEN SECTION", None, exact=True
+                        )
 
     def _record_structural(
         self, values: list[str], location: SourceLocation, statement: str

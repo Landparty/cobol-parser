@@ -153,6 +153,63 @@ _SECTION_BREAK_HEADERS: frozenset[str] = frozenset(
 # (usually WORKING-STORAGE). See _skip_section.
 _UNSUPPORTED_SECTION_HEADERS: frozenset[str] = frozenset({"SCREEN", "COMMUNICATION"})
 
+#: Screen-description clause words that can follow a level number in place of
+#: a screen-item name (``05 LINE 1 COLUMN 7 ...``). The lexer makes several
+#: of them plain identifiers, so they are told apart by spelling.
+_SCREEN_CLAUSE_WORDS: frozenset[str] = frozenset(
+    {
+        "FILLER",
+        "LINE",
+        "LINES",
+        "COLUMN",
+        "COL",
+        "PLUS",
+        "BLANK",
+        "BELL",
+        "BEEP",
+        "BLINK",
+        "HIGHLIGHT",
+        "LOWLIGHT",
+        "REVERSE-VIDEO",
+        "UNDERLINE",
+        "FOREGROUND-COLOR",
+        "FOREGROUND-COLOUR",
+        "BACKGROUND-COLOR",
+        "BACKGROUND-COLOUR",
+        "VALUE",
+        "PIC",
+        "PICTURE",
+        "USING",
+        "FROM",
+        "TO",
+        "AUTO",
+        "AUTO-SKIP",
+        "SECURE",
+        "NO-ECHO",
+        "REQUIRED",
+        "FULL",
+        "ERASE",
+        "EOL",
+        "EOS",
+        "SIGN",
+        "JUSTIFIED",
+        "JUST",
+        "BLANK-WHEN-ZERO",
+        "USAGE",
+        "OCCURS",
+        "GLOBAL",
+        "PROMPT",
+        "SIZE",
+        "CONTROL",
+    }
+)
+_NOISE_TOKEN_TYPES: frozenset[TokenType] = frozenset(
+    {TokenType.NEWLINE, TokenType.WHITESPACE, TokenType.COMMENT}
+)
+#: Screen-field clauses whose operand is a data item: ``FROM`` is DISPLAYed,
+#: ``TO`` is stored by ACCEPT, ``USING`` is both.
+_SCREEN_DATA_CLAUSES: frozenset[str] = frozenset({"USING", "FROM", "TO"})
+
 
 class DataDivisionParser(BaseDivisionParser):
     """Parser for COBOL Data Division.
@@ -533,7 +590,18 @@ class DataDivisionParser(BaseDivisionParser):
         if _dp and _dp.type == TokenType.PERIOD:
             token_stream.consume()
 
-        # Discard the body until the next section/division header.
+        # Discard the body until the next section/division header. A SCREEN
+        # SECTION still says which data items its fields display and accept
+        # (USING / FROM / TO) and what its screen items are called, so those
+        # are kept (#501): without them every bound WORKING-STORAGE item
+        # read as unused and every DISPLAY/ACCEPT of a screen as undefined.
+        screen = section_name.upper() == "SCREEN"
+        screen_items: list[dict[str, Any]] = []
+        screen_references: list[dict[str, Any]] = []
+        entry_start = True  # the next level number starts an entry
+        expect_name: int | None = None  # level number just seen
+        expect_operand: str | None = None  # USING / FROM / TO just seen
+        reference: dict[str, Any] | None = None  # operand being collected
         while not token_stream.is_empty():
             token = token_stream.peek()
             if not token:
@@ -562,13 +630,65 @@ class DataDivisionParser(BaseDivisionParser):
                 if at_division_boundary(token_stream):
                     break
 
+            if screen and tok_type not in _NOISE_TOKEN_TYPES:
+                if reference is not None:
+                    if value_upper in ("OF", "IN") and not reference["open"]:
+                        reference["text"] += f" {value_upper} "
+                        reference["open"] = True
+                    elif reference["open"] and tok_type == TokenType.IDENTIFIER:
+                        reference["text"] += tok_value
+                        reference["open"] = False
+                    else:
+                        screen_references.append(
+                            {k: v for k, v in reference.items() if k != "open"}
+                        )
+                        reference = None
+                if expect_operand is not None:
+                    if tok_type == TokenType.IDENTIFIER:
+                        reference = {
+                            "clause": expect_operand,
+                            "text": tok_value,
+                            "line": getattr(token.location, "line", None),
+                            "column": getattr(token.location, "column", 1),
+                            "open": False,
+                        }
+                    expect_operand = None
+                elif expect_name is not None:
+                    if (
+                        tok_type == TokenType.IDENTIFIER
+                        and value_upper not in _SCREEN_CLAUSE_WORDS
+                    ):
+                        screen_items.append(
+                            {
+                                "name": tok_value,
+                                "level": expect_name,
+                                "line": getattr(token.location, "line", None),
+                                "column": getattr(token.location, "column", 1),
+                            }
+                        )
+                    expect_name = None
+                elif entry_start and tok_type == TokenType.LEVEL_NUMBER:
+                    expect_name = int(tok_value) if tok_value.isdigit() else 0
+                if value_upper in _SCREEN_DATA_CLAUSES and reference is None:
+                    expect_operand = value_upper
+                entry_start = tok_type == TokenType.PERIOD
+
             token_stream.consume()
+
+        if reference is not None:
+            screen_references.append(
+                {k: v for k, v in reference.items() if k != "open"}
+            )
 
         result: dict[str, Any] = {
             "type": section_name.lower(),
             "data_items": [],
             "exec_sql_items": [],
         }
+        if screen_items:
+            result["screen_items"] = screen_items
+        if screen_references:
+            result["screen_references"] = screen_references
         if section_location is not None:
             result["location"] = section_location
         return result
@@ -746,6 +866,10 @@ class DataDivisionParser(BaseDivisionParser):
                     report_files = division_content[key].get("report_files")
                     if report_files:
                         section.set_metadata("report_files", dict(report_files))
+                    for screen_key in ("screen_items", "screen_references"):
+                        screen_value = division_content[key].get(screen_key)
+                        if screen_value:
+                            section.set_metadata(screen_key, list(screen_value))
 
                 division_node.add_section(section)
 
