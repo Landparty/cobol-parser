@@ -196,6 +196,11 @@ technical set, like CICS RESP); PCB status / MQ CompCode stay business too.
 `IMS_COMMANDS` completed (no ROLLB), `EXEC_DLI_COMMANDS` added; the parser and
 IMSSegmentAnalyzer read them; function-code candidates are no longer filtered.
 
+## 2026-10-17 -- cobol.yml paths expand ~ / $VAR; missing dirs reported (#550)
+
+[cli.md](cli.md): `_path_list` expansion, `missing_directories()`, the
+`config` marker and the stderr warning. [tests.md](tests.md): config tests.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

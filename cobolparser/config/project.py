@@ -57,6 +57,7 @@ are carried here verbatim, so this package never has to know their schema.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -166,6 +167,22 @@ class ProjectConfig:
     # Raw `mockymock:` / `analyzer:` sections, for the tools that own them.
     tools: dict[str, Any] = field(default_factory=dict)
 
+    def missing_directories(self) -> list[tuple[str, str]]:
+        """``(key, path)`` for each ``copybook_path`` / ``callee_path`` entry
+        that is not an existing directory, checked now (not at load time, so
+        a long-lived reader sees a directory created since). A typo there
+        otherwise only surfaced as "Copybook 'X' not found" on some later
+        program (#550)."""
+        return [
+            (key, entry)
+            for key, entries in (
+                ("project.copybook_path", self.copybook_path),
+                ("project.callee_path", self.callee_path),
+            )
+            for entry in entries
+            if not Path(entry).is_dir()
+        ]
+
     def tool_section(self, name: str) -> dict[str, Any]:
         """The raw mapping for another tool's section, ``{}`` if absent."""
         section = self.tools.get(name)
@@ -205,11 +222,16 @@ def _string_list(value: Any, where: str, source: Path) -> tuple[str, ...]:
 
 def _path_list(value: Any, where: str, source: Path) -> tuple[str, ...]:
     """A `_string_list` whose entries are directories, resolved against the
-    config file's directory so they mean the same thing from any cwd."""
+    config file's directory so they mean the same thing from any cwd.
+
+    ``~`` and ``$VAR`` / ``${VAR}`` are expanded first, as the shell does for
+    the matching ``--copybook-path ~/cpy`` flag: joined on as written,
+    ``~/cpy`` became ``<cfgdir>/~/cpy`` and silently found nothing (#550).
+    """
     base = source.parent
     resolved = []
     for entry in _string_list(value, where, source):
-        entry_path = Path(entry)
+        entry_path = Path(os.path.expandvars(os.path.expanduser(entry)))
         resolved.append(
             str(entry_path if entry_path.is_absolute() else base / entry_path)
         )

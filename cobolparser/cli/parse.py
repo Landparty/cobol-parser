@@ -4423,6 +4423,12 @@ def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:
             }
         ),
         "tools": dict(config.tools),
+        # Present only when some path entry is not a directory (#550).
+        **(
+            {"missing_directories": [path for _, path in missing]}
+            if (missing := config.missing_directories())
+            else {}
+        ),
     }
 
 
@@ -4445,6 +4451,7 @@ def _cmd_config(args: argparse.Namespace) -> None:
 
     lines.append(f"Config file: {config.source}")
     lines.append(f"Schema version: {config.version}")
+    missing = set(payload.get("missing_directories", ()))
     for section in ("project", "data", "lint"):
         values = payload[section]
         if not values:
@@ -4454,7 +4461,15 @@ def _cmd_config(args: argparse.Namespace) -> None:
         for key, value in values.items():
             if isinstance(value, list):
                 lines.append(f"  {key}:")
-                lines.extend(f"    - {entry}" for entry in value)
+                lines.extend(
+                    f"    - {entry}"
+                    + (
+                        "  (not an existing directory)"
+                        if key in ("copybook_path", "callee_path") and entry in missing
+                        else ""
+                    )
+                    for entry in value
+                )
             elif isinstance(value, bool):
                 # Spelled the way the file spells it, not Python's True.
                 lines.append(f"  {key}: {'true' if value else 'false'}")
@@ -4723,6 +4738,16 @@ def main() -> None:
                 "for it and parses without it",
                 file=sys.stderr,
             )
+        for key, missing in config.missing_directories():
+            # Only for a path this run actually takes from the file: one the
+            # subcommand reads and the user did not override (#550).
+            dest = key.split(".", 1)[1]
+            if hasattr(args, dest) and dest not in args_provided:
+                print(
+                    f"warning: {config.source} {key} entry {missing} is not "
+                    "an existing directory",
+                    file=sys.stderr,
+                )
 
     if not hasattr(args, "func"):
         parser.print_help()
