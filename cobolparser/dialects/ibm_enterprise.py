@@ -147,12 +147,12 @@ class ExecIMSStatement(CobolStatement):
     def set_command(self, command: str) -> None:
         """Set the IMS command."""
         self._ims_command = command.upper()
-        # Determine IMS call type. Recognizes every DL/I call type
-        # IBMEnterpriseCobol.IMS_COMMANDS does (GU/GN/GNP and their hold
-        # forms, ISRT/REPL/DLET, plus the checkpoint/recovery, message and
-        # system-service calls) -- restricting this to the first six left
-        # `ims_call_type` at "UNKNOWN" for a recognized command.
-        if self._ims_command in IBMEnterpriseCobol.IMS_COMMANDS:
+        # Determine IMS call type from the EXEC DLI command vocabulary, the
+        # same set the parser's ``ExecImsStatement`` reads (#481): this node
+        # is an EXEC statement, so the CALL function codes (hold forms GHU /
+        # GHN / GHNP, message calls CHNG / PURG / ...) are not commands here,
+        # while LOAD / SCHD / SYMCHKP / QUERY / ... are.
+        if self._ims_command in IBMEnterpriseCobol.EXEC_DLI_COMMANDS:
             self.ims_call_type = self._ims_command
 
     def add_option(self, option: str, value: str = "") -> None:

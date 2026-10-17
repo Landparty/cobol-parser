@@ -80,11 +80,13 @@ the parser's SQL model.
   (CHNG/CMD/GCMD/PURG/AUTH/SETO) and system services (CHKP/XRST/SYNC/ROLB/ROLL/
   ROLS/SETS/SETU, APSB/DPSB/PCB/TERM, INIT/INQY/LOG/STAT/ICAL/...).
   ENQUEUE/DEQUEUE/XDLT/XRPL and `ROLLB` are not DL/I calls and are not in it
-  (#481). The dialect's own `ExecIMSStatement.ims_call_type` and
-  `IMSSegmentAnalyzer._IMS_FUNCTION_CODES` read this set (#595).
-* `EXEC_DLI_COMMANDS` is the command-level (`EXEC DLI`) vocabulary, which the
-  parser's `ExecImsStatement.ims_call_type` reads (`ibm_exec_statements.
-  _IMS_CALL_TYPES` is this set). It differs from the call codes: no hold forms
+  (#481). `is_ims_command()` and `IMSSegmentAnalyzer._IMS_FUNCTION_CODES`
+  read this set (#595).
+* `EXEC_DLI_COMMANDS` is the command-level (`EXEC DLI`) vocabulary, which
+  both EXEC nodes read: the parser's `ExecImsStatement.ims_call_type`
+  (`ibm_exec_statements._IMS_CALL_TYPES` is this set) and the dialect's own
+  `ExecIMSStatement.ims_call_type`, so the two agree (#481; the dialect node
+  used to read the CALL codes and called `GHU` known, `LOAD` unknown). It differs from the call codes: no hold forms
   (holds are implicit) and no message calls, but LOAD/SCHD/SYMCHKP/QUERY/
   REFRESH/RETRIEVE/ACCEPT. So `EXEC DLI GHU` is `UNKNOWN`. Only the
   abbreviated command word is listed; the spelled-out `GET UNIQUE` /

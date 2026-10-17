@@ -15,6 +15,7 @@ import pytest
 from cobolparser import parse_cobol
 from cobolparser.analysis import IMSSegmentAnalyzer, ims_segment_analyzer
 from cobolparser.dialects.ibm_enterprise import IBMEnterpriseCobol
+from cobolparser.models.ast_base import SourceLocation
 from cobolparser.parsers.statements import ibm_exec_statements
 
 # ── #481: EXEC DLI command words ─────────────────────────────────────────────
@@ -69,6 +70,27 @@ def test_exec_dli_has_no_hold_forms():
     # Holds are implicit in EXEC DLI; GHU is a CALL function code only.
     assert _exec_dli_call_type("GHU") == "UNKNOWN"
     assert "GHU" in IBMEnterpriseCobol.IMS_COMMANDS
+
+
+@pytest.mark.parametrize(
+    "command", ["GU", "ISRT", "LOAD", "SCHD", "SYMCHKP", "GHU", "CHNG", "XDLT"]
+)
+def test_dialect_exec_ims_node_agrees_with_the_parser_node(command):
+    # The dialect's EXEC-IMS node classified against the CALL function codes,
+    # so it called GHU known and LOAD unknown -- the opposite of the parser's
+    # node for the same EXEC DLI text (#481).
+    dialect_node = IBMEnterpriseCobol().parse_exec_ims(command, SourceLocation(1, 1))
+    assert dialect_node.ims_call_type == _exec_dli_call_type(command)
+
+
+def test_dialect_exec_ims_node_uses_the_exec_dli_vocabulary():
+    dialect = IBMEnterpriseCobol()
+    assert dialect.parse_exec_ims("LOAD", SourceLocation(1, 1)).ims_call_type == (
+        "LOAD"
+    )
+    assert dialect.parse_exec_ims("GHU", SourceLocation(1, 1)).ims_call_type == (
+        "UNKNOWN"
+    )
 
 
 def test_parser_and_analyzer_read_the_dialect_lists():

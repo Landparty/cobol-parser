@@ -165,7 +165,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UNKNOWN` while the non-command `XDLT` was accepted: the parser kept its own
   list. It now reads the new `IBMEnterpriseCobol.EXEC_DLI_COMMANDS` (the
   command-level vocabulary: no hold forms, so `EXEC DLI GHU` stays
-  `UNKNOWN`). `IMS_COMMANDS`, the DL/I call function codes, gained FLD / POS
+  `UNKNOWN`), and so does the dialect's own `ExecIMSStatement`
+  (`parse_exec_ims`), which had classified against the CALL function codes
+  (`GHU` known, `LOAD` unknown). `IMS_COMMANDS`, the DL/I call function codes, gained FLD / POS
   / AUTH / SETO / APSB / DPSB / PCB / INIT / ICAL / ... and lost the non-call
   `ROLLB`. `ims-dli` reads it too, and no longer drops a function-code
   candidate missing from its list: a variable with `VALUE 'GU'` later set to
