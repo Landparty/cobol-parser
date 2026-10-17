@@ -115,6 +115,12 @@ and INSPECT operands are scanned; INSPECT reads a `FUNCTION` operand whole.
 [analysis/data-use.md](analysis/data-use.md): numeric / alphanumeric special
 register sets and `LENGTH OF x` resolve instead of counting as unresolved.
 
+## 2026-10-17 -- SELECT key and padding items are references (#549, #556)
+
+[analysis/data-use.md](analysis/data-use.md): xref's `_visit_select_clauses`
+adds RECORD / ALTERNATE / RELATIVE KEY and PADDING CHARACTER; unused-variables
+counts PADDING CHARACTER.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
