@@ -465,6 +465,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`05 X BINARY-LONG.`). Any other word gets a parse warning,
   a `data-items` `unresolved` line with `offset_ambiguous` offsets, and a
   `gen-data` caveat.
+* **OCCURS expansion is bounded across nested tables, and a cut is reported**
+  (#376). Only each table was capped (10,000 occurrences), so nested tables
+  multiplied: `OCCURS 1000` inside `OCCURS 1000` materialized a million
+  fields, and a mistyped `OCCURS 99999999` around `OCCURS 9999` ran
+  gen-fixtures, lineage and field-impact for minutes. An elementary item now
+  expands to at most 100,000 occurrences across all its tables (an inner
+  table is cut to what the outer ones leave); lineage and field-impact on
+  that program take about 2 seconds. Every table either cap cuts is named
+  in gen-data's warnings, record-view caveats and gen-fixtures'
+  `unresolved`, where it used to be cut silently.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

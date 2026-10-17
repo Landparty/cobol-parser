@@ -92,6 +92,10 @@ layout_warnings=None)`, or `.from_copybook_source()` / `.from_copybook_file()`
 `layout_warnings` names each `COPY` left unexpanded, and is the first entry
 of every `DecodeResult.caveats` (and so of compare's); the CLI prints them
 once as `warning:` and skips them in decode's `note:` loop.
+`RecordViews.caveats` (also in every `DecodeResult.caveats`) opens with
+`layout.occurs_expansion_caveats()`: a table the expansion caps cut short
+leaves the view shorter than the real record, so every offset after it is
+wrong for a real file (#376).
 `decode_bytes(data, view=..., max_records=..., skip=...) -> DecodeResult`;
 `decode_file(path, ...)` is the same in binary mode (a COMP field routinely
 contains 0x0A, which a text-mode read would translate).
