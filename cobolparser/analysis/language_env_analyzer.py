@@ -279,6 +279,53 @@ def _collect_text_fields(stmt: CobolStatement) -> list[str]:
             if isinstance(item, str):
                 _add(item)
 
+    # EVALUATE WHEN selectors and SEARCH WHEN conditions (#506). An EVALUATE
+    # arm is a WhenClause node with ``selectors`` dicts; a SEARCH arm is a
+    # plain dict with its ``condition`` text. A quoted selector literal is
+    # prose (its quotes are stripped, so the flag is the only tell).
+    for clause in getattr(stmt, "when_clauses", None) or []:
+        if isinstance(clause, dict):
+            condition_text = clause.get("condition")
+            if isinstance(condition_text, str):
+                _add(condition_text)
+            continue
+        for selector in getattr(clause, "selectors", None) or []:
+            if not isinstance(selector, dict):
+                continue
+            for key, quoted_key in (
+                ("text", None),
+                ("value", "quoted"),
+                ("start", "start_quoted"),
+                ("end", "end_quoted"),
+            ):
+                value = selector.get(key)
+                if isinstance(value, str) and not (
+                    quoted_key and selector.get(quoted_key)
+                ):
+                    _add(value)
+
+    # INSPECT operands: TALLYING FOR / REPLACING BY / CONVERTING FROM-TO and
+    # every BEFORE / AFTER delimiter (#506).
+    for attr, keys in (
+        ("tallying_clauses", ("value", "before", "after")),
+        ("replacing_clauses", ("from_value", "to_value", "before", "after")),
+    ):
+        for inspect_clause in getattr(stmt, attr, None) or []:
+            if isinstance(inspect_clause, dict):
+                for key in keys:
+                    value = inspect_clause.get(key)
+                    if isinstance(value, str):
+                        _add(value)
+    for attr in (
+        "converting_from",
+        "converting_to",
+        "converting_before",
+        "converting_after",
+    ):
+        value = getattr(stmt, attr, None)
+        if isinstance(value, str):
+            _add(value)
+
     return fields
 
 

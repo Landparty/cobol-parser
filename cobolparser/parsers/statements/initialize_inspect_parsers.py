@@ -493,7 +493,16 @@ class InspectStatementParser(IStatementParser):
             return None
         ts.consume()
         value = literal_operand_text(v)
-        if v.type == TokenType.IDENTIFIER:
+        if v.type == TokenType.IDENTIFIER and value.upper() == "FUNCTION":
+            # ``FUNCTION LOWER-CASE(A)`` is one operand. Read as an identifier
+            # it left ``LOWER-CASE(A)`` behind: TALLYING took it for a second
+            # operand, BY kept the bare word FUNCTION and CONVERTING dropped
+            # the whole clause (#506).
+            name = ts.peek()
+            if name and name.type == TokenType.IDENTIFIER and name.value:
+                ts.consume()
+                value = consume_optional_qualifiers(ts, f"{value} {name.value}")
+        elif v.type == TokenType.IDENTIFIER:
             value = consume_optional_qualifiers(ts, value)
         skip_statement_separators(ts)
         return value

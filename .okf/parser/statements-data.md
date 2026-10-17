@@ -187,7 +187,10 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   REPLACING) loops until neither qualifier matches, so `BEFORE` and `AFTER
   INITIAL` may both appear in either order (each at most once); its delimiter is
   read by `_consume_inspect_value`, so `BEFORE INITIAL SPACE` (figurative) and
-  `AFTER INITIAL ENT(2)` are taken whole. `CONVERTING` takes subscripted /
+  `AFTER INITIAL ENT(2)` are taken whole, and so is an intrinsic operand
+  (`FUNCTION LOWER-CASE(A)` -> `"FUNCTION LOWER-CASE ( A )"`; read as an
+  identifier it had become two TALLYING operands, a bare `FUNCTION` after BY,
+  and a dropped CONVERTING clause, #506). `CONVERTING` takes subscripted /
   figurative operands and keeps its BEFORE/AFTER phrase as `converting_before` /
   `converting_after` (in `to_dict()` only when present). The outer "consume to
   period" trailer in `parse()` breaks on a statement boundary and owns the H9

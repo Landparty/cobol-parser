@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- language-env scans WHEN and INSPECT operands (#506)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md),
+[parser/statements-data.md](parser/statements-data.md): EVALUATE / SEARCH WHEN
+and INSPECT operands are scanned; INSPECT reads a `FUNCTION` operand whole.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`language-env` finds intrinsics in WHEN conditions and INSPECT operands**
+  (#506). EVALUATE WHEN selectors, SEARCH WHEN conditions and INSPECT
+  TALLYING / REPLACING / CONVERTING operands were never scanned, so a
+  program whose only intrinsic sat there reported
+  `uses_intrinsic_functions: false`. The INSPECT parser now also reads
+  `FUNCTION name(args)` as one operand: TALLYING had split it in two,
+  `REPLACING ... BY` kept only the word `FUNCTION`, and CONVERTING dropped
+  the whole clause.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
