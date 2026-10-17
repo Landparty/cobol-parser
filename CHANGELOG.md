@@ -475,6 +475,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that program take about 2 seconds. Every table either cap cuts is named
   in gen-data's warnings, record-view caveats and gen-fixtures'
   `unresolved`, where it used to be cut silently.
+* **`PERFORM S1 THRU S2` with a SECTION as the end covers S2's paragraphs**
+  (#577). `range_members` stopped at the end section's header, so
+  `program-flow` reported `['S1', 'A1', 'S2']` without B1 / B2, MCP
+  `callers_of('B1')` missed the PERFORM, and the flowchart's `[THRU n]`
+  undercounted. The range now runs through the section's last paragraph
+  (`['S1', 'A1', 'S2', 'B1', 'B2']`), as gen-fixtures' constant folding
+  already counted it.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
