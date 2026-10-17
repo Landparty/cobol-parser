@@ -503,7 +503,10 @@ below always does this.
 **Two numbers per procedure**: `cyclomatic_complexity` (1 plus one decision
 point per IF, per WHEN arm on EVALUATE/SEARCH excluding WHEN OTHER/default,
 per loop-form PERFORM -- TIMES/UNTIL/VARYING, a bare `PERFORM target` is not
-a decision point since it always runs exactly once -- per target of a
+a decision point since it always runs exactly once; each AFTER phrase of a
+PERFORM VARYING adds one more decision *and* one more nesting level, being a
+nested loop with its own UNTIL, so the AFTER form scores what the nested
+inline-PERFORM form does (#514) -- per target of a
 computed `GO TO ... DEPENDING ON` (an N-way branch plus the out-of-range
 fall-through, scored like an N-arm EVALUATE; a plain GO TO adds nothing and
 neither changes nesting depth) -- and per *present*

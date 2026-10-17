@@ -13,7 +13,8 @@ Two complexity numbers are reported per procedure:
 
 - ``cyclomatic_complexity`` -- classic McCabe: 1 plus one decision point per
   IF, per WHEN arm (EVALUATE/SEARCH, excluding WHEN OTHER/the default), per
-  loop-form PERFORM (TIMES/UNTIL/VARYING -- a bare ``PERFORM target`` is not
+  loop-form PERFORM and per AFTER phrase of a PERFORM VARYING (TIMES/UNTIL/
+  VARYING -- a bare ``PERFORM target`` is not
   a decision point, it always runs exactly once), per target of a computed
   ``GO TO ... DEPENDING ON`` (an N-target computed GO TO is an N-way branch
   plus the out-of-range fall-through, scored like an N-arm EVALUATE), and
@@ -414,9 +415,13 @@ class ComplexityAnalyzer:
                 isinstance(node, PerformStatement)
                 and node.perform_type in _LOOP_PERFORM_TYPES
             ):
-                counts["decisions"] += 1
-                counts["max_depth"] = max(counts["max_depth"], depth + 1)
-                child_depth = depth + 1
+                # Each AFTER phrase is a loop nested inside the previous one,
+                # with its own UNTIL test: score it as the nested inline
+                # PERFORM VARYING it is equivalent to (#514).
+                loops = 1 + len(node.after_clauses or ())
+                counts["decisions"] += loops
+                counts["max_depth"] = max(counts["max_depth"], depth + loops)
+                child_depth = depth + loops
             elif isinstance(node, GoStatement) and node.depending_on_variable:
                 # A computed GO TO is an N-way branch (plus fall-through when
                 # the variable is out of range): one decision per target, the

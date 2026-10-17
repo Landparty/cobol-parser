@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`complexity` scores `PERFORM VARYING ... AFTER ...` as the nested loops
+  it is** (#514). Each AFTER phrase is a loop with its own UNTIL test, but a
+  loop PERFORM counted one decision and one nesting level however many it
+  had, so `VARYING A ... AFTER B` scored 2 / depth 1 where the equivalent
+  nested inline PERFORMs score 3 / depth 2. Each AFTER now adds one decision
+  and one level.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
