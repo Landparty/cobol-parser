@@ -39,11 +39,14 @@ report: HostVarResolutionReport = HostVariableResolver().resolve(ast)   # .resol
 Resolves SQL host variables (`:var-name`) in EXEC SQL blocks against WORKING-STORAGE
 definitions.
 
-**Name matching is verbatim.** `_column_index` keys DCLGEN columns by their
-own upper-cased name, so `CUST_ID` and the host variable `CUST-ID` DCLGEN
-generates for it do *not* pair up here. `DclgenChecker` (below) does that
-normalization itself rather than changing this resolver's semantics under its
-other consumers.
+**Columns are keyed by their DCLGEN host-variable name.** `dclgen_name()`
+(`_` -> `-`, upper-cased) keys `_column_index` / `_column_table_map`, and a
+host variable is looked up the same way, so `:CUST-ID` gets `db2_column`
+`CUST_ID`, and a host variable with no DATA DIVISION item still resolves
+through its column. `get_column_index()` and `column_name_collisions` use
+that form too (`CUST-ID`, not `CUST_ID`). Matching them verbatim paired only
+the columns with no underscore in their name (#572). `DclgenChecker` imports
+the same function, so the two cannot drift apart.
 
 A DCLGEN member's `DECLARE TABLE` in WORKING-STORAGE carries a qualified
 `SCHEMA.TABLE` name, which `DeclareTableStatement` extracts, so both this
@@ -73,8 +76,8 @@ fix to the type mapping fixes the check too.
 
 **The name normalization is load-bearing.** DB2 columns are underscored
 (`CUST_ID`); the host variables DCLGEN generates are hyphenated (`CUST-ID`),
-because `_` is not a COBOL data-name character. `_normalize()` (`_` -> `-`,
-upper-cased) is applied to both sides via `_column_index()`. Without it the
+because `_` is not a COBOL data-name character. `_normalize()` (the
+resolver's `dclgen_name()`: `_` -> `-`, upper-cased) is applied to both sides via `_column_index()`. Without it the
 checker reports that no column matches *any* host variable — i.e. it checks
 nothing while looking like it had. That was the first bug found in
 development, and `test_an_underscored_column_is_matched_to_its_hyphenated_host_variable`

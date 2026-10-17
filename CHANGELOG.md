@@ -201,6 +201,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unused-variables` and had no `xref` references. The expression is now
   kept as `ContinueStatement.delay_expression` and its operands count as
   read; a missing `SECONDS` is a parse error.
+* **`HostVariableResolver` links a host variable to its DCLGEN column**
+  (#572). Columns were indexed by their raw names, so `:CUST-ID` never
+  matched `CUST_ID`: `db2_column` was `None` for every underscored column,
+  and a host variable with no DATA DIVISION item was unresolved. Columns are
+  now keyed (and `get_column_index()` / `column_name_collisions` reported) by
+  the DCLGEN host-variable form, through a `dclgen_name()` that
+  `DclgenChecker` now shares.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
