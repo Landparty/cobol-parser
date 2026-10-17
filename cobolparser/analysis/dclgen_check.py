@@ -85,7 +85,7 @@ from ..models.sql_statements import (
     ExecSQLStatement,
     SQLStatementType,
 )
-from .host_var_resolver import HostVariableResolver
+from .host_var_resolver import HostVariableResolver, dclgen_name
 
 #: Severity ordering, shared with :mod:`.lint` so a DCLGEN finding grades on
 #: the same scale as every other rule.
@@ -613,13 +613,11 @@ def _normalize(name: str) -> str:
     """A name in the form both sides can be compared in.
 
     DB2 column names are underscored (``CUST_ID``); the COBOL host variables
-    DCLGEN generates for them are hyphenated (``CUST-ID``), because ``_`` is
-    not a COBOL data-name character.  DCLGEN does that substitution itself,
-    so a checker that compared the two verbatim would report that no column
-    matches *any* host variable -- which is to say, it would check nothing
-    while looking like it had.
+    DCLGEN generates for them are hyphenated (``CUST-ID``). The resolver's
+    :func:`~.host_var_resolver.dclgen_name` owns that rule, so the column a
+    host variable resolves to there and here is always the same one (#572).
     """
-    return name.strip().upper().replace("_", "-")
+    return dclgen_name(name)
 
 
 def _column_index(resolution: Any) -> dict[str, list[tuple[str, DB2ColumnDefinition]]]:
