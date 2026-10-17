@@ -392,6 +392,13 @@ with no DATA DIVISION exits 1.
 new `flag_record_layout()`; `record_layout` / `explain_symbol` report
 `offset_ambiguous` and an `incomplete-analysis` caveat like `data-items`.
 
+## 2026-10-17 -- gen-fixtures coverage counts unresolved SQL/ACCEPT boundaries (#505)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md),
+[generators/fixtures.md](generators/fixtures.md): boundary gaps are recorded
+on the `Boundary` too; OCCURS host variables / ACCEPT targets are named
+unsupported; the bundle's `unresolved` lists each gap once.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

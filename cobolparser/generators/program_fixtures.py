@@ -312,7 +312,7 @@ class ProgramFixtureGenerator:
                     len(scenario.expectations),
                 )
             scenario.expectations.extend(expectations)
-            unresolved.extend(extra_unresolved)
+            unresolved.extend([n for n in extra_unresolved if n not in unresolved])
         self._pin_read_keys(
             ast, index, scenario, unresolved, counter.counts.success_skipped
         )
@@ -426,7 +426,7 @@ class ProgramFixtureGenerator:
                         len(scenario.expectations),
                     )
                 scenario.expectations.extend(expectations)
-                unresolved.extend(extra_unresolved)
+                unresolved.extend([n for n in extra_unresolved if n not in unresolved])
             # Gaps are reported once, by the happy path above.
             self._pin_read_keys(
                 ast, index, scenario, None, counter.counts.success_skipped
