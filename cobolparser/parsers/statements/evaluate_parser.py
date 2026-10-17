@@ -1,5 +1,6 @@
 """Evaluate statement parser implementing IStatementParser interface."""
 
+import re
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
@@ -50,6 +51,36 @@ def _is_condition_phrase(words: list[str]) -> bool:
     return any(
         word in _CONDITION_WORDS or (index > 0 and word in _SIGN_TEST_WORDS)
         for index, word in enumerate(words)
+    )
+
+
+_ARITHMETIC_SYMBOLS = frozenset({"+", "-", "*", "/", "**"})
+_NUMBER_RE = re.compile(r"^\d+(\.\d*)?$|^\.\d+$")
+
+
+def _is_expression_selector(pairs: list[tuple[str, TokenType | None]]) -> bool:
+    """Whether a multi-token value selector is a computed operand, not a
+    literal (#333): a subscripted / reference-modified item (``WS-T (2)``,
+    ``WS-B (1:2)``), arithmetic (``WS-N + 1``), or several tokens none of
+    which is a literal (``FUNCTION CURRENT-DATE``). A signed number (``- 5``)
+    and ``ALL 'X'`` stay literals.
+    """
+    if len(pairs) < 2:
+        return False
+    words = [
+        "" if token_type == TokenType.STRING_LITERAL else token
+        for token, token_type in pairs
+    ]
+    if "(" in words:
+        return True
+    if any(word in _ARITHMETIC_SYMBOLS for word in words[1:]):
+        return True
+    if words[0].upper() == "ALL":
+        return False
+    return not any(
+        token_type in (TokenType.STRING_LITERAL, TokenType.FIGURATIVE_CONSTANT)
+        or _NUMBER_RE.match(token)
+        for token, token_type in pairs
     )
 
 
@@ -419,10 +450,11 @@ class EvaluateStatementParser(IStatementParser):
         condition-name selectors on it, so an additive marker is the
         backward-compatible way to make the distinction visible.
         """
+        types_known = bool(token_types) and len(token_types or ()) == len(
+            selector_tokens
+        )
         types: list[TokenType | None] = (
-            list(token_types)
-            if token_types and len(token_types) == len(selector_tokens)
-            else [None] * len(selector_tokens)
+            list(token_types or ()) if types_known else [None] * len(selector_tokens)
         )
         texts: list[str] = (
             list(token_texts)
@@ -509,7 +541,11 @@ class EvaluateStatementParser(IStatementParser):
             return selector
 
         literal: dict[str, Any] = {"type": "Literal", "value": selector_text}
-        if single_type == TokenType.IDENTIFIER:
+        if types_known and _is_expression_selector(pairs):
+            # ``WHEN WS-N + 1`` / ``WHEN WS-B (1:2)``: a value only the
+            # running program knows, not the literal text ``WS-N + 1`` (#333).
+            literal["expression"] = True
+        elif single_type == TokenType.IDENTIFIER:
             literal["identifier"] = True
         elif single_type == TokenType.FIGURATIVE_CONSTANT:
             literal["figurative"] = True

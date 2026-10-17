@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A computed EVALUATE WHEN selector is no longer a literal** (#333).
+  `WHEN WS-N + 1`, `WHEN WS-BASE (1:2)` and `WHEN WS-TE (2)` were stored as
+  plain `Literal` values with no marker, so gen-fixtures solved against the
+  text `'WS-N + 1'` and counted WHEN OTHER as targeted against it. Such
+  selectors now carry `"expression": True`; the constraint extractor
+  reports them (and range bounds of that shape) as unsupported, and
+  business-rules renders them unquoted.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

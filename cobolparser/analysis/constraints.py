@@ -1288,6 +1288,16 @@ def _extract_evaluate_selector(
     # that is the rare case, and it errs toward the visible answer.
     if sel_type == "Literal":
         value = str(sel.get("value", ""))
+        if sel.get("expression") or (
+            not sel.get("quoted") and not _is_literal_operand(value, quoted=False)
+        ):
+            # ``WHEN WS-N + 1`` / ``WHEN WS-B (1:2)``: a value the running
+            # program computes, not the literal text (#333).
+            unsupported.append(
+                f"{origin}: WHEN selector is a computed operand rather than a "
+                f"literal, which is not supported in v1: {value}"
+            )
+            return None
         if sel.get("figurative"):
             # ``WHEN SPACES`` is the figurative constant, not the six
             # characters S-P-A-C-E-S: model it as the IF path does.
@@ -1311,6 +1321,18 @@ def _extract_evaluate_selector(
             FieldConstraint(resolved, "eq", (_literal_value(value),), origin, False)
         ]
     if sel_type == "Range":
+        computed = [
+            str(sel.get(key, ""))
+            for key in ("start", "end")
+            if not sel.get(f"{key}_quoted")
+            and not _is_literal_operand(str(sel.get(key, "")), quoted=False)
+        ]
+        if computed:
+            unsupported.append(
+                f"{origin}: WHEN range bound is a computed operand rather than "
+                f"a literal, which is not supported in v1: {', '.join(computed)}"
+            )
+            return None
         start = _literal_value(str(sel.get("start", "")))
         end = _literal_value(str(sel.get("end", "")))
         named = [bound for bound in (start, end) if index.resolve(bound) is not None]

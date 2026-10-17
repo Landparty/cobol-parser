@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Computed EVALUATE selectors (#333)
+
+[parser/statements-control.md](parser/statements-control.md),
+[analysis/fixtures-support.md](analysis/fixtures-support.md),
+[analysis/business-rules.md](analysis/business-rules.md): `WHEN WS-N + 1` /
+`WHEN WS-B (1:2)` carry `"expression": True`; constraints report them
+unsupported instead of solving the text as a literal.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

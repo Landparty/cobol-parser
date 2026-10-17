@@ -319,7 +319,11 @@ forms narrow nothing;
 class tests (`IS NUMERIC`/`IS ALPHABETIC`) become `class_numeric`/
 `class_alphabetic`; sign/zero tests (`IS POSITIVE`/`NEGATIVE`/`ZERO`) fold
 directly into the relational vocabulary (`gt 0`/`lt 0`/`eq 0`) rather than
-getting their own domain-handling branch. `negated` only carries meaning for
+getting their own domain-handling branch. An EVALUATE selector marked
+`"expression"` (or any unquoted one with internal whitespace / parentheses),
+and a range bound of that shape, is reported unsupported ("computed operand
+rather than a literal") instead of being solved as literal text (#333), so
+WHEN OTHER is not counted as targeted against made-up text either. `negated` only carries meaning for
 `class_numeric`/`class_alphabetic`/`figurative`, which have no separate "not"
 op name (unlike `eq`/`ne` or `in_set`/`not_in_set`, which absorb negation
 directly into the op choice).

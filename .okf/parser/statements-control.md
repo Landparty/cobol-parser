@@ -70,7 +70,12 @@ arm.
 - **Single-token selectors say what they were** (#313): a one-token `Literal`
   carries `"identifier": True`, `"figurative": True` (`WHEN SPACES`) or
   `"quoted": True` (`WHEN 'SPACES'`); a `Range` carries `"start_quoted"` /
-  `"end_quoted"` when that bound is one STRING_LITERAL (#391). Additive markers;
+  `"end_quoted"` when that bound is one STRING_LITERAL (#391). A multi-token
+  value selector that is computed -- a `(` (subscript / reference modification /
+  FUNCTION call), an arithmetic symbol after its first token (`WS-N + 1`), or no
+  literal token at all -- carries `"expression": True` (#333,
+  `_is_expression_selector`); a signed number (`- 5`) and `ALL 'X'` do not.
+  Additive markers;
   `type` stays `"Literal"` / `"Range"`. Pinned by
   `tests/regression/test_evaluate_figurative_when.py`,
   `tests/unit/test_evaluate_variants.py::TestRangeQuotedMarkers`.
