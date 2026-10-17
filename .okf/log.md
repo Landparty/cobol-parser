@@ -21,7 +21,8 @@ its paragraphs. [generators/record-data.md](generators/record-data.md):
 `OCCURS UNBOUNDED` gets an `unresolved` lower-bound line.
 [analysis/data-use.md](analysis/data-use.md),
 [analysis/business-rules.md](analysis/business-rules.md): `DIB*` are special
-registers (technical); PCB status / MQ CompCode stay business, documented.
+registers to xref, but their tests stay business rules (carved out of the
+technical set, like CICS RESP); PCB status / MQ CompCode stay business too.
 
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 

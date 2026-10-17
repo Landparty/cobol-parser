@@ -168,10 +168,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which is sized at its minimum, so its `occurs.max` and its groups'
   `byte_length` read as a lower bound (the JSON shape is unchanged). The
   EXEC DLI interface block (`DIBSTAT`, `DIBSEGM`, ...) is a special register,
-  as `EIB*` is: xref no longer lists `DIBSTAT` as undefined, and
-  business-rules counts a `DIBSTAT` test as technical. An IMS PCB status
-  field and an MQ CompCode stay business rules, like a CICS `RESP` field;
-  this is now documented.
+  as `EIB*` is: xref no longer lists `DIBSTAT` as undefined. Its tests stay
+  business rules, like a CICS `RESP` field's and an IMS PCB status field's
+  (`DIBSTAT = 'GE'` -> "CUSTOMER NOT FOUND"), and business-rules now lists
+  `DIBSTAT` among a rule's inputs instead of calling it "a condition naming
+  no data item". An MQ CompCode stays a business rule too; this is now
+  documented.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

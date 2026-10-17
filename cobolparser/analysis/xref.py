@@ -232,9 +232,16 @@ _SPECIAL_REGISTERS: frozenset[str] = frozenset(
         "DFHVALUE",
         "DFHCOMMAREA",
         "DFHEIBLK",
-        # The EXEC DLI interface block (DIB), supplied by the translator as
-        # the EIB is for CICS: never declared, and plumbing like EIBRESP
-        # (#311).
+    }
+)
+
+#: The EXEC DLI interface block (DIB), supplied by the translator as the EIB
+#: is for CICS: never declared, so a special register to xref (#311). Unlike
+#: ``EIB*`` it is *not* technical to business-rules: EXEC DLI has no
+#: ``RESP()`` option, so ``DIBSTAT`` is the only way such a program tests a
+#: not-found -- the role a CICS ``RESP`` field plays, which stays business.
+_DLI_INTERFACE_BLOCK: frozenset[str] = frozenset(
+    {
         "DIBVER",
         "DIBSTAT",
         "DIBSEGM",
@@ -244,6 +251,7 @@ _SPECIAL_REGISTERS: frozenset[str] = frozenset(
         "DIBDBORG",
     }
 )
+_SPECIAL_REGISTERS = _SPECIAL_REGISTERS | _DLI_INTERFACE_BLOCK
 
 
 def is_special_register(name: str) -> bool:

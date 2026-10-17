@@ -3,8 +3,8 @@
 (1) ``diff`` moving every paragraph of a renamed section is pinned in
 ``tests/unit/analysis/test_ast_diff.py``. Here: (2) ``OCCURS UNBOUNDED``
 sized at its minimum said so nowhere, and (3) the EXEC DLI interface block
-(``DIBSTAT``) was an undefined name and a business rule, while its CICS
-twin ``EIBRESP`` is a special register and technical.
+(``DIBSTAT``) was an undefined name; it is a special register now, but
+its tests stay business rules like a CICS ``RESP`` field's.
 """
 
 from __future__ import annotations
@@ -48,19 +48,26 @@ def test_dibstat_is_a_special_register_not_undefined() -> None:
     assert "DIBSTAT" not in report.to_dict()["undefined"]
 
 
-def test_dibstat_tests_are_technical_rules() -> None:
-    ast = _ast("EXECDLI")
-    default = BusinessRuleExtractor().analyze(ast)
-    assert default.technical_rules_excluded > 0
-    for rule in default.rules:
-        assert not any(
-            "DIBSTAT" in (b.condition or "") for b in rule.branches
-        ), rule.to_dict()
-    everything = BusinessRuleExtractor(include_technical=True).analyze(ast)
-    assert any(
-        r.technical and any("DIBSTAT" in (b.condition or "") for b in r.branches)
-        for r in everything.rules
-    )
+def test_dibstat_tests_stay_business_rules() -> None:
+    """A special register to xref, but a status field to business-rules:
+    EXEC DLI has no RESP(), so DIBSTAT is how it tests a not-found, the role
+    a CICS RESP field plays ("NOTFND -> CUSTOMER NOT FOUND" is business)."""
+    report = BusinessRuleExtractor().analyze(_ast("EXECDLI"))
+    assert report.technical_rules_excluded == 0
+    (evaluate,) = [
+        r
+        for r in report.rules
+        if any("DIBSTAT = 'GE'" in (b.condition or "") for b in r.branches)
+    ]
+    assert evaluate.kind == "validation"
+    assert "DIBSTAT" in evaluate.inputs
+    failed = [
+        r
+        for r in report.rules
+        if r.kind == "validation"
+        and any("DIBSTAT" in (b.condition or "") for b in r.branches)
+    ]
+    assert len(failed) == 3  # SCHD FAILED, CUSTOMER NOT FOUND, REPL FAILED
 
 
 def test_mq_compcode_stays_a_business_rule() -> None:
