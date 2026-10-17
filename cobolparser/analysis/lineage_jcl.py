@@ -21,6 +21,11 @@ Utility steps understood:
   is a ``reformat`` and the flow stops with a caveat.
 - IEBGENER / ICEGENER: ``SYSUT1`` to ``SYSUT2`` (a ``GENERATE``/``RECORD``
   control statement makes it a reformat).
+
+Control statements read from a dataset (``//SYSIN DD DSN=PROD.CNTL(X)``, a
+``DFSPARM`` dataset) cannot be seen, so the step is never assumed to be a
+byte-for-byte copy: it is a ``reformat`` (the flow stops there) and a caveat
+names the control dataset.
 - IDCAMS ``REPRO`` with ``INFILE``/``OUTFILE`` DD names or
   ``INDATASET``/``OUTDATASET`` names, in either order.
 
@@ -173,9 +178,16 @@ def _sum_ranges(control: str) -> tuple[tuple[int, int], ...]:
 
 def bindings_from_jobs(
     jobs: Iterable[Any],
+    caveats: list[str] | None = None,
 ) -> tuple[list[DatasetBinding], list[Passthrough]]:
     """DD -> dataset bindings per program, and utility pass-throughs, for
-    every step of every (already PROC-expanded) jcl-parser ``Job``."""
+    every step of every (already PROC-expanded) jcl-parser ``Job``.
+
+    ``caveats``, when given, receives one line per step whose flow could not
+    be read (pass them on as ``LineageGraph(join_caveats=...)``), so a step
+    left out is never mistaken for a step that moves nothing.
+    """
+    notes: list[str] = caveats if caveats is not None else []
     bindings: list[DatasetBinding] = []
     passthroughs: list[Passthrough] = []
     for job in jobs:
@@ -190,7 +202,9 @@ def bindings_from_jobs(
             if not program:
                 continue
             if program in _SORT_PROGRAMS:
-                passthroughs += _sort_passthroughs(dds, job_name, step_name, program)
+                passthroughs += _sort_passthroughs(
+                    dds, job_name, step_name, program, notes
+                )
                 continue
             if program in _COPY_PROGRAMS:
                 dst = _dsn(dds, "SYSUT2")
@@ -198,6 +212,12 @@ def bindings_from_jobs(
                 kind = (
                     "reformat"
                     if re.search(r"\b(GENERATE|RECORD)\b", control)
+                    or (
+                        dst is not None
+                        and _unread_control(
+                            dds, ("SYSIN",), program, step_name, job_name, notes
+                        )
+                    )
                     else "copy"
                 )
                 passthroughs += [
@@ -298,10 +318,38 @@ def _repro_passthroughs(
     return out
 
 
+def _step_label(program: str, step: str | None, job: str | None) -> str:
+    return f"{program} step {step or '?'}" + (f" in job {job}" if job else "")
+
+
+def _unread_control(
+    dds: list[Any],
+    names: tuple[str, ...],
+    program: str,
+    step: str | None,
+    job: str | None,
+    notes: list[str],
+) -> bool:
+    """True (and a caveat) when a control DD of ``names`` is a dataset: its
+    statements are not read, so the step cannot be taken for a copy."""
+    unread = [dsn for name in names for dsn in _dsns(dds, name)]
+    if unread:
+        notes.append(
+            f"{_step_label(program, step, job)}: control statements are read "
+            f"from {', '.join(unread)}, which is not in-stream; the step is "
+            "treated as a reformat and values are not traced through it"
+        )
+    return bool(unread)
+
+
 def _sort_passthroughs(
-    dds: list[Any], job: str | None, step: str | None, program: str
+    dds: list[Any],
+    job: str | None,
+    step: str | None,
+    program: str,
+    notes: list[str],
 ) -> list[Passthrough]:
-    control = _control(dds, "SYSIN")
+    control = _control(dds, "SYSIN") + "\n" + _control(dds, "DFSPARM")
     inputs: list[str] = []
     for dd_name, dd in _named(dds):
         dsn = _dataset(dd)
@@ -314,6 +362,12 @@ def _sort_passthroughs(
             if dsn and dsn not in outputs:
                 outputs.append(dsn)
     kind = "reformat" if _REFORMAT_RE.search(control) else "copy"
+    if (
+        inputs
+        and outputs
+        and _unread_control(dds, ("SYSIN", "DFSPARM"), program, step, job, notes)
+    ):
+        kind = "reformat"
     ranges = _sum_ranges(control) if kind == "copy" else ()
     return [
         Passthrough(src, dst, kind, ranges, job, step, program)

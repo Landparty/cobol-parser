@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Field lineage no longer assumes a SORT / IEBGENER step whose control
+  statements live in a dataset is an exact copy** (#339). With
+  `//SYSIN DD DSN=PROD.CNTL(SRTCARD)` (or a `DFSPARM` dataset) the control
+  text was empty, so the step was classified `copy` and an OUTREC / BUILD in
+  the member went unseen. Such a step is now a `reformat` (the flow stops
+  there) and a caveat names the control dataset, through
+  `bindings_from_jobs(jobs, caveats)`, passed by `field-impact --jcl` and the
+  MCP server as `LineageGraph(join_caveats=...)` (which a graph built without
+  stored join edges no longer ignores). An in-stream `DFSPARM` is now read
+  along with `SYSIN`.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
