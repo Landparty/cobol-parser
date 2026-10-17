@@ -34,6 +34,7 @@ from ._utils import (
     consume_optional_qualifiers,
     consume_period,
     consume_procedure_qualifier,
+    get_parse_context,
     is_procedure_name_token,
     is_statement_boundary,
     looks_dedented_relative_to,
@@ -41,6 +42,7 @@ from ._utils import (
     matches_keyword,
     peek_past_noise,
     previous_meaningful_token,
+    report_parse_error,
     skip_whitespace,
     token_column,
     token_location,
@@ -49,6 +51,15 @@ from ._utils import (
 from ._utils import (
     token_value_upper as _token_value_upper,
 )
+from .arithmetic_parsers import build_compute_expression_tree
+
+# Layout and separator tokens inside a CONTINUE AFTER delay expression.
+_DELAY_SKIPPED_TYPES = SEPARATOR_TOKEN_TYPES | {
+    TokenType.WHITESPACE,
+    TokenType.NEWLINE,
+    TokenType.COMMENT,
+    TokenType.CONTINUATION,
+}
 
 
 class ContinueStatementParser(IStatementParser):
@@ -63,8 +74,57 @@ class ContinueStatementParser(IStatementParser):
         start = token_stream.consume()
         stmt = ContinueStatement(token_location(start))
         skip_whitespace(token_stream)
+        if _token_value_upper(token_stream.peek()) == "AFTER":
+            self._parse_delay(token_stream, stmt)
         consume_period(token_stream)
         return stmt
+
+    @staticmethod
+    def _parse_delay(token_stream: ITokenStream, stmt: ContinueStatement) -> None:
+        """``CONTINUE AFTER arithmetic-expression SECONDS`` (Enterprise COBOL
+        6.4, #578): the expression is kept as text so its operands count as
+        read. AFTER cannot begin a statement, so it always belongs here.
+        """
+        token_stream.consume()  # AFTER
+        terms: list[str] = []
+        paren_depth = 0
+        closed = False
+        while not token_stream.is_empty():
+            token = token_stream.peek()
+            if token is None:
+                break
+            if token.type == TokenType.LEFT_PAREN:
+                paren_depth += 1
+            elif token.type == TokenType.RIGHT_PAREN:
+                paren_depth -= 1
+            elif paren_depth == 0:
+                upper = _token_value_upper(token)
+                if upper == "SECONDS":
+                    token_stream.consume()
+                    closed = True
+                    break
+                if token.type == TokenType.PERIOD or is_statement_boundary(token):
+                    break
+            if token.type not in _DELAY_SKIPPED_TYPES and token.value:
+                terms.append(token.value)
+            token_stream.consume()
+        merged: list[str] = []
+        for term in terms:
+            if term == "*" and merged and merged[-1] == "*":
+                merged[-1] = "**"
+            else:
+                merged.append(term)
+        stmt.set_delay_expression(
+            " ".join(merged) or None,
+            build_compute_expression_tree(merged, stmt.location),
+        )
+        if not closed or not merged:
+            report_parse_error(
+                get_parse_context(token_stream),
+                "CONTINUE AFTER requires an arithmetic expression followed "
+                "by SECONDS",
+                stmt.location,
+            )
 
 
 class NextSentenceStatementParser(IStatementParser):

@@ -700,6 +700,9 @@ Fields that are easy to miss, grouped by node.
   CHARACTERS` form) xor `data_item` (the `BASED` data-item form),
   `initialized`, `returning_target`. `FreeStatement` — `pointer_names:
   list[str]`.
+* `ContinueStatement` — `delay_expression` (text of `CONTINUE AFTER expr
+  SECONDS`, else `None`; in `to_dict()` only when set) and
+  `delay_expression_tree` (not serialized), #578.
 
 **Control (`control.py`)**
 

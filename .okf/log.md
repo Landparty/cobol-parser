@@ -44,6 +44,12 @@ variable under an OCCURS inexact, like every other edge through a table.
 [analysis/data-use.md](analysis/data-use.md): `LinkageChecker` maps each
 LINKAGE 01 to the item it REDEFINES; a group is referenced when any member is.
 
+## 2026-10-17 -- CONTINUE AFTER n SECONDS (#578)
+
+[parser/statements-control.md](parser/statements-control.md): the delay
+expression is parsed onto `ContinueStatement.delay_expression` and read by
+xref / unused-variables.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
