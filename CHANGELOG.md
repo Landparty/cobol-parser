@@ -195,6 +195,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its base item's storage, so the base and every overlay of it (through a
   chain, in either direction) now count as referenced when any one of them is
   on a USING / CALL / SET ADDRESS OF.
+* **`CONTINUE AFTER n SECONDS` is parsed** (#578). The Enterprise COBOL 6.4
+  delay phrase was dropped with an "Unparsed tokens starting at 'AFTER'"
+  warning, so a data item used only in the delay was listed by
+  `unused-variables` and had no `xref` references. The expression is now
+  kept as `ContinueStatement.delay_expression` and its operands count as
+  read; a missing `SECONDS` is a parse error.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

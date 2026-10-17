@@ -44,6 +44,7 @@ from ..models.statements.data import (
     UnstringStatement,
 )
 from ..models.statements.misc import (
+    ContinueStatement,
     MergeStatement,
     SelectStatement,
     SortStatement,
@@ -143,6 +144,8 @@ _STR_ATTR_EXTRAS: dict[type, tuple[str, ...]] = {
         "converting_after",
     ),
     SearchStatement: ("table_name", "varying_variable"),
+    # ``CONTINUE AFTER expr SECONDS`` reads every operand of its delay (#578).
+    ContinueStatement: ("delay_expression",),
 }
 
 # Statement attributes holding a plain list of operand strings that never

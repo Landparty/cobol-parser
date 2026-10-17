@@ -77,6 +77,7 @@ from ..models.statements.io import (
 from ..models.statements.misc import (
     AllocateStatement,
     AlterStatement,
+    ContinueStatement,
     FreeStatement,
     MergeStatement,
     ReleaseStatement,
@@ -1355,6 +1356,12 @@ class XrefAnalyzer:
                 pairs.append((stmt.size_expr, ROLE_READ, True))
             if stmt.returning_target:
                 pairs.append((stmt.returning_target, ROLE_WRITE, True))
+        elif isinstance(stmt, ContinueStatement):
+            # ``CONTINUE AFTER expr SECONDS`` reads its delay operands (#578).
+            if stmt.delay_expression_tree is not None:
+                pairs.append((stmt.delay_expression_tree, ROLE_READ, True))
+            elif stmt.delay_expression:
+                pairs.append((_RawText(stmt.delay_expression), ROLE_READ, False))
         elif isinstance(stmt, FreeStatement):
             # FREE releases the storage and sets each pointer to NULL.
             pairs += [(name, ROLE_WRITE, True) for name in stmt.pointer_names]
@@ -1705,6 +1712,7 @@ class XrefAnalyzer:
 _ROLE_MAPPED_STATEMENTS: tuple[type, ...] = (
     AllocateStatement,
     AlterStatement,
+    ContinueStatement,
     ArithmeticStatement,
     CallStatement,
     ComputeStatement,
