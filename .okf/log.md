@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- MULTIPLY / DIVIDE GIVING keep both operands (#495)
+
+[parser/statements-data.md](parser/statements-data.md),
+[ast-models.md](ast-models.md), [analysis/flow.md](analysis/flow.md),
+[analysis/business-rules.md](analysis/business-rules.md): GIVING form records
+`source_operands`; statement text renders BY / INTO.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

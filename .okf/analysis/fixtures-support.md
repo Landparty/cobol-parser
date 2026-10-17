@@ -775,7 +775,11 @@ internal env) rather than approximating:
   reusing the target's own name as the second operand is directly what the
   statement means (multiplication has no target-is-also-an-addend hidden
   term the way ADD/SUBTRACT's TO/FROM accumulation does), so only GIVING
-  names are filtered from its operand list, never targets.
+  names are filtered from its operand list, never targets. The GIVING form
+  of MULTIPLY / DIVIDE reads its two operands from `source_operands` (#495):
+  filtering GIVING names out of `.operands` left one operand for `MULTIPLY A
+  BY A GIVING C` or `DIVIDE B INTO A GIVING A`, which poisoned the result
+  instead of folding it.
 * **ACCEPT/READ are a deliberate no-op, not an omission.** They are exactly
   the boundary categories `_tier2_expectations` seeds `env` from before the
   walk starts; falling through to the generic "unmodeled write" fallback

@@ -69,7 +69,11 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   MULTIPLY/DIVIDE's `BY` / `INTO` operand (`_consume_arithmetic_operand`) folds
   qualifiers and signs the same way. ADD/SUBTRACT record `source_operands` (the
   operand list before TO/FROM/GIVING, duplicates kept) so a consumer can tell an
-  addend from a target of the same name (`.operands` dedups).
+  addend from a target of the same name (`.operands` dedups). MULTIPLY/DIVIDE
+  record it for the GIVING form only, as `[first, second]` (both are sending
+  items; `MULTIPLY A BY B GIVING B` left one operand once GIVING names were
+  filtered from `.operands`, #495); format 1 leaves it `None`, since its BY/INTO
+  operand is a receiver.
 - **Targets.** `_consume_arithmetic_target` (ADD `TO`, SUBTRACT `FROM`, and
   MULTIPLY/DIVIDE format 1) folds `(subscript)` groups and `OF` / `IN` chains
   (`"Y OF Z"`, `"NAME ( SUB1 , SUB2 )"`). `ArithmeticStatement.target` is the
