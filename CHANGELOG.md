@@ -620,6 +620,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returned lines 300-499 and never line 800. The cap now trims context
   only: the line and its `after` lines first, the rest of the budget from
   `before`; `truncated` still records the cut.
+* **`decode` / `compare` report bad bytes in a numeric-edited field**
+  (#587). `deedit_numeric` checked only the digit positions, so any byte in
+  an insertion (`.` `,` `B` `0` `/`), fixed sign, `CR`/`DB` or currency
+  position -- and a space in a `9` position -- was read past: `'9999999'`
+  in `PIC ZZ9.99-` decoded as 999.99 with no error, `decode --strict`
+  exited 0 and `compare` called different bytes equal. It now re-edits the
+  value it read and rejects text that is not exactly that edited form, so
+  `deedit(edit(v)) == v` holds in both directions.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
