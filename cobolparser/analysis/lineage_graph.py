@@ -913,9 +913,16 @@ class LineageGraph:
             if node in start_set:
                 continue
             program, name, kind = self._describe(node)
-            if kind == "port" and adjacency.get(node):
+            if kind == "port" and any(
+                info.cross or nxt[0] != "P" or nxt[1] != node[1]
+                for nxt, info in adjacency.get(node, [])
+            ):
                 # A port is only worth reporting where the trail ends at it:
-                # a DD no JCL binds, a CALL to nothing, a console line.
+                # a DD no JCL binds, a CALL to nothing, a console line. A
+                # join (a bound dataset, a callee in the scan) carries the
+                # trail on; an edge back into the same program does not --
+                # an I-O file, a BY REFERENCE argument and a LINKAGE
+                # parameter are two-way ports and still trail ends (#510).
                 continue
             path: list[Hop] = []
             cursor = state

@@ -157,6 +157,12 @@ original's (pinned in `TestStoredJoinState`). Without `join_caveats` only
 the opaque-callee caveat is re-derived and `unjoined` is empty. A rebuilt
 graph records the edges it loads, so its own `join_edges()` re-exports them.
 `ImpactResult.start_found` is False when nothing matched the start.
+A port is a hit only where the trail ends at it: `_trace` drops it when
+some onward edge is a join (`cross`, or to a dataset / table node or
+another program). An edge back into the same program is no join, so a
+two-way port -- an unbound DD opened I-O, a BY REFERENCE argument to a
+program outside the scan, a `PROCEDURE DIVISION USING` parameter -- is
+reported (#510: any onward edge used to hide it).
 
 ## Bindings from JCL
 
