@@ -81,6 +81,13 @@ caveat, instead of being read as `REC(1:10)`.
 port only when an onward edge is a join, so an I-O file, a BY REFERENCE
 argument to an outside program and a LINKAGE parameter are reported.
 
+## 2026-10-17 -- MCP lineage hops cite their own file (#489)
+
+[mcp.md](mcp.md), [analysis/lineage.md](analysis/lineage.md): `Hop` carries
+`origin_file`, so `where_from` / `impact_of_change` no longer cite a program
+line in a copybook that has a statement of the same kind at that line;
+`edge_files` marks a key two files claim as `None`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

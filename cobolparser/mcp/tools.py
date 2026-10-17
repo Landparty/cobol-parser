@@ -1778,7 +1778,7 @@ def _hit(
     steps = []
     arrived: dict[str, Any] | None = None
     for hop in hit.path:
-        location = _hop_location(hop, index, response)
+        location = _hop_location(hop, index, response, workspace)
         how = hop.statement or hop.kind
         if location is not None:
             how += f" at {location['file']}:{location['line']}"
@@ -1800,13 +1800,21 @@ def _hit(
     return entry
 
 
-def _hop_location(hop: Any, index: Any, response: Response) -> dict[str, Any] | None:
+def _hop_location(
+    hop: Any, index: Any, response: Response, workspace: Workspace
+) -> dict[str, Any] | None:
     """Where one hop's statement is, or None for a join (no line of its own)."""
     if not hop.line or not hop.program:
         return None
     program = hop.program.upper()
-    file = index.edge_files.get((program, hop.line, hop.kind, hop.statement))
-    if file is None and program not in index.expanded:
+    origin = getattr(hop, "origin_file", None)
+    if origin:
+        # The hop's own edge says which file its line is in (#489): a
+        # copybook line and a program line of one number never collide.
+        return {"file": workspace.display(origin), "line": hop.line}
+    key = (program, hop.line, hop.kind, hop.statement)
+    file = index.edge_files.get(key)
+    if file is None and key not in index.edge_files and program not in index.expanded:
         file = index.program_files.get(program)
     if file is None:
         response.caveat(

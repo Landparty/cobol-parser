@@ -191,6 +191,9 @@ another program). An edge back into the same program is no join, so a
 two-way port -- an unbound DD opened I-O, a BY REFERENCE argument to a
 program outside the scan, a `PROCEDURE DIVISION USING` parameter -- is
 reported (#510: any onward edge used to hide it).
+`Hop.origin_file` (from `_EdgeInfo.origin_file`, the report edge's
+`origin.file` after `apply_source_map`, set in `_reach`) says which file a
+hop's line is in; it is not in `Hop.to_dict()` (#489, used by the MCP server).
 
 ## Bindings from JCL
 

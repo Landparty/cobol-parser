@@ -250,6 +250,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   program -- were never named. A port is now dropped only when the trail
   continues past it through a join (a bound dataset, a table, a callee in
   the scan).
+* **MCP `where_from` / `impact_of_change` cite the right file for each
+  step** (#489). A step's file was looked up by `(program, line, kind,
+  statement)`, so a MOVE at program line 13 and a MOVE at line 13 of a
+  PROCEDURE DIVISION copybook collided and one was cited in the other's
+  file. Each lineage hop now carries the file its edge was stamped with
+  (`Hop.origin_file`), and a key two files claim is reported as
+  `unmapped-location` rather than guessed.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
