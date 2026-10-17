@@ -1140,9 +1140,10 @@ class TestExplainSymbolFillerAndRenames:
         assert symbol["declared"] is True
         assert symbol["level"] == 66
         assert symbol["declared_at"]["line"] == 12
-        # R-A THRU R-B: bytes 0-4 of WS-REC.
+        # R-A THRU R-B: bytes 0-4 of WS-REC, as data-items places it (#563).
         assert symbol["layout"] == {
-            "qualified_name": "R-AB",
+            "qualified_name": "WS-REC.R-AB",
+            "usage": "DISPLAY",
             "byte_offset": 0,
             "byte_length": 5,
         }
