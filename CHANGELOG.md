@@ -417,6 +417,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CHARACTERS` / `ALL` / `LEADING` phrase (and each operand of `ALL` /
   `LEADING`) is now its own clause of the same counter, and an identifier
   starts a new counter only when `FOR` follows it.
+* **Every receiver of `MULTIPLY n BY a b` / `DIVIDE n INTO c d` is read and
+  written** (#534). xref graded every receiver after the first as
+  write-only, so `program-signature` (and MCP `program_brief`) called a
+  modified LINKAGE parameter `output` and `business-rules` left it out of the
+  rule's `inputs`. Field lineage, built on the same roles, also had one
+  receiver feeding the next (`A -> B`) for a GIVING-less ADD / SUBTRACT /
+  MULTIPLY / DIVIDE with several receivers; each receiver is now fed by
+  itself and the sending operands only.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

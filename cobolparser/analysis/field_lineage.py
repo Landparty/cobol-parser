@@ -1618,7 +1618,15 @@ class FieldFlowAnalyzer:
                 return set()
             receivers = [*stmt.targets, *([stmt.target] if stmt.target else [])]
             out = {r.qname for text in receivers for r in self._refs(text, ROLE_WRITE)}
-            for text in stmt.source_operands or []:
+            sending = stmt.source_operands
+            if sending is None and type(stmt).__name__ in (
+                "MultiplyStatement",
+                "DivideStatement",
+            ):
+                # No source list recorded: the first operand is the sender
+                # (``MULTIPLY n BY b c``, ``DIVIDE n INTO b c``; #534).
+                sending = list(stmt.operands[:1])
+            for text in sending or []:
                 out -= {r.qname for r in self._refs(text, ROLE_READ)}
             return out
         if isinstance(stmt, (StringStatement, UnstringStatement, InspectStatement)):
