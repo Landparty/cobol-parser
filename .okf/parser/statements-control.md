@@ -197,7 +197,11 @@ arm.
   `OMITTED` is an argument; a figurative constant (`BY CONTENT ZERO`) or a signed
   literal (`BY VALUE -7`) is one argument named by its text; `BY VALUE 100`,
   `ADDRESS OF x`, `LENGTH OF x` and subscripted / qualified data names are one
-  argument each. mocky-mock's `CAPTURE ARG n` counts depend on this list's arity.
+  argument each. `FUNCTION name [(args)] [(refmod)]` is one argument, spelled
+  as MOVE spells its source (`FUNCTION UPPER-CASE(WS-NAME)`, via the shared
+  `join_source_parts`; #579) -- left to the identifier path, `FUNCTION` became
+  an argument of its own and every later one moved a position right.
+  mocky-mock's `CAPTURE ARG n` counts depend on this list's arity.
 - **Passing mode persists** across a comma / space separated group: it is set
   once before the loop and changes only on a `BY` keyword or a bare `REFERENCE` /
   `CONTENT` / `VALUE` (`BY` is optional in IBM; #388): `USING BY CONTENT a, b`

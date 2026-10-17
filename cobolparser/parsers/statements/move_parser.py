@@ -9,6 +9,7 @@ from cobolparser.parsers.statements._utils import (
     STATEMENT_TOKEN_TYPES,
     consume_optional_qualifiers,
     get_parse_context,
+    join_source_parts,
     looks_dedented_relative_to,
     looks_like_paragraph_boundary,
     matches_keyword,
@@ -261,46 +262,4 @@ class MoveStatementParser(IStatementParser):
 
             token_stream.consume()
 
-        return _join_source_parts(source_parts)
-
-
-def _join_source_parts(parts: list[str]) -> str:
-    """Join collected source tokens back into readable COBOL text.
-
-    A bare ``"".join`` corrupted every multi-word source (``MOVE WS-A OF
-    WS-GRP`` became ``WS-AOFWS-GRP``; ``FUNCTION UPPER-CASE(WS-X)`` became
-    ``FUNCTIONUPPER-CASE(WS-X)``), while a bare ``" ".join`` would space out
-    subscripts. Words are space-separated; parens/commas follow the
-    subscript-aware convention ``_consume_arithmetic_target`` established:
-    no space before ``(``, none after ``(`` or before ``)``/``,``, so
-    ``TABLE (1, 2)`` renders as ``TABLE(1, 2)``. A reference-modification
-    colon joins tight on both sides (``WS-X(2:3)``, never ``WS-X(2 : 3)``
-    -- the spaced form is not what the source said and breaks any consumer
-    that re-parses the text). Single-token sources are returned unchanged.
-    """
-    out = ""
-    prev_part: str | None = None
-    # Tracks whether `prev_part` was itself a leading unary sign (one that
-    # starts a fresh operand: at the very start of the source, right after
-    # an opening paren, right after a ref-mod colon, or right after a comma
-    # between subscripts) so the digit that follows it glues on with no
-    # space even when the sign itself got a space (e.g. after a comma:
-    # "WS-TAB(WS-I, -1)").
-    prev_was_leading_sign = False
-    for part in parts:
-        if not part:
-            continue
-        is_sign = part in ("-", "+")
-        is_leading_sign = is_sign and prev_part in (None, "(", ",", ":")
-        if (
-            not out
-            or part in ("(", ")", ",", ":")
-            or prev_part in ("(", ":")
-            or prev_was_leading_sign
-        ):
-            out += part
-        else:
-            out += " " + part
-        prev_was_leading_sign = is_leading_sign
-        prev_part = part
-    return out
+        return join_source_parts(source_parts)

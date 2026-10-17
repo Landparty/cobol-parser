@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`CALL ... USING FUNCTION f(x)` is one argument** (#579). The CALL parser
+  took `FUNCTION` as an argument of its own and `f ( x )` as a subscripted
+  name, so every later argument sat one position too far right: field
+  lineage, `field-impact` and the MCP impact tools joined `CALLEE#n` to the
+  wrong formal parameter (or none) with no caveat, gen-fixtures recorded two
+  bogus resolution gaps and xref read `x` as a subscript. The argument is now
+  one parameter spelled the way MOVE spells its source
+  (`FUNCTION UPPER-CASE(WS-NAME)`, reference modifier included); lineage
+  treats it as flowing into the callee only (a function result is a
+  temporary, even BY REFERENCE), and gen-fixtures skips it like a literal.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

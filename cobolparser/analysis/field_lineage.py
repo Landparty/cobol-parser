@@ -1786,7 +1786,12 @@ class FieldFlowAnalyzer:
                 if not parameter.name or is_quoted_literal(parameter.name):
                     continue
                 mode = (parameter.passing_mode or "REFERENCE").upper()
-                by_reference = mode not in ("CONTENT", "VALUE")
+                # An intrinsic FUNCTION argument is a temporary: whatever the
+                # callee writes to it reaches none of the caller's items.
+                by_reference = mode not in (
+                    "CONTENT",
+                    "VALUE",
+                ) and not parameter.name.upper().startswith("FUNCTION ")
                 port = self._port(PORT_CALL, f"{callee}#{position}")
                 port.detail.update(
                     {"callee": callee, "position": position, "dynamic": stmt.is_dynamic}
