@@ -167,7 +167,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a caveat; any PRINT / SET / IF / ALTER / DEFINE / EXPORT qualifier
   did the same. A command word now starts a command only at the start of a
   statement (after a newline or `;`, or after `THEN` / `ELSE` / `DO`),
-  outside parentheses, and never inside a dataset name.
+  outside parentheses, and never inside a dataset name (`/* ... */`
+  comments are dropped first, so a command after one is still seen).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

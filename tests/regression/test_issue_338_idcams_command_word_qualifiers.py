@@ -59,3 +59,15 @@ def test_commands_still_end_a_repro() -> None:
         ("A.PRINT", "B.SET", "copy"),
         ("C.IN", "C.OUT", "copy"),
     ]
+
+
+@pytest.mark.parametrize(
+    "control",
+    [
+        "  /* COPY THE MASTER */ REPRO INFILE(IN) OUTFILE(OUT)\n",
+        "  /* A COMMENT THAT\n     SPANS LINES */ REPRO INFILE(IN) -\n    OUTFILE(OUT)\n",
+        "  REPRO INFILE(IN) /* THEN DELETE */ -\n    OUTFILE(OUT)\n",
+    ],
+)
+def test_a_comment_before_a_command_does_not_hide_it(control: str) -> None:
+    assert idcams(control) == [("DD.IN", "DD.OUT", "copy")]

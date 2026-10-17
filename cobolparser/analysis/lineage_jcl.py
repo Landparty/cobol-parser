@@ -146,8 +146,10 @@ def _dsn(dds: list[Any], name: str) -> str | None:
 
 def _repro_commands(control: str) -> list[str]:
     """The operand text of every IDCAMS ``REPRO`` command, continuation
-    (``-`` at the end of a line) joined."""
-    joined = re.sub(r"[-+]\s*\n", " ", control)
+    (``-`` at the end of a line) joined. ``/* ... */`` comments are dropped
+    first, so a command after a comment still starts its statement."""
+    uncommented = re.sub(r"/\*.*?\*/", " ", control, flags=re.DOTALL)
+    joined = re.sub(r"[-+]\s*\n", " ", uncommented)
     commands: list[str] = []
     for statement in re.split(r"[\n;]", joined):
         marks = [

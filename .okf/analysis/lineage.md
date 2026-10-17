@@ -167,7 +167,8 @@ into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT/ICETOOL (`SORTIN*`
 -> `SORTOUT` + `OUTFIL FNAMES`), IEBGENER/ICEGENER, IDCAMS REPRO (operands
 in any order, `-` continuations joined; a command word starts a command
 only at a statement start -- newline, `;`, or after `THEN`/`ELSE`/`DO` -- outside
-parentheses, so `PROD.DELETE.MASTER` does not end the REPRO, #338), IKJEFT01 `RUN PROGRAM(x)`. A
+parentheses, after `/* */` comments are dropped, so `PROD.DELETE.MASTER`
+does not end the REPRO, #338), IKJEFT01 `RUN PROGRAM(x)`. A
 blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
 referbacks resolve to the earlier step's dataset; quoted literals in
