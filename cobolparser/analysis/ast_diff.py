@@ -119,6 +119,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -1355,6 +1356,11 @@ class ProgramDiffer:
                 # are one storage format, not a change.
                 if _canonical_usage(old_value) == _canonical_usage(new_value):
                     continue
+            elif attr == "value_clause":
+                # `ZERO`/`ZEROES`, `7`/`007`, `+5`/`5.0` are one initial
+                # value (#543); the change still shows the text as coded.
+                if _canonical_value(old_value) == _canonical_value(new_value):
+                    continue
             elif _normalize(old_value) == _normalize(new_value):
                 continue
             record(kind, label, old_value, new_value)
@@ -1944,6 +1950,60 @@ def _picture_positions(picture: str) -> str:
     spellings of the same picture (`X(2)` / `XX`, `S9(3)V9(2)` / `S999V99`)
     compare equal."""
     return "".join(PictureClause._expand_symbols(picture))
+
+
+#: Singular and plural spellings of each figurative constant (#543).
+_FIGURATIVE_CANONICAL: dict[str, str] = {
+    "ZERO": "ZERO",
+    "ZEROS": "ZERO",
+    "ZEROES": "ZERO",
+    "SPACE": "SPACE",
+    "SPACES": "SPACE",
+    "HIGH-VALUE": "HIGH-VALUE",
+    "HIGH-VALUES": "HIGH-VALUE",
+    "LOW-VALUE": "LOW-VALUE",
+    "LOW-VALUES": "LOW-VALUE",
+    "QUOTE": "QUOTE",
+    "QUOTES": "QUOTE",
+    "NULL": "NULL",
+    "NULLS": "NULL",
+}
+
+_NUMERIC_LITERAL_RE = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)")
+#: A quoted literal with its optional type prefix (``X``, ``N``, ``NX``, ...).
+_PREFIXED_LITERAL_RE = re.compile(r"([A-Za-z]{0,2})['\"]")
+
+
+def _canonical_value(value: Any) -> Any:
+    """A VALUE clause in a form where equal initial values compare equal.
+
+    Figurative constants fold singular/plural (keeping a leading ``ALL``),
+    and a numeric literal becomes a ``Decimal`` (``007`` == ``7``, ``+5`` ==
+    ``5.0``). A quoted literal keeps its case -- ``'ab'`` and ``'AB'`` are
+    different values -- while everything else compares case-insensitively.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if _NUMERIC_LITERAL_RE.fullmatch(text):
+        try:
+            return Decimal(text)
+        except InvalidOperation:  # pragma: no cover - the regex admits none
+            return text
+    prefix = ""
+    words = text.split(None, 1)
+    if len(words) == 2 and words[0].upper() == "ALL":
+        prefix, text = "ALL ", words[1].strip()
+    literal = _PREFIXED_LITERAL_RE.match(text)
+    if literal:
+        kind = literal.group(1).upper()
+        body = text[literal.end(1) :]
+        # Hex digits are case-insensitive; text content is not.
+        if kind in ("X", "NX", "BX", "GX", "UX"):
+            body = body.upper()
+        return prefix + kind + body
+    upper = text.upper()
+    return prefix + _FIGURATIVE_CANONICAL.get(upper, upper)
 
 
 def _canonical_usage(usage: Any) -> str:
