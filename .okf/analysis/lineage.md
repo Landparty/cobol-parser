@@ -49,6 +49,13 @@ the record-relative byte offset/length `layout_offsets` computes) and
 | `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats, as is a FROM sub-select or a `TABLE(...)` table function -- matched on `TABLE` followed by `(`, so an ordinary table named `TABLE_CUST` / `TABLES_CFG` is traced, #340) |
 | `console` | `SYSIN` / `SYSOUT` (or the ACCEPT's `FROM` source) | ACCEPT / DISPLAY; `ACCEPT FROM DATE` / `DAY` / `DAY-OF-WEEK` / `TIME` (with or without a format qualifier) make no port -- the runtime's clock, not data entering the program |
 
+A contained program's nodes include its containers' GLOBAL records
+(`unused_variables.inherited_data_records`, laid out from the owning
+program's `compute_program_data_items`), so `DISPLAY A` of a GLOBAL `A` in
+the inner unit is an `A -> SYSOUT` edge, not a "not declared" caveat
+(#504). The item is keyed in the inner report like its own; no cross-program
+join links it to the container's node yet.
+
 Edge kinds: `move` (group MOVE is a byte overlay; CORRESPONDING pairs by
 name; literal reference modification narrows the range), `arith`,
 `string`, `init`, `set`, `aggregate` / `sql-expr` (SQL `SUM(...)` /

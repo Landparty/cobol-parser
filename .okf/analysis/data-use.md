@@ -379,6 +379,20 @@ Things worth knowing before trusting a field:
   children and are skipped in every sweep (`_contained_node_ids`) — otherwise
   a nested program's statements would read as the outer unit's references.
   Call `analyze()` separately per unit.
+* **GLOBAL items cross the unit boundary** (#504). A contained unit also
+  defines the records its containers make visible --
+  `unused_variables.inherited_data_records(ast)`: each enclosing program's
+  `GLOBAL` 01/77 records (all of a FACTORY / OBJECT unit's data for its
+  METHODs), innermost first, a name the unit or a nearer container declares
+  hiding a farther one -- at their own declaration line, so `DISPLAY A` in
+  the inner unit resolves instead of reading as `undefined`. The outer unit
+  folds in its contained programs' references to its *own* items
+  (`_collect_contained_references`: each direct child cross-referenced on
+  its own, its entries matched to the outer's by item identity), so `A`
+  lists the inner read too. The same helper scopes lineage
+  ([lineage.md](lineage.md)) and MoveTypeChecker; `collect_declared_items`
+  itself stays the unit's own items (it is what unused-variables reports).
+  Pinned by `tests/regression/test_issue_504_global_items_in_contained_programs.py`.
 * **Level-88s under a FILLER and level-66 RENAMES items are declared**
   (#485). `collect_declared_items` drops every FILLER, but
   `_collect_data_definitions` still walks a FILLER for its `ConditionNameItem`
@@ -433,6 +447,14 @@ report: MoveTypeReport = MoveTypeChecker().check(ast)
 
 Detects MOVE statements with type-incompatible sending/receiving fields based on
 PICTURE clause categories.
+
+**One unit's catalog and MOVEs** (#504). `_build_catalog` and `_check_moves`
+stop at a contained `CobolProgram`: walking into one let an inner namesake
+(`01 WS-X PIC X(3)`) make the outer `WS-X PIC 9(3)` ambiguous, so the outer
+MOVE went unresolved, and the outer report carried the inner unit's MOVEs.
+The catalog also takes the GLOBAL records of the enclosing programs
+(`inherited_data_records`), so a MOVE to a container's GLOBAL field is
+checked in the contained unit. lint checks every unit, so nothing is lost.
 
 **MOVE CORRESPONDING is expanded into its pairs** (see #383) by the IBM rule
 (same name path below the two groups, at least one of the two elementary;

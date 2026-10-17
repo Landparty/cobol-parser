@@ -99,6 +99,7 @@ from ..models.statements.misc import (
 from ._files import same_record_area_groups
 from ._names import callee_names
 from ._sql_flow import analyze_sql
+from .unused_variables import inherited_data_records
 from .value_tracker import DynamicCallAnalyzer
 from .xref import (
     ROLE_READ,
@@ -713,20 +714,41 @@ class FieldFlowAnalyzer:
 
     # -- data items --------------------------------------------------------
 
-    def _index_items(self, ast: CobolProgram) -> None:
-        from ..generators.data.layout_offsets import compute_program_data_items
-
-        data = compute_program_data_items(ast)
-        # One block per 01/77 record: the layout emits the record root first,
-        # then its subordinates with every group *after* its own children.
+    @staticmethod
+    def _record_blocks(entries: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        """Layout entries grouped one block per 01/77 record (level-66 and
+        level-88 entries dropped)."""
         blocks: list[list[dict[str, Any]]] = []
-        for entry in data["items"]:
+        for entry in entries:
             if int(entry.get("level") or 0) in (66, 88):
                 continue
             if not entry.get("parent_qualified_name") or not blocks:
                 blocks.append([entry])
             else:
                 blocks[-1].append(entry)
+        return blocks
+
+    def _index_items(self, ast: CobolProgram) -> None:
+        from ..generators.data.layout_offsets import compute_program_data_items
+
+        # One block per 01/77 record: the layout emits the record root first,
+        # then its subordinates with every group *after* its own children.
+        data = compute_program_data_items(ast)
+        blocks = self._record_blocks(data["items"])
+        # A contained program's statements can name its containers' GLOBAL
+        # records too (#504): they are indexed like its own, from the
+        # container's layout.
+        inherited: dict[int, tuple[CobolProgram, set[str]]] = {}
+        for owner, _section, record in inherited_data_records(ast):
+            inherited.setdefault(id(owner), (owner, set()))[1].add(record.name.upper())
+        for owner, names in inherited.values():
+            blocks += [
+                block
+                for block in self._record_blocks(
+                    compute_program_data_items(owner)["items"]
+                )
+                if str(block[0].get("name") or "").upper() in names
+            ]
         used: dict[str, int] = {}
         for block in blocks:
             raws = [str(e["qualified_name"]).upper() for e in block]

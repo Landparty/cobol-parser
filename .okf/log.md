@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- GLOBAL items in contained programs (#504)
+
+[analysis/data-use.md](analysis/data-use.md), [analysis/lineage.md](analysis/lineage.md):
+new `unused_variables.inherited_data_records`; xref defines inherited GLOBAL
+records and folds contained references into the outer unit; lineage indexes
+them; MoveTypeChecker stays inside its own unit plus inherited GLOBALs.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

@@ -32,6 +32,7 @@ from ..models.data_items import CobolDataItem, PictureClause
 from ..models.program import CobolProgram
 from ..models.statements import MoveStatement
 from ._names import base_data_name
+from .unused_variables import inherited_data_records
 
 
 class DataCategory(Enum):
@@ -648,8 +649,13 @@ class MoveTypeChecker:
         self._unresolved_function_count = 0
         violations: list[MoveTypeViolation] = []
 
-        # Phase 1: build catalog from DATA DIVISION
+        # Phase 1: build catalog from DATA DIVISION -- *ast*'s own, plus the
+        # GLOBAL records of the programs containing it (#504). A contained
+        # program's data and MOVEs are its own unit's business: walking them
+        # here let an inner namesake poison an outer item's category.
         self._build_catalog(ast)
+        for _owner, _section, record in inherited_data_records(ast):
+            self._build_catalog(record)
         self._index_catalog()
 
         # Phase 2: check every MOVE statement
@@ -697,7 +703,8 @@ class MoveTypeChecker:
 
         if hasattr(node, "children"):
             for child in node.children:
-                self._build_catalog(child, child_ancestors)
+                if not isinstance(child, CobolProgram):
+                    self._build_catalog(child, child_ancestors)
 
     def _index_catalog(self) -> None:
         """Fill the bare-name catalog from the collected declarations."""
@@ -734,7 +741,8 @@ class MoveTypeChecker:
 
         if hasattr(node, "children"):
             for child in node.children:
-                self._check_moves(child, violations)
+                if not isinstance(child, CobolProgram):
+                    self._check_moves(child, violations)
 
     def _validate_move(
         self, stmt: MoveStatement, violations: list[MoveTypeViolation]

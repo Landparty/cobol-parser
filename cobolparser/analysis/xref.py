@@ -96,6 +96,7 @@ from .unused_variables import (
     _qualifiers_match,
     _walk_expression_operands,
     collect_declared_items,
+    inherited_data_records,
 )
 
 # --------------------------------------------------------------------------
@@ -573,6 +574,7 @@ class XrefAnalyzer:
         self._collect_file_definitions(ast)
         self._collect_procedure_definitions(ast)
         self._collect_references(ast)
+        self._collect_contained_references(ast)
 
         if self._location_fallbacks:
             self._caveat(
@@ -722,37 +724,23 @@ class XrefAnalyzer:
         - A level-66 ``RENAMES`` item is a section child of its own
           (``RenamesItem``, not a ``CobolDataItem``), so the data-item walk
           never sees it.
+
+        A contained program also sees its containers' GLOBAL records
+        (``inherited_data_records``, #504): they are defined after its own
+        items, at their own declaration, so a reference to one resolves
+        instead of reading as undefined.
         """
         declared = {id(item) for item in collect_declared_items(ast)}
         data_div = ast.data_division
-        if data_div is None:
-            return
-        for data_section in data_div.sections:
+        sections = data_div.sections if data_div is not None else []
+        for data_section in sections:
             if not isinstance(data_section, CobolSection):
                 continue
             section = data_section.section_name or "UNKNOWN"
             if section.upper() not in _DATA_SECTION_NAMES:
                 continue
             for top_item in data_section.data_items:
-                for item in [top_item, *top_item.get_all_children()]:
-                    if id(item) in declared:
-                        self._define(
-                            item.name,
-                            KIND_DATA_ITEM,
-                            item.location,
-                            level=item.level,
-                            section=section,
-                            item=item,
-                        )
-                    elif not item.is_filler:
-                        continue
-                    self._define_condition_names(item, section)
-                    # `OCCURS ... INDEXED BY ix` declares `ix` as a name in
-                    # its own right -- it is not a data item of its own (no
-                    # level number, no PICTURE), but SET/SEARCH/subscript
-                    # references to it are real references a
-                    # cross-reference listing must resolve.
-                    self._define_index_names(item, section)
+                self._define_record(top_item, section, declared)
             for child in data_section.children:
                 if isinstance(child, RenamesItem) and child.name:
                     self._define(
@@ -763,6 +751,43 @@ class XrefAnalyzer:
                         section=section,
                         item=child,
                     )
+
+        for _owner, section, record in inherited_data_records(ast):
+            self._define_record(
+                record,
+                section,
+                {
+                    id(item)
+                    for item in [record, *record.get_all_children()]
+                    if not item.is_filler
+                    and not item.name.upper().startswith("ANONYMOUS-")
+                },
+            )
+
+    def _define_record(
+        self, top_item: CobolDataItem, section: str, declared: set[int]
+    ) -> None:
+        """Define *top_item*, its subordinates, their level-88s and index
+        names (the items in *declared* only, and the level-88s under any
+        FILLER)."""
+        for item in [top_item, *top_item.get_all_children()]:
+            if id(item) in declared:
+                self._define(
+                    item.name,
+                    KIND_DATA_ITEM,
+                    item.location,
+                    level=item.level,
+                    section=section,
+                    item=item,
+                )
+            elif not item.is_filler:
+                continue
+            self._define_condition_names(item, section)
+            # `OCCURS ... INDEXED BY ix` declares `ix` as a name in its own
+            # right -- it is not a data item of its own (no level number, no
+            # PICTURE), but SET/SEARCH/subscript references to it are real
+            # references a cross-reference listing must resolve.
+            self._define_index_names(item, section)
 
     def _define_condition_names(self, item: CobolDataItem, section: str) -> None:
         """The level-88 condition names written directly under *item*."""
@@ -914,6 +939,32 @@ class XrefAnalyzer:
                 self._visit_statement(node, context=None, fallback=None)
 
         self._visit_data_division_references(ast)
+
+    def _collect_contained_references(self, ast: CobolProgram) -> None:
+        """Add the references *ast*'s contained programs make to *ast*'s
+        own GLOBAL items (#504).
+
+        Each contained program is cross-referenced on its own; its entries
+        for items it inherited from *ast* (the same item object, so a name
+        it redeclares is not one of them) carry those references. Its own
+        contained programs are folded into it first, so direct children
+        cover every depth.
+        """
+        if not ast.contained_programs:
+            return
+        mine = {
+            id(item): entry
+            for namesakes in self._data_items.values()
+            for entry, item in namesakes
+        }
+        for contained in ast.contained_programs:
+            inner = XrefAnalyzer()
+            inner.analyze(contained)
+            for namesakes in inner._data_items.values():
+                for entry, item in namesakes:
+                    target = mine.get(id(item))
+                    if target is not None:
+                        target.references.extend(entry.references)
 
     def _visit_select_clauses(self, select: SelectStatement) -> None:
         """Data items a ``SELECT`` names: FILE STATUS, PASSWORD, ASSIGN USING.

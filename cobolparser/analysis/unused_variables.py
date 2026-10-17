@@ -268,6 +268,49 @@ def collect_declared_items(ast: CobolProgram) -> list[CobolDataItem]:
     ]
 
 
+def inherited_data_records(
+    ast: CobolProgram,
+) -> list[tuple[CobolProgram, str, CobolDataItem]]:
+    """``(owner, section name, record)`` for every 01/77 record of a program
+    enclosing *ast* that *ast*'s own statements can name (#504).
+
+    A contained program sees each enclosing program's ``GLOBAL`` records
+    (and everything under them); a METHOD sees *all* of its FACTORY /
+    OBJECT paragraph's data, GLOBAL or not. Innermost container first. A
+    name *ast* declares itself, or a nearer container already supplied,
+    hides the farther one, as COBOL name resolution does. ``EXTERNAL``
+    needs no case of its own: an EXTERNAL record is declared in each
+    program that uses it. The records are *not* part of
+    ``collect_declared_items`` -- *ast* does not declare them, so they are
+    never *ast*'s unused items -- but every analyzer that resolves *ast*'s
+    references to declarations (xref, lineage, move-type-check) must see
+    them.
+    """
+    hidden = {item.name.upper() for item in collect_declared_items(ast)}
+    result: list[tuple[CobolProgram, str, CobolDataItem]] = []
+    owner = ast.parent
+    while owner is not None:
+        if isinstance(owner, CobolProgram) and owner.data_division is not None:
+            shares_all = getattr(owner, "unit_kind", "PROGRAM") in _OO_DATA_OWNERS
+            for section in owner.data_division.sections:
+                if not isinstance(section, CobolSection):
+                    continue
+                section_name = section.section_name or ""
+                if section_name.upper() not in _DATA_SECTION_NAMES:
+                    continue
+                for record in section.data_items:
+                    if not isinstance(record, CobolDataItem) or record.is_filler:
+                        continue
+                    name = (record.name or "").upper()
+                    if name in hidden:
+                        continue
+                    if shares_all or getattr(record, "is_global", False):
+                        result.append((owner, section_name, record))
+                        hidden.add(name)
+        owner = owner.parent
+    return result
+
+
 def _extract_identifiers(operand: Any) -> set[str]:
     """Extract every candidate data-name reference out of an operand's raw
     text.
