@@ -64,3 +64,29 @@ def test_explain_symbol_says_why_the_offset_is_ambiguous(tmp_path: Path) -> None
     assert len(_sync_caveats(result)) == 1
     other = tools.explain_symbol("d1.cbl", "D")
     assert _sync_caveats(other) == []
+
+
+def test_a_partial_level_88_caveat_does_not_cast_doubt_on_offsets(
+    tmp_path: Path,
+) -> None:
+    # A level-88 THRU range listed only in part is about condition_values;
+    # its caveat must not tell the reader the offsets may be short.
+    (tmp_path / "r.cbl").write_text(
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. R.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "       01  RNG-REC.\n"
+        "           05  N    PIC 9(5).\n"
+        "               88  N-OK VALUE 1 THRU 99999.\n"
+        "       PROCEDURE DIVISION.\n"
+        "           DISPLAY RNG-REC.\n"
+    )
+    tools = CobolTools(Workspace(tmp_path, ProjectConfig()))
+    for result in (
+        tools.record_layout("r.cbl", "RNG-REC"),
+        tools.explain_symbol("r.cbl", "N"),
+    ):
+        partial = [c for c in result["caveats"] if "only part" in c["detail"]]
+        assert partial
+        assert all("offset" not in c["effect"] for c in partial)

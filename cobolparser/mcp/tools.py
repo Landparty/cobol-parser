@@ -1523,7 +1523,7 @@ def _record_layout(root: CobolDataItem, response: Response) -> list[dict[str, An
 
     layout = compute_record_layout(root)
     for line in flag_record_layout(root, layout):
-        response.caveat("incomplete-analysis", line, _UNRESOLVED_LAYOUT_EFFECT)
+        response.caveat("incomplete-analysis", line, _unresolved_layout_effect(line))
     return [item.to_dict() for item in layout]
 
 
@@ -1823,11 +1823,18 @@ def _carry_parse_caveats(parsed: ParsedProgram, response: Response) -> None:
         response.caveat(caveat.kind, caveat.detail, caveat.effect)
 
 
-#: The effect line of a byte-layout ``incomplete-analysis`` caveat.
-_UNRESOLVED_LAYOUT_EFFECT = (
-    "offsets marked offset_ambiguous may be short; do not build a record "
-    "image from them"
-)
+def _unresolved_layout_effect(line: str) -> str:
+    """The effect of one byte-layout ``unresolved`` *line*: only SYNC slack
+    puts offsets in doubt; a partial level-88 list leaves them exact."""
+    if "condition_values lists only part" in line:
+        return (
+            "a value missing from condition_values may still satisfy the "
+            "condition; read condition_ranges"
+        )
+    return (
+        "offsets marked offset_ambiguous may be short; do not build a record "
+        "image from them"
+    )
 
 
 def _layout_index(
@@ -1872,7 +1879,9 @@ def _layout_caveats(
     for entry in layout.get(_UNRESOLVED_KEY, []):
         line = str(entry["line"])
         if line.split(":", 1)[0].split(".")[0] == record:
-            response.caveat("incomplete-analysis", line, _UNRESOLVED_LAYOUT_EFFECT)
+            response.caveat(
+                "incomplete-analysis", line, _unresolved_layout_effect(line)
+            )
 
 
 def _renames_layout(
