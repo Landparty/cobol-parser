@@ -23,7 +23,11 @@ What is compared
   qualified path (``WORKING-STORAGE:WS-TAB.WS-ENT``): added, removed,
   PICTURE / USAGE / level / VALUE / OCCURS / REDEFINES changed, plus the
   SIGN / JUSTIFIED / SYNCHRONIZED / BLANK WHEN ZERO / EXTERNAL / GLOBAL
-  flags and level-88 condition names and their values.
+  flags and level-88 condition names and their values -- and the *order*
+  of each group's subordinate items (``data-item-moved``, with the byte
+  offsets before and after): swapping two fields of a record changes every
+  offset after them, the byte layout of a file, CALL interface or host
+  structure.
 * **Procedures** -- paragraphs and sections: added, removed, renamed,
   moved (reordered without a body change -- reported *separately* from a
   body change, so a pure reshuffle never reads as a rewrite) and
@@ -70,7 +74,7 @@ near-miss is not thrown away either -- it goes into
 diff considered the pair and declined.
 
 Positions are compared as *relative order*, not line numbers: the matched
-procedures of both programs are run through :class:`difflib.SequenceMatcher`
+procedures of both programs (and the matched subordinates of each group) are run through :class:`difflib.SequenceMatcher`
 and only the ones outside its matching blocks are reported as moved. So
 inserting one paragraph at the top does not report every following
 paragraph as moved, and a reformat that shifts every line reports nothing
@@ -380,6 +384,40 @@ class _DataEntry:
     item: Any  # CobolDataItem | ConditionNameItem
     is_condition: bool
     location: SourceLocation
+    # Keys of the subordinate data items, in source order (no level-88s).
+    children: list[str] = field(default_factory=list)
+
+
+class _OffsetLookup:
+    """Record-relative byte offsets of data items, one layout per record."""
+
+    def __init__(self) -> None:
+        self._layouts: dict[int, dict[str, int | None]] = {}
+
+    def offset(self, item: Any) -> int | None:
+        """*item*'s byte offset in its 01/77 record, or ``None`` when the
+        layout cannot say exactly (an OCCURS DEPENDING ON before it, ...)."""
+        if not isinstance(item, CobolDataItem):
+            return None
+        path = [item.layout_name]
+        root = item
+        while isinstance(root.parent, CobolDataItem):
+            root = root.parent
+            path.append(root.layout_name)
+        path[-1] = root.name
+        layout = self._layouts.get(id(root))
+        if layout is None:
+            from ..generators.data.layout_offsets import compute_record_layout
+
+            layout = {}
+            try:
+                for entry in compute_record_layout(root):
+                    offset = None if entry.offset_ambiguous else entry.byte_offset
+                    layout.setdefault(entry.qualified_name, offset)
+            except Exception:  # noqa: BLE001 - offsets are a detail, never fatal
+                layout = {}
+            self._layouts[id(root)] = layout
+        return layout.get(".".join(reversed(path)))
 
 
 @dataclass
@@ -1201,6 +1239,67 @@ class ProgramDiffer:
 
         for key in sorted(set(old_entries) & set(new_entries)):
             self._diff_data_entry(old_entries[key], new_entries[key], changes)
+        self._report_data_moves(old_entries, new_entries, changes)
+
+    @staticmethod
+    def _report_data_moves(
+        old_entries: dict[str, _DataEntry],
+        new_entries: dict[str, _DataEntry],
+        changes: list[DiffChange],
+    ) -> None:
+        """Report the subordinate items whose order within their group
+        changed (#545).
+
+        Like ``_report_moves`` for procedures: each group's matched
+        subordinates are run through :class:`difflib.SequenceMatcher`, and
+        only the ones outside its matching blocks moved -- inserting a field
+        does not report every later field. The byte offsets before and after
+        are in the detail, since they are what makes a reorder break a file
+        or interface.
+        """
+        offsets = _OffsetLookup()
+        for key in sorted(set(old_entries) & set(new_entries)):
+            old_group, new_group = old_entries[key], new_entries[key]
+            if old_group.is_condition or new_group.is_condition:
+                continue
+            old_order = [k for k in old_group.children if k in new_entries]
+            new_order = [k for k in new_group.children if k in old_entries]
+            if old_order == new_order:
+                continue
+            matcher = SequenceMatcher(None, old_order, new_order, autojunk=False)
+            stable = {
+                old_order[block.a + offset]
+                for block in matcher.get_matching_blocks()
+                for offset in range(block.size)
+            }
+            for child_key in new_order:
+                if child_key in stable:
+                    continue
+                old_child, new_child = old_entries[child_key], new_entries[child_key]
+                old_where = f"position {old_order.index(child_key) + 1}"
+                new_where = f"position {new_order.index(child_key) + 1}"
+                detail = (
+                    f"data item {new_child.symbol} moved from {old_where} to "
+                    f"{new_where} in {new_group.symbol}"
+                )
+                old_offset = offsets.offset(old_child.item)
+                new_offset = offsets.offset(new_child.item)
+                if old_offset is not None and new_offset is not None:
+                    detail += f" (byte offset {old_offset} -> {new_offset})"
+                    old_where += f", offset {old_offset}"
+                    new_where += f", offset {new_offset}"
+                changes.append(
+                    DiffChange(
+                        kind="data-item-moved",
+                        category="data",
+                        symbol=new_child.symbol,
+                        detail=detail,
+                        old=old_where,
+                        new=new_where,
+                        old_location=old_child.location,
+                        new_location=new_child.location,
+                    )
+                )
 
     def _diff_data_entry(
         self, old: _DataEntry, new: _DataEntry, changes: list[DiffChange]
@@ -1295,7 +1394,7 @@ class ProgramDiffer:
         entries: dict[str, _DataEntry],
         side: str,
         caveats: list[str],
-    ) -> None:
+    ) -> str:
         if item.get_metadata("report_clauses") or item.get_metadata("rd_clauses"):
             caveats.append(
                 f"the {side} program has REPORT SECTION group clauses "
@@ -1306,7 +1405,7 @@ class ProgramDiffer:
         path = f"{prefix}.{name}" if prefix else name
         base = f"{section}:{path.upper()}"
         key = self._unique_key(base, entries, side, caveats)
-        entries[key] = _DataEntry(
+        entry = entries[key] = _DataEntry(
             key=key,
             symbol=_disambiguated(path, base, key),
             section=section,
@@ -1317,7 +1416,11 @@ class ProgramDiffer:
 
         for child in item.children:
             if isinstance(child, CobolDataItem):
-                self._collect_data_item(child, section, path, entries, side, caveats)
+                entry.children.append(
+                    self._collect_data_item(
+                        child, section, path, entries, side, caveats
+                    )
+                )
             elif isinstance(child, ConditionNameItem):
                 child_path = f"{path}.{child.name}"
                 child_base = f"{section}:{child_path.upper()}"
@@ -1330,6 +1433,7 @@ class ProgramDiffer:
                     is_condition=True,
                     location=child.location,
                 )
+        return key
 
     @staticmethod
     def _unique_key(
