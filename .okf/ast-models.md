@@ -684,7 +684,8 @@ Fields that are easy to miss, grouped by node.
   (see [analysis.md](analysis.md)).
 * `ArithmeticStatement.source_operands: list[str] | None` -- the
   operands written before TO/FROM/GIVING, duplicates kept, set by the
-  ADD/SUBTRACT parsers; `None` on a node built any other way. **Not
+  ADD/SUBTRACT parsers and by MULTIPLY/DIVIDE's GIVING form (both operands,
+  #495); `None` for MULTIPLY/DIVIDE format 1 and on a node built any other way. **Not
   serialized.** `operands` cannot stand in for it: `set_target`/`set_giving`
   append a name only when absent, so `ADD A B GIVING B` and `ADD A GIVING B`
   leave the same `[A, B]`. Read by `analysis/const_fold.py`.

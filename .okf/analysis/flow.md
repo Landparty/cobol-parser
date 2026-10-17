@@ -404,7 +404,10 @@ it for THEN/ELSE/WHEN/WHEN OTHER (`to_dict()` only when non-None); the
 flowcharts render it instead of the bare keyword (see generators.md).
 Clause fidelity matters because `cobol-parser diff` compares this text: `SET x
 UP BY v` / `DOWN BY v` / `TO FALSE` are rendered as written, ADD/SUBTRACT take
-their sources from `source_operands` and append ` GIVING ...`, PERFORM renders
+their sources from `source_operands` and append ` GIVING ...`, MULTIPLY /
+DIVIDE ... GIVING render `MULTIPLY x BY y GIVING z` / `DIVIDE x {INTO|BY} y
+GIVING z [REMAINDER r]` from `division_mode` (the generic fallback dropped
+INTO/BY, so `diff` showed `DIVIDE A B C -> DIVIDE A B C`; #495), PERFORM renders
 ` VARYING v FROM x BY y` / ` n TIMES` (the UNTIL guard is the diff renderer's
 job, `ast_diff._statement_text`) and COMPUTE / ADD / SUBTRACT render each
 receiver with its own `ROUNDED [MODE IS m]` (`rounding_of`; #274, #517).
