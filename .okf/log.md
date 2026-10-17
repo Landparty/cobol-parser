@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- data-items and record_layout place RENAMES (#563)
+
+[generators/record-data.md](generators/record-data.md), [mcp.md](mcp.md):
+`renames_layout()` emits a level-66 entry per RENAMES (or an `unresolved`
+line); MCP `record_layout` answers a RENAMES name via `_renames_records`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

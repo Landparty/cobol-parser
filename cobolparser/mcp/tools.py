@@ -317,16 +317,15 @@ class CobolTools:
                     for ref in refs
                 ],
             }
+            # data-items places a level-66 RENAMES item itself (#563).
             item = _layout_for(entry.name, entry.qualified_name, layout)
             if item is None and entry.level == 66:
-                item = _renames_layout(unit, entry.name, layout)
-                if item is None:
-                    response.caveat(
-                        "incomplete-analysis",
-                        f"RENAMES item {entry.name}: the bytes it renames "
-                        "could not be placed",
-                        "no layout is reported for it",
-                    )
+                response.caveat(
+                    "incomplete-analysis",
+                    f"RENAMES item {entry.name}: the bytes it renames "
+                    "could not be placed",
+                    "no layout is reported for it",
+                )
             if item is not None:
                 _layout_caveats(item, layout, response)
                 symbol["layout"] = {
@@ -681,6 +680,12 @@ class CobolTools:
         else:
             items = _data_items_named(unit, wanted)
         if not items:
+            renames = _renames_records(unit, wanted, parsed, response, cap)
+            if renames:
+                answer["found"] = True
+                answer["records"] = renames
+                answer["offsets_from"] = "the start of each record's 01/77 item"
+                return response.build(answer, program_info)
             names = sorted(
                 {
                     found.item.name.upper()
@@ -1989,16 +1994,78 @@ def _layout_caveats(
             )
 
 
-def _renames_layout(
-    unit: CobolProgram,
-    name: str,
-    layout: dict[str, list[dict[str, Any]]],
-) -> dict[str, Any] | None:
-    """The byte range a level-66 ``RENAMES`` item names, or None (#485).
+#: A cap no record reaches: :func:`_renames_records` filters first, caps after.
+_UNCAPPED = 1 << 30
 
-    ``66 R-AB RENAMES R-A THRU R-B`` covers its record from the start of
-    ``R-A`` to the end of ``R-B``; the layout itself has no entry for it.
+
+def _renames_records(
+    unit: CobolProgram,
+    wanted: str,
+    parsed: ParsedProgram,
+    response: Response,
+    cap: int,
+) -> list[dict[str, Any]]:
+    """``record_layout`` answers for the level-66 RENAMES items named
+    *wanted* (#563): the byte range ``data-items`` places each at, within
+    the record it renames, with that record's fields lying in the range.
     """
+    name = wanted.split(" OF ")[0].strip()
+    layout = _layout_index(unit, response)
+    records: list[dict[str, Any]] = []
+    for index, entry in enumerate(
+        e for e in layout.get(name, []) if e.get("level") == 66
+    ):
+        root_name = str(entry.get("parent_qualified_name") or "")
+        roots = [f for f in _data_items_named(unit, root_name) if f.item is f.root]
+        if len(roots) != 1:
+            continue
+        found = roots[0]
+        # Every field of the record (no cap yet): the range picks from them.
+        rows = _layout_answer(
+            found,
+            _record_layout(found.root, response),
+            parsed,
+            response,
+            _UNCAPPED,
+            index,
+        )["fields"]
+        start = int(entry["byte_offset"])
+        end = start + int(entry["byte_length"])
+        covered = [
+            row
+            for row in rows
+            if row.get("byte_offset") is not None
+            and start <= int(row["byte_offset"])
+            and int(row["byte_offset"]) + int(row.get("byte_length") or 0) <= end
+        ]
+        location = _renames_location(unit, name)
+        record: dict[str, Any] = {
+            "name": entry["name"],
+            "qualified_name": entry["name"],
+            "section": found.section,
+            "level": 66,
+            "renames": found.root.name,
+            "declared_at": (
+                parsed.locate(location.line, location.column, response)
+                if location is not None
+                else None
+            ),
+            "byte_offset": start,
+            "byte_length": int(entry["byte_length"]),
+        }
+        for key in ("picture", "usage"):
+            if entry.get(key) and not entry.get("is_group"):
+                record[key] = entry[key]
+        if entry.get("offset_ambiguous"):
+            record["offset_ambiguous"] = True
+        record["field_count"] = len(covered)
+        record["fields"] = response.cap(covered, cap, f"records[{index}].fields")
+        records.append(record)
+    return records
+
+
+def _renames_location(unit: CobolProgram, name: str) -> Any:
+    """Where the level-66 RENAMES item *name* is declared, or None."""
     data_div = unit.data_division
     if data_div is None:
         return None
@@ -2006,33 +2073,8 @@ def _renames_layout(
         if not isinstance(section, CobolSection):
             continue
         for node in section.children:
-            if not isinstance(node, RenamesItem) or node.name.upper() != name.upper():
-                continue
-            ends: list[dict[str, Any]] = []
-            operands = [(node.renames_from, node.renames_from_qualifiers)]
-            if node.renames_through:
-                operands.append((node.renames_through, node.renames_through_qualifiers))
-            for operand, qualifiers in operands:
-                qualified = " OF ".join([str(operand), *qualifiers])
-                found = _layout_for(str(operand), qualified, layout)
-                if found is None:
-                    return None
-                ends.append(found)
-            first, last = ends[0], ends[-1]
-            record = str(first.get("qualified_name", "")).upper().split(".")[0]
-            if str(last.get("qualified_name", "")).upper().split(".")[0] != record:
-                return None
-            start, end_at = first.get("byte_offset"), last.get("byte_offset")
-            if start is None or end_at is None:
-                return None
-            length = int(end_at) + int(last.get("byte_length") or 0) - int(start)
-            if length <= 0:
-                return None
-            return {
-                "qualified_name": name.upper(),
-                "byte_offset": start,
-                "byte_length": length,
-            }
+            if isinstance(node, RenamesItem) and node.name.upper() == name:
+                return node.location
     return None
 
 
