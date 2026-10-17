@@ -575,6 +575,10 @@ def _build_unary_condition(
             return expr
         return None
 
+    user_class = _build_user_class_or_omitted(cleaned, upper, location)
+    if user_class is not None:
+        return user_class
+
     if (
         _is_condition_name_reference(cleaned, upper)
         and upper[0] != "NOT"
@@ -589,6 +593,44 @@ def _build_unary_condition(
         return expr
 
     return None
+
+
+def _build_user_class_or_omitted(
+    cleaned: list[str], upper: list[str], location: SourceLocation
+) -> ConditionalExpression | None:
+    """``operand [IS] [NOT] OMITTED`` and ``operand IS [NOT] class-name`` (#539).
+
+    A class-name is defined in SPECIAL-NAMES (``CLASS VALID-CODE IS 'A'
+    THRU 'F'``), which this builder cannot see, so the class form is
+    recognised by its shape: an ``IS`` after a data reference, then an
+    optional ``NOT`` and one COBOL word that is not a relational word.
+    Nothing else in COBOL is spelled ``operand IS word``. The operand must
+    itself be one data reference (``name [OF q]... [(subscripts)]``).
+    Without the ``IS`` (``IF X VALID-CODE``) the class form is not
+    recognised -- it is indistinguishable here from a stray token.
+    """
+    if len(cleaned) < 2 or not _IDENTIFIER_RE.match(cleaned[-1]):
+        return None
+    word = upper[-1]
+    if word in _CLASS_SIGN_WORDS or word in _RELATIONAL_WORDS:
+        return None
+    rest, rest_upper = cleaned[:-1], upper[:-1]
+    negated = bool(rest_upper) and rest_upper[-1] == "NOT"
+    if negated:
+        rest, rest_upper = rest[:-1], rest_upper[:-1]
+    has_is = bool(rest_upper) and rest_upper[-1] == "IS"
+    if has_is:
+        rest, rest_upper = rest[:-1], rest_upper[:-1]
+    if word != "OMITTED" and not has_is:
+        return None
+    if not rest or not _is_condition_name_reference(rest, rest_upper):
+        return None
+    if word in _FIGURATIVE_WORDS or word in ("TRUE", "FALSE"):
+        return None
+    operator = f"IS NOT {word}" if negated else f"IS {word}"
+    expr = ConditionalExpression(operator, location)
+    expr.set_left_operand(" ".join(rest))
+    return expr
 
 
 def _is_condition_name_reference(cleaned: list[str], upper: list[str]) -> bool:

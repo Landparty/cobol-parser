@@ -883,6 +883,13 @@ def _extract_class_or_sign(
     if not name.strip():
         unsupported.append(f"{origin}: class/sign condition missing operand")
         return None
+    if class_word == "OMITTED":
+        # Decided by the caller's argument list, not by any data value.
+        unsupported.append(
+            f"{origin}: OMITTED test depends on the caller's argument list, "
+            f"not on data: {name.strip()}"
+        )
+        return None
     resolved = index.resolve(name.strip())
     if resolved is None:
         unsupported.append(f"{origin}: unresolvable operand: {name}")
@@ -907,9 +914,15 @@ def _extract_class_or_sign(
             negated=effective_negate,
         )
 
+    if class_word in ("DBCS", "KANJI"):
+        unsupported.append(
+            f"{origin}: unsupported class condition: {class_word} "
+            "(DBCS/KANJI double-byte tests are out of v1 scope)"
+        )
+        return None
     unsupported.append(
-        f"{origin}: unsupported class condition: {class_word} "
-        "(DBCS/KANJI double-byte tests are out of v1 scope)"
+        f"{origin}: user-defined class condition (SPECIAL-NAMES CLASS) not "
+        f"supported in v1: {class_word}"
     )
     return None
 

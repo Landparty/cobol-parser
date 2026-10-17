@@ -185,7 +185,12 @@ decompose structurally (`EVALUATE TRUE` Condition-type selectors, and
 SEARCH WHEN conditions that carry no `condition_tree`, per `constraints.py`'s same documented gap — see
 [ConstraintExtractor](fixtures-support.md)). The fallback is deliberately
 over-inclusive: a false positive there only makes the analyzer *miss* an
-unused variable, never wrongly flag a used one.
+unused variable, never wrongly flag a used one. A node carrying a
+`condition_tree` (a PERFORM UNTIL guard, whose `operands` hold only the raw
+joined text) is walked through the tree, so a SPECIAL-NAMES class-name in
+`UNTIL X IS NOT VALID-CODE` is not read as a data item (#539). A condition node the builder could not decompose (no operands, only
+`metadata.raw_condition`, e.g. `X EXCEEDS Y`) is read from that raw text, so
+walking the tree loses no field the guard names.
 
 **EVALUATE subjects and `Literal`-typed WHEN selectors.** `evaluate_parser.py`
 routes each subject through `add_subject()`, so string subjects reach
