@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`move-type-check` resolves `LENGTH OF`, SORT-RETURN, WHEN-COMPILED,
+  XML-CODE and the other special registers** (#520). Only RETURN-CODE,
+  TALLY and LINAGE-COUNTER were known, so a MOVE of `LENGTH OF x`,
+  SORT-RETURN / SORT-CORE-SIZE / SORT-FILE-SIZE / SORT-MODE-SIZE, XML-CODE,
+  JSON-CODE (integer NUMERIC) or WHEN-COMPILED / SORT-CONTROL / SORT-MESSAGE
+  (ALPHANUMERIC) went unchecked and counted as unresolved, and `lint` blamed
+  "an unresolved COPY" in a program with none. They are now resolved and
+  checked.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

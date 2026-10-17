@@ -520,6 +520,17 @@ unresolved *argument* is still an ordinary unresolved operand. Pinned by
 `test_move_type_checker.py::TestIntrinsicFunctionsWithArguments` /
 `TestNumericFunctionIntegerness` and `test_lint.py::TestCaveats`.
 
+**Special registers** (see #520). Their category is fixed by the language,
+and none is ever a DATA DIVISION item, so `_resolve_category` knows them by
+name after the catalog lookup (a declared item of the same name still wins):
+`_NUMERIC_SPECIAL_REGISTERS` (RETURN-CODE, TALLY, LINAGE-COUNTER,
+SORT-RETURN, SORT-CORE-SIZE, SORT-FILE-SIZE, SORT-MODE-SIZE, XML-CODE,
+JSON-CODE) are integer NUMERIC, `_ALPHANUMERIC_SPECIAL_REGISTERS`
+(WHEN-COMPILED, SORT-CONTROL, SORT-MESSAGE) ALPHANUMERIC, and any `LENGTH OF
+x` operand integer NUMERIC. Unknown, they went unchecked and counted in
+`unresolved_count`, so lint told a program with no COPY to fix its copybook
+path. Pinned by `tests/regression/test_move_special_registers_issue_520.py`.
+
 **Group receivers and `ZERO` → alphabetic.** A MOVE *into* a group item is a
 group move (bytes copied as alphanumeric) and legal from any sender, so group
 receivers are exempt from every elementary rule. `MOVE ZERO TO` a `PIC A` item

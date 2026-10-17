@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- move-type-check resolves special registers (#520)
+
+[analysis/data-use.md](analysis/data-use.md): numeric / alphanumeric special
+register sets and `LENGTH OF x` resolve instead of counting as unresolved.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
