@@ -19,6 +19,7 @@ def build_fall_through_edges(
     exit_section_procedures: dict[str, str] | None = None,
     section_ends: dict[str, str] | None = None,
     sections_entered: set[str] | None = None,
+    declarative_sections: set[str] | None = None,
 ) -> None:
     """Build fall-through edges between sequential paragraphs.
 
@@ -34,10 +35,18 @@ def build_fall_through_edges(
     outside) -- it gets a fall-through edge to the procedure after the
     section's last member (*section_ends*). A section that is only
     PERFORMed returns to its performer, so it gets no onward edge.
+
+    A section in *declarative_sections* (a DECLARATIVES USE procedure)
+    returns to the runtime when it ends: control never flows out of it,
+    into the next declarative section or past END DECLARATIVES into the
+    main code (#533). Its last member, and an EXIT SECTION in it, get no
+    fall-through edge.
     """
     exits = exit_section_procedures or {}
     ends = section_ends or {}
     entered = sections_entered or set()
+    declarative = declarative_sections or set()
+    declarative_ends = {ends.get(section, section) for section in declarative}
     position = {name: i for i, name in enumerate(ordered_procedures)}
     fallen_into: set[str] = set()
     for i in range(len(ordered_procedures) - 1):
@@ -50,6 +59,8 @@ def build_fall_through_edges(
 
         section = exits.get(current)
         if section is not None:
+            if section in declarative:
+                continue
             end = position.get(ends.get(section, section))
             if (
                 end is not None
@@ -82,6 +93,8 @@ def build_fall_through_edges(
         # IF/EVALUATE arm where it only fires conditionally -- the same
         # class of bug this function's GO TO handling fixes.
         if current in terminating_paragraphs:
+            continue
+        if current in declarative_ends:
             continue
 
         fallen_into.add(next_proc)
