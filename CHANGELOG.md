@@ -572,6 +572,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for ALLOCATE (the item `reference`, the RETURNING pointer `write`, the
   CHARACTERS size `read`) and FREE (each pointer `write`), instead of plain
   references with a "no dedicated role mapping" caveat.
+* **`io-sequence` / `lint` now check each I/O verb against the OPEN mode**
+  (#548). READ / START on a file open OUTPUT or EXTEND (file status 47),
+  WRITE on INPUT or on a sequential file open I-O (48), REWRITE / DELETE on a
+  file not open I-O (49), and an OPEN of a file closed `WITH LOCK` earlier in
+  the run (38) were all reported clean -- and the failed OPEN after the lock
+  earned a FILE_LEFT_OPEN instead. New `IOViolationKind`s `READ_WRONG_MODE`,
+  `START_WRONG_MODE`, `WRITE_WRONG_MODE`, `REWRITE_WRONG_MODE`,
+  `DELETE_WRONG_MODE` and `OPEN_AFTER_LOCK`, all lint errors; a mode that
+  differs between IF/EVALUATE arms is not an error. A conditional GO TO
+  target is now walked with the file states at the GO TO merged in, so a
+  later reopen in another mode does not leak into it.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

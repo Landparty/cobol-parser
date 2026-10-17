@@ -86,6 +86,12 @@ _SEVERITY_IO: dict[str, str] = {
     "CLOSE_NOT_OPEN": "error",
     "DOUBLE_CLOSE": "error",
     "FILE_LEFT_OPEN": "warning",
+    "READ_WRONG_MODE": "error",
+    "START_WRONG_MODE": "error",
+    "WRITE_WRONG_MODE": "error",
+    "REWRITE_WRONG_MODE": "error",
+    "DELETE_WRONG_MODE": "error",
+    "OPEN_AFTER_LOCK": "error",
 }
 
 # LINKAGE: an argument-count mismatch or an unknown entry point is a wrong

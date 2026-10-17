@@ -54,7 +54,8 @@ keeps its grading: MOVE's ERROR/WARNING kinds map to error/warning,
 recursion's HIGH/MEDIUM (HIGH = a cycle with no escape route, i.e. an infinite
 loop) to error/warning, complexity's rating to warning (HIGH) / info
 (MODERATE), with LOW producing no finding at all. The rest carry a fixed
-severity: dead code and I/O `FILE_LEFT_OPEN` warn; every other I/O kind and
+severity: dead code and I/O `FILE_LEFT_OPEN` warn; every other I/O kind
+(including the OPEN-mode kinds `*_WRONG_MODE` and `OPEN_AFTER_LOCK`, #548) and
 every LINKAGE kind but `UNREFERENCED_LINKAGE` are errors. An unused item is a
 warning when the program declares it and only info when it came from a
 copybook (`copybook_item_names`) — a copybook describes a whole record and no
