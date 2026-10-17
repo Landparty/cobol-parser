@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- jcl --bindings feeds field-impact --bindings (#547)
+
+[jcl.md](jcl.md), [cli.md](cli.md): `jcl.DatasetBinding.program`; `field-impact
+--bindings` validates rows (skips program-less / dataset-less ones); an `EXEC
+proc` step no longer keeps the override DDs its expansion applied.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

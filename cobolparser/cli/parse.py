@@ -3420,6 +3420,60 @@ def _cobol_files(paths: list[str]) -> list[str]:
     return files
 
 
+def _json_rows(value: Any, key: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        _fail(f'--bindings: "{key}" must be a list of objects')
+    for index, row in enumerate(value):
+        if not isinstance(row, dict):
+            _fail(f'--bindings: "{key}"[{index}] is not an object: {row!r}')
+    return value
+
+
+def _binding_rows(value: Any) -> list[dict[str, Any]]:
+    """The usable ``--bindings`` rows. A row with no ``program`` or no
+    ``dataset`` binds nothing (``cobol-parser jcl --bindings`` writes such
+    rows for SYSOUT / DUMMY DDs and ``EXEC proc`` steps) and is skipped; a
+    row that is not a binding at all is an error naming it."""
+    rows: list[dict[str, Any]] = []
+    for index, row in enumerate(_json_rows(value, "bindings")):
+        for field in ("program", "ddname", "dataset", "job", "step"):
+            if row.get(field) is not None and not isinstance(row[field], str):
+                _fail(
+                    f'--bindings: "bindings"[{index}]: "{field}" must be a '
+                    f"string: {row!r}"
+                )
+        if not row.get("ddname"):
+            _fail(f'--bindings: "bindings"[{index}] has no "ddname": {row!r}')
+        if row.get("program") and row.get("dataset"):
+            rows.append(row)
+    return rows
+
+
+def _passthrough_rows(value: Any) -> list[dict[str, Any]]:
+    rows = _json_rows(value, "passthroughs")
+    for index, row in enumerate(rows):
+        for field in ("input", "output"):
+            if not isinstance(row.get(field), str) or not row[field]:
+                _fail(
+                    f'--bindings: "passthroughs"[{index}] needs a string '
+                    f'"{field}": {row!r}'
+                )
+        ranges = row.get("aggregate_ranges") or []
+        if not isinstance(ranges, list) or not all(
+            isinstance(r, list)
+            and len(r) == 2
+            and all(isinstance(n, int) and not isinstance(n, bool) for n in r)
+            for r in ranges
+        ):
+            _fail(
+                f'--bindings: "passthroughs"[{index}]: "aggregate_ranges" must '
+                f"be a list of [offset, length] pairs: {row!r}"
+            )
+    return rows
+
+
 def _load_bindings(args: argparse.Namespace) -> tuple[list[Any], list[Any], list[str]]:
     bindings: list[Any] = []
     passthroughs: list[Any] = []
@@ -3432,8 +3486,8 @@ def _load_bindings(args: argparse.Namespace) -> tuple[list[Any], list[Any], list
             _fail(f"--bindings could not be read: {exc}")
         if not isinstance(data, dict):
             _fail("--bindings must hold a JSON object")
-        bindings += list(data.get("bindings") or [])
-        passthroughs += list(data.get("passthroughs") or [])
+        bindings += _binding_rows(data.get("bindings"))
+        passthroughs += _passthrough_rows(data.get("passthroughs"))
     if args.jcl:
         from ..analysis.lineage_jcl import bindings_from_jobs, load_jobs
 
@@ -3806,7 +3860,8 @@ def _build_jcl_parser(subparsers: argparse._SubParsersAction) -> None:
         "--bindings",
         action="store_true",
         help="Emit one row per DD binding (ddname, dataset, step, job, DISP, "
-        "RECFM, LRECL) instead of the job structure",
+        "RECFM, LRECL, program) instead of the job structure; usable as "
+        "field-impact --bindings input",
     )
     p.add_argument(
         "--program",
