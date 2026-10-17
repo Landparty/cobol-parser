@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`expand` evaluates conditional compilation without `--define`** (#583).
+  It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
+  given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
+  both arms of every `>>IF ... >>ELSE`, in the program and in every inlined
+  copybook, disagreeing with `parse`, `data-items` and (since #271)
+  `preprocess`. It now always evaluates them; `--define` only adds symbols.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
