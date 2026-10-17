@@ -700,6 +700,9 @@ Fields that are easy to miss, grouped by node.
   CHARACTERS` form) xor `data_item` (the `BASED` data-item form),
   `initialized`, `returning_target`. `FreeStatement` — `pointer_names:
   list[str]`.
+* `CancelStatement` — `program_names` and the parallel
+  `program_names_literal: list[bool]` (`CANCEL 'X'` vs `CANCEL X`, #479;
+  serialized only when some name is a literal).
 
 **Control (`control.py`)**
 

@@ -276,7 +276,7 @@ class CancelStatementParser(IStatementParser):
                 )
             elif token.type == TokenType.STRING_LITERAL:
                 token_stream.consume()
-                stmt.add_program_name(token.value or "")
+                stmt.add_program_name(token.value or "", is_literal=True)
             else:
                 break
             skip_whitespace(token_stream)

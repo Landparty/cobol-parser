@@ -369,19 +369,29 @@ class GobackStatement(CobolStatement):
 
 
 class CancelStatement(CobolStatement):
-    """AST node for CANCEL statements."""
+    """AST node for CANCEL statements.
+
+    ``program_names_literal[i]`` says whether ``program_names[i]`` was a
+    literal (``CANCEL 'X'`` names program X) or a data name (``CANCEL X``
+    names whatever program X holds) -- the name text alone is the same for
+    both (#479).
+    """
 
     def __init__(self, location: SourceLocation):
         super().__init__("CANCEL", location)
         self.program_names: list[str] = []
+        self.program_names_literal: list[bool] = []
 
-    def add_program_name(self, name: str) -> None:
+    def add_program_name(self, name: str, *, is_literal: bool = False) -> None:
         self.program_names.append(name)
+        self.program_names_literal.append(is_literal)
         self._add_unique_operand(name)
 
     def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         result["program_names"] = self.program_names
+        if any(self.program_names_literal):
+            result["program_names_literal"] = self.program_names_literal
         return result
 
 

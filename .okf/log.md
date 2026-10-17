@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- CANCEL literal vs data name (#479)
+
+[parser/statements-control.md](parser/statements-control.md),
+[analysis/flow.md](analysis/flow.md): `CancelStatement.program_names_literal`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

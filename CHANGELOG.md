@@ -160,6 +160,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`diff` tells `CANCEL 'X'` from `CANCEL X`** (#479). `CancelStatement`
+  kept only the name text, so a literal program name (cancel program X) and
+  a data name (cancel the program X's value names) were one node and diff
+  reported no change. `program_names_literal` now records which is which.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

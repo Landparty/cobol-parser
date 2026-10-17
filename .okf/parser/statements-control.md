@@ -264,6 +264,9 @@ arm.
 - **USE** (`UseStatementParser`): `USE [GLOBAL] BEFORE REPORTING group...`
   (`use_type "REPORTING"`, `report_groups`); the word `FOR` is skipped.
 - **CANCEL**: program-name list with commas, boundary and H9 checks.
+  `CancelStatement.program_names_literal` (parallel to `program_names`, in
+  `to_dict()` only when some name is a literal) tells `CANCEL 'X'` from
+  `CANCEL X` (#479); diff compares it and quotes literal names in its text.
 - **NOTE** (COBOL-74 comment statement) runs to the sentence period but stops
   early at a following line that starts with a verb, so a period-less NOTE cannot
   eat the rest of the program.
