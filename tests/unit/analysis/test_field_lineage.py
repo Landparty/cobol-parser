@@ -330,6 +330,29 @@ class TestOccursTables:
         # SUB#1 -> A -> E(1) -> E -> E(3) -> B -> SUB#2 would invent a flow.
         assert ("call:SUB#1@0+2", "call:SUB#2@0+2") not in flows
 
+    def test_sql_host_variable_in_a_table_is_inexact(self) -> None:
+        """Issue #507: a multi-row FETCH into / INSERT from a table field was
+        flagged exact, against "every edge through a table is inexact"."""
+        report = _program(
+            """
+01 WS-ARR.
+   05 EMPNO PIC X(6) OCCURS 10 TIMES.
+01 WS-ONE PIC X(6).
+""",
+            """
+EXEC SQL DECLARE C1 CURSOR FOR SELECT EMPNO FROM EMP END-EXEC
+EXEC SQL FETCH NEXT ROWSET FROM C1 FOR 10 ROWS
+  INTO :EMPNO END-EXEC
+EXEC SQL INSERT INTO EMP3 (EMPNO) VALUES (:EMPNO) END-EXEC
+EXEC SQL INSERT INTO EMP4 (EMPNO) VALUES (:WS-ONE) END-EXEC
+""",
+        )
+        flagged = _flagged(report)
+        assert flagged[("sql", "sql:EMP.EMPNO", "WS-ARR.EMPNO")] is False
+        assert flagged[("sql", "WS-ARR.EMPNO", "sql:EMP3.EMPNO")] is False
+        # A host variable outside any table keeps its exact edge.
+        assert flagged[("sql", "WS-ONE", "sql:EMP4.EMPNO")] is True
+
 
 class TestDuplicateNames:
     def test_two_filler_groups_stay_apart(self) -> None:
