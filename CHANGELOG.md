@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`interface-contract.md` describes `ast` for unrecognised input** (#368).
+  It said `ast is None` only when nothing could be parsed, but text with no
+  recognisable division (`"hello world"`, an empty file) returns an empty
+  `CobolProgram` named `UNKNOWN` with no divisions plus an error. The
+  contract (and `ParseResult`'s docstring) now says so and tells callers to
+  check `ast.divisions` for "something usable exists"; the behaviour is
+  pinned by a regression test.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

@@ -36,7 +36,7 @@ Returns a `ParseResult` object. The adapter accesses:
 | Attribute | Type | Notes |
 |-----------|------|-------|
 | `parse_result.success` | `bool` | True = AST was built **and** `errors` is empty |
-| `parse_result.ast` | `CobolProgram \| None` | May be **non-None even when `success` is False**: under `COLLECT_ALL` recovery (and after partial `FAIL_FAST` parses) a partial AST is returned alongside populated `errors`. `ast is None` only when nothing could be parsed. Check `success` for "complete and error-free", check `ast is not None` for "something usable exists". |
+| `parse_result.ast` | `CobolProgram \| None` | May be **non-None even when `success` is False**: under `COLLECT_ALL` recovery (and after partial `FAIL_FAST` parses) a partial AST is returned alongside populated `errors`. `ast is None` only on a lexer, preprocessing, I/O or internal failure (or a `FAIL_FAST` stop). When the text parsed but **no division was recognised** (`"hello world"`, `""`, a fixed-format file read as free-form), `ast` is an empty `CobolProgram` with `program_name == "UNKNOWN"` and no divisions, and `errors` holds "No recognizable COBOL division found". Check `success` for "complete and error-free"; check `ast is not None and ast.divisions` for "something usable exists" -- `ast is not None` alone is not enough. |
 | `parse_result.errors` | `list` | Each item must have `.line_number` (int or None) and `.message` (str) |
 | `parse_result.warnings` | `list` | Items are stringified with `str()` |
 | `parse_result.statistics` | object or None | Must have `.to_dict() -> dict` if not None |
