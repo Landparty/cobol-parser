@@ -738,7 +738,8 @@ and/or `--bindings` (`{"bindings": [...], "passthroughs": [...]}`, dict forms
 of `DatasetBinding` / `Passthrough`). `--depth` caps the joins a path crosses
 (dataset or table hop into another program, or a CALL). JSON:
 `ImpactResult.to_dict()` + `graph` (statistics, opaque callees, unjoined DDs,
-caveats) + `problems` (files with no report, JCL that did not parse or
+caveats, incl. JCL steps `bindings_from_jobs` could not read, passed as
+`join_caveats`) + `problems` (files with no report, JCL that did not parse or
 expand). Text groups hits by program with their paths, then `Unjoined:` and
 `Problems:`. Exit 0 when the start was found (hits or not); 1 when no source
 produced a report (problems printed first), the start matches nothing (report

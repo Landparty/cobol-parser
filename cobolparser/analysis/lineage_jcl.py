@@ -19,6 +19,10 @@ Utility steps understood:
   ranges it names (``kind="aggregate"`` there); ``INREC``, ``OUTREC``,
   ``BUILD``, ``OVERLAY``, ``FINDREP`` and ``IFTHEN`` move bytes, so the step
   is a ``reformat`` and the flow stops with a caveat.
+- ICETOOL: every ``COPY`` / ``SORT`` / ``MERGE`` / ``SELECT`` / ``SUBSET`` /
+  ``DATASORT`` operator in ``TOOLIN`` carries ``FROM(dd)`` to ``TO(dd...)``
+  (and ``DISCARD(dd)``), read as a DFSORT step through its ``USING(xxxx)``
+  ``xxxxCNTL`` statements; ``SPLICE`` / ``RESIZE`` are reformats.
 - IEBGENER / ICEGENER: ``SYSUT1`` to ``SYSUT2`` (a ``GENERATE``/``RECORD``
   control statement makes it a reformat).
 - IDCAMS ``REPRO`` with ``INFILE``/``OUTFILE`` DD names or
@@ -49,7 +53,20 @@ from typing import Any
 
 from .lineage_graph import DatasetBinding, Passthrough
 
-_SORT_PROGRAMS = frozenset({"SORT", "DFSORT", "ICEMAN", "SYNCSORT", "ICETOOL"})
+_SORT_PROGRAMS = frozenset({"SORT", "DFSORT", "ICEMAN", "SYNCSORT"})
+_ICETOOL = "ICETOOL"
+#: ICETOOL operators that write records ``FROM(dd...)`` ``TO(dd...)``; the
+#: value says whether the records keep their bytes (``copy``) or not.
+_ICETOOL_OPERATORS = {
+    "COPY": "copy",
+    "SORT": "copy",
+    "MERGE": "copy",
+    "SELECT": "copy",
+    "SUBSET": "copy",
+    "DATASORT": "copy",
+    "SPLICE": "reformat",
+    "RESIZE": "reformat",
+}
 _COPY_PROGRAMS = frozenset({"IEBGENER", "ICEGENER"})
 _TSO_PROGRAMS = frozenset({"IKJEFT01", "IKJEFT1A", "IKJEFT1B"})
 _IMS_CONTROLLER = "DFSRRC00"
@@ -173,9 +190,16 @@ def _sum_ranges(control: str) -> tuple[tuple[int, int], ...]:
 
 def bindings_from_jobs(
     jobs: Iterable[Any],
+    caveats: list[str] | None = None,
 ) -> tuple[list[DatasetBinding], list[Passthrough]]:
     """DD -> dataset bindings per program, and utility pass-throughs, for
-    every step of every (already PROC-expanded) jcl-parser ``Job``."""
+    every step of every (already PROC-expanded) jcl-parser ``Job``.
+
+    ``caveats``, when given, receives one line per step whose flow could not
+    be read (pass them on as ``LineageGraph(join_caveats=...)``), so a step
+    left out is never mistaken for a step that moves nothing.
+    """
+    notes: list[str] = caveats if caveats is not None else []
     bindings: list[DatasetBinding] = []
     passthroughs: list[Passthrough] = []
     for job in jobs:
@@ -188,6 +212,9 @@ def bindings_from_jobs(
                 list(getattr(step, "dd_statements", None) or []), step_name, earlier
             )
             if not program:
+                continue
+            if program == _ICETOOL:
+                passthroughs += _icetool_passthroughs(dds, job_name, step_name, notes)
                 continue
             if program in _SORT_PROGRAMS:
                 passthroughs += _sort_passthroughs(dds, job_name, step_name, program)
@@ -212,6 +239,13 @@ def bindings_from_jobs(
             if program in _TSO_PROGRAMS:
                 run = _RUN_PROGRAM_RE.search(_inline(dds, "SYSTSIN"))
                 if not run:
+                    systsin = _dsn(dds, "SYSTSIN")
+                    if systsin:
+                        notes.append(
+                            f"{_step_label(program, step_name, job_name)}: "
+                            f"SYSTSIN is not in-stream ({systsin}); the programs "
+                            "it runs are not known, so its DDs are not bound"
+                        )
                     continue
                 program = run.group(1)
             elif program == _IMS_CONTROLLER:
@@ -298,6 +332,10 @@ def _repro_passthroughs(
     return out
 
 
+def _step_label(program: str, step: str | None, job: str | None) -> str:
+    return f"{program} step {step or '?'}" + (f" in job {job}" if job else "")
+
+
 def _sort_passthroughs(
     dds: list[Any], job: str | None, step: str | None, program: str
 ) -> list[Passthrough]:
@@ -320,6 +358,69 @@ def _sort_passthroughs(
         for src in inputs
         for dst in outputs
     ]
+
+
+def _icetool_operands(text: str, keyword: str) -> list[str]:
+    match = re.search(rf"\b{keyword}\s*\(([^)]*)\)", text)
+    return [n for n in re.split(r"[,\s]+", match.group(1)) if n] if match else []
+
+
+def _icetool_passthroughs(
+    dds: list[Any], job: str | None, step: str | None, notes: list[str]
+) -> list[Passthrough]:
+    """ICETOOL's record-moving operators, each read as a DFSORT step."""
+    label = _step_label(_ICETOOL, step, job)
+    if not _inline(dds, "TOOLIN"):
+        where = _dsn(dds, "TOOLIN")
+        notes.append(
+            f"{label}: TOOLIN is not in-stream"
+            + (f" ({where})" if where else "")
+            + "; the flow through it is not traced"
+        )
+        return []
+    # ``-`` at the end of a line continues the operator; ``*`` starts a comment.
+    joined = re.sub(r"-[ \t]*\n", " ", _control(dds, "TOOLIN"))
+    out: list[Passthrough] = []
+    for line in joined.splitlines():
+        words = line.split()
+        if not words or words[0].startswith("*"):
+            continue
+        operator = words[0]
+        kind = _ICETOOL_OPERATORS.get(operator)
+        if kind is None:
+            continue  # COUNT, DISPLAY, OCCUR, STATS, ...: no records written
+        inputs = [d for n in _icetool_operands(line, "FROM") for d in _dsns(dds, n)]
+        outputs: list[str] = []
+        for name in _icetool_operands(line, "TO") + _icetool_operands(line, "DISCARD"):
+            outputs += [d for d in _dsns(dds, name) if d not in outputs]
+        control = ""
+        for prefix in _icetool_operands(line, "USING")[:1]:
+            control = _control(dds, f"{prefix}CNTL")
+            if not control and _dsn(dds, f"{prefix}CNTL"):
+                notes.append(
+                    f"{label}: {operator} USING({prefix}) reads its control "
+                    f"statements from {_dsn(dds, f'{prefix}CNTL')}, which is not "
+                    "in-stream; the step is treated as a reformat"
+                )
+                kind = "reformat"
+            for match in _FNAMES_RE.finditer(control):
+                for name in re.split(r"[,\s]+", match.group(1).strip()):
+                    outputs += [d for d in _dsns(dds, name) if d not in outputs]
+        if not inputs or not outputs:
+            notes.append(
+                f"{label}: {operator} operator's FROM/TO datasets not "
+                "recognised; the flow through it is not traced"
+            )
+            continue
+        if _REFORMAT_RE.search(control):
+            kind = "reformat"
+        ranges = _sum_ranges(control) if kind == "copy" else ()
+        out += [
+            Passthrough(src, dst, kind, ranges, job, step, _ICETOOL)
+            for src in inputs
+            for dst in outputs
+        ]
+    return out
 
 
 _PROC_SUFFIXES = frozenset({".prc", ".proc", ".jcl", ".cntl", ""})
