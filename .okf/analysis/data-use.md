@@ -396,6 +396,7 @@ from cobolparser.analysis.xref import XrefAnalyzer
 report = XrefAnalyzer().analyze(ast)          # XrefReport
 report.entries                # list[XrefEntry], data items first (_KIND_ORDER)
 report.entry_for("WS-COUNT")  # XrefEntry | None, case-insensitive
+report.entries_named("AMT IN OUT-REC")  # every entry the name can mean
 report.entries_of_kind("paragraph")
 report.total_references
 report.undefined              # referenced, never declared
@@ -405,7 +406,12 @@ report.duplicate_declarations # declared more than once in one namespace
 
 `XrefEntry`: `name`, `kind`, `definition` (`SourceLocation | None`),
 `references`, `level`, `section`, `qualified_name` (set only for a name
-declared in more than one record, issue #258), plus `reference_count` / `is_referenced`.
+declared in more than one record, issue #258), `ancestors` (enclosing item
+names innermost first; not serialized), plus `reference_count` / `is_referenced`.
+`entries_named()` / `entry_for()` resolve a qualified name as the compiler
+does (#541): bare name first, then each qualifier must be an enclosing item,
+in order, intermediate levels skippable, `IN` = `OF`, a unique name needs no
+qualifier to be found qualified. They never compare `qualified_name` text.
 `XrefReference`: `location`, `role`, `statement`, `context` (the enclosing
 paragraph).
 

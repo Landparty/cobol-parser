@@ -377,6 +377,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DIBSTAT` among a rule's inputs instead of calling it "a condition naming
   no data item". An MQ CompCode stays a business rule too; this is now
   documented.
+* **Qualified names are looked up as COBOL resolves them** (#541). MCP
+  `explain_symbol` answered `found: false` for a correct qualification of a
+  unique name (`SOLO OF SOLO-REC`), for a partial chain the compiler accepts
+  (`AMT OF OUT-REC` when AMT sits in OUT-GRP) and for `IN`; `field-impact` /
+  `lineage --field` rejected `AMT IN IN-REC` as "no such field". Names are
+  now matched on the bare name and then the enclosing items, in order
+  (`XrefReport.entries_named`), and `IN` is accepted wherever `OF` is.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
