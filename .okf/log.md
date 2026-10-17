@@ -199,6 +199,10 @@ decodes are warnings or caveats, never silent.
 
 [parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): one TALLYING `FOR` takes any number of CHARACTERS / ALL / LEADING phrases; an identifier is a new counter only when FOR follows it.
 
+## 2026-10-17 -- MULTIPLY / DIVIDE receivers read and written (#534)
+
+[analysis/data-use.md](analysis/data-use.md), [analysis/lineage.md](analysis/lineage.md), [tests.md](tests.md): xref reads every BY/INTO receiver of a GIVING-less MULTIPLY/DIVIDE; lineage stops joining one arithmetic receiver to another.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

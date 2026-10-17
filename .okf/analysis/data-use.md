@@ -316,7 +316,11 @@ read/write role; `program_signature.py` grades LINKAGE directions and
   Without GIVING, the TO/FROM/BY/INTO target is both `read` and `write`
   (`ADD 1 TO X`). Sending operands come from
   `ArithmeticStatement.source_operands` (ADD/SUBTRACT) or the first two
-  operands (MULTIPLY/DIVIDE), so `ADD A B GIVING B` keeps B's read. Pinned by
+  operands (MULTIPLY/DIVIDE with GIVING), so `ADD A B GIVING B` keeps B's
+  read. MULTIPLY/DIVIDE without GIVING read the first operand plus *every*
+  BY/INTO receiver (`MULTIPLY 3 BY A B` is `A = A * 3; B = B * 3`; reading
+  only `operands[:2]` graded B write-only -- #534, pinned by
+  `tests/regression/test_multiply_divide_receivers.py`). Pinned by
   `test_xref.py::test_giving_leaves_the_from_operand_unwritten` and
   `test_program_signature.py::test_accumulated_and_giving_operands_get_the_right_direction`.
 * **Counters, pointers, in-place targets** (see #269). Operands a statement

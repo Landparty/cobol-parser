@@ -116,10 +116,13 @@ from PICTURE / USAGE), one `arith` edge each; the generic reads-to-writes
 path would join every subordinate to every other one (issue #337).
 In that generic path (`_reads_to_writes`) a receiver that only accumulates
 into itself feeds nothing else the statement writes (`_self_feeding`,
-#535): the receivers of ADD / SUBTRACT / MULTIPLY / DIVIDE without GIVING
-(taken from the model, not xref roles), and a read-and-written operand of
+#535, #534): the receivers of ADD / SUBTRACT / MULTIPLY / DIVIDE without GIVING
+(taken from the model, not xref roles; with no `source_operands` recorded,
+MULTIPLY / DIVIDE take their first operand as the sender), and a
+read-and-written operand of
 INSPECT (counters; the inspected item excepted), STRING or UNSTRING
-(POINTER, TALLYING IN). `ADD 1 TO A B` is `A = A + 1; B = B + 1`. COMPUTE
+(POINTER, TALLYING IN). `ADD 1 TO A B` is `A = A + 1; B = B + 1`, and
+`MULTIPLY n BY b c` is `b = b * n; c = c * n`. COMPUTE
 (`COMPUTE A B = A + 1` feeds B), a GIVING form, and a receiver that is also
 a sending operand keep their edges.
 
