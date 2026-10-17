@@ -328,7 +328,9 @@ carries it too: `free_format_flags()` makes `remove_comment_lines` /
 the final re-pad skip them (no pad, no width wrap), so the source map stays
 1:1; the expander's conditional-compilation passes use
 `preprocess_conditional_compilation(..., keep_source_format_directives=True)`
-so the directive survives to the final parse. Not handled: a free-format
+so the directive survives to the final parse; without that flag a recognised
+`>>SOURCE` is blanked silently, never "unknown compiler directive" (#502).
+Not handled: a free-format
 literal continuation, and a `>>SOURCE FIXED` in a file the detector calls
 free (that file never goes through the fixed normalizer). Pinned by
 `tests/regression/test_fixes_2026_09_28_preprocessing.py`.
@@ -394,6 +396,12 @@ all (alias: `cobolparser.parser._detect_fixed_format`). It samples the first
 10 non-blank lines against a 60% threshold. The `--source-format` escape
 hatch is in [cli.md](cli.md).
 
+* **Rule 0 (opening directive):** a first non-blank line that is
+  `>>SOURCE [FORMAT] [IS] FREE`, in **any** column, makes the file free-form
+  (option (a) of #502). Read as fixed, a column-1 directive sat in the
+  sequence area, was sliced to `E FORMAT FREE` and the parse failed ("no
+  division near 'E'"). Only the opening line decides; a later column-1
+  directive does not.
 * **Rule 1 (strict):** columns 1-6 blank or all digits. Decides on its own;
   rule 2 only ever *adds* detections.
 * **Rule 2 (change tags `SAPR24`, `28486`, `JSINT` in columns 1-6):** a

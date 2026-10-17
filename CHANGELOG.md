@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A file opening with `>>SOURCE FORMAT FREE` parses in any column, with
+  no false warning** (#502). Every parse warned "unknown compiler directive
+  '>>SOURCE FORMAT FREE' ignored" although the directive was applied. And
+  with the directive in column 1 above 7-space-indented lines, the file was
+  read as fixed-format: the directive was sliced to `E FORMAT FREE`, a long
+  literal was cut at column 72, and the parse failed with "No recognizable
+  COBOL division found near 'E'". An opening `>>SOURCE ... FREE` now makes
+  the file free-form wherever it starts, and `>>SOURCE` no longer warns.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
