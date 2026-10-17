@@ -311,6 +311,12 @@ VARCHAR 49-levels are not reported unused.
 IF with ELSE / EVALUATE with WHEN OTHER whose every arm terminates
 (`_procedures.branch_terminates`), so no fall-through is drawn past it.
 
+## 2026-10-17 -- ALLOCATE references a based LINKAGE item (#570)
+
+[analysis/data-use.md](analysis/data-use.md): `LinkageChecker` counts
+`ALLOCATE item` as a reference like `SET ADDRESS OF`; xref maps ALLOCATE
+(item reference, RETURNING write, size read) and FREE (pointer write).
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
