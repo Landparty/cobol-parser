@@ -298,31 +298,34 @@ def build_condition_expression(
 
     # Split on the lowest-precedence logical operator at the top paren
     # level. COBOL binds AND tighter than OR, so OR is split first (it
-    # becomes the tree root) and AND stays nested beneath it. Split on the
-    # rightmost operator so the tree is left-associative, matching COBOL's
-    # left-to-right evaluation. Parenthesised sub-conditions are skipped
-    # here and resolved by the recursive call, e.g. (A OR B) AND C keeps
-    # AND as the root.
+    # becomes the tree root) and AND stays nested beneath it. Every
+    # top-level occurrence is split in one pass and the legs folded from the
+    # left, so the tree is left-associative, matching COBOL's left-to-right
+    # evaluation. Parenthesised sub-conditions are skipped here and resolved
+    # by the recursive call, e.g. (A OR B) AND C keeps AND as the root.
+    # One pass, not one recursion per operator: a chain of ~1,000 terms hit
+    # Python's recursion limit and the whole IF was dropped (#375).
     for logical_op in ("OR", "AND"):
-        idx = find_top_level_operator(cleaned, logical_op)
-        if idx is not None:
-            left_expr = build_condition_expression(
-                cleaned[:idx], location, subject=subject, symbols=symbols
-            )
+        indexes = find_top_level_operators(cleaned, logical_op)
+        if not indexes:
+            continue
+        bounds = [-1, *indexes, len(cleaned)]
+        legs: list[CobolExpression] = []
+        for start, end in zip(bounds, bounds[1:], strict=False):
             # ``IF A = 1 OR 2`` / ``IF A > 1 AND < 5``: an abbreviated
             # combined relation condition repeats the subject (and, for a
             # bare literal, the operator) of the relation before it -- the
-            # rightmost relation of the left leg, or, when the left leg is
-            # itself abbreviated all the way down, the one handed in.
-            right_subject = _rightmost_relation(left_expr) or subject
-            right_expr = build_condition_expression(
-                cleaned[idx + 1 :], location, subject=right_subject, symbols=symbols
+            # rightmost relation of the legs to its left, or, when those are
+            # abbreviated all the way down, the one handed in.
+            leg_subject = (_rightmost_relation(legs[-1]) if legs else None) or subject
+            leg = build_condition_expression(
+                cleaned[start + 1 : end], location, subject=leg_subject, symbols=symbols
             )
-            if left_expr and right_expr:
-                logical = LogicalExpression(logical_op, location)
-                logical.set_left_condition(left_expr)
-                logical.set_right_condition(right_expr)
-                return logical
+            if leg is None:
+                break
+            legs.append(leg)
+        else:
+            return _fold_logical(logical_op, legs, location)
 
     # A leaf under an AND/OR: expand the abbreviated forms (a leg that
     # starts with a relational operator, a bare literal, ``NOT literal``)
@@ -456,6 +459,40 @@ def _negate_condition(
     negated = LogicalExpression("NOT", location)
     negated.set_left_condition(expr)
     return negated
+
+
+#: Up to this many legs, an AND/OR chain is the left-deep tree it always
+#: was. A longer one is folded pairwise so the tree stays O(log n) deep:
+#: every walker over it (``to_dict``, rendering, the analyzers) recurses on
+#: depth, and a left-deep chain of ~1,000 terms overflowed them (#375).
+_MAX_LEFT_DEEP_LEGS = 64
+
+
+def _fold_logical(
+    operator: str, legs: list[CobolExpression], location: SourceLocation
+) -> CobolExpression:
+    """Join *legs* (at least two) with *operator*, left to right."""
+
+    def join(left: CobolExpression, right: CobolExpression) -> CobolExpression:
+        logical = LogicalExpression(operator, location)
+        logical.set_left_condition(left)
+        logical.set_right_condition(right)
+        return logical
+
+    if len(legs) <= _MAX_LEFT_DEEP_LEGS:
+        tree = legs[0]
+        for leg in legs[1:]:
+            tree = join(tree, leg)
+        return tree
+    # AND / OR are associative, so pairing neighbours keeps the meaning and
+    # the left-to-right order of the legs.
+    level = legs
+    while len(level) > 1:
+        paired = [join(a, b) for a, b in zip(level[::2], level[1::2], strict=False)]
+        if len(level) % 2:
+            paired.append(level[-1])
+        level = paired
+    return level[0]
 
 
 def _rightmost_relation(expr: CobolExpression | None) -> ConditionalExpression | None:
@@ -685,6 +722,20 @@ def strip_enclosing_parens(tokens: list[str]) -> list[str]:
         else:
             break
     return tokens
+
+
+def find_top_level_operators(tokens: list[str], op: str) -> list[int]:
+    """Indexes of every ``op`` token outside any parentheses, in order."""
+    depth = 0
+    found: list[int] = []
+    for i, tok in enumerate(tokens):
+        if tok == "(":
+            depth += 1
+        elif tok == ")":
+            depth -= 1
+        elif depth == 0 and tok.upper() == op:
+            found.append(i)
+    return found
 
 
 def find_top_level_operator(tokens: list[str], op: str) -> int | None:

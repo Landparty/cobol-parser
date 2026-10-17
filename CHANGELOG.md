@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Long AND/OR chains parse; too-deep nesting is an error** (#375). A
+  condition of ~1,000 AND/OR terms hit Python's recursion limit and its IF
+  was dropped (3,000 terms also took ~5 s); it is now built in one pass
+  and a chain over 64 legs is kept shallow. Statements nested deeper than
+  the parser can follow (~500 IFs) were skipped with a warning while
+  `success` stayed True; that is now an error ("Statement nested too
+  deeply to parse"), under FAIL_FAST and COLLECT_ALL alike.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
