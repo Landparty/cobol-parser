@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A separator comma / semicolon is a space in MOVE, INSPECT, INITIALIZE and
+  ACCEPT** (#569). `MOVE 'ABC', TO X` kept the comma in its source (so
+  constant folding and `move-type-check` could not read it); INSPECT stopped
+  at the first separator and silently dropped every later TALLYING counter,
+  REPLACING pair or CONVERTING operand (gen-fixtures then asserted a wrong
+  `field_equals`); `INITIALIZE ... REPLACING NUMERIC BY 0, ALPHANUMERIC BY
+  SPACES` and `ACCEPT X, FROM DATE` lost the rest of the statement. Each now
+  parses exactly as its comma-free form.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

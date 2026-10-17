@@ -129,7 +129,9 @@ class TestParse:
         result = _parse(PROGRAM)
         moves = result.ast.find_all_by_type("MoveStatement")
         assert moves[0].source == "2.75"
-        assert moves[1].source == "A, B"
+        # Between identifiers the comma is still a separator, not a decimal
+        # point -- and a separator is a space (#569).
+        assert moves[1].source == "A B"
         compute = result.ast.find_all_by_type("ComputeStatement")[0]
         assert "1.5" in compute.to_dict()["expression"]
         assert "1 , 5" not in compute.to_dict()["expression"]

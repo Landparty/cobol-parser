@@ -48,7 +48,10 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   (`MOVE -5` -> `"-5"`, relied on by `analysis/const_fold.py`), and a
   reference-modification colon tight on both sides (`WS-X(2:3)`). A plain
   `"".join` corrupts every multi-token source (`WS-AOFWS-GRP`). A typed literal
-  keeps its prefix (`raw_value`, `X"41"`); a plain literal is re-quoted.
+  keeps its prefix (`raw_value`, `X"41"`); a plain literal is re-quoted. A
+  separator `,` / `;` outside parentheses is skipped like a space (`MOVE 'ABC',
+  TO X` -> `"ABC"`, #569); inside them it separates function arguments and is
+  kept.
 - **Malformed input.** `MOVE A TO.`, `MOVE A` (no `TO`) and a stream ending at
   `MOVE A TO` report an error via `report_parse_error` and keep the node; a
   missing source is not flagged (see
@@ -156,6 +159,12 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   (`to_value_category`), `[THEN] REPLACING ...`, `[THEN] TO DEFAULT`
   (`to_default`); `THEN` is optional (`_match_then`). Pinned by
   `tests/regression/test_level88_false_and_initialize_phrases.py`.
+- **Separators (#569).** A `,` / `;` is a space in COBOL: every gap in
+  INSPECT (target, TALLYING, REPLACING, CONVERTING, BEFORE/AFTER) and in
+  INITIALIZE's REPLACING list is skipped with `skip_statement_separators`, and
+  `_by_follows_value` looks past one. Stopping at it dropped every later
+  counter / pair with no warning. Pinned by
+  `tests/regression/test_separator_comma_operands.py`.
 - **INSPECT.** `_parse_tallying`'s counter-clause loop (`counter-1 FOR
   {CHARACTERS|ALL|LEADING} [value] ...`) checks `is_statement_boundary` and the H9
   check before treating an IDENTIFIER as a new counter; a subscripted counter
@@ -210,7 +219,8 @@ first. Node fields are in [ast-models.md](../ast-models.md).
 
 - Operand: qualified / subscripted (`ACCEPT X OF Y`, `ACCEPT T (2)`), guarded by
   `is_statement_boundary` so a missing operand does not eat the next verb;
-  `ACCEPT cd MESSAGE COUNT` is accepted.
+  `ACCEPT cd MESSAGE COUNT` is accepted. A separator after the operand is a
+  space (`ACCEPT X, FROM DATE`, #569).
 - `FROM DATE` / `TIME` / ... with a trailing format (`YYYYMMDD`, `YYYYDDD`) is
   folded into `from_source` (left in the stream it became a phantom paragraph).
   `FROM ENVIRONMENT "name"` stores the name via `set_environment_name()`.
