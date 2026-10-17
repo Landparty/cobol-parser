@@ -141,6 +141,11 @@ marks a VALUE-clause cell; `encode_field` skips both clauses for it.
 [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md): the status-check search
 follows an unconditional single-target `GO TO`, like a PERFORM.
 
+## 2026-10-17 -- recursion-check knows the program's ENTRY names (#515)
+
+[analysis/flow.md](analysis/flow.md): a CALL to an own (or enclosing)
+`ENTRY 'name'` is a self-recursive CALL risk.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

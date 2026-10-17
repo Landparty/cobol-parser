@@ -320,6 +320,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directly in the paragraph is now followed the same way (with the same
   next-SQL-statement cutoff); a conditional `GO TO` and `GO TO ... DEPENDING
   ON` stay conservative. Also in `lint`.
+* **`recursion-check` flags a CALL to the program's own ENTRY name** (#515).
+  Only a CALL to the PROGRAM-ID counted as self-recursive, so `CALL
+  'RC1ALT'` in a program with `ENTRY 'RC1ALT'` reported no risk, although it
+  re-enters the same load module (and codebase-graph already resolves ENTRY
+  names to their program). The names a program answers to are now its
+  PROGRAM-ID plus its own ENTRY names, for the self-call and the
+  enclosing-program checks alike; the risk is graded as for the PROGRAM-ID.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
