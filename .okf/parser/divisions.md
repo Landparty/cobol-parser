@@ -504,7 +504,10 @@ PROCEDURE DIVISION caller reports it -- see [statements-io.md](statements-io.md)
   property `is_declarative`.
 - `_collect_known_data_names` computes the DATA DIVISION name set once per
   parse and threads it to statement parsers via `ParseContext.known_data_names`
-  (used by the H9 paragraph-boundary check in [statements.md](statements.md)).
+  (used by the H9 paragraph-boundary check in [statements.md](statements.md)),
+  and `_collect_condition_names` the level-88 names (`ParseContext.condition_names`);
+  together they let the condition builder expand a bare data-name leg of an
+  abbreviated relation (#562).
 
 ### Paragraph and section boundaries (`procedure_boundaries.py`)
 

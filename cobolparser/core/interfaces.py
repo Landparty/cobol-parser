@@ -157,6 +157,7 @@ class ParseContext:
         host: Any,
         registry: Optional["StatementParserRegistry"] = None,
         known_data_names: frozenset[str] = frozenset(),
+        condition_names: frozenset[str] = frozenset(),
     ):
         """Initialize parsing context.
 
@@ -168,11 +169,16 @@ class ParseContext:
                 a following paragraph/section name swallowed by a missing
                 period (see ``looks_like_paragraph_boundary`` in
                 ``parsers/statements/_utils.py``).
+            condition_names: Upper-cased level-88 condition-names, so the
+                condition builder can tell ``IF A = B OR C`` with C a plain
+                data item (an abbreviated relation, ``A = C``) from one
+                where C is a condition-name (#562).
         """
         self.host = host
         self.registry = registry
         self.parser = host
         self.known_data_names = known_data_names
+        self.condition_names = condition_names
 
     @property
     def current_section(self) -> Any | None:

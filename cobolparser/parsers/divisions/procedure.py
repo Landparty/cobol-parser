@@ -101,6 +101,22 @@ class ProcedureDivisionParser(BaseDivisionParser):
         """
         self.host = host
 
+    def _collect_condition_names(self) -> frozenset:
+        """Upper-cased level-88 condition-names of the DATA DIVISION, so the
+        condition builder keeps the CONDITION_NAME reading for them and
+        expands any other declared data name in an abbreviated combined
+        relation (#562). Best-effort, like :meth:`_collect_known_data_names`.
+        """
+        program = getattr(self.host, "current_program", None)
+        data_division = getattr(program, "data_division", None) if program else None
+        if data_division is None:
+            return frozenset()
+        return frozenset(
+            item.name.upper()
+            for item in data_division.find_all_by_type("ConditionNameItem")
+            if getattr(item, "name", None)
+        )
+
     def _collect_known_data_names(self) -> frozenset:
         """Upper-cased DATA DIVISION item names, for H9's paragraph-boundary
         disambiguation (see ``looks_like_paragraph_boundary`` in
@@ -162,6 +178,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
         # H9 paragraph-boundary disambiguation: computed once per division
         # parse and threaded to statement parsers via ParseContext.
         self._known_data_names = self._collect_known_data_names()
+        self._condition_names = self._collect_condition_names()
 
         # Helper: get the paragraph list that new paragraphs should be added to.
         # If we're inside a section, add to that section's paragraphs; otherwise
@@ -523,6 +540,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
             self.host,
             self._statement_registry,
             known_data_names=getattr(self, "_known_data_names", frozenset()),
+            condition_names=getattr(self, "_condition_names", frozenset()),
         )
         token_stream.context = context
         token_stream._context = context  # type: ignore[attr-defined]

@@ -328,6 +328,16 @@ populated. Its token-cleaning pass:
   an operator or `NOT` follows. Pinned by
   `tests/regression/test_review_2026_09_09_parser.py` (`TestFinding08ConditionTrees`)
   and `tests/regression/test_issue_403_abbreviated_leading_is.py`.
+- **A bare data-name leg** (`IF A = 'X' OR WS-B`, `A NOT < B OR C`, `WS-T (1)`,
+  `X OF G`, `NOT WS-B`) expands like a literal leg (`A = WS-B`) when the
+  already-parsed DATA DIVISION declares it as an ordinary item that is not also
+  a level-88 name (#562). `ProcedureDivisionParser` threads
+  `ParseContext.known_data_names` / `.condition_names` to the builder as a
+  `ConditionSymbols` (`condition_symbols(context)`; IF, PERFORM UNTIL, SEARCH
+  WHEN). A real 88, or a name the parse cannot see (unexpanded COPY, a
+  SPECIAL-NAMES switch condition, a standalone `build_condition_expression`
+  call with no `symbols=`), keeps the CONDITION_NAME reading. Pinned by
+  `tests/regression/test_issue_562_abbreviated_data_name_leg.py`.
 - Condition collectors drop layout tokens and bare separators (rule 6); a
   condition ending at a line break must not keep a trailing `"\n"`, or a bare
   condition-name / `NOT cond` / class test / `( ... )` falls back to a raw

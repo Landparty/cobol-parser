@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`IF CODE = WS-A OR WS-B` repeats the relation when WS-B is a data item**
+  (#562). An abbreviated combined relation whose leg is a bare data-name
+  (also subscripted / qualified, or `NOT WS-B`) was always read as a
+  level-88 condition-name test. The condition builder now checks the
+  already-parsed DATA DIVISION: a declared item that is not a level-88 name
+  becomes `CODE = WS-B` (IF, PERFORM UNTIL, SEARCH WHEN); real 88s and
+  names it cannot see keep the CONDITION_NAME reading. gen-fixtures no
+  longer reports "bare condition name resolves to a non-condition field".
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

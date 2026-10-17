@@ -4,7 +4,9 @@ import logging
 from typing import Any, cast
 
 from cobolparser.parsers.statements._conditions import (
+    ConditionSymbols,
     build_condition_expression,
+    condition_symbols,
     condition_token_text,
 )
 from cobolparser.parsers.statements._utils import (
@@ -53,7 +55,9 @@ _UNTIL_LAYOUT_TOKEN_TYPES = (
 )
 
 
-def _make_until_condition_expression(condition_tokens: list[str]) -> CobolExpression:
+def _make_until_condition_expression(
+    condition_tokens: list[str], symbols: ConditionSymbols | None = None
+) -> CobolExpression:
     """Build the UNTIL condition node from its collected token strings.
 
     Backward-compatible shape (M12): the returned node is still a
@@ -72,7 +76,9 @@ def _make_until_condition_expression(condition_tokens: list[str]) -> CobolExpres
     condition_expr = CobolExpression("CONDITION", SourceLocation(0, 0))
     condition_expr.operands = [condition_str]
     try:
-        tree = build_condition_expression(list(condition_tokens), SourceLocation(0, 0))
+        tree = build_condition_expression(
+            list(condition_tokens), SourceLocation(0, 0), symbols=symbols
+        )
     except Exception:
         # Strictly fail-soft: a condition the shared machinery cannot
         # handle keeps the raw string with no structural tree.
@@ -799,7 +805,9 @@ class PerformStatementParser(IStatementParser):
             condition_tokens = self._collect_until_condition_tokens(stream)
             if condition_tokens:
                 stmt.set_until_clause(
-                    _make_until_condition_expression(condition_tokens)
+                    _make_until_condition_expression(
+                        condition_tokens, condition_symbols(get_parse_context(stream))
+                    )
                 )
             self._parse_inline_statements(stream, stmt)
         except ParseError as exc:
@@ -822,7 +830,9 @@ class PerformStatementParser(IStatementParser):
                 stream, for_varying=True
             )
             if condition_tokens:
-                return _make_until_condition_expression(condition_tokens)
+                return _make_until_condition_expression(
+                    condition_tokens, condition_symbols(get_parse_context(stream))
+                )
         except ParseError as exc:
             # H4: previously silent -- see _parse_varying_clause above.
             logger.debug(
@@ -906,7 +916,9 @@ class PerformStatementParser(IStatementParser):
             # Create CobolExpression for the condition and set it on statement
             if condition_tokens:
                 stmt.set_until_clause(
-                    _make_until_condition_expression(condition_tokens)
+                    _make_until_condition_expression(
+                        condition_tokens, condition_symbols(get_parse_context(stream))
+                    )
                 )
         except (TokenMismatch, UnexpectedEndOfInput):
             pass
