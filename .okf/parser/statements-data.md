@@ -172,7 +172,12 @@ first. Node fields are in [ast-models.md](../ast-models.md).
 - **INSPECT.** `_parse_tallying`'s counter-clause loop (`counter-1 FOR
   {CHARACTERS|ALL|LEADING} [value] ...`) checks `is_statement_boundary` and the H9
   check before treating an IDENTIFIER as a new counter; a subscripted counter
-  (`CNT(2) FOR ...`) is folded. `_parse_before_after` (shared by TALLYING and
+  (`CNT(2) FOR ...`) is folded. One `FOR` takes any number of `CHARACTERS` /
+  `ALL` / `LEADING` phrases, matched by value (`ALL` lexes as a figurative
+  constant), each a clause of the same counter; `ALL` / `LEADING` take one or
+  more operands, and a later identifier is the next counter only when `FOR`
+  follows it (`_starts_further_operand`, `_keyword_follows_value`; #332 --
+  `FOR ALL 'A' LEADING 'C'` had invented a counter named LEADING). `_parse_before_after` (shared by TALLYING and
   REPLACING) loops until neither qualifier matches, so `BEFORE` and `AFTER
   INITIAL` may both appear in either order (each at most once); its delimiter is
   read by `_consume_inspect_value`, so `BEFORE INITIAL SPACE` (figurative) and
