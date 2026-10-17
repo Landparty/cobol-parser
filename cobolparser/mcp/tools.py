@@ -1014,6 +1014,14 @@ class CobolTools:
         hits = [_hit(hit, index, self.workspace, response) for hit in result.hits]
         reached = set(result.programs) | {p.upper() for p in programs or []}
         for caveat in result.caveats:
+            if caveat in result.ambiguous:
+                response.caveat(
+                    "ambiguous-name",
+                    caveat,
+                    "every matching field is traced; qualify the name (X OF Y) "
+                    "to ask about one of them",
+                )
+                continue
             response.caveat(
                 "incomplete-analysis",
                 caveat,
