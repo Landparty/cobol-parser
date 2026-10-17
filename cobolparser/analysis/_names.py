@@ -65,6 +65,15 @@ QUALIFIER_SEPARATOR = " OF "
 
 _PAREN_GROUP_RE = re.compile(r"\(([^()]*)\)")
 
+_QUALIFIER_SPLIT_RE = re.compile(r"\s+(?:OF|IN)\s+", re.IGNORECASE)
+
+
+def split_qualified_name(text: str) -> list[str]:
+    """``"AMT IN OUT-GRP OF OUT-REC"`` -> ``["AMT", "OUT-GRP", "OUT-REC"]``:
+    the data name then its qualifiers, innermost first, upper-cased. ``IN``
+    is a full synonym of ``OF`` (#541)."""
+    return [p.upper() for p in _QUALIFIER_SPLIT_RE.split(text.strip()) if p.strip()]
+
 
 def qualified_references(text: str, skip_words: frozenset[str]) -> set[str]:
     """Every data-name reference in *text*, keeping its qualifiers.

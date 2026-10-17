@@ -183,6 +183,12 @@ its paragraphs. [generators/record-data.md](generators/record-data.md):
 registers to xref, but their tests stay business rules (carved out of the
 technical set, like CICS RESP); PCB status / MQ CompCode stay business too.
 
+## 2026-10-17 -- qualified names resolved as COBOL does (#541)
+
+[analysis/data-use.md](analysis/data-use.md), [mcp.md](mcp.md),
+[analysis/lineage.md](analysis/lineage.md): `XrefReport.entries_named` and
+`_names.split_qualified_name` (IN = OF, partial chains).
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

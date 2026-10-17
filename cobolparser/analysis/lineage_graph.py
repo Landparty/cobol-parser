@@ -43,6 +43,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ._names import split_qualified_name
 from .field_lineage import (
     ITEM,
     PORT_CALL,
@@ -793,7 +794,7 @@ class LineageGraph:
         """The start nodes of *field_name*, one group per qualified name it
         matched (an item's own node, its occurrences and subordinate fields,
         in every program), and program -> the qualified names it matched."""
-        parts = [p.strip().upper() for p in field_name.split(" OF ") if p.strip()]
+        parts = split_qualified_name(field_name)
         if not parts:
             return [], {}
         name, qualifiers = parts[0], parts[1:]
