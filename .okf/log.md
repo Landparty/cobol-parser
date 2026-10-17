@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- A LINKAGE REDEFINES group shares its reference (#596)
+
+[analysis/data-use.md](analysis/data-use.md): `LinkageChecker` maps each
+LINKAGE 01 to the item it REDEFINES; a group is referenced when any member is.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

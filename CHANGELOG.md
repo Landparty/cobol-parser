@@ -160,6 +160,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`linkage-check` / `lint` no longer report a LINKAGE 01 that REDEFINES a
+  USING parameter as "never referenced"** (#596). A level-01 REDEFINES shares
+  its base item's storage, so the base and every overlay of it (through a
+  chain, in either direction) now count as referenced when any one of them is
+  on a USING / CALL / SET ADDRESS OF.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
