@@ -258,6 +258,13 @@ arm.
   condition.
 - **CONTINUE**, **EJECT**, **SKIP1/2/3** are no-op nodes (see
   [statements.md](statements.md#registration-and-matching)).
+- **CONTINUE AFTER expr SECONDS** (Enterprise COBOL 6.4): the delay is kept as
+  `ContinueStatement.delay_expression` (text) and `delay_expression_tree`
+  (`build_compute_expression_tree`), so xref reads its operands and
+  unused-variables sees them via `_STR_ATTR_EXTRAS`. A missing `SECONDS` is a
+  parse error; the expression stops at a period or statement boundary. Flow
+  analysis ignores it (no control transfer). Before #578 the phrase was dropped
+  with an "Unparsed tokens" warning.
 
 ## USE, CANCEL and the legacy / COBOL 2002 verbs
 

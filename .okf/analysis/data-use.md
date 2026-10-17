@@ -361,6 +361,9 @@ read/write role; `program_signature.py` grades LINKAGE directions and
   as `write`; the `ALLOCATE n CHARACTERS` size is `read`; every `FREE p`
   pointer is `write` (set to NULL). Pinned by
   `tests/regression/test_issue_570_allocate_based_linkage.py`.
+* **CONTINUE AFTER n SECONDS** (#578). The delay's operands are `read`
+  (from `ContinueStatement.delay_expression_tree`, or the text inexactly);
+  `UnusedVariableAnalyzer` reads `delay_expression` via `_STR_ATTR_EXTRAS`.
 * **Reference modifiers.** A reference modifier's offset/length names are kept
   apart from the operand (`_split_operand`) and recorded `read` when the
   operand itself is a `write`: `MOVE A TO WS-B (WS-P:2)` does not write WS-P.

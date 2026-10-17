@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- CONTINUE AFTER n SECONDS (#578)
+
+[parser/statements-control.md](parser/statements-control.md): the delay
+expression is parsed onto `ContinueStatement.delay_expression` and read by
+xref / unused-variables.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

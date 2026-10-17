@@ -6,7 +6,7 @@ CANCEL, ALTER, GENERATE, RELEASE, RETURN, USE, SORT, MERGE).
 from typing import Any
 
 from ..ast_base import SourceLocation
-from .base import CobolStatement
+from .base import CobolExpression, CobolStatement
 from .call import CallParameter
 
 
@@ -273,13 +273,31 @@ class CopyStatement(CobolStatement):
 
 
 class ContinueStatement(CobolStatement):
-    """AST node for CONTINUE statements (no-op)."""
+    """AST node for CONTINUE statements (no-op).
+
+    ``delay_expression`` holds the arithmetic expression of Enterprise COBOL
+    6.4's ``CONTINUE AFTER expr SECONDS`` as text, ``None`` for a plain
+    CONTINUE. The delay transfers no control, so flow analysis ignores it.
+    """
 
     def __init__(self, location: SourceLocation):
         super().__init__("CONTINUE", location)
+        self.delay_expression: str | None = None
+        # Structural form of the same expression; None when the precedence
+        # parser could not build one (the text above is kept either way).
+        self.delay_expression_tree: CobolExpression | None = None
+
+    def set_delay_expression(
+        self, expression: str | None, tree: CobolExpression | None = None
+    ) -> None:
+        self.delay_expression = expression
+        self.delay_expression_tree = tree
 
     def to_dict(self) -> dict[str, Any]:
-        return super().to_dict()
+        result = super().to_dict()
+        if self.delay_expression is not None:
+            result["delay_expression"] = self.delay_expression
+        return result
 
 
 class NextSentenceStatement(CobolStatement):
