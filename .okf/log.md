@@ -346,6 +346,11 @@ order of each group's subordinates (`data-item-moved`, with byte offsets).
 [analysis/codebase.md](analysis/codebase.md): `ProgramDiffer` compares
 statements before the first paragraph header as `(PROCEDURE DIVISION)`.
 
+## 2026-10-17 -- MCP read_source always shows the cited line (#537)
+
+[mcp.md](mcp.md): the 200-line cap trims `before` context, keeping `line`
+and its `after` lines.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
