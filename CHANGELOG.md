@@ -221,6 +221,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operator was evaluated, so B held the word "A" and every later `>>IF B = 3`
   was silently FALSE. B now copies A's value at that point; naming an
   undefined variable warns.
+* **`complexity` counts a clause and its NOT- twin as one decision** (#553).
+  `READ ... AT END ... NOT AT END ...`, `ON SIZE ERROR / NOT ON SIZE ERROR`,
+  `ON EXCEPTION / NOT ON EXCEPTION`, `INVALID KEY / NOT INVALID KEY`, `AT EOP
+  / NOT AT EOP` and `ON OVERFLOW / NOT ON OVERFLOW` added 1 per body, so a
+  paragraph handling both outcomes scored 3 where `IF ... ELSE` scores 2. A
+  pair now adds 1 whether one or both bodies are written, and SEARCH's `AT
+  END` adds nothing (its WHENs are the decisions). Feeds `rating`, `health`
+  and the `complexity` lint rule.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

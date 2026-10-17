@@ -506,9 +506,14 @@ per loop-form PERFORM -- TIMES/UNTIL/VARYING, a bare `PERFORM target` is not
 a decision point since it always runs exactly once -- per target of a
 computed `GO TO ... DEPENDING ON` (an N-way branch plus the out-of-range
 fall-through, scored like an N-arm EVALUATE; a plain GO TO adds nothing and
-neither changes nesting depth) -- and per *present*
-exception-handling clause: AT END, INVALID KEY, AT EOP, ON SIZE ERROR, ON
-OVERFLOW, ON EXCEPTION, and their NOT- counterparts, each independently);
+neither changes nesting depth) -- and per *present* exception-handling
+clause **pair** (`_CLAUSE_PAIRS`): AT END / NOT AT END, INVALID KEY / NOT
+INVALID KEY, AT EOP / NOT AT EOP, ON SIZE ERROR / NOT ON SIZE ERROR, ON
+OVERFLOW / NOT ON OVERFLOW, ON EXCEPTION / NOT ON EXCEPTION add 1 whether
+one or both bodies are written -- they are the two outcomes of one test,
+as IF ... ELSE is one decision; counting each body scored the recommended
+explicit-both-outcomes style worse (#553). SEARCH's AT END adds nothing: a
+SEARCH already has its not-found path and is scored one per WHEN);
 `extended_complexity` adds one per boolean AND/OR operator in every
 condition tree on top of that (`IF A AND B OR C` has more distinct paths
 than a bare `IF A`, even though both are "one IF" for classic McCabe). Also
@@ -522,8 +527,8 @@ external-program targets, neither of which belong in an in-program fan
 count), and a LOW/MODERATE/HIGH `rating` from `ComplexityThresholds`
 (defaults `moderate=10`/`high=20`, overridable per analysis run).
 
-**Walk mechanics.** The clause-list attribute check
-(`at_end_clause`/`invalid_key_clause`/.../`on_exception`/`on_overflow`) is a
+**Walk mechanics.** The clause-pair attribute check (both bodies of a pair
+are walked; `at_end_clause`/`not_at_end_clause`/.../`on_exception`) is a
 local re-derivation of the same set `program_flow/scanner.py`'s
 `_CLAUSE_BODY_ATTRS` and `constraints.py`'s `_NESTED_STATEMENT_ATTRS`
 establish -- most of these are already reachable via the generic
@@ -616,7 +621,7 @@ and its mode -- rounding modes are `_DETAIL_KEYWORDS`, never renamed; #517), an 
 INVALID KEY / ON SIZE ERROR / ON EXCEPTION body, `UPON`, `CORRESPONDING`, a
 STRING delimiter or the INSPECT phrase Type-1 clones. A leaf is `(type,
 operands, clauses, details)`: `clauses` fingerprints every present clause body
-(the `_CLAUSE_ATTRS` set `complexity.py` uses, recursively through `_fp`, so
+(the same attributes `complexity.py`'s `_CLAUSE_PAIRS` pairs up, recursively through `_fp`, so
 their statements also count towards `statement_count`), and `details` is the
 statement's `to_dict()` minus `_DETAIL_SKIP_KEYS` (position, node
 bookkeeping, what the tuple already holds, and `possible_values` -- a
