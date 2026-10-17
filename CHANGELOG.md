@@ -160,6 +160,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **#311 judgment calls.** `diff` no longer reports every paragraph of a
+  renamed section as moved from the old section to the new one: a
+  paragraph's section is compared through the section match. A paragraph
+  that really leaves the section is still reported. `data-items` (and MCP
+  `record_layout`) add an `unresolved` line for an `OCCURS UNBOUNDED` table,
+  which is sized at its minimum, so its `occurs.max` and its groups'
+  `byte_length` read as a lower bound (the JSON shape is unchanged). The
+  EXEC DLI interface block (`DIBSTAT`, `DIBSEGM`, ...) is a special register,
+  as `EIB*` is: xref no longer lists `DIBSTAT` as undefined, and
+  business-rules counts a `DIBSTAT` test as technical. An IMS PCB status
+  field and an MQ CompCode stay business rules, like a CICS `RESP` field;
+  this is now documented.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

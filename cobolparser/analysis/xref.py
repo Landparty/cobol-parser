@@ -232,6 +232,16 @@ _SPECIAL_REGISTERS: frozenset[str] = frozenset(
         "DFHVALUE",
         "DFHCOMMAREA",
         "DFHEIBLK",
+        # The EXEC DLI interface block (DIB), supplied by the translator as
+        # the EIB is for CICS: never declared, and plumbing like EIBRESP
+        # (#311).
+        "DIBVER",
+        "DIBSTAT",
+        "DIBSEGM",
+        "DIBSEGLV",
+        "DIBKFBL",
+        "DIBDBDNM",
+        "DIBDBORG",
     }
 )
 

@@ -14,6 +14,15 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- #311 judgment calls: diff section rename, UNBOUNDED, DIBSTAT
+
+[analysis/codebase.md](analysis/codebase.md): a section rename moves none of
+its paragraphs. [generators/record-data.md](generators/record-data.md):
+`OCCURS UNBOUNDED` gets an `unresolved` lower-bound line.
+[analysis/data-use.md](analysis/data-use.md),
+[analysis/business-rules.md](analysis/business-rules.md): `DIB*` are special
+registers (technical); PCB status / MQ CompCode stay business, documented.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

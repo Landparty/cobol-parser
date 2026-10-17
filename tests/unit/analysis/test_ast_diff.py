@@ -1409,7 +1409,7 @@ def test_program_without_a_procedure_division_diffs_cleanly():
 
 
 def test_hand_built_program_with_a_section_and_no_data_division():
-    """A section rename also reparents the paragraphs it owns."""
+    """A section rename does not move the paragraphs it owns (#311)."""
     loc = SourceLocation(1, 1)
 
     def build(section_name: str) -> CobolProgram:
@@ -1425,10 +1425,49 @@ def test_hand_built_program_with_a_section_and_no_data_division():
 
     report = ProgramDiffer().diff(build("A-SECT"), build("B-SECT"))
 
-    assert sorted(_kinds(report)) == ["paragraph-moved", "section-renamed"]
-    moved = _of_kind(report, "paragraph-moved")[0]
-    assert moved.old == "position 2 of section A-SECT"
-    assert moved.new == "position 2 of section B-SECT"
+    assert _kinds(report) == ["section-renamed"]
+
+
+def _sectioned(work: str, other_paras: str = "", work_paras: str = "") -> str:
+    return (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. SECTS.\n"
+        "       PROCEDURE DIVISION.\n"
+        "       MAIN-SEC SECTION.\n"
+        "       M1.\n"
+        f"           PERFORM {work}\n"
+        "           STOP RUN.\n"
+        f"       {work} SECTION.\n"
+        "       W1.\n"
+        "           DISPLAY 'W1'.\n"
+        "       W2.\n"
+        "           DISPLAY 'W2'.\n"
+        f"{work_paras}"
+        "       OTHER-SEC SECTION.\n"
+        "       O1.\n"
+        "           DISPLAY 'O1'.\n"
+        f"{other_paras}"
+    )
+
+
+def test_renamed_section_does_not_move_its_paragraphs():
+    """#311: renaming WORK-SEC to JOB-SEC reported every paragraph under it
+    as moved from section WORK-SEC to section JOB-SEC."""
+    report = _diff(_sectioned("WORK-SEC"), _sectioned("JOB-SEC"))
+    assert "paragraph-moved" not in _kinds(report)
+    assert "section-renamed" in _kinds(report)
+
+
+def test_paragraph_leaving_a_renamed_section_still_moves():
+    w3 = "       W3.\n           DISPLAY 'W3'.\n"
+    report = _diff(
+        _sectioned("WORK-SEC", work_paras=w3),
+        _sectioned("JOB-SEC", other_paras=w3),
+    )
+    moved = _of_kind(report, "paragraph-moved")
+    assert [c.symbol for c in moved] == ["W3"]
+    assert moved[0].old.endswith("of section WORK-SEC")
+    assert moved[0].new.endswith("of section OTHER-SEC")
 
 
 # ---------------------------------------------------------------------------

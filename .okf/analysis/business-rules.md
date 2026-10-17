@@ -69,7 +69,12 @@ registers (SQLCODE, SQLSTATE, EIB*, RETURN-CODE, ...); plus a narrow name
 pattern (`EOF`, `EOJ`, `FS`, `END-OF-FILE`, `FILE-STAT`, `EIB*`, `DFH*`). A
 SEARCH is never technical (it is a table lookup). CICS `RESP` fields compared
 to `DFHRESP(...)` are deliberately *not* technical: "NOTFND -> CUSTOMER NOT
-FOUND" is a business rule.
+FOUND" is a business rule. The same holds for the other user-declared status
+fields: an IMS PCB status code (`PCB-STATUS = 'GE'`) and an MQ completion /
+reason code compared to `MQCC-*` / `MQRC-*`. The interface-block registers
+are the line: `EIB*`, `SQLCODE` and the EXEC DLI `DIB*` fields (`DIBSTAT`,
+#311) are special registers and so technical, even when one is tested for
+not-found.
 
 ## Context, inputs and outputs
 
