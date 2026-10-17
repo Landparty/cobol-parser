@@ -105,6 +105,30 @@ def _wrap_fragment(source: str) -> str:
     return _WRAPPER_HEAD + body + _WRAPPER_TAIL
 
 
+#: Lines :func:`_wrap_fragment` puts in front of a fragment's first line.
+WRAPPER_HEAD_LINES = _WRAPPER_HEAD.count("\n")
+_DIVISION_HEADER_RE = re.compile(
+    r"\b(?:IDENTIFICATION|ID|ENVIRONMENT|DATA|PROCEDURE)\s+DIVISION\b", re.IGNORECASE
+)
+
+
+def wrap_copybook_fragment(source: str) -> str | None:
+    """*source* wrapped in the program skeleton :func:`parse_copybook_records`
+    parses a copybook through, or ``None`` when *source* is not a bare
+    fragment (it names a division or a ``PROGRAM-ID``, or holds no code).
+
+    The fragment's line *n* is line ``n + WRAPPER_HEAD_LINES`` of the result.
+    For the tools that take any source file -- ``data-items``, the MCP
+    server -- so a copybook answers the way it does for gen-data and decode
+    rather than as a program with no divisions (#536).
+    """
+    if not source.strip() or _looks_like_program(source):
+        return None
+    if _DIVISION_HEADER_RE.search(source):
+        return None
+    return _wrap_fragment(source)
+
+
 def parse_copybook_records(
     source: str,
     *,

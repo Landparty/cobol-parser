@@ -154,6 +154,14 @@ Two shapes are detected first:
 
 * **Whole program** (`IDENTIFICATION DIVISION.` / `PROGRAM-ID.` present) —
   parsed as-is, no wrapper.
+
+`wrap_copybook_fragment(source)` is the same wrapper for the tools that take
+*any* source file -- `data-items` and the MCP server's parse (so
+`record_layout` on a `.cpy`): it returns the wrapped text, or `None` when the
+source names any division or a `PROGRAM-ID`. The fragment's line n is line
+`n + WRAPPER_HEAD_LINES` of the result; the MCP workspace maps it back.
+Without it both parsed a copybook as a program with no divisions: an empty
+`items` list with exit 0, `found: false` (#536).
 * **Free-form fragment** — `_looks_fixed_format` decides the column
   convention; a free-form fragment is indented into Area B so the wrapper and
   the fragment agree. Without this, `normalize_fixed_format` would chop the

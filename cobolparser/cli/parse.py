@@ -483,6 +483,15 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     from ..profiling import ProfilerContext
 
     source = _read_source(args.file, getattr(args, "encoding", None))
+    if getattr(args, "_wrap_copybook_fragment", False):
+        # data-items on a bare copybook: parse it the way gen-data does,
+        # inside a program skeleton, instead of as a program with no
+        # divisions (an empty answer with exit 0, #536).
+        from ..generators.data.copybook import wrap_copybook_fragment
+
+        wrapped = wrap_copybook_fragment(source)
+        if wrapped is not None:
+            source = wrapped
     dialect = _DIALECT_MAP[args.dialect]
     error_recovery = _get_error_recovery(args)
 
@@ -3164,7 +3173,12 @@ def _cmd_dclgen_check(args: argparse.Namespace) -> None:
 def _cmd_data_items(args: argparse.Namespace) -> None:
     from ..generators.data.layout_offsets import compute_program_data_items
 
+    args._wrap_copybook_fragment = True
     ast, prof = _parse_or_fail(args)
+    if ast.data_division is None:
+        # Nothing to lay out: say so rather than print `"items": []` and
+        # exit 0, which reads as "this file declares no data".
+        _fail(f"{args.file}: no DATA DIVISION found; no data items to report")
 
     output = compute_program_data_items(ast)
 

@@ -650,6 +650,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SYMBOL 'F'`) is named in an encoding caveat instead of passing as
   faithful. New `PictureClause.currency_signs` / `FieldSpec.currency_signs`
   carry each symbol's currency string.
+* **`data-items` and MCP `record_layout` accept a bare copybook** (#536).
+  A `.cpy` with no divisions was parsed as a program, so `data-items`
+  printed `"items": []` and exited 0 and `record_layout` answered `found:
+  false`, though gen-data and decode take the same file. Both now wrap a
+  fragment in gen-data's program skeleton (`wrap_copybook_fragment`), MCP
+  citing the copybook's own lines; `data-items` on a file with no DATA
+  DIVISION exits 1 with a message instead of an empty list.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

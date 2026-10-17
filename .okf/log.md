@@ -378,6 +378,14 @@ sliced across its DISPLAY fields by byte offset (figuratives to every field).
 flow lexer -> parser -> `PictureClause.currency_signs` -> `FieldSpec`; a
 one-character sign is edited like `$`, anything unmodelled gets a caveat.
 
+## 2026-10-17 -- data-items / record_layout on a bare copybook (#536)
+
+[cli.md](cli.md), [mcp.md](mcp.md),
+[generators/record-data.md](generators/record-data.md),
+[generators/decode-compare.md](generators/decode-compare.md): both wrap a
+fragment through `wrap_copybook_fragment`; MCP maps lines back; `data-items`
+with no DATA DIVISION exits 1.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
