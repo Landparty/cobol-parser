@@ -115,7 +115,8 @@ class UnitScan:
     """One program unit's reports."""
 
     program_name: str
-    #: 0 for the outermost unit, 1 for a program contained in it, and so on.
+    #: 0 for the outermost unit (and a stacked one), 1 for a program nested
+    #: in it, and so on.
     #: A portfolio row shows the outermost unit's name for the file and can
     #: indent the rest under it without re-deriving the nesting.
     depth: int
@@ -295,11 +296,19 @@ def _units_with_depth(program: Any, depth: int = 0) -> list[tuple[Any, int]]:
     which a portfolio view needs in order to show a contained program as
     contained rather than as a second top-level program in the same file.
     Re-derived here rather than changed there: that method's flat list is
-    what every existing analyzer consumes.
+    what every existing analyzer consumes. The depth is the *source*
+    nesting (``CobolProgram.nesting_depth``), so a stacked program -- a
+    separate compilation unit after the previous one's ``END PROGRAM`` --
+    is at depth 0, not contained in the first program (#532).
     """
     out = [(program, depth)]
     for contained in program.contained_programs:
-        out.extend(_units_with_depth(contained, depth + 1))
+        nested = getattr(contained, "nesting_depth", None)
+        out.extend(
+            _units_with_depth(
+                contained, depth + 1 if not isinstance(nested, int) else nested
+            )
+        )
     return out
 
 

@@ -216,8 +216,9 @@ consumer can prove every file it handed over was accounted for.
   listed under `failures`), `parse_error_count` (errors `COLLECT_ALL`
   recovered from — the grade is worth labelling, not dropping),
   `copybook_error` (serialized only when set).
-* `UnitScan` — `program_name`, `depth` (0 = outermost, 1 = contained in it,
-  ...), `reports: {analyzer: dict}`, `failed_analyzers: {analyzer:
+* `UnitScan` — `program_name`, `depth` (the source nesting,
+  `CobolProgram.nesting_depth`: 0 = outermost or stacked, 1 = nested in it,
+  ..., #532), `reports: {analyzer: dict}`, `failed_analyzers: {analyzer:
   "<ExcType>: <message>"}` (serialized only when non-empty).
 
 ### Properties it owes its caller (pinned by `tests/unit/test_scan.py`)

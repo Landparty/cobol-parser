@@ -239,7 +239,12 @@ first is returned as `ParseResult.ast` and the rest are attached to
 unit via `program_units()`. `_peek_is_end_program()` /
 `_consume_end_program_marker()` consume `END PROGRAM [name] [.]` between units.
 `CobolProgram.program_units()` enumerates every unit (outermost first, in source
-order). Dropping everything after the first program would silently lose most of
+order). The tree stays flat (every PROGRAM unit hangs off the first), so the
+source nesting is recorded apart (#532): `_open_programs` is a stack of the
+PROGRAM units whose `END PROGRAM` has not been seen; `_attach_new_unit` sets
+the new unit's `enclosing_program` to its top (None when the stack is empty:
+a *stacked* program, a separate compilation unit) and pushes it, and the
+`END PROGRAM` branch of `_handle_unmatched_token` pops it. Dropping everything after the first program would silently lose most of
 a member (NIST `IC228A`).
 
 **Object-oriented units.** IBM OO `CLASS-ID` / `FACTORY` / `OBJECT` /

@@ -846,10 +846,12 @@ class TestFailureHandling:
         )
         graph = CodebaseGraphBuilder().build([str(nested)])
         assert "OUTERPGM" in graph.program_ids
-        assert "INNERPGM" in graph.program_ids
+        # A nested program is graphed under the program it is nested in: it
+        # is not in the global CALL namespace (#532).
+        assert "OUTERPGM/INNERPGM" in graph.program_ids
         # A contained unit's CALL is not attributed to the unit enclosing it.
         assert graph.callees_of("OUTERPGM") == ["OUTERCALLEE"]
-        assert graph.callees_of("INNERPGM") == ["INNERCALLEE"]
+        assert graph.callees_of("OUTERPGM/INNERPGM") == ["INNERCALLEE"]
         assert any("program units" in n for n in graph.unresolved)
 
 

@@ -494,7 +494,8 @@ class TestCodebaseOverview:
         assert rows["ACCOUNT"]["unit_kind"] == "CLASS"
         external = {e["program"]: e for e in answer["call_graph"]["not_in_workspace"]}
         assert external["CBLTDLI"]["called_by"] == ["IMSDLIB", "IMSMPP"]
-        assert ["FACTORL"] in answer["call_graph"]["cycles"]
+        # A nested program is graphed under its container (#532).
+        assert ["SUBPROG/FACTORL"] in answer["call_graph"]["cycles"]
         assert "BATCHSEQ" in answer["call_graph"]["entry_programs"]
         assert answer["copybooks"]["most_used"][0]["member"] == "SQLCA"
         assert sum(answer["health"]["grades"].values()) == len(answer["programs"])

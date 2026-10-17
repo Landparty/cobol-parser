@@ -175,6 +175,18 @@ two methods are how to reach the units, and back both
 `LintAnalyzer`'s per-unit pass and the CLI's `--program NAME` (see
 [cli.md](cli.md)). Pinned by `tests/regression/test_nested_program_units.py`.
 
+The tree does not say how the units nest (every PROGRAM unit hangs off the
+first); `enclosing_program` does (#532): the unit it is nested in, or None
+for an outermost or *stacked* unit. `add_contained_program` defaults it to the
+containing unit; the parser corrects it. `is_nested`, `nesting_depth`,
+`is_common` (`PROGRAM-ID ... IS COMMON`) and `nested_program_called(name)`
+(the nested unit a `CALL 'name'` in this unit reaches by COBOL scope: directly
+nested, a COMMON one nested in an enclosing unit, or a nested unit's own name;
+None = a separately compiled program) build on it. `to_dict()` writes
+`enclosing_program` (a name, or null for stacked) only on a contained unit
+whose nesting differs from the tree, and `from_json()` restores it
+(`_restore_nesting()`, the nearest preceding unit of that name).
+
 ## Serialization: `to_json()` / `from_json()`
 
 `CobolProgram.to_json()` exports the full tree as JSON (top-level keys

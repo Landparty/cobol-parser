@@ -155,6 +155,14 @@ name it looked up, saying a case variant exists instead.
 [analysis/codebase.md](analysis/codebase.md): DOT / Mermaid node ids come
 from a per-diagram `_NodeIds` allocator with numeric suffixes on collision.
 
+## 2026-10-17 -- Nested programs are scoped, stacked ones are top-level (#532)
+
+[parser/orchestration.md](parser/orchestration.md),
+[ast-models.md](ast-models.md), [analysis/codebase.md](analysis/codebase.md),
+[mcp.md](mcp.md), [batch.md](batch.md): the parser records
+`enclosing_program`; codebase-graph qualifies nested ids (`OUTER/INNER`) and
+resolves CALLs by COBOL scope; MCP and `scan` report the source nesting.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
