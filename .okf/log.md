@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- MCP lineage hops cite their own file (#489)
+
+[mcp.md](mcp.md), [analysis/lineage.md](analysis/lineage.md): `Hop` carries
+`origin_file`, so `where_from` / `impact_of_change` no longer cite a program
+line in a copybook that has a statement of the same kind at that line;
+`edge_files` marks a key two files claim as `None`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

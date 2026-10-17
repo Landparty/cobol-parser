@@ -157,6 +157,9 @@ original's (pinned in `TestStoredJoinState`). Without `join_caveats` only
 the opaque-callee caveat is re-derived and `unjoined` is empty. A rebuilt
 graph records the edges it loads, so its own `join_edges()` re-exports them.
 `ImpactResult.start_found` is False when nothing matched the start.
+`Hop.origin_file` (from `_EdgeInfo.origin_file`, the report edge's
+`origin.file` after `apply_source_map`) says which file a hop's line is in;
+it is not in `Hop.to_dict()` (#489, used by the MCP server).
 
 ## Bindings from JCL
 

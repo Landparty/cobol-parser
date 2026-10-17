@@ -159,6 +159,10 @@ class _EdgeInfo:
     confidence: str = "exact"
     cross: bool = False
     guarded: bool = False
+    #: The file ``line`` is in, when the report was stamped with a source
+    #: map (``apply_source_map``): a copybook's line and the program's own
+    #: line of the same number are told apart by it (#489).
+    origin_file: str | None = None
 
 
 @dataclass(frozen=True)
@@ -171,6 +175,9 @@ class Hop:
     line: int
     statement: str
     confidence: str
+    #: The file ``line`` is in, when known (see ``_EdgeInfo.origin_file``).
+    #: Not part of ``to_dict()``: the CLI JSON shape is unchanged.
+    origin_file: str | None = None
 
     @property
     def label(self) -> str:
@@ -449,6 +456,7 @@ class LineageGraph:
                         statement=edge.get("statement") or "",
                         confidence="exact" if edge.get("exact", True) else "overlap",
                         guarded=bool(edge.get("guarded")),
+                        origin_file=(edge.get("origin") or {}).get("file"),
                     ),
                 )
                 if src[2] != ITEM:
@@ -923,7 +931,15 @@ class LineageGraph:
                 prev, info = parent[cursor]
                 p, n, _ = self._describe(cursor[0])
                 path.append(
-                    Hop(p, n, info.kind, info.line, info.statement, info.confidence)
+                    Hop(
+                        p,
+                        n,
+                        info.kind,
+                        info.line,
+                        info.statement,
+                        info.confidence,
+                        info.origin_file,
+                    )
                 )
                 cursor = prev
             path.reverse()

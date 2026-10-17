@@ -166,10 +166,15 @@ then a count), with the root cut from library notes (`_relative`).
 | `lineage` | field-mode `impact_of_change`, `where_from` | every unit's `FieldFlowAnalyzer` report (after `apply_source_map`) in one `LineageGraph`; JCL under the root (`.jcl`/`.job`) through `load_jobs` when jcl-parser imports, else `jcl_note`; `edge_files` |
 | `health` | `codebase_overview` | grade/score per unit (`TechnicalDebtAnalyzer` sharing the memoized flow and redundancy reports); `cross_file_clone_groups` over a hand-built `ScanReport`, members placed on disk |
 
-Lineage locations: `LineageGraph` hops carry the origin *line* but not its
-file, so `edge_files` maps `(PROGRAM, line, kind, statement)` to the file
-from the report's own edges; a program parsed without expansion uses its own
-file; anything else is `null` with `unmapped-location`. Join hops (dataset,
+Lineage locations: a `LineageGraph` hop carries its edge's origin line and,
+when the report was source-mapped, its origin file (`Hop.origin_file`, from
+the edge's `origin.file`), which `_hop_location` cites directly (#489: a
+program line and a PROCEDURE DIVISION copybook line of one number used to
+share a key, and the last written won). Without it, `edge_files` maps
+`(PROGRAM, line, kind, statement)` to the file from the report's own edges
+(`None` when two files claim one key -- never guessed); a program parsed
+without expansion uses its own file; anything else is `null` with
+`unmapped-location`. Join hops (dataset,
 table, CALL) have no line and no `location`.
 
 Cost: on 459 NIST programs with copybooks, the `programs` index takes about

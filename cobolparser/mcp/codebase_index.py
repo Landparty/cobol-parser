@@ -101,8 +101,13 @@ class LineageIndex(_Survey):
     #: PROGRAM-IDs whose parse expanded copybooks, so that a bare line number
     #: from its report may be in a copybook rather than in its own file.
     expanded: set[str] = field(default_factory=set)
-    #: (PROGRAM-ID, line, edge kind, statement) -> the file the line is in.
-    edge_files: dict[tuple[str, int, str, str], str] = field(default_factory=dict)
+    #: (PROGRAM-ID, line, edge kind, statement) -> the file the line is in;
+    #: None when two files claim the key (a program line and a copybook line
+    #: of the same number). Only a fallback: a hop carries its own
+    #: ``origin_file`` when the report was source-mapped (#489).
+    edge_files: dict[tuple[str, int, str, str], str | None] = field(
+        default_factory=dict
+    )
     #: Units or files that produced no lineage report, and JCL problems.
     problems: list[str] = field(default_factory=list)
     #: JCL files found under the root, and whether their datasets joined.
@@ -287,7 +292,11 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
                 file = (
                     workspace.display(edge.origin_file) if edge.origin_file else display
                 )
-                index.edge_files[(program, line, edge.kind, edge.statement)] = file
+                key = (program, line, edge.kind, edge.statement)
+                if key in index.edge_files and index.edge_files[key] != file:
+                    index.edge_files[key] = None  # ambiguous: never guess
+                else:
+                    index.edge_files[key] = file
 
     bindings: list[Any] = []
     passthroughs: list[Any] = []
