@@ -330,7 +330,9 @@ its end, repeated for `ALL`) and each field gets its slice as its own
 `value_clause` (a hex literal's slice stays `X'..'`); a figurative is given
 to every field as is. Only one-byte-per-character DISPLAY fields take a text
 slice -- COMP / COMP-3 / national fields keep being generated, a figurative
-excepted. A field with its own VALUE keeps it; `respect_values=False` still
+excepted. A numeric DISPLAY field reads its slice as digits at its own scale
+(`'0001'` over `9(2)V99` is 00.01); a slice that is not all digits, or a
+P-scaled picture, leaves that field generated. A field with its own VALUE keeps it; `respect_values=False` still
 ignores all of it. Before #552 the group's bytes were random.
 
 **Signedness.** `PictureClause.is_signed` only reports an explicit `S`, so

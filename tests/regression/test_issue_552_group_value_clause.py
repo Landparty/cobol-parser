@@ -66,3 +66,37 @@ def test_respect_values_false_still_ignores_it() -> None:
     dataset = _generate(respect_values=False)
     columns = [spec.name for spec in dataset.fields]
     assert {row[columns.index("H-TYPE")] for row in dataset.rows} != {"HDR"}
+
+
+def test_numeric_slice_is_read_as_digits_at_the_field_scale() -> None:
+    # '00012345' over 9(2)V99 + 9(4): the bytes are the literal's, so A is
+    # 00.01 -- taking the slice '0001' as the number 1 wrote '0100'.
+    copybook = (
+        "       01  R.\n"
+        "           05  G VALUE '00012345'.\n"
+        "               10 A PIC 9(2)V99.\n"
+        "               10 B PIC 9(4).\n"
+    )
+    opts = DataGeneratorOptions(rows=2, seed=1).for_record_image()
+    dataset = CopybookDataGenerator(opts).generate_from_source(copybook)
+    assert dataset.to_records(EncodingOptions()) == b"00012345" * 2
+    columns = [spec.name for spec in dataset.fields]
+    for row in dataset.rows:
+        assert row[columns.index("A")] == "0.01"
+
+
+def test_a_non_digit_slice_does_not_become_a_numeric_value() -> None:
+    # 'ABCD' over a 9(4) is no value the encoder can write back as those
+    # bytes: the cell said ABCD while the record held 0000.  It is generated.
+    copybook = (
+        "       01  R.\n"
+        "           05  G VALUE 'HDRABCD'.\n"
+        "               10 A PIC X(3).\n"
+        "               10 B PIC 9(4).\n"
+    )
+    opts = DataGeneratorOptions(rows=3, seed=1).for_record_image()
+    dataset = CopybookDataGenerator(opts).generate_from_source(copybook)
+    columns = [spec.name for spec in dataset.fields]
+    for row in dataset.rows:
+        assert row[columns.index("A")] == "HDR"
+        assert row[columns.index("B")].isdigit()

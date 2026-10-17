@@ -705,6 +705,8 @@ def _apply_group_value(clause: str, specs: list[FieldSpec]) -> None:
     the bytes a literal leaves in a COMP / COMP-3 / national field are not
     a value of its own type, so those keep being generated.  A figurative
     is the exception -- it names a value every type has.
+    A numeric DISPLAY field takes its slice as digits at its own scale,
+    and only when the slice is all digits.
     """
     raw = clause.strip()
     all_match = _GROUP_VALUE_ALL_RE.match(raw)
@@ -732,6 +734,25 @@ def _apply_group_value(clause: str, specs: list[FieldSpec]) -> None:
             or spec.category not in _TEXT_SLICE_CATEGORIES
             or width != spec.character_positions
         ):
+            continue
+        if spec.category is FieldCategory.NUMERIC:
+            # A numeric DISPLAY field's slice is its digits, not its value:
+            # ``'0001'`` over ``PIC 9(2)V99`` is 00.01, and taking it as the
+            # literal 1 wrote ``0100``.  A slice that is not all digits (a
+            # hex literal's bytes, text, the spaces past the literal's end)
+            # or a P-scaled picture is no value the encoder can write back as
+            # the same bytes, so that field keeps being generated.
+            if (
+                data is not None
+                or len(piece) != width
+                or not piece.isdigit()
+                or spec.scaling_positions != 0
+            ):
+                continue
+            scale = spec.decimal_digits
+            spec.value_clause = (
+                f"{piece[:-scale] or '0'}.{piece[-scale:]}" if scale else piece
+            )
             continue
         if data is not None and piece:
             # A hex literal is bytes: its slice stays a hex literal, so the
