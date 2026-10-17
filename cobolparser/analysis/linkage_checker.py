@@ -44,7 +44,12 @@ from enum import Enum, auto
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram, CobolSection
-from ..models.statements import CallStatement, EntryStatement, SetStatement
+from ..models.statements import (
+    AllocateStatement,
+    CallStatement,
+    EntryStatement,
+    SetStatement,
+)
 
 #: LINKAGE items the CICS command-level translator itself passes on the
 #: PROCEDURE DIVISION USING it generates; a source that declares them is a
@@ -382,14 +387,17 @@ class LinkageChecker:
 
         # 3. So do its ENTRY USING clauses and every ``SET ADDRESS OF item
         # TO pointer`` (a based LINKAGE item is addressed, not passed --
-        # the CICS ``SET(ADDRESS OF item)`` option is the same idiom);
-        # its CALLs are validated
+        # the CICS ``SET(ADDRESS OF item)`` option and ``ALLOCATE item``,
+        # which obtains its storage and sets its address, are the same
+        # idiom, #570); its CALLs are validated
         for node in self._own_nodes(unit):
             if isinstance(node, EntryStatement):
                 for p in node.using_parameters or []:
                     self._mark_referenced(p)
             elif isinstance(node, CallStatement):
                 self._validate_call(node)
+            elif isinstance(node, AllocateStatement) and node.data_item:
+                self._mark_referenced(_bare_name(node.data_item))
             elif isinstance(node, SetStatement) and node.targets_are_address_of:
                 for target in node.targets:
                     self._mark_referenced(_bare_name(target))

@@ -75,7 +75,9 @@ from ..models.statements.io import (
     IOWriteStatement,
 )
 from ..models.statements.misc import (
+    AllocateStatement,
     AlterStatement,
+    FreeStatement,
     MergeStatement,
     ReleaseStatement,
     ReturnStatement,
@@ -1287,6 +1289,19 @@ class XrefAnalyzer:
                 pairs += [(t, ROLE_WRITE, True) for t in group.get("targets") or []]
                 if group.get("value"):
                     pairs.append((group["value"], ROLE_READ, False))
+        elif isinstance(stmt, AllocateStatement):
+            # ALLOCATE gives a based item storage (its address is set, its
+            # bytes are not read or written -- INITIALIZED aside) and writes
+            # the RETURNING pointer; the CHARACTERS size is read (#570).
+            if stmt.data_item:
+                pairs.append((stmt.data_item, ROLE_REFERENCE, True))
+            if stmt.size_expr:
+                pairs.append((stmt.size_expr, ROLE_READ, True))
+            if stmt.returning_target:
+                pairs.append((stmt.returning_target, ROLE_WRITE, True))
+        elif isinstance(stmt, FreeStatement):
+            # FREE releases the storage and sets each pointer to NULL.
+            pairs += [(name, ROLE_WRITE, True) for name in stmt.pointer_names]
         elif isinstance(stmt, InitializeStatement):
             pairs += [(t, ROLE_WRITE, True) for t in stmt.targets]
             # A REPLACING ``BY`` value arrives with its string-literal quotes
@@ -1632,6 +1647,7 @@ class XrefAnalyzer:
 #: falling through to role "reference" on any *other* type is what the
 #: generic-sweep caveat reports.
 _ROLE_MAPPED_STATEMENTS: tuple[type, ...] = (
+    AllocateStatement,
     AlterStatement,
     ArithmeticStatement,
     CallStatement,
@@ -1639,6 +1655,7 @@ _ROLE_MAPPED_STATEMENTS: tuple[type, ...] = (
     DisplayStatement,
     EntryStatement,
     EvaluateStatement,
+    FreeStatement,
     GoStatement,
     IOAcceptStatement,
     IOCloseStatement,
