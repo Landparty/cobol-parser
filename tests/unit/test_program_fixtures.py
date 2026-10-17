@@ -1112,6 +1112,82 @@ class TestTier2FieldEqualsExpectations:
         )
 
 
+class TestFieldEqualsAfterARunEndingArm:
+    """#591: an arm that may STOP RUN / GOBACK leaves the straight line, so
+    no scenario -- least of all the one planned to take that arm -- is told
+    a DISPLAY after the IF shows a value."""
+
+    _SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. BRSTOP.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-CODE PIC X.
+       01 WS-MSG PIC X(10).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           ACCEPT WS-CODE
+           IF WS-CODE = 'Q'
+              DISPLAY 'QUIT REQUESTED'
+              {ender}
+           END-IF
+           MOVE 'PROCESSED' TO WS-MSG
+           DISPLAY WS-MSG
+           STOP RUN.
+"""
+
+    @pytest.mark.parametrize("ender", ["STOP RUN", "GOBACK"])
+    def test_no_scenario_asserts_the_display_after_the_if(self, ender):
+        bundle = _bundle_for(self._SOURCE.format(ender=ender))
+        names = [scenario.name for scenario in bundle.scenarios]
+        assert any("THEN" in name for name in names), names
+        for scenario in bundle.scenarios:
+            assert not any(e.kind == "field_equals" for e in scenario.expectations)
+
+    _STATUS_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. STCHK.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT IN-F ASSIGN TO INFILE
+               FILE STATUS IS WS-FS.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  IN-F.
+       01  IN-REC PIC X(5).
+       WORKING-STORAGE SECTION.
+       01  WS-FS  PIC XX.
+       01  WS-MSG PIC X(4).
+       PROCEDURE DIVISION.
+       MAIN-PARA.
+           OPEN INPUT IN-F
+           IF WS-FS {relation} '00'
+              CLOSE IN-F
+              GOBACK
+           END-IF
+           MOVE 'DONE' TO WS-MSG
+           DISPLAY WS-MSG
+           GOBACK.
+"""
+
+    def test_status_check_whose_success_arm_ends_the_run(self):
+        # ``IF WS-FS = '00' ... GOBACK``: success takes the arm, so the
+        # DISPLAY after it never runs on the happy path.
+        bundle = _bundle_for(self._STATUS_SOURCE.format(relation="="), mode="all")
+        for scenario in bundle.scenarios:
+            assert not any(e.kind == "field_equals" for e in scenario.expectations)
+
+    def test_status_check_whose_failure_arm_ends_the_run(self):
+        # ``IF WS-FS NOT = '00' ... GOBACK``: success never takes the arm, so
+        # the happy path still asserts the DISPLAY after it.
+        bundle = _bundle_for(self._STATUS_SOURCE.format(relation="NOT ="), mode="all")
+        happy = next(s for s in bundle.scenarios if s.name == "happy path")
+        assert {
+            e.ref: e.value for e in happy.expectations if e.kind == "field_equals"
+        } == {"WS-MSG": "DONE"}
+
+
 _CALLER_SOURCE = """\
        IDENTIFICATION DIVISION.
        PROGRAM-ID. CALLERPROG.

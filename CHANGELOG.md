@@ -482,6 +482,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   VALID-CODE'`; in PERFORM UNTIL, xref no longer records the class-name as
   a data item. gen-fixtures reports both as unsupported with a precise
   reason instead of "unparseable condition text".
+* **gen-fixtures no longer asserts a DISPLAY that a STOP RUN in an IF arm
+  skips** (#591). `ConstantFolder` treated GO TO / EXIT PARAGRAPH / NEXT
+  SENTENCE inside an arm, loop or handler as leaving the straight line, but
+  not STOP RUN, GOBACK or EXIT PROGRAM, so every scenario -- including the
+  one planned to take the stopping arm -- got a `field_equals` for a DISPLAY
+  after the IF. Those statements now put the walk in uncertain mode too,
+  except inside a body a success status never runs (the failure arm of a
+  status check, an INVALID KEY handler), so the happy path still asserts
+  what follows `IF WS-FS NOT = '00' ... GOBACK`.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
