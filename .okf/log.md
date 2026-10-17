@@ -14,6 +14,10 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- INSPECT TALLYING: several phrases per FOR (#332)
+
+[parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): one TALLYING `FOR` takes any number of CHARACTERS / ALL / LEADING phrases; an identifier is a new counter only when FOR follows it.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

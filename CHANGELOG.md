@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **INSPECT TALLYING keeps every phrase of one `FOR`** (#332). `TALLYING N
+  FOR ALL 'A' LEADING 'C'` invented a counter named `LEADING` and lost
+  `'C'`, `FOR ALL ',' ALL '.'` took the keyword `ALL` as an operand, and a
+  phrase after `CHARACTERS` was dropped -- with no warning, so
+  `unused-variables` / `lint` called a real operand never referenced. Each
+  `CHARACTERS` / `ALL` / `LEADING` phrase (and each operand of `ALL` /
+  `LEADING`) is now its own clause of the same counter, and an identifier
+  starts a new counter only when `FOR` follows it.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
