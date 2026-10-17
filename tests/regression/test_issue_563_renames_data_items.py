@@ -92,6 +92,16 @@ def test_mcp_record_layout_answers_renames(tmp_path: Path):
     assert (single["picture"], single["usage"]) == ("9(5)", "COMP-3")
 
 
+def test_mcp_record_layout_caveats_an_unplaceable_renames(tmp_path: Path):
+    # Declared but not placeable: found: false alone would read as "no such
+    # item", which is what the issue reported.
+    (tmp_path / "RN.cbl").write_text(_source("66 R-X RENAMES D THRU A."))
+    result = CobolTools(Workspace(tmp_path)).record_layout("RN.cbl", "R-X")
+    assert result["answer"]["found"] is False
+    assert [c["kind"] for c in result["caveats"]] == ["incomplete-analysis"]
+    assert "R-X" in result["caveats"][0]["detail"]
+
+
 def test_mcp_explain_symbol_layout_matches(tmp_path: Path):
     (tmp_path / "RN.cbl").write_text(SOURCE)
     result = CobolTools(Workspace(tmp_path)).explain_symbol("RN.cbl", "R-BC")

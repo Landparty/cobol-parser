@@ -168,7 +168,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the end of its THRU operand; a single-item RENAMES takes that item's
   PICTURE and USAGE), or an `unresolved` line when it cannot be placed.
   `record_layout` answers it with its range and the record's fields inside
-  it.
+  it, and one it cannot place with an `incomplete-analysis` caveat.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

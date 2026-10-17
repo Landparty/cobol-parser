@@ -686,6 +686,16 @@ class CobolTools:
                 answer["records"] = renames
                 answer["offsets_from"] = "the start of each record's 01/77 item"
                 return response.build(answer, program_info)
+            renames_name = wanted.split(" OF ")[0].strip()
+            if _renames_node(unit, renames_name) is not None:
+                # Declared, but data-items could not place it: say so rather
+                # than let found: false read as "no such item" (#563).
+                response.caveat(
+                    "incomplete-analysis",
+                    f"RENAMES item {renames_name}: the bytes it renames "
+                    "could not be placed",
+                    "no layout is reported for it",
+                )
             names = sorted(
                 {
                     found.item.name.upper()
@@ -2066,6 +2076,12 @@ def _renames_records(
 
 def _renames_location(unit: CobolProgram, name: str) -> Any:
     """Where the level-66 RENAMES item *name* is declared, or None."""
+    node = _renames_node(unit, name)
+    return node.location if node is not None else None
+
+
+def _renames_node(unit: CobolProgram, name: str) -> RenamesItem | None:
+    """The level-66 RENAMES item *name* of *unit*, or None."""
     data_div = unit.data_division
     if data_div is None:
         return None
@@ -2074,7 +2090,7 @@ def _renames_location(unit: CobolProgram, name: str) -> Any:
             continue
         for node in section.children:
             if isinstance(node, RenamesItem) and node.name.upper() == name:
-                return node.location
+                return node
     return None
 
 
