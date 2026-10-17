@@ -178,7 +178,12 @@ executable `EXEC SQL` written directly in a paragraph (also inside a
 PERFORMed one): it resets the SQLCA, so `DELETE` / `COMMIT` / `IF SQLCODE`
 reports the DELETE (one check is never credited to both). SQL inside an
 IF/EVALUATE body may not run and does not end the search; neither does a
-declaration or `WHENEVER`.
+declaration or `WHENEVER`. The search follows every PERFORM (transitively)
+and an unconditional single-target `GO TO` written directly in the paragraph
+(`_go_to_block_indexes`): control never comes back, so the target paragraph
+or section's check is this statement's check, and nothing after the GO TO in
+the paragraph is looked at (#557). A conditional `GO TO` and `GO TO ...
+DEPENDING ON` are not followed.
 
 `DECLARE GLOBAL TEMPORARY TABLE` is executable and is graded;
 DECLARE CURSOR / TABLE / STATEMENT / VARIABLE are not

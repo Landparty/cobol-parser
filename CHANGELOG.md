@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`sql-cics-check` follows a `GO TO` to the SQLCODE check** (#557).
+  "SQL statement, then `GO TO CHK`" was reported `SQL_NO_SQLCODE_CHECK`
+  although `CHK` tests SQLCODE first: the search covered only the paragraph
+  and what it PERFORMs. An unconditional single-target `GO TO` written
+  directly in the paragraph is now followed the same way (with the same
+  next-SQL-statement cutoff); a conditional `GO TO` and `GO TO ... DEPENDING
+  ON` stay conservative. Also in `lint`.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
