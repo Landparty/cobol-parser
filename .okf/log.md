@@ -404,6 +404,12 @@ unsupported; the bundle's `unresolved` lists each gap once.
 [analysis/fixtures-support.md](analysis/fixtures-support.md): option (b) --
 each USING/GIVING file is a `report.unresolved` entry, not a boundary.
 
+## 2026-10-17 -- ConstantFolder caches its program walk (#374)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md): `_ProgramWalk`
+/ `_CURRENT_WALK` and the unseeded-fold memo; `gen-fixtures --scenarios all`
+5-7x faster on large programs, output byte-identical.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
@@ -411,12 +417,14 @@ each USING/GIVING file is a `report.unresolved` entry, not a boundary.
 untracked writes on every MOVE source feeding a CALL variable (and carries
 the incompleteness along the MOVEs), and gives a literal MOVE to a source's
 group the slice that lands in the source.
+
 ## 2026-10-16 -- MCP reachability from dead-code (#486)
 
 [mcp.md](mcp.md), [analysis/flow.md](analysis/flow.md): `callers_of`'s
 `reachable` and `program_brief`'s `unreachable_procedures` come from
 `DeadCodeAnalyzer`; new `DeadCodeReport.fall_through_edges` filters the
 flow graph's phantom `FALL_THROUGH` callers.
+
 ## 2026-10-16 -- xref declares FILLER level-88s and level-66 RENAMES (#485)
 
 [analysis/data-use.md](analysis/data-use.md): `XrefAnalyzer` now declares
