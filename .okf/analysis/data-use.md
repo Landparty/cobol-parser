@@ -614,6 +614,12 @@ ADDRESS OF x TO p` target (`SetStatement.targets_are_address_of`), every
 `ALLOCATE x` item (`AllocateStatement.data_item`, the same based-item idiom,
 #570) and any CICS option of the form `SET(ADDRESS OF x)` (`_ADDRESS_OF_RE`).
 
+**A REDEFINES group is referenced as one.** A level-01 LINKAGE item that
+REDEFINES another (directly or through a chain, `_linkage_redefines` /
+`_redefines_root`) shares its storage, so when any member of the group is
+referenced -- the USING base or an overlay of it -- none is reported
+`UNREFERENCED_LINKAGE` (#596).
+
 **Interface collection is O(units).** `LinkageChecker.collect_scope_interfaces(ast)`
 computes the interface map (and the passing-mode map above) once;
 `check(..., entry_interfaces=..., entry_parameter_modes=...)` accepts either or
