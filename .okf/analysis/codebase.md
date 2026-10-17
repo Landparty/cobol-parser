@@ -360,7 +360,11 @@ see the pair was considered and declined.
 **Positions are relative order, not line numbers.** Matched procedures from both
 sides run through `SequenceMatcher` and only those outside its matching blocks
 are reported moved — so inserting one paragraph at the top does not report every
-following paragraph as moved, and a pure reformat reports nothing at all.
+following paragraph as moved, and a pure reformat reports nothing at all. A
+paragraph's owning section is compared *through the section match*
+(`_report_moves`' `section_names`), so renaming a section moves none of its
+paragraphs; one that leaves the renamed section for another is still moved
+(#311).
 
 **Spellings are not changes.** A PICTURE is compared by
 its character positions, repeat factors written out (`_picture_positions`:

@@ -54,6 +54,10 @@ class LayoutItem:
     #: serialized: :func:`compute_program_data_items` turns a False into an
     #: ``unresolved`` entry instead.
     condition_values_complete: bool = True
+    #: ``OCCURS UNBOUNDED``: no declared maximum, so ``occurs.max`` and the
+    #: byte lengths are only what was sized. Not serialized:
+    #: :func:`flag_record_layout` says it in ``unresolved`` instead (#311).
+    occurs_unbounded: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -346,6 +350,9 @@ def _layout_item(
             occurs=_occurs_dict(item),
             condition_values=[],
             parent_qualified_name=parent_qualified_name,
+            occurs_unbounded=bool(
+                item.occurs_clause is not None and item.occurs_clause.is_unbounded
+            ),
         )
     )
 
@@ -532,7 +539,24 @@ def flag_record_layout(record: CobolDataItem, layout: list[LayoutItem]) -> list[
     unresolved: list[str] = []
     _flag_sync_slack(record, layout, unresolved)
     _flag_partial_condition_values(layout, unresolved)
+    _flag_unbounded_occurs(layout, unresolved)
     return unresolved
+
+
+def _flag_unbounded_occurs(layout: list[LayoutItem], unresolved: list[str]) -> None:
+    """Say in *unresolved* which tables are ``OCCURS UNBOUNDED``: with no
+    declared maximum they are sized at their minimum, so ``occurs.max`` and
+    the byte length of the table and of every group holding it are a lower
+    bound, not the definite figures they otherwise read as (#311)."""
+    for entry in layout:
+        if not entry.occurs_unbounded:
+            continue
+        times = entry.occurs["max"] if entry.occurs else 1
+        unresolved.append(
+            f"{entry.qualified_name}: OCCURS UNBOUNDED has no maximum; sized "
+            f"as {times} occurrence(s), so its occurs.max and the byte_length "
+            "of every group holding it are a lower bound"
+        )
 
 
 def _flag_partial_condition_values(

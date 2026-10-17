@@ -173,6 +173,16 @@ line (option (b)); line-count invariant and source-map table updated.
 [generators/record-data.md](generators/record-data.md): the unique fallback
 counter keeps its digits and skips used values; gaps become caveats.
 
+## 2026-10-17 -- #311 judgment calls: diff section rename, UNBOUNDED, DIBSTAT
+
+[analysis/codebase.md](analysis/codebase.md): a section rename moves none of
+its paragraphs. [generators/record-data.md](generators/record-data.md):
+`OCCURS UNBOUNDED` gets an `unresolved` lower-bound line.
+[analysis/data-use.md](analysis/data-use.md),
+[analysis/business-rules.md](analysis/business-rules.md): `DIB*` are special
+registers to xref, but their tests stay business rules (carved out of the
+technical set, like CICS RESP); PCB status / MQ CompCode stay business too.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

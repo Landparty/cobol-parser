@@ -1750,6 +1750,14 @@ class ProgramDiffer:
         old_sequence = [pair[0].name for pair in by_old]
         new_sequence = [pair[0].name for pair in by_new]
 
+        # A paragraph whose section was renamed has not moved: compare its
+        # parent through the section match, not by name (#311).
+        section_names = {
+            old_proc.name: new_proc.name
+            for old_proc, new_proc, _ in pairs
+            if old_proc.kind == "section"
+        }
+
         stable: set[str] = set()
         matcher = SequenceMatcher(None, old_sequence, new_sequence, autojunk=False)
         for block in matcher.get_matching_blocks():
@@ -1758,7 +1766,12 @@ class ProgramDiffer:
 
         for old_proc, new_proc, _ in sorted(pairs, key=lambda pair: pair[1].index):
             reordered = old_proc.name not in stable
-            reparented = old_proc.parent != new_proc.parent
+            old_parent = (
+                section_names.get(old_proc.parent, old_proc.parent)
+                if old_proc.parent is not None
+                else None
+            )
+            reparented = old_parent != new_proc.parent
             if not reordered and not reparented:
                 continue
             old_where = _position_text(old_proc)
