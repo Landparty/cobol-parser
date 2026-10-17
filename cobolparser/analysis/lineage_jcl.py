@@ -13,12 +13,16 @@ cobol-parser keeps no runtime dependency on it.
 
 Utility steps understood:
 
-- DFSORT / ICEMAN / SYNCSORT: ``SORTIN`` (and ``SORTINnn``) to ``SORTOUT``
-  and every ``OUTFIL FNAMES=``. ``SORT``/``MERGE FIELDS``, ``INCLUDE``,
+- DFSORT / ICEMAN / SYNCSORT: ``SORTIN`` (and ``SORTINnn``) to ``SORTOUT``,
+  every ``OUTFIL FNAMES=`` and every ``OUTFIL FILES=`` (``SORTOFnn`` /
+  ``SORTOFd``). A ``JOINKEYS`` step reads ``SORTJNF1`` / ``SORTJNF2`` (or
+  the DDs its ``F1=`` / ``F2=`` name) and is always a ``reformat``: a join
+  builds new records. ``SORT``/``MERGE FIELDS``, ``INCLUDE``,
   ``OMIT`` keep bytes in place; ``SUM FIELDS=(p,l,f,...)`` rewrites the
   ranges it names (``kind="aggregate"`` there); ``INREC``, ``OUTREC``,
   ``BUILD``, ``OVERLAY``, ``FINDREP`` and ``IFTHEN`` move bytes, so the step
-  is a ``reformat`` and the flow stops with a caveat.
+  is a ``reformat`` and the flow stops with a caveat. A sort step whose
+  inputs or outputs are not recognised adds a caveat instead of vanishing.
 - IEBGENER / ICEGENER: ``SYSUT1`` to ``SYSUT2`` (a ``GENERATE``/``RECORD``
   control statement makes it a reformat).
 - IDCAMS ``REPRO`` with ``INFILE``/``OUTFILE`` DD names or
@@ -55,9 +59,15 @@ _TSO_PROGRAMS = frozenset({"IKJEFT01", "IKJEFT1A", "IKJEFT1B"})
 _IMS_CONTROLLER = "DFSRRC00"
 #: IMS region types whose ``PARM`` names the application program second.
 _IMS_BATCH_REGIONS = frozenset({"DLI", "DBB", "BMP"})
-_REFORMAT_RE = re.compile(r"\b(INREC|OUTREC|BUILD|OVERLAY|FINDREP|IFTHEN|PARSE)\b")
+_REFORMAT_RE = re.compile(
+    r"\b(INREC|OUTREC|BUILD|OVERLAY|FINDREP|IFTHEN|PARSE|REFORMAT|JOINKEYS)\b"
+)
 _SUM_RE = re.compile(r"\bSUM\s+FIELDS\s*=\s*\(([^)]*)\)")
 _FNAMES_RE = re.compile(r"\bFNAMES\s*=\s*\(?([A-Z0-9@#$,\s]+)\)?")
+#: ``OUTFIL FILES=01`` / ``FILES=(01,A)``: output DDs ``SORTOF01`` / ``SORTOFA``.
+_FILES_RE = re.compile(r"\bFILES\s*=\s*\(?([A-Z0-9@#$,\s]+)\)?")
+#: ``JOINKEYS F1=ddname`` / ``F2=ddname``: the join's input DDs, renamed.
+_JOIN_DD_RE = re.compile(r"\bF([12])\s*=\s*([A-Z@#$][A-Z0-9@#$]{0,7})\b")
 _RUN_PROGRAM_RE = re.compile(r"\bRUN\s+PROGRAM\s*\(\s*([A-Z0-9@#$]+)\s*\)")
 _REPRO_IN_RE = re.compile(
     r"\b(INFILE|INDATASET|IFILE|IDS)\s*\(\s*'?([A-Z0-9@#$.()+-]+?)'?\s*\)"
@@ -173,9 +183,16 @@ def _sum_ranges(control: str) -> tuple[tuple[int, int], ...]:
 
 def bindings_from_jobs(
     jobs: Iterable[Any],
+    caveats: list[str] | None = None,
 ) -> tuple[list[DatasetBinding], list[Passthrough]]:
     """DD -> dataset bindings per program, and utility pass-throughs, for
-    every step of every (already PROC-expanded) jcl-parser ``Job``."""
+    every step of every (already PROC-expanded) jcl-parser ``Job``.
+
+    ``caveats``, when given, receives one line per step whose flow could not
+    be read (pass them on as ``LineageGraph(join_caveats=...)``), so a step
+    left out is never mistaken for a step that moves nothing.
+    """
+    notes: list[str] = caveats if caveats is not None else []
     bindings: list[DatasetBinding] = []
     passthroughs: list[Passthrough] = []
     for job in jobs:
@@ -190,7 +207,9 @@ def bindings_from_jobs(
             if not program:
                 continue
             if program in _SORT_PROGRAMS:
-                passthroughs += _sort_passthroughs(dds, job_name, step_name, program)
+                passthroughs += _sort_passthroughs(
+                    dds, job_name, step_name, program, notes
+                )
                 continue
             if program in _COPY_PROGRAMS:
                 dst = _dsn(dds, "SYSUT2")
@@ -298,21 +317,54 @@ def _repro_passthroughs(
     return out
 
 
+def _step_label(program: str, step: str | None, job: str | None) -> str:
+    return f"{program} step {step or '?'}" + (f" in job {job}" if job else "")
+
+
 def _sort_passthroughs(
-    dds: list[Any], job: str | None, step: str | None, program: str
+    dds: list[Any],
+    job: str | None,
+    step: str | None,
+    program: str,
+    notes: list[str],
 ) -> list[Passthrough]:
     control = _control(dds, "SYSIN")
+    input_dds = {"SORTJNF1", "SORTJNF2"} if "JOINKEYS" in control else set()
+    input_dds |= {m.group(2) for m in _JOIN_DD_RE.finditer(control)}
     inputs: list[str] = []
     for dd_name, dd in _named(dds):
         dsn = _dataset(dd)
-        if dsn and dsn not in inputs and re.fullmatch(r"SORTIN(\d\d)?", dd_name):
+        if (
+            dsn
+            and dsn not in inputs
+            and (re.fullmatch(r"SORTIN(\d\d)?", dd_name) or dd_name in input_dds)
+        ):
             inputs.append(dsn)
     outputs = [d for d in [_dsn(dds, "SORTOUT")] if d]
-    for match in _FNAMES_RE.finditer(control):
-        for name in re.split(r"[,\s]+", match.group(1).strip()):
-            dsn = _dsn(dds, name) if name else None
-            if dsn and dsn not in outputs:
-                outputs.append(dsn)
+    names = [
+        name
+        for match in _FNAMES_RE.finditer(control)
+        for name in re.split(r"[,\s]+", match.group(1).strip())
+    ] + [
+        f"SORTOF{name}"
+        for match in _FILES_RE.finditer(control)
+        for name in re.split(r"[,\s]+", match.group(1).strip())
+        if name
+    ]
+    for name in names:
+        dsn = _dsn(dds, name) if name else None
+        if dsn and dsn not in outputs:
+            outputs.append(dsn)
+    if not inputs or not outputs:
+        missing = " and ".join(
+            what
+            for what, found in (("inputs", inputs), ("outputs", outputs))
+            if not found
+        )
+        notes.append(
+            f"{_step_label(program, step, job)}: {missing} not recognised; "
+            "the flow through it is not traced"
+        )
     kind = "reformat" if _REFORMAT_RE.search(control) else "copy"
     ranges = _sum_ranges(control) if kind == "copy" else ()
     return [

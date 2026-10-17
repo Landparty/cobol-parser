@@ -88,6 +88,13 @@ argument to an outside program and a LINKAGE parameter are reported.
 line in a copybook that has a statement of the same kind at that line;
 `edge_files` marks a key two files claim as `None`.
 
+## 2026-10-17 -- Lineage JCL: JOINKEYS, OUTFIL FILES=, sort-step caveats (#585)
+
+[analysis/lineage.md](analysis/lineage.md): sort steps read `SORTJNF1`/`SORTJNF2`
+(`JOINKEYS F1=`/`F2=`) as inputs and `SORTOFnn` (`OUTFIL FILES=`) as outputs;
+`bindings_from_jobs(jobs, caveats)` reports a sort step it cannot read, and a
+fresh `LineageGraph` keeps `join_caveats`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

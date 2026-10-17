@@ -257,6 +257,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file. Each lineage hop now carries the file its edge was stamped with
   (`Hop.origin_file`), and a key two files claim is reported as
   `unmapped-location` rather than guessed.
+* **Field lineage follows DFSORT JOINKEYS and `OUTFIL FILES=` steps, and
+  says when it cannot read a sort step** (#585). A `JOINKEYS` step's
+  `SORTJNF1` / `SORTJNF2` (or `F1=` / `F2=`) DDs are its inputs and the step
+  is a `reformat` (the flow stops there with the usual caveat);
+  `OUTFIL FILES=01` / `FILES=(01,A)` write DDs `SORTOF01` / `SORTOFA`. A sort
+  step whose inputs or outputs are still not recognised now adds a caveat
+  (`bindings_from_jobs(jobs, caveats)`, passed by `field-impact --jcl` and
+  the MCP server as `LineageGraph(join_caveats=...)`, which a graph built
+  without stored join edges no longer ignores) instead of vanishing.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
