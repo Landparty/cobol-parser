@@ -29,6 +29,11 @@ like WRITE; a READ with no INTO logs the FD's records.
 [preprocessing.md](preprocessing.md): `_origin_sources` splits with
 `split_source_lines`, so restored comments line up with the source map.
 
+## 2026-10-17 -- Clone members carry qualified_name (#555)
+
+[analysis/flow.md](analysis/flow.md): `CloneMember.qualified_name`; `health`
+top offenders match clone membership by `qualified_name or name`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
