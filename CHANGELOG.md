@@ -242,6 +242,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `impact_of_change` / `where_from`, with no caveat. Such an operand now
   reaches every field under the item, inexactly (`overlap`), and a caveat
   names it.
+* **`field-impact` / MCP `impact_of_change` / `where_from` report two-way
+  ports** (#510). A port was dropped whenever it had any onward edge, so
+  an unbound DD opened I-O (READ then REWRITE), a BY REFERENCE CALL
+  argument to a program outside the scan and a `PROCEDURE DIVISION USING`
+  parameter -- whose onward edges lead straight back into the same
+  program -- were never named. A port is now dropped only when the trail
+  continues past it through a join (a bound dataset, a table, a callee in
+  the scan).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

@@ -75,6 +75,12 @@ already listed them.
 `REC(WS-POS:10)` reaches every field under the item (inexact) with a
 caveat, instead of being read as `REC(1:10)`.
 
+## 2026-10-17 -- Impact reports two-way ports (#510)
+
+[analysis/lineage.md](analysis/lineage.md): `LineageGraph._trace` drops a
+port only when an onward edge is a join, so an I-O file, a BY REFERENCE
+argument to an outside program and a LINKAGE parameter are reported.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

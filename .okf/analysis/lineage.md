@@ -185,6 +185,12 @@ listed in `ImpactResult.ambiguous` (#540) -- on the no-flow path too.
 (prefixed `port `) under their program, tables and datasets on their own
 lines (#528: ports were dropped, so a DISPLAY-only field read as feeding
 nothing).
+A port is a hit only where the trail ends at it: `_reach` drops it when
+some onward edge is a join (`cross`, or to a dataset / table node or
+another program). An edge back into the same program is no join, so a
+two-way port -- an unbound DD opened I-O, a BY REFERENCE argument to a
+program outside the scan, a `PROCEDURE DIVISION USING` parameter -- is
+reported (#510: any onward edge used to hide it).
 
 ## Bindings from JCL
 
