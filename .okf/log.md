@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- IBMDataItem.calculate_storage_size defers to _storage (#589)
+
+[dialects.md](dialects.md): `calculate_storage_size()` returns
+`calculate_size()`; even-digit COMP-3 and PICTURE-less usages are right.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
