@@ -532,17 +532,18 @@ class CodebaseGraph:
         """
         programs, external, members = self._render_nodes()
         failed = self._failed_ids()
+        ids = _NodeIds.for_nodes(programs, external, members)
 
         lines: list[str] = ["flowchart LR"]
         for pid in programs:
             label = f"{pid} (unparsed)" if pid in failed else pid
-            lines.append(f'    {_program_node_id(pid)}["{_mermaid_label(label)}"]')
+            lines.append(f'    {ids.program(pid)}["{_mermaid_label(label)}"]')
         for pid in external:
             lines.append(
-                f'    {_program_node_id(pid)}(["{_mermaid_label(pid)} (external)"])'
+                f'    {ids.program(pid)}(["{_mermaid_label(pid)} (external)"])'
             )
         for member in members:
-            lines.append(f'    {_member_node_id(member)}[/"{_mermaid_label(member)}"/]')
+            lines.append(f'    {ids.member(member)}[/"{_mermaid_label(member)}"/]')
 
         for edge in self.call_edges:
             label = _mermaid_label(_call_edge_label(edge))
@@ -550,19 +551,17 @@ class CodebaseGraph:
             # is read by the flowchart lexer as the start of a node shape,
             # not as literal text -- "CALL (dynamic)" breaks parsing bare.
             lines.append(
-                f'    {_program_node_id(edge.caller)} -->|"{label}"|'
-                f" {_program_node_id(edge.callee)}"
+                f'    {ids.program(edge.caller)} -->|"{label}"|'
+                f" {ids.program(edge.callee)}"
             )
         for copy_edge in self._rendered_copy_edges():
             source = (
-                _member_node_id(copy_edge.program)
+                ids.member(copy_edge.program)
                 if copy_edge.nested
-                else _program_node_id(copy_edge.program)
+                else ids.program(copy_edge.program)
             )
             label = _mermaid_label("COPY (nested)" if copy_edge.nested else "COPY")
-            lines.append(
-                f'    {source} -.->|"{label}"| {_member_node_id(copy_edge.member)}'
-            )
+            lines.append(f'    {source} -.->|"{label}"| {ids.member(copy_edge.member)}')
 
         if len(lines) == 1:
             lines.append('    EMPTY["No programs found"]')
@@ -576,6 +575,7 @@ class CodebaseGraph:
         """
         programs, external, members = self._render_nodes()
         failed = self._failed_ids()
+        ids = _NodeIds.for_nodes(programs, external, members)
 
         lines: list[str] = ["digraph codebase {"]
         lines.append("    rankdir=LR;")
@@ -592,17 +592,17 @@ class CodebaseGraph:
                 # which Graphviz renders as a literal backslash-n (#274).
                 label = f'{label[:-1]}\\n(unparsed)"'
             lines.append(
-                f"    {_program_node_id(pid)} [label={label},"
+                f"    {ids.program(pid)} [label={label},"
                 f' shape=box, fillcolor="{fill}", fontcolor="#000000"];'
             )
         for pid in external:
             lines.append(
-                f"    {_program_node_id(pid)} [label={_dot_str(pid)},"
+                f"    {ids.program(pid)} [label={_dot_str(pid)},"
                 ' shape=ellipse, fillcolor="#e9ecef", fontcolor="#000000"];'
             )
         for member in members:
             lines.append(
-                f"    {_member_node_id(member)} [label={_dot_str(member)},"
+                f"    {ids.member(member)} [label={_dot_str(member)},"
                 ' shape=note, fillcolor="#fff3cd", fontcolor="#000000"];'
             )
 
@@ -616,18 +616,18 @@ class CodebaseGraph:
             if not edge.resolved:
                 attrs += ', style=dotted, color="#b02a37"'
             lines.append(
-                f"    {_program_node_id(edge.caller)} ->"
-                f" {_program_node_id(edge.callee)} [{attrs}];"
+                f"    {ids.program(edge.caller)} ->"
+                f" {ids.program(edge.callee)} [{attrs}];"
             )
         for copy_edge in self._rendered_copy_edges():
             source = (
-                _member_node_id(copy_edge.program)
+                ids.member(copy_edge.program)
                 if copy_edge.nested
-                else _program_node_id(copy_edge.program)
+                else ids.program(copy_edge.program)
             )
             label = "COPY (nested)" if copy_edge.nested else "COPY"
             lines.append(
-                f"    {source} -> {_member_node_id(copy_edge.member)}"
+                f"    {source} -> {ids.member(copy_edge.member)}"
                 f" [label={_dot_str(label)}, style=dashed];"
             )
 
@@ -659,6 +659,57 @@ def _program_node_id(program_id: str) -> str:
 
 def _member_node_id(member: str) -> str:
     return "C_" + _sanitize_id(member)
+
+
+class _NodeIds:
+    """One diagram's mapping from a program or member name to a unique id.
+
+    ``_sanitize_id`` is lossy: ``PAY#01`` / ``PAY@01`` / ``PAY$01`` and
+    ``PAY-RTN`` / ``PAY_RTN`` all collide, which merged distinct programs
+    into one node and drew false self-calls (#494, the codebase-graph twin
+    of #266's ``flowchart._IdAllocator``). Every declaration and every edge
+    endpoint asks this for its id, so one name always gets one id and two
+    names never share one; a collision gets a numeric suffix (``P_PAY_01``,
+    ``P_PAY_01_2``), and a diagram without collisions is unchanged.
+    """
+
+    def __init__(self) -> None:
+        self._ids: dict[tuple[str, str], str] = {}
+        self._taken: set[str] = set()
+
+    @classmethod
+    def for_nodes(
+        cls, programs: list[str], external: list[str], members: list[str]
+    ) -> _NodeIds:
+        """Pre-allocated in declaration order: known programs keep the
+        plain id over an external callee or a member of a colliding name."""
+        ids = cls()
+        for pid in [*programs, *external]:
+            ids.program(pid)
+        for member in members:
+            ids.member(member)
+        return ids
+
+    def program(self, name: str) -> str:
+        return self._get("P_", name)
+
+    def member(self, name: str) -> str:
+        return self._get("C_", name)
+
+    def _get(self, prefix: str, name: str) -> str:
+        key = (prefix, name)
+        found = self._ids.get(key)
+        if found is not None:
+            return found
+        base = prefix + _sanitize_id(name)
+        chosen = base
+        suffix = 2
+        while chosen in self._taken:
+            chosen = f"{base}_{suffix}"
+            suffix += 1
+        self._taken.add(chosen)
+        self._ids[key] = chosen
+        return chosen
 
 
 def _mermaid_label(text: str) -> str:

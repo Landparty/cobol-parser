@@ -160,6 +160,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`codebase-graph --format dot|mermaid` no longer merges programs whose
+  names differ only in characters a diagram id cannot hold** (#494).
+  `PAY#01` / `PAY@01` / `PAY$01` and `PAY-RTN` / `PAY_RTN` each get their
+  own node (`P_PAY_01`, `P_PAY_01_2`, ...). The false self-calls and the
+  edges to the wrong program are gone, and the JSON output is unchanged.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
