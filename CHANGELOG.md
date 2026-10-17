@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`CALL` through a procedure- or function-pointer set with `SET p TO
+  ENTRY 'SUBPGM'` now resolves** (#593). `DynamicCallAnalyzer` reads the
+  ENTRY literal as the pointer's value, and `SET p TO ENTRY identifier` /
+  `SET p1 TO p2` as copies; `codebase-graph` and MCP `callers_of` now draw
+  the edge to SUBPGM instead of reporting the CALL as having no target. Any
+  other SET to the pointer still marks the target list incomplete.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

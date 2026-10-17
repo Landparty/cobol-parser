@@ -329,6 +329,7 @@ class DynamicCallAnalyzer:
                         self._incomplete_variables.add(base_data_name(target).upper())
         elif isinstance(node, SetStatement):
             self._track_condition_set(node)
+            self._track_pointer_set(node)
 
         # Recursively process children
         if hasattr(node, "children"):
@@ -392,15 +393,111 @@ class DynamicCallAnalyzer:
                     self._variable_values.setdefault(parent_name, set()).add(value)
 
     @staticmethod
-    def _identifier_moves(nodes: list[ASTNode]) -> list[tuple[str, list[str]]]:
-        """``(source name, receivers)`` of every MOVE from a data item."""
+    def _set_groups(
+        stmt: SetStatement,
+    ) -> list[tuple[list[str], str | None, str | None, bool, bool]]:
+        """``(targets, set_type, value, value_is_address_of, value_is_entry)``
+        for every target/value group of *stmt*, the first one included."""
+        groups = [
+            (
+                stmt.targets,
+                stmt.set_type,
+                stmt.value,
+                stmt.value_is_address_of,
+                bool(stmt.metadata.get("value_is_entry")),
+            )
+        ]
+        groups += [
+            (
+                group.get("targets") or [],
+                group.get("set_type"),
+                group.get("value"),
+                bool(group.get("value_is_address_of")),
+                bool(group.get("value_is_entry")),
+            )
+            for group in stmt.groups
+        ]
+        return groups
+
+    @staticmethod
+    def _is_null(value: str) -> bool:
+        return value.strip().upper() in ("NULL", "NULLS")
+
+    @staticmethod
+    def _pointer_copies(stmt: SetStatement) -> list[tuple[str, list[str]]]:
+        """``(source name, receivers)`` of every ``SET p TO identifier`` /
+        ``SET p TO ENTRY identifier`` group of *stmt*: a copy of the
+        source's value, the same as a MOVE from it (#593)."""
+        if stmt.targets_are_address_of:
+            return []
         return [
+            (base_data_name(value).upper(), targets)
+            for targets, set_type, value, address_of, _ in (
+                DynamicCallAnalyzer._set_groups(stmt)
+            )
+            if set_type == "TO"
+            and value
+            and not address_of
+            and not DynamicCallAnalyzer._is_definite_literal(value)
+            and not DynamicCallAnalyzer._is_null(value)
+        ]
+
+    def _track_pointer_set(self, stmt: SetStatement) -> None:
+        """``SET p TO ENTRY 'NAME'`` gives ``p`` the value ``NAME`` (the
+        program a later ``CALL p`` reaches); ``SET p TO [ENTRY] identifier``
+        copies the identifier's value set like a MOVE (#593). Every other
+        ``SET`` write to an item (``UP BY``, ``ADDRESS OF``, a non-ENTRY
+        literal) leaves its value set incomplete; ``TO NULL`` adds no
+        target."""
+        groups = self._set_groups(stmt)
+        if stmt.targets_are_address_of:
+            for targets, *_ in groups:
+                for target in targets:
+                    self._incomplete_variables.add(base_data_name(target).upper())
+            return
+        for targets, set_type, value, address_of, is_entry in groups:
+            if set_type in ("TRUE", "FALSE"):
+                continue
+            names = [base_data_name(t).upper() for t in targets]
+            if set_type != "TO" or not value or address_of:
+                self._incomplete_variables.update(names)
+            elif self._is_definite_literal(value):
+                literal = self._extract_literal_value(value) if is_entry else None
+                if literal:
+                    for name in names:
+                        self._variable_values.setdefault(name, set()).add(literal)
+                else:
+                    self._incomplete_variables.update(names)
+            elif self._is_null(value):
+                continue
+            else:
+                source = base_data_name(value).upper()
+                if source in self._variable_values:
+                    for name in names:
+                        self._variable_values.setdefault(name, set()).update(
+                            self._variable_values[source]
+                        )
+                if (
+                    source not in self._variable_values
+                    or source in self._incomplete_variables
+                ):
+                    self._incomplete_variables.update(names)
+
+    @staticmethod
+    def _identifier_moves(nodes: list[ASTNode]) -> list[tuple[str, list[str]]]:
+        """``(source name, receivers)`` of every MOVE from a data item, and
+        of every ``SET`` that copies one (#593)."""
+        moves = [
             (base_data_name(node.source).upper(), node.targets)
             for node in nodes
             if isinstance(node, MoveStatement)
             and node.source
             and not DynamicCallAnalyzer._is_definite_literal(node.source)
         ]
+        for node in nodes:
+            if isinstance(node, SetStatement):
+                moves += DynamicCallAnalyzer._pointer_copies(node)
+        return moves
 
     def _value_sources(self, nodes: list[ASTNode]) -> set[str]:
         """Every dynamic CALL variable, and every item whose value reaches
@@ -579,6 +676,10 @@ class DynamicCallAnalyzer:
                         # Read off the MOVE itself below: xref also records
                         # an OF/IN qualifier as written, which is not a
                         # write to the group.
+                        continue
+                    if ref.statement == "SetStatement" and name == var:
+                        # A SET to the item itself was tracked (or marked
+                        # incomplete) by _track_pointer_set (#593).
                         continue
                     self._incomplete_variables.add(var)
         for move in nodes:
