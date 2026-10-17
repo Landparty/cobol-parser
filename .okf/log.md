@@ -110,6 +110,11 @@ the first fitting clause. [tests.md](tests.md):
 [parser/statements-data.md](parser/statements-data.md): EVALUATE / SEARCH WHEN
 and INSPECT operands are scanned; INSPECT reads a `FUNCTION` operand whole.
 
+## 2026-10-17 -- move-type-check resolves special registers (#520)
+
+[analysis/data-use.md](analysis/data-use.md): numeric / alphanumeric special
+register sets and `LENGTH OF x` resolve instead of counting as unresolved.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
