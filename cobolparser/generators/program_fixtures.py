@@ -695,6 +695,10 @@ class ProgramFixtureGenerator:
                 # ``BY CONTENT 'A'`` / ``X'00'``: a constant the caller
                 # supplies, not a data item the layout index could hold.
                 continue
+            if arg.name.upper().startswith("FUNCTION "):
+                # ``BY CONTENT FUNCTION UPPER-CASE(X)`` (#579): a value the
+                # caller computes, like a literal -- no layout to resolve.
+                continue
             arg_fields = self._fields_for_names([arg.name], index)
             if not arg_fields:
                 unresolved.append(

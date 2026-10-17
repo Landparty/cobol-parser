@@ -43,7 +43,7 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   `consume_optional_qualifiers` (`MOVE X TO QUAL OF GROUP-A` is one target, not
   two), and the H9 dedent check applies to every target position.
 - **Source.** `_parse_source` collects every token and renders them with
-  `_join_source_parts`: words space-separated, no space around parens or before
+  `join_source_parts` (`_utils.py`, shared with CALL's `FUNCTION` arguments): words space-separated, no space around parens or before
   commas (`TBL(1, 2)`), a leading unary `-` / `+` attached to its digits
   (`MOVE -5` -> `"-5"`, relied on by `analysis/const_fold.py`), and a
   reference-modification colon tight on both sides (`WS-X(2:3)`). A plain
