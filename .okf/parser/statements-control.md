@@ -75,7 +75,12 @@ arm.
   `"end_quoted"` when that bound is one STRING_LITERAL (#391). A typed literal
   (`WHEN X'00'`, #331) keeps its source spelling as `value` / bound, prefix and
   quotes included, and carries `"typed": True` instead of `"quoted"` (no
-  `start_quoted` / `end_quoted` on a typed bound). Additive markers;
+  `start_quoted` / `end_quoted` on a typed bound). A multi-token
+  value selector that is computed -- a `(` (subscript / reference modification /
+  FUNCTION call), an arithmetic symbol after its first token (`WS-N + 1`), or no
+  literal token at all -- carries `"expression": True` (#333,
+  `_is_expression_selector`); a signed number (`- 5`) and `ALL 'X'` do not.
+  Additive markers;
   `type` stays `"Literal"` / `"Range"`. Pinned by
   `tests/regression/test_evaluate_figurative_when.py`,
   `tests/unit/test_evaluate_variants.py::TestRangeQuotedMarkers`.
