@@ -218,7 +218,7 @@ Anything else — procedure text, `SELECT` clauses, an empty file — raises
 | Level 66 / 88 | Not storage; 88 VALUEs feed the parent's value domain |
 | `COMP-1`/`COMP-2` | No picture → `FieldCategory.FLOAT` |
 | Group `USAGE` / `SIGN` | Inherited by every subordinate elementary item with no clause of its own (IBM rule), resolved **in the parser** (`parsers/divisions/data.py` `propagate_group_usage_and_sign`) so `layout.py`, `layout_offsets.py` and `calculate_size` all see it. `CobolDataItem.usage_explicit` marks an entry's own USAGE; an explicit child wins for itself and below. A numeric-only group usage (COMP-3, BINARY, ...) is not pushed onto a non-numeric PICTURE; SIGN only lands on signed numeric items |
-| `BLANK WHEN ZERO` | Carried as `FieldSpec.blank_when_zero`; the encoder writes a zero value as all spaces (charset's space), the decoder reads an all-space field as 0 with no error |
+| `BLANK WHEN ZERO` | Carried as `FieldSpec.blank_when_zero`; the encoder writes a zero value as all spaces (charset's space), the decoder reads an all-space field as 0 with no error. Not for a VALUE-clause cell (see below) |
 
 `include_redefines` / `include_filler` / `expand_occurs` / `max_occurs`
 override the first four. Occurrence expansion is additionally subject to a
@@ -561,6 +561,15 @@ module docstring — that suite is the regression guard):
 | `PIC N` / `USAGE NATIONAL` | **not modelled as UTF-16**: single-byte text in the record charset, space-padded to the (correct, 2-bytes-per-position) width; `encoding_caveats()` says so. A numeric national field (`PIC 9(5) USAGE NATIONAL`, 10 bytes) goes the same way — `encode_field`/`decode_field` route `usage == "NATIONAL"` to text before the zoned branch |
 | `PIC U(n)` (UTF-8, fixed character-length) | **not modelled as UTF-8**: n single-byte characters (`FieldSpec.utf8_characters`) space-padded to the 4 x n bytes the field reserves; `encoding_caveats()` names the fields. `PIC U BYTE-LENGTH n` is an n-byte text field (#554) |
 | `PIC G` / `USAGE DISPLAY-1` (DBCS) | **not modelled as double-byte EBCDIC**: single-byte text in the record charset, space-padded to the 2-bytes-per-position width, decoded back the same way; `encoding_caveats()` (and so every `DecodeResult`) names the fields in a separate DBCS caveat, and a `PIC N USAGE DISPLAY-1` field is reported there rather than under the national/UTF-16 one (#321) |
+
+**A VALUE-clause cell ignores JUSTIFIED and BLANK WHEN ZERO** (#558):
+initialisation by VALUE is not affected by either clause, so `PIC X(5) JUST
+VALUE 'AB'` is `AB   ` and `PIC 9(3) BLANK WHEN ZERO VALUE 0` is `000`.
+`ValueFactory._declared_value` marks the cell (`layout.InitialValueCell`, or
+`initial_value = True` on a hex literal's `LiteralCell`) and `encode_field`
+checks `is_initial_value()`. Every other cell -- generated, or a level-88
+value, which stands for a SET / MOVE -- is still justified and blanked.
+`hex_literal_cell_for` accepts either alignment for that reason.
 
 **Hex literals are written as their own bytes** (see #319): `VALUE X'C1C2'`,
 or a level-88 `X'FF'` drawn as the witness, is padded/truncated like text but
