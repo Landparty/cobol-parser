@@ -296,6 +296,11 @@ an analysis -> parsers import) extracts identifiers from them. Both classes
 are `CobolStatement`s, so the per-statement loop also visits them and the
 sweep is a harmless set union -- a new analyzer does not need to reproduce it.
 See `TestExecCicsAndImsArguments` in `test_unused_variables.py`.
+The CICS sweeps here, in xref and in `LinkageChecker` read options through
+`_cics.cics_identifier_options()`, which drops every option the parser put in
+`literal_options`: the quotes are stripped from `options`, so
+`FILE('CUSTFIL')` would otherwise reference a data item named `CUSTFIL`
+(#588, `tests/regression/test_issue_588_cics_literal_options.py`).
 
 **CICS translator items.** The `DFHEIBLK` subtree is marked used and the
 `DFHCOMMAREA` 01 is used (its fields stay assessed): the translator declares

@@ -86,6 +86,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ._cics import cics_identifier_options
 from ._names import QUALIFIER_SEPARATOR
 from .unused_variables import (
     _DATA_SECTION_NAMES,
@@ -1690,9 +1691,8 @@ class XrefAnalyzer:
                     "EXEC CICS options carry raw argument text with no fixed "
                     "argument-role shape; their identifiers get role 'reference'"
                 )
-            for value in options.values():
-                if value:
-                    pairs.append((_RawText(value), ROLE_REFERENCE, False))
+            for value in cics_identifier_options(stmt).values():
+                pairs.append((_RawText(value), ROLE_REFERENCE, False))
         elif type_name == "ExecImsStatement":
             arguments = getattr(stmt, "arguments", None) or []
             if arguments:
