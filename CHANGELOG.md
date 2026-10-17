@@ -160,6 +160,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`COPY ... REPLACING` matches pseudo-text across copybook lines, and keeps
+  the copybook's line numbers when `BY` text changes the line count** (#560,
+  #561). REPLACING was applied one copybook line at a time, so `==ML-B PIC
+  X(5). 05 ML-C==` never matched a copybook that holds those words on two
+  lines, and the member was included unreplaced with no warning (the
+  `REPLACE` statement matched the same text). It now matches on the
+  text-word stream, where a line break is a separator. The replaced text was
+  also numbered from line 1 as if it were the copybook, so a `BY` text with
+  more lines than its operand pushed every later line down: `lint` cited
+  `ML.cpy:5` for an item on line 3 of a 3-line file, and `expand
+  --source-map`, xref and the MCP tools read the same wrong map. Each line
+  now maps to the copybook line it came from.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

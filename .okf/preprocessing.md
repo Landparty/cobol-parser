@@ -584,8 +584,8 @@ exponentially on unterminated REPLACING).
 
 ### REPLACING
 
-`apply_replacing_clauses` (`copy_statement_parser.py`, no Cython mirror) is a
-line-based scanner:
+`apply_replacing_clauses` (`copy_statement_parser.py`, no Cython mirror)
+scans the member's whole text in one pass (lines joined with `\n`):
 
 * **Operands.** `CopyStatementLexer._read_replacing_operand` reads
   pseudo-text, literals, and word operands extended greedily with `(OF|IN)
@@ -607,23 +607,29 @@ line-based scanner:
   `_build_clause_pattern` joins words with `_SEPARATOR_GAP` (a blank, or `,`/`;`
   then a blank), and `_pseudo_text_words` drops a `,`/`;` ending a non-literal
   search word before a blank or the end; `A,B` / `1,5` still compare as text.
-  Matching stays within one source line (a pseudo-text split across lines is
-  not matched).
+  A line break is a separator like a blank (`_SEPARATOR_GAP` includes `\n`),
+  so a search text whose words the copybook splits across lines matches, as
+  the REPLACE statement already did; per-line matching skipped it silently
+  (#560).
 * **Each word is replaced at most once.** All clauses go into ONE alternation
-  (longest search text first) applied in ONE left-to-right pass per segment;
+  (longest search text first) applied in ONE left-to-right pass;
   applying clauses one pass each would let `==A== BY ==B== ==B== BY ==A==`
   rewrite replacements.
 * **Boundaries.** Hyphen-aware word boundaries, `_` counts as a word
   character, a decimal point binds (`(?<![0-9]\.)` / `(?!\.[0-9])`, so `==1==
   BY ==2==` leaves `VALUE 1.5`), LEADING/TRAILING, case-insensitive words.
 * **Context.** Comment lines (column-7 `*`/`/`, mask computed once from the
-  original content) are never rewritten. Text inside literals (both quote
-  styles, doubled-quote escapes, an unterminated literal runs to EOL) is not
-  rewritten unless the clause's search text contains a quote. The alternation
-  runs over the whole line (`_replace_in_line_with_literals`), so a search
-  text mixing code and a literal (`==VALUE 'A'==`) can match; a match of a
-  quote-free clause inside a literal is rejected and quote-bearing clauses
-  still get their turn there. The literal words of a search text compare
+  original content) are never rewritten: a match overlapping one is
+  rejected. Text inside literals (both quote styles, doubled-quote escapes,
+  found per line; an unterminated literal runs to EOL) is not rewritten
+  unless the clause's search text contains a quote. A search text mixing
+  code and a literal (`==VALUE 'A'==`) can match; a match of a quote-free
+  clause inside a literal is rejected and quote-bearing clauses still get
+  their turn there.
+* **Line origins.** `line_origins=` (out-parameter) receives the input line
+  of each output line: lines a `BY` text adds repeat the line its match
+  started on, a match spanning lines keeps the first. The expander passes
+  them to the member's recursion as `initial_origins` (#561). The literal words of a search text compare
   **case-sensitively** (`(?-i:...)`).
 
 Pinned by `tests/regression/test_open_findings_m13_regression.py`,
@@ -753,6 +759,7 @@ that can move one:
 |------|-----------------|-------------------------|
 | `remove_comment_lines`, `strip_sequence_area` | blank in place | line-preserving by construction; nothing to track |
 | `normalize_continuation_lines` | merges N records into 1 | `line_origins` out-parameter records the input line each output line started on |
+| `apply_replacing_clauses` | a `BY` text adds or removes lines | its `line_origins` out-parameter, handed to the member's recursion as `initial_origins` so it does not number the replaced text from 1 (which pushed every later member line down, past the end of the file -- #561) |
 | the COPY splice | inserts a member's lines | `origins[:start] + copybook_origins + origins[end+1:]`, the first spliced line credited to the parent only when the parent had real text before the COPY on that line — the same flag that decides where the text splice starts, so map and text are spliced identically |
 | the re-pad's `_fit_fixed_format_width` wrap | 1 line becomes several | each piece inherits its line's origin; pieces of a line merged from continuation records map to those records (`_wrapped_origins`: piece k -> first record + k, capped at the last one absorbed) |
 
