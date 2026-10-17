@@ -599,8 +599,12 @@ paragraph *identity*, not by name: a paragraph name may repeat across
 sections, and keying on the bare name lets one `P1` in a Type-1 group drop
 another section's `P1` -- and with it a whole Type-2 group -- from the Type-2
 pass (see #353). `CloneMember.name` is still the
-bare uppercased paragraph name (callers join on it); its `location` tells
-two same-named members apart. Groups below
+bare uppercased paragraph name; a member whose name is shared with a
+paragraph in another section also carries `qualified_name` (`"CALC OF
+S1"`, the same `ProcedureIndex` key the flow graph and dead-code items use,
+in `to_dict()` only when set). Join on `qualified_name or name`: matching
+the bare name made every section's `CALC` a clone offender in `health`
+when only one of them was a clone (#555). Groups below
 `min_clone_statements` (default 3 -- two bare `EXIT.` paragraphs matching
 each other isn't meaningful redundancy) are dropped.
 
