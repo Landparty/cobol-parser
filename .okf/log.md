@@ -126,6 +126,11 @@ counts PADDING CHARACTER.
 [parser/divisions.md](parser/divisions.md): KEY and INDEXED BY phrases are
 read in either order, in `data_clauses.py` and `_data_fast.pyx` alike.
 
+## 2026-10-17 -- a copybook paragraph body is one source (#470)
+
+[batch.md](batch.md), [analysis/flow.md](analysis/flow.md): fingerprints
+carry `body_lines`; `scan` stamps `body_origin` and `source_key` prefers it.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

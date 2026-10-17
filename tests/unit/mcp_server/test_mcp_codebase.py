@@ -533,6 +533,31 @@ class TestCodebaseOverview:
             assert member["paragraph"] == "2000-TOTALS"
             assert "2000-TOTALS." in line_of(tmp_path, member["location"])
 
+    def test_a_copybook_body_under_each_programs_own_header_is_not_a_clone(
+        self, tmp_path: Path
+    ) -> None:
+        """#470 through the MCP index: each program writes the header and
+        copies in only the body, so the statements live in one file."""
+        (tmp_path / "copy").mkdir()
+        (tmp_path / "copy" / "BODY.cpy").write_text(
+            "           MOVE 1 TO WS-A\n"
+            "           ADD WS-A TO WS-B\n"
+            "           MULTIPLY 2 BY WS-B\n"
+            "           DISPLAY WS-B.\n"
+        )
+        own_header = CLONE.replace(
+            "           MOVE 1 TO WS-A\n"
+            "           ADD WS-A TO WS-B\n"
+            "           MULTIPLY 2 BY WS-B\n"
+            "           DISPLAY WS-B.\n",
+            "           COPY BODY.\n",
+        )
+        for name in ("BODYA", "BODYB"):
+            (tmp_path / f"{name}.cbl").write_text(own_header.format(name=name))
+        tools = CobolTools(workspace(tmp_path, copybook_path=(str(tmp_path / "copy"),)))
+        answer = tools.codebase_overview()["answer"]
+        assert answer["duplicated_code"]["groups"] == []
+
     def test_calls_count_resolved_targets(self, tmp_path: Path) -> None:
         (tmp_path / "DYNCALL.cbl").write_text(
             DYNAMIC.replace(

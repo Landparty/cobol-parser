@@ -497,15 +497,24 @@ class ParagraphFingerprint:
     statement_count: int
     type1: str
     type2: str
+    #: First and last source line of the paragraph's statements (the header
+    #: excluded), or None when none carries a location. A scan with copybooks
+    #: expanded maps this span through its source map: a body that comes
+    #: wholly from one copybook is that copybook's text however many
+    #: programs write their own header above it (#470).
+    body_lines: tuple[int, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "name": self.name,
             "location": self.location.to_dict(),
             "statement_count": self.statement_count,
             "type1": self.type1,
             "type2": self.type2,
         }
+        if self.body_lines is not None:
+            out["body_lines"] = list(self.body_lines)
+        return out
 
 
 @dataclass
@@ -704,9 +713,22 @@ class RedundancyAnalyzer:
                     statement_count=exact.leaf_count,
                     type1=_digest(exact_fp),
                     type2=_digest(renamed_fp),
+                    body_lines=self._body_lines(para),
                 )
             )
         return out
+
+    @staticmethod
+    def _body_lines(para: CobolParagraph) -> tuple[int, int] | None:
+        """The span of source lines *para*'s statements occupy, nested ones
+        included; None when no statement has a line."""
+        lines = [
+            node.location.line
+            for stmt in para.statements
+            for node in stmt.traverse_depth_first()
+            if getattr(node, "location", None) is not None and node.location.line > 0
+        ]
+        return (min(lines), max(lines)) if lines else None
 
     def _find_clone_groups(
         self, proc_division: CobolDivision, min_clone_statements: int
