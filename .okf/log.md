@@ -93,6 +93,11 @@ procedures only; `parser_version` is the package version; `created_at` dropped.
 [generators/fixtures.md](generators/fixtures.md): `bundle._writes_csv` adds
 IN/BIDIRECTIONAL fixtures with a layout and no rows (header-only CSV).
 
+## 2026-10-17 -- Complexity scores PERFORM VARYING AFTER as nested loops (#514)
+
+[analysis/flow.md](analysis/flow.md): each AFTER phrase adds one decision
+and one nesting level.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
