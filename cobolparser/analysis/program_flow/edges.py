@@ -158,7 +158,28 @@ class EdgeCollector:
                 break
         if i == -1 or j == -1 or j < i:
             return [start, end]
+        # A SECTION as the THRU end runs through its last paragraph, not
+        # just its header: ``PERFORM S1 THRU S2`` executes every paragraph
+        # of S2 (#577).
+        last = self._section_last_member(end)
+        if last is not None:
+            while j + 1 < len(order) and order[j] != last:
+                j += 1
         return order[i : j + 1]
+
+    def _section_last_member(self, key: str) -> str | None:
+        """The last paragraph of section *key*, or None when *key* is not a
+        section with paragraphs (or no index is available)."""
+        if self._index is None:
+            return None
+        entry = self._index.by_key.get(key)
+        if entry is None or entry.procedure_type != "SECTION":
+            return None
+        last = None
+        for candidate in self._index.entries:
+            if candidate.section == key and candidate.procedure_type == "PARAGRAPH":
+                last = candidate.key
+        return last
 
     def process_perform(self, stmt: PerformStatement, source: str) -> None:
         """Create edges for a PERFORM statement."""

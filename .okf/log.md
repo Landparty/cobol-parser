@@ -246,6 +246,11 @@ sizes in `_storage.py`; unknown words warned and reported unresolved.
 `_MAX_EXPANDED_OCCURRENCES` and `occurs_expansion_caveats()`; cut tables are
 named in dataset / view caveats and `ProgramLayoutIndex.unresolved`.
 
+## 2026-10-17 -- THRU a SECTION includes its paragraphs (#577)
+
+[analysis/flow.md](analysis/flow.md): `range_members` extends a SECTION end
+to its last paragraph.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
