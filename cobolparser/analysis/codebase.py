@@ -732,18 +732,20 @@ class CodebaseGraphBuilder:
             self._resolver = PathResolver(
                 CopybookSearchPath(directories=list(self.copybook_paths))
             )
-        # (member, library) -> resolved file path (None when unresolved). The
-        # library is part of the key: COPY REC OF LIBA and COPY REC OF LIBB
-        # are two different files (#351).
+        # (member as written, library) -> resolved file path (None when
+        # unresolved). The library is part of the key: COPY REC OF LIBA and
+        # COPY REC OF LIBB are two different files (#351). The member is the
+        # COPY text as written, not the normalized graph key: the expander
+        # resolves `COPY ordrec.` / `COPY "sub/REC.cpy"` as written (#580).
         self._member_paths: dict[tuple[str, str | None], str | None] = {}
-        # (member, library) -> why it could not be resolved (failures only)
+        # (member as written, library) -> why it could not be resolved
         self._member_failures: dict[tuple[str, str | None], str] = {}
         # (member, referrer) pairs already reported unresolved this build, so
         # a COPY and an INCLUDE of one missing member give one note, not two
         self._reported_failures: set[tuple[str, str]] = set()
         # resolved file path -> its own direct (member name, library, is EXEC
-        # SQL INCLUDE), sorted
-        self._member_copies: dict[str, list[tuple[str, str | None, bool]]] = {}
+        # SQL INCLUDE, member as written), sorted
+        self._member_copies: dict[str, list[tuple[str, str | None, bool, str]]] = {}
         # program file -> (member, line) of each COPY written in it
         self._copy_sites: dict[str, list[tuple[str, int]]] = {}
 
@@ -1194,6 +1196,7 @@ class CodebaseGraphBuilder:
                 path,
                 unresolved,
                 sql_include=statement.sql_include,
+                written=statement.member_name,
             )
             copy_edges.append(
                 CopyEdge(
@@ -1218,8 +1221,15 @@ class CodebaseGraphBuilder:
         unresolved: list[str],
         *,
         sql_include: bool = False,
+        written: str | None = None,
     ) -> str | None:
         """Resolve *member* to a file, caching the answer (and the failure).
+
+        *written* is the member as the COPY statement spells it; it is what
+        is resolved, exactly as the expander resolves it (#580) -- *member*,
+        the upper-cased basename, is only the graph key. A lowercase file
+        (`COPY ordrec.`) or a path literal (`COPY "sub/REC.cpy"`) is found
+        through *written* and would be missed through *member*.
 
         A failure is reported for every reference that is not an INCLUDE of
         a precompiler-supplied member (:data:`_PRECOMPILER_MEMBERS`), so a
@@ -1229,10 +1239,11 @@ class CodebaseGraphBuilder:
         """
         if self._resolver is None:
             return None
-        key = (member, library)
+        target = written.strip() if written and written.strip() else member
+        key = (target, library)
         if key not in self._member_paths:
             try:
-                self._member_paths[key] = self._resolver.resolve(member, library)
+                self._member_paths[key] = self._resolver.resolve(target, library)
             except Exception as exc:  # noqa: BLE001 -- an unresolvable member
                 # is a finding, not a crash: record why and carry on.
                 self._member_paths[key] = None
@@ -1255,13 +1266,13 @@ class CodebaseGraphBuilder:
 
     def _member_direct_copies(
         self, member: str, member_path: str | None, unresolved: list[str]
-    ) -> list[tuple[str, str | None, bool]]:
+    ) -> list[tuple[str, str | None, bool, str]]:
         """What the file *member_path* itself COPYs or INCLUDEs.
 
         Keyed by file, not by member name: two libraries' members of one name
         are two files with their own nested COPY statements. Each entry is
-        ``(member name, library, is EXEC SQL INCLUDE)``; empty when the member
-        did not resolve.
+        ``(member name, library, is EXEC SQL INCLUDE, member as written)``;
+        empty when the member did not resolve.
         """
         if member_path is None:
             return []
@@ -1287,11 +1298,12 @@ class CodebaseGraphBuilder:
                     _normalize_member(s.member_name),
                     _normalize_library(s.library_qualifier),
                     s.sql_include,
+                    s.member_name,
                 )
                 for s in statements
                 if _normalize_member(s.member_name)
             },
-            key=lambda entry: (entry[0], entry[1] or "", entry[2]),
+            key=lambda entry: (entry[0], entry[1] or "", entry[2], entry[3]),
         )
         self._member_copies[member_path] = names
         return names
@@ -1310,12 +1322,17 @@ class CodebaseGraphBuilder:
         ``LIBB/REC`` is a chain, not a cycle.
         """
         seen: set[tuple[str, str | None]] = set()
-        for nested, library, sql_include in self._member_direct_copies(
+        for nested, library, sql_include, written in self._member_direct_copies(
             member, member_path, unresolved
         ):
             # The nested COPY's own library, as the expander resolves it.
             nested_path = self._resolve_member(
-                nested, library, member, unresolved, sql_include=sql_include
+                nested,
+                library,
+                member,
+                unresolved,
+                sql_include=sql_include,
+                written=written,
             )
             if (nested, library) in seen:
                 # COPY and INCLUDE of one member: one edge, as for a program.
