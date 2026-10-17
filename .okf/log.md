@@ -404,6 +404,12 @@ unsupported; the bundle's `unresolved` lists each gap once.
 [analysis/fixtures-support.md](analysis/fixtures-support.md): option (b) --
 each USING/GIVING file is a `report.unresolved` entry, not a boundary.
 
+## 2026-10-17 -- ConstantFolder caches its program walk (#374)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md): `_ProgramWalk`
+/ `_CURRENT_WALK` and the unseeded-fold memo; `gen-fixtures --scenarios all`
+5-7x faster on large programs, output byte-identical.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

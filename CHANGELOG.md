@@ -678,6 +678,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   IN-FILE GIVING OUT-FILE` gave an empty bundle with `unresolved: []`. Each
   such file is now an `unresolved` entry (so `--strict` fails), pending a
   decision on modelling them as boundaries.
+* **`gen-fixtures --scenarios all` is no longer quadratic in program size**
+  (#374). Every constant fold (two per scenario) re-walked the whole
+  PROCEDURE DIVISION; the walk is now computed once per program and the
+  unseeded fold is memoised. A 600-IF program went from 50.8s to 7.3s with a
+  byte-identical bundle. The bundle's size is unchanged.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
