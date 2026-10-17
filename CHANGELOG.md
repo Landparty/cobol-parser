@@ -291,6 +291,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SELECT, like FILE STATUS. `unused-variables` and `lint` reported a
   `PADDING CHARACTER IS ws-item` item as never referenced; it now counts as
   used (a literal padding character names nothing).
+* **OCCURS `ASCENDING`/`DESCENDING KEY` after `INDEXED BY` is a key** (#542).
+  `OCCURS 5 INDEXED BY IX2 ASCENDING KEY IS K2` (an order IBM accepts) gave
+  `index_names == ['IX2', 'ASCENDING']`, no key, an "Unparsed token 'KEY'"
+  warning and an `xref` data item named `ASCENDING`, and `diff` could not
+  see a change of that table's key. The KEY and INDEXED BY phrases are now
+  read in either order, repeated, in the pure-Python walk and the Cython
+  accelerator alike.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
