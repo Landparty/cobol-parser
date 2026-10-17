@@ -463,7 +463,12 @@ Directive and skipped lines are blanked in place.
   instead (#512); pinned by
   `tests/regression/test_conditional_compilation_word_operators.py`.
 * `>>EVALUATE sym` (literal `>>WHEN`s), `>>EVALUATE TRUE` (condition
-  `>>WHEN`s), `>>WHEN OTHER`, `>>END-EVALUATE`.
+  `>>WHEN`s), `>>WHEN OTHER`, `>>END-EVALUATE`. Stacked `>>WHEN`s (no text
+  between them; blank and comment lines do not count) share the text that
+  follows: `_CondFrame.when_pending` keeps the branch on when an earlier
+  phrase of the stack matched. Without it a match on the first phrase was
+  switched off by the next and the `>>EVALUATE` produced nothing, silently
+  (#492; `tests/regression/test_conditional_compilation_stacked_when.py`).
 * `defined_symbols`: a name set/list or a `dict[str, str | int | float |
   bool]` (the CLI's `--define NAME=VALUE`). A quoted value keeps its case; an
   unquoted one is a word and is upper-cased (`{"ENV": "prod"}` matches

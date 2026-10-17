@@ -1772,6 +1772,7 @@ class _CondFrame:
         "eval_cond_negate",
         "eval_subject",
         "eval_subject_valid",
+        "when_pending",
     )
 
     def __init__(
@@ -1785,6 +1786,23 @@ class _CondFrame:
         self.eval_cond_negate = False  # True for >>EVALUATE FALSE
         self.eval_subject: str | None = None  # resolved subject value
         self.eval_subject_valid = True  # False -> only >>WHEN OTHER matches
+        # True while the lines since the last >>WHEN hold no text: a further
+        # >>WHEN there is *stacked* on it and shares the text that follows.
+        self.when_pending = False
+
+
+def _is_blank_or_comment_line(line: str) -> bool:
+    """Whether *line* holds no program text: blank, a ``*>`` floating
+    comment, or a fixed-format comment line (``*`` / ``/`` in column 7)."""
+    text = line.strip()
+    if not text or text.startswith("*>"):
+        return True
+    expanded = line.expandtabs(8)
+    return (
+        len(expanded) >= INDICATOR_COL
+        and expanded[INDICATOR_COL - 1] in "*/"
+        and not expanded[: INDICATOR_COL - 1].strip(" 0123456789")
+    )
 
 
 def _fixed_format_directive_text(line: str) -> str | None:
@@ -1923,6 +1941,16 @@ def preprocess_conditional_compilation(
             else ""
         )
 
+        # Anything but another >>WHEN, a blank line or a comment ends a run
+        # of stacked >>WHENs (#492).
+        if (
+            frames
+            and frames[-1].when_pending
+            and name != "WHEN"
+            and not _is_blank_or_comment_line(line)
+        ):
+            frames[-1].when_pending = False
+
         # >>DEFINE symbol [AS value] — honored only in an active region.
         if name == "DEFINE":
             match = _DEFINE_RE.match(stripped)
@@ -2052,7 +2080,16 @@ def preprocess_conditional_compilation(
         elif name == "WHEN":
             if frames and frames[-1].kind == "eval":
                 frame = frames[-1]
-                if rest == "OTHER":
+                stacked = frame.when_pending
+                frame.when_pending = True
+                if stacked and frame.active:
+                    # ``>>WHEN a`` ``>>WHEN b`` text: the phrases share one
+                    # text block, so an earlier match in the stack selects
+                    # it. Re-evaluating here switched the branch back off
+                    # (branch_taken was already set) and the whole
+                    # >>EVALUATE produced nothing, silently (#492).
+                    pass
+                elif rest == "OTHER":
                     frame.active = frame.parent_active and not frame.branch_taken
                     frame.branch_taken = True
                 else:
