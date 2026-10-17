@@ -224,7 +224,12 @@ with no section header of its own (a CD's record, a bare `01`) is discarded with
 the body -- the warning is what keeps that from being silent.
 
 `REPORT`, `SCREEN` and `COMMUNICATION` double as ordinary clause words (an FD's
-`REPORT IS report-name.`, `examples/cobol/shamrice/report_test.cbl`).
+`REPORT IS report-name.`, `examples/cobol/shamrice/report_test.cbl`). The FD
+clause itself is captured (`REPORT`/`REPORTS` in `_FD_CLAUSE_STARTS`,
+`fd_clauses["report_names"]`); since a report file has no record description
+to carry it, the FILE SECTION `CobolSection` gets `metadata["report_files"]`
+= `{REPORT-NAME (upper): fd-name}` -- what `analysis/_files.report_to_file_map`
+reads (#499).
 `parse_division` routes to `_parse_section("REPORT")` / `_skip_section` only when
 the *next* token is literally `SECTION` (`_next_is_section_keyword`); otherwise
 the bare word falls through to the unknown-token skip, so it cannot discard the

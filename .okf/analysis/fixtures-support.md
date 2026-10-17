@@ -80,6 +80,10 @@ OUTPUT B` in one statement) and carry `status_field` resolved via
 `ScenarioPlanner`'s "OPEN -> FILE STATUS 35" error family can never fire).
 DELETE/START/UNLOCK are
 `STATUS_ONLY` (no data payload); READ is `IN`; WRITE/REWRITE are `OUT`.
+Report Writer `GENERATE x` (when `x` is a report or report group whose
+report a `FD ... REPORT IS` names) is an `OUT` boundary of category `WRITE`
+keyed on `x`, with no `record_names` (a report group is no FILE SECTION
+record); INITIATE / TERMINATE add none (#499).
 
 **CALL/DYNCALL argument-direction ladder (Phase 2b)**, first rung wins,
 `CallArg.provenance` records which:

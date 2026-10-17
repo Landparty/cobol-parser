@@ -712,6 +712,14 @@ per file and one per DB2 table the program touches.
   `CRUDMatrix.caveats`, which MCP `program_brief` reports as
   `incomplete-analysis`. Pinned by
   `tests/regression/test_crud_cics_file_control_issue_538.py` (#538).
+* **Report Writer writes its file.** `INITIATE` / `GENERATE` / `TERMINATE`
+  mark C on the file whose `FD ... REPORT IS` names the report (or the
+  report-group's report): `_files.report_to_file_map()` (FILE SECTION
+  `report_files` metadata + each REPORT SECTION 01's `rd_report_name`) and
+  `report_writer_files()`. The same helpers make IOLogger log each as a
+  `WRITE` (`details["verb"]`) and io-sequence check the file is open
+  (`WRITE_BEFORE_OPEN`, message naming the verb). Pinned by
+  `tests/regression/test_report_writer_file_output_issue_499.py` (#499).
 * **Record → file resolution** goes through `_files.py` (see [Data names and
   references](#data-names-and-references)).
 * **SQL writes.** For INSERT/UPDATE/DELETE/MERGE only `stmt.tables[0]` (the
