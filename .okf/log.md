@@ -114,6 +114,11 @@ pass-throughs; `bindings_from_jobs(jobs, caveats)` reports what it cannot read
 caveat through `bindings_from_jobs(jobs, caveats)` (a fresh `LineageGraph` keeps
 `join_caveats`).
 
+## 2026-10-17 -- Lineage JCL: every IKJEFT01 RUN PROGRAM is bound (#584)
+
+[analysis/lineage.md](analysis/lineage.md): `bindings_from_jobs` binds the
+step's DDs to every `RUN PROGRAM(x)` in an IKJEFT01/1A/1B SYSTSIN, not only the first.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
