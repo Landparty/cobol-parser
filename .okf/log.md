@@ -223,6 +223,11 @@ special register.
 [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md), [dialects.md](dialects.md): `IBM_LE_SERVICE_CATEGORIES`
 is the source of truth, rebuilt from SA38-0683; 24 non-services removed.
 
+## 2026-10-17 -- No fall-through out of a DECLARATIVES section (#533)
+
+[analysis/flow.md](analysis/flow.md): `build_fall_through_edges` takes
+`declarative_sections` and draws no edge out of one.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
