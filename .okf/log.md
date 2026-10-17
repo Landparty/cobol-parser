@@ -207,6 +207,10 @@ decodes are warnings or caveats, never silent.
 
 [ast-models.md](ast-models.md), [parser/statements-data.md](parser/statements-data.md), [analysis/codebase.md](analysis/codebase.md), [analysis/business-rules.md](analysis/business-rules.md), [analysis/flow.md](analysis/flow.md), [tests.md](tests.md): arithmetic nodes record `rounded_targets` / `rounding_modes`; diff, business-rules, statement summaries and clone fingerprints use them.
 
+## 2026-10-17 -- Legacy verbs as data names (#525)
+
+[lexer.md](lexer.md), [parser/statements.md](parser/statements.md), [parser/statements-control.md](parser/statements-control.md), [tests.md](tests.md): a declared data item named CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM lexes as an IDENTIFIER (`_retype_legacy_verb_data_names`); the five verbs match by TokenType only and left `STATEMENT_KEYWORDS`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

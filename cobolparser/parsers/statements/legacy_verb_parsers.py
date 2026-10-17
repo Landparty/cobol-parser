@@ -37,6 +37,14 @@ from ._utils import (
 )
 
 
+def _matches_legacy_verb(token_stream: ITokenStream, token_type: TokenType) -> bool:
+    """The legacy verb by its dedicated TokenType only. The lexer retypes
+    the word to IDENTIFIER where the program declares it as a data name
+    (#525), and such an item at a statement start is never this verb."""
+    token = peek_token(token_stream)
+    return token is not None and token.type == token_type
+
+
 def _consume_one_operand(token_stream: ITokenStream) -> str | None:
     operands = collect_operands(token_stream, max_items=1)
     return operands[0] if operands else None
@@ -46,7 +54,7 @@ class ExhibitStatementParser(IStatementParser):
     """Parser for ``EXHIBIT [NAMED | CHANGED NAMED | CHANGED] item ...``."""
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        return matches_word(token_stream, "EXHIBIT", TokenType.EXHIBIT)
+        return _matches_legacy_verb(token_stream, TokenType.EXHIBIT)
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
@@ -83,7 +91,7 @@ class ExamineStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        return matches_word(token_stream, "EXAMINE", TokenType.EXAMINE)
+        return _matches_legacy_verb(token_stream, TokenType.EXAMINE)
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
@@ -129,7 +137,7 @@ class TransformStatementParser(IStatementParser):
     """Parser for ``TRANSFORM identifier CHARACTERS FROM x TO y``."""
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        return matches_word(token_stream, "TRANSFORM", TokenType.TRANSFORM)
+        return _matches_legacy_verb(token_stream, TokenType.TRANSFORM)
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
@@ -200,7 +208,7 @@ class NoteStatementParser(IStatementParser):
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        return matches_word(token_stream, "NOTE", TokenType.NOTE)
+        return _matches_legacy_verb(token_stream, TokenType.NOTE)
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None
@@ -238,7 +246,7 @@ class ChainStatementParser(IStatementParser):
     """Parser for the Micro Focus ``CHAIN {literal | identifier} [USING ...]``."""
 
     def matches(self, token_stream: ITokenStream) -> bool:
-        return matches_word(token_stream, "CHAIN", TokenType.CHAIN)
+        return _matches_legacy_verb(token_stream, TokenType.CHAIN)
 
     def parse(
         self, token_stream: ITokenStream, context: Any | None = None

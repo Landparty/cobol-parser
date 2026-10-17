@@ -516,9 +516,17 @@ token's line number by one. See [preprocessing.md](preprocessing.md).
 `&` is never a token (both lexers skip it as a separator), but
 `tokenize()` -- pure-Python and `_lexer_fast.pyx` alike -- ends with
 `CobolLexer._post_tokenize()`, which runs `_merge_concatenated_literals()`,
-`_flag_stray_sql_chars()`, then `_retype_operator_currency_symbols()` (see
-[Declared currency symbols](#declared-currency-symbols)) and rewrites `self.tokens` in place (the
-Cython path returns the same list). Two consecutive STRING_LITERAL tokens
+`_flag_stray_sql_chars()`, `_retype_operator_currency_symbols()` (see
+[Declared currency symbols](#declared-currency-symbols)), then
+`_retype_legacy_verb_data_names()`, and rewrites `self.tokens` in place (the
+Cython path returns the same list). The last pass (#525) retypes the legacy
+verbs CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM to IDENTIFIER, everywhere
+in the source, when the program declares the word as a data name: it directly
+follows a level number that starts an entry (line start or after a period)
+outside the PROCEDURE DIVISION. None is reserved under IBM Enterprise COBOL,
+and lexed as a verb `05 NOTE PIC X(30)` (a DCLGEN NOTE column) became a
+FILLER and `MOVE x TO CHAIN` a CHAIN statement. Undeclared, they keep their
+TokenTypes and stay verbs. Two consecutive STRING_LITERAL tokens
 (NEWLINEs between them allowed) are joined into one when the source text
 between them is whitespace + exactly one `&` + whitespace
 (`_ampersand_joins` reads `self.lines` back from the second literal's
