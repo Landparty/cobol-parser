@@ -98,6 +98,12 @@ IN/BIDIRECTIONAL fixtures with a layout and no rows (header-only CSV).
 [analysis/flow.md](analysis/flow.md): each AFTER phrase adds one decision
 and one nesting level.
 
+## 2026-10-17 -- COPY REPLACING LEADING + TRAILING replace a word once (#513)
+
+[preprocessing.md](preprocessing.md): a partial-word hit settles its word by
+the first fitting clause. [tests.md](tests.md):
+`test_copy_replacing_leading_trailing_once.py`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

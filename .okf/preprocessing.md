@@ -634,7 +634,14 @@ scans the member's whole text in one pass (lines joined with `\n`):
 * **Each word is replaced at most once.** All clauses go into ONE alternation
   (longest search text first) applied in ONE left-to-right pass;
   applying clauses one pass each would let `==A== BY ==B== ==B== BY ==A==`
-  rewrite replacements.
+  rewrite replacements. A LEADING / TRAILING hit settles its whole word: the
+  first partial clause (in clause order) that fits the word replaces it, and
+  scanning resumes after the word -- the leftmost hit alone turned
+  `XX-NAME-XX` into `CUST-NAME-END` under LEADING + TRAILING `==XX==`, unlike
+  REPLACE (#513). Clause order is the written order here, not the
+  longest-first order of the alternation (`LEADING ==X==` written before
+  `TRAILING ==XX==` settles `X-NAME-XX`). A whole-word clause still beats a
+  partial one by length, whatever the written order (known gap).
 * **Boundaries.** Hyphen-aware word boundaries, `_` counts as a word
   character, a decimal point binds (`(?<![0-9]\.)` / `(?!\.[0-9])`, so `==1==
   BY ==2==` leaves `VALUE 1.5`), LEADING/TRAILING, case-insensitive words.
