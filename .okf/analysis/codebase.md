@@ -398,7 +398,7 @@ ADD / SUBTRACT / MULTIPLY / DIVIDE get the same through their `to_dict()`
 (`rounded_targets`, `rounding_modes`).
 The dedicated signatures carry the markers a value alone hides (#316): CALL
 includes `is_dynamic` (`CALL 'X'` → `CALL X` is a `call-target-changed`, and
-the detail text quotes a static target), and UNSTRING includes
+the detail text quotes a static target; CANCEL compares `program_names_literal` through its `to_dict()` and quotes literal names in the detail text, #479), and UNSTRING includes
 `delimiter_all` (`DELIMITED BY ALL ','`) with a detail text spelling out
 source, delimiters and INTO targets. STRING compares `groups` (which sources
 each `DELIMITED BY` applies to, #576) and its detail text spells them out, so

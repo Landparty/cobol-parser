@@ -262,6 +262,11 @@ to its last paragraph.
 `_skip_section` keeps `screen_items` / `screen_references`; unused-variables
 counts the bindings, xref records them and declares `screen-item`s.
 
+## 2026-10-17 -- CANCEL literal vs data name (#479)
+
+[parser/statements-control.md](parser/statements-control.md),
+[analysis/flow.md](analysis/flow.md): `CancelStatement.program_names_literal`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

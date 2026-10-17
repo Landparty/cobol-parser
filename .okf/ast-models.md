@@ -721,6 +721,9 @@ Fields that are easy to miss, grouped by node.
 * `ContinueStatement` — `delay_expression` (text of `CONTINUE AFTER expr
   SECONDS`, else `None`; in `to_dict()` only when set) and
   `delay_expression_tree` (not serialized), #578.
+* `CancelStatement` — `program_names` and the parallel
+  `program_names_literal: list[bool]` (`CANCEL 'X'` vs `CANCEL X`, #479;
+  serialized only when some name is a literal).
 
 **Control (`control.py`)**
 
