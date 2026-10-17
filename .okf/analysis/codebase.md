@@ -327,6 +327,10 @@ text alone is not enough: it is a truncated summary that omits STRING's INTO,
 READ's INTO/KEY, WRITE's FROM, ..., so `STRING ... INTO A` → `INTO B` would
 diff as no change.
 
+COMPUTE's signature holds each target's rounding phrase (`rounding_of`), so
+moving `ROUNDED` to another target or changing its `MODE` is a change (#517);
+ADD / SUBTRACT / MULTIPLY / DIVIDE get the same through their `to_dict()`
+(`rounded_targets`, `rounding_modes`).
 The dedicated signatures carry the markers a value alone hides (#316): CALL
 includes `is_dynamic` (`CALL 'X'` → `CALL X` is a `call-target-changed`, and
 the detail text quotes a static target), and UNSTRING includes

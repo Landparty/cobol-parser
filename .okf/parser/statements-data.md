@@ -71,8 +71,11 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   MULTIPLY/DIVIDE format 1) folds `(subscript)` groups and `OF` / `IN` chains
   (`"Y OF Z"`, `"NAME ( SUB1 , SUB2 )"`). `ArithmeticStatement.target` is the
   first target (back-compat) and `.targets` the full ordered list (`ADD 1 TO a,
-  b, c`); `set_target()` appends to both. `ROUNDED` is recorded per statement
-  (`set_rounded()`). `CORRESPONDING` / `CORR` is a keyword
+  b, c`); `set_target()` appends to both. `ROUNDED` is recorded per receiver
+  (#517): `_consume_optional_rounded(stream, stmt, receiver)` calls
+  `set_rounded(True, receiver, mode)` for the target / GIVING item it follows,
+  with the `MODE IS` name `_consume_optional_rounded_mode` returns
+  (`ROUNDING_MODES`, in `models/statements/arithmetic.py`). `CORRESPONDING` / `CORR` is a keyword
   (`is_corresponding`), not an operand. `_consume_additional_arithmetic_targets`
   continues the list across commas / spaces / ROUNDED and stops at
   `_ADDITIONAL_TARGET_STOP_KEYWORDS` (includes `REMAINDER` and `SIZE`), at a
@@ -115,7 +118,8 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   detection exact); `**`'s two lexed `*` tokens are re-merged (`2 ** 3`).
 - **Targets.** `COMPUTE id-1 [ROUNDED], id-2 [ROUNDED] = expr`: commas between
   targets are skipped (stopping there left the comma for the `=` check and failed
-  the whole statement). `ComputeStatement.rounded` is recorded.
+  the whole statement). A ROUNDED belongs to the target just before it
+  (`rounded_targets` / `rounding_modes`, #517).
 - **`expression_tree`** is a precedence parse of the collected tokens (literals,
   subscripted identifiers, FUNCTION calls, parentheses); a failed build degrades
   to `None`, never an error. Grammar, tightest-binding first: `_parse_primary`

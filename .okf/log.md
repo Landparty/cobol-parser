@@ -14,6 +14,10 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- ROUNDED per receiver, with its MODE (#517)
+
+[ast-models.md](ast-models.md), [parser/statements-data.md](parser/statements-data.md), [analysis/codebase.md](analysis/codebase.md), [analysis/business-rules.md](analysis/business-rules.md), [analysis/flow.md](analysis/flow.md), [tests.md](tests.md): arithmetic nodes record `rounded_targets` / `rounding_modes`; diff, business-rules, statement summaries and clone fingerprints use them.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

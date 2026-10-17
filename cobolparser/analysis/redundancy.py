@@ -38,6 +38,7 @@ from .._literals import QUOTED_LITERAL_RE
 from ..lexer import CobolLexer
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
+from ..models.statements.arithmetic import ROUNDING_MODES
 from ..models.statements.call import CallStatement
 from ..models.statements.control import (
     EvaluateStatement,
@@ -120,6 +121,9 @@ _FIELD_KEY_RE = re.compile(r"[a-z][a-z0-9_]*")
 _DETAIL_KEYWORDS = (
     _NON_IDENTIFIER_WORDS
     | frozenset(CobolLexer.KEYWORDS)
+    # ``ROUNDED MODE IS NEAREST-EVEN`` vs ``TRUNCATION`` is different
+    # behaviour, not a consistent rename (#517).
+    | ROUNDING_MODES
     | frozenset(
         {
             "ADVANCING",

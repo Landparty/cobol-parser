@@ -19,6 +19,7 @@ from ...models.statements import (
     MultiplyStatement,
     SubtractStatement,
 )
+from ...models.statements.arithmetic import ROUNDING_MODES
 from ...models.statements.base import (
     ArithmeticExpression,
     CobolExpression,
@@ -65,7 +66,9 @@ class _BinaryArithmeticNode(Protocol):
 
     def set_giving(self, value: str) -> None: ...
 
-    def set_rounded(self, value: bool = ...) -> None: ...
+    def set_rounded(
+        self, rounded: bool = ..., target: str | None = ..., mode: str | None = ...
+    ) -> None: ...
 
 
 _ArithT = TypeVar("_ArithT", bound=_BinaryArithmeticNode)
@@ -109,8 +112,7 @@ class AddStatementParser(IStatementParser):
             target = _consume_arithmetic_target(token_stream)
             if target:
                 stmt.set_target(target)
-                if _consume_optional_rounded(token_stream):
-                    stmt.set_rounded(True)
+                _consume_optional_rounded(token_stream, stmt, target)
                 _consume_additional_arithmetic_targets(token_stream, stmt, start_column)
             else:
                 report_or_raise(
@@ -119,15 +121,13 @@ class AddStatementParser(IStatementParser):
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
-                if _consume_optional_rounded(token_stream):
-                    stmt.set_rounded(True)
+                _consume_optional_rounded(token_stream, stmt, giving)
                 _consume_additional_giving_targets(token_stream, stmt, start_column)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
-                if _consume_optional_rounded(token_stream):
-                    stmt.set_rounded(True)
+                _consume_optional_rounded(token_stream, stmt, giving)
                 _consume_additional_giving_targets(token_stream, stmt, start_column)
             else:
                 report_or_raise(
@@ -229,8 +229,7 @@ class SubtractStatementParser(IStatementParser):
                     ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
                 )
             if target_set:
-                if _consume_optional_rounded(token_stream):
-                    stmt.set_rounded(True)
+                _consume_optional_rounded(token_stream, stmt, stmt.targets[-1])
                 # SUBTRACT allows multiple FROM targets, each individually
                 # ROUNDED: ``FROM b [ROUNDED], c [ROUNDED] ...``.
                 _consume_additional_arithmetic_targets(token_stream, stmt, start_column)
@@ -240,15 +239,13 @@ class SubtractStatementParser(IStatementParser):
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
-                if _consume_optional_rounded(token_stream):
-                    stmt.set_rounded(True)
+                _consume_optional_rounded(token_stream, stmt, giving)
                 _consume_additional_giving_targets(token_stream, stmt, start_column)
         elif separator == "GIVING":
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
-                if _consume_optional_rounded(token_stream):
-                    stmt.set_rounded(True)
+                _consume_optional_rounded(token_stream, stmt, giving)
                 _consume_additional_giving_targets(token_stream, stmt, start_column)
             else:
                 report_or_raise(
@@ -371,8 +368,7 @@ def _parse_binary_arithmetic(
     # ``DIVIDE x BY y GIVING z ROUNDED`` and ``DIVIDE x INTO y ROUNDED``).
     # Left unconsumed, it stays in the stream and gets misread by the
     # paragraph-boundary lookahead as a new paragraph header.
-    if _consume_optional_rounded(token_stream):
-        stmt.set_rounded(True)
+    _consume_optional_rounded(token_stream, stmt, giving if giving else second_operand)
 
     if giving:
         # GIVING accepts a comma/space-separated list of result targets,
@@ -459,56 +455,57 @@ def _consume_arithmetic_target(stream: ITokenStream) -> str | None:
     return consume_optional_qualifiers(stream, value)
 
 
-def _consume_optional_rounded(stream: ITokenStream) -> bool:
+def _consume_optional_rounded(
+    stream: ITokenStream, stmt: Any = None, receiver: str | None = None
+) -> bool:
     """Consume a trailing ROUNDED keyword if present, skipping NEWLINEs first.
 
     Shared by every arithmetic verb that accepts ROUNDED (ADD/SUBTRACT's
     TO/FROM/GIVING targets -- each individually -- and MULTIPLY/DIVIDE's
     single GIVING target via :func:`_parse_binary_arithmetic`) so ROUNDED
     detection isn't left unconsumed to be misread by the paragraph-boundary
-    lookahead. Returns ``True`` if ROUNDED was found and consumed.
+    lookahead. Returns ``True`` if ROUNDED was found and consumed. With
+    *stmt*, records it there against *receiver* -- the receiving item the
+    phrase follows -- with its ``MODE IS`` rounding mode (#517): one
+    statement-wide flag made ``COMPUTE B ROUNDED C`` and ``COMPUTE B C
+    ROUNDED`` the same AST.
     """
     _skip_newlines(stream)
     if peek_value_upper(stream) == "ROUNDED":
         stream.consume()
-        _consume_optional_rounded_mode(stream)
+        mode = _consume_optional_rounded_mode(stream)
+        if stmt is not None:
+            stmt.set_rounded(True, receiver, mode)
         return True
     return False
 
 
-#: The rounding modes of ``ROUNDED MODE IS mode`` (IBM Enterprise COBOL 6.x,
-#: COBOL 2002). Matched by value so a data item that merely follows ROUNDED
-#: (``ADD A TO B ROUNDED C``) is never taken for a mode.
-_ROUNDED_MODES: frozenset[str] = frozenset(
-    {
-        "AWAY-FROM-ZERO",
-        "NEAREST-AWAY-FROM-ZERO",
-        "NEAREST-EVEN",
-        "NEAREST-TOWARD-ZERO",
-        "PROHIBITED",
-        "TOWARD-GREATER",
-        "TOWARD-LESSER",
-        "TRUNCATION",
-    }
-)
+#: The rounding modes of ``ROUNDED MODE IS mode``, matched by value so a
+#: data item that merely follows ROUNDED (``ADD A TO B ROUNDED C``) is never
+#: taken for a mode.
+_ROUNDED_MODES = ROUNDING_MODES
 
 
-def _consume_optional_rounded_mode(stream: ITokenStream) -> None:
-    """Consume ``MODE [IS] mode-name`` right after ROUNDED, if present.
+def _consume_optional_rounded_mode(stream: ITokenStream) -> str | None:
+    """Consume ``MODE [IS] mode-name`` right after ROUNDED, if present, and
+    return the mode name (``None`` when there is none).
 
     Left in the stream, ``MODE`` ended the target list: every later target,
     the SIZE ERROR handlers and (for COMPUTE) the ``=`` itself were lost.
     """
     _skip_newlines(stream)
     if peek_value_upper(stream) != "MODE":
-        return
+        return None
     stream.consume()
     _skip_newlines(stream)
     if peek_value_upper(stream) == "IS":
         stream.consume()
         _skip_newlines(stream)
-    if peek_value_upper(stream) in _ROUNDED_MODES:
+    mode = peek_value_upper(stream)
+    if mode in _ROUNDED_MODES:
         stream.consume()
+        return mode
+    return None
 
 
 #: GIVING/REMAINDER have no dedicated TokenType (see e.g.
@@ -567,8 +564,7 @@ def _consume_additional_arithmetic_targets(
         if extra_target is None:
             break
         stmt.set_target(extra_target)
-        if _consume_optional_rounded(stream):
-            stmt.set_rounded(True)
+        _consume_optional_rounded(stream, stmt, extra_target)
 
 
 #: GIVING may itself be followed by further comma/space-separated targets
@@ -615,8 +611,7 @@ def _consume_additional_giving_targets(
         if extra_giving is None:
             break
         stmt.set_giving(extra_giving)
-        if _consume_optional_rounded(stream):
-            stmt.set_rounded(True)
+        _consume_optional_rounded(stream, stmt, extra_giving)
 
 
 class _ExpressionSyntaxError(Exception):
@@ -895,13 +890,11 @@ class ComputeStatementParser(IStatementParser):
             )
         stmt.add_target(target)
 
-        # Additional targets and per-target ROUNDED phrases, up to '='. COMPUTE
-        # only records whether ROUNDED appeared at all (not which target it
-        # modified), matching ADD/SUBTRACT/MULTIPLY/DIVIDE's single `rounded`
-        # flag -- previously this branch consumed and discarded the keyword.
+        # Additional targets and per-target ROUNDED phrases, up to '='. A
+        # ROUNDED belongs to the target just before it (#517).
         while True:
-            if _consume_optional_rounded(token_stream):
-                stmt.set_rounded(True)
+            last = stmt.targets[-1] if stmt.targets else None
+            if _consume_optional_rounded(token_stream, stmt, last):
                 continue
             if peek_value_upper(token_stream) == ",":
                 # A comma between targets (`COMPUTE A, B = ...`) is a
