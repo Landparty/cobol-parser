@@ -495,9 +495,16 @@ LOCAL-STORAGE, LINKAGE), calls `compute_record_layout()` on each top-level
   `unresolved` line naming it. An aligned SYNC item, or SYNC on
   DISPLAY/packed, changes nothing. These flags (and the partial level-88
   lines) come from `flag_record_layout(record, layout)`, which
-  `compute_program_data_items` runs per record; `compute_record_layout` alone
+  `compute_program_data_items` runs per record (and the `OCCURS UNBOUNDED`
+  line, below); `compute_record_layout` alone
   does **not** flag -- a caller laying out one record must run it too (MCP
   `record_layout` does, #488).
+* **`OCCURS UNBOUNDED`** has no maximum, so the table is sized at its
+  minimum (`occurs` `{"min": 1, "max": 1}` -- the shape is kept for the
+  backend and the extension) and `flag_record_layout` adds one `unresolved`
+  line per such table saying its `occurs.max` and every enclosing group's
+  `byte_length` are a lower bound (`LayoutItem.occurs_unbounded`, not
+  serialized; #311). gen-data likewise writes the minimum.
 * **Level-88 `THRU` ranges: `condition_ranges`** (see #361).
   `condition_values` comes from `expand_condition_values()`, which lists a
   range only in part: an integer range up to `_MAX_RANGE_EXPANSION` (`VALUE 1
