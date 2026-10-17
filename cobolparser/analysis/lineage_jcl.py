@@ -28,6 +28,11 @@ Utility steps understood:
 - IDCAMS ``REPRO`` with ``INFILE``/``OUTFILE`` DD names or
   ``INDATASET``/``OUTDATASET`` names, in either order.
 
+Control statements read from a dataset (``//SYSIN DD DSN=PROD.CNTL(X)``, a
+``DFSPARM`` dataset) cannot be seen, so the step is never assumed to be a
+byte-for-byte copy: it is a ``reformat`` (the flow stops there) and a caveat
+names the control dataset.
+
 A concatenated DD (a DD statement with a blank name after a named one) is
 part of the DD before it: every dataset of ``//SORTIN DD DSN=A`` /
 ``//  DD DSN=B`` is an input. ``DD DUMMY`` and ``DSN=NULLFILE`` bind nothing.
@@ -217,6 +222,12 @@ def bindings_from_jobs(
                 kind = (
                     "reformat"
                     if re.search(r"\b(GENERATE|RECORD)\b", control)
+                    or (
+                        dst is not None
+                        and _unread_control(
+                            dds, ("SYSIN",), program, step_name, job_name, notes
+                        )
+                    )
                     else "copy"
                 )
                 passthroughs += [
@@ -321,6 +332,26 @@ def _step_label(program: str, step: str | None, job: str | None) -> str:
     return f"{program} step {step or '?'}" + (f" in job {job}" if job else "")
 
 
+def _unread_control(
+    dds: list[Any],
+    names: tuple[str, ...],
+    program: str,
+    step: str | None,
+    job: str | None,
+    notes: list[str],
+) -> bool:
+    """True (and a caveat) when a control DD of ``names`` is a dataset: its
+    statements are not read, so the step cannot be taken for a copy."""
+    unread = [dsn for name in names for dsn in _dsns(dds, name)]
+    if unread:
+        notes.append(
+            f"{_step_label(program, step, job)}: control statements are read "
+            f"from {', '.join(unread)}, which is not in-stream; the step is "
+            "treated as a reformat and values are not traced through it"
+        )
+    return bool(unread)
+
+
 def _sort_passthroughs(
     dds: list[Any],
     job: str | None,
@@ -328,7 +359,7 @@ def _sort_passthroughs(
     program: str,
     notes: list[str],
 ) -> list[Passthrough]:
-    control = _control(dds, "SYSIN")
+    control = _control(dds, "SYSIN") + "\n" + _control(dds, "DFSPARM")
     input_dds = {"SORTJNF1", "SORTJNF2"} if "JOINKEYS" in control else set()
     input_dds |= {m.group(2) for m in _JOIN_DD_RE.finditer(control)}
     inputs: list[str] = []
@@ -366,6 +397,12 @@ def _sort_passthroughs(
             "the flow through it is not traced"
         )
     kind = "reformat" if _REFORMAT_RE.search(control) else "copy"
+    if (
+        inputs
+        and outputs
+        and _unread_control(dds, ("SYSIN", "DFSPARM"), program, step, job, notes)
+    ):
+        kind = "reformat"
     ranges = _sum_ranges(control) if kind == "copy" else ()
     return [
         Passthrough(src, dst, kind, ranges, job, step, program)
