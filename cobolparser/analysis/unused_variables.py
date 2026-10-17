@@ -1274,6 +1274,24 @@ class UnusedVariableAnalyzer:
         RD's own ``CONTROL``/``CONTROLS`` (break on this field).
         """
         names: set[str] = set()
+        for _node, values in UnusedVariableAnalyzer.report_entry_operands(data_div):
+            for value in values:
+                names |= _extract_identifiers(value)
+        return names
+
+    @staticmethod
+    def report_entry_operands(data_div: Any) -> list[tuple[Any, list[str]]]:
+        """Each REPORT SECTION entry (RD or report-group item) with the raw
+        ``SOURCE`` / ``SUM`` / ``CONTROL(S)`` operand texts it carries, in
+        source order; entries carrying none are left out. Shared with
+        ``XrefAnalyzer``, which records each operand at its entry (#571).
+
+        The RD is no node of its own: the parser copies its clauses onto
+        every 01 report group it owns, so its ``CONTROL(S)`` operands are
+        taken once per report, from the first of those groups.
+        """
+        found: list[tuple[Any, list[str]]] = []
+        rd_seen: set[str] = set()
         for section in data_div.sections:
             if not isinstance(section, CobolSection):
                 continue
@@ -1282,15 +1300,28 @@ class UnusedVariableAnalyzer:
             for item in section.data_items:
                 for node in [item, *item.get_all_children()]:
                     metadata = getattr(node, "metadata", None) or {}
+                    values: list[str] = []
                     clauses = metadata.get("report_clauses") or {}
-                    names |= _extract_identifiers(clauses.get("source"))
+                    if clauses.get("source"):
+                        values.append(clauses["source"])
                     for entry in clauses.get("sum") or []:
-                        for operand in (entry or {}).get("operands") or []:
-                            names |= _extract_identifiers(operand)
+                        values.extend(
+                            operand
+                            for operand in (entry or {}).get("operands") or []
+                            if operand
+                        )
                     rd_clauses = metadata.get("rd_clauses") or {}
-                    for control in rd_clauses.get("controls") or []:
-                        names |= _extract_identifiers(control)
-        return names
+                    report = str(metadata.get("rd_report_name") or id(rd_clauses))
+                    if rd_clauses and report not in rd_seen:
+                        rd_seen.add(report)
+                        values.extend(
+                            control
+                            for control in rd_clauses.get("controls") or []
+                            if control
+                        )
+                    if values:
+                        found.append((node, values))
+        return found
 
     @staticmethod
     def _section_of(item: CobolDataItem) -> str:

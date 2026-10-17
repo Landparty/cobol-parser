@@ -156,6 +156,12 @@ figurative plurals and numeric spellings before comparing `value_clause`.
 [analysis/codebase.md](analysis/codebase.md): `_as_passed` maps a BY VALUE
 operand's `input-output` / `output` to `input`, per entry point.
 
+## 2026-10-17 -- xref records REPORT SECTION operands (#571)
+
+[analysis/data-use.md](analysis/data-use.md): `report_entry_operands()` lists
+each report entry's SOURCE / SUM / CONTROL(S) texts; unused-variables and xref
+both read it, xref recording each at its entry.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
