@@ -1086,11 +1086,16 @@ class BusinessRuleExtractor:
             low = self._literal(selector.get("start"), False)
             high = self._literal(selector.get("end"), False)
             return f"{subject} >= {low} AND {subject} <= {high}"
-        value = self._literal(
-            selector.get("value"),
-            bool(selector.get("identifier")) or kind == "Identifier",
-            quoted=bool(selector.get("quoted")),
-        )
+        if selector.get("expression"):
+            # A computed selector (``WHEN WS-N + 1``, ``WHEN WS-T (2)``), not
+            # text to quote (#333).
+            value = _tidy(str(selector.get("value") or "").strip())
+        else:
+            value = self._literal(
+                selector.get("value"),
+                bool(selector.get("identifier")) or kind == "Identifier",
+                quoted=bool(selector.get("quoted")),
+            )
         if subject_upper == "TRUE":
             return value
         if subject_upper == "FALSE":
