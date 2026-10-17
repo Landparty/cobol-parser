@@ -201,9 +201,18 @@ def _declared_currency_symbols(
     out -- they already lex as (part of) a word. A clause inside a comment
     declares nothing.
     """
-    symbols: set[str] = set()
+    return frozenset(declared_currency_signs(source, fixed_format))
+
+
+def declared_currency_signs(source: str, fixed_format: bool = False) -> dict[str, str]:
+    """Each declared PICTURE currency symbol (as
+    :func:`_declared_currency_symbols` picks them) mapped to the currency
+    string it stands for: ``CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL '#'``
+    is ``{"#": "EUR"}``, and ``CURRENCY SIGN IS '#'`` is ``{"#": "#"}``.
+    What an edited picture's currency positions display."""
+    signs: dict[str, str] = {}
     if "CURRENCY" not in source.upper():
-        return frozenset()
+        return signs
     code = _code_text(source, blank_literals=False, fixed_format=fixed_format)
     for match in _CURRENCY_CLAUSE_RE.finditer(code):
         sign = match.group(1) or match.group(2) or ""
@@ -211,8 +220,8 @@ def _declared_currency_symbols(
         if symbol is None and len(sign) == 1:
             symbol = sign
         if symbol and not symbol.isalnum() and not symbol.isspace():
-            symbols.add(symbol)
-    return frozenset(symbols)
+            signs.setdefault(symbol, sign)
+    return signs
 
 
 # ---------------------------------------------------------------------------
@@ -946,9 +955,12 @@ class _CobolLexerPure:
         self._open_string_location: SourceLocation | None = None
         # PICTURE currency symbols declared by SPECIAL-NAMES CURRENCY SIGN
         # clauses (lexed as CURRENCY tokens, like ``$``).
-        self._currency_symbols: frozenset[str] = _declared_currency_symbols(
+        #: Each one's currency string (``{"#": "EUR"}``), for the parser to
+        #: hand to the PICTURE clauses that use it.
+        self.currency_signs: dict[str, str] = declared_currency_signs(
             source, fixed_format=not free_form
         )
+        self._currency_symbols: frozenset[str] = frozenset(self.currency_signs)
         # ``DECIMAL-POINT IS COMMA``: ``,`` between digits is the decimal
         # point of a numeric literal and ``.`` is not. A decimal literal's
         # token keeps the canonical ``.`` spelling in ``value`` (every

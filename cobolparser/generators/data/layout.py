@@ -346,6 +346,11 @@ class FieldSpec:
     #: holds, while :attr:`size` counts the 4 x n bytes reserved for them.
     #: ``None`` for every other field (``PIC U BYTE-LENGTH n`` included).
     utf8_characters: int | None = None
+    #: ``SPECIAL-NAMES. CURRENCY SIGN`` symbols :attr:`picture` uses, each
+    #: mapped to its currency string (``{"#": "#"}``, ``{"#": "EUR"}``), or
+    #: to ``None`` when the program's declaration of it is not known.  Read
+    #: off the item's own ``PictureClause``; empty for a ``$``-only picture.
+    currency_signs: dict[str, str | None] = field(default_factory=dict)
 
     @property
     def scaling_positions(self) -> int:
@@ -772,6 +777,15 @@ def _apply_group_value(clause: str, specs: list[FieldSpec]) -> None:
             # Past the literal's end the group holds spaces (the encoder
             # pads a short value with them).
             spec.value_clause = "'" + (piece or " ").replace("'", "''") + "'"
+
+
+def _currency_signs(picture: PictureClause | None) -> dict[str, str | None]:
+    """*picture*'s declared currency symbols with their currency strings
+    (see :attr:`FieldSpec.currency_signs`)."""
+    if picture is None:
+        return {}
+    signs = getattr(picture, "currency_signs", {}) or {}
+    return {symbol: signs.get(symbol) for symbol in picture.currency_symbols}
 
 
 def _condition_values(item: CobolDataItem) -> list[str]:
@@ -1238,6 +1252,7 @@ def _flatten_into(
                     if picture is not None and item.byte_length is None
                     else None
                 ),
+                currency_signs=_currency_signs(picture),
             )
         )
 

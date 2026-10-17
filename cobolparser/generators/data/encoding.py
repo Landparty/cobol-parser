@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from decimal import ROUND_DOWN, Context, Decimal, InvalidOperation
 from enum import StrEnum
 
-from .editing import edit_numeric
+from .editing import edit_numeric, is_float_picture
 from .errors import CopybookLayoutError
 from .layout import (
     FieldCategory,
@@ -611,6 +611,7 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
             spec.picture,
             text,
             decimal_point_is_comma=spec.decimal_point_is_comma,
+            currency_signs=spec.currency_signs,
         )
         if edited is not None and len(edited) == width:
             return _encode_text(edited, width, opts)
@@ -903,6 +904,31 @@ def encoding_caveats(
             "record's charset, space-padded to the 4 x n bytes the field "
             "reserves, not as the UTF-8 a real compiler stores: "
             f"{', '.join(utf8)}"
+        )
+    unedited = sorted(
+        {
+            spec.qualified_name
+            for spec in specs
+            if spec.category is FieldCategory.NUMERIC_EDITED
+            and _normalized_usage(spec) == "DISPLAY"
+            and not is_float_picture(
+                spec.picture, decimal_point_is_comma=spec.decimal_point_is_comma
+            )
+            and edit_numeric(
+                spec.picture,
+                "0",
+                decimal_point_is_comma=spec.decimal_point_is_comma,
+                currency_signs=spec.currency_signs,
+            )
+            is None
+        }
+    )
+    if unedited:
+        caveats.append(
+            "numeric-edited picture not modelled (e.g. a multi-character "
+            "CURRENCY SIGN string): the field is written as its logical value, "
+            "unedited, not as the edited form a MOVE leaves: "
+            f"{', '.join(unedited)}"
         )
     if dbcs:
         caveats.append(

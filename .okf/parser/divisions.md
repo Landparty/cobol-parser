@@ -198,6 +198,9 @@ Individual statement parsers are in [statements.md](statements.md).
   accepted. Separator `,` / `;` (`TokenType.COMMA` / `SEMICOLON`) are in
   `_NOISE_TYPES` and skipped by `_skip_noise()`: `CLASS VOWEL IS 'A', 'E'` ->
   `ranges == ["A", "E"]`; `SYMBOLIC CHARACTERS NUL, SOH ARE 1, 2` keeps both names.
+- `DataItemClauseParser._picture_clause` hands each `PictureClause` the
+  currency symbols its pattern used and, from `host.currency_signs`, their
+  currency strings (`currency_signs=`, #491).
 - `DECIMAL-POINT IS COMMA` is honoured (comma-decimal literals, `,`/`.`
   exchanged in PICTURE -- see [lexer.md](../lexer.md)); no warning.
 - Tests: `tests/regression/test_special_names_clause_boundaries.py`,

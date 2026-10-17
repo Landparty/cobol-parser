@@ -13,9 +13,13 @@ Supported symbols are the ones IBM Enterprise COBOL defines for a
 numeric-edited item under the default ``CURRENCY SIGN``:
 ``9 Z * 0 B / , . V + - CR DB $``.  Under ``DECIMAL-POINT IS COMMA``
 (``decimal_point_is_comma=True``) ``,`` and ``.`` exchange roles, in the
-picture and in the edited text alike (``Z.ZZ9,99`` shows ``1.234,56``).  A picture using anything else (a ``P``
-scaling position, a non-default currency symbol) returns ``None`` and the
-caller keeps its previous behaviour rather than writing a guessed form.
+picture and in the edited text alike (``Z.ZZ9,99`` shows ``1.234,56``).  A ``SPECIAL-NAMES. CURRENCY SIGN``
+symbol (``currency_signs={"#": "#"}``) is edited exactly like ``$`` and
+shows its currency string, when that string is one character -- the width
+:class:`~...models.data_items.PictureClause` sizes the position at.  A
+picture using anything else (a multi-character currency string, a currency
+symbol whose declaration is unknown) returns ``None`` and the caller keeps
+its previous behaviour rather than writing a guessed form.
 
 Editing rules implemented (IBM Enterprise COBOL Language Reference,
 "PICTURE clause editing"):
@@ -37,6 +41,7 @@ Editing rules implemented (IBM Enterprise COBOL Language Reference,
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import ROUND_DOWN, Context, Decimal, InvalidOperation
 
 from ...models.data_items import PictureClause
@@ -255,8 +260,33 @@ def deedit_float(
     return -value if text[0] == "-" and value else value
 
 
+def _currency_spelling(
+    picture: str | None, currency_signs: Mapping[str, str | None]
+) -> tuple[str | None, str | None] | None:
+    """*picture* with its declared currency symbol spelled ``$``, and the
+    character the edited text shows there instead (``None``: the picture
+    uses no declared symbol).  ``None`` when the symbol's currency string is
+    unknown or not one character, or the picture mixes it with ``$`` or
+    another declared symbol -- forms this module does not model."""
+    if picture is None:
+        return None
+    used = [symbol for symbol in currency_signs if symbol in picture]
+    if not used:
+        return picture, None
+    if len(used) > 1 or "$" in picture:
+        return None
+    sign = currency_signs[used[0]]
+    if sign is None or len(sign) != 1:
+        return None
+    return picture.replace(used[0], "$"), sign
+
+
 def edit_numeric(
-    picture: str | None, value: str, *, decimal_point_is_comma: bool = False
+    picture: str | None,
+    value: str,
+    *,
+    decimal_point_is_comma: bool = False,
+    currency_signs: Mapping[str, str | None] | None = None,
 ) -> str | None:
     """*value* (a logical number, ``-1234.56``) as *picture* displays it.
 
@@ -265,8 +295,21 @@ def edit_numeric(
     other encoders treat it: a generated record must always be writable.
     *decimal_point_is_comma* reads *picture* under ``DECIMAL-POINT IS
     COMMA`` and writes the edited text the same way; *value* is always a
-    logical number with a ``.`` decimal point.
+    logical number with a ``.`` decimal point.  *currency_signs* maps each
+    ``CURRENCY SIGN`` symbol the picture may use to its currency string (see
+    the module docstring).
     """
+    if currency_signs:
+        spelled = _currency_spelling(picture, currency_signs)
+        if spelled is None:
+            return None
+        picture, sign = spelled
+        edited = edit_numeric(
+            picture, value, decimal_point_is_comma=decimal_point_is_comma
+        )
+        if edited is None or sign is None:
+            return edited
+        return edited.replace("$", sign)
     if decimal_point_is_comma:
         if picture is None:
             return None
@@ -409,7 +452,11 @@ def _floating_char(symbol: str, negative: bool) -> str:
 
 
 def deedit_numeric(
-    picture: str | None, text: str, *, decimal_point_is_comma: bool = False
+    picture: str | None,
+    text: str,
+    *,
+    decimal_point_is_comma: bool = False,
+    currency_signs: Mapping[str, str | None] | None = None,
 ) -> tuple[int, bool] | None:
     """The digits and sign *text* holds under *picture*.
 
@@ -422,8 +469,21 @@ def deedit_numeric(
     there, or a space in a ``9`` position, is rejected rather than read past.
     A suppressed digit position (a space, ``*``, the floating symbol) reads
     as zero, which is exactly what the edit put there.  *decimal_point_is_comma* as for
-    :func:`edit_numeric`.
+    :func:`edit_numeric`, and so is *currency_signs*.
     """
+    if currency_signs:
+        spelled = _currency_spelling(picture, currency_signs)
+        if spelled is None:
+            return None
+        picture, sign = spelled
+        if sign is not None:
+            if "$" in text:
+                # The declared sign replaces ``$``; a ``$`` is no edit's.
+                return None
+            text = text.replace(sign, "$")
+        return deedit_numeric(
+            picture, text, decimal_point_is_comma=decimal_point_is_comma
+        )
     if decimal_point_is_comma:
         if picture is None:
             return None

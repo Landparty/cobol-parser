@@ -394,11 +394,17 @@ class DataItemClauseParser:
         """Build the PictureClause for the pattern parse_picture_clause()
         just returned, with the declared currency symbols it contains."""
         host = getattr(self._parser, "host", None)
+        signs = getattr(host, "currency_signs", None) or {}
         return PictureClause(
             pattern,
             location,
             currency_symbols=self._picture_currency_symbols,
             decimal_point_is_comma=bool(getattr(host, "decimal_point_is_comma", False)),
+            currency_signs={
+                symbol: signs[symbol]
+                for symbol in self._picture_currency_symbols
+                if symbol in signs
+            },
         )
 
     def parse_data_item(

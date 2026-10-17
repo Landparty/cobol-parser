@@ -368,6 +368,16 @@ gen-data writes n characters padded to 4n and adds a UTF-8 caveat.
 [generators/record-data.md](generators/record-data.md): a group's VALUE is
 sliced across its DISPLAY fields by byte offset (figuratives to every field).
 
+## 2026-10-17 -- CURRENCY SIGN symbols in record images (#491)
+
+[lexer.md](lexer.md), [ast-models.md](ast-models.md),
+[parser/orchestration.md](parser/orchestration.md),
+[parser/divisions.md](parser/divisions.md),
+[generators/record-data.md](generators/record-data.md),
+[generators/decode-compare.md](generators/decode-compare.md): currency strings
+flow lexer -> parser -> `PictureClause.currency_signs` -> `FieldSpec`; a
+one-character sign is edited like `$`, anything unmodelled gets a caveat.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
