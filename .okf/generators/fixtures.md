@@ -340,6 +340,20 @@ before solving. Consequences:
   200 / IF A = 200` it makes the set unsatisfiable and reports the inner arm
   unreachable when `A = 200` reaches it. `_MAX_PATH_COMBINATIONS` caps the
   cross product a deep chain of disjunctive arms would otherwise produce.
+* **The path crosses paragraphs** (#310). `enclosing` stops at the top of
+  the branch's own paragraph, so a branch in a paragraph PERFORMed from
+  inside another paragraph's arm (`IF IN-CODE = 'QQ' PERFORM DEEP-PARA`)
+  used to get a `verified` scenario whose data never ran it.
+  `_ParagraphReach.path_to(parent_proc)` prepends the arms that must be
+  taken for the paragraph to run at all, from `ConstraintReport.
+  transfer_sites` (each `PERFORM p` / `GO TO p` with its own `enclosing`)
+  and the CFG's incoming edges: the entry paragraph, or any one
+  unconditional site, needs nothing; exactly one site folds that site's
+  arms (and, recursively, its paragraph's); several guarded sites, `GO TO
+  ... DEPENDING ON`, a SORT / XML / handler / ALTER transfer or a cycle add
+  a `path_gaps` reason instead. A CFG fall-through out of a paragraph only
+  counts as a way in when control can run off its end (`_falls_off`): a
+  paragraph entered only by a plain `PERFORM` returns there.
 * **`_merge_candidates` carries `path_gaps` across a merge.** A merged-in
   candidate brings its own unpinned enclosing arms with it; dropping them
   would let the merged scenario report `verified` while an arm it claims is

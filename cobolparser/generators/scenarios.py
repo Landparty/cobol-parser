@@ -8,12 +8,14 @@ reachable, satisfiable branch arm -- plus, for `mode="all"`, fixed scenario
 families that exist regardless of branching (empty input, declared error
 statuses, numeric boundary values).
 
-v1 path-condition simplification (stated up front, not discovered later): a
-scenario targets *one* arm and takes only that arm's own conjuncts;
-enclosing branches on the path to it are not accumulated. Full
-path-sensitivity is a v2 item -- `ArmOutcome` records "targeted" the same way
-whether or not the surrounding path was considered, so a coverage summary
-here is arm coverage, not full path coverage.
+Path conditions: a scenario targets one arm and folds in the arms that must
+be taken to reach it -- the enclosing IF / EVALUATE / SEARCH arms in its own
+paragraph (`BranchConstraints.enclosing`) and, when its paragraph is
+PERFORMed or reached by GO TO from exactly one guarded place, that place's
+arms too (`_ParagraphReach`, #310). Where a path cannot be pinned the
+scenario carries a `path_gaps` reason and is `unverified`. Data-dependent
+reachability (a correlation between records) is still out of scope, so a
+coverage summary here is arm coverage, not full path coverage.
 """
 
 from __future__ import annotations
@@ -32,7 +34,12 @@ from ..analysis.constraints import (
     SequenceConstraint,
 )
 from ..analysis.domains import FLOAT_LIMIT, Unsatisfiable, Witness, solve
-from ..analysis.program_flow import BranchArm, BranchNode, ProgramFlowReport
+from ..analysis.program_flow import (
+    BranchArm,
+    BranchNode,
+    FlowEdgeType,
+    ProgramFlowReport,
+)
 from .data.bundle import _unique_names
 from .data.layout import FieldCategory, FieldSpec
 
@@ -258,6 +265,8 @@ class ScenarioPlanner:
             for arm_id, constraints in b.arms.items()
         }
 
+        reach = _ParagraphReach(constraint_report, flow_report)
+
         details: list[ArmOutcome] = []
         unresolved: list[str] = []
         candidates: list[tuple[str, PlannedScenario]] = []  # (sort_key, candidate)
@@ -312,7 +321,12 @@ class ScenarioPlanner:
                     unresolved.append(f"arm {arm_key} not targeted: {reason}")
                     continue
 
-                options, path_gaps = _path_options(branch, arms_by_key)
+                # The arms that must be taken for this branch's PARAGRAPH to
+                # run at all (#310), then the ones inside it.
+                outer, reach_gaps = reach.path_to(branch.parent_proc)
+                enclosing = outer + branch.enclosing
+                options, path_gaps = _path_options(enclosing, arms_by_key)
+                path_gaps = reach_gaps + path_gaps
                 witnesses, unsat_reason, path = _solve_with_path(
                     options, branch.arms[arm_id]
                 )
@@ -344,9 +358,7 @@ class ScenarioPlanner:
                     by_field.setdefault(c.field.spec.qualified_name, []).append(c)
                 intent = f"targets branch arm {arm_key}"
                 if path:
-                    enclosing_keys = ", ".join(
-                        f"{bid}/{aid}" for bid, aid in branch.enclosing
-                    )
+                    enclosing_keys = ", ".join(f"{bid}/{aid}" for bid, aid in enclosing)
                     intent += f" (path condition from {enclosing_keys} included)"
                 scenario = PlannedScenario(
                     name=name,
@@ -420,7 +432,7 @@ class ScenarioPlanner:
 
 
 def _path_options(
-    branch: BranchConstraints,
+    enclosing: tuple[tuple[str, str], ...],
     arms_by_key: dict[tuple[str, str], list[FieldConstraint]],
 ) -> tuple[list[list[list[FieldConstraint]]], list[str]]:
     """Per enclosing arm, the alternative conjunct sets that reach it, plus
@@ -454,7 +466,7 @@ def _path_options(
     """
     options: list[list[list[FieldConstraint]]] = []
     gaps: list[str] = []
-    for branch_id, arm_id in branch.enclosing:
+    for branch_id, arm_id in enclosing:
         exact = arms_by_key.get((branch_id, arm_id))
         if exact:
             options.append([exact])
@@ -480,6 +492,157 @@ def _path_options(
             + ", so reaching this arm is not pinned by the generated data"
         )
     return options, gaps
+
+
+#: Flow edges into a paragraph that `_ParagraphReach` cannot attach a guard
+#: to: whatever runs it there, it is not a branch arm the planner can pin.
+_UNMODELED_REACH = frozenset(
+    {
+        FlowEdgeType.SORT_INPUT_PROCEDURE,
+        FlowEdgeType.SORT_INPUT_PROCEDURE_THRU,
+        FlowEdgeType.SORT_OUTPUT_PROCEDURE,
+        FlowEdgeType.SORT_OUTPUT_PROCEDURE_THRU,
+        FlowEdgeType.MERGE_OUTPUT_PROCEDURE,
+        FlowEdgeType.MERGE_OUTPUT_PROCEDURE_THRU,
+        FlowEdgeType.XML_PROCESSING_PROCEDURE,
+        FlowEdgeType.XML_PROCESSING_PROCEDURE_THRU,
+        FlowEdgeType.CICS_HANDLE,
+        FlowEdgeType.SQL_WHENEVER,
+        FlowEdgeType.ALTER,
+    }
+)
+
+_Reach = tuple[tuple[tuple[str, str], ...], list[str]]
+
+
+class _ParagraphReach:
+    """The branch arms that must be taken for a paragraph to run at all (#310).
+
+    `BranchConstraints.enclosing` stops at the top of the branch's own
+    paragraph. When that paragraph is PERFORMed from inside an arm of another
+    paragraph (``IF IN-CODE = 'QQ' PERFORM DEEP-PARA``), every branch in it
+    is reached only when that arm is taken too, and a scenario that pins
+    only the inner arm names an arm its data never runs.
+
+    `path_to(paragraph)` answers with ``(arms, gaps)``:
+
+    * reached unconditionally from somewhere (the entry paragraph, or one
+      site whose own path is unconditional) -> ``((), [])``;
+    * reached from exactly one site -> that site's own path plus the arms
+      enclosing it, folded in like a nested IF's (option 1 of the issue);
+    * reached from several sites, none unconditional, or through a transfer
+      the planner cannot attach a guard to (SORT procedures, handlers, ``GO
+      TO ... DEPENDING ON``, a cycle) -> a `path_gaps` reason, so the
+      scenario is ``unverified`` rather than claiming an arm it may never
+      reach (option 2).
+
+    A fall-through from a paragraph counts as a site only when control can
+    actually run off that paragraph's end: a paragraph entered solely by a
+    plain ``PERFORM p`` returns there, so the CFG's fall-through edge out of
+    it is not a way in. A paragraph nothing transfers to is answered
+    ``((), [])``, as before this existed: `flow_report.unreachable_nodes`
+    already decides reachability.
+    """
+
+    def __init__(
+        self, constraint_report: ConstraintReport, flow_report: ProgramFlowReport
+    ) -> None:
+        self._entries = {name.upper() for name in flow_report.entry_points}
+        self._sections = {
+            node.key.upper()
+            for node in flow_report.nodes
+            if node.procedure_type == "SECTION"
+        }
+        self._sites: dict[str, list[tuple[str, str, tuple[tuple[str, str], ...]]]] = {}
+        for site in constraint_report.transfer_sites:
+            self._sites.setdefault(site.target.upper(), []).append(
+                (site.paragraph.upper(), site.kind, site.enclosing)
+            )
+        self._incoming: dict[str, list[Any]] = {}
+        for edge in flow_report.edges:
+            self._incoming.setdefault(edge.target.upper(), []).append(edge)
+        self._memo: dict[str, _Reach] = {}
+
+    def path_to(self, paragraph: str | None) -> _Reach:
+        if not paragraph:
+            return (), []
+        return self._reach(paragraph.upper(), frozenset())
+
+    def _reach(self, name: str, visiting: frozenset[str]) -> _Reach:
+        if name in self._memo:
+            return self._memo[name]
+        if name in self._entries:
+            return (), []
+        if name in visiting:
+            return (), [f"paragraph {name} is reached through a PERFORM / GO TO cycle"]
+        visiting = visiting | {name}
+        outcomes: list[_Reach] = []
+        for source, kind, enclosing in self._sites.get(name, []):
+            if kind == "GOTO_DEPENDING":
+                outcomes.append(
+                    ((), [f"paragraph {name} is chosen by GO TO ... DEPENDING ON"])
+                )
+                continue
+            outer, gaps = self._reach(source, visiting)
+            outcomes.append((outer + enclosing, gaps))
+        for edge in self._incoming.get(name, []):
+            source = edge.source.upper()
+            if edge.edge_type is FlowEdgeType.FALL_THROUGH:
+                if self._falls_off(source, frozenset()):
+                    outcomes.append(self._reach(source, visiting))
+            elif edge.edge_type in _UNMODELED_REACH:
+                outcomes.append(
+                    (
+                        (),
+                        [
+                            f"paragraph {name} is reached via "
+                            f"{edge.edge_type.value} from {source}"
+                        ],
+                    )
+                )
+        if not outcomes:
+            result: _Reach = ((), [])
+        elif any(not arms and not gaps for arms, gaps in outcomes):
+            result = ((), [])
+        elif len(outcomes) == 1:
+            result = outcomes[0]
+        else:
+            result = (
+                (),
+                [
+                    f"paragraph {name} is reached from {len(outcomes)} places, "
+                    "none of them unconditionally, so reaching it is not pinned "
+                    "by the generated data"
+                ],
+            )
+        if not any("cycle" in gap for gap in result[1]):
+            self._memo[name] = result
+        return result
+
+    def _falls_off(self, name: str, visiting: frozenset[str]) -> bool:
+        """Whether control can run past the end of *name* into the next
+        procedure: not when every way in is a plain ``PERFORM name`` (which
+        returns at its end) or a fall-through from a procedure that itself
+        cannot fall off."""
+        if name in self._entries or name in self._sections:
+            return True
+        if name in visiting:
+            return False
+        visiting = visiting | {name}
+        for edge in self._incoming.get(name, []):
+            kind = edge.edge_type
+            if kind is FlowEdgeType.PERFORM_THRU or (
+                kind is FlowEdgeType.PERFORM and len(edge.range_members) <= 1
+            ):
+                continue
+            if kind is FlowEdgeType.FALL_THROUGH:
+                if self._falls_off(edge.source.upper(), visiting):
+                    return True
+                continue
+            if kind in (FlowEdgeType.IF_BRANCH, FlowEdgeType.EVALUATE_BRANCH):
+                continue
+            return True
+        return False
 
 
 #: Cap on the enclosing-path combinations tried before giving up. An OR-split
