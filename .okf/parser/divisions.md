@@ -447,6 +447,10 @@ suite: `tests/regression/test_value_all_clause.py`.
 - A semicolon separates values exactly as a comma does (`VALUES 'A', 'B'; 'C'`
   -> `['A', 'B', 'C']`; ranges survive). Pinned by
   `tests/regression/test_level_88_semicolon_separator.py`.
+- A `THRU` / `THROUGH` range end is marked `THROUGH:<end>` when it is a
+  literal, a signed numeric or a figurative constant other than `ALL`
+  (`LOW-VALUE THRU HIGH-VALUE`, #468; pinned by
+  `tests/regression/test_condition_figurative_thru_issue_468.py`).
 - `88 name VALUE ... WHEN SET TO FALSE [IS] literal` (IBM):
   `_parse_when_set_to_false` accepts `WHEN [SET] [TO] FALSE [IS]` + a (signed)
   literal or figurative constant into `ConditionNameItem.false_value`; anything
