@@ -65,6 +65,11 @@ so it returns `None` for a recognised service with neither.
 [EXEC SQL model](#exec-sql-model-modelssql_statementspy) section describes
 the parser's SQL model.
 
+`IBMDataItem.calculate_storage_size()` (the `storage_size` key of its
+`to_dict()`) is `calculate_size()`, i.e. `cobolparser/_storage.py`. It once
+kept its own copy of the rules, which sized even-digit COMP-3 one byte short
+(`(digits + 1) // 2`) and COMP-1 / COMP-2 / POINTER as 0 (#589).
+
 ## Command sets and COMP-3 validation
 
 * `validate_data_item` accepts any plain numeric PICTURE for COMP-3 --

@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`IBMDataItem.calculate_storage_size()` agrees with `calculate_size()`**
+  (#589). It kept its own copy of the IBM sizing rules: packed decimal used
+  `(digits + 1) // 2`, one byte short for every even digit count
+  (`S9(4) COMP-3` was 2 bytes, not 3; `9(18)` was 9, not 10), and it returned
+  0 before reaching COMP-1 / COMP-2 / POINTER, which never have a PICTURE.
+  It now defers to the package's single sizing authority, so the
+  `storage_size` key of `to_dict()` and the item `create_comp3_data_item()`
+  returns are right.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

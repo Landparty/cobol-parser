@@ -189,46 +189,18 @@ class IBMDataItem(CobolDataItem):
         self.usage = usage.value
 
     def calculate_storage_size(self) -> int:
-        """Calculate storage size in bytes using IBM rules."""
-        if not self.picture_clause:
-            return 0
+        """Calculate storage size in bytes using IBM rules.
 
-        base_size = self.picture_clause.size or 0
-
-        # POINTER doesn't depend on picture digits
-        if self.ibm_usage == IBMDataType.POINTER:
-            return 4  # 32-bit pointer on z/OS
-
-        # For other types, we need total_digits
-        if self.picture_clause.total_digits is None:
-            return base_size  # DISPLAY and other character types
-
-        if self.ibm_usage == IBMDataType.COMP_3:
-            # COMP-3: Packed decimal - (digits + 1) / 2
-            return (self.picture_clause.total_digits + 1) // 2
-        elif self.ibm_usage == IBMDataType.COMP or self.ibm_usage == IBMDataType.COMP_4:
-            # COMP/COMP-4: Binary
-            if self.picture_clause.total_digits <= 4:
-                return 2  # Halfword
-            elif self.picture_clause.total_digits <= 9:
-                return 4  # Fullword
-            else:
-                return 8  # Doubleword
-        elif self.ibm_usage == IBMDataType.COMP_1:
-            return 4  # Single precision float
-        elif self.ibm_usage == IBMDataType.COMP_2:
-            return 8  # Double precision float
-        elif self.ibm_usage == IBMDataType.COMP_5:
-            # Native binary - same as COMP but with different range
-            if self.picture_clause.total_digits <= 4:
-                return 2  # Halfword
-            elif self.picture_clause.total_digits <= 9:
-                return 4  # Fullword
-            else:
-                return 8  # Doubleword
-        else:
-            # DISPLAY and other character types
-            return base_size
+        Defers to :meth:`calculate_size` (and so to
+        :func:`cobolparser._storage.storage_size`), the package's single
+        sizing authority.  This method used to carry its own copy of the
+        rules and had drifted: packed decimal used ``(digits + 1) // 2``
+        (one byte short for every even digit count -- ``S9(4) COMP-3`` is 3
+        bytes, not 2) and it returned 0 before reaching the ``COMP-1`` /
+        ``COMP-2`` / ``POINTER`` branches, since those usages never have a
+        PICTURE (#589).
+        """
+        return self.calculate_size()
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with IBM extensions."""
