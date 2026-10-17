@@ -263,6 +263,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   had, so `VARYING A ... AFTER B` scored 2 / depth 1 where the equivalent
   nested inline PERFORMs score 3 / depth 2. Each AFTER now adds one decision
   and one level.
+* **COPY REPLACING LEADING + TRAILING replace a word only once** (#513).
+  `COPY LT REPLACING LEADING ==XX== BY ==CUST== TRAILING ==XX== BY ==END==`
+  turned `XX-NAME-XX` into `CUST-NAME-END`, rewriting both ends. The first
+  clause (in clause order) that fits a word now replaces it and the word is
+  done, giving `CUST-NAME-XX`, the same as the REPLACE statement.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
