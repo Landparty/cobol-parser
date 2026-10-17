@@ -209,6 +209,24 @@ _NOISE_TOKEN_TYPES: frozenset[TokenType] = frozenset(
 #: Screen-field clauses whose operand is a data item: ``FROM`` is DISPLAYed,
 #: ``TO`` is stored by ACCEPT, ``USING`` is both.
 _SCREEN_DATA_CLAUSES: frozenset[str] = frozenset({"USING", "FROM", "TO"})
+#: Screen-field clauses whose value may be a data item rather than a literal
+#: (``LINE WS-ROW``, ``FOREGROUND-COLOR IS WS-COLOR``): read when the screen
+#: is displayed, so the item is used.
+_SCREEN_VALUE_CLAUSES: frozenset[str] = frozenset(
+    {
+        "LINE",
+        "COLUMN",
+        "COL",
+        "FOREGROUND-COLOR",
+        "FOREGROUND-COLOUR",
+        "BACKGROUND-COLOR",
+        "BACKGROUND-COLOUR",
+        "SIZE",
+        "CONTROL",
+    }
+)
+#: Words that may sit between such a clause and its value.
+_SCREEN_VALUE_NOISE: frozenset[str] = frozenset({"NUMBER", "IS", "PLUS", "+", "-"})
 
 
 class DataDivisionParser(BaseDivisionParser):
@@ -631,6 +649,20 @@ class DataDivisionParser(BaseDivisionParser):
                     break
 
             if screen and tok_type not in _NOISE_TOKEN_TYPES:
+                if reference is not None and (
+                    reference["depth"]
+                    or (tok_type == TokenType.LEFT_PAREN and not reference["open"])
+                ):
+                    # A subscript / reference modifier of the operand
+                    # (``USING WS-E(I)``): its names are data uses too.
+                    if tok_type == TokenType.LEFT_PAREN:
+                        reference["depth"] += 1
+                    elif tok_type == TokenType.RIGHT_PAREN:
+                        reference["depth"] -= 1
+                    reference["text"] += f" {tok_value}"
+                    entry_start = False
+                    token_stream.consume()
+                    continue
                 if reference is not None:
                     if value_upper in ("OF", "IN") and not reference["open"]:
                         reference["text"] += f" {value_upper} "
@@ -640,19 +672,30 @@ class DataDivisionParser(BaseDivisionParser):
                         reference["open"] = False
                     else:
                         screen_references.append(
-                            {k: v for k, v in reference.items() if k != "open"}
+                            {
+                                k: v
+                                for k, v in reference.items()
+                                if k not in ("open", "depth")
+                            }
                         )
                         reference = None
                 if expect_operand is not None:
-                    if tok_type == TokenType.IDENTIFIER:
-                        reference = {
-                            "clause": expect_operand,
-                            "text": tok_value,
-                            "line": getattr(token.location, "line", None),
-                            "column": getattr(token.location, "column", 1),
-                            "open": False,
-                        }
-                    expect_operand = None
+                    positional = expect_operand not in _SCREEN_DATA_CLAUSES
+                    if positional and value_upper in _SCREEN_VALUE_NOISE:
+                        pass  # LINE NUMBER IS ..., LINE PLUS ...: keep waiting
+                    else:
+                        if tok_type == TokenType.IDENTIFIER and not (
+                            positional and value_upper in _SCREEN_CLAUSE_WORDS
+                        ):
+                            reference = {
+                                "clause": expect_operand,
+                                "text": tok_value,
+                                "line": getattr(token.location, "line", None),
+                                "column": getattr(token.location, "column", 1),
+                                "open": False,
+                                "depth": 0,
+                            }
+                        expect_operand = None
                 elif expect_name is not None:
                     if (
                         tok_type == TokenType.IDENTIFIER
@@ -669,7 +712,14 @@ class DataDivisionParser(BaseDivisionParser):
                     expect_name = None
                 elif entry_start and tok_type == TokenType.LEVEL_NUMBER:
                     expect_name = int(tok_value) if tok_value.isdigit() else 0
-                if value_upper in _SCREEN_DATA_CLAUSES and reference is None:
+                if (
+                    reference is None
+                    and expect_operand is None
+                    and (
+                        value_upper in _SCREEN_DATA_CLAUSES
+                        or value_upper in _SCREEN_VALUE_CLAUSES
+                    )
+                ):
                     expect_operand = value_upper
                 entry_start = tok_type == TokenType.PERIOD
 
@@ -677,7 +727,7 @@ class DataDivisionParser(BaseDivisionParser):
 
         if reference is not None:
             screen_references.append(
-                {k: v for k, v in reference.items() if k != "open"}
+                {k: v for k, v in reference.items() if k not in ("open", "depth")}
             )
 
         result: dict[str, Any] = {

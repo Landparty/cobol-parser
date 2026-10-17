@@ -1063,8 +1063,20 @@ class XrefAnalyzer:
                     "TO": [ROLE_WRITE],
                     "USING": [ROLE_READ, ROLE_WRITE],
                 }.get(clause, [ROLE_REFERENCE])
-                for name in sorted(_extract_identifiers(reference.get("text"))):
+                base, refmod, subscripts, _exact = _split_operand(
+                    str(reference.get("text") or "")
+                )
+                for name in sorted(base):
                     for role in roles:
+                        self._record(
+                            name, role, location, "SCREEN SECTION", None, exact=True
+                        )
+                # ``USING WS-E(I)``: the subscript / offset is only read.
+                for names, role in (
+                    (subscripts, ROLE_SUBSCRIPT),
+                    (refmod, ROLE_READ),
+                ):
+                    for name in sorted(names):
                         self._record(
                             name, role, location, "SCREEN SECTION", None, exact=True
                         )

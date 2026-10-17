@@ -13,6 +13,8 @@ from cobolparser import LintAnalyzer, UnusedVariableAnalyzer, parse_cobol
 from cobolparser.analysis.xref import (
     KIND_SCREEN_ITEM,
     ROLE_READ,
+    ROLE_REFERENCE,
+    ROLE_SUBSCRIPT,
     ROLE_WRITE,
     XrefAnalyzer,
 )
@@ -87,3 +89,43 @@ def test_xref_declares_screens_and_records_bindings():
     assert roles("WS-AGE") == [(14, ROLE_WRITE)]
     assert roles("WS-OUT") == [(15, ROLE_READ)]
     assert roles("WS-IDLE") == []
+
+
+POSITIONED = "".join(
+    f"       {line}\n"
+    for line in (
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. SCR2.",
+        "DATA DIVISION.",
+        "WORKING-STORAGE SECTION.",
+        "01 WS-ROW PIC 99.",
+        "01 WS-COLR PIC 9.",
+        "01 I PIC 9.",
+        "01 WS-TAB.",
+        "   05 WS-E PIC X(3) OCCURS 3.",
+        "01 WS-IDLE PIC X.",
+        "SCREEN SECTION.",
+        "01 MAIN-SCREEN BLANK SCREEN.",
+        "   05 LINE WS-ROW COLUMN PLUS 2 PIC X(3) USING WS-E(I)",
+        "      FOREGROUND-COLOR IS WS-COLR.",
+        "   05 LINE 2 COL 1 VALUE 'X'.",
+        "PROCEDURE DIVISION.",
+        "    DISPLAY MAIN-SCREEN",
+        "    GOBACK.",
+    )
+)
+
+
+def test_subscripts_and_positional_items_are_used():
+    ast = parse_cobol(POSITIONED).ast
+    report = UnusedVariableAnalyzer().analyze(ast)
+    assert {item.name for item in report.unused_items} == {"WS-IDLE"}
+    xref = XrefAnalyzer().analyze(ast)
+    assert xref.undefined == []
+    assert [r.role for r in xref.entry_for("I").references] == [ROLE_SUBSCRIPT]
+    assert [r.role for r in xref.entry_for("WS-ROW").references] == [ROLE_REFERENCE]
+    assert [r.role for r in xref.entry_for("WS-COLR").references] == [ROLE_REFERENCE]
+    assert sorted(r.role for r in xref.entry_for("WS-E").references) == [
+        ROLE_READ,
+        ROLE_WRITE,
+    ]

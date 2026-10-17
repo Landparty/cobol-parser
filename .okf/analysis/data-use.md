@@ -276,7 +276,8 @@ unused item in that set from `report.unused_items` (tallied instead in
 screen field's `USING` / `FROM` / `TO` operand
 (`unused_variables.screen_section_references(data_div)`), so an item a
 screen displays or accepts is used. xref records them at their line --
-`FROM` `read`, `TO` `write`, `USING` both, statement `"SCREEN SECTION"` --
+`FROM` `read`, `TO` `write`, `USING` both, a subscript `subscript`, a
+`LINE` / `COLUMN` / colour value `reference`, statement `"SCREEN SECTION"` --
 and declares each named screen entry as kind `screen-item`, so `DISPLAY
 MAIN-SCREEN` resolves. Pinned by
 `tests/regression/test_issue_501_screen_section_references.py`.
