@@ -164,7 +164,9 @@ graph records the edges it loads, so its own `join_edges()` re-exports them.
 **jcl-parser** `Job`s (duck-typed; imported only in `load_jobs`, through
 `importlib`, so cobol-parser keeps no runtime or mypy dependency on it)
 into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT/ICETOOL (`SORTIN*`
--> `SORTOUT` + `OUTFIL FNAMES`), IEBGENER/ICEGENER, IDCAMS REPRO (operands
+-> `SORTOUT` + `OUTFIL FNAMES` + `OUTFIL FILES=nn` as DD `SORTOFnn`; a
+`JOINKEYS` step reads `SORTJNF1`/`SORTJNF2` or its `F1=`/`F2=` DDs and is
+always a `reformat`, #585), IEBGENER/ICEGENER, IDCAMS REPRO (operands
 in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`. A
 blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
@@ -178,6 +180,16 @@ folder (`NAME.prc`) as well as a JCLLIB base -- jcl-parser's own loader
 only searches `JCLLIB ORDER=` libraries. `jobs_from_sources(jcl, procs)`
 does the same from in-memory text (the backend's stored members). Not built
 on `cobolparser/jcl/`.
+
+**JCL caveats.** `bindings_from_jobs(jobs, caveats)` appends one line per
+step whose flow it could not read (a sort step with no recognised input or
+output DD: `SORT step S2 in job J1: outputs not recognised; the flow through
+it is not traced`), so a step left out never reads as a step that moves
+nothing. `field-impact --jcl` and the MCP lineage index pass them as
+`LineageGraph(join_caveats=...)`, which -- without `join_edges` -- adds them
+to the joins' caveats (so `join_state()` exports them too). Invariant: a
+caveat there must not start with `PROGRAM:`, or `impact()` would show it
+only to queries reaching that program.
 
 Tests: `tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
 `test_lineage_jcl.py`, `test_sql_flow.py`, `tests/unit/cli/test_lineage_cli.py`;

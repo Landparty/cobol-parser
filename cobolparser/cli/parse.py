@@ -3420,10 +3420,15 @@ def _cobol_files(paths: list[str]) -> list[str]:
     return files
 
 
-def _load_bindings(args: argparse.Namespace) -> tuple[list[Any], list[Any], list[str]]:
+def _load_bindings(
+    args: argparse.Namespace,
+) -> tuple[list[Any], list[Any], list[str], list[str]]:
+    """Bindings, pass-throughs, problems (files not read) and caveats (JCL
+    steps whose flow could not be read)."""
     bindings: list[Any] = []
     passthroughs: list[Any] = []
     problems: list[str] = []
+    caveats: list[str] = []
     if args.bindings:
         try:
             with open(args.bindings, encoding="utf-8") as handle:
@@ -3441,10 +3446,10 @@ def _load_bindings(args: argparse.Namespace) -> tuple[list[Any], list[Any], list
             jobs, problems = load_jobs(args.jcl, proc_path=args.proc_path)
         except ImportError:
             _fail("--jcl needs jcl-parser: pip install jcl-parser")
-        found, carried = bindings_from_jobs(jobs)
+        found, carried = bindings_from_jobs(jobs, caveats)
         bindings += found
         passthroughs += carried
-    return bindings, passthroughs, problems
+    return bindings, passthroughs, problems, caveats
 
 
 def _cmd_field_impact(args: argparse.Namespace) -> None:
@@ -3478,8 +3483,8 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
         for problem in problems:
             print(problem, file=sys.stderr)
         _fail("no COBOL program under the given paths produced a lineage report")
-    bindings, passthroughs, jcl_problems = _load_bindings(args)
-    graph = LineageGraph(reports, bindings, passthroughs)
+    bindings, passthroughs, jcl_problems, jcl_caveats = _load_bindings(args)
+    graph = LineageGraph(reports, bindings, passthroughs, join_caveats=jcl_caveats)
 
     if args.table:
         result = graph.impact_table(args.table, args.direction, args.depth)
