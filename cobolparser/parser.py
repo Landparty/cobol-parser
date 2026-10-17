@@ -669,6 +669,10 @@ class CobolParser:
         # OBJECT units, each holding METHOD-ID units. ``END METHOD`` / ``END
         # FACTORY`` / ``END OBJECT`` / ``END CLASS`` pop back to the parent.
         self._unit_stack: list[CobolProgram] = []
+        # PROGRAM-ID units not yet closed by their END PROGRAM, outermost
+        # first: a new PROGRAM-ID is nested in the last of them, or stacked
+        # (a separate compilation unit) when they are all closed (#532).
+        self._open_programs: list[CobolProgram] = [primary_program]
 
         # Parse divisions in order: IDENTIFICATION -> ENVIRONMENT -> DATA -> PROCEDURE
         divisions_parsed: list[Any] = []
@@ -780,6 +784,8 @@ class CobolParser:
         # after the first END PROGRAM was silently dropped.
         if divisions_parsed and current_value == "END" and self._peek_is_end_program():
             self._consume_end_program_marker()
+            if self._open_programs:
+                self._open_programs.pop()
             return True
         # Only the end-of-input marker remains after at least one division
         # parsed — a clean end, not an error.
@@ -843,6 +849,14 @@ class CobolParser:
             self._unit_stack.append(parent)
         else:
             primary_program.add_contained_program(new_program)
+            # The tree stays flat; the source nesting is recorded apart.
+            enclosing = self._open_programs[-1] if self._open_programs else None
+            new_program.enclosing_program = (
+                enclosing
+                if enclosing is not None and enclosing.unit_kind == "PROGRAM"
+                else None
+            )
+            self._open_programs.append(new_program)
         self.current_program = new_program
 
     def _handle_oo_unit_marker(

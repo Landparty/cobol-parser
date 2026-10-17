@@ -73,7 +73,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -154,6 +154,38 @@ def _normalize_program_name(name: str) -> str:
     if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
         text = text[1:-1]
     return text.strip().upper()
+
+
+def _nested_in(unit: Any) -> Any:
+    """The PROGRAM unit *unit* is nested in, or None for an outermost or
+    stacked program and for an object-oriented unit (#532)."""
+    if getattr(unit, "unit_kind", "PROGRAM") != "PROGRAM":
+        return None
+    enclosing = getattr(unit, "enclosing_program", None)
+    if enclosing is None or getattr(enclosing, "unit_kind", "PROGRAM") != "PROGRAM":
+        return None
+    return enclosing
+
+
+def program_graph_ids(units: Iterable[Any], path: str) -> dict[int, str]:
+    """Each unit's program id in the graph, keyed by ``id(unit)``.
+
+    A nested program is not in the global namespace: only programs of its
+    own compilation unit can CALL it, so its id is qualified by the programs
+    it is nested in (``OUTER/INNER``), and a CALL reaches it only when
+    COBOL scope says so (#532). An outermost or stacked unit keeps its
+    PROGRAM-ID (or, with none, the file name's).
+    """
+    ids: dict[int, str] = {}
+    for unit in units:
+        declared = _normalize_program_name(unit.program_name or "")
+        named = bool(declared) and declared != _UNNAMED_PROGRAM
+        program_id = declared if named else _program_id_from_path(path)
+        enclosing = _nested_in(unit)
+        if enclosing is not None and id(enclosing) in ids:
+            program_id = f"{ids[id(enclosing)]}/{program_id}"
+        ids[id(unit)] = program_id
+    return ids
 
 
 def _normalize_member(name: str) -> str:
@@ -1015,18 +1047,26 @@ class CodebaseGraphBuilder:
             # pass rewrites it with the narrower, correct scope).
             DynamicCallAnalyzer().analyze(unit)
 
+        graph_ids = program_graph_ids(units, path)
         for unit in units:
+            program_id = graph_ids[id(unit)]
             declared = _normalize_program_name(unit.program_name or "")
             named = bool(declared) and declared != _UNNAMED_PROGRAM
-            program_id = declared if named else _program_id_from_path(path)
             if not named:
                 unresolved.append(
                     f"{path}: no PROGRAM-ID could be read; the program id is "
                     f"assumed from the file name ({program_id})"
                 )
+
+            def scoped(callee: str, unit: Any = unit) -> str:
+                target = unit.nested_program_called(callee)
+                return graph_ids.get(id(target), callee) if target else callee
+
             unit_ids.append(program_id)
             previous = seen_program_ids.get(program_id)
             if previous is not None and previous != path:
+                # A nested id is qualified by its outermost program's, so a
+                # nested ERRHAND in PGMA and one in PGMB never collide.
                 unresolved.append(
                     f"duplicate PROGRAM-ID {program_id} in {previous} and {path}: "
                     "call edges to it cannot be attributed to one file"
@@ -1047,7 +1087,13 @@ class CodebaseGraphBuilder:
             for statement in _unit_statements(unit):
                 if isinstance(statement, CallStatement):
                     self._absorb_call(
-                        statement, program_id, path, node, call_edges, unresolved
+                        statement,
+                        program_id,
+                        path,
+                        node,
+                        call_edges,
+                        unresolved,
+                        scoped,
                     )
                 elif (
                     isinstance(statement, ExecCicsStatement)
@@ -1077,7 +1123,11 @@ class CodebaseGraphBuilder:
         node: ProgramNode,
         call_edges: list[CallEdge],
         unresolved: list[str],
+        scoped: Callable[[str], str] | None = None,
     ) -> None:
+        """One CALL's edges. *scoped* maps a target name to the graph id of
+        the nested program COBOL scope says it reaches (#532), or returns
+        the name unchanged for a separately compiled program."""
         target = statement.called_program or ""
         line = statement.location.line if statement.location else 0
 
@@ -1088,11 +1138,15 @@ class CodebaseGraphBuilder:
                     f"{path}: {program_id}: CALL at line {line} has no target name"
                 )
                 return
+            if scoped is not None:
+                callee = scoped(callee)
             node.calls.append(callee)
             call_edges.append(CallEdge(caller=program_id, callee=callee))
             return
 
         values = sorted(callee_names(statement.possible_values))
+        if scoped is not None:
+            values = sorted({scoped(value) for value in values})
         incomplete = bool(statement.get_metadata("possible_values_incomplete"))
 
         if not values:

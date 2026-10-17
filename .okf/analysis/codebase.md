@@ -40,6 +40,19 @@ results into one graph with two kinds of edge:
   merged node with false self-calls. A diagram without collisions is
   unchanged. The JSON output never had the problem. Pinned by
   `tests/regression/test_issue_494_codebase_diagram_id_collisions.py`.
+* **Nested programs are not global (#532).** `program_graph_ids()` gives a
+  nested PROGRAM unit (`CobolProgram.enclosing_program`, set by the parser)
+  an id qualified by the programs it is nested in (`OUTER/INNER`); outermost
+  and stacked units keep their PROGRAM-ID. A CALL's target goes through
+  `CobolProgram.nested_program_called()` first -- a program nested directly
+  in the caller, or a `COMMON` one nested in an enclosing unit, or a nested
+  unit's own name -- and only otherwise names a separately compiled program,
+  so `CALL 'INNER'` from another file is an edge to `INNER`, not to
+  `OUTER/INNER`, and PGMA's and PGMB's nested `ERRHAND`s are `PGMA/ERRHAND`
+  and `PGMB/ERRHAND`, never a duplicate PROGRAM-ID. CICS LINK/XCTL is not
+  scoped (it goes through the CICS program definitions). Object-oriented
+  units are not qualified. Pinned by
+  `tests/regression/test_issue_532_nested_program_scope.py`.
 * **Call edges** — `program A calls program B`, from static `CALL "B"` and from
   dynamic `CALL WS-TARGET` resolved through `DynamicCallAnalyzer`. A dynamic
   call whose value set that analyzer could not fully resolve still contributes
