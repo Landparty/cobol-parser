@@ -104,6 +104,12 @@ and one nesting level.
 the first fitting clause. [tests.md](tests.md):
 `test_copy_replacing_leading_trailing_once.py`.
 
+## 2026-10-17 -- language-env scans WHEN and INSPECT operands (#506)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md),
+[parser/statements-data.md](parser/statements-data.md): EVALUATE / SEARCH WHEN
+and INSPECT operands are scanned; INSPECT reads a `FUNCTION` operand whole.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
