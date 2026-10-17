@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- SQL edges through a table field are inexact (#507)
+
+[analysis/lineage.md](analysis/lineage.md): `_visit_sql` marks a host
+variable under an OCCURS inexact, like every other edge through a table.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

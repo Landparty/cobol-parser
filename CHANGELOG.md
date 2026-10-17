@@ -160,6 +160,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Field lineage: SQL edges through an OCCURS table field are inexact**
+  (#507). A host variable under an OCCURS (`FETCH ... ROWSET ... INTO
+  :EMPNO`, `INSERT ... VALUES (:EMPNO)`) got `exact: true` edges, though its
+  node stands for any occurrence; every other edge through a table field was
+  already inexact. They now are too.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

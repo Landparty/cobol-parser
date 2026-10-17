@@ -99,7 +99,8 @@ occurrence. Its bytes are every occurrence's (`_placements`: one range per
 occurrence, or a single spanning range past `_PLACEMENT_CAP` = 1024), so a
 group MOVE / READ / WRITE / CALL maps each occurrence where it really lies,
 and every edge through a table field is **inexact** -- never a wrong exact
-field. A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
+field. That includes EXEC SQL host-variable edges (`_visit_sql`, #507: a
+multi-row FETCH writes every occurrence). A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
 OCCURS level, within bounds) on an elementary field gets its own item node
 `R.AMT(3)` at the occurrence's offset, joined both ways to `R.AMT` by
 inexact `occurrence` edges, and an exact edge to its own bytes on every port
