@@ -614,40 +614,101 @@ class IBMEnterpriseCobol:
         "CEETDLI": "ims",
     }
 
-    # IMS commands (DL/I call types)
-    IMS_COMMANDS = {
-        # Database retrieval (plain and hold forms)
-        "GU",
-        "GN",
-        "GNP",
-        "GHU",
-        "GHN",
-        "GHNP",
-        # Database update
-        "ISRT",
-        "REPL",
-        "DLET",
-        # Checkpoint, restart and recovery
-        "CHKP",
-        "XRST",
-        "SYNC",
-        "ROLB",
-        "ROLLB",
-        "ROLL",
-        "ROLS",
-        "SETS",
-        "SETU",
-        "TERM",
-        # Message processing
-        "PURG",
-        "CHNG",
-        "CMD",
-        "GCMD",
-        # System services
-        "INQY",
-        "LOG",
-        "STAT",
-    }
+    # DL/I call function codes: the first operand of ``CALL 'CBLTDLI'`` /
+    # ``'AIBTDLI'`` / ``'CEETDLI'`` (IMS Application Programming APIs, "DL/I
+    # calls"). The one list of them: IMSSegmentAnalyzer reads it from here
+    # (#595). ``ROLLB``, ``XDLT`` and ``XRPL`` are not DL/I calls (the
+    # rollback calls are ROLB, ROLL and ROLS; #481).
+    IMS_COMMANDS: frozenset[str] = frozenset(
+        {
+            # Database calls (plain and hold forms)
+            "GU",
+            "GN",
+            "GNP",
+            "GHU",
+            "GHN",
+            "GHNP",
+            "ISRT",
+            "REPL",
+            "DLET",
+            "FLD",
+            "POS",
+            # Message (TM) calls
+            "AUTH",
+            "CHNG",
+            "CMD",
+            "GCMD",
+            "PURG",
+            "SETO",
+            # System service calls: checkpoint, restart and recovery
+            "CHKP",
+            "XRST",
+            "SYNC",
+            "ROLB",
+            "ROLL",
+            "ROLS",
+            "SETS",
+            "SETU",
+            # System service calls: PSB scheduling, environment, logging
+            "APSB",
+            "DPSB",
+            "PCB",
+            "TERM",
+            "CIMS",
+            "DEQ",
+            "GMSG",
+            "GSCD",
+            "ICAL",
+            "ICMD",
+            "RCMD",
+            "INIT",
+            "INQY",
+            "LOG",
+            "SNAP",
+            "STAT",
+        }
+    )
+
+    # EXEC DLI command words (the command-level interface), which the parser's
+    # ``ExecImsStatement.ims_call_type`` reads (#481). A different vocabulary
+    # from the CALL function codes above: no hold forms (a hold is implicit
+    # in EXEC DLI) and no message calls, but its own LOAD / SCHD / SYMCHKP /
+    # QUERY / REFRESH / RETRIEVE / ACCEPT. Only the abbreviated command word
+    # is listed; the spelled-out forms (``GET UNIQUE``, ``SCHEDULE``, ...)
+    # are not.
+    EXEC_DLI_COMMANDS: frozenset[str] = frozenset(
+        {
+            # Database commands
+            "GU",
+            "GN",
+            "GNP",
+            "ISRT",
+            "REPL",
+            "DLET",
+            "LOAD",
+            "POS",
+            "RETRIEVE",
+            # PSB scheduling
+            "SCHD",
+            "TERM",
+            # Checkpoint, restart and recovery
+            "CHKP",
+            "SYMCHKP",
+            "XRST",
+            "ROLB",
+            "ROLL",
+            "ROLS",
+            "SETS",
+            "SETU",
+            # Other system services
+            "ACCEPT",
+            "DEQ",
+            "LOG",
+            "QUERY",
+            "REFRESH",
+            "STAT",
+        }
+    )
 
     def __init__(self) -> None:
         """Initialize IBM Enterprise COBOL dialect."""

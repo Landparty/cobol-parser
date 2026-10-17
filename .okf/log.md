@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- One DL/I vocabulary (#481, #595)
+
+[dialects.md](dialects.md), [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md),
+[parser/statements-io.md](parser/statements-io.md):
+`IMS_COMMANDS` completed (no ROLLB), `EXEC_DLI_COMMANDS` added; the parser and
+IMSSegmentAnalyzer read them; function-code candidates are no longer filtered.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

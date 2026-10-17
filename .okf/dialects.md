@@ -74,15 +74,24 @@ the parser's SQL model.
 * `CICS_COMMANDS` also holds READQ/WRITEQ/DELETEQ, SYNCPOINT, ENQ/DEQ,
   WAIT/POST/SIGNAL, ASSIGN/INQUIRE/ADDRESS/DUMP/QUERY, WEB, INVOKE,
   SPOOLOPEN; `NOHANDLE` is an option, not a command, and is not in it.
-* `IMS_COMMANDS` is DL/I call codes only, including the hold forms
-  GHU/GHN/GHNP, SYNC/ROLB/ROLL/ROLS/SETS/SETU, CHNG/CMD/GCMD, INQY/LOG/STAT;
-  ENQUEUE/DEQUEUE/XDLT/XRPL (not DL/I calls) are not in it. `ROLLB` is kept
-  for compatibility. The dialect's own `ExecIMSStatement.ims_call_type`
-  reads this set. The parser's `ExecImsStatement` does **not**: it classifies
-  against `ibm_exec_statements._IMS_CALL_TYPES` (GU/GN/GNP/ISRT/REPL/DLET/
-  CHKP/ROLLB/TERM/XRST/XDLT), so e.g. `GHU` parses as `UNKNOWN` there.
+* `IMS_COMMANDS` (a frozenset) is the one list of DL/I **call** function
+  codes -- the first operand of `CALL 'CBLTDLI'/'AIBTDLI'/'CEETDLI'`:
+  database calls with their hold forms (GHU/GHN/GHNP, FLD, POS), message calls
+  (CHNG/CMD/GCMD/PURG/AUTH/SETO) and system services (CHKP/XRST/SYNC/ROLB/ROLL/
+  ROLS/SETS/SETU, APSB/DPSB/PCB/TERM, INIT/INQY/LOG/STAT/ICAL/...).
+  ENQUEUE/DEQUEUE/XDLT/XRPL and `ROLLB` are not DL/I calls and are not in it
+  (#481). The dialect's own `ExecIMSStatement.ims_call_type` and
+  `IMSSegmentAnalyzer._IMS_FUNCTION_CODES` read this set (#595).
+* `EXEC_DLI_COMMANDS` is the command-level (`EXEC DLI`) vocabulary, which the
+  parser's `ExecImsStatement.ims_call_type` reads (`ibm_exec_statements.
+  _IMS_CALL_TYPES` is this set). It differs from the call codes: no hold forms
+  (holds are implicit) and no message calls, but LOAD/SCHD/SYMCHKP/QUERY/
+  REFRESH/RETRIEVE/ACCEPT. So `EXEC DLI GHU` is `UNKNOWN`. Only the
+  abbreviated command word is listed; the spelled-out `GET UNIQUE` /
+  `SCHEDULE` forms are not (#481).
 
-Pinned by `tests/unit/test_issue_341_dialect_crud.py` (see #341).
+Pinned by `tests/unit/test_issue_341_dialect_crud.py` (see #341) and
+`tests/regression/test_dli_function_codes_issue_481_595.py`.
 
 ## EXEC SQL text: literals and `--` comments (`parsers/statements/_utils.py`)
 

@@ -26,6 +26,7 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
+from ..dialects.ibm_enterprise import IBMEnterpriseCobol
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram
@@ -34,26 +35,10 @@ from ._names import base_data_name
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-_IMS_FUNCTION_CODES: frozenset[str] = frozenset(
-    {
-        "GU",
-        "GN",
-        "GNP",
-        "GHU",
-        "GHN",
-        "GHNP",
-        "ISRT",
-        "DLET",
-        "REPL",
-        "CHKP",
-        "XRST",
-        "XDLT",
-        "XRPL",
-        "TERM",
-        "ROLLB",
-        "PURG",
-    }
-)
+# Every DL/I call function code, from the one list the dialect keeps (#595):
+# a third copy here had lost ROLB / CHNG / INQY / LOG / ... and carried the
+# non-call ROLLB.
+_IMS_FUNCTION_CODES: frozenset[str] = IBMEnterpriseCobol.IMS_COMMANDS
 
 # Positional indices within the USING parameter list
 _PARAM_FUNC_CODE = 0
@@ -428,11 +413,22 @@ class IMSSegmentAnalyzer:
         if normalized in _IMS_FUNCTION_CODES:
             return normalized
 
-        # Case 3: variable name – look up its tracked values
+        # Case 3: variable name – look up its tracked values. Every value the
+        # variable can hold is a candidate (``A/B`` when several); only one
+        # that cannot be a function code at all -- blank, or a figurative
+        # constant such as ``VALUE SPACES`` -- is dropped. Keeping only the
+        # values in the function-code list dropped every real code missing
+        # from that list, so ``VALUE 'GU'`` + ``MOVE 'ROLB'`` read as GU (#595).
         if normalized in self._variable_values:
-            candidates = {v.strip().upper() for v in self._variable_values[normalized]}
-            # Prefer known IMS verbs; fall back to any tracked value
-            pool = candidates & _IMS_FUNCTION_CODES or candidates
+            pool = {
+                candidate
+                for candidate in (
+                    v.strip().upper() for v in self._variable_values[normalized]
+                )
+                if candidate
+                and candidate not in _FIGURATIVE_CONSTANTS
+                and candidate.strip("\x00\xff")
+            }
             if pool:
                 return "/".join(sorted(pool)) if len(pool) > 1 else next(iter(pool))
         return None
