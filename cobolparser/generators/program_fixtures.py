@@ -313,9 +313,15 @@ class ProgramFixtureGenerator:
                 )
             scenario.expectations.extend(expectations)
             unresolved.extend(extra_unresolved)
-        self._pin_read_keys(ast, index, scenario, unresolved)
+        self._pin_read_keys(
+            ast, index, scenario, unresolved, counter.counts.success_skipped
+        )
         counter.insert(report, scenario, anchors)
-        scenario.expectations.extend(self._tier2_expectations(ast, index, scenario))
+        scenario.expectations.extend(
+            self._tier2_expectations(
+                ast, index, scenario, counter.counts.success_skipped
+            )
+        )
 
         unresolved_count = sum(1 for b in report.boundaries if b.unresolved)
         coverage = CoverageSummary(
@@ -422,7 +428,9 @@ class ProgramFixtureGenerator:
                 scenario.expectations.extend(expectations)
                 unresolved.extend(extra_unresolved)
             # Gaps are reported once, by the happy path above.
-            self._pin_read_keys(ast, index, scenario, None)
+            self._pin_read_keys(
+                ast, index, scenario, None, counter.counts.success_skipped
+            )
             counter.insert(report, scenario, anchors)
             if planned.status_overrides:
                 # The fold walks the normal path; a failure path may stop
@@ -433,7 +441,9 @@ class ProgramFixtureGenerator:
                 )
             else:
                 scenario.expectations.extend(
-                    self._tier2_expectations(ast, index, scenario)
+                    self._tier2_expectations(
+                        ast, index, scenario, counter.counts.success_skipped
+                    )
                 )
             # Self-verify BEFORE the scenario is written out: re-read the
             # data this scenario actually emitted and re-check it against the
@@ -938,6 +948,7 @@ class ProgramFixtureGenerator:
         index: ProgramLayoutIndex,
         scenario: Scenario,
         notes: list[str] | None,
+        success_skipped: set[int] | frozenset[int] = frozenset(),
     ) -> None:
         """A successful keyed READ of an INDEXED file returns the record
         whose key the program set, so a mocked record carrying any other key
@@ -949,14 +960,18 @@ class ProgramFixtureGenerator:
         if not reads:
             return
         folder = ConstantFolder()
-        read_keys = folder.fold(ast, index, seed_values={}).read_keys
+        read_keys = folder.fold(
+            ast, index, seed_values={}, success_skipped=success_skipped
+        ).read_keys
         if not read_keys:
             return
         # The READ's own record is not a seed: before the READ its key holds
         # only what the program put there, never the mocked answer.
         seeds = self._single_row_seeds(scenario, skip=set(read_keys))
         if seeds:
-            read_keys = folder.fold(ast, index, seed_values=seeds).read_keys
+            read_keys = folder.fold(
+                ast, index, seed_values=seeds, success_skipped=success_skipped
+            ).read_keys
         for fixture in reads:
             site = (fixture.ref.key, fixture.ref.line)
             if site not in read_keys:
@@ -986,7 +1001,10 @@ class ProgramFixtureGenerator:
 
     @staticmethod
     def _tier2_expectations(
-        ast: CobolProgram, index: ProgramLayoutIndex, scenario: Scenario
+        ast: CobolProgram,
+        index: ProgramLayoutIndex,
+        scenario: Scenario,
+        success_skipped: set[int] | frozenset[int] = frozenset(),
     ) -> list[Expectation]:
         """Tier 2 (Phase 7): constant-fold this scenario's own straight-line
         chain, seeded by its own single-invocation mocked inputs, and turn
@@ -998,7 +1016,9 @@ class ProgramFixtureGenerator:
         the folder's own loop-abort rule anyway, since that is exactly where
         a multi-row READ is read from in practice."""
         seed_values = ProgramFixtureGenerator._single_row_seeds(scenario)
-        fold_result = ConstantFolder().fold(ast, index, seed_values=seed_values)
+        fold_result = ConstantFolder().fold(
+            ast, index, seed_values=seed_values, success_skipped=success_skipped
+        )
         return [
             Expectation(
                 kind="field_equals",

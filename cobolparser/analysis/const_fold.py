@@ -561,6 +561,7 @@ class ConstantFolder:
         index: ProgramLayoutIndex,
         *,
         seed_values: dict[str, str] | None = None,
+        success_skipped: frozenset[int] | set[int] = frozenset(),
     ) -> ConstantFoldResult:
         env: dict[str, Decimal | str] = {}
         seeds: dict[str, str] = seed_values if seed_values is not None else {}
@@ -578,6 +579,7 @@ class ConstantFolder:
 
         ordered_names, by_name = _ordered_paragraphs(ast)
         state = _WalkState(env=env, seed_env=dict(env))
+        state.success_skipped = success_skipped
         # The entry paragraph, then -- unless the walk stopped (STOP RUN,
         # GOBACK, EXIT PROGRAM, GO TO) -- every following paragraph in
         # source order: control falls through a paragraph's end into the
@@ -786,6 +788,17 @@ def _transfer_kind(stmt: Any) -> str | None:
     return None
 
 
+def _ends_run(stmt: Any) -> bool:
+    """STOP RUN, GOBACK or EXIT PROGRAM: the main line's `_walk_one` stops
+    on these, but inside a branch arm / loop body / handler they mean the
+    statements after the block may never run (#591)."""
+    if isinstance(stmt, StopStatement):
+        return (stmt.stop_type or "RUN").upper() == "RUN"
+    if isinstance(stmt, GobackStatement):
+        return True
+    return isinstance(stmt, ExitStatement) and (stmt.exit_type or "") == "PROGRAM"
+
+
 # -- walk state ---------------------------------------------------------------
 
 
@@ -802,6 +815,7 @@ class _WalkState:
         "visited_sites",
         "uncertain",
         "read_keys",
+        "success_skipped",
     )
 
     def __init__(
@@ -841,6 +855,10 @@ class _WalkState:
         #: of the walk over it (``None`` where not knowable); see
         #: `ConstantFoldResult.read_keys`.
         self.read_keys: dict[int, list[dict[str, Decimal | str] | None]] = {}
+        #: ``id()`` of the statements of bodies a success status never runs
+        #: (`InvocationCounts.success_skipped`): a run ender in one does not
+        #: make the walk uncertain for a scenario supplying success (#591).
+        self.success_skipped: frozenset[int] | set[int] = frozenset()
 
 
 # -- entry point / paragraph ordering -----------------------------------------
@@ -1469,6 +1487,7 @@ def _poison_written_names(
     visiting: set[str] | None = None,
     *,
     state: _WalkState | None = None,
+    success_skipped: bool = False,
 ) -> None:
     """Poison every field a nested block (an IF/EVALUATE arm, a loop body)
     could possibly write -- including through a PERFORM to another
@@ -1485,6 +1504,10 @@ def _poison_written_names(
     bounded by real source nesting, not by paragraph-chain length."""
     if visiting is None:
         visiting = set()
+    if state is not None and statements and id(statements[0]) in state.success_skipped:
+        # A body a success status never runs (`IF WS-FS NOT = '00' ...
+        # GOBACK`): its STOP RUN / GOBACK does not end a success scenario.
+        success_skipped = True
     frames: list[tuple[Iterator[Any], str | None]] = [(iter(statements), None)]
     while frames:
         iterator, entered = frames[-1]
@@ -1521,9 +1544,11 @@ def _poison_written_names(
                             resolved.spec.qualified_name, []
                         ).append(None)
             transfer = _transfer_kind(stmt)
-            if transfer is not None:
+            if transfer is not None or (_ends_run(stmt) and not success_skipped):
                 # The block may leave the straight line: later statements may
-                # not run, and a GO TO runs code this walk never sees.
+                # not run (a STOP RUN / GOBACK / EXIT PROGRAM in an arm ends
+                # the run there, #591), and a GO TO runs code this walk never
+                # sees.
                 state.uncertain = True
                 if transfer == "jump":
                     env.clear()
@@ -1542,7 +1567,14 @@ def _poison_written_names(
             frames.append((iter(body), key))
         for nested in _nested_statement_lists(stmt):
             _poison_written_names(
-                nested, index, env, by_name, ordered_names, visiting, state=state
+                nested,
+                index,
+                env,
+                by_name,
+                ordered_names,
+                visiting,
+                state=state,
+                success_skipped=success_skipped,
             )
 
 
