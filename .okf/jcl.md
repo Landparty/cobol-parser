@@ -25,7 +25,11 @@ in jcl-parser; this package has no card scanner or statement parser of its
 own, and must not grow one.
 
 Modules: `jcl/parser.py` (the adapter: `JclParser`, `parse_jcl`),
-`jcl/models.py` (the dataclasses), `jcl/bindings.py` (DD name -> dataset).
+`jcl/models.py` (the dataclasses), `jcl/bindings.py` (DD name -> dataset),
+`jcl/programs.py` (the program a launcher step runs: `run_programs(systsin)`
+for IKJEFT01/1A/1B `RUN PROGRAM(x)`, `ims_program(parm)` for DFSRRC00
+`PARM='DLI|DBB|BMP,x,...'`; pure text, shared with field lineage's
+`lineage_jcl` so the two JCL consumers agree, #493).
 Entry points: `parse_jcl(text, *, filename="<jcl>", proc_paths=None)`,
 `JclParser(proc_paths=None).parse(text, *, filename=...)` / `.parse_file(path)`,
 then `resolve_dd_bindings(result)`. CLI: `cobol-parser jcl` (below).
@@ -80,7 +84,10 @@ this package exposes none of it.
 | `DatasetBinding` | `ddname`, `dataset`, `step`, `job`, `disposition`, `record_format`, `record_length`, `program` (the step's `PGM=`; `None` for job-level DDs and `EXEC proc` steps) |
 
 Every class has `to_dict()`. Lookup helpers: `JclParseResult.dd_map()` (DD
-name -> every dataset bound to it, across steps), `.steps_running(program)`,
+name -> every dataset bound to it, across steps), `.steps_running(program)`
+(`PGM=`, or the program a launcher runs: `JobStep.effective_programs()` --
+every `RUN PROGRAM` of an in-stream IKJEFT01 SYSTSIN, the DFSRRC00 `PARM`
+program),
 `.all_dd_statements()` (`(job, step | None, dd)` triples, `step=None` for
 job-level DDs); `JclJob.step(name)`, `JobStep.dd(name)` (both
 case-insensitive); `DDStatement.flatten()` (the DD then its concatenated
@@ -156,7 +163,9 @@ dataset bind nothing there and are skipped, #547).
 * **Notes in `unresolved`:** every jclparser warning (unmatched ELSE/ENDIF,
   missing PEND, unrecognised statements, override naming no step, a symbol
   substituted with nothing, ...); a DSN still holding `&SYM`; a backward
-  reference `DSN=*.step.dd`; a non-numeric LRECL; a PROC defined twice in one
+  reference `DSN=*.step.dd`; a non-numeric LRECL; an IKJEFT01/1A/1B
+  `SYSTSIN` that is a dataset (the programs it runs are unknown, so
+  `steps_running` cannot see them); a PROC defined twice in one
   job (EXEC runs the last definition); a member with no JOB card. A JOB card
   with no name is an error.
 
@@ -201,6 +210,8 @@ See [cli.md](cli.md).
 ## Tests
 
 `tests/unit/test_jcl.py` (the shape and semantics through the adapter),
+`tests/regression/test_issue_493_jcl_program_under_launchers.py` (programs
+under IKJEFT01 / DFSRRC00, `--program` matching nothing),
 `tests/unit/test_jcl_adapter.py` (what the adapter adds), the CLI in
 `tests/unit/cli/test_jcl_cli.py`, and `tests/unit/test_bug_hunt_r11_jcl_config.py`.
 Sample decks: `tests/samples/jcl/` (`invupdt.jcl`, `payproc.jcl`).
