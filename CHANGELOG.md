@@ -300,6 +300,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only; every later program read as "DD ... is not bound to any dataset" and
   `field-impact` lost the flow through it. Each named program is now bound
   to the step's DDs (once, however often it is RUN).
+* **Field lineage keeps an IDCAMS REPRO whose dataset name contains a
+  command word** (#338). `REPRO INDATASET(PROD.DELETE.MASTER)
+  OUTDATASET(PROD.BACKUP)` was cut at the `DELETE` qualifier (`.` counted as
+  a word boundary), never saw its OUTDATASET, and its pass-through vanished
+  without a caveat; any PRINT / SET / IF / ALTER / DEFINE / EXPORT qualifier
+  did the same. A command word now starts a command only at the start of a
+  statement (after a newline or `;`, or after `THEN` / `ELSE` / `DO`),
+  outside parentheses, and never inside a dataset name (`/* ... */`
+  comments are dropped first, so a command after one is still seen).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

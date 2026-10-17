@@ -207,8 +207,12 @@ always a `reformat`, #585), ICETOOL (each `TOOLIN` `COPY` / `SORT` / `MERGE`
 / `SELECT` / `SUBSET` / `DATASORT` operator `FROM(dd)` -> `TO(dd...)` +
 `DISCARD(dd)`, classified through its `USING(xxxx)` `xxxxCNTL` statements;
 `SPLICE` / `RESIZE` are reformats, #566), IEBGENER/ICEGENER, IDCAMS REPRO
-(operands in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`
-(every one in the SYSTSIN, each bound to the step's DDs, #584). A
+(operands in any order, `-` continuations joined; a command word starts a
+command only at a statement start -- newline, `;`, or after
+`THEN`/`ELSE`/`DO` -- outside parentheses, after `/* */` comments are
+dropped, so `PROD.DELETE.MASTER` does not end the REPRO, #338), IKJEFT01
+`RUN PROGRAM(x)` (every one in the SYSTSIN, each bound to the step's DDs, #584).
+A
 blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
 referbacks resolve to the earlier step's dataset (`_referback_keys`: the
