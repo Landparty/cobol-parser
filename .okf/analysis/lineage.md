@@ -165,7 +165,8 @@ graph records the edges it loads, so its own `join_edges()` re-exports them.
 `importlib`, so cobol-parser keeps no runtime or mypy dependency on it)
 into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT/ICETOOL (`SORTIN*`
 -> `SORTOUT` + `OUTFIL FNAMES`), IEBGENER/ICEGENER, IDCAMS REPRO (operands
-in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`. A
+in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)` (every
+one in the SYSTSIN, each bound to the step's DDs, #584). A
 blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
 referbacks resolve to the earlier step's dataset; quoted literals in

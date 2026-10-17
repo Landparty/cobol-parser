@@ -14,6 +14,10 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Lineage JCL: every IKJEFT01 RUN PROGRAM is bound (#584)
+
+[analysis/lineage.md](analysis/lineage.md): `bindings_from_jobs` binds the
+step's DDs to every `RUN PROGRAM(x)` in an IKJEFT01/1A/1B SYSTSIN, not only the first.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Field lineage binds every `RUN PROGRAM` of an IKJEFT01 step** (#584).
+  A TSO step (`IKJEFT01` / `IKJEFT1A` / `IKJEFT1B`) whose SYSTSIN runs
+  several DB2 programs one after another bound the step's DDs to the first
+  only; every later program read as "DD ... is not bound to any dataset" and
+  `field-impact` lost the flow through it. Each named program is now bound
+  to the step's DDs (once, however often it is RUN).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
