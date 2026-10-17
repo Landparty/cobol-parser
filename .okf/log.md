@@ -417,12 +417,14 @@ each USING/GIVING file is a `report.unresolved` entry, not a boundary.
 untracked writes on every MOVE source feeding a CALL variable (and carries
 the incompleteness along the MOVEs), and gives a literal MOVE to a source's
 group the slice that lands in the source.
+
 ## 2026-10-16 -- MCP reachability from dead-code (#486)
 
 [mcp.md](mcp.md), [analysis/flow.md](analysis/flow.md): `callers_of`'s
 `reachable` and `program_brief`'s `unreachable_procedures` come from
 `DeadCodeAnalyzer`; new `DeadCodeReport.fall_through_edges` filters the
 flow graph's phantom `FALL_THROUGH` callers.
+
 ## 2026-10-16 -- xref declares FILLER level-88s and level-66 RENAMES (#485)
 
 [analysis/data-use.md](analysis/data-use.md): `XrefAnalyzer` now declares

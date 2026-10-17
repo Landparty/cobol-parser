@@ -246,9 +246,7 @@ class FileDescriptionClauseParser:
                     clauses["data_records"] = names
 
             elif key in ("REPORT", "REPORTS"):
-                names = [
-                    tok for tok in tokens if tok.upper() not in ("IS", "ARE", ",")
-                ]
+                names = [tok for tok in tokens if tok.upper() not in ("IS", "ARE", ",")]
                 if names:
                     clauses.setdefault("report_names", []).extend(names)
 

@@ -79,7 +79,7 @@ def test_apostrophe_string_literal_is_still_not_a_table():
 
 def test_scrubber_unquotes_identifiers_and_blanks_strings():
     scrubbed = _strip_sql_literals_and_comments(
-        "SELECT \"A\"\"B\" FROM \"PROD\".\"CUST\" WHERE N = ':H' AND M = \"X Y\""
+        'SELECT "A""B" FROM "PROD"."CUST" WHERE N = \':H\' AND M = "X Y"'
     )
     assert "PROD.CUST" in scrubbed
     assert ":H" not in scrubbed

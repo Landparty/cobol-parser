@@ -66,7 +66,7 @@ pip install -e ".[fast]"
 COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
 COBOLPARSER_ACCEL=1 python -m pytest tests/ --no-cov   # suite on the fast paths
 
-# Run all tests with coverage (90% minimum; ~13,700 tests across 483 files).
+# Run all tests with coverage (90% minimum; ~14,700 tests across 554 files).
 # Measure coverage on a pure-Python build -- see "Coverage Requirement".
 python -m pytest tests/ -v
 
@@ -584,7 +584,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~13,700 tests across 483 `test_*.py` files (see `.okf/tests.md` for the per-directory breakdown):
+~14,700 tests across 554 `test_*.py` files (see `.okf/tests.md` for the per-directory breakdown):
 
 ```
 tests/
