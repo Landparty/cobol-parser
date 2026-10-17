@@ -782,6 +782,19 @@ collected flow-insensitively (the VALUE clause stays a candidate after a
 SET). Pinned by
 `tests/unit/test_value_tracker.py::TestConditionSetAndMoveSources`.
 
+**`SET pointer TO ENTRY` is a value (#593).** `_track_pointer_set()` reads
+every `SET ... TO` group (`_set_groups()`, the first group plus
+`SetStatement.groups`): `SET p TO ENTRY 'SUBPGM'` adds `SUBPGM` to `p`,
+`SET p TO [ENTRY] identifier` copies the identifier's value set like a MOVE
+(and joins `_identifier_moves()`, so `_value_sources()` /
+`_propagate_incomplete()` follow it), `TO NULL` adds nothing, and any other
+SET to the item (`UP BY`, `ADDRESS OF`, a non-ENTRY literal, `SET ADDRESS OF
+p`) marks it incomplete. `_mark_untracked_writes()` therefore skips xref's
+`SetStatement` writes to the CALL variable itself; a SET to an overlapping
+item still marks it incomplete. Pinned by
+`tests/unit/test_issue_593_set_entry_dynamic_call.py` (also the
+codebase-graph edge).
+
 ## IO coverage and diagnostics helpers
 
 `io_coverage_reporter.py` (`IOCoverageReporter`, `CoverageStatus`, `TestType`,
