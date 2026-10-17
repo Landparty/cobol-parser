@@ -329,6 +329,13 @@ conditional GO TO targets carry the state at the GO TO.
 edge maps once (`_FlowIndex`), checks each cycle in O(len) and caches the
 escape test per component; same output.
 
+## 2026-10-17 -- GLOBAL items in contained programs (#504)
+
+[analysis/data-use.md](analysis/data-use.md), [analysis/lineage.md](analysis/lineage.md):
+new `unused_variables.inherited_data_records`; xref defines inherited GLOBAL
+records and folds contained references into the outer unit; lineage indexes
+them; MoveTypeChecker stays inside its own unit plus inherited GLOBALs.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
