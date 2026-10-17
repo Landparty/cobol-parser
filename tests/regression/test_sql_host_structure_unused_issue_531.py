@@ -8,7 +8,11 @@ column mapping -- and missed a host variable named only in a DECLARE CURSOR
 written in WORKING-STORAGE.
 """
 
+from pathlib import Path
+
 from cobolparser import LintAnalyzer, UnusedVariableAnalyzer, parse_cobol
+
+_DB2BATCH = Path(__file__).parent.parent / "samples" / "enterprise" / "DB2BATCH.cbl"
 
 _SOURCE = """\
        IDENTIFICATION DIVISION.
@@ -70,3 +74,33 @@ def test_lint_does_not_warn_on_the_varchar_pair():
     assert "HV-LEN" not in symbols
     assert "HV-TXT" not in symbols
     assert "WS-UNUSED" in symbols
+
+
+# Issue #378 (same fix): a host variable named only in a WORKING-STORAGE
+# DECLARE CURSOR -- the standard IBM layout -- is read when OPEN runs.
+_CURSOR_ONLY = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. CURS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 WS-MIN-BAL PIC S9(9)V99 COMP-3.
+           EXEC SQL DECLARE C1 CURSOR FOR SELECT ACCT_ID FROM ACCOUNT
+               WHERE BALANCE > :WS-MIN-BAL END-EXEC.
+       01 WS-UNUSED PIC X.
+       PROCEDURE DIVISION.
+           EXEC SQL OPEN C1 END-EXEC
+           GOBACK.
+"""
+
+
+def test_issue_378_cursor_only_host_variable_is_used():
+    result = parse_cobol(_CURSOR_ONLY)
+    assert result.errors == []
+    report = LintAnalyzer(["unused-variables"]).analyze(result.ast)
+    assert {f.symbol for f in report.findings} == {"WS-UNUSED"}
+
+
+def test_issue_378_db2batch_sample_parm_branch():
+    ast = parse_cobol(_DB2BATCH.read_text()).ast
+    unused = {i.name for i in UnusedVariableAnalyzer().analyze(ast).unused_items}
+    assert "PARM-BRANCH" not in unused

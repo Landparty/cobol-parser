@@ -219,7 +219,7 @@ FROM group` / `JSON PARSE doc INTO group` (every subordinate, by name, through
 SQL host variables and null indicators (`_sql_host_variable_names`, #531: DB2
 reads/writes a host structure one column per field and a VARCHAR group
 through both 49-levels, so the whole subtree is used; the program's own DATA
-DIVISION EXEC SQL, e.g. a WORKING-STORAGE DECLARE CURSOR, is read too.
+DIVISION EXEC SQL, e.g. a WORKING-STORAGE DECLARE CURSOR, is read too, #378.
 Pinned by `tests/regression/test_sql_host_structure_unused_issue_531.py`), and
 `MOVE / ADD / SUBTRACT CORRESPONDING A TO B` (`_corresponding_pairs` +
 `_mark_corresponding_used`: only the same-named subordinates of the two groups;

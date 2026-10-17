@@ -14,7 +14,7 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
-## 2026-10-17 -- unused-variables: SQL host structures used whole (#531)
+## 2026-10-17 -- unused-variables: SQL host structures used whole (#531, #378)
 
 [analysis/data-use.md](analysis/data-use.md), [tests.md](tests.md):
 `_whole_group_references` adds every EXEC SQL host variable and null

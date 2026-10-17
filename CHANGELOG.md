@@ -161,14 +161,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 * **`unused-variables` / `lint` no longer report SQL host-structure fields
-  unused** (#531). A group named as an EXEC SQL host variable (`INTO
+  unused** (#531, #378). A group named as an EXEC SQL host variable (`INTO
   :DCLCUST`, a VARCHAR `:CUST-NAME` with its `49` length/text pair) is read
   or written by DB2 one field at a time, yet every field was reported
   unused -- advice that breaks the precompile or shifts the column mapping,
   and inflated the `redundancy` / `health` scores. Host variables and null
   indicators now mark their whole subtree used, like a `CALL ... USING`
   argument, and a host variable named only in a WORKING-STORAGE `DECLARE
-  CURSOR` counts as referenced.
+  CURSOR` -- the standard IBM layout -- counts as referenced (#378; the
+  sample `DB2BATCH.cbl`'s `PARM-BRANCH` was reported unused).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
