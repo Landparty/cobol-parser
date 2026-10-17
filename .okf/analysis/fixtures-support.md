@@ -279,6 +279,16 @@ branch.enclosing             # tuple[(branch_id, arm_id), ...]: the arms that
 witness = solve(field_spec, branch.arms["THEN"])   # Witness | Unsatisfiable
 ```
 
+**`transfer_sites`: the way into a paragraph** (#310).
+`ConstraintReport.transfer_sites` holds one `TransferSite(paragraph, target,
+kind, enclosing, line)` per out-of-line `PERFORM p [THRU q]` (its first
+paragraph; the rest of a range is reached by falling through) and per `GO
+TO` target (`kind` `GOTO_DEPENDING` for `GO TO ... DEPENDING ON`), recorded
+by `_record_transfer_site` during the same `_walk_statements` pass, so its
+`enclosing` is the PERFORM's own arm chain. `ScenarioPlanner` joins a
+branch's `parent_proc` to it to carry the path condition across paragraphs
+(see generators/fixtures.md).
+
 **`enclosing`: the path condition.** Every `BranchConstraints`
 records the `(branch_id, arm_id)` chain enclosing it. `_walk_list` threads it
 down through `_nested_statement_lists`, which pairs each nested statement
