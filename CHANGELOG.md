@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`expand --keep-comments` handles CR-only and CRLF files** (#581). The
+  comment read-back split each file on `\n` only, while the source map
+  counts `\n`, `\r\n` and `\r`: a CR-only copybook was pasted whole in place
+  of its first comment line (its record listed twice), and a CRLF file left a
+  stray `\r` on every restored comment. Each comment now comes back once,
+  without `\r`.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

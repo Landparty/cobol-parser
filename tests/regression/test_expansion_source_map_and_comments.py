@@ -460,3 +460,57 @@ class TestPreserveComments:
         assert "* COPY GHOST." in result.expanded_source
         assert "GHOST-REC" not in result.expanded_source
         assert result.included_copybooks == []
+
+    @pytest.mark.parametrize("eol", ["\r", "\r\n"], ids=["cr-only", "crlf"])
+    def test_a_cr_or_crlf_copybook_restores_each_comment_once(self, tmp_path, eol):
+        # #581: the comment read-back split files on "\n" only, while the
+        # source map counts lines with split_source_lines. A CR-only member
+        # came back as ONE line and was pasted whole in place of its first
+        # comment (its record listed twice); a CRLF member left a "\r" on
+        # every restored comment.
+        (tmp_path / "CB.cpy").write_bytes(
+            eol.join(
+                [
+                    _pad("* COPYBOOK COMMENT"),
+                    _pad(" 01  CB-REC."),
+                    _pad("     05  CB-A PIC X."),
+                    "",
+                ]
+            ).encode("ascii")
+        )
+        source = "\n".join(
+            [
+                _pad(" IDENTIFICATION DIVISION."),
+                _pad(" PROGRAM-ID. CRPROG."),
+                _pad(" DATA DIVISION."),
+                _pad(" WORKING-STORAGE SECTION."),
+                _pad(" COPY CB."),
+                _pad(" PROCEDURE DIVISION."),
+                _pad("     GOBACK."),
+            ]
+        )
+        result = expand_copybooks(source, [str(tmp_path)], preserve_comments=True)
+
+        assert result.expanded_source.count("* COPYBOOK COMMENT") == 1
+        assert result.expanded_source.count("CB-REC") == 1
+        assert "\r" not in result.expanded_source
+
+    def test_a_cr_only_program_restores_its_own_comments(self, tmp_path):
+        (tmp_path / "CB.cpy").write_text(_pad(" 01  CB-REC PIC X.") + "\n")
+        source = "\r".join(
+            [
+                _pad(" IDENTIFICATION DIVISION."),
+                _pad(" PROGRAM-ID. CRMAIN."),
+                _pad("* MAIN COMMENT"),
+                _pad(" DATA DIVISION."),
+                _pad(" WORKING-STORAGE SECTION."),
+                _pad(" COPY CB."),
+                _pad(" PROCEDURE DIVISION."),
+                _pad("     GOBACK."),
+            ]
+        )
+        result = expand_copybooks(source, [str(tmp_path)], preserve_comments=True)
+
+        assert result.expanded_source.count("* MAIN COMMENT") == 1
+        assert result.expanded_source.count("PROGRAM-ID") == 1
+        assert "\r" not in result.expanded_source
