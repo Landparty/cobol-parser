@@ -568,6 +568,10 @@ PROCEDURE DIVISION caller reports it -- see [statements-io.md](statements-io.md)
   generic "Unparsed tokens starting at 'X' ... content dropped from the AST up to
   the next statement boundary" warning. Either way the tokens are skipped up to
   the next statement boundary in one pass, with one warning per dropped statement.
+- `wrap_unexpected` turns an unexpected exception from a statement parser into
+  a `ParseError`; a `RecursionError` (nesting past Python's limit, re-raised by
+  `try_parse_nested_statement`, #375) reads "Statement nested too deeply to
+  parse ... the statement starting here was dropped".
 - `STRAY_MARKERS` lists the control-flow words and scope terminators (`ELSE`,
   `WHEN`, `THEN`, `END-IF`, `END-PERFORM`, ..., `END-RECEIVE`) that may be left
   over at statement level; they are skipped without a warning.

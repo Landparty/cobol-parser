@@ -233,7 +233,7 @@ must stop at a boundary *without consuming it*. The rules:
 | `bare_end_starts_at_end_clause` | a bare `END` is an `AT END` only when it does not start `END PROGRAM` / `END DIVISION` |
 | `matches_word` | value-based match for verbs with no `TokenType` |
 | `collect_clause_stmts`, `parse_invalid_key_clauses`, `parse_size_error_clauses` | handler bodies, see below |
-| `try_parse_nested_statement` | parses one nested statement; an exception not already recorded (`_already_recorded`, set by `report_or_raise`) becomes a warning "Nested statement parse failed and was skipped: ..." |
+| `try_parse_nested_statement` | parses one nested statement; an exception not already recorded (`_already_recorded`, set by `report_or_raise`) becomes a warning "Nested statement parse failed and was skipped: ..." -- except `RecursionError` (nesting hundreds deep), re-raised so the statement loop records "Statement nested too deeply to parse ..." as an **error** and `success` is False (#375; it used to be a warning with statements missing) |
 | `get_parse_context` / `report_parse_error` | record-and-continue error reporting |
 | `collect_exec_sql_text(stream, sql=...)` | EXEC block text, see [statements-io.md](statements-io.md); with `sql=True` a literal keeps the delimiter it was written with (`Token.quote`), so a `"..."` delimited identifier stays one (#597, [dialects.md](../dialects.md)) |
 
@@ -314,7 +314,13 @@ yields the identical clause. Pinned by
 PERFORM UNTIL (`condition_tree`), EVALUATE and SEARCH WHEN (`condition_tree` next
 to the raw `condition` text; #348). Class / sign / condition-name conditions
 (`A IS NUMERIC`) get a structured node while `metadata.raw_condition` stays
-populated. Its token-cleaning pass:
+populated. An AND / OR chain is split at every top-level operator in one
+pass (`find_top_level_operators`) and the legs folded from the left
+(`_fold_logical`): up to `_MAX_LEFT_DEEP_LEGS` (64) legs the tree is the
+left-deep one it always was; a longer chain is paired neighbour by neighbour so
+its depth stays O(log n) for every recursive walker (`to_dict`, rendering, the
+analyzers). Recursing once per operator overflowed Python's stack at ~1,000
+terms and was O(n^2) (#375). Its token-cleaning pass:
 
 - Recombines `>=` / `<=` / `<>`, which the lexer emits as two single-character
   tokens (`_COMPOUND_SYMBOL_OPS`); otherwise `IF X >= 5` reads as `GREATER` with
