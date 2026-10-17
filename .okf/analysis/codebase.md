@@ -32,6 +32,14 @@ The cross-program module. It walks a whole tree of COBOL source, parses every
 file through `batch.py` (parallel, per-file fault isolation) and aggregates the
 results into one graph with two kinds of edge:
 
+* **Only PROGRAM and CLASS units are nodes (#500).** A FACTORY / OBJECT
+  paragraph or a METHOD-ID (`unit_kind`, `_OO_MEMBER_KINDS`) cannot be the
+  target of a CALL, so it is never a program id; what its statements CALL is
+  attributed to its class (`_node_statements()`). `CALL 'AUDIT'` to an
+  external program therefore no longer resolves to a method of that name,
+  and two classes no longer raise "duplicate PROGRAM-ID FACTORY". INVOKE is
+  still not an edge. Pinned by
+  `tests/regression/test_issue_500_oo_units_not_programs.py`.
 * **Call edges** — `program A calls program B`, from static `CALL "B"` and from
   dynamic `CALL WS-TARGET` resolved through `DynamicCallAnalyzer`. A dynamic
   call whose value set that analyzer could not fully resolve still contributes

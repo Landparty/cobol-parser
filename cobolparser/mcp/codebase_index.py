@@ -89,8 +89,15 @@ class ProgramsIndex(_Survey):
     copy_sites: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def units_named(self, program_id: str) -> list[UnitFacts]:
+        """The units a ``CALL 'program_id'`` could reach: a FACTORY /
+        OBJECT / METHOD-ID unit of that name is not one (#500)."""
         wanted = program_id.upper()
-        return [u for u in self.units if u.program_id.upper() == wanted]
+        return [
+            u
+            for u in self.units
+            if u.program_id.upper() == wanted
+            and u.unit_kind not in ("FACTORY", "OBJECT", "METHOD")
+        ]
 
 
 @dataclass

@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`codebase-graph` no longer treats OO FACTORY / OBJECT / METHOD-ID units
+  as CALL-able programs** (#500). Only PROGRAM and CLASS units are graph
+  nodes, and a method's CALLs are attributed to its class. A batch
+  `CALL 'AUDIT'` no longer resolves to a method named AUDIT. Two classes no
+  longer produce "duplicate PROGRAM-ID FACTORY / OBJECT / ..." notes, and
+  MCP `callers_of` no longer lists a method as the declaration of a
+  program.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
