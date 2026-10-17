@@ -234,6 +234,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   feeding / fed by nothing, while the JSON listed the port. Ports now
   appear under their program (`port console:SYSOUT@0+4 line 23
   [display]`).
+* **Field lineage no longer reads `REC(WS-POS:10)` as `REC(1:10)`**
+  (#527). A reference modifier whose start (or length) is a data name was
+  treated as starting at byte 1, so a group MOVE through it reached only
+  the fields in the item's first bytes and every later field was missing
+  from `lineage`, `field-impact`, `scan --analyzer lineage` and MCP
+  `impact_of_change` / `where_from`, with no caveat. Such an operand now
+  reaches every field under the item, inexactly (`overlap`), and a caveat
+  names it.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
