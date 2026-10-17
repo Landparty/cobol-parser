@@ -121,6 +121,11 @@ register sets and `LENGTH OF x` resolve instead of counting as unresolved.
 adds RECORD / ALTERNATE / RELATIVE KEY and PADDING CHARACTER; unused-variables
 counts PADDING CHARACTER.
 
+## 2026-10-17 -- OCCURS KEY after INDEXED BY (#542)
+
+[parser/divisions.md](parser/divisions.md): KEY and INDEXED BY phrases are
+read in either order, in `data_clauses.py` and `_data_fast.pyx` alike.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

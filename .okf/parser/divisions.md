@@ -387,8 +387,11 @@ suite: `tests/regression/test_value_all_clause.py`.
   `_parse_object_reference`).
 
 **OCCURS (`_parse_occurs_clause`, mirrored in `_data_fast.pyx`).**
-- Parses `{ASCENDING|DESCENDING} KEY [IS] k1 [k2 ...]` (repeatable) *before*
-  `INDEXED BY`, and `INDEXED BY` collects every index name
+- Parses `{ASCENDING|DESCENDING} KEY [IS] k1 [k2 ...]` (repeatable) and
+  `INDEXED BY` in one loop, in either order and interleaved (IBM accepts
+  `INDEXED BY IX ASCENDING KEY K`); both name lists stop at `ASCENDING` /
+  `DESCENDING` / `INDEXED` / `KEY` (`_OCCURS_PHRASE_WORDS`) -- before #542 the
+  index loop took `ASCENDING` as an index name and dropped the key
   (`OccursClause.key_clauses` / `index_names`, see
   [ast-models.md](../ast-models.md)). Commas in both name lists are separators;
   the `.pyx` compares the COMMA token *type* (`comma_type` parameter), never the
