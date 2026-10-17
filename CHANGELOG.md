@@ -464,72 +464,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SEARCH WHEN condition trees and in EVALUATE selectors (marked
   `"typed": True`), and the constraint extractor solves against the bytes
   the literal stands for.
-* **A computed EVALUATE WHEN selector is no longer a literal** (#333).
-  `WHEN WS-N + 1`, `WHEN WS-BASE (1:2)` and `WHEN WS-TE (2)` were stored as
-  plain `Literal` values with no marker, so gen-fixtures solved against the
-  text `'WS-N + 1'` and counted WHEN OTHER as targeted against it. Such
-  selectors now carry `"expression": True`; the constraint extractor
-  reports them (and range bounds of that shape) as unsupported, and
-  business-rules renders them unquoted.
-* **`IF x IS [NOT] class-name` and `IF x IS [NOT] OMITTED` are structured
-  conditions** (#539). A SPECIAL-NAMES CLASS test and the omitted-argument
-  test used to parse to an operand-less COMPARISON: the tested field read
-  as never referenced (`lint` / `unused-variables`), had no xref reference,
-  was missing from `business-rules` inputs, and `program-signature` graded
-  an OMITTED-tested parameter `unknown`. They now build `IS [NOT] <word>`
-  nodes with the field as the operand, like `IS NUMERIC`. In EVALUATE TRUE
-  the test is a `Condition` selector rather than the made-up literal `'X IS
-  VALID-CODE'`; in PERFORM UNTIL, xref no longer records the class-name as
-  a data item. gen-fixtures reports both as unsupported with a precise
-  reason instead of "unparseable condition text".
-* **gen-fixtures no longer asserts a DISPLAY that a STOP RUN in an IF arm
-  skips** (#591). `ConstantFolder` treated GO TO / EXIT PARAGRAPH / NEXT
-  SENTENCE inside an arm, loop or handler as leaving the straight line, but
-  not STOP RUN, GOBACK or EXIT PROGRAM, so every scenario -- including the
-  one planned to take the stopping arm -- got a `field_equals` for a DISPLAY
-  after the IF. Those statements now put the walk in uncertain mode too,
-  except inside a body a success status never runs (the failure arm of a
-  status check, an INVALID KEY handler), so the happy path still asserts
-  what follows `IF WS-FS NOT = '00' ... GOBACK`.
-* **EXEC SQL tables named as DB2 delimited identifiers are no longer lost**
-  (#597). `SELECT ... FROM "PROD"."CUST"`, `UPDATE "CUST"`, `INSERT INTO
-  "HIST"` and `DELETE FROM "CUST"` reported no tables, so the CRUD matrix,
-  MCP `program_brief`'s `sql_tables`, SQL lineage ports and host-variable
-  table matching all dropped the table without a word: the EXEC SQL text
-  re-delimited every literal with `'`, and the SQL scrubber blanked both
-  quote kinds. The lexer now records a literal's delimiter (`Token.quote`),
-  `sql_text` keeps `"..."`, and the scrubber reads an identifier-shaped
-  `"..."` as that name, unquoted (`PROD.CUST`), with the same C/R/U/D marks
-  as the undelimited form.
-* **The CRUD matrix no longer misses a cursor DECLAREd in WORKING-STORAGE**
-  (#518). The DB2 precompiler accepts `EXEC SQL DECLARE c CURSOR FOR SELECT
-  ... END-EXEC` in the DATA DIVISION, but the matrix read only PROCEDURE
-  DIVISION statements, so the cursor's tables were missing (also from MCP
-  `program_brief`'s `sql_tables`) and a `FETCH c` marked nothing. They are
-  now listed `-R--` with the cursor name, and a `FOR UPDATE` cursor used
-  with `WHERE CURRENT OF` gives `-RU-`, the same as a PROCEDURE DIVISION
-  DECLARE.
-* **The CRUD matrix and MCP `program_brief` see EXEC CICS file control**
-  (#538). A CICS program reaching its VSAM files through `EXEC CICS READ /
-  WRITE / REWRITE / DELETE / STARTBR / READNEXT / READPREV FILE(...)` (or
-  `DATASET(...)`) had no file rows, and `program_brief` answered `files: []`
-  with no caveat. Each such file now gets a row (R for the reads and
-  browses, C for WRITE, U for REWRITE, D for DELETE; the sample
-  `CICSLINK.cbl` shows `CUSTMST` as `-RU-`). A file named through a data
-  item (`FILE(WS-FNAME)`) is reported in the new `CRUDMatrix.caveats` (and
-  as an `incomplete-analysis` caveat in `program_brief`) instead of being
-  dropped.
-* **Report Writer output is no longer invisible to the file analyzers**
-  (#499). A report file (`FD f REPORT IS r`) is written only by `INITIATE`
-  / `GENERATE` / `TERMINATE`, which no analyzer handled: the CRUD matrix
-  showed `----`, IOLogger logged only OPEN/CLOSE, `gen-fixtures
-  --list-boundaries` had no OUT boundary, `lineage` had no port, and
-  `io-sequence` let a GENERATE on an unopened file pass. The FD's `REPORT
-  IS` clause is now kept in the AST (FILE SECTION metadata `report_files`),
-  and the three verbs write that file: C in the CRUD matrix, an IOLogger
-  `WRITE`, a `WRITE_BEFORE_OPEN` check in io-sequence, an OUT `WRITE`
-  boundary per GENERATE, and lineage edges from every `SOURCE` / `SUM`
-  operand of the printed groups to the report file's port.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
@@ -3602,6 +3536,125 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paragraph/section dispatch loop, ParseContext attachment, and AST
   creation, and delegates the rest. No behavior or public API changes.
 * **analysis:** internal refactor — `cobolparser/analysis/program_flow.py` (a ~987-line god class) is now the package `cobolparser/analysis/program_flow/` with focused collaborators: `models.py` (report dataclasses), `scanner.py` (procedure collection + statement scanning), `edges.py` (edge construction + edge-type categories), `cycles.py` (cycle detection/classification), `graph.py` (fall-through, convergence, reachability post-passes), and `analyzer.py` (the `ProgramFlowAnalyzer` orchestrator). No behavior or public API changes: all imports from `cobolparser`, `cobolparser.analysis`, and `cobolparser.analysis.program_flow` keep working, and `to_dict()` output is byte-identical.
+
+## [3.1.1](https://github.com/Landparty/cobol-parser/compare/v3.1.0...v3.1.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **analysis:** alias SAME RECORD AREA records in const-fold and lineage ([#497](https://github.com/Landparty/cobol-parser/issues/497)) ([ddc7031](https://github.com/Landparty/cobol-parser/commit/ddc7031fa3cdab377c4c9122d81fe42a529957e1))
+* **analysis:** dynamic CALL targets see SET cond TO TRUE and untracked writes to MOVE sources ([#511](https://github.com/Landparty/cobol-parser/issues/511)) ([a8af6b3](https://github.com/Landparty/cobol-parser/commit/a8af6b36f129455a5c60d1637b039d5c8ba57bcc))
+* **analysis:** flag dynamic CALL targets fed by READ/LINKAGE/SQL/CICS and run MOVE pass to a fixpoint ([#564](https://github.com/Landparty/cobol-parser/issues/564)) ([135e1e9](https://github.com/Landparty/cobol-parser/commit/135e1e95126f8bc32a35505f3765d6f74bc29b0f))
+* **analysis:** flag dynamic CALL targets fed by READ/LINKAGE/SQL/CICS and run MOVE pass to a fixpoint ([#564](https://github.com/Landparty/cobol-parser/issues/564)) ([0c3e1f2](https://github.com/Landparty/cobol-parser/commit/0c3e1f2022e8f1a92420fc888af28508ff5d4112))
+* **analysis:** honour I-O-CONTROL SAME RECORD AREA in const-fold and lineage ([#497](https://github.com/Landparty/cobol-parser/issues/497)) ([d085780](https://github.com/Landparty/cobol-parser/commit/d085780660dbbc337ce8031542fada9da2bc377d))
+* **analysis:** only exempt the error arm of a status check from call_count ([#590](https://github.com/Landparty/cobol-parser/issues/590)) ([6017f6b](https://github.com/Landparty/cobol-parser/commit/6017f6b701740bd9b5bf925338aa866e63d641ad))
+* **analysis:** resolve CALL through a pointer set with SET TO ENTRY ([#593](https://github.com/Landparty/cobol-parser/issues/593)) ([061f921](https://github.com/Landparty/cobol-parser/commit/061f9217a6c0163e6a6467ce575d1499dc7f0509))
+* **analysis:** resolve CALL through a pointer set with SET TO ENTRY ([#593](https://github.com/Landparty/cobol-parser/issues/593)) ([f963ea3](https://github.com/Landparty/cobol-parser/commit/f963ea3d7067f0fb3110663dfeb1cb4f2242198f))
+* **analysis:** see SET cond TO TRUE and untracked writes to MOVE sources in dynamic CALL targets ([#511](https://github.com/Landparty/cobol-parser/issues/511)) ([4b93e61](https://github.com/Landparty/cobol-parser/commit/4b93e615b8c6aa06a475ff109990b43d92b088a5))
+* **arithmetic:** record ROUNDED per receiver, with its MODE ([#517](https://github.com/Landparty/cobol-parser/issues/517)) ([18c905a](https://github.com/Landparty/cobol-parser/commit/18c905ac0255aaf027ff35b2ac61b272b3976c52))
+* **arithmetic:** record ROUNDED per receiver, with its MODE ([#517](https://github.com/Landparty/cobol-parser/issues/517)) ([baeebea](https://github.com/Landparty/cobol-parser/commit/baeebeaa39134769a56650561e941a1267b0009e))
+* **call:** parse CALL USING FUNCTION f(x) as one argument ([#579](https://github.com/Landparty/cobol-parser/issues/579)) ([8ca056f](https://github.com/Landparty/cobol-parser/commit/8ca056f565b41c54ec3e03cd56e40fa0b00857f8))
+* **call:** parse CALL USING FUNCTION f(x) as one argument ([#579](https://github.com/Landparty/cobol-parser/issues/579)) ([9607297](https://github.com/Landparty/cobol-parser/commit/9607297df5aefb3d827d0eba812d6d988f2178d9))
+* **cli:** cobol.yml define reaches scan and field-impact; warn on unapplied keys ([#324](https://github.com/Landparty/cobol-parser/issues/324)) ([ad8af38](https://github.com/Landparty/cobol-parser/commit/ad8af38f0916aec98119d8d0793efc67e3f38c7b))
+* **cli:** cobol.yml define reaches scan and field-impact; warn on unapplied keys ([#324](https://github.com/Landparty/cobol-parser/issues/324)) ([2ee0fc8](https://github.com/Landparty/cobol-parser/commit/2ee0fc8e707341c5897b0a6b544d9e534e24db6c))
+* **cli:** exit 2 from scan / codebase-graph / copybook-impact when a file fails ([#325](https://github.com/Landparty/cobol-parser/issues/325)) ([7a150af](https://github.com/Landparty/cobol-parser/commit/7a150af5dff678906f6316c146e2109438334643))
+* **cli:** exit 2 from scan / codebase-graph / copybook-impact when a file fails ([#325](https://github.com/Landparty/cobol-parser/issues/325)) ([d47b497](https://github.com/Landparty/cobol-parser/commit/d47b4977a36256bc1f3e0179b939a0773226c351))
+* **cli:** expand evaluates conditional compilation without --define ([#583](https://github.com/Landparty/cobol-parser/issues/583)) ([f199236](https://github.com/Landparty/cobol-parser/commit/f199236c8cfd2c8618f59fdecf5444ef34607634))
+* **cli:** expand evaluates conditional compilation without --define ([#583](https://github.com/Landparty/cobol-parser/issues/583)) ([b34a4f7](https://github.com/Landparty/cobol-parser/commit/b34a4f7e86d4815cbb2bd150ef7fa5653ffdfbc8))
+* **codebase:** give every DOT/Mermaid node a unique id ([#494](https://github.com/Landparty/cobol-parser/issues/494)) ([877362d](https://github.com/Landparty/cobol-parser/commit/877362d6c271dbf59350a2658d75a4de438cb31f))
+* **codebase:** give every DOT/Mermaid node a unique id ([#494](https://github.com/Landparty/cobol-parser/issues/494)) ([c35c806](https://github.com/Landparty/cobol-parser/commit/c35c80663f152e97feef2a334f4df79241d13dc0))
+* **codebase:** resolve CALLs to alternate ENTRY names ([#521](https://github.com/Landparty/cobol-parser/issues/521)) ([d89520c](https://github.com/Landparty/cobol-parser/commit/d89520c18f1d693198a9033eab212d6b33f757a2))
+* **codebase:** resolve CALLs to alternate ENTRY names ([#521](https://github.com/Landparty/cobol-parser/issues/521)) ([c2cf59a](https://github.com/Landparty/cobol-parser/commit/c2cf59a7920d217575ef4b6a8b475e1d647bd931))
+* **codebase:** resolve COPY members as written, not upper-cased basenames ([#580](https://github.com/Landparty/cobol-parser/issues/580)) ([6544388](https://github.com/Landparty/cobol-parser/commit/6544388cabf89f8dade5196747daf11c889490b9))
+* **codebase:** resolve COPY members as written, not upper-cased basenames ([#580](https://github.com/Landparty/cobol-parser/issues/580)) ([122ece0](https://github.com/Landparty/cobol-parser/commit/122ece02d80c47606c4eb7ee7a1d2f6b95b3dc99))
+* **codebase:** scope CALLs to nested programs by COBOL rules ([#532](https://github.com/Landparty/cobol-parser/issues/532)) ([bc630cc](https://github.com/Landparty/cobol-parser/commit/bc630cc2d57b0a2dbfcb52ff32ba2d38e2c686a6))
+* **codebase:** scope CALLs to nested programs by COBOL rules ([#532](https://github.com/Landparty/cobol-parser/issues/532)) ([2f1fc93](https://github.com/Landparty/cobol-parser/commit/2f1fc9324903435352e85bcd69b0587ef1263f18))
+* **compute:** end the expression at an undeclared legacy verb ([#525](https://github.com/Landparty/cobol-parser/issues/525)) ([9cc8eca](https://github.com/Landparty/cobol-parser/commit/9cc8eca74f21b265add54db8cf9881bdd24c91d4))
+* **conditions:** a leading NOT no longer negates the abbreviated leg ([#329](https://github.com/Landparty/cobol-parser/issues/329)) ([8a896e1](https://github.com/Landparty/cobol-parser/commit/8a896e182b7420ea2474917eb7291e8ac8cb2c37))
+* **conditions:** a leading NOT no longer negates the abbreviated leg ([#329](https://github.com/Landparty/cobol-parser/issues/329)) ([60a5e47](https://github.com/Landparty/cobol-parser/commit/60a5e473e6a35083de6e8931ea7f82adac3227be))
+* **conditions:** expand a bare data-name leg of an abbreviated relation ([#562](https://github.com/Landparty/cobol-parser/issues/562)) ([0718463](https://github.com/Landparty/cobol-parser/commit/07184632ede005fdec197f7a3b82ba928ac1b018))
+* **conditions:** expand a bare data-name leg of an abbreviated relation ([#562](https://github.com/Landparty/cobol-parser/issues/562)) ([2553ac6](https://github.com/Landparty/cobol-parser/commit/2553ac672f8d43b56c1f940ac56ab6843d4de17c))
+* **conditions:** keep typed-literal prefixes in conditions and selectors ([#331](https://github.com/Landparty/cobol-parser/issues/331)) ([c6a8831](https://github.com/Landparty/cobol-parser/commit/c6a88310ad923e43d97d439a27bfda7d363d4ec9))
+* **conditions:** keep typed-literal prefixes in conditions and selectors ([#331](https://github.com/Landparty/cobol-parser/issues/331)) ([b2bd977](https://github.com/Landparty/cobol-parser/commit/b2bd977ec529ad48a1f0d29e05f658ddb08cfdec))
+* **generators:** evaluate which arm a success status takes in call_count exemption ([#590](https://github.com/Landparty/cobol-parser/issues/590)) ([17690fe](https://github.com/Landparty/cobol-parser/commit/17690fe6a13c69e6bc6b3ba5186f3bc7406eca0e))
+* **generators:** expand COPY in gen-data/decode/compare record layouts ([#592](https://github.com/Landparty/cobol-parser/issues/592)) ([2042eed](https://github.com/Landparty/cobol-parser/commit/2042eedccc904b1192fbde2eef1a320229a28686))
+* **generators:** expand COPY in gen-data/decode/compare record layouts ([#592](https://github.com/Landparty/cobol-parser/issues/592)) ([b5373ba](https://github.com/Landparty/cobol-parser/commit/b5373ba5512902b31222e4a44a8dac15f2c65a2e))
+* **generators:** miss WHEN OTHER for its unsupported sibling's reason ([#509](https://github.com/Landparty/cobol-parser/issues/509)) ([0dfe348](https://github.com/Landparty/cobol-parser/commit/0dfe34828338b7ad56da852c9aa4a89b147baecb))
+* **generators:** model COMP-1/COMP-2 as signed floats, not PIC 9(9) ([#551](https://github.com/Landparty/cobol-parser/issues/551)) ([23ecc2e](https://github.com/Landparty/cobol-parser/commit/23ecc2ec8bf2a250f60de8a8758fee41c2f0f609))
+* **generators:** model COMP-1/COMP-2 as signed floats, not PIC 9(9) ([#551](https://github.com/Landparty/cobol-parser/issues/551)) ([f6c940a](https://github.com/Landparty/cobol-parser/commit/f6c940ad1b1413272d733eb76759a5fece634d8c))
+* **generators:** report unmodeled WHEN OTHER / AT END arms as missed ([#509](https://github.com/Landparty/cobol-parser/issues/509)) ([7a9938c](https://github.com/Landparty/cobol-parser/commit/7a9938cd318bccd4a6d2bfa40e258c89341911ec))
+* **generators:** report unmodeled WHEN OTHER / AT END arms as missed, not targeted ([#509](https://github.com/Landparty/cobol-parser/issues/509)) ([9fc752f](https://github.com/Landparty/cobol-parser/commit/9fc752f511887a21175a3b7dfae65803496ddf76))
+* **initialize:** keep phrases split across a line break ([#575](https://github.com/Landparty/cobol-parser/issues/575)) ([361d110](https://github.com/Landparty/cobol-parser/commit/361d110e4b78f6629603c4e3d64e0fa3ce2ba69a))
+* **initialize:** keep phrases split across a line break ([#575](https://github.com/Landparty/cobol-parser/issues/575)) ([80265bc](https://github.com/Landparty/cobol-parser/commit/80265bc150a258509d4c1f2f38f3744d29aab29e))
+* **inspect:** keep every TALLYING phrase of one FOR ([#332](https://github.com/Landparty/cobol-parser/issues/332)) ([e0c4721](https://github.com/Landparty/cobol-parser/commit/e0c4721ab59776191ea3373654319a4a054030fe))
+* **inspect:** keep every TALLYING phrase of one FOR ([#332](https://github.com/Landparty/cobol-parser/issues/332)) ([4d022f0](https://github.com/Landparty/cobol-parser/commit/4d022f09b0673ac59731ae9603026e58613baa22))
+* **io:** decode program sources like copybooks instead of refusing or mangling them ([62d1fee](https://github.com/Landparty/cobol-parser/commit/62d1fee0bac3434601f05596e7371871a18409de))
+* **io:** decode program sources like copybooks instead of refusing or mangling them ([773cb71](https://github.com/Landparty/cobol-parser/commit/773cb7165797711ee16c4815ddbbc85b16a7ca60)), closes [#522](https://github.com/Landparty/cobol-parser/issues/522)
+* **io:** keep text-mode line ends when reading a program source ([#522](https://github.com/Landparty/cobol-parser/issues/522)) ([d8322e9](https://github.com/Landparty/cobol-parser/commit/d8322e9d36e06679e30e40494ac9c5dcaf40ed8d))
+* **jcl:** find programs run under IKJEFT01 / DFSRRC00 in jcl --program ([#493](https://github.com/Landparty/cobol-parser/issues/493)) ([d57dac8](https://github.com/Landparty/cobol-parser/commit/d57dac8d2a65e3bf350948e061282fd489d80e17))
+* **jcl:** find programs run under IKJEFT01 / DFSRRC00 in jcl --program ([#493](https://github.com/Landparty/cobol-parser/issues/493)) ([12992ba](https://github.com/Landparty/cobol-parser/commit/12992babeb5939740f2ef539fa0e0beacef388c9))
+* **jcl:** make jcl --bindings output usable as field-impact --bindings input ([#547](https://github.com/Landparty/cobol-parser/issues/547)) ([54eaaa1](https://github.com/Landparty/cobol-parser/commit/54eaaa1f0a53963a166284468a33d7a255449cfe))
+* **jcl:** make jcl --bindings output usable as field-impact --bindings input ([#547](https://github.com/Landparty/cobol-parser/issues/547)) ([914bb94](https://github.com/Landparty/cobol-parser/commit/914bb947568980dc45b9a6c196f90c0cb973efc3))
+* **lexer:** let a declared data item be named CHAIN, NOTE, EXHIBIT, EXAMINE or TRANSFORM ([#525](https://github.com/Landparty/cobol-parser/issues/525)) ([d21c55a](https://github.com/Landparty/cobol-parser/commit/d21c55adebc0acf0f01e21a8507f8a6721269252))
+* **lexer:** let a declared data item be named CHAIN, NOTE, EXHIBIT, EXAMINE or TRANSFORM ([#525](https://github.com/Landparty/cobol-parser/issues/525)) ([722f973](https://github.com/Landparty/cobol-parser/commit/722f973f54b28234e21008aed53072ffeea14184))
+* **lineage:** a declared field with no value flow is found, not "no such field" ([#546](https://github.com/Landparty/cobol-parser/issues/546)) ([a2c8e26](https://github.com/Landparty/cobol-parser/commit/a2c8e267ad42054de3bac11f63075776c848b588))
+* **lineage:** a declared field with no value flow is found, not "no such field" ([#546](https://github.com/Landparty/cobol-parser/issues/546)) ([eb0138f](https://github.com/Landparty/cobol-parser/commit/eb0138f585621dc71f012f0a0dcfd79a6bc255a0))
+* **lineage:** a non-literal reference modifier is inexact outside MOVE too ([#527](https://github.com/Landparty/cobol-parser/issues/527)) ([e0b2c0e](https://github.com/Landparty/cobol-parser/commit/e0b2c0e550a31dbb3e4d347f5bdf45fa1b8e7e2d))
+* **lineage:** a non-literal reference modifier reaches every field it can ([#527](https://github.com/Landparty/cobol-parser/issues/527)) ([63c254c](https://github.com/Landparty/cobol-parser/commit/63c254c25f0597aed2d24504ddcef08a2eb47822))
+* **lineage:** a non-literal reference modifier reaches every field it can ([#527](https://github.com/Landparty/cobol-parser/issues/527)) ([02283c4](https://github.com/Landparty/cobol-parser/commit/02283c4d17c4b1bd8d69d5827f286ec2f64969fc))
+* **lineage:** bind every RUN PROGRAM of an IKJEFT01 SYSTSIN, not only the first ([#584](https://github.com/Landparty/cobol-parser/issues/584)) ([6188bf5](https://github.com/Landparty/cobol-parser/commit/6188bf5514292c93dd36861da5b5cc30d651fa1b))
+* **lineage:** bind every RUN PROGRAM of an IKJEFT01 SYSTSIN, not only the first ([#584](https://github.com/Landparty/cobol-parser/issues/584)) ([4f57f11](https://github.com/Landparty/cobol-parser/commit/4f57f115d52f7bf3f5bf5346c929fd99cdd97773))
+* **lineage:** drop IDCAMS comments before finding a statement's command ([#338](https://github.com/Landparty/cobol-parser/issues/338)) ([4cb664b](https://github.com/Landparty/cobol-parser/commit/4cb664be8f8897812026019bc5c6b6dbb1bb88ab))
+* **lineage:** field-impact text output lists port hits ([#528](https://github.com/Landparty/cobol-parser/issues/528)) ([a7ab205](https://github.com/Landparty/cobol-parser/commit/a7ab20502099b7935c823727cff8174ab4d0ef54))
+* **lineage:** field-impact text output lists port hits ([#528](https://github.com/Landparty/cobol-parser/issues/528)) ([cd7d373](https://github.com/Landparty/cobol-parser/commit/cd7d373f24ba5b06bf154cf7adb78fb2683e50f6))
+* **lineage:** follow DFSORT JOINKEYS and OUTFIL FILES= steps, caveat unread sort steps ([#585](https://github.com/Landparty/cobol-parser/issues/585)) ([b48ee36](https://github.com/Landparty/cobol-parser/commit/b48ee36fd0fadd459f73ea144ca7625ebc63a5cf))
+* **lineage:** follow DFSORT JOINKEYS and OUTFIL FILES= steps, caveat unread sort steps ([#585](https://github.com/Landparty/cobol-parser/issues/585)) ([c019dbf](https://github.com/Landparty/cobol-parser/commit/c019dbf6a8a11736da350ba9828f7b3953b96e42))
+* **lineage:** follow ICETOOL TOOLIN operators, caveat a dataset SYSTSIN ([#566](https://github.com/Landparty/cobol-parser/issues/566)) ([e0995df](https://github.com/Landparty/cobol-parser/commit/e0995dfb10cba5c235844e43794b29da3ca0e616))
+* **lineage:** follow ICETOOL TOOLIN operators, caveat a dataset SYSTSIN ([#566](https://github.com/Landparty/cobol-parser/issues/566)) ([135bb5e](https://github.com/Landparty/cobol-parser/commit/135bb5e7088c5f0cb227e94825a6af7f4c3c9418))
+* **lineage:** impact reports two-way ports (I-O DD, BY REFERENCE CALL, LINKAGE) ([#510](https://github.com/Landparty/cobol-parser/issues/510)) ([68f5c9b](https://github.com/Landparty/cobol-parser/commit/68f5c9b634b9903b57eab8f78bbff4567b241134))
+* **lineage:** impact reports two-way ports (I-O DD, BY REFERENCE CALL, LINKAGE) ([#510](https://github.com/Landparty/cobol-parser/issues/510)) ([db9a46e](https://github.com/Landparty/cobol-parser/commit/db9a46e3134e1fbdc798e1b4742b372af1cbe9bd))
+* **lineage:** keep an IDCAMS REPRO whose DSN has a command-word qualifier ([#338](https://github.com/Landparty/cobol-parser/issues/338)) ([4dba7a2](https://github.com/Landparty/cobol-parser/commit/4dba7a2a89046758ab66e3816f5819ac761e8f99))
+* **lineage:** keep an IDCAMS REPRO whose DSN has a command-word qualifier ([#338](https://github.com/Landparty/cobol-parser/issues/338)) ([3ce5e39](https://github.com/Landparty/cobol-parser/commit/3ce5e39558d2f491df12eefbbc1004a091f37f3e))
+* **lineage:** receivers of one statement no longer feed each other ([#535](https://github.com/Landparty/cobol-parser/issues/535)) ([8416e85](https://github.com/Landparty/cobol-parser/commit/8416e85165eb49c1ca6bad66081af778cb36f7f8))
+* **lineage:** receivers of one statement no longer feed each other ([#535](https://github.com/Landparty/cobol-parser/issues/535)) ([1cfae23](https://github.com/Landparty/cobol-parser/commit/1cfae23aef61262757978d9292202f4a17569a9b))
+* **lineage:** resolve JCL referbacks into and inside a PROC ([#565](https://github.com/Landparty/cobol-parser/issues/565)) ([a39fec6](https://github.com/Landparty/cobol-parser/commit/a39fec60af86f44d5bf2e20c75e2bf27074571c9))
+* **lineage:** resolve JCL referbacks into and inside a PROC ([#565](https://github.com/Landparty/cobol-parser/issues/565)) ([9492181](https://github.com/Landparty/cobol-parser/commit/94921819a2d6b7bc33dee728544a724612ed6e3d))
+* **lineage:** trace each field a bare name matches and say it is ambiguous ([#540](https://github.com/Landparty/cobol-parser/issues/540)) ([c32d856](https://github.com/Landparty/cobol-parser/commit/c32d8562e6731b3d6cfeb7b606d58fe19b787593))
+* **lineage:** trace each field a bare name matches and say it is ambiguous ([#540](https://github.com/Landparty/cobol-parser/issues/540)) ([73b3275](https://github.com/Landparty/cobol-parser/commit/73b3275f391cdb7ab05f81e9620284e836692928))
+* **lineage:** trace level-66 RENAMES items through their THRU range ([#485](https://github.com/Landparty/cobol-parser/issues/485)) ([713c916](https://github.com/Landparty/cobol-parser/commit/713c916d1d60b863f6365490889ad2a75b78a6df))
+* **lineage:** treat SORT/IEBGENER control statements from a dataset as a reformat ([#339](https://github.com/Landparty/cobol-parser/issues/339)) ([c270b3e](https://github.com/Landparty/cobol-parser/commit/c270b3e792642d6813b7c43a5e5f69a2f89477ea))
+* **lineage:** treat SORT/IEBGENER control statements from a dataset as a reformat ([#339](https://github.com/Landparty/cobol-parser/issues/339)) ([53ae49a](https://github.com/Landparty/cobol-parser/commit/53ae49ad0afe1153d539e2b9ebbbc7a656a58bc2))
+* **mcp:** callers_of / program_brief take reachability from dead-code, not the fall-through graph ([#486](https://github.com/Landparty/cobol-parser/issues/486)) ([d141ea1](https://github.com/Landparty/cobol-parser/commit/d141ea1806ad99bde54221b5a79673e8ef46e47e))
+* **mcp:** copybook dirs serve members only; refuse /, home, ancestors ([#544](https://github.com/Landparty/cobol-parser/issues/544)) ([aacca28](https://github.com/Landparty/cobol-parser/commit/aacca28f321e472c59ab6cf9815525c1f816adcf))
+* **mcp:** keep cobol.yml from widening the path guard ([#544](https://github.com/Landparty/cobol-parser/issues/544)) ([561fa7e](https://github.com/Landparty/cobol-parser/commit/561fa7e3a278adb7586f286c14f150f29696cf36))
+* **mcp:** keep cobol.yml from widening the path guard ([#544](https://github.com/Landparty/cobol-parser/issues/544)) ([3b60d03](https://github.com/Landparty/cobol-parser/commit/3b60d03188328569d6f3d84af70a875f3f0881a3))
+* **mcp:** lineage steps cite the file their line is really in ([#489](https://github.com/Landparty/cobol-parser/issues/489)) ([0a1f142](https://github.com/Landparty/cobol-parser/commit/0a1f142fd5be895b17a4c9c4c517fea60be53c95))
+* **mcp:** lineage steps cite the file their line is really in ([#489](https://github.com/Landparty/cobol-parser/issues/489)) ([b066e7d](https://github.com/Landparty/cobol-parser/commit/b066e7d8aafbbcb2c276bc26c579480d1eb0b8cb))
+* **mcp:** take procedure reachability from DeadCodeAnalyzer ([#486](https://github.com/Landparty/cobol-parser/issues/486)) ([9ac6592](https://github.com/Landparty/cobol-parser/commit/9ac65927f5aadc5a3d4885a70f4c90738f21e187))
+* **parser:** assume a missing period before a DIVISION/SECTION header ([#559](https://github.com/Landparty/cobol-parser/issues/559)) ([4d25be9](https://github.com/Landparty/cobol-parser/commit/4d25be9f2355634ec77be4ead854248f5817626e))
+* **parser:** assume a period before a header that ends a period-less entry ([#559](https://github.com/Landparty/cobol-parser/issues/559)) ([6256e00](https://github.com/Landparty/cobol-parser/commit/6256e00c051282510b95f9482077a6041a2a8e0f))
+* **parser:** consume a bare period in the procedure-division top loop ([#503](https://github.com/Landparty/cobol-parser/issues/503)) ([7814cf7](https://github.com/Landparty/cobol-parser/commit/7814cf7df5e30e9122ccbc969e9945c39b04c6fa))
+* **parser:** consume a bare period in the procedure-division top loop ([#503](https://github.com/Landparty/cobol-parser/issues/503)) ([8d51b61](https://github.com/Landparty/cobol-parser/commit/8d51b61610a74c3fe4f91ba7b56c5959bde1f449))
+* **parser:** keep CONVERTING ... [FROM|TO] JSON BOOLEAN in JSON PARSE/GENERATE ([#574](https://github.com/Landparty/cobol-parser/issues/574)) ([ffb257e](https://github.com/Landparty/cobol-parser/commit/ffb257e82fcf454afa741aff16a6c62916b7bc9a))
+* **parser:** keep JSON BOOLEAN/DECIMAL in JSON PARSE/GENERATE clauses ([#574](https://github.com/Landparty/cobol-parser/issues/574)) ([5e191d9](https://github.com/Landparty/cobol-parser/commit/5e191d98a8267895d3a651262790e39050d66b05))
+* **parser:** treat separator commas as spaces in MOVE, INSPECT, INITIALIZE and ACCEPT ([#569](https://github.com/Landparty/cobol-parser/issues/569)) ([64f15e3](https://github.com/Landparty/cobol-parser/commit/64f15e3e96255474905c3170c1838b0d4e48d1af))
+* **parser:** treat separator commas as spaces in MOVE, INSPECT, INITIALIZE and ACCEPT ([#569](https://github.com/Landparty/cobol-parser/issues/569)) ([e06fc2e](https://github.com/Landparty/cobol-parser/commit/e06fc2e99590534447e53b1f95841720816a9429))
+* **preprocess:** COPY REPLACING matches across lines and keeps member line numbers ([#560](https://github.com/Landparty/cobol-parser/issues/560), [#561](https://github.com/Landparty/cobol-parser/issues/561)) ([7ba325f](https://github.com/Landparty/cobol-parser/commit/7ba325f653580c7ea21d4a46d2687e65a54cbcda))
+* **preprocess:** COPY REPLACING matches across lines and keeps member line numbers ([#560](https://github.com/Landparty/cobol-parser/issues/560), [#561](https://github.com/Landparty/cobol-parser/issues/561)) ([da2b9a1](https://github.com/Landparty/cobol-parser/commit/da2b9a14c70703ef7b90b39f8dc1e28679ae709e))
+* **preprocess:** evaluate word-form operators and arithmetic in &gt;&gt;IF / &gt;&gt;WHEN ([#512](https://github.com/Landparty/cobol-parser/issues/512)) ([83eb42e](https://github.com/Landparty/cobol-parser/commit/83eb42eca23e76d81ed501a61917c64bac2778b3))
+* **preprocess:** evaluate word-form operators and arithmetic in &gt;&gt;IF / &gt;&gt;WHEN ([#512](https://github.com/Landparty/cobol-parser/issues/512)) ([df729f0](https://github.com/Landparty/cobol-parser/commit/df729f07b502806ebcb0a7c84ada3b46673e98d0))
+* **preprocess:** keep the undefined-symbol diagnostic for a parenthesized &gt;&gt;IF condition ([#512](https://github.com/Landparty/cobol-parser/issues/512)) ([06b5f90](https://github.com/Landparty/cobol-parser/commit/06b5f901559463691005298c5e1e77bf2f391d6d))
+* **preprocess:** stacked &gt;&gt;WHEN phrases share their text block ([#492](https://github.com/Landparty/cobol-parser/issues/492)) ([749b4b2](https://github.com/Landparty/cobol-parser/commit/749b4b2d373c8a2eb84220cb2c41e03ac52f00d9))
+* **preprocess:** stacked &gt;&gt;WHEN phrases share their text block ([#492](https://github.com/Landparty/cobol-parser/issues/492)) ([face5dd](https://github.com/Landparty/cobol-parser/commit/face5ddf3b1b25bfe676c1f9611471cbb57481d1))
+* **xref:** declare level-88s under a FILLER and level-66 RENAMES items ([#485](https://github.com/Landparty/cobol-parser/issues/485)) ([c390e74](https://github.com/Landparty/cobol-parser/commit/c390e749bdfe874c004bd9704e8809a363bd844b))
+* **xref:** declare level-88s under a FILLER and level-66 RENAMES items ([#485](https://github.com/Landparty/cobol-parser/issues/485)) ([d077f13](https://github.com/Landparty/cobol-parser/commit/d077f13c1a71b629c3c373e0178fbaa66f2ad101))
+* **xref:** read every BY/INTO receiver of a GIVING-less MULTIPLY/DIVIDE ([#534](https://github.com/Landparty/cobol-parser/issues/534)) ([32f3f77](https://github.com/Landparty/cobol-parser/commit/32f3f77694224899189418eed2f61c7c52248467))
+* **xref:** read every BY/INTO receiver of a GIVING-less MULTIPLY/DIVIDE ([#534](https://github.com/Landparty/cobol-parser/issues/534)) ([77f07d2](https://github.com/Landparty/cobol-parser/commit/77f07d233858ccc6d6929877ffdf0e4057901db9))
+
+
+### Documentation
+
+* **okf:** merge duplicated test-index rows after combining the high-issue PRs ([102f683](https://github.com/Landparty/cobol-parser/commit/102f68389bbb153dba3000015e0eea4980d06a2a))
 
 ## [3.1.0](https://github.com/Landparty/cobol-parser/compare/v3.0.0...v3.1.0) (2026-10-15)
 
