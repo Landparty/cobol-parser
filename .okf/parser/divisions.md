@@ -226,6 +226,17 @@ section. Known tradeoff: a data item inside or directly after such a section
 with no section header of its own (a CD's record, a bare `01`) is discarded with
 the body -- the warning is what keeps that from being silent.
 
+A SCREEN SECTION body is still read as it is discarded (#501): each named
+entry (`01 MAIN-SCREEN.`, an identifier right after a level number that opens
+an entry and is not a screen clause word, `_SCREEN_CLAUSE_WORDS`) lands in the
+section's `screen_items` metadata (`name` / `level` / `line` / `column`), and
+each `USING` / `FROM` / `TO` identifier operand, with its `OF`/`IN`
+qualifiers and any subscript (`WS-E ( I )`), in `screen_references` (`clause`
+/ `text` / `line` / `column`); so is an identifier value of `LINE` / `COLUMN`
+/ `COL` / `*-COLOR` / `SIZE` / `CONTROL` (`_SCREEN_VALUE_CLAUSES`, clause
+named as written). A literal operand is not kept. unused-variables and xref read them (see
+[../analysis/data-use.md](../analysis/data-use.md)).
+
 `REPORT`, `SCREEN` and `COMMUNICATION` double as ordinary clause words (an FD's
 `REPORT IS report-name.`, `examples/cobol/shamrice/report_test.cbl`). The FD
 clause itself is captured (`REPORT`/`REPORTS` in `_FD_CLAUSE_STARTS`,

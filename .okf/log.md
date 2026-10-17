@@ -256,6 +256,12 @@ to its last paragraph.
 [ast-models.md](ast-models.md): `LOW-VALUE THRU HIGH-VALUE` keeps its
 `THROUGH:` marker.
 
+## 2026-10-17 -- SCREEN SECTION bindings and names are kept (#501)
+
+[parser/divisions.md](parser/divisions.md), [analysis/data-use.md](analysis/data-use.md):
+`_skip_section` keeps `screen_items` / `screen_references`; unused-variables
+counts the bindings, xref records them and declares `screen-item`s.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
