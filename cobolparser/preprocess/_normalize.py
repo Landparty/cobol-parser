@@ -1257,8 +1257,11 @@ def _eval_define_arithmetic(text: str, defined: Mapping[str, str]) -> int | None
             return None
         tokens.append((match.group(1) or match.group(2)).upper())
         pos = match.end()
-    if not any(tok in "+-*/" for tok in tokens):
-        return None  # a plain literal or word, not an expression
+    if not any(tok in "+-*/()" for tok in tokens):
+        # A plain literal or word, not an expression. A parenthesised
+        # operand (``AS (A)``) is one, though: storing "(A)" made every
+        # ``>>IF B = 3`` silently FALSE, as ``AS A`` did (#567).
+        return None
 
     index = 0
 

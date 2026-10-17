@@ -477,7 +477,8 @@ Directive and skipped lines are blanked in place.
   arithmetic-expression` over integer literals / defined integer variables
   (`+ - * /`, parentheses) is evaluated exactly (`_eval_define_arithmetic`:
   `AS 2 + 1` is `3`); otherwise the raw text is kept. A lone word
-  (`_DEFINE_WORD_RE`, `AS A`) copies A's current value, any type; an
+  (`_DEFINE_WORD_RE`, `AS A`) copies A's current value, any type (`AS (A)`
+  goes through the arithmetic, integers only); an
   undefined one warns and keeps the word -- storing "A" made `>>IF B = 3`
   silently FALSE (#567). An `>>IF` / `>>WHEN`
   comparison operand may be the same arithmetic (`X + 1 = 8`), evaluated by

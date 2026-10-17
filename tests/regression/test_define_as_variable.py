@@ -53,3 +53,9 @@ def test_arithmetic_on_a_variable_still_evaluates() -> None:
     out, warnings = _run(">>DEFINE A AS 3", ">>DEFINE B AS A + 1", ">>IF B = 4")
     assert out == "DISPLAY 'GOOD'."
     assert warnings == []
+
+
+def test_a_parenthesised_variable_copies_its_value() -> None:
+    out, warnings = _run(">>DEFINE A AS 3", ">>DEFINE B AS (A)", ">>IF B = 3")
+    assert out == "DISPLAY 'GOOD'."
+    assert warnings == []
