@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Field lineage no longer links the receivers of one statement to each
+  other** (#535). `ADD 1 TO CNT-READ CNT-ERR` reported CNT-READ as feeding
+  CNT-ERR and back (likewise `SUBTRACT x FROM a b`, `MULTIPLY x BY a b`,
+  `DIVIDE x INTO a b`, INSPECT TALLYING counters and a STRING / UNSTRING
+  POINTER or TALLYING IN item), in `lineage`, `field-impact` and MCP
+  `impact_of_change` / `where_from`. Each receiver is now fed only by the
+  sending operands; COMPUTE and GIVING forms are unchanged.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
