@@ -119,6 +119,12 @@ caveat through `bindings_from_jobs(jobs, caveats)` (a fresh `LineageGraph` keeps
 [analysis/lineage.md](analysis/lineage.md): `bindings_from_jobs` binds the
 step's DDs to every `RUN PROGRAM(x)` in an IKJEFT01/1A/1B SYSTSIN, not only the first.
 
+## 2026-10-17 -- Lineage JCL: IDCAMS command words in DSNs (#338)
+
+[analysis/lineage.md](analysis/lineage.md): `_repro_commands` accepts an IDCAMS
+command word only at a statement start, outside parentheses and not as a DSN
+qualifier.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
