@@ -1273,7 +1273,12 @@ class XrefAnalyzer:
             if stmt.source_operands is not None:
                 read: list[str] = [*stmt.source_operands, *targets]
             elif isinstance(stmt, (MultiplyStatement, DivideStatement)):
-                read = list(stmt.operands[:2])
+                if givings or not targets:
+                    read = list(stmt.operands[:2])
+                else:
+                    # `MULTIPLY n BY a b` is a = a * n; b = b * n: every
+                    # BY/INTO receiver is read, not just the first (#534).
+                    read = [*stmt.operands[:1], *targets]
             else:
                 consumed = {name.upper() for name in written}
                 read = [op for op in stmt.operands if op.upper() not in consumed]

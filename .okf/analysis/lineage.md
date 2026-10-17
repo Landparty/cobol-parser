@@ -110,6 +110,9 @@ skipping FILLER, REDEFINES and OCCURS items and what is under them.
 item is numeric and receiving item numeric or numeric-edited (`_Item.category`,
 from PICTURE / USAGE), one `arith` edge each; the generic reads-to-writes
 path would join every subordinate to every other one (issue #337).
+Likewise the receivers of a GIVING-less `ADD a TO b c` / `MULTIPLY n BY b c`
+never feed each other (`_other_receivers`): each is computed from its own
+value and the sending operands only (#534).
 
 **Alias edges are never chained with one of their own class**
 (`overlay_class`; summary BFS and `LineageGraph._trace` both carry the

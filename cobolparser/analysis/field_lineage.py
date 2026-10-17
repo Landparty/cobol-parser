@@ -1542,13 +1542,41 @@ class FieldFlowAnalyzer:
             elif role == ROLE_WRITE:
                 writes += [r for r in self._refs(value, ROLE_WRITE) if r not in writes]
         statement = stmt.statement_type or type(stmt).__name__
+        others = self._other_receivers(stmt)
         for src in reads:
             for s in self._pieces(src) or self._loose_pieces(src):
                 for tgt in writes:
+                    if src != tgt and src in others:
+                        continue
                     for t in self._pieces(tgt) or self._loose_pieces(tgt):
                         self._edge(
                             s.node, t.node, kind, ctx, statement, s.exact and t.exact
                         )
+
+    def _other_receivers(self, stmt: CobolStatement) -> list[_Ref]:
+        """The receivers of ``ADD a TO b c`` / ``MULTIPLY n BY b c`` (no
+        GIVING) that are not also sending operands. Each receiver is
+        computed from its own prior value and the sending operands only
+        (``b = b * n; c = c * n``), so one never feeds another (#534)."""
+        if not isinstance(stmt, ArithmeticStatement) or isinstance(
+            stmt, ComputeStatement
+        ):
+            return []
+        if stmt.giving or stmt.givings or len(stmt.targets) < 2:
+            return []
+        if stmt.source_operands is not None:
+            sending = list(stmt.source_operands)
+        elif type(stmt).__name__ in ("MultiplyStatement", "DivideStatement"):
+            sending = list(stmt.operands[:1])
+        else:
+            return []
+        sent = [r for name in sending for r in self._refs(name, ROLE_READ)]
+        return [
+            ref
+            for name in stmt.targets
+            for ref in self._refs(name, ROLE_WRITE)
+            if ref not in sent
+        ]
 
     def _loose_pieces(self, ref: _Ref) -> list[_Piece]:
         """Every elementary field of an operand whose offset is unknown."""
