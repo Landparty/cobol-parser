@@ -152,7 +152,7 @@ from ..models.statements.data import (
     UnstringStatement,
 )
 from ..models.statements.io import IOAcceptStatement, IOOpenStatement
-from ..models.statements.misc import SelectStatement
+from ..models.statements.misc import CancelStatement, SelectStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 from .program_flow.condition_text import render_condition_text
 from .program_flow.statement_text import summarize_statement
@@ -707,6 +707,15 @@ def _statement_text(stmt: Any) -> str:
         if stmt.into_target:
             parts.append(f"INTO {stmt.into_target}")
         text = " ".join(parts)
+    elif isinstance(stmt, CancelStatement) and stmt.program_names:
+        # The flowchart renders CANCEL 'X' and CANCEL X alike; a literal ->
+        # data-name change would then read identically on both sides (#479).
+        text = "CANCEL " + " ".join(
+            f"'{name}'" if literal else name
+            for name, literal in zip(
+                stmt.program_names, stmt.program_names_literal, strict=False
+            )
+        )
     elif isinstance(stmt, UnstringStatement) and text == "UNSTRING":
         # The flowchart collapses UNSTRING to its verb.
         all_flags = list(stmt.delimiter_all) + [False] * len(stmt.delimiters)

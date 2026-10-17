@@ -662,7 +662,8 @@ consistent rename. Because case is folded outside quotes (#391),
 AST *marks* as literals (static CALL target, INVOKE method literal, STOP
 literal, EVALUATE `WHEN` Literal with `quoted` and Range bounds with
 `start_quoted` / `end_quoted`), so a case-only difference there still breaks
-Type-1. Where the AST does not mark them -- CANCEL targets, ACCEPT ... FROM
+Type-1. Where the AST does not mark them -- CANCEL targets (marked since
+#479 by `CancelStatement.program_names_literal`, not yet read here), ACCEPT ... FROM
 ENVIRONMENT names, EXEC CICS option values, literal arguments inside a COMPUTE
 `expression`, XML/JSON `clause_text` -- a case-only literal difference reads as
 the same text, so Type-1 can group them.
