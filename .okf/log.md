@@ -191,6 +191,10 @@ decodes are warnings or caveats, never silent.
 
 [parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): INITIALIZE's `TO VALUE`, `THEN` and `TO DEFAULT` lookaheads look past layout, so a line break inside a phrase no longer drops it.
 
+## 2026-10-17 -- Separator commas in MOVE / INSPECT / INITIALIZE / ACCEPT (#569)
+
+[parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): a separator `,` / `;` is skipped like a space in MOVE's source, every INSPECT phrase, INITIALIZE REPLACING and after the ACCEPT operand.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

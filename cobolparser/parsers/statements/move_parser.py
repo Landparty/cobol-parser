@@ -248,6 +248,13 @@ class MoveStatementParser(IStatementParser):
             if paren_depth == 0 and token.type == TokenType.PERIOD:
                 break
 
+            # ``MOVE 'ABC', TO X``: a separator comma / semicolon outside
+            # parentheses is a space, not part of the source (#569). Inside
+            # them it separates a function's arguments and is kept.
+            if paren_depth == 0 and token.type in SEPARATOR_TOKEN_TYPES:
+                token_stream.consume()
+                continue
+
             # Get token value. A typed literal (X"41", Z"...", N"...")
             # keeps its original prefixed text in raw_value -- re-quoting
             # only the content would silently turn the one-byte hex literal
