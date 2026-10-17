@@ -82,7 +82,7 @@ from .._lines import split_source_lines
 from ..batch import BatchResult, parse_files, parse_files_with_copybooks
 from ..models.program import CobolProgram
 from ..models.statements.base import CobolStatement
-from ..models.statements.call import CallStatement
+from ..models.statements.call import CallStatement, EntryStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 from ..preprocess.copy_statement_parser import extract_copy_statements
 from ..preprocess.models import CopybookSearchPath
@@ -210,6 +210,9 @@ class ProgramNode:
             deduplicated.
         parse_failed: True when the file produced no AST; ``calls`` is then
             empty and unknown, not empty and known.
+        entries: The alternate ``ENTRY 'name'`` names the unit declares,
+            uppercased and sorted: a ``CALL 'name'`` reaches this program
+            (#521).
     """
 
     program_id: str
@@ -217,15 +220,19 @@ class ProgramNode:
     calls: list[str] = field(default_factory=list)
     copies: list[str] = field(default_factory=list)
     parse_failed: bool = False
+    entries: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "program_id": self.program_id,
             "path": self.path,
             "calls": list(self.calls),
             "copies": list(self.copies),
             "parse_failed": self.parse_failed,
         }
+        if self.entries:
+            out["entries"] = list(self.entries)
+        return out
 
 
 @dataclass(frozen=True)
@@ -248,18 +255,31 @@ class CallEdge:
     is_dynamic: bool = False
     resolved: bool = True
     kind: str = CALL_KIND_CALL
+    #: The alternate ``ENTRY`` name the CALL used when it reached *callee*
+    #: through one rather than through its PROGRAM-ID (#521).
+    entry: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "caller": self.caller,
             "callee": self.callee,
             "is_dynamic": self.is_dynamic,
             "resolved": self.resolved,
             "kind": self.kind,
         }
+        if self.entry is not None:
+            out["entry"] = self.entry
+        return out
 
-    def _sort_key(self) -> tuple[str, str, str, bool, bool]:
-        return (self.caller, self.callee, self.kind, self.is_dynamic, self.resolved)
+    def _sort_key(self) -> tuple[str, str, str, bool, bool, str]:
+        return (
+            self.caller,
+            self.callee,
+            self.kind,
+            self.is_dynamic,
+            self.resolved,
+            self.entry or "",
+        )
 
 
 @dataclass(frozen=True)
@@ -683,6 +703,8 @@ def _call_edge_label(edge: CallEdge) -> str:
         CALL_KIND_CICS_LINK: "CICS LINK",
         CALL_KIND_CICS_XCTL: "CICS XCTL",
     }.get(edge.kind, "CALL")
+    if edge.entry is not None:
+        verb = f"{verb} ENTRY {edge.entry}"
     if not edge.is_dynamic:
         return verb
     return f"{verb} (dynamic)" if edge.resolved else f"{verb} (dynamic, partial)"
@@ -822,6 +844,8 @@ class CodebaseGraphBuilder:
                 errors,
             )
 
+        call_edges = self._resolve_entry_names(nodes, call_edges, unresolved)
+
         for node in nodes:
             node.calls = sorted(set(node.calls))
             node.copies = sorted(set(node.copies))
@@ -834,6 +858,60 @@ class CodebaseGraphBuilder:
             errors=sorted(errors, key=lambda e: (str(e["path"]), str(e["error"]))),
             copy_sites=self._copy_sites,
         )
+
+    @staticmethod
+    def _resolve_entry_names(
+        nodes: list[ProgramNode],
+        call_edges: list[CallEdge],
+        unresolved: list[str],
+    ) -> list[CallEdge]:
+        """Send a CALL to an alternate ``ENTRY`` name to the program that
+        declares it, keeping the name on the edge (#521).
+
+        A PROGRAM-ID wins over an ENTRY name of the same spelling. An ENTRY
+        name two programs declare is left as written and, when something
+        CALLs it, reported like a duplicate PROGRAM-ID.
+        """
+        program_ids = {node.program_id for node in nodes}
+        owners: dict[str, set[tuple[str, str]]] = {}
+        for node in nodes:
+            for entry in node.entries:
+                if entry not in program_ids:
+                    owners.setdefault(entry, set()).add((node.program_id, node.path))
+        if not owners:
+            return call_edges
+        resolved: list[CallEdge] = []
+        for edge in call_edges:
+            owner = owners.get(edge.callee)
+            if not owner or edge.kind != CALL_KIND_CALL:
+                resolved.append(edge)
+                continue
+            if len({program for program, _ in owner}) > 1:
+                where = " and ".join(sorted(path for _, path in owner))
+                unresolved.append(
+                    f"duplicate ENTRY {edge.callee} in {where}: call edges to it "
+                    "cannot be attributed to one program"
+                )
+                resolved.append(edge)
+                continue
+            (program, _), *_ = owner
+            resolved.append(
+                CallEdge(
+                    caller=edge.caller,
+                    callee=program,
+                    is_dynamic=edge.is_dynamic,
+                    resolved=edge.resolved,
+                    kind=edge.kind,
+                    entry=edge.callee,
+                )
+            )
+            for node in nodes:
+                if node.program_id == edge.caller and edge.callee in node.calls:
+                    node.calls = [
+                        program if callee == edge.callee else callee
+                        for callee in node.calls
+                    ]
+        return resolved
 
     def build_from_directory(
         self,
@@ -992,6 +1070,11 @@ class CodebaseGraphBuilder:
             # asks for the unit's tracked values.
             tracker: DynamicCallAnalyzer | None = None
             for statement in _unit_statements(unit):
+                if isinstance(statement, EntryStatement) and statement.entry_name:
+                    entry = _normalize_program_name(statement.entry_name)
+                    if entry and entry not in node.entries:
+                        node.entries.append(entry)
+                        node.entries.sort()
                 if isinstance(statement, CallStatement):
                     self._absorb_call(
                         statement, program_id, path, node, call_edges, unresolved

@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- ENTRY names in the call graph (#521)
+
+[analysis/codebase.md](analysis/codebase.md), [mcp.md](mcp.md):
+codebase-graph sends a CALL to an ENTRY name to the declaring program
+(`CallEdge.entry`), and MCP `callers_of` / `codebase_overview` count it.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
