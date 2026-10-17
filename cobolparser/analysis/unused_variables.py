@@ -391,6 +391,14 @@ def _walk_expression_operands(expr: CobolExpression | None) -> set[str]:
         return names
 
     if isinstance(expr, (ConditionalExpression, ArithmeticExpression)):
+        if expr.left_operand is None and expr.right_operand is None:
+            # A condition the builder could not decompose (``X EXCEEDS Y``,
+            # a class test without IS) keeps only its raw text. Now that a
+            # PERFORM UNTIL guard is walked through its tree (#539), this
+            # is the only place its names can come from.
+            raw = expr.get_metadata("raw_condition")
+            if raw:
+                return _extract_identifiers(str(raw))
         for operand in (expr.left_operand, expr.right_operand):
             names |= _names_from_value(operand)
         return names

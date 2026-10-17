@@ -140,3 +140,19 @@ def test_constraints_report_the_real_reason() -> None:
     reasons = " ".join(str(r) for r in report.to_dict().values())
     assert "unparseable condition text" not in reasons
     assert "user-defined class condition" in reasons
+
+
+@pytest.mark.parametrize("condition", ["WS-I EXCEEDS WS-J", "WS-I VALID-CODE"])
+def test_undecomposed_until_guard_still_references_its_fields(condition) -> None:
+    # PERFORM UNTIL is now walked through its condition_tree; a node the
+    # builder could not decompose keeps only metadata.raw_condition, which
+    # must still yield the fields (main read them from the raw text).
+    ast = _parse(
+        "IDENTIFICATION DIVISION.\nPROGRAM-ID. T.\nDATA DIVISION.\n"
+        "WORKING-STORAGE SECTION.\n01 WS-I PIC 9.\n01 WS-J PIC 9.\n"
+        f"PROCEDURE DIVISION.\nMAIN-PARA.\n    PERFORM UNTIL {condition}\n"
+        "       DISPLAY 'Z'\n    END-PERFORM\n    STOP RUN.\n"
+    )
+    report = LintAnalyzer(["unused-variables"]).analyze(ast)
+    flagged = {f.symbol for f in report.findings}
+    assert "WS-I" not in flagged
