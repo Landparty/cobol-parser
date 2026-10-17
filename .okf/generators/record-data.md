@@ -460,7 +460,11 @@ LOCAL-STORAGE, LINKAGE), calls `compute_record_layout()` on each top-level
   boundary (2/4/8 bytes, its own width) or inside an `OCCURS` table, and
   every item after it in source order, get `offset_ambiguous: True`, with one
   `unresolved` line naming it. An aligned SYNC item, or SYNC on
-  DISPLAY/packed, changes nothing.
+  DISPLAY/packed, changes nothing. These flags (and the partial level-88
+  lines) come from `flag_record_layout(record, layout)`, which
+  `compute_program_data_items` runs per record; `compute_record_layout` alone
+  does **not** flag -- a caller laying out one record must run it too (MCP
+  `record_layout` does, #488).
 * **Level-88 `THRU` ranges: `condition_ranges`** (see #361).
   `condition_values` comes from `expand_condition_values()`, which lists a
   range only in part: an integer range up to `_MAX_RANGE_EXPANSION` (`VALUE 1

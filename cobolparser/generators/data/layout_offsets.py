@@ -503,8 +503,7 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
                 record_layout[0].redefines_chain = _walk_redefines_chain(
                     record, siblings_by_name
                 )
-            _flag_sync_slack(record, record_layout, unresolved)
-            _flag_partial_condition_values(record_layout, unresolved)
+            unresolved.extend(flag_record_layout(record, record_layout))
             for layout_item in record_layout:
                 items.append(layout_item.to_dict())
 
@@ -519,6 +518,21 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
                     items.append(layout_item.to_dict())
 
     return {"items": items, "unresolved": unresolved}
+
+
+def flag_record_layout(record: CobolDataItem, layout: list[LayoutItem]) -> list[str]:
+    """What :func:`compute_record_layout`'s *layout* of *record* cannot vouch
+    for, as ``unresolved`` lines -- marking the offsets a ``SYNCHRONIZED``
+    item's slack bytes could shift ``offset_ambiguous`` on the way.
+
+    :func:`compute_program_data_items` runs it on every record; a caller
+    laying out one record on its own (MCP ``record_layout``) must run it too,
+    or its offsets read as exact when they are short by the slack (#488).
+    """
+    unresolved: list[str] = []
+    _flag_sync_slack(record, layout, unresolved)
+    _flag_partial_condition_values(layout, unresolved)
+    return unresolved
 
 
 def _flag_partial_condition_values(
