@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Constant folding: run enders inside an arm (#591)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md): a STOP RUN /
+GOBACK / EXIT PROGRAM inside a branch arm, loop or handler puts
+`ConstantFolder` in uncertain mode, like a conditional GO TO -- except in a
+body a success status never runs (`InvocationCounts.success_skipped`).
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

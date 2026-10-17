@@ -592,9 +592,16 @@ checked against GnuCOBOL 3.2 output):
   nothing at all clears the env.
 * **SEARCH WHEN bodies and SORT/MERGE INPUT/OUTPUT PROCEDUREs** are
   poisoned like a loop body (`_nested_statement_lists`, `_procedure_ranges`).
-* **Conditional transfers.** A `GO TO`, `EXIT PARAGRAPH/SECTION/PERFORM` or
-  `NEXT SENTENCE` inside an arm / loop / handler (or a main-line `EXIT
-  PARAGRAPH`...) sets `_WalkState.uncertain`: from then on every
+* **Conditional transfers.** A `GO TO`, `EXIT PARAGRAPH/SECTION/PERFORM`,
+  `NEXT SENTENCE` or run ender (`STOP RUN`, `GOBACK`, `EXIT PROGRAM` --
+  `_ends_run`, #591; not `STOP 'literal'`) inside an arm / loop / handler, or a
+  paragraph PERFORMed from one (or a main-line `EXIT PARAGRAPH`...) sets
+  `_WalkState.uncertain`. A run ender in a body a success status never runs
+  (`IF WS-FS NOT = '00' ... GOBACK`, an INVALID KEY handler -- the bodies
+  `count_invocations` exempts, `InvocationCounts.success_skipped`, passed as
+  `fold(..., success_skipped=)`) does not, so the happy path keeps its
+  `field_equals` after the ubiquitous status check; `IF WS-FS = '00' ...
+  GOBACK` (success takes the arm) still does. From then on every
   MOVE/arithmetic/READ/ACCEPT poisons instead of folding, because the walk
   can no longer tell whether it ran. A `GO TO` also clears the env (it runs
   code the walk never sees), so the `IF ... GO TO P1-EXIT` idiom never folds

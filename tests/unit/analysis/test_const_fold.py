@@ -11,6 +11,8 @@ observation points that make a folded value visible in the result.
 
 from __future__ import annotations
 
+import pytest
+
 from cobolparser import parse_cobol
 from cobolparser.analysis.const_fold import ConstantFolder
 from cobolparser.generators.data.program_layout import ProgramLayoutIndex
@@ -461,6 +463,50 @@ class TestControlFlowStops:
             "           DISPLAY WS-A.\n"
         )
         assert fold.known == {}
+
+    @pytest.mark.parametrize("ender", ["STOP RUN", "GOBACK", "EXIT PROGRAM"])
+    def test_run_ender_inside_an_arm_makes_later_writes_uncertain(self, ender):
+        # #591: the arm may end the run, so the DISPLAY after the IF may
+        # never execute -- the scenario taking the arm must not be told it
+        # shows 'PROCESSED'.
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           IF WS-FLAG = 'Q'\n"
+            "              DISPLAY 'QUIT'\n"
+            f"              {ender}\n"
+            "           END-IF.\n"
+            "           MOVE 'DONE' TO WS-NAME.\n"
+            "           DISPLAY WS-NAME.\n"
+            "           STOP RUN.\n"
+        )
+        assert "WS-NAME" not in fold.known
+
+    def test_run_ender_in_a_performed_paragraph_inside_an_arm(self):
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           IF WS-FLAG = 'Q'\n"
+            "              PERFORM QUIT-PARA\n"
+            "           END-IF.\n"
+            "           MOVE 'DONE' TO WS-NAME.\n"
+            "           DISPLAY WS-NAME.\n"
+            "           STOP RUN.\n"
+            "       QUIT-PARA.\n"
+            "           GOBACK.\n"
+        )
+        assert "WS-NAME" not in fold.known
+
+    def test_stop_literal_inside_an_arm_does_not_end_the_run(self):
+        # STOP 'literal' pauses and resumes; it is not a run ender.
+        fold = _fold(
+            "       MAIN-PARA.\n"
+            "           IF WS-FLAG = 'Q'\n"
+            "              STOP 'PAUSED'\n"
+            "           END-IF.\n"
+            "           MOVE 'DONE' TO WS-NAME.\n"
+            "           DISPLAY WS-NAME.\n"
+            "           STOP RUN.\n"
+        )
+        assert fold.known == {"WS-NAME": "DONE"}
 
 
 class TestPerformChaining:
