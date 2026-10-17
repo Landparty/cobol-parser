@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`PIC U(n)` reserves 4 x n bytes** (#554). Fixed character-length UTF-8
+  was sized n bytes, so every later `data-items` / MCP `record_layout`
+  offset and every gen-data / decode / compare record length was 3n bytes
+  short per such field. `PictureClause.size` is now 4n (new
+  `utf8_characters` keeps n); gen-data writes n characters space-padded to
+  4n bytes with an encoding caveat. `PIC U BYTE-LENGTH n` stays n bytes.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

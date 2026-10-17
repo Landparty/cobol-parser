@@ -530,6 +530,7 @@ module docstring — that suite is the regression guard):
 | `COMP-1` / `COMP-2` | IEEE 754 binary32/binary64, byte order as `COMP-5` |
 | `INDEX` / `POINTER` | binary zeros — an occurrence number and an address are not record content |
 | `PIC N` / `USAGE NATIONAL` | **not modelled as UTF-16**: single-byte text in the record charset, space-padded to the (correct, 2-bytes-per-position) width; `encoding_caveats()` says so. A numeric national field (`PIC 9(5) USAGE NATIONAL`, 10 bytes) goes the same way — `encode_field`/`decode_field` route `usage == "NATIONAL"` to text before the zoned branch |
+| `PIC U(n)` (UTF-8, fixed character-length) | **not modelled as UTF-8**: n single-byte characters (`FieldSpec.utf8_characters`) space-padded to the 4 x n bytes the field reserves; `encoding_caveats()` names the fields. `PIC U BYTE-LENGTH n` is an n-byte text field (#554) |
 | `PIC G` / `USAGE DISPLAY-1` (DBCS) | **not modelled as double-byte EBCDIC**: single-byte text in the record charset, space-padded to the 2-bytes-per-position width, decoded back the same way; `encoding_caveats()` (and so every `DecodeResult`) names the fields in a separate DBCS caveat, and a `PIC N USAGE DISPLAY-1` field is reported there rather than under the national/UTF-16 one (#321) |
 
 **Hex literals are written as their own bytes** (see #319): `VALUE X'C1C2'`,

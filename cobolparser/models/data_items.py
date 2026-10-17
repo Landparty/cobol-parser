@@ -15,8 +15,10 @@ from .ast_base import ASTNode, SourceLocation
 _PIC_P_FACTOR_RE = re.compile(r"P(\((\d+)\))?")
 _PIC_ALPHA_RE = re.compile(r"([XA])(\((\d+)\))?$")
 _PIC_NATIONAL_RE = re.compile(r"N(\((\d+)\))?$")
-# UTF-8 (``PIC U`` / ``PIC U(n)``, Enterprise COBOL 6.3): one *byte* per
-# symbol -- the item holds n bytes of UTF-8, not n characters.
+# UTF-8 (``PIC U`` / ``PIC U(n)``, Enterprise COBOL 6.3): fixed
+# character-length -- n UTF-8 characters, for which the compiler reserves
+# 4 x n bytes (the widest n characters can be).  ``PIC U BYTE-LENGTH n`` is
+# the fixed byte-length form and reserves n bytes.
 _PIC_UTF8_RE = re.compile(r"^U(?:\((\d+)\))?$")
 _PIC_DBCS_RE = re.compile(r"G(\((\d+)\))?$")
 _PIC_BASIC_NUMERIC_RE = re.compile(r"S?9(\((\d+)\))?$")
@@ -115,6 +117,10 @@ class PictureClause(ASTNode):
         self.is_national: bool = False
         #: National-edited: ``N`` with ``B``/``0``/``/`` insertion characters.
         self.is_national_edited: bool = False
+        #: Fixed character-length UTF-8 (``PIC U(n)``): the n characters the
+        #: item holds; ``size`` is the 4 x n bytes reserved for them.
+        #: ``None`` for any other picture, and for ``PIC U BYTE-LENGTH n``.
+        self.utf8_characters: int | None = None
         # Populated by ``_validate_pattern``: ``is_valid`` is False when the
         # pattern violates a PICTURE syntax rule, with human-readable reasons
         # in ``validation_errors``. Parsing stays lenient regardless so a bad
@@ -210,15 +216,20 @@ class PictureClause(ASTNode):
                 self.is_national = first == "N"
                 return
 
-        # 1c. UTF-8 (PIC U) patterns: U, U(n). ``PIC U(n)`` reserves n
-        # bytes (IBM sizes UTF-8 items in bytes, not characters); ``PIC U
-        # BYTE-LENGTH n`` reaches the same size through
-        # ``CobolDataItem.set_byte_length``.
+        # 1c. UTF-8 (PIC U) patterns: U, U(n). ``PIC U(n)`` is fixed
+        # character-length: n characters in 4 x n reserved bytes (IBM
+        # Enterprise COBOL 6.3+, "UTF-8 data items"), so ``size`` -- the
+        # byte width every layout surface reads -- is 4n, and
+        # ``utf8_characters`` keeps n.  Sizing it n bytes put every later
+        # offset 3n bytes short.  ``PIC U BYTE-LENGTH n`` is the fixed
+        # byte-length form; ``CobolDataItem.set_byte_length`` sizes it n.
         if first == "U":
             utf8_match = _PIC_UTF8_RE.match(pattern)
             if utf8_match:
                 count_str = utf8_match.group(1)
-                self.size = int(count_str) if count_str else 1
+                characters = int(count_str) if count_str else 1
+                self.utf8_characters = characters
+                self.size = 4 * characters
                 return
 
         # 2. Basic numeric patterns: 9, 9(n)
@@ -853,6 +864,7 @@ class CobolDataItem(ASTNode):
         self.byte_length = byte_length
         if self.picture_clause is not None:
             self.picture_clause.size = byte_length
+            self.picture_clause.utf8_characters = None
 
     def set_dynamic_length(self, limit: int | None = None) -> None:
         """Record ``DYNAMIC LENGTH [LIMIT n]``."""

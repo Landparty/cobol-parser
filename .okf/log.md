@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- PIC U(n) reserves 4 x n bytes (#554)
+
+[ast-models.md](ast-models.md), [generators/record-data.md](generators/record-data.md):
+fixed character-length UTF-8 is sized 4n bytes with `utf8_characters == n`;
+gen-data writes n characters padded to 4n and adds a UTF-8 caveat.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
