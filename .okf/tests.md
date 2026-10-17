@@ -97,7 +97,7 @@ tests/
   contracts/                   # 21 files: API contract tests (`contract` marker)
     test_fixture_bundle_contract.py  # FixtureBundle: exported names, bundle_version, generator signatures, to_dict() key sets, reproducibility, scenario-mode contract (see docs/fixture-bundle-schema.md)
     io_statements/             # 1 file (`io` too)
-  regression/                  # 137 files: pinned bug fixes, typically named for the issue/finding, e.g.
+  regression/                  # 169 files: pinned bug fixes, typically named for the issue/finding, e.g.
                                #   test_swallow_sweep.py: one period-less snippet per registered statement
                                #     parser x a DISPLAY 'MARKER'. sentinel; fails if a new parser is
                                #     registered without a fixture (see parser.md)
