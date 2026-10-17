@@ -83,6 +83,11 @@ xref and `LinkageChecker` sweep CICS options through it.
 [analysis/codebase.md](analysis/codebase.md): `StringStatement.groups`
 records which sources each DELIMITED BY applies to; diff compares it.
 
+## 2026-10-17 -- to_dict() metadata and procedure_count (#508)
+
+[ast-models.md](ast-models.md): `procedure_count` counts PROCEDURE DIVISION
+procedures only; `parser_version` is the package version; `created_at` dropped.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
