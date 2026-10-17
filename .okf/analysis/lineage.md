@@ -156,7 +156,12 @@ unjoined=...)` restores them so the rebuilt graph's `to_dict()` equals the
 original's (pinned in `TestStoredJoinState`). Without `join_caveats` only
 the opaque-callee caveat is re-derived and `unjoined` is empty. A rebuilt
 graph records the edges it loads, so its own `join_edges()` re-exports them.
-`ImpactResult.start_found` is False when nothing matched the start.
+`ImpactResult.start_found` is False when nothing matched the start. A
+declared item that no edge touches (set only from literals / VALUE, or only
+tested in a condition) is found: `impact()` returns no hits and a
+`notes` entry saying no value flows through it (#546; `_matched_items`
+answers "declared?", `_nodes_of` "in the graph?"). `ImpactResult.notes`
+is in `to_dict()` and a `Notes:` block of `to_text()`.
 
 ## Bindings from JCL
 

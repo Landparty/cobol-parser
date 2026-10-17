@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Lineage: a declared field with no value flow is found (#546)
+
+[analysis/lineage.md](analysis/lineage.md), [cli.md](cli.md), [mcp.md](mcp.md):
+`LineageGraph.impact()` reports a declared field no edge touches as found,
+with no hits and an `ImpactResult.notes` entry; `field-impact` exits 0 for it
+and MCP `where_from` / `impact_of_change` answer `found: true`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
