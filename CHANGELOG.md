@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`health` no longer flags a clone's namesake in another section as a
+  clone** (#555). `top_offenders` matched clone-group members by bare
+  paragraph name, so when `CALC` in section S1 was a clone, S2's unrelated
+  `CALC` got "+15 member of a duplicate-paragraph clone group" too. Clone
+  members now carry `qualified_name` (`"CALC OF S1"`, only when the name
+  repeats, also in `redundancy`'s JSON) and the match is by that key.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

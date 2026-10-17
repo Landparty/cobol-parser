@@ -49,6 +49,7 @@ from ..models.statements.control import (
 )
 from ..models.statements.misc import InvokeStatement
 from ._names import IDENTIFIER_TOKEN_RE
+from ._procedures import ProcedureIndex
 from .dead_code import DeadCodeAnalyzer, DeadCodeItem
 from .program_flow.condition_text import render_condition_text
 
@@ -513,9 +514,20 @@ class CloneMember:
 
     name: str
     location: SourceLocation
+    #: ``"CALC OF S1"`` when the paragraph's name is shared with a paragraph
+    #: in another section (the same key ``FlowNode.qualified_name`` and
+    #: ``DeadCodeItem.qualified_name`` use), else ``None`` -- the bare name
+    #: alone cannot tell the two apart (#555).
+    qualified_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "location": self.location.to_dict()}
+        result: dict[str, Any] = {
+            "name": self.name,
+            "location": self.location.to_dict(),
+        }
+        if self.qualified_name:
+            result["qualified_name"] = self.qualified_name
+        return result
 
 
 @dataclass
@@ -700,9 +712,15 @@ class RedundancyAnalyzer:
         self, proc_division: CobolDivision, min_clone_statements: int
     ) -> list[CloneGroup]:
         paragraphs = self._collect_paragraphs(proc_division)
+        qualified = {
+            id(entry.node): entry.qualified_name
+            for entry in ProcedureIndex.build(proc_division).entries
+        }
 
         type1_buckets = self._bucket_by_fingerprint(paragraphs, type2=False)
-        type1_groups = self._groups_from_buckets(type1_buckets, type2=False)
+        type1_groups = self._groups_from_buckets(
+            type1_buckets, type2=False, qualified=qualified
+        )
         # Any pair that's already a Type-1 match is a Type-1 match, not also
         # a "renamed" one -- Type-2 grouping only runs over paragraphs that
         # didn't already land in a Type-1 group of size >= 2, so every
@@ -717,7 +735,9 @@ class RedundancyAnalyzer:
             for p in members
         }
         remaining = [p for p in paragraphs if id(p) not in type1_ids]
-        type2_groups = self._group_by_fingerprint(remaining, type2=True)
+        type2_groups = self._group_by_fingerprint(
+            remaining, type2=True, qualified=qualified
+        )
 
         groups = [g for g in type1_groups if len(g.members) >= 2] + [
             g for g in type2_groups if len(g.members) >= 2
@@ -744,16 +764,26 @@ class RedundancyAnalyzer:
 
     @classmethod
     def _group_by_fingerprint(
-        cls, paragraphs: list[CobolParagraph], *, type2: bool
+        cls,
+        paragraphs: list[CobolParagraph],
+        *,
+        type2: bool,
+        qualified: dict[int, str | None] | None = None,
     ) -> list[CloneGroup]:
         return cls._groups_from_buckets(
-            cls._bucket_by_fingerprint(paragraphs, type2=type2), type2=type2
+            cls._bucket_by_fingerprint(paragraphs, type2=type2),
+            type2=type2,
+            qualified=qualified,
         )
 
     @staticmethod
     def _groups_from_buckets(
-        buckets: dict[Any, tuple[list[CobolParagraph], int]], *, type2: bool
+        buckets: dict[Any, tuple[list[CobolParagraph], int]],
+        *,
+        type2: bool,
+        qualified: dict[int, str | None] | None = None,
     ) -> list[CloneGroup]:
+        qualified = qualified or {}
         groups = []
         for members, leaf_count in buckets.values():
             groups.append(
@@ -766,7 +796,11 @@ class RedundancyAnalyzer:
                         # FlowNode, ...) -- callers like
                         # TechnicalDebtAnalyzer match clone membership by
                         # name against those always-uppercase sets.
-                        CloneMember(name=p.paragraph_name.upper(), location=p.location)
+                        CloneMember(
+                            name=p.paragraph_name.upper(),
+                            location=p.location,
+                            qualified_name=qualified.get(id(p)),
+                        )
                         for p in members
                     ],
                 )
