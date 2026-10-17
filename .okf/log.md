@@ -25,6 +25,11 @@ program's own `>>DEFINE` selects one arm, as `preprocess` does since #271.
 LESS [THAN] [OR EQUAL [TO]]` and `EQUAL [TO]` to symbols and evaluates
 arithmetic operands through `_eval_define_arithmetic`.
 
+## 2026-10-17 -- Stacked >>WHEN phrases (#492)
+
+[preprocessing.md](preprocessing.md): `_CondFrame.when_pending` lets a
+`>>WHEN` stacked on a matching one keep the shared text selected.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
