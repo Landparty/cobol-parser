@@ -43,6 +43,7 @@ from .models import (
     JobStep,
     unquote,
 )
+from .programs import TSO_PROGRAMS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from jclparser.model import DDStatement as _JDD
@@ -705,6 +706,17 @@ def _diagnose(job: JclJob, unresolved: list[str]) -> None:
         )
         if coded is not None and dd.record_length is None:
             note(f"{where}: LRECL={coded} is not a number; record length unknown")
+        if (
+            step is not None
+            and (step.program or "").upper() in TSO_PROGRAMS
+            and dd.name.upper() == "SYSTSIN"
+            and dd.dataset is not None
+        ):
+            note(
+                f"{where}: {step.program} reads SYSTSIN from {dd.dataset}, "
+                "which is not read, so the programs it runs (RUN PROGRAM) are "
+                "not known"
+            )
 
 
 def _names(procedures: Iterable[_JProc]) -> set[str]:

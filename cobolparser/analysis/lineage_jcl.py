@@ -64,6 +64,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from ..jcl.programs import IMS_CONTROLLER as _IMS_CONTROLLER
+from ..jcl.programs import RUN_PROGRAM_RE as _RUN_PROGRAM_RE
+from ..jcl.programs import TSO_PROGRAMS as _TSO_PROGRAMS
+from ..jcl.programs import ims_program
 from .lineage_graph import DatasetBinding, Passthrough
 
 _SORT_PROGRAMS = frozenset({"SORT", "DFSORT", "ICEMAN", "SYNCSORT"})
@@ -81,10 +85,6 @@ _ICETOOL_OPERATORS = {
     "RESIZE": "reformat",
 }
 _COPY_PROGRAMS = frozenset({"IEBGENER", "ICEGENER"})
-_TSO_PROGRAMS = frozenset({"IKJEFT01", "IKJEFT1A", "IKJEFT1B"})
-_IMS_CONTROLLER = "DFSRRC00"
-#: IMS region types whose ``PARM`` names the application program second.
-_IMS_BATCH_REGIONS = frozenset({"DLI", "DBB", "BMP"})
 _REFORMAT_RE = re.compile(
     r"\b(INREC|OUTREC|BUILD|OVERLAY|FINDREP|IFTHEN|PARSE|REFORMAT|JOINKEYS)\b"
 )
@@ -94,7 +94,6 @@ _FNAMES_RE = re.compile(r"\bFNAMES\s*=\s*\(?([A-Z0-9@#$,\s]+)\)?")
 _FILES_RE = re.compile(r"\bFILES\s*=\s*\(?([A-Z0-9@#$,\s]+)\)?")
 #: ``JOINKEYS F1=ddname`` / ``F2=ddname``: the join's input DDs, renamed.
 _JOIN_DD_RE = re.compile(r"\bF([12])\s*=\s*([A-Z@#$][A-Z0-9@#$]{0,7})\b")
-_RUN_PROGRAM_RE = re.compile(r"\bRUN\s+PROGRAM\s*\(\s*([A-Z0-9@#$]+)\s*\)")
 _REPRO_IN_RE = re.compile(
     r"\b(INFILE|INDATASET|IFILE|IDS)\s*\(\s*'?([A-Z0-9@#$.()+-]+?)'?\s*\)"
 )
@@ -324,16 +323,7 @@ def _ims_program(step: Any) -> str | None:
     ``PARM`` positional when the first is ``DLI`` / ``DBB`` / ``BMP``."""
     parameters = getattr(step, "parameters", None) or {}
     parm = parameters.get("PARM") if isinstance(parameters, dict) else None
-    if isinstance(parm, (list, tuple)):
-        parts = [str(p) for p in parm]
-    elif parm is not None:
-        parts = str(parm).strip().strip("()'").split(",")
-    else:
-        return None
-    parts = [p.strip().strip("'").upper() for p in parts]
-    if len(parts) > 1 and parts[0] in _IMS_BATCH_REGIONS and parts[1]:
-        return parts[1]
-    return None
+    return ims_program(parm)
 
 
 def _referback_keys(parts: list[str], step: str | None) -> list[str]:

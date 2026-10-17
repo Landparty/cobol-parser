@@ -131,6 +131,12 @@ qualifier.
 --bindings` validates rows (skips program-less / dataset-less ones); an `EXEC
 proc` step no longer keeps the override DDs its expansion applied.
 
+## 2026-10-17 -- jcl --program sees IKJEFT01 / DFSRRC00 programs (#493)
+
+[jcl.md](jcl.md), [cli.md](cli.md): new `jcl/programs.py` (shared with
+`lineage_jcl`); `steps_running` matches `JobStep.effective_programs()`; a dataset
+SYSTSIN is `unresolved`; `jcl --program` matching nothing exits 1.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

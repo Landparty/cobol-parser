@@ -807,7 +807,7 @@ flowchart renderer's conventions). `copybook-impact` takes the member first
 |------|---------|
 | `--dd-map` | Only the `ddname -> datasets` mapping (what `SELECT ... ASSIGN TO ddname` resolves through) |
 | `--bindings` | One row per DD binding (ddname, dataset, step, job, DISP, RECFM, LRECL, program) instead of the job structure; usable as `field-impact --bindings` input |
-| `--program NAME` | Only the steps that run this program; filters `--dd-map` and `--bindings` to the same steps |
+| `--program NAME` | Only the steps that run this program (`PGM=`, or `RUN PROGRAM` under IKJEFT01, the DFSRRC00 `PARM` program); filters `--dd-map` (DD names *and* datasets of those steps only) and `--bindings` to the same steps. A name no step runs prints the empty view, then exits 1 (#493) |
 | `--proc-path DIR` | Cataloged procedures and INCLUDE members (one per file, named after it; repeatable, in order). Without it only in-stream procedures expand; other `EXEC proc`s go to `unresolved` |
 | `--strict` | **Exit 3** when any card could not be parsed (exit 1 still means the run failed) |
 

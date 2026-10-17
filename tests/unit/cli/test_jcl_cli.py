@@ -146,12 +146,18 @@ class TestProgramView:
         assert payload["program"] == "PAYCALC"
         assert [s["name"] for s in payload["steps"]] == ["STEP010"]
 
-    def test_a_program_no_step_runs_reports_empty_rather_than_failing(
-        self, tmp_path, capsys
-    ):
-        payload = _run(tmp_path, TWO_STEP, capsys, program="NOSUCH")
+    def test_a_program_no_step_runs_reports_empty_then_fails(self, tmp_path, capsys):
+        # Like every analyzer's --program, a name that matches nothing exits
+        # 1 (#493); the empty report is still printed first.
+        path = tmp_path / "JOB.jcl"
+        path.write_text(TWO_STEP, encoding="utf-8")
+        with pytest.raises(SystemExit) as exc:
+            _cmd_jcl(_args(str(path), program="NOSUCH"))
+        captured = capsys.readouterr()
 
-        assert payload["steps"] == []
+        assert exc.value.code == 1
+        assert json.loads(captured.out)["steps"] == []
+        assert "--program NOSUCH: no step" in captured.err
 
 
 class TestGapReporting:
