@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`recursion-check` (and `lint` / `health`) no longer go cubic on the
+  "GO TO restart" idiom** (#373). With N paragraphs that may each `GO TO`
+  the first, every one of the N cycles rebuilt the edge maps, rescanned
+  every edge and compared every pair of its hops: 17 s at 800 paragraphs.
+  The maps are now built once per program, each cycle is checked in linear
+  time and the escape test runs once per strongly connected component --
+  0.4 s for the same program (`lint` 17.8 s -> 0.4 s, `health` 15.5 s ->
+  0.5 s), with identical output across the NIST suite and the samples.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

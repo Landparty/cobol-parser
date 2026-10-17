@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- recursion-check linear per cycle (#373)
+
+[analysis/flow.md](analysis/flow.md): `RecursionRiskAnalyzer` builds its
+edge maps once (`_FlowIndex`), checks each cycle in O(len) and caches the
+escape test per component; same output.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

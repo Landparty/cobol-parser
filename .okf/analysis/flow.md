@@ -446,6 +446,17 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   paragraph (`_perform_range`), not at the header node -- the header's
   fall-through into its first paragraph is not "leaving the range", so
   `S. S1. PERFORM S.` is reported.
+- **Cost is linear per cycle** (#373). `cycle_details` holds one cycle per
+  back edge with its full path, so the "GO TO restart" idiom (every
+  paragraph may `GO TO 0000-START`) yields N cycles of length ~N. The edge
+  maps, node map and PERFORM ranges are built once per report
+  (`_FlowIndex`); `_closed_by_perform_range_end` collects the PERFORM-only
+  hops' range ends then tests each fall-through-only hop by set lookup;
+  `_reenters_own_perform_range` needs exactly one non-fall-through hop; the
+  escape test is cached per strongly connected component. 800 paragraphs:
+  17 s -> 0.4 s, output unchanged. One risk per cycle is still reported (N
+  near-identical risks for that idiom). Pinned by
+  `tests/regression/test_issue_373_recursion_check_restart_idiom.py`.
 - **Self-recursive CALL** — a CALL (static, or dynamic and resolved via
   `DynamicCallAnalyzer`, which this analyzer runs internally) whose target
   equals the program's own `PROGRAM-ID`. `HIGH`, or `LOW` when the
