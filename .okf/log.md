@@ -183,6 +183,10 @@ entry, never a phantom `parse_failed` program.
 `--encoding`, batch / scan / codebase-graph default `None`, MCP); lossy
 decodes are warnings or caveats, never silent.
 
+## 2026-10-17 -- CALL USING FUNCTION f(x) is one argument (#579)
+
+[parser/statements-control.md](parser/statements-control.md), [analysis/lineage.md](analysis/lineage.md), [generators/fixtures.md](generators/fixtures.md), [tests.md](tests.md): a `FUNCTION` argument in a CALL USING list is one parameter, flows into the callee only, and is no gen-fixtures gap.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
