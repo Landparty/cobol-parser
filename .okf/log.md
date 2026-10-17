@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- io-sequence checks the OPEN mode (#548)
+
+[analysis/data-use.md](analysis/data-use.md): open states carry the OPEN
+mode; six new `IOViolationKind`s (`*_WRONG_MODE`, `OPEN_AFTER_LOCK`); pending
+conditional GO TO targets carry the state at the GO TO.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

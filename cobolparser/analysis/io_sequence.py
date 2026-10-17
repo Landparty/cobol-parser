@@ -9,6 +9,10 @@ Common bugs caught:
 - OPEN of a file that is already open (double-open)
 - CLOSE of a file that was never opened or already closed
 - Files left open at program exit (STOP RUN / GOBACK)
+- A verb the OPEN mode does not allow (READ / START on OUTPUT or EXTEND,
+  WRITE on INPUT or on a sequential file open I-O, REWRITE / DELETE on a
+  file not open I-O: file status 47 / 48 / 49), and an OPEN of a file
+  closed WITH LOCK earlier in the run (status 38)
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from ..models.statements import (
     IOWriteStatement,
     MergeStatement,
     PerformStatement,
+    SelectStatement,
     SortStatement,
     StopStatement,
 )
@@ -54,6 +59,13 @@ class IOViolationKind(Enum):
     CLOSE_NOT_OPEN = auto()
     DOUBLE_CLOSE = auto()
     FILE_LEFT_OPEN = auto()  # open at STOP RUN / GOBACK / end-of-program
+    # A verb the file's OPEN mode does not allow (#548): status 47 / 48 / 49.
+    READ_WRONG_MODE = auto()
+    START_WRONG_MODE = auto()
+    WRITE_WRONG_MODE = auto()
+    REWRITE_WRONG_MODE = auto()
+    DELETE_WRONG_MODE = auto()
+    OPEN_AFTER_LOCK = auto()  # OPEN of a file closed WITH LOCK (status 38)
 
 
 @dataclass
@@ -105,13 +117,49 @@ _OP_TO_VIOLATION: dict[str, IOViolationKind] = {
     "START": IOViolationKind.START_BEFORE_OPEN,
 }
 
+# Maps verb -> (the OPEN modes it is allowed under, the ViolationKind, the
+# file status the runtime returns otherwise). WRITE is further refused on a
+# sequential file open I-O (``_write_modes``).
+_MODE_RULES: dict[str, tuple[frozenset[str], IOViolationKind, str]] = {
+    "READ": (frozenset({"INPUT", "I-O"}), IOViolationKind.READ_WRONG_MODE, "47"),
+    "START": (frozenset({"INPUT", "I-O"}), IOViolationKind.START_WRONG_MODE, "47"),
+    "WRITE": (
+        frozenset({"OUTPUT", "EXTEND", "I-O"}),
+        IOViolationKind.WRITE_WRONG_MODE,
+        "48",
+    ),
+    "REWRITE": (frozenset({"I-O"}), IOViolationKind.REWRITE_WRONG_MODE, "49"),
+    "DELETE": (frozenset({"I-O"}), IOViolationKind.DELETE_WRONG_MODE, "49"),
+}
+_SEQUENTIAL_ORGANIZATIONS = frozenset(
+    {"SEQUENTIAL", "LINE SEQUENTIAL", "RECORD SEQUENTIAL"}
+)
+
 # A file's possible states at a point of the walk. Before an IF/EVALUATE
 # every file has exactly one; after one, it holds every state an arm that
-# falls out of the branch could have left it in.
-_OPEN = "open"
+# falls out of the branch could have left it in. An open file's state
+# carries its OPEN mode (``"open:INPUT"``; ``"open:"`` when the mode is not
+# known), so arms that open it in different modes merge into two states
+# and no mode violation is claimed unless every path breaks the rule. A
+# file closed WITH LOCK is ``locked``: closed, and not reopenable this run.
+_OPEN_PREFIX = "open:"
 _CLOSED = "closed"
+_LOCKED = "locked"
 _UNOPENED = "unopened"
 _NEVER_OPENED: frozenset[str] = frozenset({_UNOPENED})
+
+
+def _open_state(mode: str | None) -> str:
+    return _OPEN_PREFIX + (mode or "").upper()
+
+
+def _is_open(state: str) -> bool:
+    return state.startswith(_OPEN_PREFIX)
+
+
+def _any_open(states: frozenset[str]) -> bool:
+    return any(_is_open(state) for state in states)
+
 
 # Upper-cased file name -> the states it may be in; a file not in the map
 # has never been opened on any path.
@@ -139,6 +187,16 @@ _ENDS = "ends"
 _ViolationKey = tuple[Any, ...]
 
 
+def _merge_into(table: dict[str, _Status], name: str, state: _Status) -> None:
+    """Union *state* into ``table[name]`` (see ``IOSequenceAnalyzer._merge``)."""
+    previous = table.get(name)
+    table[name] = (
+        dict(state)
+        if previous is None
+        else IOSequenceAnalyzer._merge([previous, state])
+    )
+
+
 def _violation_key(v: IOSequenceViolation) -> _ViolationKey:
     loc = v.location
     where = (
@@ -160,7 +218,8 @@ class _Recording:
     entered: set[_PerformKey] = field(default_factory=set)
     guarded: set[_PerformKey] = field(default_factory=set)
     violations: dict[_ViolationKey, IOSequenceViolation] = field(default_factory=dict)
-    gotos: dict[str, None] = field(default_factory=dict)
+    # Conditional GO TO target -> the file states at the GO TO(s).
+    gotos: dict[str, _Status] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -176,7 +235,7 @@ class _RangeSummary:
     status_out: _FrozenStatus
     terminated: bool
     violations: tuple[IOSequenceViolation, ...]
-    gotos: tuple[str, ...]
+    gotos: tuple[tuple[str, _FrozenStatus], ...]
     entered: frozenset[_PerformKey]
     guarded: frozenset[_PerformKey]
 
@@ -251,6 +310,10 @@ class IOSequenceAnalyzer:
         # 9000-EOF``, ``IF ... GO TO ...``), walked once the fall-through
         # chain has looped back on itself.
         self._pending_gotos: list[str] = []  # resolved procedure keys
+        # The file states at the GO TO(s) that queued each pending target,
+        # merged into the walk's state when it resumes there: by then the
+        # walk may have reopened the file in another mode (#548).
+        self._pending_states: dict[str, _Status] = {}
         # True once the walk ended because it looped back to a paragraph it
         # had already run, with no STOP RUN/GOBACK reached: whatever is
         # still open then was open *inside* a loop, not at program end.
@@ -259,6 +322,9 @@ class IOSequenceAnalyzer:
         # and REWRITE name a record, never a file, so without this map they
         # could never be checked against the open-file set at all.
         self._record_to_file: dict[str, str] = {}
+        # SELECT file name -> ORGANIZATION (upper-cased; absent means the
+        # default, SEQUENTIAL). Only WRITE under I-O depends on it.
+        self._organization: dict[str, str] = {}
 
     def analyze(self, ast: CobolProgram) -> IOSequenceReport:
         """Analyze the AST and return an IOSequenceReport.
@@ -285,8 +351,14 @@ class IOSequenceAnalyzer:
         self._seen_violations = set()
         self._terminated = False
         self._pending_gotos = []
+        self._pending_states = {}
         self._ended_in_cycle = False
         self._record_to_file = record_to_file_map(ast)
+        self._organization = {
+            select.file_name.upper(): (select.organization or "SEQUENTIAL").upper()
+            for select in ast.find_all_by_type("SelectStatement")
+            if isinstance(select, SelectStatement) and select.file_name
+        }
 
         proc_division = ast.procedure_division
         if proc_division is not None:
@@ -407,8 +479,9 @@ class IOSequenceAnalyzer:
         When the chain loops back to a paragraph it already ran -- the
         ``READ ... AT END GO TO END-P`` / ``GO TO LOOP-P`` idiom -- the walk
         resumes at a GO TO target it met inside a conditional branch and has
-        not run yet (from the state the walk is in at that point), since
-        that is how such a loop is left. Without it, the CLOSE in the loop's
+        not run yet (from the state the walk is in at that point, merged
+        with the state at the GO TO), since that is how such a loop is
+        left. Without it, the CLOSE in the loop's
         exit paragraph was never seen and the file was reported left open.
         """
         visited: set[int] = set()
@@ -433,8 +506,12 @@ class IOSequenceAnalyzer:
     def _next_pending(self, visited: set[int]) -> int | None:
         """The next conditional GO TO target the chain has not run yet."""
         while self._pending_gotos:
-            idx = self._name_first.get(self._pending_gotos.pop(0))
+            name = self._pending_gotos.pop(0)
+            idx = self._name_first.get(name)
             if idx is not None and idx not in visited:
+                saved = self._pending_states.get(name)
+                if saved is not None:
+                    self._status = self._merge([self._status, saved])
                 return idx
         return None
 
@@ -663,7 +740,7 @@ class IOSequenceAnalyzer:
         return self._status.get(key, _NEVER_OPENED)
 
     def _maybe_open_files(self) -> list[str]:
-        return sorted(k for k, v in self._status.items() if _OPEN in v)
+        return sorted(k for k, v in self._status.items() if _any_open(v))
 
     def _run_perform(
         self,
@@ -727,14 +804,17 @@ class IOSequenceAnalyzer:
             outer.guarded |= rec.guarded
             for vkey, violation in rec.violations.items():
                 outer.violations.setdefault(vkey, violation)
-            for name in rec.gotos:
-                outer.gotos.setdefault(name)
+            for name, at_goto in rec.gotos.items():
+                _merge_into(outer.gotos, name, at_goto)
         self._summaries.setdefault(state, []).append(
             _RangeSummary(
                 status_out=frozenset(self._status.items()),
                 terminated=self._terminated,
                 violations=tuple(rec.violations.values()),
-                gotos=tuple(rec.gotos),
+                gotos=tuple(
+                    (name, frozenset(at_goto.items()))
+                    for name, at_goto in rec.gotos.items()
+                ),
                 entered=frozenset(rec.entered),
                 # A guard hit on a range this run itself entered is internal
                 # to it; only the enclosing frames' ranges are a dependency.
@@ -766,8 +846,8 @@ class IOSequenceAnalyzer:
         self._status = dict(summary.status_out)
         for violation in summary.violations:
             self._emit(violation)
-        for name in summary.gotos:
-            self._add_pending_goto(name)
+        for name, at_goto in summary.gotos:
+            self._add_pending_goto(name, dict(at_goto))
         if self._recordings:
             rec = self._recordings[-1]
             rec.entered |= summary.entered
@@ -784,10 +864,13 @@ class IOSequenceAnalyzer:
             self._seen_violations.add(vkey)
             self._violations.append(violation)
 
-    def _add_pending_goto(self, name: str) -> None:
-        """Queue a conditional GO TO target for ``_run_chain``."""
+    def _add_pending_goto(self, name: str, at_goto: _Status | None = None) -> None:
+        """Queue a conditional GO TO target for ``_run_chain``, with the
+        file states at the GO TO (*at_goto*, default the current ones)."""
+        state = dict(self._status) if at_goto is None else at_goto
         if self._recordings:
-            self._recordings[-1].gotos.setdefault(name)
+            _merge_into(self._recordings[-1].gotos, name, state)
+        _merge_into(self._pending_states, name, state)
         if name not in self._pending_gotos:
             self._pending_gotos.append(name)
 
@@ -864,11 +947,28 @@ class IOSequenceAnalyzer:
     def _handle_open(self, node: IOOpenStatement, loc: SourceLocation | None) -> None:
         """Process an OPEN statement."""
         files = self._get_open_files(node)
+        modes = getattr(node, "file_modes", None) or {}
         for file_name in files:
             if not file_name.strip():
                 continue  # Skip empty/whitespace names
             key = file_name.upper()
-            if self._states(key) == {_OPEN}:
+            states = self._states(key)
+            if states == frozenset({_LOCKED}):
+                # Closed WITH LOCK on every path: the OPEN fails (status
+                # 38) and the file stays closed -- no FILE_LEFT_OPEN either.
+                self._emit(
+                    IOSequenceViolation(
+                        kind=IOViolationKind.OPEN_AFTER_LOCK,
+                        file_name=file_name,
+                        location=loc,
+                        message=(
+                            f"OPEN of file '{file_name}' that was closed WITH "
+                            "LOCK earlier in the run (file status 38)"
+                        ),
+                    )
+                )
+                continue
+            if all(_is_open(state) for state in states):
                 self._emit(
                     IOSequenceViolation(
                         kind=IOViolationKind.DOUBLE_OPEN,
@@ -878,7 +978,7 @@ class IOSequenceAnalyzer:
                     )
                 )
             # Open on every path now, whether or not it was before.
-            self._status[key] = frozenset({_OPEN})
+            self._status[key] = frozenset({_open_state(modes.get(file_name))})
 
     def _handle_close(self, node: IOCloseStatement, loc: SourceLocation | None) -> None:
         """Process a CLOSE statement."""
@@ -894,11 +994,12 @@ class IOSequenceAnalyzer:
                 continue
             key = file_name.upper()
             states = self._states(key)
-            if _OPEN in states:
+            if _any_open(states):
                 # Closed on every path now; one where it was never open is
                 # not reported (see the class docstring).
-                self._status[key] = frozenset({_CLOSED})
-            elif _CLOSED in states:
+                closed = _LOCKED if opts.get("with_lock") else _CLOSED
+                self._status[key] = frozenset({closed})
+            elif _CLOSED in states or _LOCKED in states:
                 self._emit(
                     IOSequenceViolation(
                         kind=IOViolationKind.DOUBLE_CLOSE,
@@ -920,20 +1021,60 @@ class IOSequenceAnalyzer:
     def _check_open(
         self, file_name: str, verb: str, loc: SourceLocation | None
     ) -> None:
-        """Emit a violation if *file_name* is not currently open."""
+        """Emit a violation if *file_name* is not currently open, or is
+        open on every path in a mode that does not allow *verb*."""
         if not file_name:
             return  # Cannot determine file name statically
         key = file_name.upper()
-        if _OPEN not in self._states(key):
-            kind = _OP_TO_VIOLATION.get(verb, IOViolationKind.READ_BEFORE_OPEN)
-            self._emit(
-                IOSequenceViolation(
-                    kind=kind,
-                    file_name=file_name,
-                    location=loc,
-                    message=(f"{verb} on file '{file_name}' before it was OPENed"),
-                )
+        states = self._states(key)
+        if _any_open(states):
+            self._check_mode(file_name, key, states, verb, loc)
+            return
+        kind = _OP_TO_VIOLATION.get(verb, IOViolationKind.READ_BEFORE_OPEN)
+        self._emit(
+            IOSequenceViolation(
+                kind=kind,
+                file_name=file_name,
+                location=loc,
+                message=(f"{verb} on file '{file_name}' before it was OPENed"),
             )
+        )
+
+    def _check_mode(
+        self,
+        file_name: str,
+        key: str,
+        states: frozenset[str],
+        verb: str,
+        loc: SourceLocation | None,
+    ) -> None:
+        """Emit a ``*_WRONG_MODE`` violation when every path has *key* open
+        in a known mode that refuses *verb* (#548)."""
+        rule = _MODE_RULES.get(verb)
+        if rule is None or not all(_is_open(state) for state in states):
+            return
+        allowed, kind, status = rule
+        if verb == "WRITE" and (
+            self._organization.get(key, "SEQUENTIAL") in _SEQUENTIAL_ORGANIZATIONS
+        ):
+            # A sequential file open I-O can be READ and REWRITten, never
+            # written to: WRITE needs OUTPUT or EXTEND.
+            allowed = allowed - {"I-O"}
+        modes = {state[len(_OPEN_PREFIX) :] for state in states}
+        if "" in modes or modes & allowed:
+            return
+        shown = " / ".join(sorted(modes))
+        self._emit(
+            IOSequenceViolation(
+                kind=kind,
+                file_name=file_name,
+                location=loc,
+                message=(
+                    f"{verb} on file '{file_name}' opened {shown}, which does "
+                    f"not allow it (file status {status})"
+                ),
+            )
+        )
 
     # ------------------------------------------------------------------
     # Helpers to extract file names from IO nodes
