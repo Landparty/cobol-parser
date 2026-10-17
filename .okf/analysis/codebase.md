@@ -51,7 +51,11 @@ results into one graph with two kinds of edge:
   `extract_copy_statements()` rather than from an expanded parse, because
   expansion *consumes* the COPY statement and discards exactly the edge we are
   after. Members resolve to real files through the same `PathResolver` the
-  expander uses, so a nested chain is followed to its leaves and a circular pair
+  expander uses, and with the member **as written** (`statement.member_name`,
+  `_resolve_member(..., written=...)`), not the upper-cased basename that is
+  the graph key -- `COPY ordrec.` on a case-sensitive filesystem and
+  `COPY "sub/REC.cpy"` were unresolved here while the expander inlined them
+  (#580). A nested chain is followed to its leaves and a circular pair
   (`A COPY B`, `B COPY A`) is reported, not looped on.
   A DB2 `EXEC SQL INCLUDE X END-EXEC` is a copy edge too (the scan passes
   `sql_include=True`), with the same `COPY` label and the same unresolved-member
@@ -98,8 +102,9 @@ walkable in either direction.
 
 **Library-qualified COPY (#351).** `COPY REC OF LIBA` and `COPY REC IN LIBB`
 are two different files, so the builder's caches are keyed by more than the
-member name: `_member_paths` / `_member_failures` on `(member, library)`, and
-`_member_copies` on the resolved file path. A nested COPY is resolved with its
+member name: `_member_paths` / `_member_failures` on `(member as written,
+library)`, and `_member_copies` on the resolved file path (its entries carry
+the written spelling too, #580). A nested COPY is resolved with its
 own `library_qualifier`, as the expander does. `CopyEdge` carries `library`
 (the qualifier as written, case kept) and, for a nested edge, `parent_path` --
 the outer member's file. `programs_using()` and `CopybookImpactAnalyzer` walk

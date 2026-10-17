@@ -147,10 +147,16 @@ class CopybookNotFoundError(PreprocessingError):
         search_paths: list[str],
         suggestions: list[str] | None = None,
         message: str | None = None,
+        *,
+        case_variant_exists: bool = False,
     ):
         self.copybook_name = copybook_name
         self.search_paths = search_paths
         self.suggestions = suggestions or []
+        #: A copybook of this name exists, spelled in a different letter
+        #: case: on a case-sensitive filesystem the member is matched as
+        #: written, so suggesting the same name back would be no help (#580).
+        self.case_variant_exists = case_variant_exists
         if message is None:
             paths_str = (
                 ", ".join(search_paths) if search_paths else "(no paths configured)"
@@ -158,6 +164,11 @@ class CopybookNotFoundError(PreprocessingError):
             message = (
                 f"Copybook '{copybook_name}' not found in search paths: {paths_str}"
             )
+            if case_variant_exists:
+                message += (
+                    f". A copybook named {copybook_name.upper()} exists in a "
+                    "different letter case; the member is matched as written"
+                )
             if self.suggestions:
                 message += f". Did you mean: {', '.join(self.suggestions)}?"
         super().__init__(message)

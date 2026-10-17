@@ -336,6 +336,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SET p1 TO p2` as copies; `codebase-graph` and MCP `callers_of` now draw
   the edge to SUBPGM instead of reporting the CALL as having no target. Any
   other SET to the pointer still marks the target list incomplete.
+* **`codebase-graph`, `copybook-impact` and MCP `impact_of_change` find
+  the copybooks the parser expands** (#580). The member is resolved as the
+  COPY statement writes it rather than upper-cased and cut to its basename,
+  so `COPY ordrec.` (a lowercase file on a case-sensitive filesystem) and
+  `COPY "sub/SUBREC.cpy".` resolve, with their fields and nested members.
+  A not-found note no longer suggests the name it just looked up ("Did you
+  mean: ORDREC?"); it says a copybook of that name exists in a different
+  letter case.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
