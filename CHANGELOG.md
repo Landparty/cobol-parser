@@ -517,6 +517,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the parser can follow (~500 IFs) were skipped with a warning while
   `success` stayed True; that is now an error ("Statement nested too
   deeply to parse"), under FAIL_FAST and COLLECT_ALL alike.
+* **`data-items` and MCP `record_layout` report level-66 RENAMES items**
+  (#563). `compute_program_data_items` walked only the 01/77 trees, so a
+  RENAMES item had no entry and no `unresolved` line, and `record_layout`
+  answered `found: false` with no caveat. Each RENAMES now gets a level-66
+  entry under the record it renames (offset of its first operand, length to
+  the end of its THRU operand; a single-item RENAMES takes that item's
+  PICTURE and USAGE), or an `unresolved` line when it cannot be placed.
+  `record_layout` answers it with its range and the record's fields inside
+  it, and one it cannot place with an `incomplete-analysis` caveat.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

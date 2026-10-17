@@ -499,6 +499,17 @@ LOCAL-STORAGE, LINKAGE), calls `compute_record_layout()` on each top-level
   (resolving its `redefines_chain` against the section's top-level siblings).
   Without it a 77 that was its misnested parent's *only* child vanishes from
   the output entirely and the parent reads as a PIC-less elementary item.
+* **Level-66 RENAMES** (#563). After a section's records are laid out,
+  `renames_layout(node, placed)` places each `RenamesItem` in the last record
+  declared before it: `byte_offset` = its first operand's, `byte_length` = to
+  the end of its THRU operand (`OF` qualifiers must name ancestors). The entry
+  is `level` 66, `qualified_name` `REC.NAME`, `parent_qualified_name` the
+  record; a single-operand RENAMES takes the renamed item's PICTURE / USAGE /
+  group-ness, a THRU range is a DISPLAY group; `offset_ambiguous` if either
+  end is. One it cannot place (an operand not found or ambiguous, an inverted
+  range) gets an `unresolved` line instead. Lineage's `_record_blocks` still
+  drops level-66 entries. Pinned by
+  `tests/regression/test_issue_563_renames_data_items.py`.
 * **`SYNCHRONIZED`** is not modelled (offsets are unaligned throughout), so
   the first `SYNCHRONIZED` binary/float/pointer/index item that is off its
   boundary (2/4/8 bytes, its own width) or inside an `OCCURS` table, and

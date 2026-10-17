@@ -278,6 +278,12 @@ counts the bindings, xref records them and declares `screen-item`s.
 [parser/statements.md](parser/statements.md): chains built in one pass
 (`_fold_logical`); a RecursionError from nesting is an error.
 
+## 2026-10-17 -- data-items and record_layout place RENAMES (#563)
+
+[generators/record-data.md](generators/record-data.md), [mcp.md](mcp.md):
+`renames_layout()` emits a level-66 entry per RENAMES (or an `unresolved`
+line); MCP `record_layout` answers a RENAMES name via `_renames_records`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
