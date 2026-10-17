@@ -110,6 +110,14 @@ skipping FILLER, REDEFINES and OCCURS items and what is under them.
 item is numeric and receiving item numeric or numeric-edited (`_Item.category`,
 from PICTURE / USAGE), one `arith` edge each; the generic reads-to-writes
 path would join every subordinate to every other one (issue #337).
+In that generic path (`_reads_to_writes`) a receiver that only accumulates
+into itself feeds nothing else the statement writes (`_self_feeding`,
+#535): the receivers of ADD / SUBTRACT / MULTIPLY / DIVIDE without GIVING
+(taken from the model, not xref roles), and a read-and-written operand of
+INSPECT (counters; the inspected item excepted), STRING or UNSTRING
+(POINTER, TALLYING IN). `ADD 1 TO A B` is `A = A + 1; B = B + 1`. COMPUTE
+(`COMPUTE A B = A + 1` feeds B), a GIVING form, and a receiver that is also
+a sending operand keep their edges.
 
 **Alias edges are never chained with one of their own class**
 (`overlay_class`; summary BFS and `LineageGraph._trace` both carry the
