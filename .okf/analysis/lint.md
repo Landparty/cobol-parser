@@ -73,7 +73,9 @@ underlying analyzer's own category (`READ_BEFORE_OPEN`, `WORKING-STORAGE`,
 **A quiet report is not automatically a clean program**, and the report says
 so structurally rather than in prose: `caveats` carries what an analyzer could
 not check (MOVE operands whose data category never resolved, most often an
-unresolved COPY), and `failed_rules` records a rule that raised — it costs
+unresolved COPY; dclgen-check's count of host variables it could not
+(fully) check -- since #530 that includes the null-indicator check of a
+stored-procedure CALL argument), and `failed_rules` records a rule that raised — it costs
 only its own findings, never the other rules'. A consumer gating on `findings`
 alone must still surface both lists.
 

@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`dclgen-check` / `lint` no longer warn of SQLCODE -305 on input host
+  variables** (#530). The `null-indicator` warning fired for every host
+  variable bound to a nullable column without an indicator, including pure
+  inputs (`INSERT ... VALUES (:BAL)`, `UPDATE ... SET BAL = :BAL`, WHERE),
+  where DB2 never returns a NULL. It now fires only for outputs (an `INTO`
+  list of SELECT / FETCH / VALUES / EXECUTE, the target of `SET :hv =`);
+  a variable whose direction cannot be told (a stored-procedure `CALL`
+  argument) is reported in `unchecked` for that check instead.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

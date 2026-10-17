@@ -79,7 +79,12 @@ from .._storage import (
 )
 from ..models.data_items import CobolDataItem, PictureClause
 from ..models.program import CobolProgram
-from ..models.sql_statements import DB2ColumnDefinition, ExecSQLStatement
+from ..models.sql_statements import (
+    _SQL_HOST_VAR_RE,
+    DB2ColumnDefinition,
+    ExecSQLStatement,
+    SQLStatementType,
+)
 from .host_var_resolver import HostVariableResolver
 
 #: Severity ordering, shared with :mod:`.lint` so a DCLGEN finding grades on
@@ -182,7 +187,10 @@ class DclgenReport:
             be compared -- no ``DECLARE TABLE`` names a column of that name,
             the column's type has no COBOL equivalent, or the binding is a
             group item.  Reported so a clean report is never mistaken for a
-            checked one.
+            checked one.  A checked variable may appear here too, for the one
+            check it could not make: the null-indicator check of a variable
+            whose direction is unknown (a stored-procedure ``CALL``
+            argument) -- only an output needs an indicator (#530).
         tables: The ``DECLARE TABLE`` blocks found, with their column counts.
         ambiguous_columns: ``column: [tables]`` where the same column name is
             declared by more than one table.  The comparison uses the first
@@ -267,6 +275,11 @@ class DclgenChecker:
             return report
 
         indicators = _indicator_bindings(ast)
+        # SQLCODE -305 needs DB2 to *return* a NULL into the host variable:
+        # only an output (SELECT/FETCH/VALUES INTO, SET :hv =) needs an
+        # indicator. An input (INSERT VALUES, UPDATE SET, WHERE) without one
+        # merely cannot write NULL (#530).
+        outputs, undetermined = _host_variable_directions(ast)
         for name in names:
             info = resolution.resolved.get(name)
             item = info.data_item if info is not None else None
@@ -287,8 +300,27 @@ class DclgenChecker:
                 report.unchecked[name] = reason
                 continue
             report.checked.append(name)
+            upper = name.upper()
+            needs_indicator = upper in outputs
+            if (
+                column.nullable
+                and upper not in indicators
+                and not needs_indicator
+                and upper in undetermined
+            ):
+                report.unchecked[name] = (
+                    "null indicator not checked: passed to an SQL statement "
+                    "(a stored-procedure CALL, ...) whose parameter direction "
+                    "is not declared in this program"
+                )
             report.violations.extend(
-                _compare(name, item, column, table, has_indicator=name in indicators)
+                _compare(
+                    name,
+                    item,
+                    column,
+                    table,
+                    has_indicator=upper in indicators or not needs_indicator,
+                )
             )
         report.violations.sort(key=_violation_order)
         return report
@@ -621,6 +653,59 @@ def _indicator_bindings(node: Any) -> set[str]:
             found.add(match.group(1).upper())
     for child in getattr(node, "children", []):
         found |= _indicator_bindings(child)
+    return found
+
+
+#: Statement types whose host variables, other than an ``INTO`` list, are
+#: all values the program hands to DB2.
+_INPUT_SQL_TYPES = frozenset(
+    {
+        SQLStatementType.SELECT,
+        SQLStatementType.INSERT,
+        SQLStatementType.UPDATE,
+        SQLStatementType.DELETE,
+        SQLStatementType.TRUNCATE,
+        SQLStatementType.MERGE,
+        SQLStatementType.DECLARE_CURSOR,
+        SQLStatementType.OPEN_CURSOR,
+        SQLStatementType.FETCH,
+        SQLStatementType.PREPARE,
+        SQLStatementType.EXECUTE,
+    }
+)
+_SQL_SET_RE = re.compile(r"^\s*SET\b", re.IGNORECASE)
+
+
+def _host_variable_directions(node: Any) -> tuple[set[str], set[str]]:
+    """``(outputs, undetermined)``: upper-cased host variables DB2 writes
+    (an ``INTO`` list, the target of ``SET :hv =``), and those used where
+    this check cannot tell which way the value goes (a stored-procedure
+    ``CALL``, any statement type it does not model)."""
+    outputs: set[str] = set()
+    undetermined: set[str] = set()
+    for stmt in _sql_statements(node):
+        into = {str(v).upper() for v in stmt.into_variables or []}
+        outputs |= into
+        if stmt.sql_type in _INPUT_SQL_TYPES:
+            continue
+        text = stmt.sql_text or ""
+        if _SQL_SET_RE.match(text) and "=" in text:
+            # ``SET :hv = expr``: the target is written; everything right
+            # of ``=`` is an input expression.
+            left = text.partition("=")[0]
+            outputs |= {m.upper() for m in _SQL_HOST_VAR_RE.findall(left)}
+            continue
+        undetermined |= {m.upper() for m in _SQL_HOST_VAR_RE.findall(text)} - into
+    return outputs, undetermined
+
+
+def _sql_statements(node: Any) -> list[ExecSQLStatement]:
+    """Every ExecSQLStatement under *node*, depth first."""
+    found: list[ExecSQLStatement] = []
+    if isinstance(node, ExecSQLStatement):
+        found.append(node)
+    for child in getattr(node, "children", []):
+        found.extend(_sql_statements(child))
     return found
 
 

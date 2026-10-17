@@ -94,7 +94,9 @@ being reported as `unchecked`.
 | `length` | error / info | `CHAR(30)` into `PIC X(20)` truncates every fetch (error); the reverse only wastes space (info) |
 | `usage` | warning | DISPLAY where DCLGEN generates COMP-3; DB2 converts every row rather than moving it (IBM synonyms are folded first: `BINARY`/`COMP-4`/`COMP-5` all count as `COMP`, since on z/OS `COMP-5` is the same big-endian storage and is IBM's recommended integer host variable -- #259) |
 | `sign` | warning | unsigned host variable; a negative value arrives as its absolute value |
-| `null-indicator` | warning | nullable column with no indicator variable; SQLCODE -305 the first time the column is actually null |
+| `null-indicator` | warning | nullable column with no indicator variable on an **output** host variable (an `INTO` list of SELECT/FETCH/VALUES/EXECUTE, the target of `SET :hv =`); SQLCODE -305 the first time the column is actually null. An input (INSERT VALUES, UPDATE SET, WHERE, OPEN USING) needs none -- it just cannot write NULL (#530). A variable of unknown direction (a stored-procedure `CALL` argument, an unmodelled statement type) gets an `unchecked` entry for this one check instead (`_host_variable_directions`); it stays in `checked` for the others |
+
+Pinned by `tests/regression/test_dclgen_null_indicator_direction_issue_530.py`.
 
 **A `category` finding stands alone.** Every later check would be comparing
 digits against characters, so `_compare` returns immediately after one rather
