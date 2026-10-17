@@ -40,7 +40,12 @@ from ..models.statements.control import (
 )
 from ..models.statements.data import MoveStatement
 from ..models.statements.io import IOReadStatement
-from .boundary_inventory import BoundaryRef, BoundaryReport, _condition_field_names
+from .boundary_inventory import (
+    BoundaryRef,
+    BoundaryReport,
+    _condition_field_names,
+    call_argument_data_name,
+)
 
 if TYPE_CHECKING:
     # Deferred: cobolparser.generators (reached via generators/__init__.py's
@@ -1431,7 +1436,10 @@ def _boundary_fed_names(report: BoundaryReport) -> set[str]:
             fed.update(name.upper() for name in boundary.record_names)
         for arg in boundary.call_args:
             if arg.direction in ("IN", "BIDIRECTIONAL"):
-                fed.add(arg.name.upper())
+                # ``ADDRESS OF X`` feeds X; constants feed nothing (#582).
+                data_name = call_argument_data_name(arg.name)
+                if data_name is not None:
+                    fed.add(data_name.upper())
     return fed
 
 

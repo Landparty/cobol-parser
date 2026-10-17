@@ -208,6 +208,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now keyed (and `get_column_index()` / `column_name_collisions` reported) by
   the DCLGEN host-variable form, through a `dclgen_name()` that
   `DclgenChecker` now shares.
+* **gen-fixtures no longer lists constant CALL arguments as unresolved**
+  (#582). Numeric literals (`BY VALUE 0`), figurative constants (`ZERO`,
+  `SPACES`), `OMITTED`, `LENGTH OF x` and `ADDRESS OF x` each became an
+  "argument X not resolvable in layout index" entry in `unresolved`, burying
+  real gaps while `coverage` said `unresolved_boundaries: 0`. They are now
+  classified first: constants are skipped, `ADDRESS OF x` resolves against
+  `x`, and `OMITTED` keeps its position in the boundary inventory's
+  `call_args` with `direction: "NONE"` instead of a data direction.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

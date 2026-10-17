@@ -55,6 +55,12 @@ xref / unused-variables.
 [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md): `dclgen_name()` keys the
 column index, shared with `DclgenChecker`; `:CUST-ID` links to `CUST_ID`.
 
+## 2026-10-17 -- gen-fixtures constant CALL arguments (#582)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md),
+[generators/fixtures.md](generators/fixtures.md): `call_argument_data_name()`
+classifies CALL arguments; `OMITTED` is `direction="NONE"`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
