@@ -160,6 +160,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **IOLogger logs the right variables for REWRITE FROM and a plain READ**
+  (#573). `REWRITE rec FROM ws-item` logged the record instead of the FROM
+  item (WRITE already logged it) and now also carries `from_clause` in
+  `details`; `READ file` with no INTO logged no variables at all and now
+  logs the 01 records under the file's FD.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
