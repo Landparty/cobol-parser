@@ -16,6 +16,10 @@ with an empty ``step`` name.  Steps produced by expanding an in-stream
 procedure are included like any other, under their ``invocation.procstep``
 name, which is how a program run out of a procedure still resolves.
 
+Each binding names the program its step runs (``program``; ``None`` for
+job-level DDs and ``EXEC proc`` steps), so ``cobol-parser jcl --bindings``
+output is directly usable as ``field-impact --bindings`` input.
+
 A DD backed by SYSOUT, DUMMY or in-stream data yields a binding whose
 ``dataset`` is ``None``.  Those rows are kept rather than dropped -- knowing
 that ``SYSPRINT`` is a SYSOUT DD is an answer, and silently omitting it would
@@ -40,6 +44,7 @@ def resolve_dd_bindings(result: JclParseResult) -> list[DatasetBinding]:
                 disposition=dd.disposition,
                 record_format=dd.record_format,
                 record_length=dd.record_length,
+                program=None if step is None else step.program,
             )
         )
     return bindings
