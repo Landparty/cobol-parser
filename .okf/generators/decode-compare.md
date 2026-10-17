@@ -113,7 +113,9 @@ record after the first — silently, with an all-text layout and a file length
 divisible by both sizes.
 
 Per storage class, each the exact inverse of `encoding.py`'s encoder and
-dispatched on the same `USAGE`-then-category ladder:
+dispatched on the same `USAGE`-then-category ladder (a numeric-edited field
+is de-edited with the field's own `currency_signs`, as the encoder edits it,
+#491):
 
 | Storage | Read back as |
 |---|---|

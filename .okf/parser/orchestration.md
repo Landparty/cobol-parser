@@ -221,6 +221,11 @@ Every pass preserves the line count, so token locations stay true to the source.
   shared with the lexer's `_tokenize_source`. `CobolParser.source_is_fixed_format`
   records the decision (the H9 paragraph-boundary check reads it, see
   [statements.md](statements.md)).
+- **SPECIAL-NAMES state from the lexer.** After lexing, `CobolParser` copies
+  `lexer.decimal_point_is_comma` and `lexer.currency_signs` (each declared
+  PICTURE currency symbol's string, #491) onto itself; the DATA DIVISION's
+  `DataItemClauseParser._picture_clause` reads both off its host. Both reset
+  at the start of every `parse()`.
 - **Debugging lines.** `debug_lines` (`parse_cobol` and `CobolParser`, default
   False; #334) compiles fixed-format `D` lines as code. With it off,
   `_normalize_fixed_source` records the dropped line numbers and

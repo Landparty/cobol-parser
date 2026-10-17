@@ -1277,6 +1277,7 @@ def _data_item_from(data: dict[str, Any]) -> "CobolDataItem":
             _location_from(pic),
             currency_symbols=set(pic_meta.get("currency_symbols", ())),
             decimal_point_is_comma=bool(pic_meta.get("decimal_point_is_comma")),
+            currency_signs=dict(pic_meta.get("currency_signs") or {}),
         )
         for field in _PICTURE_FIELDS:
             if field in pic:
