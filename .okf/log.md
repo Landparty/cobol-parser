@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- EXEC SQL delimited identifiers (#597)
+
+[dialects.md](dialects.md), [lexer.md](lexer.md), [ast-models.md](ast-models.md),
+[parser/statements.md](parser/statements.md), [tests.md](tests.md):
+`Token.quote` records a literal's delimiter; EXEC SQL text keeps `"X"`, and
+the SQL scrubber reads it as identifier `X`, so `FROM "PROD"."CUST"` names
+table `PROD.CUST` (CRUD matrix, lineage, MCP).
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

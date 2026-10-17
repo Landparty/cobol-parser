@@ -209,14 +209,26 @@ _SQL_TABLE_STOP_KEYWORDS = frozenset(
 # ---------------------------------------------------------------------------
 
 
+# The text of a ``"..."`` delimited identifier that can stand in for it
+# unquoted: what ``_SQL_TABLE_NAME`` and ``_scan_sql_tokens`` read as a name.
+_SQL_DELIMITED_IDENT_RE = re.compile(r"[A-Za-z_$#@][A-Za-z0-9_$#@]*")
+
+
 def _strip_sql_literals_and_comments(sql: str) -> str:
     """Blank out string literals and SQL comments from *sql*.
 
-    Quoted literals (``'...'`` / ``"..."`` with doubled-quote escapes),
-    ``--`` line comments, and ``/* ... */`` block comments are replaced by a
-    single space so subsequent keyword/host-variable scans never match text
-    inside them. A ``--`` immediately preceded by an identifier character is
-    NOT treated as a comment (COBOL names may contain hyphens).
+    String literals (``'...'`` with doubled-quote escapes), ``--`` line
+    comments, and ``/* ... */`` block comments are replaced by a single space
+    so subsequent keyword/host-variable scans never match text inside them.
+    A ``--`` immediately preceded by an identifier character is NOT treated
+    as a comment (COBOL names may contain hyphens).
+
+    A ``"..."`` run is a DB2 *delimited identifier* (APOSTSQL, the default),
+    not a string: when its unescaped text is identifier-shaped it is kept,
+    unquoted and verbatim, so ``FROM "PROD"."CUST"`` reads as
+    ``FROM PROD.CUST`` (issue #597). One that is not identifier-shaped
+    (``"MY TABLE"``) is still blanked -- no regex or token scan downstream
+    could carry its spaces or punctuation as one name.
     """
     out: list[str] = []
     i = 0
@@ -225,6 +237,7 @@ def _strip_sql_literals_and_comments(sql: str) -> str:
         ch = sql[i]
         if ch in ("'", '"'):
             quote = ch
+            start = i + 1
             i += 1
             while i < n:
                 if sql[i] == quote:
@@ -234,6 +247,11 @@ def _strip_sql_literals_and_comments(sql: str) -> str:
                     i += 1
                     break
                 i += 1
+            if quote == '"':
+                inner = sql[start : i - 1].replace('""', '"')
+                if _SQL_DELIMITED_IDENT_RE.fullmatch(inner):
+                    out.append(inner)
+                    continue
             out.append(" ")
             continue
         if (

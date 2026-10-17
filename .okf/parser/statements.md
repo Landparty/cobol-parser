@@ -231,7 +231,7 @@ must stop at a boundary *without consuming it*. The rules:
 | `collect_clause_stmts`, `parse_invalid_key_clauses`, `parse_size_error_clauses` | handler bodies, see below |
 | `try_parse_nested_statement` | parses one nested statement; an exception not already recorded (`_already_recorded`, set by `report_or_raise`) becomes a warning "Nested statement parse failed and was skipped: ..." |
 | `get_parse_context` / `report_parse_error` | record-and-continue error reporting |
-| `collect_exec_sql_text(stream, sql=...)` | EXEC block text, see [statements-io.md](statements-io.md) |
+| `collect_exec_sql_text(stream, sql=...)` | EXEC block text, see [statements-io.md](statements-io.md); with `sql=True` a literal keeps the delimiter it was written with (`Token.quote`), so a `"..."` delimited identifier stays one (#597, [dialects.md](../dialects.md)) |
 
 **Folded references reach analyzers.** Operand strings carry the full
 qualified / subscripted reference (`"WS-NUM OF GRP-1"`, `"WS-TAB ( 3 )"`). An

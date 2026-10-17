@@ -1853,9 +1853,16 @@ def _sql_literal_text(token: Token) -> str:
     ``:Y`` was reported as a host variable (``'FROM T9'`` likewise became a
     table). A typed literal (``X'C1'``) keeps its original text; any other is
     re-delimited with the SQL string delimiter, embedded quotes doubled.
+
+    A literal the source wrote with ``"`` stays ``"``-delimited: in DB2 SQL
+    (APOSTSQL, the default) that is a delimited identifier -- a table,
+    schema or column name -- not a string, and re-delimiting it with ``'``
+    hid every ``FROM "CUST"`` table from the SQL model (issue #597).
     """
     if token.raw_value:
         return token.raw_value
+    if token.quote == '"':
+        return '"' + (token.value or "").replace('"', '""') + '"'
     return "'" + (token.value or "").replace("'", "''") + "'"
 
 

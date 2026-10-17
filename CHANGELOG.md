@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **EXEC SQL tables named as DB2 delimited identifiers are no longer lost**
+  (#597). `SELECT ... FROM "PROD"."CUST"`, `UPDATE "CUST"`, `INSERT INTO
+  "HIST"` and `DELETE FROM "CUST"` reported no tables, so the CRUD matrix,
+  MCP `program_brief`'s `sql_tables`, SQL lineage ports and host-variable
+  table matching all dropped the table without a word: the EXEC SQL text
+  re-delimited every literal with `'`, and the SQL scrubber blanked both
+  quote kinds. The lexer now records a literal's delimiter (`Token.quote`),
+  `sql_text` keeps `"..."`, and the scrubber reads an identifier-shaped
+  `"..."` as that name, unquoted (`PROD.CUST`), with the same C/R/U/D marks
+  as the undelimited form.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

@@ -12,7 +12,7 @@ This module provides comprehensive tokenization of COBOL source code including:
 
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum, auto
 
 from ._accel import accelerators_enabled
@@ -560,6 +560,10 @@ class Token:
     value: str
     location: SourceLocation
     raw_value: str | None = None  # Original source text if different from value
+    # The delimiter a STRING_LITERAL was written with (``'`` or ``"``), None
+    # when unknown. Embedded SQL needs it: there ``"X"`` is a delimited
+    # identifier, not a string (issue #597). Not part of equality.
+    quote: str | None = field(default=None, compare=False, repr=False)
 
     def __str__(self) -> str:
         return f"{self.type.name}({self.value})"
@@ -1061,7 +1065,9 @@ class _CobolLexerPure:
                 chars.append(char)
                 self.advance_char()
 
-        return Token(TokenType.STRING_LITERAL, "".join(chars), start_location)
+        return Token(
+            TokenType.STRING_LITERAL, "".join(chars), start_location, quote=quote_char
+        )
 
     def read_numeric_literal(self) -> Token:
         """Read a numeric literal (integer or decimal)."""
@@ -1799,7 +1805,7 @@ class _CobolLexerPure:
                     )
                 )
 
-        return Token(TokenType.STRING_LITERAL, value, location), pos
+        return Token(TokenType.STRING_LITERAL, value, location, quote=quote_char), pos
 
     def _try_single_line_string(
         self, text: str, start_pos: int, line_num: int, start_col: int
@@ -1824,7 +1830,12 @@ class _CobolLexerPure:
                     continue
                 pos += 1
                 return (
-                    Token(TokenType.STRING_LITERAL, "".join(chars), location),
+                    Token(
+                        TokenType.STRING_LITERAL,
+                        "".join(chars),
+                        location,
+                        quote=quote,
+                    ),
                     pos,
                     False,
                 )

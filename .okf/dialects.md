@@ -89,7 +89,9 @@ Pinned by `tests/unit/test_issue_341_dialect_crud.py` (see #341).
 `collect_exec_sql_text(stream, sql=True)` (EXEC SQL, procedure and data
 division) re-delimits every string literal the lexer handed over unquoted
 (`'...'`, embedded `'` doubled; a typed literal such as `X'C1'` keeps its
-`raw_value`) and drops a `--` comment -- two MINUS tokens in adjacent columns
+`raw_value`; one the source wrote with `"` -- `Token.quote` -- is
+re-delimited with `"`, since under APOSTSQL that is a DB2 *delimited
+identifier*, a table/schema/column name, #597) and drops a `--` comment -- two MINUS tokens in adjacent columns
 -- up to its NEWLINE (never past END-EXEC). Both must reach the SQL model's
 scrubber, or `WHERE B = 'X:FAKE'` reports host variable `FAKE`, `'FROM T9'`
 reports table `T9`, and a comment's `:WS-C` is a host variable. EXEC CICS /
@@ -98,6 +100,17 @@ graph and signature extractor). Pinned by
 `tests/unit/test_exec_sql_literals_comments.py`.
 
 ## EXEC SQL model (`models/sql_statements.py`)
+
+### Delimited identifiers
+
+`_strip_sql_literals_and_comments` blanks `'...'` strings but keeps a
+`"..."` delimited identifier, unquoted and verbatim (doubled `""`
+unescaped), when its text is identifier-shaped
+(`_SQL_DELIMITED_IDENT_RE`), so `FROM "PROD"."CUST"` reads as
+`FROM PROD.CUST` in both table passes and `tables == ["PROD.CUST"]`. One
+that is not (`"MY TABLE"`) is still blanked: no scan downstream can carry it
+as one name. QUOTESQL (where `"` delimits strings) is not modelled. Pinned by
+`regression/test_sql_delimited_identifiers_issue_597.py`.
 
 ### Null indicators
 
