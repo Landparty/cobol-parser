@@ -383,7 +383,10 @@ class LineageGraph:
         JCL binds): the ``"caveats"`` and ``"unjoined"`` of
         :meth:`join_state`. Without them a graph rebuilt from stored edges
         only re-derives the opaque-callee caveat and has no ``unjoined``.
-        Both are ignored when ``join_edges`` is None.
+        When ``join_edges`` is None, ``unjoined`` is ignored and
+        ``join_caveats`` are added to the joins' own caveats: what the
+        binding source could not read (``lineage_jcl.bindings_from_jobs``'s
+        ``caveats``).
         """
         self.reports: dict[str, dict[str, Any]] = {}
         duplicates: list[str] = []
@@ -488,6 +491,11 @@ class LineageGraph:
             self._join_sql(written_ports, read_ports)
             self._join_calls(written_ports, read_ports)
             self._recording = False
+            # What the binding source could not read (a JCL step left out,
+            # from ``lineage_jcl.bindings_from_jobs(jobs, caveats)``).
+            for caveat in join_caveats or []:
+                if str(caveat) not in self._join_caveats:
+                    self._join_caveat(str(caveat))
         else:
             # Recorded again, so the rebuilt graph exports the same state.
             self._recording = True

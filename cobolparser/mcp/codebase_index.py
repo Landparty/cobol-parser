@@ -300,6 +300,7 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
 
     bindings: list[Any] = []
     passthroughs: list[Any] = []
+    jcl_caveats: list[str] = []
     jcl = workspace.files_named((".jcl", ".job"))
     index.jcl_files = [workspace.display(p) for p in jcl]
     for path in jcl:
@@ -316,11 +317,13 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
                 "so no file is joined to another program through a dataset"
             )
         else:
-            found, carried = bindings_from_jobs(jobs)
+            found, carried = bindings_from_jobs(jobs, jcl_caveats)
             bindings += found
             passthroughs += carried
             index.problems += [str(p) for p in problems]
-    index.graph = LineageGraph(reports, bindings, passthroughs)
+    index.graph = LineageGraph(
+        reports, bindings, passthroughs, join_caveats=jcl_caveats
+    )
     index.seconds = time.monotonic() - started
     return index, stamps
 
