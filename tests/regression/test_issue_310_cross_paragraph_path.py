@@ -149,3 +149,56 @@ def test_an_unguarded_perform_needs_no_guard(tmp_path) -> None:
     for scenario in deep:
         assert scenario.verification["status"] == "verified"
         assert scenario.verification["gaps"] == []
+
+
+SECTIONS_HEADER = HEADER.replace(
+    "       PROCEDURE DIVISION.\n       MAIN-PARA.\n",
+    "       PROCEDURE DIVISION.\n       MAIN-SECTION SECTION.\n       MAIN-PARA.\n",
+).replace("PERFORM CHECK-PARA", "PERFORM CHECK-SECTION")
+
+GUARDED_SECTION = SECTIONS_HEADER + """\
+       CHECK-SECTION SECTION.
+       CHECK-PARA.
+           IF IN-CODE = 'QQ'
+               PERFORM DEEP-SECTION
+           END-IF.
+       CHECK-EXIT.
+           EXIT.
+       DEEP-SECTION SECTION.
+       DEEP-PARA.
+           IF IN-AMT > 500
+               DISPLAY 'BIG'
+           ELSE
+               DISPLAY 'SMALL'
+           END-IF.
+       DEEP-EXIT.
+           EXIT.
+"""
+
+
+def test_a_guarded_perform_of_a_section_folds_its_guard(tmp_path) -> None:
+    # A PERFORMed section returns at its last paragraph's end, so the CFG's
+    # fall-through from CHECK-EXIT into DEEP-SECTION is no way in, and
+    # DEEP-PARA is reached exactly when DEEP-SECTION is.
+    assert "MAIN-SECTION SECTION" in GUARDED_SECTION
+    bundle = _bundle(tmp_path, GUARDED_SECTION)
+    deep = _scenarios_with(bundle, "DEEP-PARA")
+    assert deep
+    for scenario in deep:
+        assert _read_row(scenario)["IN-CODE"] == "QQ", scenario.name
+        assert scenario.verification["status"] == "verified"
+
+
+def test_a_section_entered_by_falling_through_needs_no_guard(tmp_path) -> None:
+    # The entry section has no GOBACK, so control runs on through every
+    # following section: DEEP-SECTION is reached unconditionally too.
+    source = GUARDED_SECTION.replace(
+        "           CLOSE IN-FILE\n           GOBACK.\n",
+        "           CLOSE IN-FILE.\n",
+    )
+    assert "GOBACK" not in source
+    bundle = _bundle(tmp_path, source)
+    deep = _scenarios_with(bundle, "DEEP-PARA")
+    assert deep
+    for scenario in deep:
+        assert scenario.verification["gaps"] == [], scenario.name

@@ -553,6 +553,25 @@ class _ParagraphReach:
             for node in flow_report.nodes
             if node.procedure_type == "SECTION"
         }
+        # Section membership, from the nodes' source order: a paragraph
+        # belongs to the last SECTION before it, and is the section's last
+        # paragraph when the next node is a SECTION (or there is none).
+        self._section_of: dict[str, str] = {}
+        self._last_in_section: set[str] = set()
+        current: str | None = None
+        previous: str | None = None
+        for node in flow_report.nodes:
+            key = node.key.upper()
+            if node.procedure_type == "SECTION":
+                if previous is not None:
+                    self._last_in_section.add(previous)
+                current, previous = key, None
+                continue
+            if current is not None:
+                self._section_of[key] = current
+                previous = key
+        if previous is not None:
+            self._last_in_section.add(previous)
         self._sites: dict[str, list[tuple[str, str, tuple[tuple[str, str], ...]]]] = {}
         for site in constraint_report.transfer_sites:
             self._sites.setdefault(site.target.upper(), []).append(
@@ -588,7 +607,11 @@ class _ParagraphReach:
         for edge in self._incoming.get(name, []):
             source = edge.source.upper()
             if edge.edge_type is FlowEdgeType.FALL_THROUGH:
-                if self._falls_off(source, frozenset()):
+                # A section's header always runs on into its first paragraph:
+                # that paragraph is reached exactly when the section is.
+                if source == self._section_of.get(name) or self._falls_off(
+                    source, frozenset()
+                ):
                     outcomes.append(self._reach(source, visiting))
             elif edge.edge_type in _UNMODELED_REACH:
                 outcomes.append(
@@ -623,8 +646,15 @@ class _ParagraphReach:
         """Whether control can run past the end of *name* into the next
         procedure: not when every way in is a plain ``PERFORM name`` (which
         returns at its end) or a fall-through from a procedure that itself
-        cannot fall off."""
-        if name in self._entries or name in self._sections:
+        cannot fall off.
+
+        Sections are procedures like any other: a ``PERFORM S`` returns at
+        the end of S's last paragraph.  A paragraph run as part of its
+        section (entered by falling through from the header or a sibling)
+        always runs on to the next paragraph of that section; past the
+        section's last paragraph only when the section itself falls off.
+        """
+        if name in self._entries:
             return True
         if name in visiting:
             return False
@@ -636,7 +666,18 @@ class _ParagraphReach:
             ):
                 continue
             if kind is FlowEdgeType.FALL_THROUGH:
-                if self._falls_off(edge.source.upper(), visiting):
+                source = edge.source.upper()
+                section = self._section_of.get(name)
+                if section is not None and section in (
+                    source,
+                    self._section_of.get(source),
+                ):
+                    if name not in self._last_in_section:
+                        return True
+                    if self._falls_off(section, visiting):
+                        return True
+                    continue
+                if self._falls_off(source, visiting):
                     return True
                 continue
             if kind in (FlowEdgeType.IF_BRANCH, FlowEdgeType.EVALUATE_BRANCH):
