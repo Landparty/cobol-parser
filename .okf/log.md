@@ -201,6 +201,12 @@ IMSSegmentAnalyzer read them; function-code candidates are no longer filtered.
 [cli.md](cli.md): `_path_list` expansion, `missing_directories()`, the
 `config` marker and the stderr warning. [tests.md](tests.md): config tests.
 
+## 2026-10-17 -- DFHRESP / DFHVALUE arguments are no data names (#594)
+
+`_names.strip_translator_arguments` runs in `_extract_identifiers` and xref's
+`_split_operand`; MoveTypeChecker classifies the call NUMERIC; JNIENVPTR is a
+special register.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
