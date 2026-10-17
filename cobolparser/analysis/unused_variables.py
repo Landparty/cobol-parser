@@ -396,6 +396,27 @@ def _extract_identifiers(operand: Any) -> set[str]:
     return qualified_references(stripped, _NON_IDENTIFIER_WORDS)
 
 
+def screen_section_references(data_div: Any) -> list[dict[str, Any]]:
+    """The data items a SCREEN SECTION's fields bind (#501).
+
+    The DATA DIVISION parser skips the SCREEN SECTION's grammar but keeps
+    each ``USING`` / ``FROM`` / ``TO`` operand as ``{"clause", "text",
+    "line"}`` in the section's ``screen_references`` metadata: a field
+    ``USING WS-NAME`` displays and accepts WS-NAME whenever the screen is
+    DISPLAYed or ACCEPTed, without the PROCEDURE DIVISION naming it.
+    """
+    found: list[dict[str, Any]] = []
+    for section in getattr(data_div, "sections", None) or []:
+        if not isinstance(section, CobolSection):
+            continue
+        if (section.section_name or "").upper() != "SCREEN":
+            continue
+        for reference in section.get_metadata("screen_references") or []:
+            if isinstance(reference, dict) and reference.get("text"):
+                found.append(reference)
+    return found
+
+
 def _mark_subtree_used(item: CobolDataItem, group_used: dict[int, bool]) -> None:
     """Mark *item* and everything beneath it used, structurally."""
     group_used[id(item)] = True
@@ -1180,6 +1201,8 @@ class UnusedVariableAnalyzer:
             return names
 
         names |= self._report_section_references(data_div)
+        for reference in screen_section_references(data_div):
+            names |= _extract_identifiers(reference.get("text"))
 
         for section in data_div.sections:
             if not isinstance(section, CobolSection):

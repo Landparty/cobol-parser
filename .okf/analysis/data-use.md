@@ -285,6 +285,16 @@ unused item in that set from `report.unused_items` (tallied instead in
 `report.skipped_copybook_count`); the flag is a documented no-op when
 `copybook_item_names` is None.
 
+**SCREEN SECTION bindings are references** (#501). The parser keeps each
+screen field's `USING` / `FROM` / `TO` operand
+(`unused_variables.screen_section_references(data_div)`), so an item a
+screen displays or accepts is used. xref records them at their line --
+`FROM` `read`, `TO` `write`, `USING` both, a subscript `subscript`, a
+`LINE` / `COLUMN` / colour value `reference`, statement `"SCREEN SECTION"` --
+and declares each named screen entry as kind `screen-item`, so `DISPLAY
+MAIN-SCREEN` resolves. Pinned by
+`tests/regression/test_issue_501_screen_section_references.py`.
+
 **SCREEN / REPORT / COMMUNICATION SECTION items are out of scope.**
 `collect_declared_items` reads only FILE / WORKING-STORAGE / LOCAL-STORAGE /
 LINKAGE (`_DATA_SECTION_NAMES`). The DATA DIVISION parser skips SCREEN and
@@ -429,8 +439,9 @@ qualifier to be found qualified. They never compare `qualified_name` text.
 paragraph).
 
 **Kinds** (`KIND_*`): `data-item`, `condition-name`, `paragraph`, `section`,
-`file`, and the SPECIAL-NAMES kinds `mnemonic-name`, `class-name`,
-`alphabet-name`, `symbolic-character` (#519).
+`file`, `screen-item` (a named SCREEN SECTION entry, #501), and the
+SPECIAL-NAMES kinds `mnemonic-name`, `class-name`, `alphabet-name`,
+`symbolic-character` (#519).
 
 **Roles** (`ROLE_*`): `write`, `read`, `condition`, `subscript`, `perform`,
 `goto`, `call-argument`, `host-variable`, `file-operation`, and `reference`
