@@ -9,6 +9,8 @@ record-view caveats) instead of being cut silently.
 
 from __future__ import annotations
 
+import pytest
+
 from cobolparser import parse_cobol
 from cobolparser.generators import (
     CopybookDataGenerator,
@@ -16,6 +18,7 @@ from cobolparser.generators import (
     ProgramFixtureGenerator,
     ProgramLayoutIndex,
 )
+from cobolparser.generators.data import layout
 from cobolparser.generators.data.copybook import parse_copybook_records
 from cobolparser.generators.data.layout import (
     _MAX_EXPANDED_OCCURRENCES,
@@ -82,7 +85,16 @@ def test_a_requested_max_occurs_is_not_reported() -> None:
     assert occurs_expansion_caveats(_record(MISTYPED), opts) == []
 
 
-def test_gen_data_and_views_carry_the_caveat() -> None:
+@pytest.fixture
+def small_caps(monkeypatch):
+    """Shrink both caps so the caveat plumbing runs on a few hundred fields
+    instead of 100,000 (the real caps are pinned by the tests above). Both
+    constants are read at call time."""
+    monkeypatch.setattr(layout, "_MAX_OCCURS_HARD_CAP", 50)
+    monkeypatch.setattr(layout, "_MAX_EXPANDED_OCCURRENCES", 200)
+
+
+def test_gen_data_and_views_carry_the_caveat(small_caps) -> None:
     dataset = CopybookDataGenerator(DataGeneratorOptions(rows=1)).generate_from_source(
         MISTYPED
     )
@@ -91,7 +103,7 @@ def test_gen_data_and_views_carry_the_caveat() -> None:
     assert any(c.startswith("OCCURS table T1 ") for c in views.caveats)
 
 
-def test_gen_fixtures_reports_it_in_unresolved(tmp_path) -> None:
+def test_gen_fixtures_reports_it_in_unresolved(tmp_path, small_caps) -> None:
     source = PROGRAM.format(record=MISTYPED.rstrip("\n"))
     ast = parse_cobol(source).ast
     assert ast is not None
