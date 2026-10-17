@@ -150,6 +150,11 @@ a copy, so `CALL p` and codebase-graph resolve the target.
 as written (cache keyed on it), and a not-found note no longer suggests the
 name it looked up, saying a case variant exists instead.
 
+## 2026-10-17 -- codebase-graph diagram ids never collide (#494)
+
+[analysis/codebase.md](analysis/codebase.md): DOT / Mermaid node ids come
+from a per-diagram `_NodeIds` allocator with numeric suffixes on collision.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

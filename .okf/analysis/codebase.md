@@ -32,6 +32,14 @@ The cross-program module. It walks a whole tree of COBOL source, parses every
 file through `batch.py` (parallel, per-file fault isolation) and aggregates the
 results into one graph with two kinds of edge:
 
+* **Diagram ids are unique per diagram (#494).** `to_dot()` / `to_mermaid()`
+  take every node id from one `_NodeIds` allocator (`P_` programs, known and
+  external alike, then `C_` members, pre-allocated in declaration order), so
+  names `_sanitize_id` folds together (`PAY#01` / `PAY@01` / `PAY$01`,
+  `PAY-RTN` / `PAY_RTN`) get `P_PAY_01`, `P_PAY_01_2`, ... instead of one
+  merged node with false self-calls. A diagram without collisions is
+  unchanged. The JSON output never had the problem. Pinned by
+  `tests/regression/test_issue_494_codebase_diagram_id_collisions.py`.
 * **Call edges** — `program A calls program B`, from static `CALL "B"` and from
   dynamic `CALL WS-TARGET` resolved through `DynamicCallAnalyzer`. A dynamic
   call whose value set that analyzer could not fully resolve still contributes
