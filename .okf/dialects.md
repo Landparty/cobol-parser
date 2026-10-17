@@ -24,7 +24,10 @@ Two modules:
 * `ibm_enterprise.py` -- `IBMEnterpriseCobol`: class-level word tables
   (`IBM_RESERVED_WORDS`, `IBM_INTRINSIC_FUNCTIONS`, `CICS_COMMANDS`,
   `IMS_COMMANDS`, `IBM_LE_CALLABLE_SERVICES`, `IBM_LE_SERVICE_CATEGORIES`,
-  `IBM_LE_SERVICE_INFO`) plus lookups and light validation. The analyzers read
+  `IBM_LE_SERVICE_INFO`) plus lookups and light validation.
+  `IBM_LE_CALLABLE_SERVICES` is the key set of `IBM_LE_SERVICE_CATEGORIES`,
+  rebuilt from the LE Programming Reference in #529 (see
+  [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md)). The analyzers read
   the tables directly (`analysis/xref.py`, `analysis/language_env_analyzer.py`).
   `cobolparser.dialects` exports only `IBMEnterpriseCobol` (also re-exported
   from `cobolparser`).

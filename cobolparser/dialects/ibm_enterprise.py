@@ -401,79 +401,109 @@ class IBMEnterpriseCobol:
         "SPOOLOPEN",
     }
 
-    # IBM Language Environment (LE) callable services (CEE* functions)
-    IBM_LE_CALLABLE_SERVICES = {
-        # Date and Time services
-        "CEEDATM",  # Convert Lilian seconds to character timestamp
-        "CEEDATE",  # Convert Lilian date to character date
-        "CEEDAYS",  # Convert character date to Lilian date
-        "CEECBLDY",  # Convert character date to COBOL integer date
-        "CEEUTC",  # Get current Coordinated Universal Time (CEEGMT alias)
-        "CEEISEC",  # Convert integer date/time components to Lilian seconds
-        "CEESECI",  # Convert Lilian seconds to integer date/time components
-        "CEEQCEN",  # Query the century window
-        "CEESCEN",  # Set the century window
-        "CEEFMDA",  # Get the default date picture string
-        "CEEFMDT",  # Get the default date and time picture string
-        "CEEFMTM",  # Get the default time picture string
-        "CEETIME",  # Get current time
-        "CEEGMT",  # Get current Greenwich Mean Time
-        "CEELOCT",  # Get current local time
-        "CEESECS",  # Convert date/time to Lilian seconds
-        "CEEFMTDT",  # Format date/time
-        "CEEDTTM",  # Convert character date/time to Lilian seconds
-        "CEEDYWK",  # Calculate day of week from Lilian date
-        "CEEGMTO",  # Get Greenwich Mean Time offset
-        "CEEGMTCO",  # Get GMT offset for a date
-        "CEEFMTVF",  # Format date/time using variable-length format
-        # Heap Storage services
-        "CEEGTST",  # Get heap storage
-        "CEEFRST",  # Free heap storage
-        "CEECZST",  # Reallocate (change the size of) heap storage
-        "CEEFRMST",  # Free heap storage
-        "CEECREH",  # Create heap
-        "CEEDSHP",  # Destroy heap
-        "CEECRHP",  # Create heap (alternate)
-        # Mathematical services
-        "CEEZLNG",  # Get string length
-        # Condition and Error Handling services
-        "CEEHDLR",  # Register a condition handler
-        "CEEHDLU",  # Unregister a condition handler
-        "CEEMOUT",  # Dispatch a message string
-        "CEE3DMP",  # Generate a Language Environment dump
-        "CEE3ABD",  # Terminate the enclave with an abend
-        "CEETREC",  # Remove a condition handler
-        "CEEHOOK",  # Set hook
-        "CEEMRCR",  # Move condition record
-        "CEENDUC",  # Non-destructive update of condition
-        "CEERADR",  # Re-raise a condition
-        "CEESGL",  # Signal a condition
-        "CEEDUMP",  # Produce a system dump
-        "CEEABND",  # Abend with condition
-        # Environment services
-        "CEENVST",  # Get next environment setting
-        "CEEENV",  # Get environment variable
-        "CEEGPID",  # Get program instance data
-        "CEEGPIL",  # Get program instance level
-        "CEEGMEM",  # Get member name
-        "CEEGLS",  # Get language sensitive string length
-        # Runtime services
-        "CEE3PRM",  # Query the runtime parameter string
-        "CEE3GRC",  # Get the enclave return code
-        "CEE3SRC",  # Set the enclave return code
-        "CEETERM",  # Terminate the run unit
-        "CEEBINIT",  # Initialize Language Environment
-        "CEEPCMD",  # Perform command
-        "CEEMSG",  # Get message text
-        "CEEGLOB",  # Get global data
-        "CEEGSS",  # Get stack storage
-        "CEESST",  # Get static storage
-        # String conversion services
-        "CEESG",  # Convert string
-        "CEESQ",  # Convert string length
-        # IMS LE interface (also a LE service)
-        "CEETDLI",  # IMS DL/I call through Language Environment
+    # IBM Language Environment (LE) callable services, each with its category.
+    #
+    # Rebuilt from the z/OS Language Environment Programming Reference
+    # (SA38-0683) service list (#529). The single source of truth used by
+    # LanguageEnvironmentAnalyzer (``is_known_service`` and ``category``);
+    # ``IBM_LE_CALLABLE_SERVICES`` below is its key set. Names that are not in
+    # the reference are deliberately absent, so a typo such as ``CEEDUMP`` for
+    # CEE3DMP does not read as a valid service: the earlier set carried 24 of
+    # them (CEEDUMP, CEEABND, CEETIME, CEEFMTDT, CEESG, ...). The math
+    # services (CEESxyyy: CEESDSIN, CEESSLOG, ...) are not listed; a CALL to
+    # one is still reported, as an unknown CEE-prefixed name. Pinned against a
+    # checked-in copy of this list in
+    # ``tests/regression/test_le_callable_services_issue_529.py``.
+    IBM_LE_SERVICE_CATEGORIES: dict[str, str] = {
+        # Date and time services
+        "CEECBLDY": "datetime",  # Convert date to COBOL integer format
+        "CEEDATE": "datetime",  # Convert Lilian date to character format
+        "CEEDATM": "datetime",  # Convert seconds to character timestamp
+        "CEEDAYS": "datetime",  # Convert date to Lilian format
+        "CEEDYWK": "datetime",  # Calculate day of week from Lilian date
+        "CEEFMDA": "datetime",  # Get default date format
+        "CEEFMDT": "datetime",  # Get default date and time format
+        "CEEFMTM": "datetime",  # Get default time format
+        "CEEGMT": "datetime",  # Get current Greenwich Mean Time
+        "CEEGMTO": "datetime",  # Get offset from Greenwich Mean Time
+        "CEEISEC": "datetime",  # Convert integers to seconds
+        "CEELOCT": "datetime",  # Get current local date or time
+        "CEEQCEN": "datetime",  # Query the century window
+        "CEESCEN": "datetime",  # Set the century window
+        "CEESECI": "datetime",  # Convert seconds to integers
+        "CEESECS": "datetime",  # Convert timestamp to seconds
+        "CEEUTC": "datetime",  # Get Coordinated Universal Time
+        # Storage management services
+        "CEECRHP": "storage",  # Create new additional heap
+        "CEECZST": "storage",  # Reallocate (change size of) storage
+        "CEEDSHP": "storage",  # Discard heap
+        "CEEFRST": "storage",  # Free heap storage
+        "CEEGTST": "storage",  # Get heap storage
+        "CEE3RPH": "storage",  # Set report heading
+        # Condition handling services
+        "CEEHDLR": "condition",  # Register user-written condition handler
+        "CEEHDLU": "condition",  # Unregister user-written condition handler
+        "CEESGL": "condition",  # Signal a condition
+        "CEEMRCE": "condition",  # Move resume cursor explicit
+        "CEEMRCR": "condition",  # Move resume cursor relative to handle cursor
+        "CEE3SRP": "condition",  # Set resume point
+        "CEEITOK": "condition",  # Return initial condition token
+        "CEEGQDT": "condition",  # Retrieve q_data_token
+        "CEENCOD": "condition",  # Construct a condition token
+        "CEEDCOD": "condition",  # Decompose a condition token
+        "CEE3CIB": "condition",  # Return pointer to condition information block
+        "CEE3CNC": "condition",  # Handle nested conditions
+        "CEE3GRN": "condition",  # Get name of routine that incurred condition
+        "CEE3GRO": "condition",  # Get offset of condition
+        "CEE3SPM": "condition",  # Query and modify hardware condition enablement
+        "CEE3DMP": "condition",  # Generate dump
+        "CEE3ABD": "condition",  # Terminate enclave with an abend
+        "CEE3AB2": "condition",  # Terminate enclave with abend and reason code
+        "CEETREC": "condition",  # Set the enclave return code and terminate
+        # Message handling services
+        "CEEMGET": "runtime",  # Get a message
+        "CEEMOUT": "runtime",  # Dispatch a message
+        "CEEMSG": "runtime",  # Get, format and dispatch a message
+        # Program and enclave services
+        "CEE3PRM": "runtime",  # Query parameter string
+        "CEE3PR2": "runtime",  # Query parameter string (long)
+        "CEE3GRC": "runtime",  # Get the enclave return code
+        "CEE3SRC": "runtime",  # Set the enclave return code
+        "CEE3DLY": "runtime",  # Suspend enclave execution (seconds)
+        "CEEDLYM": "runtime",  # Suspend enclave execution (milliseconds)
+        "CEETEST": "runtime",  # Invoke the debugger
+        "CEETERM": "runtime",  # Terminate the run unit
+        # Environment query services
+        "CEE3INF": "environment",  # Query enclave information
+        "CEE3USR": "environment",  # Set or query user area fields
+        "CEEENV": "environment",  # Process environment variables
+        "CEEGPID": "environment",  # Retrieve LE version and platform ID
+        "CEEGTJS": "environment",  # Retrieve value of an exported JCL symbol
+        # National language and locale services
+        "CEE3CTY": "locale",  # Set default country
+        "CEE3LNG": "locale",  # Set national language
+        "CEE3MCS": "locale",  # Get default currency symbol
+        "CEE3MDS": "locale",  # Get default decimal separator
+        "CEE3MTS": "locale",  # Get default thousands separator
+        "CEEFMON": "locale",  # Format monetary string
+        "CEEFTDS": "locale",  # Format time and date into character string
+        "CEELCNV": "locale",  # Query locale numeric conventions
+        "CEEQDTC": "locale",  # Query locale date and time conventions
+        "CEEQRYL": "locale",  # Query active locale environment
+        "CEESCOL": "locale",  # Compare collation weight of two strings
+        "CEESETL": "locale",  # Set locale operating environment
+        "CEESTXF": "locale",  # Transform string into collation weights
+        # Math and bit manipulation services
+        "CEERAN0": "math",  # Calculate uniform random numbers
+        "CEESICLR": "math",  # Bit clear
+        "CEESISET": "math",  # Bit set
+        "CEESISHF": "math",  # Bit shift
+        "CEESITST": "math",  # Bit test
+        # IMS interface
+        "CEETDLI": "ims",  # Invoke IMS
     }
+
+    IBM_LE_CALLABLE_SERVICES: set[str] = set(IBM_LE_SERVICE_CATEGORIES)
 
     # Metadata for the most commonly used LE callable services.
     #
@@ -485,20 +515,11 @@ class IBMEnterpriseCobol:
     # whether an operand may be omitted should read the signature catalogue
     # instead (or `cobol-parser le-info`).
     _UNCATALOGUED_LE_SERVICE_INFO: dict[str, dict] = {
-        "CEEFMTDT": {
-            "category": "datetime",
-            "description": "Format date/time",
-            "parameters": ["seconds", "picture-string", "output-string", "fc"],
-        },
-        "CEEFRMST": {
-            "category": "storage",
-            "description": "Free heap storage",
-            "parameters": ["pointer", "fc"],
-        },
         "CEETREC": {
             "category": "condition",
-            "description": "Remove a condition handler",
-            "parameters": ["token", "fc"],
+            # Not "Remove a condition handler" -- that is CEEHDLU (#529).
+            "description": "Set the enclave return code and terminate",
+            "parameters": ["cel-rc-modifier", "user-rc"],
         },
         "CEETERM": {
             "category": "runtime",
@@ -517,73 +538,6 @@ class IBMEnterpriseCobol:
             }
             for name, sig in LE_SERVICE_SIGNATURES.items()
         },
-    }
-
-    # Category lookup for every IBM LE callable service.
-    # This is the single source of truth used by LanguageEnvironmentAnalyzer.
-    IBM_LE_SERVICE_CATEGORIES: dict[str, str] = {
-        "CEEDATM": "datetime",
-        "CEEDAYS": "datetime",
-        "CEECBLDY": "datetime",
-        "CEEUTC": "datetime",
-        "CEEISEC": "datetime",
-        "CEESECI": "datetime",
-        "CEEQCEN": "datetime",
-        "CEESCEN": "datetime",
-        "CEEFMDA": "datetime",
-        "CEEFMDT": "datetime",
-        "CEEFMTM": "datetime",
-        "CEEDATE": "datetime",
-        "CEETIME": "datetime",
-        "CEEGMT": "datetime",
-        "CEELOCT": "datetime",
-        "CEESECS": "datetime",
-        "CEEFMTDT": "datetime",
-        "CEEDTTM": "datetime",
-        "CEEDYWK": "datetime",
-        "CEEGMTO": "datetime",
-        "CEEGMTCO": "datetime",
-        "CEEFMTVF": "datetime",
-        "CEEGTST": "storage",
-        "CEEFRST": "storage",
-        "CEECZST": "storage",
-        "CEEFRMST": "storage",
-        "CEECREH": "storage",
-        "CEEDSHP": "storage",
-        "CEECRHP": "storage",
-        "CEEGSS": "storage",
-        "CEESST": "storage",
-        "CEEZLNG": "string",
-        "CEEGLS": "string",
-        "CEESG": "string",
-        "CEESQ": "string",
-        "CEEHDLR": "condition",
-        "CEEHDLU": "condition",
-        "CEE3DMP": "condition",
-        "CEE3ABD": "condition",
-        "CEETREC": "condition",
-        "CEEHOOK": "condition",
-        "CEEMRCR": "condition",
-        "CEENDUC": "condition",
-        "CEERADR": "condition",
-        "CEESGL": "condition",
-        "CEEDUMP": "condition",
-        "CEEABND": "condition",
-        "CEENVST": "environment",
-        "CEEENV": "environment",
-        "CEEGPID": "environment",
-        "CEEGPIL": "environment",
-        "CEEGMEM": "environment",
-        "CEETERM": "runtime",
-        "CEEMOUT": "runtime",
-        "CEE3PRM": "runtime",
-        "CEE3GRC": "runtime",
-        "CEE3SRC": "runtime",
-        "CEEBINIT": "runtime",
-        "CEEPCMD": "runtime",
-        "CEEMSG": "runtime",
-        "CEEGLOB": "runtime",
-        "CEETDLI": "ims",
     }
 
     # DL/I call function codes: the first operand of ``CALL 'CBLTDLI'`` /
