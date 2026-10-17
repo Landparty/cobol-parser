@@ -328,6 +328,12 @@ populated. Its token-cleaning pass:
   an operator or `NOT` follows. Pinned by
   `tests/regression/test_review_2026_09_09_parser.py` (`TestFinding08ConditionTrees`)
   and `tests/regression/test_issue_403_abbreviated_leading_is.py`.
+- **A leading NOT negates only its own relation** (#329): IBM reads `NOT A = 1
+  OR 2` as `(NOT A = 1) OR (A = 2)`. `_negate_condition` folds the NOT into the
+  relation's operator in place, so it records the operator as written on the
+  node (`_abbreviation_operator`) and `_expand_abbreviated_condition` repeats
+  that one; `A NOT = 1 OR 2` (NOT inside the operator) still carries NOT to the
+  leg. Pinned by `tests/regression/test_issue_329_leading_not_abbreviated.py`.
 - Condition collectors drop layout tokens and bare separators (rule 6); a
   condition ending at a line break must not keep a trailing `"\n"`, or a bare
   condition-name / `NOT cond` / class test / `( ... )` falls back to a raw

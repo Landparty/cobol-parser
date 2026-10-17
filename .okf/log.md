@@ -14,6 +14,10 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Leading NOT in an abbreviated relation (#329)
+
+[parser/statements.md](parser/statements.md): `NOT A = 1 OR 2` is
+`A <> 1 OR A = 2`; the abbreviated leg repeats the operator as written.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`IF NOT A = 'X' OR 'Y'` no longer negates the abbreviated leg** (#329).
+  The leading NOT was folded into the first relation's operator in place and
+  then copied into the abbreviated leg, building the always-true `A <> 'X'
+  OR A <> 'Y'`. It is now `A <> 'X' OR A = 'Y'`, the IBM reading, in IF,
+  PERFORM UNTIL and SEARCH WHEN condition trees (and so in business-rules,
+  constraints and every other tree consumer).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
