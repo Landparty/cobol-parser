@@ -123,7 +123,10 @@ def test_xref_has_the_field_and_not_the_class_name() -> None:
     report = XrefAnalyzer().analyze(_parse(_CLASS_PROGRAM)).to_dict()
     entries = {entry["name"]: entry for entry in report["entries"]}
     assert [r["role"] for r in entries["IN-CODE"]["references"]] == ["condition"]
-    assert "VALID-CODE" not in entries
+    # Not a data item: since #519 the SPECIAL-NAMES class is declared as
+    # its own kind, and the class test references it.
+    assert entries["VALID-CODE"]["kind"] == "class-name"
+    assert "VALID-CODE" not in report["undefined"]
 
 
 def test_evaluate_true_class_test_is_a_condition_selector() -> None:

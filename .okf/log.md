@@ -228,6 +228,12 @@ is the source of truth, rebuilt from SA38-0683; 24 non-services removed.
 [analysis/flow.md](analysis/flow.md): `build_fall_through_edges` takes
 `declarative_sections` and draws no edge out of one.
 
+## 2026-10-17 -- xref declares SPECIAL-NAMES (#519)
+
+[analysis/data-use.md](analysis/data-use.md), [mcp.md](mcp.md): mnemonic,
+class, alphabet and symbolic-character kinds plus UPSI condition names, at the
+CONFIGURATION SECTION; a class test credits its declared class-name.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

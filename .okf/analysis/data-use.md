@@ -429,7 +429,8 @@ qualifier to be found qualified. They never compare `qualified_name` text.
 paragraph).
 
 **Kinds** (`KIND_*`): `data-item`, `condition-name`, `paragraph`, `section`,
-`file`.
+`file`, and the SPECIAL-NAMES kinds `mnemonic-name`, `class-name`,
+`alphabet-name`, `symbolic-character` (#519).
 
 **Roles** (`ROLE_*`): `write`, `read`, `condition`, `subscript`, `perform`,
 `goto`, `call-argument`, `host-variable`, `file-operation`, and `reference`
@@ -473,6 +474,16 @@ Things worth knowing before trusting a field:
   counts as used (a literal `PADDING CHARACTER IS '*'` names nothing). The
   roles a READ / START gives the keys are unchanged. Pinned by
   `tests/regression/test_issue_549_556_select_clause_references.py`.
+* **SPECIAL-NAMES are declared** (#519). `_collect_special_names` reads the
+  CONFIGURATION SECTION's `special_names` metadata: each mnemonic name
+  (`C01 IS TOP-PAGE`), CLASS, ALPHABET and SYMBOLIC CHARACTERS name gets its
+  own kind, and an UPSI switch's ON/OFF STATUS names are `condition-name`s.
+  They live in the data namespace (a DATA DIVISION item of the same name
+  wins). The metadata has no line per entry, so each is declared at the
+  CONFIGURATION SECTION's location. A class test `X IS [NOT] HEX-CHARS` keeps
+  the class-name in the operator, which the operand walk skips (#539);
+  `_class_test_names` credits it, only when it names a declared class. Pinned
+  by `tests/regression/test_issue_519_xref_special_names.py`.
 * **Digit-led paragraph names resolve.** Procedure names (PERFORM / GO TO
   targets) are credited verbatim and `_COBOL_WORD_RE` allows a leading digit
   provided there is at least one letter, so `1000-INIT` is one symbol rather
