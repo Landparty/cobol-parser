@@ -14,6 +14,10 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- INITIALIZE phrases across a line break (#575)
+
+[parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): INITIALIZE's `TO VALUE`, `THEN` and `TO DEFAULT` lookaheads look past layout, so a line break inside a phrase no longer drops it.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

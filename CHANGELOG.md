@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A line break inside an INITIALIZE phrase no longer drops it** (#575).
+  `ALL` / `TO VALUE`, `THEN` / `REPLACING ...` and `THEN` / `TO DEFAULT`
+  split over two lines lost the phrase -- `to_default` silently stayed
+  `False`, the others left "Unparsed tokens" warnings -- and field lineage
+  lost the `REPLACING ... BY` source. The INITIALIZE parser's lookaheads now
+  look past line breaks, as #385 did for other verbs.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

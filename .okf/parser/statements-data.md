@@ -154,8 +154,12 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   (`_INITIALIZE_PHRASE_STARTS`). Enterprise COBOL 6 phrases: `[[WITH] FILLER]`
   (`with_filler`; WITH optional, #402), `[{ALL | category} TO VALUE]`
   (`to_value_category`), `[THEN] REPLACING ...`, `[THEN] TO DEFAULT`
-  (`to_default`); `THEN` is optional (`_match_then`). Pinned by
-  `tests/regression/test_level88_false_and_initialize_phrases.py`.
+  (`to_default`); `THEN` is optional (`_match_then`). Every phrase lookahead
+  uses `peek_past_noise`, so a line break inside `ALL TO VALUE` / `THEN
+  REPLACING` / `THEN TO DEFAULT` keeps the phrase (a raw `peek(1)` saw the
+  NEWLINE and dropped it, silently for `TO DEFAULT`; #575). Pinned by
+  `tests/regression/test_level88_false_and_initialize_phrases.py` and
+  `test_initialize_phrase_line_breaks.py` (every form split at every gap).
 - **INSPECT.** `_parse_tallying`'s counter-clause loop (`counter-1 FOR
   {CHARACTERS|ALL|LEADING} [value] ...`) checks `is_statement_boundary` and the H9
   check before treating an IDENTIFIER as a new counter; a subscripted counter
