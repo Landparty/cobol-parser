@@ -657,6 +657,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fragment in gen-data's program skeleton (`wrap_copybook_fragment`), MCP
   citing the copybook's own lines; `data-items` on a file with no DATA
   DIVISION exits 1 with a message instead of an empty list.
+* **MCP `record_layout` no longer drops the SYNCHRONIZED caveat** (#488).
+  It laid records out with `compute_record_layout` alone, which never flags
+  slack bytes, so offsets after an unaligned `SYNC` item came back exact
+  with no caveat. It now runs the new `flag_record_layout()` (what
+  `data-items` runs), marking those fields `offset_ambiguous` and adding an
+  `incomplete-analysis` caveat; `explain_symbol` adds the same caveat for
+  its item's record.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
