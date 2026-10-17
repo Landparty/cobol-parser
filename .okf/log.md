@@ -305,6 +305,12 @@ VARCHAR 49-levels are not reported unused.
 [tests.md](tests.md): the `null-indicator` warning needs an output host variable (INTO, `SET :hv
 =`); an unknown-direction one (SQL CALL argument) is `unchecked` for it.
 
+## 2026-10-17 -- Exhaustive IF/EVALUATE branches terminate a paragraph (#586)
+
+[analysis/flow.md](analysis/flow.md): both `_is_terminator` copies count an
+IF with ELSE / EVALUATE with WHEN OTHER whose every arm terminates
+(`_procedures.branch_terminates`), so no fall-through is drawn past it.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

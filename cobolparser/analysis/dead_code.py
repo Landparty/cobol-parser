@@ -33,6 +33,7 @@ from ..models.statements.misc import (
 from ._cics import cics_terminator_kind
 from ._procedures import (
     ProcedureIndex,
+    branch_terminates,
     enclosing_section,
     qualify,
     statement_qualifier,
@@ -797,10 +798,10 @@ class DeadCodeAnalyzer:
         physically written after it in the same paragraph is itself
         unreachable and irrelevant to whether the paragraph falls through --
         checking only ``para.statements[-1]`` would miss a mid-paragraph
-        terminator followed by dead trailing statements. Nested statements
-        (inside an IF/EVALUATE arm) are deliberately excluded: a terminator
-        there only fires conditionally, so it must not suppress
-        fall-through whenever that branch isn't the one actually taken.
+        terminator followed by dead trailing statements. A terminator nested
+        in one IF/EVALUATE arm only fires conditionally and does not count;
+        an exhaustive branch whose every arm terminates does (see
+        ``_is_terminator``).
         """
         cached = self._terminates_cache.get(name)
         if cached is not None:
@@ -849,8 +850,11 @@ class DeadCodeAnalyzer:
         operator action), GOBACK, EXIT PROGRAM, a non-DEPENDING GO TO --
         including the alterable ``GO TO.`` with no operand, which always
         transfers to whatever an ALTER last set it to -- or EXEC CICS
-        RETURN / XCTL / ABEND (see ``_cics``).
+        RETURN / XCTL / ABEND (see ``_cics``) -- or an exhaustive branch
+        whose every arm reaches one (``_procedures.branch_terminates``).
         """
+        if branch_terminates(stmt, DeadCodeAnalyzer._is_terminator):
+            return True
         if cics_terminator_kind(stmt) is not None:
             return True
         if isinstance(stmt, GobackStatement):
