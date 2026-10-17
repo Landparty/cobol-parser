@@ -68,7 +68,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `redundancy.py` | `RedundancyAnalyzer` (clone groups, paragraph fingerprints) | [flow](analysis/flow.md) |
 | `technical_debt.py` | `TechnicalDebtAnalyzer`, `DebtWeights` | [flow](analysis/flow.md) |
 | `_procedures.py` | `ProcedureIndex`, `enclosing_section`, `qualify` | [flow](analysis/flow.md) |
-| `_cics.py` | `cics_exit_kind`, `cics_terminator_kind` | [flow](analysis/flow.md) |
+| `_cics.py` | `cics_exit_kind`, `cics_terminator_kind`, `cics_identifier_options` | [flow](analysis/flow.md), [data-use](analysis/data-use.md) |
 | `_sql_whenever.py` | `whenever_coverage`, `whenever_goto_target` | [flow](analysis/flow.md) |
 | `unused_variables.py` | `UnusedVariableAnalyzer`, `collect_declared_items`, `qualified_data_name` | [data-use](analysis/data-use.md) |
 | `xref.py` | `XrefAnalyzer` | [data-use](analysis/data-use.md) |

@@ -163,6 +163,8 @@ so a retry loop ending in `RETURN TRANSID(...) RESP(...)`, the usual shop
 form, is `MEDIUM` like the GOBACK equivalent, not a `HIGH` lint error
 (review of PR #453: applying the RESP exemption to the escape flag too left
 that loop HIGH). Pinned in `tests/unit/analysis/test_cics_terminators.py`.
+`_cics.py` also holds `cics_identifier_options()` (the non-literal options
+the data-use sweeps read, #588; see [data-use.md](data-use.md)).
 
 ## DeadCodeAnalyzer
 

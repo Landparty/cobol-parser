@@ -71,6 +71,12 @@ reference; undefined warns. [tests.md](tests.md): `test_define_as_variable.py`.
 [analysis/flow.md](analysis/flow.md): `_CLAUSE_PAIRS` -- AT END / NOT AT END
 (and the other NOT- twins) add one decision; SEARCH AT END adds none.
 
+## 2026-10-17 -- EXEC CICS literal options reference nothing (#588)
+
+[analysis/data-use.md](analysis/data-use.md), [analysis.md](analysis.md):
+`_cics.cics_identifier_options()` drops `literal_options`; unused-variables,
+xref and `LinkageChecker` sweep CICS options through it.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

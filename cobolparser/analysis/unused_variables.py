@@ -50,6 +50,7 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
+from ._cics import cics_identifier_options
 from ._names import QUALIFIER_SEPARATOR, qualified_references
 
 # DATA DIVISION section names whose data items are in scope for this
@@ -1101,8 +1102,7 @@ class UnusedVariableAnalyzer:
                 continue
             type_name = type(node).__name__
             if type_name == "ExecCicsStatement":
-                options = getattr(node, "options", None) or {}
-                for v in options.values():
+                for v in cics_identifier_options(node).values():
                     names |= _extract_identifiers(v)
             elif type_name == "ExecImsStatement":
                 for v in getattr(node, "arguments", None) or []:
