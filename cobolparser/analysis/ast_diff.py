@@ -147,6 +147,7 @@ from ..models.statements.data import (
     DisplayStatement,
     InspectStatement,
     MoveStatement,
+    StringStatement,
     UnstringStatement,
 )
 from ..models.statements.io import IOAcceptStatement, IOOpenStatement
@@ -570,6 +571,15 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
             stmt.converting_before or "",
             stmt.converting_after or "",
         )
+    if isinstance(stmt, StringStatement):
+        return (
+            kind,
+            # Which delimiter applies to which source (#576): moving B from
+            # ``DELIMITED BY SIZE`` to ``DELIMITED BY D1`` truncates it.
+            _json_key(stmt.groups),
+            stmt.into_target or "",
+            stmt.pointer_variable or "",
+        )
     if isinstance(stmt, UnstringStatement):
         return (
             kind,
@@ -685,6 +695,17 @@ def _statement_text(stmt: Any) -> str:
         text = (
             f"CALL '{stmt.called_program}'" + text[len(f"CALL {stmt.called_program}") :]
         )
+    elif isinstance(stmt, StringStatement) and stmt.groups:
+        # The flowchart lists the sources only; a source moving between
+        # delimiter groups would then read identically on both sides (#576).
+        parts = ["STRING"]
+        for group in stmt.groups:
+            parts.extend(str(source) for source in group["sources"])
+            if group["delimiter"] is not None:
+                parts.append(f"DELIMITED BY {group['delimiter']}")
+        if stmt.into_target:
+            parts.append(f"INTO {stmt.into_target}")
+        text = " ".join(parts)
     elif isinstance(stmt, UnstringStatement) and text == "UNSTRING":
         # The flowchart collapses UNSTRING to its verb.
         all_flags = list(stmt.delimiter_all) + [False] * len(stmt.delimiters)

@@ -236,6 +236,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lint` and `xref`, and a truly unused item went unreported. The options the
   parser records as single literals (`literal_options`) are now skipped by
   those sweeps and by `linkage-check` (`_cics.cics_identifier_options()`).
+* **STRING records which sources each `DELIMITED BY` applies to** (#576).
+  `STRING A B DELIMITED BY SIZE C DELIMITED BY D1` and `STRING A DELIMITED
+  BY SIZE B C DELIMITED BY D1` produced the same node, so `diff` said "No
+  structural changes" although B is copied whole in one and truncated at D1
+  in the other. `StringStatement.groups` (`[{"sources": [...], "delimiter":
+  ...}]`, also in `to_dict()`) now records the grouping, and `diff`
+  compares it; `operands` and `delimiters` are unchanged.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

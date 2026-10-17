@@ -202,6 +202,11 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   only when the next token is operand-shaped (`_next_is_delimiter`), so
   `DELIMITED INTO X` leaves INTO for its own clause. Operands and delimiters are
   re-quoted literals (`literal_operand_text`).
+- **STRING groups** (#576). Besides the flat `operands` / `delimiters`,
+  `StringStatement.groups` is `[{"sources": [...], "delimiter": d}]`: each
+  `DELIMITED BY` closes the sources read since the previous one; trailing
+  sources with no `DELIMITED BY` form a last group with `delimiter: None`.
+  Built in the model's `add_operand` / `add_delimiter`.
 - **UNSTRING.** `DELIMITED BY d1 OR d2 ...` collects every delimiter
   (`delimiters`), with `delimiter_all` a parallel bool list emitted by `to_dict()`
   only when some delimiter is `ALL`. `_parse_into_targets` accepts a comma list

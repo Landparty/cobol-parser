@@ -77,6 +77,12 @@ reference; undefined warns. [tests.md](tests.md): `test_define_as_variable.py`.
 `_cics.cics_identifier_options()` drops `literal_options`; unused-variables,
 xref and `LinkageChecker` sweep CICS options through it.
 
+## 2026-10-17 -- STRING delimiter groups (#576)
+
+[parser/statements-data.md](parser/statements-data.md),
+[analysis/codebase.md](analysis/codebase.md): `StringStatement.groups`
+records which sources each DELIMITED BY applies to; diff compares it.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
