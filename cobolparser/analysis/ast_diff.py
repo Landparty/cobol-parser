@@ -370,6 +370,12 @@ class _Procedure:
         return [item.key for item in self.body]
 
 
+#: The name the unnamed paragraph -- PROCEDURE DIVISION statements before
+#: the first paragraph header -- is compared under. Parenthesized, so no
+#: COBOL paragraph can share it.
+UNNAMED_PARAGRAPH = "(PROCEDURE DIVISION)"
+
+
 @dataclass
 class _DataEntry:
     """One DATA DIVISION entry (data item or level-88 condition name)."""
@@ -1505,6 +1511,18 @@ class ProgramDiffer:
                 if node.paragraph_name and node.paragraph_name != ".":
                     add(
                         node.paragraph_name,
+                        "paragraph",
+                        None,
+                        node.location,
+                        node.statements,
+                    )
+                elif not node.paragraph_name and node.statements:
+                    # Statements before the first paragraph header (or a
+                    # PROCEDURE DIVISION with no header at all) sit in an
+                    # unnamed paragraph; skipping it made every edit there
+                    # diff as "No structural changes" (#516).
+                    add(
+                        UNNAMED_PARAGRAPH,
                         "paragraph",
                         None,
                         node.location,

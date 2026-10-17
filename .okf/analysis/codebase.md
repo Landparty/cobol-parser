@@ -276,7 +276,11 @@ plus the SIGN / JUSTIFIED / SYNCHRONIZED / BLANK WHEN ZERO / EXTERNAL / GLOBAL
 flags and level-88 names and values — an entry with no data-name, which the
 parser names `ANONYMOUS-<level>-<line>`, is keyed as a positional `FILLER`,
 so a line shift does not report it removed and re-added);
-procedures (added, removed, renamed,
+procedures (the unnamed paragraph holding statements before the first
+header, or a whole header-less PROCEDURE DIVISION, is compared as
+`(PROCEDURE DIVISION)` (`ast_diff.UNNAMED_PARAGRAPH`) -- skipped, every edit
+there diffed clean, #516; adding a header to it reads as a rename; pinned by
+`tests/regression/test_issue_516_diff_unnamed_paragraph.py`) (added, removed, renamed,
 **moved** — reordered without a body change, reported separately so a pure
 reshuffle never reads as a rewrite — and body-changed); and statements within
 matched paragraphs.
