@@ -29,6 +29,7 @@ __all__ = [
     "apply_project_config",
     "extract_config_flags",
     "provided_dests",
+    "unapplied_parse_settings",
 ]
 
 
@@ -227,3 +228,41 @@ def apply_project_config(
         value = read(config)
         if value is not None:
             setattr(args, dest, value)
+
+
+# The settings that change *which program* a COBOL-parsing subcommand sees,
+# each with the argparse dest that would apply it and the value at which it
+# changes nothing (so a config stating the default draws no warning).
+# ``dialect`` is not here: there is one dialect, so it can change nothing.
+_PARSE_SETTINGS: tuple[tuple[str, str, Callable[[ProjectConfig], bool]], ...] = (
+    ("project.define", "define", lambda c: bool(c.define)),
+    (
+        "project.source_format",
+        "source_format",
+        lambda c: c.source_format not in (None, "auto"),
+    ),
+    ("project.debug_lines", "debug_lines", lambda c: bool(c.debug_lines)),
+)
+
+#: Dests whose presence marks a subcommand as one that parses COBOL source.
+#: ``config``, ``le-info``, ``jcl`` and ``mcp`` have none of them and are
+#: never warned about.
+_PARSES_COBOL = frozenset({"define", "source_format", "debug_lines", "copybook_path"})
+
+
+def unapplied_parse_settings(
+    args: argparse.Namespace, config: ProjectConfig
+) -> list[str]:
+    """The cobol.yml keys that would change the parsed program but that the
+    running subcommand has no flag for -- ``apply_project_config`` skips
+    those, and skipping them silently made e.g. ``batch`` parse a different
+    program than ``parse`` did (#324). Empty for a subcommand that does not
+    parse COBOL at all.
+    """
+    if not any(hasattr(args, dest) for dest in _PARSES_COBOL):
+        return []
+    return [
+        key
+        for key, dest, changes in _PARSE_SETTINGS
+        if changes(config) and not hasattr(args, dest)
+    ]

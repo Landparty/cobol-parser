@@ -160,6 +160,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`cobol.yml` `project.define` reaches `scan` and `field-impact`, and a
+  setting a subcommand cannot apply is no longer dropped silently** (#324).
+  `scan` reported code under `>>IF DBG` as dead and `field-impact` could not
+  find a field MOVEd there, while `dead-code` and `lineage` on the same file
+  honoured the define. Both now take `--define` (and with it the config
+  value; `field-impact` also takes `--source-format`), through the new
+  `ScanOptions.defined_symbols`. `batch`, `gen-fixtures`, `codebase-graph`,
+  `copybook-impact` (and the data commands) still have no `--define`, but a
+  `project.define`, non-`auto` `source_format` or true `debug_lines` they
+  cannot apply is now a `warning:` on stderr naming the key.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

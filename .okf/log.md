@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- cobol.yml define for scan / field-impact; unapplied keys warn (#324)
+
+[cli.md](cli.md), [batch.md](batch.md): `scan` / `field-impact` take
+`--define` (`ScanOptions.defined_symbols`); `unapplied_parse_settings()`
+warns about a program-shaping config key the subcommand has no flag for.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

@@ -291,6 +291,12 @@ def _parse_defines(defines: list[str]) -> dict[str, str] | None:
     return symbols
 
 
+def _defined_symbol_pairs(args: argparse.Namespace) -> tuple[tuple[str, str], ...]:
+    """``--define`` (or cobol.yml ``project.define``) as picklable pairs, for
+    ``ScanOptions.defined_symbols``."""
+    return tuple((_parse_defines(getattr(args, "define", [])) or {}).items())
+
+
 def _read_source(filepath: str) -> str:
     try:
         with open(filepath, encoding="utf-8") as f:
@@ -2591,6 +2597,7 @@ def _build_scan_parser(subparsers: argparse._SubParsersAction) -> None:
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
+    _add_define_args(p)
     _add_output_arg(p)
     _add_min_clone_statements_arg(p)
     p.set_defaults(func=_cmd_scan)
@@ -2685,6 +2692,7 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         free_form=bool(source_format["free_form"]),
         preprocess_fixed=source_format["preprocess_fixed"],
         debug_lines=bool(source_format.get("debug_lines", False)),
+        defined_symbols=_defined_symbol_pairs(args),
     )
 
     try:
@@ -3401,7 +3409,8 @@ def _build_field_impact_parser(subparsers: argparse._SubParsersAction) -> None:
     _add_compact_arg(p)
     _add_copybook_args(p)
     _add_output_arg(p)
-    _add_debug_lines_arg(p)
+    _add_source_format_args(p)
+    _add_define_args(p)
     p.set_defaults(func=_cmd_field_impact)
 
 
@@ -3464,12 +3473,16 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
         _fail("--depth must be >= 0")
 
     files = _cobol_files(targets)
+    source_format = _source_format_kwargs(args)
     scan = scan_files(
         files,
         ScanOptions(
             analyzers=("lineage",),
             copybook_paths=tuple(args.copybook_path or []),
-            debug_lines=bool(getattr(args, "debug_lines", False)),
+            free_form=bool(source_format["free_form"]),
+            preprocess_fixed=source_format["preprocess_fixed"],
+            debug_lines=bool(source_format.get("debug_lines", False)),
+            defined_symbols=_defined_symbol_pairs(args),
         ),
         workers=args.workers,
     )
@@ -4550,6 +4563,15 @@ def main() -> None:
         # there is a config file with something to say.
         args_provided = _project_config.provided_dests(_build_parser, argv)
         _project_config.apply_project_config(args, config, args_provided)
+        for key in _project_config.unapplied_parse_settings(args, config):
+            # Silently dropped before: the subcommand then analysed a
+            # different program than the single-file ones do (#324).
+            print(
+                f"warning: {config.source} sets {key}, but "
+                f"`{getattr(args, 'command', None) or 'parse'}` has no flag "
+                "for it and parses without it",
+                file=sys.stderr,
+            )
 
     if not hasattr(args, "func"):
         parser.print_help()

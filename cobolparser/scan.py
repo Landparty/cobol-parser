@@ -102,6 +102,12 @@ class ScanOptions:
     #: ``parse_cobol``'s ``debug_lines``: compile ``D``-in-column-7 lines as
     #: code (CLI ``--debug-lines``, cobol.yml ``project.debug_lines``).
     debug_lines: bool = False
+    #: Conditional-compilation symbols, as ``(name, value)`` pairs (CLI
+    #: ``--define``, cobol.yml ``project.define``). Without them a scan
+    #: analysed a different program than the single-file subcommands did:
+    #: code under ``>>IF DBG DEFINED`` vanished and its PERFORM targets read
+    #: as dead (#324).
+    defined_symbols: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -369,6 +375,7 @@ def _parse(
         kwargs["preprocess_fixed"] = options.preprocess_fixed
     if options.debug_lines:
         kwargs["debug_lines"] = True
+    defines = dict(options.defined_symbols)
 
     if options.copybook_paths:
         from cobolparser.preprocess.copybook_expander import parse_cobol_with_expansion
@@ -378,6 +385,9 @@ def _parse(
                 source,
                 path,
                 copybook_paths=list(options.copybook_paths),
+                # The expander evaluates the directives itself, so the
+                # symbols reach the members COPYd under them too.
+                defined_symbols=defines or None,
                 **kwargs,
             )
         except Exception as exc:  # noqa: BLE001
@@ -391,7 +401,24 @@ def _parse(
 
     from cobolparser.parser import parse_cobol
 
-    return parse_cobol(source, filename=path, **kwargs)
+    if not defines:
+        return parse_cobol(source, filename=path, **kwargs)
+
+    # parse_cobol takes no symbols; evaluate the directives first, as the
+    # CLI's single-file path does, keeping >>SOURCE FORMAT for the parser's
+    # own normalization.
+    from cobolparser.preprocess import preprocess_conditional_compilation
+
+    conditional_warnings: list[str] = []
+    source = preprocess_conditional_compilation(
+        source,
+        defines,
+        warnings=conditional_warnings,
+        keep_source_format_directives=True,
+    )
+    result = parse_cobol(source, filename=path, **kwargs)
+    result.warnings[:0] = conditional_warnings
+    return result
 
 
 def _scan_one_packed(args: tuple[str, ScanOptions]) -> FileScan:
