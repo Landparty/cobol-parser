@@ -351,6 +351,12 @@ statements before the first paragraph header as `(PROCEDURE DIVISION)`.
 [mcp.md](mcp.md): the 200-line cap trims `before` context, keeping `line`
 and its `after` lines.
 
+## 2026-10-17 -- Numeric-edited decode is exact (#587)
+
+[generators/record-data.md](generators/record-data.md): `deedit_numeric`
+re-edits the value it read and rejects text that differs, so bad bytes in
+insertion / sign / `CR`/`DB` / currency positions are reported.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

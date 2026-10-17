@@ -341,6 +341,11 @@ all-`Z`/all-`*` zero case — and every case in
 GnuCOBOL 3. A floating `+`/`-` can land on an insertion position inside its
 own string (`PIC +++,+++` edits -514 as `   -514`, the sign where the comma
 would be); `deedit_numeric` reads the sign there too.
+`deedit_numeric` accepts only text that *is* an edited form: after reading
+digits and sign it re-edits the value and requires the result to equal the
+input, so a stray byte in an insertion, fixed-sign, `CR`/`DB` or `$`
+position, or a space in a `9` position, is an error rather than read past
+(`'9999999'` in `ZZ9.99-` once decoded cleanly as 999.99, #587).
 
 **Line terminator.** `to_csv()` and `write_csv()` share
 `_DEFAULT_LINE_TERMINATOR = "\n"`, deliberately *not* the `csv` module's

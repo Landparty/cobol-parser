@@ -296,7 +296,7 @@ def edit_numeric(
             ),
             context=_EXACT,
         )
-    negative = number < 0
+    negative = bool(number < 0)
     width = layout.integer_positions + layout.fraction_positions
     # Truncated, not rounded: a MOVE drops the places the picture has no
     # room for (``9.999`` into ``ZZ9.99`` edits as ``  9.99``).
@@ -305,7 +305,14 @@ def edit_numeric(
         .scaleb(layout.fraction_positions, context=_EXACT)
         .to_integral_value(rounding=ROUND_DOWN, context=_EXACT)
     )
-    digits = str(scaled % 10**width).rjust(width, "0") if width else ""
+    return _edit_digits(layout, scaled % 10**width if width else 0, negative)
+
+
+def _edit_digits(layout: _Layout, scaled: int, negative: bool) -> str:
+    """*scaled* (the value as an integer of the picture's digit positions,
+    already within its width) and its sign, as *layout* displays them."""
+    width = layout.integer_positions + layout.fraction_positions
+    digits = str(scaled).rjust(width, "0") if width else ""
     if scaled == 0:
         negative = False
 
@@ -409,10 +416,12 @@ def deedit_numeric(
     Returns ``(magnitude, negative)`` -- the value as an integer of the
     picture's digit positions, the scale implied by its fraction positions --
     or ``None`` when the picture is not one :func:`edit_numeric` models,
-    *text* is not the picture's width, or a digit position holds a character
-    no edit could have put there.  A digit position holding anything
-    but a digit (a space, ``*``, the floating symbol) reads as zero, which is
-    exactly what the edit put there.  *decimal_point_is_comma* as for
+    *text* is not the picture's width, or *text* is not exactly what
+    :func:`edit_numeric` writes for the value it holds -- a byte in an
+    insertion, sign, ``CR``/``DB`` or currency position that no edit puts
+    there, or a space in a ``9`` position, is rejected rather than read past.
+    A suppressed digit position (a space, ``*``, the floating symbol) reads
+    as zero, which is exactly what the edit put there.  *decimal_point_is_comma* as for
     :func:`edit_numeric`.
     """
     if decimal_point_is_comma:
@@ -458,4 +467,13 @@ def deedit_numeric(
             # sitting where the comma would be.
             negative = negative or chunk == "-"
     magnitude = int("".join(digits)) if digits else 0
-    return magnitude, negative and magnitude != 0
+    negative = negative and magnitude != 0
+    # The loop above reads digits and sign; it does not check the positions
+    # that hold neither (an insertion ``.``/``,``/``B``/``/``, a fixed sign,
+    # ``CR``/``DB``, ``$``) nor a space in a ``9`` position.  Editing the
+    # value back and comparing does, exactly: ``'9999999'`` in ``ZZ9.99-``
+    # is no value's edited form, so ``deedit(edit(v)) == v`` holds in both
+    # directions rather than only one.
+    if _edit_digits(layout, magnitude, negative) != text:
+        return None
+    return magnitude, negative
