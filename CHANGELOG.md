@@ -160,6 +160,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`>>DEFINE B AS A` gives B the value of A** (#567). A lone compilation
+  variable is an IBM arithmetic expression too, but only text containing an
+  operator was evaluated, so B held the word "A" and every later `>>IF B = 3`
+  was silently FALSE. B now copies A's value at that point; naming an
+  undefined variable warns.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

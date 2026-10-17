@@ -476,7 +476,10 @@ Directive and skipped lines are blanked in place.
 * `>>DEFINE` symbols may be hyphenated (`_DEFINE_RE`). `>>DEFINE name AS
   arithmetic-expression` over integer literals / defined integer variables
   (`+ - * /`, parentheses) is evaluated exactly (`_eval_define_arithmetic`:
-  `AS 2 + 1` is `3`); otherwise the raw text is kept. An `>>IF` / `>>WHEN`
+  `AS 2 + 1` is `3`); otherwise the raw text is kept. A lone word
+  (`_DEFINE_WORD_RE`, `AS A`) copies A's current value, any type; an
+  undefined one warns and keeps the word -- storing "A" made `>>IF B = 3`
+  silently FALSE (#567). An `>>IF` / `>>WHEN`
   comparison operand may be the same arithmetic (`X + 1 = 8`), evaluated by
   the same function so the two directives agree; an inexact or non-integer
   one warns and is FALSE (#512). `_COND_TOKEN_RE` reads `X -1` as `X`, `-1`;
