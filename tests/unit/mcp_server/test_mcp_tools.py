@@ -825,7 +825,12 @@ class TestProgramBrief:
     def test_sql_tables_and_cics(self, root: Path) -> None:
         tools = with_copybooks(root)
         db2 = tools.program_brief("DB2BATCH.cbl")["answer"]
-        assert {"name": "BANK.ACCOUNT", "access": "--U-"} in db2["sql_tables"]
+        # Read through the two cursors DECLAREd in WORKING-STORAGE (#518).
+        assert {
+            "name": "BANK.ACCOUNT",
+            "access": "-RU-",
+            "cursors": ["ACCT-CSR", "BULK-CSR"],
+        } in db2["sql_tables"]
         cics = tools.program_brief("CICSONLN.cbl")["answer"]
         assert cics["cics_commands"]["SEND"] == 2
         linked = {c["program"]: c for c in cics["calls"]}

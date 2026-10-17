@@ -701,6 +701,13 @@ per file and one per DB2 table the program touches.
   INSERT|UPDATE|DELETE` clauses take. `EXEC SQL TRUNCATE [TABLE] t` marks `t`
   D, like a DELETE (`SQLStatementType.TRUNCATE` is in `_WRITE_SQL_TYPES`, see
   #341). Pinned by `tests/unit/test_issue_341_dialect_crud.py::TestTruncateTable`.
+* **SQL in the DATA DIVISION counts.** `get_all_statements()` walks the
+  PROCEDURE DIVISION only, so the SQL passes also read the program's own
+  DATA DIVISION EXEC SQL nodes (`_data_division_sql()`, ahead of the
+  procedure statements): a `DECLARE c CURSOR` in WORKING-STORAGE marks its
+  tables R with the cursor name, and a `FETCH c` / `WHERE CURRENT OF c`
+  resolves through it. A contained program's DATA DIVISION is its own.
+  Pinned by `tests/regression/test_crud_ws_cursor_issue_518.py` (#518).
 
 ## DynamicCallAnalyzer
 
