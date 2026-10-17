@@ -287,7 +287,11 @@ the [history](../history/analysis.md).
 
 **Reachability differs from `ProgramFlowAnalyzer` by design.**
 `graph.build_fall_through_edges` emits a `FALL_THROUGH` edge between *any* two
-adjacent non-terminating procedures, PERFORM targets included, so
+adjacent non-terminating procedures, PERFORM targets included (except out of
+a DECLARATIVES section: its last member, and an EXIT SECTION in it, get no
+edge, since a USE procedure returns to the runtime -- `declarative_sections`,
+#533; the edge into the next declarative section or past END DECLARATIVES
+made MCP `callers_of("MAIN")` report the last USE paragraph), so
 `flow_report.unreachable_nodes` under-reports the same way. Changing that is a
 CFG-shape question with a much wider blast radius (flowcharts,
 `ScenarioPlanner` arm reachability, `TechnicalDebtAnalyzer`'s

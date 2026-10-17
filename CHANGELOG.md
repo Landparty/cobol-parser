@@ -160,6 +160,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`program-flow` draws no fall-through out of a DECLARATIVES section**
+  (#533). The last paragraph of each USE section got a FALL_THROUGH edge to
+  the next procedure in source order -- the next declarative section, or the
+  first section after END DECLARATIVES -- so MCP `callers_of("MAIN")`
+  reported the USE paragraph as a caller. A USE procedure returns to the
+  runtime when its section ends; its last member (and an EXIT SECTION in it)
+  now has no onward edge.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

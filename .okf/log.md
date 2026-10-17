@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- No fall-through out of a DECLARATIVES section (#533)
+
+[analysis/flow.md](analysis/flow.md): `build_fall_through_edges` takes
+`declarative_sections` and draws no edge out of one.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
