@@ -609,6 +609,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose position in its group changed is now a `data-item-moved` change,
   with its position and byte offset before and after; as for procedures,
   an inserted or removed field moves nothing else.
+* **`diff` compares the statements before the first paragraph header**
+  (#516). They sit in an unnamed paragraph, which `ProgramDiffer` skipped,
+  so an edit there -- or anywhere in a PROCEDURE DIVISION with no paragraph
+  header -- read as "No structural changes". They are now compared as the
+  paragraph `(PROCEDURE DIVISION)`; adding a header to them reads as a
+  rename.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
