@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`cobol.yml` path entries expand `~` and `$VAR`, and a missing directory
+  is reported** (#550). `copybook_path: ~/copybooks` was joined onto the
+  config file's directory as written (`<cfgdir>/~/copybooks`), so it
+  silently matched nothing, while `--copybook-path ~/copybooks` worked
+  because the shell expands it. `~` and `$VAR` / `${VAR}` are now expanded.
+  An entry that is not an existing directory is marked
+  `(not an existing directory)` by `cobol-parser config` (`--json`:
+  `missing_directories`), and every command that uses it prints a one-line
+  warning.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

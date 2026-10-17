@@ -290,8 +290,16 @@ Reports which `cobol.yml` is in effect and every setting it supplies;
 settings the file does not mention are **omitted**, so what is printed is
 exactly what the file changes. No file anywhere: says so, suggests creating
 one, exit 0. `--json` emits `{"config_file", "version", "project", "data",
-"lint", "tools"}` (`config_file` `null` when none). Honours `--config` /
-`--no-config`.
+"lint", "tools"}` (`config_file` `null` when none), plus
+`missing_directories` only when `ProjectConfig.missing_directories()` names
+a path entry that is not a directory; the text form marks those entries
+`(not an existing directory)`. Honours `--config` / `--no-config`.
+
+Path entries (`_path_list`) get `os.path.expanduser` + `expandvars` before
+the join onto the file's directory: as written, `~/cpy` became
+`<cfgdir>/~/cpy` and silently found nothing (#550). `main()` warns on stderr
+once per missing entry for a dest the subcommand reads and the user did not
+pass explicitly.
 
 ## Shared flags
 
