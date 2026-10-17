@@ -132,6 +132,19 @@ def touch_later(path: Path, text: str) -> None:
 # -- the indexes ---------------------------------------------------------------
 
 
+def _unreadable(root: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """Make *name* a program under *root* that cannot be read."""
+    (root / name).write_text("       PROGRAM-ID. X.\n")
+    original = Workspace.read_text
+
+    def read_text(path: Path, warnings: list[str] | None = None) -> str:
+        if path.name == name:
+            raise ToolError(f"cannot read {name}: unreadable")
+        return original(path, warnings)
+
+    monkeypatch.setattr(Workspace, "read_text", staticmethod(read_text))
+
+
 class TestIndexes:
     def test_program_files_follow_cobol_yml(self, root: Path) -> None:
         (root / ".hidden").mkdir()
@@ -176,10 +189,14 @@ class TestIndexes:
         ws._use_config(ProjectConfig(copybook_path=(str(root / "copybooks"),)))
         assert programs_index(ws) is not first
 
-    def test_an_unreadable_program_is_named(self, root: Path) -> None:
-        (root / "LATIN1.cbl").write_bytes(b"       PROGRAM-ID. \xff\xfe.\n")
+    def test_an_unreadable_program_is_named(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A Latin-1 program is decoded, not refused, since #522: an
+        # unreadable one is simulated instead.
+        _unreadable(root, monkeypatch, "LATIN1.cbl")
         index = programs_index(workspace(root))
-        assert "not valid UTF-8" in index.failed["LATIN1.cbl"]
+        assert "cannot read LATIN1.cbl" in index.failed["LATIN1.cbl"]
         assert index.graph.programs  # the rest still answered
 
     def test_lineage_and_health_are_separate_builds(self, root: Path) -> None:
@@ -304,8 +321,10 @@ class TestProgramCallers:
         assert len(result["answer"]["declared_in"]) == 2
         assert "duplicate-declaration" in kinds(result)
 
-    def test_unparsed_files_are_a_caveat(self, root: Path) -> None:
-        (root / "LATIN1.cbl").write_bytes(b"       PROGRAM-ID. \xff\xfe.\n")
+    def test_unparsed_files_are_a_caveat(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unreadable(root, monkeypatch, "LATIN1.cbl")
         result = CobolTools(workspace(root)).callers_of(None, "LOGGER")
         (caveat,) = [c for c in result["caveats"] if "LATIN1.cbl" in c["detail"]]
         assert caveat["kind"] == "incomplete-analysis"

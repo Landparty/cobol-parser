@@ -20,8 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
+from .._lines import split_source_lines
 from ..models.data_items import CobolDataItem, ConditionNameItem, RenamesItem
 from ..models.program import CobolProgram, CobolSection
+from ..preprocess import PreprocessingError
 from .envelope import Response, ToolError, clamp_limit
 from .workspace import ParsedProgram, Workspace, stdout_to_stderr
 
@@ -81,6 +83,30 @@ _CONTROL_EDGES = frozenset(
 )
 
 
+def _source_lines(path: Path) -> Iterator[str]:
+    """*path*'s lines, decoded as the parse decodes it (#522), so a line
+    number in any other answer is the same line here.
+
+    An ASCII-shaped encoding streams (newline="" splits on \n, \r\n and \r
+    only, as split_source_lines does: never on a form feed inside a record),
+    so a huge file costs no memory; EBCDIC / UTF-16 go through the same
+    whole-file conversion the parse uses.
+    """
+    from ..preprocess.copybook_expander import (
+        _is_ebcdic_codec,
+        detect_encoding,
+        read_program_source,
+    )
+
+    encoding = detect_encoding(str(path))
+    if _is_ebcdic_codec(encoding) or encoding.startswith("utf-16"):
+        yield from split_source_lines(read_program_source(str(path), encoding))
+        return
+    with path.open(encoding=encoding, errors="replace", newline="") as handle:
+        for text in handle:
+            yield text.rstrip("\r\n")
+
+
 class CobolTools:
     """Every tool the MCP server exposes, bound to one workspace."""
 
@@ -103,15 +129,10 @@ class CobolTools:
         window: list[str] = []
         total = 0
         try:
-            # newline="" splits on \n, \r\n and \r only, as
-            # split_source_lines does: never on a form feed inside a record.
-            with path.open(encoding="utf-8", newline="") as handle:
-                for total, text in enumerate(handle, start=1):
-                    if start <= total <= last_kept:
-                        window.append(text.rstrip("\r\n"))
-        except UnicodeDecodeError as exc:
-            raise ToolError(f"{path.name} is not valid UTF-8 text") from exc
-        except OSError as exc:
+            for total, text in enumerate(_source_lines(path), start=1):
+                if start <= total <= last_kept:
+                    window.append(text)
+        except (OSError, PreprocessingError) as exc:
             raise ToolError(f"cannot read {path.name}: {exc}") from exc
         if line < 1 or (total and line > total):
             raise ToolError(f"line {line} is outside {file} (1-{total})")

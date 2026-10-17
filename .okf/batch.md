@@ -58,7 +58,7 @@ results = parse_files_with_copybooks(files, copybook_paths=["/path/to/cpy"])
 Signatures (all keyword arguments after `paths` have defaults):
 
 * `parse_files(paths, workers=None, error_recovery=COLLECT_ALL,
-  dialect=IBM_ENTERPRISE, encoding="utf-8", errors="replace", executor=None,
+  dialect=IBM_ENTERPRISE, encoding=None, errors="replace", executor=None,
   enable_profiling=False, top_n=50, prof_output=None, debug_lines=False)`.
   `workers=None` uses `os.cpu_count()`; `workers <= 0` raises `ValueError`.
   With no `executor` and one worker it takes a **sequential fast path** in
@@ -67,9 +67,12 @@ Signatures (all keyword arguments after `paths` have defaults):
   `error_recovery` / `dialect` / `debug_lines` change). Otherwise
   `ProcessPoolExecutor.map` with `chunksize = max(1, n // (workers*4))`.
   File I/O happens inside the workers, so large source strings are never
-  pickled.
+  pickled. `encoding=None` detects each file's encoding the way a
+  copybook's is (`read_program_source`, #522); a lossy decode is appended
+  to `result.warnings` (and to `expansion_warnings` with copybooks), and
+  `errors="strict"` makes it a `read_error`.
 * `parse_files_with_copybooks(paths, copybook_paths, workers=None,
-  error_recovery=..., dialect=..., encoding="utf-8", errors="replace",
+  error_recovery=..., dialect=..., encoding=None, errors="replace",
   max_nesting_depth=100, copybook_cache_size=1024, enable_profiling=False,
   top_n=50, prof_output=None, debug_lines=False)`. Runs **sequentially** in
   the main process (`workers` is accepted but unused, reserved) to maximize
@@ -195,7 +198,7 @@ arguments, so a worker signature cannot drift from its call site):
 | `error_recovery` | `COLLECT_ALL` | |
 | `copybook_paths` | `()` | non-empty -> `parse_cobol_with_expansion` |
 | `min_clone_statements` | `3` | passed to `RedundancyAnalyzer` |
-| `encoding` / `errors` | `"utf-8"` / `"replace"` | `Path.read_text` |
+| `encoding` / `errors` | `None` (detected) / `"replace"` | `read_program_source` (#522); a lossy decode is `FileScan.decode_warnings`, serialized only when non-empty |
 | `free_form` | `False` | lexer hint (auto-detection may still normalize) |
 | `preprocess_fixed` | `None` | `None` auto-detects, `True`/`False` force/disable fixed-format normalization (CLI `--source-format fixed\|free`, cobol.yml `source_format:`) |
 | `debug_lines` | `False` | compile `D`-in-column-7 lines (CLI `--debug-lines`, cobol.yml `project.debug_lines`) |

@@ -84,7 +84,9 @@ from ..models.program import CobolProgram
 from ..models.statements.base import CobolStatement
 from ..models.statements.call import CallStatement, EntryStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
+from ..preprocess import PreprocessingError
 from ..preprocess.copy_statement_parser import extract_copy_statements
+from ..preprocess.copybook_expander import read_program_source
 from ..preprocess.models import CopybookSearchPath
 from ..preprocess.path_resolver import PathResolver
 from ._names import callee_names
@@ -813,7 +815,8 @@ class CodebaseGraphBuilder:
             runs in-process to share its caches.
         chunk_size: Files parsed per batch before their ASTs are dropped.
         encoding: Source encoding, passed through to the batch parser and to
-            the COPY scan.
+            the COPY scan. None (default) detects it per file, the way a
+            copybook's is detected (#522).
         debug_lines: Compile fixed-format debugging lines (``D`` in column
             7) as code, so a CALL written on one is an edge.
     """
@@ -824,7 +827,7 @@ class CodebaseGraphBuilder:
         copybook_paths: list[str] | None = None,
         workers: int | None = None,
         chunk_size: int = _DEFAULT_CHUNK_SIZE,
-        encoding: str = "utf-8",
+        encoding: str | None = None,
         debug_lines: bool = False,
     ) -> None:
         self.copybook_paths: list[str] = list(copybook_paths or [])
@@ -1110,6 +1113,12 @@ class CodebaseGraphBuilder:
             nodes.append(ProgramNode(program_id=fallback, path=path, parse_failed=True))
             return
 
+        for warning in parse_result.warnings if parse_result is not None else []:
+            if str(warning).startswith("Lossy decode of "):
+                # Bytes the encoding could not map are U+FFFD in the parse
+                # (#522): a name or literal there may be wrong.
+                unresolved.append(f"{path}: {warning}")
+
         if parse_errors:
             # COLLECT_ALL always hands back *some* AST, so a file full of
             # garbage arrives here rather than above. Its parse errors are
@@ -1338,8 +1347,8 @@ class CodebaseGraphBuilder:
 
     def _read_source(self, path: str) -> str | None:
         try:
-            return Path(path).read_text(encoding=self.encoding, errors="replace")
-        except (OSError, ValueError):
+            return read_program_source(path, self.encoding)
+        except (OSError, ValueError, PreprocessingError):
             return None
 
     def _collect_copy_edges(

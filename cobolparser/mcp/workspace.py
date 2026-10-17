@@ -441,12 +441,18 @@ class Workspace:
             return resolved.as_posix()
 
     @staticmethod
-    def read_text(path: Path) -> str:
+    def read_text(path: Path, warnings: list[str] | None = None) -> str:
+        """A program's text, decoded the way the CLI and a copybook decode it
+        (#522): the encoding detected, so a cp1252 / Latin-1 program is read
+        rather than refused. A lossy decode is appended to *warnings*."""
+        from ..preprocess import PreprocessingError
+        from ..preprocess.copybook_expander import read_program_source
+
+        if not path.is_file():
+            raise ToolError(f"cannot read {path.name}: not a file")
         try:
-            return path.read_text(encoding="utf-8")
-        except UnicodeDecodeError as exc:
-            raise ToolError(f"{path.name} is not valid UTF-8 text") from exc
-        except OSError as exc:
+            return read_program_source(str(path), warnings=warnings)
+        except (OSError, PreprocessingError) as exc:
             raise ToolError(f"cannot read {path.name}: {exc}") from exc
 
     # -- parsing -------------------------------------------------------------
@@ -602,7 +608,8 @@ class Workspace:
         from ..preprocess import PreprocessingError, preprocess_conditional_compilation
         from ..preprocess.copybook_expander import parse_cobol_with_expansion
 
-        source = self.read_text(path)
+        decode_warnings: list[str] = []
+        source = self.read_text(path, decode_warnings)
         filename = str(path)
         format_kwargs = self._format_kwargs()
         parse_kwargs: dict[str, Any] = {
@@ -612,7 +619,14 @@ class Workspace:
         }
         defines = _defined_symbols(self.config.define)
         copybook_paths = list(self.config.copybook_path)
-        caveats: list[Caveat] = []
+        caveats: list[Caveat] = [
+            Caveat(
+                "incomplete-analysis",
+                warning,
+                "names or literals holding those bytes may be wrong",
+            )
+            for warning in decode_warnings
+        ]
 
         def parse_plain() -> Any:
             text = source
