@@ -456,6 +456,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   becomes `CODE = WS-B` (IF, PERFORM UNTIL, SEARCH WHEN); real 88s and
   names it cannot see keep the CONDITION_NAME reading. gen-fixtures no
   longer reports "bare condition name resolves to a non-condition field".
+* **Typed literals keep their prefix in conditions and EVALUATE selectors**
+  (#331). `IF A = X'0000'` was stored as `A = '0000'` (four characters, not
+  two bytes), and `EVALUATE A WHEN X'00'` as the value `00`, so gen-fixtures
+  called a 2-byte comparison against a `PIC X(2)` field unsatisfiable. The
+  prefix now survives (`X'0000'`, `Z'q'`, `N'..'`) in IF / PERFORM UNTIL /
+  SEARCH WHEN condition trees and in EVALUATE selectors (marked
+  `"typed": True`), and the constraint extractor solves against the bytes
+  the literal stands for.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
