@@ -90,7 +90,8 @@ class ScanOptions:
     error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.COLLECT_ALL
     copybook_paths: tuple[str, ...] = ()
     min_clone_statements: int = 3
-    encoding: str = "utf-8"
+    #: Source encoding: None detects it the way a copybook's is (#522).
+    encoding: str | None = None
     errors: str = "replace"
     free_form: bool = False
     #: ``parse_cobol``'s layout override: ``None`` auto-detects, ``True``
@@ -148,6 +149,9 @@ class FileScan:
     #: parses fine without its member -- so without this the report would be
     #: graded against a record layout it never saw, with nothing to say so.
     copybook_error: str | None = None
+    #: Lossy-decode warnings: bytes of the source its encoding could not
+    #: map, replaced with U+FFFD (#522). Serialized only when non-empty.
+    decode_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"path": self.path}
@@ -159,6 +163,8 @@ class FileScan:
             out["parse_error_count"] = self.parse_error_count
         if self.copybook_error is not None:
             out["copybook_error"] = self.copybook_error
+        if self.decode_warnings:
+            out["decode_warnings"] = list(self.decode_warnings)
         return out
 
 
@@ -299,9 +305,18 @@ def _units_with_depth(program: Any, depth: int = 0) -> list[tuple[Any, int]]:
 
 def scan_one(path: str, options: ScanOptions) -> FileScan:
     """Parse and analyze one file. Never raises -- see the module docstring."""
+    from .preprocess import PreprocessingError
+    from .preprocess.copybook_expander import read_program_source
+
+    decode_warnings: list[str] = []
     try:
-        source = Path(path).read_text(encoding=options.encoding, errors=options.errors)
-    except (OSError, ValueError) as exc:
+        source = read_program_source(
+            path,
+            options.encoding,
+            warnings=decode_warnings,
+            encoding_errors=options.errors,
+        )
+    except (OSError, ValueError, PreprocessingError) as exc:
         # ValueError covers UnicodeDecodeError under ``errors="strict"``: one
         # undecodable file must cost its own entry, not abort the whole scan
         # (the same guard batch.py's workers have).
@@ -324,6 +339,7 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
         path=path,
         parse_error_count=len(result.errors),
         copybook_error=expansion_failures[0] if expansion_failures else None,
+        decode_warnings=decode_warnings,
     )
     source_map = getattr(result, "expansion_source_map", None)
     for unit, depth in _units_with_depth(result.ast):

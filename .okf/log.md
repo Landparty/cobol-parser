@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Program sources decoded like copybooks (#522)
+
+[preprocessing.md](preprocessing.md), [cli.md](cli.md), [batch.md](batch.md),
+[mcp.md](mcp.md), [analysis/codebase.md](analysis/codebase.md):
+`read_program_source` detects a program's encoding everywhere (CLI
+`--encoding`, batch / scan / codebase-graph default `None`, MCP); lossy
+decodes are warnings or caveats, never silent.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

@@ -39,7 +39,7 @@ returns a small payload. Every list is capped (`limit`, default 50, max 500).
 
 | Tool | Answers | Built on |
 |---|---|---|
-| `read_source(file, line, before, after)` | numbered lines around a citation, at most `MAX_SOURCE_LINES` (200) | the file, streamed through the guard (`newline=""`: splits as `split_source_lines` does); only the window is kept |
+| `read_source(file, line, before, after)` | numbered lines around a citation, at most `MAX_SOURCE_LINES` (200) | the file, streamed through the guard (`newline=""`: splits as `split_source_lines` does) in the encoding the parse detected (`_source_lines`, #522; EBCDIC / UTF-16 converted whole); only the window is kept |
 | `lint(file, rules, min_severity, limit)` | findings worst first, `summary` counts, `rules_run` | `LintAnalyzer` over **every** unit, `add_parse_errors`; defaults from `cobol.yml`'s `lint:` |
 | `program_brief(file, program, limit)` | `size` (own statements only: `get_all_statements()` walks into contained units), `entry_points`, `interface` (entry points, parameters, `call_example`) and `interface_notes`, `files` (C/R/U/D string, open modes, organization, records, key, status field), `sql_tables`, `calls` (one row per target; dynamic `candidates` from `DynamicCallAnalyzer`; CICS LINK/XCTL `PROGRAM`), `cics_commands` / `exec_dli_commands` counts, `unreachable_procedures` (`DeadCodeAnalyzer`'s, via `_reachability()`; the flow graph's only if it raises), `perform_cycles`, `health`, `lint` (whole file: summary + `BRIEF_LINT` worst) | `ProgramFlowAnalyzer`, `DeadCodeAnalyzer`, `ProgramSignatureExtractor`, `CRUDMatrixGenerator`, `ProgramLayoutIndex.file_facts`, `TechnicalDebtAnalyzer`, `LintAnalyzer`; each section through `_attempt()`, so one analyzer raising costs only its section (`analyzer-failed`) |
 | `callers_of(file, name, program, limit)` | per matching paragraph/section: `callers` (`from`, `type`, location, `thru`, `via_range`, `perform_type`, `condition`, `loop`), `callers_by_type`, `reachable`, `is_entry_point`. `file=None`, or a name that is no procedure of `file`: `_program_callers()` (`kind: program`, `scope: workspace`): `callers` (`program`, `via`, location, `from` (the paragraph), `dynamic`/`target_from`), `calling_programs`, `declared_in`, `unresolved_dynamic_calls`, a `note` when it is external or called by nobody | flow edges in `_CONTROL_EDGES`; a THRU is two edges (opener + `*_THRU` closer), so only openers count and `range_members` gives `via_range`. `reachable` is `DeadCodeAnalyzer`'s (memoized `_reachability()`), not `flow.unreachable_nodes`, which misses the paragraph after a PERFORMed one; a `FALL_THROUGH` edge is a caller only when it is in `DeadCodeReport.fall_through_edges` or leaves the first entry point (#486). Program level: the `programs` index's per-unit `_calls` rows: a static target, or a dynamic one whose traced `candidates` include the name; an incomplete dynamic row is listed, not counted |
@@ -61,6 +61,11 @@ Invariants:
 - Lint keeps errors when the list is cut: ordering is severity, then source.
 
 ## Envelope
+
+`Workspace.read_text` decodes a program as the CLI does
+(`read_program_source`, #522): a cp1252 / Latin-1 program is parsed, not
+refused, and a lossy decode is an `incomplete-analysis` caveat on every
+answer about it.
 
 Every tool returns `{"surface_version", "answer", "caveats", "truncated",
 "program"?}` (`Response.build`). A location anywhere in `answer` is

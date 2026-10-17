@@ -260,7 +260,10 @@ class TestParseFilesWithCopybooksDecodeError:
         bad = tmp_path / "bad_encoding.cbl"
         bad.write_bytes(b"\xff\xfe not valid utf-8 \x80\x81")
 
-        results = parse_files_with_copybooks([bad], copybook_paths=[], errors="strict")
+        # Named explicitly: left to detection it reads as cp1252 (#522).
+        results = parse_files_with_copybooks(
+            [bad], copybook_paths=[], encoding="utf-8", errors="strict"
+        )
 
         assert len(results) == 1
         assert results[0].read_error is not None

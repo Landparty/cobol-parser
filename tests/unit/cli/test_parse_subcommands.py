@@ -65,11 +65,13 @@ class TestReadSource:
         with pytest.raises(SystemExit):
             _read_source(missing)
 
-    def test_unicode_error_exits(self, tmp_path):
+    def test_unknown_encoding_exits(self, tmp_path):
+        # Non-UTF-8 bytes are decoded since #522 (detected, as a copybook's
+        # are); naming an encoding that does not exist still exits.
         bad = tmp_path / "bad.cbl"
         bad.write_bytes(b"\xff\xfe binary garbage \x00\x01")
         with pytest.raises(SystemExit):
-            _read_source(str(bad))
+            _read_source(str(bad), "no-such-codec")
 
     def test_os_error_exits(self, tmp_path):
         """OSError (e.g. permission denied) causes SystemExit."""

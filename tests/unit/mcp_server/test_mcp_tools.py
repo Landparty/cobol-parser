@@ -382,10 +382,11 @@ class TestWorkspaceFiles:
         )
         assert ws.config.copybook_path == ()
 
-    def test_non_utf8_is_an_error(self, root: Path) -> None:
+    def test_non_utf8_is_decoded_as_the_parse_decodes_it(self, root: Path) -> None:
+        # Detected as cp1252, as a copybook would be (#522), not refused.
         (root / "BIN.cbl").write_bytes(b"\xff\xfe\x00")
-        with pytest.raises(ToolError, match="UTF-8"):
-            tools_for(root).read_source("BIN.cbl")
+        (line,) = tools_for(root).read_source("BIN.cbl")["answer"]["lines"]
+        assert line["text"] == "\u00ff\u00fe\x00"
 
 
 class TestCache:

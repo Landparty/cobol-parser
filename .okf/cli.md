@@ -76,7 +76,8 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
   `--free-form`, `--debug-lines`/`--no-debug-lines`, `--dialect {ibm-enterprise}`
   (default), `--error-recovery {fail-fast,collect-all}` (default `collect-all`),
   `--copybook-path DIR`..., `--program NAME` (default: the outermost unit),
-  `--define SYMBOL[=VALUE]`..., `-o/--output FILE`.
+  `--define SYMBOL[=VALUE]`..., `--encoding ENC` (default: detected, #522),
+  `-o/--output FILE`.
 * **+prof** — also `--profile`, `--profile-top-n N` (default 20; implies
   `--profile`), `--profile-output PATH` (implies `--profile`).
 * **dl** — `--debug-lines`/`--no-debug-lines` without `--source-format`.
@@ -84,11 +85,11 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | Subcommand | Positionals | Own flags (default) | Shared flags | Output |
 |---|---|---|---|---|
 | `parse` | `file [path]` | `--errors`, `--stats`, `--find-type NODE_TYPE` | A without `--program`; +prof | AST JSON; exit 2 on a recovered-but-errored parse |
-| `batch` | `[files ...]` | `--glob PATTERN`..., `--workers N` (CPU count), `--encoding` (`utf-8`), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
-| `tokenize` | `file` | — | `--compact`, `--source-format`/`--free-form`, dl, `--dialect`, `-o` | `{source_file, tokens}` |
-| `preprocess` | `file` | `--strip-directives` | `--source-format`/`--free-form`, dl, `--define` (no `--compact`, no `-o`) | free-form source text |
-| `expand` | `file` | `--keep-comments`, `--source-map`, `--max-depth N` (100) | `--copybook-path`, `--compact`, `--define`, `-o`, dl | expansion JSON |
-| `gen-data` | `file` (copybook or program) | `--rows/-n` (10), `--seed`, `--record`, `--list-records`, `--describe`, `--header-style {short,path}`, `--include-filler`, `--include-redefines`, `--no-expand-occurs`, `--max-occurs`, `--no-semantic`, `--ignore-values`, `--unique FIELD`, `--blank-rate`, `--format {csv,json,record,hex}` (csv), `--charset` (ascii), `--endian` (auto), `--record-format` (fixed), `--record-varying MIN:MAX`, `--record-separator` (none) | `--copybook-path`, `--compact`, `-o` | CSV / JSON / record bytes / hex |
+| `batch` | `[files ...]` | `--glob PATTERN`..., `--workers N` (CPU count), `--encoding` (detected), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
+| `tokenize` | `file` | — | `--compact`, `--source-format`/`--free-form`, dl, `--dialect`, `--encoding`, `-o` | `{source_file, tokens}` |
+| `preprocess` | `file` | `--strip-directives` | `--source-format`/`--free-form`, dl, `--define`, `--encoding` (no `--compact`, no `-o`) | free-form source text |
+| `expand` | `file` | `--keep-comments`, `--source-map`, `--max-depth N` (100) | `--copybook-path`, `--compact`, `--define`, `--encoding`, `-o`, dl | expansion JSON |
+| `gen-data` | `file` (copybook or program) | `--rows/-n` (10), `--seed`, `--record`, `--list-records`, `--describe`, `--header-style {short,path}`, `--include-filler`, `--include-redefines`, `--no-expand-occurs`, `--max-occurs`, `--no-semantic`, `--ignore-values`, `--unique FIELD`, `--blank-rate`, `--format {csv,json,record,hex}` (csv), `--charset` (ascii), `--endian` (auto), `--record-format` (fixed), `--record-varying MIN:MAX`, `--record-separator` (none) | `--copybook-path`, `--compact`, `--encoding`, `-o` | CSV / JSON / record bytes / hex |
 | `decode` | `[file]` | `--copybook FILE` (required), `--record`, `--view`, `--list-views`, `--format {csv,json,hex}` (csv), `--charset`, `--endian`, `--record-format`, `--record-length N`, `--record-separator`, `--max-records N` (all), `--skip N` (0), `--strict` | `--copybook-path`, `--compact`, `-o` | CSV / JSON / hex |
 | `compare` | `expected actual` | `--copybook FILE` (required), `--record`, `--view`, `--key FIELD`..., `--ignore FIELD`..., `--compare-bytes`, `--max-differences N`, `--format {text,json}` (text), the decode file-format flags (`--charset`, `--endian`, `--record-format`, `--record-length N`, `--record-separator`) | `--copybook-path`, `--compact`, `-o` | report; exit 0/1/2 like `cmp` |
 | `gen-fixtures` | `file` | `--callee-path DIR`..., `--rows/-n` (10), `--seed`, `--max-occurs N`, `--scenarios {happy,branches,all}` (happy), `--format {json,csv-dir}` (json), `--list-boundaries`, `--strict` | `--copybook-path`, `--compact`, `-o`, dl | `FixtureBundle` JSON or CSV dir |
@@ -106,7 +107,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `ims-dli` | `file` | — | A (no profiling) | `IMSSegmentAnalyzer` |
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
-| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (`utf-8`) | A without `--program`/`--define` | `scan_version` report |
+| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected) | A without `--program`/`--define` | `scan_version` report |
 | `lint` | `file` | `--rule RULE`... (all), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text}` (json) | A (`--program` default: every unit); +prof | findings; exit 3 on `--fail-on` |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
@@ -403,9 +404,17 @@ start.
   `--errors` shows errors only, `--stats` appends `ParseStatistics`,
   `--find-type T` lists nodes of a type (`ast.find_all_by_type()`). Exit 2 on
   a recovered-but-errored parse, `--find-type` included.
+* **Source encoding** (#522): every subcommand that reads one COBOL source
+  through `_read_source` (`parse`, `tokenize`, `preprocess`, `expand`,
+  `gen-data`, `lint`, every analyzer subcommand) takes `--encoding ENC`,
+  default detected as for a copybook (`read_program_source`): a cp1252 /
+  Latin-1 program is read, not refused as "not valid UTF-8". A lossy decode
+  prints `warning: Lossy decode ...` on stderr; an unknown codec exits 1.
+  `gen-fixtures` and `jcl` still read their own way. `cobol.yml` has no
+  source-encoding key.
 * **`batch`** parses in parallel (`ProcessPoolExecutor`); files positional
   and/or via repeatable `--glob 'src/**/*.cbl'`; `--workers` (CPU count),
-  `--encoding` (`utf-8`); one JSON result per file, `--errors` / `--stats`
+  `--encoding` (detected); one JSON result per file, `--errors` / `--stats`
   per file. Exit 2 when any file has a `read_error` or `success=false`.
 * **`tokenize`** prints `{"source_file", "tokens": [{"type", "value", "line",
   "column"}]}` (`type` is the `TokenType` name) through
