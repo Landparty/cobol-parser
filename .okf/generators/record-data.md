@@ -225,9 +225,20 @@ override the first four. Occurrence expansion is additionally subject to a
 hard ceiling, `_MAX_OCCURS_HARD_CAP = 10_000` in `generators/data/layout.py`
 — applied on top of (never widened by) a caller's own `max_occurs`, so a
 pathological `OCCURS 5000000 TIMES` in the source cannot materialize
-millions of `FieldSpec`s. `gen-data --max-occurs` and `gen-fixtures
---max-occurs` both expose the caller-facing cap; only the hard ceiling is
-internal.
+millions of `FieldSpec`s. A second ceiling bounds nested tables
+(#376): `_MAX_EXPANDED_OCCURRENCES = 100_000` occurrences per elementary item
+across *all* its enclosing tables -- `_flatten_into` carries
+`occurs_product` down and `_occurrence_cap()` cuts an inner table to what the
+outer ones leave (`OCCURS 99999999` around `OCCURS 9999` is 10,000 x 10, not
+10,000 x 9,999). `occurs_expansion_caveats(record, opts)` walks the
+declarations (never the expansion) and names every table either ceiling
+cuts; a cut the caller asked for with `max_occurs` is not reported. It feeds
+`GeneratedDataset.caveats` (gen-data `warning:` lines),
+`ProgramLayoutIndex.unresolved` (so gen-fixtures' `bundle.unresolved`) and
+`RecordViews.caveats` (decode, `--list-views`). Field lineage builds its own
+byte map from the declared counts (`_PLACEMENT_CAP`), so a cut does not
+change its answers. `gen-data --max-occurs` and `gen-fixtures --max-occurs`
+both expose the caller-facing cap; the hard ceilings are internal.
 
 **Column naming.** Short field name by default; falls back to the dotted
 qualified path when the *same name appears at more than one path* (COBOL

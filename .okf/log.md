@@ -240,6 +240,12 @@ CONFIGURATION SECTION; a class test credits its declared class-name.
 [generators/record-data.md](generators/record-data.md): FLOAT-*/BINARY-*
 sizes in `_storage.py`; unknown words warned and reported unresolved.
 
+## 2026-10-17 -- OCCURS expansion bounded across nested tables (#376)
+
+[generators/record-data.md](generators/record-data.md):
+`_MAX_EXPANDED_OCCURRENCES` and `occurs_expansion_caveats()`; cut tables are
+named in dataset / view caveats and `ProgramLayoutIndex.unresolved`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

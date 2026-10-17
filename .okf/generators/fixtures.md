@@ -69,7 +69,10 @@ The DATA DIVISION parser tags every level-01 FILE SECTION item with
 `fd_file_name` (`parsers/divisions/data.py`) while scanning under an FD/SD —
 that tag is the *only* source of truth this index uses (no positional
 fallback: an untagged FILE SECTION record is reported in `unresolved`, never
-guessed from source order). An FD with more than one 01-level record (a
+guessed from source order). A table the OCCURS expansion caps cut short
+is named in `unresolved` too (`layout.occurs_expansion_caveats`, #376), so a
+fixture built from a partly-expanded record never looks complete. An FD
+with more than one 01-level record (a
 legal "record redefinition" idiom) tags all of them, so `records_for_file`
 naturally returns every variant.
 
