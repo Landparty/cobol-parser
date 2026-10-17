@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Impact text lists port hits (#528)
+
+[analysis/lineage.md](analysis/lineage.md), [cli.md](cli.md):
+`ImpactResult.to_text()` renders port hits under their program, as the JSON
+already listed them.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

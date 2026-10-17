@@ -157,6 +157,10 @@ original's (pinned in `TestStoredJoinState`). Without `join_caveats` only
 the opaque-callee caveat is re-derived and `unjoined` is empty. A rebuilt
 graph records the edges it loads, so its own `join_edges()` re-exports them.
 `ImpactResult.start_found` is False when nothing matched the start.
+`ImpactResult.to_text()` lists every hit `to_dict()` does: items and ports
+(prefixed `port `) under their program, tables and datasets on their own
+lines (#528: ports were dropped, so a DISPLAY-only field read as feeding
+nothing).
 
 ## Bindings from JCL
 
