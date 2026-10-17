@@ -67,6 +67,7 @@ class PictureClause(ASTNode):
         location: SourceLocation,
         currency_symbols: frozenset[str] | set[str] | None = None,
         decimal_point_is_comma: bool = False,
+        currency_signs: dict[str, str] | None = None,
     ):
         """*currency_symbols* are the PICTURE currency symbols the program
         declares through ``SPECIAL-NAMES. CURRENCY SIGN IS ...`` (other than
@@ -79,9 +80,18 @@ class PictureClause(ASTNode):
         exchanges the roles of ``,`` and ``.``: ``,`` is the editing decimal
         point and ``.`` a simple insertion character. The pattern is sized
         and validated through the default spelling (``9(3),99`` as
-        ``9(3).99``) and, like the currency symbols, kept as written."""
+        ``9(3).99``) and, like the currency symbols, kept as written.
+
+        *currency_signs* maps each of those symbols to the currency string
+        its ``CURRENCY SIGN`` clause declares (``{"#": "EUR"}``): what an
+        edited record shows in the symbol's position."""
         super().__init__("PictureClause", location)
         self.currency_symbols: frozenset[str] = frozenset(currency_symbols or ())
+        self.currency_signs: dict[str, str] = {
+            symbol: sign
+            for symbol, sign in (currency_signs or {}).items()
+            if symbol in self.currency_symbols
+        }
         self.decimal_point_is_comma: bool = bool(decimal_point_is_comma)
         # Sized and validated through the ``$`` / default-decimal-point
         # spelling (see above); the verbatim pattern is restored once both
@@ -127,6 +137,8 @@ class PictureClause(ASTNode):
             self.pattern = pattern
         if self.currency_symbols:
             self._metadata["currency_symbols"] = sorted(self.currency_symbols)
+        if self.currency_signs:
+            self._metadata["currency_signs"] = dict(sorted(self.currency_signs.items()))
         if self.decimal_point_is_comma:
             self._metadata["decimal_point_is_comma"] = True
 

@@ -342,6 +342,11 @@ class FieldSpec:
     #: way, so a record holding exactly these bytes decodes back to the cell
     #: it was generated from (:func:`.encoding.hex_literal_cell_for`).
     literal_bytes: dict[str, bytes] = field(default_factory=dict)
+    #: ``SPECIAL-NAMES. CURRENCY SIGN`` symbols :attr:`picture` uses, each
+    #: mapped to its currency string (``{"#": "#"}``, ``{"#": "EUR"}``), or
+    #: to ``None`` when the program's declaration of it is not known.  Read
+    #: off the item's own ``PictureClause``; empty for a ``$``-only picture.
+    currency_signs: dict[str, str | None] = field(default_factory=dict)
 
     @property
     def scaling_positions(self) -> int:
@@ -674,6 +679,15 @@ _FIGURATIVE_WORDS = frozenset(
         "NULLS",
     }
 )
+
+
+def _currency_signs(picture: PictureClause | None) -> dict[str, str | None]:
+    """*picture*'s declared currency symbols with their currency strings
+    (see :attr:`FieldSpec.currency_signs`)."""
+    if picture is None:
+        return {}
+    signs = getattr(picture, "currency_signs", {}) or {}
+    return {symbol: signs.get(symbol) for symbol in picture.currency_symbols}
 
 
 def _condition_values(item: CobolDataItem) -> list[str]:
@@ -1126,6 +1140,7 @@ def _flatten_into(
                     inherited_controls[0].depending_on if inherited_controls else None
                 ),
                 odo_controls=inherited_controls,
+                currency_signs=_currency_signs(picture),
             )
         )
 

@@ -295,7 +295,8 @@ class CobolDataItem(ASTNode):        # CobolDataItem(name, level, location); nod
         set_value_clause / set_byte_length / set_dynamic_length / set_object_reference
 
 class PictureClause(ASTNode):        # PictureClause(pattern, location, currency_symbols=None,
-                                     #               decimal_point_is_comma=False)
+                                     #               decimal_point_is_comma=False,
+                                     #               currency_signs=None)
     pattern: str                     # as written, e.g. "9(5)V99"
     size: int | None                 # BYTES, not character positions
     integer_digits / decimal_digits / total_digits: int | None
@@ -303,6 +304,7 @@ class PictureClause(ASTNode):        # PictureClause(pattern, location, currency
     is_national, is_national_edited, is_valid: bool
     has_scaling_factor: bool; scaling_factor: int; scaling_leading: bool | None
     currency_symbols: frozenset[str]; decimal_point_is_comma: bool
+    currency_signs: dict[str, str]   # symbol -> its CURRENCY SIGN string
 
 class OccursClause(ASTNode):         # OccursClause(location)
     min_times: int | None
@@ -424,6 +426,10 @@ offsets and record images are built from.
   through `DataItemClauseParser._picture_clause` (also handed to the
   `_data_fast` helper in place of the class), from the non-`$` CURRENCY tokens
   `parse_picture_clause` saw; without them `£` is an invalid PICTURE character.
+  **`currency_signs`** maps each of them to its declared currency string
+  (`{"#": "EUR"}`, from `parser.currency_signs`), so the record-image editor
+  knows what the position shows; `metadata["currency_signs"]` when non-empty,
+  restored by `from_json` (#491).
 * **`decimal_point_is_comma`**: `SPECIAL-NAMES. DECIMAL-POINT IS
   COMMA` -- `,` is the decimal point and `.` a simple insertion character.
   Sized and validated through the default spelling (`,`/`.` exchanged,

@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Record images honour `SPECIAL-NAMES. CURRENCY SIGN`** (#491). The
+  numeric-edited encoder knew only `$`, so with `CURRENCY SIGN IS '#'` a
+  `PIC ###,##9.99` field was written as its logical value left-justified
+  (`17611.57  `), silently. A declared symbol whose currency string is one
+  character is now edited like `$` (`#17,611.57`) and decoded back; a
+  picture still not modelled (e.g. `CURRENCY SIGN IS 'CHF ' WITH PICTURE
+  SYMBOL 'F'`) is named in an encoding caveat instead of passing as
+  faithful. New `PictureClause.currency_signs` / `FieldSpec.currency_signs`
+  carry each symbol's currency string.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
