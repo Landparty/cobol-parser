@@ -562,6 +562,10 @@ copybook, back into a table**.
   trailing bytes that are not a whole record (usually a wrong record length);
   **`--strict`** makes either of the last two exit 1 — the CI form of "does
   this copybook describe this file?".
+* A copybook that is not UTF-8 (a Latin-1 accent in a comment) is a one-line
+  `error: Cannot read copybook FILE: ...`, exit 1, also under
+  `--list-views` -- `UnicodeDecodeError` is a `ValueError`, not an `OSError`,
+  and used to escape as a traceback (#496). `compare` words it the same.
 
 ### `compare`
 

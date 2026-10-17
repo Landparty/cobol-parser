@@ -160,6 +160,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`decode` reports a non-UTF-8 copybook in one line** (#496). A copybook
+  with, for example, a Latin-1 `é` in a comment made `decode` and
+  `decode --list-views` print a `UnicodeDecodeError` traceback. They now
+  exit 1 with `error: Cannot read copybook FILE: ...`, as `compare` does.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

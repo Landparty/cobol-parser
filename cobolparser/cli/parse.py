@@ -1729,6 +1729,10 @@ def _cmd_decode(args: argparse.Namespace) -> None:
         _fail(str(exc))
     except OSError as exc:
         _fail(f"Cannot read copybook: {exc}")
+    except UnicodeDecodeError as exc:
+        # A non-UTF-8 copybook (a Latin-1 accent in a comment): a one-line
+        # error, as compare gives, not a traceback (#496).
+        _fail(f"Cannot read copybook {args.copybook}: {exc}")
     _warn_layout(decoder.layout_warnings)
 
     output_path = getattr(args, "output", None)
