@@ -692,7 +692,9 @@ encoding_errors="replace")` wraps `read_file_with_encoding` -- `None` /
 `EncodingError`, never a silent ASCII fallback), and a lossy decode lands in
 *warnings* naming `--encoding`. The CLI's `_read_source`, `batch`, `scan`,
 `CodebaseGraphBuilder` and the MCP workspace all read a main program through
-it, so they cannot disagree about a cp1252 program's text.
+it, so they cannot disagree about a cp1252 program's text. CR LF and a lone
+CR come back as LF, as the text-mode reads it replaced returned them (a
+copybook read keeps its CRs; `split_source_lines` numbers both alike).
 
 `encoding_errors` (`CopybookSearchPath` / `expand_copybooks`): `"replace"`
 (default) substitutes U+FFFD and warns with a count; `"strict"` raises

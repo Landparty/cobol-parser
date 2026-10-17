@@ -71,6 +71,16 @@ class TestSharedReader:
         with pytest.raises(PreprocessingError, match="unknown encoding"):
             read_program_source(str(latin1), "no-such-codec")
 
+    def test_line_ends_read_as_text_mode_did(self, tmp_path: Path) -> None:
+        # The readers this replaced opened the file in text mode: CR LF (and
+        # a lone CR) came back as LF, so `expand` and the MCP parse never
+        # saw a CR. Detection must not change that.
+        path = tmp_path / "CRLF.cbl"
+        path.write_bytes(SOURCE.encode("cp1252").replace(b"\n", b"\r\n"))
+        assert read_program_source(str(path)) == SOURCE
+        path.write_bytes(SOURCE.encode("utf-8").replace(b"\n", b"\r"))
+        assert read_program_source(str(path)) == SOURCE
+
 
 class TestCli:
     def test_parse_reads_the_program(

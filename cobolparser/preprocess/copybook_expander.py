@@ -539,6 +539,13 @@ def read_program_source(
             )
             for warning in collected
         )
+    # Every reader this replaced opened the file in text mode, which turns
+    # CR LF and a lone CR into LF; keep that, so a Windows-edited program's
+    # text (``expand``'s ``expanded_source``, the MCP parse, a COPY scan) does
+    # not start carrying CRs. Line numbers are unchanged: split_source_lines
+    # breaks on all three the same way.
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text
 
 
