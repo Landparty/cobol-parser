@@ -73,8 +73,13 @@ tokens = tokenize_cobol(source, filename="<string>", dialect=...,
 `Token` is a `@dataclass(slots=True)`: `type: TokenType`, `value: str`,
 `location: SourceLocation`, `raw_value: str | None = None` (the source
 spelling when it differs from `value` -- typed literals, `DECIMAL-POINT IS
-COMMA` numbers, merged `&` literals). `STRING_LITERAL` `value`s arrive
-**decoded** (delimiters stripped, doubled delimiter collapsed).
+COMMA` numbers, merged `&` literals), and `quote: str | None = None` (the
+delimiter a `STRING_LITERAL` was written with, `'` or `"`; excluded from
+equality and repr; None for a continued multi-line literal or a merged `&`
+literal). `STRING_LITERAL` `value`s arrive **decoded** (delimiters stripped,
+doubled delimiter collapsed). `quote` exists for embedded SQL, where `"X"` is
+a delimited identifier rather than a string (#597); the Cython
+`_try_single_line_string` sets it too.
 
 Module-level helpers also used outside the lexer:
 `mask_comment_entries(source)` (blanks IDENTIFICATION comment-entry text,

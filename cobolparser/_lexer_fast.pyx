@@ -218,7 +218,9 @@ class CobolLexer(_CobolLexerBase):
                     continue
                 pos += 1
                 return (
-                    Token(TokenType.STRING_LITERAL, "".join(chars), location),
+                    Token(
+                        TokenType.STRING_LITERAL, "".join(chars), location, quote=quote
+                    ),
                     pos,
                     False,
                 )
