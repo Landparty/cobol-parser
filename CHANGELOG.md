@@ -565,6 +565,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `health` and the MCP reachability answers. An exhaustive branch whose every
   arm terminates (recursively) now ends the paragraph; an IF with no ELSE or
   an EVALUATE with no WHEN OTHER still falls through.
+* **`linkage-check` / `lint` no longer call a LINKAGE item that `ALLOCATE`
+  gives storage to "never referenced"** (#570). `ALLOCATE item [INITIALIZED]
+  [RETURNING p]` sets a based item's address the way `SET ADDRESS OF item`
+  does, and now counts as a reference to it. xref also gains role mappings
+  for ALLOCATE (the item `reference`, the RETURNING pointer `write`, the
+  CHARACTERS size `read`) and FREE (each pointer `write`), instead of plain
+  references with a "no dedicated role mapping" caveat.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

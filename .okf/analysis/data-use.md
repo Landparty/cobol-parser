@@ -356,6 +356,11 @@ read/write role; `program_signature.py` grades LINKAGE directions and
   sd-file INTO x` (file-operation on the SD, `x` write) have dedicated role
   mappings; the model setters add `FROM`/`INTO` to `.operands` like READ INTO /
   WRITE FROM, so `UnusedVariableAnalyzer` sees `x` too.
+* **ALLOCATE / FREE** (#570). `ALLOCATE item [INITIALIZED] RETURNING p`
+  records `item` as `reference` (its address is set, not its bytes) and `p`
+  as `write`; the `ALLOCATE n CHARACTERS` size is `read`; every `FREE p`
+  pointer is `write` (set to NULL). Pinned by
+  `tests/regression/test_issue_570_allocate_based_linkage.py`.
 * **Reference modifiers.** A reference modifier's offset/length names are kept
   apart from the operand (`_split_operand`) and recorded `read` when the
   operand itself is a `write`: `MOVE A TO WS-B (WS-P:2)` does not write WS-P.
@@ -583,8 +588,9 @@ reference `LK-REC`.
 **CICS translator items and address-only use.** `DFHEIBLK` and `DFHCOMMAREA`
 are referenced unconditionally (`_CICS_TRANSLATOR_ITEMS` -- the translator
 passes them on the USING it generates), plus the `RETURNING` item, every `SET
-ADDRESS OF x TO p` target (`SetStatement.targets_are_address_of`) and any CICS
-option of the form `SET(ADDRESS OF x)` (`_ADDRESS_OF_RE`).
+ADDRESS OF x TO p` target (`SetStatement.targets_are_address_of`), every
+`ALLOCATE x` item (`AllocateStatement.data_item`, the same based-item idiom,
+#570) and any CICS option of the form `SET(ADDRESS OF x)` (`_ADDRESS_OF_RE`).
 
 **Interface collection is O(units).** `LinkageChecker.collect_scope_interfaces(ast)`
 computes the interface map (and the passing-mode map above) once;
