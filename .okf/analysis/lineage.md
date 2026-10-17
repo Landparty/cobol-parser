@@ -157,6 +157,13 @@ original's (pinned in `TestStoredJoinState`). Without `join_caveats` only
 the opaque-callee caveat is re-derived and `unjoined` is empty. A rebuilt
 graph records the edges it loads, so its own `join_edges()` re-exports them.
 `ImpactResult.start_found` is False when nothing matched the start.
+A bare name matching several items of one program (`AMT` in IN-REC and
+OUT-REC) is traced once per matched qualified name (`_start_groups`; a
+copybook field is one group across every program that COPYs it), so a
+field one match reaches is a hit even when it is another match -- one
+multi-source trace never reported a start. `impact()` adds the caveat
+`PROG: AMT matches N fields: ...; qualify with OF to trace one`, also
+listed in `ImpactResult.ambiguous` (#540).
 
 ## Bindings from JCL
 

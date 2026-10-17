@@ -229,6 +229,9 @@ class ImpactResult:
     caveats: list[str] = field(default_factory=list)
     #: False when nothing in any report matched the start.
     start_found: bool = True
+    #: The caveats (also in ``caveats``) saying the start named several
+    #: fields of one program, for a caller that reports ambiguity apart.
+    ambiguous: list[str] = field(default_factory=list)
 
     @property
     def programs(self) -> list[str]:
@@ -753,9 +756,18 @@ class LineageGraph:
     def _items_named(
         self, field_name: str, programs: Sequence[str] | None
     ) -> list[NodeKey]:
+        groups, _matched = self._start_groups(field_name, programs)
+        return sorted({n for group in groups for n in group}, key=repr)
+
+    def _start_groups(
+        self, field_name: str, programs: Sequence[str] | None
+    ) -> tuple[list[list[NodeKey]], dict[str, list[str]]]:
+        """The start nodes of *field_name*, one group per qualified name it
+        matched (an item's own node, its occurrences and subordinate fields,
+        in every program), and program -> the qualified names it matched."""
         parts = [p.strip().upper() for p in field_name.split(" OF ") if p.strip()]
         if not parts:
-            return []
+            return [], {}
         name, qualifiers = parts[0], parts[1:]
         wanted = [p.upper() for p in programs] if programs else list(self.reports)
         matched: dict[str, list[str]] = {}
@@ -769,18 +781,29 @@ class LineageGraph:
                 if qname == name or segments[-1] == name:
                     if all(q in segments[:-1] for q in qualifiers):
                         matched.setdefault(prog, []).append(qname)
-        starts: list[NodeKey] = []
+        # Grouped by qualified name, not by program: a copybook field is one
+        # group however many programs COPY it, so the trace count stays the
+        # number of distinct fields matched.
+        groups: dict[str, list[NodeKey]] = {}
         seen: set[NodeKey] = set()
         for node in (*self._out, *self._in):
             if node[0] != "P" or node[2] != ITEM or node in seen:
                 continue
-            names = matched.get(node[1])
-            if names and any(
-                node[3] == m or node[3].startswith((m + ".", m + "(")) for m in names
-            ):
+            owners = [
+                m
+                for m in matched.get(node[1], [])
+                if node[3] == m or node[3].startswith((m + ".", m + "("))
+            ]
+            if owners:
                 seen.add(node)
-                starts.append(node)
-        return sorted(starts, key=repr)
+                # A node under two matched items (one nested in the other)
+                # belongs to the closer one.
+                owner = max(owners, key=len)
+                groups.setdefault(owner, []).append(node)
+        return (
+            [sorted(groups[key], key=repr) for key in sorted(groups)],
+            matched,
+        )
 
     def impact(
         self,
@@ -798,12 +821,25 @@ class LineageGraph:
         table) a path may cross; ``None`` follows every one.
         """
         programs = [program] if isinstance(program, str) else program
-        starts = self._items_named(field_name, programs)
+        groups, matched = self._start_groups(field_name, programs)
+        starts = sorted({n for group in groups for n in group}, key=repr)
         if programs:
             label = [f"{p.upper()}:{field_name.upper()}" for p in programs]
         else:
             label = [field_name.upper()]
-        return self._trace(starts, label, direction, depth)
+        result = self._trace(starts, label, direction, depth, groups)
+        # A bare name shared by several fields of one program (AMT in IN-REC
+        # and OUT-REC) starts from all of them: say so, naming each (#540).
+        for prog in sorted(matched):
+            names = sorted(set(matched[prog]))
+            if len(names) > 1:
+                caveat = (
+                    f"{prog}: {field_name.upper()} matches {len(names)} fields: "
+                    f"{', '.join(names)}; qualify with OF to trace one"
+                )
+                result.ambiguous.append(caveat)
+                result.caveats.insert(len(result.ambiguous) - 1, caveat)
+        return result
 
     def impact_table(
         self, table_column: str, direction: str = "forward", depth: int | None = None
@@ -859,13 +895,41 @@ class LineageGraph:
         label: list[str],
         direction: str,
         depth: int | None,
+        groups: list[list[NodeKey]] | None = None,
     ) -> ImpactResult:
+        """Trace from *starts*. With several *groups* (one per field a bare
+        name matched), each is traced on its own, so a field one start
+        reaches is a hit even when it is another start (#540)."""
         result = ImpactResult(start=label, direction=direction, depth=depth)
         if not starts:
             result.start_found = False
             result.caveats.append(f"{', '.join(label)}: no such field in any report")
             return result
         adjacency = self._out if direction == "forward" else self._in
+        merged: dict[NodeKey, ImpactHit] = {}
+        for group in groups if groups and len(groups) > 1 else [starts]:
+            for node, hit in self._reach(group, adjacency, depth):
+                old = merged.get(node)
+                if old is None or len(hit.path) < len(old.path):
+                    merged[node] = hit
+        hits = list(merged.values())
+        hits.sort(
+            key=lambda h: (
+                h.node_kind != "table",
+                h.node_kind != "dataset",
+                h.program or "",
+                h.field,
+            )
+        )
+        return self._finish(result, hits, starts)
+
+    def _reach(
+        self,
+        starts: list[NodeKey],
+        adjacency: dict[NodeKey, list[tuple[NodeKey, _EdgeInfo]]],
+        depth: int | None,
+    ) -> list[tuple[NodeKey, ImpactHit]]:
+        """Every node *starts* reach (other than themselves), with its path."""
         # 0-1 BFS: stepping into a program from outside it (from a dataset or
         # table, or across a CALL) costs 1; every other step costs 0. So
         # ``depth=1`` reaches the programs one join away.
@@ -908,7 +972,7 @@ class LineageGraph:
         for state, _cost in sorted(best.items(), key=lambda kv: (kv[1], kv[0][1])):
             chosen.setdefault(state[0], state)
         start_set = set(starts)
-        hits: list[ImpactHit] = []
+        hits: list[tuple[NodeKey, ImpactHit]] = []
         for node, state in chosen.items():
             if node in start_set:
                 continue
@@ -927,15 +991,12 @@ class LineageGraph:
                 )
                 cursor = prev
             path.reverse()
-            hits.append(ImpactHit(program, name, kind, tuple(path)))
-        hits.sort(
-            key=lambda h: (
-                h.node_kind != "table",
-                h.node_kind != "dataset",
-                h.program or "",
-                h.field,
-            )
-        )
+            hits.append((node, ImpactHit(program, name, kind, tuple(path))))
+        return hits
+
+    def _finish(
+        self, result: ImpactResult, hits: list[ImpactHit], starts: list[NodeKey]
+    ) -> ImpactResult:
         result.hits = hits
         reached = {h.program for h in hits if h.program}
         reached |= {s[1] for s in starts if s[0] == "P"}
