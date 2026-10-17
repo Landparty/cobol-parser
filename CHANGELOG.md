@@ -471,6 +471,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selectors now carry `"expression": True`; the constraint extractor
   reports them (and range bounds of that shape) as unsupported, and
   business-rules renders them unquoted.
+* **`IF x IS [NOT] class-name` and `IF x IS [NOT] OMITTED` are structured
+  conditions** (#539). A SPECIAL-NAMES CLASS test and the omitted-argument
+  test used to parse to an operand-less COMPARISON: the tested field read
+  as never referenced (`lint` / `unused-variables`), had no xref reference,
+  was missing from `business-rules` inputs, and `program-signature` graded
+  an OMITTED-tested parameter `unknown`. They now build `IS [NOT] <word>`
+  nodes with the field as the operand, like `IS NUMERIC`. In EVALUATE TRUE
+  the test is a `Condition` selector rather than the made-up literal `'X IS
+  VALID-CODE'`; in PERFORM UNTIL, xref no longer records the class-name as
+  a data item. gen-fixtures reports both as unsupported with a precise
+  reason instead of "unparseable condition text".
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

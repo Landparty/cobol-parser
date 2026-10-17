@@ -239,6 +239,15 @@ constraint extractor decodes it.
 `WHEN WS-B (1:2)` carry `"expression": True`; constraints report them
 unsupported instead of solving the text as a literal.
 
+## 2026-10-17 -- User class and OMITTED conditions (#539)
+
+[parser/statements.md](parser/statements.md),
+[parser/statements-control.md](parser/statements-control.md),
+[analysis/data-use.md](analysis/data-use.md),
+[analysis/fixtures-support.md](analysis/fixtures-support.md): `IS [NOT]
+class-name` / `IS [NOT] OMITTED` get structured nodes; EVALUATE WHEN treats
+them as Conditions; `_walk_expression_operands` walks a `condition_tree`.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
