@@ -46,8 +46,9 @@ from another step of the same PROC); one that names no earlier DD binds
 nothing and is a caveat.
 Quoted literals in utility control statements (``INCLUDE COND=(...,
 C'BUILD')``) are blanked before keywords are looked for.
-- IKJEFT01 / IKJEFT1A / IKJEFT1B: the program named by ``RUN PROGRAM(x)``
-  in ``SYSTSIN`` is bound to the step's DDs (the DB2 batch pattern).
+- IKJEFT01 / IKJEFT1A / IKJEFT1B: every program named by a ``RUN
+  PROGRAM(x)`` in ``SYSTSIN`` is bound to the step's DDs (the DB2 batch
+  pattern; programs run one after another in the step share its DDs).
 - DFSRRC00 (the IMS region controller): for a ``DLI`` / ``DBB`` / ``BMP``
   region, the program named by the second ``PARM`` positional
   (``PARM='BMP,LOANPMT,LOANPSB,...'``) is bound to the step's DDs (the IMS
@@ -266,9 +267,17 @@ def bindings_from_jobs(
             if program == "IDCAMS":
                 passthroughs += _repro_passthroughs(dds, job_name, step_name)
                 continue
+            programs = [program]
             if program in _TSO_PROGRAMS:
-                run = _RUN_PROGRAM_RE.search(_inline(dds, "SYSTSIN"))
-                if not run:
+                # Every RUN PROGRAM of the SYSTSIN runs in this step, one
+                # after another, and each sees the step's DDs.
+                programs = list(
+                    dict.fromkeys(
+                        run.group(1)
+                        for run in _RUN_PROGRAM_RE.finditer(_inline(dds, "SYSTSIN"))
+                    )
+                )
+                if not programs:
                     systsin = _dsn(dds, "SYSTSIN")
                     if systsin:
                         notes.append(
@@ -277,21 +286,21 @@ def bindings_from_jobs(
                             "it runs are not known, so its DDs are not bound"
                         )
                     continue
-                program = run.group(1)
             elif program == _IMS_CONTROLLER:
-                program = _ims_program(step) or program
-            for dd_name, dd in _named(dds):
-                dsn = _dataset(dd)
-                if dd_name and dsn:
-                    bindings.append(
-                        DatasetBinding(
-                            program=program,
-                            ddname=dd_name,
-                            dataset=dsn,
-                            job=job_name,
-                            step=step_name,
+                programs = [_ims_program(step) or program]
+            for run_program in programs:
+                for dd_name, dd in _named(dds):
+                    dsn = _dataset(dd)
+                    if dd_name and dsn:
+                        bindings.append(
+                            DatasetBinding(
+                                program=run_program,
+                                ddname=dd_name,
+                                dataset=dsn,
+                                job=job_name,
+                                step=step_name,
+                            )
                         )
-                    )
     return bindings, passthroughs
 
 

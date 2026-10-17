@@ -200,14 +200,15 @@ hop's line is in; it is not in `Hop.to_dict()` (#489, used by the MCP server).
 **Bindings (`lineage_jcl.py`).** `bindings_from_jobs(jobs)` turns
 **jcl-parser** `Job`s (duck-typed; imported only in `load_jobs`, through
 `importlib`, so cobol-parser keeps no runtime or mypy dependency on it)
-into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT (`SORTIN*`
--> `SORTOUT` + `OUTFIL FNAMES` + `OUTFIL FILES=nn` as DD `SORTOFnn`; a
+into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT (`SORTIN*` ->
+`SORTOUT` + `OUTFIL FNAMES` + `OUTFIL FILES=nn` as DD `SORTOFnn`; a
 `JOINKEYS` step reads `SORTJNF1`/`SORTJNF2` or its `F1=`/`F2=` DDs and is
-always a `reformat`, #585), ICETOOL (each `TOOLIN` `COPY` / `SORT` /
-`MERGE` / `SELECT` / `SUBSET` / `DATASORT` operator `FROM(dd)` -> `TO(dd...)`
-+ `DISCARD(dd)`, classified through its `USING(xxxx)` `xxxxCNTL` statements;
-`SPLICE` / `RESIZE` are reformats, #566), IEBGENER/ICEGENER, IDCAMS REPRO (operands
-in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`. A
+always a `reformat`, #585), ICETOOL (each `TOOLIN` `COPY` / `SORT` / `MERGE`
+/ `SELECT` / `SUBSET` / `DATASORT` operator `FROM(dd)` -> `TO(dd...)` +
+`DISCARD(dd)`, classified through its `USING(xxxx)` `xxxxCNTL` statements;
+`SPLICE` / `RESIZE` are reformats, #566), IEBGENER/ICEGENER, IDCAMS REPRO
+(operands in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`
+(every one in the SYSTSIN, each bound to the step's DDs, #584). A
 blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
 referbacks resolve to the earlier step's dataset (`_referback_keys`: the
