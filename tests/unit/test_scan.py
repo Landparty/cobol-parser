@@ -661,6 +661,61 @@ class TestCopybookExpansion:
         assert group.to_dict()["source_count"] == 2
         assert group.file_count == 3
 
+    _BODY_COPYBOOK = "           MOVE 1 TO WS-A\n           MOVE 2 TO WS-B\n           DISPLAY 'X'.\n"
+    _HEADER_THEN_BODY = (
+        "           PERFORM ERR-PARA\n           STOP RUN.\n"
+        "       ERR-PARA.\n           COPY BODY.\n"
+    )
+
+    def test_a_copybook_body_under_each_programs_own_header_is_not_a_clone(
+        self, tmp_path: Path
+    ) -> None:
+        """#470: each program writes the header and copies in only the body.
+        The duplicated statements live in one place on disk, so this is
+        shared code like #352, not copy-paste."""
+        (tmp_path / "BODY.cpy").write_text(self._BODY_COPYBOOK)
+        paths = [
+            _write(
+                tmp_path, f"{n}.cbl", _program(n, "MAIN-PARA", self._HEADER_THEN_BODY)
+            )
+            for n in ("B1", "B2")
+        ]
+        report = scan_files(
+            paths,
+            ScanOptions(analyzers=("redundancy",), copybook_paths=(str(tmp_path),)),
+            workers=1,
+        )
+        body = str(tmp_path / "BODY.cpy")
+        fingerprints = [
+            f
+            for file_scan in report.ok_files
+            for f in file_scan.units[0].reports["redundancy"]["paragraph_fingerprints"]
+            if f["name"] == "ERR-PARA"
+        ]
+        assert [f["body_origin"] for f in fingerprints] == [
+            {"file": body, "line": 1},
+            {"file": body, "line": 1},
+        ]
+        assert cross_file_clone_groups(report) == []
+
+    def test_a_copybook_body_plus_own_statements_is_still_a_clone(
+        self, tmp_path: Path
+    ) -> None:
+        """A body that mixes the copybook with statements written in each
+        program is not one source: the program's own lines are duplicated."""
+        (tmp_path / "BODY.cpy").write_text(self._BODY_COPYBOOK)
+        mixed = self._HEADER_THEN_BODY.replace(
+            "           COPY BODY.\n",
+            "           DISPLAY 'START'\n           COPY BODY.\n",
+        )
+        paths = [
+            _write(tmp_path, f"{n}.cbl", _program(n, "MAIN-PARA", mixed))
+            for n in ("B1", "B2")
+        ]
+        (group,) = self._scan_with_copybooks(tmp_path, paths)
+        assert {m.paragraph for m in group.members} == {"ERR-PARA"}
+        assert group.source_count == 2
+
     def test_min_members_counts_sources_not_inclusions(self, tmp_path: Path) -> None:
         (tmp_path / "PARAS.cpy").write_text(self._SHARED_COPYBOOK)
         paths = [
