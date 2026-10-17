@@ -1324,6 +1324,9 @@ def apply_replacing_clauses(
     quoted: set[str] = set()
     code_alternatives: list[str] = []
     literal_alternatives: list[str] = []
+    # LEADING / TRAILING clauses, in clause order, each with its own pattern:
+    # a word one of them matches is settled by the first that fits (#513).
+    partial_clauses: list[tuple[str, str, re.Pattern[str]]] = []
     for index, clause in enumerate(sorted_clauses):
         source = _build_clause_pattern(clause)
         if source is None:
@@ -1331,6 +1334,10 @@ def apply_replacing_clauses(
         name = f"c{index}"
         alternative = f"(?P<{name}>{source})"
         replacements[name] = clause.replace_text
+        if clause.mode in ("LEADING", "TRAILING"):
+            partial_clauses.append(
+                (name, clause.mode, re.compile(source, re.IGNORECASE))
+            )
         code_alternatives.append(alternative)
         # A search text that itself contains a quote deliberately targets
         # literal text; only such clauses may match inside string literals.
@@ -1417,14 +1424,41 @@ def apply_replacing_clauses(
         if chosen is None:
             search_from = match.start() + 1
             continue
-        _copy(chosen.start())
+        name = chosen.lastgroup or ""
+        start, end = chosen.start(), chosen.end()
+        word_end = end
+        if any(name == partial_name for partial_name, _, _ in partial_clauses):
+            # LEADING tests a word's start and TRAILING its end, so the
+            # leftmost hit is not the whole story: the standard compares the
+            # word against the clauses in order, the first that fits
+            # replaces it, and the word is then done. Without this,
+            # LEADING ==XX== ... TRAILING ==XX== rewrote both ends of
+            # XX-NAME-XX (#513), unlike REPLACE.
+            word_start = start
+            # Never reach back into text an earlier replacement emitted.
+            while word_start > pos and _is_word_char(text[word_start - 1]):
+                word_start -= 1
+            while word_end < len(text) and _is_word_char(text[word_end]):
+                word_end += 1
+            for partial_name, mode, pattern in partial_clauses:
+                hit = (
+                    pattern.match(text, word_start, word_end)
+                    if mode == "LEADING"
+                    else pattern.search(text, word_start, word_end)
+                )
+                if hit is not None:
+                    name, start, end = partial_name, hit.start(), hit.end()
+                    break
+        _copy(start)
         # Literal text, never an re template: a backslash in it
         # (`'C:\TEMP\1'`) must not be read as a group reference.
-        replacement = replacements[chosen.lastgroup or ""]
+        replacement = replacements[name]
         out.append(replacement)
         # Lines the BY text adds belong to the line its match started on.
-        origins.extend([_line_of(chosen.start())] * replacement.count("\n"))
-        pos = search_from = chosen.end()
+        origins.extend([_line_of(start)] * replacement.count("\n"))
+        pos = end
+        _copy(word_end)  # the rest of a partially replaced word, unchanged
+        pos = search_from = word_end
     _copy(len(text))
 
     if line_origins is not None:

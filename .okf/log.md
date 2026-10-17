@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- COPY REPLACING LEADING + TRAILING replace a word once (#513)
+
+[preprocessing.md](preprocessing.md): a partial-word hit settles its word by
+the first fitting clause. [tests.md](tests.md):
+`test_copy_replacing_leading_trailing_once.py`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
