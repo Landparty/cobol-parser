@@ -591,6 +591,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time and the escape test runs once per strongly connected component --
   0.4 s for the same program (`lint` 17.8 s -> 0.4 s, `health` 15.5 s ->
   0.5 s), with identical output across the NIST suite and the samples.
+* **A contained program's references to its container's GLOBAL items now
+  resolve** (#504). `xref --program INNER` listed a GLOBAL item as
+  undefined, MCP `explain_symbol` called it undeclared, and `lineage`
+  dropped its edges with a "not declared" caveat; the outer unit's xref
+  missed the inner reads. `move-type-check` left MOVEs to a GLOBAL field
+  unresolved inside the contained program, and in the outer unit an inner
+  same-named item made the outer item ambiguous (the "unresolved COPY" lint
+  note instead of the warning) while the inner unit's MOVEs were reported
+  as the outer's. All now scope by the same rule: the unit's own data plus
+  every enclosing program's GLOBAL records, nearer names hiding farther
+  ones.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
