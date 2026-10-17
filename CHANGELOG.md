@@ -160,6 +160,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A level-88 `THRU` range with a figurative end stays a range** (#468).
+  `88 H-ANY VALUE LOW-VALUE THRU HIGH-VALUE` reached the AST as the two
+  values `LOW-VALUE` and `HIGH-VALUE`, so `data-items` reported no
+  `condition_ranges` and no partial-list caveat. The range end is now
+  marked `THROUGH:` whether it is a literal or a figurative constant.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

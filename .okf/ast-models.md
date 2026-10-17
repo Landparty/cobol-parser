@@ -472,7 +472,10 @@ Both compensated for in [generators.md](generators.md)'s data generator:
   consumer wanting the field's full domain has to expand the range itself
   (and bound the expansion — `VALUE 1 THRU 999999` is legal COBOL). A signed
   range end keeps its marker too (`88 X VALUE -5 THRU -1.` →
-  `["-5", "THROUGH:-1"]`, distinct from `VALUE -5, -1` → `["-5", "-1"]`).
+  `["-5", "THROUGH:-1"]`, distinct from `VALUE -5, -1` → `["-5", "-1"]`),
+  and so does a figurative end (`VALUE LOW-VALUE THRU HIGH-VALUE` →
+  `["LOW-VALUE", "THROUGH:HIGH-VALUE"]`; before #468 the marker was dropped
+  and the range read as two values). `ALL` is never a range end.
 
 ## `calculate_size()` and `_storage.py`
 

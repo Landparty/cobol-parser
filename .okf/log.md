@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- level-88 THRU with a figurative end (#468)
+
+[ast-models.md](ast-models.md): `LOW-VALUE THRU HIGH-VALUE` keeps its
+`THROUGH:` marker.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
