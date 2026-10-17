@@ -177,7 +177,9 @@ controller) binds its DDs to the application program named by the second
 folder (`NAME.prc`) as well as a JCLLIB base -- jcl-parser's own loader
 only searches `JCLLIB ORDER=` libraries. `jobs_from_sources(jcl, procs)`
 does the same from in-memory text (the backend's stored members). Not built
-on `cobolparser/jcl/`.
+on `cobolparser/jcl/`'s model; it shares only `jcl/programs.py` (the
+IKJEFT01 / DFSRRC00 launched-program rules), so `jcl --program` and lineage
+agree about a deck (#493).
 
 Tests: `tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
 `test_lineage_jcl.py`, `test_sql_flow.py`, `tests/unit/cli/test_lineage_cli.py`;

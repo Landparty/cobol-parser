@@ -160,6 +160,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`cobol-parser jcl --program X` finds a program run under IKJEFT01 or
+  DFSRRC00** (#493). `JclParseResult.steps_running` compared only `PGM=`, so
+  a DB2 program (`RUN PROGRAM(X)` in an IKJEFT01/1A/1B SYSTSIN) or an IMS
+  batch program (`DFSRRC00 PARM='DLI,X,...'`) was never found, and
+  `--program`, `--dd-map --program` and `--bindings --program` came back
+  empty with exit 0. It now matches the launched program too
+  (`JobStep.effective_programs()`, through the same rules field lineage uses,
+  now in `cobolparser/jcl/programs.py`). A SYSTSIN that is a dataset is an
+  `unresolved` note; `--program` matching no step exits 1 after printing the
+  empty view, like every analyzer's `--program`; and `--dd-map --program`
+  lists only the matching steps' datasets, not every step's for the same DD
+  name.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

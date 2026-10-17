@@ -3883,16 +3883,16 @@ def _cmd_jcl(args: argparse.Namespace) -> None:
             # Only the DDs of the steps that run this program, exactly as
             # ``--bindings --program`` filters; ``--dd-map --program`` used
             # to return every step's DDs and silently ignore the program.
+            # The datasets too come from those steps only: a DD name shared
+            # with another step (SYSTSIN, SYSIN) must not bring its datasets.
             running = {id(s) for s in result.steps_running(args.program)}
-            dd_map = {
-                ddname: datasets
-                for ddname, datasets in dd_map.items()
-                if any(
-                    id(step) in running and step.dd(ddname) is not None
-                    for job in result.jobs
-                    for step in job.steps
-                )
-            }
+            dd_map = {}
+            for _job, owner, dd in result.all_dd_statements():
+                if owner is None or id(owner) not in running:
+                    continue
+                bucket = dd_map.setdefault(dd.name.upper(), [])
+                if dd.dataset is not None and dd.dataset not in bucket:
+                    bucket.append(dd.dataset)
         payload = {"dd_map": dd_map}
     elif args.program:
         payload = {
@@ -3916,6 +3916,10 @@ def _cmd_jcl(args: argparse.Namespace) -> None:
         getattr(args, "output", None),
     )
 
+    if args.program and not result.steps_running(args.program):
+        # Like every analyzer's --program: an empty answer for a name that
+        # matches nothing must not read as "this JCL never runs it" quietly.
+        _fail(f"--program {args.program}: no step in {args.file} runs it")
     if args.strict and result.errors:
         sys.exit(3)
 
