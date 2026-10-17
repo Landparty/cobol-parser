@@ -438,6 +438,10 @@ class IOLogger:
                     variables.append(stmt.into_target)
                 elif stmt.record_name:
                     variables.append(stmt.record_name)
+                else:
+                    # ``READ file`` with no INTO fills the FD's record area,
+                    # which every 01 under that FD shares (#573).
+                    variables.extend(self._records_of(stmt.file_name))
                 self._operations.append(
                     IOOperation(
                         category="FILE-IO",
@@ -511,8 +515,11 @@ class IOLogger:
                     )
 
             elif isinstance(stmt, IORewriteStatement):
+                # Same as WRITE: ``REWRITE rec FROM item`` sends ``item`` (#573).
                 variables = []
-                if stmt.record_name:
+                if stmt.from_clause:
+                    variables.append(stmt.from_clause)
+                elif stmt.record_name:
                     variables.append(stmt.record_name)
                 self._operations.append(
                     IOOperation(
@@ -522,7 +529,7 @@ class IOLogger:
                         variables=variables,
                         target=self._file_for(stmt.file_name, stmt.record_name),
                         line=line,
-                        details={},
+                        details={"from_clause": stmt.from_clause},
                     )
                 )
 
@@ -583,6 +590,13 @@ class IOLogger:
                         details={"record_scope": stmt.record_scope},
                     )
                 )
+
+    def _records_of(self, file_name: str | None) -> list[str]:
+        """The FILE SECTION records an FD declares, in source order."""
+        if not file_name:
+            return []
+        wanted = file_name.upper()
+        return [rec for rec, fd in self._record_to_file.items() if fd == wanted]
 
     def _file_for(self, file_name: str | None, record_name: str | None) -> str | None:
         """The file a WRITE/REWRITE targets, via its record's FD."""
