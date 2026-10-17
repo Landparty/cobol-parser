@@ -55,6 +55,9 @@ class UnitFacts:
     #: Its id in the codebase graph: the PROGRAM-ID, qualified by the
     #: programs it is nested in for a nested one (``OUTER/INNER``, #532).
     graph_id: str = ""
+    #: Its alternate ``ENTRY 'name'`` names, uppercased: a ``CALL 'name'``
+    #: reaches this program too (#521).
+    entries: list[str] = field(default_factory=list)
     #: ``program_brief``'s ``calls`` rows: target, via, dynamic, candidates
     #: and the sites (on-disk locations) of every CALL / LINK / XCTL.
     calls: list[dict[str, Any]] = field(default_factory=list)
@@ -93,8 +96,11 @@ class ProgramsIndex(_Survey):
     copy_sites: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def units_named(self, program_id: str) -> list[UnitFacts]:
+        """The units whose PROGRAM-ID is *program_id*, or, when none is,
+        those that declare it as an ``ENTRY`` name (#521)."""
         wanted = program_id.upper()
-        return [u for u in self.units if u.program_id.upper() == wanted]
+        named = [u for u in self.units if u.program_id.upper() == wanted]
+        return named or [u for u in self.units if wanted in u.entries]
 
 
 @dataclass
@@ -141,6 +147,21 @@ def _units_with_depth(
         # The source nesting: a stacked unit is outermost, not contained
         # (#532).
         yield from _units_with_depth(contained, contained.nesting_depth)
+
+
+def _entry_names(unit: CobolProgram) -> list[str]:
+    """*unit*'s own ``ENTRY 'name'`` names, normalized like PROGRAM-IDs."""
+    from ..analysis.codebase import _normalize_program_name, _unit_statements
+    from ..models.statements.call import EntryStatement
+
+    return sorted(
+        {
+            _normalize_program_name(statement.entry_name)
+            for statement in _unit_statements(unit)
+            if isinstance(statement, EntryStatement) and statement.entry_name
+        }
+        - {""}
+    )
 
 
 def _programs(
@@ -226,6 +247,7 @@ def _build_programs(workspace: Workspace) -> tuple[ProgramsIndex, dict[str, Stam
                     depth=depth,
                     unit_kind=unit.unit_kind,
                     graph_id=graph_ids.get(id(unit), ""),
+                    entries=_entry_names(unit),
                 )
                 try:
                     facts.calls = _calls(parsed, unit, _flow(parsed, unit), response)

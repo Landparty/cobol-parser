@@ -53,6 +53,15 @@ results into one graph with two kinds of edge:
   scoped (it goes through the CICS program definitions). Object-oriented
   units are not qualified. Pinned by
   `tests/regression/test_issue_532_nested_program_scope.py`.
+* **ENTRY names are call targets (#521).** Each `ProgramNode` records its
+  unit's own `ENTRY 'name'` names (`entries`, uppercased; in `to_dict()` only
+  when non-empty). After every file is absorbed, `_resolve_entry_names()`
+  sends a `CALL` edge whose callee is an ENTRY name (and no PROGRAM-ID of that
+  spelling) to the declaring program, keeping the name as `CallEdge.entry`
+  (`to_dict()` only when set; DOT/Mermaid label `CALL ENTRY X`). An ENTRY two
+  programs declare is left as written and, when CALLed, noted as
+  `duplicate ENTRY X in ...`. CICS LINK/XCTL edges are not aliased. Pinned by
+  `tests/regression/test_issue_521_entry_names_in_call_graph.py`.
 * **Call edges** — `program A calls program B`, from static `CALL "B"` and from
   dynamic `CALL WS-TARGET` resolved through `DynamicCallAnalyzer`. A dynamic
   call whose value set that analyzer could not fully resolve still contributes

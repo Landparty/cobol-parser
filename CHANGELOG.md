@@ -360,6 +360,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `callers_of` stops listing out-of-scope callers and drops the false
   load-order `duplicate-declaration` caveat. MCP `contained` and `scan`'s
   `depth` now follow the real nesting.
+* **A CALL to an alternate `ENTRY` name reaches the program that declares
+  it** (#521). `codebase-graph` used to draw `CALL 'CALLALT'` as a call to an
+  external CALLALT. It now draws an edge to CALLEE that keeps
+  `entry: CALLALT`. MCP `callers_of('CALLEE')` and `callers_of('CALLALT')`
+  both list the caller, and `codebase_overview` no longer shows CALLEE as
+  never called. An ENTRY name declared by two programs is reported like a
+  duplicate PROGRAM-ID.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

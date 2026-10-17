@@ -163,6 +163,12 @@ from a per-diagram `_NodeIds` allocator with numeric suffixes on collision.
 `enclosing_program`; codebase-graph qualifies nested ids (`OUTER/INNER`) and
 resolves CALLs by COBOL scope; MCP and `scan` report the source nesting.
 
+## 2026-10-17 -- ENTRY names in the call graph (#521)
+
+[analysis/codebase.md](analysis/codebase.md), [mcp.md](mcp.md):
+codebase-graph sends a CALL to an ENTRY name to the declaring program
+(`CallEdge.entry`), and MCP `callers_of` / `codebase_overview` count it.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
