@@ -620,7 +620,9 @@ report: IOSequenceReport = IOSequenceAnalyzer().analyze(ast)
 # report.violations: list[IOSequenceViolation]  (kind/file_name/location/message)
 # IOViolationKind: READ_BEFORE_OPEN, WRITE_BEFORE_OPEN, REWRITE_BEFORE_OPEN,
 #                  DELETE_BEFORE_OPEN, START_BEFORE_OPEN, DOUBLE_OPEN,
-#                  CLOSE_NOT_OPEN, DOUBLE_CLOSE, FILE_LEFT_OPEN
+#                  CLOSE_NOT_OPEN, DOUBLE_CLOSE, FILE_LEFT_OPEN,
+#                  READ_WRONG_MODE, START_WRONG_MODE, WRITE_WRONG_MODE,
+#                  REWRITE_WRONG_MODE, DELETE_WRONG_MODE, OPEN_AFTER_LOCK
 ```
 
 Validates that IO operations follow legal COBOL sequencing rules (file must be
@@ -667,8 +669,8 @@ emitted once per (kind, file, location, message), not once per call path.
 Pinned by `tests/unit/analysis/test_io_sequence_perform_summaries.py`.
 
 **IF / EVALUATE arms are forked and merged** (see #380). State is
-`_status: dict[file, frozenset]` of possible states (`open` / `closed` /
-`unopened`). `_fork` runs each arm (an IF's THEN and ELSE, an EVALUATE's
+`_status: dict[file, frozenset]` of possible states (`open:<MODE>` /
+`closed` / `locked` / `unopened`; see the open-mode paragraph below). `_fork` runs each arm (an IF's THEN and ELSE, an EVALUATE's
 `when_groups()` bodies and WHEN OTHER; a missing ELSE / WHEN OTHER is an empty
 arm) from the branch's state and unions the arms that do not end the program,
 so `IF .. OPEN OUTPUT f ELSE OPEN EXTEND f` is not a DOUBLE_OPEN and an `IF
@@ -687,6 +689,21 @@ path. AT END / INVALID KEY handlers are not forked. The PERFORM-summary key is
 the whole `_status` map, so a range is re-walked from a new set of possible
 states. Pinned by `tests/unit/analysis/test_io_sequence_branches.py`.
 
+**Each verb is checked against the OPEN mode** (#548). An open state carries
+the mode from `IOOpenStatement.file_modes` (`open:` when unknown). READ /
+START need INPUT or I-O (else status 47, `READ_WRONG_MODE` /
+`START_WRONG_MODE`); WRITE needs OUTPUT, EXTEND or -- on a non-sequential
+SELECT `ORGANIZATION`, or a file whose SELECT is not in the AST (an
+unexpanded COPY member) -- I-O (48, `WRITE_WRONG_MODE`); REWRITE / DELETE need
+I-O (49). `CLOSE f WITH LOCK` leaves `f` `locked`; an OPEN of a file locked
+on every path is `OPEN_AFTER_LOCK` (38) and leaves it closed, so no
+FILE_LEFT_OPEN follows. Like every other kind, a mode error needs every
+merged path open in a known mode that refuses the verb: a mode that differs
+between arms (`IF .. OPEN INPUT f ELSE OPEN OUTPUT f`) is no error. All six
+are lint errors. Limit: an EXTERNAL file opened by a CALLed program (NIST
+IC227A) is invisible to the walk, as for the `*_BEFORE_OPEN` kinds. Pinned by
+`tests/regression/test_issue_548_io_open_mode.py`.
+
 **`CLOSE f REEL` / `CLOSE f UNIT` keep the file open.** They close only the
 current volume (`close_options[f]["reel"/"unit"]`).
 
@@ -694,7 +711,10 @@ current volume (`close_options[f]["reel"/"unit"]`).
 sequential loop (`READ IN-F AT END GO TO END-P` / `GO TO LOOP-P`), GO TO
 targets met inside a branch or handler are queued (`_pending_gotos`) and the
 chain resumes at the next unvisited one when it loops back, so END-P's CLOSE
-is seen. If it still ends on a loop without reaching STOP RUN/GOBACK, no
+is seen. The file states at the GO TO(s) that queued a target
+(`_pending_states`, carried through PERFORM summaries as well) are merged
+into the walk's state there: by the time the walk resumes, a later paragraph
+may have reopened the file in another mode (NIST IX103A's DELETE, #548). If it still ends on a loop without reaching STOP RUN/GOBACK, no
 FILE_LEFT_OPEN is claimed (`_ended_in_cycle`): the walk never reached program
 end. A missing or duplicate CLOSE in the exit paragraph is still reported.
 Pinned by `tests/unit/analysis/test_io_sequence.py::TestGoToReadLoop`.

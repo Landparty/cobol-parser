@@ -317,6 +317,12 @@ IF with ELSE / EVALUATE with WHEN OTHER whose every arm terminates
 `ALLOCATE item` as a reference like `SET ADDRESS OF`; xref maps ALLOCATE
 (item reference, RETURNING write, size read) and FREE (pointer write).
 
+## 2026-10-17 -- io-sequence checks the OPEN mode (#548)
+
+[analysis/data-use.md](analysis/data-use.md): open states carry the OPEN
+mode; six new `IOViolationKind`s (`*_WRONG_MODE`, `OPEN_AFTER_LOCK`); pending
+conditional GO TO targets carry the state at the GO TO.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
