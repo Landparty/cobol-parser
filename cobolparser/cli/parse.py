@@ -2715,6 +2715,17 @@ def _cmd_scan(args: argparse.Namespace) -> None:
 
     _json_out(output, args.compact, getattr(args, "output", None))
 
+    # Like batch: a file that produced nothing to scan fails the run, so a
+    # script gating on $? does not read "nothing scanned" as success (#325).
+    failed = report.failed_files
+    if failed:
+        print(
+            f"warning: {len(failed)} of {len(report.files)} file(s) could not "
+            "be scanned (see the JSON output's failures)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
 
 # -- Subcommand: io-sequence --------------------------------------------------
 
@@ -3763,11 +3774,27 @@ def _build_graph(args: argparse.Namespace) -> Any:
             return builder.build_from_directory(directories[0], extensions=extensions)
         return builder.build_from_directory(directories[0])
 
-    # Anything that is not a directory is treated as a source file, including
-    # a path that does not exist: the builder records it in `errors` and
-    # `unresolved` rather than dropping it, so a mistyped file name surfaces
-    # instead of quietly shrinking the graph.
+    # Anything that is not a directory is treated as a source file. A path
+    # that does not exist is recorded in `errors` and `unresolved` (never as
+    # a program), and the command then exits 2, so a mistyped name surfaces
+    # instead of quietly shrinking the graph (#325).
     return builder.build(list(args.paths))
+
+
+def _exit_on_graph_errors(graph: Any) -> None:
+    """Exit 2, like ``batch``, when any input file failed: missing, unreadable
+    or parsed with errors (#325). The output was already written."""
+    if not graph.errors:
+        return
+    for error in graph.errors:
+        if error.get("error") == "no such file or directory":
+            print(f"error: no such file or directory: {error['path']}", file=sys.stderr)
+    print(
+        f"warning: {len(graph.errors)} file(s) failed (see the JSON output's "
+        "errors); the graph is incomplete",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 
 def _cmd_codebase_graph(args: argparse.Namespace) -> None:
@@ -3775,12 +3802,11 @@ def _cmd_codebase_graph(args: argparse.Namespace) -> None:
 
     if args.output_format == "dot":
         _verbatim_out(graph.to_dot(), getattr(args, "output", None))
-        return
-    if args.output_format == "mermaid":
+    elif args.output_format == "mermaid":
         _verbatim_out(graph.to_mermaid(), getattr(args, "output", None))
-        return
-
-    _json_out(graph.to_dict(), args.compact, getattr(args, "output", None))
+    else:
+        _json_out(graph.to_dict(), args.compact, getattr(args, "output", None))
+    _exit_on_graph_errors(graph)
 
 
 # -- Subcommand: copybook-impact ----------------------------------------------
@@ -3835,6 +3861,7 @@ def _cmd_copybook_impact(args: argparse.Namespace) -> None:
     report = CopybookImpactAnalyzer(graph).analyze(args.member)
 
     _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+    _exit_on_graph_errors(graph)
 
 
 # -- Subcommand: sql-cics-check -----------------------------------------------

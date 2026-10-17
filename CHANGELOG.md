@@ -367,6 +367,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both list the caller, and `codebase_overview` no longer shows CALLEE as
   never called. An ENTRY name declared by two programs is reported like a
   duplicate PROGRAM-ID.
+* **`scan`, `codebase-graph` and `copybook-impact` exit 2 when an input file
+  fails** (#325). They follow `batch`, the option the owner chose: the JSON
+  is still written, a `warning:` goes to stderr, and the exit code is 2 when
+  any file could not be scanned, read or parsed cleanly. A path that does
+  not exist (`codebase-graph ./typo-dir/`) is now reported as
+  `no such file or directory` instead of being graphed as a phantom
+  `parse_failed` program named after it.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it
