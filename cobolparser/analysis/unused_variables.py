@@ -268,6 +268,40 @@ def collect_declared_items(ast: CobolProgram) -> list[CobolDataItem]:
     ]
 
 
+#: Statement attributes that hold a procedure (paragraph / section) name:
+#: PERFORM's target and THRU, SORT / MERGE input / output procedures.
+_PROCEDURE_NAME_ATTRS: tuple[str, ...] = (
+    "target_paragraph",
+    "thru_paragraph",
+    "processing_procedure",
+    "processing_procedure_thru",
+    "input_procedure",
+    "input_procedure_thru",
+    "output_procedure",
+    "output_procedure_thru",
+)
+
+
+def _procedure_operands(stmt: Any) -> set[str]:
+    """Upper-cased procedure names *stmt* names (PERFORM / GO TO / ALTER /
+    SORT-MERGE procedures): operands that are never data references."""
+    names: set[str] = set()
+    for attr in _PROCEDURE_NAME_ATTRS:
+        value = getattr(stmt, attr, None)
+        if isinstance(value, str) and value:
+            names.add(value.strip().upper())
+    for value in getattr(stmt, "target_paragraphs", None) or []:
+        if isinstance(value, str) and value:
+            names.add(value.strip().upper())
+    for alteration in getattr(stmt, "alterations", None) or []:
+        if isinstance(alteration, dict):
+            for key in ("from_paragraph", "to_paragraph"):
+                value = alteration.get(key)
+                if isinstance(value, str) and value:
+                    names.add(value.strip().upper())
+    return names
+
+
 def _extract_identifiers(operand: Any) -> set[str]:
     """Extract every candidate data-name reference out of an operand's raw
     text.
@@ -900,7 +934,12 @@ class UnusedVariableAnalyzer:
         names: set[str] = set()
 
         for stmt in self._own_statements(ast):
+            procedures = _procedure_operands(stmt)
             for operand in stmt.operands:
+                if isinstance(operand, str) and operand.strip().upper() in procedures:
+                    # ``PERFORM INIT`` names paragraph INIT, never a data
+                    # item of that name (#487).
+                    continue
                 names |= _extract_identifiers(operand)
 
             # Walked by MRO, not exact type, so a (currently hypothetical)

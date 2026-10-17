@@ -25,7 +25,15 @@ import re
 #: text for clone-detection renaming, an unstructured EVALUATE selector).
 #: Shared so a future fix to what counts as an identifier token does not
 #: have to be made in more than one place.
-IDENTIFIER_TOKEN_RE = re.compile(r"(?<![\w.])\d*[A-Za-z][A-Za-z0-9-]*")
+#:
+#: A token is a *whole* word: it may not start right after a hyphen either,
+#: and digits may be followed by a hyphen. The old ``\d*[A-Za-z]...`` could
+#: not match ``1000-INIT`` from its first character, so it matched the tail
+#: ``INIT`` instead -- and ``PERFORM 1000-INIT`` referenced data item
+#: ``INIT`` (#487). Such a word is now one token that names no data item.
+IDENTIFIER_TOKEN_RE = re.compile(
+    r"(?<![\w.-])(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9-]*"
+)
 
 #: Same, but also matches a token that *starts* with a digit. Only where a
 #: stray non-identifier match is harmless -- the caller looks every match up
