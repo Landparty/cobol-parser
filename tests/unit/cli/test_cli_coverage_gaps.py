@@ -283,3 +283,72 @@ class TestCmdExpand:
         _cmd_expand(_expand_args(_SIMPLE, max_depth=5))
         data = json.loads(capsys.readouterr().out)
         assert isinstance(data, dict)
+
+    # Issue #583: conditional compilation ran in `expand` only when a --define
+    # was given, so without one both arms of every >>IF ... >>ELSE (program
+    # and inlined copybook) were printed and the program's own >>DEFINE was
+    # ignored.
+    _COPY_COND = (
+        "       01 REC-A.\n"
+        "          05 RA-ID   PIC X(5).\n"
+        "       >>IF WIDE DEFINED\n"
+        "          05 RA-NAME PIC X(40).\n"
+        "       >>ELSE\n"
+        "          05 RA-NAME PIC X(10).\n"
+        "       >>END-IF\n"
+    )
+    _PROG_COND = (
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. CC.\n"
+        "       DATA DIVISION.\n"
+        "       WORKING-STORAGE SECTION.\n"
+        "{define}"
+        "       COPY RECA.\n"
+        "       PROCEDURE DIVISION.\n"
+        "       MAIN-PARA.\n"
+        "       >>IF WIDE DEFINED\n"
+        "           DISPLAY 'WIDE'\n"
+        "       >>ELSE\n"
+        "           DISPLAY 'NARROW'\n"
+        "       >>END-IF\n"
+        "           GOBACK.\n"
+    )
+
+    def _expand_cond(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        define_line: str,
+        define: list[str],
+    ) -> str:
+        cpy = tmp_path / "cpy"
+        cpy.mkdir()
+        (cpy / "RECA.cpy").write_text(self._COPY_COND)
+        src = tmp_path / "cc.cbl"
+        src.write_text(self._PROG_COND.format(define=define_line))
+        _cmd_expand(_expand_args(str(src), copybook_path=[str(cpy)], define=define))
+        return str(json.loads(capsys.readouterr().out)["expanded_source"])
+
+    def test_in_source_define_selects_one_arm_without_cli_define(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        out = self._expand_cond(tmp_path, capsys, "       >>DEFINE WIDE\n", [])
+        assert "PIC X(40)" in out and "PIC X(10)" not in out
+        assert "DISPLAY 'WIDE'" in out and "DISPLAY 'NARROW'" not in out
+        assert ">>IF" not in out and ">>DEFINE" not in out
+
+    def test_same_output_with_unrelated_cli_define(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        without = self._expand_cond(tmp_path, capsys, "       >>DEFINE WIDE\n", [])
+        other = tmp_path / "other"
+        other.mkdir()
+        with_foo = self._expand_cond(other, capsys, "       >>DEFINE WIDE\n", ["FOO"])
+        assert without == with_foo
+
+    def test_no_define_anywhere_selects_else_arm(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        out = self._expand_cond(tmp_path, capsys, "", [])
+        assert "PIC X(10)" in out and "PIC X(40)" not in out
+        assert "DISPLAY 'NARROW'" in out and "DISPLAY 'WIDE'" not in out

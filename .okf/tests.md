@@ -453,6 +453,9 @@ pins that each check still flags the drift it exists for.
   nested in a copybook or under an FD is expanded by `gen-data` / `decode` /
   `compare` from `--copybook-path` or `cobol.yml`, and one left unexpanded
   is a stderr warning and a caveat, never a silently short record
+* `tests/unit/cli/test_cli_coverage_gaps.py` -- `preprocess` (#271) and
+  `expand` (#583) evaluate `>>IF` / `>>DEFINE` with or without `--define`:
+  one arm survives, in the program and in an inlined copybook
 * `tests/unit/generators/data/test_variable_length.py` -- fixed vs variable
   record length: ODO layout linking, per-row trimming, counter bounds, RDW
   framing, and the length reporting built on them.
