@@ -293,7 +293,11 @@ Statement operands store the quoted spelling (`"A"`), so a literal `'A'` and the
 data item `A` produce different AST values and `X'00'` keeps its prefix; every
 consumer that already skips quoted text (unused-variables, lineage, xref) relies
 on that rather than on a per-operand `is_literal` flag (#330). MOVE source and
-DISPLAY items prefer `Token.raw_value` for typed literals (`X"41"`). Level-88
+DISPLAY items prefer `Token.raw_value` for typed literals (`X"41"`). Condition
+tokens (IF, PERFORM UNTIL, SEARCH WHEN, EVALUATE `Condition` text) keep the
+prefix too: `_conditions.condition_token_text` re-quotes a typed literal as
+`X'0000'` (`typed_literal_prefix`), and `_is_literal_leg` accepts one as an
+abbreviated leg (#331; `tests/regression/test_issue_331_typed_literal_conditions.py`). Level-88
 values are the exception: stored undelimited (see [divisions.md](divisions.md)).
 Round-tripping is the property that matters -- re-parsing an emitted clause
 yields the identical clause. Pinned by

@@ -864,7 +864,9 @@ must use it -- `analysis/constraints.py` (`_strip_quotes`, branch witnesses),
 `analysis/const_fold.py` (MOVE sources) and `generators/data/layout.py`
 (`_strip_literal_quotes`, VALUE clauses) do; stripping only the delimiters
 turns `VALUE "A""B"` into `A""B`. Pinned by
-`tests/regression/test_doubled_quote_literal_values.py`.
+`tests/regression/test_doubled_quote_literal_values.py`. `_strip_quotes` reads
+a typed literal through `typed_literal_content()` first (`X'0000'` is two NUL
+characters, `X'41'` is `A`), and `_is_literal_operand` accepts one (#331).
 
 ## See also
 

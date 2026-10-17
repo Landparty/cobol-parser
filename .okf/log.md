@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- Typed literals keep their prefix in conditions (#331)
+
+[parser/statements.md](parser/statements.md),
+[parser/statements-control.md](parser/statements-control.md),
+[analysis/fixtures-support.md](analysis/fixtures-support.md),
+[analysis/business-rules.md](analysis/business-rules.md): `X'00'` stays
+`X'00'` in condition trees and EVALUATE selectors (`"typed": True`); the
+constraint extractor decodes it.
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats

@@ -12,6 +12,7 @@ M12). The IF parser's methods now delegate here.
 
 import re
 
+from ..._literals import is_quoted_literal
 from ...lexer import Token, TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements.base import (
@@ -116,6 +117,24 @@ _FIGURATIVE_WORDS = frozenset(
 _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$")
 
 
+def typed_literal_prefix(token: Token) -> str:
+    """The upper-cased type prefix of a typed STRING_LITERAL token (``X``,
+    ``Z``, ``N``, ``NX``, ``G``, ``U``, ``UX``, ...) or ``""``.
+
+    The lexer keeps a typed literal's content in ``value`` and its source
+    text in ``raw_value`` (``X'00'``); the prefix is what precedes the
+    first quote of ``raw_value``.
+    """
+    raw = token.raw_value
+    if token.type != TokenType.STRING_LITERAL or not raw:
+        return ""
+    for index, ch in enumerate(raw):
+        if ch in "\"'":
+            prefix = raw[:index].upper()
+            return prefix if prefix.isalpha() else ""
+    return ""
+
+
 def condition_token_text(token: Token) -> str:
     """Text for one condition token, re-quoting string literals.
 
@@ -124,11 +143,12 @@ def condition_token_text(token: Token) -> str:
     indistinguishable from an identifier once collected into a flat
     condition-token list. Re-wrap it here, at the one point the token
     type is still known, rather than guessing from the rendered text
-    later.
+    later. A typed literal keeps its prefix (#331): ``X'0000'`` is two
+    bytes, and re-quoted bare it read as the four characters ``'0000'``.
     """
     if token.type == TokenType.STRING_LITERAL:
         value = (token.value or "").replace("'", "''")
-        return f"'{value}'"
+        return f"{typed_literal_prefix(token)}'{value}'"
     return token.value or str(token.type)
 
 
@@ -402,7 +422,7 @@ def _is_literal_leg(tokens: list[str]) -> bool:
     if len(tokens) != 1:
         return False
     tok = tokens[0]
-    if tok.startswith(("'", '"')):
+    if tok.startswith(("'", '"')) or is_quoted_literal(tok):
         return True
     if _NUMERIC_LITERAL_RE.match(tok):
         return True

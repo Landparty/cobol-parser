@@ -73,6 +73,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .._literals import is_quoted_literal
 from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolParagraph, CobolProgram
@@ -1115,7 +1116,8 @@ class BusinessRuleExtractor:
             return text
         if _NUMERIC_LITERAL_RE.match(text) or text.upper() in _FIGURATIVES:
             return text
-        if text[:1] in ("'", '"'):
+        if text[:1] in ("'", '"') or is_quoted_literal(text):
+            # Already source spelling, a typed literal (``X'00'``) included.
             return text
         # The parser joins a multi-token selector with spaces
         # (``DFHRESP ( NORMAL )``); a quoted literal it unquoted never has

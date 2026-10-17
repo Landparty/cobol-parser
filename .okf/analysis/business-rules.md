@@ -100,7 +100,8 @@ SETting a condition name also counts its item.
 then `_tidy()` (`T-K ( IX )` -> `T-K(IX)`, `NOT =` reads `<>`). EVALUATE
 selector literals arrive **unquoted** from the parser, so a non-identifier,
 non-numeric, non-figurative selector is re-quoted -- except the space-joined
-call shape `DFHRESP ( NORMAL )`, which is an expression. A negated range
+call shape `DFHRESP ( NORMAL )`, which is an expression, and a typed literal
+(`X'00'`, `"typed": True`), already in source spelling (#331). A negated range
 selector (`WHEN NOT 0 THRU 17`, a `Condition` dict with `negated` plus
 `start`/`end`) reads `NOT (AGE >= 0 AND AGE <= 17)` from those bounds, not
 from its raw `THRU` text; only a single negated value reads `AGE <> 6`
