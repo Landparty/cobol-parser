@@ -1470,6 +1470,7 @@ class _ConditionParser:
 
         if kind == "lparen":
             start = self._pos
+            paren_error: _ConditionSyntaxError | _UndefinedSymbolError | None = None
             try:
                 self._advance()
                 value = self._parse_or()
@@ -1479,11 +1480,20 @@ class _ConditionParser:
                 self._advance()
                 if not self._follows_operand():
                     return value
-            except (_ConditionSyntaxError, _UndefinedSymbolError):
-                pass
+            except (_ConditionSyntaxError, _UndefinedSymbolError) as exc:
+                paren_error = exc
             # Not a parenthesized condition: an arithmetic operand such as
             # ``(X + 1) * 2 = 16``. Re-read it as one.
             self._pos = start
+            if paren_error is not None:
+                # If the text cannot be an operand either, it was a condition
+                # after all: report *its* error (``(FOO = 1)`` with FOO
+                # undefined says so), not "expected an operand, got '='".
+                try:
+                    self._arith_parts()
+                except _ConditionSyntaxError:
+                    raise paren_error from None
+                self._pos = start
 
         # DEFINED(symbol) function form
         if kind == "word" and text == "DEFINED":

@@ -98,6 +98,18 @@ class TestArithmeticOperands:
         assert selected is False
         assert len(warnings) == 1 and "undefined symbol 'Z'" in warnings[0]
 
+    @pytest.mark.parametrize(
+        "condition", ["(Z = 1)", "(X = 7) AND (Z = 1)", "(X = 7 AND (Z > 1))"]
+    )
+    def test_undefined_symbol_in_parenthesized_condition_named(
+        self, condition: str
+    ) -> None:
+        # The arithmetic re-read of a parenthesized group must not replace
+        # the undefined-symbol diagnostic with "expected an operand".
+        selected, warnings = _run(condition)
+        assert selected is False
+        assert len(warnings) == 1 and "undefined symbol 'Z'" in warnings[0]
+
 
 def test_issue_repro_keeps_big_and_arith() -> None:
     source = (

@@ -456,7 +456,9 @@ Directive and skipped lines are blanked in place.
   between symbol values and numeric/string literals; `DEFINED(sym)` / `sym
   [IS] [NOT] DEFINED` (`IS` optional per IBM; a dangling `IS`/`NOT` is a
   syntax error); `AND`/`OR`/`NOT` with parentheses. A `(` that turns out to
-  open an arithmetic operand (`(X + 1) * 2 = 16`) is re-read as one. Word
+  open an arithmetic operand (`(X + 1) * 2 = 16`) is re-read as one; when
+  the text cannot be an operand either, the group's own error is reported
+  (`(FOO = 1)` still names the undefined `FOO`). Word
   forms used to be "unsupported ... treated as FALSE", compiling the `>>ELSE`
   instead (#512); pinned by
   `tests/regression/test_conditional_compilation_word_operators.py`.
