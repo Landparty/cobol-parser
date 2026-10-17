@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`gen-data --unique` keeps a narrow text field distinct, and says when it
+  cannot** (#526). After 32 retries the counter fallback was
+  `<name[:4]><count>` cut to the field's width, so on a `PIC X(3)` with
+  level-88 or VALUE-clause values every fallback value was `STA`, silently.
+  The counter is now built from the right (`ST0`, `ST1`, ...) and steps past
+  values already used. A column whose PICTURE runs out of distinct values,
+  and a `--unique` name matching no generated field, are reported as
+  `warning:` lines on stderr (dataset `caveats`).
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed

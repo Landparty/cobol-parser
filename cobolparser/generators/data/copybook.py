@@ -399,7 +399,7 @@ class CopybookDataGenerator:
         # After the rows, deliberately: a copybook that declares no varying
         # range draws nothing here, and so generates byte-identical output to
         # a version of this package that had never heard of one.
-        caveats: list[str] = []
+        caveats = self._unique_caveats(record, fields, factory)
         varying = self._varying_for(record, fields, caveats)
         lengths = self._draw_lengths(varying, fields, rng)
         if lengths is not None:
@@ -413,6 +413,29 @@ class CopybookDataGenerator:
             declared_lengths=lengths,
             caveats=caveats,
         )
+
+    def _unique_caveats(
+        self, record: CobolDataItem, fields: list[FieldSpec], factory: ValueFactory
+    ) -> list[str]:
+        """What ``unique_fields`` could not deliver (#526): a name that
+        matches no generated column, and a column that repeats because its
+        PICTURE ran out of distinct values."""
+        caveats: list[str] = []
+        known = {spec.name.upper() for spec in fields} | {
+            spec.column.upper() for spec in fields
+        }
+        for name in self.options.unique_fields:
+            if name.upper() not in known:
+                caveats.append(
+                    f"unique field {name} matches no generated field of record "
+                    f"{record.name}; ignored"
+                )
+        for column in factory.duplicate_columns:
+            caveats.append(
+                f"unique field {column} repeats a value: its PICTURE cannot "
+                f"hold {self.options.rows} distinct values"
+            )
+        return caveats
 
     # -- variable record length ---------------------------------------------
 

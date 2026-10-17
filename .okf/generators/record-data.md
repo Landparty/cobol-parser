@@ -383,7 +383,15 @@ after the fact (surfaced by `gen-data --describe`).
 
 **`unique_fields`** retries a field up to 32 times for a distinct value, then
 falls back to a deterministic counter — a narrow field (`PIC 9`, ten possible
-values) asked for 40 unique rows must terminate, not spin.
+values) asked for 40 unique rows must terminate, not spin. The counter
+(`ValueFactory._sequential`) steps past values already used and builds text
+from the right (`ST0`, `ST1` ... `10` on a `PIC X(3)`), so truncation never
+cuts the counter off -- cutting it made every fallback value of a narrow
+VALUE / level-88 field identical (#526). When the counter runs out of values
+the PICTURE holds, the repeat is kept and the column lands in
+`ValueFactory.duplicate_columns`; `CopybookDataGenerator` turns that, and a
+`unique_fields` name matching no generated column, into dataset `caveats`
+(printed by `gen-data` as `warning:` lines on stderr, exit 0).
 
 ## Level-88 `VALUE ALL`
 
