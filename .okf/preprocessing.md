@@ -166,9 +166,10 @@ file -- the most important invariant in this area. How each pass keeps it:
 * The COPY splice strips exactly one trailing newline from the expanded
   member (never more -- a genuine blank final line stays) before counting its
   lines.
-* The only pass allowed to add lines is the expander's width-fitting wrap
-  (see [Output re-pad and width fitting](#output-re-pad-and-width-fitting)),
-  and the source map accounts for it.
+* The only passes allowed to add lines are the expander's width-fitting wrap
+  (see [Output re-pad and width fitting](#output-re-pad-and-width-fitting))
+  and the COPY splice's tail line (see [The COPY splice](#the-copy-splice)),
+  and the source map accounts for both.
 
 Pinned by `tests/regression/test_normalize_line_number_preservation.py`
 (also checks Cython/pure parity).
@@ -753,6 +754,13 @@ and `tests/regression/test_audit_2026_09_17_preprocessing.py`.
   it on that line. The `COPY`'s own indentation is not the member's; splicing
   at the keyword pushes a member's `01` out of Area A or past column 72.
   Pinned by `tests/regression/test_copy_splice_keeps_member_columns.py`.
+* **Text after the COPY's period gets a line of its own** (`tail_has_text`;
+  option (b) of #355): the member is followed by a newline and the tail's own
+  columns of blanks, and the source map credits that line to the parent line
+  the tail was on. Appended to the member's last line it inherited the
+  member's origin, so lint blamed the copybook for a parent item. Known
+  limit: with `COPY A. COPY B.` on one line, B's first line is that tail and
+  maps to the parent line, not to `B.cpy:1`.
 
 ### Output re-pad and width fitting
 
@@ -798,7 +806,7 @@ that can move one:
 | `remove_comment_lines`, `strip_sequence_area` | blank in place | line-preserving by construction; nothing to track |
 | `normalize_continuation_lines` | merges N records into 1 | `line_origins` out-parameter records the input line each output line started on |
 | `apply_replacing_clauses` | a `BY` text adds or removes lines | its `line_origins` out-parameter, handed to the member's recursion as `initial_origins` so it does not number the replaced text from 1 (which pushed every later member line down, past the end of the file -- #561) |
-| the COPY splice | inserts a member's lines | `origins[:start] + copybook_origins + origins[end+1:]`, the first spliced line credited to the parent only when the parent had real text before the COPY on that line — the same flag that decides where the text splice starts, so map and text are spliced identically |
+| the COPY splice | inserts a member's lines | `origins[:start] + copybook_origins + origins[end+1:]`, the first spliced line credited to the parent only when the parent had real text before the COPY on that line — the same flag that decides where the text splice starts, so map and text are spliced identically; text after the COPY's period becomes one more line credited to the parent's line (#355) |
 | the re-pad's `_fit_fixed_format_width` wrap | 1 line becomes several | each piece inherits its line's origin; pieces of a line merged from continuation records map to those records (`_wrapped_origins`: piece k -> first record + k, capped at the last one absorbed) |
 
 `ExpansionContext.content_origins` stores origins beside each cached content

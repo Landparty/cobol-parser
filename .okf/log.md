@@ -162,6 +162,12 @@ operand's `input-output` / `output` to `input`, per entry point.
 each report entry's SOURCE / SUM / CONTROL(S) texts; unused-variables and xref
 both read it, xref recording each at its entry.
 
+## 2026-10-17 -- text after a COPY's period maps to the parent (#355)
+
+[preprocessing.md](preprocessing.md): the splice moves the tail onto its own
+line (option (b)); line-count invariant and source-map table updated.
+[tests.md](tests.md): `test_expansion_source_map_and_comments.py`.
+
 ## 2026-10-17 -- expand evaluates >>IF without --define (#583)
 
 [cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the

@@ -348,6 +348,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reference` at its report entry (statement `REPORT SECTION`); the RD's
   CONTROLS are recorded once per report. `PAGE-COUNTER` / `LINE-COUNTER`
   join xref's special registers, so `SOURCE PAGE-COUNTER` is not undefined.
+* **Code after a COPY statement on the same line is located in the parent
+  file** (#355). `COPY AREC REPLACING A-ONE BY Z-ONE. 05 TAIL-X PIC X.`
+  appended the trailing `05 TAIL-X` to the copybook's last line, so the
+  source map, and `lint --copybook-path`, reported TAIL-X at
+  `AREC.cpy:2`. The expander now puts text after the COPY's period on a line
+  of its own, in its original columns, mapped to the parent line it was on
+  (`M.cbl:7`).
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
