@@ -147,6 +147,32 @@ def _defined_symbols(defines: tuple[str, ...]) -> dict[str, str] | None:
     return symbols
 
 
+def _unwrap_source_map(
+    source_map: dict[int, tuple[str, int]] | None,
+    filename: str,
+    head_lines: int,
+    fragment_lines: int,
+) -> dict[int, tuple[str, int]]:
+    """A wrapped copybook's lines back to the file's own.
+
+    The skeleton's head moves every line of *filename* down by *head_lines*;
+    the head and the tail after the fragment's *fragment_lines* are not in
+    the file at all, so they map to nothing.  Lines from expanded members
+    keep their own origins.
+    """
+    if source_map is None:
+        source_map = {
+            line: (filename, line) for line in range(1, head_lines + fragment_lines + 1)
+        }
+    unwrapped: dict[int, tuple[str, int]] = {}
+    for line, (file, file_line) in source_map.items():
+        if file != filename:
+            unwrapped[line] = (file, file_line)
+        elif head_lines < file_line <= head_lines + fragment_lines:
+            unwrapped[line] = (file, file_line - head_lines)
+    return unwrapped
+
+
 @dataclass
 class ParsedProgram:
     """One parsed source file, with what it takes to cite it on disk."""
@@ -597,13 +623,27 @@ class Workspace:
 
     def _parse(self, path: Path) -> ParsedProgram:
         from .. import parse_cobol
+        from .._lines import split_source_lines
         from ..analysis.lint import source_column_offsets
+        from ..generators.data.copybook import (
+            WRAPPER_HEAD_LINES,
+            wrap_copybook_fragment,
+        )
         from ..plugins.core import DialectType, ErrorRecoveryMode
         from ..preprocess import PreprocessingError, preprocess_conditional_compilation
         from ..preprocess.copybook_expander import parse_cobol_with_expansion
 
         source = self.read_text(path)
         filename = str(path)
+        # A bare copybook (``record_layout`` on a .cpy) is parsed inside the
+        # same program skeleton gen-data uses, so it has records at all; its
+        # lines are mapped back below (#536).
+        wrapped = wrap_copybook_fragment(source)
+        head_lines = fragment_lines = 0
+        if wrapped is not None:
+            fragment_lines = len(split_source_lines(source))
+            source = wrapped
+            head_lines = WRAPPER_HEAD_LINES
         format_kwargs = self._format_kwargs()
         parse_kwargs: dict[str, Any] = {
             "dialect": DialectType.IBM_ENTERPRISE,
@@ -695,6 +735,10 @@ class Workspace:
             )
 
         source_map = getattr(result, "expansion_source_map", None) or None
+        if head_lines:
+            source_map = _unwrap_source_map(
+                source_map, filename, head_lines, fragment_lines
+            )
         files = {filename}
         if source_map:
             files.update(file for file, _ in source_map.values())

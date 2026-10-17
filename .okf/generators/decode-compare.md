@@ -81,6 +81,10 @@ again rather than a parallel size model.
 
 ## Decoding
 
+(A bare copybook is wrapped in a program skeleton before parsing, see
+[record-data.md](record-data.md#parsing-a-copybook); `data-items` and the
+MCP server wrap the same way through `wrap_copybook_fragment`, #536.)
+
 `RecordDecoder(views, opts=None, *, record_length=None, varying=None,
 layout_warnings=None)`, or `.from_copybook_source()` / `.from_copybook_file()`
 (both take `copybook_paths=` to expand a `COPY` in the layout; see
