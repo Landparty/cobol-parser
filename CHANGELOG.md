@@ -160,6 +160,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **Multi-character and letter `CURRENCY SIGN` symbols in record images**
+  (#491, #311 item 4). `CURRENCY SIGN IS 'CHF ' WITH PICTURE SYMBOL 'F'`
+  was not recognized at all (a letter symbol was dropped), so `PIC
+  FFFF,FF9.99` got one integer digit and values like `2.57`; and a
+  multi-character string such as `'EUR'` was only named in a caveat. A
+  letter symbol is now declared like any other (except the letters the
+  PICTURE grammar uses: A B C D E G N P R S U V X Z), the currency string
+  fills the one position a `$` would hold, so the item is n - 1 bytes wider
+  for an n-character string (`PIC FFFF,FF9.99` is 14 bytes, `data-items`
+  offsets included), and `gen-data` writes ` CHF 17,611.57`, which `decode`
+  reads back. The width follows IBM's rule as documented; GnuCOBOL 3.x does
+  not implement a separate currency string, so it is not verified against a
+  compiler.
 * **`IBMDataItem.calculate_storage_size()` agrees with `calculate_size()`**
   (#589). It kept its own copy of the IBM sizing rules: packed decimal used
   `(digits + 1) // 2`, one byte short for every even digit count

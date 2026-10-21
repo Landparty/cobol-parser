@@ -197,9 +197,10 @@ def _declared_currency_symbols(
     """The PICTURE currency symbols a SPECIAL-NAMES paragraph declares.
 
     A clause without ``PICTURE SYMBOL`` declares its sign as the symbol, so
-    only a one-character sign counts there. Alphanumeric symbols are left
-    out -- they already lex as (part of) a word. A clause inside a comment
-    declares nothing.
+    only a one-character sign counts there. Digits and the letters the
+    PICTURE grammar already uses are left out; any other letter counts,
+    though it lexes as (part of) a word. A clause inside a comment declares
+    nothing.
     """
     return frozenset(declared_currency_signs(source, fixed_format))
 
@@ -219,9 +220,27 @@ def declared_currency_signs(source: str, fixed_format: bool = False) -> dict[str
         symbol = match.group(3) or match.group(4)
         if symbol is None and len(sign) == 1:
             symbol = sign
-        if symbol and not symbol.isalnum() and not symbol.isspace():
+        if symbol and _is_currency_picture_symbol(symbol):
             signs.setdefault(symbol, sign)
     return signs
+
+
+#: Letters a ``PICTURE SYMBOL`` may not be (IBM Enterprise COBOL, "CURRENCY
+#: SIGN clause"): each is already a PICTURE symbol of its own, either case.
+_RESERVED_PICTURE_LETTERS = frozenset("ABCDEGNPRSUVXZ")
+
+
+def _is_currency_picture_symbol(symbol: str) -> bool:
+    """Whether *symbol* can be a declared PICTURE currency symbol: not a
+    digit, a space or a letter the PICTURE grammar already uses. A letter
+    such as ``F`` is one (``CURRENCY SIGN IS 'CHF ' WITH PICTURE SYMBOL
+    'F'``), though it lexes as part of a word rather than as a CURRENCY
+    token (#491)."""
+    if symbol.isspace() or symbol.isdigit():
+        return False
+    if symbol.isalpha():
+        return symbol.isascii() and symbol.upper() not in _RESERVED_PICTURE_LETTERS
+    return not symbol.isalnum()
 
 
 # ---------------------------------------------------------------------------
@@ -960,7 +979,11 @@ class _CobolLexerPure:
         self.currency_signs: dict[str, str] = declared_currency_signs(
             source, fixed_format=not free_form
         )
-        self._currency_symbols: frozenset[str] = frozenset(self.currency_signs)
+        # Only a symbol that is not a letter lexes as a CURRENCY token; a
+        # letter symbol (``F``) stays part of the PICTURE word it is in.
+        self._currency_symbols: frozenset[str] = frozenset(
+            symbol for symbol in self.currency_signs if not symbol.isalpha()
+        )
         # ``DECIMAL-POINT IS COMMA``: ``,`` between digits is the decimal
         # point of a numeric literal and ``.`` is not. A decimal literal's
         # token keeps the canonical ``.`` spelling in ``value`` (every

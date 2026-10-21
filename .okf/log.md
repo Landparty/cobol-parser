@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-21 -- Multi-character and letter currency symbols (#491)
+
+[lexer.md](lexer.md): `declared_currency_signs()` keeps a letter `PICTURE
+SYMBOL` (not one of A B C D E G N P R S U V X Z); only non-letters lex as
+CURRENCY tokens. [ast-models.md](ast-models.md): `PictureClause.size` grows by
+len(string) - 1. [generators/record-data.md](generators/record-data.md):
+`edit_numeric` / `deedit_numeric` put the whole string in the `$` position.
+
 ## 2026-10-17 -- IBMDataItem.calculate_storage_size defers to _storage (#589)
 
 [dialects.md](dialects.md): `calculate_storage_size()` returns

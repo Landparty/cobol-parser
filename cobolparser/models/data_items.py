@@ -86,7 +86,8 @@ class PictureClause(ASTNode):
 
         *currency_signs* maps each of those symbols to the currency string
         its ``CURRENCY SIGN`` clause declares (``{"#": "EUR"}``): what an
-        edited record shows in the symbol's position."""
+        edited record shows in the symbol's position. A string of n
+        characters makes the item n - 1 bytes wider than its pattern."""
         super().__init__("PictureClause", location)
         self.currency_symbols: frozenset[str] = frozenset(currency_symbols or ())
         self.currency_signs: dict[str, str] = {
@@ -141,6 +142,16 @@ class PictureClause(ASTNode):
         self._validate_pattern()
         if translation:
             self.pattern = pattern
+        # A currency string longer than one character (``CURRENCY SIGN IS
+        # 'CHF ' WITH PICTURE SYMBOL 'F'``) occupies its full length in the
+        # one position that shows it, fixed or floating; every other
+        # occurrence of the symbol is one position (#491, #311).
+        widest = max(
+            (len(sign) for sign in self.currency_signs.values() if sign),
+            default=1,
+        )
+        if widest > 1 and self.size is not None:
+            self.size += widest - 1
         if self.currency_symbols:
             self._metadata["currency_symbols"] = sorted(self.currency_symbols)
         if self.currency_signs:

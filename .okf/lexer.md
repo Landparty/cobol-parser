@@ -581,9 +581,9 @@ a pure/Cython parity check).
 
 `CURRENCY SIGN IS '£'` / `CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL '#'`
 makes the symbol a PICTURE editing character like `$`. `__init__`
-collects the declared non-alphanumeric symbols
-(`_declared_currency_symbols(source)`, one regex scan) into
-`self._currency_symbols`; in `tokenize_program_text` (both lexers) a
+collects the declared symbols (`declared_currency_signs(source)`, one regex
+scan; digits, spaces and the letters A B C D E G N P R S U V X Z are never
+symbols) and keeps the non-letters in `self._currency_symbols`; in `tokenize_program_text` (both lexers) a
 character that would otherwise be an "Invalid character" error is emitted
 as a `CURRENCY` token when it is declared. Characters that already lex as
 something (`& ! | < > :`, letters) are not rerouted. Without the declaration,
@@ -591,7 +591,10 @@ every `£` in `PIC £££9.99` is a lexer error. See [ast-models.md](ast-models.
 how the PictureClause sizes it. The same scan
 (`declared_currency_signs(source)`) also keeps each symbol's currency string,
 public as `lexer.currency_signs` (`{"#": "EUR"}`); `CobolParser` copies it to
-`parser.currency_signs` for the PICTURE clauses (#491).
+`parser.currency_signs` for the PICTURE clauses (#491). A letter symbol
+(`PICTURE SYMBOL 'F'`) is in `currency_signs` but not `_currency_symbols`: it
+lexes inside the PICTURE word, and `DataItemClauseParser._picture_clause`
+finds it in the pattern.
 
 **Operator-shaped symbols.** A declared `<`, `>` or `=` already lexes as
 `LESS`/`GREATER`/`ASSIGN`, so `tokenize_program_text` cannot reroute it;

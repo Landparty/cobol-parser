@@ -453,7 +453,10 @@ offsets and record images are built from.
   **`currency_signs`** maps each of them to its declared currency string
   (`{"#": "EUR"}`, from `parser.currency_signs`), so the record-image editor
   knows what the position shows; `metadata["currency_signs"]` when non-empty,
-  restored by `from_json` (#491).
+  restored by `from_json` (#491). A string of n characters fills the one
+  position that shows it, so `size` is n - 1 more than the `$` spelling's
+  (`'CHF '` with `PIC FFFF,FF9.99`: 14, not 11). A letter symbol is added by
+  `_picture_clause` from the pattern itself (it is not a CURRENCY token).
 * **`decimal_point_is_comma`**: `SPECIAL-NAMES. DECIMAL-POINT IS
   COMMA` -- `,` is the decimal point and `.` a simple insertion character.
   Sized and validated through the default spelling (`,`/`.` exchanged,

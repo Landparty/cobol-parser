@@ -51,10 +51,11 @@ def test_picture_keeps_symbol_and_sizes_like_dollar() -> None:
     usd = items["WS-USD"].picture_clause
     assert eur.pattern == "###,##9.99"
     assert gbp.pattern == "£££9.99"
-    for pic, ref in ((eur, "$$$,$$9.99"), (gbp, "$$$9.99")):
+    for pic, ref, extra in ((eur, "$$$,$$9.99", 2), (gbp, "$$$9.99", 0)):
         expected = PictureClause(ref, SourceLocation(1, 1))
         assert pic.is_valid, pic.validation_errors
-        assert pic.size == expected.size
+        # The 3-character string 'EUR' fills its one position (#491).
+        assert pic.size == expected.size + extra
         assert pic.integer_digits == expected.integer_digits
         assert pic.decimal_digits == expected.decimal_digits
         assert pic.is_numeric_edited
