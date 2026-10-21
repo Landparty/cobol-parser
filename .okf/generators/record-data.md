@@ -619,7 +619,13 @@ bytes as Latin-1, carrying them as `.data`), made by `ValueFactory` from the
 VALUE clause and by `expand_condition_values` for a level-88; the encoder
 writes `.data` and never looks a cell up by its text, so an ordinary value
 with the same text (`VALUE SPACE` next to `88 VALUE X'20'`, `'AB'` next to
-`X'4142'`, a random `A` next to `X'41'`) stays charset-encoded, and
+`X'4142'`, a random `A` next to `X'41'`) stays charset-encoded, and a mixed
+concatenation `VALUE 'AB' & X'0102'` (the lexer spells it `"AB" & X'0102'`,
+#479) is a `LiteralCell` with `text_runs` -- the basic parts' ranges, which
+`encoding.literal_cell_bytes()` writes in the record charset (`C1 C2 01 02`
+in EBCDIC) while the hex parts keep their bytes
+(`layout.concatenated_literal_cell()`; the decoder's `literal_bytes` key is
+that cell, so it round-trips in both charsets), and
 `'AB'`/`X'4142'` are both drawn. `FieldSpec.literal_bytes` (stand-in text to
 bytes) is the decoder's map: a field holding exactly a hex literal's padded
 bytes decodes to its cell (`X'FF'` as `ÿ`, not EBCDIC `\x9f`), so
