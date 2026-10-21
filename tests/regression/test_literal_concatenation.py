@@ -59,8 +59,9 @@ class TestLexerMerge:
             # No ampersand: two literals, as before.
             ('"AB" "CD"', [("AB", None), ("CD", None)]),
             ('"AB", "CD"', [("AB", None), ("CD", None)]),
-            # Literals of different kinds are not joined.
-            ("\"AB\" & X'C1'", [("AB", None), ("C1", "X'C1'")]),
+            # Literals of different kinds are not joined (a basic and a hex
+            # literal are both alphanumeric, so those are: #479).
+            ("\"AB\" & N'C1'", [("AB", None), ("C1", "N'C1'")]),
             # Null-terminated literals may not be concatenated.
             ("Z'A' & Z'B'", [("A", "Z'A'"), ("B", "Z'B'")]),
             # An ampersand inside a literal is literal text.

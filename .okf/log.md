@@ -34,6 +34,12 @@ CURRENCY tokens. [ast-models.md](ast-models.md): `PictureClause.size` grows by
 len(string) - 1. [generators/record-data.md](generators/record-data.md):
 `edit_numeric` / `deedit_numeric` put the whole string in the `$` position.
 
+## 2026-10-21 -- 'AB' & X'0102' concatenation (#479)
+
+[lexer.md](lexer.md): a basic and a hex literal joined by `&` are one
+literal (`_mixed_alphanumeric`). [generators/record-data.md](generators/record-data.md):
+`LiteralCell.text_runs` and `literal_cell_bytes()` write it per charset.
+
 ## 2026-10-17 -- IBMDataItem.calculate_storage_size defers to _storage (#589)
 
 [dialects.md](dialects.md): `calculate_storage_size()` returns
