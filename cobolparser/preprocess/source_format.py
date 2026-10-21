@@ -19,7 +19,7 @@ The single home of both decisions for ``CobolParser`` (and so
 import re
 
 from .._lines import split_source_lines
-from .._source_directive import free_format_flags
+from .._source_directive import free_format_flags, source_format_directive
 from ._normalize import (
     ALL_COMMENT_INDICATORS,
     DEBUG_INDICATORS,
@@ -197,6 +197,20 @@ def detect_fixed_format(source: str) -> bool:
     non_empty_lines = [line for line in lines if line.strip()]
 
     if len(non_empty_lines) < 3:
+        return False
+
+    first = non_empty_lines[0]
+    if (
+        len(first) - len(first.lstrip()) < 6
+        and source_format_directive(first) == "FREE"
+    ):
+        # A file that OPENS with ``>>SOURCE ... FREE`` in the sequence area
+        # (columns 1-6; GnuCOBOL users write it in column 1) is free-form.
+        # Read as fixed, such a directive was never seen and was sliced to
+        # ``E FORMAT FREE``: the parse failed with "no division near 'E'"
+        # (#502). From column 7 on the fixed reader sees it itself and
+        # honours a later ``>>SOURCE FIXED`` with sequence numbers, which a
+        # wholly free reading would lex as code.
         return False
 
     if any(">>" in line for line in lines):
