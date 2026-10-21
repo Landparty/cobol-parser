@@ -115,3 +115,35 @@ def test_record_image_and_round_trip(charset, expected) -> None:
     first = decoded.records[0].values()
     assert first["F"] == "AB\x01\x02"
     assert first["K"] == "A\xffC\x00"
+
+
+def test_level_88_values_round_trip_in_ebcdic() -> None:
+    # Review fix: the decoder only knew a VALUE clause's mixed literal.
+    source = "\n".join(
+        [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. C88.",
+            "       DATA DIVISION.",
+            "       WORKING-STORAGE SECTION.",
+            "       01  REC.",
+            "           05  D   PIC X(4).",
+            "               88  D-OK  VALUE 'AB' & X'0D25'.",
+            "               88  D-ALT VALUES 'CD' & X'0000' 'EF' & X'FFFF'.",
+            "       PROCEDURE DIVISION.",
+            "           STOP RUN.",
+            "",
+        ]
+    )
+    result = parse_cobol(source, error_recovery=ErrorRecoveryMode.FAIL_FAST)
+    record = next(
+        i for i in result.ast.find_all_by_type("CobolDataItem") if i.name == "REC"
+    )
+    opts = DataGeneratorOptions(rows=8, seed=3).for_record_image()
+    dataset = CopybookDataGenerator(opts).generate_from_record(record)
+    for charset in (Charset.ASCII, Charset.EBCDIC):
+        enc = EncodingOptions(charset=charset)
+        image = dataset.to_records(enc)
+        decoded = RecordDecoder.from_record(record, opts=enc).decode_bytes(image)
+        assert [r.values()["D"] for r in decoded.records] == [
+            row[0] for row in dataset.rows
+        ]

@@ -1006,6 +1006,11 @@ def _literal_bytes(item: CobolDataItem, width: int) -> dict[str, bytes]:
     for raw in raws:
         data = hex_literal_bytes(raw)
         if not data:
+            # A level-88 ``'AB' & X'0D25'``: keyed by its cell, as above.
+            mixed = concatenated_literal_cell(raw)
+            if mixed is not None:
+                mixed = mixed.cut(width)
+                found.setdefault(mixed, mixed.data)
             continue
         if width > 0:
             data = data[:width]
