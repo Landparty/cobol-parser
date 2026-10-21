@@ -19,6 +19,7 @@ entries, including both 2026-09-15 sections, were found there on
 [analysis/codebase.md](analysis/codebase.md), [mcp.md](mcp.md):
 codebase-graph graphs PROGRAM and CLASS units only (a method's CALLs are its
 class's); MCP `callers_of` never declares a method as a program.
+
 ## 2026-10-17 -- IBMDataItem.calculate_storage_size defers to _storage (#589)
 
 [dialects.md](dialects.md): `calculate_storage_size()` returns

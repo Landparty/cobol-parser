@@ -756,11 +756,12 @@ class CobolTools:
         out_of_scope: set[str] = set()
         # A CALL to one of the program's alternate ENTRY names reaches it
         # too (#521); a PROGRAM-ID of that spelling would win instead.
-        program_ids = {u.program_id.upper() for u in index.units}
+        # A FACTORY / OBJECT / METHOD-ID unit is neither (#500).
+        program_ids = {u.program_id.upper() for u in index.units if u.is_call_target}
         entries = {
             entry
             for u in index.units
-            if u.program_id.upper() == wanted
+            if u.is_call_target and u.program_id.upper() == wanted
             for entry in u.entries
             if entry not in program_ids
         }

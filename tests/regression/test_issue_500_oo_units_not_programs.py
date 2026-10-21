@@ -96,3 +96,26 @@ def test_mcp_overview_does_not_count_a_call_on_a_method(root: Path) -> None:
     assert "AUDIT" not in {row["program"] for row in graph["most_called"]}
     methods = [r for r in answer["programs"] if r.get("unit_kind") == "METHOD"]
     assert methods and all(r["called_by"] == 0 for r in methods)
+
+
+def test_mcp_entry_named_like_a_method_keeps_its_callers(tmp_path: Path) -> None:
+    # Review fix: a METHOD-ID spelled like another program's ENTRY name
+    # shadowed the ENTRY, so callers_of found no caller through it.
+    (tmp_path / "CLS.cbl").write_text(METHOD_CALLS)
+    (tmp_path / "PGM.cbl").write_text(
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. PGM.\n"
+        "       PROCEDURE DIVISION.\n"
+        "           GOBACK.\n"
+        "           ENTRY 'RUN-IT'.\n"
+        "           GOBACK.\n"
+    )
+    (tmp_path / "CALLER.cbl").write_text(
+        "       IDENTIFICATION DIVISION.\n"
+        "       PROGRAM-ID. CALLER.\n"
+        "       PROCEDURE DIVISION.\n"
+        "           CALL 'RUN-IT'\n"
+        "           GOBACK.\n"
+    )
+    answer = CobolTools(Workspace(tmp_path, ProjectConfig())).callers_of(None, "PGM")
+    assert answer["answer"]["calling_programs"] == ["CALLER"]
