@@ -200,7 +200,9 @@ Individual statement parsers are in [statements.md](statements.md).
   `ranges == ["A", "E"]`; `SYMBOLIC CHARACTERS NUL, SOH ARE 1, 2` keeps both names.
 - `DataItemClauseParser._picture_clause` hands each `PictureClause` the
   currency symbols its pattern used and, from `host.currency_signs`, their
-  currency strings (`currency_signs=`, #491).
+  currency strings (`currency_signs=`, #491). A letter symbol (`PICTURE
+  SYMBOL 'F'`) is no CURRENCY token, so it is taken from the pattern itself,
+  matched case-sensitively.
 - `DECIMAL-POINT IS COMMA` is honoured (comma-decimal literals, `,`/`.`
   exchanged in PICTURE -- see [lexer.md](../lexer.md)); no warning.
 - Tests: `tests/regression/test_special_names_clause_boundaries.py`,
