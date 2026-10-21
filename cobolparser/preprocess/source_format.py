@@ -199,12 +199,18 @@ def detect_fixed_format(source: str) -> bool:
     if len(non_empty_lines) < 3:
         return False
 
-    if source_format_directive(non_empty_lines[0]) == "FREE":
-        # A file that OPENS with ``>>SOURCE ... FREE`` is free-form, in any
-        # column (GnuCOBOL users write it in column 1). Read as fixed, a
-        # column-1 directive sat in the sequence area, was never seen, and
-        # was sliced to ``E FORMAT FREE``: the parse failed with "no
-        # division near 'E'" (#502).
+    first = non_empty_lines[0]
+    if (
+        len(first) - len(first.lstrip()) < 6
+        and source_format_directive(first) == "FREE"
+    ):
+        # A file that OPENS with ``>>SOURCE ... FREE`` in the sequence area
+        # (columns 1-6; GnuCOBOL users write it in column 1) is free-form.
+        # Read as fixed, such a directive was never seen and was sliced to
+        # ``E FORMAT FREE``: the parse failed with "no division near 'E'"
+        # (#502). From column 7 on the fixed reader sees it itself and
+        # honours a later ``>>SOURCE FIXED`` with sequence numbers, which a
+        # wholly free reading would lex as code.
         return False
 
     if any(">>" in line for line in lines):

@@ -397,11 +397,13 @@ all (alias: `cobolparser.parser._detect_fixed_format`). It samples the first
 hatch is in [cli.md](cli.md).
 
 * **Rule 0 (opening directive):** a first non-blank line that is
-  `>>SOURCE [FORMAT] [IS] FREE`, in **any** column, makes the file free-form
-  (option (a) of #502). Read as fixed, a column-1 directive sat in the
+  `>>SOURCE [FORMAT] [IS] FREE` starting in columns 1-6 makes the file
+  free-form (option (a) of #502). Read as fixed, such a directive sat in the
   sequence area, was sliced to `E FORMAT FREE` and the parse failed ("no
-  division near 'E'"). Only the opening line decides; a later column-1
-  directive does not.
+  division near 'E'"). From column 7 on, the per-line flags below already
+  honour it, and keep a later `>>SOURCE FORMAT FIXED` section with sequence
+  numbers fixed, so an opening `>>SOURCE FREE` works in any column. Only the
+  opening line decides; a later column-1 directive does not.
 * **Rule 1 (strict):** columns 1-6 blank or all digits. Decides on its own;
   rule 2 only ever *adds* detections.
 * **Rule 2 (change tags `SAPR24`, `28486`, `JSINT` in columns 1-6):** a

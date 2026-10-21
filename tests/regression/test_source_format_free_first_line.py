@@ -81,3 +81,43 @@ def test_other_unknown_directives_still_warn() -> None:
     preprocess_conditional_compilation(">>CALLINTERFACE DLL\n", warnings=warnings)
 
     assert any("unknown compiler directive" in w for w in warnings)
+
+
+def test_a_column_8_opening_directive_keeps_a_later_fixed_section() -> None:
+    # Review fix: rule 0 only claims a directive in the sequence area. One in
+    # column 8 is honoured per line, so a later ``>>SOURCE FORMAT FIXED``
+    # section with sequence numbers stays fixed.
+    source = "\n".join(
+        [
+            "       >>SOURCE FORMAT FREE",
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. MIXED.",
+            "       >>SOURCE FORMAT FIXED",
+            "000100 DATA DIVISION.",
+            "000200 WORKING-STORAGE SECTION.",
+            "000300 01 WS-A PIC X.",
+            "000400*A COMMENT LINE",
+            "000500 PROCEDURE DIVISION.",
+            "000600     DISPLAY WS-A.",
+            "000700     STOP RUN.",
+        ]
+    )
+    result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+    assert result.errors == [] and result.warnings == []
+    assert result.ast is not None and result.ast.program_name == "MIXED"
+
+
+def test_a_lowercase_column_1_directive_decides_free_form() -> None:
+    source = "\n".join(
+        [
+            ">>source format free",
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. LOWER.",
+            "PROCEDURE DIVISION.",
+            "    DISPLAY 'X'.",
+            "    STOP RUN.",
+        ]
+    )
+    result = parse_cobol(source, error_recovery=ErrorRecoveryMode.COLLECT_ALL)
+    assert result.errors == [] and result.warnings == []
+    assert result.ast is not None and result.ast.program_name == "LOWER"
