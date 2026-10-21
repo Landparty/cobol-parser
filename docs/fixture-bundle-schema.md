@@ -75,6 +75,31 @@ targetable arm therefore still yields one scenario, never zero.
 | `expectations` | `list[Expectation]` | Assert-on stubs (see below). |
 | `unconstrained` | `list[str]` | Reserved for a future phase; always `[]` today (a happy-path scenario doesn't attempt branch coverage, and Phase 5/6 record misses in `scenario_coverage` instead, not here). |
 | `verification` | `ScenarioVerification` | Present only for a `"branches"`/`"all"` scenario (absent in `mode="happy"`, which targets no branch). See below. |
+| `entry_parameters` | `BoundaryFixture` | Present only with `ProgramFixtureGenerator(entry_parameters=True)` and a program whose PROCEDURE DIVISION has a USING list. See "Entry parameters" below. |
+
+### Entry parameters (`entry_parameters=True`)
+
+A called subprogram takes its input from, and hands its result back
+through, its own PROCEDURE DIVISION USING items. With
+`ProgramFixtureGenerator(entry_parameters=True)` those items are treated as
+one more boundary:
+
+- `entry_parameters` is a `BoundaryFixture` with `category` `"ENTRY"`, `key`
+  the PROGRAM-ID, `direction` `"BIDIRECTIONAL"`, a `layout` over every
+  elementary field of every USING item, and a `sequence` of exactly one
+  row: the values a caller passes. A CICS-translated program's `DFHEIBLK`
+  is left out (CICS fills the EIB, not the caller).
+- `expectations` gains a `stub` per USING field the program writes (xref
+  role `write`) and for the RETURNING item, with `ref` the field's
+  qualified name and `note` `"returned to the caller of <PROGRAM-ID>"`.
+- Branches on those fields become targets in `"branches"`/`"all"` mode
+  (`ConstraintExtractor.extract(..., extra_fed_names=...)`): the solved
+  witness lands in the scenario's own `entry_parameters` row, and
+  `verification` reads it there.
+- The row seeds tier 2's constant folding like a single-row fixture does.
+
+Off by default: a generator that does not ask emits no `entry_parameters`
+key and exactly the same values as before.
 
 ### `ScenarioVerification`
 
@@ -567,7 +592,8 @@ change so far, including this document's own Phase 6 (`scenario_coverage`),
 has been **additive**: a new key that is `None`/absent-equivalent unless a
 new capability (a new `mode=`, a new CLI flag) is actually used. The same
 holds for `Scenario.verification` (2026-09-04), which is absent entirely in
-`mode="happy"`. A consumer
+`mode="happy"`, and for `Scenario.entry_parameters` (2026-10-21), absent
+unless `entry_parameters=True`. A consumer
 that only reads keys it knows about is unaffected by a bundle produced by a
 newer `cobolparser` gaining one more key. Phase 8 (mockymock integration)
 checks `bundle_version` before consuming a bundle and fails closed on an

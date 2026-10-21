@@ -310,11 +310,14 @@ def _verdict_for(
 def verify_scenario(
     planned: PlannedScenario, scenario: Scenario
 ) -> ScenarioVerification:
-    """Check `scenario`'s emitted data against `planned`'s own constraints."""
+    """Check `scenario`'s emitted data against `planned`'s own constraints.
+    The scenario's entry parameters (the values a caller passes through the
+    program's USING items) are emitted data too."""
+    fixtures = list(scenario.fixtures)
+    if scenario.entry_parameters is not None:
+        fixtures.append(scenario.entry_parameters)
     verdicts = [
-        _verdict_for(
-            field_name, constraints, _values_for(field_name, scenario.fixtures)
-        )
+        _verdict_for(field_name, constraints, _values_for(field_name, fixtures))
         for field_name, constraints in sorted(planned.field_constraints.items())
     ]
     status = (

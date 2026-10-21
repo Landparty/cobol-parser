@@ -19,6 +19,7 @@ the posture Phases 1-3 already established.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
@@ -399,13 +400,20 @@ class ConstraintExtractor:
         ast: CobolProgram,
         index: ProgramLayoutIndex,
         boundary_report: BoundaryReport,
+        *,
+        extra_fed_names: Iterable[str] = (),
     ) -> ConstraintReport:
+        """``extra_fed_names`` -- data names to treat as boundary-fed on top
+        of what ``boundary_report`` feeds: a subprogram's own PROCEDURE
+        DIVISION USING parameters, which its caller supplies
+        (``ProgramFixtureGenerator(entry_parameters=True)``)."""
         report = ConstraintReport()
         procedure = ast.get_division("PROCEDURE")
         if procedure is None:
             return report
 
         fed_names = _boundary_fed_names(boundary_report)
+        fed_names.update(name.upper() for name in extra_fed_names)
         eof_flags = _collect_eof_flags(ast)
 
         for paragraph_name, statement, enclosing in _walk_statements(procedure):

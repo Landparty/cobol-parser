@@ -151,6 +151,13 @@ class Scenario:
     #: only, no analysis imports" posture -- the verifier depends on this
     #: module, not the other way round.
     verification: dict[str, Any] | None = None
+    #: The values a caller passes through the program's own PROCEDURE
+    #: DIVISION USING parameters -- one row over every elementary field of
+    #: every USING item, with the scenario's witnesses pinned in it. Its ref
+    #: has category ``"ENTRY"`` and the PROGRAM-ID as key. Only set when the
+    #: generator was asked for it (``entry_parameters=True``), so a bundle
+    #: that never asked keeps its shape: the key is absent, not null.
+    entry_parameters: BoundaryFixture | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -163,6 +170,8 @@ class Scenario:
         }
         if self.verification is not None:
             result["verification"] = self.verification
+        if self.entry_parameters is not None:
+            result["entry_parameters"] = self.entry_parameters.to_dict()
         return result
 
 
