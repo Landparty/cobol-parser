@@ -112,7 +112,16 @@ _detect_fixed_format = detect_fixed_format
 
 @dataclass
 class ParseResult:
-    """Result of parsing operation with AST and metadata."""
+    """Result of parsing operation with AST and metadata.
+
+    ``ast`` is ``None`` only when lexing, preprocessing, file I/O or the
+    parser itself failed (or a ``FAIL_FAST`` error stopped the parse). Text
+    in which no division is recognised still yields a ``CobolProgram``
+    named ``"UNKNOWN"`` with no divisions, next to a "No recognizable COBOL
+    division found" error -- callers that partially report on failed
+    parses (``lint``, ``health``) rely on it. Test ``ast.divisions``, not
+    just ``ast is not None``, for "something usable exists" (#368).
+    """
 
     ast: CobolProgram | None
     errors: list[ParseError]

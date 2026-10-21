@@ -45,7 +45,12 @@ from ..models.statements.arithmetic import (
     DivideStatement,
     MultiplyStatement,
 )
-from ..models.statements.base import CobolExpression, CobolStatement
+from ..models.statements.base import (
+    CobolExpression,
+    CobolStatement,
+    ConditionalExpression,
+    LogicalExpression,
+)
 from ..models.statements.call import CallStatement, EntryStatement
 from ..models.statements.control import (
     EvaluateStatement,
@@ -77,6 +82,7 @@ from ..models.statements.io import (
 from ..models.statements.misc import (
     AllocateStatement,
     AlterStatement,
+    ContinueStatement,
     FreeStatement,
     MergeStatement,
     ReleaseStatement,
@@ -85,7 +91,12 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
-from ._names import QUALIFIER_SEPARATOR
+from ._cics import cics_identifier_options
+from ._names import (
+    QUALIFIER_SEPARATOR,
+    split_qualified_name,
+    strip_translator_arguments,
+)
 from .unused_variables import (
     _DATA_SECTION_NAMES,
     _DICT_LIST_EXTRAS,
@@ -99,6 +110,7 @@ from .unused_variables import (
     _walk_expression_operands,
     collect_declared_items,
     inherited_data_records,
+    screen_section_references,
 )
 
 # --------------------------------------------------------------------------
@@ -139,6 +151,14 @@ KIND_CONDITION_NAME = "condition-name"
 KIND_PARAGRAPH = "paragraph"
 KIND_SECTION = "section"
 KIND_FILE = "file"
+#: SPECIAL-NAMES declarations (#519). An UPSI switch's ON/OFF STATUS name is
+#: a ``condition-name``.
+KIND_MNEMONIC_NAME = "mnemonic-name"
+KIND_CLASS_NAME = "class-name"
+KIND_ALPHABET_NAME = "alphabet-name"
+KIND_SYMBOLIC_CHARACTER = "symbolic-character"
+#: A SCREEN SECTION entry (#501): the parser keeps only its name and line.
+KIND_SCREEN_ITEM = "screen-item"
 
 #: Kind ordering used when sorting ``XrefReport.entries``; unknown kinds sort
 #: last, then alphabetically, so the ordering is total and deterministic.
@@ -148,6 +168,11 @@ _KIND_ORDER: dict[str, int] = {
     KIND_FILE: 2,
     KIND_PARAGRAPH: 3,
     KIND_SECTION: 4,
+    KIND_SCREEN_ITEM: 5,
+    KIND_MNEMONIC_NAME: 6,
+    KIND_CLASS_NAME: 7,
+    KIND_ALPHABET_NAME: 8,
+    KIND_SYMBOLIC_CHARACTER: 9,
 }
 
 # Roles that name a procedure rather than a data item, and roles that name a
@@ -195,6 +220,10 @@ _SPECIAL_REGISTERS: frozenset[str] = frozenset(
         "SHIFT-IN",
         "SHIFT-OUT",
         "LINAGE-COUNTER",
+        # Report Writer: a report group's SOURCE PAGE-COUNTER / LINE-COUNTER
+        # is now recorded (#571), and these are registers, not data items.
+        "PAGE-COUNTER",
+        "LINE-COUNTER",
         "ADDRESS",
         "LENGTH",
         "XML-CODE",
@@ -208,6 +237,8 @@ _SPECIAL_REGISTERS: frozenset[str] = frozenset(
         "XML-INFORMATION",
         "JSON-CODE",
         "JSON-STATUS",
+        # IBM Java interoperability: the JNI environment pointer.
+        "JNIENVPTR",
         "SQLCODE",
         "SQLSTATE",
         "SQLCA",
@@ -234,6 +265,24 @@ _SPECIAL_REGISTERS: frozenset[str] = frozenset(
         "DFHEIBLK",
     }
 )
+
+#: The EXEC DLI interface block (DIB), supplied by the translator as the EIB
+#: is for CICS: never declared, so a special register to xref (#311). Unlike
+#: ``EIB*`` it is *not* technical to business-rules: EXEC DLI has no
+#: ``RESP()`` option, so ``DIBSTAT`` is the only way such a program tests a
+#: not-found -- the role a CICS ``RESP`` field plays, which stays business.
+_DLI_INTERFACE_BLOCK: frozenset[str] = frozenset(
+    {
+        "DIBVER",
+        "DIBSTAT",
+        "DIBSEGM",
+        "DIBSEGLV",
+        "DIBKFBL",
+        "DIBDBDNM",
+        "DIBDBORG",
+    }
+)
+_SPECIAL_REGISTERS = _SPECIAL_REGISTERS | _DLI_INTERFACE_BLOCK
 
 
 def is_special_register(name: str) -> bool:
@@ -297,6 +346,10 @@ class XrefEntry:
     #: such item then has an entry of its own, and ``name`` alone no longer
     #: identifies it.
     qualified_name: str | None = None
+    #: Names of the enclosing data items, innermost first (data items and
+    #: condition names only). Not serialized; it is what resolves a
+    #: qualified name the way the compiler does (#541).
+    ancestors: list[str] = field(default_factory=list, repr=False, compare=False)
 
     @property
     def reference_count(self) -> int:
@@ -344,11 +397,30 @@ class XrefReport:
         ``_KIND_ORDER``) is returned. A qualified name (``"AMT OF OUT-REC"``)
         picks out one of several same-named data items.
         """
-        upper = " ".join(name.upper().split())
+        matches = self.entries_named(name)
+        return matches[0] if matches else None
+
+    def entries_named(self, name: str) -> list[XrefEntry]:
+        """Every entry *name* can mean, resolved as the compiler resolves it.
+
+        A bare name matches every entry of that name. A qualified one (``X OF
+        Y``, ``X IN Y``, partial chains allowed) matches the data items named
+        X whose enclosing items include each qualifier, in order (#541).
+        """
+        parts = split_qualified_name(name)
+        if not parts:
+            return []
+        bare, qualifiers = parts[0], parts[1:]
+        matches = []
         for entry in self.entries:
-            if entry.name == upper or entry.qualified_name == upper:
-                return entry
-        return None
+            if entry.name != bare:
+                continue
+            if qualifiers:
+                ancestors = iter(entry.ancestors)
+                if not all(q in ancestors for q in qualifiers):
+                    continue
+            matches.append(entry)
+        return matches
 
     def entries_of_kind(self, kind: str) -> list[XrefEntry]:
         """Every entry of one kind, in ``entries`` order."""
@@ -370,6 +442,28 @@ class XrefReport:
                 "total_references": self.total_references,
             },
         }
+
+
+def _class_test_names(expr: CobolExpression | None) -> set[str]:
+    """The word after ``IS [NOT]`` in every class-test operator of *expr*
+    (``IS HEX-CHARS`` / ``IS NOT HEX-CHARS``) -- a class-name candidate."""
+    if isinstance(expr, LogicalExpression):
+        return _class_test_names(expr.left_condition) | _class_test_names(
+            expr.right_condition
+        )
+    names: set[str] = set()
+    if isinstance(expr, ConditionalExpression):
+        words = str(expr.operator or "").upper().split()
+        if words[:1] == ["IS"]:
+            words = words[1:]
+            if words[:1] == ["NOT"]:
+                words = words[1:]
+            if len(words) == 1:
+                names.add(words[0])
+    tree = getattr(expr, "condition_tree", None)
+    if isinstance(tree, CobolExpression) and tree is not expr:
+        names |= _class_test_names(tree)
+    return names
 
 
 def _partition_operand(text: str) -> tuple[set[str], set[str], bool]:
@@ -406,6 +500,8 @@ def _split_operand(text: str) -> tuple[set[str], set[str], set[str], bool]:
     """
     if not text:
         return set(), set(), set(), True
+    # DFHRESP(cond) / DFHVALUE(cvda): the argument is no subscript (#594).
+    text = strip_translator_arguments(text)
 
     if _FUNCTION_RE.search(text):
         return _extract_identifiers(text), set(), set(), False
@@ -481,6 +577,10 @@ class XrefAnalyzer:
       -- including the level-88s under a FILLER (issue #485).
     - ``file`` -- every file named by a ``SELECT`` or by an ``FD``/``SD``.
     - ``paragraph`` / ``section`` -- every PROCEDURE DIVISION procedure.
+    - ``mnemonic-name`` / ``class-name`` / ``alphabet-name`` /
+      ``symbolic-character`` -- every SPECIAL-NAMES declaration, plus an
+      UPSI switch's ON/OFF STATUS names as ``condition-name`` (#519),
+      declared at the CONFIGURATION SECTION.
 
     Each reference records the role the symbol plays (see ``XREF_ROLES``).
     The role also decides which namespace a name resolves against: a
@@ -508,8 +608,10 @@ class XrefAnalyzer:
     - The declared-symbol set is the one ``collect_declared_items`` defines
       (FILE / WORKING-STORAGE / LOCAL-STORAGE / LINKAGE), plus files,
       procedures, level-88 condition names (FILLER parents included),
-      level-66 ``RENAMES`` items and ``INDEXED BY`` index names.
-      SCREEN / COMMUNICATION / REPORT SECTION items and special registers are
+      level-66 ``RENAMES`` items, ``INDEXED BY`` index names, the
+      SPECIAL-NAMES names and the named SCREEN SECTION entries
+      (``screen-item``, #501).
+      COMMUNICATION / REPORT SECTION items and special registers are
       outside it, so a reference to one reads as undefined -- reported, with
       a caveat saying so, rather than silently swallowed.
     - Symbols are resolved by uppercased name, not by structural identity, so
@@ -573,6 +675,8 @@ class XrefAnalyzer:
         self._duplicates = set()
 
         self._collect_data_definitions(ast)
+        self._collect_special_names(ast)
+        self._collect_screen_definitions(ast)
         self._collect_file_definitions(ast)
         self._collect_procedure_definitions(ast)
         self._collect_references(ast)
@@ -676,6 +780,7 @@ class XrefAnalyzer:
                     references=[],
                     level=level,
                     section=section,
+                    ancestors=path,
                 )
                 namesakes.append((entry, item))
                 self._entries.append(entry)
@@ -702,6 +807,7 @@ class XrefAnalyzer:
         table[upper] = entry
         self._entries.append(entry)
         if item is not None:
+            entry.ancestors = _ancestor_names(item)
             self._data_items.setdefault(upper, []).append((entry, item))
         return entry
 
@@ -852,6 +958,78 @@ class XrefAnalyzer:
                 if fd_file:
                     self._define_file(str(fd_file), record.location)
 
+    def _collect_special_names(self, ast: CobolProgram) -> None:
+        """Every name the SPECIAL-NAMES paragraph declares (#519).
+
+        Mnemonic names (``C01 IS TOP-PAGE``), UPSI ON/OFF STATUS condition
+        names, CLASS, ALPHABET and SYMBOLIC CHARACTERS names, from the
+        ``special_names`` metadata on the CONFIGURATION SECTION. The metadata
+        carries no line per entry, so each is declared at the CONFIGURATION
+        SECTION's location. They share the data namespace (a reference in
+        a condition or an operand resolves to them); a name a DATA DIVISION
+        item already declares is left to that item.
+        """
+        env_div = ast.get_division("ENVIRONMENT")
+        if env_div is None:
+            return
+        for section in env_div.sections:
+            if not isinstance(section, CobolSection):
+                continue
+            special = section.get_metadata("special_names")
+            if not isinstance(special, dict):
+                continue
+            declared: list[tuple[str, str]] = []
+            for entry in special.get("mnemonic_definitions") or []:
+                if entry.get("mnemonic_name"):
+                    declared.append((entry["mnemonic_name"], KIND_MNEMONIC_NAME))
+                for key in ("on_status", "off_status"):
+                    if entry.get(key):
+                        declared.append((entry[key], KIND_CONDITION_NAME))
+            for key, kind in (
+                ("class_definitions", KIND_CLASS_NAME),
+                ("alphabet_definitions", KIND_ALPHABET_NAME),
+                ("symbolic_characters", KIND_SYMBOLIC_CHARACTER),
+            ):
+                for entry in special.get(key) or []:
+                    if entry.get("name"):
+                        declared.append((entry["name"], kind))
+            for name, kind in declared:
+                if str(name).upper() in self._data:
+                    continue
+                self._define(str(name), kind, section.location, section="SPECIAL-NAMES")
+
+    def _collect_screen_definitions(self, ast: CobolProgram) -> None:
+        """Every named SCREEN SECTION entry, from the section's
+        ``screen_items`` metadata (#501): ``DISPLAY MAIN-SCREEN`` /
+        ``ACCEPT MAIN-SCREEN`` then resolve instead of reading as undefined.
+        A name a DATA DIVISION item already declares is left to that item.
+        """
+        data_div = ast.data_division
+        if data_div is None:
+            return
+        for section in data_div.sections:
+            if not isinstance(section, CobolSection):
+                continue
+            if (section.section_name or "").upper() != "SCREEN":
+                continue
+            for entry in section.get_metadata("screen_items") or []:
+                name = str(entry.get("name") or "")
+                if not name or name.upper() in self._data:
+                    continue
+                line = entry.get("line")
+                location = (
+                    SourceLocation(line, entry.get("column") or 1)
+                    if line
+                    else section.location
+                )
+                self._define(
+                    name,
+                    KIND_SCREEN_ITEM,
+                    location,
+                    level=entry.get("level"),
+                    section="SCREEN",
+                )
+
     def _define_file(self, name: str, location: SourceLocation) -> None:
         """Declare a file once, from whichever half is seen first.
 
@@ -969,24 +1147,30 @@ class XrefAnalyzer:
                         target.references.extend(entry.references)
 
     def _visit_select_clauses(self, select: SelectStatement) -> None:
-        """Data items a ``SELECT`` names: FILE STATUS, PASSWORD, ASSIGN USING.
+        """Data items a ``SELECT`` names: FILE STATUS, RECORD / ALTERNATE /
+        RELATIVE KEY, PASSWORD, ASSIGN USING, PADDING CHARACTER.
 
-        The runtime stores into the FILE STATUS item after every I/O whether
-        or not the PROCEDURE DIVISION ever names it (a program that tests
-        its status only through a level-88 never does) --
-        ``UnusedVariableAnalyzer._file_control_references`` counts it as
-        used, and listing it unreferenced here contradicted that. Recorded
-        with role ``"reference"``. The RECORD / ALTERNATE / RELATIVE KEY
-        items are not recorded here (yet): their roles on READ / START are
-        pinned by the existing role tests.
+        The runtime stores into the FILE STATUS item after every I/O, reads
+        the key items on every keyed READ / START / WRITE / DELETE (and
+        writes the RELATIVE KEY on a sequential READ), and reads the padding
+        item on every WRITE, whether or not the PROCEDURE DIVISION ever names
+        them -- ``UnusedVariableAnalyzer._file_control_references`` counts
+        them as used, and listing them unreferenced here contradicted that
+        (#549, #556). Recorded with role ``"reference"`` at the SELECT; the
+        roles a READ / START gives the keys are unchanged.
         """
         values: list[str | None] = [
             select.file_status,
             select.file_status_vsam,
+            select.record_key,
+            select.record_key_source,
+            select.relative_key,
             select.password,
             select.assign_using,
+            select.padding_character,
         ]
         for alternate in select.alternate_keys:
+            values.append(alternate.get("key"))
             values.append(alternate.get("password"))
         self._record_structural(
             [value for value in values if value], select.location, "SelectStatement"
@@ -996,7 +1180,8 @@ class XrefAnalyzer:
         """References that live in the DATA DIVISION itself.
 
         ``OCCURS ... DEPENDING ON`` counters and the data items an FD's own
-        clauses name (``RECORD VARYING ... DEPENDING ON``, ``LINAGE``):
+        clauses name (``RECORD VARYING ... DEPENDING ON``, ``LINAGE``), and
+        the REPORT SECTION's ``SOURCE`` / ``SUM`` / ``CONTROL(S)`` operands:
         ``UnusedVariableAnalyzer`` counts them as used, so a cross-reference
         that listed them unreferenced contradicted it. Recorded with role
         ``"reference"`` at the declaring entry's location.
@@ -1010,6 +1195,44 @@ class XrefAnalyzer:
                 self._record_structural(
                     [occurs.depending_on], item.location, "OCCURS DEPENDING ON"
                 )
+        # REPORT SECTION SOURCE / SUM / CONTROL(S) operands: a Report Writer
+        # program prints, totals and breaks on these fields without the
+        # PROCEDURE DIVISION ever naming them (#571).
+        data_div = ast.data_division
+        if data_div is not None:
+            for node, values in UnusedVariableAnalyzer.report_entry_operands(data_div):
+                self._record_structural(values, node.location, "REPORT SECTION")
+        # SCREEN SECTION USING / FROM / TO operands (#501): FROM is shown,
+        # TO is stored by ACCEPT, USING is both.
+        if data_div is not None:
+            for reference in screen_section_references(data_div):
+                line = reference.get("line")
+                if not line:
+                    continue
+                location = SourceLocation(line, reference.get("column") or 1)
+                clause = str(reference.get("clause") or "").upper()
+                roles = {
+                    "FROM": [ROLE_READ],
+                    "TO": [ROLE_WRITE],
+                    "USING": [ROLE_READ, ROLE_WRITE],
+                }.get(clause, [ROLE_REFERENCE])
+                base, refmod, subscripts, _exact = _split_operand(
+                    str(reference.get("text") or "")
+                )
+                for name in sorted(base):
+                    for role in roles:
+                        self._record(
+                            name, role, location, "SCREEN SECTION", None, exact=True
+                        )
+                # ``USING WS-E(I)``: the subscript / offset is only read.
+                for names, role in (
+                    (subscripts, ROLE_SUBSCRIPT),
+                    (refmod, ROLE_READ),
+                ):
+                    for name in sorted(names):
+                        self._record(
+                            name, role, location, "SCREEN SECTION", None, exact=True
+                        )
 
     def _record_structural(
         self, values: list[str], location: SourceLocation, statement: str
@@ -1124,9 +1347,19 @@ class XrefAnalyzer:
                 (name, role, False) for name in sorted(_extract_identifiers(value.text))
             ]
         if isinstance(value, CobolExpression):
-            return [
+            triples = [
                 (name, role, True) for name in sorted(_walk_expression_operands(value))
             ]
+            # ``X IS [NOT] HEX-CHARS``: the class-name sits in the operator,
+            # which the operand walk deliberately skips (#539); a declared
+            # SPECIAL-NAMES class is referenced there (#519).
+            triples += [
+                (name, role, True)
+                for name in sorted(_class_test_names(value))
+                if (entry := self._data.get(name)) is not None
+                and entry.kind == KIND_CLASS_NAME
+            ]
+            return triples
         if not isinstance(value, str):
             # Clause values read out of a dict (a PERFORM AFTER's
             # ``until_condition``, ...) may be an expression *or* raw operand
@@ -1355,6 +1588,12 @@ class XrefAnalyzer:
                 pairs.append((stmt.size_expr, ROLE_READ, True))
             if stmt.returning_target:
                 pairs.append((stmt.returning_target, ROLE_WRITE, True))
+        elif isinstance(stmt, ContinueStatement):
+            # ``CONTINUE AFTER expr SECONDS`` reads its delay operands (#578).
+            if stmt.delay_expression_tree is not None:
+                pairs.append((stmt.delay_expression_tree, ROLE_READ, True))
+            elif stmt.delay_expression:
+                pairs.append((_RawText(stmt.delay_expression), ROLE_READ, False))
         elif isinstance(stmt, FreeStatement):
             # FREE releases the storage and sets each pointer to NULL.
             pairs += [(name, ROLE_WRITE, True) for name in stmt.pointer_names]
@@ -1683,9 +1922,8 @@ class XrefAnalyzer:
                     "EXEC CICS options carry raw argument text with no fixed "
                     "argument-role shape; their identifiers get role 'reference'"
                 )
-            for value in options.values():
-                if value:
-                    pairs.append((_RawText(value), ROLE_REFERENCE, False))
+            for value in cics_identifier_options(stmt).values():
+                pairs.append((_RawText(value), ROLE_REFERENCE, False))
         elif type_name == "ExecImsStatement":
             arguments = getattr(stmt, "arguments", None) or []
             if arguments:
@@ -1705,6 +1943,7 @@ class XrefAnalyzer:
 _ROLE_MAPPED_STATEMENTS: tuple[type, ...] = (
     AllocateStatement,
     AlterStatement,
+    ContinueStatement,
     ArithmeticStatement,
     CallStatement,
     ComputeStatement,

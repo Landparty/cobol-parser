@@ -218,16 +218,27 @@ Anything else — procedure text, `SELECT` clauses, an empty file — raises
 | Level 66 / 88 | Not storage; 88 VALUEs feed the parent's value domain |
 | `COMP-1`/`COMP-2` | No picture → `FieldCategory.FLOAT` |
 | Group `USAGE` / `SIGN` | Inherited by every subordinate elementary item with no clause of its own (IBM rule), resolved **in the parser** (`parsers/divisions/data.py` `propagate_group_usage_and_sign`) so `layout.py`, `layout_offsets.py` and `calculate_size` all see it. `CobolDataItem.usage_explicit` marks an entry's own USAGE; an explicit child wins for itself and below. A numeric-only group usage (COMP-3, BINARY, ...) is not pushed onto a non-numeric PICTURE; SIGN only lands on signed numeric items |
-| `BLANK WHEN ZERO` | Carried as `FieldSpec.blank_when_zero`; the encoder writes a zero value as all spaces (charset's space), the decoder reads an all-space field as 0 with no error |
+| `BLANK WHEN ZERO` | Carried as `FieldSpec.blank_when_zero`; the encoder writes a zero value as all spaces (charset's space), the decoder reads an all-space field as 0 with no error. Not for a VALUE-clause cell (see below) |
 
 `include_redefines` / `include_filler` / `expand_occurs` / `max_occurs`
 override the first four. Occurrence expansion is additionally subject to a
 hard ceiling, `_MAX_OCCURS_HARD_CAP = 10_000` in `generators/data/layout.py`
 — applied on top of (never widened by) a caller's own `max_occurs`, so a
 pathological `OCCURS 5000000 TIMES` in the source cannot materialize
-millions of `FieldSpec`s. `gen-data --max-occurs` and `gen-fixtures
---max-occurs` both expose the caller-facing cap; only the hard ceiling is
-internal.
+millions of `FieldSpec`s. A second ceiling bounds nested tables
+(#376): `_MAX_EXPANDED_OCCURRENCES = 100_000` occurrences per elementary item
+across *all* its enclosing tables -- `_flatten_into` carries
+`occurs_product` down and `_occurrence_cap()` cuts an inner table to what the
+outer ones leave (`OCCURS 99999999` around `OCCURS 9999` is 10,000 x 10, not
+10,000 x 9,999). `occurs_expansion_caveats(record, opts)` walks the
+declarations (never the expansion) and names every table either ceiling
+cuts; a cut the caller asked for with `max_occurs` is not reported. It feeds
+`GeneratedDataset.caveats` (gen-data `warning:` lines),
+`ProgramLayoutIndex.unresolved` (so gen-fixtures' `bundle.unresolved`) and
+`RecordViews.caveats` (decode, `--list-views`). Field lineage builds its own
+byte map from the declared counts (`_PLACEMENT_CAP`), so a cut does not
+change its answers. `gen-data --max-occurs` and `gen-fixtures --max-occurs`
+both expose the caller-facing cap; the hard ceilings are internal.
 
 **Column naming.** Short field name by default; falls back to the dotted
 qualified path when the *same name appears at more than one path* (COBOL
@@ -383,7 +394,15 @@ after the fact (surfaced by `gen-data --describe`).
 
 **`unique_fields`** retries a field up to 32 times for a distinct value, then
 falls back to a deterministic counter — a narrow field (`PIC 9`, ten possible
-values) asked for 40 unique rows must terminate, not spin.
+values) asked for 40 unique rows must terminate, not spin. The counter
+(`ValueFactory._sequential`) steps past values already used and builds text
+from the right (`ST0`, `ST1` ... `10` on a `PIC X(3)`), so truncation never
+cuts the counter off -- cutting it made every fallback value of a narrow
+VALUE / level-88 field identical (#526). When the counter runs out of values
+the PICTURE holds, the repeat is kept and the column lands in
+`ValueFactory.duplicate_columns`; `CopybookDataGenerator` turns that, and a
+`unique_fields` name matching no generated column, into dataset `caveats`
+(printed by `gen-data` as `warning:` lines on stderr, exit 0).
 
 ## Level-88 `VALUE ALL`
 
@@ -480,6 +499,17 @@ LOCAL-STORAGE, LINKAGE), calls `compute_record_layout()` on each top-level
   (resolving its `redefines_chain` against the section's top-level siblings).
   Without it a 77 that was its misnested parent's *only* child vanishes from
   the output entirely and the parent reads as a PIC-less elementary item.
+* **Level-66 RENAMES** (#563). After a section's records are laid out,
+  `renames_layout(node, placed)` places each `RenamesItem` in the last record
+  declared before it: `byte_offset` = its first operand's, `byte_length` = to
+  the end of its THRU operand (`OF` qualifiers must name ancestors). The entry
+  is `level` 66, `qualified_name` `REC.NAME`, `parent_qualified_name` the
+  record; a single-operand RENAMES takes the renamed item's PICTURE / USAGE /
+  group-ness, a THRU range is a DISPLAY group; `offset_ambiguous` if either
+  end is. One it cannot place (an operand not found or ambiguous, an inverted
+  range) gets an `unresolved` line instead. Lineage's `_record_blocks` still
+  drops level-66 entries. Pinned by
+  `tests/regression/test_issue_563_renames_data_items.py`.
 * **`SYNCHRONIZED`** is not modelled (offsets are unaligned throughout), so
   the first `SYNCHRONIZED` binary/float/pointer/index item that is off its
   boundary (2/4/8 bytes, its own width) or inside an `OCCURS` table, and
@@ -487,9 +517,16 @@ LOCAL-STORAGE, LINKAGE), calls `compute_record_layout()` on each top-level
   `unresolved` line naming it. An aligned SYNC item, or SYNC on
   DISPLAY/packed, changes nothing. These flags (and the partial level-88
   lines) come from `flag_record_layout(record, layout)`, which
-  `compute_program_data_items` runs per record; `compute_record_layout` alone
+  `compute_program_data_items` runs per record (and the `OCCURS UNBOUNDED`
+  line, below); `compute_record_layout` alone
   does **not** flag -- a caller laying out one record must run it too (MCP
   `record_layout` does, #488).
+* **`OCCURS UNBOUNDED`** has no maximum, so the table is sized at its
+  minimum (`occurs` `{"min": 1, "max": 1}` -- the shape is kept for the
+  backend and the extension) and `flag_record_layout` adds one `unresolved`
+  line per such table saying its `occurs.max` and every enclosing group's
+  `byte_length` are a lower bound (`LayoutItem.occurs_unbounded`, not
+  serialized; #311). gen-data likewise writes the minimum.
 * **Level-88 `THRU` ranges: `condition_ranges`** (see #361).
   `condition_values` comes from `expand_condition_values()`, which lists a
   range only in part: an integer range up to `_MAX_RANGE_EXPANSION` (`VALUE 1
@@ -558,9 +595,21 @@ module docstring — that suite is the regression guard):
 | `COMP-5` | two's complement, **host byte order** — that is what "native binary" means |
 | `COMP-1` / `COMP-2` | IEEE 754 binary32/binary64, byte order as `COMP-5` |
 | `INDEX` / `POINTER` | binary zeros — an occurrence number and an address are not record content |
+| `FLOAT-SHORT` / `FLOAT-LONG` | as `COMP-1` / `COMP-2` (#524) |
+| `FLOAT-EXTENDED`, `BINARY-CHAR` / `-SHORT` / `-LONG` / `-DOUBLE` | sized exactly (`FIXED_SIZE_USAGES`: 16 / 1 / 2 / 4 / 8) but **not modelled**: binary zeros, named in an `encoding_caveats()` line (#524) |
+| an unknown USAGE word (`USAGE IS COMPX`) | binary zeros of the DISPLAY/PICTURE width, with an `encoding_caveats()` line saying the length is unknown; `data-items` reports it `unresolved` and marks it and every later offset `offset_ambiguous` (`layout_offsets._flag_unknown_usage`) |
 | `PIC N` / `USAGE NATIONAL` | **not modelled as UTF-16**: single-byte text in the record charset, space-padded to the (correct, 2-bytes-per-position) width; `encoding_caveats()` says so. A numeric national field (`PIC 9(5) USAGE NATIONAL`, 10 bytes) goes the same way — `encode_field`/`decode_field` route `usage == "NATIONAL"` to text before the zoned branch |
 | `PIC U(n)` (UTF-8, fixed character-length) | **not modelled as UTF-8**: n single-byte characters (`FieldSpec.utf8_characters`) space-padded to the 4 x n bytes the field reserves; `encoding_caveats()` names the fields. `PIC U BYTE-LENGTH n` is an n-byte text field (#554) |
 | `PIC G` / `USAGE DISPLAY-1` (DBCS) | **not modelled as double-byte EBCDIC**: single-byte text in the record charset, space-padded to the 2-bytes-per-position width, decoded back the same way; `encoding_caveats()` (and so every `DecodeResult`) names the fields in a separate DBCS caveat, and a `PIC N USAGE DISPLAY-1` field is reported there rather than under the national/UTF-16 one (#321) |
+
+**A VALUE-clause cell ignores JUSTIFIED and BLANK WHEN ZERO** (#558):
+initialisation by VALUE is not affected by either clause, so `PIC X(5) JUST
+VALUE 'AB'` is `AB   ` and `PIC 9(3) BLANK WHEN ZERO VALUE 0` is `000`.
+`ValueFactory._declared_value` marks the cell (`layout.InitialValueCell`, or
+`initial_value = True` on a hex literal's `LiteralCell`) and `encode_field`
+checks `is_initial_value()`. Every other cell -- generated, or a level-88
+value, which stands for a SET / MOVE -- is still justified and blanked.
+`hex_literal_cell_for` accepts either alignment for that reason.
 
 **Hex literals are written as their own bytes** (see #319): `VALUE X'C1C2'`,
 or a level-88 `X'FF'` drawn as the witness, is padded/truncated like text but

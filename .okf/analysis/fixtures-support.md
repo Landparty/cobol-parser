@@ -88,6 +88,15 @@ record); INITIATE / TERMINATE add none (#499).
 **CALL/DYNCALL argument-direction ladder (Phase 2b)**, first rung wins,
 `CallArg.provenance` records which:
 
+0. Before the ladder (#582): an `OMITTED` argument is `direction="NONE"`,
+   `provenance="omitted"` -- kept in its position so later arguments still
+   pair with the right callee LINKAGE 01. A constant passed BY REFERENCE (a
+   literal, figurative, `LENGTH OF x`, `FUNCTION f(...)`) is **OUT**,
+   `provenance="constant"`. `call_argument_data_name()` is the one classifier
+   (None for those constants and `OMITTED`, `x` for `ADDRESS OF x`); rung 3's
+   dataflow, `constraints._boundary_fed_names` and `program_fixtures` resolve
+   that name, never the raw argument text.
+
 1. `passing_mode` in `CONTENT`/`VALUE` -> **OUT**, always (language rule --
    the callee cannot write back through either mode).
 2. Callee source available (`callee_indexes`/`callee_asts`, keyed by
@@ -269,6 +278,16 @@ branch.enclosing             # tuple[(branch_id, arm_id), ...]: the arms that
 
 witness = solve(field_spec, branch.arms["THEN"])   # Witness | Unsatisfiable
 ```
+
+**`transfer_sites`: the way into a paragraph** (#310).
+`ConstraintReport.transfer_sites` holds one `TransferSite(paragraph, target,
+kind, enclosing, line)` per out-of-line `PERFORM p [THRU q]` (its first
+paragraph; the rest of a range is reached by falling through) and per `GO
+TO` target (`kind` `GOTO_DEPENDING` for `GO TO ... DEPENDING ON`), recorded
+by `_record_transfer_site` during the same `_walk_statements` pass, so its
+`enclosing` is the PERFORM's own arm chain. `ScenarioPlanner` joins a
+branch's `parent_proc` to it to carry the path condition across paragraphs
+(see generators/fixtures.md).
 
 **`enclosing`: the path condition.** Every `BranchConstraints`
 records the `(branch_id, arm_id)` chain enclosing it. `_walk_list` threads it
@@ -775,7 +794,11 @@ internal env) rather than approximating:
   reusing the target's own name as the second operand is directly what the
   statement means (multiplication has no target-is-also-an-addend hidden
   term the way ADD/SUBTRACT's TO/FROM accumulation does), so only GIVING
-  names are filtered from its operand list, never targets.
+  names are filtered from its operand list, never targets. The GIVING form
+  of MULTIPLY / DIVIDE reads its two operands from `source_operands` (#495):
+  filtering GIVING names out of `.operands` left one operand for `MULTIPLY A
+  BY A GIVING C` or `DIVIDE B INTO A GIVING A`, which poisoned the result
+  instead of folding it.
 * **ACCEPT/READ are a deliberate no-op, not an omission.** They are exactly
   the boundary categories `_tier2_expectations` seeds `env` from before the
   walk starts; falling through to the generic "unmodeled write" fallback

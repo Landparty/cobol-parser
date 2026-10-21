@@ -290,8 +290,16 @@ Reports which `cobol.yml` is in effect and every setting it supplies;
 settings the file does not mention are **omitted**, so what is printed is
 exactly what the file changes. No file anywhere: says so, suggests creating
 one, exit 0. `--json` emits `{"config_file", "version", "project", "data",
-"lint", "tools"}` (`config_file` `null` when none). Honours `--config` /
-`--no-config`.
+"lint", "tools"}` (`config_file` `null` when none), plus
+`missing_directories` only when `ProjectConfig.missing_directories()` names
+a path entry that is not a directory; the text form marks those entries
+`(not an existing directory)`. Honours `--config` / `--no-config`.
+
+Path entries (`_path_list`) get `os.path.expanduser` + `expandvars` before
+the join onto the file's directory: as written, `~/cpy` became
+`<cfgdir>/~/cpy` and silently found nothing (#550). `main()` warns on stderr
+once per missing entry for a dest the subcommand reads and the user did not
+pass explicitly.
 
 ## Shared flags
 
@@ -562,6 +570,10 @@ copybook, back into a table**.
   trailing bytes that are not a whole record (usually a wrong record length);
   **`--strict`** makes either of the last two exit 1 — the CI form of "does
   this copybook describe this file?".
+* A copybook that is not UTF-8 (a Latin-1 accent in a comment) is a one-line
+  `error: Cannot read copybook FILE: ...`, exit 1, also under
+  `--list-views` -- `UnicodeDecodeError` is a `ValueError`, not an `OSError`,
+  and used to escape as a traceback (#496). `compare` words it the same.
 
 ### `compare`
 

@@ -17,9 +17,11 @@ built for the same program (Phase 1).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .._literals import is_quoted_literal
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.sql_statements import (
     ExecSQLStatement,
@@ -387,15 +389,64 @@ class BoundaryRef:
     line: int | None
 
 
+#: Figurative constants a CALL may pass (``BY CONTENT ZERO``): constants, not
+#: data items the layout index could hold (#582).
+_FIGURATIVE_ARGUMENTS = frozenset(
+    {
+        "ZERO",
+        "ZEROS",
+        "ZEROES",
+        "SPACE",
+        "SPACES",
+        "HIGH-VALUE",
+        "HIGH-VALUES",
+        "LOW-VALUE",
+        "LOW-VALUES",
+        "QUOTE",
+        "QUOTES",
+        "NULL",
+        "NULLS",
+    }
+)
+_NUMERIC_ARGUMENT_RE = re.compile(r"[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)")
+_LENGTH_OF_RE = re.compile(r"LENGTH\s+OF\s+\S", re.IGNORECASE)
+_ADDRESS_OF_RE = re.compile(r"ADDRESS\s+OF\s+(.+)", re.IGNORECASE | re.DOTALL)
+
+
+def call_argument_data_name(name: str) -> str | None:
+    """The data item a CALL argument's text names, or None when it names none.
+
+    ``OMITTED`` is an empty argument position; a quoted, numeric or ALL
+    literal, a figurative constant, ``LENGTH OF x`` (a compiler-computed
+    value) and ``FUNCTION f(...)`` (#579) are constants the caller supplies.
+    ``ADDRESS OF x`` points at ``x``, so it resolves against ``x`` (#582).
+    Everything else is the argument text itself.
+    """
+    text = name.strip()
+    upper = text.upper()
+    if not text or upper == "OMITTED":
+        return None
+    if is_quoted_literal(text) or _NUMERIC_ARGUMENT_RE.fullmatch(text):
+        return None
+    if upper in _FIGURATIVE_ARGUMENTS or upper.startswith(("ALL ", "FUNCTION ")):
+        return None
+    if _LENGTH_OF_RE.match(text):
+        return None
+    address = _ADDRESS_OF_RE.fullmatch(text)
+    if address is not None:
+        return address.group(1).strip()
+    return text
+
+
 @dataclass
 class CallArg:
     """One CALL/DYNCALL USING argument, with its resolved data direction."""
 
     name: str
     passing_mode: str  # REFERENCE | CONTENT | VALUE
-    direction: str  # IN | OUT | BIDIRECTIONAL
+    direction: str  # IN | OUT | BIDIRECTIONAL | NONE (an OMITTED position)
     provenance: str  # "by-content-rule" | "callee-source" | "caller-dataflow"
-    # | "assumed-bidirectional" | "giving-parameter"
+    # | "assumed-bidirectional" | "giving-parameter" | "constant" | "omitted"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -895,6 +946,31 @@ class BoundaryInventoryAnalyzer:
 
         for i, param in enumerate(statement.using_parameters):
             mode = (param.passing_mode or "REFERENCE").upper()
+            if param.name.strip().upper() == "OMITTED":
+                # An empty position (#582): no data either way, but it keeps
+                # its place so later arguments pair with the right LINKAGE 01.
+                args.append(
+                    CallArg(
+                        name=param.name,
+                        passing_mode=mode,
+                        direction="NONE",
+                        provenance="omitted",
+                    )
+                )
+                continue
+            data_name = call_argument_data_name(param.name)
+            if data_name is None and mode == "REFERENCE":
+                # A literal / figurative / LENGTH OF passed BY REFERENCE: the
+                # caller supplies a constant; nothing it holds comes back.
+                args.append(
+                    CallArg(
+                        name=param.name,
+                        passing_mode=mode,
+                        direction="OUT",
+                        provenance="constant",
+                    )
+                )
+                continue
             if mode in ("CONTENT", "VALUE"):
                 args.append(
                     CallArg(
@@ -920,7 +996,7 @@ class BoundaryInventoryAnalyzer:
                     continue
 
             direction, provenance = self._caller_dataflow_direction(
-                param.name, index, enclosing_statements, position
+                data_name or param.name, index, enclosing_statements, position
             )
             args.append(
                 CallArg(

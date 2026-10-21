@@ -1284,6 +1284,11 @@ def try_parse_nested_statement(
         if exclude_self is not None and parser is exclude_self:
             return None
         return parser.parse(stream)
+    except RecursionError:
+        # Nesting too deep to parse (#375): skipping the inner statement
+        # with a warning left a ``success=True`` AST missing statements.
+        # Let it reach the statement loop, which records it as an error.
+        raise
     except Exception as exc:
         # Exploratory nested dispatch must never raise (the real error is
         # surfaced via the parse context when report_or_raise pre-records

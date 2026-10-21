@@ -101,7 +101,7 @@ from ._files import (
     report_writer_files,
     same_record_area_groups,
 )
-from ._names import callee_names
+from ._names import callee_names, split_qualified_name
 from ._sql_flow import analyze_sql
 from .unused_variables import inherited_data_records
 from .value_tracker import DynamicCallAnalyzer
@@ -971,7 +971,7 @@ class FieldFlowAnalyzer:
 
     def _resolve(self, text: str) -> list[str]:
         """Qualified names a (possibly ``A OF B``-qualified) name means."""
-        parts = [p.strip().upper() for p in text.split(" OF ") if p.strip()]
+        parts = split_qualified_name(text)
         if not parts:
             return []
         name, qualifiers = parts[0], parts[1:]
@@ -2048,12 +2048,16 @@ class FieldFlowAnalyzer:
             for qname in self._resolve(flow.host_var):
                 for leaf in self._leaves(qname):
                     node = self._item_node(leaf.qname)
+                    # A table field's node stands for any occurrence (a
+                    # multi-row FETCH writes them all), so the edge is
+                    # inexact like every other edge through a table (#507).
+                    exact = flow.exact and self._table(leaf.qname) is None
                     if flow.direction == "out":
                         port.directions.add("out")
-                        self._edge(node, column, flow.kind, ctx, "EXEC SQL", flow.exact)
+                        self._edge(node, column, flow.kind, ctx, "EXEC SQL", exact)
                     else:
                         port.directions.add("in")
-                        self._edge(column, node, flow.kind, ctx, "EXEC SQL", flow.exact)
+                        self._edge(column, node, flow.kind, ctx, "EXEC SQL", exact)
         line = ctx.location.line if ctx.location is not None else 0
         for key in result.keys:
             node = LineageNode(PORT_SQL, f"{key.table}.{key.column}")

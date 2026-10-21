@@ -92,6 +92,10 @@ layout_warnings=None)`, or `.from_copybook_source()` / `.from_copybook_file()`
 `layout_warnings` names each `COPY` left unexpanded, and is the first entry
 of every `DecodeResult.caveats` (and so of compare's); the CLI prints them
 once as `warning:` and skips them in decode's `note:` loop.
+`RecordViews.caveats` (also in every `DecodeResult.caveats`) opens with
+`layout.occurs_expansion_caveats()`: a table the expansion caps cut short
+leaves the view shorter than the real record, so every offset after it is
+wrong for a real file (#376).
 `decode_bytes(data, view=..., max_records=..., skip=...) -> DecodeResult`;
 `decode_file(path, ...)` is the same in binary mode (a COMP field routinely
 contains 0x0A, which a text-mode read would translate).
@@ -318,6 +322,8 @@ picks the 01 a `--record` name means. Both halves of the package use it and
 must *agree*: generating from `--record CUST-REC` and decoding through
 `--record CUST-REC` must land on the same 01, or a round trip through the
 record image silently changes layout.
+The rest of `copybook.py` is generation-only (value drawing, `unique_fields`
+caveats, #526) and never reaches the decoder.
 
 ## Tests
 

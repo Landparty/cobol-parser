@@ -480,58 +480,53 @@ def parse_data_item_clauses_fast(
                             )
                             occurs.depending_on_qualifiers = qualifiers
 
-            # ASCENDING / DESCENDING KEY IS key-1 [key-2 ...] clauses (may
-            # repeat). These sit between DEPENDING ON and INDEXED BY and are
-            # what make a table valid for SEARCH ALL; dropping them lost real
-            # semantics and previously also cascaded into dropping INDEXED BY.
-            pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
-            while (
-                pos < n
-                and tokens[pos] is not None
-                and tokens[pos].value
-                and tokens[pos].value.upper() in ("ASCENDING", "DESCENDING")
-            ):
-                direction = tokens[pos].value.upper()
-                pos += 1  # consume ASCENDING/DESCENDING
+            # ASCENDING / DESCENDING KEY IS key-1 [key-2 ...] phrases (may
+            # repeat) and the INDEXED BY phrase, in either order: IBM accepts
+            # ``INDEXED BY IX ASCENDING KEY K`` too (#542). The KEY phrases
+            # are what make a table valid for SEARCH ALL.
+            while True:
                 pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
-                if pos < n and tokens[pos] is not None and tokens[pos].value and tokens[pos].value.upper() == "KEY":
-                    pos += 1
-                pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
-                if pos < n and tokens[pos] is not None and tokens[pos].value and tokens[pos].value.upper() == "IS":
-                    pos += 1
-                keys = []
-                while True:
+                if pos >= n or tokens[pos] is None or not tokens[pos].value:
+                    break
+                word = tokens[pos].value.upper()
+                if word in ("ASCENDING", "DESCENDING"):
+                    direction = word
+                    pos += 1  # consume ASCENDING/DESCENDING
                     pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
-                    # Comma-separated key list: a comma is only a
-                    # separator, never a key name -- consume and continue.
-                    if pos < n and tokens[pos] is not None and tokens[pos].type is comma_type:
+                    if pos < n and tokens[pos] is not None and tokens[pos].value and tokens[pos].value.upper() == "KEY":
                         pos += 1
-                        continue
-                    if (
-                        pos < n
-                        and tokens[pos] is not None
-                        and tokens[pos].type is identifier_type
-                        and tokens[pos].value
-                        and tokens[pos].value.upper() not in ("ASCENDING", "DESCENDING", "INDEXED", "KEY")
-                    ):
-                        keys.append(tokens[pos].value)
+                    pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
+                    if pos < n and tokens[pos] is not None and tokens[pos].value and tokens[pos].value.upper() == "IS":
                         pos += 1
-                        # A qualified key (``K1 OF ENTRY``): keep the bare name.
-                        pos = _consume_qualifiers(
-                            tokens, pos, n, newline_type, identifier_type, []
-                        )
-                    else:
-                        break
-                if keys:
-                    occurs.add_key_clause(direction, keys)
-                pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
-
-            # INDEXED BY clause (one or more index names, optionally
-            # comma-separated; INDEXED and BY may straddle a line break)
-            pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
-            if pos < n:
-                nxt = tokens[pos]
-                if nxt is not None and nxt.value and nxt.value.upper() == "INDEXED":
+                    keys = []
+                    while True:
+                        pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
+                        # Comma-separated key list: a comma is only a
+                        # separator, never a key name -- consume and continue.
+                        if pos < n and tokens[pos] is not None and tokens[pos].type is comma_type:
+                            pos += 1
+                            continue
+                        if (
+                            pos < n
+                            and tokens[pos] is not None
+                            and tokens[pos].type is identifier_type
+                            and tokens[pos].value
+                            and tokens[pos].value.upper() not in ("ASCENDING", "DESCENDING", "INDEXED", "KEY")
+                        ):
+                            keys.append(tokens[pos].value)
+                            pos += 1
+                            # A qualified key (``K1 OF ENTRY``): keep the bare name.
+                            pos = _consume_qualifiers(
+                                tokens, pos, n, newline_type, identifier_type, []
+                            )
+                        else:
+                            break
+                    if keys:
+                        occurs.add_key_clause(direction, keys)
+                elif word == "INDEXED":
+                    # INDEXED BY: one or more index names, optionally
+                    # comma-separated; INDEXED and BY may straddle a line
+                    # break. ASCENDING / DESCENDING / KEY open a KEY phrase.
                     pos += 1
                     pos = _skip_layout(tokens, pos, n, newline_type, comma_type, semicolon_type)
                     if pos < n:
@@ -543,11 +538,18 @@ def parse_data_item_clauses_fast(
                         if pos < n and tokens[pos] is not None and tokens[pos].type is comma_type:
                             pos += 1
                             continue
-                        if pos < n and tokens[pos] is not None and tokens[pos].type is identifier_type:
+                        if (
+                            pos < n
+                            and tokens[pos] is not None
+                            and tokens[pos].type is identifier_type
+                            and (tokens[pos].value or "").upper() not in ("ASCENDING", "DESCENDING", "INDEXED", "KEY")
+                        ):
                             occurs.add_index_name(tokens[pos].value)
                             pos += 1
                         else:
                             break
+                else:
+                    break
 
             if has_depending:
                 occurs.set_variable_occurs(min_count, max_count, depending_var)

@@ -25,6 +25,9 @@ from .._source_directive import source_format_directive
 _DEFINE_RE = re.compile(
     r">>DEFINE\s+([\w-]+)(?:\s+(?:AS\s+)?(?!OVERRIDE\s*$)(.+?))?(?:\s+OVERRIDE)?\s*$"
 )
+#: A ``>>DEFINE ... AS`` operand that is one COBOL word (at least one letter,
+#: no quotes): a compilation-variable reference, never a literal.
+_DEFINE_WORD_RE = re.compile(r"[A-Z0-9-]*[A-Z][A-Z0-9-]*", re.IGNORECASE)
 #: The head of a data-description entry: a level number and the name it
 #: introduces. Shared by the two patterns below so they cannot disagree about
 #: what an entry looks like -- when they did, a single-digit level closed the
@@ -1254,8 +1257,11 @@ def _eval_define_arithmetic(text: str, defined: Mapping[str, str]) -> int | None
             return None
         tokens.append((match.group(1) or match.group(2)).upper())
         pos = match.end()
-    if not any(tok in "+-*/" for tok in tokens):
-        return None  # a plain literal or word, not an expression
+    if not any(tok in "+-*/()" for tok in tokens):
+        # A plain literal or word, not an expression. A parenthesised
+        # operand (``AS (A)``) is one, though: storing "(A)" made every
+        # ``>>IF B = 3`` silently FALSE, as ``AS A`` did (#567).
+        return None
 
     index = 0
 
@@ -1984,6 +1990,22 @@ def preprocess_conditional_compilation(
                                 "defined symbols, which do not define it — "
                                 "left undefined"
                             )
+                    elif _DEFINE_WORD_RE.fullmatch(raw_value.strip()):
+                        # ``AS A``: a lone compilation variable is an
+                        # arithmetic expression too, so B takes A's value --
+                        # storing the word "A" made every ``>>IF B = 3``
+                        # silently FALSE (#567).
+                        word = raw_value.strip()
+                        if word in defined:
+                            defined[symbol] = defined[word]
+                        else:
+                            _warn(
+                                f"Line {line_no}: >>DEFINE {symbol} AS {word}: "
+                                f"'{word}' is not a defined compilation "
+                                f"variable — {symbol} holds the text "
+                                f"'{word}'"
+                            )
+                            defined[symbol] = word
                     else:
                         arith_value = _eval_define_arithmetic(raw_value, defined)
                         defined[symbol] = (

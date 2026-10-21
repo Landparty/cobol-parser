@@ -57,6 +57,7 @@ from .layout import (
     LiteralCell,
     VaryingLength,
     _strip_literal_quotes,
+    is_initial_value,
     present_indexes,
     unresolved_odo_counters,
     value_clause_hex_bytes,
@@ -64,11 +65,13 @@ from .layout import (
 from .storage import (
     BINARY_NATIVE_USAGES,
     BINARY_USAGES,
+    FIXED_SIZE_USAGES,
     FLOAT_USAGES,
     PACKED_USAGES,
     POINTER_USAGES,
     SINGLE_FLOAT_USAGES,
     binary_byte_length,
+    is_known_usage,
 )
 
 
@@ -572,7 +575,16 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
     filled = _filler_fill(spec, opts)
     if filled is not None:
         return filled
+    # A VALUE-clause initial value is stored as declared: initialisation is
+    # not affected by JUSTIFIED or BLANK WHEN ZERO (#558).  Both still apply
+    # to every other cell, which stands for a MOVE result.
+    justified = spec.justified and not is_initial_value(text)
 
+    if usage in FIXED_SIZE_USAGES or not is_known_usage(usage):
+        # COBOL 2002 FLOAT-EXTENDED / BINARY-CHAR..DOUBLE (sized exactly,
+        # bytes not modelled) or a USAGE word nothing here knows: zeros of
+        # the field's width, named in ``encoding_caveats`` (#524).
+        return bytes(width)
     if usage == "INDEX" or usage in POINTER_USAGES:
         # Neither is file data: an index is a compiler-managed occurrence
         # number and a pointer is an address, both meaningless in a record
@@ -591,7 +603,7 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         # (see ``encoding_caveats``), so -- like a ``PIC N`` field -- the
         # value is written as text padded to the field's full width rather
         # than as five zoned bytes in a ten-byte slot.
-        return _encode_text(text, width, opts, justified=spec.justified)
+        return _encode_text(text, width, opts, justified=justified)
     # DISPLAY from here down.  An unedited numeric picture is zoned decimal.
     # A numeric-edited one holds what a MOVE into it would leave: the CSV
     # cell is the logical value (`1234.56`), the bytes are the edited form
@@ -599,6 +611,7 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
     # cell's text as is.
     if (
         spec.blank_when_zero
+        and not is_initial_value(text)
         and spec.category in (FieldCategory.NUMERIC, FieldCategory.NUMERIC_EDITED)
         and _scaled_integer(text, spec) == 0
     ):
@@ -622,8 +635,8 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         # The bytes come with the cell, not from a lookup by its text: an
         # ordinary ``'AB'`` or ``VALUE SPACE`` with the same text as a hex
         # literal's stand-in is still charset-encoded.
-        return _place_bytes(text.data, width, opts, justified=spec.justified)
-    return _encode_text(text, width, opts, justified=spec.justified)
+        return _place_bytes(text.data, width, opts, justified=justified)
+    return _encode_text(text, width, opts, justified=justified)
 
 
 #: Figurative constants as the cell :class:`~.values.ValueFactory` writes for
@@ -692,11 +705,17 @@ def hex_literal_cell_for(
     width = spec.storage_size
     if len(raw) != width:
         return None
+    # A VALUE-clause cell is placed left-aligned even under JUSTIFIED RIGHT
+    # (#558), a level-88 one right-aligned: either placement is the literal.
+    alignments = {spec.justified, False}
     for cell, data in spec.literal_bytes.items():
-        if _place_bytes(data, width, opts, justified=spec.justified) != raw:
+        if all(_place_bytes(data, width, opts, justified=j) != raw for j in alignments):
             continue
         for ordinary in _ordinary_literal_cells(spec):
-            if _encode_text(ordinary, width, opts, justified=spec.justified) == raw:
+            if any(
+                _encode_text(ordinary, width, opts, justified=j) == raw
+                for j in alignments
+            ):
                 return None
         return cell
     return None
@@ -849,6 +868,31 @@ def encoding_caveats(
             "SYNCHRONIZED alignment is not modelled -- these items may sit at "
             "a higher offset under a real compiler, shifting everything after "
             f"them: {', '.join(synchronized)}"
+        )
+    unmodelled = sorted(
+        {
+            f"{spec.qualified_name} ({_normalized_usage(spec)})"
+            for spec in specs
+            if _normalized_usage(spec) in FIXED_SIZE_USAGES
+        }
+    )
+    if unmodelled:
+        caveats.append(
+            "these USAGEs are sized but their bytes are not modelled; written "
+            f"as binary zeros: {', '.join(unmodelled)}"
+        )
+    unknown = sorted(
+        {
+            f"{spec.qualified_name} ({_normalized_usage(spec)})"
+            for spec in specs
+            if not is_known_usage(spec.usage)
+        }
+    )
+    if unknown:
+        caveats.append(
+            "unsupported USAGE: the field's byte length is unknown, so it and "
+            "every later offset in the record may be wrong (written as binary "
+            f"zeros): {', '.join(unknown)}"
         )
     floats = sorted(
         {

@@ -42,7 +42,13 @@ from functools import partial
 from typing import Any
 
 from ...models.data_items import CobolDataItem
-from .layout import FieldSpec, HiddenCounter, flatten_overlay_view, flatten_record
+from .layout import (
+    FieldSpec,
+    HiddenCounter,
+    flatten_overlay_view,
+    flatten_record,
+    occurs_expansion_caveats,
+)
 from .options import DataGeneratorOptions
 
 #: Levels that name no storage of their own: 66 RENAMES and 88 condition
@@ -348,7 +354,9 @@ def build_record_views(
         offset_ambiguous=any(spec.odo_controls for spec in base_specs),
     )
     overlays: list[RecordView] = []
-    caveats: list[str] = []
+    # A table the expansion caps cut short leaves the view shorter than the
+    # record it maps: every offset after it is wrong for a real file (#376).
+    caveats: list[str] = occurs_expansion_caveats(record, opts)
     base_columns = {_column_key(spec): spec.column for spec in base_specs}
     first_odo = next((p.offset for p in base.fields if p.spec.odo_controls), None)
     _scan_overlays(

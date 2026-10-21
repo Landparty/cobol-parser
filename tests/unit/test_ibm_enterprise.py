@@ -297,7 +297,7 @@ class TestIBMDataItem:
         item.picture_clause = PictureClause("9(5)V99", location)
         item.set_ibm_usage(IBMDataType.COMP_3)
 
-        # COMP-3: (digits + 1) / 2 = (7 + 1) / 2 = 4 bytes
+        # COMP-3: digits // 2 + 1 = 7 // 2 + 1 = 4 bytes
         size = item.calculate_storage_size()
         assert size == 4
 
@@ -308,9 +308,33 @@ class TestIBMDataItem:
         item.picture_clause = PictureClause("9(5)", location)
         item.set_ibm_usage(IBMDataType.COMP_3)
 
-        # COMP-3: (digits + 1) / 2 = (5 + 1) / 2 = 3 bytes
+        # COMP-3: digits // 2 + 1 = 5 // 2 + 1 = 3 bytes
         size = item.calculate_storage_size()
         assert size == 3
+
+    def test_calculate_storage_size_comp3_even_digits(self):
+        """Even digit counts need a whole extra byte for the sign nibble (#589)."""
+        location = SourceLocation(20, 12)
+        for picture, expected in [("S9(4)", 3), ("9(6)", 4), ("9(18)", 10)]:
+            item = IBMEnterpriseCobol().create_comp3_data_item(
+                "WS-PACKED", picture, location
+            )
+            assert item.calculate_storage_size() == expected, picture
+            assert item.to_dict()["storage_size"] == expected, picture
+            assert item.calculate_storage_size() == item.calculate_size()
+
+    def test_calculate_storage_size_no_picture_usages(self):
+        """COMP-1 / COMP-2 / POINTER never have a PICTURE and are not 0 bytes (#589)."""
+        location = SourceLocation(20, 12)
+        for usage, expected in [
+            (IBMDataType.COMP_1, 4),
+            (IBMDataType.COMP_2, 8),
+            (IBMDataType.POINTER, 4),
+        ]:
+            item = IBMDataItem("WS-X", 1, location)
+            item.set_ibm_usage(usage)
+            assert item.calculate_storage_size() == expected, usage
+            assert item.to_dict()["storage_size"] == expected, usage
 
     def test_calculate_storage_size_comp_binary(self):
         """Test COMP/COMP-4 binary storage size calculation."""
@@ -1002,9 +1026,9 @@ class TestIBMEnterpriseIntegration:
             IBMDataType.COMP_5: 4,  # Native binary: same as COMP
             IBMDataType.POINTER: 4,  # 32-bit pointer
             IBMDataType.DISPLAY: 5,  # Character: picture size
-            IBMDataType.PROCEDURE_POINTER: 5,  # Uses base size
-            IBMDataType.FUNCTION_POINTER: 5,  # Uses base size
-            IBMDataType.OBJECT_REFERENCE: 5,  # Uses base size
+            IBMDataType.PROCEDURE_POINTER: 8,  # Two words (entry + environment)
+            IBMDataType.FUNCTION_POINTER: 4,  # One address word
+            IBMDataType.OBJECT_REFERENCE: 4,  # One address word
         }
 
         for usage_type, expected_size in storage_expectations.items():

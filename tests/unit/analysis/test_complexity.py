@@ -7,7 +7,7 @@ Covers:
 - EVALUATE counts WHEN arms, excludes WHEN OTHER
 - SEARCH counts WHEN arms
 - Loop-form PERFORM (UNTIL/TIMES/VARYING) adds a decision; simple PERFORM does not
-- Exception-handling clauses (AT END, ON SIZE ERROR) each add a decision
+- Exception-handling clause pairs (AT END / NOT AT END, ...) add one decision
 - AND/OR only affects extended_complexity, not cyclomatic_complexity
 - GO TO count / goto_density on the program summary
 - Fan-in / fan-out derived from real PERFORM/GO TO edges
@@ -227,7 +227,8 @@ class TestExceptionClauses:
         proc = _proc(_analyze(source), "MAIN-PARA")
         assert proc.cyclomatic_complexity == 2
 
-    def test_on_size_error_and_not_on_size_error_add_two_decisions(self) -> None:
+    def test_on_size_error_and_not_on_size_error_are_one_decision(self) -> None:
+        # One binary outcome, like IF ... ELSE (#553).
         source = HEADER + """\
        PROCEDURE DIVISION.
        MAIN-PARA.
@@ -240,7 +241,7 @@ class TestExceptionClauses:
            STOP RUN.
 """
         proc = _proc(_analyze(source), "MAIN-PARA")
-        assert proc.cyclomatic_complexity == 3
+        assert proc.cyclomatic_complexity == 2
 
     def test_at_end_clause_adds_one_decision(self) -> None:
         source = HEADER + """\

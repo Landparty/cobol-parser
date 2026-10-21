@@ -44,12 +44,18 @@ from ..models.statements.data import (
     UnstringStatement,
 )
 from ..models.statements.misc import (
+    ContinueStatement,
     MergeStatement,
     SelectStatement,
     SortStatement,
     XmlJsonStatement,
 )
-from ._names import QUALIFIER_SEPARATOR, qualified_references
+from ._cics import cics_identifier_options
+from ._names import (
+    QUALIFIER_SEPARATOR,
+    qualified_references,
+    strip_translator_arguments,
+)
 
 # DATA DIVISION section names whose data items are in scope for this
 # analysis. Matches the exact names the DATA DIVISION parser assigns (see
@@ -143,6 +149,8 @@ _STR_ATTR_EXTRAS: dict[type, tuple[str, ...]] = {
         "converting_after",
     ),
     SearchStatement: ("table_name", "varying_variable"),
+    # ``CONTINUE AFTER expr SECONDS`` reads every operand of its delay (#578).
+    ContinueStatement: ("delay_expression",),
 }
 
 # Statement attributes holding a plain list of operand strings that never
@@ -384,8 +392,29 @@ def _extract_identifiers(operand: Any) -> set[str]:
     if not isinstance(operand, str) or not operand:
         return set()
 
-    stripped = _QUOTED_TEXT_RE.sub(" ", operand)
+    stripped = strip_translator_arguments(_QUOTED_TEXT_RE.sub(" ", operand))
     return qualified_references(stripped, _NON_IDENTIFIER_WORDS)
+
+
+def screen_section_references(data_div: Any) -> list[dict[str, Any]]:
+    """The data items a SCREEN SECTION's fields bind (#501).
+
+    The DATA DIVISION parser skips the SCREEN SECTION's grammar but keeps
+    each ``USING`` / ``FROM`` / ``TO`` operand as ``{"clause", "text",
+    "line"}`` in the section's ``screen_references`` metadata: a field
+    ``USING WS-NAME`` displays and accepts WS-NAME whenever the screen is
+    DISPLAYed or ACCEPTed, without the PROCEDURE DIVISION naming it.
+    """
+    found: list[dict[str, Any]] = []
+    for section in getattr(data_div, "sections", None) or []:
+        if not isinstance(section, CobolSection):
+            continue
+        if (section.section_name or "").upper() != "SCREEN":
+            continue
+        for reference in section.get_metadata("screen_references") or []:
+            if isinstance(reference, dict) and reference.get("text"):
+                found.append(reference)
+    return found
 
 
 def _mark_subtree_used(item: CobolDataItem, group_used: dict[int, bool]) -> None:
@@ -1098,8 +1127,7 @@ class UnusedVariableAnalyzer:
                 continue
             type_name = type(node).__name__
             if type_name == "ExecCicsStatement":
-                options = getattr(node, "options", None) or {}
-                for v in options.values():
+                for v in cics_identifier_options(node).values():
                     names |= _extract_identifiers(v)
             elif type_name == "ExecImsStatement":
                 for v in getattr(node, "arguments", None) or []:
@@ -1173,6 +1201,8 @@ class UnusedVariableAnalyzer:
             return names
 
         names |= self._report_section_references(data_div)
+        for reference in screen_section_references(data_div):
+            names |= _extract_identifiers(reference.get("text"))
 
         for section in data_div.sections:
             if not isinstance(section, CobolSection):
@@ -1204,7 +1234,8 @@ class UnusedVariableAnalyzer:
         The runtime stores into a ``FILE STATUS`` item after every I/O
         operation and reads the ``RECORD KEY`` / ``ALTERNATE RECORD KEY`` /
         ``RELATIVE KEY`` / ``PASSWORD`` items to position the file (and the
-        ``ASSIGN USING`` item to name it), whether
+        ``ASSIGN USING`` item to name it, and the ``PADDING CHARACTER``
+        item on every WRITE, #556), whether
         or not the PROCEDURE DIVISION ever names them -- a program that
         only tests its status through a level-88 on the same item, or never
         tests it at all, still uses it. Scanning only the PROCEDURE
@@ -1225,6 +1256,7 @@ class UnusedVariableAnalyzer:
                 node.relative_key,
                 node.password,
                 node.assign_using,
+                node.padding_character,
             ):
                 names |= _extract_identifiers(value)
             for alt in node.alternate_keys:
@@ -1269,6 +1301,24 @@ class UnusedVariableAnalyzer:
         RD's own ``CONTROL``/``CONTROLS`` (break on this field).
         """
         names: set[str] = set()
+        for _node, values in UnusedVariableAnalyzer.report_entry_operands(data_div):
+            for value in values:
+                names |= _extract_identifiers(value)
+        return names
+
+    @staticmethod
+    def report_entry_operands(data_div: Any) -> list[tuple[Any, list[str]]]:
+        """Each REPORT SECTION entry (RD or report-group item) with the raw
+        ``SOURCE`` / ``SUM`` / ``CONTROL(S)`` operand texts it carries, in
+        source order; entries carrying none are left out. Shared with
+        ``XrefAnalyzer``, which records each operand at its entry (#571).
+
+        The RD is no node of its own: the parser copies its clauses onto
+        every 01 report group it owns, so its ``CONTROL(S)`` operands are
+        taken once per report, from the first of those groups.
+        """
+        found: list[tuple[Any, list[str]]] = []
+        rd_seen: set[str] = set()
         for section in data_div.sections:
             if not isinstance(section, CobolSection):
                 continue
@@ -1277,15 +1327,28 @@ class UnusedVariableAnalyzer:
             for item in section.data_items:
                 for node in [item, *item.get_all_children()]:
                     metadata = getattr(node, "metadata", None) or {}
+                    values: list[str] = []
                     clauses = metadata.get("report_clauses") or {}
-                    names |= _extract_identifiers(clauses.get("source"))
+                    if clauses.get("source"):
+                        values.append(clauses["source"])
                     for entry in clauses.get("sum") or []:
-                        for operand in (entry or {}).get("operands") or []:
-                            names |= _extract_identifiers(operand)
+                        values.extend(
+                            operand
+                            for operand in (entry or {}).get("operands") or []
+                            if operand
+                        )
                     rd_clauses = metadata.get("rd_clauses") or {}
-                    for control in rd_clauses.get("controls") or []:
-                        names |= _extract_identifiers(control)
-        return names
+                    report = str(metadata.get("rd_report_name") or id(rd_clauses))
+                    if rd_clauses and report not in rd_seen:
+                        rd_seen.add(report)
+                        values.extend(
+                            control
+                            for control in rd_clauses.get("controls") or []
+                            if control
+                        )
+                    if values:
+                        found.append((node, values))
+        return found
 
     @staticmethod
     def _section_of(item: CobolDataItem) -> str:

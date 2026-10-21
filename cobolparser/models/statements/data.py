@@ -90,7 +90,15 @@ class DisplayStatement(CobolStatement):
 
 
 class StringStatement(CobolStatement):
-    """AST node for STRING statements."""
+    """AST node for STRING statements.
+
+    ``operands`` and ``delimiters`` are flat lists kept for compatibility;
+    ``groups`` records which sources each ``DELIMITED BY`` applies to
+    (#576): ``STRING A B DELIMITED BY SIZE C DELIMITED BY D1`` is
+    ``[{"sources": ["A", "B"], "delimiter": "SIZE"}, {"sources": ["C"],
+    "delimiter": "D1"}]``. Sources with no DELIMITED BY after them form a
+    last group whose ``delimiter`` is ``None``.
+    """
 
     def __init__(self, location: SourceLocation):
         super().__init__("STRING", location)
@@ -100,10 +108,17 @@ class StringStatement(CobolStatement):
         self.into_target: str | None = None
         self.pointer_variable: str | None = None
         self.delimiters: list[str] = []
+        self.groups: list[dict[str, Any]] = []
+        # Sources read since the last DELIMITED BY, not yet in ``groups``.
+        self._open_group: dict[str, Any] | None = None
 
     def add_operand(self, operand: str) -> None:
         """Add a STRING operand."""
         self.operands.append(operand)
+        if self._open_group is None:
+            self._open_group = {"sources": [], "delimiter": None}
+            self.groups.append(self._open_group)
+        self._open_group["sources"].append(operand)
 
     def set_into_target(self, target: str) -> None:
         """Set the INTO target variable."""
@@ -114,8 +129,14 @@ class StringStatement(CobolStatement):
         self.pointer_variable = variable
 
     def add_delimiter(self, delimiter: str) -> None:
-        """Add a DELIMITED BY delimiter."""
+        """Add a DELIMITED BY delimiter, closing the sources before it."""
         self.delimiters.append(delimiter)
+        if self._open_group is None:
+            # DELIMITED BY with no source before it: keep the delimiter.
+            self.groups.append({"sources": [], "delimiter": delimiter})
+        else:
+            self._open_group["delimiter"] = delimiter
+            self._open_group = None
 
     def set_on_overflow_clause(self, statements: list["CobolStatement"]) -> None:
         self._set_clause("on_overflow", statements)
@@ -129,6 +150,8 @@ class StringStatement(CobolStatement):
             result["operands"] = self.operands
         if self.delimiters:
             result["delimiters"] = self.delimiters
+        if self.groups:
+            result["groups"] = self.groups
         if self.into_target:
             result["into_target"] = self.into_target
         if self.pointer_variable:

@@ -39,11 +39,14 @@ report: HostVarResolutionReport = HostVariableResolver().resolve(ast)   # .resol
 Resolves SQL host variables (`:var-name`) in EXEC SQL blocks against WORKING-STORAGE
 definitions.
 
-**Name matching is verbatim.** `_column_index` keys DCLGEN columns by their
-own upper-cased name, so `CUST_ID` and the host variable `CUST-ID` DCLGEN
-generates for it do *not* pair up here. `DclgenChecker` (below) does that
-normalization itself rather than changing this resolver's semantics under its
-other consumers.
+**Columns are keyed by their DCLGEN host-variable name.** `dclgen_name()`
+(`_` -> `-`, upper-cased) keys `_column_index` / `_column_table_map`, and a
+host variable is looked up the same way, so `:CUST-ID` gets `db2_column`
+`CUST_ID`, and a host variable with no DATA DIVISION item still resolves
+through its column. `get_column_index()` and `column_name_collisions` use
+that form too (`CUST-ID`, not `CUST_ID`). Matching them verbatim paired only
+the columns with no underscore in their name (#572). `DclgenChecker` imports
+the same function, so the two cannot drift apart.
 
 A DCLGEN member's `DECLARE TABLE` in WORKING-STORAGE carries a qualified
 `SCHEMA.TABLE` name, which `DeclareTableStatement` extracts, so both this
@@ -73,8 +76,8 @@ fix to the type mapping fixes the check too.
 
 **The name normalization is load-bearing.** DB2 columns are underscored
 (`CUST_ID`); the host variables DCLGEN generates are hyphenated (`CUST-ID`),
-because `_` is not a COBOL data-name character. `_normalize()` (`_` -> `-`,
-upper-cased) is applied to both sides via `_column_index()`. Without it the
+because `_` is not a COBOL data-name character. `_normalize()` (the
+resolver's `dclgen_name()`: `_` -> `-`, upper-cased) is applied to both sides via `_column_index()`. Without it the
 checker reports that no column matches *any* host variable — i.e. it checks
 nothing while looking like it had. That was the first bug found in
 development, and `test_an_underscored_column_is_matched_to_its_hyphenated_host_variable`
@@ -178,7 +181,12 @@ executable `EXEC SQL` written directly in a paragraph (also inside a
 PERFORMed one): it resets the SQLCA, so `DELETE` / `COMMIT` / `IF SQLCODE`
 reports the DELETE (one check is never credited to both). SQL inside an
 IF/EVALUATE body may not run and does not end the search; neither does a
-declaration or `WHENEVER`.
+declaration or `WHENEVER`. The search follows every PERFORM (transitively)
+and an unconditional single-target `GO TO` written directly in the paragraph
+(`_go_to_block_indexes`): control never comes back, so the target paragraph
+or section's check is this statement's check, and nothing after the GO TO in
+the paragraph is looked at (#557). A conditional `GO TO` and `GO TO ...
+DEPENDING ON` are not followed.
 
 `DECLARE GLOBAL TEMPORARY TABLE` is executable and is graded;
 DECLARE CURSOR / TABLE / STATEMENT / VARIABLE are not
@@ -206,6 +214,15 @@ calls: list[IMSDLICall] = IMSSegmentAnalyzer().analyze(ast)
 Analyses IMS DL/I calls -- `CALL 'CBLTDLI'/'AIBTDLI'/'CEETDLI'` and `EXEC
 DLI` (GU/GN/GNP/ISRT/DLET/REPL, ...) -- resolving each call's SSAs to segment
 names.
+
+**Function code.** A function-code variable resolves to every value its VALUE
+clause and MOVEs give it, joined by the "/" convention (`CHNG/GU/ROLB`); only
+values that cannot be a function code -- blank, or a figurative such as
+`VALUE SPACES` -- are dropped. An unquoted literal is recognised against
+`IBMEnterpriseCobol.IMS_COMMANDS`, the one DL/I call-code list. Keeping only
+candidates in a (then incomplete) local list reported `GU` at every call of a
+variable also set to `CHNG` / `ROLB` (#595). The candidates are the union over
+the whole program, not per call site.
 
 **Optional parmcount.** `CALL 'CBLTDLI' USING parmcount, function, pcb, ...`
 (also AIBTDLI; CEETDLI takes none): a first operand that is a numeric literal
@@ -264,7 +281,13 @@ DISABLED'` names no function `KEYS`). `FUNCTION` must be its own word (no name
 character before it, so `WS-FUNCTIONAL` / `DLI-FUNCTIONS` are data names), and
 the no-blank form (`FUNCTIONLENGTH`) is accepted only for a known intrinsic.
 IF / PERFORM UNTIL conditions (their operands live on the condition tree) and
-STRING's split `"FUNCTION"`, `"UPPER-CASE ( X )"` operands are scanned too.
+STRING's split `"FUNCTION"`, `"UPPER-CASE ( X )"` operands are scanned too,
+and so are EVALUATE WHEN selectors (`text`, `value`, range `start`/`end`; a
+quoted selector literal is skipped by its `quoted` flag), SEARCH WHEN
+`condition` text (in both, a literal embedded in the text, `A = 'FUNCTION
+LENGTH(B)'`, is blanked out first: the text keeps its quotes), and every
+INSPECT TALLYING / REPLACING / CONVERTING operand and BEFORE / AFTER delimiter (#506,
+`tests/regression/test_language_env_when_inspect_functions_issue_506.py`).
 Pinned by
 `tests/regression/test_audit_2026_08_16_analyzers.py::TestA3FunctionInsideLiteralIsProse`
 and `TestIntrinsicReferenceBoundaries` in
@@ -297,8 +320,19 @@ catalog_to_dict()                         # the le-info JSON; CATALOG_VERSION "1
 
 Also public: `LEServiceSignature`, `IntrinsicSignature`, `IntrinsicArgument`,
 and `LE_DATA_TYPES` (type id -> `LEDataType`). As of 2026-10-15 the catalogue
-holds 33 service signatures (`services_without_signature()` lists 29 more
-recognised services) and 81 intrinsic signatures.
+holds 33 service signatures (`services_without_signature()` lists 44 more
+recognised services since #529) and 81 intrinsic signatures.
+
+**The recognised-service list is SA38-0683's.** `IBM_LE_SERVICE_CATEGORIES`
+(name -> category) is the source of truth and `IBM_LE_CALLABLE_SERVICES` is
+its key set; categories are `datetime` / `storage` / `condition` / `runtime` /
+`environment` / `locale` / `math` / `ims`. Rebuilt from the reference's
+service list in #529: it had missed CEERAN0 / CEEDCOD / CEENCOD / CEE3INF /
+CEEMGET / CEE3DLY / ... (reported `is_known_service: false`) and carried 24
+names that are not LE services (CEEDUMP for CEE3DMP, CEEABND for CEE3ABD,
+CEETIME, CEESG, ...), so a typo read as valid. The CEESxyyy math services are
+not listed. Pinned against a checked-in copy in
+`tests/regression/test_le_callable_services_issue_529.py`.
 
 **Coverage is partial and says so.** `services_without_signature()` lists the
 LE services `IBM_LE_CALLABLE_SERVICES` recognises but this module cannot

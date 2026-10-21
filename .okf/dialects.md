@@ -24,7 +24,10 @@ Two modules:
 * `ibm_enterprise.py` -- `IBMEnterpriseCobol`: class-level word tables
   (`IBM_RESERVED_WORDS`, `IBM_INTRINSIC_FUNCTIONS`, `CICS_COMMANDS`,
   `IMS_COMMANDS`, `IBM_LE_CALLABLE_SERVICES`, `IBM_LE_SERVICE_CATEGORIES`,
-  `IBM_LE_SERVICE_INFO`) plus lookups and light validation. The analyzers read
+  `IBM_LE_SERVICE_INFO`) plus lookups and light validation.
+  `IBM_LE_CALLABLE_SERVICES` is the key set of `IBM_LE_SERVICE_CATEGORIES`,
+  rebuilt from the LE Programming Reference in #529 (see
+  [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md)). The analyzers read
   the tables directly (`analysis/xref.py`, `analysis/language_env_analyzer.py`).
   `cobolparser.dialects` exports only `IBMEnterpriseCobol` (also re-exported
   from `cobolparser`).
@@ -65,6 +68,11 @@ so it returns `None` for a recognised service with neither.
 [EXEC SQL model](#exec-sql-model-modelssql_statementspy) section describes
 the parser's SQL model.
 
+`IBMDataItem.calculate_storage_size()` (the `storage_size` key of its
+`to_dict()`) is `calculate_size()`, i.e. `cobolparser/_storage.py`. It once
+kept its own copy of the rules, which sized even-digit COMP-3 one byte short
+(`(digits + 1) // 2`) and COMP-1 / COMP-2 / POINTER as 0 (#589).
+
 ## Command sets and COMP-3 validation
 
 * `validate_data_item` accepts any plain numeric PICTURE for COMP-3 --
@@ -74,15 +82,26 @@ the parser's SQL model.
 * `CICS_COMMANDS` also holds READQ/WRITEQ/DELETEQ, SYNCPOINT, ENQ/DEQ,
   WAIT/POST/SIGNAL, ASSIGN/INQUIRE/ADDRESS/DUMP/QUERY, WEB, INVOKE,
   SPOOLOPEN; `NOHANDLE` is an option, not a command, and is not in it.
-* `IMS_COMMANDS` is DL/I call codes only, including the hold forms
-  GHU/GHN/GHNP, SYNC/ROLB/ROLL/ROLS/SETS/SETU, CHNG/CMD/GCMD, INQY/LOG/STAT;
-  ENQUEUE/DEQUEUE/XDLT/XRPL (not DL/I calls) are not in it. `ROLLB` is kept
-  for compatibility. The dialect's own `ExecIMSStatement.ims_call_type`
-  reads this set. The parser's `ExecImsStatement` does **not**: it classifies
-  against `ibm_exec_statements._IMS_CALL_TYPES` (GU/GN/GNP/ISRT/REPL/DLET/
-  CHKP/ROLLB/TERM/XRST/XDLT), so e.g. `GHU` parses as `UNKNOWN` there.
+* `IMS_COMMANDS` (a frozenset) is the one list of DL/I **call** function
+  codes -- the first operand of `CALL 'CBLTDLI'/'AIBTDLI'/'CEETDLI'`:
+  database calls with their hold forms (GHU/GHN/GHNP, FLD, POS), message calls
+  (CHNG/CMD/GCMD/PURG/AUTH/SETO) and system services (CHKP/XRST/SYNC/ROLB/ROLL/
+  ROLS/SETS/SETU, APSB/DPSB/PCB/TERM, INIT/INQY/LOG/STAT/ICAL/...).
+  ENQUEUE/DEQUEUE/XDLT/XRPL and `ROLLB` are not DL/I calls and are not in it
+  (#481). `is_ims_command()` and `IMSSegmentAnalyzer._IMS_FUNCTION_CODES`
+  read this set (#595).
+* `EXEC_DLI_COMMANDS` is the command-level (`EXEC DLI`) vocabulary, which
+  both EXEC nodes read: the parser's `ExecImsStatement.ims_call_type`
+  (`ibm_exec_statements._IMS_CALL_TYPES` is this set) and the dialect's own
+  `ExecIMSStatement.ims_call_type`, so the two agree (#481; the dialect node
+  used to read the CALL codes and called `GHU` known, `LOAD` unknown). It differs from the call codes: no hold forms
+  (holds are implicit) and no message calls, but LOAD/SCHD/SYMCHKP/QUERY/
+  REFRESH/RETRIEVE/ACCEPT. So `EXEC DLI GHU` is `UNKNOWN`. Only the
+  abbreviated command word is listed; the spelled-out `GET UNIQUE` /
+  `SCHEDULE` forms are not (#481).
 
-Pinned by `tests/unit/test_issue_341_dialect_crud.py` (see #341).
+Pinned by `tests/unit/test_issue_341_dialect_crud.py` (see #341) and
+`tests/regression/test_dli_function_codes_issue_481_595.py`.
 
 ## EXEC SQL text: literals and `--` comments (`parsers/statements/_utils.py`)
 

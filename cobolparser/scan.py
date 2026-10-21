@@ -367,8 +367,35 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
             from .analysis.lint import stamp_report_origins
 
             stamp_report_origins(unit_scan.reports, source_map)
+            _stamp_body_origins(unit_scan.reports.get("redundancy"), source_map)
         scan.units.append(unit_scan)
     return scan
+
+
+def _stamp_body_origins(
+    redundancy: Any, source_map: dict[int, tuple[str, int]]
+) -> None:
+    """Give each paragraph fingerprint whose whole body comes from one file a
+    ``body_origin``: that file and the line its first statement is on there.
+
+    Every expanded line of the body's span must map to the same file, so a
+    body that mixes a copybook with the program's own statements gets none
+    (those statements are the program's text, duplicated or not). The
+    header's ``origin`` cannot answer this: a program that writes the header
+    itself and copies in only the body has its own header line there (#470).
+    """
+    if not isinstance(redundancy, dict):
+        return
+    for entry in redundancy.get("paragraph_fingerprints", []):
+        span = entry.get("body_lines")
+        if not isinstance(span, list) or len(span) != 2:
+            continue
+        first, last = int(span[0]), int(span[1])
+        origins = [source_map.get(line) for line in range(first, last + 1)]
+        start = origins[0]
+        if start is None or any(o is None or o[0] != start[0] for o in origins):
+            continue
+        entry["body_origin"] = {"file": start[0], "line": start[1]}
 
 
 def _parse(
@@ -531,6 +558,11 @@ class CrossFileCloneMember:
     #: (``line`` then counts lines of the expanded text); ``None`` otherwise.
     origin_file: str | None = None
     origin_line: int | None = None
+    #: Where the paragraph's statements really are, when every one of them
+    #: comes from one file (``body_origin`` on the fingerprint); ``None``
+    #: otherwise or without expansion.
+    body_origin_file: str | None = None
+    body_origin_line: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -550,7 +582,12 @@ class CrossFileCloneMember:
         The copybook position when the paragraph was expanded from one, else
         its own position in the scanned file. Two members with the same key
         are one piece of source included twice, not two copies of it (#352).
+        The body's position wins over the header's: a program that writes
+        the header and copies in only the statements shares them all the
+        same (#470).
         """
+        if self.body_origin_file is not None and self.body_origin_line is not None:
+            return (self.body_origin_file, int(self.body_origin_line))
         if self.origin_file is not None and self.origin_line is not None:
             return (self.origin_file, int(self.origin_line))
         return (self.path, self.line)
@@ -635,6 +672,7 @@ def cross_file_clone_groups(
                 continue
             for entry in redundancy.get("paragraph_fingerprints", []):
                 origin = entry.get("origin") or {}
+                body_origin = entry.get("body_origin") or {}
                 member = CrossFileCloneMember(
                     path=file_scan.path,
                     program_name=unit.program_name,
@@ -642,6 +680,8 @@ def cross_file_clone_groups(
                     line=int((entry.get("location") or {}).get("line", 0)),
                     origin_file=origin.get("file"),
                     origin_line=origin.get("line"),
+                    body_origin_file=body_origin.get("file"),
+                    body_origin_line=body_origin.get("line"),
                 )
                 sizes.setdefault(
                     entry.get("type1", ""), int(entry.get("statement_count", 0))

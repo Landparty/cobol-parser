@@ -99,7 +99,8 @@ occurrence. Its bytes are every occurrence's (`_placements`: one range per
 occurrence, or a single spanning range past `_PLACEMENT_CAP` = 1024), so a
 group MOVE / READ / WRITE / CALL maps each occurrence where it really lies,
 and every edge through a table field is **inexact** -- never a wrong exact
-field. A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
+field. That includes EXEC SQL host-variable edges (`_visit_sql`, #507: a
+multi-row FETCH writes every occurrence). A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
 OCCURS level, within bounds) on an elementary field gets its own item node
 `R.AMT(3)` at the occurrence's offset, joined both ways to `R.AMT` by
 inexact `occurrence` edges, and an exact edge to its own bytes on every port
@@ -191,6 +192,9 @@ field one match reaches is a hit even when it is another match -- one
 multi-source trace never reported a start. `impact()` adds the caveat
 `PROG: AMT matches N fields: ...; qualify with OF to trace one`, also
 listed in `ImpactResult.ambiguous` (#540) -- on the no-flow path too.
+The start name is split by `_names.split_qualified_name`, so `IN` works
+wherever `OF` does (`field-impact "AMT IN IN-REC"`, #541; `FieldFlowAnalyzer`
+`_resolve` shares it).
 `ImpactResult.to_text()` lists every hit `to_dict()` does: items and ports
 (prefixed `port `) under their program, tables and datasets on their own
 lines (#528: ports were dropped, so a DISPLAY-only field read as feeding

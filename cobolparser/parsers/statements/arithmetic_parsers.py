@@ -61,6 +61,8 @@ class _BinaryArithmeticNode(Protocol):
     without giving up the concrete return type each parser exposes.
     """
 
+    source_operands: list[str] | None
+
     def add_operand(self, value: str) -> None: ...
 
     def set_target(self, value: str) -> None: ...
@@ -318,6 +320,7 @@ def _parse_binary_arithmetic(
 
     separators = (separator,) if isinstance(separator, str) else separator
 
+    second_operand: str | None = None
     first_operand = _consume_arithmetic_operand(token_stream)
     if first_operand is not None:
         stmt.add_operand(first_operand)
@@ -354,6 +357,14 @@ def _parse_binary_arithmetic(
     giving = consume_keyword_and_operand(token_stream, "GIVING")
     if giving:
         stmt.set_giving(giving)
+        if first_operand is not None and second_operand is not None:
+            # Format 2: both operands are sending items. Recorded verbatim
+            # because ``operands`` dedupes: ``MULTIPLY A BY B GIVING B``
+            # leaves ``[A, B]`` there, indistinguishable from a missing
+            # operand once the GIVING name is filtered out (#495). Format 1
+            # leaves it ``None``: its BY/INTO operand is a receiver, which
+            # ``source_operands`` (ADD/SUBTRACT's sending items) never holds.
+            stmt.source_operands = [first_operand, second_operand]
     elif second_operand is not None:
         # Format 1 (no GIVING): MULTIPLY/DIVIDE overwrite the second operand
         # in place, so -- unlike format 2, where it's just a multiplicand/

@@ -30,6 +30,7 @@ its origin really is a comment line, so it can never rewrite code.
 import pytest
 
 from cobolparser.analysis.lint import (
+    LintAnalyzer,
     LintFinding,
     LintReport,
     apply_source_map,
@@ -460,3 +461,131 @@ class TestPreserveComments:
         assert "* COPY GHOST." in result.expanded_source
         assert "GHOST-REC" not in result.expanded_source
         assert result.included_copybooks == []
+
+    @pytest.mark.parametrize("eol", ["\r", "\r\n"], ids=["cr-only", "crlf"])
+    def test_a_cr_or_crlf_copybook_restores_each_comment_once(self, tmp_path, eol):
+        # #581: the comment read-back split files on "\n" only, while the
+        # source map counts lines with split_source_lines. A CR-only member
+        # came back as ONE line and was pasted whole in place of its first
+        # comment (its record listed twice); a CRLF member left a "\r" on
+        # every restored comment.
+        (tmp_path / "CB.cpy").write_bytes(
+            eol.join(
+                [
+                    _pad("* COPYBOOK COMMENT"),
+                    _pad(" 01  CB-REC."),
+                    _pad("     05  CB-A PIC X."),
+                    "",
+                ]
+            ).encode("ascii")
+        )
+        source = "\n".join(
+            [
+                _pad(" IDENTIFICATION DIVISION."),
+                _pad(" PROGRAM-ID. CRPROG."),
+                _pad(" DATA DIVISION."),
+                _pad(" WORKING-STORAGE SECTION."),
+                _pad(" COPY CB."),
+                _pad(" PROCEDURE DIVISION."),
+                _pad("     GOBACK."),
+            ]
+        )
+        result = expand_copybooks(source, [str(tmp_path)], preserve_comments=True)
+
+        assert result.expanded_source.count("* COPYBOOK COMMENT") == 1
+        assert result.expanded_source.count("CB-REC") == 1
+        assert "\r" not in result.expanded_source
+
+    def test_a_cr_only_program_restores_its_own_comments(self, tmp_path):
+        (tmp_path / "CB.cpy").write_text(_pad(" 01  CB-REC PIC X.") + "\n")
+        source = "\r".join(
+            [
+                _pad(" IDENTIFICATION DIVISION."),
+                _pad(" PROGRAM-ID. CRMAIN."),
+                _pad("* MAIN COMMENT"),
+                _pad(" DATA DIVISION."),
+                _pad(" WORKING-STORAGE SECTION."),
+                _pad(" COPY CB."),
+                _pad(" PROCEDURE DIVISION."),
+                _pad("     GOBACK."),
+            ]
+        )
+        result = expand_copybooks(source, [str(tmp_path)], preserve_comments=True)
+
+        assert result.expanded_source.count("* MAIN COMMENT") == 1
+        assert result.expanded_source.count("PROGRAM-ID") == 1
+        assert "\r" not in result.expanded_source
+
+
+class TestTextAfterCopyOnItsLine:
+    """#355: text after a COPY's period was appended to the copybook's last
+    line and inherited its origin, so lint blamed the member for a parent
+    item. It now gets a physical line of its own, credited to the parent."""
+
+    AREC = "\n".join([_pad(" 05 A-ONE PIC X."), _pad(" 05 A-TWO PIC X.")])
+    SOURCE = "\n".join(
+        [
+            _pad(" IDENTIFICATION DIVISION."),
+            _pad(" PROGRAM-ID. M."),
+            _pad(" DATA DIVISION."),
+            _pad(" WORKING-STORAGE SECTION."),
+            _pad(" 01 REC."),
+            _pad("     COPY AREC"),
+            _pad("         REPLACING A-ONE BY Z-ONE. 05 TAIL-X PIC X."),
+            _pad(" PROCEDURE DIVISION."),
+            _pad("     DISPLAY Z-ONE."),
+            _pad("     GOBACK."),
+        ]
+    )
+
+    def _expand(self, tmp_path):
+        (tmp_path / "AREC.cpy").write_text(self.AREC + "\n")
+        return expand_copybooks(
+            self.SOURCE,
+            [str(tmp_path)],
+            preserve_source_locations=True,
+            source_file="M.cbl",
+        )
+
+    def test_tail_is_on_its_own_line_mapped_to_the_parent(self, tmp_path):
+        result = self._expand(tmp_path)
+        lines = result.expanded_source.split("\n")
+        origins = _origins(result)
+        cpy = str(tmp_path / "AREC.cpy")
+
+        two = next(i for i, line in enumerate(lines) if "A-TWO" in line)
+        tail = next(i for i, line in enumerate(lines) if "TAIL-X" in line)
+        assert "TAIL-X" not in lines[two]
+        assert origins[two] == (cpy, 2)
+        assert origins[tail] == ("M.cbl", 7)
+        # The tail keeps the columns it has on disk.
+        original = self.SOURCE.split("\n")[6]
+        assert lines[tail].index("05 TAIL-X") == original.index("05 TAIL-X")
+
+    def test_lines_below_keep_their_origin(self, tmp_path):
+        result = self._expand(tmp_path)
+        lines = result.expanded_source.split("\n")
+        origins = _origins(result)
+
+        goback = next(i for i, line in enumerate(lines) if "GOBACK" in line)
+        assert origins[goback] == ("M.cbl", 10)
+
+    def test_lint_locates_the_tail_item_in_the_parent(self, tmp_path):
+        (tmp_path / "AREC.cpy").write_text(self.AREC + "\n")
+        parsed = parse_cobol_with_expansion(
+            self.SOURCE, "M.cbl", copybook_paths=[str(tmp_path)]
+        )
+        report = apply_source_map(
+            LintAnalyzer(["unused-variables"]).analyze(parsed.ast),
+            parsed.expansion_source_map,
+        )
+
+        tail = next(f for f in report.findings if f.symbol == "TAIL-X")
+        assert (tail.origin_file, tail.origin_line) == ("M.cbl", 7)
+
+    def test_a_copy_alone_on_its_line_adds_no_line(self, tmp_path):
+        (tmp_path / "AREC.cpy").write_text(self.AREC + "\n")
+        source = self.SOURCE.replace(" 05 TAIL-X PIC X.", "")
+        result = expand_copybooks(source, [str(tmp_path)])
+
+        assert len(result.expanded_source.split("\n")) == 10

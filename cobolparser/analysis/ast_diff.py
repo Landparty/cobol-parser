@@ -119,6 +119,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -147,10 +148,11 @@ from ..models.statements.data import (
     DisplayStatement,
     InspectStatement,
     MoveStatement,
+    StringStatement,
     UnstringStatement,
 )
 from ..models.statements.io import IOAcceptStatement, IOOpenStatement
-from ..models.statements.misc import SelectStatement
+from ..models.statements.misc import CancelStatement, SelectStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 from .program_flow.condition_text import render_condition_text
 from .program_flow.statement_text import summarize_statement
@@ -570,6 +572,15 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
             stmt.converting_before or "",
             stmt.converting_after or "",
         )
+    if isinstance(stmt, StringStatement):
+        return (
+            kind,
+            # Which delimiter applies to which source (#576): moving B from
+            # ``DELIMITED BY SIZE`` to ``DELIMITED BY D1`` truncates it.
+            _json_key(stmt.groups),
+            stmt.into_target or "",
+            stmt.pointer_variable or "",
+        )
     if isinstance(stmt, UnstringStatement):
         return (
             kind,
@@ -684,6 +695,26 @@ def _statement_text(stmt: Any) -> str:
         # static -> dynamic change would then read identically on both sides.
         text = (
             f"CALL '{stmt.called_program}'" + text[len(f"CALL {stmt.called_program}") :]
+        )
+    elif isinstance(stmt, StringStatement) and stmt.groups:
+        # The flowchart lists the sources only; a source moving between
+        # delimiter groups would then read identically on both sides (#576).
+        parts = ["STRING"]
+        for group in stmt.groups:
+            parts.extend(str(source) for source in group["sources"])
+            if group["delimiter"] is not None:
+                parts.append(f"DELIMITED BY {group['delimiter']}")
+        if stmt.into_target:
+            parts.append(f"INTO {stmt.into_target}")
+        text = " ".join(parts)
+    elif isinstance(stmt, CancelStatement) and stmt.program_names:
+        # The flowchart renders CANCEL 'X' and CANCEL X alike; a literal ->
+        # data-name change would then read identically on both sides (#479).
+        text = "CANCEL " + " ".join(
+            f"'{name}'" if literal else name
+            for name, literal in zip(
+                stmt.program_names, stmt.program_names_literal, strict=False
+            )
         )
     elif isinstance(stmt, UnstringStatement) and text == "UNSTRING":
         # The flowchart collapses UNSTRING to its verb.
@@ -1355,6 +1386,11 @@ class ProgramDiffer:
                 # are one storage format, not a change.
                 if _canonical_usage(old_value) == _canonical_usage(new_value):
                     continue
+            elif attr == "value_clause":
+                # `ZERO`/`ZEROES`, `7`/`007`, `+5`/`5.0` are one initial
+                # value (#543); the change still shows the text as coded.
+                if _canonical_value(old_value) == _canonical_value(new_value):
+                    continue
             elif _normalize(old_value) == _normalize(new_value):
                 continue
             record(kind, label, old_value, new_value)
@@ -1723,6 +1759,14 @@ class ProgramDiffer:
         old_sequence = [pair[0].name for pair in by_old]
         new_sequence = [pair[0].name for pair in by_new]
 
+        # A paragraph whose section was renamed has not moved: compare its
+        # parent through the section match, not by name (#311).
+        section_names = {
+            old_proc.name: new_proc.name
+            for old_proc, new_proc, _ in pairs
+            if old_proc.kind == "section"
+        }
+
         stable: set[str] = set()
         matcher = SequenceMatcher(None, old_sequence, new_sequence, autojunk=False)
         for block in matcher.get_matching_blocks():
@@ -1731,7 +1775,12 @@ class ProgramDiffer:
 
         for old_proc, new_proc, _ in sorted(pairs, key=lambda pair: pair[1].index):
             reordered = old_proc.name not in stable
-            reparented = old_proc.parent != new_proc.parent
+            old_parent = (
+                section_names.get(old_proc.parent, old_proc.parent)
+                if old_proc.parent is not None
+                else None
+            )
+            reparented = old_parent != new_proc.parent
             if not reordered and not reparented:
                 continue
             old_where = _position_text(old_proc)
@@ -1944,6 +1993,60 @@ def _picture_positions(picture: str) -> str:
     spellings of the same picture (`X(2)` / `XX`, `S9(3)V9(2)` / `S999V99`)
     compare equal."""
     return "".join(PictureClause._expand_symbols(picture))
+
+
+#: Singular and plural spellings of each figurative constant (#543).
+_FIGURATIVE_CANONICAL: dict[str, str] = {
+    "ZERO": "ZERO",
+    "ZEROS": "ZERO",
+    "ZEROES": "ZERO",
+    "SPACE": "SPACE",
+    "SPACES": "SPACE",
+    "HIGH-VALUE": "HIGH-VALUE",
+    "HIGH-VALUES": "HIGH-VALUE",
+    "LOW-VALUE": "LOW-VALUE",
+    "LOW-VALUES": "LOW-VALUE",
+    "QUOTE": "QUOTE",
+    "QUOTES": "QUOTE",
+    "NULL": "NULL",
+    "NULLS": "NULL",
+}
+
+_NUMERIC_LITERAL_RE = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)")
+#: A quoted literal with its optional type prefix (``X``, ``N``, ``NX``, ...).
+_PREFIXED_LITERAL_RE = re.compile(r"([A-Za-z]{0,2})['\"]")
+
+
+def _canonical_value(value: Any) -> Any:
+    """A VALUE clause in a form where equal initial values compare equal.
+
+    Figurative constants fold singular/plural (keeping a leading ``ALL``),
+    and a numeric literal becomes a ``Decimal`` (``007`` == ``7``, ``+5`` ==
+    ``5.0``). A quoted literal keeps its case -- ``'ab'`` and ``'AB'`` are
+    different values -- while everything else compares case-insensitively.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if _NUMERIC_LITERAL_RE.fullmatch(text):
+        try:
+            return Decimal(text)
+        except InvalidOperation:  # pragma: no cover - the regex admits none
+            return text
+    prefix = ""
+    words = text.split(None, 1)
+    if len(words) == 2 and words[0].upper() == "ALL":
+        prefix, text = "ALL ", words[1].strip()
+    literal = _PREFIXED_LITERAL_RE.match(text)
+    if literal:
+        kind = literal.group(1).upper()
+        body = text[literal.end(1) :]
+        # Hex digits are case-insensitive; text content is not.
+        if kind in ("X", "NX", "BX", "GX", "UX"):
+            body = body.upper()
+        return prefix + kind + body
+    upper = text.upper()
+    return prefix + _FIGURATIVE_CANONICAL.get(upper, upper)
 
 
 def _canonical_usage(usage: Any) -> str:

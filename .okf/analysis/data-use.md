@@ -69,6 +69,19 @@ WS-PROG` must find values MOVEd to `WS-PROG OF GRP-1`). Any new analyzer
 keying data items by bare name needs it too. Pinned by
 `tests/regression/test_folded_reference_analyzers.py`.
 
+### CICS translator functions: `_names.strip_translator_arguments`
+
+The argument of `DFHRESP(cond)` / `DFHVALUE(cvda)` is a CICS condition or
+CVDA name (`NORMAL`, `NOTFND`, `ACQUIRED`), not a data name; the translator
+replaces the whole call with a fullword binary constant.
+`strip_translator_arguments` drops the argument (keeping the function word,
+a special register) and runs first in `_extract_identifiers` and xref's
+`_split_operand`, so unused-variables, xref and business-rules never credit a
+same-named item (a flag called `NOTFND`) or list a condition as undefined.
+`is_translator_function` lets `MoveTypeChecker._resolve_category` classify
+such a MOVE source as NUMERIC. Pinned by
+`tests/regression/test_issue_594_dfhresp_arguments.py` (#594).
+
 ### Identifier tokens: `_names.IDENTIFIER_TOKEN_RE`
 
 `IDENTIFIER_TOKEN_RE` accepts a digit-led user word (`1ST-NAME`, IBM-legal as
@@ -272,12 +285,28 @@ unused item in that set from `report.unused_items` (tallied instead in
 `report.skipped_copybook_count`); the flag is a documented no-op when
 `copybook_item_names` is None.
 
+**SCREEN SECTION bindings are references** (#501). The parser keeps each
+screen field's `USING` / `FROM` / `TO` operand
+(`unused_variables.screen_section_references(data_div)`), so an item a
+screen displays or accepts is used. xref records them at their line --
+`FROM` `read`, `TO` `write`, `USING` both, a subscript `subscript`, a
+`LINE` / `COLUMN` / colour value `reference`, statement `"SCREEN SECTION"` --
+and declares each named screen entry as kind `screen-item`, so `DISPLAY
+MAIN-SCREEN` resolves. Pinned by
+`tests/regression/test_issue_501_screen_section_references.py`.
+
 **SCREEN / REPORT / COMMUNICATION SECTION items are out of scope.**
 `collect_declared_items` reads only FILE / WORKING-STORAGE / LOCAL-STORAGE /
 LINKAGE (`_DATA_SECTION_NAMES`). The DATA DIVISION parser skips SCREEN and
 COMMUNICATION SECTION content (`_skip_section`) and parses REPORT SECTION RDs
 and report groups into a `REPORT` section, which this analyzer ignores, so
-report-group items are never reported unused.
+report-group items are never reported unused. The fields a report group
+names (`SOURCE`, `SUM`, the RD's `CONTROL(S)`) *are* references:
+`UnusedVariableAnalyzer.report_entry_operands(data_div)` lists each entry
+with its operand texts, and both this analyzer and xref read it (xref records
+each at its entry with statement `"REPORT SECTION"`, #571). The RD is no node
+-- the parser copies its clauses onto every 01 group it owns -- so its
+CONTROLS are taken once per report, at the first group.
 
 **Known limitations are tagged inline.** Each limitation called out in the
 class docstring carries a `TODO(known limitation)` comment so a `grep` sweep
@@ -296,6 +325,11 @@ an analysis -> parsers import) extracts identifiers from them. Both classes
 are `CobolStatement`s, so the per-statement loop also visits them and the
 sweep is a harmless set union -- a new analyzer does not need to reproduce it.
 See `TestExecCicsAndImsArguments` in `test_unused_variables.py`.
+The CICS sweeps here, in xref and in `LinkageChecker` read options through
+`_cics.cics_identifier_options()`, which drops every option the parser put in
+`literal_options`: the quotes are stripped from `options`, so
+`FILE('CUSTFIL')` would otherwise reference a data item named `CUSTFIL`
+(#588, `tests/regression/test_issue_588_cics_literal_options.py`).
 
 **CICS translator items.** The `DFHEIBLK` subtree is marked used and the
 `DFHCOMMAREA` 01 is used (its fields stay assessed): the translator declares
@@ -361,6 +395,9 @@ read/write role; `program_signature.py` grades LINKAGE directions and
   as `write`; the `ALLOCATE n CHARACTERS` size is `read`; every `FREE p`
   pointer is `write` (set to NULL). Pinned by
   `tests/regression/test_issue_570_allocate_based_linkage.py`.
+* **CONTINUE AFTER n SECONDS** (#578). The delay's operands are `read`
+  (from `ContinueStatement.delay_expression_tree`, or the text inexactly);
+  `UnusedVariableAnalyzer` reads `delay_expression` via `_STR_ATTR_EXTRAS`.
 * **Reference modifiers.** A reference modifier's offset/length names are kept
   apart from the operand (`_split_operand`) and recorded `read` when the
   operand itself is a `write`: `MOVE A TO WS-B (WS-P:2)` does not write WS-P.
@@ -382,6 +419,7 @@ from cobolparser.analysis.xref import XrefAnalyzer
 report = XrefAnalyzer().analyze(ast)          # XrefReport
 report.entries                # list[XrefEntry], data items first (_KIND_ORDER)
 report.entry_for("WS-COUNT")  # XrefEntry | None, case-insensitive
+report.entries_named("AMT IN OUT-REC")  # every entry the name can mean
 report.entries_of_kind("paragraph")
 report.total_references
 report.undefined              # referenced, never declared
@@ -391,12 +429,19 @@ report.duplicate_declarations # declared more than once in one namespace
 
 `XrefEntry`: `name`, `kind`, `definition` (`SourceLocation | None`),
 `references`, `level`, `section`, `qualified_name` (set only for a name
-declared in more than one record, issue #258), plus `reference_count` / `is_referenced`.
+declared in more than one record, issue #258), `ancestors` (enclosing item
+names innermost first; not serialized), plus `reference_count` / `is_referenced`.
+`entries_named()` / `entry_for()` resolve a qualified name as the compiler
+does (#541): bare name first, then each qualifier must be an enclosing item,
+in order, intermediate levels skippable, `IN` = `OF`, a unique name needs no
+qualifier to be found qualified. They never compare `qualified_name` text.
 `XrefReference`: `location`, `role`, `statement`, `context` (the enclosing
 paragraph).
 
 **Kinds** (`KIND_*`): `data-item`, `condition-name`, `paragraph`, `section`,
-`file`.
+`file`, `screen-item` (a named SCREEN SECTION entry, #501), and the
+SPECIAL-NAMES kinds `mnemonic-name`, `class-name`, `alphabet-name`,
+`symbolic-character` (#519).
 
 **Roles** (`ROLE_*`): `write`, `read`, `condition`, `subscript`, `perform`,
 `goto`, `call-argument`, `host-variable`, `file-operation`, and `reference`
@@ -432,12 +477,34 @@ Things worth knowing before trusting a field:
   name still wins. Before, they read as `undefined` in `xref`, as
   `declared: false` / `found: false` in MCP `explain_symbol`, and as "not
   declared ... not traced" in the `lineage` caveats.
+* **SELECT clause items are references at the SELECT** (#549, #556).
+  `_visit_select_clauses` records FILE STATUS (both items), RECORD KEY (and
+  its `SOURCE IS`), each ALTERNATE RECORD KEY and its PASSWORD, RELATIVE
+  KEY, PASSWORD, ASSIGN USING and PADDING CHARACTER items with role
+  `reference`, the same set `UnusedVariableAnalyzer._file_control_references`
+  counts as used (a literal `PADDING CHARACTER IS '*'` names nothing). The
+  roles a READ / START gives the keys are unchanged. Pinned by
+  `tests/regression/test_issue_549_556_select_clause_references.py`.
+* **SPECIAL-NAMES are declared** (#519). `_collect_special_names` reads the
+  CONFIGURATION SECTION's `special_names` metadata: each mnemonic name
+  (`C01 IS TOP-PAGE`), CLASS, ALPHABET and SYMBOLIC CHARACTERS name gets its
+  own kind, and an UPSI switch's ON/OFF STATUS names are `condition-name`s.
+  They live in the data namespace (a DATA DIVISION item of the same name
+  wins). The metadata has no line per entry, so each is declared at the
+  CONFIGURATION SECTION's location. A class test `X IS [NOT] HEX-CHARS` keeps
+  the class-name in the operator, which the operand walk skips (#539);
+  `_class_test_names` credits it, only when it names a declared class. Pinned
+  by `tests/regression/test_issue_519_xref_special_names.py`.
 * **Digit-led paragraph names resolve.** Procedure names (PERFORM / GO TO
   targets) are credited verbatim and `_COBOL_WORD_RE` allows a leading digit
   provided there is at least one letter, so `1000-INIT` is one symbol rather
   than a number and a word.
 * **`undefined` excludes special registers.** `_SPECIAL_REGISTERS`
-  (RETURN-CODE, SQLCODE, SQLCA, `EIB*`, `DFH*`, `XML-*`/`JSON-*`, TALLY, …)
+  (RETURN-CODE, SQLCODE, SQLCA, `EIB*`, the EXEC DLI `DIB*` fields --
+  `DIBSTAT`, `DIBSEGM`, ... (#311), kept apart as `_DLI_INTERFACE_BLOCK`
+  because business-rules does not count them technical --, `DFH*`,
+  `XML-*`/`JSON-*`, TALLY, JNIENVPTR, the Report Writer PAGE-COUNTER /
+  LINE-COUNTER a `SOURCE` names, …)
   are never reported undefined; a caveat names the ones that were seen.
   `is_special_register(name)` is the public test (the MCP `explain_symbol`
   answers a not-found special register with it).
@@ -519,6 +586,17 @@ separately without the `--copybook-path` hint (the COPY was never missing); an
 unresolved *argument* is still an ordinary unresolved operand. Pinned by
 `test_move_type_checker.py::TestIntrinsicFunctionsWithArguments` /
 `TestNumericFunctionIntegerness` and `test_lint.py::TestCaveats`.
+
+**Special registers** (see #520). Their category is fixed by the language,
+and none is ever a DATA DIVISION item, so `_resolve_category` knows them by
+name after the catalog lookup (a declared item of the same name still wins):
+`_NUMERIC_SPECIAL_REGISTERS` (RETURN-CODE, TALLY, LINAGE-COUNTER,
+SORT-RETURN, SORT-CORE-SIZE, SORT-FILE-SIZE, SORT-MODE-SIZE, XML-CODE,
+JSON-CODE) are integer NUMERIC, `_ALPHANUMERIC_SPECIAL_REGISTERS`
+(WHEN-COMPILED, SORT-CONTROL, SORT-MESSAGE) ALPHANUMERIC, and any `LENGTH OF
+x` operand integer NUMERIC. Unknown, they went unchecked and counted in
+`unresolved_count`, so lint told a program with no COPY to fix its copybook
+path. Pinned by `tests/regression/test_move_special_registers_issue_520.py`.
 
 **Group receivers and `ZERO` → alphabetic.** A MOVE *into* a group item is a
 group move (bytes copied as alphanumeric) and legal from any sender, so group
@@ -614,6 +692,12 @@ ADDRESS OF x TO p` target (`SetStatement.targets_are_address_of`), every
 `ALLOCATE x` item (`AllocateStatement.data_item`, the same based-item idiom,
 #570) and any CICS option of the form `SET(ADDRESS OF x)` (`_ADDRESS_OF_RE`).
 
+**A REDEFINES group is referenced as one.** A level-01 LINKAGE item that
+REDEFINES another (directly or through a chain, `_linkage_redefines` /
+`_redefines_root`) shares its storage, so when any member of the group is
+referenced -- the USING base or an overlay of it -- none is reported
+`UNREFERENCED_LINKAGE` (#596).
+
 **Interface collection is O(units).** `LinkageChecker.collect_scope_interfaces(ast)`
 computes the interface map (and the passing-mode map above) once;
 `check(..., entry_interfaces=..., entry_parameter_modes=...)` accepts either or
@@ -633,7 +717,10 @@ Lists every input/output operation the program performs, one `IOOperation`
 each. Categories: `FILE-IO` (OPEN, CLOSE, READ, WRITE, REWRITE, DELETE,
 START, UNLOCK; file names resolved through `_files.py`), `CONSOLE-IO`
 (ACCEPT, DISPLAY), `SQL` (EXEC SQL), `CALL` and `ENTRY` (program linkage);
-`direction` is `INPUT` / `OUTPUT` / `BIDIRECTIONAL`.
+`direction` is `INPUT` / `OUTPUT` / `BIDIRECTIONAL`. `variables` for WRITE
+and REWRITE is the `FROM` item when there is one, else the record; for READ
+it is the `INTO` item, else every 01 record under the file's FD (they share
+the record area the READ fills; #573).
 
 ## IOSequenceAnalyzer
 

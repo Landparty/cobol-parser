@@ -53,6 +53,14 @@ anywhere is the ordinary case and is not an error.
 Paths inside the file are resolved **against the file's own directory**, not
 against your current directory, so `cobol-parser lint` run from `src/batch/`
 searches the same copybook libraries as one run from the project root.
+A leading `~` and `$VAR` / `${VAR}` are expanded first, the way your shell
+expands them in `--copybook-path ~/cpy`, so `~/copybooks` and
+`$SHOP_ROOT/copybooks` mean what they say (an unset variable is left as
+written). A `copybook_path` or `callee_path` entry that is not an existing
+directory is never dropped silently: `cobol-parser config` marks it
+`(not an existing directory)` (and `--json` lists it under
+`missing_directories`), and every command that uses that setting prints a
+one-line `warning:` naming it on stderr.
 
 Two flags override the search, and may appear on either side of the
 subcommand:

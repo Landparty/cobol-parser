@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..models.program import CobolProgram
-from ..models.statements.call import CallStatement
+from ..models.statements.call import CallStatement, EntryStatement
 from ._names import callee_names
 from .program_flow import ProgramFlowAnalyzer, ProgramFlowReport
 from .program_flow.edges import INTERNAL_EDGE_TYPES, PERFORM_EDGE_TYPES
@@ -486,6 +486,12 @@ class RecursionRiskAnalyzer:
                 enclosing.append(parent)
             parent = parent.parent
 
+        # Every name the program answers to: its PROGRAM-ID and each of its
+        # own ``ENTRY 'name'`` points. A CALL to an alternate entry re-enters
+        # the same load module just as a CALL to the PROGRAM-ID does (#515).
+        own_names = _names_answered_to(ast)
+        container_names = [(unit, _names_answered_to(unit)) for unit in enclosing]
+
         risks: list[RecursionRisk] = []
         for stmt in _own_statements(ast):
             if not isinstance(stmt, CallStatement):
@@ -496,13 +502,9 @@ class RecursionRiskAnalyzer:
                 targets = {stmt.called_program.strip("'\"").upper()}
             else:
                 targets = set()
-            if program_name not in targets:
+            if not own_names & targets:
                 container = next(
-                    (
-                        unit
-                        for unit in enclosing
-                        if (unit.program_name or "").strip().upper() in targets
-                    ),
+                    (unit for unit, names in container_names if names & targets),
                     None,
                 )
                 if container is not None:
@@ -510,6 +512,14 @@ class RecursionRiskAnalyzer:
                 continue
 
             call_kind = "dynamically " if stmt.is_dynamic else ""
+            # Name the program's own PROGRAM-ID when the CALL can reach it
+            # that way, else the alternate ENTRY it targets.
+            via_entry = program_name not in targets
+            target_text = (
+                f"'{min(own_names & targets)}', an ENTRY point of " f"'{program_name}'"
+                if via_entry
+                else f"'{program_name}', the program's own PROGRAM-ID"
+            )
             if ast.is_recursive:
                 # ``PROGRAM-ID. name IS RECURSIVE``: re-entry is legal and
                 # the programmer said so. What remains is the ordinary
@@ -523,8 +533,8 @@ class RecursionRiskAnalyzer:
                         program=program_name,
                         is_dynamic=stmt.is_dynamic,
                         explanation=(
-                            f"This CALL {call_kind}targets '{program_name}', "
-                            "the program's own PROGRAM-ID, which is declared "
+                            f"This CALL {call_kind}targets {target_text}, "
+                            "which is declared "
                             "IS RECURSIVE -- re-entry is legal (LOCAL-STORAGE "
                             "is per invocation). The recursion still needs a "
                             "base case the analyzer cannot verify."
@@ -542,8 +552,8 @@ class RecursionRiskAnalyzer:
                     program=program_name,
                     is_dynamic=stmt.is_dynamic,
                     explanation=(
-                        f"This CALL {call_kind}targets '{program_name}', the "
-                        "program's own PROGRAM-ID. COBOL programs are "
+                        f"This CALL {call_kind}targets {target_text}. "
+                        "COBOL programs are "
                         "non-reentrant by default -- calling yourself, "
                         "directly or via a dynamic value that can resolve to "
                         "your own name, either abends on re-entry or recurses "
@@ -552,6 +562,21 @@ class RecursionRiskAnalyzer:
                 )
             )
         return risks
+
+
+def _names_answered_to(unit: CobolProgram) -> set[str]:
+    """*unit*'s PROGRAM-ID plus every ``ENTRY 'name'`` in its own code,
+    unquoted and uppercased (the form CALL targets are compared in)."""
+    names: set[str] = set()
+    program_name = (unit.program_name or "").strip().upper()
+    if program_name:
+        names.add(program_name)
+    for stmt in _own_statements(unit):
+        if isinstance(stmt, EntryStatement) and stmt.entry_name:
+            name = stmt.entry_name.strip().strip("'\"").strip().upper()
+            if name:
+                names.add(name)
+    return names
 
 
 def _own_statements(ast: CobolProgram) -> list[Any]:

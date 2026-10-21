@@ -375,7 +375,13 @@ def health_index(workspace: Workspace) -> HealthIndex:
 
 def _build_health(workspace: Workspace) -> tuple[HealthIndex, dict[str, Stamp]]:
     from ..analysis.lint import stamp_report_origins
-    from ..scan import FileScan, ScanReport, UnitScan, cross_file_clone_groups
+    from ..scan import (
+        FileScan,
+        ScanReport,
+        UnitScan,
+        _stamp_body_origins,
+        cross_file_clone_groups,
+    )
 
     started = time.monotonic()
     index = HealthIndex()
@@ -412,6 +418,10 @@ def _build_health(workspace: Workspace) -> tuple[HealthIndex, dict[str, Stamp]]:
                 }
             )
             fingerprints = stamp_report_origins(redundancy.to_dict(), parsed.source_map)
+            if parsed.source_map:
+                # A body COPYed under each program's own header is one
+                # source, as in ``scan`` (#470).
+                _stamp_body_origins(fingerprints, parsed.source_map)
             file_scan.units.append(
                 UnitScan(
                     program_name=name,

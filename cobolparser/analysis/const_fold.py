@@ -1970,7 +1970,13 @@ def _fold_multiply(
     # second operand (`MULTIPLY A BY B` reads B's old value directly, no
     # hidden extra term -- unlike ADD/SUBTRACT's accumulate form) so only
     # GIVING names are filtered out here, never targets.
-    true_operands = [op for op in stmt.operands if op not in stmt.givings]
+    # ``source_operands`` (GIVING form) keeps a BY operand that is also the
+    # GIVING target, which the deduped ``operands`` loses (#495).
+    true_operands = (
+        list(stmt.source_operands)
+        if stmt.givings and stmt.source_operands is not None
+        else [op for op in stmt.operands if op not in stmt.givings]
+    )
     if len(true_operands) != 2:
         _poison_names([*stmt.targets, *stmt.givings], index, env)
         return
@@ -2043,7 +2049,11 @@ def _fold_divide(
         reserved = set(stmt.givings)
         if stmt.remainder:
             reserved.add(stmt.remainder)
-        true_operands = [op for op in stmt.operands if op not in reserved]
+        true_operands = (
+            list(stmt.source_operands)
+            if stmt.source_operands is not None
+            else [op for op in stmt.operands if op not in reserved]
+        )
         if len(true_operands) != 2:
             _poison_names(stmt.givings, index, env)
             return

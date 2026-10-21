@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ...models.data_items import CobolDataItem, ConditionNameItem
+from ...models.data_items import CobolDataItem, ConditionNameItem, RenamesItem
 from ...models.program import CobolProgram, CobolSection
 from .layout import (
     FieldCategory,
@@ -26,7 +26,13 @@ from .layout import (
     condition_values_exhaustive,
     expand_condition_values,
 )
-from .storage import BINARY_USAGES, FLOAT_USAGES, POINTER_USAGES, storage_size
+from .storage import (
+    BINARY_USAGES,
+    FLOAT_USAGES,
+    POINTER_USAGES,
+    is_known_usage,
+    storage_size,
+)
 
 _SECTION_NAMES = ("FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE")
 
@@ -54,6 +60,10 @@ class LayoutItem:
     #: serialized: :func:`compute_program_data_items` turns a False into an
     #: ``unresolved`` entry instead.
     condition_values_complete: bool = True
+    #: ``OCCURS UNBOUNDED``: no declared maximum, so ``occurs.max`` and the
+    #: byte lengths are only what was sized. Not serialized:
+    #: :func:`flag_record_layout` says it in ``unresolved`` instead (#311).
+    occurs_unbounded: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -346,6 +356,9 @@ def _layout_item(
             occurs=_occurs_dict(item),
             condition_values=[],
             parent_qualified_name=parent_qualified_name,
+            occurs_unbounded=bool(
+                item.occurs_clause is not None and item.occurs_clause.is_unbounded
+            ),
         )
     )
 
@@ -497,6 +510,7 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
             continue
         records = [r for r in section.data_items if isinstance(r, CobolDataItem)]
         siblings_by_name = {r.name.upper(): r for r in records}
+        placed: list[tuple[CobolDataItem, list[dict[str, Any]]]] = []
         for record in records:
             record_layout = compute_record_layout(record)
             if record.redefines:
@@ -504,8 +518,9 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
                     record, siblings_by_name
                 )
             unresolved.extend(flag_record_layout(record, record_layout))
-            for layout_item in record_layout:
-                items.append(layout_item.to_dict())
+            record_items = [layout_item.to_dict() for layout_item in record_layout]
+            placed.append((record, record_items))
+            items.extend(record_items)
 
             for misnested in _find_misnested_level_77_items(record):
                 misnested_layout = compute_record_layout(misnested)
@@ -517,7 +532,96 @@ def compute_program_data_items(ast: CobolProgram) -> dict[str, Any]:
                 for layout_item in misnested_layout:
                     items.append(layout_item.to_dict())
 
+        for node in section.children:
+            if isinstance(node, RenamesItem):
+                entry = renames_layout(node, placed)
+                if entry is None:
+                    unresolved.append(
+                        f"{node.name.upper()}: the RENAMES range "
+                        f"{_renames_text(node)} could not be placed"
+                    )
+                else:
+                    items.append(entry)
+
     return {"items": items, "unresolved": unresolved}
+
+
+def _renames_text(node: RenamesItem) -> str:
+    """``A THRU B`` as the RENAMES clause names it."""
+    text = " OF ".join([node.renames_from, *node.renames_from_qualifiers])
+    if node.renames_through:
+        through = " OF ".join([node.renames_through, *node.renames_through_qualifiers])
+        text += f" THRU {through}"
+    return text
+
+
+def renames_layout(
+    node: RenamesItem,
+    placed: list[tuple[CobolDataItem, list[dict[str, Any]]]],
+) -> dict[str, Any] | None:
+    """The ``data-items`` entry of a level-66 RENAMES item, or None when the
+    bytes it renames cannot be placed (#563).
+
+    A RENAMES regroups a contiguous run of the record just before it: from
+    the start of its first operand to the end of its THRU operand. *placed*
+    is each record of the section with its layout entries, in source order;
+    the operands are looked up in the last record declared before *node*
+    (an ``OF`` qualifier must name an ancestor). A single-operand RENAMES
+    takes the renamed item's description (PICTURE, USAGE, group-ness).
+    """
+    line = getattr(node.location, "line", None)
+    before = [
+        (record, layout)
+        for record, layout in placed
+        if line is None or (getattr(record.location, "line", 0) or 0) < line
+    ]
+    if not before:
+        return None
+    record, layout = before[-1]
+
+    def find(name: str, qualifiers: list[str]) -> dict[str, Any] | None:
+        wanted = {q.upper() for q in qualifiers}
+        matches = [
+            entry
+            for entry in layout
+            if str(entry["name"]).upper() == name.upper()
+            and wanted <= set(str(entry["qualified_name"]).upper().split(".")[:-1])
+            and entry["level"] != 88
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    first = find(node.renames_from, node.renames_from_qualifiers)
+    if first is None:
+        return None
+    last: dict[str, Any] | None = first
+    if node.renames_through:
+        last = find(node.renames_through, node.renames_through_qualifiers)
+    if last is None:
+        return None
+    start, end_at = first["byte_offset"], last["byte_offset"]
+    if start is None or end_at is None:
+        return None
+    length = int(end_at) + int(last["byte_length"] or 0) - int(start)
+    if length <= 0:
+        return None
+    single = last is first
+    root = record.name.upper()
+    return {
+        "name": node.name,
+        "qualified_name": f"{root}.{node.name.upper()}",
+        "level": 66,
+        "is_group": bool(first["is_group"]) if single else True,
+        "picture": first["picture"] if single else None,
+        "usage": first["usage"] if single else "DISPLAY",
+        "byte_offset": int(start),
+        "byte_length": length,
+        "offset_ambiguous": bool(first["offset_ambiguous"] or last["offset_ambiguous"]),
+        "redefines_chain": [],
+        "occurs": None,
+        "condition_values": [],
+        "parent_qualified_name": root,
+        "condition_ranges": [],
+    }
 
 
 def flag_record_layout(record: CobolDataItem, layout: list[LayoutItem]) -> list[str]:
@@ -531,8 +635,43 @@ def flag_record_layout(record: CobolDataItem, layout: list[LayoutItem]) -> list[
     """
     unresolved: list[str] = []
     _flag_sync_slack(record, layout, unresolved)
+    _flag_unknown_usage(layout, unresolved)
     _flag_partial_condition_values(layout, unresolved)
+    _flag_unbounded_occurs(layout, unresolved)
     return unresolved
+
+
+def _flag_unbounded_occurs(layout: list[LayoutItem], unresolved: list[str]) -> None:
+    """Say in *unresolved* which tables are ``OCCURS UNBOUNDED``: with no
+    declared maximum they are sized at their minimum, so ``occurs.max`` and
+    the byte length of the table and of every group holding it are a lower
+    bound, not the definite figures they otherwise read as (#311)."""
+    for entry in layout:
+        if not entry.occurs_unbounded:
+            continue
+        times = entry.occurs["max"] if entry.occurs else 1
+        unresolved.append(
+            f"{entry.qualified_name}: OCCURS UNBOUNDED has no maximum; sized "
+            f"as {times} occurrence(s), so its occurs.max and the byte_length "
+            "of every group holding it are a lower bound"
+        )
+
+
+def _flag_unknown_usage(layout: list[LayoutItem], unresolved: list[str]) -> None:
+    """A USAGE word nothing here can size (``USAGE IS COMPX``) leaves its
+    item's length a guess: mark it and every later offset in the record
+    ``offset_ambiguous`` and say so, rather than a quiet 0-byte item (#524)."""
+    for entry in layout:
+        if entry.level == 88 or is_known_usage(entry.usage):
+            continue
+        for other in layout:
+            if other is entry or (other.byte_offset or 0) > (entry.byte_offset or 0):
+                other.offset_ambiguous = True
+        unresolved.append(
+            f"{entry.qualified_name}: USAGE {entry.usage} is not supported; its "
+            "byte length is unknown, so it and every later offset in the record "
+            "may be wrong"
+        )
 
 
 def _flag_partial_condition_values(

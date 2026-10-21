@@ -99,7 +99,8 @@ class HostVarResolutionReport:
             neither a DATA DIVISION entry nor a matching DB2 column.
         declare_tables: All ``DECLARE TABLE`` statements found in the program,
             keyed by upper-cased table name.
-        column_name_collisions: Mapping of upper-cased column name → list of
+        column_name_collisions: Mapping of column name, in its DCLGEN
+            host-variable form (``CUST_ID`` -> ``CUST-ID``) → list of
             table names that define a column with that name.  Only populated
             when the same column name exists in **two or more** DECLARE TABLE
             blocks.  When a collision exists the DB2 fallback for that name is
@@ -125,6 +126,19 @@ class HostVarResolutionReport:
                 k: sorted(v) for k, v in self.column_name_collisions.items()
             },
         }
+
+
+def dclgen_name(name: str) -> str:
+    """A DB2 column name the way the DCLGEN host variable for it is spelled.
+
+    DB2 column names are underscored (``CUST_ID``); the COBOL host variables
+    DCLGEN generates for them are hyphenated (``CUST-ID``), because ``_`` is
+    not a COBOL data-name character. Columns are indexed, and host variables
+    looked up, by this form -- comparing the two verbatim matched only the
+    columns with no underscore in their name (#572). :class:`DclgenChecker`
+    uses the same function, so the two cannot drift apart.
+    """
+    return name.strip().upper().replace("_", "-")
 
 
 # ---------------------------------------------------------------------------
@@ -154,9 +168,11 @@ class HostVariableResolver:
         self._all_items: dict[str, list[tuple[CobolDataItem, list[str]]]] = {}
         # Upper-cased table name → DeclareTableStatement
         self._declare_tables: dict[str, DeclareTableStatement] = {}
-        # Upper-cased column name → DB2ColumnDefinition (first occurrence wins)
+        # DCLGEN host-variable form of the column name (``CUST_ID`` ->
+        # ``CUST-ID``, see :func:`dclgen_name`) → DB2ColumnDefinition (first
+        # occurrence wins)
         self._column_index: dict[str, DB2ColumnDefinition] = {}
-        # Upper-cased column name → list of table names that define it
+        # DCLGEN host-variable form of the column name → tables defining it
         self._column_table_map: dict[str, list[str]] = {}
 
     # ------------------------------------------------------------------
@@ -245,7 +261,9 @@ class HostVariableResolver:
             table_upper = node.table_name.upper()
             self._declare_tables[table_upper] = node
             for col in node.columns:
-                col_upper = col.name.upper()
+                # Keyed the way the host variable names it: DCLGEN turns
+                # ``CUST_ID`` into ``CUST-ID`` (#572).
+                col_upper = dclgen_name(col.name)
                 self._column_table_map.setdefault(col_upper, [])
                 self._column_table_map[col_upper].append(table_upper)
                 # First occurrence wins — keeps fallback resolution deterministic
@@ -300,7 +318,7 @@ class HostVariableResolver:
             return
 
         data_item = self._lookup_item(upper, qualifiers or [])
-        db2_col = self._column_index.get(upper)
+        db2_col = self._column_index.get(dclgen_name(upper))
 
         if data_item is None and db2_col is None:
             report.unresolved.add(upper)
@@ -345,6 +363,8 @@ class HostVariableResolver:
         """Return the DB2 column index built from DECLARE TABLE statements.
 
         Returns:
-            Mapping of upper-cased column name → :class:`DB2ColumnDefinition`.
+            Mapping of column name, in its DCLGEN host-variable form
+            (``CUST_ID`` -> ``CUST-ID``, see :func:`dclgen_name`) →
+            :class:`DB2ColumnDefinition`.
         """
         return dict(self._column_index)

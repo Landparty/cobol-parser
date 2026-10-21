@@ -63,12 +63,41 @@ BINARY_FIXED_USAGES = frozenset(
 #: fixed property.  Sized identically to ``COMP``.
 BINARY_NATIVE_USAGES = frozenset({"COMP-5", "COMPUTATIONAL-5"})
 BINARY_USAGES = BINARY_FIXED_USAGES | BINARY_NATIVE_USAGES
-SINGLE_FLOAT_USAGES = frozenset({"COMP-1", "COMPUTATIONAL-1"})
-DOUBLE_FLOAT_USAGES = frozenset({"COMP-2", "COMPUTATIONAL-2"})
+#: ``FLOAT-SHORT`` / ``FLOAT-LONG`` are the COBOL 2002 names of the same
+#: single / double floats (#524).
+SINGLE_FLOAT_USAGES = frozenset({"COMP-1", "COMPUTATIONAL-1", "FLOAT-SHORT"})
+DOUBLE_FLOAT_USAGES = frozenset({"COMP-2", "COMPUTATIONAL-2", "FLOAT-LONG"})
 FLOAT_USAGES = SINGLE_FLOAT_USAGES | DOUBLE_FLOAT_USAGES
+#: COBOL 2002 usages whose width is fixed by the usage word alone, but whose
+#: bytes the record-image encoder does not model (#524): sized exactly, so
+#: every later offset is right, and reported as unmodelled.
+FIXED_SIZE_USAGES: dict[str, int] = {
+    "FLOAT-EXTENDED": 16,
+    "BINARY-CHAR": 1,
+    "BINARY-SHORT": 2,
+    "BINARY-LONG": 4,
+    "BINARY-DOUBLE": 8,
+}
 #: Usages whose items never carry a PICTURE: their width comes from the
 #: usage alone, so a childless item with one of them is elementary.
-PICTURELESS_USAGES = FLOAT_USAGES | POINTER_USAGES | frozenset({"INDEX"})
+PICTURELESS_USAGES = (
+    FLOAT_USAGES | POINTER_USAGES | frozenset({"INDEX"}) | frozenset(FIXED_SIZE_USAGES)
+)
+#: Every USAGE word this package knows.  Anything else (``USAGE IS COMPX``, a
+#: vendor extension) gets a parse warning and an ``unresolved`` /
+#: caveat line from the layout paths instead of a silent guess (#524).
+KNOWN_USAGES = (
+    PICTURELESS_USAGES
+    | PACKED_USAGES
+    | BINARY_USAGES
+    | frozenset({"DISPLAY", "DISPLAY-1", "NATIONAL", "UTF-8"})
+)
+
+
+def is_known_usage(usage: str | None) -> bool:
+    """Whether *usage* (``None`` meaning the DISPLAY default) is a USAGE
+    this package can size."""
+    return usage is None or usage.upper() in KNOWN_USAGES
 
 
 def binary_byte_length(digits: int) -> int:
@@ -133,6 +162,8 @@ def storage_size(
         return 4
     if normalized in DOUBLE_FLOAT_USAGES:
         return 8
+    if normalized in FIXED_SIZE_USAGES:
+        return FIXED_SIZE_USAGES[normalized]
     if normalized in PACKED_USAGES:
         return packed_byte_length(total_digits) if total_digits else 0
     if normalized in BINARY_USAGES:
