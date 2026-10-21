@@ -19,6 +19,13 @@ entries, including both 2026-09-15 sections, were found there on
 [preprocessing.md](preprocessing.md): detection rule 0; no "unknown
 directive" warning for `>>SOURCE`. [tests.md](tests.md):
 `test_source_format_free_first_line.py`.
+
+## 2026-10-17 -- OO member units are not graph nodes (#500)
+
+[analysis/codebase.md](analysis/codebase.md), [mcp.md](mcp.md):
+codebase-graph graphs PROGRAM and CLASS units only (a method's CALLs are its
+class's); MCP `callers_of` never declares a method as a program.
+
 ## 2026-10-17 -- IBMDataItem.calculate_storage_size defers to _storage (#589)
 
 [dialects.md](dialects.md): `calculate_storage_size()` returns
