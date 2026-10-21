@@ -2190,15 +2190,16 @@ def preprocess_conditional_compilation(
             result_lines.append("")
             continue
 
-        elif (
-            keep_source_format_directives
-            and source_format_directive(stripped) is not None
-        ):
-            result_lines.append(line if _active() else "")
+        elif source_format_directive(stripped) is not None:
+            # A recognised >>SOURCE is honoured by the format pass, never
+            # "unknown": warning that it was ignored was false (#502).
+            result_lines.append(
+                line if keep_source_format_directives and _active() else ""
+            )
             continue
 
         # Any other >> compiler directive (>>CALLINTERFACE, >>INLINE,
-        # >>SOURCE FORMAT, ...) is not evaluated here, but it is a directive
+        # ...) is not evaluated here, but it is a directive
         # to the compiler and never program text, so it is blanked out like
         # the ones above rather than handed to the lexer as a stray ``>>``
         # token pair that the parser would then report as unparsed content.

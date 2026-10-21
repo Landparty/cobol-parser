@@ -14,6 +14,11 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-17 -- an opening >>SOURCE FORMAT FREE decides, in any column (#502)
+
+[preprocessing.md](preprocessing.md): detection rule 0; no "unknown
+directive" warning for `>>SOURCE`. [tests.md](tests.md):
+`test_source_format_free_first_line.py`.
 ## 2026-10-17 -- IBMDataItem.calculate_storage_size defers to _storage (#589)
 
 [dialects.md](dialects.md): `calculate_storage_size()` returns
