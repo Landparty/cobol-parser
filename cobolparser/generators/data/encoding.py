@@ -969,8 +969,8 @@ def encoding_caveats(
     )
     if unedited:
         caveats.append(
-            "numeric-edited picture not modelled (e.g. a multi-character "
-            "CURRENCY SIGN string): the field is written as its logical value, "
+            "numeric-edited picture not modelled (e.g. two CURRENCY SIGN "
+            "symbols in one picture): the field is written as its logical value, "
             "unedited, not as the edited form a MOVE leaves: "
             f"{', '.join(unedited)}"
         )

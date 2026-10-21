@@ -404,15 +404,19 @@ class DataItemClauseParser:
         just returned, with the declared currency symbols it contains."""
         host = getattr(self._parser, "host", None)
         signs = getattr(host, "currency_signs", None) or {}
+        # A declared letter symbol (``PICTURE SYMBOL 'F'``) is no CURRENCY
+        # token -- it lexes inside the PICTURE word -- so it is found in the
+        # pattern itself (#491).
+        symbols = self._picture_currency_symbols | {
+            symbol for symbol in signs if symbol.isalpha() and symbol in pattern
+        }
         return PictureClause(
             pattern,
             location,
-            currency_symbols=self._picture_currency_symbols,
+            currency_symbols=symbols,
             decimal_point_is_comma=bool(getattr(host, "decimal_point_is_comma", False)),
             currency_signs={
-                symbol: signs[symbol]
-                for symbol in self._picture_currency_symbols
-                if symbol in signs
+                symbol: signs[symbol] for symbol in symbols if symbol in signs
             },
         )
 
