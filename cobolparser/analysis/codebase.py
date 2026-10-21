@@ -1146,8 +1146,12 @@ class CodebaseGraphBuilder:
             # pass rewrites it with the narrower, correct scope).
             DynamicCallAnalyzer().analyze(unit)
 
+        # Only a PROGRAM-ID (outermost, nested or stacked) or a CLASS-ID is a
+        # graph node: a FACTORY / OBJECT paragraph or a METHOD-ID cannot be
+        # the target of a CALL, so it is never a program id. What such a
+        # member unit CALLs is its class's (#500).
         graph_ids = program_graph_ids(units, path)
-        for unit in units:
+        for unit in [u for u in units if u.unit_kind not in _OO_MEMBER_KINDS]:
             program_id = graph_ids[id(unit)]
             declared = _normalize_program_name(unit.program_name or "")
             named = bool(declared) and declared != _UNNAMED_PROGRAM
@@ -1182,8 +1186,9 @@ class CodebaseGraphBuilder:
             )
             # Built on first need: only a CICS transfer through a data-name
             # asks for the unit's tracked values.
-            tracker: DynamicCallAnalyzer | None = None
-            for statement in _unit_statements(unit):
+            trackers: dict[int, DynamicCallAnalyzer] = {}
+            for owner, statement in _node_statements(unit):
+                tracker = trackers.get(id(owner))
                 if isinstance(statement, EntryStatement) and statement.entry_name:
                     entry = _normalize_program_name(statement.entry_name)
                     if entry and entry not in node.entries:
@@ -1204,8 +1209,8 @@ class CodebaseGraphBuilder:
                     and statement.cics_command in _CICS_TRANSFER_KINDS
                 ):
                     if tracker is None and "PROGRAM" not in statement.literal_options:
-                        tracker = DynamicCallAnalyzer()
-                        tracker.analyze(unit)
+                        tracker = trackers[id(owner)] = DynamicCallAnalyzer()
+                        tracker.analyze(owner)
                     self._absorb_cics_transfer(
                         statement,
                         program_id,
@@ -1570,6 +1575,23 @@ class CodebaseGraphBuilder:
                 copy_edges,
                 unresolved,
             )
+
+
+#: Object-oriented member units: never a CALL target, so never a graph node.
+_OO_MEMBER_KINDS = frozenset({"FACTORY", "OBJECT", "METHOD"})
+
+
+def _node_statements(
+    unit: CobolProgram,
+) -> list[tuple[CobolProgram, CobolStatement]]:
+    """``(owning unit, statement)`` for every statement of graph node *unit*:
+    its own, plus, for a class, those of its FACTORY / OBJECT / METHOD
+    units (#500)."""
+    out = [(unit, statement) for statement in _unit_statements(unit)]
+    for member in unit.contained_programs:
+        if member.unit_kind in _OO_MEMBER_KINDS:
+            out += _node_statements(member)
+    return out
 
 
 def _unit_statements(unit: CobolProgram) -> list[CobolStatement]:

@@ -756,11 +756,12 @@ class CobolTools:
         out_of_scope: set[str] = set()
         # A CALL to one of the program's alternate ENTRY names reaches it
         # too (#521); a PROGRAM-ID of that spelling would win instead.
-        program_ids = {u.program_id.upper() for u in index.units}
+        # A FACTORY / OBJECT / METHOD-ID unit is neither (#500).
+        program_ids = {u.program_id.upper() for u in index.units if u.is_call_target}
         entries = {
             entry
             for u in index.units
-            if u.program_id.upper() == wanted
+            if u.is_call_target and u.program_id.upper() == wanted
             for entry in u.entries
             if entry not in program_ids
         }
@@ -1206,8 +1207,15 @@ class CobolTools:
             callees_of.setdefault(edge.caller, set()).add(edge.callee)
         programs = []
         for unit in index.units:
-            # The graph's id: a nested program's is qualified (#532).
-            pid = (unit.graph_id or unit.program_id).upper()
+            # The graph's id: a nested program's is qualified (#532). A
+            # FACTORY / OBJECT / METHOD-ID unit has no graph node of its
+            # own (its CALLs are its class's), so a graph id of the same
+            # spelling is a different program, never this unit (#500).
+            pid = (
+                (unit.graph_id or unit.program_id).upper()
+                if unit.is_call_target
+                else ""
+            )
             graded = grades.get((unit.program_id, unit.file), {})
             row: dict[str, Any] = {
                 "program": unit.program_id,
@@ -1225,7 +1233,11 @@ class CobolTools:
                 row["unit_kind"] = unit.unit_kind
             programs.append(row)
 
-        declared = {(u.graph_id or u.program_id).upper() for u in index.units}
+        declared = {
+            (u.graph_id or u.program_id).upper()
+            for u in index.units
+            if u.is_call_target
+        }
         external: dict[str, set[str]] = {}
         for edge in graph.call_edges:
             if edge.callee not in declared:

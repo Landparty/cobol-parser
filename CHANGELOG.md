@@ -168,6 +168,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   literal was cut at column 72, and the parse failed with "No recognizable
   COBOL division found near 'E'". An opening `>>SOURCE ... FREE` now makes
   the file free-form wherever it starts, and `>>SOURCE` no longer warns.
+* **`codebase-graph` no longer treats OO FACTORY / OBJECT / METHOD-ID units
+  as CALL-able programs** (#500). Only PROGRAM and CLASS units are graph
+  nodes, and a method's CALLs are attributed to its class. A batch
+  `CALL 'AUDIT'` no longer resolves to a method named AUDIT. Two classes no
+  longer produce "duplicate PROGRAM-ID FACTORY / OBJECT / ..." notes, and
+  MCP `callers_of` no longer lists a method as the declaration of a
+  program; `codebase_overview` no longer counts such a CALL on the method
+  (nor hides the external callee from `not_in_workspace`).
 * **`IBMDataItem.calculate_storage_size()` agrees with `calculate_size()`**
   (#589). It kept its own copy of the IBM sizing rules: packed decimal used
   `(digits + 1) // 2`, one byte short for every even digit count
