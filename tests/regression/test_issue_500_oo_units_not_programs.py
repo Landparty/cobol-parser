@@ -86,3 +86,13 @@ def test_mcp_does_not_declare_a_method_as_a_program(root: Path) -> None:
     assert answer["declared_in"] == []
     result = tools.callers_of(None, "OBJECT")
     assert "duplicate-declaration" not in [c["kind"] for c in result["caveats"]]
+
+
+def test_mcp_overview_does_not_count_a_call_on_a_method(root: Path) -> None:
+    answer = CobolTools(Workspace(root, ProjectConfig())).codebase_overview()["answer"]
+    graph = answer["call_graph"]
+    external = {e["program"] for e in graph["not_in_workspace"]}
+    assert {"AUDIT", "OBJECT"} <= external
+    assert "AUDIT" not in {row["program"] for row in graph["most_called"]}
+    methods = [r for r in answer["programs"] if r.get("unit_kind") == "METHOD"]
+    assert methods and all(r["called_by"] == 0 for r in methods)

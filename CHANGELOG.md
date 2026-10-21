@@ -166,7 +166,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CALL 'AUDIT'` no longer resolves to a method named AUDIT. Two classes no
   longer produce "duplicate PROGRAM-ID FACTORY / OBJECT / ..." notes, and
   MCP `callers_of` no longer lists a method as the declaration of a
-  program.
+  program; `codebase_overview` no longer counts such a CALL on the method
+  (nor hides the external callee from `not_in_workspace`).
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

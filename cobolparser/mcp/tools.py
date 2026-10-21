@@ -1102,7 +1102,10 @@ class CobolTools:
             callees_of.setdefault(edge.caller, set()).add(edge.callee)
         programs = []
         for unit in index.units:
-            pid = unit.program_id.upper()
+            # A FACTORY / OBJECT / METHOD-ID unit has no graph node of its
+            # own (its CALLs are its class's), so a graph id of the same
+            # spelling is a different program, never this unit (#500).
+            pid = unit.program_id.upper() if unit.is_call_target else ""
             graded = grades.get((unit.program_id, unit.file), {})
             row: dict[str, Any] = {
                 "program": unit.program_id,
@@ -1120,7 +1123,7 @@ class CobolTools:
                 row["unit_kind"] = unit.unit_kind
             programs.append(row)
 
-        declared = {u.program_id.upper() for u in index.units}
+        declared = {u.program_id.upper() for u in index.units if u.is_call_target}
         external: dict[str, set[str]] = {}
         for edge in graph.call_edges:
             if edge.callee not in declared:

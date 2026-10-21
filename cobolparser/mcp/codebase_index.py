@@ -55,6 +55,13 @@ class UnitFacts:
     #: and the sites (on-disk locations) of every CALL / LINK / XCTL.
     calls: list[dict[str, Any]] = field(default_factory=list)
 
+    @property
+    def is_call_target(self) -> bool:
+        """False for a FACTORY / OBJECT / METHOD-ID unit: no ``CALL`` can
+        reach one, and the codebase graph has no node for it -- what it
+        CALLs is counted on its class (#500)."""
+        return self.unit_kind not in ("FACTORY", "OBJECT", "METHOD")
+
 
 @dataclass
 class _Survey:
@@ -93,10 +100,7 @@ class ProgramsIndex(_Survey):
         OBJECT / METHOD-ID unit of that name is not one (#500)."""
         wanted = program_id.upper()
         return [
-            u
-            for u in self.units
-            if u.program_id.upper() == wanted
-            and u.unit_kind not in ("FACTORY", "OBJECT", "METHOD")
+            u for u in self.units if u.program_id.upper() == wanted and u.is_call_target
         ]
 
 
