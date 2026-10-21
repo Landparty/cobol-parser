@@ -594,7 +594,9 @@ public as `lexer.currency_signs` (`{"#": "EUR"}`); `CobolParser` copies it to
 `parser.currency_signs` for the PICTURE clauses (#491). A letter symbol
 (`PICTURE SYMBOL 'F'`) is in `currency_signs` but not `_currency_symbols`: it
 lexes inside the PICTURE word, and `DataItemClauseParser._picture_clause`
-finds it in the pattern.
+finds it in the pattern, case-sensitively as IBM documents the PICTURE
+SYMBOL literal (`'F'` does not match `PIC fff9`), though the rest of the
+PICTURE grammar here is case-insensitive.
 
 **Operator-shaped symbols.** A declared `<`, `>` or `=` already lexes as
 `LESS`/`GREATER`/`ASSIGN`, so `tokenize_program_text` cannot reroute it;

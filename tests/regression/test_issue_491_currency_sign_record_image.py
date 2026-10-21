@@ -162,3 +162,17 @@ def test_two_symbols_in_one_picture_are_named_in_a_caveat() -> None:
         "not modelled" in caveat and "REC.C1" in caveat
         for caveat in encoding_caveats(specs)
     )
+
+
+def test_a_letter_symbol_matches_its_own_case_only() -> None:
+    # IBM documents the PICTURE SYMBOL literal as case-sensitive.
+    source = _program(
+        "CURRENCY SIGN IS 'CHF ' WITH PICTURE SYMBOL 'F'",
+        "           05  C1  PIC FFF9.\n",
+    )
+    assert flatten_record(_record(source))[0].currency_signs == {"F": "CHF "}
+    lower = _program(
+        "CURRENCY SIGN IS 'CHF ' WITH PICTURE SYMBOL 'f'",
+        "           05  C1  PIC FFF9.\n",
+    )
+    assert flatten_record(_record(lower))[0].currency_signs == {}
