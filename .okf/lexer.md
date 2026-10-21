@@ -540,7 +540,13 @@ location; a fixed-format line is read in columns 8-72 only). IBM:
 unmerged, a VALUE clause keeps only `"AB"` and a MOVE source reads
 `"AB" "CD"`. Only literals of one kind are joined
 (plain, or the same `X` / `N` / `NX` / `G` / `U` prefix; `Z` and `B`
-literals never); a typed result's `raw_value` is rebuilt (`X"C1C2"`). The
+literals never); a typed result's `raw_value` is rebuilt (`X"C1C2"`). A
+basic and an `X` literal are both alphanumeric and are joined too
+(`_mixed_alphanumeric`, #479): `'AB' & X'0102'` becomes one literal whose
+`value` holds each hex part's bytes as Latin-1 characters (`AB\x01\x02`) and
+whose `raw_value` is every part's source joined with ` & `
+(`"AB" & X'0102'`, a basic part re-quoted with `"`), which the record-image
+generator reads back as bytes plus characters. The
 merged token keeps the first literal's location; NEWLINEs between the
 parts follow it. Fast path: no `&` in any line -> no work. The checked-in
 `_lexer_fast.c` is generated with Cython 3.3.0. Pinned by

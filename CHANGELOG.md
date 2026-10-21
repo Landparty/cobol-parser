@@ -160,6 +160,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`VALUE 'AB' & X'0102'` is no longer cut to `'AB'`** (#479). The lexer
+  joined `&`-concatenated literals of one spelling only, so a basic literal
+  joined to a hexadecimal one (both alphanumeric literals to IBM; GnuCOBOL
+  stores `41420102`) lost its second part with an "Unparsed token" warning,
+  and `gen-data` wrote `AB  `. They are now one literal (spelled
+  `"AB" & X'0102'` in the AST), and the record image holds the hex part's
+  own bytes with the basic part in the record charset (`C1 C2 01 02` in
+  EBCDIC), which `decode` reads back.
 * **`IBMDataItem.calculate_storage_size()` agrees with `calculate_size()`**
   (#589). It kept its own copy of the IBM sizing rules: packed decimal used
   `(digits + 1) // 2`, one byte short for every even digit count

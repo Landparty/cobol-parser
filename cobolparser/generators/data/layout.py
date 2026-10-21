@@ -830,14 +830,34 @@ class LiteralCell(str):
     data: bytes
     #: Set on the cell of a VALUE clause (see :class:`InitialValueCell`).
     initial_value: bool = False
+    #: ``(start, end)`` ranges of :attr:`data` that are *characters*, not
+    #: bytes: the basic parts of a concatenation such as ``'AB' & X'0102'``
+    #: (held as Latin-1), which the encoder writes in the record charset
+    #: while the hex parts keep their own bytes (#479).
+    text_runs: tuple[tuple[int, int], ...] = ()
 
-    def __new__(cls, data: bytes) -> LiteralCell:
+    def __new__(
+        cls, data: bytes, text_runs: tuple[tuple[int, int], ...] = ()
+    ) -> LiteralCell:
         cell = super().__new__(cls, data.decode("latin-1"))
         cell.data = data
+        if text_runs:
+            cell.text_runs = text_runs
         return cell
 
-    def __reduce__(self) -> tuple[type[LiteralCell], tuple[bytes]]:
-        return (LiteralCell, (self.data,))
+    def __reduce__(
+        self,
+    ) -> tuple[type[LiteralCell], tuple[bytes, tuple[tuple[int, int], ...]]]:
+        return (LiteralCell, (self.data, self.text_runs))
+
+    def cut(self, width: int) -> LiteralCell:
+        """The cell's first *width* bytes, its text runs cut with them."""
+        if width <= 0 or width >= len(self.data):
+            return self
+        runs = tuple(
+            (start, min(end, width)) for start, end in self.text_runs if start < width
+        )
+        return LiteralCell(self.data[:width], runs)
 
 
 class InitialValueCell(str):
@@ -866,10 +886,56 @@ def hex_literal_cell(value: str, width: int | None = None) -> LiteralCell | None
     *width* when one is known; ``None`` for any other literal."""
     data = hex_literal_bytes(value)
     if not data:
-        return None
+        cell = concatenated_literal_cell(value)
+        if cell is None:
+            return None
+        return cell.cut(width) if width is not None else cell
     if width is not None and width > 0:
         data = data[:width]
     return LiteralCell(data)
+
+
+#: One part of a literal concatenation: an optional ``X`` and a quoted run.
+_CONCAT_PART_RE = re.compile(
+    r"""\s*(X?)("(?:[^"]|"")*"|'(?:[^']|'')*')\s*(&|$)""", re.IGNORECASE
+)
+
+
+def concatenated_literal_cell(value: str) -> LiteralCell | None:
+    """The cell ``'AB' & X'0102'`` stands for: the hex parts' bytes and the
+    basic parts' characters (as :attr:`LiteralCell.text_runs`), in order.
+    ``None`` unless *value* is two or more such parts with at least one hex
+    part -- the spelling the lexer gives a mixed alphanumeric concatenation
+    (#479); one of plain parts only is already a single literal."""
+    data = bytearray()
+    runs: list[tuple[int, int]] = []
+    pos, parts, hex_parts = 0, 0, 0
+    text = value.strip()
+    while pos < len(text):
+        match = _CONCAT_PART_RE.match(text, pos)
+        if match is None or (match.group(3) == "" and match.end() != len(text)):
+            return None
+        content = unquote_literal(match.group(2))
+        if match.group(1):
+            try:
+                data += bytes.fromhex(content)
+            except ValueError:
+                return None
+            hex_parts += 1
+        else:
+            try:
+                encoded = content.encode("latin-1")
+            except UnicodeEncodeError:
+                return None
+            runs.append((len(data), len(data) + len(encoded)))
+            data += encoded
+        parts += 1
+        pos = match.end()
+        if match.group(3) == "&" and pos >= len(text):
+            return None
+    if parts < 2 or not hex_parts:
+        return None
+    return LiteralCell(bytes(data), tuple(run for run in runs if run[0] < run[1]))
 
 
 def _dedup_values(values: list[str]) -> list[str]:
@@ -926,6 +992,13 @@ def _literal_bytes(item: CobolDataItem, width: int) -> dict[str, bytes]:
         if data:
             data = data[:width] if width > 0 else data
             found.setdefault(data.decode("latin-1"), data)
+        else:
+            # ``'AB' & X'0102'``: the key is the cell itself, so the decoder
+            # can write its text runs in the record charset (#479).
+            mixed = concatenated_literal_cell(item.value_clause)
+            if mixed is not None:
+                mixed = mixed.cut(width)
+                found.setdefault(mixed, mixed.data)
     raws: list[str] = []
     for child in item.children:
         if isinstance(child, ConditionNameItem):

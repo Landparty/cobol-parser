@@ -635,8 +635,24 @@ def encode_field(spec: FieldSpec, text: str, opts: EncodingOptions) -> bytes:
         # The bytes come with the cell, not from a lookup by its text: an
         # ordinary ``'AB'`` or ``VALUE SPACE`` with the same text as a hex
         # literal's stand-in is still charset-encoded.
-        return _place_bytes(text.data, width, opts, justified=justified)
+        return _place_bytes(
+            literal_cell_bytes(text, opts), width, opts, justified=justified
+        )
     return _encode_text(text, width, opts, justified=justified)
+
+
+def literal_cell_bytes(cell: LiteralCell, opts: EncodingOptions) -> bytes:
+    """The bytes *cell* is written as: its own :attr:`~LiteralCell.data`,
+    with any :attr:`~LiteralCell.text_runs` (the basic parts of ``'AB' &
+    X'0102'``) in the record charset (#479)."""
+    if not cell.text_runs:
+        return cell.data
+    out = bytearray(cell.data)
+    for start, end in cell.text_runs:
+        out[start:end] = _encode_text(
+            cell.data[start:end].decode("latin-1"), end - start, opts
+        )
+    return bytes(out)
 
 
 #: Figurative constants as the cell :class:`~.values.ValueFactory` writes for
@@ -709,6 +725,8 @@ def hex_literal_cell_for(
     # (#558), a level-88 one right-aligned: either placement is the literal.
     alignments = {spec.justified, False}
     for cell, data in spec.literal_bytes.items():
+        if isinstance(cell, LiteralCell):
+            data = literal_cell_bytes(cell, opts)
         if all(_place_bytes(data, width, opts, justified=j) != raw for j in alignments):
             continue
         for ordinary in _ordinary_literal_cells(spec):

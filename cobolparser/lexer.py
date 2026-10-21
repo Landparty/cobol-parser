@@ -17,6 +17,7 @@ from enum import IntEnum, auto
 
 from ._accel import accelerators_enabled
 from ._lines import split_source_lines
+from ._literals import is_quoted_literal
 from .models.ast_base import SourceLocation
 from .plugins.core import DialectType, ParseError
 
@@ -2376,6 +2377,46 @@ class _CobolLexerPure:
                 return index
         return len(line)
 
+    @classmethod
+    def _mixed_alphanumeric(cls, prev: Token, token: Token) -> Token | None:
+        """``'AB' & X'0102'``: the one literal a basic and a hexadecimal
+        alphanumeric literal make (IBM: both are alphanumeric literals, so
+        they may be joined; GnuCOBOL stores ``41420102``), or ``None`` when
+        *prev* and *token* are not such a pair.
+
+        Its ``value`` is the content with each hex part's bytes read as
+        Latin-1 characters, and its ``raw_value`` the source spelling of
+        every part joined with `` & `` -- so a consumer that needs the bytes
+        (the record-image generator) can still tell which characters a hex
+        part named. A run already joined this way joins one more part of
+        either kind (#479)."""
+        prev_raw = prev.raw_value or ""
+        # An earlier mixed join: its raw text is several literals, not one.
+        prev_mixed = "&" in prev_raw and not is_quoted_literal(prev_raw)
+        kinds = {cls._literal_prefix(prev), cls._literal_prefix(token)}
+        if not kinds <= {"", "X"} or (kinds != {"", "X"} and not prev_mixed):
+            return None
+        parts: list[tuple[str, str]] = []
+        for part in (prev, token):
+            if part is prev and prev_mixed:
+                parts.append((prev_raw, prev.value))
+                continue
+            if cls._literal_prefix(part) == "X":
+                try:
+                    text = bytes.fromhex(part.value).decode("latin-1")
+                except ValueError:
+                    return None
+                parts.append((part.raw_value or "", text))
+            else:
+                source = '"' + part.value.replace('"', '""') + '"'
+                parts.append((part.raw_value or source, part.value))
+        return Token(
+            TokenType.STRING_LITERAL,
+            parts[0][1] + parts[1][1],
+            prev.location,
+            f"{parts[0][0]} & {parts[1][0]}",
+        )
+
     def _merge_concatenated_literals(self) -> None:
         """Join ``lit-1 & lit-2 [& ...]`` into one STRING_LITERAL token.
 
@@ -2401,6 +2442,10 @@ class _CobolLexerPure:
                 and prev.type == TokenType.STRING_LITERAL
             ):
                 prefix = self._literal_prefix(token)
+                mixed = self._mixed_alphanumeric(prev, token)
+                if mixed is not None and self._ampersand_joins(prev, token):
+                    merged[last_index] = mixed
+                    continue
                 if (
                     prefix == self._literal_prefix(prev)
                     and prefix in self._CONCATENABLE_PREFIXES
