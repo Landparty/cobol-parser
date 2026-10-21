@@ -14,12 +14,13 @@ numeric-edited item under the default ``CURRENCY SIGN``:
 ``9 Z * 0 B / , . V + - CR DB $``.  Under ``DECIMAL-POINT IS COMMA``
 (``decimal_point_is_comma=True``) ``,`` and ``.`` exchange roles, in the
 picture and in the edited text alike (``Z.ZZ9,99`` shows ``1.234,56``).  A ``SPECIAL-NAMES. CURRENCY SIGN``
-symbol (``currency_signs={"#": "#"}``) is edited exactly like ``$`` and
-shows its currency string, when that string is one character -- the width
-:class:`~...models.data_items.PictureClause` sizes the position at.  A
-picture using anything else (a multi-character currency string, a currency
-symbol whose declaration is unknown) returns ``None`` and the caller keeps
-its previous behaviour rather than writing a guessed form.
+symbol (``currency_signs={"#": "#"}``, ``{"F": "CHF "}``) is edited
+exactly like ``$`` and shows its currency string in the one position the
+``$`` would hold; a string of n characters makes the edited text n - 1
+characters wider, the width :class:`~...models.data_items.PictureClause`
+sizes the item at.  A picture using anything else (a currency symbol whose
+declaration is unknown, two currency symbols) returns ``None`` and the
+caller keeps its previous behaviour rather than writing a guessed form.
 
 Editing rules implemented (IBM Enterprise COBOL Language Reference,
 "PICTURE clause editing"):
@@ -264,10 +265,10 @@ def _currency_spelling(
     picture: str | None, currency_signs: Mapping[str, str | None]
 ) -> tuple[str | None, str | None] | None:
     """*picture* with its declared currency symbol spelled ``$``, and the
-    character the edited text shows there instead (``None``: the picture
-    uses no declared symbol).  ``None`` when the symbol's currency string is
-    unknown or not one character, or the picture mixes it with ``$`` or
-    another declared symbol -- forms this module does not model."""
+    currency string the edited text shows there instead (``None``: the
+    picture uses no declared symbol).  ``None`` when the symbol's currency
+    string is unknown, or the picture mixes it with ``$`` or another
+    declared symbol -- forms this module does not model."""
     if picture is None:
         return None
     used = [symbol for symbol in currency_signs if symbol in picture]
@@ -276,7 +277,7 @@ def _currency_spelling(
     if len(used) > 1 or "$" in picture:
         return None
     sign = currency_signs[used[0]]
-    if sign is None or len(sign) != 1:
+    if not sign:
         return None
     return picture.replace(used[0], "$"), sign
 
@@ -309,7 +310,13 @@ def edit_numeric(
         )
         if edited is None or sign is None:
             return edited
-        return edited.replace("$", sign)
+        if "$" in edited:
+            # One position shows the whole string; the item is that much
+            # wider than its pattern (``PictureClause`` sizes it so, #491).
+            return edited.replace("$", sign, 1)
+        # Suppressed to spaces, currency position included: the extra
+        # positions are spaces too.
+        return " " * (len(sign) - 1) + edited
     if decimal_point_is_comma:
         if picture is None:
             return None
@@ -480,7 +487,14 @@ def deedit_numeric(
             if "$" in text:
                 # The declared sign replaces ``$``; a ``$`` is no edit's.
                 return None
-            text = text.replace(sign, "$")
+            if sign in text:
+                text = text.replace(sign, "$", 1)
+            elif not text[: len(sign) - 1].strip():
+                # No currency shown (a value suppressed to spaces): the
+                # string's extra positions are leading spaces.
+                text = text[len(sign) - 1 :]
+            else:
+                return None
         return deedit_numeric(
             picture, text, decimal_point_is_comma=decimal_point_is_comma
         )
