@@ -25,7 +25,11 @@ in jcl-parser; this package has no card scanner or statement parser of its
 own, and must not grow one.
 
 Modules: `jcl/parser.py` (the adapter: `JclParser`, `parse_jcl`),
-`jcl/models.py` (the dataclasses), `jcl/bindings.py` (DD name -> dataset).
+`jcl/models.py` (the dataclasses), `jcl/bindings.py` (DD name -> dataset),
+`jcl/programs.py` (the program a launcher step runs: `run_programs(systsin)`
+for IKJEFT01/1A/1B `RUN PROGRAM(x)`, `ims_program(parm)` for DFSRRC00
+`PARM='DLI|DBB|BMP,x,...'`; pure text, shared with field lineage's
+`lineage_jcl` so the two JCL consumers agree, #493).
 Entry points: `parse_jcl(text, *, filename="<jcl>", proc_paths=None)`,
 `JclParser(proc_paths=None).parse(text, *, filename=...)` / `.parse_file(path)`,
 then `resolve_dd_bindings(result)`. CLI: `cobol-parser jcl` (below).
@@ -77,10 +81,13 @@ this package exposes none of it.
 | `JobStep` | `name`, `program`, `procedure`, `parm`, `dd_statements`, `condition`, `parameters`, `line` |
 | `DDStatement` | `name`, `dataset`, `disposition`, `sysout`, `is_dummy`, `is_instream`, `instream_lines`, `concatenated`, `record_format`, `record_length`, `parameters`, `procstep`, `line` |
 | `JclParameter` | `keyword`, `value`, `subparameters`, `positional` |
-| `DatasetBinding` | `ddname`, `dataset`, `step`, `job`, `disposition`, `record_format`, `record_length` |
+| `DatasetBinding` | `ddname`, `dataset`, `step`, `job`, `disposition`, `record_format`, `record_length`, `program` (the step's `PGM=`; `None` for job-level DDs and `EXEC proc` steps) |
 
 Every class has `to_dict()`. Lookup helpers: `JclParseResult.dd_map()` (DD
-name -> every dataset bound to it, across steps), `.steps_running(program)`,
+name -> every dataset bound to it, across steps), `.steps_running(program)`
+(`PGM=`, or the program a launcher runs: `JobStep.effective_programs()` --
+every `RUN PROGRAM` of an in-stream IKJEFT01 SYSTSIN, the DFSRRC00 `PARM`
+program),
 `.all_dd_statements()` (`(job, step | None, dd)` triples, `step=None` for
 job-level DDs); `JclJob.step(name)`, `JobStep.dd(name)` (both
 case-insensitive); `DDStatement.flatten()` (the DD then its concatenated
@@ -94,8 +101,10 @@ member right after the card that owns it, job-level DDs (JOBLIB, ...) first
 with `step=""`. Steps expanded from a procedure appear under their
 `invocation.procstep` names. SYSOUT / DUMMY / in-stream DDs yield
 `dataset=None` rows, kept rather than dropped (knowing `SYSPRINT` is SYSOUT is
-an answer). `bindings_for_ddname(result, ddname)` filters it
-case-insensitively.
+an answer). Each row names its step's `program`, so `jcl --bindings` output
+is directly a `field-impact --bindings` file (rows with no program or no
+dataset bind nothing there and are skipped, #547).
+`bindings_for_ddname(result, ddname)` filters it case-insensitively.
 
 ## Conversion (`jcl/parser.py`)
 
@@ -105,7 +114,10 @@ case-insensitively.
   ones each parenthesised and joined with ` AND `). jclparser normalises
   unparenthesised expressions (`RC = 0` reads `RC=0`).
 * **Procedure invocations** keep their own step (`program=None`,
-  `procedure=NAME`, the invocation's override DDs with `procstep` set),
+  `procedure=NAME`, and only the override / added DDs that reached no
+  expanded step, with `procstep` set: `_drop_applied_overrides` removes the
+  ones the expansion applied, which would otherwise bind the same DD twice,
+  #547),
   followed by one step per procedure step, named `invocation.procstep` (nested:
   `RUN.S2.S1`), with both `program` and `procedure` (the innermost procedure)
   set. Each invocation is exploded on its own (`explode_job` over a one-step
@@ -151,7 +163,9 @@ case-insensitively.
 * **Notes in `unresolved`:** every jclparser warning (unmatched ELSE/ENDIF,
   missing PEND, unrecognised statements, override naming no step, a symbol
   substituted with nothing, ...); a DSN still holding `&SYM`; a backward
-  reference `DSN=*.step.dd`; a non-numeric LRECL; a PROC defined twice in one
+  reference `DSN=*.step.dd`; a non-numeric LRECL; an IKJEFT01/1A/1B
+  `SYSTSIN` that is a dataset (the programs it runs are unknown, so
+  `steps_running` cannot see them); a PROC defined twice in one
   job (EXEC runs the last definition); a member with no JOB card. A JOB card
   with no name is an error.
 
@@ -196,6 +210,8 @@ See [cli.md](cli.md).
 ## Tests
 
 `tests/unit/test_jcl.py` (the shape and semantics through the adapter),
+`tests/regression/test_issue_493_jcl_program_under_launchers.py` (programs
+under IKJEFT01 / DFSRRC00, `--program` matching nothing),
 `tests/unit/test_jcl_adapter.py` (what the adapter adds), the CLI in
 `tests/unit/cli/test_jcl_cli.py`, and `tests/unit/test_bug_hunt_r11_jcl_config.py`.
 Sample decks: `tests/samples/jcl/` (`invupdt.jcl`, `payproc.jcl`).

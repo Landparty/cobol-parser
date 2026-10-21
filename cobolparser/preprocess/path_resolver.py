@@ -183,12 +183,24 @@ def suggest_similar_copybooks(
         else suggestion_extensions
     )
     suggestion_config = replace(search_config, extensions=list(extensions))
-    available = get_available_copybooks(suggestion_config)
-
-    # Normalize to uppercase for comparison
+    # Normalize to uppercase for comparison. The name that was just looked
+    # up is never offered back: an upper-cased stem equal to it is a file
+    # differing only in case, which `CopybookNotFoundError` says instead
+    # (#580: "Copybook 'ORDREC' not found ... Did you mean: ORDREC?").
     member_upper = member_name.upper()
+    available = [
+        name
+        for name in get_available_copybooks(suggestion_config)
+        if name != member_upper
+    ]
 
     return get_close_matches(member_upper, available, n=max_suggestions, cutoff=cutoff)
+
+
+def _case_variant_exists(member_name: str, search_config: CopybookSearchPath) -> bool:
+    """True when a copybook of *member_name* exists in a different case."""
+    suggestion_config = replace(search_config, extensions=list(_SUGGESTION_EXTENSIONS))
+    return member_name.upper() in get_available_copybooks(suggestion_config)
 
 
 def _on_disk_casing(file_path: str) -> str:
@@ -374,7 +386,12 @@ def find_copybook_file(
 
     # Copybook not found - get suggestions
     suggestions = suggest_similar_copybooks(member_name, search_config)
-    raise CopybookNotFoundError(member_name, search_dirs, suggestions)
+    raise CopybookNotFoundError(
+        member_name,
+        search_dirs,
+        suggestions,
+        case_variant_exists=_case_variant_exists(member_name, search_config),
+    )
 
 
 class PathResolver:

@@ -90,7 +90,8 @@ class ScanOptions:
     error_recovery: ErrorRecoveryMode = ErrorRecoveryMode.COLLECT_ALL
     copybook_paths: tuple[str, ...] = ()
     min_clone_statements: int = 3
-    encoding: str = "utf-8"
+    #: Source encoding: None detects it the way a copybook's is (#522).
+    encoding: str | None = None
     errors: str = "replace"
     free_form: bool = False
     #: ``parse_cobol``'s layout override: ``None`` auto-detects, ``True``
@@ -102,6 +103,12 @@ class ScanOptions:
     #: ``parse_cobol``'s ``debug_lines``: compile ``D``-in-column-7 lines as
     #: code (CLI ``--debug-lines``, cobol.yml ``project.debug_lines``).
     debug_lines: bool = False
+    #: Conditional-compilation symbols, as ``(name, value)`` pairs (CLI
+    #: ``--define``, cobol.yml ``project.define``). Without them a scan
+    #: analysed a different program than the single-file subcommands did:
+    #: code under ``>>IF DBG DEFINED`` vanished and its PERFORM targets read
+    #: as dead (#324).
+    defined_symbols: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -109,7 +116,8 @@ class UnitScan:
     """One program unit's reports."""
 
     program_name: str
-    #: 0 for the outermost unit, 1 for a program contained in it, and so on.
+    #: 0 for the outermost unit (and a stacked one), 1 for a program nested
+    #: in it, and so on.
     #: A portfolio row shows the outermost unit's name for the file and can
     #: indent the rest under it without re-deriving the nesting.
     depth: int
@@ -148,6 +156,9 @@ class FileScan:
     #: parses fine without its member -- so without this the report would be
     #: graded against a record layout it never saw, with nothing to say so.
     copybook_error: str | None = None
+    #: Lossy-decode warnings: bytes of the source its encoding could not
+    #: map, replaced with U+FFFD (#522). Serialized only when non-empty.
+    decode_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"path": self.path}
@@ -159,6 +170,8 @@ class FileScan:
             out["parse_error_count"] = self.parse_error_count
         if self.copybook_error is not None:
             out["copybook_error"] = self.copybook_error
+        if self.decode_warnings:
+            out["decode_warnings"] = list(self.decode_warnings)
         return out
 
 
@@ -289,19 +302,36 @@ def _units_with_depth(program: Any, depth: int = 0) -> list[tuple[Any, int]]:
     which a portfolio view needs in order to show a contained program as
     contained rather than as a second top-level program in the same file.
     Re-derived here rather than changed there: that method's flat list is
-    what every existing analyzer consumes.
+    what every existing analyzer consumes. The depth is the *source*
+    nesting (``CobolProgram.nesting_depth``), so a stacked program -- a
+    separate compilation unit after the previous one's ``END PROGRAM`` --
+    is at depth 0, not contained in the first program (#532).
     """
     out = [(program, depth)]
     for contained in program.contained_programs:
-        out.extend(_units_with_depth(contained, depth + 1))
+        nested = getattr(contained, "nesting_depth", None)
+        out.extend(
+            _units_with_depth(
+                contained, depth + 1 if not isinstance(nested, int) else nested
+            )
+        )
     return out
 
 
 def scan_one(path: str, options: ScanOptions) -> FileScan:
     """Parse and analyze one file. Never raises -- see the module docstring."""
+    from .preprocess import PreprocessingError
+    from .preprocess.copybook_expander import read_program_source
+
+    decode_warnings: list[str] = []
     try:
-        source = Path(path).read_text(encoding=options.encoding, errors=options.errors)
-    except (OSError, ValueError) as exc:
+        source = read_program_source(
+            path,
+            options.encoding,
+            warnings=decode_warnings,
+            encoding_errors=options.errors,
+        )
+    except (OSError, ValueError, PreprocessingError) as exc:
         # ValueError covers UnicodeDecodeError under ``errors="strict"``: one
         # undecodable file must cost its own entry, not abort the whole scan
         # (the same guard batch.py's workers have).
@@ -324,6 +354,7 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
         path=path,
         parse_error_count=len(result.errors),
         copybook_error=expansion_failures[0] if expansion_failures else None,
+        decode_warnings=decode_warnings,
     )
     source_map = getattr(result, "expansion_source_map", None)
     for unit, depth in _units_with_depth(result.ast):
@@ -336,8 +367,35 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
             from .analysis.lint import stamp_report_origins
 
             stamp_report_origins(unit_scan.reports, source_map)
+            _stamp_body_origins(unit_scan.reports.get("redundancy"), source_map)
         scan.units.append(unit_scan)
     return scan
+
+
+def _stamp_body_origins(
+    redundancy: Any, source_map: dict[int, tuple[str, int]]
+) -> None:
+    """Give each paragraph fingerprint whose whole body comes from one file a
+    ``body_origin``: that file and the line its first statement is on there.
+
+    Every expanded line of the body's span must map to the same file, so a
+    body that mixes a copybook with the program's own statements gets none
+    (those statements are the program's text, duplicated or not). The
+    header's ``origin`` cannot answer this: a program that writes the header
+    itself and copies in only the body has its own header line there (#470).
+    """
+    if not isinstance(redundancy, dict):
+        return
+    for entry in redundancy.get("paragraph_fingerprints", []):
+        span = entry.get("body_lines")
+        if not isinstance(span, list) or len(span) != 2:
+            continue
+        first, last = int(span[0]), int(span[1])
+        origins = [source_map.get(line) for line in range(first, last + 1)]
+        start = origins[0]
+        if start is None or any(o is None or o[0] != start[0] for o in origins):
+            continue
+        entry["body_origin"] = {"file": start[0], "line": start[1]}
 
 
 def _parse(
@@ -369,6 +427,7 @@ def _parse(
         kwargs["preprocess_fixed"] = options.preprocess_fixed
     if options.debug_lines:
         kwargs["debug_lines"] = True
+    defines = dict(options.defined_symbols)
 
     if options.copybook_paths:
         from cobolparser.preprocess.copybook_expander import parse_cobol_with_expansion
@@ -378,6 +437,9 @@ def _parse(
                 source,
                 path,
                 copybook_paths=list(options.copybook_paths),
+                # The expander evaluates the directives itself, so the
+                # symbols reach the members COPYd under them too.
+                defined_symbols=defines or None,
                 **kwargs,
             )
         except Exception as exc:  # noqa: BLE001
@@ -391,7 +453,24 @@ def _parse(
 
     from cobolparser.parser import parse_cobol
 
-    return parse_cobol(source, filename=path, **kwargs)
+    if not defines:
+        return parse_cobol(source, filename=path, **kwargs)
+
+    # parse_cobol takes no symbols; evaluate the directives first, as the
+    # CLI's single-file path does, keeping >>SOURCE FORMAT for the parser's
+    # own normalization.
+    from cobolparser.preprocess import preprocess_conditional_compilation
+
+    conditional_warnings: list[str] = []
+    source = preprocess_conditional_compilation(
+        source,
+        defines,
+        warnings=conditional_warnings,
+        keep_source_format_directives=True,
+    )
+    result = parse_cobol(source, filename=path, **kwargs)
+    result.warnings[:0] = conditional_warnings
+    return result
 
 
 def _scan_one_packed(args: tuple[str, ScanOptions]) -> FileScan:
@@ -479,6 +558,11 @@ class CrossFileCloneMember:
     #: (``line`` then counts lines of the expanded text); ``None`` otherwise.
     origin_file: str | None = None
     origin_line: int | None = None
+    #: Where the paragraph's statements really are, when every one of them
+    #: comes from one file (``body_origin`` on the fingerprint); ``None``
+    #: otherwise or without expansion.
+    body_origin_file: str | None = None
+    body_origin_line: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -498,7 +582,12 @@ class CrossFileCloneMember:
         The copybook position when the paragraph was expanded from one, else
         its own position in the scanned file. Two members with the same key
         are one piece of source included twice, not two copies of it (#352).
+        The body's position wins over the header's: a program that writes
+        the header and copies in only the statements shares them all the
+        same (#470).
         """
+        if self.body_origin_file is not None and self.body_origin_line is not None:
+            return (self.body_origin_file, int(self.body_origin_line))
         if self.origin_file is not None and self.origin_line is not None:
             return (self.origin_file, int(self.origin_line))
         return (self.path, self.line)
@@ -583,6 +672,7 @@ def cross_file_clone_groups(
                 continue
             for entry in redundancy.get("paragraph_fingerprints", []):
                 origin = entry.get("origin") or {}
+                body_origin = entry.get("body_origin") or {}
                 member = CrossFileCloneMember(
                     path=file_scan.path,
                     program_name=unit.program_name,
@@ -590,6 +680,8 @@ def cross_file_clone_groups(
                     line=int((entry.get("location") or {}).get("line", 0)),
                     origin_file=origin.get("file"),
                     origin_line=origin.get("line"),
+                    body_origin_file=body_origin.get("file"),
+                    body_origin_line=body_origin.get("line"),
                 )
                 sizes.setdefault(
                     entry.get("type1", ""), int(entry.get("statement_count", 0))

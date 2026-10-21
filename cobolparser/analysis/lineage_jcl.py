@@ -13,25 +13,42 @@ cobol-parser keeps no runtime dependency on it.
 
 Utility steps understood:
 
-- DFSORT / ICEMAN / SYNCSORT: ``SORTIN`` (and ``SORTINnn``) to ``SORTOUT``
-  and every ``OUTFIL FNAMES=``. ``SORT``/``MERGE FIELDS``, ``INCLUDE``,
+- DFSORT / ICEMAN / SYNCSORT: ``SORTIN`` (and ``SORTINnn``) to ``SORTOUT``,
+  every ``OUTFIL FNAMES=`` and every ``OUTFIL FILES=`` (``SORTOFnn`` /
+  ``SORTOFd``). A ``JOINKEYS`` step reads ``SORTJNF1`` / ``SORTJNF2`` (or
+  the DDs its ``F1=`` / ``F2=`` name) and is always a ``reformat``: a join
+  builds new records. ``SORT``/``MERGE FIELDS``, ``INCLUDE``,
   ``OMIT`` keep bytes in place; ``SUM FIELDS=(p,l,f,...)`` rewrites the
   ranges it names (``kind="aggregate"`` there); ``INREC``, ``OUTREC``,
   ``BUILD``, ``OVERLAY``, ``FINDREP`` and ``IFTHEN`` move bytes, so the step
-  is a ``reformat`` and the flow stops with a caveat.
+  is a ``reformat`` and the flow stops with a caveat. A sort step whose
+  inputs or outputs are not recognised adds a caveat instead of vanishing.
+- ICETOOL: every ``COPY`` / ``SORT`` / ``MERGE`` / ``SELECT`` / ``SUBSET`` /
+  ``DATASORT`` operator in ``TOOLIN`` carries ``FROM(dd)`` to ``TO(dd...)``
+  (and ``DISCARD(dd)``), read as a DFSORT step through its ``USING(xxxx)``
+  ``xxxxCNTL`` statements; ``SPLICE`` / ``RESIZE`` are reformats.
 - IEBGENER / ICEGENER: ``SYSUT1`` to ``SYSUT2`` (a ``GENERATE``/``RECORD``
   control statement makes it a reformat).
 - IDCAMS ``REPRO`` with ``INFILE``/``OUTFILE`` DD names or
   ``INDATASET``/``OUTDATASET`` names, in either order.
 
+Control statements read from a dataset (``//SYSIN DD DSN=PROD.CNTL(X)``, a
+``DFSPARM`` dataset) cannot be seen, so the step is never assumed to be a
+byte-for-byte copy: it is a ``reformat`` (the flow stops there) and a caveat
+names the control dataset.
+
 A concatenated DD (a DD statement with a blank name after a named one) is
 part of the DD before it: every dataset of ``//SORTIN DD DSN=A`` /
 ``//  DD DSN=B`` is an input. ``DD DUMMY`` and ``DSN=NULLFILE`` bind nothing.
-A ``DSN=*.STEP.DD`` referback is replaced by the dataset it names.
+A ``DSN=*.STEP.DD`` referback is replaced by the dataset it names, including
+one into or inside a PROC (``*.INVOKE.PROCSTEP.DD``, or ``*.PROCSTEP.DD``
+from another step of the same PROC); one that names no earlier DD binds
+nothing and is a caveat.
 Quoted literals in utility control statements (``INCLUDE COND=(...,
 C'BUILD')``) are blanked before keywords are looked for.
-- IKJEFT01 / IKJEFT1A / IKJEFT1B: the program named by ``RUN PROGRAM(x)``
-  in ``SYSTSIN`` is bound to the step's DDs (the DB2 batch pattern).
+- IKJEFT01 / IKJEFT1A / IKJEFT1B: every program named by a ``RUN
+  PROGRAM(x)`` in ``SYSTSIN`` is bound to the step's DDs (the DB2 batch
+  pattern; programs run one after another in the step share its DDs).
 - DFSRRC00 (the IMS region controller): for a ``DLI`` / ``DBB`` / ``BMP``
   region, the program named by the second ``PARM`` positional
   (``PARM='BMP,LOANPMT,LOANPSB,...'``) is bound to the step's DDs (the IMS
@@ -47,29 +64,51 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from ..jcl.programs import IMS_CONTROLLER as _IMS_CONTROLLER
+from ..jcl.programs import RUN_PROGRAM_RE as _RUN_PROGRAM_RE
+from ..jcl.programs import TSO_PROGRAMS as _TSO_PROGRAMS
+from ..jcl.programs import ims_program
 from .lineage_graph import DatasetBinding, Passthrough
 
-_SORT_PROGRAMS = frozenset({"SORT", "DFSORT", "ICEMAN", "SYNCSORT", "ICETOOL"})
+_SORT_PROGRAMS = frozenset({"SORT", "DFSORT", "ICEMAN", "SYNCSORT"})
+_ICETOOL = "ICETOOL"
+#: ICETOOL operators that write records ``FROM(dd...)`` ``TO(dd...)``; the
+#: value says whether the records keep their bytes (``copy``) or not.
+_ICETOOL_OPERATORS = {
+    "COPY": "copy",
+    "SORT": "copy",
+    "MERGE": "copy",
+    "SELECT": "copy",
+    "SUBSET": "copy",
+    "DATASORT": "copy",
+    "SPLICE": "reformat",
+    "RESIZE": "reformat",
+}
 _COPY_PROGRAMS = frozenset({"IEBGENER", "ICEGENER"})
-_TSO_PROGRAMS = frozenset({"IKJEFT01", "IKJEFT1A", "IKJEFT1B"})
-_IMS_CONTROLLER = "DFSRRC00"
-#: IMS region types whose ``PARM`` names the application program second.
-_IMS_BATCH_REGIONS = frozenset({"DLI", "DBB", "BMP"})
-_REFORMAT_RE = re.compile(r"\b(INREC|OUTREC|BUILD|OVERLAY|FINDREP|IFTHEN|PARSE)\b")
+_REFORMAT_RE = re.compile(
+    r"\b(INREC|OUTREC|BUILD|OVERLAY|FINDREP|IFTHEN|PARSE|REFORMAT|JOINKEYS)\b"
+)
 _SUM_RE = re.compile(r"\bSUM\s+FIELDS\s*=\s*\(([^)]*)\)")
 _FNAMES_RE = re.compile(r"\bFNAMES\s*=\s*\(?([A-Z0-9@#$,\s]+)\)?")
-_RUN_PROGRAM_RE = re.compile(r"\bRUN\s+PROGRAM\s*\(\s*([A-Z0-9@#$]+)\s*\)")
+#: ``OUTFIL FILES=01`` / ``FILES=(01,A)``: output DDs ``SORTOF01`` / ``SORTOFA``.
+_FILES_RE = re.compile(r"\bFILES\s*=\s*\(?([A-Z0-9@#$,\s]+)\)?")
+#: ``JOINKEYS F1=ddname`` / ``F2=ddname``: the join's input DDs, renamed.
+_JOIN_DD_RE = re.compile(r"\bF([12])\s*=\s*([A-Z@#$][A-Z0-9@#$]{0,7})\b")
 _REPRO_IN_RE = re.compile(
     r"\b(INFILE|INDATASET|IFILE|IDS)\s*\(\s*'?([A-Z0-9@#$.()+-]+?)'?\s*\)"
 )
 _REPRO_OUT_RE = re.compile(
     r"\b(OUTFILE|OUTDATASET|OFILE|ODS)\s*\(\s*'?([A-Z0-9@#$.()+-]+?)'?\s*\)"
 )
-#: IDCAMS commands: where one REPRO's operands end.
+#: IDCAMS commands: where one REPRO's operands end. A command word starts a
+#: command only at the start of a statement (after a newline or ``;``, or
+#: after ``IF ... THEN`` / ``ELSE`` / ``DO``), outside parentheses and not
+#: inside a dataset name: ``PROD.DELETE.MASTER`` holds no DELETE (#338).
 _IDCAMS_COMMAND_RE = re.compile(
-    r"\b(REPRO|DEFINE|DELETE|PRINT|LISTCAT|ALTER|VERIFY|EXPORT|IMPORT|SET|IF"
-    r"|BLDINDEX|EXAMINE|DIAGNOSE)\b"
+    r"(?<![\w.@#$])(REPRO|DEFINE|DELETE|PRINT|LISTCAT|ALTER|VERIFY|EXPORT|IMPORT"
+    r"|SET|IF|BLDINDEX|EXAMINE|DIAGNOSE)(?![\w.@#$])"
 )
+_IDCAMS_LEAD_RE = re.compile(r"(?:^|\b(?:THEN|ELSE|DO))\s*$")
 #: A quoted literal (``C'...'``, ``X'...'``, ``'...'``) in a control statement.
 _LITERAL_RE = re.compile(r"(?:\b[CXZ])?'(?:[^']|'')*'")
 _NULL_DSNS = frozenset({"NULLFILE"})
@@ -142,17 +181,28 @@ def _dsn(dds: list[Any], name: str) -> str | None:
 
 def _repro_commands(control: str) -> list[str]:
     """The operand text of every IDCAMS ``REPRO`` command, continuation
-    (``-`` at the end of a line) joined."""
-    joined = re.sub(r"[-+]\s*\n", " ", control)
+    (``-`` at the end of a line) joined. ``/* ... */`` comments are dropped
+    first, so a command after a comment still starts its statement."""
+    uncommented = re.sub(r"/\*.*?\*/", " ", control, flags=re.DOTALL)
+    joined = re.sub(r"[-+]\s*\n", " ", uncommented)
     commands: list[str] = []
-    for line in joined.splitlines():
-        marks = list(_IDCAMS_COMMAND_RE.finditer(line))
+    for statement in re.split(r"[\n;]", joined):
+        marks = [
+            mark
+            for mark in _IDCAMS_COMMAND_RE.finditer(statement)
+            if _paren_depth(statement, mark.start()) == 0
+            and _IDCAMS_LEAD_RE.search(statement[: mark.start()])
+        ]
         for index, mark in enumerate(marks):
             if mark.group(1) != "REPRO":
                 continue
-            end = marks[index + 1].start() if index + 1 < len(marks) else len(line)
-            commands.append(line[mark.end() : end])
+            end = marks[index + 1].start() if index + 1 < len(marks) else None
+            commands.append(statement[mark.end() : end])
     return commands
+
+
+def _paren_depth(text: str, index: int) -> int:
+    return text.count("(", 0, index) - text.count(")", 0, index)
 
 
 def _sum_ranges(control: str) -> tuple[tuple[int, int], ...]:
@@ -173,9 +223,16 @@ def _sum_ranges(control: str) -> tuple[tuple[int, int], ...]:
 
 def bindings_from_jobs(
     jobs: Iterable[Any],
+    caveats: list[str] | None = None,
 ) -> tuple[list[DatasetBinding], list[Passthrough]]:
     """DD -> dataset bindings per program, and utility pass-throughs, for
-    every step of every (already PROC-expanded) jcl-parser ``Job``."""
+    every step of every (already PROC-expanded) jcl-parser ``Job``.
+
+    ``caveats``, when given, receives one line per step whose flow could not
+    be read (pass them on as ``LineageGraph(join_caveats=...)``), so a step
+    left out is never mistaken for a step that moves nothing.
+    """
+    notes: list[str] = caveats if caveats is not None else []
     bindings: list[DatasetBinding] = []
     passthroughs: list[Passthrough] = []
     for job in jobs:
@@ -185,12 +242,21 @@ def bindings_from_jobs(
             program = (getattr(step, "program", None) or "").upper()
             step_name = (getattr(step, "name", None) or "").upper() or None
             dds = _resolve_referbacks(
-                list(getattr(step, "dd_statements", None) or []), step_name, earlier
+                list(getattr(step, "dd_statements", None) or []),
+                step_name,
+                earlier,
+                notes,
+                job_name,
             )
             if not program:
                 continue
+            if program == _ICETOOL:
+                passthroughs += _icetool_passthroughs(dds, job_name, step_name, notes)
+                continue
             if program in _SORT_PROGRAMS:
-                passthroughs += _sort_passthroughs(dds, job_name, step_name, program)
+                passthroughs += _sort_passthroughs(
+                    dds, job_name, step_name, program, notes
+                )
                 continue
             if program in _COPY_PROGRAMS:
                 dst = _dsn(dds, "SYSUT2")
@@ -198,6 +264,12 @@ def bindings_from_jobs(
                 kind = (
                     "reformat"
                     if re.search(r"\b(GENERATE|RECORD)\b", control)
+                    or (
+                        dst is not None
+                        and _unread_control(
+                            dds, ("SYSIN",), program, step_name, job_name, notes
+                        )
+                    )
                     else "copy"
                 )
                 passthroughs += [
@@ -209,25 +281,40 @@ def bindings_from_jobs(
             if program == "IDCAMS":
                 passthroughs += _repro_passthroughs(dds, job_name, step_name)
                 continue
+            programs = [program]
             if program in _TSO_PROGRAMS:
-                run = _RUN_PROGRAM_RE.search(_inline(dds, "SYSTSIN"))
-                if not run:
-                    continue
-                program = run.group(1)
-            elif program == _IMS_CONTROLLER:
-                program = _ims_program(step) or program
-            for dd_name, dd in _named(dds):
-                dsn = _dataset(dd)
-                if dd_name and dsn:
-                    bindings.append(
-                        DatasetBinding(
-                            program=program,
-                            ddname=dd_name,
-                            dataset=dsn,
-                            job=job_name,
-                            step=step_name,
-                        )
+                # Every RUN PROGRAM of the SYSTSIN runs in this step, one
+                # after another, and each sees the step's DDs.
+                programs = list(
+                    dict.fromkeys(
+                        run.group(1)
+                        for run in _RUN_PROGRAM_RE.finditer(_inline(dds, "SYSTSIN"))
                     )
+                )
+                if not programs:
+                    systsin = _dsn(dds, "SYSTSIN")
+                    if systsin:
+                        notes.append(
+                            f"{_step_label(program, step_name, job_name)}: "
+                            f"SYSTSIN is not in-stream ({systsin}); the programs "
+                            "it runs are not known, so its DDs are not bound"
+                        )
+                    continue
+            elif program == _IMS_CONTROLLER:
+                programs = [_ims_program(step) or program]
+            for run_program in programs:
+                for dd_name, dd in _named(dds):
+                    dsn = _dataset(dd)
+                    if dd_name and dsn:
+                        bindings.append(
+                            DatasetBinding(
+                                program=run_program,
+                                ddname=dd_name,
+                                dataset=dsn,
+                                job=job_name,
+                                step=step_name,
+                            )
+                        )
     return bindings, passthroughs
 
 
@@ -236,37 +323,59 @@ def _ims_program(step: Any) -> str | None:
     ``PARM`` positional when the first is ``DLI`` / ``DBB`` / ``BMP``."""
     parameters = getattr(step, "parameters", None) or {}
     parm = parameters.get("PARM") if isinstance(parameters, dict) else None
-    if isinstance(parm, (list, tuple)):
-        parts = [str(p) for p in parm]
-    elif parm is not None:
-        parts = str(parm).strip().strip("()'").split(",")
-    else:
-        return None
-    parts = [p.strip().strip("'").upper() for p in parts]
-    if len(parts) > 1 and parts[0] in _IMS_BATCH_REGIONS and parts[1]:
-        return parts[1]
-    return None
+    return ims_program(parm)
+
+
+def _referback_keys(parts: list[str], step: str | None) -> list[str]:
+    """Where ``*.parts`` may be remembered, most specific first: a referback
+    from a step of an expanded PROC (``RUNA.S2``) to ``*.S1.DD`` means that
+    PROC's own ``RUNA.S1``; ``*.RUNB.S1.DD`` is the whole path."""
+    if len(parts) == 1:
+        return [f"{step}.{parts[0]}"]
+    keys: list[str] = []
+    if step and "." in step:
+        keys.append(f"{step.rsplit('.', 1)[0]}.{'.'.join(parts)}")
+    keys += [".".join(parts), ".".join(parts[-2:])]
+    return list(dict.fromkeys(keys))
 
 
 def _resolve_referbacks(
-    dds: list[Any], step: str | None, earlier: dict[str, str]
+    dds: list[Any],
+    step: str | None,
+    earlier: dict[str, str],
+    notes: list[str] | None = None,
+    job: str | None = None,
 ) -> list[Any]:
     """Replace ``DSN=*.STEP.DD`` / ``DSN=*.DD`` referbacks with the dataset
-    they name, and remember this step's DDs for the steps after it."""
+    they name, and remember this step's DDs for the steps after it. A
+    referback naming no earlier DD binds nothing (never the ``*.`` text) and
+    is noted in ``notes``."""
     out: list[Any] = []
     for dd_name, dd in _named(dds):
         dsn = str(getattr(dd, "dataset_name", None) or "")
         if dsn.startswith("*."):
             parts = dsn[2:].upper().split(".")
-            key = ".".join(parts[-2:]) if len(parts) > 1 else f"{step}.{parts[0]}"
-            resolved = earlier.get(key)
-            if resolved is not None:
-                dd = SimpleNamespace(
-                    name=getattr(dd, "name", None),
-                    dataset_name=resolved,
-                    inline_data=getattr(dd, "inline_data", None),
-                    parameters=getattr(dd, "parameters", None),
+            resolved = next(
+                (
+                    earlier[key]
+                    for key in _referback_keys(parts, step)
+                    if key in earlier
+                ),
+                None,
+            )
+            if resolved is None and notes is not None:
+                notes.append(
+                    f"step {step or '?'}"
+                    + (f" in job {job}" if job else "")
+                    + f": DD {dd_name or '?'} refers back to {dsn}, which names "
+                    "no earlier DD; it is not bound to any dataset"
                 )
+            dd = SimpleNamespace(
+                name=getattr(dd, "name", None),
+                dataset_name=resolved,
+                inline_data=getattr(dd, "inline_data", None),
+                parameters=getattr(dd, "parameters", None),
+            )
         out.append(dd)
         found = _dataset(dd)
         if dd_name and found and f"{step}.{dd_name}" not in earlier:
@@ -298,28 +407,150 @@ def _repro_passthroughs(
     return out
 
 
+def _step_label(program: str, step: str | None, job: str | None) -> str:
+    return f"{program} step {step or '?'}" + (f" in job {job}" if job else "")
+
+
+def _unread_control(
+    dds: list[Any],
+    names: tuple[str, ...],
+    program: str,
+    step: str | None,
+    job: str | None,
+    notes: list[str],
+) -> bool:
+    """True (and a caveat) when a control DD of ``names`` is a dataset: its
+    statements are not read, so the step cannot be taken for a copy."""
+    unread = [dsn for name in names for dsn in _dsns(dds, name)]
+    if unread:
+        notes.append(
+            f"{_step_label(program, step, job)}: control statements are read "
+            f"from {', '.join(unread)}, which is not in-stream; the step is "
+            "treated as a reformat and values are not traced through it"
+        )
+    return bool(unread)
+
+
 def _sort_passthroughs(
-    dds: list[Any], job: str | None, step: str | None, program: str
+    dds: list[Any],
+    job: str | None,
+    step: str | None,
+    program: str,
+    notes: list[str],
 ) -> list[Passthrough]:
-    control = _control(dds, "SYSIN")
+    control = _control(dds, "SYSIN") + "\n" + _control(dds, "DFSPARM")
+    input_dds = {"SORTJNF1", "SORTJNF2"} if "JOINKEYS" in control else set()
+    input_dds |= {m.group(2) for m in _JOIN_DD_RE.finditer(control)}
     inputs: list[str] = []
     for dd_name, dd in _named(dds):
         dsn = _dataset(dd)
-        if dsn and dsn not in inputs and re.fullmatch(r"SORTIN(\d\d)?", dd_name):
+        if (
+            dsn
+            and dsn not in inputs
+            and (re.fullmatch(r"SORTIN(\d\d)?", dd_name) or dd_name in input_dds)
+        ):
             inputs.append(dsn)
     outputs = [d for d in [_dsn(dds, "SORTOUT")] if d]
-    for match in _FNAMES_RE.finditer(control):
-        for name in re.split(r"[,\s]+", match.group(1).strip()):
-            dsn = _dsn(dds, name) if name else None
-            if dsn and dsn not in outputs:
-                outputs.append(dsn)
+    names = [
+        name
+        for match in _FNAMES_RE.finditer(control)
+        for name in re.split(r"[,\s]+", match.group(1).strip())
+    ] + [
+        f"SORTOF{name}"
+        for match in _FILES_RE.finditer(control)
+        for name in re.split(r"[,\s]+", match.group(1).strip())
+        if name
+    ]
+    for name in names:
+        dsn = _dsn(dds, name) if name else None
+        if dsn and dsn not in outputs:
+            outputs.append(dsn)
+    if not inputs or not outputs:
+        missing = " and ".join(
+            what
+            for what, found in (("inputs", inputs), ("outputs", outputs))
+            if not found
+        )
+        notes.append(
+            f"{_step_label(program, step, job)}: {missing} not recognised; "
+            "the flow through it is not traced"
+        )
     kind = "reformat" if _REFORMAT_RE.search(control) else "copy"
+    if (
+        inputs
+        and outputs
+        and _unread_control(dds, ("SYSIN", "DFSPARM"), program, step, job, notes)
+    ):
+        kind = "reformat"
     ranges = _sum_ranges(control) if kind == "copy" else ()
     return [
         Passthrough(src, dst, kind, ranges, job, step, program)
         for src in inputs
         for dst in outputs
     ]
+
+
+def _icetool_operands(text: str, keyword: str) -> list[str]:
+    match = re.search(rf"\b{keyword}\s*\(([^)]*)\)", text)
+    return [n for n in re.split(r"[,\s]+", match.group(1)) if n] if match else []
+
+
+def _icetool_passthroughs(
+    dds: list[Any], job: str | None, step: str | None, notes: list[str]
+) -> list[Passthrough]:
+    """ICETOOL's record-moving operators, each read as a DFSORT step."""
+    label = _step_label(_ICETOOL, step, job)
+    if not _inline(dds, "TOOLIN"):
+        where = _dsn(dds, "TOOLIN")
+        notes.append(
+            f"{label}: TOOLIN is not in-stream"
+            + (f" ({where})" if where else "")
+            + "; the flow through it is not traced"
+        )
+        return []
+    # ``-`` at the end of a line continues the operator; ``*`` starts a comment.
+    joined = re.sub(r"-[ \t]*\n", " ", _control(dds, "TOOLIN"))
+    out: list[Passthrough] = []
+    for line in joined.splitlines():
+        words = line.split()
+        if not words or words[0].startswith("*"):
+            continue
+        operator = words[0]
+        kind = _ICETOOL_OPERATORS.get(operator)
+        if kind is None:
+            continue  # COUNT, DISPLAY, OCCUR, STATS, ...: no records written
+        inputs = [d for n in _icetool_operands(line, "FROM") for d in _dsns(dds, n)]
+        outputs: list[str] = []
+        for name in _icetool_operands(line, "TO") + _icetool_operands(line, "DISCARD"):
+            outputs += [d for d in _dsns(dds, name) if d not in outputs]
+        control = ""
+        for prefix in _icetool_operands(line, "USING")[:1]:
+            control = _control(dds, f"{prefix}CNTL")
+            if not control and _dsn(dds, f"{prefix}CNTL"):
+                notes.append(
+                    f"{label}: {operator} USING({prefix}) reads its control "
+                    f"statements from {_dsn(dds, f'{prefix}CNTL')}, which is not "
+                    "in-stream; the step is treated as a reformat"
+                )
+                kind = "reformat"
+            for match in _FNAMES_RE.finditer(control):
+                for name in re.split(r"[,\s]+", match.group(1).strip()):
+                    outputs += [d for d in _dsns(dds, name) if d not in outputs]
+        if not inputs or not outputs:
+            notes.append(
+                f"{label}: {operator} operator's FROM/TO datasets not "
+                "recognised; the flow through it is not traced"
+            )
+            continue
+        if _REFORMAT_RE.search(control):
+            kind = "reformat"
+        ranges = _sum_ranges(control) if kind == "copy" else ()
+        out += [
+            Passthrough(src, dst, kind, ranges, job, step, _ICETOOL)
+            for src in inputs
+            for dst in outputs
+        ]
+    return out
 
 
 _PROC_SUFFIXES = frozenset({".prc", ".proc", ".jcl", ".cntl", ""})

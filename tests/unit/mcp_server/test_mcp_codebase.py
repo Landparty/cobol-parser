@@ -132,6 +132,19 @@ def touch_later(path: Path, text: str) -> None:
 # -- the indexes ---------------------------------------------------------------
 
 
+def _unreadable(root: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """Make *name* a program under *root* that cannot be read."""
+    (root / name).write_text("       PROGRAM-ID. X.\n")
+    original = Workspace.read_text
+
+    def read_text(path: Path, warnings: list[str] | None = None) -> str:
+        if path.name == name:
+            raise ToolError(f"cannot read {name}: unreadable")
+        return original(path, warnings)
+
+    monkeypatch.setattr(Workspace, "read_text", staticmethod(read_text))
+
+
 class TestIndexes:
     def test_program_files_follow_cobol_yml(self, root: Path) -> None:
         (root / ".hidden").mkdir()
@@ -176,10 +189,14 @@ class TestIndexes:
         ws._use_config(ProjectConfig(copybook_path=(str(root / "copybooks"),)))
         assert programs_index(ws) is not first
 
-    def test_an_unreadable_program_is_named(self, root: Path) -> None:
-        (root / "LATIN1.cbl").write_bytes(b"       PROGRAM-ID. \xff\xfe.\n")
+    def test_an_unreadable_program_is_named(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A Latin-1 program is decoded, not refused, since #522: an
+        # unreadable one is simulated instead.
+        _unreadable(root, monkeypatch, "LATIN1.cbl")
         index = programs_index(workspace(root))
-        assert "not valid UTF-8" in index.failed["LATIN1.cbl"]
+        assert "cannot read LATIN1.cbl" in index.failed["LATIN1.cbl"]
         assert index.graph.programs  # the rest still answered
 
     def test_lineage_and_health_are_separate_builds(self, root: Path) -> None:
@@ -304,8 +321,10 @@ class TestProgramCallers:
         assert len(result["answer"]["declared_in"]) == 2
         assert "duplicate-declaration" in kinds(result)
 
-    def test_unparsed_files_are_a_caveat(self, root: Path) -> None:
-        (root / "LATIN1.cbl").write_bytes(b"       PROGRAM-ID. \xff\xfe.\n")
+    def test_unparsed_files_are_a_caveat(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _unreadable(root, monkeypatch, "LATIN1.cbl")
         result = CobolTools(workspace(root)).callers_of(None, "LOGGER")
         (caveat,) = [c for c in result["caveats"] if "LATIN1.cbl" in c["detail"]]
         assert caveat["kind"] == "incomplete-analysis"
@@ -494,7 +513,8 @@ class TestCodebaseOverview:
         assert rows["ACCOUNT"]["unit_kind"] == "CLASS"
         external = {e["program"]: e for e in answer["call_graph"]["not_in_workspace"]}
         assert external["CBLTDLI"]["called_by"] == ["IMSDLIB", "IMSMPP"]
-        assert ["FACTORL"] in answer["call_graph"]["cycles"]
+        # A nested program is graphed under its container (#532).
+        assert ["SUBPROG/FACTORL"] in answer["call_graph"]["cycles"]
         assert "BATCHSEQ" in answer["call_graph"]["entry_programs"]
         assert answer["copybooks"]["most_used"][0]["member"] == "SQLCA"
         assert sum(answer["health"]["grades"].values()) == len(answer["programs"])
@@ -512,6 +532,31 @@ class TestCodebaseOverview:
         for member in group["members"]:
             assert member["paragraph"] == "2000-TOTALS"
             assert "2000-TOTALS." in line_of(tmp_path, member["location"])
+
+    def test_a_copybook_body_under_each_programs_own_header_is_not_a_clone(
+        self, tmp_path: Path
+    ) -> None:
+        """#470 through the MCP index: each program writes the header and
+        copies in only the body, so the statements live in one file."""
+        (tmp_path / "copy").mkdir()
+        (tmp_path / "copy" / "BODY.cpy").write_text(
+            "           MOVE 1 TO WS-A\n"
+            "           ADD WS-A TO WS-B\n"
+            "           MULTIPLY 2 BY WS-B\n"
+            "           DISPLAY WS-B.\n"
+        )
+        own_header = CLONE.replace(
+            "           MOVE 1 TO WS-A\n"
+            "           ADD WS-A TO WS-B\n"
+            "           MULTIPLY 2 BY WS-B\n"
+            "           DISPLAY WS-B.\n",
+            "           COPY BODY.\n",
+        )
+        for name in ("BODYA", "BODYB"):
+            (tmp_path / f"{name}.cbl").write_text(own_header.format(name=name))
+        tools = CobolTools(workspace(tmp_path, copybook_path=(str(tmp_path / "copy"),)))
+        answer = tools.codebase_overview()["answer"]
+        assert answer["duplicated_code"]["groups"] == []
 
     def test_calls_count_resolved_targets(self, tmp_path: Path) -> None:
         (tmp_path / "DYNCALL.cbl").write_text(

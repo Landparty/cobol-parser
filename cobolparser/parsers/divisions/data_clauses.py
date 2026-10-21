@@ -23,6 +23,7 @@ from typing import Any
 
 from cobolparser._accel import accelerators_enabled
 from cobolparser._literals import quote_literal
+from cobolparser._storage import FIXED_SIZE_USAGES, is_known_usage
 from cobolparser.core.interfaces import ITokenStream
 from cobolparser.lexer import Token, TokenType
 from cobolparser.models.ast_base import SourceLocation
@@ -50,6 +51,12 @@ _COMP_KEYWORDS: frozenset[str] = frozenset(
         "COMPUTATIONAL-5",
         "BINARY",
         "PACKED-DECIMAL",
+        # COBOL 2002 usages, which may also be written without the USAGE
+        # keyword (``05 X BINARY-LONG.``), #524. ``_data_fast`` receives
+        # this set as an argument, so both clause loops accept them.
+        "FLOAT-SHORT",
+        "FLOAT-LONG",
+        *FIXED_SIZE_USAGES,
     }
 )
 
@@ -178,6 +185,8 @@ _REPORT_OPERATOR_WORDS: frozenset[str] = frozenset(
     }
 )
 # ``,`` / ``;`` between data-item clauses are separators, not clauses.
+# Words that open the next OCCURS phrase, never a key or an index name.
+_OCCURS_PHRASE_WORDS = frozenset({"ASCENDING", "DESCENDING", "INDEXED", "KEY"})
 _CLAUSE_SEPARATOR_TOKEN_TYPES: frozenset[TokenType] = frozenset(
     {TokenType.COMMA, TokenType.SEMICOLON}
 )
@@ -394,11 +403,17 @@ class DataItemClauseParser:
         """Build the PictureClause for the pattern parse_picture_clause()
         just returned, with the declared currency symbols it contains."""
         host = getattr(self._parser, "host", None)
+        signs = getattr(host, "currency_signs", None) or {}
         return PictureClause(
             pattern,
             location,
             currency_symbols=self._picture_currency_symbols,
             decimal_point_is_comma=bool(getattr(host, "decimal_point_is_comma", False)),
+            currency_signs={
+                symbol: signs[symbol]
+                for symbol in self._picture_currency_symbols
+                if symbol in signs
+            },
         )
 
     def parse_data_item(
@@ -664,6 +679,14 @@ class DataItemClauseParser:
             # POINTER, PROCEDURE-POINTER, FUNCTION-POINTER without USAGE keyword
             elif value_upper in _POINTER_KEYWORDS:
                 data_item.set_usage(value_upper)
+                token_stream.consume()
+
+            # ``BINARY-LONG [SIGNED|UNSIGNED]`` written without the USAGE
+            # keyword: the sign does not change the width (#524). The fast
+            # clause loop hands this word back here, so one branch serves both.
+            elif value_upper in ("SIGNED", "UNSIGNED") and (
+                data_item.usage or ""
+            ).upper().startswith("BINARY-"):
                 token_stream.consume()
 
             # DISPLAY without the USAGE keyword (``05 X PIC X(3) DISPLAY.``).
@@ -1230,82 +1253,21 @@ class DataItemClauseParser:
                 # dropped as an unparsed token.
                 occurs.depending_on_qualifiers = self._consume_qualifiers(token_stream)
 
-        # ASCENDING / DESCENDING KEY IS key-1 [key-2 ...] clauses
-        # (may repeat). These sit between DEPENDING ON and INDEXED BY
-        # in standard COBOL and are what makes a table valid for
-        # SEARCH ALL (binary search), so dropping them loses real
-        # semantics — and previously it also cascaded into dropping a
-        # following INDEXED BY clause.
-        self._skip_clause_separators(token_stream)
-        nxt = token_stream.peek()
-        while (
-            nxt
-            and nxt.value
-            and nxt.value.upper()
-            in (
-                "ASCENDING",
-                "DESCENDING",
-            )
-        ):
-            direction = nxt.value.upper()
-            token_stream.consume()  # consume ASCENDING/DESCENDING
-            self._skip_clause_separators(token_stream)
-            key_kw = token_stream.peek()
-            if key_kw and key_kw.value and key_kw.value.upper() == "KEY":
-                token_stream.consume()  # consume KEY
-            self._skip_clause_separators(token_stream)
-            is_kw = token_stream.peek()
-            if is_kw and is_kw.value and is_kw.value.upper() == "IS":
-                token_stream.consume()  # consume optional IS
-            keys: list[str] = []
-            while True:
-                self._skip_clause_separators(token_stream)
-                key_token = token_stream.peek()
-                if key_token and key_token.type == TokenType.COMMA:
-                    # Comma-separated key list: the comma is only a
-                    # separator, never a key name -- consume and continue.
-                    token_stream.consume()
-                    continue
-                if (
-                    key_token
-                    and key_token.type == TokenType.IDENTIFIER
-                    and key_token.value
-                    and key_token.value.upper()
-                    not in ("ASCENDING", "DESCENDING", "INDEXED", "KEY")
-                ):
-                    keys.append(key_token.value)
-                    token_stream.consume()
-                    # A key may be qualified (``KEY IS K1 OF ENTRY``); the
-                    # key is the bare name, the qualifier only locates it.
-                    self._consume_qualifiers(token_stream)
-                else:
-                    break
-            if keys:
-                occurs.add_key_clause(direction, keys)
+        # ASCENDING / DESCENDING KEY IS key-1 [key-2 ...] phrases (may
+        # repeat) and the INDEXED BY phrase, in either order: IBM accepts
+        # ``INDEXED BY IX ASCENDING KEY K`` as well as the standard order
+        # (#542). The KEY phrases are what makes a table valid for SEARCH
+        # ALL (binary search), so dropping them loses real semantics.
+        while True:
             self._skip_clause_separators(token_stream)
             nxt = token_stream.peek()
-
-        # INDEXED BY clause (one or more index names, optionally
-        # comma-separated; INDEXED and BY may straddle a line break)
-        self._skip_clause_separators(token_stream)
-        nxt = token_stream.peek()
-        if nxt and nxt.value and nxt.value.upper() == "INDEXED":
-            token_stream.consume()  # consume INDEXED
-            self._skip_clause_separators(token_stream)
-            by_token = token_stream.peek()
-            if by_token and by_token.value and by_token.value.upper() == "BY":
-                token_stream.consume()  # consume BY
-            while True:
-                self._skip_clause_separators(token_stream)
-                idx_token = token_stream.peek()
-                if idx_token and idx_token.type == TokenType.COMMA:
-                    token_stream.consume()
-                    continue
-                if idx_token and idx_token.type == TokenType.IDENTIFIER:
-                    occurs.add_index_name(idx_token.value)
-                    token_stream.consume()
-                else:
-                    break
+            word = nxt.value.upper() if nxt and nxt.value else ""
+            if word in ("ASCENDING", "DESCENDING"):
+                self._parse_occurs_key_phrase(token_stream, occurs, word)
+            elif word == "INDEXED":
+                self._parse_occurs_indexed_by(token_stream, occurs)
+            else:
+                break
 
         if unbounded:
             occurs.is_unbounded = True
@@ -1321,6 +1283,69 @@ class DataItemClauseParser:
         if occurs.max_times is not None:
             data_item.set_occurs_clause(occurs)
 
+    def _parse_occurs_key_phrase(
+        self, token_stream: Any, occurs: Any, direction: str
+    ) -> None:
+        """``ASCENDING|DESCENDING [KEY] [IS] key-1 [key-2 ...]``."""
+        token_stream.consume()  # consume ASCENDING/DESCENDING
+        self._skip_clause_separators(token_stream)
+        key_kw = token_stream.peek()
+        if key_kw and key_kw.value and key_kw.value.upper() == "KEY":
+            token_stream.consume()  # consume KEY
+        self._skip_clause_separators(token_stream)
+        is_kw = token_stream.peek()
+        if is_kw and is_kw.value and is_kw.value.upper() == "IS":
+            token_stream.consume()  # consume optional IS
+        keys: list[str] = []
+        while True:
+            self._skip_clause_separators(token_stream)
+            key_token = token_stream.peek()
+            if key_token and key_token.type == TokenType.COMMA:
+                # Comma-separated key list: the comma is only a
+                # separator, never a key name -- consume and continue.
+                token_stream.consume()
+                continue
+            if (
+                key_token
+                and key_token.type == TokenType.IDENTIFIER
+                and key_token.value
+                and key_token.value.upper() not in _OCCURS_PHRASE_WORDS
+            ):
+                keys.append(key_token.value)
+                token_stream.consume()
+                # A key may be qualified (``KEY IS K1 OF ENTRY``); the
+                # key is the bare name, the qualifier only locates it.
+                self._consume_qualifiers(token_stream)
+            else:
+                break
+        if keys:
+            occurs.add_key_clause(direction, keys)
+
+    def _parse_occurs_indexed_by(self, token_stream: Any, occurs: Any) -> None:
+        """``INDEXED [BY] index-1 [index-2 ...]`` (optionally comma-separated;
+        INDEXED and BY may straddle a line break). Stops at a following
+        ASCENDING / DESCENDING / KEY, which open a KEY phrase (#542)."""
+        token_stream.consume()  # consume INDEXED
+        self._skip_clause_separators(token_stream)
+        by_token = token_stream.peek()
+        if by_token and by_token.value and by_token.value.upper() == "BY":
+            token_stream.consume()  # consume BY
+        while True:
+            self._skip_clause_separators(token_stream)
+            idx_token = token_stream.peek()
+            if idx_token and idx_token.type == TokenType.COMMA:
+                token_stream.consume()
+                continue
+            if (
+                idx_token
+                and idx_token.type == TokenType.IDENTIFIER
+                and (idx_token.value or "").upper() not in _OCCURS_PHRASE_WORDS
+            ):
+                occurs.add_index_name(idx_token.value)
+                token_stream.consume()
+            else:
+                break
+
     def _warn_item_missing_period(
         self, token: Any, header: str, data_item: Any
     ) -> None:
@@ -1335,6 +1360,18 @@ class DataItemClauseParser:
             add_warning(
                 f"Data item '{item_name}' missing its terminating period: a "
                 f"period was assumed before '{header}'{where}"
+            )
+
+    def _warn_unknown_usage(self, token: Any, usage: str) -> None:
+        """Record that *usage* is not a USAGE this parser can size."""
+        line = getattr(getattr(token, "location", None), "line", None)
+        where = f" at line {line}" if line else ""
+        host = getattr(self._parser, "host", None)
+        add_warning = getattr(host, "add_warning", None)
+        if callable(add_warning):
+            add_warning(
+                f"Unsupported USAGE '{usage}'{where}: its storage size is "
+                "unknown, so record offsets from this item on are unreliable"
             )
 
     def _warn_dropped_data_token(self, token: Any, data_item: Any) -> None:
@@ -1835,6 +1872,20 @@ class DataItemClauseParser:
         if token.type == TokenType.IDENTIFIER:
             usage = token.value.upper()
             token_stream.consume()
+            if usage in FIXED_SIZE_USAGES and usage.startswith("BINARY-"):
+                # ``BINARY-LONG [SIGNED|UNSIGNED]``: the sign does not
+                # change the width.
+                self._skip_newlines(token_stream)
+                nxt = token_stream.peek()
+                if nxt is not None and (nxt.value or "").upper() in (
+                    "SIGNED",
+                    "UNSIGNED",
+                ):
+                    token_stream.consume()
+            elif not is_known_usage(usage):
+                # A word nothing here can size (``USAGE IS COMPX``, a vendor
+                # extension): say so instead of storing it silently (#524).
+                self._warn_unknown_usage(token, usage)
             return usage
 
         # Check for COMP variations that are tokenized differently

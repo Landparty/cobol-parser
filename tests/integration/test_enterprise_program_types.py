@@ -629,7 +629,8 @@ class TestDataAndText:
 
     def test_cobol_6x_data_description(self, corpus_asts) -> None:
         ast, _ = corpus_asts["MODERN63"]
-        assert _item(ast, "WS-UTF8-NAME").picture_clause.size == 40
+        # PIC U(40): 40 characters in 4 x 40 reserved bytes (#554).
+        assert _item(ast, "WS-UTF8-NAME").picture_clause.size == 160
         assert _item(ast, "WS-UTF8-BYTES").byte_length == 120
         assert _item(ast, "WS-UTF8-BYTES").picture_clause.size == 120
         dyn = _item(ast, "WS-UTF8-DYN")

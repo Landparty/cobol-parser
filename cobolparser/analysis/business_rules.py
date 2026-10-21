@@ -73,6 +73,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .._literals import is_quoted_literal
 from ..models.ast_base import SourceLocation
 from ..models.data_items import CobolDataItem, ConditionNameItem
 from ..models.program import CobolParagraph, CobolProgram
@@ -114,6 +115,7 @@ from .dead_code import DeadCodeAnalyzer
 from .program_flow.condition_text import render_condition_text
 from .unused_variables import collect_declared_items
 from .xref import (
+    _DLI_INTERFACE_BLOCK,
     _SPECIAL_REGISTERS,
     ROLE_CALL_ARGUMENT,
     ROLE_CONDITION,
@@ -622,7 +624,10 @@ class BusinessRuleExtractor:
         for name, (_cond, parent) in self._condition_names.items():
             if parent.name.upper() in technical:
                 technical.add(name)
-        self._technical = technical | set(_SPECIAL_REGISTERS)
+        # The EXEC DLI DIB* fields are special registers but status fields
+        # a program branches on for business outcomes, like a CICS RESP
+        # field ("GE -> CUSTOMER NOT FOUND"), so they stay business (#311).
+        self._technical = technical | (_SPECIAL_REGISTERS - _DLI_INTERFACE_BLOCK)
 
     # ------------------------------------------------------------------
     # Procedure walk
@@ -1085,11 +1090,16 @@ class BusinessRuleExtractor:
             low = self._literal(selector.get("start"), False)
             high = self._literal(selector.get("end"), False)
             return f"{subject} >= {low} AND {subject} <= {high}"
-        value = self._literal(
-            selector.get("value"),
-            bool(selector.get("identifier")) or kind == "Identifier",
-            quoted=bool(selector.get("quoted")),
-        )
+        if selector.get("expression"):
+            # A computed selector (``WHEN WS-N + 1``, ``WHEN WS-T (2)``), not
+            # text to quote (#333).
+            value = _tidy(str(selector.get("value") or "").strip())
+        else:
+            value = self._literal(
+                selector.get("value"),
+                bool(selector.get("identifier")) or kind == "Identifier",
+                quoted=bool(selector.get("quoted")),
+            )
         if subject_upper == "TRUE":
             return value
         if subject_upper == "FALSE":
@@ -1115,7 +1125,8 @@ class BusinessRuleExtractor:
             return text
         if _NUMERIC_LITERAL_RE.match(text) or text.upper() in _FIGURATIVES:
             return text
-        if text[:1] in ("'", '"'):
+        if text[:1] in ("'", '"') or is_quoted_literal(text):
+            # Already source spelling, a typed literal (``X'00'``) included.
             return text
         # The parser joins a multi-token selector with spaces
         # (``DFHRESP ( NORMAL )``); a quoted literal it unquoted never has
@@ -1191,11 +1202,10 @@ class BusinessRuleExtractor:
 
     def _formula(self, stmt: CobolStatement) -> str:
         if isinstance(stmt, ComputeStatement):
-            rounded = " ROUNDED" if stmt.rounded else ""
             expression = _expression_text(stmt.expression)
             if not expression and stmt.expression_tree is not None:
                 expression = _expression_text(stmt.expression_tree)
-            return _tidy(f"{', '.join(stmt.targets)}{rounded} = {expression}")
+            return _tidy(f"{_receivers(stmt, stmt.targets)} = {expression}")
         if isinstance(stmt, ArithmeticStatement):
             return _tidy(_arithmetic_formula(stmt))
         return self._statement_text(stmt)
@@ -1262,44 +1272,62 @@ def _arithmetic_sources(stmt: ArithmeticStatement) -> list[str]:
     return [op for op in stmt.operands if op.upper() not in results]
 
 
+def _rounded(stmt: ArithmeticStatement | ComputeStatement, receiver: str) -> str:
+    """`` ROUNDED [MODE IS m]`` when *receiver* carries it, else ``""`` --
+    per receiver, not statement-wide (#517)."""
+    phrase = stmt.rounding_of(receiver)
+    return f" {phrase}" if phrase else ""
+
+
+def _receivers(stmt: ArithmeticStatement | ComputeStatement, names: list[str]) -> str:
+    """``B ROUNDED, C`` -- each receiver with its own rounding phrase."""
+    return ", ".join(f"{name}{_rounded(stmt, name)}" for name in names)
+
+
 def _arithmetic_formula(stmt: ArithmeticStatement) -> str:
     """``target = expression`` for an ADD / SUBTRACT / MULTIPLY / DIVIDE."""
-    rounded = " ROUNDED" if stmt.rounded else ""
     sources = _arithmetic_sources(stmt)
     if stmt.is_corresponding or not sources:
         return _arithmetic_cobol_text(stmt)
-    givings = ", ".join(stmt.givings)
+    givings = _receivers(stmt, stmt.givings)
     if isinstance(stmt, AddStatement):
         if stmt.givings:
             terms = sources + [t for t in stmt.targets if t not in sources]
-            return f"{givings}{rounded} = {' + '.join(terms)}"
+            return f"{givings} = {' + '.join(terms)}"
         return "; ".join(
-            f"{t}{rounded} = {' + '.join([t, *sources])}" for t in stmt.targets
+            f"{t}{_rounded(stmt, t)} = {' + '.join([t, *sources])}"
+            for t in stmt.targets
         )
     if isinstance(stmt, SubtractStatement):
         subtrahend = " - ".join(sources)
         if stmt.givings:
             minuend = stmt.targets[0] if stmt.targets else "?"
-            return f"{givings}{rounded} = {minuend} - {subtrahend}"
-        return "; ".join(f"{t}{rounded} = {t} - {subtrahend}" for t in stmt.targets)
+            return f"{givings} = {minuend} - {subtrahend}"
+        return "; ".join(
+            f"{t}{_rounded(stmt, t)} = {t} - {subtrahend}" for t in stmt.targets
+        )
     if isinstance(stmt, MultiplyStatement):
         if stmt.givings and len(sources) == 2:
-            return f"{givings}{rounded} = {sources[0]} * {sources[1]}"
+            return f"{givings} = {sources[0]} * {sources[1]}"
         if not stmt.givings and stmt.targets:
             first = sources[0]
             return "; ".join(
-                f"{t}{rounded} = {t} * {first}" for t in stmt.targets if t != first
+                f"{t}{_rounded(stmt, t)} = {t} * {first}"
+                for t in stmt.targets
+                if t != first
             ) or _arithmetic_cobol_text(stmt)
     if isinstance(stmt, DivideStatement):
         into = (stmt.division_mode or "").upper() == "INTO"
         remainder = f"; REMAINDER {stmt.remainder}" if stmt.remainder else ""
         if stmt.givings and len(sources) == 2:
             dividend, divisor = (sources[1], sources[0]) if into else sources
-            return f"{givings}{rounded} = {dividend} / {divisor}{remainder}"
+            return f"{givings} = {dividend} / {divisor}{remainder}"
         if not stmt.givings and into and stmt.targets:
             first = sources[0]
             return "; ".join(
-                f"{t}{rounded} = {t} / {first}" for t in stmt.targets if t != first
+                f"{t}{_rounded(stmt, t)} = {t} / {first}"
+                for t in stmt.targets
+                if t != first
             ) or _arithmetic_cobol_text(stmt)
     return _arithmetic_cobol_text(stmt)
 
@@ -1326,11 +1354,12 @@ def _arithmetic_cobol_text(stmt: ArithmeticStatement) -> str:
         rest = list(stmt.targets)
     text = f"{verb} {corr}{' '.join(head)}"
     if rest:
-        text += f" {joiner} {' '.join(rest)}"
+        receivers = [
+            f"{r}{_rounded(stmt, r) if r in stmt.targets else ''}" for r in rest
+        ]
+        text += f" {joiner} {' '.join(receivers)}"
     if stmt.givings:
-        text += f" GIVING {' '.join(stmt.givings)}"
-    if stmt.rounded:
-        text += " ROUNDED"
+        text += f" GIVING {' '.join(f'{g}{_rounded(stmt, g)}' for g in stmt.givings)}"
     if isinstance(stmt, DivideStatement) and stmt.remainder:
         text += f" REMAINDER {stmt.remainder}"
     return text

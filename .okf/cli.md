@@ -76,7 +76,8 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
   `--free-form`, `--debug-lines`/`--no-debug-lines`, `--dialect {ibm-enterprise}`
   (default), `--error-recovery {fail-fast,collect-all}` (default `collect-all`),
   `--copybook-path DIR`..., `--program NAME` (default: the outermost unit),
-  `--define SYMBOL[=VALUE]`..., `-o/--output FILE`.
+  `--define SYMBOL[=VALUE]`..., `--encoding ENC` (default: detected, #522),
+  `-o/--output FILE`.
 * **+prof** — also `--profile`, `--profile-top-n N` (default 20; implies
   `--profile`), `--profile-output PATH` (implies `--profile`).
 * **dl** — `--debug-lines`/`--no-debug-lines` without `--source-format`.
@@ -84,11 +85,11 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | Subcommand | Positionals | Own flags (default) | Shared flags | Output |
 |---|---|---|---|---|
 | `parse` | `file [path]` | `--errors`, `--stats`, `--find-type NODE_TYPE` | A without `--program`; +prof | AST JSON; exit 2 on a recovered-but-errored parse |
-| `batch` | `[files ...]` | `--glob PATTERN`..., `--workers N` (CPU count), `--encoding` (`utf-8`), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
-| `tokenize` | `file` | — | `--compact`, `--source-format`/`--free-form`, dl, `--dialect`, `-o` | `{source_file, tokens}` |
-| `preprocess` | `file` | `--strip-directives` | `--source-format`/`--free-form`, dl, `--define` (no `--compact`, no `-o`) | free-form source text |
-| `expand` | `file` | `--keep-comments`, `--source-map`, `--max-depth N` (100) | `--copybook-path`, `--compact`, `--define`, `-o`, dl | expansion JSON |
-| `gen-data` | `file` (copybook or program) | `--rows/-n` (10), `--seed`, `--record`, `--list-records`, `--describe`, `--header-style {short,path}`, `--include-filler`, `--include-redefines`, `--no-expand-occurs`, `--max-occurs`, `--no-semantic`, `--ignore-values`, `--unique FIELD`, `--blank-rate`, `--format {csv,json,record,hex}` (csv), `--charset` (ascii), `--endian` (auto), `--record-format` (fixed), `--record-varying MIN:MAX`, `--record-separator` (none) | `--copybook-path`, `--compact`, `-o` | CSV / JSON / record bytes / hex |
+| `batch` | `[files ...]` | `--glob PATTERN`..., `--workers N` (CPU count), `--encoding` (detected), `--errors`, `--stats` | `--compact`, `--dialect`, `--error-recovery`, `-o`, dl; +prof | JSON list, one entry per file |
+| `tokenize` | `file` | — | `--compact`, `--source-format`/`--free-form`, dl, `--dialect`, `--encoding`, `-o` | `{source_file, tokens}` |
+| `preprocess` | `file` | `--strip-directives` | `--source-format`/`--free-form`, dl, `--define`, `--encoding` (no `--compact`, no `-o`) | free-form source text |
+| `expand` | `file` | `--keep-comments`, `--source-map`, `--max-depth N` (100) | `--copybook-path`, `--compact`, `--define`, `--encoding`, `-o`, dl | expansion JSON |
+| `gen-data` | `file` (copybook or program) | `--rows/-n` (10), `--seed`, `--record`, `--list-records`, `--describe`, `--header-style {short,path}`, `--include-filler`, `--include-redefines`, `--no-expand-occurs`, `--max-occurs`, `--no-semantic`, `--ignore-values`, `--unique FIELD`, `--blank-rate`, `--format {csv,json,record,hex}` (csv), `--charset` (ascii), `--endian` (auto), `--record-format` (fixed), `--record-varying MIN:MAX`, `--record-separator` (none) | `--copybook-path`, `--compact`, `--encoding`, `-o` | CSV / JSON / record bytes / hex |
 | `decode` | `[file]` | `--copybook FILE` (required), `--record`, `--view`, `--list-views`, `--format {csv,json,hex}` (csv), `--charset`, `--endian`, `--record-format`, `--record-length N`, `--record-separator`, `--max-records N` (all), `--skip N` (0), `--strict` | `--copybook-path`, `--compact`, `-o` | CSV / JSON / hex |
 | `compare` | `expected actual` | `--copybook FILE` (required), `--record`, `--view`, `--key FIELD`..., `--ignore FIELD`..., `--compare-bytes`, `--max-differences N`, `--format {text,json}` (text), the decode file-format flags (`--charset`, `--endian`, `--record-format`, `--record-length N`, `--record-separator`) | `--copybook-path`, `--compact`, `-o` | report; exit 0/1/2 like `cmp` |
 | `gen-fixtures` | `file` | `--callee-path DIR`..., `--rows/-n` (10), `--seed`, `--max-occurs N`, `--scenarios {happy,branches,all}` (happy), `--format {json,csv-dir}` (json), `--list-boundaries`, `--strict` | `--copybook-path`, `--compact`, `-o`, dl | `FixtureBundle` JSON or CSV dir |
@@ -106,7 +107,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `ims-dli` | `file` | — | A (no profiling) | `IMSSegmentAnalyzer` |
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
-| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (`utf-8`) | A without `--program`/`--define` | `scan_version` report |
+| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected) | A without `--program` | `scan_version` report |
 | `lint` | `file` | `--rule RULE`... (all), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text}` (json) | A (`--program` default: every unit); +prof | findings; exit 3 on `--fail-on` |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
@@ -117,7 +118,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `sql-cics-check` | `file` | — | A; +prof | `SqlCicsReport` |
 | `business-rules` | `file` | `--format {json,text}` (json), `--include-technical` | A; +prof | `BusinessRuleReport` |
 | `lineage` | `file` | `--field NAME`, `--direction {forward,backward}` (forward), `--format {json,text}` (json) | A (no profiling) | `FieldFlowReport` |
-| `field-impact` | `[FIELD] PATH ...` | `--program NAME` (every program with that field), `--table T.C`, `--dataset DSN`, `--direction` (forward), `--depth N` (unlimited), `--jcl PATH`..., `--proc-path DIR`, `--bindings FILE.json`, `--key-relationships`, `--workers N`, `--format {json,text}` (json) | `--compact`, `--copybook-path`, `-o`, dl | `ImpactResult`; exit 1 when the start matches nothing |
+| `field-impact` | `[FIELD] PATH ...` | `--program NAME` (every program with that field), `--table T.C`, `--dataset DSN`, `--direction` (forward), `--depth N` (unlimited), `--jcl PATH`..., `--proc-path DIR`, `--bindings FILE.json`, `--key-relationships`, `--workers N`, `--format {json,text}` (json) | `--compact`, `--copybook-path`, `--source-format`, `--define`, `-o`, dl | `ImpactResult`; exit 1 when the start matches nothing |
 | `jcl` | `file` | `--dd-map`, `--bindings`, `--program NAME`, `--proc-path DIR`..., `--strict` | `--compact`, `-o` | job JSON; needs `[jcl]` extra; exit 3 on `--strict` |
 | `le-info` | `[name ...]` | `--kind {service,function,all}` (all) | `--compact`, `-o` | LE / intrinsic signature catalogue |
 | `config` | — | `--json` | `--compact`, `-o` | effective `cobol.yml` |
@@ -134,7 +135,7 @@ Subcommands that take none of the COBOL parse flags (`--source-format`,
 |------|---------|
 | `0` | Ran to completion; findings alone never change it. Analyzer subcommands exit 0 on a partial parse too, printing `warning: <file> parsed with N error(s); analysis may be incomplete` to stderr (`_parse_result_or_fail`) |
 | `1` | The CLI failed (`_fail()`): unreadable file, `ast is None`, unwritable output, a `cobol.yml` error, a missing extra, an invalid option value |
-| `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`); `batch` had a file with a `read_error` or `success=false`; `gen-fixtures --strict` found unresolved items |
+| `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`); `batch` had a file with a `read_error` or `success=false`; `scan` had a file in `failures`, and `codebase-graph` / `copybook-impact` a file in the graph's `errors` (missing, unreadable or parsed with errors) -- output still written, a `warning:` on stderr, plus `error: no such file or directory: X` per missing path (`_exit_on_graph_errors`, #325, owner's option (a): any failed file, as `batch`); `gen-fixtures --strict` found unresolved items |
 | `3` | `lint --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
 | `141` | stdout closed (128 + SIGPIPE) |
 
@@ -227,8 +228,20 @@ stated" stays distinct from "equals the default"):
   `charset`, `endian`, `record_format`, `record_separator`, `rows`, `rules`,
   `min_severity`, `fail_on`. `extensions`/`rules` are argparse *dests*, not
   the `--extension`/`--rule` spellings — getting that wrong silently binds
-  nothing. A subcommand without the dest silently ignores the key, which is
-  why every subcommand that parses COBOL has `--debug-lines`.
+  nothing. A subcommand without the dest skips the key; for the keys that
+  change *which program* is parsed (`project.define`, a non-`auto`
+  `source_format`, a true `debug_lines`) `unapplied_parse_settings()` names
+  each one it skipped and `main()` prints `warning: <file> sets
+  project.define, but `batch` has no flag for it and parses without it` on
+  stderr (#324). It returns nothing for a subcommand with none of `define` /
+  `source_format` / `debug_lines` / `copybook_path` (`config`, `le-info`,
+  `jcl`, `mcp`), and nothing for `dialect`, which has one value. For
+  `gen-data` / `decode` / `compare` / `expand` (`_SOURCE_FORMAT_NOT_WARNED`)
+  it leaves out `source_format`, which auto-detection settles for a
+  copybook; their `define` warning stays. Every
+  subcommand that parses COBOL has `--debug-lines`; `batch`, `gen-fixtures`,
+  `codebase-graph`, `copybook-impact`, `gen-data`, `decode`, `compare`,
+  `tokenize` and `expand` still lack `--define` and/or `--source-format`.
 * **`--free-form`** passed by the user suppresses filling `source_format`:
   `_source_format_kwargs()` reads `--source-format` first, so a config value
   would override the layout stated on the command line.
@@ -277,8 +290,16 @@ Reports which `cobol.yml` is in effect and every setting it supplies;
 settings the file does not mention are **omitted**, so what is printed is
 exactly what the file changes. No file anywhere: says so, suggests creating
 one, exit 0. `--json` emits `{"config_file", "version", "project", "data",
-"lint", "tools"}` (`config_file` `null` when none). Honours `--config` /
-`--no-config`.
+"lint", "tools"}` (`config_file` `null` when none), plus
+`missing_directories` only when `ProjectConfig.missing_directories()` names
+a path entry that is not a directory; the text form marks those entries
+`(not an existing directory)`. Honours `--config` / `--no-config`.
+
+Path entries (`_path_list`) get `os.path.expanduser` + `expandvars` before
+the join onto the file's directory: as written, `~/cpy` became
+`<cfgdir>/~/cpy` and silently found nothing (#550). `main()` warns on stderr
+once per missing entry for a dest the subcommand reads and the user did not
+pass explicitly.
 
 ## Shared flags
 
@@ -304,7 +325,9 @@ then `parse_cobol`. Conditional-compilation diagnostics (unknown `>>IF`
 conditions, stray `>>ELSE`/`>>END-IF`, malformed `>>DEFINE`, unclosed `>>IF`)
 are printed as `warning:` lines on stderr — by `preprocess`, and by `parse` /
 analyzers given `--define` without `--copybook-path` — so deleted guarded
-blocks are never silent. With `--copybook-path` the expander runs that pass
+blocks are never silent. `scan` and `field-impact` take `--define` too
+(`ScanOptions.defined_symbols`, same two paths inside the worker; the
+directive warnings land in each unit's parse warnings) (#324). With `--copybook-path` the expander runs that pass
 and `expand` reports them in `statistics.warnings`.
 
 ### Source layout (`--source-format`)
@@ -313,9 +336,10 @@ and `expand` reports them in `statistics.warnings`.
 `--free-form`; `cobol.yml` `project.source_format`) is taken by `parse`,
 `tokenize`, `preprocess`, every `_build_analyzer_parser` subcommand, and the
 hand-built `unused-variables`, `program-flow`, `redundancy`, `scan`, `lint`,
-`business-rules`, `lineage`, `diff`. `batch`, `expand`, `gen-fixtures`,
-`codebase-graph`, `copybook-impact` and `field-impact` always auto-detect
-(their APIs expose no layout override).
+`business-rules`, `lineage`, `diff`, `field-impact`. `batch`, `expand`,
+`gen-fixtures`, `codebase-graph` and `copybook-impact` always auto-detect
+(their APIs expose no layout override; a config value is warned about, see
+Bound dests).
 
 | Value | Behaviour |
 |-------|-----------|
@@ -403,9 +427,17 @@ start.
   `--errors` shows errors only, `--stats` appends `ParseStatistics`,
   `--find-type T` lists nodes of a type (`ast.find_all_by_type()`). Exit 2 on
   a recovered-but-errored parse, `--find-type` included.
+* **Source encoding** (#522): every subcommand that reads one COBOL source
+  through `_read_source` (`parse`, `tokenize`, `preprocess`, `expand`,
+  `gen-data`, `lint`, every analyzer subcommand) takes `--encoding ENC`,
+  default detected as for a copybook (`read_program_source`): a cp1252 /
+  Latin-1 program is read, not refused as "not valid UTF-8". A lossy decode
+  prints `warning: Lossy decode ...` on stderr; an unknown codec exits 1.
+  `gen-fixtures` and `jcl` still read their own way. `cobol.yml` has no
+  source-encoding key.
 * **`batch`** parses in parallel (`ProcessPoolExecutor`); files positional
   and/or via repeatable `--glob 'src/**/*.cbl'`; `--workers` (CPU count),
-  `--encoding` (`utf-8`); one JSON result per file, `--errors` / `--stats`
+  `--encoding` (detected); one JSON result per file, `--errors` / `--stats`
   per file. Exit 2 when any file has a `read_error` or `success=false`.
 * **`tokenize`** prints `{"source_file", "tokens": [{"type", "value", "line",
   "column"}]}` (`type` is the `TokenType` name) through
@@ -438,9 +470,11 @@ Prints the normalised, conditionally compiled free-form text on stdout.
 Prints `{"source_file", **CopybookExpansion.to_dict()}`. `--copybook-path` is
 repeatable (search order); `--max-depth` (100) caps nesting (`max_nesting_depth`). A missing /
 circular / traversing COPY is `error: Copybook expansion failed ...`, exit 1.
-Conditional compilation runs in the expander only with `--define`
-(`process_conditionals=bool(defines)`), so a program's own `>>DEFINE`
-reaches its copybooks; diagnostics go to `statistics.warnings`.
+Conditional compilation always runs in the expander, `--define` or not
+(`process_conditionals=True`), so a program's own `>>DEFINE` reaches its
+copybooks and only one arm of each `>>IF` survives; diagnostics go to
+`statistics.warnings`. Gating it on `--define` printed both arms (#583, the
+`expand` twin of #271).
 
 * `--keep-comments` puts each comment line's text back, in the program and in
   every inlined member. Expansion always blanks comments first (a `COPY`
@@ -536,6 +570,10 @@ copybook, back into a table**.
   trailing bytes that are not a whole record (usually a wrong record length);
   **`--strict`** makes either of the last two exit 1 — the CI form of "does
   this copybook describe this file?".
+* A copybook that is not UTF-8 (a Latin-1 accent in a comment) is a one-line
+  `error: Cannot read copybook FILE: ...`, exit 1, also under
+  `--list-views` -- `UnicodeDecodeError` is a `ValueError`, not an `OSError`,
+  and used to escape as a traceback (#496). `compare` words it the same.
 
 ### `compare`
 
@@ -610,7 +648,7 @@ Each takes `file` plus **A** (and **+prof** per the
 | `health` | `TechnicalDebtAnalyzer`: 0-100 score, A-F grade, components, `top_offenders`, `complexity_summary`/`redundancy_summary`. A file parsed with errors exits 0 with `"grade": null`, nonzero `parse_error_count` and a caveat (#397) |
 | `io-sequence` / `move-type-check` / `linkage-check` / `language-env` | `IOSequenceAnalyzer` / `MoveTypeChecker` / `LinkageChecker` violations; LE function/service usage |
 | `ims-dli` | `IMSSegmentAnalyzer`; `is_ims_program` = `ast.has_ims() or ast.uses_ims_interface()` (a CBLTDLI / AIBTDLI / CEETDLI caller is IMS without `ENTRY 'DLITCBL'`, #398); `primary_segment` is a call's **last** segment |
-| `data-items` | `compute_program_data_items()`: `{"items", "unresolved"}` — offset, length, REDEFINES chain, OCCURS min/max, level-88 values, every DATA DIVISION section ([generators/record-data.md](generators/record-data.md)) |
+| `data-items` | `compute_program_data_items()`: `{"items", "unresolved"}` — offset, length, REDEFINES chain, OCCURS min/max, level-88 values, every DATA DIVISION section ([generators/record-data.md](generators/record-data.md)). A bare copybook is wrapped like gen-data's (`args._wrap_copybook_fragment`, read by `_do_parse`); a file with no DATA DIVISION exits 1 instead of printing `"items": []` (#536) |
 | `dclgen-check` | `DclgenChecker().check(ast)`: `violation_count`, `checked_count`, `unchecked_count`, `worst_severity`, `tables`, `violations`, `checked`, `unchecked`, `ambiguous_columns`; also a lint rule |
 | `redundancy` | `RedundancyAnalyzer`: `dead_code`, `unused_variables`, `clone_groups`, `paragraph_fingerprints` (only exposed here). Hand-built for `--min-clone-statements`, shared with `scan` via `_add_min_clone_statements_arg` so the two cannot disagree on what a clone is |
 | `xref` | `XrefReport`: `entries` (`definition`, `references`, `reference_count`), `undefined`, `caveats` (+ the parser's unexpanded-COPY warnings, which explain fields looking undeclared), `duplicate_declarations`, `summary` |
@@ -735,13 +773,19 @@ data item (a single-report `LineageGraph`). See [analysis.md](analysis.md).
 [SCHEMA.]TABLE.COLUMN` or `--dataset DSN` — exactly one. Bindings: `--jcl`
 (needs jcl-parser; `--proc-path` is a flat PROC folder or a JCLLIB base)
 and/or `--bindings` (`{"bindings": [...], "passthroughs": [...]}`, dict forms
-of `DatasetBinding` / `Passthrough`). `--depth` caps the joins a path crosses
+of `DatasetBinding` / `Passthrough`; `jcl --bindings` output works as-is: a
+row with no `program` or `dataset` is skipped, and a malformed row is a
+one-line `error: --bindings: ...` naming it, exit 1, never a traceback). `--depth` caps the joins a path crosses
 (dataset or table hop into another program, or a CALL). JSON:
 `ImpactResult.to_dict()` + `graph` (statistics, opaque callees, unjoined DDs,
-caveats) + `problems` (files with no report, JCL that did not parse or
-expand). Text groups hits by program with their paths, then `Unjoined:` and
-`Problems:`. Exit 0 when the start was found (hits or not); 1 when no source
-produced a report (problems printed first), the start matches nothing (report
+caveats, incl. JCL steps `bindings_from_jobs` could not read, passed as
+`join_caveats`) + `problems` (files with no report, JCL that did not parse
+or expand). Text groups hits by program with their paths -- item hits and
+port hits (`port console:SYSOUT@0+4 line 23 [display]`, an unbound DD, a
+CALL argument), the same hits as the JSON (#528) -- then `Unjoined:` and
+`Problems:`. Exit 0 when the start was found (hits or not, including a
+declared field no value flows through, #546); 1 when no source produced a
+report (problems printed first), the start matches no declared item (report
 still printed with `"start_found": false`), or on an argument error. Files
 that failed while others parsed stay in `problems` only.
 
@@ -783,8 +827,8 @@ flowchart renderer's conventions). `copybook-impact` takes the member first
 | Flag | Meaning |
 |------|---------|
 | `--dd-map` | Only the `ddname -> datasets` mapping (what `SELECT ... ASSIGN TO ddname` resolves through) |
-| `--bindings` | One row per DD binding (ddname, dataset, step, job, DISP, RECFM, LRECL) instead of the job structure |
-| `--program NAME` | Only the steps that run this program; filters `--dd-map` and `--bindings` to the same steps |
+| `--bindings` | One row per DD binding (ddname, dataset, step, job, DISP, RECFM, LRECL, program) instead of the job structure; usable as `field-impact --bindings` input |
+| `--program NAME` | Only the steps that run this program (`PGM=`, or `RUN PROGRAM` under IKJEFT01, the DFSRRC00 `PARM` program); filters `--dd-map` (DD names *and* datasets of those steps only) and `--bindings` to the same steps. A name no step runs prints the empty view, then exits 1 (#493) |
 | `--proc-path DIR` | Cataloged procedures and INCLUDE members (one per file, named after it; repeatable, in order). Without it only in-stream procedures expand; other `EXEC proc`s go to `unresolved` |
 | `--strict` | **Exit 3** when any card could not be parsed (exit 1 still means the run failed) |
 

@@ -20,8 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
+from .._lines import split_source_lines
 from ..models.data_items import CobolDataItem, ConditionNameItem, RenamesItem
 from ..models.program import CobolProgram, CobolSection
+from ..preprocess import PreprocessingError
 from .envelope import Response, ToolError, clamp_limit
 from .workspace import ParsedProgram, Workspace, stdout_to_stderr
 
@@ -81,6 +83,30 @@ _CONTROL_EDGES = frozenset(
 )
 
 
+def _source_lines(path: Path) -> Iterator[str]:
+    """*path*'s lines, decoded as the parse decodes it (#522), so a line
+    number in any other answer is the same line here.
+
+    An ASCII-shaped encoding streams (newline="" splits on \n, \r\n and \r
+    only, as split_source_lines does: never on a form feed inside a record),
+    so a huge file costs no memory; EBCDIC / UTF-16 go through the same
+    whole-file conversion the parse uses.
+    """
+    from ..preprocess.copybook_expander import (
+        _is_ebcdic_codec,
+        detect_encoding,
+        read_program_source,
+    )
+
+    encoding = detect_encoding(str(path))
+    if _is_ebcdic_codec(encoding) or encoding.startswith("utf-16"):
+        yield from split_source_lines(read_program_source(str(path), encoding))
+        return
+    with path.open(encoding=encoding, errors="replace", newline="") as handle:
+        for text in handle:
+            yield text.rstrip("\r\n")
+
+
 class CobolTools:
     """Every tool the MCP server exposes, bound to one workspace."""
 
@@ -96,46 +122,44 @@ class CobolTools:
         path = self.workspace.resolve(file)
         before = max(0, before)
         after = max(0, after)
-        start = max(1, line - before)
-        # At most MAX_SOURCE_LINES are kept while the file streams past; the
-        # rest is only counted, so a huge file under the root costs no memory.
-        last_kept = min(line + after, start + MAX_SOURCE_LINES - 1)
-        window: list[str] = []
+        # The cap trims context, never the cited line (#537): lines are kept
+        # from at most MAX_SOURCE_LINES - 1 either side of *line* while the
+        # file streams past (the rest is only counted, so a huge file under
+        # the root costs no memory), then cut to the budget once the end of
+        # the file is known -- *line* and its ``after`` lines first, the
+        # rest of the budget from ``before``.
+        first_kept = max(1, line - min(before, MAX_SOURCE_LINES - 1))
+        last_kept = line + min(after, MAX_SOURCE_LINES - 1)
+        kept: dict[int, str] = {}
         total = 0
         try:
-            # newline="" splits on \n, \r\n and \r only, as
-            # split_source_lines does: never on a form feed inside a record.
-            with path.open(encoding="utf-8", newline="") as handle:
-                for total, text in enumerate(handle, start=1):
-                    if start <= total <= last_kept:
-                        window.append(text.rstrip("\r\n"))
-        except UnicodeDecodeError as exc:
-            raise ToolError(f"{path.name} is not valid UTF-8 text") from exc
-        except OSError as exc:
+            for total, text in enumerate(_source_lines(path), start=1):
+                if first_kept <= total <= last_kept:
+                    kept[total] = text
+        except (OSError, PreprocessingError) as exc:
             raise ToolError(f"cannot read {path.name}: {exc}") from exc
         if line < 1 or (total and line > total):
             raise ToolError(f"line {line} is outside {file} (1-{total})")
-        end = min(total, line + after)
+        requested_start = max(1, line - before)
+        requested_end = min(total, line + after)
+        end = min(requested_end, line + MAX_SOURCE_LINES - 1)
+        start = max(requested_start, end - MAX_SOURCE_LINES + 1)
         response = Response()
-        if end - start + 1 > MAX_SOURCE_LINES:
+        if requested_end - requested_start + 1 > MAX_SOURCE_LINES:
             response.truncated.append(
                 {
                     "field": "lines",
-                    "shown": MAX_SOURCE_LINES,
-                    "total": end - start + 1,
+                    "shown": end - start + 1,
+                    "total": requested_end - requested_start + 1,
                 }
             )
-            end = start + MAX_SOURCE_LINES - 1
         return response.build(
             {
                 "file": self.workspace.display(path),
                 "start_line": start,
                 "end_line": end,
                 "total_lines": total,
-                "lines": [
-                    {"line": n, "text": window[n - start]}
-                    for n in range(start, end + 1)
-                ],
+                "lines": [{"line": n, "text": kept[n]} for n in range(start, end + 1)],
             }
         )
 
@@ -200,12 +224,9 @@ class CobolTools:
         with stdout_to_stderr():
             report = XrefAnalyzer().analyze(unit)
 
-        qualified = " OF " in wanted or " IN " in wanted
-        if qualified:
-            entry = report.entry_for(wanted.replace(" IN ", " OF "))
-            matches = [entry] if entry is not None else []
-        else:
-            matches = [e for e in report.entries if e.name.upper() == wanted]
+        # A qualified name is resolved as the compiler resolves it: partial
+        # chains, ``IN`` for ``OF``, and no need to qualify a unique name.
+        matches = report.entries_named(wanted)
 
         program_info = parsed.program_info(unit)
         undeclared_asked = not matches or any(e.definition is None for e in matches)
@@ -293,17 +314,17 @@ class CobolTools:
                     for ref in refs
                 ],
             }
+            # data-items places a level-66 RENAMES item itself (#563).
             item = _layout_for(entry.name, entry.qualified_name, layout)
             if item is None and entry.level == 66:
-                item = _renames_layout(unit, entry.name, layout)
-                if item is None:
-                    response.caveat(
-                        "incomplete-analysis",
-                        f"RENAMES item {entry.name}: the bytes it renames "
-                        "could not be placed",
-                        "no layout is reported for it",
-                    )
+                response.caveat(
+                    "incomplete-analysis",
+                    f"RENAMES item {entry.name}: the bytes it renames "
+                    "could not be placed",
+                    "no layout is reported for it",
+                )
             if item is not None:
+                _layout_caveats(item, layout, response)
                 symbol["layout"] = {
                     key: item.get(key)
                     for key in (
@@ -406,6 +427,10 @@ class CobolTools:
 
         crud = _attempt(response, "file and table use", lambda: _crud(parsed, unit))
         if crud is not None:
+            # An EXEC CICS file command naming its file through a data item
+            # has no row; say so rather than let ``files`` read as complete.
+            for caveat in crud.caveats:
+                response.caveat("incomplete-analysis", caveat)
             facts = _attempt(
                 response, "file descriptions", lambda: _file_facts(parsed, unit)
             )
@@ -652,6 +677,22 @@ class CobolTools:
         else:
             items = _data_items_named(unit, wanted)
         if not items:
+            renames = _renames_records(unit, wanted, parsed, response, cap)
+            if renames:
+                answer["found"] = True
+                answer["records"] = renames
+                answer["offsets_from"] = "the start of each record's 01/77 item"
+                return response.build(answer, program_info)
+            renames_name = wanted.split(" OF ")[0].strip()
+            if _renames_node(unit, renames_name) is not None:
+                # Declared, but data-items could not place it: say so rather
+                # than let found: false read as "no such item" (#563).
+                response.caveat(
+                    "incomplete-analysis",
+                    f"RENAMES item {renames_name}: the bytes it renames "
+                    "could not be placed",
+                    "no layout is reported for it",
+                )
             names = sorted(
                 {
                     found.item.name.upper()
@@ -676,7 +717,9 @@ class CobolTools:
         records = []
         for index, found in enumerate(items):
             layout = _attempt(
-                response, "byte layout", functools.partial(_record_layout, found.root)
+                response,
+                "byte layout",
+                functools.partial(_record_layout, found.root, response),
             )
             if layout is not None:
                 records.append(
@@ -704,14 +747,40 @@ class CobolTools:
         _carry_index_caveats(index, response, "CALL statements")
         callers: list[dict[str, Any]] = []
         unresolved: list[dict[str, Any]] = []
+        # A nested program can only be CALLed from its own compilation unit
+        # (#532): when every declaration of *wanted* is nested, a CALL that
+        # COBOL scope does not send to one reaches a separately compiled
+        # program of the same name, not any declared here.
+        declared_units = index.units_named(wanted)
+        only_nested = bool(declared_units) and all(u.depth for u in declared_units)
+        out_of_scope: set[str] = set()
+        # A CALL to one of the program's alternate ENTRY names reaches it
+        # too (#521); a PROGRAM-ID of that spelling would win instead.
+        program_ids = {u.program_id.upper() for u in index.units}
+        entries = {
+            entry
+            for u in index.units
+            if u.program_id.upper() == wanted
+            for entry in u.entries
+            if entry not in program_ids
+        }
+        names = {wanted} | entries
         for unit in index.units:
             for row in unit.calls:
                 target = str(row.get("program") or "").upper()
                 candidates = [str(c).upper() for c in row.get("candidates") or []]
-                if not row.get("dynamic") and target == wanted:
+                via_entry: str | None = None
+                if not row.get("dynamic") and target in names:
                     resolved_from = None
-                elif row.get("dynamic") and wanted in candidates:
+                    reaches_nested = bool(row.get("nested"))
+                    via_entry = target if target in entries else None
+                elif row.get("dynamic") and names & set(candidates):
                     resolved_from = row.get("program")
+                    reaches_nested = wanted in {
+                        str(c).upper() for c in row.get("nested_candidates") or []
+                    }
+                    if wanted not in candidates:
+                        via_entry = sorted(names & set(candidates))[0]
                 elif row.get("dynamic") and not row.get("candidates_complete"):
                     for site in row.get("sites") or []:
                         unresolved.append(
@@ -725,23 +794,33 @@ class CobolTools:
                     continue
                 else:
                     continue
+                if only_nested and not reaches_nested:
+                    out_of_scope.add(unit.program_id)
+                    continue
                 for site in row.get("sites") or []:
                     caller: dict[str, Any] = {
                         "program": unit.program_id,
                         "via": row.get("via"),
                         "location": site.get("location"),
                     }
+                    if reaches_nested:
+                        caller["nested"] = True
                     if site.get("paragraph"):
                         # "from", as a paragraph-level caller names its own.
                         caller["from"] = site["paragraph"]
+                    if via_entry is not None:
+                        caller["entry"] = via_entry
                     if resolved_from is not None:
                         caller["dynamic"] = True
                         caller["target_from"] = resolved_from
                     callers.append(caller)
 
         declared = []
-        for unit in index.units_named(wanted):
+        for unit in declared_units:
             where: dict[str, Any] = {"file": unit.file}
+            if unit.program_id.upper() != wanted:
+                # Found through an ENTRY name it declares (#521).
+                where["program"] = unit.program_id
             if unit.depth:
                 where["contained"] = True
             if unit.unit_kind != "PROGRAM":
@@ -778,11 +857,17 @@ class CobolTools:
             "calling_programs": sorted({c["program"] for c in callers}),
             "callers": response.cap(callers, cap, "callers"),
         }
-        if len(declared) > 1:
+        if out_of_scope:
+            answer["out_of_scope_callers"] = sorted(out_of_scope)
+        # Only outermost (or stacked) declarations share one load-module
+        # namespace: a nested program is reached from its own compilation
+        # unit, whatever else is in the load library (#532).
+        top_level = [d for d in declared if not d.get("contained")]
+        if len(top_level) > 1:
             response.caveat(
                 "duplicate-declaration",
-                f"PROGRAM-ID {wanted} is declared in {len(declared)} places: "
-                + ", ".join(d["file"] for d in declared),
+                f"PROGRAM-ID {wanted} is declared in {len(top_level)} places: "
+                + ", ".join(d["file"] for d in top_level),
                 "which one a CALL reaches depends on the load library order, "
                 "which the source does not say",
             )
@@ -791,6 +876,13 @@ class CobolTools:
                 f"no program under the root has PROGRAM-ID {wanted}: it is "
                 "external to this workspace (a vendor or system program, or "
                 "one kept elsewhere)"
+            )
+        elif not callers and out_of_scope:
+            answer["note"] = (
+                f"every {wanted} under the root is a nested program, which "
+                "only its own compilation unit can CALL; the CALLs from "
+                "out_of_scope_callers reach a separately compiled program "
+                "of that name"
             )
         elif not callers:
             answer["note"] = (
@@ -996,8 +1088,11 @@ class CobolTools:
                 "kind": "field",
                 "direction": direction,
                 "found": False,
+                # Never the very name asked for (#546): it reads as "you
+                # meant this". A wrongly qualified name still gets its bare
+                # one suggested.
                 "suggestions": difflib.get_close_matches(
-                    wanted.split(" OF ")[0], sorted(names), n=5
+                    wanted.split(" OF ")[0], sorted(names - {wanted}), n=5
                 ),
             }
             if direction == "forward" and self._is_member(wanted, parsed):
@@ -1011,6 +1106,14 @@ class CobolTools:
         hits = [_hit(hit, index, self.workspace, response) for hit in result.hits]
         reached = set(result.programs) | {p.upper() for p in programs or []}
         for caveat in result.caveats:
+            if caveat in result.ambiguous:
+                response.caveat(
+                    "ambiguous-name",
+                    caveat,
+                    "every matching field is traced; qualify the name (X OF Y) "
+                    "to ask about one of them",
+                )
+                continue
             response.caveat(
                 "incomplete-analysis",
                 caveat,
@@ -1050,6 +1153,7 @@ class CobolTools:
             "datasets": result.datasets,
             "hit_count": len(hits),
             "hits": response.cap(hits, cap, "hits"),
+            "notes": list(result.notes),
             "legend": (
                 "each hit is a field (or a table column, a dataset byte range, "
                 "or the port where a trail ends) with its path from the start, "
@@ -1102,10 +1206,15 @@ class CobolTools:
             callees_of.setdefault(edge.caller, set()).add(edge.callee)
         programs = []
         for unit in index.units:
-            # A FACTORY / OBJECT / METHOD-ID unit has no graph node of its
+            # The graph's id: a nested program's is qualified (#532). A
+            # FACTORY / OBJECT / METHOD-ID unit has no graph node of its
             # own (its CALLs are its class's), so a graph id of the same
             # spelling is a different program, never this unit (#500).
-            pid = unit.program_id.upper() if unit.is_call_target else ""
+            pid = (
+                (unit.graph_id or unit.program_id).upper()
+                if unit.is_call_target
+                else ""
+            )
             graded = grades.get((unit.program_id, unit.file), {})
             row: dict[str, Any] = {
                 "program": unit.program_id,
@@ -1123,7 +1232,11 @@ class CobolTools:
                 row["unit_kind"] = unit.unit_kind
             programs.append(row)
 
-        declared = {u.program_id.upper() for u in index.units if u.is_call_target}
+        declared = {
+            (u.graph_id or u.program_id).upper()
+            for u in index.units
+            if u.is_call_target
+        }
         external: dict[str, set[str]] = {}
         for edge in graph.call_edges:
             if edge.callee not in declared:
@@ -1381,6 +1494,13 @@ def _calls(
                 values, incomplete = tracker.resolve_variable(target)
                 row["candidates"] = values
                 row["candidates_complete"] = bool(values) and not incomplete
+                nested = [v for v in values if unit.nested_program_called(v)]
+                if nested:
+                    row["nested_candidates"] = nested
+            elif unit.nested_program_called(target) is not None:
+                # COBOL scope: the CALL reaches the program nested here,
+                # not a separately compiled one of that name (#532).
+                row["nested"] = True
             rows[(target.upper(), "CALL")] = row
         location = call.get("location")
         line = location.get("line") if isinstance(location, dict) else None
@@ -1512,10 +1632,19 @@ def _data_items_named(unit: CobolProgram, wanted: str) -> list[_FoundItem]:
     return found
 
 
-def _record_layout(root: CobolDataItem) -> list[dict[str, Any]]:
-    from ..generators.data.layout_offsets import compute_record_layout
+def _record_layout(root: CobolDataItem, response: Response) -> list[dict[str, Any]]:
+    """*root*'s byte layout, with what it cannot vouch for (``SYNCHRONIZED``
+    slack, partial level-88 values) flagged and carried as caveats -- the
+    same flags ``data-items`` reports (#488)."""
+    from ..generators.data.layout_offsets import (
+        compute_record_layout,
+        flag_record_layout,
+    )
 
-    return [item.to_dict() for item in compute_record_layout(root)]
+    layout = compute_record_layout(root)
+    for line in flag_record_layout(root, layout):
+        response.caveat("incomplete-analysis", line, _unresolved_layout_effect(line))
+    return [item.to_dict() for item in layout]
 
 
 def _declarations(root: CobolDataItem) -> dict[str, list[tuple[int, Any]]]:
@@ -1769,7 +1898,7 @@ def _hit(
     steps = []
     arrived: dict[str, Any] | None = None
     for hop in hit.path:
-        location = _hop_location(hop, index, response)
+        location = _hop_location(hop, index, response, workspace)
         how = hop.statement or hop.kind
         if location is not None:
             how += f" at {location['file']}:{location['line']}"
@@ -1791,13 +1920,21 @@ def _hit(
     return entry
 
 
-def _hop_location(hop: Any, index: Any, response: Response) -> dict[str, Any] | None:
+def _hop_location(
+    hop: Any, index: Any, response: Response, workspace: Workspace
+) -> dict[str, Any] | None:
     """Where one hop's statement is, or None for a join (no line of its own)."""
     if not hop.line or not hop.program:
         return None
     program = hop.program.upper()
-    file = index.edge_files.get((program, hop.line, hop.kind, hop.statement))
-    if file is None and program not in index.expanded:
+    origin = getattr(hop, "origin_file", None)
+    if origin:
+        # The hop's own edge says which file its line is in (#489): a
+        # copybook line and a program line of one number never collide.
+        return {"file": workspace.display(origin), "line": hop.line}
+    key = (program, hop.line, hop.kind, hop.statement)
+    file = index.edge_files.get(key)
+    if file is None and key not in index.edge_files and program not in index.expanded:
         file = index.program_files.get(program)
     if file is None:
         response.caveat(
@@ -1814,15 +1951,34 @@ def _carry_parse_caveats(parsed: ParsedProgram, response: Response) -> None:
         response.caveat(caveat.kind, caveat.detail, caveat.effect)
 
 
+def _unresolved_layout_effect(line: str) -> str:
+    """The effect of one byte-layout ``unresolved`` *line*: only SYNC slack
+    puts offsets in doubt; a partial level-88 list leaves them exact."""
+    if "condition_values lists only part" in line:
+        return (
+            "a value missing from condition_values may still satisfy the "
+            "condition; read condition_ranges"
+        )
+    return (
+        "offsets marked offset_ambiguous may be short; do not build a record "
+        "image from them"
+    )
+
+
 def _layout_index(
     unit: CobolProgram, response: Response
 ) -> dict[str, list[dict[str, Any]]]:
-    """Every data item's byte layout, by upper-cased name."""
+    """Every data item's byte layout, by upper-cased name.
+
+    The layout's ``unresolved`` lines are kept under :data:`_UNRESOLVED_KEY`
+    for :func:`_layout_caveats` to carry the ones that bear on an answer.
+    """
     from ..generators.data.layout_offsets import compute_program_data_items
 
     try:
         with stdout_to_stderr():
-            items = compute_program_data_items(unit)["items"]
+            computed = compute_program_data_items(unit)
+            items = computed["items"]
     except Exception as exc:  # noqa: BLE001 -- one analyzer must not sink the answer
         response.caveat(
             "analyzer-failed",
@@ -1833,19 +1989,107 @@ def _layout_index(
     index: dict[str, list[dict[str, Any]]] = {}
     for item in items:
         index.setdefault(str(item["name"]).upper(), []).append(item)
+    index[_UNRESOLVED_KEY] = [{"line": line} for line in computed["unresolved"]]
     return index
 
 
-def _renames_layout(
-    unit: CobolProgram,
-    name: str,
-    layout: dict[str, list[dict[str, Any]]],
-) -> dict[str, Any] | None:
-    """The byte range a level-66 ``RENAMES`` item names, or None (#485).
+#: Not a COBOL name (it has a space), so it cannot collide with an item.
+_UNRESOLVED_KEY = " unresolved"
 
-    ``66 R-AB RENAMES R-A THRU R-B`` covers its record from the start of
-    ``R-A`` to the end of ``R-B``; the layout itself has no entry for it.
+
+def _layout_caveats(
+    item: dict[str, Any],
+    layout: dict[str, list[dict[str, Any]]],
+    response: Response,
+) -> None:
+    """Carry the layout's ``unresolved`` lines about *item*'s record."""
+    record = str(item.get("qualified_name") or "").split(".")[0]
+    for entry in layout.get(_UNRESOLVED_KEY, []):
+        line = str(entry["line"])
+        if line.split(":", 1)[0].split(".")[0] == record:
+            response.caveat(
+                "incomplete-analysis", line, _unresolved_layout_effect(line)
+            )
+
+
+#: A cap no record reaches: :func:`_renames_records` filters first, caps after.
+_UNCAPPED = 1 << 30
+
+
+def _renames_records(
+    unit: CobolProgram,
+    wanted: str,
+    parsed: ParsedProgram,
+    response: Response,
+    cap: int,
+) -> list[dict[str, Any]]:
+    """``record_layout`` answers for the level-66 RENAMES items named
+    *wanted* (#563): the byte range ``data-items`` places each at, within
+    the record it renames, with that record's fields lying in the range.
     """
+    name = wanted.split(" OF ")[0].strip()
+    layout = _layout_index(unit, response)
+    records: list[dict[str, Any]] = []
+    for index, entry in enumerate(
+        e for e in layout.get(name, []) if e.get("level") == 66
+    ):
+        root_name = str(entry.get("parent_qualified_name") or "")
+        roots = [f for f in _data_items_named(unit, root_name) if f.item is f.root]
+        if len(roots) != 1:
+            continue
+        found = roots[0]
+        # Every field of the record (no cap yet): the range picks from them.
+        rows = _layout_answer(
+            found,
+            _record_layout(found.root, response),
+            parsed,
+            response,
+            _UNCAPPED,
+            index,
+        )["fields"]
+        start = int(entry["byte_offset"])
+        end = start + int(entry["byte_length"])
+        covered = [
+            row
+            for row in rows
+            if row.get("byte_offset") is not None
+            and start <= int(row["byte_offset"])
+            and int(row["byte_offset"]) + int(row.get("byte_length") or 0) <= end
+        ]
+        location = _renames_location(unit, name)
+        record: dict[str, Any] = {
+            "name": entry["name"],
+            "qualified_name": entry["name"],
+            "section": found.section,
+            "level": 66,
+            "renames": found.root.name,
+            "declared_at": (
+                parsed.locate(location.line, location.column, response)
+                if location is not None
+                else None
+            ),
+            "byte_offset": start,
+            "byte_length": int(entry["byte_length"]),
+        }
+        for key in ("picture", "usage"):
+            if entry.get(key) and not entry.get("is_group"):
+                record[key] = entry[key]
+        if entry.get("offset_ambiguous"):
+            record["offset_ambiguous"] = True
+        record["field_count"] = len(covered)
+        record["fields"] = response.cap(covered, cap, f"records[{index}].fields")
+        records.append(record)
+    return records
+
+
+def _renames_location(unit: CobolProgram, name: str) -> Any:
+    """Where the level-66 RENAMES item *name* is declared, or None."""
+    node = _renames_node(unit, name)
+    return node.location if node is not None else None
+
+
+def _renames_node(unit: CobolProgram, name: str) -> RenamesItem | None:
+    """The level-66 RENAMES item *name* of *unit*, or None."""
     data_div = unit.data_division
     if data_div is None:
         return None
@@ -1853,33 +2097,8 @@ def _renames_layout(
         if not isinstance(section, CobolSection):
             continue
         for node in section.children:
-            if not isinstance(node, RenamesItem) or node.name.upper() != name.upper():
-                continue
-            ends: list[dict[str, Any]] = []
-            operands = [(node.renames_from, node.renames_from_qualifiers)]
-            if node.renames_through:
-                operands.append((node.renames_through, node.renames_through_qualifiers))
-            for operand, qualifiers in operands:
-                qualified = " OF ".join([str(operand), *qualifiers])
-                found = _layout_for(str(operand), qualified, layout)
-                if found is None:
-                    return None
-                ends.append(found)
-            first, last = ends[0], ends[-1]
-            record = str(first.get("qualified_name", "")).upper().split(".")[0]
-            if str(last.get("qualified_name", "")).upper().split(".")[0] != record:
-                return None
-            start, end_at = first.get("byte_offset"), last.get("byte_offset")
-            if start is None or end_at is None:
-                return None
-            length = int(end_at) + int(last.get("byte_length") or 0) - int(start)
-            if length <= 0:
-                return None
-            return {
-                "qualified_name": name.upper(),
-                "byte_offset": start,
-                "byte_length": length,
-            }
+            if isinstance(node, RenamesItem) and node.name.upper() == name:
+                return node
     return None
 
 

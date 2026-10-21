@@ -4,6 +4,8 @@ CRUD Matrix Generator for COBOL programs.
 For each program × file/table, marks C/R/U/D based on:
 - OPEN mode + READ/WRITE/REWRITE/DELETE for VSAM/sequential files
 - EXEC SQL verbs (SELECT/INSERT/UPDATE/DELETE/FETCH) for DB2 tables
+- EXEC CICS file control (READ/WRITE/REWRITE/DELETE/STARTBR/READNEXT/
+  READPREV FILE(...) | DATASET(...)) for the files a CICS program reaches
 
 Standard deliverable in mainframe modernization engagements.
 """
@@ -35,7 +37,13 @@ from ..models.statements.misc import (
     ReturnStatement,
     SortStatement,
 )
-from ._files import record_to_file_map, resolve_file_name
+from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
+from ._files import (
+    record_to_file_map,
+    report_to_file_map,
+    report_writer_files,
+    resolve_file_name,
+)
 
 
 @dataclass
@@ -123,6 +131,10 @@ class CRUDMatrix:
     program_name: str | None
     file_entries: list[FileEntry] = field(default_factory=list)
     table_entries: list[TableEntry] = field(default_factory=list)
+    #: Accesses the matrix could not attribute to a resource (an EXEC CICS
+    #: file command naming its file through a data item), so an absent row
+    #: is never mistaken for an untouched file.
+    caveats: list[str] = field(default_factory=list)
 
     @property
     def entries(self) -> list[FileEntry | TableEntry]:
@@ -143,6 +155,7 @@ class CRUDMatrix:
             "program_name": self.program_name,
             "files": [e.to_dict() for e in self.file_entries],
             "tables": [e.to_dict() for e in self.table_entries],
+            "caveats": list(self.caveats),
             "summary": {
                 "total_files": len(self.file_entries),
                 "total_tables": len(self.table_entries),
@@ -214,8 +227,31 @@ _WRITE_SQL_TYPES = frozenset(
         SQLStatementType.MERGE,
     }
 )
+#: EXEC CICS file-control commands and the access each one makes. A browse
+#: (STARTBR/READNEXT/READPREV) reads; RESETBR/ENDBR/UNLOCK touch no record.
+_CICS_FILE_ACCESS = {
+    "READ": "read",
+    "READNEXT": "read",
+    "READPREV": "read",
+    "STARTBR": "read",
+    "WRITE": "create",
+    "REWRITE": "update",
+    "DELETE": "delete",
+}
 #: ``WHEN [NOT] MATCHED [AND ...] THEN INSERT|UPDATE|DELETE`` in a MERGE.
 _MERGE_ACTION_RE = re.compile(r"\bTHEN\s+(INSERT|UPDATE|DELETE)\b")
+
+
+def _data_division_sql(ast: CobolProgram) -> list[ExecSQLStatement]:
+    """Every EXEC SQL statement node in *ast*'s own DATA DIVISION, in order."""
+    data_div = ast.get_division("DATA")
+    if data_div is None:
+        return []
+    return [
+        node
+        for node in data_div.traverse_depth_first()
+        if isinstance(node, ExecSQLStatement)
+    ]
 
 
 class CRUDMatrixGenerator:
@@ -232,6 +268,8 @@ class CRUDMatrixGenerator:
         - SORT/MERGE ``USING`` files are read (R) and ``GIVING`` files are
           written (C); ``RELEASE`` writes (C) and ``RETURN`` reads (R) the
           SD work file
+        - Report Writer ``INITIATE`` / ``GENERATE`` / ``TERMINATE`` write
+          (C) the file whose ``FD ... REPORT IS`` names the report
         OPEN modes (INPUT/OUTPUT/I-O/EXTEND) are recorded as metadata.
 
     SQL table mapping:
@@ -241,6 +279,12 @@ class CRUDMatrixGenerator:
         - U (Update)  <- UPDATE
         - D (Delete)  <- DELETE, TRUNCATE [TABLE]
         - MERGE marks its target with the actions its WHEN clauses take
+
+    EXEC CICS file control (``FILE(name)`` or the older ``DATASET(name)``):
+        - C <- WRITE, R <- READ / READNEXT / READPREV / STARTBR,
+          U <- REWRITE, D <- DELETE
+        A file named through a data item (``FILE(WS-FNAME)``) cannot be
+        attributed; it is reported in ``CRUDMatrix.caveats`` instead.
 
     Example:
         ```python
@@ -263,6 +307,8 @@ class CRUDMatrixGenerator:
         self._cursor_tables: dict[str, set[str]] = {}
         # record_name (upper) -> file_name (upper) built from FD metadata
         self._record_to_file: dict[str, str] = {}
+        # report / report-group name (upper) -> report file (FD REPORT IS)
+        self._report_to_file: dict[str, str] = {}
         self._program_name: str | None = None
 
     def analyze(self, ast: CobolProgram) -> CRUDMatrix:
@@ -278,6 +324,7 @@ class CRUDMatrixGenerator:
         self._table_entries = {}
         self._cursor_tables = {}
         self._record_to_file = {}
+        self._report_to_file = {}
         self._program_name = ast.program_name
 
         all_statements = ast.get_all_statements()
@@ -291,17 +338,26 @@ class CRUDMatrixGenerator:
         # Third pass: collect OPEN modes (must precede CRUD marking so metadata is ready)
         self._collect_open_modes(all_statements)
 
+        # EXEC SQL in the DATA DIVISION: the DB2 precompiler accepts
+        # ``DECLARE c CURSOR FOR SELECT ...`` in WORKING-STORAGE (a common
+        # shop style), and ``get_all_statements()`` walks the PROCEDURE
+        # DIVISION only -- without these the cursor's tables were missing
+        # and a FETCH from it marked nothing (#518).
+        sql_statements = _data_division_sql(ast) + all_statements
+
         # Fourth pass: collect DECLARE CURSOR table associations for FETCH tracking
-        self._collect_cursor_declarations(all_statements)
+        self._collect_cursor_declarations(sql_statements)
 
         # Fifth pass: mark CRUD operations
         self._mark_file_crud(all_statements)
-        self._mark_sql_crud(all_statements)
+        self._mark_sql_crud(sql_statements)
+        caveats = self._mark_cics_file_crud(all_statements)
 
         return CRUDMatrix(
             program_name=self._program_name,
             file_entries=list(self._file_entries.values()),
             table_entries=list(self._table_entries.values()),
+            caveats=caveats,
         )
 
     # ------------------------------------------------------------------
@@ -341,6 +397,7 @@ class CRUDMatrixGenerator:
         analyzers cannot disagree about which file a record belongs to.
         """
         self._record_to_file = record_to_file_map(ast)
+        self._report_to_file = report_to_file_map(ast)
 
     # ------------------------------------------------------------------
     # OPEN mode tracking
@@ -452,9 +509,47 @@ class CRUDMatrixGenerator:
                 if fn:
                     self._get_or_create_file_entry(fn).crud.read = True
 
+            else:
+                # Report Writer: INITIATE / GENERATE / TERMINATE write the
+                # file whose ``FD ... REPORT IS`` names the report (#499).
+                for fn in report_writer_files(stmt, self._report_to_file):
+                    self._get_or_create_file_entry(fn).crud.create = True
+
     # ------------------------------------------------------------------
     # SQL CRUD marking
     # ------------------------------------------------------------------
+
+    def _mark_cics_file_crud(self, statements: list) -> list[str]:
+        """Mark C/R/U/D for EXEC CICS file control; return the caveats.
+
+        Every CICS program reaches its VSAM data this way, so skipping these
+        left such a program with no file rows at all (#538). Organization and
+        access mode stay unknown: they live in the CICS file definition, not
+        in the program.
+        """
+        caveats: list[str] = []
+        for stmt in statements:
+            if not isinstance(stmt, ExecCicsStatement):
+                continue
+            flag = _CICS_FILE_ACCESS.get(stmt.cics_command.upper())
+            if flag is None:
+                continue
+            option = next((o for o in ("FILE", "DATASET") if o in stmt.options), None)
+            if option is None:
+                # ``WRITE OPERATOR`` / ``WRITE JOURNALNAME`` etc.: no file.
+                continue
+            name = stmt.options.get(option)
+            if not name or option not in stmt.literal_options:
+                line = stmt.location.line if stmt.location else "?"
+                caveats.append(
+                    f"EXEC CICS {stmt.cics_command.upper()} at line {line} "
+                    f"names its file through a data item ({option}({name or ''}))"
+                    f"; which file it {flag}s is not in the CRUD matrix"
+                )
+                continue
+            entry = self._get_or_create_file_entry(name.upper())
+            setattr(entry.crud, flag, True)
+        return caveats
 
     def _mark_sql_crud(self, statements: list) -> None:
         """Mark C/R/U/D for SQL table operations."""

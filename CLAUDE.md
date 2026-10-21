@@ -66,7 +66,7 @@ pip install -e ".[fast]"
 COBOLPARSER_ACCEL=1 python setup.py build_ext --inplace
 COBOLPARSER_ACCEL=1 python -m pytest tests/ --no-cov   # suite on the fast paths
 
-# Run all tests with coverage (90% minimum; ~13,700 tests across 483 files).
+# Run all tests with coverage (90% minimum; ~14,700 tests across 554 files).
 # Measure coverage on a pure-Python build -- see "Coverage Requirement".
 python -m pytest tests/ -v
 
@@ -117,10 +117,10 @@ cobol-parser complexity <file.cbl>
 cobol-parser health <file.cbl>
 cobol-parser business-rules <file.cbl> [--format json|text] [--include-technical]
 cobol-parser lineage <file.cbl> [--field NAME] [--direction forward|backward] [--format json|text]
-cobol-parser field-impact [FIELD] PATH... [--program NAME] [--table T.C | --dataset DSN] [--direction forward|backward] [--depth N] [--jcl PATH]... [--proc-path DIR] [--bindings FILE.json] [--key-relationships] [--format json|text] [--copybook-path DIR]
+cobol-parser field-impact [FIELD] PATH... [--program NAME] [--table T.C | --dataset DSN] [--direction forward|backward] [--depth N] [--jcl PATH]... [--proc-path DIR] [--bindings FILE.json] [--key-relationships] [--format json|text] [--copybook-path DIR] [--source-format auto|fixed|free] [--define SYMBOL[=VALUE]]
 cobol-parser redundancy <file.cbl> [--min-clone-statements N]
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
-cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables|lineage] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR] [--encoding ENC] [--source-format auto|fixed|free] [--output FILE] [--compact]
+cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables|lineage] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR] [--define SYMBOL[=VALUE]] [--encoding ENC] [--source-format auto|fixed|free] [--output FILE] [--compact]
 cobol-parser io-sequence <file.cbl>
 cobol-parser move-type-check <file.cbl>
 cobol-parser linkage-check <file.cbl>
@@ -584,7 +584,7 @@ Full JSON shape, key by key, with a worked example: `docs/fixture-bundle-schema.
 
 ## Test Structure
 
-~13,700 tests across 483 `test_*.py` files (see `.okf/tests.md` for the per-directory breakdown):
+~14,700 tests across 554 `test_*.py` files (see `.okf/tests.md` for the per-directory breakdown):
 
 ```
 tests/

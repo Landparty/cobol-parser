@@ -43,6 +43,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ._names import split_qualified_name
 from .field_lineage import (
     ITEM,
     PORT_CALL,
@@ -159,6 +160,10 @@ class _EdgeInfo:
     confidence: str = "exact"
     cross: bool = False
     guarded: bool = False
+    #: The file ``line`` is in, when the report was stamped with a source
+    #: map (``apply_source_map``): a copybook's line and the program's own
+    #: line of the same number are told apart by it (#489).
+    origin_file: str | None = None
 
 
 @dataclass(frozen=True)
@@ -171,6 +176,9 @@ class Hop:
     line: int
     statement: str
     confidence: str
+    #: The file ``line`` is in, when known (see ``_EdgeInfo.origin_file``).
+    #: Not part of ``to_dict()``: the CLI JSON shape is unchanged.
+    origin_file: str | None = None
 
     @property
     def label(self) -> str:
@@ -229,6 +237,12 @@ class ImpactResult:
     caveats: list[str] = field(default_factory=list)
     #: False when nothing in any report matched the start.
     start_found: bool = True
+    #: Facts about the answer that are not gaps in it (a declared field
+    #: with no value flow at all).
+    notes: list[str] = field(default_factory=list)
+    #: The caveats (also in ``caveats``) saying the start named several
+    #: fields of one program, for a caller that reports ambiguity apart.
+    ambiguous: list[str] = field(default_factory=list)
 
     @property
     def programs(self) -> list[str]:
@@ -255,6 +269,7 @@ class ImpactResult:
             "hits": [h.to_dict() for h in self.hits],
             "caveats": list(self.caveats),
             "start_found": self.start_found,
+            "notes": list(self.notes),
         }
 
     def to_text(self) -> str:
@@ -268,7 +283,10 @@ class ImpactResult:
         lines.append(f"Programs ({len(self.programs)}): " + ", ".join(self.programs))
         by_program: dict[str, list[ImpactHit]] = {}
         for hit in self.hits:
-            if hit.node_kind == "item" and hit.program:
+            # Ports too (console, an unbound DD, a CALL, a LINKAGE
+            # parameter): that is where the trail leaves the program, and
+            # the JSON lists them (#528).
+            if hit.node_kind in ("item", "port") and hit.program:
                 by_program.setdefault(hit.program, []).append(hit)
         for program in sorted(by_program):
             lines.append("")
@@ -288,10 +306,15 @@ class ImpactResult:
                     for h in reversed(hit.path[:-1])
                     if h.kind not in ("redefines", "occurrence")
                 )
+                label = f"port {hit.field}" if hit.node_kind == "port" else hit.field
                 lines.append(
-                    f"  {hit.field}{where}  [{', '.join(tags)}]"
+                    f"  {label}{where}  [{', '.join(tags)}]"
                     + (f"\n      via {via}" if via else "")
                 )
+        if self.notes:
+            lines.append("")
+            lines.append("Notes:")
+            lines += [f"  - {n}" for n in self.notes]
         if self.caveats:
             lines.append("")
             lines.append("Caveats:")
@@ -361,7 +384,10 @@ class LineageGraph:
         JCL binds): the ``"caveats"`` and ``"unjoined"`` of
         :meth:`join_state`. Without them a graph rebuilt from stored edges
         only re-derives the opaque-callee caveat and has no ``unjoined``.
-        Both are ignored when ``join_edges`` is None.
+        When ``join_edges`` is None, ``unjoined`` is ignored and
+        ``join_caveats`` are added to the joins' own caveats: what the
+        binding source could not read (``lineage_jcl.bindings_from_jobs``'s
+        ``caveats``).
         """
         self.reports: dict[str, dict[str, Any]] = {}
         duplicates: list[str] = []
@@ -449,6 +475,7 @@ class LineageGraph:
                         statement=edge.get("statement") or "",
                         confidence="exact" if edge.get("exact", True) else "overlap",
                         guarded=bool(edge.get("guarded")),
+                        origin_file=(edge.get("origin") or {}).get("file"),
                     ),
                 )
                 if src[2] != ITEM:
@@ -465,6 +492,11 @@ class LineageGraph:
             self._join_sql(written_ports, read_ports)
             self._join_calls(written_ports, read_ports)
             self._recording = False
+            # What the binding source could not read (a JCL step left out,
+            # from ``lineage_jcl.bindings_from_jobs(jobs, caveats)``).
+            for caveat in join_caveats or []:
+                if str(caveat) not in self._join_caveats:
+                    self._join_caveat(str(caveat))
         else:
             # Recorded again, so the rebuilt graph exports the same state.
             self._recording = True
@@ -753,9 +785,18 @@ class LineageGraph:
     def _items_named(
         self, field_name: str, programs: Sequence[str] | None
     ) -> list[NodeKey]:
-        parts = [p.strip().upper() for p in field_name.split(" OF ") if p.strip()]
+        groups, _matched = self._start_groups(field_name, programs)
+        return sorted({n for group in groups for n in group}, key=repr)
+
+    def _start_groups(
+        self, field_name: str, programs: Sequence[str] | None
+    ) -> tuple[list[list[NodeKey]], dict[str, list[str]]]:
+        """The start nodes of *field_name*, one group per qualified name it
+        matched (an item's own node, its occurrences and subordinate fields,
+        in every program), and program -> the qualified names it matched."""
+        parts = split_qualified_name(field_name)
         if not parts:
-            return []
+            return [], {}
         name, qualifiers = parts[0], parts[1:]
         wanted = [p.upper() for p in programs] if programs else list(self.reports)
         matched: dict[str, list[str]] = {}
@@ -769,18 +810,29 @@ class LineageGraph:
                 if qname == name or segments[-1] == name:
                     if all(q in segments[:-1] for q in qualifiers):
                         matched.setdefault(prog, []).append(qname)
-        starts: list[NodeKey] = []
+        # Grouped by qualified name, not by program: a copybook field is one
+        # group however many programs COPY it, so the trace count stays the
+        # number of distinct fields matched.
+        groups: dict[str, list[NodeKey]] = {}
         seen: set[NodeKey] = set()
         for node in (*self._out, *self._in):
             if node[0] != "P" or node[2] != ITEM or node in seen:
                 continue
-            names = matched.get(node[1])
-            if names and any(
-                node[3] == m or node[3].startswith((m + ".", m + "(")) for m in names
-            ):
+            owners = [
+                m
+                for m in matched.get(node[1], [])
+                if node[3] == m or node[3].startswith((m + ".", m + "("))
+            ]
+            if owners:
                 seen.add(node)
-                starts.append(node)
-        return sorted(starts, key=repr)
+                # A node under two matched items (one nested in the other)
+                # belongs to the closer one.
+                owner = max(owners, key=len)
+                groups.setdefault(owner, []).append(node)
+        return (
+            [sorted(groups[key], key=repr) for key in sorted(groups)],
+            matched,
+        )
 
     def impact(
         self,
@@ -798,12 +850,39 @@ class LineageGraph:
         table) a path may cross; ``None`` follows every one.
         """
         programs = [program] if isinstance(program, str) else program
-        starts = self._items_named(field_name, programs)
+        groups, matched = self._start_groups(field_name, programs)
+        starts = sorted({n for group in groups for n in group}, key=repr)
         if programs:
             label = [f"{p.upper()}:{field_name.upper()}" for p in programs]
         else:
             label = [field_name.upper()]
-        return self._trace(starts, label, direction, depth)
+        # A bare name shared by several fields of one program (AMT in IN-REC
+        # and OUT-REC) starts from all of them: say so, naming each (#540).
+        # Computed before the no-flow return below, so an ambiguous name
+        # whose matches carry no flow still gets the caveat.
+        ambiguous: list[str] = []
+        for prog in sorted(matched):
+            names = sorted(set(matched[prog]))
+            if len(names) > 1:
+                ambiguous.append(
+                    f"{prog}: {field_name.upper()} matches {len(names)} fields: "
+                    f"{', '.join(names)}; qualify with OF to trace one"
+                )
+        if matched and not starts:
+            # Declared, but no edge touches it: set only from literals or
+            # VALUE, or only tested in a condition. That is "feeds nothing",
+            # not "no such field" (which is for a name matching no item).
+            result = ImpactResult(start=label, direction=direction, depth=depth)
+            result.notes.append(
+                f"{', '.join(label)}: declared, but no value flows into or out "
+                "of it (only literals, VALUE clauses or conditions use it)"
+            )
+        else:
+            result = self._trace(starts, label, direction, depth, groups)
+        for caveat in ambiguous:
+            result.ambiguous.append(caveat)
+            result.caveats.insert(len(result.ambiguous) - 1, caveat)
+        return result
 
     def impact_table(
         self, table_column: str, direction: str = "forward", depth: int | None = None
@@ -859,13 +938,41 @@ class LineageGraph:
         label: list[str],
         direction: str,
         depth: int | None,
+        groups: list[list[NodeKey]] | None = None,
     ) -> ImpactResult:
+        """Trace from *starts*. With several *groups* (one per field a bare
+        name matched), each is traced on its own, so a field one start
+        reaches is a hit even when it is another start (#540)."""
         result = ImpactResult(start=label, direction=direction, depth=depth)
         if not starts:
             result.start_found = False
             result.caveats.append(f"{', '.join(label)}: no such field in any report")
             return result
         adjacency = self._out if direction == "forward" else self._in
+        merged: dict[NodeKey, ImpactHit] = {}
+        for group in groups if groups and len(groups) > 1 else [starts]:
+            for node, hit in self._reach(group, adjacency, depth):
+                old = merged.get(node)
+                if old is None or len(hit.path) < len(old.path):
+                    merged[node] = hit
+        hits = list(merged.values())
+        hits.sort(
+            key=lambda h: (
+                h.node_kind != "table",
+                h.node_kind != "dataset",
+                h.program or "",
+                h.field,
+            )
+        )
+        return self._finish(result, hits, starts)
+
+    def _reach(
+        self,
+        starts: list[NodeKey],
+        adjacency: dict[NodeKey, list[tuple[NodeKey, _EdgeInfo]]],
+        depth: int | None,
+    ) -> list[tuple[NodeKey, ImpactHit]]:
+        """Every node *starts* reach (other than themselves), with its path."""
         # 0-1 BFS: stepping into a program from outside it (from a dataset or
         # table, or across a CALL) costs 1; every other step costs 0. So
         # ``depth=1`` reaches the programs one join away.
@@ -908,14 +1015,21 @@ class LineageGraph:
         for state, _cost in sorted(best.items(), key=lambda kv: (kv[1], kv[0][1])):
             chosen.setdefault(state[0], state)
         start_set = set(starts)
-        hits: list[ImpactHit] = []
+        hits: list[tuple[NodeKey, ImpactHit]] = []
         for node, state in chosen.items():
             if node in start_set:
                 continue
             program, name, kind = self._describe(node)
-            if kind == "port" and adjacency.get(node):
+            if kind == "port" and any(
+                info.cross or nxt[0] != "P" or nxt[1] != node[1]
+                for nxt, info in adjacency.get(node, [])
+            ):
                 # A port is only worth reporting where the trail ends at it:
-                # a DD no JCL binds, a CALL to nothing, a console line.
+                # a DD no JCL binds, a CALL to nothing, a console line. A
+                # join (a bound dataset, a callee in the scan) carries the
+                # trail on; an edge back into the same program does not --
+                # an I-O file, a BY REFERENCE argument and a LINKAGE
+                # parameter are two-way ports and still trail ends (#510).
                 continue
             path: list[Hop] = []
             cursor = state
@@ -923,19 +1037,24 @@ class LineageGraph:
                 prev, info = parent[cursor]
                 p, n, _ = self._describe(cursor[0])
                 path.append(
-                    Hop(p, n, info.kind, info.line, info.statement, info.confidence)
+                    Hop(
+                        p,
+                        n,
+                        info.kind,
+                        info.line,
+                        info.statement,
+                        info.confidence,
+                        info.origin_file,
+                    )
                 )
                 cursor = prev
             path.reverse()
-            hits.append(ImpactHit(program, name, kind, tuple(path)))
-        hits.sort(
-            key=lambda h: (
-                h.node_kind != "table",
-                h.node_kind != "dataset",
-                h.program or "",
-                h.field,
-            )
-        )
+            hits.append((node, ImpactHit(program, name, kind, tuple(path))))
+        return hits
+
+    def _finish(
+        self, result: ImpactResult, hits: list[ImpactHit], starts: list[NodeKey]
+    ) -> ImpactResult:
         result.hits = hits
         reached = {h.program for h in hits if h.program}
         reached |= {s[1] for s in starts if s[0] == "P"}

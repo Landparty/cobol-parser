@@ -73,8 +73,13 @@ tokens = tokenize_cobol(source, filename="<string>", dialect=...,
 `Token` is a `@dataclass(slots=True)`: `type: TokenType`, `value: str`,
 `location: SourceLocation`, `raw_value: str | None = None` (the source
 spelling when it differs from `value` -- typed literals, `DECIMAL-POINT IS
-COMMA` numbers, merged `&` literals). `STRING_LITERAL` `value`s arrive
-**decoded** (delimiters stripped, doubled delimiter collapsed).
+COMMA` numbers, merged `&` literals), and `quote: str | None = None` (the
+delimiter a `STRING_LITERAL` was written with, `'` or `"`; excluded from
+equality and repr; None for a continued multi-line literal or a merged `&`
+literal). `STRING_LITERAL` `value`s arrive **decoded** (delimiters stripped,
+doubled delimiter collapsed). `quote` exists for embedded SQL, where `"X"` is
+a delimited identifier rather than a string (#597); the Cython
+`_try_single_line_string` sets it too.
 
 Module-level helpers also used outside the lexer:
 `mask_comment_entries(source)` (blanks IDENTIFICATION comment-entry text,
@@ -516,9 +521,17 @@ token's line number by one. See [preprocessing.md](preprocessing.md).
 `&` is never a token (both lexers skip it as a separator), but
 `tokenize()` -- pure-Python and `_lexer_fast.pyx` alike -- ends with
 `CobolLexer._post_tokenize()`, which runs `_merge_concatenated_literals()`,
-`_flag_stray_sql_chars()`, then `_retype_operator_currency_symbols()` (see
-[Declared currency symbols](#declared-currency-symbols)) and rewrites `self.tokens` in place (the
-Cython path returns the same list). Two consecutive STRING_LITERAL tokens
+`_flag_stray_sql_chars()`, `_retype_operator_currency_symbols()` (see
+[Declared currency symbols](#declared-currency-symbols)), then
+`_retype_legacy_verb_data_names()`, and rewrites `self.tokens` in place (the
+Cython path returns the same list). The last pass (#525) retypes the legacy
+verbs CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM to IDENTIFIER, everywhere
+in the source, when the program declares the word as a data name: it directly
+follows a level number that starts an entry (line start or after a period)
+outside the PROCEDURE DIVISION. None is reserved under IBM Enterprise COBOL,
+and lexed as a verb `05 NOTE PIC X(30)` (a DCLGEN NOTE column) became a
+FILLER and `MOVE x TO CHAIN` a CHAIN statement. Undeclared, they keep their
+TokenTypes and stay verbs. Two consecutive STRING_LITERAL tokens
 (NEWLINEs between them allowed) are joined into one when the source text
 between them is whitespace + exactly one `&` + whitespace
 (`_ampersand_joins` reads `self.lines` back from the second literal's
@@ -575,7 +588,10 @@ character that would otherwise be an "Invalid character" error is emitted
 as a `CURRENCY` token when it is declared. Characters that already lex as
 something (`& ! | < > :`, letters) are not rerouted. Without the declaration,
 every `£` in `PIC £££9.99` is a lexer error. See [ast-models.md](ast-models.md) for
-how the PictureClause sizes it.
+how the PictureClause sizes it. The same scan
+(`declared_currency_signs(source)`) also keeps each symbol's currency string,
+public as `lexer.currency_signs` (`{"#": "EUR"}`); `CobolParser` copies it to
+`parser.currency_signs` for the PICTURE clauses (#491).
 
 **Operator-shaped symbols.** A declared `<`, `>` or `=` already lexes as
 `LESS`/`GREATER`/`ASSIGN`, so `tokenize_program_text` cannot reroute it;

@@ -28,6 +28,10 @@ _FD_CLAUSE_STARTS: frozenset[str] = frozenset(
         "VALUE",
         "GLOBAL",
         "EXTERNAL",
+        # Report Writer: ``REPORT IS r`` / ``REPORTS ARE r1 r2`` -- the
+        # reports INITIATE / GENERATE / TERMINATE write to this file.
+        "REPORT",
+        "REPORTS",
     }
 )
 
@@ -78,7 +82,7 @@ class FileDescriptionClauseParser:
         terminating period, or up to the next level number / division header.
         Recognized clauses (BLOCK CONTAINS, RECORD/RECORD VARYING, LABEL
         RECORDS, RECORDING MODE, CODE-SET, DATA RECORDS, LINAGE, VALUE OF,
-        GLOBAL, EXTERNAL) are returned as a structured, JSON-serializable
+        GLOBAL, EXTERNAL, REPORT(S)) are returned as a structured, JSON-serializable
         mapping. Unrecognized tokens for a clause are preserved as raw text so
         nothing is silently lost.
         """
@@ -240,6 +244,11 @@ class FileDescriptionClauseParser:
                 ]
                 if names:
                     clauses["data_records"] = names
+
+            elif key in ("REPORT", "REPORTS"):
+                names = [tok for tok in tokens if tok.upper() not in ("IS", "ARE", ",")]
+                if names:
+                    clauses.setdefault("report_names", []).extend(names)
 
             elif key == "LINAGE":
                 clauses["linage"] = " ".join(tokens)

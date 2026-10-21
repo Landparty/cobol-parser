@@ -175,6 +175,30 @@ class JobStep:
     line: int = 0
     parameters: list[JclParameter] = field(default_factory=list)
 
+    def effective_programs(self) -> list[str]:
+        """The programs this step runs: ``PGM=``, or, for a launcher, what it
+        launches -- every ``RUN PROGRAM(x)`` of an IKJEFT01/1A/1B step's
+        in-stream ``SYSTSIN``, the application program of a DFSRRC00
+        ``PARM='DLI|DBB|BMP,x,...'``. Empty for a procedure invocation, and
+        for a TSO step whose ``SYSTSIN`` is not in-stream (the parser notes
+        that in ``unresolved``)."""
+        from .programs import IMS_CONTROLLER, TSO_PROGRAMS, ims_program, run_programs
+
+        program = (self.program or "").upper()
+        if program in TSO_PROGRAMS:
+            systsin = self.dd("SYSTSIN")
+            lines = [
+                line
+                for top in ([systsin] if systsin else [])
+                for member in top.flatten()
+                for line in member.instream_lines
+            ]
+            return run_programs("\n".join(lines))
+        if program == IMS_CONTROLLER:
+            launched = ims_program(self.parm)
+            return [launched] if launched else [program]
+        return [program] if program else []
+
     def dd(self, name: str) -> DDStatement | None:
         """The DD statement named ``name`` (case-insensitive), or ``None``."""
         target = name.strip().upper()
@@ -254,7 +278,10 @@ class JclParseResult:
         return not self.errors
 
     def steps_running(self, program: str) -> list[JobStep]:
-        """Every step whose ``PGM=`` is ``program``, across all jobs.
+        """Every step that runs ``program``, across all jobs: its ``PGM=``,
+        or the program a launcher step runs (``RUN PROGRAM(x)`` under
+        IKJEFT01, the ``PARM`` program of DFSRRC00; see
+        :meth:`JobStep.effective_programs`).
 
         Steps produced by expanding an in-stream procedure are included, so a
         program run only from inside a procedure is still found.
@@ -264,7 +291,8 @@ class JclParseResult:
             step
             for job in self.jobs
             for step in job.steps
-            if step.program is not None and step.program.upper() == target
+            if (step.program is not None and step.program.upper() == target)
+            or target in step.effective_programs()
         ]
 
     def all_dd_statements(self) -> list[tuple[JclJob, JobStep | None, DDStatement]]:
@@ -321,6 +349,10 @@ class DatasetBinding:
     ``SELECT INV-FILE ASSIGN TO INVFILE``, look ``INVFILE`` up here and get the
     dataset it is bound to in this job, which step binds it, how it is
     disposed, and (when the JCL says so) its RECFM and LRECL.
+
+    ``program`` is the ``PGM=`` the binding step runs (``None`` for a
+    job-level DD and for an ``EXEC proc`` step, which runs no program
+    itself), so ``to_dict()`` rows feed ``field-impact --bindings`` as-is.
     """
 
     ddname: str
@@ -330,6 +362,7 @@ class DatasetBinding:
     disposition: str | None = None
     record_format: str | None = None
     record_length: int | None = None
+    program: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -340,4 +373,5 @@ class DatasetBinding:
             "disposition": self.disposition,
             "record_format": self.record_format,
             "record_length": self.record_length,
+            "program": self.program,
         }

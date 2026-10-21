@@ -183,6 +183,12 @@ SCOPE_TERMINATORS: frozenset = frozenset(
     }
 )
 
+#: Verb spellings that begin a statement, matched by value. The legacy verbs
+#: CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM are deliberately absent: the
+#: lexer gives them their own TokenType (so :data:`STATEMENT_TOKEN_TYPES`
+#: still makes them boundaries) except where the program declares one as a
+#: data name, and then it is an IDENTIFIER that must read as an operand
+#: (``MOVE 'ACME' TO CHAIN``, #525).
 STATEMENT_KEYWORDS: frozenset = frozenset(
     {
         "ACCEPT",
@@ -191,7 +197,6 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
         "ALTER",
         "CALL",
         "CANCEL",
-        "CHAIN",
         "CLOSE",
         "COMMIT",
         "COMPUTE",
@@ -205,10 +210,8 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
         "ENTER",
         "ENTRY",
         "EVALUATE",
-        "EXAMINE",
         "EXEC",
         "EXECUTE",
-        "EXHIBIT",
         "EXIT",
         "FREE",
         "GENERATE",
@@ -225,7 +228,6 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
         "MOVE",
         "MULTIPLY",
         "NEXT",
-        "NOTE",
         "OPEN",
         "PERFORM",
         "PURGE",
@@ -254,7 +256,6 @@ STATEMENT_KEYWORDS: frozenset = frozenset(
         "SUBTRACT",
         "SUPPRESS",
         "TERMINATE",
-        "TRANSFORM",
         "UNLOCK",
         "UNSTRING",
         "USE",
@@ -1283,6 +1284,11 @@ def try_parse_nested_statement(
         if exclude_self is not None and parser is exclude_self:
             return None
         return parser.parse(stream)
+    except RecursionError:
+        # Nesting too deep to parse (#375): skipping the inner statement
+        # with a warning left a ``success=True`` AST missing statements.
+        # Let it reach the statement loop, which records it as an error.
+        raise
     except Exception as exc:
         # Exploratory nested dispatch must never raise (the real error is
         # surfaced via the parse context when report_or_raise pre-records
@@ -1530,6 +1536,49 @@ def consume_optional_qualifiers(stream: ITokenStream, value: str) -> str:
             continue
         break
     return " ".join(p for p in parts if p)
+
+
+def join_source_parts(parts: list[str]) -> str:
+    """Join collected source tokens back into readable COBOL text.
+
+    A bare ``"".join`` corrupted every multi-word source (``MOVE WS-A OF
+    WS-GRP`` became ``WS-AOFWS-GRP``; ``FUNCTION UPPER-CASE(WS-X)`` became
+    ``FUNCTIONUPPER-CASE(WS-X)``), while a bare ``" ".join`` would space out
+    subscripts. Words are space-separated; parens/commas follow the
+    subscript-aware convention ``_consume_arithmetic_target`` established:
+    no space before ``(``, none after ``(`` or before ``)``/``,``, so
+    ``TABLE (1, 2)`` renders as ``TABLE(1, 2)``. A reference-modification
+    colon joins tight on both sides (``WS-X(2:3)``, never ``WS-X(2 : 3)``
+    -- the spaced form is not what the source said and breaks any consumer
+    that re-parses the text). Single-token sources are returned unchanged.
+    Shared by MOVE's source operand and CALL's ``FUNCTION`` arguments.
+    """
+    out = ""
+    prev_part: str | None = None
+    # Tracks whether `prev_part` was itself a leading unary sign (one that
+    # starts a fresh operand: at the very start of the source, right after
+    # an opening paren, right after a ref-mod colon, or right after a comma
+    # between subscripts) so the digit that follows it glues on with no
+    # space even when the sign itself got a space (e.g. after a comma:
+    # "WS-TAB(WS-I, -1)").
+    prev_was_leading_sign = False
+    for part in parts:
+        if not part:
+            continue
+        is_sign = part in ("-", "+")
+        is_leading_sign = is_sign and prev_part in (None, "(", ",", ":")
+        if (
+            not out
+            or part in ("(", ")", ",", ":")
+            or prev_part in ("(", ":")
+            or prev_was_leading_sign
+        ):
+            out += part
+        else:
+            out += " " + part
+        prev_was_leading_sign = is_leading_sign
+        prev_part = part
+    return out
 
 
 def literal_operand_text(token: Token) -> str:
@@ -1853,9 +1902,16 @@ def _sql_literal_text(token: Token) -> str:
     ``:Y`` was reported as a host variable (``'FROM T9'`` likewise became a
     table). A typed literal (``X'C1'``) keeps its original text; any other is
     re-delimited with the SQL string delimiter, embedded quotes doubled.
+
+    A literal the source wrote with ``"`` stays ``"``-delimited: in DB2 SQL
+    (APOSTSQL, the default) that is a delimited identifier -- a table,
+    schema or column name -- not a string, and re-delimiting it with ``'``
+    hid every ``FROM "CUST"`` table from the SQL model (issue #597).
     """
     if token.raw_value:
         return token.raw_value
+    if token.quote == '"':
+        return '"' + (token.value or "").replace('"', '""') + '"'
     return "'" + (token.value or "").replace("'", "''") + "'"
 
 

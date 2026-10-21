@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 
-from .._literals import unquote_literal
+from .._literals import is_quoted_literal, typed_literal_content, unquote_literal
 from ..generators.data.layout import all_literal_operand, condition_values_exhaustive
 from ..models.ast_base import SourceLocation
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
@@ -34,13 +34,19 @@ from ..models.statements.base import (
 )
 from ..models.statements.control import (
     EvaluateStatement,
+    GoStatement,
     IfStatement,
     PerformStatement,
     SearchStatement,
 )
 from ..models.statements.data import MoveStatement
 from ..models.statements.io import IOReadStatement
-from .boundary_inventory import BoundaryRef, BoundaryReport, _condition_field_names
+from .boundary_inventory import (
+    BoundaryRef,
+    BoundaryReport,
+    _condition_field_names,
+    call_argument_data_name,
+)
 
 if TYPE_CHECKING:
     # Deferred: cobolparser.generators (reached via generators/__init__.py's
@@ -333,17 +339,47 @@ class BranchConstraints:
         }
 
 
+@dataclass(frozen=True)
+class TransferSite:
+    """One out-of-line ``PERFORM p`` or ``GO TO p``, with the branch arms
+    that must be taken for it to run (#310).
+
+    `BranchConstraints.enclosing` only reaches the top of its own paragraph;
+    a branch in a paragraph that another paragraph PERFORMs from inside an IF
+    arm is reached only when that arm is taken too. `ScenarioPlanner` joins a
+    branch's paragraph to the sites that transfer control to it to fold
+    those arms into the scenario's path condition.
+    """
+
+    paragraph: str
+    target: str
+    kind: str  # "PERFORM" | "GOTO" | "GOTO_DEPENDING"
+    enclosing: tuple[tuple[str, str], ...] = ()
+    line: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "paragraph": self.paragraph,
+            "target": self.target,
+            "kind": self.kind,
+            "enclosing": [list(pair) for pair in self.enclosing],
+            "line": self.line,
+        }
+
+
 @dataclass
 class ConstraintReport:
     branches: list[BranchConstraints] = field(default_factory=list)
     sequence_constraints: list[SequenceConstraint] = field(default_factory=list)
     unsupported: list[str] = field(default_factory=list)
+    transfer_sites: list[TransferSite] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "branches": [b.to_dict() for b in self.branches],
             "sequence_constraints": [s.to_dict() for s in self.sequence_constraints],
             "unsupported": list(self.unsupported),
+            "transfer_sites": [t.to_dict() for t in self.transfer_sites],
         }
 
 
@@ -373,6 +409,7 @@ class ConstraintExtractor:
         eof_flags = _collect_eof_flags(ast)
 
         for paragraph_name, statement, enclosing in _walk_statements(procedure):
+            _record_transfer_site(statement, paragraph_name, enclosing, report)
             if isinstance(statement, IfStatement) and statement.condition is not None:
                 self._extract_if(
                     statement, paragraph_name, index, fed_names, report, enclosing
@@ -883,6 +920,13 @@ def _extract_class_or_sign(
     if not name.strip():
         unsupported.append(f"{origin}: class/sign condition missing operand")
         return None
+    if class_word == "OMITTED":
+        # Decided by the caller's argument list, not by any data value.
+        unsupported.append(
+            f"{origin}: OMITTED test depends on the caller's argument list, "
+            f"not on data: {name.strip()}"
+        )
+        return None
     resolved = index.resolve(name.strip())
     if resolved is None:
         unsupported.append(f"{origin}: unresolvable operand: {name}")
@@ -907,9 +951,15 @@ def _extract_class_or_sign(
             negated=effective_negate,
         )
 
+    if class_word in ("DBCS", "KANJI"):
+        unsupported.append(
+            f"{origin}: unsupported class condition: {class_word} "
+            "(DBCS/KANJI double-byte tests are out of v1 scope)"
+        )
+        return None
     unsupported.append(
-        f"{origin}: unsupported class condition: {class_word} "
-        "(DBCS/KANJI double-byte tests are out of v1 scope)"
+        f"{origin}: user-defined class condition (SPECIAL-NAMES CLASS) not "
+        f"supported in v1: {class_word}"
     )
     return None
 
@@ -1288,6 +1338,16 @@ def _extract_evaluate_selector(
     # that is the rare case, and it errs toward the visible answer.
     if sel_type == "Literal":
         value = str(sel.get("value", ""))
+        if sel.get("expression") or (
+            not sel.get("quoted") and not _is_literal_operand(value, quoted=False)
+        ):
+            # ``WHEN WS-N + 1`` / ``WHEN WS-B (1:2)``: a value the running
+            # program computes, not the literal text (#333).
+            unsupported.append(
+                f"{origin}: WHEN selector is a computed operand rather than a "
+                f"literal, which is not supported in v1: {value}"
+            )
+            return None
         if sel.get("figurative"):
             # ``WHEN SPACES`` is the figurative constant, not the six
             # characters S-P-A-C-E-S: model it as the IF path does.
@@ -1311,6 +1371,18 @@ def _extract_evaluate_selector(
             FieldConstraint(resolved, "eq", (_literal_value(value),), origin, False)
         ]
     if sel_type == "Range":
+        computed = [
+            str(sel.get(key, ""))
+            for key in ("start", "end")
+            if not sel.get(f"{key}_quoted")
+            and not _is_literal_operand(str(sel.get(key, "")), quoted=False)
+        ]
+        if computed:
+            unsupported.append(
+                f"{origin}: WHEN range bound is a computed operand rather than "
+                f"a literal, which is not supported in v1: {', '.join(computed)}"
+            )
+            return None
         start = _literal_value(str(sel.get("start", "")))
         end = _literal_value(str(sel.get("end", "")))
         named = [bound for bound in (start, end) if index.resolve(bound) is not None]
@@ -1396,7 +1468,10 @@ def _boundary_fed_names(report: BoundaryReport) -> set[str]:
             fed.update(name.upper() for name in boundary.record_names)
         for arg in boundary.call_args:
             if arg.direction in ("IN", "BIDIRECTIONAL"):
-                fed.add(arg.name.upper())
+                # ``ADDRESS OF X`` feeds X; constants feed nothing (#582).
+                data_name = call_argument_data_name(arg.name)
+                if data_name is not None:
+                    fed.add(data_name.upper())
     return fed
 
 
@@ -1416,6 +1491,11 @@ def _figurative_name(text: str) -> str | None:
 def _strip_quotes(text: str) -> str:
     # Delimiters off and doubled delimiters collapsed: `IF X = '"'` reaches
     # here as `""""` (see `quote_literal`) and means the one character `"`.
+    # A typed literal stands for its decoded characters: `X'0000'` is two
+    # bytes, `X'C1'` one (#331).
+    typed = typed_literal_content(text)
+    if typed is not None:
+        return typed
     return unquote_literal(text)
 
 
@@ -1471,6 +1551,9 @@ def _is_literal_operand(text: str, *, quoted: bool = True) -> bool:
     """
     t = text.strip()
     if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'":
+        return True
+    if is_quoted_literal(t):
+        # A typed literal: `X'00'`, `Z'AB'` (#331).
         return True
     if _NUMERIC_LITERAL_RE.match(t):
         return True
@@ -1616,6 +1699,29 @@ def _walk_list(
             yield from _walk_list(paragraph_name, nested, deeper)
 
 
+def _record_transfer_site(
+    statement: Any,
+    paragraph_name: str,
+    enclosing: tuple[tuple[str, str], ...],
+    report: ConstraintReport,
+) -> None:
+    """Record *statement* as a `TransferSite` when it is an out-of-line
+    ``PERFORM p [THRU q]`` (its first paragraph: the rest of a THRU range is
+    reached by falling through) or a ``GO TO``."""
+    line = statement.location.line if getattr(statement, "location", None) else None
+    if isinstance(statement, PerformStatement) and statement.target_paragraph:
+        targets, kind = [statement.target_paragraph], "PERFORM"
+    elif isinstance(statement, GoStatement) and statement.target_paragraphs:
+        targets = list(statement.target_paragraphs)
+        kind = "GOTO_DEPENDING" if statement.depending_on_variable else "GOTO"
+    else:
+        return
+    for target in targets:
+        report.transfer_sites.append(
+            TransferSite(paragraph_name, target, kind, enclosing, line)
+        )
+
+
 def _branch_id(paragraph_name: str | None, location: SourceLocation | None) -> str:
     line = location.line if location else "?"
     column = location.column if location else "?"
@@ -1627,5 +1733,6 @@ __all__ = [
     "SequenceConstraint",
     "BranchConstraints",
     "ConstraintReport",
+    "TransferSite",
     "ConstraintExtractor",
 ]

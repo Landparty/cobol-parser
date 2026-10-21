@@ -112,7 +112,16 @@ _detect_fixed_format = detect_fixed_format
 
 @dataclass
 class ParseResult:
-    """Result of parsing operation with AST and metadata."""
+    """Result of parsing operation with AST and metadata.
+
+    ``ast`` is ``None`` only when lexing, preprocessing, file I/O or the
+    parser itself failed (or a ``FAIL_FAST`` error stopped the parse). Text
+    in which no division is recognised still yields a ``CobolProgram``
+    named ``"UNKNOWN"`` with no divisions, next to a "No recognizable COBOL
+    division found" error -- callers that partially report on failed
+    parses (``lint``, ``health``) rely on it. Test ``ast.divisions``, not
+    just ``ast is not None``, for "something usable exists" (#368).
+    """
 
     ast: CobolProgram | None
     errors: list[ParseError]
@@ -207,6 +216,9 @@ class CobolParser:
         #: ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA`` (decided by the lexer
         #: from the whole source): PICTURE strings exchange ``,`` and ``.``.
         self.decimal_point_is_comma: bool = False
+        #: ``SPECIAL-NAMES. CURRENCY SIGN``: each declared PICTURE currency
+        #: symbol's currency string (decided by the lexer), ``{"#": "EUR"}``.
+        self.currency_signs: dict[str, str] = {}
         #: True when this parse normalized fixed-format source to free-form
         #: text: column 1 of every lexed line is then the old column 8, so
         #: Area A is columns 1-4 and Area B starts at
@@ -322,6 +334,7 @@ class CobolParser:
 
         self._begin_parse()
         self.decimal_point_is_comma = False
+        self.currency_signs = {}
         self.source_is_fixed_format = False
         # Set up front, not only on the success path: a FAIL_FAST lexer
         # error or a propagated ParseError returns early, and its result
@@ -536,6 +549,7 @@ class CobolParser:
         self.decimal_point_is_comma = bool(
             getattr(lexer, "decimal_point_is_comma", False)
         )
+        self.currency_signs = dict(getattr(lexer, "currency_signs", {}) or {})
         logger.debug("Lexer produced %d tokens for %s", len(self.tokens), filename)
 
         if lexer.has_errors():
@@ -669,6 +683,10 @@ class CobolParser:
         # OBJECT units, each holding METHOD-ID units. ``END METHOD`` / ``END
         # FACTORY`` / ``END OBJECT`` / ``END CLASS`` pop back to the parent.
         self._unit_stack: list[CobolProgram] = []
+        # PROGRAM-ID units not yet closed by their END PROGRAM, outermost
+        # first: a new PROGRAM-ID is nested in the last of them, or stacked
+        # (a separate compilation unit) when they are all closed (#532).
+        self._open_programs: list[CobolProgram] = [primary_program]
 
         # Parse divisions in order: IDENTIFICATION -> ENVIRONMENT -> DATA -> PROCEDURE
         divisions_parsed: list[Any] = []
@@ -780,6 +798,8 @@ class CobolParser:
         # after the first END PROGRAM was silently dropped.
         if divisions_parsed and current_value == "END" and self._peek_is_end_program():
             self._consume_end_program_marker()
+            if self._open_programs:
+                self._open_programs.pop()
             return True
         # Only the end-of-input marker remains after at least one division
         # parsed — a clean end, not an error.
@@ -843,6 +863,14 @@ class CobolParser:
             self._unit_stack.append(parent)
         else:
             primary_program.add_contained_program(new_program)
+            # The tree stays flat; the source nesting is recorded apart.
+            enclosing = self._open_programs[-1] if self._open_programs else None
+            new_program.enclosing_program = (
+                enclosing
+                if enclosing is not None and enclosing.unit_kind == "PROGRAM"
+                else None
+            )
+            self._open_programs.append(new_program)
         self.current_program = new_program
 
     def _handle_oo_unit_marker(

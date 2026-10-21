@@ -43,12 +43,15 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   `consume_optional_qualifiers` (`MOVE X TO QUAL OF GROUP-A` is one target, not
   two), and the H9 dedent check applies to every target position.
 - **Source.** `_parse_source` collects every token and renders them with
-  `_join_source_parts`: words space-separated, no space around parens or before
+  `join_source_parts` (`_utils.py`, shared with CALL's `FUNCTION` arguments): words space-separated, no space around parens or before
   commas (`TBL(1, 2)`), a leading unary `-` / `+` attached to its digits
   (`MOVE -5` -> `"-5"`, relied on by `analysis/const_fold.py`), and a
   reference-modification colon tight on both sides (`WS-X(2:3)`). A plain
   `"".join` corrupts every multi-token source (`WS-AOFWS-GRP`). A typed literal
-  keeps its prefix (`raw_value`, `X"41"`); a plain literal is re-quoted.
+  keeps its prefix (`raw_value`, `X"41"`); a plain literal is re-quoted. A
+  separator `,` / `;` outside parentheses is skipped like a space (`MOVE 'ABC',
+  TO X` -> `"ABC"`, #569); inside them it separates function arguments and is
+  kept.
 - **Malformed input.** `MOVE A TO.`, `MOVE A` (no `TO`) and a stream ending at
   `MOVE A TO` report an error via `report_parse_error` and keep the node; a
   missing source is not flagged (see
@@ -66,13 +69,20 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   MULTIPLY/DIVIDE's `BY` / `INTO` operand (`_consume_arithmetic_operand`) folds
   qualifiers and signs the same way. ADD/SUBTRACT record `source_operands` (the
   operand list before TO/FROM/GIVING, duplicates kept) so a consumer can tell an
-  addend from a target of the same name (`.operands` dedups).
+  addend from a target of the same name (`.operands` dedups). MULTIPLY/DIVIDE
+  record it for the GIVING form only, as `[first, second]` (both are sending
+  items; `MULTIPLY A BY B GIVING B` left one operand once GIVING names were
+  filtered from `.operands`, #495); format 1 leaves it `None`, since its BY/INTO
+  operand is a receiver.
 - **Targets.** `_consume_arithmetic_target` (ADD `TO`, SUBTRACT `FROM`, and
   MULTIPLY/DIVIDE format 1) folds `(subscript)` groups and `OF` / `IN` chains
   (`"Y OF Z"`, `"NAME ( SUB1 , SUB2 )"`). `ArithmeticStatement.target` is the
   first target (back-compat) and `.targets` the full ordered list (`ADD 1 TO a,
-  b, c`); `set_target()` appends to both. `ROUNDED` is recorded per statement
-  (`set_rounded()`). `CORRESPONDING` / `CORR` is a keyword
+  b, c`); `set_target()` appends to both. `ROUNDED` is recorded per receiver
+  (#517): `_consume_optional_rounded(stream, stmt, receiver)` calls
+  `set_rounded(True, receiver, mode)` for the target / GIVING item it follows,
+  with the `MODE IS` name `_consume_optional_rounded_mode` returns
+  (`ROUNDING_MODES`, in `models/statements/arithmetic.py`). `CORRESPONDING` / `CORR` is a keyword
   (`is_corresponding`), not an operand. `_consume_additional_arithmetic_targets`
   continues the list across commas / spaces / ROUNDED and stops at
   `_ADDITIONAL_TARGET_STOP_KEYWORDS` (includes `REMAINDER` and `SIZE`), at a
@@ -105,7 +115,9 @@ first. Node fields are in [ast-models.md](../ast-models.md).
 - **Expression collection.** At `paren_depth == 0` the loop stops at a period,
   `ON` / `NOT` / `SIZE`, and any `STATEMENT_KEYWORDS` /
   `CONTROL_FLOW_BOUNDARIES` / `SCOPE_TERMINATORS` value (an enclosing `END-READ`
-  must end the clause, not join the expression). At non-zero depth it still
+  must end the clause, not join the expression), or any `STATEMENT_TOKEN_TYPES`
+  token (the legacy verbs CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM are
+  boundaries by type only, #525). At non-zero depth it still
   breaks on `is_statement_boundary`, and an unclosed parenthesis is reported
   ("COMPUTE statement has unbalanced parentheses in expression") -- a depth that
   never returns to zero must not swallow the rest of the program. Bare
@@ -115,7 +127,8 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   detection exact); `**`'s two lexed `*` tokens are re-merged (`2 ** 3`).
 - **Targets.** `COMPUTE id-1 [ROUNDED], id-2 [ROUNDED] = expr`: commas between
   targets are skipped (stopping there left the comma for the `=` check and failed
-  the whole statement). `ComputeStatement.rounded` is recorded.
+  the whole statement). A ROUNDED belongs to the target just before it
+  (`rounded_targets` / `rounding_modes`, #517).
 - **`expression_tree`** is a precedence parse of the collected tokens (literals,
   subscripted identifiers, FUNCTION calls, parentheses); a failed build degrades
   to `None`, never an error. Grammar, tightest-binding first: `_parse_primary`
@@ -154,16 +167,34 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   (`_INITIALIZE_PHRASE_STARTS`). Enterprise COBOL 6 phrases: `[[WITH] FILLER]`
   (`with_filler`; WITH optional, #402), `[{ALL | category} TO VALUE]`
   (`to_value_category`), `[THEN] REPLACING ...`, `[THEN] TO DEFAULT`
-  (`to_default`); `THEN` is optional (`_match_then`). Pinned by
-  `tests/regression/test_level88_false_and_initialize_phrases.py`.
+  (`to_default`); `THEN` is optional (`_match_then`). Every phrase lookahead
+  uses `peek_past_noise`, so a line break inside `ALL TO VALUE` / `THEN
+  REPLACING` / `THEN TO DEFAULT` keeps the phrase (a raw `peek(1)` saw the
+  NEWLINE and dropped it, silently for `TO DEFAULT`; #575). Pinned by
+  `tests/regression/test_level88_false_and_initialize_phrases.py` and
+  `test_initialize_phrase_line_breaks.py` (every form split at every gap).
+- **Separators (#569).** A `,` / `;` is a space in COBOL: every gap in
+  INSPECT (target, TALLYING, REPLACING, CONVERTING, BEFORE/AFTER) and in
+  INITIALIZE's REPLACING list is skipped with `skip_statement_separators`, and
+  `_by_follows_value` looks past one. Stopping at it dropped every later
+  counter / pair with no warning. Pinned by
+  `tests/regression/test_separator_comma_operands.py`.
 - **INSPECT.** `_parse_tallying`'s counter-clause loop (`counter-1 FOR
   {CHARACTERS|ALL|LEADING} [value] ...`) checks `is_statement_boundary` and the H9
   check before treating an IDENTIFIER as a new counter; a subscripted counter
-  (`CNT(2) FOR ...`) is folded. `_parse_before_after` (shared by TALLYING and
+  (`CNT(2) FOR ...`) is folded. One `FOR` takes any number of `CHARACTERS` /
+  `ALL` / `LEADING` phrases, matched by value (`ALL` lexes as a figurative
+  constant), each a clause of the same counter; `ALL` / `LEADING` take one or
+  more operands, and a later identifier is the next counter only when `FOR`
+  follows it (`_starts_further_operand`, `_keyword_follows_value`; #332 --
+  `FOR ALL 'A' LEADING 'C'` had invented a counter named LEADING). `_parse_before_after` (shared by TALLYING and
   REPLACING) loops until neither qualifier matches, so `BEFORE` and `AFTER
   INITIAL` may both appear in either order (each at most once); its delimiter is
   read by `_consume_inspect_value`, so `BEFORE INITIAL SPACE` (figurative) and
-  `AFTER INITIAL ENT(2)` are taken whole. `CONVERTING` takes subscripted /
+  `AFTER INITIAL ENT(2)` are taken whole, and so is an intrinsic operand
+  (`FUNCTION LOWER-CASE(A)` -> `"FUNCTION LOWER-CASE ( A )"`; read as an
+  identifier it had become two TALLYING operands, a bare `FUNCTION` after BY,
+  and a dropped CONVERTING clause, #506). `CONVERTING` takes subscripted /
   figurative operands and keeps its BEFORE/AFTER phrase as `converting_before` /
   `converting_after` (in `to_dict()` only when present). The outer "consume to
   period" trailer in `parse()` breaks on a statement boundary and owns the H9
@@ -178,6 +209,11 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   only when the next token is operand-shaped (`_next_is_delimiter`), so
   `DELIMITED INTO X` leaves INTO for its own clause. Operands and delimiters are
   re-quoted literals (`literal_operand_text`).
+- **STRING groups** (#576). Besides the flat `operands` / `delimiters`,
+  `StringStatement.groups` is `[{"sources": [...], "delimiter": d}]`: each
+  `DELIMITED BY` closes the sources read since the previous one; trailing
+  sources with no `DELIMITED BY` form a last group with `delimiter: None`.
+  Built in the model's `add_operand` / `add_delimiter`.
 - **UNSTRING.** `DELIMITED BY d1 OR d2 ...` collects every delimiter
   (`delimiters`), with `delimiter_all` a parallel bool list emitted by `to_dict()`
   only when some delimiter is `ALL`. `_parse_into_targets` accepts a comma list
@@ -210,7 +246,8 @@ first. Node fields are in [ast-models.md](../ast-models.md).
 
 - Operand: qualified / subscripted (`ACCEPT X OF Y`, `ACCEPT T (2)`), guarded by
   `is_statement_boundary` so a missing operand does not eat the next verb;
-  `ACCEPT cd MESSAGE COUNT` is accepted.
+  `ACCEPT cd MESSAGE COUNT` is accepted. A separator after the operand is a
+  space (`ACCEPT X, FROM DATE`, #569).
 - `FROM DATE` / `TIME` / ... with a trailing format (`YYYYMMDD`, `YYYYDDD`) is
   folded into `from_source` (left in the stream it became a phantom paragraph).
   `FROM ENVIRONMENT "name"` stores the name via `set_environment_name()`.

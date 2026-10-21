@@ -58,7 +58,7 @@ results = parse_files_with_copybooks(files, copybook_paths=["/path/to/cpy"])
 Signatures (all keyword arguments after `paths` have defaults):
 
 * `parse_files(paths, workers=None, error_recovery=COLLECT_ALL,
-  dialect=IBM_ENTERPRISE, encoding="utf-8", errors="replace", executor=None,
+  dialect=IBM_ENTERPRISE, encoding=None, errors="replace", executor=None,
   enable_profiling=False, top_n=50, prof_output=None, debug_lines=False)`.
   `workers=None` uses `os.cpu_count()`; `workers <= 0` raises `ValueError`.
   With no `executor` and one worker it takes a **sequential fast path** in
@@ -67,9 +67,12 @@ Signatures (all keyword arguments after `paths` have defaults):
   `error_recovery` / `dialect` / `debug_lines` change). Otherwise
   `ProcessPoolExecutor.map` with `chunksize = max(1, n // (workers*4))`.
   File I/O happens inside the workers, so large source strings are never
-  pickled.
+  pickled. `encoding=None` detects each file's encoding the way a
+  copybook's is (`read_program_source`, #522); a lossy decode is appended
+  to `result.warnings` (and to `expansion_warnings` with copybooks), and
+  `errors="strict"` makes it a `read_error`.
 * `parse_files_with_copybooks(paths, copybook_paths, workers=None,
-  error_recovery=..., dialect=..., encoding="utf-8", errors="replace",
+  error_recovery=..., dialect=..., encoding=None, errors="replace",
   max_nesting_depth=100, copybook_cache_size=1024, enable_profiling=False,
   top_n=50, prof_output=None, debug_lines=False)`. Runs **sequentially** in
   the main process (`workers` is accepted but unused, reserved) to maximize
@@ -195,10 +198,11 @@ arguments, so a worker signature cannot drift from its call site):
 | `error_recovery` | `COLLECT_ALL` | |
 | `copybook_paths` | `()` | non-empty -> `parse_cobol_with_expansion` |
 | `min_clone_statements` | `3` | passed to `RedundancyAnalyzer` |
-| `encoding` / `errors` | `"utf-8"` / `"replace"` | `Path.read_text` |
+| `encoding` / `errors` | `None` (detected) / `"replace"` | `read_program_source` (#522); a lossy decode is `FileScan.decode_warnings`, serialized only when non-empty |
 | `free_form` | `False` | lexer hint (auto-detection may still normalize) |
 | `preprocess_fixed` | `None` | `None` auto-detects, `True`/`False` force/disable fixed-format normalization (CLI `--source-format fixed\|free`, cobol.yml `source_format:`) |
 | `debug_lines` | `False` | compile `D`-in-column-7 lines (CLI `--debug-lines`, cobol.yml `project.debug_lines`) |
+| `defined_symbols` | `()` | conditional-compilation `(name, value)` pairs (CLI `--define`, cobol.yml `project.define`): handed to the expander with copybook paths, else evaluated by `preprocess_conditional_compilation` before `parse_cobol` (#324) |
 
 ### Report shape
 
@@ -215,8 +219,9 @@ consumer can prove every file it handed over was accounted for.
   listed under `failures`), `parse_error_count` (errors `COLLECT_ALL`
   recovered from — the grade is worth labelling, not dropping),
   `copybook_error` (serialized only when set).
-* `UnitScan` — `program_name`, `depth` (0 = outermost, 1 = contained in it,
-  ...), `reports: {analyzer: dict}`, `failed_analyzers: {analyzer:
+* `UnitScan` — `program_name`, `depth` (the source nesting,
+  `CobolProgram.nesting_depth`: 0 = outermost or stacked, 1 = nested in it,
+  ..., #532), `reports: {analyzer: dict}`, `failed_analyzers: {analyzer:
   "<ExcType>: <message>"}` (serialized only when non-empty).
 
 ### Properties it owes its caller (pinned by `tests/unit/test_scan.py`)
@@ -240,6 +245,11 @@ consumer can prove every file it handed over was accounted for.
   `location` — so `_run_analyzer` receives the source map and applies
   `field_lineage.apply_source_map` itself.
 
+**The `scan` CLI exits 2 when any file is in `failures`** (#325, as
+`batch`): the JSON is still written, with a `warning: N of M file(s) could
+not be scanned` on stderr, so a script gating on `$?` never reads "nothing
+scanned" as success. `scan_files()` itself is unchanged.
+
 **Copybook expansion failure degrades, as in `batch.py`.** The file falls
 back to the unexpanded parse and keeps the reason as
 `FileScan.copybook_error` (the unexpanded parse is usually error-free, so
@@ -260,9 +270,17 @@ contributes nothing.
 
 * `CrossFileCloneMember` — `path`, `program_name`, `paragraph`, `line`,
   `origin_file` / `origin_line` (where the paragraph really is when
-  copybooks were expanded; serialized as `"origin"`). `source_key` is the
-  on-disk position: the copybook position when the paragraph came from one,
-  else `(path, line)`.
+  copybooks were expanded; serialized as `"origin"`), `body_origin_file` /
+  `body_origin_line` (the fingerprint's `body_origin`, below). `source_key`
+  is the on-disk position: the body's origin when there is one, else the
+  copybook position when the header came from one, else `(path, line)`.
+* `body_origin` (#470): the scan worker (`_stamp_body_origins`) maps each
+  fingerprint's `body_lines` span through the expansion source map and, when
+  every expanded line of it lies in one file, stamps that file and the first
+  statement's line there. A program that writes `ERR-PARA.` itself and
+  `COPY BODY.` under it then shares `BODY.cpy`'s key with every other such
+  program; a body mixing the copybook with its own statements gets none, so
+  it is still a copy.
 * `CrossFileCloneGroup` — `clone_type` (`"TYPE_1"` / `"TYPE_2"`),
   `statement_count`, `fingerprint`, `members`; properties `file_count`
   (distinct files) and `source_count` (distinct `source_key`s).
@@ -270,8 +288,9 @@ contributes nothing.
   as a renamed match (same precedence as `RedundancyAnalyzer` within one
   program).
 * **One source, one copy** (#352): `min_members` counts distinct
-  `source_key`s, so a PROCEDURE DIVISION copybook paragraph included by
-  every program is shared code and forms no group on its own; its
+  `source_key`s, so a PROCEDURE DIVISION copybook paragraph (or paragraph
+  body, #470) included by every program is shared code and forms no group
+  on its own; its
   inclusions still appear as members of a group that has another real copy.
 * **Ranking**: by duplicated volume, `statement_count x source_count`
   descending, then `source_count`, member count, `TYPE_1` before `TYPE_2`,

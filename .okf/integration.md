@@ -72,7 +72,7 @@ parse_result = parser.parse(cleaned_content, filename) # with filename str
 | Attribute | Type | Notes |
 |-----------|------|-------|
 | `result.success` | `bool` | `True` = AST built **and** `errors` empty (`ast is not None and not errors`) |
-| `result.ast` | `CobolProgram \| None` | May be **non-None when `success` is False**: `COLLECT_ALL` (and a partial `FAIL_FAST` parse) returns a partial AST alongside populated `errors`. `None` only when nothing could be parsed. `success` = "complete and error-free"; `ast is not None` = "something usable exists" |
+| `result.ast` | `CobolProgram \| None` | May be **non-None when `success` is False**: `COLLECT_ALL` (and a partial `FAIL_FAST` parse) returns a partial AST alongside populated `errors`. `None` only on a lexer/preprocessing/I/O/internal failure or a `FAIL_FAST` stop. No division recognised (`"hello world"`, `""`) gives an empty `CobolProgram("UNKNOWN")` with no divisions plus a "No recognizable COBOL division found" error (#368, contract option (b)). `success` = "complete and error-free"; `ast is not None and ast.divisions` = "something usable exists" |
 | `result.errors` | `list` | Each item has `.line_number` (`int \| None`) and `.message` (`str`) |
 | `result.warnings` | `list` | Items stringified with `str()` |
 | `result.statistics` | object \| None | Must have `.to_dict() -> dict` if not `None` |

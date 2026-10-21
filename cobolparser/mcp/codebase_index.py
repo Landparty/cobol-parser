@@ -47,10 +47,17 @@ class UnitFacts:
 
     program_id: str
     file: str
-    #: 0 for the outermost unit of its file, 1 for one contained in it, ...
+    #: 0 for an outermost (or stacked) unit of its file, 1 for one nested in
+    #: it, ...
     depth: int
     #: ``PROGRAM``, or ``CLASS`` / ``FACTORY`` / ``OBJECT`` / ``METHOD``.
     unit_kind: str = "PROGRAM"
+    #: Its id in the codebase graph: the PROGRAM-ID, qualified by the
+    #: programs it is nested in for a nested one (``OUTER/INNER``, #532).
+    graph_id: str = ""
+    #: Its alternate ``ENTRY 'name'`` names, uppercased: a ``CALL 'name'``
+    #: reaches this program too (#521).
+    entries: list[str] = field(default_factory=list)
     #: ``program_brief``'s ``calls`` rows: target, via, dynamic, candidates
     #: and the sites (on-disk locations) of every CALL / LINK / XCTL.
     calls: list[dict[str, Any]] = field(default_factory=list)
@@ -96,12 +103,14 @@ class ProgramsIndex(_Survey):
     copy_sites: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def units_named(self, program_id: str) -> list[UnitFacts]:
-        """The units a ``CALL 'program_id'`` could reach: a FACTORY /
-        OBJECT / METHOD-ID unit of that name is not one (#500)."""
+        """The units a ``CALL 'program_id'`` could reach: those whose
+        PROGRAM-ID is *program_id*, or, when none is, those that declare it
+        as an ``ENTRY`` name (#521). A FACTORY / OBJECT / METHOD-ID unit is
+        never one (#500)."""
         wanted = program_id.upper()
-        return [
-            u for u in self.units if u.program_id.upper() == wanted and u.is_call_target
-        ]
+        targets = [u for u in self.units if u.is_call_target]
+        named = [u for u in targets if u.program_id.upper() == wanted]
+        return named or [u for u in targets if wanted in u.entries]
 
 
 @dataclass
@@ -112,8 +121,13 @@ class LineageIndex(_Survey):
     #: PROGRAM-IDs whose parse expanded copybooks, so that a bare line number
     #: from its report may be in a copybook rather than in its own file.
     expanded: set[str] = field(default_factory=set)
-    #: (PROGRAM-ID, line, edge kind, statement) -> the file the line is in.
-    edge_files: dict[tuple[str, int, str, str], str] = field(default_factory=dict)
+    #: (PROGRAM-ID, line, edge kind, statement) -> the file the line is in;
+    #: None when two files claim the key (a program line and a copybook line
+    #: of the same number). Only a fallback: a hop carries its own
+    #: ``origin_file`` when the report was source-mapped (#489).
+    edge_files: dict[tuple[str, int, str, str], str | None] = field(
+        default_factory=dict
+    )
     #: Units or files that produced no lineage report, and JCL problems.
     problems: list[str] = field(default_factory=list)
     #: JCL files found under the root, and whether their datasets joined.
@@ -140,7 +154,24 @@ def _units_with_depth(
 ) -> Iterator[tuple[CobolProgram, int]]:
     yield program, depth
     for contained in program.contained_programs:
-        yield from _units_with_depth(contained, depth + 1)
+        # The source nesting: a stacked unit is outermost, not contained
+        # (#532).
+        yield from _units_with_depth(contained, contained.nesting_depth)
+
+
+def _entry_names(unit: CobolProgram) -> list[str]:
+    """*unit*'s own ``ENTRY 'name'`` names, normalized like PROGRAM-IDs."""
+    from ..analysis.codebase import _normalize_program_name, _unit_statements
+    from ..models.statements.call import EntryStatement
+
+    return sorted(
+        {
+            _normalize_program_name(statement.entry_name)
+            for statement in _unit_statements(unit)
+            if isinstance(statement, EntryStatement) and statement.entry_name
+        }
+        - {""}
+    )
 
 
 def _programs(
@@ -198,7 +229,7 @@ def programs_index(workspace: Workspace) -> ProgramsIndex:
 
 
 def _build_programs(workspace: Workspace) -> tuple[ProgramsIndex, dict[str, Stamp]]:
-    from ..analysis.codebase import CodebaseGraphBuilder
+    from ..analysis.codebase import CodebaseGraphBuilder, program_graph_ids
     from ..batch import BatchResult
     from .tools import _calls, _flow
 
@@ -216,12 +247,17 @@ def _build_programs(workspace: Workspace) -> tuple[ProgramsIndex, dict[str, Stam
                 )
                 continue
             response = Response()
+            graph_ids = program_graph_ids(
+                parsed.ast.program_units(), str(Path(str(path)))
+            )
             for unit, depth in _units_with_depth(parsed.ast):
                 facts = UnitFacts(
                     program_id=unit.program_name or "",
                     file=display,
                     depth=depth,
                     unit_kind=unit.unit_kind,
+                    graph_id=graph_ids.get(id(unit), ""),
+                    entries=_entry_names(unit),
                 )
                 try:
                     facts.calls = _calls(parsed, unit, _flow(parsed, unit), response)
@@ -298,10 +334,15 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
                 file = (
                     workspace.display(edge.origin_file) if edge.origin_file else display
                 )
-                index.edge_files[(program, line, edge.kind, edge.statement)] = file
+                key = (program, line, edge.kind, edge.statement)
+                if key in index.edge_files and index.edge_files[key] != file:
+                    index.edge_files[key] = None  # ambiguous: never guess
+                else:
+                    index.edge_files[key] = file
 
     bindings: list[Any] = []
     passthroughs: list[Any] = []
+    jcl_caveats: list[str] = []
     jcl = workspace.files_named((".jcl", ".job"))
     index.jcl_files = [workspace.display(p) for p in jcl]
     for path in jcl:
@@ -318,11 +359,13 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
                 "so no file is joined to another program through a dataset"
             )
         else:
-            found, carried = bindings_from_jobs(jobs)
+            found, carried = bindings_from_jobs(jobs, jcl_caveats)
             bindings += found
             passthroughs += carried
             index.problems += [str(p) for p in problems]
-    index.graph = LineageGraph(reports, bindings, passthroughs)
+    index.graph = LineageGraph(
+        reports, bindings, passthroughs, join_caveats=jcl_caveats
+    )
     index.seconds = time.monotonic() - started
     return index, stamps
 
@@ -342,7 +385,13 @@ def health_index(workspace: Workspace) -> HealthIndex:
 
 def _build_health(workspace: Workspace) -> tuple[HealthIndex, dict[str, Stamp]]:
     from ..analysis.lint import stamp_report_origins
-    from ..scan import FileScan, ScanReport, UnitScan, cross_file_clone_groups
+    from ..scan import (
+        FileScan,
+        ScanReport,
+        UnitScan,
+        _stamp_body_origins,
+        cross_file_clone_groups,
+    )
 
     started = time.monotonic()
     index = HealthIndex()
@@ -379,6 +428,10 @@ def _build_health(workspace: Workspace) -> tuple[HealthIndex, dict[str, Stamp]]:
                 }
             )
             fingerprints = stamp_report_origins(redundancy.to_dict(), parsed.source_map)
+            if parsed.source_map:
+                # A body COPYed under each program's own header is one
+                # source, as in ``scan`` (#470).
+                _stamp_body_origins(fingerprints, parsed.source_map)
             file_scan.units.append(
                 UnitScan(
                     program_name=name,

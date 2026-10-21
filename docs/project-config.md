@@ -53,6 +53,14 @@ anywhere is the ordinary case and is not an error.
 Paths inside the file are resolved **against the file's own directory**, not
 against your current directory, so `cobol-parser lint` run from `src/batch/`
 searches the same copybook libraries as one run from the project root.
+A leading `~` and `$VAR` / `${VAR}` are expanded first, the way your shell
+expands them in `--copybook-path ~/cpy`, so `~/copybooks` and
+`$SHOP_ROOT/copybooks` mean what they say (an unset variable is left as
+written). A `copybook_path` or `callee_path` entry that is not an existing
+directory is never dropped silently: `cobol-parser config` marks it
+`(not an existing directory)` (and `--json` lists it under
+`missing_directories`), and every command that uses that setting prints a
+one-line `warning:` naming it on stderr.
 
 Two flags override the search, and may appear on either side of the
 subcommand:
@@ -118,6 +126,18 @@ define: ["DEBUG=TRUE", "TRACE"]
 
 In the mapping shape each value is a single string, number or `true`/`false`
 (or empty); a list or mapping as a symbol's value is an error.
+
+A key fills a command's flag only when the command has that flag. A few
+commands still have no `--define` or `--source-format` (`batch`,
+`gen-fixtures`, `codebase-graph`, `copybook-impact`, `gen-data`, `decode`,
+`compare`; `tokenize` has no `--define`, `expand` no `--source-format`).
+When the config sets `define`, a non-`auto` `source_format` or `debug_lines:
+true` and the command cannot apply it, the command prints a `warning:` on
+stderr naming the key rather than quietly parsing a different program.
+`gen-data`, `decode`, `compare` and `expand` do not warn about
+`source_format`: they read copybooks, where auto-detection settles the
+format, so the warning would fire on every run for nothing. They still warn
+about `define`, which can change a record layout.
 
 ### `data:` — record layout and encoding
 

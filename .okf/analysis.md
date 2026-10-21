@@ -68,7 +68,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `redundancy.py` | `RedundancyAnalyzer` (clone groups, paragraph fingerprints) | [flow](analysis/flow.md) |
 | `technical_debt.py` | `TechnicalDebtAnalyzer`, `DebtWeights` | [flow](analysis/flow.md) |
 | `_procedures.py` | `ProcedureIndex`, `enclosing_section`, `qualify` | [flow](analysis/flow.md) |
-| `_cics.py` | `cics_exit_kind`, `cics_terminator_kind` | [flow](analysis/flow.md) |
+| `_cics.py` | `cics_exit_kind`, `cics_terminator_kind`, `cics_identifier_options` | [flow](analysis/flow.md), [data-use](analysis/data-use.md) |
 | `_sql_whenever.py` | `whenever_coverage`, `whenever_goto_target` | [flow](analysis/flow.md) |
 | `unused_variables.py` | `UnusedVariableAnalyzer`, `collect_declared_items`, `qualified_data_name` | [data-use](analysis/data-use.md) |
 | `xref.py` | `XrefAnalyzer` | [data-use](analysis/data-use.md) |
@@ -80,7 +80,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `io_diagnostics.py` | `IOErrorCode`, `IODiagnosticHelper` | [data-use](analysis/data-use.md) |
 | `crud_matrix.py` | `CRUDMatrixGenerator`, `CRUDMatrix`, `CRUDFlags` | [data-use](analysis/data-use.md) |
 | `value_tracker.py` | `DynamicCallAnalyzer` | [data-use](analysis/data-use.md) |
-| `_names.py` | `base_data_name`, `qualified_references`, `bare_names`, `callee_names`, `IDENTIFIER_TOKEN_RE` | [data-use](analysis/data-use.md) |
+| `_names.py` | `base_data_name`, `qualified_references`, `bare_names`, `callee_names`, `IDENTIFIER_TOKEN_RE`, `strip_translator_arguments`, `is_translator_function` | [data-use](analysis/data-use.md) |
 | `_files.py` | `record_to_file_map`, `resolve_file_name`, `same_record_area_groups` | [data-use](analysis/data-use.md) |
 | `host_var_resolver.py` | `HostVariableResolver` | [sql-cics-ims](analysis/sql-cics-ims.md) |
 | `dclgen_check.py` | `DclgenChecker` | [sql-cics-ims](analysis/sql-cics-ims.md) |

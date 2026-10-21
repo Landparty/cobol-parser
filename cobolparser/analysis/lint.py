@@ -86,6 +86,12 @@ _SEVERITY_IO: dict[str, str] = {
     "CLOSE_NOT_OPEN": "error",
     "DOUBLE_CLOSE": "error",
     "FILE_LEFT_OPEN": "warning",
+    "READ_WRONG_MODE": "error",
+    "START_WRONG_MODE": "error",
+    "WRITE_WRONG_MODE": "error",
+    "REWRITE_WRONG_MODE": "error",
+    "DELETE_WRONG_MODE": "error",
+    "OPEN_AFTER_LOCK": "error",
 }
 
 # LINKAGE: an argument-count mismatch or an unknown entry point is a wrong
@@ -931,7 +937,7 @@ class LintAnalyzer:
         if result.unchecked:
             report.caveats.append(
                 f"dclgen-check: {len(result.unchecked)} host variable(s) could "
-                "not be checked against a DECLARE TABLE column -- run "
+                "not be (fully) checked against a DECLARE TABLE column -- run "
                 "`cobol-parser dclgen-check` for the reason per variable"
             )
         for column, tables in sorted(result.ambiguous_columns.items()):

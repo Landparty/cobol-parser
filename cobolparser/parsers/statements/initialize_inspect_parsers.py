@@ -6,6 +6,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.statements import InitializeStatement, InspectStatement
 from ._utils import (
+    SEPARATOR_TOKEN_TYPES,
     consume_optional_qualifiers,
     consume_period,
     is_statement_boundary,
@@ -14,6 +15,7 @@ from ._utils import (
     looks_like_paragraph_boundary,
     matches_keyword,
     peek_past_noise,
+    skip_statement_separators,
     skip_whitespace,
     starts_negative_handler_phrase,
     token_column,
@@ -121,14 +123,19 @@ class InitializeStatementParser(IStatementParser):
             stmt.with_filler = True
             skip_whitespace(token_stream)
 
-        # Optional ``{ALL | category} TO VALUE`` phrase
+        # Optional ``{ALL | category} TO VALUE`` phrase. Every lookahead in
+        # this parser looks past layout: a line break inside a multi-word
+        # phrase (``ALL`` / ``TO VALUE``, ``THEN`` / ``TO DEFAULT``) is
+        # legal, and a raw ``peek(1)`` saw the NEWLINE and dropped the
+        # phrase (#575).
         token = token_stream.peek()
         if token and _val(token) in _REPLACING_CATEGORIES | {"ALL"}:
-            nxt = token_stream.peek(1)
-            after = token_stream.peek(2)
+            nxt, nxt_idx = peek_past_noise(token_stream, 1)
+            after, _ = peek_past_noise(token_stream, nxt_idx + 1)
             if nxt and _val(nxt) == "TO" and after and _val(after) == "VALUE":
                 stmt.to_value_category = _val(token)
                 for _ in range(3):
+                    skip_whitespace(token_stream)
                     token_stream.consume()
                 skip_whitespace(token_stream)
 
@@ -140,9 +147,10 @@ class InitializeStatementParser(IStatementParser):
 
         # Optional [THEN] TO DEFAULT
         if self._match_then(token_stream, "TO"):
-            nxt = token_stream.peek(1)
+            nxt, _ = peek_past_noise(token_stream, 1)
             if nxt and _val(nxt) == "DEFAULT":
                 token_stream.consume()
+                skip_whitespace(token_stream)
                 token_stream.consume()
                 stmt.to_default = True
                 skip_whitespace(token_stream)
@@ -156,7 +164,7 @@ class InitializeStatementParser(IStatementParser):
         whether *keyword* is now the next token (left unconsumed)."""
         token = ts.peek()
         if token and _val(token) == "THEN":
-            nxt = ts.peek(1)
+            nxt, _ = peek_past_noise(ts, 1)
             if not nxt or _val(nxt) != keyword:
                 return False
             ts.consume()
@@ -175,17 +183,17 @@ class InitializeStatementParser(IStatementParser):
             if val in _REPLACING_CATEGORIES:
                 category = val
                 ts.consume()
-                skip_whitespace(ts)
+                skip_statement_separators(ts)
                 # Optional DATA keyword
                 nxt = ts.peek()
                 if nxt and _val(nxt) == "DATA":
                     ts.consume()
-                    skip_whitespace(ts)
+                    skip_statement_separators(ts)
                 # Expect BY
                 nxt = ts.peek()
                 if nxt and _val(nxt) == "BY":
                     ts.consume()
-                    skip_whitespace(ts)
+                    skip_statement_separators(ts)
                 # Value
                 nxt = ts.peek()
                 if nxt and nxt.type != TokenType.PERIOD:
@@ -196,7 +204,7 @@ class InitializeStatementParser(IStatementParser):
                         # subscripted sending item is one value.
                         by_value = consume_optional_qualifiers(ts, by_value)
                     stmt.add_replacing_clause(category, by_value)
-                skip_whitespace(ts)
+                skip_statement_separators(ts)
             else:
                 break
 
@@ -236,6 +244,11 @@ class InspectStatementParser(IStatementParser):
         INSPECT identifier TALLYING ...
         INSPECT identifier REPLACING ...
         INSPECT identifier CONVERTING from TO to
+
+    A separator comma / semicolon is a space in COBOL, so every gap between
+    words here is skipped with ``skip_statement_separators`` (#569): taking
+    ``,`` for the end of the phrase dropped every later TALLYING counter /
+    REPLACING pair with no warning.
     """
 
     def matches(self, token_stream: ITokenStream) -> bool:
@@ -247,7 +260,7 @@ class InspectStatementParser(IStatementParser):
         start = token_stream.consume()
         stmt = InspectStatement(token_location(start))
         start_column = token_column(start)
-        skip_whitespace(token_stream)
+        skip_statement_separators(token_stream)
 
         # Target identifier -- with its subscript / reference modification /
         # OF-IN qualifier chain folded in, the way MOVE/READ/WRITE read
@@ -261,7 +274,7 @@ class InspectStatementParser(IStatementParser):
             if token.type == TokenType.IDENTIFIER:
                 target = consume_optional_qualifiers(token_stream, target)
             stmt.set_target(target)
-        skip_whitespace(token_stream)
+        skip_statement_separators(token_stream)
 
         # Determine type
         token = token_stream.peek()
@@ -272,17 +285,17 @@ class InspectStatementParser(IStatementParser):
         if val == "TALLYING":
             stmt.set_inspect_type("TALLYING")
             token_stream.consume()
-            skip_whitespace(token_stream)
+            skip_statement_separators(token_stream)
             self._parse_tallying(token_stream, stmt, start_column)
         elif val == "REPLACING":
             stmt.set_inspect_type("REPLACING")
             token_stream.consume()
-            skip_whitespace(token_stream)
+            skip_statement_separators(token_stream)
             self._parse_replacing(token_stream, stmt)
         elif val == "CONVERTING":
             stmt.set_inspect_type("CONVERTING")
             token_stream.consume()
-            skip_whitespace(token_stream)
+            skip_statement_separators(token_stream)
             self._parse_converting(token_stream, stmt)
 
         # Consume to period
@@ -297,7 +310,7 @@ class InspectStatementParser(IStatementParser):
             if _val(t) == "REPLACING" and stmt.inspect_type == "TALLYING":
                 stmt.set_inspect_type("TALLYING_REPLACING")
                 token_stream.consume()
-                skip_whitespace(token_stream)
+                skip_statement_separators(token_stream)
                 self._parse_replacing(token_stream, stmt)
                 continue
             # No trailing period before the next statement: stop rather than
@@ -321,7 +334,7 @@ class InspectStatementParser(IStatementParser):
                 warn_paragraph_boundary_swallowed(token_stream)
                 break
             token_stream.consume()
-            skip_whitespace(token_stream)
+            skip_statement_separators(token_stream)
 
         return stmt
 
@@ -366,7 +379,7 @@ class InspectStatementParser(IStatementParser):
             # its ``(1)`` would stand where FOR is expected)
             ts.consume()
             counter = consume_optional_qualifiers(ts, token.value or "")
-            skip_whitespace(ts)
+            skip_statement_separators(ts)
 
             # Expect FOR
             nxt = ts.peek()
@@ -375,45 +388,44 @@ class InspectStatementParser(IStatementParser):
                 stmt.add_tallying_clause(counter, "CHARACTERS")
                 break
             ts.consume()
-            skip_whitespace(ts)
+            skip_statement_separators(ts)
 
-            # Parse FOR type
-            nxt = ts.peek()
-            if not nxt:
-                break
-            for_type = _val(nxt)
-            if for_type in ("CHARACTERS", "ALL", "LEADING"):
+            # One FOR takes any number of phrases (#332): ``FOR ALL 'A'
+            # LEADING 'C' CHARACTERS AFTER '*'`` -- each a clause of this
+            # counter. Matched by value: ALL lexes as a FIGURATIVE_CONSTANT.
+            took_phrase = False
+            while True:
+                # A ``,`` / ``;`` between phrases is a space (#569).
+                skip_statement_separators(ts)
+                nxt = ts.peek()
+                for_type = _val(nxt) if nxt else ""
+                if for_type not in ("CHARACTERS", "ALL", "LEADING"):
+                    break
+                took_phrase = True
                 ts.consume()
-                skip_whitespace(ts)
-
-                value = None
-                if for_type != "CHARACTERS":
-                    value = self._consume_inspect_value(ts)
-
-                # Optional BEFORE [INITIAL] ... AFTER [INITIAL] ... -- a single
-                # FOR-phrase may carry both qualifiers simultaneously.
-                before, after = self._parse_before_after(ts)
-
-                stmt.add_tallying_clause(counter, for_type, value, before, after)
-
-                # ``FOR ALL 'X' 'Y'``: further *literal* values under the same
-                # ALL/LEADING each get their own clause. Only literals are
-                # taken -- an IDENTIFIER here is the next counter name.
-                while for_type != "CHARACTERS":
-                    extra = ts.peek()
-                    if not (extra and extra.type in _INSPECT_LITERAL_TOKEN_TYPES):
-                        break
-                    ts.consume()
-                    skip_whitespace(ts)
+                skip_statement_separators(ts)
+                if for_type == "CHARACTERS":
+                    # Optional BEFORE [INITIAL] ... AFTER [INITIAL] ... -- a
+                    # single FOR-phrase may carry both qualifiers.
                     before, after = self._parse_before_after(ts)
-                    stmt.add_tallying_clause(
-                        counter,
-                        for_type,
-                        literal_operand_text(extra),
-                        before,
-                        after,
-                    )
-            else:
+                    stmt.add_tallying_clause(counter, for_type, None, before, after)
+                    continue
+                # ``ALL 'X' 'Y' WS-Z``: each operand under the same ALL /
+                # LEADING is its own clause. The first is always this
+                # phrase's; a later identifier is the next counter only when
+                # FOR follows it.
+                value = self._consume_inspect_value(ts)
+                before, after = self._parse_before_after(ts)
+                stmt.add_tallying_clause(counter, for_type, value, before, after)
+                while value is not None:
+                    # Separators first, so ``ALL 'A', 'B'`` keeps 'B' (#569).
+                    skip_statement_separators(ts)
+                    if not self._starts_further_operand(ts, reference_column):
+                        break
+                    value = self._consume_inspect_value(ts)
+                    before, after = self._parse_before_after(ts)
+                    stmt.add_tallying_clause(counter, for_type, value, before, after)
+            if not took_phrase:
                 break
 
     def _parse_replacing(self, ts: ITokenStream, stmt: InspectStatement) -> None:
@@ -428,7 +440,7 @@ class InspectStatementParser(IStatementParser):
             if val in ("CHARACTERS", "ALL", "LEADING", "FIRST"):
                 replace_type = val
                 ts.consume()
-                skip_whitespace(ts)
+                skip_statement_separators(ts)
 
                 # ``CHARACTERS BY x`` has no search operand; recording the
                 # keyword as one read it as a (nonexistent) data item. None,
@@ -481,9 +493,18 @@ class InspectStatementParser(IStatementParser):
             return None
         ts.consume()
         value = literal_operand_text(v)
-        if v.type == TokenType.IDENTIFIER:
+        if v.type == TokenType.IDENTIFIER and value.upper() == "FUNCTION":
+            # ``FUNCTION LOWER-CASE(A)`` is one operand. Read as an identifier
+            # it left ``LOWER-CASE(A)`` behind: TALLYING took it for a second
+            # operand, BY kept the bare word FUNCTION and CONVERTING dropped
+            # the whole clause (#506).
+            name = ts.peek()
+            if name and name.type == TokenType.IDENTIFIER and name.value:
+                ts.consume()
+                value = consume_optional_qualifiers(ts, f"{value} {name.value}")
+        elif v.type == TokenType.IDENTIFIER:
             value = consume_optional_qualifiers(ts, value)
-        skip_whitespace(ts)
+        skip_statement_separators(ts)
         return value
 
     def _consume_by_value(self, ts: ITokenStream) -> str:
@@ -492,20 +513,52 @@ class InspectStatementParser(IStatementParser):
         if not (nxt and _val(nxt) == "BY"):
             return ""
         ts.consume()
-        skip_whitespace(ts)
+        skip_statement_separators(ts)
         return self._consume_inspect_value(ts) or ""
+
+    def _starts_further_operand(
+        self, ts: ITokenStream, reference_column: int | None
+    ) -> bool:
+        """True when the next token is one more TALLYING ``ALL`` / ``LEADING``
+        operand: a value that is not a phrase keyword (``ALL``, ``LEADING``,
+        ``CHARACTERS``, ``REPLACING`` ...), not the next statement's verb or
+        paragraph, and -- for an identifier -- not the next counter (one
+        that ``FOR`` follows)."""
+        token = ts.peek()
+        if not (token and token.type in _INSPECT_VALUE_TOKEN_TYPES):
+            return False
+        if _val(token) in _INSPECT_KEYWORDS:
+            return False
+        if token.type != TokenType.IDENTIFIER:
+            return True
+        if is_statement_boundary(token):
+            return False
+        if looks_like_paragraph_boundary(ts) and looks_dedented_relative_to(
+            ts, reference_column
+        ):
+            return False
+        return not self._keyword_follows_value(ts, "FOR")
 
     @staticmethod
     def _by_follows_value(ts: ITokenStream) -> bool:
         """True when the value at the current position (possibly subscripted
         or qualified) is followed by ``BY`` -- i.e. it starts another
         ``from BY to`` pair rather than something else."""
+        return InspectStatementParser._keyword_follows_value(ts, "BY")
+
+    @staticmethod
+    def _keyword_follows_value(ts: ITokenStream, keyword: str) -> bool:
+        """True when the value at the current position (possibly subscripted
+        or qualified) is followed by *keyword*."""
         i = 1
         depth = 0
         while True:
             tok, i = peek_past_noise(ts, i)
             if tok is None:
                 return False
+            if depth == 0 and tok.type in SEPARATOR_TOKEN_TYPES:
+                i += 1  # ``'A', BY 'B'``: a separator is a space
+                continue
             if tok.type == TokenType.LEFT_PAREN:
                 depth += 1
             elif tok.type == TokenType.RIGHT_PAREN:
@@ -517,7 +570,7 @@ class InspectStatementParser(IStatementParser):
                     if tok is None:
                         return False
                 else:
-                    return _val(tok) == "BY"
+                    return _val(tok) == keyword
             elif depth < 0:
                 return False
             i += 1
@@ -542,11 +595,11 @@ class InspectStatementParser(IStatementParser):
             ):
                 break
             ts.consume()
-            skip_whitespace(ts)
+            skip_statement_separators(ts)
             p = ts.peek()
             if p and _val(p) == "INITIAL":
                 ts.consume()
-                skip_whitespace(ts)
+                skip_statement_separators(ts)
             # The delimiter may be a figurative constant (``BEFORE INITIAL
             # SPACE``) or a subscripted/qualified identifier; accepting only
             # a bare identifier/literal left SPACE (or ``(2)``) in the stream,
@@ -578,7 +631,7 @@ class InspectStatementParser(IStatementParser):
         if not (nxt and _val(nxt) == "TO"):
             return
         ts.consume()
-        skip_whitespace(ts)
+        skip_statement_separators(ts)
         to_val = self._consume_inspect_value(ts)
         if to_val is None:
             return

@@ -12,6 +12,7 @@ from ...models.data_items import PictureClause
 from .layout import (
     FieldCategory,
     FieldSpec,
+    InitialValueCell,
     LiteralCell,
     _strip_literal_quotes,
     hex_literal_bytes,
@@ -263,6 +264,17 @@ def _name_tokens(name: str) -> set[str]:
     return {t for t in _WORD_SPLIT_RE.split(name.upper()) if t}
 
 
+def _mark_initial_value(cell: str | None) -> str | None:
+    """*cell* marked as a VALUE-clause initial value, which the encoder
+    writes without JUSTIFIED / BLANK WHEN ZERO (#558)."""
+    if cell is None:
+        return None
+    if isinstance(cell, LiteralCell):
+        cell.initial_value = True
+        return cell
+    return InitialValueCell(cell)
+
+
 class ValueFactory:
     """Builds one field's value for one row.
 
@@ -284,6 +296,9 @@ class ValueFactory:
         self._unique = {u.upper() for u in opts.unique_fields}
         self._used: dict[str, set[str]] = {}
         self._counters: dict[str, int] = {}
+        #: Columns of ``unique_fields`` where a repeat could not be avoided:
+        #: the fallback counter ran out of values the PICTURE can hold.
+        self.duplicate_columns: list[str] = []
 
     def value_for(self, spec: FieldSpec, row: int) -> str:
         """Generate the CSV cell for *spec* in row *row* (0-based)."""
@@ -309,9 +324,15 @@ class ValueFactory:
             if candidate not in seen:
                 seen.add(candidate)
                 return candidate
-        candidate = self._sequential(spec)
-        seen.add(candidate)
-        return candidate
+        fallback = self._sequential(spec, seen)
+        if fallback is None:
+            # The PICTURE holds no further distinct value the counter can
+            # write: keep the repeat, but say so (#526).
+            if spec.column not in self.duplicate_columns:
+                self.duplicate_columns.append(spec.column)
+            return candidate
+        seen.add(fallback)
+        return fallback
 
     # -- dispatch -----------------------------------------------------------
 
@@ -366,7 +387,7 @@ class ValueFactory:
                     return self._fill_figurative(figurative, spec)
                 return self._fit_domain_value(choice, spec)
         if self._opts.respect_values and spec.value_clause:
-            return self._from_value_clause(spec)
+            return _mark_initial_value(self._from_value_clause(spec))
         return None
 
     def _fill_figurative(self, character: str, spec: FieldSpec) -> str:
@@ -593,18 +614,48 @@ class ValueFactory:
         base = self._rng.randint(1, ceiling) if ceiling >= 1 else 0
         return (base + row) % modulus
 
-    def _sequential(self, spec: FieldSpec) -> str:
-        """Deterministic fallback used when unique retries are exhausted."""
-        count = self._counters.get(spec.column, 0)
-        self._counters[spec.column] = count + 1
-        if spec.category in (
+    def _sequential(self, spec: FieldSpec, seen: set[str]) -> str | None:
+        """Deterministic fallback used when unique retries are exhausted.
+
+        A per-column counter, advanced until its value is not in *seen*.
+        ``None`` once the counter has used every value the field can hold.
+        Distinct counts give distinct values, so at most ``len(seen) + 1``
+        steps are ever needed.
+
+        A text value is built from the right -- ``STA1`` ... ``ST10`` on a
+        ``PIC X(4)`` -- so truncation never cuts the counter off; cutting it
+        (``STAT1`` / ``STAT2`` both written ``STA``) made every fallback
+        value identical on a narrow field (#526).
+        """
+        numeric = spec.category in (
             FieldCategory.NUMERIC,
             FieldCategory.NUMERIC_EDITED,
             FieldCategory.FLOAT,
-        ):
-            digits = max(1, spec.integer_digits)
-            return self._format_number(count % (10**digits), spec)
-        return self._fit_text(f"{spec.name[:4]}{count}", spec)
+        )
+        if numeric:
+            capacity = 10 ** max(1, spec.integer_digits)
+        else:
+            size = spec.character_positions
+            capacity = 10**size if size > 0 else None
+        for _ in range(len(seen) + 1):
+            count = self._counters.get(spec.column, 0)
+            if capacity is not None and count >= capacity:
+                return None
+            self._counters[spec.column] = count + 1
+            if numeric:
+                candidate = self._format_number(count, spec)
+            else:
+                candidate = self._counter_text(spec, count)
+            if candidate not in seen:
+                return candidate
+        return None
+
+    def _counter_text(self, spec: FieldSpec, count: int) -> str:
+        """``<up to 4 name characters><count>``, the name cut first."""
+        digits = str(count)
+        size = spec.character_positions
+        room = 4 if size <= 0 else max(0, min(4, size - len(digits)))
+        return self._fit_text(f"{spec.name[:room]}{digits}", spec)
 
     def _date_digits(self, digits: int) -> str | None:
         """A valid date rendered as *digits* digits, or ``None`` if it won't fit."""

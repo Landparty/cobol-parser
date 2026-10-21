@@ -19,6 +19,677 @@ entries, including both 2026-09-15 sections, were found there on
 [analysis/codebase.md](analysis/codebase.md), [mcp.md](mcp.md):
 codebase-graph graphs PROGRAM and CLASS units only (a method's CALLs are its
 class's); MCP `callers_of` never declares a method as a program.
+## 2026-10-17 -- IBMDataItem.calculate_storage_size defers to _storage (#589)
+
+[dialects.md](dialects.md): `calculate_storage_size()` returns
+`calculate_size()`; even-digit COMP-3 and PICTURE-less usages are right.
+
+## 2026-10-17 -- IOLogger REWRITE FROM / READ without INTO (#573)
+
+[analysis/data-use.md](analysis/data-use.md): REWRITE logs its `FROM` item
+like WRITE; a READ with no INTO logs the FD's records.
+
+## 2026-10-17 -- --keep-comments on CR-only / CRLF files (#581)
+
+[preprocessing.md](preprocessing.md): `_origin_sources` splits with
+`split_source_lines`, so restored comments line up with the source map.
+
+## 2026-10-17 -- Clone members carry qualified_name (#555)
+
+[analysis/flow.md](analysis/flow.md): `CloneMember.qualified_name`; `health`
+top offenders match clone membership by `qualified_name or name`.
+
+## 2026-10-17 -- SQL edges through a table field are inexact (#507)
+
+[analysis/lineage.md](analysis/lineage.md): `_visit_sql` marks a host
+variable under an OCCURS inexact, like every other edge through a table.
+
+## 2026-10-17 -- A LINKAGE REDEFINES group shares its reference (#596)
+
+[analysis/data-use.md](analysis/data-use.md): `LinkageChecker` maps each
+LINKAGE 01 to the item it REDEFINES; a group is referenced when any member is.
+
+## 2026-10-17 -- CONTINUE AFTER n SECONDS (#578)
+
+[parser/statements-control.md](parser/statements-control.md): the delay
+expression is parsed onto `ContinueStatement.delay_expression` and read by
+xref / unused-variables.
+
+## 2026-10-17 -- HostVariableResolver keys columns by DCLGEN name (#572)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md): `dclgen_name()` keys the
+column index, shared with `DclgenChecker`; `:CUST-ID` links to `CUST_ID`.
+
+## 2026-10-17 -- gen-fixtures constant CALL arguments (#582)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md),
+[generators/fixtures.md](generators/fixtures.md): `call_argument_data_name()`
+classifies CALL arguments; `OMITTED` is `direction="NONE"`.
+
+## 2026-10-17 -- >>DEFINE B AS A copies A's value (#567)
+
+[preprocessing.md](preprocessing.md): a lone-word `AS` operand is a variable
+reference; undefined warns. [tests.md](tests.md): `test_define_as_variable.py`.
+
+## 2026-10-17 -- Complexity counts a clause pair once (#553)
+
+[analysis/flow.md](analysis/flow.md): `_CLAUSE_PAIRS` -- AT END / NOT AT END
+(and the other NOT- twins) add one decision; SEARCH AT END adds none.
+
+## 2026-10-17 -- EXEC CICS literal options reference nothing (#588)
+
+[analysis/data-use.md](analysis/data-use.md), [analysis.md](analysis.md):
+`_cics.cics_identifier_options()` drops `literal_options`; unused-variables,
+xref and `LinkageChecker` sweep CICS options through it.
+
+## 2026-10-17 -- STRING delimiter groups (#576)
+
+[parser/statements-data.md](parser/statements-data.md),
+[analysis/codebase.md](analysis/codebase.md): `StringStatement.groups`
+records which sources each DELIMITED BY applies to; diff compares it.
+
+## 2026-10-17 -- to_dict() metadata and procedure_count (#508)
+
+[ast-models.md](ast-models.md): `procedure_count` counts PROCEDURE DIVISION
+procedures only; `parser_version` is the package version; `created_at` dropped.
+
+## 2026-10-17 -- csv-dir header-only CSV for an empty IN fixture (#568)
+
+[generators/fixtures.md](generators/fixtures.md): `bundle._writes_csv` adds
+IN/BIDIRECTIONAL fixtures with a layout and no rows (header-only CSV).
+
+## 2026-10-17 -- Complexity scores PERFORM VARYING AFTER as nested loops (#514)
+
+[analysis/flow.md](analysis/flow.md): each AFTER phrase adds one decision
+and one nesting level.
+
+## 2026-10-17 -- COPY REPLACING LEADING + TRAILING replace a word once (#513)
+
+[preprocessing.md](preprocessing.md): a partial-word hit settles its word by
+the first fitting clause. [tests.md](tests.md):
+`test_copy_replacing_leading_trailing_once.py`.
+
+## 2026-10-17 -- language-env scans WHEN and INSPECT operands (#506)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md),
+[parser/statements-data.md](parser/statements-data.md): EVALUATE / SEARCH WHEN
+and INSPECT operands are scanned; INSPECT reads a `FUNCTION` operand whole.
+
+## 2026-10-17 -- move-type-check resolves special registers (#520)
+
+[analysis/data-use.md](analysis/data-use.md): numeric / alphanumeric special
+register sets and `LENGTH OF x` resolve instead of counting as unresolved.
+
+## 2026-10-17 -- SELECT key and padding items are references (#549, #556)
+
+[analysis/data-use.md](analysis/data-use.md): xref's `_visit_select_clauses`
+adds RECORD / ALTERNATE / RELATIVE KEY and PADDING CHARACTER; unused-variables
+counts PADDING CHARACTER.
+
+## 2026-10-17 -- OCCURS KEY after INDEXED BY (#542)
+
+[parser/divisions.md](parser/divisions.md): KEY and INDEXED BY phrases are
+read in either order, in `data_clauses.py` and `_data_fast.pyx` alike.
+
+## 2026-10-17 -- a copybook paragraph body is one source (#470)
+
+[batch.md](batch.md), [analysis/flow.md](analysis/flow.md): fingerprints
+carry `body_lines`; `scan` stamps `body_origin` and `source_key` prefers it.
+
+## 2026-10-17 -- VALUE initial values ignore JUSTIFIED / BWZ (#558)
+
+[generators/record-data.md](generators/record-data.md): `InitialValueCell`
+marks a VALUE-clause cell; `encode_field` skips both clauses for it.
+
+## 2026-10-17 -- SQLCODE check reached by GO TO (#557)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md): the status-check search
+follows an unconditional single-target `GO TO`, like a PERFORM.
+
+## 2026-10-17 -- recursion-check knows the program's ENTRY names (#515)
+
+[analysis/flow.md](analysis/flow.md): a CALL to an own (or enclosing)
+`ENTRY 'name'` is a self-recursive CALL risk.
+
+## 2026-10-17 -- diff VALUE canonical form (#543)
+
+[analysis/codebase.md](analysis/codebase.md): `_canonical_value` folds
+figurative plurals and numeric spellings before comparing `value_clause`.
+
+## 2026-10-17 -- program-signature grades BY VALUE parameters as input (#490)
+
+[analysis/codebase.md](analysis/codebase.md): `_as_passed` maps a BY VALUE
+operand's `input-output` / `output` to `input`, per entry point.
+
+## 2026-10-17 -- xref records REPORT SECTION operands (#571)
+
+[analysis/data-use.md](analysis/data-use.md): `report_entry_operands()` lists
+each report entry's SOURCE / SUM / CONTROL(S) texts; unused-variables and xref
+both read it, xref recording each at its entry.
+
+## 2026-10-17 -- text after a COPY's period maps to the parent (#355)
+
+[preprocessing.md](preprocessing.md): the splice moves the tail onto its own
+line (option (b)); line-count invariant and source-map table updated.
+[tests.md](tests.md): `test_expansion_source_map_and_comments.py`.
+
+## 2026-10-17 -- gen-data --unique on narrow text fields (#526)
+
+[generators/record-data.md](generators/record-data.md): the unique fallback
+counter keeps its digits and skips used values; gaps become caveats.
+
+## 2026-10-17 -- #311 judgment calls: diff section rename, UNBOUNDED, DIBSTAT
+
+[analysis/codebase.md](analysis/codebase.md): a section rename moves none of
+its paragraphs. [generators/record-data.md](generators/record-data.md):
+`OCCURS UNBOUNDED` gets an `unresolved` lower-bound line.
+[analysis/data-use.md](analysis/data-use.md),
+[analysis/business-rules.md](analysis/business-rules.md): `DIB*` are special
+registers to xref, but their tests stay business rules (carved out of the
+technical set, like CICS RESP); PCB status / MQ CompCode stay business too.
+
+## 2026-10-17 -- qualified names resolved as COBOL does (#541)
+
+[analysis/data-use.md](analysis/data-use.md), [mcp.md](mcp.md),
+[analysis/lineage.md](analysis/lineage.md): `XrefReport.entries_named` and
+`_names.split_qualified_name` (IN = OF, partial chains).
+
+## 2026-10-17 -- One DL/I vocabulary (#481, #595)
+
+[dialects.md](dialects.md), [analysis/sql-cics-ims.md](analysis/sql-cics-ims.md),
+[parser/statements-io.md](parser/statements-io.md):
+`IMS_COMMANDS` completed (no ROLLB), `EXEC_DLI_COMMANDS` added; the parser and
+IMSSegmentAnalyzer read them; function-code candidates are no longer filtered.
+
+## 2026-10-17 -- cobol.yml paths expand ~ / $VAR; missing dirs reported (#550)
+
+[cli.md](cli.md): `_path_list` expansion, `missing_directories()`, the
+`config` marker and the stderr warning. [tests.md](tests.md): config tests.
+
+## 2026-10-17 -- DFHRESP / DFHVALUE arguments are no data names (#594)
+
+`_names.strip_translator_arguments` runs in `_extract_identifiers` and xref's
+`_split_operand`; MoveTypeChecker classifies the call NUMERIC; JNIENVPTR is a
+special register.
+
+## 2026-10-17 -- MULTIPLY / DIVIDE GIVING keep both operands (#495)
+
+[ast-models.md](ast-models.md), [analysis/flow.md](analysis/flow.md),
+[analysis/business-rules.md](analysis/business-rules.md): GIVING form records
+`source_operands`; statement text renders BY / INTO.
+
+## 2026-10-17 -- decode: non-UTF-8 copybook is a one-line error (#496)
+
+[cli.md](cli.md): `decode` catches `UnicodeDecodeError` like `compare`.
+[tests.md](tests.md): `test_decode_cli.py`.
+
+## 2026-10-17 -- LE callable service list rebuilt (#529)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md), [dialects.md](dialects.md): `IBM_LE_SERVICE_CATEGORIES`
+is the source of truth, rebuilt from SA38-0683; 24 non-services removed.
+
+## 2026-10-17 -- No fall-through out of a DECLARATIVES section (#533)
+
+[analysis/flow.md](analysis/flow.md): `build_fall_through_edges` takes
+`declarative_sections` and draws no edge out of one.
+
+## 2026-10-17 -- xref declares SPECIAL-NAMES (#519)
+
+[analysis/data-use.md](analysis/data-use.md), [mcp.md](mcp.md): mnemonic,
+class, alphabet and symbolic-character kinds plus UPSI condition names, at the
+CONFIGURATION SECTION; a class test credits its declared class-name.
+
+## 2026-10-17 -- COBOL 2002 and unknown USAGE words (#524)
+
+[ast-models.md](ast-models.md), [parser/divisions.md](parser/divisions.md),
+[generators/record-data.md](generators/record-data.md): FLOAT-*/BINARY-*
+sizes in `_storage.py`; unknown words warned and reported unresolved.
+
+## 2026-10-17 -- OCCURS expansion bounded across nested tables (#376)
+
+[generators/record-data.md](generators/record-data.md):
+`_MAX_EXPANDED_OCCURRENCES` and `occurs_expansion_caveats()`; cut tables are
+named in dataset / view caveats and `ProgramLayoutIndex.unresolved`.
+
+## 2026-10-17 -- THRU a SECTION includes its paragraphs (#577)
+
+[analysis/flow.md](analysis/flow.md): `range_members` extends a SECTION end
+to its last paragraph.
+
+## 2026-10-17 -- level-88 THRU with a figurative end (#468)
+
+[ast-models.md](ast-models.md): `LOW-VALUE THRU HIGH-VALUE` keeps its
+`THROUGH:` marker.
+
+## 2026-10-17 -- SCREEN SECTION bindings and names are kept (#501)
+
+[parser/divisions.md](parser/divisions.md), [analysis/data-use.md](analysis/data-use.md):
+`_skip_section` keeps `screen_items` / `screen_references`; unused-variables
+counts the bindings, xref records them and declares `screen-item`s.
+
+## 2026-10-17 -- CANCEL literal vs data name (#479)
+
+[parser/statements-control.md](parser/statements-control.md),
+[analysis/flow.md](analysis/flow.md): `CancelStatement.program_names_literal`.
+
+## 2026-10-17 -- scenario path conditions cross paragraphs (#310)
+
+[generators/fixtures.md](generators/fixtures.md),
+[analysis/fixtures-support.md](analysis/fixtures-support.md):
+`ConstraintReport.transfer_sites` and `scenarios._ParagraphReach`.
+
+## 2026-10-17 -- long AND/OR chains, too-deep nesting (#375)
+
+[parser/statements.md](parser/statements.md): chains built in one pass
+(`_fold_logical`); a RecursionError from nesting is an error.
+
+## 2026-10-17 -- data-items and record_layout place RENAMES (#563)
+
+[generators/record-data.md](generators/record-data.md), [mcp.md](mcp.md):
+`renames_layout()` emits a level-66 entry per RENAMES (or an `unresolved`
+line); MCP `record_layout` answers a RENAMES name via `_renames_records`.
+
+## 2026-10-17 -- ast contract for unrecognised input (#368)
+
+[integration.md](integration.md): no division recognised gives an empty
+`CobolProgram("UNKNOWN")`, not `ast=None`; the contract now says so.
+
+## 2026-10-17 -- expand evaluates >>IF without --define (#583)
+
+[cli.md](cli.md): `expand` passes `process_conditionals=True` always, so the
+program's own `>>DEFINE` selects one arm, as `preprocess` does since #271.
+
+## 2026-10-17 -- >>IF word-form operators and arithmetic (#512)
+
+[preprocessing.md](preprocessing.md): `_ConditionParser` maps `GREATER /
+LESS [THAN] [OR EQUAL [TO]]` and `EQUAL [TO]` to symbols and evaluates
+arithmetic operands through `_eval_define_arithmetic`.
+
+## 2026-10-17 -- Stacked >>WHEN phrases (#492)
+
+[preprocessing.md](preprocessing.md): `_CondFrame.when_pending` lets a
+`>>WHEN` stacked on a matching one keep the shared text selected.
+
+## 2026-10-17 -- COPY REPLACING across lines, and its source map (#560, #561)
+
+[preprocessing.md](preprocessing.md): `apply_replacing_clauses` matches over
+the whole member (a line break is a separator) and returns `line_origins`,
+which the expander passes down as `initial_origins`.
+
+## 2026-10-17 -- cobol.yml define for scan / field-impact; unapplied keys warn (#324)
+
+[cli.md](cli.md), [batch.md](batch.md): `scan` / `field-impact` take
+`--define` (`ScanOptions.defined_symbols`); `unapplied_parse_settings()`
+warns about a program-shaping config key the subcommand has no flag for.
+
+## 2026-10-17 -- Lineage: a declared field with no value flow is found (#546)
+
+[analysis/lineage.md](analysis/lineage.md), [cli.md](cli.md), [mcp.md](mcp.md):
+`LineageGraph.impact()` reports a declared field no edge touches as found,
+with no hits and an `ImpactResult.notes` entry; `field-impact` exits 0 for it
+and MCP `where_from` / `impact_of_change` answer `found: true`.
+
+## 2026-10-17 -- Lineage: a bare name matching several fields (#540)
+
+[analysis/lineage.md](analysis/lineage.md), [mcp.md](mcp.md):
+`LineageGraph.impact()` traces each field a bare name matches on its own
+(a flow from one into another is a hit) and adds an ambiguity caveat; MCP
+reports it as `ambiguous-name`.
+
+## 2026-10-17 -- Lineage: receivers of one statement are not linked (#535)
+
+[analysis/lineage.md](analysis/lineage.md): `_reads_to_writes` no longer
+draws edges between the self-accumulating receivers of one statement
+(ADD/SUBTRACT/MULTIPLY/DIVIDE without GIVING, INSPECT counters, STRING /
+UNSTRING POINTER and TALLYING IN).
+
+## 2026-10-17 -- Impact text lists port hits (#528)
+
+[analysis/lineage.md](analysis/lineage.md), [cli.md](cli.md):
+`ImpactResult.to_text()` renders port hits under their program, as the JSON
+already listed them.
+
+## 2026-10-17 -- Lineage: non-literal reference modifiers (#527)
+
+[analysis/lineage.md](analysis/lineage.md): an operand like
+`REC(WS-POS:10)` reaches every field under the item (inexact) with a
+caveat, instead of being read as `REC(1:10)`.
+
+## 2026-10-17 -- Impact reports two-way ports (#510)
+
+[analysis/lineage.md](analysis/lineage.md): `LineageGraph._trace` drops a
+port only when an onward edge is a join, so an I-O file, a BY REFERENCE
+argument to an outside program and a LINKAGE parameter are reported.
+
+## 2026-10-17 -- MCP lineage hops cite their own file (#489)
+
+[mcp.md](mcp.md), [analysis/lineage.md](analysis/lineage.md): `Hop` carries
+`origin_file`, so `where_from` / `impact_of_change` no longer cite a program
+line in a copybook that has a statement of the same kind at that line;
+`edge_files` marks a key two files claim as `None`.
+
+## 2026-10-17 -- Lineage JCL: JOINKEYS, OUTFIL FILES=, sort-step caveats (#585)
+
+[analysis/lineage.md](analysis/lineage.md): sort steps read `SORTJNF1`/`SORTJNF2`
+(`JOINKEYS F1=`/`F2=`) as inputs and `SORTOFnn` (`OUTFIL FILES=`) as outputs;
+`bindings_from_jobs(jobs, caveats)` reports a sort step it cannot read, and a
+fresh `LineageGraph` keeps `join_caveats`.
+
+## 2026-10-17 -- Lineage JCL: control statements in a dataset (#339)
+
+[analysis/lineage.md](analysis/lineage.md): a SORT / IEBGENER step whose
+SYSIN (or DFSPARM) is a dataset is a `reformat` with a caveat, through
+`bindings_from_jobs(jobs, caveats)`; a fresh `LineageGraph` keeps `join_caveats`.
+
+## 2026-10-17 -- Lineage JCL: ICETOOL operators, dataset SYSTSIN caveat (#566)
+
+[analysis/lineage.md](analysis/lineage.md): ICETOOL `TOOLIN` operators become
+pass-throughs; `bindings_from_jobs(jobs, caveats)` reports what it cannot read
+(dataset TOOLIN / SYSTSIN), and a fresh `LineageGraph` keeps `join_caveats`.
+
+## 2026-10-17 -- Lineage JCL: PROC-step referbacks resolve (#565)
+
+[analysis/lineage.md](analysis/lineage.md): `*.INVOKE.PROCSTEP.DD` and in-PROC
+`*.PROCSTEP.DD` referbacks resolve; an unresolved one binds nothing and is a
+caveat through `bindings_from_jobs(jobs, caveats)` (a fresh `LineageGraph` keeps
+`join_caveats`).
+
+## 2026-10-17 -- Lineage JCL: every IKJEFT01 RUN PROGRAM is bound (#584)
+
+[analysis/lineage.md](analysis/lineage.md): `bindings_from_jobs` binds the
+step's DDs to every `RUN PROGRAM(x)` in an IKJEFT01/1A/1B SYSTSIN, not only the first.
+
+## 2026-10-17 -- Lineage JCL: IDCAMS command words in DSNs (#338)
+
+[analysis/lineage.md](analysis/lineage.md): `_repro_commands` accepts an IDCAMS
+command word only at a statement start, outside parentheses and not as a DSN
+qualifier.
+
+## 2026-10-17 -- jcl --bindings feeds field-impact --bindings (#547)
+
+[jcl.md](jcl.md), [cli.md](cli.md): `jcl.DatasetBinding.program`; `field-impact
+--bindings` validates rows (skips program-less / dataset-less ones); an `EXEC
+proc` step no longer keeps the override DDs its expansion applied.
+
+## 2026-10-17 -- jcl --program sees IKJEFT01 / DFSRRC00 programs (#493)
+
+[jcl.md](jcl.md), [cli.md](cli.md): new `jcl/programs.py` (shared with
+`lineage_jcl`); `steps_running` matches `JobStep.effective_programs()`; a dataset
+SYSTSIN is `unresolved`; `jcl --program` matching nothing exits 1.
+
+## 2026-10-17 -- Dynamic CALL: SET pointer TO ENTRY (#593)
+
+[analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` reads
+`SET p TO ENTRY 'X'` as a value of `p` and `SET p TO [ENTRY] identifier` as
+a copy, so `CALL p` and codebase-graph resolve the target.
+
+## 2026-10-17 -- codebase-graph resolves COPY members as written (#580)
+
+[analysis/codebase.md](analysis/codebase.md),
+[preprocessing.md](preprocessing.md): the builder resolves each COPY member
+as written (cache keyed on it), and a not-found note no longer suggests the
+name it looked up, saying a case variant exists instead.
+
+## 2026-10-17 -- codebase-graph diagram ids never collide (#494)
+
+[analysis/codebase.md](analysis/codebase.md): DOT / Mermaid node ids come
+from a per-diagram `_NodeIds` allocator with numeric suffixes on collision.
+
+## 2026-10-17 -- Nested programs are scoped, stacked ones are top-level (#532)
+
+[parser/orchestration.md](parser/orchestration.md),
+[ast-models.md](ast-models.md), [analysis/codebase.md](analysis/codebase.md),
+[mcp.md](mcp.md), [batch.md](batch.md): the parser records
+`enclosing_program`; codebase-graph qualifies nested ids (`OUTER/INNER`) and
+resolves CALLs by COBOL scope; MCP and `scan` report the source nesting.
+
+## 2026-10-17 -- ENTRY names in the call graph (#521)
+
+[analysis/codebase.md](analysis/codebase.md), [mcp.md](mcp.md):
+codebase-graph sends a CALL to an ENTRY name to the declaring program
+(`CallEdge.entry`), and MCP `callers_of` / `codebase_overview` count it.
+
+## 2026-10-17 -- scan / codebase-graph / copybook-impact exit 2 on failed files (#325)
+
+[cli.md](cli.md), [batch.md](batch.md), [analysis/codebase.md](analysis/codebase.md):
+any failed input file exits 2 like `batch`; a missing path is an `errors`
+entry, never a phantom `parse_failed` program.
+
+## 2026-10-17 -- Program sources decoded like copybooks (#522)
+
+[preprocessing.md](preprocessing.md), [cli.md](cli.md), [batch.md](batch.md),
+[mcp.md](mcp.md), [analysis/codebase.md](analysis/codebase.md):
+`read_program_source` detects a program's encoding everywhere (CLI
+`--encoding`, batch / scan / codebase-graph default `None`, MCP); lossy
+decodes are warnings or caveats, never silent.
+
+## 2026-10-17 -- CALL USING FUNCTION f(x) is one argument (#579)
+
+[parser/statements-control.md](parser/statements-control.md), [analysis/lineage.md](analysis/lineage.md), [generators/fixtures.md](generators/fixtures.md), [tests.md](tests.md): a `FUNCTION` argument in a CALL USING list is one parameter, flows into the callee only, and is no gen-fixtures gap.
+
+## 2026-10-17 -- INITIALIZE phrases across a line break (#575)
+
+[parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): INITIALIZE's `TO VALUE`, `THEN` and `TO DEFAULT` lookaheads look past layout, so a line break inside a phrase no longer drops it.
+
+## 2026-10-17 -- Separator commas in MOVE / INSPECT / INITIALIZE / ACCEPT (#569)
+
+[parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): a separator `,` / `;` is skipped like a space in MOVE's source, every INSPECT phrase, INITIALIZE REPLACING and after the ACCEPT operand.
+
+## 2026-10-17 -- INSPECT TALLYING: several phrases per FOR (#332)
+
+[parser/statements-data.md](parser/statements-data.md), [tests.md](tests.md): one TALLYING `FOR` takes any number of CHARACTERS / ALL / LEADING phrases; an identifier is a new counter only when FOR follows it.
+
+## 2026-10-17 -- MULTIPLY / DIVIDE receivers read and written (#534)
+
+[analysis/data-use.md](analysis/data-use.md), [analysis/lineage.md](analysis/lineage.md), [tests.md](tests.md): xref reads every BY/INTO receiver of a GIVING-less MULTIPLY/DIVIDE; lineage stops joining one arithmetic receiver to another.
+
+## 2026-10-17 -- ROUNDED per receiver, with its MODE (#517)
+
+[ast-models.md](ast-models.md), [parser/statements-data.md](parser/statements-data.md), [analysis/codebase.md](analysis/codebase.md), [analysis/business-rules.md](analysis/business-rules.md), [analysis/flow.md](analysis/flow.md), [tests.md](tests.md): arithmetic nodes record `rounded_targets` / `rounding_modes`; diff, business-rules, statement summaries and clone fingerprints use them.
+
+## 2026-10-17 -- Legacy verbs as data names (#525)
+
+[lexer.md](lexer.md), [parser/statements.md](parser/statements.md), [parser/statements-control.md](parser/statements-control.md), [tests.md](tests.md): a declared data item named CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM lexes as an IDENTIFIER (`_retype_legacy_verb_data_names`); the five verbs match by TokenType only and left `STATEMENT_KEYWORDS`.
+
+## 2026-10-17 -- Leading NOT in an abbreviated relation (#329)
+
+[parser/statements.md](parser/statements.md): `NOT A = 1 OR 2` is
+`A <> 1 OR A = 2`; the abbreviated leg repeats the operator as written.
+
+## 2026-10-17 -- Abbreviated relation with a data-name leg (#562)
+
+[parser/statements.md](parser/statements.md): a bare leg that the DATA
+DIVISION declares as a plain (non-88) data item expands to a relation
+against the subject; `ParseContext.condition_names` / `ConditionSymbols`.
+
+## 2026-10-17 -- Typed literals keep their prefix in conditions (#331)
+
+[parser/statements.md](parser/statements.md),
+[parser/statements-control.md](parser/statements-control.md),
+[analysis/fixtures-support.md](analysis/fixtures-support.md),
+[analysis/business-rules.md](analysis/business-rules.md): `X'00'` stays
+`X'00'` in condition trees and EVALUATE selectors (`"typed": True`); the
+constraint extractor decodes it.
+
+## 2026-10-17 -- Computed EVALUATE selectors (#333)
+
+[parser/statements-control.md](parser/statements-control.md),
+[analysis/fixtures-support.md](analysis/fixtures-support.md),
+[analysis/business-rules.md](analysis/business-rules.md): `WHEN WS-N + 1` /
+`WHEN WS-B (1:2)` carry `"expression": True`; constraints report them
+unsupported instead of solving the text as a literal.
+
+## 2026-10-17 -- User class and OMITTED conditions (#539)
+
+[parser/statements.md](parser/statements.md),
+[parser/statements-control.md](parser/statements-control.md),
+[analysis/data-use.md](analysis/data-use.md),
+[analysis/fixtures-support.md](analysis/fixtures-support.md): `IS [NOT]
+class-name` / `IS [NOT] OMITTED` get structured nodes; EVALUATE WHEN treats
+them as Conditions; `_walk_expression_operands` walks a `condition_tree`.
+
+## 2026-10-17 -- Constant folding: run enders inside an arm (#591)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md): a STOP RUN /
+GOBACK / EXIT PROGRAM inside a branch arm, loop or handler puts
+`ConstantFolder` in uncertain mode, like a conditional GO TO -- except in a
+body a success status never runs (`InvocationCounts.success_skipped`).
+
+## 2026-10-17 -- EXEC SQL delimited identifiers (#597)
+
+[dialects.md](dialects.md), [lexer.md](lexer.md), [ast-models.md](ast-models.md),
+[parser/statements.md](parser/statements.md), [tests.md](tests.md):
+`Token.quote` records a literal's delimiter; EXEC SQL text keeps `"X"`, and
+the SQL scrubber reads it as identifier `X`, so `FROM "PROD"."CUST"` names
+table `PROD.CUST` (CRUD matrix, lineage, MCP).
+
+## 2026-10-17 -- CRUD matrix reads WORKING-STORAGE cursors (#518)
+
+[analysis/data-use.md](analysis/data-use.md), [tests.md](tests.md):
+`CRUDMatrixGenerator` also feeds the DATA DIVISION's EXEC SQL nodes to its
+cursor and SQL passes, so a WORKING-STORAGE `DECLARE CURSOR` table is
+listed (R, with the cursor) and MCP `sql_tables` shows it.
+
+## 2026-10-17 -- CRUD matrix: EXEC CICS file control (#538)
+
+[analysis/data-use.md](analysis/data-use.md), [mcp.md](mcp.md), [tests.md](tests.md):
+`CRUDMatrixGenerator` marks files from EXEC CICS READ/WRITE/REWRITE/DELETE/
+browse `FILE(...)`; a data-item file name lands in new `CRUDMatrix.caveats`,
+which `program_brief` reports.
+
+## 2026-10-17 -- Report Writer output reaches the I/O analyzers (#499)
+
+[parser/divisions.md](parser/divisions.md), [analysis/data-use.md](analysis/data-use.md),
+[analysis/fixtures-support.md](analysis/fixtures-support.md),
+[analysis/lineage.md](analysis/lineage.md), [tests.md](tests.md): FD `REPORT IS`
+is kept (FILE SECTION `report_files`); INITIATE/GENERATE/TERMINATE write the
+report file in CRUD, IOLogger, io-sequence; GENERATE is an OUT boundary;
+lineage carries SOURCE/SUM operands to the report file port.
+
+## 2026-10-17 -- unused-variables: SQL host structures used whole (#531, #378)
+
+[analysis/data-use.md](analysis/data-use.md), [tests.md](tests.md):
+`_whole_group_references` adds every EXEC SQL host variable and null
+indicator (PROCEDURE and own DATA DIVISION), so host-structure fields and
+VARCHAR 49-levels are not reported unused.
+
+## 2026-10-17 -- Identifier tokens take whole words (#487)
+
+[analysis/data-use.md](analysis/data-use.md), [tests.md](tests.md):
+`IDENTIFIER_TOKEN_RE` no longer matches the tail of a digit-led word
+(`1000-INIT` -> `INIT`); unused-variables skips procedure-name operands.
+
+## 2026-10-17 -- dclgen-check: null-indicator only on outputs (#530)
+
+[analysis/sql-cics-ims.md](analysis/sql-cics-ims.md), [analysis/lint.md](analysis/lint.md),
+[tests.md](tests.md): the `null-indicator` warning needs an output host variable (INTO, `SET :hv
+=`); an unknown-direction one (SQL CALL argument) is `unchecked` for it.
+
+## 2026-10-17 -- Exhaustive IF/EVALUATE branches terminate a paragraph (#586)
+
+[analysis/flow.md](analysis/flow.md): both `_is_terminator` copies count an
+IF with ELSE / EVALUATE with WHEN OTHER whose every arm terminates
+(`_procedures.branch_terminates`), so no fall-through is drawn past it.
+
+## 2026-10-17 -- ALLOCATE references a based LINKAGE item (#570)
+
+[analysis/data-use.md](analysis/data-use.md): `LinkageChecker` counts
+`ALLOCATE item` as a reference like `SET ADDRESS OF`; xref maps ALLOCATE
+(item reference, RETURNING write, size read) and FREE (pointer write).
+
+## 2026-10-17 -- io-sequence checks the OPEN mode (#548)
+
+[analysis/data-use.md](analysis/data-use.md): open states carry the OPEN
+mode; six new `IOViolationKind`s (`*_WRONG_MODE`, `OPEN_AFTER_LOCK`); pending
+conditional GO TO targets carry the state at the GO TO.
+
+## 2026-10-17 -- recursion-check linear per cycle (#373)
+
+[analysis/flow.md](analysis/flow.md): `RecursionRiskAnalyzer` builds its
+edge maps once (`_FlowIndex`), checks each cycle in O(len) and caches the
+escape test per component; same output.
+
+## 2026-10-17 -- GLOBAL items in contained programs (#504)
+
+[analysis/data-use.md](analysis/data-use.md), [analysis/lineage.md](analysis/lineage.md):
+new `unused_variables.inherited_data_records`; xref defines inherited GLOBAL
+records and folds contained references into the outer unit; lineage indexes
+them; MoveTypeChecker stays inside its own unit plus inherited GLOBALs.
+
+## 2026-10-17 -- diff reports reordered data items (#545)
+
+[analysis/codebase.md](analysis/codebase.md): `ProgramDiffer` compares the
+order of each group's subordinates (`data-item-moved`, with byte offsets).
+
+## 2026-10-17 -- diff compares the unnamed leading paragraph (#516)
+
+[analysis/codebase.md](analysis/codebase.md): `ProgramDiffer` compares
+statements before the first paragraph header as `(PROCEDURE DIVISION)`.
+
+## 2026-10-17 -- MCP read_source always shows the cited line (#537)
+
+[mcp.md](mcp.md): the 200-line cap trims `before` context, keeping `line`
+and its `after` lines.
+
+## 2026-10-17 -- Numeric-edited decode is exact (#587)
+
+[generators/record-data.md](generators/record-data.md): `deedit_numeric`
+re-edits the value it read and rejects text that differs, so bad bytes in
+insertion / sign / `CR`/`DB` / currency positions are reported.
+
+## 2026-10-17 -- PIC U(n) reserves 4 x n bytes (#554)
+
+[ast-models.md](ast-models.md), [generators/record-data.md](generators/record-data.md):
+fixed character-length UTF-8 is sized 4n bytes with `utf8_characters == n`;
+gen-data writes n characters padded to 4n and adds a UTF-8 caveat.
+
+## 2026-10-17 -- gen-data honours a group VALUE (#552)
+
+[generators/record-data.md](generators/record-data.md): a group's VALUE is
+sliced across its DISPLAY fields by byte offset (figuratives to every field).
+
+## 2026-10-17 -- CURRENCY SIGN symbols in record images (#491)
+
+[lexer.md](lexer.md), [ast-models.md](ast-models.md),
+[parser/orchestration.md](parser/orchestration.md),
+[parser/divisions.md](parser/divisions.md),
+[generators/record-data.md](generators/record-data.md),
+[generators/decode-compare.md](generators/decode-compare.md): currency strings
+flow lexer -> parser -> `PictureClause.currency_signs` -> `FieldSpec`; a
+one-character sign is edited like `$`, anything unmodelled gets a caveat.
+
+## 2026-10-17 -- data-items / record_layout on a bare copybook (#536)
+
+[cli.md](cli.md), [mcp.md](mcp.md),
+[generators/record-data.md](generators/record-data.md),
+[generators/decode-compare.md](generators/decode-compare.md): both wrap a
+fragment through `wrap_copybook_fragment`; MCP maps lines back; `data-items`
+with no DATA DIVISION exits 1.
+
+## 2026-10-17 -- MCP record_layout keeps the SYNCHRONIZED caveat (#488)
+
+[mcp.md](mcp.md), [generators/record-data.md](generators/record-data.md):
+new `flag_record_layout()`; `record_layout` / `explain_symbol` report
+`offset_ambiguous` and an `incomplete-analysis` caveat like `data-items`.
+
+## 2026-10-17 -- gen-fixtures coverage counts unresolved SQL/ACCEPT boundaries (#505)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md),
+[generators/fixtures.md](generators/fixtures.md): boundary gaps are recorded
+on the `Boundary` too; OCCURS host variables / ACCEPT targets are named
+unsupported; the bundle's `unresolved` lists each gap once.
+
+## 2026-10-17 -- SORT/MERGE USING/GIVING files reported unresolved (#498)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md): option (b) --
+each USING/GIVING file is a `report.unresolved` entry, not a boundary.
+
+## 2026-10-17 -- ConstantFolder caches its program walk (#374)
+
+[analysis/fixtures-support.md](analysis/fixtures-support.md): `_ProgramWalk`
+/ `_CURRENT_WALK` and the unseeded-fold memo; `gen-fixtures --scenarios all`
+5-7x faster on large programs, output byte-identical.
+
 ## 2026-10-16 -- Dynamic CALL: SET cond TO TRUE and MOVE sources (#511)
 
 [analysis/data-use.md](analysis/data-use.md): `DynamicCallAnalyzer` treats
@@ -26,12 +697,14 @@ class's); MCP `callers_of` never declares a method as a program.
 untracked writes on every MOVE source feeding a CALL variable (and carries
 the incompleteness along the MOVEs), and gives a literal MOVE to a source's
 group the slice that lands in the source.
+
 ## 2026-10-16 -- MCP reachability from dead-code (#486)
 
 [mcp.md](mcp.md), [analysis/flow.md](analysis/flow.md): `callers_of`'s
 `reachable` and `program_brief`'s `unreachable_procedures` come from
 `DeadCodeAnalyzer`; new `DeadCodeReport.fall_through_edges` filters the
 flow graph's phantom `FALL_THROUGH` callers.
+
 ## 2026-10-16 -- xref declares FILLER level-88s and level-66 RENAMES (#485)
 
 [analysis/data-use.md](analysis/data-use.md): `XrefAnalyzer` now declares

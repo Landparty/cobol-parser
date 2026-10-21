@@ -73,9 +73,11 @@ Two conservatisms are worth stating plainly, since they shape the findings:
   That is correct for ``WHENEVER`` by definition and an approximation for
   ``PUSH HANDLE``/``POP HANDLE``.
 * The search for a status-code check spans the SQL statement's own paragraph
-  and, transitively, every paragraph ``PERFORM``ed from it.  A check that
-  happens only in the paragraph the program falls through into is not seen,
-  and the statement is reported.
+  and, transitively, every paragraph ``PERFORM``ed from it and the paragraph
+  (or section) an unconditional single-target ``GO TO`` written directly in
+  it transfers to (#557).  A check that happens only in the paragraph the
+  program falls through into, or behind a conditional or ``GO TO ...
+  DEPENDING ON`` jump, is not seen, and the statement is reported.
 * The text handed to ``PREPARE`` / ``EXECUTE IMMEDIATE`` is traced through
   every ``STRING`` and ``MOVE`` into it anywhere in the program unit, unless
   a ``MOVE`` written directly in the same paragraph, before the statement,
@@ -108,7 +110,12 @@ from ..models.sql_statements import (
     ExecSQLStatement,
     _strip_sql_literals_and_comments,
 )
-from ..models.statements import MoveStatement, PerformStatement, StringStatement
+from ..models.statements import (
+    GoStatement,
+    MoveStatement,
+    PerformStatement,
+    StringStatement,
+)
 from ..models.statements.base import CobolStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 
@@ -550,7 +557,7 @@ class SqlCicsAnalyzer:
                 message=(
                     f"EXEC SQL {_sql_label(statement)} result is never checked: "
                     "nothing after it in this paragraph (or in a paragraph it "
-                    "PERFORMs) references SQLCODE, SQLSTATE or SQLCA before "
+                    "PERFORMs or does GO TO) references SQLCODE, SQLSTATE or SQLCA before "
                     "the next SQL statement overwrites them, and no "
                     "WHENEVER SQLERROR handler is in effect; test SQLCODE "
                     "immediately after the statement"
@@ -560,7 +567,7 @@ class SqlCicsAnalyzer:
                 detail={
                     "sql": text,
                     "whenever_sqlerror": whenever.get("SQLERROR"),
-                    "scope": "paragraph + PERFORMed paragraphs",
+                    "scope": "paragraph + PERFORMed / GO TO paragraphs",
                 },
             )
         )
@@ -1090,7 +1097,9 @@ def _status_checked(
     """True when something after *position* looks at the SQL status.
 
     "After" means later in the same paragraph, or anywhere in a paragraph
-    (or section) reached by a ``PERFORM`` written after it. *cache* memoises
+    (or section) reached by a ``PERFORM`` written after it, or by an
+    unconditional single-target ``GO TO`` written directly in the paragraph
+    (#557). *cache* memoises
     the per-statement scan, which is otherwise repeated once per SQL
     statement in the same paragraph.
 
@@ -1133,7 +1142,35 @@ def _scan_for_status(
                 found = _scan_for_status(index, -1, blocks, by_name, cache, visited)
                 if found is not None:
                     return found
+        elif id(statement) in block.unconditional and isinstance(
+            statement, GoStatement
+        ):
+            # An unconditional single-target ``GO TO para`` hands control to
+            # that paragraph (or section) for good: the check there is this
+            # statement's check (#557). ``GO TO ... DEPENDING ON`` and an
+            # ALTERable ``GO TO.`` are not followed (conservative). Either
+            # way nothing after a GO TO in this paragraph runs.
+            for index in _go_to_block_indexes(statement, by_name):
+                if index in visited:
+                    continue
+                visited.add(index)
+                found = _scan_for_status(index, -1, blocks, by_name, cache, visited)
+                if found is not None:
+                    return found
+            return None
     return None
+
+
+def _go_to_block_indexes(
+    statement: GoStatement, by_name: dict[str, list[int]]
+) -> list[int]:
+    """The blocks an unconditional single-target ``GO TO`` transfers to."""
+    if getattr(statement, "depending_on_variable", None):
+        return []
+    targets = getattr(statement, "target_paragraphs", None) or []
+    if len(targets) != 1:
+        return []
+    return list(by_name.get(_procedure_name(targets[0]), []))
 
 
 def _resets_sqlca(statement: ASTNode) -> bool:

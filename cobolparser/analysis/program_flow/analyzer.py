@@ -162,6 +162,12 @@ class ProgramFlowAnalyzer:
             exit_section_procedures=exit_section_procedures,
             section_ends=self._section_ends(scanner.index),
             sections_entered=self._sections_entered(scanner.index, declaratives),
+            declarative_sections={
+                name
+                for name in declaratives
+                if (node := self._nodes.get(name)) is not None
+                and node.procedure_type == "SECTION"
+            },
         )
 
         # Mark the first procedure as entry point before cycle/reachability analysis

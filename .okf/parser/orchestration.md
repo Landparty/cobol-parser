@@ -94,6 +94,12 @@ class ParseResult:
     def has_warnings(self) -> bool:
 ```
 
+- **`ast` is `None` only on a lexer/preprocessing/I/O/internal failure** (or a
+  `FAIL_FAST` stop). Text with no recognisable division (`"hello world"`, `""`)
+  gives an empty `CobolProgram("UNKNOWN")` with no divisions plus a "No
+  recognizable COBOL division found" error, under both recovery modes; `lint`
+  and `health` report on that shape. "Something usable" is `ast.divisions`, not
+  `ast is not None` (#368; documented in `interface-contract.md`).
 - **`statistics` is an independent snapshot.** `_create_result` hands each
   `ParseResult` `self.statistics.copy()` (`ParseStatistics.copy()`), never the
   parser's live object: the next `parse()` call `reset()`s that object in place,
@@ -221,6 +227,11 @@ Every pass preserves the line count, so token locations stay true to the source.
   shared with the lexer's `_tokenize_source`. `CobolParser.source_is_fixed_format`
   records the decision (the H9 paragraph-boundary check reads it, see
   [statements.md](statements.md)).
+- **SPECIAL-NAMES state from the lexer.** After lexing, `CobolParser` copies
+  `lexer.decimal_point_is_comma` and `lexer.currency_signs` (each declared
+  PICTURE currency symbol's string, #491) onto itself; the DATA DIVISION's
+  `DataItemClauseParser._picture_clause` reads both off its host. Both reset
+  at the start of every `parse()`.
 - **Debugging lines.** `debug_lines` (`parse_cobol` and `CobolParser`, default
   False; #334) compiles fixed-format `D` lines as code. With it off,
   `_normalize_fixed_source` records the dropped line numbers and
@@ -239,7 +250,12 @@ first is returned as `ParseResult.ast` and the rest are attached to
 unit via `program_units()`. `_peek_is_end_program()` /
 `_consume_end_program_marker()` consume `END PROGRAM [name] [.]` between units.
 `CobolProgram.program_units()` enumerates every unit (outermost first, in source
-order). Dropping everything after the first program would silently lose most of
+order). The tree stays flat (every PROGRAM unit hangs off the first), so the
+source nesting is recorded apart (#532): `_open_programs` is a stack of the
+PROGRAM units whose `END PROGRAM` has not been seen; `_attach_new_unit` sets
+the new unit's `enclosing_program` to its top (None when the stack is empty:
+a *stacked* program, a separate compilation unit) and pushes it, and the
+`END PROGRAM` branch of `_handle_unmatched_token` pops it. Dropping everything after the first program would silently lose most of
 a member (NIST `IC228A`).
 
 **Object-oriented units.** IBM OO `CLASS-ID` / `FACTORY` / `OBJECT` /
@@ -264,7 +280,7 @@ and keeps the case. Every division parser stops at these markers (see
 
 | File | Class / Purpose |
 |------|----------------|
-| `interfaces.py` | `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParseContext` (nested statement parsing; carries `host`, the registry and `known_data_names`) |
+| `interfaces.py` | `ITokenStream`, `IDivisionParser`, `IStatementParser` ABCs; `ParseContext` (nested statement parsing; carries `host`, the registry, `known_data_names` and `condition_names` -- the level-88 names, #562) |
 | `token_stream.py` | `TokenStream` — `peek()`, `consume()`, `expect()`, configurable lookahead; `omitted_source_lines` |
 | `registry.py` | `StatementParserRegistry` — `register(parser, position=None)` / `unregister` / `clear` / `find_parser(stream)` / `get_all_parsers()`; first-match dispatch (registration order matters) memoised in `_dispatch_cache`, keyed on the first token, the raw second token and the first meaningful token after the verb (so `EXEC <newline> CICS` and `EXEC <newline> SQL` differ), invalidated on every register/unregister/clear |
 | `exceptions.py` | `TokenMismatch`, `UnexpectedEndOfInput`, `DivisionNotFoundError`, `UnknownStatementError`, `ValidationError` (all `ParseError` subclasses) |

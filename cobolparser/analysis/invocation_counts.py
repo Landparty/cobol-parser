@@ -189,6 +189,11 @@ class InvocationCounts:
     exact: dict[int, int] = field(default_factory=dict)
     #: ``id(statement)`` of every statement reached somewhere uncertain.
     unknown: set[int] = field(default_factory=set)
+    #: ``id(statement)`` of each statement of a body a success status never
+    #: runs (the failure arm of a status check, an INVALID KEY / ON EXCEPTION
+    #: handler): what a STOP RUN there does says nothing about a scenario
+    #: whose fixtures supply success. Read by `ConstantFolder` (#591).
+    success_skipped: set[int] = field(default_factory=set)
     #: (UPPERCASED paragraph or "", line) -> statements of a boundary type.
     _by_site: dict[tuple[str, int], list[Any]] = field(default_factory=dict)
     #: line -> every statement starting there (any paragraph, any type).
@@ -302,6 +307,9 @@ class _Walk:
         bodies = [body for body in bodies if body]
         if not bodies:
             return
+        if exempt:
+            for body in bodies:
+                self.result.success_skipped.update(id(stmt) for stmt in body)
         self.stack.append(
             _RegionEnd(exempt=exempt, saved_transfer=self.region_transfer)
         )

@@ -23,7 +23,11 @@ What is compared
   qualified path (``WORKING-STORAGE:WS-TAB.WS-ENT``): added, removed,
   PICTURE / USAGE / level / VALUE / OCCURS / REDEFINES changed, plus the
   SIGN / JUSTIFIED / SYNCHRONIZED / BLANK WHEN ZERO / EXTERNAL / GLOBAL
-  flags and level-88 condition names and their values.
+  flags and level-88 condition names and their values -- and the *order*
+  of each group's subordinate items (``data-item-moved``, with the byte
+  offsets before and after): swapping two fields of a record changes every
+  offset after them, the byte layout of a file, CALL interface or host
+  structure.
 * **Procedures** -- paragraphs and sections: added, removed, renamed,
   moved (reordered without a body change -- reported *separately* from a
   body change, so a pure reshuffle never reads as a rewrite) and
@@ -70,7 +74,7 @@ near-miss is not thrown away either -- it goes into
 diff considered the pair and declined.
 
 Positions are compared as *relative order*, not line numbers: the matched
-procedures of both programs are run through :class:`difflib.SequenceMatcher`
+procedures of both programs (and the matched subordinates of each group) are run through :class:`difflib.SequenceMatcher`
 and only the ones outside its matching blocks are reported as moved. So
 inserting one paragraph at the top does not report every following
 paragraph as moved, and a reformat that shifts every line reports nothing
@@ -115,6 +119,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -143,10 +148,11 @@ from ..models.statements.data import (
     DisplayStatement,
     InspectStatement,
     MoveStatement,
+    StringStatement,
     UnstringStatement,
 )
 from ..models.statements.io import IOAcceptStatement, IOOpenStatement
-from ..models.statements.misc import SelectStatement
+from ..models.statements.misc import CancelStatement, SelectStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
 from .program_flow.condition_text import render_condition_text
 from .program_flow.statement_text import summarize_statement
@@ -370,6 +376,12 @@ class _Procedure:
         return [item.key for item in self.body]
 
 
+#: The name the unnamed paragraph -- PROCEDURE DIVISION statements before
+#: the first paragraph header -- is compared under. Parenthesized, so no
+#: COBOL paragraph can share it.
+UNNAMED_PARAGRAPH = "(PROCEDURE DIVISION)"
+
+
 @dataclass
 class _DataEntry:
     """One DATA DIVISION entry (data item or level-88 condition name)."""
@@ -380,6 +392,40 @@ class _DataEntry:
     item: Any  # CobolDataItem | ConditionNameItem
     is_condition: bool
     location: SourceLocation
+    # Keys of the subordinate data items, in source order (no level-88s).
+    children: list[str] = field(default_factory=list)
+
+
+class _OffsetLookup:
+    """Record-relative byte offsets of data items, one layout per record."""
+
+    def __init__(self) -> None:
+        self._layouts: dict[int, dict[str, int | None]] = {}
+
+    def offset(self, item: Any) -> int | None:
+        """*item*'s byte offset in its 01/77 record, or ``None`` when the
+        layout cannot say exactly (an OCCURS DEPENDING ON before it, ...)."""
+        if not isinstance(item, CobolDataItem):
+            return None
+        path = [item.layout_name]
+        root = item
+        while isinstance(root.parent, CobolDataItem):
+            root = root.parent
+            path.append(root.layout_name)
+        path[-1] = root.name
+        layout = self._layouts.get(id(root))
+        if layout is None:
+            from ..generators.data.layout_offsets import compute_record_layout
+
+            layout = {}
+            try:
+                for entry in compute_record_layout(root):
+                    offset = None if entry.offset_ambiguous else entry.byte_offset
+                    layout.setdefault(entry.qualified_name, offset)
+            except Exception:  # noqa: BLE001 - offsets are a detail, never fatal
+                layout = {}
+            self._layouts[id(root)] = layout
+        return layout.get(".".join(reversed(path)))
 
 
 @dataclass
@@ -510,7 +556,9 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
             kind,
             tuple(stmt.targets),
             " ".join(_text_of(stmt.expression).split()),
-            bool(stmt.rounded),
+            # Which target is rounded, and how: ``COMPUTE B ROUNDED C`` and
+            # ``COMPUTE B C ROUNDED`` store different values (#517).
+            tuple(stmt.rounding_of(target) for target in stmt.targets),
         )
     if isinstance(stmt, InspectStatement):
         return (
@@ -523,6 +571,15 @@ def _statement_signature(stmt: Any) -> tuple[Any, ...]:
             stmt.converting_to or "",
             stmt.converting_before or "",
             stmt.converting_after or "",
+        )
+    if isinstance(stmt, StringStatement):
+        return (
+            kind,
+            # Which delimiter applies to which source (#576): moving B from
+            # ``DELIMITED BY SIZE`` to ``DELIMITED BY D1`` truncates it.
+            _json_key(stmt.groups),
+            stmt.into_target or "",
+            stmt.pointer_variable or "",
         )
     if isinstance(stmt, UnstringStatement):
         return (
@@ -638,6 +695,26 @@ def _statement_text(stmt: Any) -> str:
         # static -> dynamic change would then read identically on both sides.
         text = (
             f"CALL '{stmt.called_program}'" + text[len(f"CALL {stmt.called_program}") :]
+        )
+    elif isinstance(stmt, StringStatement) and stmt.groups:
+        # The flowchart lists the sources only; a source moving between
+        # delimiter groups would then read identically on both sides (#576).
+        parts = ["STRING"]
+        for group in stmt.groups:
+            parts.extend(str(source) for source in group["sources"])
+            if group["delimiter"] is not None:
+                parts.append(f"DELIMITED BY {group['delimiter']}")
+        if stmt.into_target:
+            parts.append(f"INTO {stmt.into_target}")
+        text = " ".join(parts)
+    elif isinstance(stmt, CancelStatement) and stmt.program_names:
+        # The flowchart renders CANCEL 'X' and CANCEL X alike; a literal ->
+        # data-name change would then read identically on both sides (#479).
+        text = "CANCEL " + " ".join(
+            f"'{name}'" if literal else name
+            for name, literal in zip(
+                stmt.program_names, stmt.program_names_literal, strict=False
+            )
         )
     elif isinstance(stmt, UnstringStatement) and text == "UNSTRING":
         # The flowchart collapses UNSTRING to its verb.
@@ -1199,6 +1276,67 @@ class ProgramDiffer:
 
         for key in sorted(set(old_entries) & set(new_entries)):
             self._diff_data_entry(old_entries[key], new_entries[key], changes)
+        self._report_data_moves(old_entries, new_entries, changes)
+
+    @staticmethod
+    def _report_data_moves(
+        old_entries: dict[str, _DataEntry],
+        new_entries: dict[str, _DataEntry],
+        changes: list[DiffChange],
+    ) -> None:
+        """Report the subordinate items whose order within their group
+        changed (#545).
+
+        Like ``_report_moves`` for procedures: each group's matched
+        subordinates are run through :class:`difflib.SequenceMatcher`, and
+        only the ones outside its matching blocks moved -- inserting a field
+        does not report every later field. The byte offsets before and after
+        are in the detail, since they are what makes a reorder break a file
+        or interface.
+        """
+        offsets = _OffsetLookup()
+        for key in sorted(set(old_entries) & set(new_entries)):
+            old_group, new_group = old_entries[key], new_entries[key]
+            if old_group.is_condition or new_group.is_condition:
+                continue
+            old_order = [k for k in old_group.children if k in new_entries]
+            new_order = [k for k in new_group.children if k in old_entries]
+            if old_order == new_order:
+                continue
+            matcher = SequenceMatcher(None, old_order, new_order, autojunk=False)
+            stable = {
+                old_order[block.a + offset]
+                for block in matcher.get_matching_blocks()
+                for offset in range(block.size)
+            }
+            for child_key in new_order:
+                if child_key in stable:
+                    continue
+                old_child, new_child = old_entries[child_key], new_entries[child_key]
+                old_where = f"position {old_order.index(child_key) + 1}"
+                new_where = f"position {new_order.index(child_key) + 1}"
+                detail = (
+                    f"data item {new_child.symbol} moved from {old_where} to "
+                    f"{new_where} in {new_group.symbol}"
+                )
+                old_offset = offsets.offset(old_child.item)
+                new_offset = offsets.offset(new_child.item)
+                if old_offset is not None and new_offset is not None:
+                    detail += f" (byte offset {old_offset} -> {new_offset})"
+                    old_where += f", offset {old_offset}"
+                    new_where += f", offset {new_offset}"
+                changes.append(
+                    DiffChange(
+                        kind="data-item-moved",
+                        category="data",
+                        symbol=new_child.symbol,
+                        detail=detail,
+                        old=old_where,
+                        new=new_where,
+                        old_location=old_child.location,
+                        new_location=new_child.location,
+                    )
+                )
 
     def _diff_data_entry(
         self, old: _DataEntry, new: _DataEntry, changes: list[DiffChange]
@@ -1248,6 +1386,11 @@ class ProgramDiffer:
                 # are one storage format, not a change.
                 if _canonical_usage(old_value) == _canonical_usage(new_value):
                     continue
+            elif attr == "value_clause":
+                # `ZERO`/`ZEROES`, `7`/`007`, `+5`/`5.0` are one initial
+                # value (#543); the change still shows the text as coded.
+                if _canonical_value(old_value) == _canonical_value(new_value):
+                    continue
             elif _normalize(old_value) == _normalize(new_value):
                 continue
             record(kind, label, old_value, new_value)
@@ -1293,7 +1436,7 @@ class ProgramDiffer:
         entries: dict[str, _DataEntry],
         side: str,
         caveats: list[str],
-    ) -> None:
+    ) -> str:
         if item.get_metadata("report_clauses") or item.get_metadata("rd_clauses"):
             caveats.append(
                 f"the {side} program has REPORT SECTION group clauses "
@@ -1304,7 +1447,7 @@ class ProgramDiffer:
         path = f"{prefix}.{name}" if prefix else name
         base = f"{section}:{path.upper()}"
         key = self._unique_key(base, entries, side, caveats)
-        entries[key] = _DataEntry(
+        entry = entries[key] = _DataEntry(
             key=key,
             symbol=_disambiguated(path, base, key),
             section=section,
@@ -1315,7 +1458,11 @@ class ProgramDiffer:
 
         for child in item.children:
             if isinstance(child, CobolDataItem):
-                self._collect_data_item(child, section, path, entries, side, caveats)
+                entry.children.append(
+                    self._collect_data_item(
+                        child, section, path, entries, side, caveats
+                    )
+                )
             elif isinstance(child, ConditionNameItem):
                 child_path = f"{path}.{child.name}"
                 child_base = f"{section}:{child_path.upper()}"
@@ -1328,6 +1475,7 @@ class ProgramDiffer:
                     is_condition=True,
                     location=child.location,
                 )
+        return key
 
     @staticmethod
     def _unique_key(
@@ -1510,6 +1658,18 @@ class ProgramDiffer:
                         node.location,
                         node.statements,
                     )
+                elif not node.paragraph_name and node.statements:
+                    # Statements before the first paragraph header (or a
+                    # PROCEDURE DIVISION with no header at all) sit in an
+                    # unnamed paragraph; skipping it made every edit there
+                    # diff as "No structural changes" (#516).
+                    add(
+                        UNNAMED_PARAGRAPH,
+                        "paragraph",
+                        None,
+                        node.location,
+                        node.statements,
+                    )
 
         return procedures
 
@@ -1599,6 +1759,14 @@ class ProgramDiffer:
         old_sequence = [pair[0].name for pair in by_old]
         new_sequence = [pair[0].name for pair in by_new]
 
+        # A paragraph whose section was renamed has not moved: compare its
+        # parent through the section match, not by name (#311).
+        section_names = {
+            old_proc.name: new_proc.name
+            for old_proc, new_proc, _ in pairs
+            if old_proc.kind == "section"
+        }
+
         stable: set[str] = set()
         matcher = SequenceMatcher(None, old_sequence, new_sequence, autojunk=False)
         for block in matcher.get_matching_blocks():
@@ -1607,7 +1775,12 @@ class ProgramDiffer:
 
         for old_proc, new_proc, _ in sorted(pairs, key=lambda pair: pair[1].index):
             reordered = old_proc.name not in stable
-            reparented = old_proc.parent != new_proc.parent
+            old_parent = (
+                section_names.get(old_proc.parent, old_proc.parent)
+                if old_proc.parent is not None
+                else None
+            )
+            reparented = old_parent != new_proc.parent
             if not reordered and not reparented:
                 continue
             old_where = _position_text(old_proc)
@@ -1820,6 +1993,60 @@ def _picture_positions(picture: str) -> str:
     spellings of the same picture (`X(2)` / `XX`, `S9(3)V9(2)` / `S999V99`)
     compare equal."""
     return "".join(PictureClause._expand_symbols(picture))
+
+
+#: Singular and plural spellings of each figurative constant (#543).
+_FIGURATIVE_CANONICAL: dict[str, str] = {
+    "ZERO": "ZERO",
+    "ZEROS": "ZERO",
+    "ZEROES": "ZERO",
+    "SPACE": "SPACE",
+    "SPACES": "SPACE",
+    "HIGH-VALUE": "HIGH-VALUE",
+    "HIGH-VALUES": "HIGH-VALUE",
+    "LOW-VALUE": "LOW-VALUE",
+    "LOW-VALUES": "LOW-VALUE",
+    "QUOTE": "QUOTE",
+    "QUOTES": "QUOTE",
+    "NULL": "NULL",
+    "NULLS": "NULL",
+}
+
+_NUMERIC_LITERAL_RE = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)")
+#: A quoted literal with its optional type prefix (``X``, ``N``, ``NX``, ...).
+_PREFIXED_LITERAL_RE = re.compile(r"([A-Za-z]{0,2})['\"]")
+
+
+def _canonical_value(value: Any) -> Any:
+    """A VALUE clause in a form where equal initial values compare equal.
+
+    Figurative constants fold singular/plural (keeping a leading ``ALL``),
+    and a numeric literal becomes a ``Decimal`` (``007`` == ``7``, ``+5`` ==
+    ``5.0``). A quoted literal keeps its case -- ``'ab'`` and ``'AB'`` are
+    different values -- while everything else compares case-insensitively.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if _NUMERIC_LITERAL_RE.fullmatch(text):
+        try:
+            return Decimal(text)
+        except InvalidOperation:  # pragma: no cover - the regex admits none
+            return text
+    prefix = ""
+    words = text.split(None, 1)
+    if len(words) == 2 and words[0].upper() == "ALL":
+        prefix, text = "ALL ", words[1].strip()
+    literal = _PREFIXED_LITERAL_RE.match(text)
+    if literal:
+        kind = literal.group(1).upper()
+        body = text[literal.end(1) :]
+        # Hex digits are case-insensitive; text content is not.
+        if kind in ("X", "NX", "BX", "GX", "UX"):
+            body = body.upper()
+        return prefix + kind + body
+    upper = text.upper()
+    return prefix + _FIGURATIVE_CANONICAL.get(upper, upper)
 
 
 def _canonical_usage(usage: Any) -> str:

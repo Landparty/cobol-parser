@@ -43,6 +43,7 @@ from .models import (
     JobStep,
     unquote,
 )
+from .programs import TSO_PROGRAMS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from jclparser.model import DDStatement as _JDD
@@ -495,6 +496,36 @@ def _step(
     )
 
 
+def _drop_applied_overrides(invocation: JobStep, expanded: list[JobStep]) -> None:
+    """Remove from an ``EXEC proc`` step the DDs its expansion applied.
+
+    An override (``//S1.OUTDD DD ...``) or an added DD (an unqualified DD
+    after the ``EXEC``, which lands in the first procedure step) belongs to
+    the procedure step it reaches; kept on the invocation as well, it was a
+    second binding for a step that runs no program. One that reached no
+    expanded step (the procedure was not found, or names no such step) stays
+    on the invocation, where it is the only record of it.
+    """
+    if not expanded:
+        return
+    by_name = {step.name.upper(): step for step in expanded}
+
+    def applied(dd: DDStatement) -> bool:
+        target = (
+            by_name.get(f"{invocation.name}.{dd.procstep}".upper())
+            if dd.procstep
+            else expanded[0]
+        )
+        return target is not None and any(
+            own.name.upper() == dd.name.upper() and own.dataset == dd.dataset
+            for own in target.dd_statements
+        )
+
+    invocation.dd_statements = [
+        dd for dd in invocation.dd_statements if not applied(dd)
+    ]
+
+
 class _JobConverter:
     def __init__(
         self,
@@ -535,9 +566,12 @@ class _JobConverter:
                 self._walk(item.then_steps, [*enclosing, item.condition], out)
                 self._walk(item.else_steps, [*enclosing, _negated(item.condition)], out)
                 continue
-            out.append(_step(item, self.offset, enclosing))
+            invocation = _step(item, self.offset, enclosing)
+            out.append(invocation)
             if item.procedure:
-                out.extend(self._expand(item, enclosing))
+                expanded = self._expand(item, enclosing)
+                _drop_applied_overrides(invocation, expanded)
+                out.extend(expanded)
 
     def procedures(self) -> dict[str, list[JobStep]]:
         """Each in-stream procedure's steps, expanded with its own defaults."""
@@ -672,6 +706,17 @@ def _diagnose(job: JclJob, unresolved: list[str]) -> None:
         )
         if coded is not None and dd.record_length is None:
             note(f"{where}: LRECL={coded} is not a number; record length unknown")
+        if (
+            step is not None
+            and (step.program or "").upper() in TSO_PROGRAMS
+            and dd.name.upper() == "SYSTSIN"
+            and dd.dataset is not None
+        ):
+            note(
+                f"{where}: {step.program} reads SYSTSIN from {dd.dataset}, "
+                "which is not read, so the programs it runs (RUN PROGRAM) are "
+                "not known"
+            )
 
 
 def _names(procedures: Iterable[_JProc]) -> set[str]:

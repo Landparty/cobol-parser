@@ -306,12 +306,17 @@ class TestCodebaseGraph:
         # records it rather than skipping it.
         missing = tmp_path / "also-missing.cbl"
 
-        _cmd_codebase_graph(_graph_args([str(missing)]))
-        payload = json.loads(capsys.readouterr().out)
+        with pytest.raises(SystemExit) as exc:
+            _cmd_codebase_graph(_graph_args([str(missing)]))
+        # Exit 2 like batch, and never a phantom program (#325).
+        assert exc.value.code == 2
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
 
         assert payload["errors"], "a missing file must be reported"
         assert any(str(missing) in e["path"] for e in payload["errors"])
-        assert payload["programs"][0]["parse_failed"] is True
+        assert payload["programs"] == []
+        assert f"no such file or directory: {missing}" in captured.err
 
 
 class TestGraphWorkersValidation:

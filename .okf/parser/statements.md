@@ -116,7 +116,10 @@ must stop at a boundary *without consuming it*. The rules:
 1. **Every verb is a boundary.** Each verb word must be in
    `_utils.STATEMENT_TOKEN_TYPES` (its `TokenType`, when it has one) **and**
    `STATEMENT_KEYWORDS` (its string, including verbs with no `TokenType` such as
-   `PURGE` / `RAISE` / `RESUME`, which only a value check can catch). Includes
+   `PURGE` / `RAISE` / `RESUME`, which only a value check can catch). The
+   legacy verbs CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM are the
+   exception: type only, since a declared data name of that spelling lexes as
+   IDENTIFIER and must not read as a boundary (#525). Includes
    no-op and handler-only verbs (`COMMIT`, `ROLLBACK`, `EJECT`, `SKIP1-3`,
    `NEXT`, ...). Pure clause words that never start a statement (`ON`,
    `OTHERWISE`, `THEN`, `END-*` terminators) are deliberately left out.
@@ -219,6 +222,7 @@ must stop at a boundary *without consuming it*. The rules:
 | `previous_meaningful_token` | last consumed non-layout token -- used to detect that a nested parser already consumed the sentence period, and for H9 line checks |
 | `consume_optional_subscript(stream, parts)` | folds `( ... )` into `parts`, tracking paren depth (nested subscripts / function calls keep their inner parens); at depth > 0 stops without consuming at a period, an arithmetic scope terminator or a statement / control-flow keyword, so an unbalanced `(` cannot eat the rest of the program |
 | `consume_optional_qualifiers(stream, value) -> str` | folds any number of `(subscript)` groups and `OF` / `IN` hops (layout skipped between hops) into the returned reference: `"Y OF Z"`, `"TBL ( I )"`. Confirms an identifier follows `OF` / `IN` by lookahead *before* consuming the keyword, so a malformed `OF 5` is left in the stream |
+| `join_source_parts(parts) -> str` | renders collected operand tokens as COBOL text: words space-separated, tight parens / ref-mod colon, a leading sign glued to its digits (`FUNCTION UPPER-CASE(WS-X)`, `TBL(1, 2)`). MOVE's source and CALL's `FUNCTION` arguments (#579) |
 | `consume_signed_numeric` | composes a MINUS/PLUS token and the following NUMERIC_LITERAL / LEVEL_NUMBER (a signed literal lexes as two tokens) into one value, looking past layout (`BY -` / newline / `1`) |
 | `consume_value_operand(stream)` | one value operand: signed numeric, else literal (`literal_operand_text`) or identifier with qualifiers folded. Used by PERFORM VARYING / AFTER `FROM` / `BY` and SET's `TO` / `UP BY` / `DOWN BY` |
 | `consume_keyword_and_operand` | optional keyword + operand (GIVING, REMAINDER); skips layout before *and* after the keyword check, folds qualifiers / subscripts |
@@ -229,9 +233,9 @@ must stop at a boundary *without consuming it*. The rules:
 | `bare_end_starts_at_end_clause` | a bare `END` is an `AT END` only when it does not start `END PROGRAM` / `END DIVISION` |
 | `matches_word` | value-based match for verbs with no `TokenType` |
 | `collect_clause_stmts`, `parse_invalid_key_clauses`, `parse_size_error_clauses` | handler bodies, see below |
-| `try_parse_nested_statement` | parses one nested statement; an exception not already recorded (`_already_recorded`, set by `report_or_raise`) becomes a warning "Nested statement parse failed and was skipped: ..." |
+| `try_parse_nested_statement` | parses one nested statement; an exception not already recorded (`_already_recorded`, set by `report_or_raise`) becomes a warning "Nested statement parse failed and was skipped: ..." -- except `RecursionError` (nesting hundreds deep), re-raised so the statement loop records "Statement nested too deeply to parse ..." as an **error** and `success` is False (#375; it used to be a warning with statements missing) |
 | `get_parse_context` / `report_parse_error` | record-and-continue error reporting |
-| `collect_exec_sql_text(stream, sql=...)` | EXEC block text, see [statements-io.md](statements-io.md) |
+| `collect_exec_sql_text(stream, sql=...)` | EXEC block text, see [statements-io.md](statements-io.md); with `sql=True` a literal keeps the delimiter it was written with (`Token.quote`), so a `"..."` delimited identifier stays one (#597, [dialects.md](../dialects.md)) |
 
 **Folded references reach analyzers.** Operand strings carry the full
 qualified / subscripted reference (`"WS-NUM OF GRP-1"`, `"WS-TAB ( 3 )"`). An
@@ -293,7 +297,11 @@ Statement operands store the quoted spelling (`"A"`), so a literal `'A'` and the
 data item `A` produce different AST values and `X'00'` keeps its prefix; every
 consumer that already skips quoted text (unused-variables, lineage, xref) relies
 on that rather than on a per-operand `is_literal` flag (#330). MOVE source and
-DISPLAY items prefer `Token.raw_value` for typed literals (`X"41"`). Level-88
+DISPLAY items prefer `Token.raw_value` for typed literals (`X"41"`). Condition
+tokens (IF, PERFORM UNTIL, SEARCH WHEN, EVALUATE `Condition` text) keep the
+prefix too: `_conditions.condition_token_text` re-quotes a typed literal as
+`X'0000'` (`typed_literal_prefix`), and `_is_literal_leg` accepts one as an
+abbreviated leg (#331; `tests/regression/test_issue_331_typed_literal_conditions.py`). Level-88
 values are the exception: stored undelimited (see [divisions.md](divisions.md)).
 Round-tripping is the property that matters -- re-parsing an emitted clause
 yields the identical clause. Pinned by
@@ -306,7 +314,13 @@ yields the identical clause. Pinned by
 PERFORM UNTIL (`condition_tree`), EVALUATE and SEARCH WHEN (`condition_tree` next
 to the raw `condition` text; #348). Class / sign / condition-name conditions
 (`A IS NUMERIC`) get a structured node while `metadata.raw_condition` stays
-populated. Its token-cleaning pass:
+populated. An AND / OR chain is split at every top-level operator in one
+pass (`find_top_level_operators`) and the legs folded from the left
+(`_fold_logical`): up to `_MAX_LEFT_DEEP_LEGS` (64) legs the tree is the
+left-deep one it always was; a longer chain is paired neighbour by neighbour so
+its depth stays O(log n) for every recursive walker (`to_dict`, rendering, the
+analyzers). Recursing once per operator overflowed Python's stack at ~1,000
+terms and was O(n^2) (#375). Its token-cleaning pass:
 
 - Recombines `>=` / `<=` / `<>`, which the lexer emits as two single-character
   tokens (`_COMPOUND_SYMBOL_OPS`); otherwise `IF X >= 5` reads as `GREATER` with
@@ -328,6 +342,30 @@ populated. Its token-cleaning pass:
   an operator or `NOT` follows. Pinned by
   `tests/regression/test_review_2026_09_09_parser.py` (`TestFinding08ConditionTrees`)
   and `tests/regression/test_issue_403_abbreviated_leading_is.py`.
+- **A leading NOT negates only its own relation** (#329): IBM reads `NOT A = 1
+  OR 2` as `(NOT A = 1) OR (A = 2)`. `_negate_condition` folds the NOT into the
+  relation's operator in place, so it records the operator as written on the
+  node (`_abbreviation_operator`) and `_expand_abbreviated_condition` repeats
+  that one; `A NOT = 1 OR 2` (NOT inside the operator) still carries NOT to the
+  leg. Pinned by `tests/regression/test_issue_329_leading_not_abbreviated.py`.
+- **A bare data-name leg** (`IF A = 'X' OR WS-B`, `A NOT < B OR C`, `WS-T (1)`,
+  `X OF G`, `NOT WS-B`) expands like a literal leg (`A = WS-B`) when the
+  already-parsed DATA DIVISION declares it as an ordinary item that is not also
+  a level-88 name (#562). `ProcedureDivisionParser` threads
+  `ParseContext.known_data_names` / `.condition_names` to the builder as a
+  `ConditionSymbols` (`condition_symbols(context)`; IF, PERFORM UNTIL, SEARCH
+  WHEN). A real 88, or a name the parse cannot see (unexpanded COPY, a
+  SPECIAL-NAMES switch condition, a standalone `build_condition_expression`
+  call with no `symbols=`), keeps the CONDITION_NAME reading. Pinned by
+  `tests/regression/test_issue_562_abbreviated_data_name_leg.py`.
+- **User class and OMITTED tests** (#539): `operand IS [NOT] word` -- `word` a
+  SPECIAL-NAMES class-name, recognised by shape since the builder cannot see
+  SPECIAL-NAMES -- and `operand [IS] [NOT] OMITTED` build `IS [NOT] <word>`
+  nodes with the tested field as `left_operand`
+  (`_build_user_class_or_omitted`), like `IS NUMERIC`. The operand must be one
+  data reference; the class form needs its `IS` (`IF X VALID-CODE` stays a raw
+  COMPARISON). Pinned by
+  `tests/regression/test_issue_539_user_class_and_omitted_conditions.py`.
 - Condition collectors drop layout tokens and bare separators (rule 6); a
   condition ending at a line break must not keep a trailing `"\n"`, or a bare
   condition-name / `NOT cond` / class test / `( ... )` falls back to a raw

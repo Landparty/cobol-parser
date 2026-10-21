@@ -15,7 +15,9 @@ Rules and gotchas for the statement parsers that branch, loop, call or end:
 control verbs of `simple_statement_parsers.py`. The invariants every parser keeps
 (boundaries, separators, layout, literals) are in [statements.md](statements.md);
 read that first. Condition trees are built by `_conditions.py`
-([statements.md](statements.md#condition-trees-_conditionspy)).
+([statements.md](statements.md#condition-trees-_conditionspy)); IF, PERFORM
+UNTIL and SEARCH WHEN pass it `condition_symbols(context)` so a bare data-name
+leg of an abbreviated relation expands (#562).
 
 ## Contents
 
@@ -70,7 +72,15 @@ arm.
 - **Single-token selectors say what they were** (#313): a one-token `Literal`
   carries `"identifier": True`, `"figurative": True` (`WHEN SPACES`) or
   `"quoted": True` (`WHEN 'SPACES'`); a `Range` carries `"start_quoted"` /
-  `"end_quoted"` when that bound is one STRING_LITERAL (#391). Additive markers;
+  `"end_quoted"` when that bound is one STRING_LITERAL (#391). A typed literal
+  (`WHEN X'00'`, #331) keeps its source spelling as `value` / bound, prefix and
+  quotes included, and carries `"typed": True` instead of `"quoted"` (no
+  `start_quoted` / `end_quoted` on a typed bound). A multi-token
+  value selector that is computed -- a `(` (subscript / reference modification /
+  FUNCTION call), an arithmetic symbol after its first token (`WS-N + 1`), or no
+  literal token at all -- carries `"expression": True` (#333,
+  `_is_expression_selector`); a signed number (`- 5`) and `ALL 'X'` do not.
+  Additive markers;
   `type` stays `"Literal"` / `"Range"`. Pinned by
   `tests/regression/test_evaluate_figurative_when.py`,
   `tests/unit/test_evaluate_variants.py::TestRangeQuotedMarkers`.
@@ -80,7 +90,10 @@ arm.
   test (`POSITIVE NEGATIVE ZERO`) after its first word, is a `Condition`; a lone
   `WHEN ZERO` stays the figurative `Literal`. `operator: "OR"` is set only for a
   logical OR, never the OR of `OR EQUAL` (`_has_logical_or`). Pinned by
-  `tests/regression/test_evaluate_word_operator_when.py`.
+  `tests/regression/test_evaluate_word_operator_when.py`. `IS` or `OMITTED`
+  after the first word also makes a `Condition` (#539): `WHEN WS-C IS
+  VALID-CODE` (a SPECIAL-NAMES class test) used to be the literal
+  `'WS-C IS VALID-CODE'`.
 - **Subjects reach `.operands`.** `_parse_subjects` calls
   `EvaluateStatement.add_subject()`, which also calls `add_operand()`, so
   `find_statements_using_variable`, intrinsic-function detection,
@@ -197,7 +210,11 @@ arm.
   `OMITTED` is an argument; a figurative constant (`BY CONTENT ZERO`) or a signed
   literal (`BY VALUE -7`) is one argument named by its text; `BY VALUE 100`,
   `ADDRESS OF x`, `LENGTH OF x` and subscripted / qualified data names are one
-  argument each. mocky-mock's `CAPTURE ARG n` counts depend on this list's arity.
+  argument each. `FUNCTION name [(args)] [(refmod)]` is one argument, spelled
+  as MOVE spells its source (`FUNCTION UPPER-CASE(WS-NAME)`, via the shared
+  `join_source_parts`; #579) -- left to the identifier path, `FUNCTION` became
+  an argument of its own and every later one moved a position right.
+  mocky-mock's `CAPTURE ARG n` counts depend on this list's arity.
 - **Passing mode persists** across a comma / space separated group: it is set
   once before the loop and changes only on a `BY` keyword or a bare `REFERENCE` /
   `CONTENT` / `VALUE` (`BY` is optional in IBM; #388): `USING BY CONTENT a, b`
@@ -241,15 +258,30 @@ arm.
   condition.
 - **CONTINUE**, **EJECT**, **SKIP1/2/3** are no-op nodes (see
   [statements.md](statements.md#registration-and-matching)).
+- **CONTINUE AFTER expr SECONDS** (Enterprise COBOL 6.4): the delay is kept as
+  `ContinueStatement.delay_expression` (text) and `delay_expression_tree`
+  (`build_compute_expression_tree`), so xref reads its operands and
+  unused-variables sees them via `_STR_ATTR_EXTRAS`. A missing `SECONDS` is a
+  parse error; the expression stops at a period or statement boundary. Flow
+  analysis ignores it (no control transfer). Before #578 the phrase was dropped
+  with an "Unparsed tokens" warning.
 
 ## USE, CANCEL and the legacy / COBOL 2002 verbs
 
 - **USE** (`UseStatementParser`): `USE [GLOBAL] BEFORE REPORTING group...`
   (`use_type "REPORTING"`, `report_groups`); the word `FOR` is skipped.
 - **CANCEL**: program-name list with commas, boundary and H9 checks.
+  `CancelStatement.program_names_literal` (parallel to `program_names`, in
+  `to_dict()` only when some name is a literal) tells `CANCEL 'X'` from
+  `CANCEL X` (#479); diff compares it and quotes literal names in its text.
 - **NOTE** (COBOL-74 comment statement) runs to the sentence period but stops
   early at a following line that starts with a verb, so a period-less NOTE cannot
   eat the rest of the program.
+- **CHAIN / NOTE / EXHIBIT / EXAMINE / TRANSFORM** match by their dedicated
+  TokenType only (`_matches_legacy_verb`), and are not in `STATEMENT_KEYWORDS`:
+  where the program declares one as a data name the lexer retypes it to
+  IDENTIFIER, and it is then an ordinary operand (`MOVE 'ACME' TO CHAIN`,
+  #525). Pinned by `tests/regression/test_legacy_verb_data_names.py`.
 - `TITLE`, `VALIDATE`, `READY` / `RESET TRACE`, `SERVICE LABEL` / `RELOAD`,
   `RAISE`, `RESUME`, `PURGE` are matched by value under the conditions in
   [statements.md](statements.md#registration-and-matching). Node classes are in

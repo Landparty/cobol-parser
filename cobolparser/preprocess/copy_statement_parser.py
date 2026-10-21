@@ -1115,11 +1115,14 @@ _PSEUDO_TEXT_WORD_RE = re.compile(
 )
 
 
-#: One separator between two text words of the source: a blank, or a
-#: separator comma / semicolon (one followed by a blank).  IBM: "a separator
-#: comma or separator semicolon ... is considered to be a space" when
-#: comparing pseudo-text, so ``==X(3) VALUE==`` finds ``X(3), VALUE``.
-_SEPARATOR_GAP = r"(?:[ \t]|[,;](?=[ \t]))"
+#: One separator between two text words of the source: a blank, a line
+#: break, or a separator comma / semicolon (one followed by a blank).  IBM:
+#: "a separator comma or separator semicolon ... is considered to be a
+#: space" when comparing pseudo-text, so ``==X(3) VALUE==`` finds ``X(3),
+#: VALUE``. Pseudo-text is compared on the text-word stream, where the end of
+#: a line is just another separator, so ``==ML-B PIC X(5). 05 ML-C==`` finds
+#: the two copybook lines it spans (#560).
+_SEPARATOR_GAP = r"(?:[ \t\n]|[,;](?=[ \t\n]))"
 
 #: A separator comma / semicolon at the end of a pseudo-text word.
 _TRAILING_SEPARATOR_RE = re.compile(r"[,;]+$")
@@ -1158,7 +1161,7 @@ def _build_clause_pattern(clause: ReplacingClause) -> str | None:
     optional (``X (10)`` too). A separator comma or semicolon counts as a
     blank on both sides (``==X(3) VALUE==`` finds ``X(3), VALUE``).
     Leading/trailing blanks of the pseudo-text are not part of it.
-    Comparison stays within one source line.
+    A line break in the source is a separator like any blank (#560).
 
     Uses identifier-safe boundaries to avoid partial word collisions: regex
     ``\\b`` is unsuitable because COBOL identifiers can contain hyphens, so a
@@ -1253,6 +1256,7 @@ def apply_replacing_clauses(
     content: str,
     clauses: list[ReplacingClause],
     indicator_position: int = 6,
+    line_origins: list[int] | None = None,
 ) -> str:
     """
     Apply REPLACING clauses to copybook content with identifier awareness.
@@ -1284,6 +1288,17 @@ def apply_replacing_clauses(
             sequence-number area still present). Pass 0 for content that has
             already had ``strip_sequence_area`` applied, where the indicator
             is the first character of each line.
+        line_origins: When given, filled with the 1-based line of *content*
+            each line of the result came from. A BY text that adds lines
+            repeats the line its match started on; one that removes lines
+            (a match spanning several) keeps the first. The source map needs
+            it: numbering the replaced text from 1 as if it were the
+            copybook shifted every later line (#561).
+
+    Matching runs over the whole text, not line by line: pseudo-text is
+    compared on the text-word stream, where a line break is a separator, so
+    a search text whose words a copybook splits across two lines is found
+    (#560). A match is never taken inside a comment line.
     """
     lines = _records(content)
 
@@ -1309,6 +1324,14 @@ def apply_replacing_clauses(
     quoted: set[str] = set()
     code_alternatives: list[str] = []
     literal_alternatives: list[str] = []
+    # LEADING / TRAILING clauses, in clause order, each with its own pattern:
+    # a word one of them matches is settled by the first that fits (#513).
+    # Written order, not the longest-first order above: with
+    # LEADING ==X== ... TRAILING ==XX== the standard (and REPLACE) let the
+    # LEADING clause settle X-NAME-XX because it is written first.
+    partial_clauses: list[tuple[str, str, re.Pattern[str]]] = []
+    written_order = {id(clause): i for i, clause in enumerate(clauses)}
+    partial_order: list[int] = []
     for index, clause in enumerate(sorted_clauses):
         source = _build_clause_pattern(clause)
         if source is None:
@@ -1316,13 +1339,27 @@ def apply_replacing_clauses(
         name = f"c{index}"
         alternative = f"(?P<{name}>{source})"
         replacements[name] = clause.replace_text
+        if clause.mode in ("LEADING", "TRAILING"):
+            partial_clauses.append(
+                (name, clause.mode, re.compile(source, re.IGNORECASE))
+            )
+            partial_order.append(written_order[id(clause)])
         code_alternatives.append(alternative)
         # A search text that itself contains a quote deliberately targets
         # literal text; only such clauses may match inside string literals.
         if '"' in clause.find_text or "'" in clause.find_text:
             quoted.add(name)
             literal_alternatives.append(alternative)
+    partial_clauses = [
+        partial
+        for _, partial in sorted(
+            zip(partial_order, partial_clauses, strict=True),
+            key=lambda pair: pair[0],
+        )
+    ]
     if not code_alternatives:
+        if line_origins is not None:
+            line_origins[:] = range(1, len(lines) + 1)
         return content
     code_pattern = re.compile("|".join(code_alternatives), re.IGNORECASE)
     literal_pattern = (
@@ -1331,71 +1368,114 @@ def apply_replacing_clauses(
         else None
     )
 
-    def _replacement(match: re.Match[str]) -> str:
-        # The replacement is literal text, never an re template: a
-        # backslash in it (`'C:\TEMP\1'`) would otherwise raise re.error or
-        # be silently reinterpreted as a group reference.
-        return replacements[match.lastgroup or ""]
-
-    for idx, line in enumerate(lines):
-        if is_comment[idx]:
-            continue
-        if '"' in line or "'" in line:
-            lines[idx] = _replace_in_line_with_literals(
-                line, code_pattern, literal_pattern, quoted, replacements
-            )
-        else:
-            lines[idx] = code_pattern.sub(_replacement, line)
-
-    return "\n".join(lines)
-
-
-def _replace_in_line_with_literals(
-    line: str,
-    code_pattern: re.Pattern[str],
-    literal_pattern: re.Pattern[str] | None,
-    quoted: set[str],
-    replacements: dict[str, str],
-) -> str:
-    """Apply the REPLACING alternation to one line that holds a literal.
-
-    The pattern runs over the *whole* line, so a search text mixing code and
-    a literal (``==VALUE 'A'==``) can match. A match of a clause whose search
-    text has no quote is rejected when it lies inside a literal (it can only
-    be wholly inside one, having no quote of its own to straddle one with);
-    at a rejected position the quote-bearing clauses still get their turn.
-    """
+    text = "\n".join(lines)
+    # Offset of each line's first character in *text*.
+    line_starts: list[int] = []
+    offset = 0
+    for line in lines:
+        line_starts.append(offset)
+        offset += len(line) + 1
+    comment_spans = [
+        (line_starts[idx], line_starts[idx] + len(line))
+        for idx, line in enumerate(lines)
+        if is_comment[idx]
+    ]
     literal_spans = [
-        (start, start + len(segment))
+        (line_starts[idx] + start, line_starts[idx] + start + len(segment))
+        for idx, line in enumerate(lines)
+        if not is_comment[idx] and ('"' in line or "'" in line)
         for start, segment, is_literal in _segment_offsets(line)
         if is_literal
     ]
 
-    def _inside_literal(position: int) -> bool:
-        return any(start <= position < end for start, end in literal_spans)
+    def _in_spans(spans: list[tuple[int, int]], start: int, end: int) -> bool:
+        # *spans* are sorted and disjoint: only the last one starting before
+        # *end* can overlap [start, end).
+        index = bisect.bisect_left(spans, (max(end, start + 1), -1)) - 1
+        return index >= 0 and spans[index][1] > start
+
+    def _line_of(position: int) -> int:
+        return bisect.bisect_right(line_starts, position)  # 1-based
 
     out: list[str] = []
+    origins: list[int] = [1]
     pos = 0
     search_from = 0
+
+    def _copy(end: int) -> None:
+        # Unchanged text: each line it starts keeps its own input line.
+        chunk = text[pos:end]
+        newline = chunk.find("\n")
+        while newline != -1:
+            origins.append(_line_of(pos + newline + 1))
+            newline = chunk.find("\n", newline + 1)
+        out.append(chunk)
+
     while True:
-        match = code_pattern.search(line, search_from)
+        match = code_pattern.search(text, search_from)
         if match is None:
             break
         name = match.lastgroup or ""
         chosen: re.Match[str] | None = match
-        if name not in quoted and _inside_literal(match.start()):
+        if _in_spans(comment_spans, match.start(), match.end()):
+            chosen = None
+        elif name not in quoted and _in_spans(
+            literal_spans, match.start(), match.start() + 1
+        ):
+            # A search text with no quote of its own can only lie wholly
+            # inside a literal; at that position the quote-bearing clauses
+            # still get their turn.
             chosen = (
-                literal_pattern.match(line, match.start())
+                literal_pattern.match(text, match.start())
                 if literal_pattern is not None
                 else None
             )
+            if chosen is not None and _in_spans(
+                comment_spans, chosen.start(), chosen.end()
+            ):
+                chosen = None
         if chosen is None:
             search_from = match.start() + 1
             continue
-        out.append(line[pos : chosen.start()])
-        out.append(replacements[chosen.lastgroup or ""])
-        pos = search_from = chosen.end()
-    out.append(line[pos:])
+        name = chosen.lastgroup or ""
+        start, end = chosen.start(), chosen.end()
+        word_end = end
+        if any(name == partial_name for partial_name, _, _ in partial_clauses):
+            # LEADING tests a word's start and TRAILING its end, so the
+            # leftmost hit is not the whole story: the standard compares the
+            # word against the clauses in order, the first that fits
+            # replaces it, and the word is then done. Without this,
+            # LEADING ==XX== ... TRAILING ==XX== rewrote both ends of
+            # XX-NAME-XX (#513), unlike REPLACE.
+            word_start = start
+            # Never reach back into text an earlier replacement emitted.
+            while word_start > pos and _is_word_char(text[word_start - 1]):
+                word_start -= 1
+            while word_end < len(text) and _is_word_char(text[word_end]):
+                word_end += 1
+            for partial_name, mode, pattern in partial_clauses:
+                hit = (
+                    pattern.match(text, word_start, word_end)
+                    if mode == "LEADING"
+                    else pattern.search(text, word_start, word_end)
+                )
+                if hit is not None:
+                    name, start, end = partial_name, hit.start(), hit.end()
+                    break
+        _copy(start)
+        # Literal text, never an re template: a backslash in it
+        # (`'C:\TEMP\1'`) must not be read as a group reference.
+        replacement = replacements[name]
+        out.append(replacement)
+        # Lines the BY text adds belong to the line its match started on.
+        origins.extend([_line_of(start)] * replacement.count("\n"))
+        pos = end
+        _copy(word_end)  # the rest of a partially replaced word, unchanged
+        pos = search_from = word_end
+    _copy(len(text))
+
+    if line_origins is not None:
+        line_origins[:] = origins
     return "".join(out)
 
 

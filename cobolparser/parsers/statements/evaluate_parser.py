@@ -1,5 +1,6 @@
 """Evaluate statement parser implementing IStatementParser interface."""
 
+import re
 from typing import Any
 
 from cobolparser.parsers.statements._utils import (
@@ -21,7 +22,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import EvaluateStatement, WhenClause
-from ._conditions import condition_token_text
+from ._conditions import condition_token_text, typed_literal_prefix
 
 # Words that make a WHEN phrase a condition rather than a value. Symbols
 # and logical connectives count anywhere; the relational words
@@ -46,10 +47,48 @@ _CONDITION_WORDS = _CONDITION_SYMBOLS | _RELATIONAL_WORDS | _CLASS_TEST_WORDS
 
 
 def _is_condition_phrase(words: list[str]) -> bool:
-    """Whether a WHEN selector's (unquoted) words spell a condition."""
+    """Whether a WHEN selector's (unquoted) words spell a condition.
+
+    ``IS`` after a subject (``WHEN X IS VALID-CODE``, a SPECIAL-NAMES class
+    test; ``WHEN L IS OMITTED``) and ``OMITTED`` cannot appear in a value
+    selector either (#539); without them a user class test read as the
+    literal ``'X IS VALID-CODE'``.
+    """
     return any(
-        word in _CONDITION_WORDS or (index > 0 and word in _SIGN_TEST_WORDS)
+        word in _CONDITION_WORDS
+        or (index > 0 and word in _SIGN_TEST_WORDS)
+        or (index > 0 and word in ("IS", "OMITTED"))
         for index, word in enumerate(words)
+    )
+
+
+_ARITHMETIC_SYMBOLS = frozenset({"+", "-", "*", "/", "**"})
+_NUMBER_RE = re.compile(r"^\d+(\.\d*)?$|^\.\d+$")
+
+
+def _is_expression_selector(pairs: list[tuple[str, TokenType | None]]) -> bool:
+    """Whether a multi-token value selector is a computed operand, not a
+    literal (#333): a subscripted / reference-modified item (``WS-T (2)``,
+    ``WS-B (1:2)``), arithmetic (``WS-N + 1``), or several tokens none of
+    which is a literal (``FUNCTION CURRENT-DATE``). A signed number (``- 5``)
+    and ``ALL 'X'`` stay literals.
+    """
+    if len(pairs) < 2:
+        return False
+    words = [
+        "" if token_type == TokenType.STRING_LITERAL else token
+        for token, token_type in pairs
+    ]
+    if "(" in words:
+        return True
+    if any(word in _ARITHMETIC_SYMBOLS for word in words[1:]):
+        return True
+    if words[0].upper() == "ALL":
+        return False
+    return not any(
+        token_type in (TokenType.STRING_LITERAL, TokenType.FIGURATIVE_CONSTANT)
+        or _NUMBER_RE.match(token)
+        for token, token_type in pairs
     )
 
 
@@ -370,6 +409,10 @@ class EvaluateStatementParser(IStatementParser):
                 # tests/regression/test_evaluate_space_literal_when.py.
                 if token.type == TokenType.STRING_LITERAL and not value.strip():
                     value = f"'{value}'"
+                # A typed literal keeps its prefix (#331): ``WHEN X'00'`` is
+                # one byte, not the two characters ``00``.
+                if typed_literal_prefix(token):
+                    value = condition_token_text(token)
                 current_selector.append(value)
                 current_types.append(token.type)
                 current_texts.append(
@@ -419,10 +462,11 @@ class EvaluateStatementParser(IStatementParser):
         condition-name selectors on it, so an additive marker is the
         backward-compatible way to make the distinction visible.
         """
+        types_known = bool(token_types) and len(token_types or ()) == len(
+            selector_tokens
+        )
         types: list[TokenType | None] = (
-            list(token_types)
-            if token_types and len(token_types) == len(selector_tokens)
-            else [None] * len(selector_tokens)
+            list(token_types or ()) if types_known else [None] * len(selector_tokens)
         )
         texts: list[str] = (
             list(token_texts)
@@ -493,10 +537,16 @@ class EvaluateStatementParser(IStatementParser):
                 # lexer strips the quotes, so ``'a' THRU 'c'`` and
                 # ``A THRU C`` would otherwise read alike (#391).
                 for key, bound in (
-                    ("start_quoted", pairs[first:index]),
-                    ("end_quoted", pairs[index + 1 :]),
+                    ("start_quoted", kept[first:index]),
+                    ("end_quoted", kept[index + 1 :]),
                 ):
-                    if len(bound) == 1 and bound[0][1] == TokenType.STRING_LITERAL:
+                    if (
+                        len(bound) == 1
+                        and bound[0][1] == TokenType.STRING_LITERAL
+                        and bound[0][2][:1] in ("'", '"')
+                    ):
+                        # Not for a typed bound (``X'00'``, #331): its value
+                        # already is its quoted source spelling.
                         range_selector[key] = True
                 return range_selector
 
@@ -509,12 +559,23 @@ class EvaluateStatementParser(IStatementParser):
             return selector
 
         literal: dict[str, Any] = {"type": "Literal", "value": selector_text}
-        if single_type == TokenType.IDENTIFIER:
+        if types_known and _is_expression_selector(pairs):
+            # ``WHEN WS-N + 1`` / ``WHEN WS-B (1:2)``: a value only the
+            # running program knows, not the literal text ``WS-N + 1`` (#333).
+            literal["expression"] = True
+        elif single_type == TokenType.IDENTIFIER:
             literal["identifier"] = True
         elif single_type == TokenType.FIGURATIVE_CONSTANT:
             literal["figurative"] = True
         elif single_type == TokenType.STRING_LITERAL:
-            literal["quoted"] = True
+            if texts[0][:1] in ("'", '"'):
+                literal["quoted"] = True
+            else:
+                # A typed literal (#331): ``value`` is its source spelling,
+                # prefix and quotes included (``X'00'``), since its content
+                # alone (``00``) means something else -- so not ``quoted``,
+                # which says ``value`` is the content with quotes stripped.
+                literal["typed"] = True
         return literal
 
     def _skip_clause_statements(

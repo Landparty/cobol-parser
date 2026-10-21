@@ -12,6 +12,7 @@ Performance features for large batch scenarios (3000+ programs, 50+ copybooks):
 - Directory index in PathResolver for instant file lookups
 """
 
+import codecs
 import os
 import re
 import time
@@ -498,6 +499,56 @@ def convert_to_utf8(
     return _normalize_record_separators(text, detected_encoding)
 
 
+def read_program_source(
+    file_path: str,
+    encoding: str | None = None,
+    *,
+    warnings: list[str] | None = None,
+    encoding_errors: str = "replace",
+) -> str:
+    """Read a *program* source the way a copybook is read (#522).
+
+    *encoding* None (or ``"auto"``) detects it (:func:`detect_encoding`), so a
+    cp1252 / Latin-1 program decodes like a cp1252 copybook instead of being
+    refused as "not valid UTF-8" by one entry point and silently mangled to
+    U+FFFD by another. A named *encoding* is used as given. A lossy decode
+    appends a warning to *warnings*; ``encoding_errors="strict"`` raises
+    ``EncodingError`` instead. Every entry point that reads a main program
+    (the CLI, ``batch``, ``scan``, ``codebase-graph``, the MCP server) goes
+    through here, so they cannot disagree about a file's text or lines.
+    """
+    override = None if encoding in (None, "", "auto") else encoding
+    if override is not None:
+        try:
+            codecs.lookup(override)
+        except LookupError as exc:
+            # convert_to_utf8 would quietly fall back to ASCII on a typo.
+            raise EncodingError(file_path, f"unknown encoding {override!r}") from exc
+    collected: list[str] = []
+    text = read_file_with_encoding(
+        file_path,
+        override,
+        warnings=collected,
+        encoding_errors=encoding_errors,
+    )
+    if warnings is not None:
+        warnings.extend(
+            warning.replace(
+                "Set CopybookSearchPath.encoding explicitly",
+                "Name the source encoding explicitly (--encoding)",
+            )
+            for warning in collected
+        )
+    # Every reader this replaced opened the file in text mode, which turns
+    # CR LF and a lone CR into LF; keep that, so a Windows-edited program's
+    # text (``expand``'s ``expanded_source``, the MCP parse, a COPY scan) does
+    # not start carrying CRs. Line numbers are unchanged: split_source_lines
+    # breaks on all three the same way.
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text
+
+
 def _is_ebcdic_codec(encoding: str) -> bool:
     """True when *encoding* names an EBCDIC code page (cp037, cp500,
     cp1047, cp273, cp1140, ...). Decided by what the codec does to the
@@ -953,7 +1004,10 @@ def _origin_sources(
     different string. A file that has become unreadable since is skipped: a
     listing missing one member's comments beats an expansion that fails.
     """
-    sources: dict[str, list[str]] = {source_file: source_code.split("\n")}
+    # split_source_lines, not split("\n"): the source map numbers lines the
+    # same way, so a CR-only file must not read back as one line, and a CRLF
+    # file must not hand back each comment with a stray "\r" (#581).
+    sources: dict[str, list[str]] = {source_file: split_source_lines(source_code)}
     for path in included_copybooks:
         try:
             content = _cached_read_file(
@@ -964,7 +1018,7 @@ def _origin_sources(
             )
         except (OSError, EncodingError):
             continue
-        sources[path] = content.split("\n")
+        sources[path] = split_source_lines(content)
     return sources
 
 
@@ -1316,6 +1370,7 @@ def _expand_source_recursive(
     already_stripped: bool = False,
     free_form: bool | None = None,
     define_log: list[tuple[int, dict[str, str]]] | None = None,
+    initial_origins: list[LineOrigin] | None = None,
 ) -> tuple[str, int, bool, list[LineOrigin]]:
     """
     Recursively expand COPY statements in source code.
@@ -1347,6 +1402,10 @@ def _expand_source_recursive(
             processing of *source_code* produced (``process_conditionals``
             only): each COPY's member is processed with the symbols in effect
             on the COPY's own line, not the ones the caller started with.
+        initial_origins: Where each line of *source_code* really came from,
+            when that is not simply its own line of *source_file* -- a
+            copybook rewritten by a REPLACING whose BY text added or removed
+            lines (#561). None means identity origins.
 
     Returns:
         Tuple of (expanded_source, max_depth_reached, is_normalized, origins)
@@ -1360,6 +1419,16 @@ def _expand_source_recursive(
         NestingDepthError: If max nesting depth exceeded
         TotalExpansionSizeExceededError: If total size exceeds limit
     """
+    source_origins: list[LineOrigin] = _fit_origins(
+        (
+            list(initial_origins)
+            if initial_origins is not None
+            else _identity_origins(source_file, source_code)
+        ),
+        source_code.count("\n") + 1,
+        (source_file, 1),
+    )
+
     # Check nesting depth
     if context.current_depth > path_resolver.search_config.max_nesting_depth:
         raise NestingDepthError(
@@ -1427,7 +1496,7 @@ def _expand_source_recursive(
             source_code,
             context.current_depth,
             already_stripped and not free_form,
-            _identity_origins(source_file, source_code),
+            source_origins,
         )
 
     # Push current file onto stack
@@ -1439,7 +1508,10 @@ def _expand_source_recursive(
     # We use the NORMALIZED source as the base for expansion because we need valid indices
     expanded_source = normalized_source
     origins: list[LineOrigin] = _fit_origins(
-        [(source_file, n) for n in merged_from],
+        [
+            source_origins[n - 1] if 0 < n <= len(source_origins) else (source_file, n)
+            for n in merged_from
+        ],
         normalized_source.count("\n") + 1,
         (source_file, 1),
     )
@@ -1607,13 +1679,20 @@ def _expand_source_recursive(
 
             # Apply REPLACING clause if present (using enhanced function).
             # copybook_content is already stripped (indicator at index 0).
+            replaced_origins: list[LineOrigin] | None = None
             if statement.replacing_clauses:
                 pre_replacing_size = len(copybook_content.encode("utf-8"))
+                replaced_from: list[int] = []
                 copybook_content = apply_replacing_clauses(
                     copybook_content,
                     statement.replacing_clauses,
                     indicator_position=0,
+                    line_origins=replaced_from,
                 )
+                # The recursion below numbers its input from line 1; after a
+                # BY text that added or removed lines that numbering is not
+                # the copybook's, so hand it the real one (#561).
+                replaced_origins = [(copybook_path, n) for n in replaced_from]
                 # The raw-content charge above is taken before REPLACING, and
                 # a REPLACING BY text longer than its operand multiplies the
                 # member: a 48 KB copybook grew to 5.5 MB under a 1 MB
@@ -1655,6 +1734,7 @@ def _expand_source_recursive(
                     # just given the stripped fixed shape above.
                     free_form=member_free_form and free_form,
                     define_log=member_define_log,
+                    initial_origins=replaced_origins,
                 )
             )
 
@@ -1722,13 +1802,19 @@ def _expand_source_recursive(
         # the copybook's own lines replace them. The first spliced line is
         # credited to the *parent* only when the parent had real text before
         # the COPY on that line (`COPY X.` on a line of its own, the normal
-        # case, credits it to the copybook); the last one always keeps the
-        # copybook's origin, since a statement's own remainder after the COPY
-        # is what continues on it.
+        # case, credits it to the copybook). Text AFTER the COPY's period on
+        # its last line is moved onto a physical line of its own, in its own
+        # columns, credited to that parent line: appended to the copybook's
+        # last line it inherited the copybook's origin, so lint blamed the
+        # member for a parent item (#355, option (b)).
         start_line = expanded_source.count("\n", 0, statement_start)
         end_line = expanded_source.count("\n", 0, statement_end)
         head_start = expanded_source.rfind("\n", 0, statement_start) + 1
         head_has_text = bool(expanded_source[head_start:statement_start].strip())
+        tail_end = expanded_source.find("\n", statement_end)
+        if tail_end == -1:
+            tail_end = len(expanded_source)
+        tail_has_text = bool(expanded_source[statement_end:tail_end].strip())
 
         copybook_line_count = expanded_copybook.count("\n") + 1
         spliced = _fit_origins(
@@ -1736,6 +1822,12 @@ def _expand_source_recursive(
         )
         if head_has_text and start_line < len(origins):
             spliced[0] = origins[start_line]
+        if tail_has_text and end_line < len(origins):
+            spliced.append(origins[end_line])
+            tail_column = statement_end - (
+                expanded_source.rfind("\n", 0, statement_end) + 1
+            )
+            expanded_copybook += "\n" + " " * tail_column
         origins = origins[:start_line] + spliced + origins[end_line + 1 :]
 
         # `COPY X.` on a line of its own: the blanks before it are the COPY

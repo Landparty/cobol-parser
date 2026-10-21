@@ -14,6 +14,7 @@ from ._utils import (
     matches_keyword,
     peek_past_noise,
     peek_value_upper,
+    skip_statement_separators,
     skip_whitespace,
     token_location,
 )
@@ -59,7 +60,8 @@ class AcceptStatementParser(IStatementParser):
                 target = consume_optional_qualifiers(token_stream, target)
             stmt.set_target(target)
 
-        skip_whitespace(token_stream)
+        # ``ACCEPT X, FROM DATE``: a separator is a space (#569).
+        skip_statement_separators(token_stream)
 
         # Communication Module form: ``ACCEPT cd-name MESSAGE COUNT``.
         if peek_value_upper(token_stream) == "MESSAGE":

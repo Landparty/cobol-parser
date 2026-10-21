@@ -401,7 +401,10 @@ class TestBatchWorkerContainment:
 
         from cobolparser.batch import parse_files
 
-        results = parse_files([str(good), str(undecodable)], workers=1, errors="strict")
+        # Named: left to detection the bytes read as cp1252 (#522).
+        results = parse_files(
+            [str(good), str(undecodable)], workers=1, encoding="utf-8", errors="strict"
+        )
         assert len(results) == 2
         by_name = {r.path.name: r for r in results}
         assert by_name["good.cbl"].result is not None

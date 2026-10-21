@@ -96,9 +96,14 @@ from ..models.statements.misc import (
     SortStatement,
     XmlJsonStatement,
 )
-from ._files import same_record_area_groups
-from ._names import callee_names
+from ._files import (
+    report_to_file_map,
+    report_writer_files,
+    same_record_area_groups,
+)
+from ._names import callee_names, split_qualified_name
 from ._sql_flow import analyze_sql
+from .unused_variables import inherited_data_records
 from .value_tracker import DynamicCallAnalyzer
 from .xref import (
     ROLE_READ,
@@ -142,6 +147,8 @@ _ASSIGN_PREFIX_TOKENS = frozenset(
 )
 
 _REFMOD_RE = re.compile(r"\(\s*(\d+)\s*:\s*(\d+)?\s*\)\s*$")
+#: Any trailing reference modifier, literal or not: ``(WS-POS:10)``.
+_ANY_REFMOD_RE = re.compile(r"\(\s*([^():]+?)\s*:\s*([^():]*?)\s*\)\s*$")
 #: One data reference: a (qualified) name, an optional subscript group and an
 #: optional reference modifier -- nothing else (no operator, no second name).
 _SINGLE_REF_RE = re.compile(
@@ -542,11 +549,15 @@ def _category(picture: Any, usage: Any) -> str:
 @dataclass(frozen=True)
 class _Ref:
     """One operand: the item, a literal reference modifier ``(start, length)``
-    (0-based) and literal subscripts, when the operand has them."""
+    (0-based) and literal subscripts, when the operand has them.
+    ``loose_window``: the reference modifier's start (or length) is a data
+    name, so the bytes it names may be anywhere in the item; ``window`` then
+    holds ``(0, length)`` when the length is a literal (#527)."""
 
     qname: str
     window: tuple[int, int | None] | None = None
     subscripts: tuple[int, ...] | None = None
+    loose_window: bool = False
 
 
 @dataclass(frozen=True)
@@ -623,6 +634,11 @@ class FieldFlowAnalyzer:
         self._caveat_set: set[str] = set()
         self._cursors: dict[str, str] = {}
         self._program_id = ""
+        #: Report Writer: report / report-group name -> report file, and
+        #: each REPORT SECTION 01 group's report, DETAIL-ness and the
+        #: ``SOURCE`` / ``SUM`` operands it (and its subordinates) print.
+        self._report_to_file: dict[str, str] = {}
+        self._report_groups: dict[str, tuple[str, bool, list[str]]] = {}
 
     # -- entry point -------------------------------------------------------
 
@@ -639,6 +655,7 @@ class FieldFlowAnalyzer:
         self._index_items(ast)
         self._index_renames(ast)
         self._index_files(ast)
+        self._index_reports(ast)
         inner = _contained_node_ids(ast)
         statements = [
             node
@@ -713,20 +730,41 @@ class FieldFlowAnalyzer:
 
     # -- data items --------------------------------------------------------
 
-    def _index_items(self, ast: CobolProgram) -> None:
-        from ..generators.data.layout_offsets import compute_program_data_items
-
-        data = compute_program_data_items(ast)
-        # One block per 01/77 record: the layout emits the record root first,
-        # then its subordinates with every group *after* its own children.
+    @staticmethod
+    def _record_blocks(entries: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        """Layout entries grouped one block per 01/77 record (level-66 and
+        level-88 entries dropped)."""
         blocks: list[list[dict[str, Any]]] = []
-        for entry in data["items"]:
+        for entry in entries:
             if int(entry.get("level") or 0) in (66, 88):
                 continue
             if not entry.get("parent_qualified_name") or not blocks:
                 blocks.append([entry])
             else:
                 blocks[-1].append(entry)
+        return blocks
+
+    def _index_items(self, ast: CobolProgram) -> None:
+        from ..generators.data.layout_offsets import compute_program_data_items
+
+        # One block per 01/77 record: the layout emits the record root first,
+        # then its subordinates with every group *after* its own children.
+        data = compute_program_data_items(ast)
+        blocks = self._record_blocks(data["items"])
+        # A contained program's statements can name its containers' GLOBAL
+        # records too (#504): they are indexed like its own, from the
+        # container's layout.
+        inherited: dict[int, tuple[CobolProgram, set[str]]] = {}
+        for owner, _section, record in inherited_data_records(ast):
+            inherited.setdefault(id(owner), (owner, set()))[1].add(record.name.upper())
+        for owner, names in inherited.values():
+            blocks += [
+                block
+                for block in self._record_blocks(
+                    compute_program_data_items(owner)["items"]
+                )
+                if str(block[0].get("name") or "").upper() in names
+            ]
         used: dict[str, int] = {}
         for block in blocks:
             raws = [str(e["qualified_name"]).upper() for e in block]
@@ -933,7 +971,7 @@ class FieldFlowAnalyzer:
 
     def _resolve(self, text: str) -> list[str]:
         """Qualified names a (possibly ``A OF B``-qualified) name means."""
-        parts = [p.strip().upper() for p in text.split(" OF ") if p.strip()]
+        parts = split_qualified_name(text)
         if not parts:
             return []
         name, qualifiers = parts[0], parts[1:]
@@ -998,10 +1036,23 @@ class FieldFlowAnalyzer:
                 names = sorted(base)
             single = _SINGLE_REF_RE.match(value)
         window = self._refmod(value) if single else None
+        loose = False
+        if single and window is None and isinstance(value, str):
+            variable = _ANY_REFMOD_RE.search(value)
+            if variable:
+                loose = True
+                length = variable.group(2)
+                window = (0, int(length)) if length.isdigit() else None
+                shown = re.sub(r"\s*([():])\s*", r"\1", " ".join(value.split()))
+                self._caveat(
+                    f"{shown}: reference modifier with a "
+                    "non-literal start or length; mapped inexactly to every "
+                    "field it can reach"
+                )
         subscripts = _constant_subscripts(value) if single else None
         for name in names:
             for qname in self._resolve(name):
-                ref = _Ref(qname, window, self._occurrence(qname, subscripts))
+                ref = _Ref(qname, window, self._occurrence(qname, subscripts), loose)
                 if ref not in out:
                     out.append(ref)
         return out
@@ -1069,14 +1120,15 @@ class FieldFlowAnalyzer:
 
     def _pieces(self, ref: _Ref) -> list[_Piece] | None:
         """Elementary fields inside the operand, relative to its start;
-        None when its offset is unknown."""
+        None when its offset is unknown. A reference modifier with a
+        non-literal start makes every piece inexact (#527)."""
         item = self._items[ref.qname]
         if not item.children:
             if ref.subscripts is not None:
                 node = self._occ_node(ref.qname, ref.subscripts)
                 if node is not None:
-                    return [_Piece(node, 0, item.length, True)]
-            exact = self._table(ref.qname) is None
+                    return [_Piece(node, 0, item.length, not ref.loose_window)]
+            exact = self._table(ref.qname) is None and not ref.loose_window
             return [_Piece(self._item_node(ref.qname), 0, item.length, exact)]
         base = self._ref_base(ref)
         if base is None:
@@ -1088,7 +1140,7 @@ class FieldFlowAnalyzer:
             if placements is None:
                 continue
             node = self._item_node(leaf.qname)
-            exact = self._table(leaf.qname) is None
+            exact = self._table(leaf.qname) is None and not ref.loose_window
             for offset, length in placements:
                 if offset + length > base and offset < end:
                     out.append(_Piece(node, offset - base, length, exact))
@@ -1142,6 +1194,34 @@ class FieldFlowAnalyzer:
                         self._key_uses.append(
                             KeyUse(port, qname, 0, "SELECT RECORD KEY")
                         )
+
+    def _index_reports(self, ast: CobolProgram) -> None:
+        self._report_to_file = report_to_file_map(ast)
+        data_div = ast.get_division("DATA")
+        section = data_div._sections.get("REPORT") if data_div is not None else None
+        if section is None:
+            return
+        for group in section.data_items:
+            report = group.get_metadata("rd_report_name")
+            if not group.name or not report:
+                continue
+            clauses = group.get_metadata("report_clauses") or {}
+            detail = str(clauses.get("type", "")).upper() in ("DETAIL", "DE")
+            operands: list[str] = []
+            for node in group.traverse_depth_first():
+                get_metadata = getattr(node, "get_metadata", None)
+                rc = get_metadata("report_clauses") if callable(get_metadata) else None
+                if not rc:
+                    continue
+                if rc.get("source"):
+                    operands.append(str(rc["source"]))
+                for entry in rc.get("sum") or []:
+                    operands.extend(str(o) for o in entry.get("operands") or [])
+            self._report_groups[group.name.upper()] = (
+                str(report).upper(),
+                detail,
+                operands,
+            )
 
     def _file_port(self, file_name: str) -> Port:
         upper = file_name.upper()
@@ -1224,9 +1304,11 @@ class FieldFlowAnalyzer:
         src, tgt = self._items[src_ref.qname], self._items[tgt_ref.qname]
         sources = self._pieces(src_ref)
         targets = self._pieces(tgt_ref)
+        loose = src_ref.loose_window or tgt_ref.loose_window
         if not src.children and not tgt.children and sources and targets:
             s, t = sources[0], targets[0]
-            self._edge(s.node, t.node, kind, ctx, statement, s.exact and t.exact)
+            exact = s.exact and t.exact and not loose
+            self._edge(s.node, t.node, kind, ctx, statement, exact)
             return
         if sources is None or targets is None:
             for s_leaf in self._leaves(src_ref.qname):
@@ -1249,6 +1331,32 @@ class FieldFlowAnalyzer:
             t_start = tgt_ref.window[0]
             t_len = tgt_ref.window[1] or max(t_len - t_start, 0)
         span = min(s_len, t_len)
+        if loose:
+            # A side whose window may start anywhere can reach every field
+            # under it; how it lines up with the other side is unknown, so
+            # every pair is an inexact edge (#527).
+            s_reach = (
+                sources
+                if src_ref.loose_window
+                else [
+                    p
+                    for p in sources
+                    if p.rel + p.length > s_start and p.rel < s_start + span
+                ]
+            )
+            t_reach = (
+                targets
+                if tgt_ref.loose_window
+                else [
+                    p
+                    for p in targets
+                    if p.rel + p.length > t_start and p.rel < t_start + span
+                ]
+            )
+            for s in s_reach:
+                for t in t_reach:
+                    self._edge(s.node, t.node, kind, ctx, statement, False)
+            return
         # Both sides relative to the start of the bytes actually moved.
         moved_s = [
             replace(p, rel=p.rel - s_start)
@@ -1523,6 +1631,8 @@ class FieldFlowAnalyzer:
                     )
         elif isinstance(stmt, CallStatement):
             self._visit_call(stmt, ctx)
+        elif stmt.statement_type in ("GENERATE", "TERMINATE"):
+            self._visit_report_writer(stmt, ctx)
         elif hasattr(stmt, "sql_text"):
             self._visit_sql(stmt, ctx)
         elif name == "ExecCicsStatement":
@@ -1542,13 +1652,53 @@ class FieldFlowAnalyzer:
             elif role == ROLE_WRITE:
                 writes += [r for r in self._refs(value, ROLE_WRITE) if r not in writes]
         statement = stmt.statement_type or type(stmt).__name__
+        self_only = self._self_feeding(stmt, reads, writes)
         for src in reads:
             for s in self._pieces(src) or self._loose_pieces(src):
                 for tgt in writes:
+                    if src.qname in self_only and src.qname != tgt.qname:
+                        continue
                     for t in self._pieces(tgt) or self._loose_pieces(tgt):
                         self._edge(
                             s.node, t.node, kind, ctx, statement, s.exact and t.exact
                         )
+
+    def _self_feeding(
+        self, stmt: CobolStatement, reads: list[_Ref], writes: list[_Ref]
+    ) -> set[str]:
+        """Receivers that only accumulate into themselves (#535):
+        ``ADD 1 TO A B`` is ``A = A + 1; B = B + 1``, so A feeds nothing
+        else the statement writes. The same holds for SUBTRACT / MULTIPLY /
+        DIVIDE without GIVING, INSPECT TALLYING counters and a STRING /
+        UNSTRING POINTER or TALLYING IN item. COMPUTE (``COMPUTE A B = A +
+        1`` does feed B) and a GIVING form keep every edge; a receiver that
+        is also a sending operand (``ADD A TO A B``) feeds the others too."""
+        if isinstance(stmt, ComputeStatement):
+            return set()
+        if isinstance(stmt, ArithmeticStatement):
+            if stmt.givings or stmt.giving:
+                return set()
+            receivers = [*stmt.targets, *([stmt.target] if stmt.target else [])]
+            out = {r.qname for text in receivers for r in self._refs(text, ROLE_WRITE)}
+            sending = stmt.source_operands
+            if sending is None and type(stmt).__name__ in (
+                "MultiplyStatement",
+                "DivideStatement",
+            ):
+                # No source list recorded: the first operand is the sender
+                # (``MULTIPLY n BY b c``, ``DIVIDE n INTO b c``; #534).
+                sending = list(stmt.operands[:1])
+            for text in sending or []:
+                out -= {r.qname for r in self._refs(text, ROLE_READ)}
+            return out
+        if isinstance(stmt, (StringStatement, UnstringStatement, InspectStatement)):
+            out = {r.qname for r in reads} & {w.qname for w in writes}
+            if isinstance(stmt, InspectStatement) and stmt.target:
+                # The inspected item is the sending operand, even when
+                # REPLACING also writes it.
+                out -= {r.qname for r in self._refs(stmt.target, ROLE_READ)}
+            return out
+        return set()
 
     def _loose_pieces(self, ref: _Ref) -> list[_Piece]:
         """Every elementary field of an operand whose offset is unknown."""
@@ -1703,6 +1853,53 @@ class FieldFlowAnalyzer:
                 out_of_program=True,
             )
 
+    def _visit_report_writer(self, stmt: CobolStatement, ctx: _Context) -> None:
+        """GENERATE / TERMINATE: the ``SOURCE`` / ``SUM`` operands of the
+        report groups they print flow to the report file (#499).
+
+        ``GENERATE detail`` prints that DETAIL group; any GENERATE can also
+        trigger the report's headings, footings and control breaks, as does
+        TERMINATE (final footings), so those non-DETAIL groups count for
+        every site. Where on the line each value lands (COLUMN, edited
+        PICTURE) is not modelled: the edges carry no offset and are inexact.
+        """
+        files = report_writer_files(stmt, self._report_to_file)
+        if not files:
+            return
+        verb = stmt.statement_type
+        names = (
+            [getattr(stmt, "report_name", None) or ""]
+            if verb == "GENERATE"
+            else list(getattr(stmt, "report_names", None) or [])
+        )
+        groups: list[str] = []
+        for name in names:
+            upper = name.upper()
+            entry = self._report_groups.get(upper)
+            report = entry[0] if entry is not None else upper
+            if entry is not None:
+                groups.append(upper)
+            groups.extend(
+                group
+                for group, (owner, detail, _ops) in self._report_groups.items()
+                if owner == report and not detail
+            )
+        for file_name in files:
+            port = self._file_port(file_name)
+            port.directions.add("out")
+            for group in dict.fromkeys(groups):
+                for operand in self._report_groups[group][2]:
+                    for ref in self._refs(operand, ROLE_READ):
+                        for leaf in self._leaves(ref.qname):
+                            self._edge(
+                                self._item_node(leaf.qname),
+                                LineageNode(port.kind, port.key, None, leaf.length),
+                                "write",
+                                ctx,
+                                verb,
+                                exact=False,
+                            )
+
     def _visit_accept(self, stmt: IOAcceptStatement, ctx: _Context) -> None:
         source = (stmt.from_source or "SYSIN").upper()
         words = source.split()
@@ -1786,7 +1983,12 @@ class FieldFlowAnalyzer:
                 if not parameter.name or is_quoted_literal(parameter.name):
                     continue
                 mode = (parameter.passing_mode or "REFERENCE").upper()
-                by_reference = mode not in ("CONTENT", "VALUE")
+                # An intrinsic FUNCTION argument is a temporary: whatever the
+                # callee writes to it reaches none of the caller's items.
+                by_reference = mode not in (
+                    "CONTENT",
+                    "VALUE",
+                ) and not parameter.name.upper().startswith("FUNCTION ")
                 port = self._port(PORT_CALL, f"{callee}#{position}")
                 port.detail.update(
                     {"callee": callee, "position": position, "dynamic": stmt.is_dynamic}
@@ -1846,12 +2048,16 @@ class FieldFlowAnalyzer:
             for qname in self._resolve(flow.host_var):
                 for leaf in self._leaves(qname):
                     node = self._item_node(leaf.qname)
+                    # A table field's node stands for any occurrence (a
+                    # multi-row FETCH writes them all), so the edge is
+                    # inexact like every other edge through a table (#507).
+                    exact = flow.exact and self._table(leaf.qname) is None
                     if flow.direction == "out":
                         port.directions.add("out")
-                        self._edge(node, column, flow.kind, ctx, "EXEC SQL", flow.exact)
+                        self._edge(node, column, flow.kind, ctx, "EXEC SQL", exact)
                     else:
                         port.directions.add("in")
-                        self._edge(column, node, flow.kind, ctx, "EXEC SQL", flow.exact)
+                        self._edge(column, node, flow.kind, ctx, "EXEC SQL", exact)
         line = ctx.location.line if ctx.location is not None else 0
         for key in result.keys:
             node = LineageNode(PORT_SQL, f"{key.table}.{key.column}")

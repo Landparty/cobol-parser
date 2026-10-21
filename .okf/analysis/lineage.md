@@ -43,14 +43,25 @@ the record-relative byte offset/length `layout_offsets` computes) and
 
 | Port kind | Key | From |
 |-----------|-----|------|
-| `file` | DD name (`normalize_ddname`: `UT-S-` / `S-` prefixes stripped, the backend's rule) | READ / WRITE / REWRITE / RELEASE / RETURN / SORT-MERGE USING-GIVING, one byte range per record field |
-| `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`; SPACES / LOW-VALUES / HIGH-VALUES / ZERO candidates are the "no program" sentinel and are dropped by `_names.callee_names`), else `?IDENT#n` plus a caveat |
+| `file` | DD name (`normalize_ddname`: `UT-S-` / `S-` prefixes stripped, the backend's rule) | READ / WRITE / REWRITE / RELEASE / RETURN / SORT-MERGE USING-GIVING, one byte range per record field; Report Writer GENERATE / TERMINATE: the `SOURCE` / `SUM` operands of the printed groups (the GENERATEd DETAIL group plus every non-DETAIL group of its report -- headings, footings and control breaks can fire at any GENERATE), offset-less and inexact (`_visit_report_writer`, #499) |
+| `call` | `CALLEE#n`, `CALLEE#RETURNING` | CALL USING (BY REFERENCE goes both ways, except a `FUNCTION ...` argument: a temporary, so it only goes in, #579); a dynamic CALL fans out over `DynamicCallAnalyzer`'s candidates (run inside `analyze`; SPACES / LOW-VALUES / HIGH-VALUES / ZERO candidates are the "no program" sentinel and are dropped by `_names.callee_names`), else `?IDENT#n` plus a caveat |
 | `linkage` | `PROGRAM#n` / `ENTRY#n`, `PROGRAM#RETURNING` (out only) | PROCEDURE DIVISION USING / RETURNING, via `ProgramSignatureExtractor`; the edge's line is the entry point's own (the USING line, or the ENTRY statement), not the program's first line |
 | `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats, as is a FROM sub-select or a `TABLE(...)` table function -- matched on `TABLE` followed by `(`, so an ordinary table named `TABLE_CUST` / `TABLES_CFG` is traced, #340) |
 | `console` | `SYSIN` / `SYSOUT` (or the ACCEPT's `FROM` source) | ACCEPT / DISPLAY; `ACCEPT FROM DATE` / `DAY` / `DAY-OF-WEEK` / `TIME` (with or without a format qualifier) make no port -- the runtime's clock, not data entering the program |
 
+A contained program's nodes include its containers' GLOBAL records
+(`unused_variables.inherited_data_records`, laid out from the owning
+program's `compute_program_data_items`), so `DISPLAY A` of a GLOBAL `A` in
+the inner unit is an `A -> SYSOUT` edge, not a "not declared" caveat
+(#504). The item is keyed in the inner report like its own; no cross-program
+join links it to the container's node yet.
+
 Edge kinds: `move` (group MOVE is a byte overlay; CORRESPONDING pairs by
-name; literal reference modification narrows the range), `arith`,
+name; literal reference modification narrows the range; a non-literal
+start or length -- `REC(WS-POS:10)` -- is `_Ref.loose_window`: the operand
+reaches every field under it, every pair inexact (`_pieces` marks its
+pieces inexact, so STRING / DISPLAY / arithmetic operands too), with a
+caveat naming it, #527 -- it used to be read as `REC(1:10)`), `arith`,
 `string`, `init`, `set`, `aggregate` / `sql-expr` (SQL `SUM(...)` /
 expressions), `read`, `write`, `redefines` (two-way, including several 01
 records under one FD, and the records of every file one `I-O-CONTROL. SAME
@@ -88,7 +99,8 @@ occurrence. Its bytes are every occurrence's (`_placements`: one range per
 occurrence, or a single spanning range past `_PLACEMENT_CAP` = 1024), so a
 group MOVE / READ / WRITE / CALL maps each occurrence where it really lies,
 and every edge through a table field is **inexact** -- never a wrong exact
-field. A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
+field. That includes EXEC SQL host-variable edges (`_visit_sql`, #507: a
+multi-row FETCH writes every occurrence). A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
 OCCURS level, within bounds) on an elementary field gets its own item node
 `R.AMT(3)` at the occurrence's offset, joined both ways to `R.AMT` by
 inexact `occurrence` edges, and an exact edge to its own bytes on every port
@@ -110,6 +122,17 @@ skipping FILLER, REDEFINES and OCCURS items and what is under them.
 item is numeric and receiving item numeric or numeric-edited (`_Item.category`,
 from PICTURE / USAGE), one `arith` edge each; the generic reads-to-writes
 path would join every subordinate to every other one (issue #337).
+In that generic path (`_reads_to_writes`) a receiver that only accumulates
+into itself feeds nothing else the statement writes (`_self_feeding`,
+#535, #534): the receivers of ADD / SUBTRACT / MULTIPLY / DIVIDE without GIVING
+(taken from the model, not xref roles; with no `source_operands` recorded,
+MULTIPLY / DIVIDE take their first operand as the sender), and a
+read-and-written operand of
+INSPECT (counters; the inspected item excepted), STRING or UNSTRING
+(POINTER, TALLYING IN). `ADD 1 TO A B` is `A = A + 1; B = B + 1`, and
+`MULTIPLY n BY b c` is `b = b * n; c = c * n`. COMPUTE
+(`COMPUTE A B = A + 1` feeds B), a GIVING form, and a receiver that is also
+a sending operand keep their edges.
 
 **Alias edges are never chained with one of their own class**
 (`overlay_class`; summary BFS and `LineageGraph._trace` both carry the
@@ -156,28 +179,91 @@ unjoined=...)` restores them so the rebuilt graph's `to_dict()` equals the
 original's (pinned in `TestStoredJoinState`). Without `join_caveats` only
 the opaque-callee caveat is re-derived and `unjoined` is empty. A rebuilt
 graph records the edges it loads, so its own `join_edges()` re-exports them.
-`ImpactResult.start_found` is False when nothing matched the start.
+`ImpactResult.start_found` is False when nothing matched the start. A
+declared item that no edge touches (set only from literals / VALUE, or only
+tested in a condition) is found: `impact()` returns no hits and a
+`notes` entry saying no value flows through it (#546; `_start_groups`
+answers "declared?" in its `matched` half and "in the graph?" in its groups).
+`ImpactResult.notes` is in `to_dict()` and a `Notes:` block of `to_text()`.
+A bare name matching several items of one program (`AMT` in IN-REC and
+OUT-REC) is traced once per matched qualified name (`_start_groups`; a
+copybook field is one group across every program that COPYs it), so a
+field one match reaches is a hit even when it is another match -- one
+multi-source trace never reported a start. `impact()` adds the caveat
+`PROG: AMT matches N fields: ...; qualify with OF to trace one`, also
+listed in `ImpactResult.ambiguous` (#540) -- on the no-flow path too.
+The start name is split by `_names.split_qualified_name`, so `IN` works
+wherever `OF` does (`field-impact "AMT IN IN-REC"`, #541; `FieldFlowAnalyzer`
+`_resolve` shares it).
+`ImpactResult.to_text()` lists every hit `to_dict()` does: items and ports
+(prefixed `port `) under their program, tables and datasets on their own
+lines (#528: ports were dropped, so a DISPLAY-only field read as feeding
+nothing).
+A port is a hit only where the trail ends at it: `_reach` drops it when
+some onward edge is a join (`cross`, or to a dataset / table node or
+another program). An edge back into the same program is no join, so a
+two-way port -- an unbound DD opened I-O, a BY REFERENCE argument to a
+program outside the scan, a `PROCEDURE DIVISION USING` parameter -- is
+reported (#510: any onward edge used to hide it).
+`Hop.origin_file` (from `_EdgeInfo.origin_file`, the report edge's
+`origin.file` after `apply_source_map`, set in `_reach`) says which file a
+hop's line is in; it is not in `Hop.to_dict()` (#489, used by the MCP server).
 
 ## Bindings from JCL
 
 **Bindings (`lineage_jcl.py`).** `bindings_from_jobs(jobs)` turns
 **jcl-parser** `Job`s (duck-typed; imported only in `load_jobs`, through
 `importlib`, so cobol-parser keeps no runtime or mypy dependency on it)
-into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT/ICETOOL (`SORTIN*`
--> `SORTOUT` + `OUTFIL FNAMES`), IEBGENER/ICEGENER, IDCAMS REPRO (operands
-in any order, `-` continuations joined), IKJEFT01 `RUN PROGRAM(x)`. A
+into bindings and pass-throughs: DFSORT/ICEMAN/SYNCSORT (`SORTIN*` ->
+`SORTOUT` + `OUTFIL FNAMES` + `OUTFIL FILES=nn` as DD `SORTOFnn`; a
+`JOINKEYS` step reads `SORTJNF1`/`SORTJNF2` or its `F1=`/`F2=` DDs and is
+always a `reformat`, #585), ICETOOL (each `TOOLIN` `COPY` / `SORT` / `MERGE`
+/ `SELECT` / `SUBSET` / `DATASORT` operator `FROM(dd)` -> `TO(dd...)` +
+`DISCARD(dd)`, classified through its `USING(xxxx)` `xxxxCNTL` statements;
+`SPLICE` / `RESIZE` are reformats, #566), IEBGENER/ICEGENER, IDCAMS REPRO
+(operands in any order, `-` continuations joined; a command word starts a
+command only at a statement start -- newline, `;`, or after
+`THEN`/`ELSE`/`DO` -- outside parentheses, after `/* */` comments are
+dropped, so `PROD.DELETE.MASTER` does not end the REPRO, #338), IKJEFT01
+`RUN PROGRAM(x)` (every one in the SYSTSIN, each bound to the step's DDs, #584).
+A
 blank-named DD continues the concatenation of the DD before it (`_named`);
 `DD DUMMY` / `DSN=NULLFILE` bind nothing (`_dataset`); `DSN=*.STEP.DD`
-referbacks resolve to the earlier step's dataset; quoted literals in
+referbacks resolve to the earlier step's dataset (`_referback_keys`: the
+current step's PROC-invocation prefix + the referback first, so an in-PROC
+`*.S1.DD` from `RUNA.S2` is `RUNA.S1`; then the full path, so
+`*.RUNB.S1.DD` works from outside; then the last two parts), and one that
+names no earlier DD binds nothing -- never the literal `*.` text -- and is
+a caveat (#565); quoted literals in
 DFSORT/IEBGENER control statements are blanked before keywords are matched
-(`INCLUDE COND=(...,C'BUILD')` is not a reformat). A `DFSRRC00` step (the IMS region
+(`INCLUDE COND=(...,C'BUILD')` is not a reformat). Control statements that
+live in a dataset (`SYSIN DD DSN=PROD.CNTL(X)`, a `DFSPARM` dataset) are not
+read, so a SORT / IEBGENER step with one is a `reformat` plus a caveat naming
+it, never an assumed copy (#339, option (a)); an in-stream `DFSPARM` is read
+with `SYSIN`. A `DFSRRC00` step (the IMS region
 controller) binds its DDs to the application program named by the second
 `PARM` positional when the region is `DLI` / `DBB` / `BMP`, not to
 `DFSRRC00` itself, so an IMS batch program's files join. `load_jobs(paths, proc_path)` reads a flat PROC
 folder (`NAME.prc`) as well as a JCLLIB base -- jcl-parser's own loader
 only searches `JCLLIB ORDER=` libraries. `jobs_from_sources(jcl, procs)`
 does the same from in-memory text (the backend's stored members). Not built
-on `cobolparser/jcl/`.
+on `cobolparser/jcl/`'s model; it shares only `jcl/programs.py` (the
+IKJEFT01 / DFSRRC00 launched-program rules), so `jcl --program` and lineage
+agree about a deck (#493).
+
+**JCL caveats.** `bindings_from_jobs(jobs, caveats)` appends one line per
+step whose flow it could not read (`<PROGRAM> step <STEP> in job <JOB>:
+...`), so a step left out never reads as a step that moves nothing: a sort
+step with no recognised input or output DD (`SORT step S2 in job J1:
+outputs not recognised; the flow through it is not traced`), an ICETOOL
+`TOOLIN` (or `USING` `xxxxCNTL`, then read as a reformat) that is not
+in-stream, an operator whose DDs bind nothing, an IKJEFT01 step whose
+`SYSTSIN` is a dataset (its programs are unknown, #566), and a referback
+that names no earlier DD (#565). `field-impact --jcl` and the MCP lineage
+index pass them as `LineageGraph(join_caveats=...)`, which -- without
+`join_edges` -- adds them to the joins' caveats (so `join_state()` exports
+them too). Invariant: a caveat there must not start with `PROGRAM:`, or
+`impact()` would show it only to queries reaching that program.
 
 Tests: `tests/unit/analysis/test_field_lineage.py`, `test_lineage_graph.py`,
 `test_lineage_jcl.py`, `test_sql_flow.py`, `tests/unit/cli/test_lineage_cli.py`;

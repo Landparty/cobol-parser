@@ -7,9 +7,11 @@ from cobolparser.parsers.statements._utils import (
     SCOPE_TERMINATORS,
     STATEMENT_KEYWORDS,
     STATEMENT_TOKEN_TYPES,
+    _looks_like_statement_boundary,
     consume_optional_qualifiers,
     get_parse_context,
     is_statement_boundary,
+    join_source_parts,
     literal_operand_text,
     matches_keyword,
     peek_past_noise,
@@ -508,6 +510,13 @@ class CallStatementParser(IStatementParser):
                 TokenType.LEVEL_NUMBER,
                 TokenType.OMITTED,
             ):
+                # ``FUNCTION name(args)`` is one argument (#579): left to the
+                # identifier path, FUNCTION became an argument of its own and
+                # every later one moved a position right.
+                function_arg = _consume_function_argument(token_stream)
+                if function_arg is not None:
+                    stmt.add_using_parameter(function_arg, passing_mode)
+                    continue
                 # A literal argument keeps its quotes (``BY CONTENT 'A'``
                 # is not the data item A; ``X'00'`` is not ``00``).
                 param_name = literal_operand_text(token) or "OMITTED"
@@ -532,3 +541,46 @@ class CallStatementParser(IStatementParser):
             else:
                 # No parameter found, end of USING clause
                 break
+
+
+def _consume_function_argument(token_stream: ITokenStream) -> str | None:
+    """Consume ``FUNCTION name [(args)] [(refmod)]`` as one CALL argument.
+
+    Returns the argument text in MOVE's source spelling
+    (``FUNCTION UPPER-CASE(WS-NAME)``, ``FUNCTION CURRENT-DATE(1:8)``), or
+    ``None`` -- consuming nothing -- when the next token is not ``FUNCTION``
+    followed by a function name. Every directly following parenthesised
+    group is folded in: an argument list and a reference modifier both
+    belong to the function, and no next argument can start with ``(``.
+    A literal inside the parentheses keeps its quotes. An unclosed ``(``
+    stops at the first token that could never sit inside one rather than
+    running on through later statements.
+    """
+    token = token_stream.peek()
+    if token is None or token_value_upper(token) != "FUNCTION":
+        return None
+    name_tok, name_idx = peek_past_noise(token_stream, 1)
+    if name_tok is None or name_tok.type != TokenType.IDENTIFIER:
+        return None
+    token_stream.consume()  # FUNCTION
+    skip_whitespace(token_stream)
+    token_stream.consume()  # the function name
+    parts = ["FUNCTION", name_tok.value]
+    depth = 0
+    while not token_stream.is_empty():
+        if depth > 0:
+            skip_whitespace(token_stream)
+        t = token_stream.peek()
+        if t is None:
+            break
+        if depth == 0 and t.type != TokenType.LEFT_PAREN:
+            break
+        if depth > 0 and _looks_like_statement_boundary(t):
+            break
+        if t.type == TokenType.LEFT_PAREN:
+            depth += 1
+        elif t.type == TokenType.RIGHT_PAREN:
+            depth -= 1
+        parts.append(literal_operand_text(t))
+        token_stream.consume()
+    return join_source_parts(parts)

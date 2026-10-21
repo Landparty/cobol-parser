@@ -12,7 +12,7 @@ This module provides comprehensive tokenization of COBOL source code including:
 
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum, auto
 
 from ._accel import accelerators_enabled
@@ -201,9 +201,18 @@ def _declared_currency_symbols(
     out -- they already lex as (part of) a word. A clause inside a comment
     declares nothing.
     """
-    symbols: set[str] = set()
+    return frozenset(declared_currency_signs(source, fixed_format))
+
+
+def declared_currency_signs(source: str, fixed_format: bool = False) -> dict[str, str]:
+    """Each declared PICTURE currency symbol (as
+    :func:`_declared_currency_symbols` picks them) mapped to the currency
+    string it stands for: ``CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL '#'``
+    is ``{"#": "EUR"}``, and ``CURRENCY SIGN IS '#'`` is ``{"#": "#"}``.
+    What an edited picture's currency positions display."""
+    signs: dict[str, str] = {}
     if "CURRENCY" not in source.upper():
-        return frozenset()
+        return signs
     code = _code_text(source, blank_literals=False, fixed_format=fixed_format)
     for match in _CURRENCY_CLAUSE_RE.finditer(code):
         sign = match.group(1) or match.group(2) or ""
@@ -211,8 +220,8 @@ def _declared_currency_symbols(
         if symbol is None and len(sign) == 1:
             symbol = sign
         if symbol and not symbol.isalnum() and not symbol.isspace():
-            symbols.add(symbol)
-    return frozenset(symbols)
+            signs.setdefault(symbol, sign)
+    return signs
 
 
 # ---------------------------------------------------------------------------
@@ -560,6 +569,10 @@ class Token:
     value: str
     location: SourceLocation
     raw_value: str | None = None  # Original source text if different from value
+    # The delimiter a STRING_LITERAL was written with (``'`` or ``"``), None
+    # when unknown. Embedded SQL needs it: there ``"X"`` is a delimited
+    # identifier, not a string (issue #597). Not part of equality.
+    quote: str | None = field(default=None, compare=False, repr=False)
 
     def __str__(self) -> str:
         return f"{self.type.name}({self.value})"
@@ -942,9 +955,12 @@ class _CobolLexerPure:
         self._open_string_location: SourceLocation | None = None
         # PICTURE currency symbols declared by SPECIAL-NAMES CURRENCY SIGN
         # clauses (lexed as CURRENCY tokens, like ``$``).
-        self._currency_symbols: frozenset[str] = _declared_currency_symbols(
+        #: Each one's currency string (``{"#": "EUR"}``), for the parser to
+        #: hand to the PICTURE clauses that use it.
+        self.currency_signs: dict[str, str] = declared_currency_signs(
             source, fixed_format=not free_form
         )
+        self._currency_symbols: frozenset[str] = frozenset(self.currency_signs)
         # ``DECIMAL-POINT IS COMMA``: ``,`` between digits is the decimal
         # point of a numeric literal and ``.`` is not. A decimal literal's
         # token keeps the canonical ``.`` spelling in ``value`` (every
@@ -1061,7 +1077,9 @@ class _CobolLexerPure:
                 chars.append(char)
                 self.advance_char()
 
-        return Token(TokenType.STRING_LITERAL, "".join(chars), start_location)
+        return Token(
+            TokenType.STRING_LITERAL, "".join(chars), start_location, quote=quote_char
+        )
 
     def read_numeric_literal(self) -> Token:
         """Read a numeric literal (integer or decimal)."""
@@ -1799,7 +1817,7 @@ class _CobolLexerPure:
                     )
                 )
 
-        return Token(TokenType.STRING_LITERAL, value, location), pos
+        return Token(TokenType.STRING_LITERAL, value, location, quote=quote_char), pos
 
     def _try_single_line_string(
         self, text: str, start_pos: int, line_num: int, start_col: int
@@ -1824,7 +1842,12 @@ class _CobolLexerPure:
                     continue
                 pos += 1
                 return (
-                    Token(TokenType.STRING_LITERAL, "".join(chars), location),
+                    Token(
+                        TokenType.STRING_LITERAL,
+                        "".join(chars),
+                        location,
+                        quote=quote,
+                    ),
                     pos,
                     False,
                 )
@@ -2151,6 +2174,73 @@ class _CobolLexerPure:
         self._merge_concatenated_literals()
         self._flag_stray_sql_chars()
         self._retype_operator_currency_symbols()
+        self._retype_legacy_verb_data_names()
+
+    #: Legacy verbs (Micro Focus CHAIN, COBOL-74 NOTE, OS/VS EXHIBIT /
+    #: EXAMINE / TRANSFORM) that no default-dialect program reserves.
+    _LEGACY_VERB_TYPES = frozenset(
+        {
+            TokenType.CHAIN,
+            TokenType.NOTE,
+            TokenType.EXHIBIT,
+            TokenType.EXAMINE,
+            TokenType.TRANSFORM,
+        }
+    )
+    _LAYOUT_TYPES = frozenset(
+        {
+            TokenType.WHITESPACE,
+            TokenType.NEWLINE,
+            TokenType.COMMENT,
+            TokenType.CONTINUATION,
+        }
+    )
+
+    def _retype_legacy_verb_data_names(self) -> None:
+        """Lex a legacy verb the program declares as a data name as an
+        IDENTIFIER, everywhere in the source (#525).
+
+        ``05 CHAIN PIC X(10)`` / ``05 NOTE PIC X(30)`` (a DCLGEN for a table
+        with a NOTE column) are legal under IBM Enterprise COBOL, where none
+        of these words is reserved; lexed as verbs the item became an
+        anonymous FILLER and ``MOVE x TO CHAIN`` started a CHAIN statement.
+        A word counts as declared when it directly follows a level number
+        that starts its line outside the PROCEDURE DIVISION -- the
+        data-name slot. Undeclared, the words stay verbs, as TITLE and
+        VALIDATE already behave.
+        """
+        tokens = self.tokens
+        legacy = self._LEGACY_VERB_TYPES
+        if not any(token.type in legacy for token in tokens):
+            return
+        layout = self._LAYOUT_TYPES
+        declared: set[str] = set()
+        in_procedure = False
+        # An entry starts a line or follows a period; only a level number
+        # there opens a data-name slot (``IF 1 = 1 EXHIBIT ...`` must not).
+        entry_start = True
+        after_level = False
+        for token in tokens:
+            kind = token.type
+            if kind == TokenType.PROCEDURE_DIVISION:
+                in_procedure = True
+            elif kind == TokenType.DATA_DIVISION:
+                in_procedure = False
+            if kind in layout:
+                if kind == TokenType.NEWLINE:
+                    entry_start = True
+                continue
+            if kind in legacy and after_level and not in_procedure:
+                declared.add(token.value.upper())
+            after_level = kind == TokenType.LEVEL_NUMBER and entry_start
+            entry_start = kind == TokenType.PERIOD
+        if not declared:
+            return
+        for index, token in enumerate(tokens):
+            if token.type in legacy and token.value.upper() in declared:
+                tokens[index] = Token(
+                    TokenType.IDENTIFIER, token.value, token.location, token.raw_value
+                )
 
     #: Single-character operator tokens a SPECIAL-NAMES ``CURRENCY SIGN``
     #: clause can declare as a PICTURE symbol (``CURRENCY SIGN IS "<"``).

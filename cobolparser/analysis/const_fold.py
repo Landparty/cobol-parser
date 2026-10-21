@@ -60,6 +60,7 @@ from __future__ import annotations
 import re
 import weakref
 from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, localcontext
 from fractions import Fraction
@@ -247,6 +248,62 @@ class _LayoutFacts:
 
 
 _FACTS_CACHE: weakref.WeakKeyDictionary[Any, _LayoutFacts] = weakref.WeakKeyDictionary()
+
+
+class _ProgramWalk:
+    """What a fold reads off the program's statement tree and nothing else,
+    computed once per program instead of once per fold (#374).
+
+    ``gen-fixtures --scenarios all`` folds the same program twice per
+    scenario, and every fold re-walked the whole PROCEDURE DIVISION for its
+    READ and DISPLAY/WRITE sites and recomputed every statement's nested
+    lists: quadratic in program size.  The statement tree does not change
+    between folds (the same assumption ``_FACTS_CACHE`` makes of the index).
+
+    Kept per *index*, not per AST: everything here leads back to the AST
+    (a statement's ``parent`` chain, ``index.ast``), so a weak-keyed entry
+    on the AST would hold its own key alive and no folded program would ever
+    be freed.  Nothing in the AST leads to the index, so an entry keyed on
+    the index goes when the index does.  :attr:`program` is a weak
+    reference, checked on every lookup, so an index folded with a different
+    AST does not reuse this one's walk.
+    """
+
+    __slots__ = ("nested", "program", "statements", "unseeded")
+
+    def __init__(self, ast: CobolProgram) -> None:
+        self.program: weakref.ref[CobolProgram] = weakref.ref(ast)
+        #: The fold with no seed values, by the ``success_skipped`` set it
+        #: was folded under (#591 makes the result depend on it): the same
+        #: for every scenario of one program, and ``gen-fixtures`` asks for
+        #: it once per scenario.
+        self.unseeded: dict[frozenset[int], ConstantFoldResult] = {}
+        #: ``_procedure_statements`` results, by the *types* asked for.
+        self.statements: dict[Any, list[Any]] = {}
+        #: ``_nested_statement_lists`` results, by ``id(stmt)``; the
+        #: statement is kept beside its lists so a reused id cannot match.
+        self.nested: dict[int, tuple[Any, list[list[Any]]]] = {}
+
+
+_WALK_CACHE: weakref.WeakKeyDictionary[Any, _ProgramWalk] = weakref.WeakKeyDictionary()
+#: The program walk of the fold running now; ``None`` outside one.
+_CURRENT_WALK: ContextVar[_ProgramWalk | None] = ContextVar(
+    "_CURRENT_WALK", default=None
+)
+
+
+def _program_walk(ast: CobolProgram, index: ProgramLayoutIndex) -> _ProgramWalk:
+    try:
+        cached = _WALK_CACHE.get(index)
+    except TypeError:  # an index that cannot be weakly referenced
+        cached = None
+    if cached is None or cached.program() is not ast:
+        cached = _ProgramWalk(ast)
+        try:
+            _WALK_CACHE[index] = cached
+        except TypeError:
+            pass
+    return cached
 
 
 def _facts(index: ProgramLayoutIndex) -> _LayoutFacts:
@@ -561,6 +618,29 @@ class ConstantFolder:
         index: ProgramLayoutIndex,
         *,
         seed_values: dict[str, str] | None = None,
+        success_skipped: frozenset[int] | set[int] = frozenset(),
+    ) -> ConstantFoldResult:
+        walk = _program_walk(ast, index)
+        skipped = frozenset(success_skipped)
+        if not seed_values:
+            cached = walk.unseeded.get(skipped)
+            if cached is not None:
+                return _copy_result(cached)
+        token = _CURRENT_WALK.set(walk)
+        try:
+            result = self._fold(ast, index, seed_values, skipped)
+        finally:
+            _CURRENT_WALK.reset(token)
+        if not seed_values:
+            walk.unseeded[skipped] = _copy_result(result)
+        return result
+
+    def _fold(
+        self,
+        ast: CobolProgram,
+        index: ProgramLayoutIndex,
+        seed_values: dict[str, str] | None,
+        success_skipped: frozenset[int] = frozenset(),
     ) -> ConstantFoldResult:
         env: dict[str, Decimal | str] = {}
         seeds: dict[str, str] = seed_values if seed_values is not None else {}
@@ -578,6 +658,7 @@ class ConstantFolder:
 
         ordered_names, by_name = _ordered_paragraphs(ast)
         state = _WalkState(env=env, seed_env=dict(env))
+        state.success_skipped = success_skipped
         # The entry paragraph, then -- unless the walk stopped (STOP RUN,
         # GOBACK, EXIT PROGRAM, GO TO) -- every following paragraph in
         # source order: control falls through a paragraph's end into the
@@ -636,6 +717,18 @@ class ConstantFolder:
         return ConstantFoldResult(
             known=known, read_keys=_read_key_values(ast, index, state)
         )
+
+
+def _copy_result(result: ConstantFoldResult) -> ConstantFoldResult:
+    """*result* with its own dicts, so a caller changing one cannot change
+    the cached fold."""
+    return ConstantFoldResult(
+        known=dict(result.known),
+        read_keys={
+            site: dict(values) if values is not None else None
+            for site, values in result.read_keys.items()
+        },
+    )
 
 
 def keyed_read_key(stmt: IOReadStatement, index: ProgramLayoutIndex) -> str | None:
@@ -741,6 +834,16 @@ def _observation_sites(ast: CobolProgram) -> list[Any]:
 
 def _procedure_statements(ast: CobolProgram, types: Any) -> list[Any]:
     """Every PROCEDURE DIVISION statement of *types*, nested ones included."""
+    walk = _CURRENT_WALK.get()
+    if walk is not None:
+        cached = walk.statements.get(types)
+        if cached is None:
+            cached = walk.statements[types] = _collect_statements(ast, types)
+        return cached
+    return _collect_statements(ast, types)
+
+
+def _collect_statements(ast: CobolProgram, types: Any) -> list[Any]:
     procedure = ast.get_division("PROCEDURE")
     if procedure is None:
         return []
@@ -786,6 +889,17 @@ def _transfer_kind(stmt: Any) -> str | None:
     return None
 
 
+def _ends_run(stmt: Any) -> bool:
+    """STOP RUN, GOBACK or EXIT PROGRAM: the main line's `_walk_one` stops
+    on these, but inside a branch arm / loop body / handler they mean the
+    statements after the block may never run (#591)."""
+    if isinstance(stmt, StopStatement):
+        return (stmt.stop_type or "RUN").upper() == "RUN"
+    if isinstance(stmt, GobackStatement):
+        return True
+    return isinstance(stmt, ExitStatement) and (stmt.exit_type or "") == "PROGRAM"
+
+
 # -- walk state ---------------------------------------------------------------
 
 
@@ -802,6 +916,7 @@ class _WalkState:
         "visited_sites",
         "uncertain",
         "read_keys",
+        "success_skipped",
     )
 
     def __init__(
@@ -841,6 +956,10 @@ class _WalkState:
         #: of the walk over it (``None`` where not knowable); see
         #: `ConstantFoldResult.read_keys`.
         self.read_keys: dict[int, list[dict[str, Decimal | str] | None]] = {}
+        #: ``id()`` of the statements of bodies a success status never runs
+        #: (`InvocationCounts.success_skipped`): a run ender in one does not
+        #: make the walk uncertain for a scenario supplying success (#591).
+        self.success_skipped: frozenset[int] | set[int] = frozenset()
 
 
 # -- entry point / paragraph ordering -----------------------------------------
@@ -1425,6 +1544,18 @@ def _write_targets(stmt: Any) -> list[str]:
 
 
 def _nested_statement_lists(stmt: Any) -> list[list[Any]]:
+    walk = _CURRENT_WALK.get()
+    if walk is None:
+        return _collect_nested_lists(stmt)
+    found = walk.nested.get(id(stmt))
+    if found is not None and found[0] is stmt:
+        return found[1]
+    lists = _collect_nested_lists(stmt)
+    walk.nested[id(stmt)] = (stmt, lists)
+    return lists
+
+
+def _collect_nested_lists(stmt: Any) -> list[list[Any]]:
     lists: list[list[Any]] = []
     for attr in _NESTED_STATEMENT_ATTRS:
         value = getattr(stmt, attr, None)
@@ -1469,6 +1600,7 @@ def _poison_written_names(
     visiting: set[str] | None = None,
     *,
     state: _WalkState | None = None,
+    success_skipped: bool = False,
 ) -> None:
     """Poison every field a nested block (an IF/EVALUATE arm, a loop body)
     could possibly write -- including through a PERFORM to another
@@ -1485,6 +1617,10 @@ def _poison_written_names(
     bounded by real source nesting, not by paragraph-chain length."""
     if visiting is None:
         visiting = set()
+    if state is not None and statements and id(statements[0]) in state.success_skipped:
+        # A body a success status never runs (`IF WS-FS NOT = '00' ...
+        # GOBACK`): its STOP RUN / GOBACK does not end a success scenario.
+        success_skipped = True
     frames: list[tuple[Iterator[Any], str | None]] = [(iter(statements), None)]
     while frames:
         iterator, entered = frames[-1]
@@ -1521,9 +1657,11 @@ def _poison_written_names(
                             resolved.spec.qualified_name, []
                         ).append(None)
             transfer = _transfer_kind(stmt)
-            if transfer is not None:
+            if transfer is not None or (_ends_run(stmt) and not success_skipped):
                 # The block may leave the straight line: later statements may
-                # not run, and a GO TO runs code this walk never sees.
+                # not run (a STOP RUN / GOBACK / EXIT PROGRAM in an arm ends
+                # the run there, #591), and a GO TO runs code this walk never
+                # sees.
                 state.uncertain = True
                 if transfer == "jump":
                     env.clear()
@@ -1542,7 +1680,14 @@ def _poison_written_names(
             frames.append((iter(body), key))
         for nested in _nested_statement_lists(stmt):
             _poison_written_names(
-                nested, index, env, by_name, ordered_names, visiting, state=state
+                nested,
+                index,
+                env,
+                by_name,
+                ordered_names,
+                visiting,
+                state=state,
+                success_skipped=success_skipped,
             )
 
 
@@ -1825,7 +1970,13 @@ def _fold_multiply(
     # second operand (`MULTIPLY A BY B` reads B's old value directly, no
     # hidden extra term -- unlike ADD/SUBTRACT's accumulate form) so only
     # GIVING names are filtered out here, never targets.
-    true_operands = [op for op in stmt.operands if op not in stmt.givings]
+    # ``source_operands`` (GIVING form) keeps a BY operand that is also the
+    # GIVING target, which the deduped ``operands`` loses (#495).
+    true_operands = (
+        list(stmt.source_operands)
+        if stmt.givings and stmt.source_operands is not None
+        else [op for op in stmt.operands if op not in stmt.givings]
+    )
     if len(true_operands) != 2:
         _poison_names([*stmt.targets, *stmt.givings], index, env)
         return
@@ -1898,7 +2049,11 @@ def _fold_divide(
         reserved = set(stmt.givings)
         if stmt.remainder:
             reserved.add(stmt.remainder)
-        true_operands = [op for op in stmt.operands if op not in reserved]
+        true_operands = (
+            list(stmt.source_operands)
+            if stmt.source_operands is not None
+            else [op for op in stmt.operands if op not in reserved]
+        )
         if len(true_operands) != 2:
             _poison_names(stmt.givings, index, env)
             return

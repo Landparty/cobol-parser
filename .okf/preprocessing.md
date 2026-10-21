@@ -166,9 +166,10 @@ file -- the most important invariant in this area. How each pass keeps it:
 * The COPY splice strips exactly one trailing newline from the expanded
   member (never more -- a genuine blank final line stays) before counting its
   lines.
-* The only pass allowed to add lines is the expander's width-fitting wrap
-  (see [Output re-pad and width fitting](#output-re-pad-and-width-fitting)),
-  and the source map accounts for it.
+* The only passes allowed to add lines are the expander's width-fitting wrap
+  (see [Output re-pad and width fitting](#output-re-pad-and-width-fitting))
+  and the COPY splice's tail line (see [The COPY splice](#the-copy-splice)),
+  and the source map accounts for both.
 
 Pinned by `tests/regression/test_normalize_line_number_preservation.py`
 (also checks Cython/pure parity).
@@ -450,12 +451,25 @@ strip and REPLACE), so `parse_cobol` honours directives too;
 `_skip_to_identification_division` keeps `>>` lines ahead of the header.
 Directive and skipped lines are blanked in place.
 
-* `>>IF` is **evaluated**: `=`, `<>`, `>`, `<`, `>=`, `<=` between symbol
-  values and numeric/string literals; `DEFINED(sym)` / `sym [IS] [NOT]
-  DEFINED` (`IS` optional per IBM; a dangling `IS`/`NOT` is a syntax error);
-  `AND`/`OR`/`NOT` with parentheses.
+* `>>IF` is **evaluated**: `=`, `<>`, `>`, `<`, `>=`, `<=` and their word
+  forms (`[IS] [NOT] GREATER [THAN]`, `LESS [THAN]`, `EQUAL [TO]`, `... OR
+  EQUAL [TO]`; an `OR` is part of the operator only when `EQUAL` follows it)
+  between symbol values and numeric/string literals; `DEFINED(sym)` / `sym
+  [IS] [NOT] DEFINED` (`IS` optional per IBM; a dangling `IS`/`NOT` is a
+  syntax error); `AND`/`OR`/`NOT` with parentheses. A `(` that turns out to
+  open an arithmetic operand (`(X + 1) * 2 = 16`) is re-read as one; when
+  the text cannot be an operand either, the group's own error is reported
+  (`(FOO = 1)` still names the undefined `FOO`). Word
+  forms used to be "unsupported ... treated as FALSE", compiling the `>>ELSE`
+  instead (#512); pinned by
+  `tests/regression/test_conditional_compilation_word_operators.py`.
 * `>>EVALUATE sym` (literal `>>WHEN`s), `>>EVALUATE TRUE` (condition
-  `>>WHEN`s), `>>WHEN OTHER`, `>>END-EVALUATE`.
+  `>>WHEN`s), `>>WHEN OTHER`, `>>END-EVALUATE`. Stacked `>>WHEN`s (no text
+  between them; blank and comment lines do not count) share the text that
+  follows: `_CondFrame.when_pending` keeps the branch on when an earlier
+  phrase of the stack matched. Without it a match on the first phrase was
+  switched off by the next and the `>>EVALUATE` produced nothing, silently
+  (#492; `tests/regression/test_conditional_compilation_stacked_when.py`).
 * `defined_symbols`: a name set/list or a `dict[str, str | int | float |
   bool]` (the CLI's `--define NAME=VALUE`). A quoted value keeps its case; an
   unquoted one is a word and is upper-cased (`{"ENV": "prod"}` matches
@@ -463,8 +477,15 @@ Directive and skipped lines are blanked in place.
 * `>>DEFINE` symbols may be hyphenated (`_DEFINE_RE`). `>>DEFINE name AS
   arithmetic-expression` over integer literals / defined integer variables
   (`+ - * /`, parentheses) is evaluated exactly (`_eval_define_arithmetic`:
-  `AS 2 + 1` is `3`); otherwise the raw text is kept. Arithmetic inside an
-  `>>IF` comparison is unsupported (warns, FALSE).
+  `AS 2 + 1` is `3`); otherwise the raw text is kept. A lone word
+  (`_DEFINE_WORD_RE`, `AS A`) copies A's current value, any type (`AS (A)`
+  goes through the arithmetic, integers only); an
+  undefined one warns and keeps the word -- storing "A" made `>>IF B = 3`
+  silently FALSE (#567). An `>>IF` / `>>WHEN`
+  comparison operand may be the same arithmetic (`X + 1 = 8`), evaluated by
+  the same function so the two directives agree; an inexact or non-integer
+  one warns and is FALSE (#512). `_COND_TOKEN_RE` reads `X -1` as `X`, `-1`;
+  between two operands the sign is taken as the binary operator.
 * **Literal contents are case-sensitive**: only text outside quotes is
   upper-cased (`_upper_outside_literals`); `_compare` / `_values_equal`
   compare non-numeric values exactly. `_COND_TOKEN_RE` accepts signed
@@ -584,8 +605,8 @@ exponentially on unterminated REPLACING).
 
 ### REPLACING
 
-`apply_replacing_clauses` (`copy_statement_parser.py`, no Cython mirror) is a
-line-based scanner:
+`apply_replacing_clauses` (`copy_statement_parser.py`, no Cython mirror)
+scans the member's whole text in one pass (lines joined with `\n`):
 
 * **Operands.** `CopyStatementLexer._read_replacing_operand` reads
   pseudo-text, literals, and word operands extended greedily with `(OF|IN)
@@ -607,23 +628,36 @@ line-based scanner:
   `_build_clause_pattern` joins words with `_SEPARATOR_GAP` (a blank, or `,`/`;`
   then a blank), and `_pseudo_text_words` drops a `,`/`;` ending a non-literal
   search word before a blank or the end; `A,B` / `1,5` still compare as text.
-  Matching stays within one source line (a pseudo-text split across lines is
-  not matched).
+  A line break is a separator like a blank (`_SEPARATOR_GAP` includes `\n`),
+  so a search text whose words the copybook splits across lines matches, as
+  the REPLACE statement already did; per-line matching skipped it silently
+  (#560).
 * **Each word is replaced at most once.** All clauses go into ONE alternation
-  (longest search text first) applied in ONE left-to-right pass per segment;
+  (longest search text first) applied in ONE left-to-right pass;
   applying clauses one pass each would let `==A== BY ==B== ==B== BY ==A==`
-  rewrite replacements.
+  rewrite replacements. A LEADING / TRAILING hit settles its whole word: the
+  first partial clause (in clause order) that fits the word replaces it, and
+  scanning resumes after the word -- the leftmost hit alone turned
+  `XX-NAME-XX` into `CUST-NAME-END` under LEADING + TRAILING `==XX==`, unlike
+  REPLACE (#513). Clause order is the written order here, not the
+  longest-first order of the alternation (`LEADING ==X==` written before
+  `TRAILING ==XX==` settles `X-NAME-XX`). A whole-word clause still beats a
+  partial one by length, whatever the written order (known gap).
 * **Boundaries.** Hyphen-aware word boundaries, `_` counts as a word
   character, a decimal point binds (`(?<![0-9]\.)` / `(?!\.[0-9])`, so `==1==
   BY ==2==` leaves `VALUE 1.5`), LEADING/TRAILING, case-insensitive words.
 * **Context.** Comment lines (column-7 `*`/`/`, mask computed once from the
-  original content) are never rewritten. Text inside literals (both quote
-  styles, doubled-quote escapes, an unterminated literal runs to EOL) is not
-  rewritten unless the clause's search text contains a quote. The alternation
-  runs over the whole line (`_replace_in_line_with_literals`), so a search
-  text mixing code and a literal (`==VALUE 'A'==`) can match; a match of a
-  quote-free clause inside a literal is rejected and quote-bearing clauses
-  still get their turn there. The literal words of a search text compare
+  original content) are never rewritten: a match overlapping one is
+  rejected. Text inside literals (both quote styles, doubled-quote escapes,
+  found per line; an unterminated literal runs to EOL) is not rewritten
+  unless the clause's search text contains a quote. A search text mixing
+  code and a literal (`==VALUE 'A'==`) can match; a match of a quote-free
+  clause inside a literal is rejected and quote-bearing clauses still get
+  their turn there.
+* **Line origins.** `line_origins=` (out-parameter) receives the input line
+  of each output line: lines a `BY` text adds repeat the line its match
+  started on, a match spanning lines keeps the first. The expander passes
+  them to the member's recursion as `initial_origins` (#561). The literal words of a search text compare
   **case-sensitively** (`(?-i:...)`).
 
 Pinned by `tests/regression/test_open_findings_m13_regression.py`,
@@ -685,6 +719,17 @@ misdetect an ASCII file full of `@`. ASCII-shaped bytes that are not valid
 UTF-8 are `cp1252`, or `latin-1` when a byte cp1252 leaves undefined is
 present (`_single_byte_codec`), so accented `VALUE` text survives.
 
+**Program sources are read the same way** (#522):
+`read_program_source(path, encoding=None, *, warnings=None,
+encoding_errors="replace")` wraps `read_file_with_encoding` -- `None` /
+`""` / `"auto"` detects, a named codec is used as given (an unknown one is an
+`EncodingError`, never a silent ASCII fallback), and a lossy decode lands in
+*warnings* naming `--encoding`. The CLI's `_read_source`, `batch`, `scan`,
+`CodebaseGraphBuilder` and the MCP workspace all read a main program through
+it, so they cannot disagree about a cp1252 program's text. CR LF and a lone
+CR come back as LF, as the text-mode reads it replaced returned them (a
+copybook read keeps its CRs; `split_source_lines` numbers both alike).
+
 `encoding_errors` (`CopybookSearchPath` / `expand_copybooks`): `"replace"`
 (default) substitutes U+FFFD and warns with a count; `"strict"` raises
 `EncodingError` with file/offset context.
@@ -709,6 +754,13 @@ and `tests/regression/test_audit_2026_09_17_preprocessing.py`.
   it on that line. The `COPY`'s own indentation is not the member's; splicing
   at the keyword pushes a member's `01` out of Area A or past column 72.
   Pinned by `tests/regression/test_copy_splice_keeps_member_columns.py`.
+* **Text after the COPY's period gets a line of its own** (`tail_has_text`;
+  option (b) of #355): the member is followed by a newline and the tail's own
+  columns of blanks, and the source map credits that line to the parent line
+  the tail was on. Appended to the member's last line it inherited the
+  member's origin, so lint blamed the copybook for a parent item. Known
+  limit: with `COPY A. COPY B.` on one line, B's first line is that tail and
+  maps to the parent line, not to `B.cpy:1`.
 
 ### Output re-pad and width fitting
 
@@ -753,7 +805,8 @@ that can move one:
 |------|-----------------|-------------------------|
 | `remove_comment_lines`, `strip_sequence_area` | blank in place | line-preserving by construction; nothing to track |
 | `normalize_continuation_lines` | merges N records into 1 | `line_origins` out-parameter records the input line each output line started on |
-| the COPY splice | inserts a member's lines | `origins[:start] + copybook_origins + origins[end+1:]`, the first spliced line credited to the parent only when the parent had real text before the COPY on that line — the same flag that decides where the text splice starts, so map and text are spliced identically |
+| `apply_replacing_clauses` | a `BY` text adds or removes lines | its `line_origins` out-parameter, handed to the member's recursion as `initial_origins` so it does not number the replaced text from 1 (which pushed every later member line down, past the end of the file -- #561) |
+| the COPY splice | inserts a member's lines | `origins[:start] + copybook_origins + origins[end+1:]`, the first spliced line credited to the parent only when the parent had real text before the COPY on that line — the same flag that decides where the text splice starts, so map and text are spliced identically; text after the COPY's period becomes one more line credited to the parent's line (#355) |
 | the re-pad's `_fit_fixed_format_width` wrap | 1 line becomes several | each piece inherits its line's origin; pieces of a line merged from continuation records map to those records (`_wrapped_origins`: piece k -> first record + k, capped at the last one absorbed) |
 
 `ExpansionContext.content_origins` stores origins beside each cached content
@@ -779,7 +832,10 @@ after every substitution, using the source map: `_restore_comment_lines`
 replaces a line only when it is blank in the expansion AND its origin is a
 comment line in its origin file, so it cannot rewrite code or change the line
 count. `_origin_sources` reads members back through `_cached_read_file` with
-the expansion's own encoding settings; an unreadable file is skipped. A `COPY`
+the expansion's own encoding settings; an unreadable file is skipped. It
+splits each file with `split_source_lines`, the splitter the source map counts
+with: a `split("\n")` read a CR-only member as one line (pasted whole over its
+first comment) and left `\r` on every CRLF comment (#581). A `COPY`
 inside a comment comes back as text and is not expanded.
 
 Source map and comments pinned by
@@ -906,6 +962,12 @@ config untouched) rather than the resolution extensions, which would suggest
 the program's own `.cbl` back; `""` stays for extensionless PDS downloads. In
 `get_available_copybooks` / `PathResolver.list_available()`, `""` lists only
 extensionless files. Pinned by `tests/regression/test_copybook_suggestion_pool.py`.
+The name just looked up is never suggested back: an upper-cased stem equal to
+it is a file differing only in letter case, which `find_copybook_file` reports
+as `CopybookNotFoundError(..., case_variant_exists=True)` ("A copybook named X
+exists in a different letter case; the member is matched as written") instead
+of "Did you mean: X?" (#580). Pinned by
+`tests/regression/test_issue_580_copy_member_as_written.py`.
 
 ## Error hierarchy
 

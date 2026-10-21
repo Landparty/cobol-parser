@@ -40,6 +40,36 @@ results into one graph with two kinds of edge:
   and two classes no longer raise "duplicate PROGRAM-ID FACTORY". INVOKE is
   still not an edge. Pinned by
   `tests/regression/test_issue_500_oo_units_not_programs.py`.
+* **Diagram ids are unique per diagram (#494).** `to_dot()` / `to_mermaid()`
+  take every node id from one `_NodeIds` allocator (`P_` programs, known and
+  external alike, then `C_` members, pre-allocated in declaration order), so
+  names `_sanitize_id` folds together (`PAY#01` / `PAY@01` / `PAY$01`,
+  `PAY-RTN` / `PAY_RTN`) get `P_PAY_01`, `P_PAY_01_2`, ... instead of one
+  merged node with false self-calls. A diagram without collisions is
+  unchanged. The JSON output never had the problem. Pinned by
+  `tests/regression/test_issue_494_codebase_diagram_id_collisions.py`.
+* **Nested programs are not global (#532).** `program_graph_ids()` gives a
+  nested PROGRAM unit (`CobolProgram.enclosing_program`, set by the parser)
+  an id qualified by the programs it is nested in (`OUTER/INNER`); outermost
+  and stacked units keep their PROGRAM-ID. A CALL's target goes through
+  `CobolProgram.nested_program_called()` first -- a program nested directly
+  in the caller, or a `COMMON` one nested in an enclosing unit, or a nested
+  unit's own name -- and only otherwise names a separately compiled program,
+  so `CALL 'INNER'` from another file is an edge to `INNER`, not to
+  `OUTER/INNER`, and PGMA's and PGMB's nested `ERRHAND`s are `PGMA/ERRHAND`
+  and `PGMB/ERRHAND`, never a duplicate PROGRAM-ID. CICS LINK/XCTL is not
+  scoped (it goes through the CICS program definitions). Object-oriented
+  units are not qualified. Pinned by
+  `tests/regression/test_issue_532_nested_program_scope.py`.
+* **ENTRY names are call targets (#521).** Each `ProgramNode` records its
+  unit's own `ENTRY 'name'` names (`entries`, uppercased; in `to_dict()` only
+  when non-empty). After every file is absorbed, `_resolve_entry_names()`
+  sends a `CALL` edge whose callee is an ENTRY name (and no PROGRAM-ID of that
+  spelling) to the declaring program, keeping the name as `CallEdge.entry`
+  (`to_dict()` only when set; DOT/Mermaid label `CALL ENTRY X`). An ENTRY two
+  programs declare is left as written and, when CALLed, noted as
+  `duplicate ENTRY X in ...`. CICS LINK/XCTL edges are not aliased. Pinned by
+  `tests/regression/test_issue_521_entry_names_in_call_graph.py`.
 * **Call edges** — `program A calls program B`, from static `CALL "B"` and from
   dynamic `CALL WS-TARGET` resolved through `DynamicCallAnalyzer`. A dynamic
   call whose value set that analyzer could not fully resolve still contributes
@@ -59,7 +89,11 @@ results into one graph with two kinds of edge:
   `extract_copy_statements()` rather than from an expanded parse, because
   expansion *consumes* the COPY statement and discards exactly the edge we are
   after. Members resolve to real files through the same `PathResolver` the
-  expander uses, so a nested chain is followed to its leaves and a circular pair
+  expander uses, and with the member **as written** (`statement.member_name`,
+  `_resolve_member(..., written=...)`), not the upper-cased basename that is
+  the graph key -- `COPY ordrec.` on a case-sensitive filesystem and
+  `COPY "sub/REC.cpy"` were unresolved here while the expander inlined them
+  (#580). A nested chain is followed to its leaves and a circular pair
   (`A COPY B`, `B COPY A`) is reported, not looped on.
   A DB2 `EXEC SQL INCLUDE X END-EXEC` is a copy edge too (the scan passes
   `sql_include=True`), with the same `COPY` label and the same unresolved-member
@@ -77,7 +111,7 @@ results into one graph with two kinds of edge:
 from cobolparser.analysis.codebase import CodebaseGraphBuilder, CopybookImpactAnalyzer
 
 builder = CodebaseGraphBuilder(copybook_paths=["./copybooks"])   # also workers=, chunk_size=200,
-                                                        # encoding="utf-8", debug_lines=False
+                                                        # encoding=None (detected, #522), debug_lines=False
 graph = builder.build_from_directory("./src", extensions=(".cbl", "cob"))
 graph = builder.build(["a.cbl", "b.cbl"])       # or an explicit file list
 
@@ -97,7 +131,9 @@ report.program_count
 ```
 
 `ProgramNode` holds `program_id` (uppercased; the **file stem** when the file
-would not parse, recorded as such in `unresolved`), `path`, `calls`, `copies`
+would not parse, recorded as such in `unresolved`; a path that does not exist
+is an input error -- `errors` entry `no such file or directory`, an
+`unresolved` note, no node and no COPY scan, #325), `path`, `calls`, `copies`
 and `parse_failed` — with `parse_failed` true, `calls` is "empty and unknown",
 not "empty and known". `CallEdge` carries `is_dynamic` / `resolved` / `kind`; `CopyEdge`
 carries `member`, `path` and `nested`, where for a nested edge `program` is the
@@ -106,8 +142,9 @@ walkable in either direction.
 
 **Library-qualified COPY (#351).** `COPY REC OF LIBA` and `COPY REC IN LIBB`
 are two different files, so the builder's caches are keyed by more than the
-member name: `_member_paths` / `_member_failures` on `(member, library)`, and
-`_member_copies` on the resolved file path. A nested COPY is resolved with its
+member name: `_member_paths` / `_member_failures` on `(member as written,
+library)`, and `_member_copies` on the resolved file path (its entries carry
+the written spelling too, #580). A nested COPY is resolved with its
 own `library_qualifier`, as the expander does. `CopyEdge` carries `library`
 (the qualifier as written, case kept) and, for a nested edge, `parent_path` --
 the outer member's file. `programs_using()` and `CopybookImpactAnalyzer` walk
@@ -234,6 +271,10 @@ DIVISION uses each parameter, reusing xref's role vocabulary:
   since naming an entry's own parameter neither reads nor writes it.
 * A group whose fields xref reports as duplicated → `unknown`, rather than
   inferred from a same-named WORKING-STORAGE field.
+* An operand the entry point takes `BY VALUE` is graded from the caller's
+  side (`_as_passed`): `input-output` / `output` become `input`, since the
+  callee writes only its own copy (#490); `unknown` stays. Per entry point:
+  the same item BY REFERENCE on an ENTRY keeps `input-output` there.
 
 Operand *order* is preserved verbatim from the USING clause and is sorted
 nowhere in the module — it is the whole point of `call_example()`.
@@ -283,8 +324,21 @@ and FD-vs-SD kind); data items keyed by section plus qualified path
 plus the SIGN / JUSTIFIED / SYNCHRONIZED / BLANK WHEN ZERO / EXTERNAL / GLOBAL
 flags and level-88 names and values — an entry with no data-name, which the
 parser names `ANONYMOUS-<level>-<line>`, is keyed as a positional `FILLER`,
-so a line shift does not report it removed and re-added);
-procedures (added, removed, renamed,
+so a line shift does not report it removed and re-added; and the **order of
+each group's subordinates**, #545: a field reordered within its group is
+`data-item-moved`, with its position and record-relative byte offset before
+and after -- swapping two fields moves every offset after them, so it must
+not diff clean. Same `SequenceMatcher` rule as procedures: an inserted or
+removed field moves nothing, a swap reports one item; level-88 order is not
+compared. Offsets come from `layout_offsets.compute_record_layout`, omitted
+when ambiguous. Pinned by
+`tests/regression/test_issue_545_diff_data_item_order.py`); procedures (the
+unnamed paragraph holding statements before the first header, or a whole
+header-less PROCEDURE DIVISION, is compared as `(PROCEDURE DIVISION)`
+(`ast_diff.UNNAMED_PARAGRAPH`) -- skipped, every edit there diffed clean, #516;
+adding a header to it reads as a rename; pinned by
+`tests/regression/test_issue_516_diff_unnamed_paragraph.py`) (added,
+removed, renamed,
 **moved** — reordered without a body change, reported separately so a pure
 reshuffle never reads as a rewrite — and body-changed); and statements within
 matched paragraphs.
@@ -314,7 +368,11 @@ see the pair was considered and declined.
 **Positions are relative order, not line numbers.** Matched procedures from both
 sides run through `SequenceMatcher` and only those outside its matching blocks
 are reported moved — so inserting one paragraph at the top does not report every
-following paragraph as moved, and a pure reformat reports nothing at all.
+following paragraph as moved, and a pure reformat reports nothing at all. A
+paragraph's owning section is compared *through the section match*
+(`_report_moves`' `section_names`), so renaming a section moves none of its
+paragraphs; one that leaves the renamed section for another is still moved
+(#311).
 
 **Spellings are not changes.** A PICTURE is compared by
 its character positions, repeat factors written out (`_picture_positions`:
@@ -322,12 +380,19 @@ its character positions, repeat factors written out (`_picture_positions`:
 (`_canonical_usage`, the `_storage.py` synonym sets: `COMP` = `BINARY` =
 `COMP-4` = `COMPUTATIONAL`, `COMP-3` = `PACKED-DECIMAL`). `COMP-5` stays
 distinct from `COMP` (no truncation to the PICTURE). The change still reports
-both strings as coded. A VALUE is still compared as written (`+12` vs `12`,
-`'AB'` vs `'AB  '` on `PIC X(4)` read as changes).
+both strings as coded. A VALUE is compared by `_canonical_value` (#543):
+figurative constants fold singular/plural (`ZERO` = `ZEROS` = `ZEROES`,
+`HIGH-VALUE` = `HIGH-VALUES`, ...; `ALL` is kept and significant), a numeric
+literal compares as a `Decimal` (`7` = `007`, `+5` = `5.0`), hex digits
+case-insensitively, and a quoted literal's text case-sensitively (`'ab'` vs
+`'AB'` is a change; before #543 it was not). Padding is still not modelled:
+`'AB'` vs `'AB  '` on `PIC X(4)` reads as a change. Procedure-side
+condition text is not canonicalized: `IF A = ZERO` -> `IF A = ZEROS` is a
+`condition-changed`.
 
 Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
 IF, EVALUATE, SEARCH, OPEN, EXEC SQL, EXEC CICS, COMPUTE,
-INSPECT, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
+INSPECT, STRING, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
 operands, its rendered text *and* its own `to_dict()` fields** (locations and
 nested statement bodies stripped — those are compared on their own), so an
 unmodelled edit over-reports rather than reading as unchanged. The rendered
@@ -335,11 +400,17 @@ text alone is not enough: it is a truncated summary that omits STRING's INTO,
 READ's INTO/KEY, WRITE's FROM, ..., so `STRING ... INTO A` → `INTO B` would
 diff as no change.
 
+COMPUTE's signature holds each target's rounding phrase (`rounding_of`), so
+moving `ROUNDED` to another target or changing its `MODE` is a change (#517);
+ADD / SUBTRACT / MULTIPLY / DIVIDE get the same through their `to_dict()`
+(`rounded_targets`, `rounding_modes`).
 The dedicated signatures carry the markers a value alone hides (#316): CALL
 includes `is_dynamic` (`CALL 'X'` → `CALL X` is a `call-target-changed`, and
-the detail text quotes a static target), and UNSTRING includes
+the detail text quotes a static target; CANCEL compares `program_names_literal` through its `to_dict()` and quotes literal names in the detail text, #479), and UNSTRING includes
 `delimiter_all` (`DELIMITED BY ALL ','`) with a detail text spelling out
-source, delimiters and INTO targets. (WHEN selectors carry theirs via
+source, delimiters and INTO targets. STRING compares `groups` (which sources
+each `DELIMITED BY` applies to, #576) and its detail text spells them out, so
+moving a source between delimiter groups is a `statement-changed`. (WHEN selectors carry theirs via
 `_selector_text`'s `FIG:` / `ID:` / quoted renderings, #313.)
 
 Determinism: the same pair always produces byte-identical `to_dict()` — changes

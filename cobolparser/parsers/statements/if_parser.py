@@ -4,7 +4,9 @@ from typing import Any
 
 from cobolparser.parsers.statements._conditions import (
     COMPARISON_OPS,
+    ConditionSymbols,
     build_condition_expression,
+    condition_symbols,
     condition_token_text,
     find_top_level_operator,
     strip_enclosing_parens,
@@ -119,7 +121,9 @@ class IfStatementParser(IStatementParser):
         # Create condition expression tree
         loc = start_token.location if start_token else SourceLocation(0, 0)
         if condition_tokens:
-            condition_expr = self._build_condition_expression(condition_tokens, loc)
+            condition_expr = self._build_condition_expression(
+                condition_tokens, loc, symbols=condition_symbols(context)
+            )
             if condition_expr:
                 stmt.set_condition(condition_expr)
             else:
@@ -250,7 +254,11 @@ class IfStatementParser(IStatementParser):
     _COMPARISON_OPS = COMPARISON_OPS
 
     def _build_condition_expression(
-        self, tokens: list[str], location: SourceLocation
+        self,
+        tokens: list[str],
+        location: SourceLocation,
+        *,
+        symbols: ConditionSymbols | None = None,
     ) -> CobolExpression | None:
         """Convert a flat list of condition token strings into an expression tree.
 
@@ -258,7 +266,7 @@ class IfStatementParser(IStatementParser):
         :mod:`cobolparser.parsers.statements._conditions`, which is also
         used by the PERFORM parser to decompose UNTIL conditions (M12).
         """
-        return build_condition_expression(tokens, location)
+        return build_condition_expression(tokens, location, symbols=symbols)
 
     @staticmethod
     def _strip_enclosing_parens(tokens: list[str]) -> list[str]:

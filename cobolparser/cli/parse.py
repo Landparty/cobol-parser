@@ -291,16 +291,48 @@ def _parse_defines(defines: list[str]) -> dict[str, str] | None:
     return symbols
 
 
-def _read_source(filepath: str) -> str:
-    try:
-        with open(filepath, encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
+def _defined_symbol_pairs(args: argparse.Namespace) -> tuple[tuple[str, str], ...]:
+    """``--define`` (or cobol.yml ``project.define``) as picklable pairs, for
+    ``ScanOptions.defined_symbols``."""
+    return tuple((_parse_defines(getattr(args, "define", [])) or {}).items())
+
+
+def _read_source(filepath: str, encoding: str | None = None) -> str:
+    """Read a program source, decoded the way a copybook is (#522).
+
+    *encoding* None detects it (a cp1252 / Latin-1 program reads as such, not
+    "not valid UTF-8"); a named one is used as given. Bytes the encoding
+    cannot map become U+FFFD with a ``warning:`` on stderr.
+    """
+    from ..preprocess import PreprocessingError
+    from ..preprocess.copybook_expander import read_program_source
+
+    if not os.path.exists(filepath):
         _fail(f"File not found: {filepath}")
-    except UnicodeDecodeError:
-        _fail(f"Cannot read file (not valid UTF-8): {filepath}")
+    warnings: list[str] = []
+    try:
+        text = read_program_source(filepath, encoding, warnings=warnings)
+    except LookupError:
+        _fail(f"Unknown encoding: {encoding}")
+    except PreprocessingError as e:
+        _fail(f"Cannot read file: {e}")
     except OSError as e:
         _fail(f"Cannot read file: {e}")
+    for warning in warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    return text
+
+
+def _add_encoding_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--encoding",
+        default=None,
+        metavar="ENC",
+        help=(
+            "Source encoding (e.g. cp1252, latin-1, cp037). Default: detected, "
+            "the same way a copybook's encoding is"
+        ),
+    )
 
 
 def _json_out(data: Any, compact: bool, output_path: str | None = None) -> None:
@@ -412,6 +444,7 @@ def _build_parse_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     p.add_argument(
         "path",
         nargs="?",
@@ -449,7 +482,16 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     """Shared parse logic used by parse and analyze subcommands."""
     from ..profiling import ProfilerContext
 
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
+    if getattr(args, "_wrap_copybook_fragment", False):
+        # data-items on a bare copybook: parse it the way gen-data does,
+        # inside a program skeleton, instead of as a program with no
+        # divisions (an empty answer with exit 0, #536).
+        from ..generators.data.copybook import wrap_copybook_fragment
+
+        wrapped = wrap_copybook_fragment(source)
+        if wrapped is not None:
+            source = wrapped
     dialect = _DIALECT_MAP[args.dialect]
     error_recovery = _get_error_recovery(args)
 
@@ -709,8 +751,11 @@ def _build_batch_parser(
     )
     p.add_argument(
         "--encoding",
-        default="utf-8",
-        help="File encoding (default: utf-8)",
+        default=None,
+        help=(
+            "Source encoding (default: detected per file, the same way a "
+            "copybook's is)"
+        ),
     )
     _add_compact_arg(p)
     _add_dialect_arg(p)
@@ -854,6 +899,7 @@ def _build_tokenize_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -864,7 +910,7 @@ def _build_tokenize_parser(
 def _cmd_tokenize(args: argparse.Namespace) -> None:
     from ..lexer import _tokenize_source
 
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
     dialect = _DIALECT_MAP[args.dialect]
 
     # Unified pipeline (M6): fixed-format source is normalized and lexed
@@ -908,6 +954,7 @@ def _build_preprocess_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_source_format_args(p)
     _add_define_args(p)
     p.add_argument(
@@ -928,7 +975,7 @@ def _cmd_preprocess(args: argparse.Namespace) -> None:
         normalize_with_recovery,
     )
 
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
 
     if args.strip_directives:
         source = strip_compiler_directives(source)
@@ -999,6 +1046,7 @@ def _build_expand_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_copybook_args(p)
     _add_compact_arg(p)
     p.add_argument(
@@ -1035,13 +1083,15 @@ def _cmd_expand(args: argparse.Namespace) -> None:
     from ..preprocess import PreprocessingError
     from ..preprocess.copybook_expander import expand_copybooks
 
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
 
     # Conditional compilation is left to expand_copybooks (process_conditionals
     # below): it must see the program's own >>DEFINE lines to hand them to the
     # copybooks COPYd beneath them. Running it here first consumed those
     # lines, so every copybook saw only the --define symbols. Its diagnostics
-    # land in the JSON's statistics.warnings.
+    # land in the JSON's statistics.warnings. Always evaluated, --define or
+    # not: gating it on --define printed both arms of every >>IF ... >>ELSE
+    # and ignored the program's own >>DEFINE (#583, as #271 for preprocess).
     defines = _parse_defines(args.define)
 
     try:
@@ -1049,8 +1099,8 @@ def _cmd_expand(args: argparse.Namespace) -> None:
             source,
             copybook_paths=args.copybook_path,
             max_nesting_depth=args.max_depth,
-            process_conditionals=bool(defines),
-            defined_symbols=defines,
+            process_conditionals=True,
+            defined_symbols=defines or {},
             preserve_source_locations=getattr(args, "source_map", False),
             source_file=args.file,
             preserve_comments=getattr(args, "keep_comments", False),
@@ -1086,6 +1136,7 @@ def _build_gen_data_parser(
         ),
     )
     p.add_argument("file", help="Path to the copybook (or COBOL source) file")
+    _add_encoding_arg(p)
     p.add_argument(
         "--rows",
         "-n",
@@ -1285,7 +1336,7 @@ def _cmd_gen_data(args: argparse.Namespace) -> None:
         parse_copybook_records,
     )
 
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
     copybook_paths = args.copybook_path or None
 
     if args.list_records:
@@ -1678,6 +1729,10 @@ def _cmd_decode(args: argparse.Namespace) -> None:
         _fail(str(exc))
     except OSError as exc:
         _fail(f"Cannot read copybook: {exc}")
+    except UnicodeDecodeError as exc:
+        # A non-UTF-8 copybook (a Latin-1 accent in a comment): a one-line
+        # error, as compare gives, not a traceback (#496).
+        _fail(f"Cannot read copybook {args.copybook}: {exc}")
     _warn_layout(decoder.layout_warnings)
 
     output_path = getattr(args, "output", None)
@@ -2138,6 +2193,7 @@ def _build_analyzer_parser(
         epilog=f"{label}\n{examples}",
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -2210,6 +2266,7 @@ def _build_unused_variables_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -2244,7 +2301,7 @@ def _parse_without_copybook_expansion(args: argparse.Namespace) -> Any:
     determined by set-difference -- names declared in the expanded AST but
     not in this unexpanded one must have come from an expanded COPY.
     """
-    source = _read_source(args.file)
+    source = _read_source(args.file, getattr(args, "encoding", None))
     dialect = _DIALECT_MAP[args.dialect]
     error_recovery = _get_error_recovery(args)
     defines = _parse_defines(getattr(args, "define", []))
@@ -2334,6 +2391,7 @@ def _build_program_flow_parser(
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     p.add_argument(
         "--format",
         choices=["json", "mermaid", "dot"],
@@ -2449,6 +2507,7 @@ def _build_redundancy_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -2583,14 +2642,18 @@ def _build_scan_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--encoding",
-        default="utf-8",
-        help="File encoding (default: utf-8)",
+        default=None,
+        help=(
+            "Source encoding (default: detected per file, the same way a "
+            "copybook's is)"
+        ),
     )
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
     _add_error_recovery_arg(p)
     _add_copybook_args(p)
+    _add_define_args(p)
     _add_output_arg(p)
     _add_min_clone_statements_arg(p)
     p.set_defaults(func=_cmd_scan)
@@ -2685,6 +2748,7 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         free_form=bool(source_format["free_form"]),
         preprocess_fixed=source_format["preprocess_fixed"],
         debug_lines=bool(source_format.get("debug_lines", False)),
+        defined_symbols=_defined_symbol_pairs(args),
     )
 
     try:
@@ -2704,6 +2768,17 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         output["summary"]["cross_file_clone_group_count"] = len(groups)
 
     _json_out(output, args.compact, getattr(args, "output", None))
+
+    # Like batch: a file that produced nothing to scan fails the run, so a
+    # script gating on $? does not read "nothing scanned" as success (#325).
+    failed = report.failed_files
+    if failed:
+        print(
+            f"warning: {len(failed)} of {len(report.files)} file(s) could not "
+            "be scanned (see the JSON output's failures)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
 
 # -- Subcommand: io-sequence --------------------------------------------------
@@ -2839,6 +2914,7 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -3101,7 +3177,12 @@ def _cmd_dclgen_check(args: argparse.Namespace) -> None:
 def _cmd_data_items(args: argparse.Namespace) -> None:
     from ..generators.data.layout_offsets import compute_program_data_items
 
+    args._wrap_copybook_fragment = True
     ast, prof = _parse_or_fail(args)
+    if ast.data_division is None:
+        # Nothing to lay out: say so rather than print `"items": []` and
+        # exit 0, which reads as "this file declares no data".
+        _fail(f"{args.file}: no DATA DIVISION found; no data items to report")
 
     output = compute_program_data_items(ast)
 
@@ -3178,6 +3259,7 @@ def _build_business_rules_parser(subparsers: argparse._SubParsersAction) -> None
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     p.add_argument(
         "--format",
         choices=["json", "text"],
@@ -3255,6 +3337,7 @@ def _build_lineage_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     p.add_argument("file", help="Path to the COBOL source file")
+    _add_encoding_arg(p)
     p.add_argument(
         "--field",
         default=None,
@@ -3401,7 +3484,8 @@ def _build_field_impact_parser(subparsers: argparse._SubParsersAction) -> None:
     _add_compact_arg(p)
     _add_copybook_args(p)
     _add_output_arg(p)
-    _add_debug_lines_arg(p)
+    _add_source_format_args(p)
+    _add_define_args(p)
     p.set_defaults(func=_cmd_field_impact)
 
 
@@ -3420,10 +3504,69 @@ def _cobol_files(paths: list[str]) -> list[str]:
     return files
 
 
-def _load_bindings(args: argparse.Namespace) -> tuple[list[Any], list[Any], list[str]]:
+def _json_rows(value: Any, key: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        _fail(f'--bindings: "{key}" must be a list of objects')
+    for index, row in enumerate(value):
+        if not isinstance(row, dict):
+            _fail(f'--bindings: "{key}"[{index}] is not an object: {row!r}')
+    return value
+
+
+def _binding_rows(value: Any) -> list[dict[str, Any]]:
+    """The usable ``--bindings`` rows. A row with no ``program`` or no
+    ``dataset`` binds nothing (``cobol-parser jcl --bindings`` writes such
+    rows for SYSOUT / DUMMY DDs and ``EXEC proc`` steps) and is skipped; a
+    row that is not a binding at all is an error naming it."""
+    rows: list[dict[str, Any]] = []
+    for index, row in enumerate(_json_rows(value, "bindings")):
+        for field in ("program", "ddname", "dataset", "job", "step"):
+            if row.get(field) is not None and not isinstance(row[field], str):
+                _fail(
+                    f'--bindings: "bindings"[{index}]: "{field}" must be a '
+                    f"string: {row!r}"
+                )
+        if not row.get("ddname"):
+            _fail(f'--bindings: "bindings"[{index}] has no "ddname": {row!r}')
+        if row.get("program") and row.get("dataset"):
+            rows.append(row)
+    return rows
+
+
+def _passthrough_rows(value: Any) -> list[dict[str, Any]]:
+    rows = _json_rows(value, "passthroughs")
+    for index, row in enumerate(rows):
+        for field in ("input", "output"):
+            if not isinstance(row.get(field), str) or not row[field]:
+                _fail(
+                    f'--bindings: "passthroughs"[{index}] needs a string '
+                    f'"{field}": {row!r}'
+                )
+        ranges = row.get("aggregate_ranges") or []
+        if not isinstance(ranges, list) or not all(
+            isinstance(r, list)
+            and len(r) == 2
+            and all(isinstance(n, int) and not isinstance(n, bool) for n in r)
+            for r in ranges
+        ):
+            _fail(
+                f'--bindings: "passthroughs"[{index}]: "aggregate_ranges" must '
+                f"be a list of [offset, length] pairs: {row!r}"
+            )
+    return rows
+
+
+def _load_bindings(
+    args: argparse.Namespace,
+) -> tuple[list[Any], list[Any], list[str], list[str]]:
+    """Bindings, pass-throughs, problems (files not read) and caveats (JCL
+    steps whose flow could not be read)."""
     bindings: list[Any] = []
     passthroughs: list[Any] = []
     problems: list[str] = []
+    caveats: list[str] = []
     if args.bindings:
         try:
             with open(args.bindings, encoding="utf-8") as handle:
@@ -3432,8 +3575,8 @@ def _load_bindings(args: argparse.Namespace) -> tuple[list[Any], list[Any], list
             _fail(f"--bindings could not be read: {exc}")
         if not isinstance(data, dict):
             _fail("--bindings must hold a JSON object")
-        bindings += list(data.get("bindings") or [])
-        passthroughs += list(data.get("passthroughs") or [])
+        bindings += _binding_rows(data.get("bindings"))
+        passthroughs += _passthrough_rows(data.get("passthroughs"))
     if args.jcl:
         from ..analysis.lineage_jcl import bindings_from_jobs, load_jobs
 
@@ -3441,10 +3584,10 @@ def _load_bindings(args: argparse.Namespace) -> tuple[list[Any], list[Any], list
             jobs, problems = load_jobs(args.jcl, proc_path=args.proc_path)
         except ImportError:
             _fail("--jcl needs jcl-parser: pip install jcl-parser")
-        found, carried = bindings_from_jobs(jobs)
+        found, carried = bindings_from_jobs(jobs, caveats)
         bindings += found
         passthroughs += carried
-    return bindings, passthroughs, problems
+    return bindings, passthroughs, problems, caveats
 
 
 def _cmd_field_impact(args: argparse.Namespace) -> None:
@@ -3464,12 +3607,16 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
         _fail("--depth must be >= 0")
 
     files = _cobol_files(targets)
+    source_format = _source_format_kwargs(args)
     scan = scan_files(
         files,
         ScanOptions(
             analyzers=("lineage",),
             copybook_paths=tuple(args.copybook_path or []),
-            debug_lines=bool(getattr(args, "debug_lines", False)),
+            free_form=bool(source_format["free_form"]),
+            preprocess_fixed=source_format["preprocess_fixed"],
+            debug_lines=bool(source_format.get("debug_lines", False)),
+            defined_symbols=_defined_symbol_pairs(args),
         ),
         workers=args.workers,
     )
@@ -3478,8 +3625,8 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
         for problem in problems:
             print(problem, file=sys.stderr)
         _fail("no COBOL program under the given paths produced a lineage report")
-    bindings, passthroughs, jcl_problems = _load_bindings(args)
-    graph = LineageGraph(reports, bindings, passthroughs)
+    bindings, passthroughs, jcl_problems, jcl_caveats = _load_bindings(args)
+    graph = LineageGraph(reports, bindings, passthroughs, join_caveats=jcl_caveats)
 
     if args.table:
         result = graph.impact_table(args.table, args.direction, args.depth)
@@ -3689,11 +3836,27 @@ def _build_graph(args: argparse.Namespace) -> Any:
             return builder.build_from_directory(directories[0], extensions=extensions)
         return builder.build_from_directory(directories[0])
 
-    # Anything that is not a directory is treated as a source file, including
-    # a path that does not exist: the builder records it in `errors` and
-    # `unresolved` rather than dropping it, so a mistyped file name surfaces
-    # instead of quietly shrinking the graph.
+    # Anything that is not a directory is treated as a source file. A path
+    # that does not exist is recorded in `errors` and `unresolved` (never as
+    # a program), and the command then exits 2, so a mistyped name surfaces
+    # instead of quietly shrinking the graph (#325).
     return builder.build(list(args.paths))
+
+
+def _exit_on_graph_errors(graph: Any) -> None:
+    """Exit 2, like ``batch``, when any input file failed: missing, unreadable
+    or parsed with errors (#325). The output was already written."""
+    if not graph.errors:
+        return
+    for error in graph.errors:
+        if error.get("error") == "no such file or directory":
+            print(f"error: no such file or directory: {error['path']}", file=sys.stderr)
+    print(
+        f"warning: {len(graph.errors)} file(s) failed (see the JSON output's "
+        "errors); the graph is incomplete",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 
 def _cmd_codebase_graph(args: argparse.Namespace) -> None:
@@ -3701,12 +3864,11 @@ def _cmd_codebase_graph(args: argparse.Namespace) -> None:
 
     if args.output_format == "dot":
         _verbatim_out(graph.to_dot(), getattr(args, "output", None))
-        return
-    if args.output_format == "mermaid":
+    elif args.output_format == "mermaid":
         _verbatim_out(graph.to_mermaid(), getattr(args, "output", None))
-        return
-
-    _json_out(graph.to_dict(), args.compact, getattr(args, "output", None))
+    else:
+        _json_out(graph.to_dict(), args.compact, getattr(args, "output", None))
+    _exit_on_graph_errors(graph)
 
 
 # -- Subcommand: copybook-impact ----------------------------------------------
@@ -3761,6 +3923,7 @@ def _cmd_copybook_impact(args: argparse.Namespace) -> None:
     report = CopybookImpactAnalyzer(graph).analyze(args.member)
 
     _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+    _exit_on_graph_errors(graph)
 
 
 # -- Subcommand: sql-cics-check -----------------------------------------------
@@ -3806,7 +3969,8 @@ def _build_jcl_parser(subparsers: argparse._SubParsersAction) -> None:
         "--bindings",
         action="store_true",
         help="Emit one row per DD binding (ddname, dataset, step, job, DISP, "
-        "RECFM, LRECL) instead of the job structure",
+        "RECFM, LRECL, program) instead of the job structure; usable as "
+        "field-impact --bindings input",
     )
     p.add_argument(
         "--program",
@@ -3883,16 +4047,16 @@ def _cmd_jcl(args: argparse.Namespace) -> None:
             # Only the DDs of the steps that run this program, exactly as
             # ``--bindings --program`` filters; ``--dd-map --program`` used
             # to return every step's DDs and silently ignore the program.
+            # The datasets too come from those steps only: a DD name shared
+            # with another step (SYSTSIN, SYSIN) must not bring its datasets.
             running = {id(s) for s in result.steps_running(args.program)}
-            dd_map = {
-                ddname: datasets
-                for ddname, datasets in dd_map.items()
-                if any(
-                    id(step) in running and step.dd(ddname) is not None
-                    for job in result.jobs
-                    for step in job.steps
-                )
-            }
+            dd_map = {}
+            for _job, owner, dd in result.all_dd_statements():
+                if owner is None or id(owner) not in running:
+                    continue
+                bucket = dd_map.setdefault(dd.name.upper(), [])
+                if dd.dataset is not None and dd.dataset not in bucket:
+                    bucket.append(dd.dataset)
         payload = {"dd_map": dd_map}
     elif args.program:
         payload = {
@@ -3916,6 +4080,10 @@ def _cmd_jcl(args: argparse.Namespace) -> None:
         getattr(args, "output", None),
     )
 
+    if args.program and not result.steps_running(args.program):
+        # Like every analyzer's --program: an empty answer for a name that
+        # matches nothing must not read as "this JCL never runs it" quietly.
+        _fail(f"--program {args.program}: no step in {args.file} runs it")
     if args.strict and result.errors:
         sys.exit(3)
 
@@ -4259,6 +4427,12 @@ def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:
             }
         ),
         "tools": dict(config.tools),
+        # Present only when some path entry is not a directory (#550).
+        **(
+            {"missing_directories": [path for _, path in missing]}
+            if (missing := config.missing_directories())
+            else {}
+        ),
     }
 
 
@@ -4281,6 +4455,7 @@ def _cmd_config(args: argparse.Namespace) -> None:
 
     lines.append(f"Config file: {config.source}")
     lines.append(f"Schema version: {config.version}")
+    missing = set(payload.get("missing_directories", ()))
     for section in ("project", "data", "lint"):
         values = payload[section]
         if not values:
@@ -4290,7 +4465,15 @@ def _cmd_config(args: argparse.Namespace) -> None:
         for key, value in values.items():
             if isinstance(value, list):
                 lines.append(f"  {key}:")
-                lines.extend(f"    - {entry}" for entry in value)
+                lines.extend(
+                    f"    - {entry}"
+                    + (
+                        "  (not an existing directory)"
+                        if key in ("copybook_path", "callee_path") and entry in missing
+                        else ""
+                    )
+                    for entry in value
+                )
             elif isinstance(value, bool):
                 # Spelled the way the file spells it, not Python's True.
                 lines.append(f"  {key}: {'true' if value else 'false'}")
@@ -4550,6 +4733,25 @@ def main() -> None:
         # there is a config file with something to say.
         args_provided = _project_config.provided_dests(_build_parser, argv)
         _project_config.apply_project_config(args, config, args_provided)
+        for key in _project_config.unapplied_parse_settings(args, config):
+            # Silently dropped before: the subcommand then analysed a
+            # different program than the single-file ones do (#324).
+            print(
+                f"warning: {config.source} sets {key}, but "
+                f"`{getattr(args, 'command', None) or 'parse'}` has no flag "
+                "for it and parses without it",
+                file=sys.stderr,
+            )
+        for key, missing in config.missing_directories():
+            # Only for a path this run actually takes from the file: one the
+            # subcommand reads and the user did not override (#550).
+            dest = key.split(".", 1)[1]
+            if hasattr(args, dest) and dest not in args_provided:
+                print(
+                    f"warning: {config.source} {key} entry {missing} is not "
+                    "an existing directory",
+                    file=sys.stderr,
+                )
 
     if not hasattr(args, "func"):
         parser.print_help()

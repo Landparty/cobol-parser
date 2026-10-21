@@ -73,7 +73,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -82,9 +82,11 @@ from .._lines import split_source_lines
 from ..batch import BatchResult, parse_files, parse_files_with_copybooks
 from ..models.program import CobolProgram
 from ..models.statements.base import CobolStatement
-from ..models.statements.call import CallStatement
+from ..models.statements.call import CallStatement, EntryStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement
+from ..preprocess import PreprocessingError
 from ..preprocess.copy_statement_parser import extract_copy_statements
+from ..preprocess.copybook_expander import read_program_source
 from ..preprocess.models import CopybookSearchPath
 from ..preprocess.path_resolver import PathResolver
 from ._names import callee_names
@@ -156,6 +158,38 @@ def _normalize_program_name(name: str) -> str:
     return text.strip().upper()
 
 
+def _nested_in(unit: Any) -> Any:
+    """The PROGRAM unit *unit* is nested in, or None for an outermost or
+    stacked program and for an object-oriented unit (#532)."""
+    if getattr(unit, "unit_kind", "PROGRAM") != "PROGRAM":
+        return None
+    enclosing = getattr(unit, "enclosing_program", None)
+    if enclosing is None or getattr(enclosing, "unit_kind", "PROGRAM") != "PROGRAM":
+        return None
+    return enclosing
+
+
+def program_graph_ids(units: Iterable[Any], path: str) -> dict[int, str]:
+    """Each unit's program id in the graph, keyed by ``id(unit)``.
+
+    A nested program is not in the global namespace: only programs of its
+    own compilation unit can CALL it, so its id is qualified by the programs
+    it is nested in (``OUTER/INNER``), and a CALL reaches it only when
+    COBOL scope says so (#532). An outermost or stacked unit keeps its
+    PROGRAM-ID (or, with none, the file name's).
+    """
+    ids: dict[int, str] = {}
+    for unit in units:
+        declared = _normalize_program_name(unit.program_name or "")
+        named = bool(declared) and declared != _UNNAMED_PROGRAM
+        program_id = declared if named else _program_id_from_path(path)
+        enclosing = _nested_in(unit)
+        if enclosing is not None and id(enclosing) in ids:
+            program_id = f"{ids[id(enclosing)]}/{program_id}"
+        ids[id(unit)] = program_id
+    return ids
+
+
 def _normalize_member(name: str) -> str:
     """Canonical form of a copybook member name.
 
@@ -210,6 +244,9 @@ class ProgramNode:
             deduplicated.
         parse_failed: True when the file produced no AST; ``calls`` is then
             empty and unknown, not empty and known.
+        entries: The alternate ``ENTRY 'name'`` names the unit declares,
+            uppercased and sorted: a ``CALL 'name'`` reaches this program
+            (#521).
     """
 
     program_id: str
@@ -217,15 +254,19 @@ class ProgramNode:
     calls: list[str] = field(default_factory=list)
     copies: list[str] = field(default_factory=list)
     parse_failed: bool = False
+    entries: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "program_id": self.program_id,
             "path": self.path,
             "calls": list(self.calls),
             "copies": list(self.copies),
             "parse_failed": self.parse_failed,
         }
+        if self.entries:
+            out["entries"] = list(self.entries)
+        return out
 
 
 @dataclass(frozen=True)
@@ -248,18 +289,31 @@ class CallEdge:
     is_dynamic: bool = False
     resolved: bool = True
     kind: str = CALL_KIND_CALL
+    #: The alternate ``ENTRY`` name the CALL used when it reached *callee*
+    #: through one rather than through its PROGRAM-ID (#521).
+    entry: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "caller": self.caller,
             "callee": self.callee,
             "is_dynamic": self.is_dynamic,
             "resolved": self.resolved,
             "kind": self.kind,
         }
+        if self.entry is not None:
+            out["entry"] = self.entry
+        return out
 
-    def _sort_key(self) -> tuple[str, str, str, bool, bool]:
-        return (self.caller, self.callee, self.kind, self.is_dynamic, self.resolved)
+    def _sort_key(self) -> tuple[str, str, str, bool, bool, str]:
+        return (
+            self.caller,
+            self.callee,
+            self.kind,
+            self.is_dynamic,
+            self.resolved,
+            self.entry or "",
+        )
 
 
 @dataclass(frozen=True)
@@ -532,17 +586,18 @@ class CodebaseGraph:
         """
         programs, external, members = self._render_nodes()
         failed = self._failed_ids()
+        ids = _NodeIds.for_nodes(programs, external, members)
 
         lines: list[str] = ["flowchart LR"]
         for pid in programs:
             label = f"{pid} (unparsed)" if pid in failed else pid
-            lines.append(f'    {_program_node_id(pid)}["{_mermaid_label(label)}"]')
+            lines.append(f'    {ids.program(pid)}["{_mermaid_label(label)}"]')
         for pid in external:
             lines.append(
-                f'    {_program_node_id(pid)}(["{_mermaid_label(pid)} (external)"])'
+                f'    {ids.program(pid)}(["{_mermaid_label(pid)} (external)"])'
             )
         for member in members:
-            lines.append(f'    {_member_node_id(member)}[/"{_mermaid_label(member)}"/]')
+            lines.append(f'    {ids.member(member)}[/"{_mermaid_label(member)}"/]')
 
         for edge in self.call_edges:
             label = _mermaid_label(_call_edge_label(edge))
@@ -550,19 +605,17 @@ class CodebaseGraph:
             # is read by the flowchart lexer as the start of a node shape,
             # not as literal text -- "CALL (dynamic)" breaks parsing bare.
             lines.append(
-                f'    {_program_node_id(edge.caller)} -->|"{label}"|'
-                f" {_program_node_id(edge.callee)}"
+                f'    {ids.program(edge.caller)} -->|"{label}"|'
+                f" {ids.program(edge.callee)}"
             )
         for copy_edge in self._rendered_copy_edges():
             source = (
-                _member_node_id(copy_edge.program)
+                ids.member(copy_edge.program)
                 if copy_edge.nested
-                else _program_node_id(copy_edge.program)
+                else ids.program(copy_edge.program)
             )
             label = _mermaid_label("COPY (nested)" if copy_edge.nested else "COPY")
-            lines.append(
-                f'    {source} -.->|"{label}"| {_member_node_id(copy_edge.member)}'
-            )
+            lines.append(f'    {source} -.->|"{label}"| {ids.member(copy_edge.member)}')
 
         if len(lines) == 1:
             lines.append('    EMPTY["No programs found"]')
@@ -576,6 +629,7 @@ class CodebaseGraph:
         """
         programs, external, members = self._render_nodes()
         failed = self._failed_ids()
+        ids = _NodeIds.for_nodes(programs, external, members)
 
         lines: list[str] = ["digraph codebase {"]
         lines.append("    rankdir=LR;")
@@ -592,17 +646,17 @@ class CodebaseGraph:
                 # which Graphviz renders as a literal backslash-n (#274).
                 label = f'{label[:-1]}\\n(unparsed)"'
             lines.append(
-                f"    {_program_node_id(pid)} [label={label},"
+                f"    {ids.program(pid)} [label={label},"
                 f' shape=box, fillcolor="{fill}", fontcolor="#000000"];'
             )
         for pid in external:
             lines.append(
-                f"    {_program_node_id(pid)} [label={_dot_str(pid)},"
+                f"    {ids.program(pid)} [label={_dot_str(pid)},"
                 ' shape=ellipse, fillcolor="#e9ecef", fontcolor="#000000"];'
             )
         for member in members:
             lines.append(
-                f"    {_member_node_id(member)} [label={_dot_str(member)},"
+                f"    {ids.member(member)} [label={_dot_str(member)},"
                 ' shape=note, fillcolor="#fff3cd", fontcolor="#000000"];'
             )
 
@@ -616,18 +670,18 @@ class CodebaseGraph:
             if not edge.resolved:
                 attrs += ', style=dotted, color="#b02a37"'
             lines.append(
-                f"    {_program_node_id(edge.caller)} ->"
-                f" {_program_node_id(edge.callee)} [{attrs}];"
+                f"    {ids.program(edge.caller)} ->"
+                f" {ids.program(edge.callee)} [{attrs}];"
             )
         for copy_edge in self._rendered_copy_edges():
             source = (
-                _member_node_id(copy_edge.program)
+                ids.member(copy_edge.program)
                 if copy_edge.nested
-                else _program_node_id(copy_edge.program)
+                else ids.program(copy_edge.program)
             )
             label = "COPY (nested)" if copy_edge.nested else "COPY"
             lines.append(
-                f"    {source} -> {_member_node_id(copy_edge.member)}"
+                f"    {source} -> {ids.member(copy_edge.member)}"
                 f" [label={_dot_str(label)}, style=dashed];"
             )
 
@@ -661,6 +715,57 @@ def _member_node_id(member: str) -> str:
     return "C_" + _sanitize_id(member)
 
 
+class _NodeIds:
+    """One diagram's mapping from a program or member name to a unique id.
+
+    ``_sanitize_id`` is lossy: ``PAY#01`` / ``PAY@01`` / ``PAY$01`` and
+    ``PAY-RTN`` / ``PAY_RTN`` all collide, which merged distinct programs
+    into one node and drew false self-calls (#494, the codebase-graph twin
+    of #266's ``flowchart._IdAllocator``). Every declaration and every edge
+    endpoint asks this for its id, so one name always gets one id and two
+    names never share one; a collision gets a numeric suffix (``P_PAY_01``,
+    ``P_PAY_01_2``), and a diagram without collisions is unchanged.
+    """
+
+    def __init__(self) -> None:
+        self._ids: dict[tuple[str, str], str] = {}
+        self._taken: set[str] = set()
+
+    @classmethod
+    def for_nodes(
+        cls, programs: list[str], external: list[str], members: list[str]
+    ) -> _NodeIds:
+        """Pre-allocated in declaration order: known programs keep the
+        plain id over an external callee or a member of a colliding name."""
+        ids = cls()
+        for pid in [*programs, *external]:
+            ids.program(pid)
+        for member in members:
+            ids.member(member)
+        return ids
+
+    def program(self, name: str) -> str:
+        return self._get("P_", name)
+
+    def member(self, name: str) -> str:
+        return self._get("C_", name)
+
+    def _get(self, prefix: str, name: str) -> str:
+        key = (prefix, name)
+        found = self._ids.get(key)
+        if found is not None:
+            return found
+        base = prefix + _sanitize_id(name)
+        chosen = base
+        suffix = 2
+        while chosen in self._taken:
+            chosen = f"{base}_{suffix}"
+            suffix += 1
+        self._taken.add(chosen)
+        self._ids[key] = chosen
+        return chosen
+
+
 def _mermaid_label(text: str) -> str:
     """Escape what Mermaid mangles inside a quoted label.
 
@@ -683,6 +788,8 @@ def _call_edge_label(edge: CallEdge) -> str:
         CALL_KIND_CICS_LINK: "CICS LINK",
         CALL_KIND_CICS_XCTL: "CICS XCTL",
     }.get(edge.kind, "CALL")
+    if edge.entry is not None:
+        verb = f"{verb} ENTRY {edge.entry}"
     if not edge.is_dynamic:
         return verb
     return f"{verb} (dynamic)" if edge.resolved else f"{verb} (dynamic, partial)"
@@ -708,7 +815,8 @@ class CodebaseGraphBuilder:
             runs in-process to share its caches.
         chunk_size: Files parsed per batch before their ASTs are dropped.
         encoding: Source encoding, passed through to the batch parser and to
-            the COPY scan.
+            the COPY scan. None (default) detects it per file, the way a
+            copybook's is detected (#522).
         debug_lines: Compile fixed-format debugging lines (``D`` in column
             7) as code, so a CALL written on one is an edge.
     """
@@ -719,7 +827,7 @@ class CodebaseGraphBuilder:
         copybook_paths: list[str] | None = None,
         workers: int | None = None,
         chunk_size: int = _DEFAULT_CHUNK_SIZE,
-        encoding: str = "utf-8",
+        encoding: str | None = None,
         debug_lines: bool = False,
     ) -> None:
         self.copybook_paths: list[str] = list(copybook_paths or [])
@@ -732,18 +840,20 @@ class CodebaseGraphBuilder:
             self._resolver = PathResolver(
                 CopybookSearchPath(directories=list(self.copybook_paths))
             )
-        # (member, library) -> resolved file path (None when unresolved). The
-        # library is part of the key: COPY REC OF LIBA and COPY REC OF LIBB
-        # are two different files (#351).
+        # (member as written, library) -> resolved file path (None when
+        # unresolved). The library is part of the key: COPY REC OF LIBA and
+        # COPY REC OF LIBB are two different files (#351). The member is the
+        # COPY text as written, not the normalized graph key: the expander
+        # resolves `COPY ordrec.` / `COPY "sub/REC.cpy"` as written (#580).
         self._member_paths: dict[tuple[str, str | None], str | None] = {}
-        # (member, library) -> why it could not be resolved (failures only)
+        # (member as written, library) -> why it could not be resolved
         self._member_failures: dict[tuple[str, str | None], str] = {}
         # (member, referrer) pairs already reported unresolved this build, so
         # a COPY and an INCLUDE of one missing member give one note, not two
         self._reported_failures: set[tuple[str, str]] = set()
         # resolved file path -> its own direct (member name, library, is EXEC
-        # SQL INCLUDE), sorted
-        self._member_copies: dict[str, list[tuple[str, str | None, bool]]] = {}
+        # SQL INCLUDE, member as written), sorted
+        self._member_copies: dict[str, list[tuple[str, str | None, bool, str]]] = {}
         # program file -> (member, line) of each COPY written in it
         self._copy_sites: dict[str, list[tuple[str, int]]] = {}
 
@@ -813,6 +923,8 @@ class CodebaseGraphBuilder:
             nodes_by_path.setdefault(node.path, []).append(node)
 
         for path in files:
+            if units_by_path.get(path) == [] and not os.path.exists(path):
+                continue  # reported above as a missing path
             self._collect_copy_edges(
                 path,
                 units_by_path.get(path, [_program_id_from_path(path)]),
@@ -821,6 +933,8 @@ class CodebaseGraphBuilder:
                 unresolved,
                 errors,
             )
+
+        call_edges = self._resolve_entry_names(nodes, call_edges, unresolved)
 
         for node in nodes:
             node.calls = sorted(set(node.calls))
@@ -834,6 +948,60 @@ class CodebaseGraphBuilder:
             errors=sorted(errors, key=lambda e: (str(e["path"]), str(e["error"]))),
             copy_sites=self._copy_sites,
         )
+
+    @staticmethod
+    def _resolve_entry_names(
+        nodes: list[ProgramNode],
+        call_edges: list[CallEdge],
+        unresolved: list[str],
+    ) -> list[CallEdge]:
+        """Send a CALL to an alternate ``ENTRY`` name to the program that
+        declares it, keeping the name on the edge (#521).
+
+        A PROGRAM-ID wins over an ENTRY name of the same spelling. An ENTRY
+        name two programs declare is left as written and, when something
+        CALLs it, reported like a duplicate PROGRAM-ID.
+        """
+        program_ids = {node.program_id for node in nodes}
+        owners: dict[str, set[tuple[str, str]]] = {}
+        for node in nodes:
+            for entry in node.entries:
+                if entry not in program_ids:
+                    owners.setdefault(entry, set()).add((node.program_id, node.path))
+        if not owners:
+            return call_edges
+        resolved: list[CallEdge] = []
+        for edge in call_edges:
+            owner = owners.get(edge.callee)
+            if not owner or edge.kind != CALL_KIND_CALL:
+                resolved.append(edge)
+                continue
+            if len({program for program, _ in owner}) > 1:
+                where = " and ".join(sorted(path for _, path in owner))
+                unresolved.append(
+                    f"duplicate ENTRY {edge.callee} in {where}: call edges to it "
+                    "cannot be attributed to one program"
+                )
+                resolved.append(edge)
+                continue
+            (program, _), *_ = owner
+            resolved.append(
+                CallEdge(
+                    caller=edge.caller,
+                    callee=program,
+                    is_dynamic=edge.is_dynamic,
+                    resolved=edge.resolved,
+                    kind=edge.kind,
+                    entry=edge.callee,
+                )
+            )
+            for node in nodes:
+                if node.program_id == edge.caller and edge.callee in node.calls:
+                    node.calls = [
+                        program if callee == edge.callee else callee
+                        for callee in node.calls
+                    ]
+        return resolved
 
     def build_from_directory(
         self,
@@ -921,6 +1089,16 @@ class CodebaseGraphBuilder:
         ast = parse_result.ast if parse_result is not None else None
         parse_errors = list(parse_result.errors) if parse_result is not None else []
 
+        if ast is None and not os.path.exists(path):
+            # A mistyped path is an input error, not a program that failed to
+            # parse: no phantom node named after it (#325).
+            errors.append({"path": path, "error": "no such file or directory"})
+            unresolved.append(
+                f"{path}: no such file or directory; it is not in the graph"
+            )
+            units_by_path[path] = []
+            return
+
         if ast is None:
             reason = batch_result.read_error or (
                 str(parse_errors[0]) if parse_errors else "no AST produced"
@@ -934,6 +1112,12 @@ class CodebaseGraphBuilder:
             units_by_path[path] = [fallback]
             nodes.append(ProgramNode(program_id=fallback, path=path, parse_failed=True))
             return
+
+        for warning in parse_result.warnings if parse_result is not None else []:
+            if str(warning).startswith("Lossy decode of "):
+                # Bytes the encoding could not map are U+FFFD in the parse
+                # (#522): a name or literal there may be wrong.
+                unresolved.append(f"{path}: {warning}")
 
         if parse_errors:
             # COLLECT_ALL always hands back *some* AST, so a file full of
@@ -966,18 +1150,26 @@ class CodebaseGraphBuilder:
         # graph node: a FACTORY / OBJECT paragraph or a METHOD-ID cannot be
         # the target of a CALL, so it is never a program id. What such a
         # member unit CALLs is its class's (#500).
+        graph_ids = program_graph_ids(units, path)
         for unit in [u for u in units if u.unit_kind not in _OO_MEMBER_KINDS]:
+            program_id = graph_ids[id(unit)]
             declared = _normalize_program_name(unit.program_name or "")
             named = bool(declared) and declared != _UNNAMED_PROGRAM
-            program_id = declared if named else _program_id_from_path(path)
             if not named:
                 unresolved.append(
                     f"{path}: no PROGRAM-ID could be read; the program id is "
                     f"assumed from the file name ({program_id})"
                 )
+
+            def scoped(callee: str, unit: Any = unit) -> str:
+                target = unit.nested_program_called(callee)
+                return graph_ids.get(id(target), callee) if target else callee
+
             unit_ids.append(program_id)
             previous = seen_program_ids.get(program_id)
             if previous is not None and previous != path:
+                # A nested id is qualified by its outermost program's, so a
+                # nested ERRHAND in PGMA and one in PGMB never collide.
                 unresolved.append(
                     f"duplicate PROGRAM-ID {program_id} in {previous} and {path}: "
                     "call edges to it cannot be attributed to one file"
@@ -997,9 +1189,20 @@ class CodebaseGraphBuilder:
             trackers: dict[int, DynamicCallAnalyzer] = {}
             for owner, statement in _node_statements(unit):
                 tracker = trackers.get(id(owner))
+                if isinstance(statement, EntryStatement) and statement.entry_name:
+                    entry = _normalize_program_name(statement.entry_name)
+                    if entry and entry not in node.entries:
+                        node.entries.append(entry)
+                        node.entries.sort()
                 if isinstance(statement, CallStatement):
                     self._absorb_call(
-                        statement, program_id, path, node, call_edges, unresolved
+                        statement,
+                        program_id,
+                        path,
+                        node,
+                        call_edges,
+                        unresolved,
+                        scoped,
                     )
                 elif (
                     isinstance(statement, ExecCicsStatement)
@@ -1029,7 +1232,11 @@ class CodebaseGraphBuilder:
         node: ProgramNode,
         call_edges: list[CallEdge],
         unresolved: list[str],
+        scoped: Callable[[str], str] | None = None,
     ) -> None:
+        """One CALL's edges. *scoped* maps a target name to the graph id of
+        the nested program COBOL scope says it reaches (#532), or returns
+        the name unchanged for a separately compiled program."""
         target = statement.called_program or ""
         line = statement.location.line if statement.location else 0
 
@@ -1040,11 +1247,15 @@ class CodebaseGraphBuilder:
                     f"{path}: {program_id}: CALL at line {line} has no target name"
                 )
                 return
+            if scoped is not None:
+                callee = scoped(callee)
             node.calls.append(callee)
             call_edges.append(CallEdge(caller=program_id, callee=callee))
             return
 
         values = sorted(callee_names(statement.possible_values))
+        if scoped is not None:
+            values = sorted({scoped(value) for value in values})
         incomplete = bool(statement.get_metadata("possible_values_incomplete"))
 
         if not values:
@@ -1141,8 +1352,8 @@ class CodebaseGraphBuilder:
 
     def _read_source(self, path: str) -> str | None:
         try:
-            return Path(path).read_text(encoding=self.encoding, errors="replace")
-        except (OSError, ValueError):
+            return read_program_source(path, self.encoding)
+        except (OSError, ValueError, PreprocessingError):
             return None
 
     def _collect_copy_edges(
@@ -1199,6 +1410,7 @@ class CodebaseGraphBuilder:
                 path,
                 unresolved,
                 sql_include=statement.sql_include,
+                written=statement.member_name,
             )
             copy_edges.append(
                 CopyEdge(
@@ -1223,8 +1435,15 @@ class CodebaseGraphBuilder:
         unresolved: list[str],
         *,
         sql_include: bool = False,
+        written: str | None = None,
     ) -> str | None:
         """Resolve *member* to a file, caching the answer (and the failure).
+
+        *written* is the member as the COPY statement spells it; it is what
+        is resolved, exactly as the expander resolves it (#580) -- *member*,
+        the upper-cased basename, is only the graph key. A lowercase file
+        (`COPY ordrec.`) or a path literal (`COPY "sub/REC.cpy"`) is found
+        through *written* and would be missed through *member*.
 
         A failure is reported for every reference that is not an INCLUDE of
         a precompiler-supplied member (:data:`_PRECOMPILER_MEMBERS`), so a
@@ -1234,10 +1453,11 @@ class CodebaseGraphBuilder:
         """
         if self._resolver is None:
             return None
-        key = (member, library)
+        target = written.strip() if written and written.strip() else member
+        key = (target, library)
         if key not in self._member_paths:
             try:
-                self._member_paths[key] = self._resolver.resolve(member, library)
+                self._member_paths[key] = self._resolver.resolve(target, library)
             except Exception as exc:  # noqa: BLE001 -- an unresolvable member
                 # is a finding, not a crash: record why and carry on.
                 self._member_paths[key] = None
@@ -1260,13 +1480,13 @@ class CodebaseGraphBuilder:
 
     def _member_direct_copies(
         self, member: str, member_path: str | None, unresolved: list[str]
-    ) -> list[tuple[str, str | None, bool]]:
+    ) -> list[tuple[str, str | None, bool, str]]:
         """What the file *member_path* itself COPYs or INCLUDEs.
 
         Keyed by file, not by member name: two libraries' members of one name
         are two files with their own nested COPY statements. Each entry is
-        ``(member name, library, is EXEC SQL INCLUDE)``; empty when the member
-        did not resolve.
+        ``(member name, library, is EXEC SQL INCLUDE, member as written)``;
+        empty when the member did not resolve.
         """
         if member_path is None:
             return []
@@ -1292,11 +1512,12 @@ class CodebaseGraphBuilder:
                     _normalize_member(s.member_name),
                     _normalize_library(s.library_qualifier),
                     s.sql_include,
+                    s.member_name,
                 )
                 for s in statements
                 if _normalize_member(s.member_name)
             },
-            key=lambda entry: (entry[0], entry[1] or "", entry[2]),
+            key=lambda entry: (entry[0], entry[1] or "", entry[2], entry[3]),
         )
         self._member_copies[member_path] = names
         return names
@@ -1315,12 +1536,17 @@ class CodebaseGraphBuilder:
         ``LIBB/REC`` is a chain, not a cycle.
         """
         seen: set[tuple[str, str | None]] = set()
-        for nested, library, sql_include in self._member_direct_copies(
+        for nested, library, sql_include, written in self._member_direct_copies(
             member, member_path, unresolved
         ):
             # The nested COPY's own library, as the expander resolves it.
             nested_path = self._resolve_member(
-                nested, library, member, unresolved, sql_include=sql_include
+                nested,
+                library,
+                member,
+                unresolved,
+                sql_include=sql_include,
+                written=written,
             )
             if (nested, library) in seen:
                 # COPY and INCLUDE of one member: one edge, as for a program.

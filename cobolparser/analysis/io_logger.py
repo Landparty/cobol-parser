@@ -27,7 +27,12 @@ from ..models.statements import (
     IOUnlockStatement,
     IOWriteStatement,
 )
-from ._files import record_to_file_map, resolve_file_name
+from ._files import (
+    record_to_file_map,
+    report_to_file_map,
+    report_writer_files,
+    resolve_file_name,
+)
 
 
 @dataclass
@@ -187,6 +192,8 @@ class IOLogger:
         # FILE SECTION record name -> owning FD/SD name. WRITE/REWRITE name
         # a record, never a file, so their target is resolved through it.
         self._record_to_file: dict[str, str] = {}
+        # Report Writer report / report-group name -> its report file.
+        self._report_to_file: dict[str, str] = {}
 
     def analyze(self, ast: CobolProgram) -> IOLogReport:
         """Analyze AST and return structured I/O report.
@@ -199,6 +206,7 @@ class IOLogger:
         """
         self._operations = []
         self._record_to_file = record_to_file_map(ast)
+        self._report_to_file = report_to_file_map(ast)
 
         # Collect all statements once to avoid repeated AST traversal
         all_statements = ast.get_all_statements()
@@ -430,6 +438,10 @@ class IOLogger:
                     variables.append(stmt.into_target)
                 elif stmt.record_name:
                     variables.append(stmt.record_name)
+                else:
+                    # ``READ file`` with no INTO fills the FD's record area,
+                    # which every 01 under that FD shares (#573).
+                    variables.extend(self._records_of(stmt.file_name))
                 self._operations.append(
                     IOOperation(
                         category="FILE-IO",
@@ -503,8 +515,11 @@ class IOLogger:
                     )
 
             elif isinstance(stmt, IORewriteStatement):
+                # Same as WRITE: ``REWRITE rec FROM item`` sends ``item`` (#573).
                 variables = []
-                if stmt.record_name:
+                if stmt.from_clause:
+                    variables.append(stmt.from_clause)
+                elif stmt.record_name:
                     variables.append(stmt.record_name)
                 self._operations.append(
                     IOOperation(
@@ -514,7 +529,7 @@ class IOLogger:
                         variables=variables,
                         target=self._file_for(stmt.file_name, stmt.record_name),
                         line=line,
-                        details={},
+                        details={"from_clause": stmt.from_clause},
                     )
                 )
 
@@ -544,6 +559,25 @@ class IOLogger:
                     )
                 )
 
+            elif report_files := report_writer_files(stmt, self._report_to_file):
+                # INITIATE / GENERATE / TERMINATE write the report file
+                # (headings, detail lines, footings) -- #499.
+                operand = getattr(stmt, "report_name", None) or ", ".join(
+                    getattr(stmt, "report_names", None) or []
+                )
+                for file_name in report_files:
+                    self._operations.append(
+                        IOOperation(
+                            category="FILE-IO",
+                            operation="WRITE",
+                            direction="OUTPUT",
+                            variables=[],
+                            target=file_name,
+                            line=line,
+                            details={"verb": stmt.statement_type, "report": operand},
+                        )
+                    )
+
             elif isinstance(stmt, IOUnlockStatement):
                 self._operations.append(
                     IOOperation(
@@ -556,6 +590,13 @@ class IOLogger:
                         details={"record_scope": stmt.record_scope},
                     )
                 )
+
+    def _records_of(self, file_name: str | None) -> list[str]:
+        """The FILE SECTION records an FD declares, in source order."""
+        if not file_name:
+            return []
+        wanted = file_name.upper()
+        return [rec for rec, fd in self._record_to_file.items() if fd == wanted]
 
     def _file_for(self, file_name: str | None, record_name: str | None) -> str | None:
         """The file a WRITE/REWRITE targets, via its record's FD."""

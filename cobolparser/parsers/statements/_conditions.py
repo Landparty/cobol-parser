@@ -11,7 +11,10 @@ M12). The IF parser's methods now delegate here.
 """
 
 import re
+from dataclasses import dataclass
+from typing import Any
 
+from ..._literals import is_quoted_literal
 from ...lexer import Token, TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements.base import (
@@ -93,6 +96,12 @@ _NEGATED_RELATIONAL = {
 }
 _RELATIONAL_OPERATORS = frozenset(_NEGATED_RELATIONAL)
 
+#: Attribute set on a relation whose operator a leading ``NOT`` was folded
+#: into (``NOT A = 1`` built as ``A NOT_EQUAL 1``): the operator as written,
+#: before the fold. An abbreviated leg after it repeats *that* operator --
+#: IBM defines ``NOT a = b OR c`` as ``(NOT a = b) OR (a = c)`` (#329).
+_WRITTEN_OPERATOR_ATTR = "_abbreviation_operator"
+
 # Figurative constants that can stand alone as the object of a relation
 # (``IF A = 1 OR SPACES``); a bare one of these after AND/OR is a literal
 # leg of an abbreviated combined condition, never a condition-name.
@@ -116,6 +125,69 @@ _FIGURATIVE_WORDS = frozenset(
 _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$")
 
 
+@dataclass(frozen=True)
+class ConditionSymbols:
+    """What the already-parsed DATA DIVISION says about a bare name (#562).
+
+    The PROCEDURE DIVISION is parsed after the DATA DIVISION, so the
+    condition builder can tell a level-88 condition-name from an ordinary
+    data item: the leg ``WS-B`` of ``IF A = 'X' OR WS-B`` is an abbreviated
+    relation (``A = WS-B``) when WS-B is a plain data item, and a
+    condition-name test when it is a level-88 name. Both sets hold
+    upper-cased names; a name in neither (an unexpanded COPY member, a
+    SPECIAL-NAMES switch condition) keeps the CONDITION_NAME reading.
+    """
+
+    data_names: frozenset[str] = frozenset()
+    condition_names: frozenset[str] = frozenset()
+
+    def is_data_reference(self, tokens: list[str]) -> bool:
+        """True when *tokens* is one reference (``name [OF|IN q]...
+        [(subscripts)]``) to a declared data item that is not also a
+        level-88 condition-name anywhere in the program."""
+        if not tokens or not _is_condition_name_reference(
+            tokens, [t.upper() for t in tokens]
+        ):
+            return False
+        name = tokens[0].upper()
+        return name in self.data_names and name not in self.condition_names
+
+
+def condition_symbols(context: Any) -> ConditionSymbols | None:
+    """The :class:`ConditionSymbols` a statement parser's ParseContext
+    carries, or None when there is no context (a standalone parse)."""
+    if context is None:
+        return None
+    data_names = getattr(context, "known_data_names", None)
+    condition_names = getattr(context, "condition_names", None)
+    if not isinstance(data_names, frozenset) or not data_names:
+        return None
+    return ConditionSymbols(
+        data_names=data_names,
+        condition_names=(
+            condition_names if isinstance(condition_names, frozenset) else frozenset()
+        ),
+    )
+
+
+def typed_literal_prefix(token: Token) -> str:
+    """The upper-cased type prefix of a typed STRING_LITERAL token (``X``,
+    ``Z``, ``N``, ``NX``, ``G``, ``U``, ``UX``, ...) or ``""``.
+
+    The lexer keeps a typed literal's content in ``value`` and its source
+    text in ``raw_value`` (``X'00'``); the prefix is what precedes the
+    first quote of ``raw_value``.
+    """
+    raw = token.raw_value
+    if token.type != TokenType.STRING_LITERAL or not raw:
+        return ""
+    for index, ch in enumerate(raw):
+        if ch in "\"'":
+            prefix = raw[:index].upper()
+            return prefix if prefix.isalpha() else ""
+    return ""
+
+
 def condition_token_text(token: Token) -> str:
     """Text for one condition token, re-quoting string literals.
 
@@ -124,11 +196,12 @@ def condition_token_text(token: Token) -> str:
     indistinguishable from an identifier once collected into a flat
     condition-token list. Re-wrap it here, at the one point the token
     type is still known, rather than guessing from the rendered text
-    later.
+    later. A typed literal keeps its prefix (#331): ``X'0000'`` is two
+    bytes, and re-quoted bare it read as the four characters ``'0000'``.
     """
     if token.type == TokenType.STRING_LITERAL:
         value = (token.value or "").replace("'", "''")
-        return f"'{value}'"
+        return f"{typed_literal_prefix(token)}'{value}'"
     return token.value or str(token.type)
 
 
@@ -137,6 +210,7 @@ def build_condition_expression(
     location: SourceLocation,
     *,
     subject: ConditionalExpression | None = None,
+    symbols: ConditionSymbols | None = None,
 ) -> CobolExpression | None:
     """Convert a flat list of condition token strings into an expression tree.
 
@@ -152,6 +226,10 @@ def build_condition_expression(
     ``A = 1 OR 2 AND 3`` is ``A = 1 OR (A = 2 AND A = 3)``, and ``A = 1 OR
     (2 AND 3)`` the same; expanding only the whole right-hand leg left both
     with two operand-less COMPARISON nodes.
+
+    *symbols* (from the parsed DATA DIVISION) lets a bare data-name leg
+    expand like a literal one: ``A = B OR C`` is ``A = B OR A = C`` when C
+    is a plain data item, not a level-88 condition-name (#562).
     """
     # Normalise multi-word operators ("NOT LESS", "NOT EQUAL", etc.) and
     # two-character symbolic operators the lexer emits as separate
@@ -220,37 +298,40 @@ def build_condition_expression(
 
     # Split on the lowest-precedence logical operator at the top paren
     # level. COBOL binds AND tighter than OR, so OR is split first (it
-    # becomes the tree root) and AND stays nested beneath it. Split on the
-    # rightmost operator so the tree is left-associative, matching COBOL's
-    # left-to-right evaluation. Parenthesised sub-conditions are skipped
-    # here and resolved by the recursive call, e.g. (A OR B) AND C keeps
-    # AND as the root.
+    # becomes the tree root) and AND stays nested beneath it. Every
+    # top-level occurrence is split in one pass and the legs folded from the
+    # left, so the tree is left-associative, matching COBOL's left-to-right
+    # evaluation. Parenthesised sub-conditions are skipped here and resolved
+    # by the recursive call, e.g. (A OR B) AND C keeps AND as the root.
+    # One pass, not one recursion per operator: a chain of ~1,000 terms hit
+    # Python's recursion limit and the whole IF was dropped (#375).
     for logical_op in ("OR", "AND"):
-        idx = find_top_level_operator(cleaned, logical_op)
-        if idx is not None:
-            left_expr = build_condition_expression(
-                cleaned[:idx], location, subject=subject
-            )
+        indexes = find_top_level_operators(cleaned, logical_op)
+        if not indexes:
+            continue
+        bounds = [-1, *indexes, len(cleaned)]
+        legs: list[CobolExpression] = []
+        for start, end in zip(bounds, bounds[1:], strict=False):
             # ``IF A = 1 OR 2`` / ``IF A > 1 AND < 5``: an abbreviated
             # combined relation condition repeats the subject (and, for a
             # bare literal, the operator) of the relation before it -- the
-            # rightmost relation of the left leg, or, when the left leg is
-            # itself abbreviated all the way down, the one handed in.
-            right_subject = _rightmost_relation(left_expr) or subject
-            right_expr = build_condition_expression(
-                cleaned[idx + 1 :], location, subject=right_subject
+            # rightmost relation of the legs to its left, or, when those are
+            # abbreviated all the way down, the one handed in.
+            leg_subject = (_rightmost_relation(legs[-1]) if legs else None) or subject
+            leg = build_condition_expression(
+                cleaned[start + 1 : end], location, subject=leg_subject, symbols=symbols
             )
-            if left_expr and right_expr:
-                logical = LogicalExpression(logical_op, location)
-                logical.set_left_condition(left_expr)
-                logical.set_right_condition(right_expr)
-                return logical
+            if leg is None:
+                break
+            legs.append(leg)
+        else:
+            return _fold_logical(logical_op, legs, location)
 
     # A leaf under an AND/OR: expand the abbreviated forms (a leg that
     # starts with a relational operator, a bare literal, ``NOT literal``)
     # against the relation to the left. Anything else is left alone.
     if subject is not None:
-        cleaned = _expand_abbreviated_condition(subject, cleaned)
+        cleaned = _expand_abbreviated_condition(subject, cleaned, symbols)
 
     # Leading NOT: ``NOT A = 1``, ``NOT (A = 1 AND B = 2)``, ``NOT FLAG-ON``.
     # NOT binds tighter than AND/OR, so this runs after the split above
@@ -260,7 +341,7 @@ def build_condition_expression(
     # Previously the word was swallowed into the left operand text
     # (``left_operand="NOT ( A"``).
     if len(cleaned) > 1 and cleaned[0].upper() == "NOT":
-        inner = build_condition_expression(cleaned[1:], location)
+        inner = build_condition_expression(cleaned[1:], location, symbols=symbols)
         if inner is not None and not _is_raw_fallback(inner):
             return _negate_condition(inner, location)
 
@@ -365,6 +446,8 @@ def _negate_condition(
     """Apply a leading ``NOT`` to an already-built condition."""
     if isinstance(expr, ConditionalExpression):
         if expr.operator in _NEGATED_RELATIONAL:
+            if not hasattr(expr, _WRITTEN_OPERATOR_ATTR):
+                setattr(expr, _WRITTEN_OPERATOR_ATTR, expr.operator)
             expr.operator = _NEGATED_RELATIONAL[expr.operator]
             return expr
         if expr.operator.startswith("IS NOT "):
@@ -376,6 +459,40 @@ def _negate_condition(
     negated = LogicalExpression("NOT", location)
     negated.set_left_condition(expr)
     return negated
+
+
+#: Up to this many legs, an AND/OR chain is the left-deep tree it always
+#: was. A longer one is folded pairwise so the tree stays O(log n) deep:
+#: every walker over it (``to_dict``, rendering, the analyzers) recurses on
+#: depth, and a left-deep chain of ~1,000 terms overflowed them (#375).
+_MAX_LEFT_DEEP_LEGS = 64
+
+
+def _fold_logical(
+    operator: str, legs: list[CobolExpression], location: SourceLocation
+) -> CobolExpression:
+    """Join *legs* (at least two) with *operator*, left to right."""
+
+    def join(left: CobolExpression, right: CobolExpression) -> CobolExpression:
+        logical = LogicalExpression(operator, location)
+        logical.set_left_condition(left)
+        logical.set_right_condition(right)
+        return logical
+
+    if len(legs) <= _MAX_LEFT_DEEP_LEGS:
+        tree = legs[0]
+        for leg in legs[1:]:
+            tree = join(tree, leg)
+        return tree
+    # AND / OR are associative, so pairing neighbours keeps the meaning and
+    # the left-to-right order of the legs.
+    level = legs
+    while len(level) > 1:
+        paired = [join(a, b) for a, b in zip(level[::2], level[1::2], strict=False)]
+        if len(level) % 2:
+            paired.append(level[-1])
+        level = paired
+    return level[0]
 
 
 def _rightmost_relation(expr: CobolExpression | None) -> ConditionalExpression | None:
@@ -402,7 +519,7 @@ def _is_literal_leg(tokens: list[str]) -> bool:
     if len(tokens) != 1:
         return False
     tok = tokens[0]
-    if tok.startswith(("'", '"')):
+    if tok.startswith(("'", '"')) or is_quoted_literal(tok):
         return True
     if _NUMERIC_LITERAL_RE.match(tok):
         return True
@@ -410,7 +527,9 @@ def _is_literal_leg(tokens: list[str]) -> bool:
 
 
 def _expand_abbreviated_condition(
-    subject: ConditionalExpression, rest: list[str]
+    subject: ConditionalExpression,
+    rest: list[str],
+    symbols: ConditionSymbols | None = None,
 ) -> list[str]:
     """Rebuild one leg of an AND/OR when it has no subject of its own.
 
@@ -420,10 +539,12 @@ def _expand_abbreviated_condition(
     1 AND A < 5``. Two shapes are expanded: a leg that *starts with a
     relational operator*, optionally after ``IS`` (subject prepended) and a
     leg that is *one bare literal* (subject and operator prepended; ``NOT
-    literal`` negates the operator). A bare identifier is left alone:
-    without a symbol table it is indistinguishable from a level-88
-    condition-name (``A = 1 OR FLAG-ON``), and the CONDITION_NAME reading
-    is the one the analyzers resolve. Anything else is returned unchanged.
+    literal`` negates the operator). A bare identifier expands the same way
+    only when *symbols* says it is a declared data item that is not a
+    level-88 condition-name (#562); otherwise it is left alone -- without
+    a symbol table it is indistinguishable from a condition-name (``A = 1
+    OR FLAG-ON``), and the CONDITION_NAME reading is the one the analyzers
+    resolve. Anything else is returned unchanged.
     *subject* is the relation the leg repeats -- see
     :func:`build_condition_expression`.
     """
@@ -431,6 +552,9 @@ def _expand_abbreviated_condition(
         return rest
     if not isinstance(subject.left_operand, str):
         return rest
+    # The relation's operator as written: a leading NOT negates only its own
+    # relation, never the legs that abbreviate it (#329).
+    operator = getattr(subject, _WRITTEN_OPERATOR_ATTR, subject.operator)
     if len(rest) > 1 and rest[0].upper() == "IS":
         # ``A > 1 AND IS < 5``: the optional IS that opens a relational
         # operator survives cleaning when the leg has no subject before it.
@@ -441,9 +565,19 @@ def _expand_abbreviated_condition(
     if first in COMPARISON_OPS or first in _RELATIONAL_OPERATORS:
         return [subject.left_operand, *rest]
     if _is_literal_leg(rest):
-        return [subject.left_operand, subject.operator, *rest]
+        return [subject.left_operand, operator, *rest]
     if first == "NOT" and _is_literal_leg(rest[1:]):
-        return [subject.left_operand, _NEGATED_RELATIONAL[subject.operator], *rest[1:]]
+        return [subject.left_operand, _NEGATED_RELATIONAL[operator], *rest[1:]]
+    if symbols is not None:
+        # The written operator (#329) for a data-name leg too (#562).
+        if symbols.is_data_reference(rest):
+            return [subject.left_operand, operator, *rest]
+        if first == "NOT" and symbols.is_data_reference(rest[1:]):
+            return [
+                subject.left_operand,
+                _NEGATED_RELATIONAL[operator],
+                *rest[1:],
+            ]
     return rest
 
 
@@ -478,6 +612,10 @@ def _build_unary_condition(
             return expr
         return None
 
+    user_class = _build_user_class_or_omitted(cleaned, upper, location)
+    if user_class is not None:
+        return user_class
+
     if (
         _is_condition_name_reference(cleaned, upper)
         and upper[0] != "NOT"
@@ -492,6 +630,44 @@ def _build_unary_condition(
         return expr
 
     return None
+
+
+def _build_user_class_or_omitted(
+    cleaned: list[str], upper: list[str], location: SourceLocation
+) -> ConditionalExpression | None:
+    """``operand [IS] [NOT] OMITTED`` and ``operand IS [NOT] class-name`` (#539).
+
+    A class-name is defined in SPECIAL-NAMES (``CLASS VALID-CODE IS 'A'
+    THRU 'F'``), which this builder cannot see, so the class form is
+    recognised by its shape: an ``IS`` after a data reference, then an
+    optional ``NOT`` and one COBOL word that is not a relational word.
+    Nothing else in COBOL is spelled ``operand IS word``. The operand must
+    itself be one data reference (``name [OF q]... [(subscripts)]``).
+    Without the ``IS`` (``IF X VALID-CODE``) the class form is not
+    recognised -- it is indistinguishable here from a stray token.
+    """
+    if len(cleaned) < 2 or not _IDENTIFIER_RE.match(cleaned[-1]):
+        return None
+    word = upper[-1]
+    if word in _CLASS_SIGN_WORDS or word in _RELATIONAL_WORDS:
+        return None
+    rest, rest_upper = cleaned[:-1], upper[:-1]
+    negated = bool(rest_upper) and rest_upper[-1] == "NOT"
+    if negated:
+        rest, rest_upper = rest[:-1], rest_upper[:-1]
+    has_is = bool(rest_upper) and rest_upper[-1] == "IS"
+    if has_is:
+        rest, rest_upper = rest[:-1], rest_upper[:-1]
+    if word != "OMITTED" and not has_is:
+        return None
+    if not rest or not _is_condition_name_reference(rest, rest_upper):
+        return None
+    if word in _FIGURATIVE_WORDS or word in ("TRUE", "FALSE"):
+        return None
+    operator = f"IS NOT {word}" if negated else f"IS {word}"
+    expr = ConditionalExpression(operator, location)
+    expr.set_left_operand(" ".join(rest))
+    return expr
 
 
 def _is_condition_name_reference(cleaned: list[str], upper: list[str]) -> bool:
@@ -546,6 +722,20 @@ def strip_enclosing_parens(tokens: list[str]) -> list[str]:
         else:
             break
     return tokens
+
+
+def find_top_level_operators(tokens: list[str], op: str) -> list[int]:
+    """Indexes of every ``op`` token outside any parentheses, in order."""
+    depth = 0
+    found: list[int] = []
+    for i, tok in enumerate(tokens):
+        if tok == "(":
+            depth += 1
+        elif tok == ")":
+            depth -= 1
+        elif depth == 0 and tok.upper() == op:
+            found.append(i)
+    return found
 
 
 def find_top_level_operator(tokens: list[str], op: str) -> int | None:

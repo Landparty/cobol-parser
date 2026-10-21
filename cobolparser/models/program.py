@@ -277,6 +277,17 @@ class CobolProgram(ASTNode):
         # nested programs delimited by END PROGRAM). Historically everything
         # after the first program was silently dropped.
         self.contained_programs: list[CobolProgram] = []
+        #: The program unit this one is *nested* in (its ``END PROGRAM``
+        #: comes before the enclosing one's), or None for an outermost
+        #: program and for a *stacked* one (a separate compilation unit
+        #: written after the previous one's ``END PROGRAM``). Every unit
+        #: hangs off the first program's ``contained_programs`` whatever its
+        #: nesting, so the tree does not say this; the parser does (#532).
+        #: ``add_contained_program`` defaults it to the containing unit.
+        self.enclosing_program: CobolProgram | None = None
+        # from_json only: the serialized ``enclosing_program`` name ("" for
+        # a stacked unit) until _restore_nesting() resolves it.
+        self._enclosing_name: str | None = None
         #: What kind of compilation unit this is: ``"PROGRAM"`` (a
         #: PROGRAM-ID, the default) or, for IBM object-oriented COBOL, one
         #: of ``"CLASS"`` (CLASS-ID), ``"FACTORY"``, ``"OBJECT"`` and
@@ -342,6 +353,71 @@ class CobolProgram(ASTNode):
         it may legally be re-entered while still active."""
         return "RECURSIVE" in self.program_attributes
 
+    @property
+    def is_common(self) -> bool:
+        """True when the unit declared ``PROGRAM-ID. name IS COMMON``: the
+        programs nested in its own container may CALL it, not only that
+        container."""
+        return "COMMON" in self.program_attributes
+
+    @property
+    def is_nested(self) -> bool:
+        """True for a program nested in another (not outermost, not
+        stacked): only programs of its own compilation unit can CALL it."""
+        return self.enclosing_program is not None
+
+    @property
+    def nesting_depth(self) -> int:
+        """0 for an outermost or stacked unit, 1 for one nested in it, ..."""
+        depth = 0
+        unit = self.enclosing_program
+        while unit is not None and depth < 10_000:
+            depth += 1
+            unit = unit.enclosing_program
+        return depth
+
+    def nested_program_called(self, name: str) -> "CobolProgram | None":
+        """The nested program a ``CALL 'name'`` written in this unit reaches
+        by COBOL scope, or None when the CALL goes to a separately compiled
+        (external) program of that name (#532).
+
+        A program nested directly in this unit is visible; so is a
+        ``COMMON`` program nested directly in any unit enclosing this one
+        (not one of its own enclosing units), and a nested unit's own name
+        (a RECURSIVE program calling itself).
+        """
+        wanted = name.strip().strip("\"'").strip().upper()
+        if not wanted:
+            return None
+        if self.is_nested and (self.program_name or "").upper() == wanted:
+            return self
+        root: CobolProgram = self
+        while isinstance(getattr(root, "parent", None), CobolProgram):
+            root = root.parent  # type: ignore[assignment]
+        units = [
+            u
+            for u in root.program_units()
+            if u.unit_kind == "PROGRAM" and (u.program_name or "").upper() == wanted
+        ]
+        for unit in units:
+            if unit.enclosing_program is self:
+                return unit
+        ancestors: list[CobolProgram] = []
+        unit_up = self.enclosing_program
+        while unit_up is not None and len(ancestors) < 10_000:
+            ancestors.append(unit_up)
+            unit_up = unit_up.enclosing_program
+        for ancestor in ancestors:
+            for unit in units:
+                if (
+                    unit.enclosing_program is ancestor
+                    and unit.is_common
+                    and unit is not self
+                    and unit not in ancestors
+                ):
+                    return unit
+        return None
+
     def program_units(self) -> list["CobolProgram"]:
         """This program and every program contained in it, outermost first.
 
@@ -370,6 +446,7 @@ class CobolProgram(ASTNode):
         """Attach an additional program unit from the same compilation unit."""
         self.add_child(program)
         self.contained_programs.append(program)
+        program.enclosing_program = self
         # A contained program brings its own statements.
         self._cached_all_statements = None
 
@@ -843,7 +920,10 @@ class CobolProgram(ASTNode):
             if isinstance(node, CobolDataItem):
                 data_item_count += 1
             elif isinstance(node, (CobolParagraph, CobolSection)):
-                procedure_count += 1
+                # Only PROCEDURE DIVISION procedures: WORKING-STORAGE,
+                # LOCAL-STORAGE, LINKAGE and FILE are sections too (#508).
+                if node.division_name in (None, "PROCEDURE"):
+                    procedure_count += 1
             elif isinstance(node, CobolStatement):
                 # By class, not ``node_type == "Statement"``: EXEC CICS /
                 # EXEC IMS keep their historical ``EXEC_CICS`` / ``EXEC_IMS``
@@ -878,6 +958,18 @@ class CobolProgram(ASTNode):
         }
         if self.unit_kind != "PROGRAM":
             result["unit_kind"] = self.unit_kind
+        container = getattr(self, "parent", None)
+        if (
+            isinstance(container, CobolProgram)
+            and self.enclosing_program is not container
+        ):
+            # Nesting the tree does not show (#532): None for a stacked
+            # unit, else the name of the unit it is nested in.
+            result["enclosing_program"] = (
+                self.enclosing_program.program_name
+                if self.enclosing_program is not None
+                else None
+            )
 
         if self.contained_programs:
             result["contained_programs"] = [
@@ -890,10 +982,13 @@ class CobolProgram(ASTNode):
             _strip_locations(result["divisions"])
 
         if config.include_metadata:
+            from cobolparser import __version__
+
+            # No ``created_at``: a timestamp would make the JSON of the same
+            # input differ run to run, and the placeholder one was a lie (#508).
             metadata = {
                 "statistics": self.get_statistics(),
-                "parser_version": "1.0.0",
-                "created_at": "2024-01-01T00:00:00Z",  # Would be actual timestamp
+                "parser_version": __version__,
                 **(self._metadata or {}),
             }
 
@@ -962,6 +1057,7 @@ class CobolProgram(ASTNode):
         """
         dropped: dict[str, int] = {}
         program = cls._from_dict(json.loads(json_str), dropped)
+        program._restore_nesting()
         if dropped.get("statements"):
             warnings.warn(
                 f"CobolProgram.from_json restored a structural skeleton of "
@@ -1014,8 +1110,31 @@ class CobolProgram(ASTNode):
         program.unit_kind = data.get("unit_kind", "PROGRAM")
         for contained in data.get("contained_programs", []):
             program.add_contained_program(cls._from_dict(contained, dropped))
+        if "enclosing_program" in data:
+            program._enclosing_name = data["enclosing_program"] or ""
 
         return program
+
+    def _restore_nesting(self) -> None:
+        """Point each unit ``to_dict`` marked with ``enclosing_program`` at
+        the nearest preceding unit of that name ("" = stacked)."""
+        seen: list[CobolProgram] = []
+        for unit in self.program_units():
+            name, unit._enclosing_name = unit._enclosing_name, None
+            if name is not None:
+                unit.enclosing_program = (
+                    next(
+                        (
+                            u
+                            for u in reversed(seen)
+                            if (u.program_name or "").upper() == name.upper()
+                        ),
+                        None,
+                    )
+                    if name
+                    else None
+                )
+            seen.append(unit)
 
 
 class LossyDeserializationWarning(UserWarning):
@@ -1164,6 +1283,7 @@ def _data_item_from(data: dict[str, Any]) -> "CobolDataItem":
             _location_from(pic),
             currency_symbols=set(pic_meta.get("currency_symbols", ())),
             decimal_point_is_comma=bool(pic_meta.get("decimal_point_is_comma")),
+            currency_signs=dict(pic_meta.get("currency_signs") or {}),
         )
         for field in _PICTURE_FIELDS:
             if field in pic:

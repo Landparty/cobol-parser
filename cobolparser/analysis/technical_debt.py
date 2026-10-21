@@ -403,8 +403,11 @@ class TechnicalDebtAnalyzer:
             getattr(item, "qualified_name", None) or item.name
             for item in redundancy_report.dead_items
         }
+        # Matched by key, not bare name: a CALC in another section that is
+        # not itself a clone must not inherit its namesake's membership
+        # (#555).
         cloned_names = {
-            member.name
+            member.qualified_name or member.name
             for group in redundancy_report.clone_groups
             for member in group.members
         }
@@ -439,7 +442,7 @@ class TechnicalDebtAnalyzer:
                 severity += 20
                 reasons.append("dead code (unreferenced)")
 
-            if proc.name in cloned_names:
+            if key in cloned_names:
                 severity += 15
                 reasons.append("member of a duplicate-paragraph clone group")
 

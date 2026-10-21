@@ -382,10 +382,11 @@ class TestWorkspaceFiles:
         )
         assert ws.config.copybook_path == ()
 
-    def test_non_utf8_is_an_error(self, root: Path) -> None:
+    def test_non_utf8_is_decoded_as_the_parse_decodes_it(self, root: Path) -> None:
+        # Detected as cp1252, as a copybook would be (#522), not refused.
         (root / "BIN.cbl").write_bytes(b"\xff\xfe\x00")
-        with pytest.raises(ToolError, match="UTF-8"):
-            tools_for(root).read_source("BIN.cbl")
+        (line,) = tools_for(root).read_source("BIN.cbl")["answer"]["lines"]
+        assert line["text"] == "\u00ff\u00fe\x00"
 
 
 class TestCache:
@@ -555,6 +556,34 @@ class TestReadSource:
         assert result["truncated"] == [
             {"field": "lines", "shown": MAX_SOURCE_LINES, "total": 801}
         ]
+        assert 500 in [row["line"] for row in result["answer"]["lines"]]
+
+    def test_a_large_before_still_shows_the_line(self, root: Path) -> None:
+        # #537: the cut kept the head of the window, so line=800 before=500
+        # showed lines 300-499 and never the line asked for.
+        (root / "BIG.cbl").write_text(
+            "".join(f"      * line {n}\n" for n in range(1, 1001))
+        )
+        result = tools_for(root).read_source("BIG.cbl", 800, before=500, after=5)
+        answer = result["answer"]
+        assert (answer["start_line"], answer["end_line"]) == (606, 805)
+        assert answer["lines"][194] == {"line": 800, "text": "      * line 800"}
+        assert result["truncated"] == [
+            {"field": "lines", "shown": MAX_SOURCE_LINES, "total": 506}
+        ]
+
+    def test_the_after_lines_come_before_the_before_lines(self, root: Path) -> None:
+        (root / "BIG.cbl").write_text("".join(f"line {n}\n" for n in range(1, 1001)))
+        tools = tools_for(root)
+        answer = tools.read_source("BIG.cbl", 800, before=5, after=500)["answer"]
+        assert (answer["start_line"], answer["end_line"]) == (800, 999)
+        # After the end of the file, the unused budget goes to ``before``.
+        near_end = tools.read_source("BIG.cbl", 990, before=500, after=500)
+        assert (near_end["answer"]["start_line"], near_end["answer"]["end_line"]) == (
+            801,
+            1000,
+        )
+        assert near_end["truncated"][0]["total"] == 511
 
 
 # -- lint ------------------------------------------------------------------------
@@ -825,7 +854,12 @@ class TestProgramBrief:
     def test_sql_tables_and_cics(self, root: Path) -> None:
         tools = with_copybooks(root)
         db2 = tools.program_brief("DB2BATCH.cbl")["answer"]
-        assert {"name": "BANK.ACCOUNT", "access": "--U-"} in db2["sql_tables"]
+        # Read through the two cursors DECLAREd in WORKING-STORAGE (#518).
+        assert {
+            "name": "BANK.ACCOUNT",
+            "access": "-RU-",
+            "cursors": ["ACCT-CSR", "BULK-CSR"],
+        } in db2["sql_tables"]
         cics = tools.program_brief("CICSONLN.cbl")["answer"]
         assert cics["cics_commands"]["SEND"] == 2
         linked = {c["program"]: c for c in cics["calls"]}
@@ -1106,9 +1140,10 @@ class TestExplainSymbolFillerAndRenames:
         assert symbol["declared"] is True
         assert symbol["level"] == 66
         assert symbol["declared_at"]["line"] == 12
-        # R-A THRU R-B: bytes 0-4 of WS-REC.
+        # R-A THRU R-B: bytes 0-4 of WS-REC, as data-items places it (#563).
         assert symbol["layout"] == {
-            "qualified_name": "R-AB",
+            "qualified_name": "WS-REC.R-AB",
+            "usage": "DISPLAY",
             "byte_offset": 0,
             "byte_length": 5,
         }

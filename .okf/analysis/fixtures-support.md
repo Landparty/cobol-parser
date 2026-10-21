@@ -80,9 +80,22 @@ OUTPUT B` in one statement) and carry `status_field` resolved via
 `ScenarioPlanner`'s "OPEN -> FILE STATUS 35" error family can never fire).
 DELETE/START/UNLOCK are
 `STATUS_ONLY` (no data payload); READ is `IN`; WRITE/REWRITE are `OUT`.
+Report Writer `GENERATE x` (when `x` is a report or report group whose
+report a `FD ... REPORT IS` names) is an `OUT` boundary of category `WRITE`
+keyed on `x`, with no `record_names` (a report group is no FILE SECTION
+record); INITIATE / TERMINATE add none (#499).
 
 **CALL/DYNCALL argument-direction ladder (Phase 2b)**, first rung wins,
 `CallArg.provenance` records which:
+
+0. Before the ladder (#582): an `OMITTED` argument is `direction="NONE"`,
+   `provenance="omitted"` -- kept in its position so later arguments still
+   pair with the right callee LINKAGE 01. A constant passed BY REFERENCE (a
+   literal, figurative, `LENGTH OF x`, `FUNCTION f(...)`) is **OUT**,
+   `provenance="constant"`. `call_argument_data_name()` is the one classifier
+   (None for those constants and `OMITTED`, `x` for `ADDRESS OF x`); rung 3's
+   dataflow, `constraints._boundary_fed_names` and `program_fixtures` resolve
+   that name, never the raw argument text.
 
 1. `passing_mode` in `CONTENT`/`VALUE` -> **OUT**, always (language rule --
    the callee cannot write back through either mode).
@@ -163,6 +176,16 @@ re-reads the qualifiers from the scrubbed `sql_text` with
 `AMT` declared under two structures would otherwise land in `unresolved`
 (issue #366).
 
+**A gap goes on the boundary too.** An unresolvable SQL host variable,
+ACCEPT target, READ record layout or WRITE/REWRITE record is appended to the
+`Boundary`'s own `unresolved` as well as `report.unresolved`: coverage
+(`CoverageSummary`) counts a boundary resolved by its own list, so a SELECT
+whose host variables all failed -- and so got no fixture -- read as resolved
+(#505). An item inside an `OCCURS` table never resolves in
+`ProgramLayoutIndex`; `_is_table_item()` names it instead ("host-variable
+array (OCCURS): unsupported" / "table element (OCCURS)"), so a DB2 rowset
+`FETCH ... INTO :ARRAY` or `ACCEPT TB(I)` says why it has no fixture.
+
 **CICS/DLI** have no fixed INTO/FROM-shaped attributes to key layout
 resolution off -- `ExecCicsStatement.options` is a generic option-keyword ->
 argument-text dict, and `ExecImsStatement.arguments` is a positional list
@@ -172,6 +195,14 @@ value/argument is tried against the layout index (via the same
 defaults to `BIDIRECTIONAL`, and an unresolved entry on the `Boundary` itself
 (not the report-level list) notes the limitation rather than claiming
 precision this phase does not have.
+
+**SORT / MERGE files are not boundaries** (#498, option b, pending a
+key/category agreed with mockymock's `mock_surface`). Each `USING` and
+`GIVING` file of a SORT or MERGE is one `report.unresolved` entry ("SORT
+USING file IN-FILE in MAIN-PARA is not modelled as a boundary ..."), so a
+program whose only I/O is `SORT ... USING ... GIVING` no longer reports an
+empty bundle with nothing unresolved, and `gen-fixtures --strict` fails on
+it. No `Boundary` is emitted, so coverage counts are unchanged.
 
 **ACCEPT.** Non-interactive sources (`DATE`, `DAY`, `DAY-OF-WEEK`, `TIME`,
 `COMMAND-LINE`, `ENVIRONMENT`, `ENVIRONMENT-VALUE`, `ARGUMENT-NUMBER`,
@@ -248,6 +279,16 @@ branch.enclosing             # tuple[(branch_id, arm_id), ...]: the arms that
 witness = solve(field_spec, branch.arms["THEN"])   # Witness | Unsatisfiable
 ```
 
+**`transfer_sites`: the way into a paragraph** (#310).
+`ConstraintReport.transfer_sites` holds one `TransferSite(paragraph, target,
+kind, enclosing, line)` per out-of-line `PERFORM p [THRU q]` (its first
+paragraph; the rest of a range is reached by falling through) and per `GO
+TO` target (`kind` `GOTO_DEPENDING` for `GO TO ... DEPENDING ON`), recorded
+by `_record_transfer_site` during the same `_walk_statements` pass, so its
+`enclosing` is the PERFORM's own arm chain. `ScenarioPlanner` joins a
+branch's `parent_proc` to it to carry the path condition across paragraphs
+(see generators/fixtures.md).
+
 **`enclosing`: the path condition.** Every `BranchConstraints`
 records the `(branch_id, arm_id)` chain enclosing it. `_walk_list` threads it
 down through `_nested_statement_lists`, which pairs each nested statement
@@ -319,7 +360,14 @@ forms narrow nothing;
 class tests (`IS NUMERIC`/`IS ALPHABETIC`) become `class_numeric`/
 `class_alphabetic`; sign/zero tests (`IS POSITIVE`/`NEGATIVE`/`ZERO`) fold
 directly into the relational vocabulary (`gt 0`/`lt 0`/`eq 0`) rather than
-getting their own domain-handling branch. `negated` only carries meaning for
+getting their own domain-handling branch. An EVALUATE selector marked
+`"expression"` (or any unquoted one with internal whitespace / parentheses),
+and a range bound of that shape, is reported unsupported ("computed operand
+rather than a literal") instead of being solved as literal text (#333), so
+WHEN OTHER is not counted as targeted against made-up text either. A
+SPECIAL-NAMES class test (`IS VALID-CODE`) and `IS [NOT] OMITTED` are
+reported unsupported with their own reason (#539) -- the latter depends on
+the caller's argument list, not data. `negated` only carries meaning for
 `class_numeric`/`class_alphabetic`/`figurative`, which have no separate "not"
 op name (unlike `eq`/`ne` or `in_set`/`not_in_set`, which absorb negation
 directly into the op choice).
@@ -575,6 +623,26 @@ visits) budget; past it the fold reports nothing (`_WalkState.exhausted`),
 never a partial answer. `test_const_fold_corpus.py`'s non-triviality check
 folds `tests/samples/file_operations.cbl` and `enterprise/COMPDIR.cbl`.
 
+**The program walk is cached** (#374). `gen-fixtures --scenarios all` folds
+one program twice per scenario, and each fold used to re-walk the whole
+PROCEDURE DIVISION for its READ / DISPLAY / WRITE sites and recompute every
+statement's nested lists -- quadratic in program size (300 IFs / 40 I/O
+statements: 13.3s, 600/60: 50.8s). `_ProgramWalk` holds those, one per
+program (`_WALK_CACHE`, a weak-keyed dictionary on the *index*, like
+`_FACTS_CACHE`; keyed on the AST it held its own key alive -- a statement's
+`parent` chain and `index.ast` lead back to it -- so no folded program was
+ever freed; the entry's weak `program` reference is checked so an index
+folded with another AST gets a fresh walk), and is reached through the `_CURRENT_WALK`
+context variable set only for the duration of `fold()`, so the module-level
+helpers keep their signatures and nothing is cached outside a fold. The
+unseeded fold (`seed_values` empty) is memoised on the same entry, one
+result per `success_skipped` set (an arm a success status never takes
+changes the fold), and handed out as a copy (`_copy_result`). Both assume the AST is not mutated
+between folds. Output is byte-identical (same bundle SHA-256; 2.5s / 7.3s
+for the two programs above); the bundle's size, which still grows with
+scenarios x fixtures, is untouched -- shrinking it would change the bundle
+shape (`bundle_version`).
+
 **Every site, and only control flow the walk really follows** (each case
 checked against GnuCOBOL 3.2 output):
 
@@ -592,9 +660,16 @@ checked against GnuCOBOL 3.2 output):
   nothing at all clears the env.
 * **SEARCH WHEN bodies and SORT/MERGE INPUT/OUTPUT PROCEDUREs** are
   poisoned like a loop body (`_nested_statement_lists`, `_procedure_ranges`).
-* **Conditional transfers.** A `GO TO`, `EXIT PARAGRAPH/SECTION/PERFORM` or
-  `NEXT SENTENCE` inside an arm / loop / handler (or a main-line `EXIT
-  PARAGRAPH`...) sets `_WalkState.uncertain`: from then on every
+* **Conditional transfers.** A `GO TO`, `EXIT PARAGRAPH/SECTION/PERFORM`,
+  `NEXT SENTENCE` or run ender (`STOP RUN`, `GOBACK`, `EXIT PROGRAM` --
+  `_ends_run`, #591; not `STOP 'literal'`) inside an arm / loop / handler, or a
+  paragraph PERFORMed from one (or a main-line `EXIT PARAGRAPH`...) sets
+  `_WalkState.uncertain`. A run ender in a body a success status never runs
+  (`IF WS-FS NOT = '00' ... GOBACK`, an INVALID KEY handler -- the bodies
+  `count_invocations` exempts, `InvocationCounts.success_skipped`, passed as
+  `fold(..., success_skipped=)`) does not, so the happy path keeps its
+  `field_equals` after the ubiquitous status check; `IF WS-FS = '00' ...
+  GOBACK` (success takes the arm) still does. From then on every
   MOVE/arithmetic/READ/ACCEPT poisons instead of folding, because the walk
   can no longer tell whether it ran. A `GO TO` also clears the env (it runs
   code the walk never sees), so the `IF ... GO TO P1-EXIT` idiom never folds
@@ -719,7 +794,11 @@ internal env) rather than approximating:
   reusing the target's own name as the second operand is directly what the
   statement means (multiplication has no target-is-also-an-addend hidden
   term the way ADD/SUBTRACT's TO/FROM accumulation does), so only GIVING
-  names are filtered from its operand list, never targets.
+  names are filtered from its operand list, never targets. The GIVING form
+  of MULTIPLY / DIVIDE reads its two operands from `source_operands` (#495):
+  filtering GIVING names out of `.operands` left one operand for `MULTIPLY A
+  BY A GIVING C` or `DIVIDE B INTO A GIVING A`, which poisoned the result
+  instead of folding it.
 * **ACCEPT/READ are a deliberate no-op, not an omission.** They are exactly
   the boundary categories `_tier2_expectations` seeds `env` from before the
   walk starts; falling through to the generic "unmodeled write" fallback
@@ -864,7 +943,9 @@ must use it -- `analysis/constraints.py` (`_strip_quotes`, branch witnesses),
 `analysis/const_fold.py` (MOVE sources) and `generators/data/layout.py`
 (`_strip_literal_quotes`, VALUE clauses) do; stripping only the delimiters
 turns `VALUE "A""B"` into `A""B`. Pinned by
-`tests/regression/test_doubled_quote_literal_values.py`.
+`tests/regression/test_doubled_quote_literal_values.py`. `_strip_quotes` reads
+a typed literal through `typed_literal_content()` first (`X'0000'` is two NUL
+characters, `X'41'` is `A`), and `_is_literal_operand` accepts one (#331).
 
 ## See also
 

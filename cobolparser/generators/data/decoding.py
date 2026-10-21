@@ -407,11 +407,22 @@ def _decode_edited(
             )
         return _render_decimal(number, spec.decimal_digits), None
     if (
-        edit_numeric(spec.picture, "0", decimal_point_is_comma=comma) is None
+        edit_numeric(
+            spec.picture,
+            "0",
+            decimal_point_is_comma=comma,
+            currency_signs=spec.currency_signs,
+        )
+        is None
         or len(raw) < spec.storage_size
     ):
         return _decode_text(raw, opts), None
-    parsed = deedit_numeric(spec.picture, text, decimal_point_is_comma=comma)
+    parsed = deedit_numeric(
+        spec.picture,
+        text,
+        decimal_point_is_comma=comma,
+        currency_signs=spec.currency_signs,
+    )
     if parsed is None:
         return text.rstrip(" \x00"), (
             f"{text!r} is not a value PIC {spec.picture} can display"

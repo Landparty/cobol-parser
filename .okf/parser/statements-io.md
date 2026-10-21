@@ -125,7 +125,9 @@ skips statement separators in its body.
   parentheses and quoted literals handled). The CICS command verb is read after
   skipping layout, so `EXEC CICS` / newline / `SEND ...` (the usual layout) keeps
   its verb. `ExecImsStatement` captures the DLI function code plus top-level
-  positional arguments (PCB, I/O area, SSAs). `parse_exec_sql`
+  positional arguments (PCB, I/O area, SSAs); its `ims_call_type` is the command
+  word when it is in `IBMEnterpriseCobol.EXEC_DLI_COMMANDS`, else `UNKNOWN`
+  (`_IMS_CALL_TYPES` is that set, not a copy -- #481). `parse_exec_sql`
   (`models/sql_statements.py`) is a literal/comment-aware tokenizer: statement
   kind, tables (FROM / INTO / UPDATE / JOIN), host variables including
   `:VAR:IND`, and for SELECTs `select_columns` + `where_present`.

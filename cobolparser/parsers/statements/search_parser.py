@@ -6,13 +6,19 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import CobolExpression, SearchStatement
-from ._conditions import build_condition_expression, condition_token_text
+from ._conditions import (
+    ConditionSymbols,
+    build_condition_expression,
+    condition_symbols,
+    condition_token_text,
+)
 from ._utils import (
     LITERAL_TOKEN_TYPES,
     SEPARATOR_TOKEN_TYPES,
     STATEMENT_KEYWORDS,
     bare_end_starts_at_end_clause,
     consume_optional_qualifiers,
+    get_parse_context,
     is_bare_separator,
     keyword_upper,
     matches_keyword,
@@ -161,7 +167,11 @@ class SearchStatementParser(IStatementParser):
                 stmt.add_when_clause(
                     " ".join(cond_parts),
                     when_stmts,
-                    _condition_tree(cond_parts, when_location),
+                    _condition_tree(
+                        cond_parts,
+                        when_location,
+                        condition_symbols(get_parse_context(token_stream)),
+                    ),
                 )
                 if when_stmts and _sentence_period_consumed(token_stream):
                     break
@@ -208,7 +218,9 @@ class SearchStatementParser(IStatementParser):
 
 
 def _condition_tree(
-    cond_parts: list[str], location: SourceLocation
+    cond_parts: list[str],
+    location: SourceLocation,
+    symbols: ConditionSymbols | None = None,
 ) -> CobolExpression | None:
     """The WHEN condition as a structural tree, or None.
 
@@ -220,7 +232,7 @@ def _condition_tree(
     if not cond_parts:
         return None
     try:
-        return build_condition_expression(list(cond_parts), location)
+        return build_condition_expression(list(cond_parts), location, symbols=symbols)
     except Exception:
         return None
 

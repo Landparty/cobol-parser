@@ -181,7 +181,10 @@ class TestScanSubcommand:
             "sys.argv",
             ["cobol-parser", "scan", good, missing, "--compact", "--workers", "1"],
         ):
-            main()
+            # The report is still written; the run exits 2 like batch (#325).
+            with pytest.raises(SystemExit) as exc:
+                main()
+        assert exc.value.code == 2
         data = json.loads(capsys.readouterr().out)
         assert data["summary"]["scanned_file_count"] == 1
         assert data["summary"]["failed_file_count"] == 1
