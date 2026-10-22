@@ -24,6 +24,7 @@ with [Program fixtures](#program-fixtures).
 - [Program layout index](#program-layout-index)
 - [Program fixtures](#program-fixtures)
 - [Scenario-mode generation](#scenario-mode-generation)
+- [Entry parameters](#entry-parameters)
 - [Self-verification](#self-verification)
 - [Path conditions](#path-conditions)
 - [Expectations: tiers 1-2](#expectations-tiers-1-2)
@@ -268,6 +269,25 @@ the internal `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers:
 `FixtureBundle.scenario_coverage` (additive field — `bundle_version` stays
 `1`) carries `ScenarioPlan.coverage.to_dict()` verbatim, `None` for a
 `mode="happy"` bundle since that mode never attempts branch targeting.
+
+## Entry parameters
+
+`ProgramFixtureGenerator(options, entry_parameters=True)` (2026-10-21,
+mocky-mock#275) treats the program's own PROCEDURE DIVISION USING items
+(`procedure.get_metadata("using_parameters")`, DFHEIBLK left out) as one
+more boundary, for a called subprogram whose whole interface they are.
+`_attach_entry_parameters` sets `Scenario.entry_parameters`: a
+`BoundaryFixture` with ref `ENTRY:<PROGRAM-ID>`, layout over the items'
+elementary fields (`_fields_for_names`), one row from a
+`_sub_seed(seed, scenario, "ENTRY", program)` `ValueFactory`, witnesses
+pinned through `_value_for` like any fixture; and a `stub` expectation per
+field whose path includes a LINKAGE name xref gives role `write`, plus the
+RETURNING item. `generate_with_scenarios` passes the names to
+`ConstraintExtractor.extract(..., extra_fed_names=...)`, so branches on the
+parameters are planned; `verify_scenario` and `_single_row_seeds` read the
+row too. Off by default: no `entry_parameters` key, identical values.
+Layout registered under `layouts["ENTRY:<PROGRAM-ID>"]`. Tests:
+`tests/unit/generators/test_entry_parameters.py`.
 
 ## Self-verification
 

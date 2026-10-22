@@ -257,6 +257,9 @@ operand that resolves (via Phase 1's `ProgramLayoutIndex`) to a field a
 boundary actually feeds (per Phase 2's `BoundaryReport`), emits a
 `FieldConstraint`; the domain-propagation solver in `domains.py` (same PR)
 turns a field's constraints into a concrete witness value.
+`extract(..., extra_fed_names=[...])` (2026-10-21) adds data names to treat
+as boundary-fed on top of the report's: `ProgramFixtureGenerator(
+entry_parameters=True)` passes the program's own USING items.
 
 ```python
 from cobolparser.analysis.constraints import ConstraintExtractor
