@@ -3,6 +3,17 @@ name: cobol-analysis
 description: Answer questions about COBOL, JCL or copybook source by running the cobol-parser CLI instead of reading the source by eye. Use when a task involves a .cbl/.cob/.cpy/.jcl file or a mainframe checkout — "what does this program do", "is this paragraph used", "what breaks if I change this field", "decode this record image", "grade this codebase", "what are the byte offsets", or any edit to COBOL source that needs checking afterwards.
 ---
 
+<!--
+Maintainer note: this file is the one source of the `cobol-analysis`
+skill. mocky-mock ships it, byte for byte, as
+mockymock/cli/skills/cobol-analysis/SKILL.md (its cobol-testing plugin and
+`mockymock skills install`), so keep it free of anything true only inside
+this repo. Edit it here, then run mocky-mock's
+`scripts/sync_cobol_analysis_skill.py`; that repo's tests fail on a copy
+that has drifted from this one. tests/unit/test_cobol_analysis_skill.py
+checks every subcommand and flag it names against the real CLI.
+-->
+
 # Analyzing COBOL with cobol-parser
 
 COBOL defeats the usual read-the-file approach in three specific ways, and
@@ -29,9 +40,12 @@ tools for those questions (`program_brief` first, then `explain_symbol`,
 and `where_from`): they answer from cached parses, cite every fact as
 `file:line` on disk, and list what they could not check under `caveats`.
 
-The CLI is `cobol-parser` (entry point `cobolparser.cli:main`). In this repo,
-`pip install -e ".[dev]"`; elsewhere it may be installed already — check with
-`cobol-parser --version`.
+The CLI is `cobol-parser` (`pip install cobol-parser`; from a cobol-parser
+checkout, `pip install -e ".[dev]"`). Check with `cobol-parser --version`.
+When only mockymock is installed (`uv tool install mocky-mock` puts
+`mockymock` on the PATH but not its dependency's CLI), run every subcommand
+below through it instead: `mockymock analyze <subcommand> <args>` forwards
+the arguments to the same cobol-parser CLI unchanged.
 
 Copybooks are the usual reason a run is incomplete. Pass `--copybook-path DIR`
 (repeatable), or rely on a `cobol.yml` at the project root, which every
@@ -51,10 +65,14 @@ program-scoped: `--program NAME` picks one (default: the outermost).
 | Control flow, PERFORM/GO TO/CALL | `program-flow FILE` |
 | Is this paragraph reachable? | `dead-code FILE` |
 | Is this field ever used? | `unused-variables FILE` |
+| What business rules does it implement? | `business-rules FILE [--format text]` |
+| Where does this field's value come from / go? | `lineage FILE --field NAME` |
+| What breaks if I change this field, across programs and JCL? | `field-impact FIELD PATH... [--jcl JOB.jcl]` |
 | How bad is this program / this estate? | `health FILE`, `scan --glob 'src/**/*.cbl'` |
 | Duplicate code across programs | `scan --glob '**/*.cbl' --clones` |
 | Byte offsets, lengths, REDEFINES, level-88s | `data-items FILE` |
 | What does this record image say? | `decode DATA --copybook X.cpy` |
+| Do two output files match, field by field? | `compare EXPECTED ACTUAL --copybook X.cpy [--key FIELD]` |
 | Synthetic test rows from a layout | `gen-data X.cpy --rows N --seed N` |
 | Test fixtures for a whole program | `gen-fixtures FILE --scenarios all` |
 | What interface does this callee expose? | `program-signature FILE` |
@@ -92,7 +110,10 @@ this," and that distinction is the point. Before asserting anything:
 Exit codes are meaningful and differ by subcommand: `0` ran to completion
 (findings alone never change it), `1` could not read/parse/write, `2` bad
 arguments (or, for `parse`/`batch`, parse errors), `3` a gate fired
-(`lint --fail-on`, `jcl --strict`). Never read a non-zero exit as "no findings".
+(`lint --fail-on`, `jcl --strict`). Two exceptions: `compare` exits `1` when
+the files differ (`2` for trouble), and `field-impact` exits `1` when the
+start matches nothing (the report is still printed). Never read a non-zero
+exit as "no findings".
 
 ## After editing COBOL
 

@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-26 -- the cobol-analysis skill is the one copy mocky-mock ships
+
+[tests.md](tests.md): `test_cobol_analysis_skill.py` checks the skill's
+subcommands, flags and lint rule list against the CLI. The skill itself
+(`.claude/skills/cobol-analysis/SKILL.md`) is now distribution-neutral so
+mocky-mock vendors it byte for byte instead of keeping an edited copy.
+
 ## 2026-10-17 -- an opening >>SOURCE FORMAT FREE decides, in any column (#502)
 
 [preprocessing.md](preprocessing.md): detection rule 0; no "unknown
