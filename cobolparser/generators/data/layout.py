@@ -16,7 +16,7 @@ from ...models.data_items import (
     PictureClause,
 )
 from .options import DataGeneratorOptions
-from .storage import storage_size
+from .storage import FLOAT_USAGES, storage_size
 
 
 class FieldCategory(StrEnum):
@@ -342,6 +342,15 @@ class FieldSpec:
     #: way, so a record holding exactly these bytes decodes back to the cell
     #: it was generated from (:func:`.encoding.hex_literal_cell_for`).
     literal_bytes: dict[str, bytes] = field(default_factory=dict)
+    #: Fixed character-length UTF-8 (``PIC U(n)``): the n characters a value
+    #: holds, while :attr:`size` counts the 4 x n bytes reserved for them.
+    #: ``None`` for every other field (``PIC U BYTE-LENGTH n`` included).
+    utf8_characters: int | None = None
+    #: ``SPECIAL-NAMES. CURRENCY SIGN`` symbols :attr:`picture` uses, each
+    #: mapped to its currency string (``{"#": "#"}``, ``{"#": "EUR"}``), or
+    #: to ``None`` when the program's declaration of it is not known.  Read
+    #: off the item's own ``PictureClause``; empty for a ``$``-only picture.
+    currency_signs: dict[str, str | None] = field(default_factory=dict)
 
     @property
     def scaling_positions(self) -> int:
@@ -372,7 +381,9 @@ class FieldSpec:
 
         :attr:`size` counts bytes for a national (``PIC N``) or DBCS
         (``PIC G`` / ``USAGE DISPLAY-1``) picture -- two per character -- so
-        a ``PIC N(2)`` value is two characters long, not four.  Every other
+        a ``PIC N(2)`` value is two characters long, not four; and for a
+        fixed character-length UTF-8 picture -- four per character -- so a
+        ``PIC U(4)`` value is four characters long, not sixteen.  Every other
         field holds :attr:`size` characters.
         """
         double_byte = self.category is FieldCategory.NATIONAL or (
@@ -386,6 +397,9 @@ class FieldSpec:
         )
         if double_byte and self.size > 1:
             return self.size // 2
+        if self.utf8_characters is not None:
+            # ``PIC U(n)``: n characters in 4 x n bytes.
+            return self.utf8_characters
         return self.size
 
     @property
@@ -447,6 +461,14 @@ _MAX_RANGE_EXPANSION = 64
 # otherwise materialize one FieldSpec per occurrence per field, exhausting
 # memory well before any caller-supplied cap kicks in.
 _MAX_OCCURS_HARD_CAP = 10_000
+# Hard ceiling on the occurrences one elementary item is expanded into across
+# *all* its enclosing tables (#376). The per-table cap alone still let nested
+# tables multiply: ``OCCURS 1000`` inside ``OCCURS 1000`` is a million
+# FieldSpecs, and a mistyped ``OCCURS 99999999`` around ``OCCURS 9999``
+# capped at 10,000 x 10,000 ran gen-fixtures, lineage and field-impact for
+# minutes. An inner table is cut to what the enclosing ones leave of this
+# budget; :func:`occurs_expansion_caveats` names every table either cap cuts.
+_MAX_EXPANDED_OCCURRENCES = 100_000
 
 _REPEAT_COUNT_RE = re.compile(r"\(\d+\)")
 _THROUGH_RE = re.compile(r"^THROUGH:(.*)$", re.IGNORECASE)
@@ -676,6 +698,104 @@ _FIGURATIVE_WORDS = frozenset(
 )
 
 
+#: Field categories whose DISPLAY bytes are one character per byte, so a
+#: slice of a group VALUE's text is exactly the field's own value.
+_TEXT_SLICE_CATEGORIES = frozenset(
+    {
+        FieldCategory.ALPHANUMERIC,
+        FieldCategory.ALPHABETIC,
+        FieldCategory.ALPHANUMERIC_EDITED,
+        FieldCategory.NUMERIC,
+        FieldCategory.NUMERIC_EDITED,
+    }
+)
+_GROUP_VALUE_ALL_RE = re.compile(r"ALL\s+(.+)$", re.IGNORECASE | re.DOTALL)
+
+
+def _apply_group_value(clause: str, specs: list[FieldSpec]) -> None:
+    """Give each field of a group the part of the group's VALUE it holds.
+
+    A group VALUE is an alphanumeric literal laid over the group's bytes
+    (``05 HDR VALUE 'HDR0001'`` puts ``HDR`` in a leading ``X(3)`` and
+    ``0001`` in the ``9(4)`` after it), padded with spaces when shorter; a
+    figurative constant, or ``ALL`` a literal, fills every byte.  Each field
+    gets the matching slice as its own VALUE clause, so ``ValueFactory``
+    honours it -- or not, under ``respect_values=False`` -- exactly as it
+    does an elementary VALUE.  A field that already declares one keeps it.
+
+    Only DISPLAY fields of one byte per character are given a text slice:
+    the bytes a literal leaves in a COMP / COMP-3 / national field are not
+    a value of its own type, so those keep being generated.  A figurative
+    is the exception -- it names a value every type has.
+    A numeric DISPLAY field takes its slice as digits at its own scale,
+    and only when the slice is all digits.
+    """
+    raw = clause.strip()
+    all_match = _GROUP_VALUE_ALL_RE.match(raw)
+    unit = all_match.group(1).strip() if all_match else raw
+    if unit.upper() in _FIGURATIVE_WORDS:
+        for spec in specs:
+            if spec.value_clause is None:
+                spec.value_clause = unit
+        return
+    data = hex_literal_bytes(unit)
+    text = data.decode("latin-1") if data is not None else _strip_literal_quotes(unit)
+    if not text:
+        return
+    total = sum(spec.storage_size for spec in specs)
+    if all_match:
+        text = (text * (total // len(text) + 1))[:total]
+    offset = 0
+    for spec in specs:
+        width = spec.storage_size
+        piece = text[offset : offset + width]
+        offset += width
+        if (
+            spec.value_clause is not None
+            or spec.usage != "DISPLAY"
+            or spec.category not in _TEXT_SLICE_CATEGORIES
+            or width != spec.character_positions
+        ):
+            continue
+        if spec.category is FieldCategory.NUMERIC:
+            # A numeric DISPLAY field's slice is its digits, not its value:
+            # ``'0001'`` over ``PIC 9(2)V99`` is 00.01, and taking it as the
+            # literal 1 wrote ``0100``.  A slice that is not all digits (a
+            # hex literal's bytes, text, the spaces past the literal's end)
+            # or a P-scaled picture is no value the encoder can write back as
+            # the same bytes, so that field keeps being generated.
+            if (
+                data is not None
+                or len(piece) != width
+                or not piece.isdigit()
+                or spec.scaling_positions != 0
+            ):
+                continue
+            scale = spec.decimal_digits
+            spec.value_clause = (
+                f"{piece[:-scale] or '0'}.{piece[-scale:]}" if scale else piece
+            )
+            continue
+        if data is not None and piece:
+            # A hex literal is bytes: its slice stays a hex literal, so the
+            # encoder writes those bytes rather than their Latin-1 text.
+            spec.value_clause = "X'" + piece.encode("latin-1").hex().upper() + "'"
+            spec.literal_bytes.setdefault(piece, piece.encode("latin-1"))
+        else:
+            # Past the literal's end the group holds spaces (the encoder
+            # pads a short value with them).
+            spec.value_clause = "'" + (piece or " ").replace("'", "''") + "'"
+
+
+def _currency_signs(picture: PictureClause | None) -> dict[str, str | None]:
+    """*picture*'s declared currency symbols with their currency strings
+    (see :attr:`FieldSpec.currency_signs`)."""
+    if picture is None:
+        return {}
+    signs = getattr(picture, "currency_signs", {}) or {}
+    return {symbol: signs.get(symbol) for symbol in picture.currency_symbols}
+
+
 def _condition_values(item: CobolDataItem) -> list[str]:
     """Collect level-88 VALUEs under *item*, merged across all its
     level-88 children -- FieldSpec.condition_values needs "any value that
@@ -708,14 +828,57 @@ class LiteralCell(str):
     """
 
     data: bytes
+    #: Set on the cell of a VALUE clause (see :class:`InitialValueCell`).
+    initial_value: bool = False
+    #: ``(start, end)`` ranges of :attr:`data` that are *characters*, not
+    #: bytes: the basic parts of a concatenation such as ``'AB' & X'0102'``
+    #: (held as Latin-1), which the encoder writes in the record charset
+    #: while the hex parts keep their own bytes (#479).
+    text_runs: tuple[tuple[int, int], ...] = ()
 
-    def __new__(cls, data: bytes) -> LiteralCell:
+    def __new__(
+        cls, data: bytes, text_runs: tuple[tuple[int, int], ...] = ()
+    ) -> LiteralCell:
         cell = super().__new__(cls, data.decode("latin-1"))
         cell.data = data
+        if text_runs:
+            cell.text_runs = text_runs
         return cell
 
-    def __reduce__(self) -> tuple[type[LiteralCell], tuple[bytes]]:
-        return (LiteralCell, (self.data,))
+    def __reduce__(
+        self,
+    ) -> tuple[type[LiteralCell], tuple[bytes, tuple[tuple[int, int], ...]]]:
+        return (LiteralCell, (self.data, self.text_runs))
+
+    def cut(self, width: int) -> LiteralCell:
+        """The cell's first *width* bytes, its text runs cut with them."""
+        if width <= 0 or width >= len(self.data):
+            return self
+        runs = tuple(
+            (start, min(end, width)) for start, end in self.text_runs if start < width
+        )
+        return LiteralCell(self.data[:width], runs)
+
+
+class InitialValueCell(str):
+    """A generated cell that is a field's VALUE-clause initial value.
+
+    COBOL initialisation by VALUE is not affected by ``JUSTIFIED`` or
+    ``BLANK WHEN ZERO`` (IBM LRM, VALUE clause): ``PIC X(5) JUST VALUE 'AB'``
+    holds ``AB   `` and ``PIC 9(3) BLANK WHEN ZERO VALUE 0`` holds ``000``.
+    Both clauses still apply to every other cell, which stands for the
+    result of a MOVE.  :func:`.encoding.encode_field` reads the marker
+    through :func:`is_initial_value` (#558).  A hex literal's
+    :class:`LiteralCell` carries the same marker as its ``initial_value``.
+    """
+
+    initial_value = True
+
+
+def is_initial_value(cell: str) -> bool:
+    """Whether *cell* is a VALUE-clause initial value (see
+    :class:`InitialValueCell`)."""
+    return bool(getattr(cell, "initial_value", False))
 
 
 def hex_literal_cell(value: str, width: int | None = None) -> LiteralCell | None:
@@ -723,10 +886,56 @@ def hex_literal_cell(value: str, width: int | None = None) -> LiteralCell | None
     *width* when one is known; ``None`` for any other literal."""
     data = hex_literal_bytes(value)
     if not data:
-        return None
+        cell = concatenated_literal_cell(value)
+        if cell is None:
+            return None
+        return cell.cut(width) if width is not None else cell
     if width is not None and width > 0:
         data = data[:width]
     return LiteralCell(data)
+
+
+#: One part of a literal concatenation: an optional ``X`` and a quoted run.
+_CONCAT_PART_RE = re.compile(
+    r"""\s*(X?)("(?:[^"]|"")*"|'(?:[^']|'')*')\s*(&|$)""", re.IGNORECASE
+)
+
+
+def concatenated_literal_cell(value: str) -> LiteralCell | None:
+    """The cell ``'AB' & X'0102'`` stands for: the hex parts' bytes and the
+    basic parts' characters (as :attr:`LiteralCell.text_runs`), in order.
+    ``None`` unless *value* is two or more such parts with at least one hex
+    part -- the spelling the lexer gives a mixed alphanumeric concatenation
+    (#479); one of plain parts only is already a single literal."""
+    data = bytearray()
+    runs: list[tuple[int, int]] = []
+    pos, parts, hex_parts = 0, 0, 0
+    text = value.strip()
+    while pos < len(text):
+        match = _CONCAT_PART_RE.match(text, pos)
+        if match is None or (match.group(3) == "" and match.end() != len(text)):
+            return None
+        content = unquote_literal(match.group(2))
+        if match.group(1):
+            try:
+                data += bytes.fromhex(content)
+            except ValueError:
+                return None
+            hex_parts += 1
+        else:
+            try:
+                encoded = content.encode("latin-1")
+            except UnicodeEncodeError:
+                return None
+            runs.append((len(data), len(data) + len(encoded)))
+            data += encoded
+        parts += 1
+        pos = match.end()
+        if match.group(3) == "&" and pos >= len(text):
+            return None
+    if parts < 2 or not hex_parts:
+        return None
+    return LiteralCell(bytes(data), tuple(run for run in runs if run[0] < run[1]))
 
 
 def _dedup_values(values: list[str]) -> list[str]:
@@ -783,6 +992,13 @@ def _literal_bytes(item: CobolDataItem, width: int) -> dict[str, bytes]:
         if data:
             data = data[:width] if width > 0 else data
             found.setdefault(data.decode("latin-1"), data)
+        else:
+            # ``'AB' & X'0102'``: the key is the cell itself, so the decoder
+            # can write its text runs in the record charset (#479).
+            mixed = concatenated_literal_cell(item.value_clause)
+            if mixed is not None:
+                mixed = mixed.cut(width)
+                found.setdefault(mixed, mixed.data)
     raws: list[str] = []
     for child in item.children:
         if isinstance(child, ConditionNameItem):
@@ -790,6 +1006,11 @@ def _literal_bytes(item: CobolDataItem, width: int) -> dict[str, bytes]:
     for raw in raws:
         data = hex_literal_bytes(raw)
         if not data:
+            # A level-88 ``'AB' & X'0D25'``: keyed by its cell, as above.
+            mixed = concatenated_literal_cell(raw)
+            if mixed is not None:
+                mixed = mixed.cut(width)
+                found.setdefault(mixed, mixed.data)
             continue
         if width > 0:
             data = data[:width]
@@ -809,7 +1030,7 @@ def _strip_literal_quotes(value: str) -> str:
 def _classify(item: CobolDataItem, picture: PictureClause | None) -> FieldCategory:
     """Determine the data category used to pick a value generator."""
     usage = (item.usage or "DISPLAY").upper()
-    if usage in ("COMP-1", "COMPUTATIONAL-1", "COMP-2", "COMPUTATIONAL-2"):
+    if usage in FLOAT_USAGES:
         return FieldCategory.FLOAT
     if picture is None:
         # INDEX/POINTER and friends carry no picture; treat as small integers.
@@ -984,8 +1205,12 @@ def _flatten_into(
     ignore_own_redefines: bool = False,
     overlays: _OverlayWalk | None = None,
     segment: str | None = None,
+    occurs_product: int = 1,
 ) -> None:
     """Recursive worker for :func:`flatten_record`.
+
+    *occurs_product* is how many occurrences the enclosing tables already
+    expand this item into (see ``_MAX_EXPANDED_OCCURRENCES``).
 
     *segment* is this item's path segment (see :func:`layout_segment`);
     ``None`` means its :attr:`~CobolDataItem.layout_name`.
@@ -1023,7 +1248,8 @@ def _flatten_into(
     # to carry where that assumption came from -- and, for variable-length
     # output, which of its subscripts the counter governs.
     occurs = item.occurs_clause
-    indexes = _occurrence_indexes(item, opts)
+    indexes = _occurrence_indexes(item, opts, occurs_product)
+    child_product = occurs_product * len(indexes)
     inherited_controls = odo_controls
     if occurs is not None and occurs.depending_on:
         inherited_controls = (
@@ -1058,6 +1284,7 @@ def _flatten_into(
         occ = (*subscripts, index) if index is not None else subscripts
         children = _child_items(item)
         if children:
+            start = len(out)
             for child in children:
                 overlay = overlays.substitutions.get(id(child)) if overlays else None
                 if overlay is not None and overlays is not None:
@@ -1071,6 +1298,7 @@ def _flatten_into(
                         opts,
                         out,
                         overlays,
+                        child_product,
                     )
                     continue
                 _flatten_into(
@@ -1084,6 +1312,15 @@ def _flatten_into(
                     redefines_label=redefines_label,
                     overlays=overlays,
                     segment=layout_segment(child, item),
+                    occurs_product=child_product,
+                )
+            if item.value_clause:
+                # A group VALUE initialises the group's bytes, not one field:
+                # carry it down to the fields that make them up (#552).
+                own = inherited_redefines or redefines_label
+                _apply_group_value(
+                    item.value_clause,
+                    [spec for spec in out[start:] if spec.redefines == own],
                 )
             continue
 
@@ -1126,6 +1363,12 @@ def _flatten_into(
                     inherited_controls[0].depending_on if inherited_controls else None
                 ),
                 odo_controls=inherited_controls,
+                utf8_characters=(
+                    picture.utf8_characters
+                    if picture is not None and item.byte_length is None
+                    else None
+                ),
+                currency_signs=_currency_signs(picture),
             )
         )
 
@@ -1140,6 +1383,7 @@ def _flatten_overlay(
     opts: DataGeneratorOptions,
     out: list[FieldSpec],
     overlays: _OverlayWalk,
+    occurs_product: int = 1,
 ) -> None:
     """Emit *overlay*'s fields in *target*'s place, padded to its width.
 
@@ -1164,10 +1408,20 @@ def _flatten_overlay(
         redefines_label=overlay.redefines,
         ignore_own_redefines=True,
         overlays=overlays,
+        occurs_product=occurs_product,
     )
     own = sum(spec.storage_size for spec in out[start:])
     probe: list[FieldSpec] = []
-    _flatten_into(target, path, subscripts, redefines, odo_controls, opts, probe)
+    _flatten_into(
+        target,
+        path,
+        subscripts,
+        redefines,
+        odo_controls,
+        opts,
+        probe,
+        occurs_product=occurs_product,
+    )
     at = 0
     for spec in probe:
         overlays.hidden.append(HiddenCounter(index=start, offset=at, spec=spec))
@@ -1198,20 +1452,77 @@ def _flatten_overlay(
 
 
 def _occurrence_indexes(
-    item: CobolDataItem, opts: DataGeneratorOptions
+    item: CobolDataItem, opts: DataGeneratorOptions, occurs_product: int = 1
 ) -> list[int | None]:
     """Return the subscripts to emit for *item* (``[None]`` when not a table)."""
     occurs = item.occurs_clause
     if occurs is None:
         return [None]
+    times = _requested_occurrences(item, opts)
+    if opts.expand_occurs:
+        times = min(times, _occurrence_cap(occurs_product))
+    return list(range(1, max(1, times) + 1))
+
+
+def _requested_occurrences(item: CobolDataItem, opts: DataGeneratorOptions) -> int:
+    """*item*'s occurrences after ``expand_occurs`` / ``max_occurs``, before
+    the hard caps."""
+    occurs = item.occurs_clause
+    if occurs is None:
+        return 1
     times = occurs.max_times or occurs.min_times or 1
     if not opts.expand_occurs:
+        return 1
+    if opts.max_occurs is not None:
+        times = min(times, opts.max_occurs)
+    return max(1, times)
+
+
+def _occurrence_cap(occurs_product: int) -> int:
+    """The most occurrences a table inside *occurs_product* enclosing
+    occurrences may expand to (see ``_MAX_EXPANDED_OCCURRENCES``)."""
+    return max(
+        1, min(_MAX_OCCURS_HARD_CAP, _MAX_EXPANDED_OCCURRENCES // occurs_product)
+    )
+
+
+def occurs_expansion_caveats(
+    record: CobolDataItem, options: DataGeneratorOptions | None = None
+) -> list[str]:
+    """One sentence per OCCURS table under *record* that the expansion caps
+    cut short (#376) -- a mistyped or pathological count that the layout
+    materializes only partly, so the fields, record images and byte offsets
+    built from it cover fewer occurrences than the copybook declares.
+
+    A cut made by the caller's own ``max_occurs`` is not reported: that was
+    asked for.  Walks the declarations only, never the expansion.
+    """
+    opts = options or DataGeneratorOptions()
+    caveats: list[str] = []
+    if not opts.expand_occurs:
+        return caveats
+
+    def walk(item: CobolDataItem, product: int, root: bool) -> None:
+        if item.level in (66, 88):
+            return
+        if item.redefines and not root and not opts.include_redefines:
+            return
         times = 1
-    else:
-        if opts.max_occurs is not None:
-            times = min(times, opts.max_occurs)
-        times = min(times, _MAX_OCCURS_HARD_CAP)
-    return list(range(1, max(1, times) + 1))
+        if item.occurs_clause is not None:
+            requested = _requested_occurrences(item, opts)
+            times = min(requested, _occurrence_cap(product))
+            if times < requested:
+                caveats.append(
+                    f"OCCURS table {item.name} expanded to {times} of its "
+                    f"{requested} occurrences: the layout caps expansion at "
+                    f"{_MAX_OCCURS_HARD_CAP:,} per table and "
+                    f"{_MAX_EXPANDED_OCCURRENCES:,} across nested tables"
+                )
+        for child in _child_items(item):
+            walk(child, product * times, False)
+
+    walk(record, 1, True)
+    return caveats
 
 
 def _assign_columns(specs: list[FieldSpec], opts: DataGeneratorOptions) -> None:

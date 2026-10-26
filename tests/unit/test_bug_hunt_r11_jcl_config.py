@@ -228,7 +228,11 @@ def test_scan_isolates_an_undecodable_file_under_strict_errors(
         "           STOP RUN.\n",
         encoding="utf-8",
     )
-    report = scan_files([bad, good], ScanOptions(errors="strict"), workers=1)
+    # The encoding is named: since #522 an unnamed one is detected, and these
+    # bytes decode cleanly as cp1252, so nothing would be undecodable.
+    report = scan_files(
+        [bad, good], ScanOptions(encoding="utf-8", errors="strict"), workers=1
+    )
     summary = report.to_dict()["summary"]
     assert summary["scanned_file_count"] == 1
     assert summary["failed_file_count"] == 1

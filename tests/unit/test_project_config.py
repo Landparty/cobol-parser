@@ -312,3 +312,48 @@ def test_resolve_prefers_cli_then_config_then_default():
     assert resolve(None, "config", "default") == "config"
     assert resolve(None, None, "default") == "default"
     assert resolve(None, None) is None
+
+
+# -- ~ / $VAR expansion and missing directories (#550) -------------------------
+
+
+def test_tilde_in_a_path_entry_is_the_home_directory(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "cpy").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    (tmp_path / "cobol.yml").write_text('project:\n  copybook_path: "~/cpy"\n')
+
+    config = load_project_config(tmp_path)
+
+    assert config.copybook_path == (str(home / "cpy"),)
+    assert config.missing_directories() == []
+
+
+def test_environment_variables_in_a_path_entry_are_expanded(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHOP_CPY", str(tmp_path / "shop"))
+    (tmp_path / "cobol.yml").write_text(
+        'project:\n  copybook_path: ["$SHOP_CPY/a", "${SHOP_CPY}/b"]\n'
+        '  callee_path: "$SHOP_CPY/calls"\n'
+    )
+
+    config = load_project_config(tmp_path)
+
+    assert config.copybook_path == (
+        str(tmp_path / "shop" / "a"),
+        str(tmp_path / "shop" / "b"),
+    )
+    assert config.callee_path == (str(tmp_path / "shop" / "calls"),)
+
+
+def test_missing_directories_names_each_entry_that_is_not_one(tmp_path):
+    (tmp_path / "there").mkdir()
+    (tmp_path / "cobol.yml").write_text(
+        "project:\n  copybook_path: [there, nowhere]\n  callee_path: gone\n"
+    )
+
+    config = load_project_config(tmp_path)
+
+    assert config.missing_directories() == [
+        ("project.copybook_path", str(tmp_path / "nowhere")),
+        ("project.callee_path", str(tmp_path / "gone")),
+    ]

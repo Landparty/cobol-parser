@@ -369,3 +369,33 @@ def test_dclgen_check_is_a_lint_rule_too(tmp_path, capsys):
     assert payload["rules_run"] == ["dclgen-check"]
     assert payload["findings"][0]["rule"] == "dclgen-check"
     assert payload["findings"][0]["kind"] == "length"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [["DATA"], ["--list-views"]],
+    ids=["decode", "list-views"],
+)
+def test_a_non_utf8_copybook_is_a_one_line_error(tmp_path, capsys, extra):
+    # #496: a Latin-1 accent in a comment line raised UnicodeDecodeError,
+    # which _cmd_decode did not catch: a raw traceback instead of the
+    # one-line error compare already gives.
+    copybook = tmp_path / "lat.cpy"
+    copybook.write_bytes(
+        b"      * Cr\xe9\xe9 par Andr\xe9\n"
+        b"       01  REC.\n"
+        b"           05  A  PIC X(3).\n"
+    )
+    data = tmp_path / "lat.bin"
+    data.write_bytes(b"ABC")
+    argv = ["--no-config", "decode", "--copybook", str(copybook)]
+    argv += [str(data)] if extra == ["DATA"] else extra
+
+    with pytest.raises(SystemExit) as excinfo:
+        _run(argv)
+
+    assert excinfo.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"error: Cannot read copybook {copybook}:")
+    assert "codec can't decode byte 0xe9" in err
+    assert "Traceback" not in err

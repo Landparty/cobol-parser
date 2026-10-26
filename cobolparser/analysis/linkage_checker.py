@@ -44,7 +44,13 @@ from enum import Enum, auto
 from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import CobolDataItem
 from ..models.program import CobolProgram, CobolSection
-from ..models.statements import CallStatement, EntryStatement, SetStatement
+from ..models.statements import (
+    AllocateStatement,
+    CallStatement,
+    EntryStatement,
+    SetStatement,
+)
+from ._cics import cics_identifier_options
 
 #: LINKAGE items the CICS command-level translator itself passes on the
 #: PROCEDURE DIVISION USING it generates; a source that declares them is a
@@ -197,6 +203,8 @@ class LinkageChecker:
         self._linkage_locations: dict[str, SourceLocation | None] = {}
         # subordinate item name (upper) → the 01-level item(s) holding it
         self._linkage_owners: dict[str, set[str]] = {}
+        # 01-level item name (upper) → the 01-level item it REDEFINES
+        self._linkage_redefines: dict[str, str] = {}
         self._all_linkage_items: set[str] = set()
         self._violations: list[LinkageViolation] = []
 
@@ -358,6 +366,7 @@ class LinkageChecker:
         self._linkage_items = {}
         self._linkage_locations = {}
         self._linkage_owners = {}
+        self._linkage_redefines = {}
 
         # 1. Collect this unit's LINKAGE SECTION 01-level items
         self._collect_linkage_items(unit)
@@ -382,23 +391,25 @@ class LinkageChecker:
 
         # 3. So do its ENTRY USING clauses and every ``SET ADDRESS OF item
         # TO pointer`` (a based LINKAGE item is addressed, not passed --
-        # the CICS ``SET(ADDRESS OF item)`` option is the same idiom);
-        # its CALLs are validated
+        # the CICS ``SET(ADDRESS OF item)`` option and ``ALLOCATE item``,
+        # which obtains its storage and sets its address, are the same
+        # idiom, #570); its CALLs are validated
         for node in self._own_nodes(unit):
             if isinstance(node, EntryStatement):
                 for p in node.using_parameters or []:
                     self._mark_referenced(p)
             elif isinstance(node, CallStatement):
                 self._validate_call(node)
+            elif isinstance(node, AllocateStatement) and node.data_item:
+                self._mark_referenced(_bare_name(node.data_item))
             elif isinstance(node, SetStatement) and node.targets_are_address_of:
                 for target in node.targets:
                     self._mark_referenced(_bare_name(target))
             elif getattr(node, "node_type", None) == "EXEC_CICS":
-                for value in (getattr(node, "options", None) or {}).values():
-                    if value:
-                        based = _ADDRESS_OF_RE.match(value)
-                        if based:
-                            self._mark_referenced(_bare_name(based.group(1)))
+                for value in cics_identifier_options(node).values():
+                    based = _ADDRESS_OF_RE.match(value)
+                    if based:
+                        self._mark_referenced(_bare_name(based.group(1)))
 
         # 4. Warn on unreferenced LINKAGE items
         self._check_unreferenced_linkage()
@@ -422,6 +433,9 @@ class LinkageChecker:
                             self._linkage_locations[name] = getattr(
                                 item, "location", None
                             )
+                            base = (item.redefines or "").upper().strip()
+                            if base:
+                                self._linkage_redefines[name] = base
                             for child in item.get_all_children():
                                 child_name = (child.name or "").upper().strip()
                                 if child_name:
@@ -534,10 +548,30 @@ class LinkageChecker:
     # Unreferenced linkage check
     # ------------------------------------------------------------------
 
+    def _redefines_root(self, name: str) -> str:
+        """The item at the bottom of *name*'s REDEFINES chain (#596)."""
+        seen = {name}
+        while name in self._linkage_redefines:
+            name = self._linkage_redefines[name]
+            if name in seen:
+                break
+            seen.add(name)
+        return name
+
     def _check_unreferenced_linkage(self) -> None:
-        """Emit a violation for every 01-level LINKAGE item not referenced."""
+        """Emit a violation for every 01-level LINKAGE item not referenced.
+
+        A level-01 ``REDEFINES`` shares its base item's storage, so every
+        item of one redefines group (the base and each overlay, through a
+        chain) counts as referenced when any one of them is (#596).
+        """
+        referenced_roots = {
+            self._redefines_root(name)
+            for name, referenced in self._linkage_items.items()
+            if referenced
+        }
         for name, referenced in self._linkage_items.items():
-            if not referenced:
+            if not referenced and self._redefines_root(name) not in referenced_roots:
                 self._violations.append(
                     LinkageViolation(
                         kind=LinkageViolationKind.UNREFERENCED_LINKAGE,

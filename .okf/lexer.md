@@ -540,7 +540,16 @@ location; a fixed-format line is read in columns 8-72 only). IBM:
 unmerged, a VALUE clause keeps only `"AB"` and a MOVE source reads
 `"AB" "CD"`. Only literals of one kind are joined
 (plain, or the same `X` / `N` / `NX` / `G` / `U` prefix; `Z` and `B`
-literals never); a typed result's `raw_value` is rebuilt (`X"C1C2"`). The
+literals never); a typed result's `raw_value` is rebuilt (`X"C1C2"`). A
+basic and an `X` literal are both alphanumeric and are joined too
+(`_mixed_alphanumeric`, #479): `'AB' & X'0102'` becomes one literal whose
+`value` holds each hex part's bytes as Latin-1 characters (`AB\x01\x02`; so
+`'AB' & X'C1C2'` reads `ABÁÂ`, not the `ABAB` it is in EBCDIC -- the
+convention a lone `X'..'` cell follows too) and
+whose `raw_value` is every part's source joined with ` & `
+(`"AB" & X'0102'`, a basic part re-quoted with `"`; not one quoted literal,
+so a caller reading a prefix off it must treat it as a concatenation), which the record-image
+generator reads back as bytes plus characters. The
 merged token keeps the first literal's location; NEWLINEs between the
 parts follow it. Fast path: no `&` in any line -> no work. The checked-in
 `_lexer_fast.c` is generated with Cython 3.3.0. Pinned by
@@ -581,14 +590,22 @@ a pure/Cython parity check).
 
 `CURRENCY SIGN IS '£'` / `CURRENCY SIGN IS 'EUR' WITH PICTURE SYMBOL '#'`
 makes the symbol a PICTURE editing character like `$`. `__init__`
-collects the declared non-alphanumeric symbols
-(`_declared_currency_symbols(source)`, one regex scan) into
-`self._currency_symbols`; in `tokenize_program_text` (both lexers) a
+collects the declared symbols (`declared_currency_signs(source)`, one regex
+scan; digits, spaces and the letters A B C D E G N P R S U V X Z are never
+symbols) and keeps the non-letters in `self._currency_symbols`; in `tokenize_program_text` (both lexers) a
 character that would otherwise be an "Invalid character" error is emitted
 as a `CURRENCY` token when it is declared. Characters that already lex as
 something (`& ! | < > :`, letters) are not rerouted. Without the declaration,
 every `£` in `PIC £££9.99` is a lexer error. See [ast-models.md](ast-models.md) for
-how the PictureClause sizes it.
+how the PictureClause sizes it. The same scan
+(`declared_currency_signs(source)`) also keeps each symbol's currency string,
+public as `lexer.currency_signs` (`{"#": "EUR"}`); `CobolParser` copies it to
+`parser.currency_signs` for the PICTURE clauses (#491). A letter symbol
+(`PICTURE SYMBOL 'F'`) is in `currency_signs` but not `_currency_symbols`: it
+lexes inside the PICTURE word, and `DataItemClauseParser._picture_clause`
+finds it in the pattern, case-sensitively as IBM documents the PICTURE
+SYMBOL literal (`'F'` does not match `PIC fff9`), though the rest of the
+PICTURE grammar here is case-insensitive.
 
 **Operator-shaped symbols.** A declared `<`, `>` or `=` already lexes as
 `LESS`/`GREATER`/`ASSIGN`, so `tokenize_program_text` cannot reroute it;

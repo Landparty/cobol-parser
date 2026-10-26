@@ -54,7 +54,8 @@ keeps its grading: MOVE's ERROR/WARNING kinds map to error/warning,
 recursion's HIGH/MEDIUM (HIGH = a cycle with no escape route, i.e. an infinite
 loop) to error/warning, complexity's rating to warning (HIGH) / info
 (MODERATE), with LOW producing no finding at all. The rest carry a fixed
-severity: dead code and I/O `FILE_LEFT_OPEN` warn; every other I/O kind and
+severity: dead code and I/O `FILE_LEFT_OPEN` warn; every other I/O kind
+(including the OPEN-mode kinds `*_WRONG_MODE` and `OPEN_AFTER_LOCK`, #548) and
 every LINKAGE kind but `UNREFERENCED_LINKAGE` are errors. An unused item is a
 warning when the program declares it and only info when it came from a
 copybook (`copybook_item_names`) — a copybook describes a whole record and no
@@ -73,7 +74,9 @@ underlying analyzer's own category (`READ_BEFORE_OPEN`, `WORKING-STORAGE`,
 **A quiet report is not automatically a clean program**, and the report says
 so structurally rather than in prose: `caveats` carries what an analyzer could
 not check (MOVE operands whose data category never resolved, most often an
-unresolved COPY), and `failed_rules` records a rule that raised — it costs
+unresolved COPY; dclgen-check's count of host variables it could not
+(fully) check -- since #530 that includes the null-indicator check of a
+stored-procedure CALL argument), and `failed_rules` records a rule that raised — it costs
 only its own findings, never the other rules'. A consumer gating on `findings`
 alone must still surface both lists.
 

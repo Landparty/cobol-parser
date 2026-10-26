@@ -15,8 +15,10 @@ from .ast_base import ASTNode, SourceLocation
 _PIC_P_FACTOR_RE = re.compile(r"P(\((\d+)\))?")
 _PIC_ALPHA_RE = re.compile(r"([XA])(\((\d+)\))?$")
 _PIC_NATIONAL_RE = re.compile(r"N(\((\d+)\))?$")
-# UTF-8 (``PIC U`` / ``PIC U(n)``, Enterprise COBOL 6.3): one *byte* per
-# symbol -- the item holds n bytes of UTF-8, not n characters.
+# UTF-8 (``PIC U`` / ``PIC U(n)``, Enterprise COBOL 6.3): fixed
+# character-length -- n UTF-8 characters, for which the compiler reserves
+# 4 x n bytes (the widest n characters can be).  ``PIC U BYTE-LENGTH n`` is
+# the fixed byte-length form and reserves n bytes.
 _PIC_UTF8_RE = re.compile(r"^U(?:\((\d+)\))?$")
 _PIC_DBCS_RE = re.compile(r"G(\((\d+)\))?$")
 _PIC_BASIC_NUMERIC_RE = re.compile(r"S?9(\((\d+)\))?$")
@@ -67,6 +69,7 @@ class PictureClause(ASTNode):
         location: SourceLocation,
         currency_symbols: frozenset[str] | set[str] | None = None,
         decimal_point_is_comma: bool = False,
+        currency_signs: dict[str, str] | None = None,
     ):
         """*currency_symbols* are the PICTURE currency symbols the program
         declares through ``SPECIAL-NAMES. CURRENCY SIGN IS ...`` (other than
@@ -79,9 +82,19 @@ class PictureClause(ASTNode):
         exchanges the roles of ``,`` and ``.``: ``,`` is the editing decimal
         point and ``.`` a simple insertion character. The pattern is sized
         and validated through the default spelling (``9(3),99`` as
-        ``9(3).99``) and, like the currency symbols, kept as written."""
+        ``9(3).99``) and, like the currency symbols, kept as written.
+
+        *currency_signs* maps each of those symbols to the currency string
+        its ``CURRENCY SIGN`` clause declares (``{"#": "EUR"}``): what an
+        edited record shows in the symbol's position. A string of n
+        characters makes the item n - 1 bytes wider than its pattern."""
         super().__init__("PictureClause", location)
         self.currency_symbols: frozenset[str] = frozenset(currency_symbols or ())
+        self.currency_signs: dict[str, str] = {
+            symbol: sign
+            for symbol, sign in (currency_signs or {}).items()
+            if symbol in self.currency_symbols
+        }
         self.decimal_point_is_comma: bool = bool(decimal_point_is_comma)
         # Sized and validated through the ``$`` / default-decimal-point
         # spelling (see above); the verbatim pattern is restored once both
@@ -115,6 +128,10 @@ class PictureClause(ASTNode):
         self.is_national: bool = False
         #: National-edited: ``N`` with ``B``/``0``/``/`` insertion characters.
         self.is_national_edited: bool = False
+        #: Fixed character-length UTF-8 (``PIC U(n)``): the n characters the
+        #: item holds; ``size`` is the 4 x n bytes reserved for them.
+        #: ``None`` for any other picture, and for ``PIC U BYTE-LENGTH n``.
+        self.utf8_characters: int | None = None
         # Populated by ``_validate_pattern``: ``is_valid`` is False when the
         # pattern violates a PICTURE syntax rule, with human-readable reasons
         # in ``validation_errors``. Parsing stays lenient regardless so a bad
@@ -125,10 +142,25 @@ class PictureClause(ASTNode):
         self._validate_pattern()
         if translation:
             self.pattern = pattern
+        self._widen_for_currency_string()
         if self.currency_symbols:
             self._metadata["currency_symbols"] = sorted(self.currency_symbols)
+        if self.currency_signs:
+            self._metadata["currency_signs"] = dict(sorted(self.currency_signs.items()))
         if self.decimal_point_is_comma:
             self._metadata["decimal_point_is_comma"] = True
+
+    def _widen_for_currency_string(self) -> None:
+        """A currency string longer than one character (``CURRENCY SIGN IS
+        'CHF ' WITH PICTURE SYMBOL 'F'``) occupies its full length in the
+        one position that shows it, fixed or floating; every other
+        occurrence of the symbol is one position (#491, #311)."""
+        widest = max(
+            (len(sign) for sign in self.currency_signs.values() if sign),
+            default=1,
+        )
+        if widest > 1 and self.size is not None:
+            self.size += widest - 1
 
     def _parse_pattern(self) -> None:
         """Parse the PICTURE pattern to extract size and digit information."""
@@ -210,15 +242,20 @@ class PictureClause(ASTNode):
                 self.is_national = first == "N"
                 return
 
-        # 1c. UTF-8 (PIC U) patterns: U, U(n). ``PIC U(n)`` reserves n
-        # bytes (IBM sizes UTF-8 items in bytes, not characters); ``PIC U
-        # BYTE-LENGTH n`` reaches the same size through
-        # ``CobolDataItem.set_byte_length``.
+        # 1c. UTF-8 (PIC U) patterns: U, U(n). ``PIC U(n)`` is fixed
+        # character-length: n characters in 4 x n reserved bytes (IBM
+        # Enterprise COBOL 6.3+, "UTF-8 data items"), so ``size`` -- the
+        # byte width every layout surface reads -- is 4n, and
+        # ``utf8_characters`` keeps n.  Sizing it n bytes put every later
+        # offset 3n bytes short.  ``PIC U BYTE-LENGTH n`` is the fixed
+        # byte-length form; ``CobolDataItem.set_byte_length`` sizes it n.
         if first == "U":
             utf8_match = _PIC_UTF8_RE.match(pattern)
             if utf8_match:
                 count_str = utf8_match.group(1)
-                self.size = int(count_str) if count_str else 1
+                characters = int(count_str) if count_str else 1
+                self.utf8_characters = characters
+                self.size = 4 * characters
                 return
 
         # 2. Basic numeric patterns: 9, 9(n)
@@ -853,6 +890,7 @@ class CobolDataItem(ASTNode):
         self.byte_length = byte_length
         if self.picture_clause is not None:
             self.picture_clause.size = byte_length
+            self.picture_clause.utf8_characters = None
 
     def set_dynamic_length(self, limit: int | None = None) -> None:
         """Record ``DYNAMIC LENGTH [LIMIT n]``."""

@@ -1004,7 +1004,10 @@ def _origin_sources(
     different string. A file that has become unreadable since is skipped: a
     listing missing one member's comments beats an expansion that fails.
     """
-    sources: dict[str, list[str]] = {source_file: source_code.split("\n")}
+    # split_source_lines, not split("\n"): the source map numbers lines the
+    # same way, so a CR-only file must not read back as one line, and a CRLF
+    # file must not hand back each comment with a stray "\r" (#581).
+    sources: dict[str, list[str]] = {source_file: split_source_lines(source_code)}
     for path in included_copybooks:
         try:
             content = _cached_read_file(
@@ -1015,7 +1018,7 @@ def _origin_sources(
             )
         except (OSError, EncodingError):
             continue
-        sources[path] = content.split("\n")
+        sources[path] = split_source_lines(content)
     return sources
 
 
@@ -1799,13 +1802,19 @@ def _expand_source_recursive(
         # the copybook's own lines replace them. The first spliced line is
         # credited to the *parent* only when the parent had real text before
         # the COPY on that line (`COPY X.` on a line of its own, the normal
-        # case, credits it to the copybook); the last one always keeps the
-        # copybook's origin, since a statement's own remainder after the COPY
-        # is what continues on it.
+        # case, credits it to the copybook). Text AFTER the COPY's period on
+        # its last line is moved onto a physical line of its own, in its own
+        # columns, credited to that parent line: appended to the copybook's
+        # last line it inherited the copybook's origin, so lint blamed the
+        # member for a parent item (#355, option (b)).
         start_line = expanded_source.count("\n", 0, statement_start)
         end_line = expanded_source.count("\n", 0, statement_end)
         head_start = expanded_source.rfind("\n", 0, statement_start) + 1
         head_has_text = bool(expanded_source[head_start:statement_start].strip())
+        tail_end = expanded_source.find("\n", statement_end)
+        if tail_end == -1:
+            tail_end = len(expanded_source)
+        tail_has_text = bool(expanded_source[statement_end:tail_end].strip())
 
         copybook_line_count = expanded_copybook.count("\n") + 1
         spliced = _fit_origins(
@@ -1813,6 +1822,12 @@ def _expand_source_recursive(
         )
         if head_has_text and start_line < len(origins):
             spliced[0] = origins[start_line]
+        if tail_has_text and end_line < len(origins):
+            spliced.append(origins[end_line])
+            tail_column = statement_end - (
+                expanded_source.rfind("\n", 0, statement_end) + 1
+            )
+            expanded_copybook += "\n" + " " * tail_column
         origins = origins[:start_line] + spliced + origins[end_line + 1 :]
 
         # `COPY X.` on a line of its own: the blanks before it are the COPY

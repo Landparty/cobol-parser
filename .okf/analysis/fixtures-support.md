@@ -88,6 +88,15 @@ record); INITIATE / TERMINATE add none (#499).
 **CALL/DYNCALL argument-direction ladder (Phase 2b)**, first rung wins,
 `CallArg.provenance` records which:
 
+0. Before the ladder (#582): an `OMITTED` argument is `direction="NONE"`,
+   `provenance="omitted"` -- kept in its position so later arguments still
+   pair with the right callee LINKAGE 01. A constant passed BY REFERENCE (a
+   literal, figurative, `LENGTH OF x`, `FUNCTION f(...)`) is **OUT**,
+   `provenance="constant"`. `call_argument_data_name()` is the one classifier
+   (None for those constants and `OMITTED`, `x` for `ADDRESS OF x`); rung 3's
+   dataflow, `constraints._boundary_fed_names` and `program_fixtures` resolve
+   that name, never the raw argument text.
+
 1. `passing_mode` in `CONTENT`/`VALUE` -> **OUT**, always (language rule --
    the callee cannot write back through either mode).
 2. Callee source available (`callee_indexes`/`callee_asts`, keyed by
@@ -167,6 +176,16 @@ re-reads the qualifiers from the scrubbed `sql_text` with
 `AMT` declared under two structures would otherwise land in `unresolved`
 (issue #366).
 
+**A gap goes on the boundary too.** An unresolvable SQL host variable,
+ACCEPT target, READ record layout or WRITE/REWRITE record is appended to the
+`Boundary`'s own `unresolved` as well as `report.unresolved`: coverage
+(`CoverageSummary`) counts a boundary resolved by its own list, so a SELECT
+whose host variables all failed -- and so got no fixture -- read as resolved
+(#505). An item inside an `OCCURS` table never resolves in
+`ProgramLayoutIndex`; `_is_table_item()` names it instead ("host-variable
+array (OCCURS): unsupported" / "table element (OCCURS)"), so a DB2 rowset
+`FETCH ... INTO :ARRAY` or `ACCEPT TB(I)` says why it has no fixture.
+
 **CICS/DLI** have no fixed INTO/FROM-shaped attributes to key layout
 resolution off -- `ExecCicsStatement.options` is a generic option-keyword ->
 argument-text dict, and `ExecImsStatement.arguments` is a positional list
@@ -176,6 +195,14 @@ value/argument is tried against the layout index (via the same
 defaults to `BIDIRECTIONAL`, and an unresolved entry on the `Boundary` itself
 (not the report-level list) notes the limitation rather than claiming
 precision this phase does not have.
+
+**SORT / MERGE files are not boundaries** (#498, option b, pending a
+key/category agreed with mockymock's `mock_surface`). Each `USING` and
+`GIVING` file of a SORT or MERGE is one `report.unresolved` entry ("SORT
+USING file IN-FILE in MAIN-PARA is not modelled as a boundary ..."), so a
+program whose only I/O is `SORT ... USING ... GIVING` no longer reports an
+empty bundle with nothing unresolved, and `gen-fixtures --strict` fails on
+it. No `Boundary` is emitted, so coverage counts are unchanged.
 
 **ACCEPT.** Non-interactive sources (`DATE`, `DAY`, `DAY-OF-WEEK`, `TIME`,
 `COMMAND-LINE`, `ENVIRONMENT`, `ENVIRONMENT-VALUE`, `ARGUMENT-NUMBER`,
@@ -230,6 +257,9 @@ operand that resolves (via Phase 1's `ProgramLayoutIndex`) to a field a
 boundary actually feeds (per Phase 2's `BoundaryReport`), emits a
 `FieldConstraint`; the domain-propagation solver in `domains.py` (same PR)
 turns a field's constraints into a concrete witness value.
+`extract(..., extra_fed_names=[...])` (2026-10-21) adds data names to treat
+as boundary-fed on top of the report's: `ProgramFixtureGenerator(
+entry_parameters=True)` passes the program's own USING items.
 
 ```python
 from cobolparser.analysis.constraints import ConstraintExtractor
@@ -251,6 +281,16 @@ branch.enclosing             # tuple[(branch_id, arm_id), ...]: the arms that
 
 witness = solve(field_spec, branch.arms["THEN"])   # Witness | Unsatisfiable
 ```
+
+**`transfer_sites`: the way into a paragraph** (#310).
+`ConstraintReport.transfer_sites` holds one `TransferSite(paragraph, target,
+kind, enclosing, line)` per out-of-line `PERFORM p [THRU q]` (its first
+paragraph; the rest of a range is reached by falling through) and per `GO
+TO` target (`kind` `GOTO_DEPENDING` for `GO TO ... DEPENDING ON`), recorded
+by `_record_transfer_site` during the same `_walk_statements` pass, so its
+`enclosing` is the PERFORM's own arm chain. `ScenarioPlanner` joins a
+branch's `parent_proc` to it to carry the path condition across paragraphs
+(see generators/fixtures.md).
 
 **`enclosing`: the path condition.** Every `BranchConstraints`
 records the `(branch_id, arm_id)` chain enclosing it. `_walk_list` threads it
@@ -586,6 +626,26 @@ visits) budget; past it the fold reports nothing (`_WalkState.exhausted`),
 never a partial answer. `test_const_fold_corpus.py`'s non-triviality check
 folds `tests/samples/file_operations.cbl` and `enterprise/COMPDIR.cbl`.
 
+**The program walk is cached** (#374). `gen-fixtures --scenarios all` folds
+one program twice per scenario, and each fold used to re-walk the whole
+PROCEDURE DIVISION for its READ / DISPLAY / WRITE sites and recompute every
+statement's nested lists -- quadratic in program size (300 IFs / 40 I/O
+statements: 13.3s, 600/60: 50.8s). `_ProgramWalk` holds those, one per
+program (`_WALK_CACHE`, a weak-keyed dictionary on the *index*, like
+`_FACTS_CACHE`; keyed on the AST it held its own key alive -- a statement's
+`parent` chain and `index.ast` lead back to it -- so no folded program was
+ever freed; the entry's weak `program` reference is checked so an index
+folded with another AST gets a fresh walk), and is reached through the `_CURRENT_WALK`
+context variable set only for the duration of `fold()`, so the module-level
+helpers keep their signatures and nothing is cached outside a fold. The
+unseeded fold (`seed_values` empty) is memoised on the same entry, one
+result per `success_skipped` set (an arm a success status never takes
+changes the fold), and handed out as a copy (`_copy_result`). Both assume the AST is not mutated
+between folds. Output is byte-identical (same bundle SHA-256; 2.5s / 7.3s
+for the two programs above); the bundle's size, which still grows with
+scenarios x fixtures, is untouched -- shrinking it would change the bundle
+shape (`bundle_version`).
+
 **Every site, and only control flow the walk really follows** (each case
 checked against GnuCOBOL 3.2 output):
 
@@ -737,7 +797,11 @@ internal env) rather than approximating:
   reusing the target's own name as the second operand is directly what the
   statement means (multiplication has no target-is-also-an-addend hidden
   term the way ADD/SUBTRACT's TO/FROM accumulation does), so only GIVING
-  names are filtered from its operand list, never targets.
+  names are filtered from its operand list, never targets. The GIVING form
+  of MULTIPLY / DIVIDE reads its two operands from `source_operands` (#495):
+  filtering GIVING names out of `.operands` left one operand for `MULTIPLY A
+  BY A GIVING C` or `DIVIDE B INTO A GIVING A`, which poisoned the result
+  instead of folding it.
 * **ACCEPT/READ are a deliberate no-op, not an omission.** They are exactly
   the boundary categories `_tier2_expectations` seeds `env` from before the
   walk starts; falling through to the generic "unmodeled write" fallback

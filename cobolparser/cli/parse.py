@@ -483,6 +483,15 @@ def _do_parse(args: argparse.Namespace) -> tuple[Any, Any]:
     from ..profiling import ProfilerContext
 
     source = _read_source(args.file, getattr(args, "encoding", None))
+    if getattr(args, "_wrap_copybook_fragment", False):
+        # data-items on a bare copybook: parse it the way gen-data does,
+        # inside a program skeleton, instead of as a program with no
+        # divisions (an empty answer with exit 0, #536).
+        from ..generators.data.copybook import wrap_copybook_fragment
+
+        wrapped = wrap_copybook_fragment(source)
+        if wrapped is not None:
+            source = wrapped
     dialect = _DIALECT_MAP[args.dialect]
     error_recovery = _get_error_recovery(args)
 
@@ -1720,6 +1729,10 @@ def _cmd_decode(args: argparse.Namespace) -> None:
         _fail(str(exc))
     except OSError as exc:
         _fail(f"Cannot read copybook: {exc}")
+    except UnicodeDecodeError as exc:
+        # A non-UTF-8 copybook (a Latin-1 accent in a comment): a one-line
+        # error, as compare gives, not a traceback (#496).
+        _fail(f"Cannot read copybook {args.copybook}: {exc}")
     _warn_layout(decoder.layout_warnings)
 
     output_path = getattr(args, "output", None)
@@ -3164,7 +3177,12 @@ def _cmd_dclgen_check(args: argparse.Namespace) -> None:
 def _cmd_data_items(args: argparse.Namespace) -> None:
     from ..generators.data.layout_offsets import compute_program_data_items
 
+    args._wrap_copybook_fragment = True
     ast, prof = _parse_or_fail(args)
+    if ast.data_division is None:
+        # Nothing to lay out: say so rather than print `"items": []` and
+        # exit 0, which reads as "this file declares no data".
+        _fail(f"{args.file}: no DATA DIVISION found; no data items to report")
 
     output = compute_program_data_items(ast)
 
@@ -4409,6 +4427,12 @@ def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:
             }
         ),
         "tools": dict(config.tools),
+        # Present only when some path entry is not a directory (#550).
+        **(
+            {"missing_directories": [path for _, path in missing]}
+            if (missing := config.missing_directories())
+            else {}
+        ),
     }
 
 
@@ -4431,6 +4455,7 @@ def _cmd_config(args: argparse.Namespace) -> None:
 
     lines.append(f"Config file: {config.source}")
     lines.append(f"Schema version: {config.version}")
+    missing = set(payload.get("missing_directories", ()))
     for section in ("project", "data", "lint"):
         values = payload[section]
         if not values:
@@ -4440,7 +4465,15 @@ def _cmd_config(args: argparse.Namespace) -> None:
         for key, value in values.items():
             if isinstance(value, list):
                 lines.append(f"  {key}:")
-                lines.extend(f"    - {entry}" for entry in value)
+                lines.extend(
+                    f"    - {entry}"
+                    + (
+                        "  (not an existing directory)"
+                        if key in ("copybook_path", "callee_path") and entry in missing
+                        else ""
+                    )
+                    for entry in value
+                )
             elif isinstance(value, bool):
                 # Spelled the way the file spells it, not Python's True.
                 lines.append(f"  {key}: {'true' if value else 'false'}")
@@ -4709,6 +4742,16 @@ def main() -> None:
                 "for it and parses without it",
                 file=sys.stderr,
             )
+        for key, missing in config.missing_directories():
+            # Only for a path this run actually takes from the file: one the
+            # subcommand reads and the user did not override (#550).
+            dest = key.split(".", 1)[1]
+            if hasattr(args, dest) and dest not in args_provided:
+                print(
+                    f"warning: {config.source} {key} entry {missing} is not "
+                    "an existing directory",
+                    file=sys.stderr,
+                )
 
     if not hasattr(args, "func"):
         parser.print_help()

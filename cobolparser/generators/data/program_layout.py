@@ -26,6 +26,7 @@ from .layout import (
     expand_condition_values,
     flatten_record,
     layout_segment,
+    occurs_expansion_caveats,
 )
 from .options import DataGeneratorOptions
 
@@ -523,10 +524,13 @@ class ProgramLayoutIndex:
         # Every storage-carrying field flattens into the name multimap --
         # indexing must see all of it (FILLER, REDEFINES included); which
         # fields are *generation*-eligible is a later phase's concern.
-        fields = flatten_record(
-            record,
-            DataGeneratorOptions(include_filler=True, include_redefines=True),
+        index_options = DataGeneratorOptions(
+            include_filler=True, include_redefines=True
         )
+        fields = flatten_record(record, index_options)
+        # A table the expansion caps cut short is indexed (and so generated)
+        # only partly: say so rather than let a fixture look complete (#376).
+        self.unresolved.extend(occurs_expansion_caveats(record, index_options))
         qualified_index: dict[str, list[ResolvedField]] = {}
         for spec in fields:
             resolved = ResolvedField(spec=spec, section=section, record=record)

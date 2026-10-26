@@ -25,7 +25,15 @@ import re
 #: text for clone-detection renaming, an unstructured EVALUATE selector).
 #: Shared so a future fix to what counts as an identifier token does not
 #: have to be made in more than one place.
-IDENTIFIER_TOKEN_RE = re.compile(r"(?<![\w.])\d*[A-Za-z][A-Za-z0-9-]*")
+#:
+#: A token is a *whole* word: it may not start right after a hyphen either,
+#: and digits may be followed by a hyphen. The old ``\d*[A-Za-z]...`` could
+#: not match ``1000-INIT`` from its first character, so it matched the tail
+#: ``INIT`` instead -- and ``PERFORM 1000-INIT`` referenced data item
+#: ``INIT`` (#487). Such a word is now one token that names no data item.
+IDENTIFIER_TOKEN_RE = re.compile(
+    r"(?<![\w.-])(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9][A-Za-z0-9-]*"
+)
 
 #: Same, but also matches a token that *starts* with a digit. Only where a
 #: stray non-identifier match is harmless -- the caller looks every match up
@@ -51,11 +59,49 @@ def base_data_name(ref: str) -> str:
     return ref
 
 
+#: ``DFHRESP(cond)`` / ``DFHVALUE(cvda)``: the CICS translator replaces each
+#: with a fullword binary constant. The argument is a CICS condition or CVDA
+#: name (``NORMAL``, ``NOTFND``, ``ACQUIRED``), never a data name.
+_TRANSLATOR_FUNCTION_RE = re.compile(
+    r"(?<![\w-])(DFHRESP|DFHVALUE)\s*\([^()]*\)", re.IGNORECASE
+)
+
+
+def strip_translator_arguments(text: str) -> str:
+    """*text* with the argument of every ``DFHRESP(...)`` / ``DFHVALUE(...)``
+    removed, the function word kept: ``"DFHRESP ( NOTFND )"`` becomes
+    ``"DFHRESP"``.
+
+    The argument went through the subscript splitter as a data-item
+    reference, so xref listed CICS conditions as undefined and a data item
+    sharing a condition's name (a flag called ``NOTFND``) was credited with
+    a use (#594). Every name extractor applies this before splitting.
+    """
+    if "(" not in text:
+        return text
+    return _TRANSLATOR_FUNCTION_RE.sub(r"\1", text)
+
+
+def is_translator_function(text: str) -> bool:
+    """Whether *text* is one ``DFHRESP(...)`` / ``DFHVALUE(...)`` call: a
+    fullword binary numeric constant once translated."""
+    return _TRANSLATOR_FUNCTION_RE.fullmatch(text.strip()) is not None
+
+
 #: Separator of a qualified reference as :func:`qualified_references` spells
 #: it: ``"AMT OF IN-REC"`` (an ``IN`` qualifier is normalized to ``OF``).
 QUALIFIER_SEPARATOR = " OF "
 
 _PAREN_GROUP_RE = re.compile(r"\(([^()]*)\)")
+
+_QUALIFIER_SPLIT_RE = re.compile(r"\s+(?:OF|IN)\s+", re.IGNORECASE)
+
+
+def split_qualified_name(text: str) -> list[str]:
+    """``"AMT IN OUT-GRP OF OUT-REC"`` -> ``["AMT", "OUT-GRP", "OUT-REC"]``:
+    the data name then its qualifiers, innermost first, upper-cased. ``IN``
+    is a full synonym of ``OF`` (#541)."""
+    return [p.upper() for p in _QUALIFIER_SPLIT_RE.split(text.strip()) if p.strip()]
 
 
 def qualified_references(text: str, skip_words: frozenset[str]) -> set[str]:

@@ -44,12 +44,18 @@ from ..models.statements.data import (
     UnstringStatement,
 )
 from ..models.statements.misc import (
+    ContinueStatement,
     MergeStatement,
     SelectStatement,
     SortStatement,
     XmlJsonStatement,
 )
-from ._names import QUALIFIER_SEPARATOR, qualified_references
+from ._cics import cics_identifier_options
+from ._names import (
+    QUALIFIER_SEPARATOR,
+    qualified_references,
+    strip_translator_arguments,
+)
 
 # DATA DIVISION section names whose data items are in scope for this
 # analysis. Matches the exact names the DATA DIVISION parser assigns (see
@@ -143,6 +149,8 @@ _STR_ATTR_EXTRAS: dict[type, tuple[str, ...]] = {
         "converting_after",
     ),
     SearchStatement: ("table_name", "varying_variable"),
+    # ``CONTINUE AFTER expr SECONDS`` reads every operand of its delay (#578).
+    ContinueStatement: ("delay_expression",),
 }
 
 # Statement attributes holding a plain list of operand strings that never
@@ -268,6 +276,83 @@ def collect_declared_items(ast: CobolProgram) -> list[CobolDataItem]:
     ]
 
 
+#: Statement attributes that hold a procedure (paragraph / section) name:
+#: PERFORM's target and THRU, SORT / MERGE input / output procedures.
+_PROCEDURE_NAME_ATTRS: tuple[str, ...] = (
+    "target_paragraph",
+    "thru_paragraph",
+    "processing_procedure",
+    "processing_procedure_thru",
+    "input_procedure",
+    "input_procedure_thru",
+    "output_procedure",
+    "output_procedure_thru",
+)
+
+
+def _procedure_operands(stmt: Any) -> set[str]:
+    """Upper-cased procedure names *stmt* names (PERFORM / GO TO / ALTER /
+    SORT-MERGE procedures): operands that are never data references."""
+    names: set[str] = set()
+    for attr in _PROCEDURE_NAME_ATTRS:
+        value = getattr(stmt, attr, None)
+        if isinstance(value, str) and value:
+            names.add(value.strip().upper())
+    for value in getattr(stmt, "target_paragraphs", None) or []:
+        if isinstance(value, str) and value:
+            names.add(value.strip().upper())
+    for alteration in getattr(stmt, "alterations", None) or []:
+        if isinstance(alteration, dict):
+            for key in ("from_paragraph", "to_paragraph"):
+                value = alteration.get(key)
+                if isinstance(value, str) and value:
+                    names.add(value.strip().upper())
+    return names
+
+
+def inherited_data_records(
+    ast: CobolProgram,
+) -> list[tuple[CobolProgram, str, CobolDataItem]]:
+    """``(owner, section name, record)`` for every 01/77 record of a program
+    enclosing *ast* that *ast*'s own statements can name (#504).
+
+    A contained program sees each enclosing program's ``GLOBAL`` records
+    (and everything under them); a METHOD sees *all* of its FACTORY /
+    OBJECT paragraph's data, GLOBAL or not. Innermost container first. A
+    name *ast* declares itself, or a nearer container already supplied,
+    hides the farther one, as COBOL name resolution does. ``EXTERNAL``
+    needs no case of its own: an EXTERNAL record is declared in each
+    program that uses it. The records are *not* part of
+    ``collect_declared_items`` -- *ast* does not declare them, so they are
+    never *ast*'s unused items -- but every analyzer that resolves *ast*'s
+    references to declarations (xref, lineage, move-type-check) must see
+    them.
+    """
+    hidden = {item.name.upper() for item in collect_declared_items(ast)}
+    result: list[tuple[CobolProgram, str, CobolDataItem]] = []
+    owner = ast.parent
+    while owner is not None:
+        if isinstance(owner, CobolProgram) and owner.data_division is not None:
+            shares_all = getattr(owner, "unit_kind", "PROGRAM") in _OO_DATA_OWNERS
+            for section in owner.data_division.sections:
+                if not isinstance(section, CobolSection):
+                    continue
+                section_name = section.section_name or ""
+                if section_name.upper() not in _DATA_SECTION_NAMES:
+                    continue
+                for record in section.data_items:
+                    if not isinstance(record, CobolDataItem) or record.is_filler:
+                        continue
+                    name = (record.name or "").upper()
+                    if name in hidden:
+                        continue
+                    if shares_all or getattr(record, "is_global", False):
+                        result.append((owner, section_name, record))
+                        hidden.add(name)
+        owner = owner.parent
+    return result
+
+
 def _extract_identifiers(operand: Any) -> set[str]:
     """Extract every candidate data-name reference out of an operand's raw
     text.
@@ -307,8 +392,29 @@ def _extract_identifiers(operand: Any) -> set[str]:
     if not isinstance(operand, str) or not operand:
         return set()
 
-    stripped = _QUOTED_TEXT_RE.sub(" ", operand)
+    stripped = strip_translator_arguments(_QUOTED_TEXT_RE.sub(" ", operand))
     return qualified_references(stripped, _NON_IDENTIFIER_WORDS)
+
+
+def screen_section_references(data_div: Any) -> list[dict[str, Any]]:
+    """The data items a SCREEN SECTION's fields bind (#501).
+
+    The DATA DIVISION parser skips the SCREEN SECTION's grammar but keeps
+    each ``USING`` / ``FROM`` / ``TO`` operand as ``{"clause", "text",
+    "line"}`` in the section's ``screen_references`` metadata: a field
+    ``USING WS-NAME`` displays and accepts WS-NAME whenever the screen is
+    DISPLAYed or ACCEPTed, without the PROCEDURE DIVISION naming it.
+    """
+    found: list[dict[str, Any]] = []
+    for section in getattr(data_div, "sections", None) or []:
+        if not isinstance(section, CobolSection):
+            continue
+        if (section.section_name or "").upper() != "SCREEN":
+            continue
+        for reference in section.get_metadata("screen_references") or []:
+            if isinstance(reference, dict) and reference.get("text"):
+                found.append(reference)
+    return found
 
 
 def _mark_subtree_used(item: CobolDataItem, group_used: dict[int, bool]) -> None:
@@ -839,7 +945,13 @@ class UnusedVariableAnalyzer:
           identifier-1 and identifier-2 with the same data-name");
         * ``XML GENERATE doc FROM group`` / ``JSON GENERATE doc FROM group``
           emit one element per subordinate, by name; ``XML PARSE`` /
-          ``JSON PARSE doc INTO group`` store into each subordinate by name.
+          ``JSON PARSE doc INTO group`` store into each subordinate by name;
+        * EXEC SQL host variables and null indicators (#531): DB2 reads or
+          writes a host structure one column per elementary field, and a
+          VARCHAR group through both 49-level parts -- removing one breaks
+          the precompile or shifts the column mapping. Includes the EXEC
+          SQL of the program's own DATA DIVISION (a DECLARE CURSOR in
+          WORKING-STORAGE), which no PROCEDURE DIVISION walk reaches.
 
         ``MOVE SPACES TO group`` deliberately stays a plain group reference:
         its fields really are never individually referenced.
@@ -849,6 +961,26 @@ class UnusedVariableAnalyzer:
             if isinstance(stmt, XmlJsonStatement):
                 for operand in (stmt.from_item, stmt.into_item):
                     names |= _extract_identifiers(operand)
+        names |= UnusedVariableAnalyzer._sql_host_variable_names(ast)
+        return names
+
+    @staticmethod
+    def _sql_host_variable_names(ast: CobolProgram) -> set[str]:
+        """Every EXEC SQL host variable and null indicator of *ast*'s own
+        PROCEDURE and DATA DIVISION statements."""
+        statements: list[Any] = list(UnusedVariableAnalyzer._own_statements(ast))
+        data_div = ast.get_division("DATA")
+        if data_div is not None:
+            statements += [
+                node
+                for node in data_div.traverse_depth_first()
+                if hasattr(node, "host_variables")
+            ]
+        names: set[str] = set()
+        for stmt in statements:
+            for attr in ("host_variables", "null_indicators"):
+                for value in getattr(stmt, attr, None) or []:
+                    names |= _extract_identifiers(value)
         return names
 
     @staticmethod
@@ -874,7 +1006,12 @@ class UnusedVariableAnalyzer:
         names: set[str] = set()
 
         for stmt in self._own_statements(ast):
+            procedures = _procedure_operands(stmt)
             for operand in stmt.operands:
+                if isinstance(operand, str) and operand.strip().upper() in procedures:
+                    # ``PERFORM INIT`` names paragraph INIT, never a data
+                    # item of that name (#487).
+                    continue
                 names |= _extract_identifiers(operand)
 
             # Walked by MRO, not exact type, so a (currently hypothetical)
@@ -990,8 +1127,7 @@ class UnusedVariableAnalyzer:
                 continue
             type_name = type(node).__name__
             if type_name == "ExecCicsStatement":
-                options = getattr(node, "options", None) or {}
-                for v in options.values():
+                for v in cics_identifier_options(node).values():
                     names |= _extract_identifiers(v)
             elif type_name == "ExecImsStatement":
                 for v in getattr(node, "arguments", None) or []:
@@ -1065,6 +1201,8 @@ class UnusedVariableAnalyzer:
             return names
 
         names |= self._report_section_references(data_div)
+        for reference in screen_section_references(data_div):
+            names |= _extract_identifiers(reference.get("text"))
 
         for section in data_div.sections:
             if not isinstance(section, CobolSection):
@@ -1096,7 +1234,8 @@ class UnusedVariableAnalyzer:
         The runtime stores into a ``FILE STATUS`` item after every I/O
         operation and reads the ``RECORD KEY`` / ``ALTERNATE RECORD KEY`` /
         ``RELATIVE KEY`` / ``PASSWORD`` items to position the file (and the
-        ``ASSIGN USING`` item to name it), whether
+        ``ASSIGN USING`` item to name it, and the ``PADDING CHARACTER``
+        item on every WRITE, #556), whether
         or not the PROCEDURE DIVISION ever names them -- a program that
         only tests its status through a level-88 on the same item, or never
         tests it at all, still uses it. Scanning only the PROCEDURE
@@ -1117,6 +1256,7 @@ class UnusedVariableAnalyzer:
                 node.relative_key,
                 node.password,
                 node.assign_using,
+                node.padding_character,
             ):
                 names |= _extract_identifiers(value)
             for alt in node.alternate_keys:
@@ -1161,6 +1301,24 @@ class UnusedVariableAnalyzer:
         RD's own ``CONTROL``/``CONTROLS`` (break on this field).
         """
         names: set[str] = set()
+        for _node, values in UnusedVariableAnalyzer.report_entry_operands(data_div):
+            for value in values:
+                names |= _extract_identifiers(value)
+        return names
+
+    @staticmethod
+    def report_entry_operands(data_div: Any) -> list[tuple[Any, list[str]]]:
+        """Each REPORT SECTION entry (RD or report-group item) with the raw
+        ``SOURCE`` / ``SUM`` / ``CONTROL(S)`` operand texts it carries, in
+        source order; entries carrying none are left out. Shared with
+        ``XrefAnalyzer``, which records each operand at its entry (#571).
+
+        The RD is no node of its own: the parser copies its clauses onto
+        every 01 report group it owns, so its ``CONTROL(S)`` operands are
+        taken once per report, from the first of those groups.
+        """
+        found: list[tuple[Any, list[str]]] = []
+        rd_seen: set[str] = set()
         for section in data_div.sections:
             if not isinstance(section, CobolSection):
                 continue
@@ -1169,15 +1327,28 @@ class UnusedVariableAnalyzer:
             for item in section.data_items:
                 for node in [item, *item.get_all_children()]:
                     metadata = getattr(node, "metadata", None) or {}
+                    values: list[str] = []
                     clauses = metadata.get("report_clauses") or {}
-                    names |= _extract_identifiers(clauses.get("source"))
+                    if clauses.get("source"):
+                        values.append(clauses["source"])
                     for entry in clauses.get("sum") or []:
-                        for operand in (entry or {}).get("operands") or []:
-                            names |= _extract_identifiers(operand)
+                        values.extend(
+                            operand
+                            for operand in (entry or {}).get("operands") or []
+                            if operand
+                        )
                     rd_clauses = metadata.get("rd_clauses") or {}
-                    for control in rd_clauses.get("controls") or []:
-                        names |= _extract_identifiers(control)
-        return names
+                    report = str(metadata.get("rd_report_name") or id(rd_clauses))
+                    if rd_clauses and report not in rd_seen:
+                        rd_seen.add(report)
+                        values.extend(
+                            control
+                            for control in rd_clauses.get("controls") or []
+                            if control
+                        )
+                    if values:
+                        found.append((node, values))
+        return found
 
     @staticmethod
     def _section_of(item: CobolDataItem) -> str:

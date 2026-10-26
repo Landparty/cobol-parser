@@ -160,6 +160,416 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **A file opening with `>>SOURCE FORMAT FREE` parses in any column, with
+  no false warning** (#502). Every parse warned "unknown compiler directive
+  '>>SOURCE FORMAT FREE' ignored" although the directive was applied. And
+  with the directive in column 1 above 7-space-indented lines, the file was
+  read as fixed-format: the directive was sliced to `E FORMAT FREE`, a long
+  literal was cut at column 72, and the parse failed with "No recognizable
+  COBOL division found near 'E'". An opening `>>SOURCE ... FREE` now makes
+  the file free-form wherever it starts, and `>>SOURCE` no longer warns.
+* **`codebase-graph` no longer treats OO FACTORY / OBJECT / METHOD-ID units
+  as CALL-able programs** (#500). Only PROGRAM and CLASS units are graph
+  nodes, and a method's CALLs are attributed to its class. A batch
+  `CALL 'AUDIT'` no longer resolves to a method named AUDIT. Two classes no
+  longer produce "duplicate PROGRAM-ID FACTORY / OBJECT / ..." notes, and
+  MCP `callers_of` no longer lists a method as the declaration of a
+  program; `codebase_overview` no longer counts such a CALL on the method
+  (nor hides the external callee from `not_in_workspace`).
+* **Multi-character and letter `CURRENCY SIGN` symbols in record images**
+  (#491, #311 item 4). `CURRENCY SIGN IS 'CHF ' WITH PICTURE SYMBOL 'F'`
+  was not recognized at all (a letter symbol was dropped), so `PIC
+  FFFF,FF9.99` got one integer digit and values like `2.57`; and a
+  multi-character string such as `'EUR'` was only named in a caveat. A
+  letter symbol is now declared like any other (except the letters the
+  PICTURE grammar uses: A B C D E G N P R S U V X Z), the currency string
+  fills the one position a `$` would hold, so the item is n - 1 bytes wider
+  for an n-character string (`PIC FFFF,FF9.99` is 14 bytes, `data-items`
+  offsets included), and `gen-data` writes ` CHF 17,611.57`, which `decode`
+  reads back. The width follows IBM's rule as documented; GnuCOBOL 3.x does
+  not implement a separate currency string, so it is not verified against a
+  compiler.
+* **`VALUE 'AB' & X'0102'` is no longer cut to `'AB'`** (#479). The lexer
+  joined `&`-concatenated literals of one spelling only, so a basic literal
+  joined to a hexadecimal one (both alphanumeric literals to IBM; GnuCOBOL
+  stores `41420102`) lost its second part with an "Unparsed token" warning,
+  and `gen-data` wrote `AB  `. They are now one literal (spelled
+  `"AB" & X'0102'` in the AST), and the record image holds the hex part's
+  own bytes with the basic part in the record charset (`C1 C2 01 02` in
+  EBCDIC), which `decode` reads back.
+* **`IBMDataItem.calculate_storage_size()` agrees with `calculate_size()`**
+  (#589). It kept its own copy of the IBM sizing rules: packed decimal used
+  `(digits + 1) // 2`, one byte short for every even digit count
+  (`S9(4) COMP-3` was 2 bytes, not 3; `9(18)` was 9, not 10), and it returned
+  0 before reaching COMP-1 / COMP-2 / POINTER, which never have a PICTURE.
+  It now defers to the package's single sizing authority, so the
+  `storage_size` key of `to_dict()` and the item `create_comp3_data_item()`
+  returns are right.
+* **IOLogger logs the right variables for REWRITE FROM and a plain READ**
+  (#573). `REWRITE rec FROM ws-item` logged the record instead of the FROM
+  item (WRITE already logged it) and now also carries `from_clause` in
+  `details`; `READ file` with no INTO logged no variables at all and now
+  logs the 01 records under the file's FD.
+* **`expand --keep-comments` handles CR-only and CRLF files** (#581). The
+  comment read-back split each file on `\n` only, while the source map
+  counts `\n`, `\r\n` and `\r`: a CR-only copybook was pasted whole in place
+  of its first comment line (its record listed twice), and a CRLF file left a
+  stray `\r` on every restored comment. Each comment now comes back once,
+  without `\r`.
+* **`health` no longer flags a clone's namesake in another section as a
+  clone** (#555). `top_offenders` matched clone-group members by bare
+  paragraph name, so when `CALC` in section S1 was a clone, S2's unrelated
+  `CALC` got "+15 member of a duplicate-paragraph clone group" too. Clone
+  members now carry `qualified_name` (`"CALC OF S1"`, only when the name
+  repeats, also in `redundancy`'s JSON) and the match is by that key.
+* **Field lineage: SQL edges through an OCCURS table field are inexact**
+  (#507). A host variable under an OCCURS (`FETCH ... ROWSET ... INTO
+  :EMPNO`, `INSERT ... VALUES (:EMPNO)`) got `exact: true` edges, though its
+  node stands for any occurrence; every other edge through a table field was
+  already inexact. They now are too.
+* **`linkage-check` / `lint` no longer report a LINKAGE 01 that REDEFINES a
+  USING parameter as "never referenced"** (#596). A level-01 REDEFINES shares
+  its base item's storage, so the base and every overlay of it (through a
+  chain, in either direction) now count as referenced when any one of them is
+  on a USING / CALL / SET ADDRESS OF.
+* **`CONTINUE AFTER n SECONDS` is parsed** (#578). The Enterprise COBOL 6.4
+  delay phrase was dropped with an "Unparsed tokens starting at 'AFTER'"
+  warning, so a data item used only in the delay was listed by
+  `unused-variables` and had no `xref` references. The expression is now
+  kept as `ContinueStatement.delay_expression` and its operands count as
+  read; a missing `SECONDS` is a parse error.
+* **`HostVariableResolver` links a host variable to its DCLGEN column**
+  (#572). Columns were indexed by their raw names, so `:CUST-ID` never
+  matched `CUST_ID`: `db2_column` was `None` for every underscored column,
+  and a host variable with no DATA DIVISION item was unresolved. Columns are
+  now keyed (and `get_column_index()` / `column_name_collisions` reported) by
+  the DCLGEN host-variable form, through a `dclgen_name()` that
+  `DclgenChecker` now shares.
+* **gen-fixtures no longer lists constant CALL arguments as unresolved**
+  (#582). Numeric literals (`BY VALUE 0`), figurative constants (`ZERO`,
+  `SPACES`), `OMITTED`, `LENGTH OF x` and `ADDRESS OF x` each became an
+  "argument X not resolvable in layout index" entry in `unresolved`, burying
+  real gaps while `coverage` said `unresolved_boundaries: 0`. They are now
+  classified first: constants are skipped, `ADDRESS OF x` resolves against
+  `x`, and `OMITTED` keeps its position in the boundary inventory's
+  `call_args` with `direction: "NONE"` instead of a data direction.
+* **`>>DEFINE B AS A` gives B the value of A** (#567). A lone compilation
+  variable is an IBM arithmetic expression too, but only text containing an
+  operator was evaluated, so B held the word "A" and every later `>>IF B = 3`
+  was silently FALSE. B now copies A's value at that point; naming an
+  undefined variable warns.
+* **`complexity` counts a clause and its NOT- twin as one decision** (#553).
+  `READ ... AT END ... NOT AT END ...`, `ON SIZE ERROR / NOT ON SIZE ERROR`,
+  `ON EXCEPTION / NOT ON EXCEPTION`, `INVALID KEY / NOT INVALID KEY`, `AT EOP
+  / NOT AT EOP` and `ON OVERFLOW / NOT ON OVERFLOW` added 1 per body, so a
+  paragraph handling both outcomes scored 3 where `IF ... ELSE` scores 2. A
+  pair now adds 1 whether one or both bodies are written, and SEARCH's `AT
+  END` adds nothing (its WHENs are the decisions). Feeds `rating`, `health`
+  and the `complexity` lint rule.
+* **An EXEC CICS literal operand no longer counts as a reference to a
+  same-named data item** (#588). The option arguments are stored with their
+  quotes stripped, so `FILE('CUSTFIL')` / `PROGRAM('SUBPGM')` credited a
+  WORKING-STORAGE item named `CUSTFIL` / `SUBPGM` in `unused-variables`,
+  `lint` and `xref`, and a truly unused item went unreported. The options the
+  parser records as single literals (`literal_options`) are now skipped by
+  those sweeps and by `linkage-check` (`_cics.cics_identifier_options()`).
+* **STRING records which sources each `DELIMITED BY` applies to** (#576).
+  `STRING A B DELIMITED BY SIZE C DELIMITED BY D1` and `STRING A DELIMITED
+  BY SIZE B C DELIMITED BY D1` produced the same node, so `diff` said "No
+  structural changes" although B is copied whole in one and truncated at D1
+  in the other. `StringStatement.groups` (`[{"sources": [...], "delimiter":
+  ...}]`, also in `to_dict()`) now records the grouping, and `diff`
+  compares it; `operands` and `delimiters` are unchanged.
+* **`CobolProgram.to_dict()` metadata** (#508). `metadata.parser_version`
+  was hard-coded `"1.0.0"`; it is now the package version. The placeholder
+  `metadata.created_at` (`"2024-01-01T00:00:00Z"`) is dropped rather than made
+  real, so the JSON of one input stays byte-identical run to run. And
+  `statistics.procedure_count` counted the DATA DIVISION's WORKING-STORAGE /
+  LOCAL-STORAGE / LINKAGE / FILE sections as procedures; it now counts PROCEDURE
+  DIVISION sections and paragraphs only.
+* **`gen-fixtures --format csv-dir` writes the "empty input" scenario's
+  file** (#568). A CSV was written only for a fixture with rows, so the
+  zero-record READ of `--scenarios all`'s "empty input" scenario got no
+  file and `csv_path: null` in `MANIFEST.json`, exactly like the STATUS_ONLY
+  OPEN / CLOSE beside it. An IN or BIDIRECTIONAL fixture with a layout and
+  no rows now gets a header-only CSV and its `csv_path`, so a consumer binds
+  an empty dataset with no special case.
+* **`complexity` scores `PERFORM VARYING ... AFTER ...` as the nested loops
+  it is** (#514). Each AFTER phrase is a loop with its own UNTIL test, but a
+  loop PERFORM counted one decision and one nesting level however many it
+  had, so `VARYING A ... AFTER B` scored 2 / depth 1 where the equivalent
+  nested inline PERFORMs score 3 / depth 2. Each AFTER now adds one decision
+  and one level.
+* **COPY REPLACING LEADING + TRAILING replace a word only once** (#513).
+  `COPY LT REPLACING LEADING ==XX== BY ==CUST== TRAILING ==XX== BY ==END==`
+  turned `XX-NAME-XX` into `CUST-NAME-END`, rewriting both ends. The first
+  clause (in clause order) that fits a word now replaces it and the word is
+  done, giving `CUST-NAME-XX`, the same as the REPLACE statement.
+* **`language-env` finds intrinsics in WHEN conditions and INSPECT operands**
+  (#506). EVALUATE WHEN selectors, SEARCH WHEN conditions and INSPECT
+  TALLYING / REPLACING / CONVERTING operands were never scanned, so a
+  program whose only intrinsic sat there reported
+  `uses_intrinsic_functions: false`. The INSPECT parser now also reads
+  `FUNCTION name(args)` as one operand: TALLYING had split it in two,
+  `REPLACING ... BY` kept only the word `FUNCTION`, and CONVERTING dropped
+  the whole clause.
+* **`move-type-check` resolves `LENGTH OF`, SORT-RETURN, WHEN-COMPILED,
+  XML-CODE and the other special registers** (#520). Only RETURN-CODE,
+  TALLY and LINAGE-COUNTER were known, so a MOVE of `LENGTH OF x`,
+  SORT-RETURN / SORT-CORE-SIZE / SORT-FILE-SIZE / SORT-MODE-SIZE, XML-CODE,
+  JSON-CODE (integer NUMERIC) or WHEN-COMPILED / SORT-CONTROL / SORT-MESSAGE
+  (ALPHANUMERIC) went unchecked and counted as unresolved, and `lint` blamed
+  "an unresolved COPY" in a program with none. They are now resolved and
+  checked.
+* **Data items named only in a SELECT clause are no longer unreferenced**
+  (#549, #556). `xref` and MCP `explain_symbol` gave a RECORD KEY, ALTERNATE
+  RECORD KEY, RELATIVE KEY or PADDING CHARACTER item that the PROCEDURE
+  DIVISION never names 0 references; they now carry a `reference` at the
+  SELECT, like FILE STATUS. `unused-variables` and `lint` reported a
+  `PADDING CHARACTER IS ws-item` item as never referenced; it now counts as
+  used (a literal padding character names nothing).
+* **OCCURS `ASCENDING`/`DESCENDING KEY` after `INDEXED BY` is a key** (#542).
+  `OCCURS 5 INDEXED BY IX2 ASCENDING KEY IS K2` (an order IBM accepts) gave
+  `index_names == ['IX2', 'ASCENDING']`, no key, an "Unparsed token 'KEY'"
+  warning and an `xref` data item named `ASCENDING`, and `diff` could not
+  see a change of that table's key. The KEY and INDEXED BY phrases are now
+  read in either order, repeated, in the pure-Python walk and the Cython
+  accelerator alike.
+* **`scan --clones`: a paragraph body copied from a shared copybook is not a
+  clone** (#470). When each program wrote the paragraph header itself and
+  copied in only the statements (`ERR-PARA.` / `COPY BODY.`), the members
+  were keyed on their own header lines and the one copybook was reported as
+  a cross-file clone. Redundancy's `paragraph_fingerprints` now carry
+  `body_lines`, a scan with copybooks expanded stamps `body_origin` when the
+  whole body comes from one file, and `CrossFileCloneMember.source_key`
+  prefers it.
+* **gen-data writes a VALUE-clause initial value without JUSTIFIED or BLANK
+  WHEN ZERO** (#558). `PIC X(5) JUSTIFIED RIGHT VALUE 'AB'` was written
+  `   AB` and `PIC 9(3) BLANK WHEN ZERO VALUE 0` as spaces, but COBOL
+  initialisation by VALUE is not affected by either clause: the item holds
+  `AB   ` and `000`. A VALUE-derived cell is now marked and written as
+  declared; generated and level-88 values, which stand for MOVE results,
+  are still justified and blanked.
+* **`sql-cics-check` follows a `GO TO` to the SQLCODE check** (#557).
+  "SQL statement, then `GO TO CHK`" was reported `SQL_NO_SQLCODE_CHECK`
+  although `CHK` tests SQLCODE first: the search covered only the paragraph
+  and what it PERFORMs. An unconditional single-target `GO TO` written
+  directly in the paragraph is now followed the same way (with the same
+  next-SQL-statement cutoff); a conditional `GO TO` and `GO TO ... DEPENDING
+  ON` stay conservative. Also in `lint`.
+* **`recursion-check` flags a CALL to the program's own ENTRY name** (#515).
+  Only a CALL to the PROGRAM-ID counted as self-recursive, so `CALL
+  'RC1ALT'` in a program with `ENTRY 'RC1ALT'` reported no risk, although it
+  re-enters the same load module (and codebase-graph already resolves ENTRY
+  names to their program). The names a program answers to are now its
+  PROGRAM-ID plus its own ENTRY names, for the self-call and the
+  enclosing-program checks alike; the risk is graded as for the PROGRAM-ID.
+* **`diff` no longer reports equivalent VALUE spellings as changes** (#543).
+  `ZERO` -> `ZEROES`, `HIGH-VALUE` -> `HIGH-VALUES`, `SPACES` -> `SPACE`,
+  `7` -> `007` and `+5` -> `5.0` were each a `value-changed`; VALUE clauses
+  are now compared in a canonical form (figurative plurals folded, numeric
+  literals as decimals) and the message still quotes them as coded. A
+  quoted literal's case is now significant (`'ab'` -> `'AB'` was silently
+  equal).
+* **`program-signature` grades a BY VALUE parameter as `input`** (#490).
+  Direction came from xref roles alone, so `PROCEDURE DIVISION USING BY
+  VALUE LK-N` with `ADD 1 TO LK-N` reported `input-output`, in
+  `program-signature` and MCP `program_brief`'s interface -- though the
+  callee only changes its own copy. A BY VALUE operand's `input-output` /
+  `output` is now `input` (`unknown` stays), per entry point, so the same
+  item BY REFERENCE on an ENTRY keeps `input-output` there.
+* **`xref` and MCP `explain_symbol` count the fields a Report Writer report
+  prints, totals and breaks on** (#571). REPORT SECTION `SOURCE`, `SUM` and
+  RD `CONTROL(S)` operands were references for `unused-variables` but not for
+  `xref`, so every such field showed `reference_count: 0`. Each is now a
+  `reference` at its report entry (statement `REPORT SECTION`); the RD's
+  CONTROLS are recorded once per report. `PAGE-COUNTER` / `LINE-COUNTER`
+  join xref's special registers, so `SOURCE PAGE-COUNTER` is not undefined.
+* **Code after a COPY statement on the same line is located in the parent
+  file** (#355). `COPY AREC REPLACING A-ONE BY Z-ONE. 05 TAIL-X PIC X.`
+  appended the trailing `05 TAIL-X` to the copybook's last line, so the
+  source map, and `lint --copybook-path`, reported TAIL-X at
+  `AREC.cpy:2`. The expander now puts text after the COPY's period on a line
+  of its own, in its original columns, mapped to the parent line it was on
+  (`M.cbl:7`).
+* **`gen-data --unique` keeps a narrow text field distinct, and says when it
+  cannot** (#526). After 32 retries the counter fallback was
+  `<name[:4]><count>` cut to the field's width, so on a `PIC X(3)` with
+  level-88 or VALUE-clause values every fallback value was `STA`, silently.
+  The counter is now built from the right (`ST0`, `ST1`, ...) and steps past
+  values already used. A column whose PICTURE runs out of distinct values,
+  and a `--unique` name matching no generated field, are reported as
+  `warning:` lines on stderr (dataset `caveats`).
+* **#311 judgment calls.** `diff` no longer reports every paragraph of a
+  renamed section as moved from the old section to the new one: a
+  paragraph's section is compared through the section match. A paragraph
+  that really leaves the section is still reported. `data-items` (and MCP
+  `record_layout`) add an `unresolved` line for an `OCCURS UNBOUNDED` table,
+  which is sized at its minimum, so its `occurs.max` and its groups'
+  `byte_length` read as a lower bound (the JSON shape is unchanged). The
+  EXEC DLI interface block (`DIBSTAT`, `DIBSEGM`, ...) is a special register,
+  as `EIB*` is: xref no longer lists `DIBSTAT` as undefined. Its tests stay
+  business rules, like a CICS `RESP` field's and an IMS PCB status field's
+  (`DIBSTAT = 'GE'` -> "CUSTOMER NOT FOUND"), and business-rules now lists
+  `DIBSTAT` among a rule's inputs instead of calling it "a condition naming
+  no data item". An MQ CompCode stays a business rule too; this is now
+  documented.
+* **Qualified names are looked up as COBOL resolves them** (#541). MCP
+  `explain_symbol` answered `found: false` for a correct qualification of a
+  unique name (`SOLO OF SOLO-REC`), for a partial chain the compiler accepts
+  (`AMT OF OUT-REC` when AMT sits in OUT-GRP) and for `IN`; `field-impact` /
+  `lineage --field` rejected `AMT IN IN-REC` as "no such field". Names are
+  now matched on the bare name and then the enclosing items, in order
+  (`XrefReport.entries_named`), and `IN` is accepted wherever `OF` is.
+* **One DL/I vocabulary for the parser, the dialect and `ims-dli`** (#481,
+  #595). `EXEC DLI ROLB` / `LOAD` / `SCHD` parsed with `ims_call_type`
+  `UNKNOWN` while the non-command `XDLT` was accepted: the parser kept its own
+  list. It now reads the new `IBMEnterpriseCobol.EXEC_DLI_COMMANDS` (the
+  command-level vocabulary: no hold forms, so `EXEC DLI GHU` stays
+  `UNKNOWN`), and so does the dialect's own `ExecIMSStatement`
+  (`parse_exec_ims`), which had classified against the CALL function codes
+  (`GHU` known, `LOAD` unknown). `IMS_COMMANDS`, the DL/I call function codes, gained FLD / POS
+  / AUTH / SETO / APSB / DPSB / PCB / INIT / ICAL / ... and lost the non-call
+  `ROLLB`. `ims-dli` reads it too, and no longer drops a function-code
+  candidate missing from its list: a variable with `VALUE 'GU'` later set to
+  `CHNG` and `ROLB` is reported `CHNG/GU/ROLB` instead of `GU`, and
+  `VALUE SPACES` is no longer reported as the word `SPACES`.
+* **`cobol.yml` path entries expand `~` and `$VAR`, and a missing directory
+  is reported** (#550). `copybook_path: ~/copybooks` was joined onto the
+  config file's directory as written (`<cfgdir>/~/copybooks`), so it
+  silently matched nothing, while `--copybook-path ~/copybooks` worked
+  because the shell expands it. `~` and `$VAR` / `${VAR}` are now expanded.
+  An entry that is not an existing directory is marked
+  `(not an existing directory)` by `cobol-parser config` (`--json`:
+  `missing_directories`), and every command that uses it prints a one-line
+  warning.
+* **The argument of `DFHRESP(cond)` / `DFHVALUE(cvda)` is no longer read as a
+  data name** (#594). It went through the subscript splitter, so `xref`
+  listed CICS conditions and CVDAs (`NORMAL`, `LENGERR`, `ACQUIRED`) as
+  undefined, a data item sharing a condition's name (a flag called `NOTFND`)
+  was credited with a use by `unused-variables` and listed as a rule input by
+  `business-rules`, and `MOVE DFHVALUE(ACQUIRED) TO WS-ST` was an unresolved
+  `move-type-check` operand that `lint` blamed on an unresolved COPY. The
+  argument is now dropped before names are extracted, and the call is a
+  numeric MOVE source. `JNIENVPTR` joins xref's special registers.
+* **MULTIPLY / DIVIDE ... GIVING keep both operands; `diff` shows INTO vs
+  BY** (#495). When the BY/INTO operand was also the GIVING target
+  (`MULTIPLY RATE BY PREM GIVING PREM`, `DIVIDE B INTO A GIVING A`), the
+  deduped operand list lost it, so business-rules printed `compute MULTIPLY
+  RATE GIVING PREM` instead of `PREM = RATE * PREM` (and `MULTIPLY A BY A
+  GIVING C` made xref read C). The parser now records both operands of the
+  GIVING form in `source_operands`, which business-rules, xref and constant
+  folding read. Program-flow's statement text renders `MULTIPLY x BY y GIVING
+  z` / `DIVIDE x INTO|BY y GIVING z [REMAINDER r]`, so `diff` reports `DIVIDE
+  A INTO B GIVING C -> DIVIDE A BY B GIVING C` rather than `DIVIDE A B C ->
+  DIVIDE A B C`.
+* **`decode` reports a non-UTF-8 copybook in one line** (#496). A copybook
+  with, for example, a Latin-1 `é` in a comment made `decode` and
+  `decode --list-views` print a `UnicodeDecodeError` traceback. They now
+  exit 1 with `error: Cannot read copybook FILE: ...`, as `compare` does.
+* **`language-env` / `le-info` recognise the real LE callable services**
+  (#529). The service list missed CEERAN0, CEEDCOD, CEENCOD, CEE3INF,
+  CEEMGET, CEE3DLY and others from the LE Programming Reference (SA38-0683),
+  which were reported `is_known_service: false`, and carried 24 names that
+  are not LE services (CEEDUMP, CEEABND, CEETIME, CEESG, ...), which were
+  reported known -- so a typo such as CEEDUMP for CEE3DMP read as valid. The
+  list is rebuilt from the reference with a category for each service (new
+  categories `locale` and `math`), and CEETREC is no longer described as
+  removing a condition handler.
+* **`program-flow` draws no fall-through out of a DECLARATIVES section**
+  (#533). The last paragraph of each USE section got a FALL_THROUGH edge to
+  the next procedure in source order -- the next declarative section, or the
+  first section after END DECLARATIVES -- so MCP `callers_of("MAIN")`
+  reported the USE paragraph as a caller. A USE procedure returns to the
+  runtime when its section ends; its last member (and an EXIT SECTION in it)
+  now has no onward edge.
+* **`xref` and MCP `explain_symbol` know the SPECIAL-NAMES declarations**
+  (#519). UPSI `ON/OFF STATUS` condition names and `SYMBOLIC CHARACTERS` were
+  listed as undefined data items, and mnemonic names (`C01 IS TOP-PAGE`) and
+  `CLASS` names were not found at all. Each is now declared (at the
+  CONFIGURATION SECTION, the parser keeps no line per entry) with kind
+  `mnemonic-name`, `condition-name`, `class-name`, `alphabet-name` or
+  `symbolic-character`, and its uses resolve to it, a class test
+  `X IS HEX-CHARS` included.
+* **COBOL 2002 USAGE words are sized, unknown ones are reported** (#524).
+  `FLOAT-SHORT` / `FLOAT-LONG` / `FLOAT-EXTENDED` / `BINARY-CHAR` /
+  `-SHORT` / `-LONG` / `-DOUBLE` and typos such as `USAGE IS COMPX` were
+  stored silently and sized 0 bytes by `data-items` but 9 by `gen-data`, so
+  the record length and every later offset disagreed. The COBOL 2002 words
+  now get their real sizes (4 / 8 / 16 / 1 / 2 / 4 / 8) in both paths
+  (`FLOAT-SHORT` / `FLOAT-LONG` encode as `COMP-1` / `COMP-2`; the others
+  are written as zeros with a caveat), with or without the USAGE keyword
+  (`05 X BINARY-LONG.`). Any other word gets a parse warning,
+  a `data-items` `unresolved` line with `offset_ambiguous` offsets, and a
+  `gen-data` caveat.
+* **OCCURS expansion is bounded across nested tables, and a cut is reported**
+  (#376). Only each table was capped (10,000 occurrences), so nested tables
+  multiplied: `OCCURS 1000` inside `OCCURS 1000` materialized a million
+  fields, and a mistyped `OCCURS 99999999` around `OCCURS 9999` ran
+  gen-fixtures, lineage and field-impact for minutes. An elementary item now
+  expands to at most 100,000 occurrences across all its tables (an inner
+  table is cut to what the outer ones leave); lineage and field-impact on
+  that program take about 2 seconds. Every table either cap cuts is named
+  in gen-data's warnings, record-view caveats and gen-fixtures'
+  `unresolved`, where it used to be cut silently.
+* **`PERFORM S1 THRU S2` with a SECTION as the end covers S2's paragraphs**
+  (#577). `range_members` stopped at the end section's header, so
+  `program-flow` reported `['S1', 'A1', 'S2']` without B1 / B2, MCP
+  `callers_of('B1')` missed the PERFORM, and the flowchart's `[THRU n]`
+  undercounted. The range now runs through the section's last paragraph
+  (`['S1', 'A1', 'S2', 'B1', 'B2']`), as gen-fixtures' constant folding
+  already counted it.
+* **A level-88 `THRU` range with a figurative end stays a range** (#468).
+  `88 H-ANY VALUE LOW-VALUE THRU HIGH-VALUE` reached the AST as the two
+  values `LOW-VALUE` and `HIGH-VALUE`, so `data-items` reported no
+  `condition_ranges` and no partial-list caveat. The range end is now
+  marked `THROUGH:` whether it is a literal or a figurative constant.
+* **`unused-variables` / `lint` no longer report an item a SCREEN SECTION
+  binds as never referenced** (#501). The DATA DIVISION parser skipped the
+  SCREEN SECTION whole, so every WORKING-STORAGE item named in a screen
+  field's `USING` / `FROM` / `TO` read as unused, and `xref` listed the screen
+  itself (`DISPLAY MAIN-SCREEN`) as an undefined data item. The skip now keeps
+  each named screen entry and each bound operand in the section's metadata;
+  unused-variables counts the operands (and their subscripts, and a data
+  item given as a `LINE` / `COLUMN` / colour / `SIZE` / `CONTROL` value) as
+  used, and xref records them (`FROM` read, `TO` write, `USING` both) and
+  declares the screen entries (kind `screen-item`). The rest of the screen grammar is still not modelled.
+* **`diff` tells `CANCEL 'X'` from `CANCEL X`** (#479). `CancelStatement`
+  kept only the name text, so a literal program name (cancel program X) and
+  a data name (cancel the program X's value names) were one node and diff
+  reported no change. `program_names_literal` now records which is which.
+* **gen-fixtures scenarios carry the guard on the PERFORM that reaches their
+  paragraph** (#310). A branch in a paragraph PERFORMed from inside another
+  paragraph's IF / EVALUATE arm got a `verified` scenario whose data never
+  ran it (`IN-CODE` never `'QQ'`, so `DEEP-PARA` was never PERFORMed): path
+  conditions stopped at the top of the branch's own paragraph. A paragraph
+  reached from exactly one guarded place now takes that place's arms into
+  the scenario's path condition; one reached from several guarded places
+  (or through GO TO ... DEPENDING ON, a SORT procedure, a handler or a
+  cycle) gets a `path_gaps` reason, so its scenario is `unverified` instead.
+* **Long AND/OR chains parse; too-deep nesting is an error** (#375). A
+  condition of ~1,000 AND/OR terms hit Python's recursion limit and its IF
+  was dropped (3,000 terms also took ~5 s); it is now built in one pass
+  and a chain over 64 legs is kept shallow. Statements nested deeper than
+  the parser can follow (~500 IFs) were skipped with a warning while
+  `success` stayed True; that is now an error ("Statement nested too
+  deeply to parse"), under FAIL_FAST and COLLECT_ALL alike.
+* **`data-items` and MCP `record_layout` report level-66 RENAMES items**
+  (#563). `compute_program_data_items` walked only the 01/77 trees, so a
+  RENAMES item had no entry and no `unresolved` line, and `record_layout`
+  answered `found: false` with no caveat. Each RENAMES now gets a level-66
+  entry under the record it renames (offset of its first operand, length to
+  the end of its THRU operand; a single-item RENAMES takes that item's
+  PICTURE and USAGE), or an `unresolved` line when it cannot be placed.
+  `record_layout` answers it with its range and the record's fields inside
+  it, and one it cannot place with an `incomplete-analysis` caveat.
+* **`interface-contract.md` describes `ast` for unrecognised input** (#368).
+  It said `ast is None` only when nothing could be parsed, but text with no
+  recognisable division (`"hello world"`, an empty file) returns an empty
+  `CobolProgram` named `UNKNOWN` with no divisions plus an error. The
+  contract (and `ParseResult`'s docstring) now says so and tells callers to
+  check `ast.divisions` for "something usable exists"; the behaviour is
+  pinned by a regression test.
 * **`expand` evaluates conditional compilation without `--define`** (#583).
   It only ran the `>>IF` / `>>EVALUATE` evaluator when some `--define` was
   given, so a plain `expand` ignored the program's own `>>DEFINE` and printed
@@ -464,6 +874,225 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SEARCH WHEN condition trees and in EVALUATE selectors (marked
   `"typed": True`), and the constraint extractor solves against the bytes
   the literal stands for.
+* **A computed EVALUATE WHEN selector is no longer a literal** (#333).
+  `WHEN WS-N + 1`, `WHEN WS-BASE (1:2)` and `WHEN WS-TE (2)` were stored as
+  plain `Literal` values with no marker, so gen-fixtures solved against the
+  text `'WS-N + 1'` and counted WHEN OTHER as targeted against it. Such
+  selectors now carry `"expression": True`; the constraint extractor
+  reports them (and range bounds of that shape) as unsupported, and
+  business-rules renders them unquoted.
+* **`IF x IS [NOT] class-name` and `IF x IS [NOT] OMITTED` are structured
+  conditions** (#539). A SPECIAL-NAMES CLASS test and the omitted-argument
+  test used to parse to an operand-less COMPARISON: the tested field read
+  as never referenced (`lint` / `unused-variables`), had no xref reference,
+  was missing from `business-rules` inputs, and `program-signature` graded
+  an OMITTED-tested parameter `unknown`. They now build `IS [NOT] <word>`
+  nodes with the field as the operand, like `IS NUMERIC`. In EVALUATE TRUE
+  the test is a `Condition` selector rather than the made-up literal `'X IS
+  VALID-CODE'`; in PERFORM UNTIL, xref no longer records the class-name as
+  a data item. gen-fixtures reports both as unsupported with a precise
+  reason instead of "unparseable condition text".
+* **gen-fixtures no longer asserts a DISPLAY that a STOP RUN in an IF arm
+  skips** (#591). `ConstantFolder` treated GO TO / EXIT PARAGRAPH / NEXT
+  SENTENCE inside an arm, loop or handler as leaving the straight line, but
+  not STOP RUN, GOBACK or EXIT PROGRAM, so every scenario -- including the
+  one planned to take the stopping arm -- got a `field_equals` for a DISPLAY
+  after the IF. Those statements now put the walk in uncertain mode too,
+  except inside a body a success status never runs (the failure arm of a
+  status check, an INVALID KEY handler), so the happy path still asserts
+  what follows `IF WS-FS NOT = '00' ... GOBACK`.
+* **EXEC SQL tables named as DB2 delimited identifiers are no longer lost**
+  (#597). `SELECT ... FROM "PROD"."CUST"`, `UPDATE "CUST"`, `INSERT INTO
+  "HIST"` and `DELETE FROM "CUST"` reported no tables, so the CRUD matrix,
+  MCP `program_brief`'s `sql_tables`, SQL lineage ports and host-variable
+  table matching all dropped the table without a word: the EXEC SQL text
+  re-delimited every literal with `'`, and the SQL scrubber blanked both
+  quote kinds. The lexer now records a literal's delimiter (`Token.quote`),
+  `sql_text` keeps `"..."`, and the scrubber reads an identifier-shaped
+  `"..."` as that name, unquoted (`PROD.CUST`), with the same C/R/U/D marks
+  as the undelimited form.
+* **The CRUD matrix no longer misses a cursor DECLAREd in WORKING-STORAGE**
+  (#518). The DB2 precompiler accepts `EXEC SQL DECLARE c CURSOR FOR SELECT
+  ... END-EXEC` in the DATA DIVISION, but the matrix read only PROCEDURE
+  DIVISION statements, so the cursor's tables were missing (also from MCP
+  `program_brief`'s `sql_tables`) and a `FETCH c` marked nothing. They are
+  now listed `-R--` with the cursor name, and a `FOR UPDATE` cursor used
+  with `WHERE CURRENT OF` gives `-RU-`, the same as a PROCEDURE DIVISION
+  DECLARE.
+* **The CRUD matrix and MCP `program_brief` see EXEC CICS file control**
+  (#538). A CICS program reaching its VSAM files through `EXEC CICS READ /
+  WRITE / REWRITE / DELETE / STARTBR / READNEXT / READPREV FILE(...)` (or
+  `DATASET(...)`) had no file rows, and `program_brief` answered `files: []`
+  with no caveat. Each such file now gets a row (R for the reads and
+  browses, C for WRITE, U for REWRITE, D for DELETE; the sample
+  `CICSLINK.cbl` shows `CUSTMST` as `-RU-`). A file named through a data
+  item (`FILE(WS-FNAME)`) is reported in the new `CRUDMatrix.caveats` (and
+  as an `incomplete-analysis` caveat in `program_brief`) instead of being
+  dropped.
+* **Report Writer output is no longer invisible to the file analyzers**
+  (#499). A report file (`FD f REPORT IS r`) is written only by `INITIATE`
+  / `GENERATE` / `TERMINATE`, which no analyzer handled: the CRUD matrix
+  showed `----`, IOLogger logged only OPEN/CLOSE, `gen-fixtures
+  --list-boundaries` had no OUT boundary, `lineage` had no port, and
+  `io-sequence` let a GENERATE on an unopened file pass. The FD's `REPORT
+  IS` clause is now kept in the AST (FILE SECTION metadata `report_files`),
+  and the three verbs write that file: C in the CRUD matrix, an IOLogger
+  `WRITE`, a `WRITE_BEFORE_OPEN` check in io-sequence, an OUT `WRITE`
+  boundary per GENERATE, and lineage edges from every `SOURCE` / `SUM`
+  operand of the printed groups to the report file's port.
+* **`unused-variables` / `lint` no longer report SQL host-structure fields
+  unused** (#531, #378). A group named as an EXEC SQL host variable (`INTO
+  :DCLCUST`, a VARCHAR `:CUST-NAME` with its `49` length/text pair) is read
+  or written by DB2 one field at a time, yet every field was reported
+  unused -- advice that breaks the precompile or shifts the column mapping,
+  and inflated the `redundancy` / `health` scores. Host variables and null
+  indicators now mark their whole subtree used, like a `CALL ... USING`
+  argument, and a host variable named only in a WORKING-STORAGE `DECLARE
+  CURSOR` -- the standard IBM layout -- counts as referenced (#378; the
+  sample `DB2BATCH.cbl`'s `PARM-BRANCH` was reported unused).
+* **`PERFORM 1000-INIT` no longer counts as a use of data item `INIT`**
+  (#487). The shared identifier tokenizer could not match a digit-then-hyphen
+  word from its first character and took its tail instead, so with the
+  dominant `1000-xxx` paragraph convention any data item sharing a
+  paragraph's tail (`INIT`, `CUST-TOTAL`) read as used in
+  `unused-variables` and `lint` and got phantom references in `xref`. The
+  tokenizer now takes whole words, and `unused-variables` also ignores
+  PERFORM / GO TO / ALTER / SORT-procedure targets, so a paragraph named
+  like a data item (`PERFORM INIT`) no longer uses it either.
+* **`dclgen-check` / `lint` no longer warn of SQLCODE -305 on input host
+  variables** (#530). The `null-indicator` warning fired for every host
+  variable bound to a nullable column without an indicator, including pure
+  inputs (`INSERT ... VALUES (:BAL)`, `UPDATE ... SET BAL = :BAL`, WHERE),
+  where DB2 never returns a NULL. It now fires only for outputs (an `INTO`
+  list of SELECT / FETCH / VALUES / EXECUTE, the target of `SET :hv =`);
+  a variable whose direction cannot be told (a stored-procedure `CALL`
+  argument) is reported in `unchecked` for that check instead.
+* **A paragraph whose IF/ELSE or EVALUATE ... WHEN OTHER ends every arm in
+  GOBACK / STOP RUN / EXIT PROGRAM / GO TO no longer falls through** (#586).
+  `dead-code` and `program-flow` counted only top-level terminators, so the
+  `IF c GO TO A ELSE GO TO B END-IF` dispatch drew a `FALL_THROUGH` edge into
+  the next paragraph and kept a dead paragraph live in `dead-code`, `lint`,
+  `health` and the MCP reachability answers. An exhaustive branch whose every
+  arm terminates (recursively) now ends the paragraph; an IF with no ELSE or
+  an EVALUATE with no WHEN OTHER still falls through.
+* **`linkage-check` / `lint` no longer call a LINKAGE item that `ALLOCATE`
+  gives storage to "never referenced"** (#570). `ALLOCATE item [INITIALIZED]
+  [RETURNING p]` sets a based item's address the way `SET ADDRESS OF item`
+  does, and now counts as a reference to it. xref also gains role mappings
+  for ALLOCATE (the item `reference`, the RETURNING pointer `write`, the
+  CHARACTERS size `read`) and FREE (each pointer `write`), instead of plain
+  references with a "no dedicated role mapping" caveat.
+* **`io-sequence` / `lint` now check each I/O verb against the OPEN mode**
+  (#548). READ / START on a file open OUTPUT or EXTEND (file status 47),
+  WRITE on INPUT or on a sequential file open I-O (48), REWRITE / DELETE on a
+  file not open I-O (49), and an OPEN of a file closed `WITH LOCK` earlier in
+  the run (38) were all reported clean -- and the failed OPEN after the lock
+  earned a FILE_LEFT_OPEN instead. New `IOViolationKind`s `READ_WRONG_MODE`,
+  `START_WRONG_MODE`, `WRITE_WRONG_MODE`, `REWRITE_WRONG_MODE`,
+  `DELETE_WRONG_MODE` and `OPEN_AFTER_LOCK`, all lint errors; a mode that
+  differs between IF/EVALUATE arms is not an error. A conditional GO TO
+  target is now walked with the file states at the GO TO merged in, so a
+  later reopen in another mode does not leak into it.
+* **`recursion-check` (and `lint` / `health`) no longer go cubic on the
+  "GO TO restart" idiom** (#373). With N paragraphs that may each `GO TO`
+  the first, every one of the N cycles rebuilt the edge maps, rescanned
+  every edge and compared every pair of its hops: 17 s at 800 paragraphs.
+  The maps are now built once per program, each cycle is checked in linear
+  time and the escape test runs once per strongly connected component --
+  0.4 s for the same program (`lint` 17.8 s -> 0.4 s, `health` 15.5 s ->
+  0.5 s), with identical output across the NIST suite and the samples.
+* **A contained program's references to its container's GLOBAL items now
+  resolve** (#504). `xref --program INNER` listed a GLOBAL item as
+  undefined, MCP `explain_symbol` called it undeclared, and `lineage`
+  dropped its edges with a "not declared" caveat; the outer unit's xref
+  missed the inner reads. `move-type-check` left MOVEs to a GLOBAL field
+  unresolved inside the contained program, and in the outer unit an inner
+  same-named item made the outer item ambiguous (the "unresolved COPY" lint
+  note instead of the warning) while the inner unit's MOVEs were reported
+  as the outer's. All now scope by the same rule: the unit's own data plus
+  every enclosing program's GLOBAL records, nearer names hiding farther
+  ones.
+* **`diff` no longer reports "No structural changes" when a record's fields
+  are reordered** (#545). Swapping two fields moves every byte offset after
+  them -- a breaking change to a file, CALL interface or host structure --
+  but only each item's own attributes were compared. A subordinate item
+  whose position in its group changed is now a `data-item-moved` change,
+  with its position and byte offset before and after; as for procedures,
+  an inserted or removed field moves nothing else.
+* **`diff` compares the statements before the first paragraph header**
+  (#516). They sit in an unnamed paragraph, which `ProgramDiffer` skipped,
+  so an edit there -- or anywhere in a PROCEDURE DIVISION with no paragraph
+  header -- read as "No structural changes". They are now compared as the
+  paragraph `(PROCEDURE DIVISION)`; adding a header to them reads as a
+  rename.
+* **MCP `read_source` always includes the line asked for** (#537). Its
+  200-line cap kept the head of the window, so `line=800, before=500`
+  returned lines 300-499 and never line 800. The cap now trims context
+  only: the line and its `after` lines first, the rest of the budget from
+  `before`; `truncated` still records the cut.
+* **`decode` / `compare` report bad bytes in a numeric-edited field**
+  (#587). `deedit_numeric` checked only the digit positions, so any byte in
+  an insertion (`.` `,` `B` `0` `/`), fixed sign, `CR`/`DB` or currency
+  position -- and a space in a `9` position -- was read past: `'9999999'`
+  in `PIC ZZ9.99-` decoded as 999.99 with no error, `decode --strict`
+  exited 0 and `compare` called different bytes equal. It now re-edits the
+  value it read and rejects text that is not exactly that edited form, so
+  `deedit(edit(v)) == v` holds in both directions.
+* **`PIC U(n)` reserves 4 x n bytes** (#554). Fixed character-length UTF-8
+  was sized n bytes, so every later `data-items` / MCP `record_layout`
+  offset and every gen-data / decode / compare record length was 3n bytes
+  short per such field. `PictureClause.size` is now 4n (new
+  `utf8_characters` keeps n); gen-data writes n characters space-padded to
+  4n bytes with an encoding caveat. `PIC U BYTE-LENGTH n` stays n bytes.
+* **gen-data honours a VALUE clause on a group item** (#552). `05 HDR
+  VALUE 'HDR0001'` and `05 NUMS VALUE ZEROES` never reached their
+  subordinates, so a constant header / trailer group got random data. The
+  literal is now laid over the group's DISPLAY fields by byte offset
+  (space-padded, `ALL` repeated, hex kept as bytes) and a figurative fills
+  every field, in the CSV and the record image alike;
+  `respect_values=False` still ignores it.
+* **Record images honour `SPECIAL-NAMES. CURRENCY SIGN`** (#491). The
+  numeric-edited encoder knew only `$`, so with `CURRENCY SIGN IS '#'` a
+  `PIC ###,##9.99` field was written as its logical value left-justified
+  (`17611.57  `), silently. A declared symbol whose currency string is one
+  character is now edited like `$` (`#17,611.57`) and decoded back; a
+  picture still not modelled (e.g. `CURRENCY SIGN IS 'CHF ' WITH PICTURE
+  SYMBOL 'F'`) is named in an encoding caveat instead of passing as
+  faithful. New `PictureClause.currency_signs` / `FieldSpec.currency_signs`
+  carry each symbol's currency string.
+* **`data-items` and MCP `record_layout` accept a bare copybook** (#536).
+  A `.cpy` with no divisions was parsed as a program, so `data-items`
+  printed `"items": []` and exited 0 and `record_layout` answered `found:
+  false`, though gen-data and decode take the same file. Both now wrap a
+  fragment in gen-data's program skeleton (`wrap_copybook_fragment`), MCP
+  citing the copybook's own lines; `data-items` on a file with no DATA
+  DIVISION exits 1 with a message instead of an empty list.
+* **MCP `record_layout` no longer drops the SYNCHRONIZED caveat** (#488).
+  It laid records out with `compute_record_layout` alone, which never flags
+  slack bytes, so offsets after an unaligned `SYNC` item came back exact
+  with no caveat. It now runs the new `flag_record_layout()` (what
+  `data-items` runs), marking those fields `offset_ambiguous` and adding an
+  `incomplete-analysis` caveat; `explain_symbol` adds the same caveat for
+  its item's record.
+* **gen-fixtures coverage no longer counts a boundary resolved when it is
+  not** (#505). An unresolvable SQL host variable, ACCEPT target, READ
+  record layout or WRITE record went only into the report-level
+  `unresolved`, so `CoverageSummary` counted the boundary resolved though it
+  got no fixture (`SELECT ... INTO :NOPE` was 2/2 resolved, 0 fixtures). The
+  gap now goes on the boundary too; a host-variable array or table element
+  (`OCCURS`, e.g. a rowset `FETCH ... INTO :ARRAY`, `ACCEPT TB(I)`) is named
+  unsupported; and the bundle's `unresolved` lists each gap once.
+* **gen-fixtures no longer reports full coverage for a SORT/MERGE-only
+  program** (#498). A file a `SORT`/`MERGE` reads (`USING`) or writes
+  (`GIVING`) is not a boundary, and nothing said so: `SORT ... USING
+  IN-FILE GIVING OUT-FILE` gave an empty bundle with `unresolved: []`. Each
+  such file is now an `unresolved` entry (so `--strict` fails), pending a
+  decision on modelling them as boundaries.
+* **`gen-fixtures --scenarios all` is no longer quadratic in program size**
+  (#374). Every constant fold (two per scenario) re-walked the whole
+  PROCEDURE DIVISION; the walk is now computed once per program and the
+  unseeded fold is memoised. A 600-IF program went from 50.8s to 7.3s with a
+  byte-identical bundle. The bundle's size is unchanged.
 * **Dynamic CALL targets no longer read as complete when they are not**
   (#511). `DynamicCallAnalyzer` now treats `SET cond TO TRUE` (and `TO
   FALSE`) as a write to the level-88's parent item, adding the value it

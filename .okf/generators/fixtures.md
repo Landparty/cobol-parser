@@ -24,6 +24,7 @@ with [Program fixtures](#program-fixtures).
 - [Program layout index](#program-layout-index)
 - [Program fixtures](#program-fixtures)
 - [Scenario-mode generation](#scenario-mode-generation)
+- [Entry parameters](#entry-parameters)
 - [Self-verification](#self-verification)
 - [Path conditions](#path-conditions)
 - [Expectations: tiers 1-2](#expectations-tiers-1-2)
@@ -69,7 +70,10 @@ The DATA DIVISION parser tags every level-01 FILE SECTION item with
 `fd_file_name` (`parsers/divisions/data.py`) while scanning under an FD/SD —
 that tag is the *only* source of truth this index uses (no positional
 fallback: an untagged FILE SECTION record is reported in `unresolved`, never
-guessed from source order). An FD with more than one 01-level record (a
+guessed from source order). A table the OCCURS expansion caps cut short
+is named in `unresolved` too (`layout.occurs_expansion_caveats`, #376), so a
+fixture built from a partly-expanded record never looks complete. An FD
+with more than one 01-level record (a
 legal "record redefinition" idiom) tags all of them, so `records_for_file`
 naturally returns every variant.
 
@@ -175,7 +179,9 @@ bundle = generator.generate_from_file(
 bundle.scenarios[0].fixtures       # list[BoundaryFixture]: mock in-data
 bundle.scenarios[0].expectations   # list[Expectation]: assert-on stubs
 bundle.coverage                    # CoverageSummary (boundary-level, v1)
-bundle.unresolved                  # every gap from Phases 1-2-3, merged
+bundle.unresolved                  # every gap from Phases 1-2-3, merged (each once:
+                                   # a boundary gap also in report.unresolved is
+                                   # not repeated, #505)
 bundle.to_json()                   # bundle_version, program_name, seed, ...
 bundle.write_csv_dir("out/")       # out/<scenario-slug>/<KEY>.csv + MANIFEST.json
 ```
@@ -264,6 +270,25 @@ the internal `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers:
 `1`) carries `ScenarioPlan.coverage.to_dict()` verbatim, `None` for a
 `mode="happy"` bundle since that mode never attempts branch targeting.
 
+## Entry parameters
+
+`ProgramFixtureGenerator(options, entry_parameters=True)` (2026-10-21,
+mocky-mock#275) treats the program's own PROCEDURE DIVISION USING items
+(`procedure.get_metadata("using_parameters")`, DFHEIBLK left out) as one
+more boundary, for a called subprogram whose whole interface they are.
+`_attach_entry_parameters` sets `Scenario.entry_parameters`: a
+`BoundaryFixture` with ref `ENTRY:<PROGRAM-ID>`, layout over the items'
+elementary fields (`_fields_for_names`), one row from a
+`_sub_seed(seed, scenario, "ENTRY", program)` `ValueFactory`, witnesses
+pinned through `_value_for` like any fixture; and a `stub` expectation per
+field whose path includes a LINKAGE name xref gives role `write`, plus the
+RETURNING item. `generate_with_scenarios` passes the names to
+`ConstraintExtractor.extract(..., extra_fed_names=...)`, so branches on the
+parameters are planned; `verify_scenario` and `_single_row_seeds` read the
+row too. Off by default: no `entry_parameters` key, identical values.
+Layout registered under `layouts["ENTRY:<PROGRAM-ID>"]`. Tests:
+`tests/unit/generators/test_entry_parameters.py`.
+
 ## Self-verification
 
 A scenario's *name* is a claim. `generators/verification.py`'s
@@ -338,6 +363,26 @@ before solving. Consequences:
   200 / IF A = 200` it makes the set unsatisfiable and reports the inner arm
   unreachable when `A = 200` reaches it. `_MAX_PATH_COMBINATIONS` caps the
   cross product a deep chain of disjunctive arms would otherwise produce.
+* **The path crosses paragraphs** (#310). `enclosing` stops at the top of
+  the branch's own paragraph, so a branch in a paragraph PERFORMed from
+  inside another paragraph's arm (`IF IN-CODE = 'QQ' PERFORM DEEP-PARA`)
+  used to get a `verified` scenario whose data never ran it.
+  `_ParagraphReach.path_to(parent_proc)` prepends the arms that must be
+  taken for the paragraph to run at all, from `ConstraintReport.
+  transfer_sites` (each `PERFORM p` / `GO TO p` with its own `enclosing`)
+  and the CFG's incoming edges: the entry paragraph, or any one
+  unconditional site, needs nothing; exactly one site folds that site's
+  arms (and, recursively, its paragraph's); several guarded sites, `GO TO
+  ... DEPENDING ON`, a SORT / XML / handler / ALTER transfer or a cycle add
+  a `path_gaps` reason instead. A CFG fall-through out of a paragraph only
+  counts as a way in when control can run off its end (`_falls_off`): a
+  paragraph entered only by a plain `PERFORM` returns there. Sections are
+  procedures too: a section header always runs into its first paragraph
+  (which is reached exactly when the section is), a paragraph run as part
+  of its section runs on to the next one, and the last paragraph falls off
+  into the next section only when its own section can (a `PERFORM S`
+  returns at S's end). Membership comes from `flow_report.nodes`' source
+  order.
 * **`_merge_candidates` carries `path_gaps` across a merge.** A merged-in
   candidate brings its own unpinned enclosing arms with it; dropping them
   would let the merged scenario report `verified` while an arm it claims is
@@ -420,7 +465,7 @@ carries the exact same expectations.
 | `SQL`, INSERT/UPDATE/DELETE (OUT) | Expectation stub, like WRITE |
 | `CICS`/`DLI` (`BIDIRECTIONAL`, best-effort) | Whatever fields resolved get generated values *and* an expectation stub — Phase 2's own layout resolution here is already best-effort (no fixed INTO/FROM attributes), so this phase does not pretend otherwise |
 | `ACCEPT` (IN) | One generated value |
-| `CALL`/`DYNCALL` | Per-argument: IN/BIDIRECTIONAL args' fields are generated into **one combined row** (one CALL invocation, all its IN arguments at once); OUT args get an expectation stub reading "value supplied by the program under test, not mock-generated"; BIDIRECTIONAL args get both a generated value **and** a stub noting the OUT aspect isn't asserted yet; `RETURNING`/`GIVING` parameters always get a generated value (`provenance="giving-parameter"`). A quoted literal or `FUNCTION ...` argument is a value the caller supplies: skipped, never a resolution gap (#579) |
+| `CALL`/`DYNCALL` | Per-argument: IN/BIDIRECTIONAL args' fields are generated into **one combined row** (one CALL invocation, all its IN arguments at once); OUT args get an expectation stub reading "value supplied by the program under test, not mock-generated"; BIDIRECTIONAL args get both a generated value **and** a stub noting the OUT aspect isn't asserted yet; `RETURNING`/`GIVING` parameters always get a generated value (`provenance="giving-parameter"`). A quoted / numeric literal, figurative constant, `LENGTH OF x` or `FUNCTION ...` argument is a value the caller supplies and `OMITTED` is an empty position: skipped, never a resolution gap (#579, #582); `ADDRESS OF x` resolves against `x` |
 
 A name may resolve to either an elementary field or a whole record
 (`_fields_for_name`/`_fields_for_names`, private helpers using the same
@@ -498,8 +543,11 @@ to parse is skipped (falls through to the caller-dataflow rung), not a hard
 error — one bad `--callee-path` entry should not sink the whole bundle.
 
 **`write_csv_dir`.** One `GeneratedDataset`-shaped CSV per fixture whose
-`layout`/`sequence` are both non-empty (file-shaped boundaries only —
-`STATUS_ONLY`/OUT/expectation-only fixtures produce nothing to write), under
+`layout`/`sequence` are both non-empty, or whose `layout` is non-empty with
+an empty `sequence` and direction IN/BIDIRECTIONAL (`_writes_csv`): that is
+the "empty input" scenario's READ, written **header-only** so its
+`csv_path` is not `null` like a STATUS_ONLY boundary's (#568).
+`STATUS_ONLY`/OUT/expectation-only fixtures produce nothing to write. Under
 `<path>/<scenario-slug>/<KEY>.csv`. A `MANIFEST.json` at the root is the full
 bundle with each fixture's `sequence` emptied to `[]` (never replaced with a
 pointer string — a consumer running the manifest through the same

@@ -31,7 +31,8 @@ from ..models.ast_base import ASTNode, SourceLocation
 from ..models.data_items import CobolDataItem, PictureClause
 from ..models.program import CobolProgram
 from ..models.statements import MoveStatement
-from ._names import base_data_name
+from ._names import base_data_name, is_translator_function
+from .unused_variables import inherited_data_records
 
 
 class DataCategory(Enum):
@@ -188,9 +189,33 @@ _FIGURATIVE_FILL_ILLEGAL_TARGETS: frozenset[DataCategory] = frozenset(
 # COBOL special registers with a fixed, implicit numeric picture -- they never
 # appear in the DATA DIVISION with a PICTURE clause of their own, so the
 # catalog built from CobolDataItem nodes can never contain them. Without this,
-# every MOVE touching RETURN-CODE (by far the most common of the three) was
-# silently counted as unresolved rather than checked.
-_NUMERIC_SPECIAL_REGISTERS = frozenset({"RETURN-CODE", "TALLY", "LINAGE-COUNTER"})
+# every MOVE touching RETURN-CODE (by far the most common of them) was
+# silently counted as unresolved rather than checked -- and ``lint`` then
+# blamed "an unresolved COPY" in a program with none (#520). All are
+# integers (IBM Enterprise COBOL Language Reference, "Special registers").
+_NUMERIC_SPECIAL_REGISTERS = frozenset(
+    {
+        "RETURN-CODE",
+        "TALLY",
+        "LINAGE-COUNTER",
+        "SORT-RETURN",
+        "SORT-CORE-SIZE",
+        "SORT-FILE-SIZE",
+        "SORT-MODE-SIZE",
+        "XML-CODE",
+        "JSON-CODE",
+    }
+)
+
+# Special registers with an implicit alphanumeric picture: WHEN-COMPILED is
+# PIC X(16), SORT-CONTROL PIC X(8), SORT-MESSAGE PIC X(8).
+_ALPHANUMERIC_SPECIAL_REGISTERS = frozenset(
+    {"WHEN-COMPILED", "SORT-CONTROL", "SORT-MESSAGE"}
+)
+
+# ``LENGTH OF x``: the special register holding x's byte count, an integer
+# whatever x is.
+_LENGTH_OF_RE = re.compile(r"^\s*LENGTH\s+OF\s+\S", re.IGNORECASE)
 
 # Intrinsic FUNCTION result categories, keyed by the ``returns`` wording of
 # ``dialects.le_signatures``' intrinsic catalog (which lists every intrinsic).
@@ -648,8 +673,13 @@ class MoveTypeChecker:
         self._unresolved_function_count = 0
         violations: list[MoveTypeViolation] = []
 
-        # Phase 1: build catalog from DATA DIVISION
+        # Phase 1: build catalog from DATA DIVISION -- *ast*'s own, plus the
+        # GLOBAL records of the programs containing it (#504). A contained
+        # program's data and MOVEs are its own unit's business: walking them
+        # here let an inner namesake poison an outer item's category.
         self._build_catalog(ast)
+        for _owner, _section, record in inherited_data_records(ast):
+            self._build_catalog(record)
         self._index_catalog()
 
         # Phase 2: check every MOVE statement
@@ -697,7 +727,8 @@ class MoveTypeChecker:
 
         if hasattr(node, "children"):
             for child in node.children:
-                self._build_catalog(child, child_ancestors)
+                if not isinstance(child, CobolProgram):
+                    self._build_catalog(child, child_ancestors)
 
     def _index_catalog(self) -> None:
         """Fill the bare-name catalog from the collected declarations."""
@@ -734,7 +765,8 @@ class MoveTypeChecker:
 
         if hasattr(node, "children"):
             for child in node.children:
-                self._check_moves(child, violations)
+                if not isinstance(child, CobolProgram):
+                    self._check_moves(child, violations)
 
     def _validate_move(
         self, stmt: MoveStatement, violations: list[MoveTypeViolation]
@@ -993,11 +1025,17 @@ class MoveTypeChecker:
         intrinsic FUNCTION results have a category fixed by the COBOL
         standard itself -- neither ever shows up as a CobolDataItem with a
         PICTURE clause, so the catalog built from the DATA DIVISION can never
-        resolve them on its own.
+        resolve them on its own. Nor can ``DFHRESP(cond)`` /
+        ``DFHVALUE(cvda)``, which the CICS translator replaces with a
+        fullword binary constant (#594).
         """
+        if is_translator_function(name):
+            return DataCategory.NUMERIC
         function = _function_source(name)
         if function is not None:
             return self._resolve_function(function)[0]
+        if _LENGTH_OF_RE.match(name):
+            return DataCategory.NUMERIC
         upper = _reference_name(name).upper()
         qualified = None if upper in self._catalog else self._qualified_entry(name)
         if upper in self._catalog or qualified is not None:
@@ -1010,6 +1048,8 @@ class MoveTypeChecker:
             return DataCategory.UNKNOWN  # ambiguous without its qualifiers
         if upper in _NUMERIC_SPECIAL_REGISTERS:
             return DataCategory.NUMERIC
+        if upper in _ALPHANUMERIC_SPECIAL_REGISTERS:
+            return DataCategory.ALPHANUMERIC
         return _classify_literal(name)
 
     def _resolve_function(

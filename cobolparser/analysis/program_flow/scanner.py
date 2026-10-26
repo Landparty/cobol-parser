@@ -33,7 +33,7 @@ from ...models.statements.misc import (
     XmlJsonStatement,
 )
 from .._cics import cics_exit_kind, cics_terminator_kind
-from .._procedures import ProcedureIndex, enclosing_section
+from .._procedures import ProcedureIndex, branch_terminates, enclosing_section
 from .condition_text import render_condition_text
 from .edges import EdgeCollector
 from .models import BranchArm, BranchNode, FlowEdge, FlowEdgeType, FlowNode
@@ -650,9 +650,10 @@ class ProcedureScanner:
         # whether the paragraph as a whole falls through -- checking only
         # para.statements[-1] would miss a mid-paragraph terminator followed
         # by dead trailing statements. Only statements directly in
-        # para.statements qualify: one nested inside an IF/EVALUATE arm only
-        # fires conditionally and must not suppress fall-through whenever
-        # that branch isn't taken. (A terminator inside an unconditional
+        # para.statements qualify: one nested inside a single IF/EVALUATE arm
+        # only fires conditionally and must not suppress fall-through
+        # whenever that branch isn't taken -- unless the branch is exhaustive
+        # and every arm terminates (_is_terminator, #586). (A terminator inside an unconditional
         # bare PERFORM ... END-PERFORM block -- no UNTIL/TIMES -- is a rare
         # construct not covered here, since inline PERFORM bodies are not
         # top-level statements either.)
@@ -680,8 +681,11 @@ class ProcedureScanner:
         transfers to whatever an ALTER last set it to -- or EXEC CICS
         RETURN / XCTL / ABEND (see ``_cics``). Mirrors
         DeadCodeAnalyzer._is_terminator, kept independent per this package's
-        existing collaborator architecture.
+        existing collaborator architecture. An exhaustive IF/EVALUATE whose
+        every arm terminates counts too (``_procedures.branch_terminates``).
         """
+        if branch_terminates(stmt, ProcedureScanner._is_terminator):
+            return True
         if cics_terminator_kind(stmt) is not None:
             return True
         if isinstance(stmt, GobackStatement):

@@ -290,8 +290,16 @@ Reports which `cobol.yml` is in effect and every setting it supplies;
 settings the file does not mention are **omitted**, so what is printed is
 exactly what the file changes. No file anywhere: says so, suggests creating
 one, exit 0. `--json` emits `{"config_file", "version", "project", "data",
-"lint", "tools"}` (`config_file` `null` when none). Honours `--config` /
-`--no-config`.
+"lint", "tools"}` (`config_file` `null` when none), plus
+`missing_directories` only when `ProjectConfig.missing_directories()` names
+a path entry that is not a directory; the text form marks those entries
+`(not an existing directory)`. Honours `--config` / `--no-config`.
+
+Path entries (`_path_list`) get `os.path.expanduser` + `expandvars` before
+the join onto the file's directory: as written, `~/cpy` became
+`<cfgdir>/~/cpy` and silently found nothing (#550). `main()` warns on stderr
+once per missing entry for a dest the subcommand reads and the user did not
+pass explicitly.
 
 ## Shared flags
 
@@ -562,6 +570,10 @@ copybook, back into a table**.
   trailing bytes that are not a whole record (usually a wrong record length);
   **`--strict`** makes either of the last two exit 1 — the CI form of "does
   this copybook describe this file?".
+* A copybook that is not UTF-8 (a Latin-1 accent in a comment) is a one-line
+  `error: Cannot read copybook FILE: ...`, exit 1, also under
+  `--list-views` -- `UnicodeDecodeError` is a `ValueError`, not an `OSError`,
+  and used to escape as a traceback (#496). `compare` words it the same.
 
 ### `compare`
 
@@ -636,7 +648,7 @@ Each takes `file` plus **A** (and **+prof** per the
 | `health` | `TechnicalDebtAnalyzer`: 0-100 score, A-F grade, components, `top_offenders`, `complexity_summary`/`redundancy_summary`. A file parsed with errors exits 0 with `"grade": null`, nonzero `parse_error_count` and a caveat (#397) |
 | `io-sequence` / `move-type-check` / `linkage-check` / `language-env` | `IOSequenceAnalyzer` / `MoveTypeChecker` / `LinkageChecker` violations; LE function/service usage |
 | `ims-dli` | `IMSSegmentAnalyzer`; `is_ims_program` = `ast.has_ims() or ast.uses_ims_interface()` (a CBLTDLI / AIBTDLI / CEETDLI caller is IMS without `ENTRY 'DLITCBL'`, #398); `primary_segment` is a call's **last** segment |
-| `data-items` | `compute_program_data_items()`: `{"items", "unresolved"}` — offset, length, REDEFINES chain, OCCURS min/max, level-88 values, every DATA DIVISION section ([generators/record-data.md](generators/record-data.md)) |
+| `data-items` | `compute_program_data_items()`: `{"items", "unresolved"}` — offset, length, REDEFINES chain, OCCURS min/max, level-88 values, every DATA DIVISION section ([generators/record-data.md](generators/record-data.md)). A bare copybook is wrapped like gen-data's (`args._wrap_copybook_fragment`, read by `_do_parse`); a file with no DATA DIVISION exits 1 instead of printing `"items": []` (#536) |
 | `dclgen-check` | `DclgenChecker().check(ast)`: `violation_count`, `checked_count`, `unchecked_count`, `worst_severity`, `tables`, `violations`, `checked`, `unchecked`, `ambiguous_columns`; also a lint rule |
 | `redundancy` | `RedundancyAnalyzer`: `dead_code`, `unused_variables`, `clone_groups`, `paragraph_fingerprints` (only exposed here). Hand-built for `--min-clone-statements`, shared with `scan` via `_add_min_clone_statements_arg` so the two cannot disagree on what a clone is |
 | `xref` | `XrefReport`: `entries` (`definition`, `references`, `reference_count`), `undefined`, `caveats` (+ the parser's unexpanded-COPY warnings, which explain fields looking undeclared), `duplicate_declarations`, `summary` |

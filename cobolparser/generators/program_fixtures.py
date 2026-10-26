@@ -16,12 +16,12 @@ import os
 import random
 import zlib
 
-from .._literals import is_quoted_literal
 from ..analysis.boundary_inventory import (
     Boundary,
     BoundaryInventoryAnalyzer,
     BoundaryRef,
     BoundaryReport,
+    call_argument_data_name,
 )
 from ..analysis.const_fold import ConstantFolder
 from ..analysis.constraints import ConstraintExtractor
@@ -31,6 +31,7 @@ from ..analysis.invocation_counts import (
     is_plain_eof_loop,
 )
 from ..analysis.program_flow import ProgramFlowAnalyzer
+from ..analysis.xref import ROLE_WRITE, XrefAnalyzer
 from ..models.program import CobolProgram
 from ..models.statements.call import CallStatement
 from ..models.statements.control import PerformStatement
@@ -273,13 +274,26 @@ class ProgramFixtureGenerator:
     ``CobolProgram.contained_programs`` in the same compilation unit).
     """
 
-    def __init__(self, options: DataGeneratorOptions | None = None) -> None:
+    def __init__(
+        self,
+        options: DataGeneratorOptions | None = None,
+        *,
+        entry_parameters: bool = False,
+    ) -> None:
+        """``entry_parameters`` -- also treat the program's own PROCEDURE
+        DIVISION USING items as a boundary: its caller supplies them, so
+        every scenario gets ``Scenario.entry_parameters`` (one generated
+        row over their elementary fields), a ``stub`` expectation for each
+        field the program writes (and for its RETURNING item), and branches
+        on those fields become scenario targets. Off by default: a bundle
+        that does not ask keeps its exact shape and values."""
         # A FILLER that owns a level-88 is a flag the program branches on
         # (``05 PIC X. 88 FLAG-ON VALUE 'Y'.``): without its column a
         # scenario's witness for that branch has nowhere to go.
         self.options = dataclasses.replace(
             options or DataGeneratorOptions(), include_condition_filler=True
         )
+        self.entry_parameters = entry_parameters
 
     def generate(
         self,
@@ -312,7 +326,15 @@ class ProgramFixtureGenerator:
                     len(scenario.expectations),
                 )
             scenario.expectations.extend(expectations)
-            unresolved.extend(extra_unresolved)
+            unresolved.extend([n for n in extra_unresolved if n not in unresolved])
+        if self.entry_parameters:
+            unresolved.extend(
+                n
+                for n in self._attach_entry_parameters(
+                    ast, index, scenario, bundle_seed, layouts
+                )
+                if n not in unresolved
+            )
         self._pin_read_keys(
             ast, index, scenario, unresolved, counter.counts.success_skipped
         )
@@ -377,7 +399,14 @@ class ProgramFixtureGenerator:
 
         bundle_seed = seed if seed is not None else random.randrange(2**31)
         happy = self.generate(ast, index, report, seed=bundle_seed)
-        constraint_report = ConstraintExtractor().extract(ast, index, report)
+        constraint_report = ConstraintExtractor().extract(
+            ast,
+            index,
+            report,
+            extra_fed_names=(
+                self._entry_parameter_names(ast) if self.entry_parameters else ()
+            ),
+        )
         flow_report = ProgramFlowAnalyzer().analyze(ast)
         scenario_plan = ScenarioPlanner().plan(
             constraint_report, flow_report, report, mode=mode
@@ -426,7 +455,12 @@ class ProgramFixtureGenerator:
                         len(scenario.expectations),
                     )
                 scenario.expectations.extend(expectations)
-                unresolved.extend(extra_unresolved)
+                unresolved.extend([n for n in extra_unresolved if n not in unresolved])
+            if self.entry_parameters:
+                # Its notes are the happy path's, already reported above.
+                self._attach_entry_parameters(
+                    ast, index, scenario, bundle_seed, layouts, override=planned
+                )
             # Gaps are reported once, by the happy path above.
             self._pin_read_keys(
                 ast, index, scenario, None, counter.counts.success_skipped
@@ -701,15 +735,13 @@ class ProgramFixtureGenerator:
         expectations: list[Expectation] = []
 
         for arg in boundary.call_args:
-            if is_quoted_literal(arg.name):
-                # ``BY CONTENT 'A'`` / ``X'00'``: a constant the caller
-                # supplies, not a data item the layout index could hold.
+            data_name = call_argument_data_name(arg.name)
+            if data_name is None:
+                # ``OMITTED``, a literal / figurative constant, ``LENGTH OF x``
+                # or ``FUNCTION f(...)`` (#579, #582): no data item the layout
+                # index could hold. ``ADDRESS OF x`` resolves against ``x``.
                 continue
-            if arg.name.upper().startswith("FUNCTION "):
-                # ``BY CONTENT FUNCTION UPPER-CASE(X)`` (#579): a value the
-                # caller computes, like a literal -- no layout to resolve.
-                continue
-            arg_fields = self._fields_for_names([arg.name], index)
+            arg_fields = self._fields_for_names([data_name], index)
             if not arg_fields:
                 unresolved.append(
                     f"{ref.category} {ref.key}: argument {arg.name} not resolvable "
@@ -931,7 +963,10 @@ class ProgramFixtureGenerator:
         scenario's own mocked inputs the constant folder may start from.
         Fixtures of the READ sites in *skip* are left out."""
         seed_values: dict[str, str] = {}
-        for fixture in scenario.fixtures:
+        fixtures = list(scenario.fixtures)
+        if scenario.entry_parameters is not None:
+            fixtures.append(scenario.entry_parameters)
+        for fixture in fixtures:
             if len(fixture.sequence) != 1:
                 continue
             if skip and (fixture.ref.key, fixture.ref.line) in skip:
@@ -1028,6 +1063,102 @@ class ProgramFixtureGenerator:
             )
             for qualified_name, value in fold_result.known.items()
         ]
+
+    # -- the program's own USING parameters (entry_parameters=True) ---------
+
+    @staticmethod
+    def _entry_parameter_names(ast: CobolProgram) -> list[str]:
+        """The PROCEDURE DIVISION USING items, in order (no ENTRY points:
+        the scaffold PERFORMs the default entry). A CICS-translated
+        program's DFHEIBLK is left out: CICS fills the EIB, not the
+        caller."""
+        procedure = ast.get_division("PROCEDURE")
+        if procedure is None:
+            return []
+        return [
+            str(name)
+            for name in procedure.get_metadata("using_parameters") or []
+            if str(name).upper() != "DFHEIBLK"
+        ]
+
+    def _attach_entry_parameters(
+        self,
+        ast: CobolProgram,
+        index: ProgramLayoutIndex,
+        scenario: Scenario,
+        bundle_seed: int,
+        layouts: dict[str, list[FieldSpec]],
+        *,
+        override: PlannedScenario | None = None,
+    ) -> list[str]:
+        """Give `scenario` the values its caller passes through the USING
+        items, and a ``stub`` expectation per field the program writes back
+        through them. Returns notes on what could not be resolved."""
+        names = self._entry_parameter_names(ast)
+        procedure = ast.get_division("PROCEDURE")
+        returning = (
+            procedure.get_metadata("returning_parameter")
+            if procedure is not None
+            else None
+        )
+        if not names and not returning:
+            return []
+        program = str(ast.program_name or "PROGRAM").upper()
+        unresolved = [
+            f"ENTRY {program}: USING {name} resolves to no data item"
+            for name in names
+            if not self._fields_for_name(name, index)
+        ]
+        fields = self._fields_for_names(names, index)
+        ref = BoundaryRef(
+            category="ENTRY",
+            key=program,
+            paragraph=scenario.entry,
+            line=procedure.location.line if procedure is not None else None,
+        )
+        if fields:
+            rng = random.Random(_sub_seed(bundle_seed, scenario.name, "ENTRY", program))
+            factory = ValueFactory(rng, self.options)
+            scenario.entry_parameters = BoundaryFixture(
+                ref=ref,
+                direction="BIDIRECTIONAL",
+                layout=fields,
+                sequence=[
+                    {
+                        spec.column: self._value_for(spec, factory, 0, override)
+                        for spec in fields
+                    }
+                ],
+            )
+            layouts.setdefault(f"ENTRY:{program}", fields)
+        written = self._written_linkage_names(ast)
+        outputs = [
+            spec
+            for spec in fields
+            if any(part.upper() in written for part in spec.path)
+        ]
+        if returning:
+            outputs.extend(self._fields_for_name(str(returning), index))
+        scenario.expectations.extend(
+            Expectation(
+                kind="stub",
+                ref=spec.qualified_name,
+                note=f"returned to the caller of {program}",
+            )
+            for spec in self._unique_columns(outputs)
+        )
+        return unresolved
+
+    @staticmethod
+    def _written_linkage_names(ast: CobolProgram) -> set[str]:
+        """LINKAGE SECTION data names the program writes (xref role
+        ``write``): the USING fields it hands back to its caller."""
+        return {
+            entry.name.upper()
+            for entry in XrefAnalyzer().analyze(ast).entries
+            if entry.section == "LINKAGE"
+            and any(ref.role == ROLE_WRITE for ref in entry.references)
+        }
 
     @staticmethod
     def _entry_paragraph(ast: CobolProgram) -> str | None:

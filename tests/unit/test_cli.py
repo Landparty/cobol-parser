@@ -167,7 +167,17 @@ class TestCLIErrorHandling:
             f.write(b"\x80\x81\x82\xff\xfe")
             fname = f.name
         try:
-            assert _run_cli_expect_fail(fname) == 1
+            # #522: a non-UTF-8 program is decoded (detected encoding), not
+            # refused with exit 1. These bytes decode to no program at all,
+            # so the parse collects errors and the CLI exits 2 -- still
+            # non-zero, now for the right reason.
+            with patch("sys.argv", ["cobol-parser", fname]):
+                buf = StringIO()
+                with patch("sys.stdout", buf):
+                    with pytest.raises(SystemExit) as exc_info:
+                        main()
+            assert exc_info.value.code == 2
+            assert json.loads(buf.getvalue())["node_type"] == "Program"
         finally:
             os.unlink(fname)
 

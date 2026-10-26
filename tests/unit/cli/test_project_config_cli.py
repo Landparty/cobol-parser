@@ -337,3 +337,50 @@ def test_config_subcommand_under_no_config_reports_nothing_in_effect(project, ca
     with patch("sys.argv", ["cobol-parser", "config", "--no-config"]):
         main()
     assert "No cobol.yml found" in capsys.readouterr().out
+
+
+# -- a path entry that is not a directory is reported (#550) -------------------
+
+
+@pytest.fixture
+def typo_project(tmp_path, monkeypatch):
+    (tmp_path / "cobol.yml").write_text(
+        "project:\n  copybook_path: [copybooks, copybokos]\n"
+    )
+    (tmp_path / "copybooks").mkdir()
+    (tmp_path / "PROG.cbl").write_text("       IDENTIFICATION DIVISION.\n")
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def test_config_subcommand_marks_a_missing_directory(typo_project, capsys):
+    with patch("sys.argv", ["cobol-parser", "config"]):
+        main()
+    out = capsys.readouterr().out
+    assert f"{typo_project / 'copybokos'}  (not an existing directory)" in out
+    assert f"{typo_project / 'copybooks'}  (not" not in out
+
+
+def test_config_subcommand_json_lists_missing_directories(typo_project, capsys):
+    with patch("sys.argv", ["cobol-parser", "config", "--json"]):
+        main()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["missing_directories"] == [str(typo_project / "copybokos")]
+
+
+def test_config_json_has_no_missing_key_when_all_exist(project, capsys):
+    with patch("sys.argv", ["cobol-parser", "config", "--json"]):
+        main()
+    assert "missing_directories" not in json.loads(capsys.readouterr().out)
+
+
+def test_a_parsing_command_warns_once_per_missing_directory(typo_project, capsys):
+    run_capturing_args(["lint", "PROG.cbl"], "lint")
+    err = capsys.readouterr().err
+    assert err.count("is not an existing directory") == 1
+    assert str(typo_project / "copybokos") in err
+
+
+def test_no_warning_when_the_flag_overrides_the_config(typo_project, capsys):
+    run_capturing_args(["lint", "PROG.cbl", "--copybook-path", "copybooks"], "lint")
+    assert "not an existing directory" not in capsys.readouterr().err

@@ -17,9 +17,11 @@ built for the same program (Phase 1).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .._literals import is_quoted_literal
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.sql_statements import (
     ExecSQLStatement,
@@ -60,6 +62,7 @@ from ..models.statements.io import (
     IOUnlockStatement,
     IOWriteStatement,
 )
+from ..models.statements.misc import MergeStatement, SortStatement
 from ..parsers.statements.ibm_exec_statements import ExecCicsStatement, ExecImsStatement
 from ._files import report_to_file_map, report_writer_files
 from ._names import RELAXED_IDENTIFIER_TOKEN_RE, callee_names
@@ -386,15 +389,64 @@ class BoundaryRef:
     line: int | None
 
 
+#: Figurative constants a CALL may pass (``BY CONTENT ZERO``): constants, not
+#: data items the layout index could hold (#582).
+_FIGURATIVE_ARGUMENTS = frozenset(
+    {
+        "ZERO",
+        "ZEROS",
+        "ZEROES",
+        "SPACE",
+        "SPACES",
+        "HIGH-VALUE",
+        "HIGH-VALUES",
+        "LOW-VALUE",
+        "LOW-VALUES",
+        "QUOTE",
+        "QUOTES",
+        "NULL",
+        "NULLS",
+    }
+)
+_NUMERIC_ARGUMENT_RE = re.compile(r"[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)")
+_LENGTH_OF_RE = re.compile(r"LENGTH\s+OF\s+\S", re.IGNORECASE)
+_ADDRESS_OF_RE = re.compile(r"ADDRESS\s+OF\s+(.+)", re.IGNORECASE | re.DOTALL)
+
+
+def call_argument_data_name(name: str) -> str | None:
+    """The data item a CALL argument's text names, or None when it names none.
+
+    ``OMITTED`` is an empty argument position; a quoted, numeric or ALL
+    literal, a figurative constant, ``LENGTH OF x`` (a compiler-computed
+    value) and ``FUNCTION f(...)`` (#579) are constants the caller supplies.
+    ``ADDRESS OF x`` points at ``x``, so it resolves against ``x`` (#582).
+    Everything else is the argument text itself.
+    """
+    text = name.strip()
+    upper = text.upper()
+    if not text or upper == "OMITTED":
+        return None
+    if is_quoted_literal(text) or _NUMERIC_ARGUMENT_RE.fullmatch(text):
+        return None
+    if upper in _FIGURATIVE_ARGUMENTS or upper.startswith(("ALL ", "FUNCTION ")):
+        return None
+    if _LENGTH_OF_RE.match(text):
+        return None
+    address = _ADDRESS_OF_RE.fullmatch(text)
+    if address is not None:
+        return address.group(1).strip()
+    return text
+
+
 @dataclass
 class CallArg:
     """One CALL/DYNCALL USING argument, with its resolved data direction."""
 
     name: str
     passing_mode: str  # REFERENCE | CONTENT | VALUE
-    direction: str  # IN | OUT | BIDIRECTIONAL
+    direction: str  # IN | OUT | BIDIRECTIONAL | NONE (an OMITTED position)
     provenance: str  # "by-content-rule" | "callee-source" | "caller-dataflow"
-    # | "assumed-bidirectional" | "giving-parameter"
+    # | "assumed-bidirectional" | "giving-parameter" | "constant" | "omitted"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -639,6 +691,24 @@ class BoundaryInventoryAnalyzer:
                 self._classify_file_op(statement, category, ref, index, report)
                 return
 
+        if isinstance(statement, (SortStatement, MergeStatement)):
+            # SORT/MERGE USING reads whole files and GIVING writes them, but
+            # neither is a boundary mockymock's mock surface knows (#498,
+            # pending a decision on its key/category).  Say so, rather than
+            # report full coverage for a program whose only I/O this is.
+            verb = "SORT" if isinstance(statement, SortStatement) else "MERGE"
+            for phrase, files in (
+                ("USING", statement.using_files),
+                ("GIVING", statement.giving_files),
+            ):
+                for file_name in files:
+                    report.unresolved.append(
+                        f"{verb} {phrase} file {file_name.upper()} in "
+                        f"{paragraph_name} is not modelled as a boundary: no "
+                        "fixture or expectation is generated for it"
+                    )
+            return
+
         if isinstance(statement, CallStatement):
             self._classify_call(
                 statement,
@@ -738,16 +808,19 @@ class BoundaryInventoryAnalyzer:
             # elementary leaves). record_named() looks up the group itself.
             record = index.record_named(record_name)
             record_names = [record.name] if record else []
+            gaps: list[str] = []
             if not record:
-                report.unresolved.append(
+                gaps.append(
                     f"{category} {record_name}: record not resolvable in layout index"
                 )
+                report.unresolved.extend(gaps)
             report.boundaries.append(
                 Boundary(
                     ref=ref(category, record_name.upper()),
                     direction="OUT",
                     record_names=record_names,
                     handlers=handlers,
+                    unresolved=gaps,
                 )
             )
             return
@@ -774,10 +847,10 @@ class BoundaryInventoryAnalyzer:
                     record_names = [into_record.name]
             if not record_names:
                 record_names = [r.name for r in index.records_for_file(file_name)]
+            gaps = []
             if not record_names:
-                report.unresolved.append(
-                    f"READ {file_name}: no record layout resolvable"
-                )
+                gaps.append(f"READ {file_name}: no record layout resolvable")
+                report.unresolved.extend(gaps)
             report.boundaries.append(
                 Boundary(
                     ref=ref(category, file_name.upper()),
@@ -785,6 +858,7 @@ class BoundaryInventoryAnalyzer:
                     record_names=record_names,
                     status_field=status_field,
                     handlers=handlers,
+                    unresolved=gaps,
                 )
             )
             return
@@ -872,6 +946,31 @@ class BoundaryInventoryAnalyzer:
 
         for i, param in enumerate(statement.using_parameters):
             mode = (param.passing_mode or "REFERENCE").upper()
+            if param.name.strip().upper() == "OMITTED":
+                # An empty position (#582): no data either way, but it keeps
+                # its place so later arguments pair with the right LINKAGE 01.
+                args.append(
+                    CallArg(
+                        name=param.name,
+                        passing_mode=mode,
+                        direction="NONE",
+                        provenance="omitted",
+                    )
+                )
+                continue
+            data_name = call_argument_data_name(param.name)
+            if data_name is None and mode == "REFERENCE":
+                # A literal / figurative / LENGTH OF passed BY REFERENCE: the
+                # caller supplies a constant; nothing it holds comes back.
+                args.append(
+                    CallArg(
+                        name=param.name,
+                        passing_mode=mode,
+                        direction="OUT",
+                        provenance="constant",
+                    )
+                )
+                continue
             if mode in ("CONTENT", "VALUE"):
                 args.append(
                     CallArg(
@@ -897,7 +996,7 @@ class BoundaryInventoryAnalyzer:
                     continue
 
             direction, provenance = self._caller_dataflow_direction(
-                param.name, index, enclosing_statements, position
+                data_name or param.name, index, enclosing_statements, position
             )
             args.append(
                 CallArg(
@@ -1118,14 +1217,22 @@ class BoundaryInventoryAnalyzer:
         for var in dict.fromkeys(v.lstrip(":") for v in host_vars if v):
             names.extend(qualified.get(var.upper(), [var]))
         record_names: list[str] = []
+        gaps: list[str] = []
         for var in dict.fromkeys(names):
             display_name = self._resolve_display_name(var, index)
             if display_name:
                 record_names.append(display_name)
-            else:
-                report.unresolved.append(
-                    f"SQL host variable {var} not resolvable in layout index"
+            elif _is_table_item(var, index):
+                gaps.append(
+                    f"SQL host variable {var} is a host-variable array (OCCURS): "
+                    "unsupported, no fixture generated for it"
                 )
+            else:
+                gaps.append(f"SQL host variable {var} not resolvable in layout index")
+        # On the boundary too, not only the report: coverage counts a
+        # boundary resolved by its own `unresolved`, and one whose host
+        # variables all failed has no fixture (#505).
+        report.unresolved.extend(gaps)
 
         if sql_type in _SQL_IN_TYPES or isinstance(statement, FetchStatement):
             direction = "IN"
@@ -1146,6 +1253,7 @@ class BoundaryInventoryAnalyzer:
                 direction=direction,
                 record_names=record_names,
                 status_field="SQLCODE",
+                unresolved=gaps,
             )
         )
 
@@ -1261,18 +1369,47 @@ class BoundaryInventoryAnalyzer:
 
         display_name = self._resolve_display_name(target, index)
         record_names = [display_name] if display_name else []
+        gaps: list[str] = []
         if not display_name:
-            report.unresolved.append(
-                f"ACCEPT target {target} not resolvable in layout index"
-            )
+            if _is_table_item(target, index):
+                gaps.append(
+                    f"ACCEPT target {target} is a table element (OCCURS): "
+                    "unsupported, no fixture generated for it"
+                )
+            else:
+                gaps.append(f"ACCEPT target {target} not resolvable in layout index")
+            report.unresolved.extend(gaps)
 
         report.boundaries.append(
             Boundary(
                 ref=ref("ACCEPT", target),
                 direction="IN",
                 record_names=record_names,
+                unresolved=gaps,
             )
         )
+
+
+def _is_table_item(name: str, index: ProgramLayoutIndex) -> bool:
+    """Whether *name* (subscript and qualifiers dropped) is a data item
+    inside an ``OCCURS`` table -- which ``ProgramLayoutIndex.resolve`` never
+    finds, so a host-variable array or ``ACCEPT TB(I)`` gets an explicit
+    "unsupported" note rather than a bare "not resolvable"."""
+    wanted = name.split("(")[0].split()[0].split(".")[-1].upper() if name else ""
+    if not wanted:
+        return False
+
+    def walk(item: Any, in_table: bool) -> bool:
+        in_table = in_table or getattr(item, "occurs_clause", None) is not None
+        if in_table and str(getattr(item, "name", "")).upper() == wanted:
+            return True
+        return any(
+            walk(child, in_table)
+            for child in getattr(item, "children", [])
+            if hasattr(child, "occurs_clause")
+        )
+
+    return any(walk(record, False) for record in index.records())
 
 
 __all__ = [

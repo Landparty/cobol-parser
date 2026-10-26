@@ -115,6 +115,7 @@ from .dead_code import DeadCodeAnalyzer
 from .program_flow.condition_text import render_condition_text
 from .unused_variables import collect_declared_items
 from .xref import (
+    _DLI_INTERFACE_BLOCK,
     _SPECIAL_REGISTERS,
     ROLE_CALL_ARGUMENT,
     ROLE_CONDITION,
@@ -623,7 +624,10 @@ class BusinessRuleExtractor:
         for name, (_cond, parent) in self._condition_names.items():
             if parent.name.upper() in technical:
                 technical.add(name)
-        self._technical = technical | set(_SPECIAL_REGISTERS)
+        # The EXEC DLI DIB* fields are special registers but status fields
+        # a program branches on for business outcomes, like a CICS RESP
+        # field ("GE -> CUSTOMER NOT FOUND"), so they stay business (#311).
+        self._technical = technical | (_SPECIAL_REGISTERS - _DLI_INTERFACE_BLOCK)
 
     # ------------------------------------------------------------------
     # Procedure walk

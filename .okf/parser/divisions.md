@@ -198,6 +198,11 @@ Individual statement parsers are in [statements.md](statements.md).
   accepted. Separator `,` / `;` (`TokenType.COMMA` / `SEMICOLON`) are in
   `_NOISE_TYPES` and skipped by `_skip_noise()`: `CLASS VOWEL IS 'A', 'E'` ->
   `ranges == ["A", "E"]`; `SYMBOLIC CHARACTERS NUL, SOH ARE 1, 2` keeps both names.
+- `DataItemClauseParser._picture_clause` hands each `PictureClause` the
+  currency symbols its pattern used and, from `host.currency_signs`, their
+  currency strings (`currency_signs=`, #491). A letter symbol (`PICTURE
+  SYMBOL 'F'`) is no CURRENCY token, so it is taken from the pattern itself,
+  matched case-sensitively.
 - `DECIMAL-POINT IS COMMA` is honoured (comma-decimal literals, `,`/`.`
   exchanged in PICTURE -- see [lexer.md](../lexer.md)); no warning.
 - Tests: `tests/regression/test_special_names_clause_boundaries.py`,
@@ -222,6 +227,17 @@ the body up to the next section/division boundary, registers an empty
 section. Known tradeoff: a data item inside or directly after such a section
 with no section header of its own (a CD's record, a bare `01`) is discarded with
 the body -- the warning is what keeps that from being silent.
+
+A SCREEN SECTION body is still read as it is discarded (#501): each named
+entry (`01 MAIN-SCREEN.`, an identifier right after a level number that opens
+an entry and is not a screen clause word, `_SCREEN_CLAUSE_WORDS`) lands in the
+section's `screen_items` metadata (`name` / `level` / `line` / `column`), and
+each `USING` / `FROM` / `TO` identifier operand, with its `OF`/`IN`
+qualifiers and any subscript (`WS-E ( I )`), in `screen_references` (`clause`
+/ `text` / `line` / `column`); so is an identifier value of `LINE` / `COLUMN`
+/ `COL` / `*-COLOR` / `SIZE` / `CONTROL` (`_SCREEN_VALUE_CLAUSES`, clause
+named as written). A literal operand is not kept. unused-variables and xref read them (see
+[../analysis/data-use.md](../analysis/data-use.md)).
 
 `REPORT`, `SCREEN` and `COMMUNICATION` double as ordinary clause words (an FD's
 `REPORT IS report-name.`, `examples/cobol/shamrice/report_test.cbl`). The FD
@@ -369,6 +385,14 @@ suite: `tests/regression/test_value_all_clause.py`.
   helper.
 
 **USAGE.**
+- `parse_usage_clause` warns `Unsupported USAGE 'X' ...` for an IDENTIFIER
+  usage word outside `_storage.KNOWN_USAGES` (#524; the word is still
+  stored), and consumes `SIGNED` / `UNSIGNED` after `BINARY-CHAR` /
+  `-SHORT` / `-LONG` / `-DOUBLE`. The COBOL 2002 words are also in
+  `_COMP_KEYWORDS`, so the bare form (`05 X BINARY-LONG [SIGNED].`, no
+  USAGE keyword) is the same usage in both clause loops; the bare
+  `SIGNED` / `UNSIGNED` is consumed by the pure-Python loop, which the fast
+  loop hands it back to.
 - `USAGE` consumes an optional `IS` before the usage word (`USAGE IS NATIONAL`
   / `INDEX` / `DISPLAY-1`); `DISPLAY-1` lexes as its own `TokenType`, which the
   keyword set must include.
@@ -384,8 +408,11 @@ suite: `tests/regression/test_value_all_clause.py`.
   `_parse_object_reference`).
 
 **OCCURS (`_parse_occurs_clause`, mirrored in `_data_fast.pyx`).**
-- Parses `{ASCENDING|DESCENDING} KEY [IS] k1 [k2 ...]` (repeatable) *before*
-  `INDEXED BY`, and `INDEXED BY` collects every index name
+- Parses `{ASCENDING|DESCENDING} KEY [IS] k1 [k2 ...]` (repeatable) and
+  `INDEXED BY` in one loop, in either order and interleaved (IBM accepts
+  `INDEXED BY IX ASCENDING KEY K`); both name lists stop at `ASCENDING` /
+  `DESCENDING` / `INDEXED` / `KEY` (`_OCCURS_PHRASE_WORDS`) -- before #542 the
+  index loop took `ASCENDING` as an index name and dropped the key
   (`OccursClause.key_clauses` / `index_names`, see
   [ast-models.md](../ast-models.md)). Commas in both name lists are separators;
   the `.pyx` compares the COMMA token *type* (`comma_type` parameter), never the
@@ -433,6 +460,10 @@ suite: `tests/regression/test_value_all_clause.py`.
 - A semicolon separates values exactly as a comma does (`VALUES 'A', 'B'; 'C'`
   -> `['A', 'B', 'C']`; ranges survive). Pinned by
   `tests/regression/test_level_88_semicolon_separator.py`.
+- A `THRU` / `THROUGH` range end is marked `THROUGH:<end>` when it is a
+  literal, a signed numeric or a figurative constant other than `ALL`
+  (`LOW-VALUE THRU HIGH-VALUE`, #468; pinned by
+  `tests/regression/test_condition_figurative_thru_issue_468.py`).
 - `88 name VALUE ... WHEN SET TO FALSE [IS] literal` (IBM):
   `_parse_when_set_to_false` accepts `WHEN [SET] [TO] FALSE [IS]` + a (signed)
   literal or figurative constant into `ConditionNameItem.false_value`; anything
@@ -539,6 +570,10 @@ PROCEDURE DIVISION caller reports it -- see [statements-io.md](statements-io.md)
   generic "Unparsed tokens starting at 'X' ... content dropped from the AST up to
   the next statement boundary" warning. Either way the tokens are skipped up to
   the next statement boundary in one pass, with one warning per dropped statement.
+- `wrap_unexpected` turns an unexpected exception from a statement parser into
+  a `ParseError`; a `RecursionError` (nesting past Python's limit, re-raised by
+  `try_parse_nested_statement`, #375) reads "Statement nested too deeply to
+  parse ... the statement starting here was dropped".
 - `STRAY_MARKERS` lists the control-flow words and scope terminators (`ELSE`,
   `WHEN`, `THEN`, `END-IF`, `END-PERFORM`, ..., `END-RECEIVE`) that may be left
   over at statement level; they are skipped without a warning.

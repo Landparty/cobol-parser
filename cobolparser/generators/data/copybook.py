@@ -16,7 +16,12 @@ from ...preprocess.copybook_expander import parse_cobol_with_expansion
 from .dataset import GeneratedDataset
 from .encoding import record_length
 from .errors import CopybookLayoutError
-from .layout import FieldSpec, VaryingLength, flatten_record
+from .layout import (
+    FieldSpec,
+    VaryingLength,
+    flatten_record,
+    occurs_expansion_caveats,
+)
 from .options import DataGeneratorOptions
 from .values import ValueFactory
 from .views import build_record_views
@@ -103,6 +108,30 @@ def _wrap_fragment(source: str) -> str:
     if not body.endswith("\n"):
         body += "\n"
     return _WRAPPER_HEAD + body + _WRAPPER_TAIL
+
+
+#: Lines :func:`_wrap_fragment` puts in front of a fragment's first line.
+WRAPPER_HEAD_LINES = _WRAPPER_HEAD.count("\n")
+_DIVISION_HEADER_RE = re.compile(
+    r"\b(?:IDENTIFICATION|ID|ENVIRONMENT|DATA|PROCEDURE)\s+DIVISION\b", re.IGNORECASE
+)
+
+
+def wrap_copybook_fragment(source: str) -> str | None:
+    """*source* wrapped in the program skeleton :func:`parse_copybook_records`
+    parses a copybook through, or ``None`` when *source* is not a bare
+    fragment (it names a division or a ``PROGRAM-ID``, or holds no code).
+
+    The fragment's line *n* is line ``n + WRAPPER_HEAD_LINES`` of the result.
+    For the tools that take any source file -- ``data-items``, the MCP
+    server -- so a copybook answers the way it does for gen-data and decode
+    rather than as a program with no divisions (#536).
+    """
+    if not source.strip() or _looks_like_program(source):
+        return None
+    if _DIVISION_HEADER_RE.search(source):
+        return None
+    return _wrap_fragment(source)
 
 
 def parse_copybook_records(
@@ -375,7 +404,9 @@ class CopybookDataGenerator:
         # After the rows, deliberately: a copybook that declares no varying
         # range draws nothing here, and so generates byte-identical output to
         # a version of this package that had never heard of one.
-        caveats: list[str] = []
+        caveats = occurs_expansion_caveats(record, self.options) + self._unique_caveats(
+            record, fields, factory
+        )
         varying = self._varying_for(record, fields, caveats)
         lengths = self._draw_lengths(varying, fields, rng)
         if lengths is not None:
@@ -389,6 +420,29 @@ class CopybookDataGenerator:
             declared_lengths=lengths,
             caveats=caveats,
         )
+
+    def _unique_caveats(
+        self, record: CobolDataItem, fields: list[FieldSpec], factory: ValueFactory
+    ) -> list[str]:
+        """What ``unique_fields`` could not deliver (#526): a name that
+        matches no generated column, and a column that repeats because its
+        PICTURE ran out of distinct values."""
+        caveats: list[str] = []
+        known = {spec.name.upper() for spec in fields} | {
+            spec.column.upper() for spec in fields
+        }
+        for name in self.options.unique_fields:
+            if name.upper() not in known:
+                caveats.append(
+                    f"unique field {name} matches no generated field of record "
+                    f"{record.name}; ignored"
+                )
+        for column in factory.duplicate_columns:
+            caveats.append(
+                f"unique field {column} repeats a value: its PICTURE cannot "
+                f"hold {self.options.rows} distinct values"
+            )
+        return caveats
 
     # -- variable record length ---------------------------------------------
 

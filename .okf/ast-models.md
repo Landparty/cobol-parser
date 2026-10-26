@@ -263,7 +263,12 @@ and `get_sql_statements()` / `get_cics_statements()` /
 CICS, likewise IMS. Both spellings must be accepted: parsed statements carry
 the spaced one, so testing `"EXEC-CICS"` alone answers False for every real
 CICS / EXEC DLI program. `get_statistics()["statement_count"]` counts `CobolStatement`
-instances, `EXEC_CICS` / `EXEC_IMS` included. `find_statements_using_variable(name)`
+instances, `EXEC_CICS` / `EXEC_IMS` included; `procedure_count` counts only
+PROCEDURE DIVISION sections and paragraphs (a node whose `division_name` is
+another division -- WORKING-STORAGE, LINKAGE, ... -- is not one, #508).
+`to_dict()["metadata"]["parser_version"]` is `cobolparser.__version__`, and
+there is no `created_at`: the JSON of one input is byte-identical run to run
+(`from_json` still skips a `created_at` from older output). `find_statements_using_variable(name)`
 matches a whole COBOL word, case-insensitively, outside quoted literals (not a
 substring: `WS-A` does not match `WS-AMOUNT`). `get_intrinsic_function_usages()`
 delegates to `LanguageEnvironmentAnalyzer` rather than running its own regex,
@@ -307,7 +312,8 @@ class CobolDataItem(ASTNode):        # CobolDataItem(name, level, location); nod
         set_value_clause / set_byte_length / set_dynamic_length / set_object_reference
 
 class PictureClause(ASTNode):        # PictureClause(pattern, location, currency_symbols=None,
-                                     #               decimal_point_is_comma=False)
+                                     #               decimal_point_is_comma=False,
+                                     #               currency_signs=None)
     pattern: str                     # as written, e.g. "9(5)V99"
     size: int | None                 # BYTES, not character positions
     integer_digits / decimal_digits / total_digits: int | None
@@ -315,6 +321,7 @@ class PictureClause(ASTNode):        # PictureClause(pattern, location, currency
     is_national, is_national_edited, is_valid: bool
     has_scaling_factor: bool; scaling_factor: int; scaling_leading: bool | None
     currency_symbols: frozenset[str]; decimal_point_is_comma: bool
+    currency_signs: dict[str, str]   # symbol -> its CURRENCY SIGN string
 
 class OccursClause(ASTNode):         # OccursClause(location)
     min_times: int | None
@@ -330,6 +337,9 @@ class OccursClause(ASTNode):         # OccursClause(location)
 class ConditionNameItem(ASTNode):    # level 88: name, values, false_value
 class RenamesItem(ASTNode):          # level 66: name, renames_from, renames_through
 ```
+
+`index_names` / `key_clauses` are filled whichever order the source writes
+the INDEXED BY and KEY phrases in (#542).
 
 Serialization: `index_names`, `key_clauses` and `depending_on_qualifiers` are
 serialized only when non-empty, `is_unbounded` only when True; every data
@@ -403,8 +413,12 @@ build.
 `size` is a **byte** count — it is what `calculate_size()`, `data-items`
 offsets and record images are built from.
 
-* `PIC N(n)` (national) and `PIC G(n)` (DBCS) are **2 bytes per character**;
-  `U` (UTF-8) is one byte per symbol.
+* `PIC N(n)` (national) and `PIC G(n)` (DBCS) are **2 bytes per character**.
+* `PIC U(n)` (UTF-8, fixed character-length) is **4 bytes per character**:
+  `size == 4n`, and `utf8_characters == n` keeps the character count
+  (`FieldSpec.character_positions` reads it). `PIC U BYTE-LENGTH n` (fixed
+  byte-length) is `size == n`, `utf8_characters is None`. Sizing `U(n)` at n
+  bytes put every later offset 3n short (#554).
 * P-scaled pictures (`9(3)PPP`, `SVPP9(3)`) are sized by their stored `9`s (3
   bytes) while `integer_digits`/`decimal_digits` include the `P` positions
   (6/0 and 0/5). `scaling_leading: bool | None` records the P
@@ -436,6 +450,13 @@ offsets and record images are built from.
   through `DataItemClauseParser._picture_clause` (also handed to the
   `_data_fast` helper in place of the class), from the non-`$` CURRENCY tokens
   `parse_picture_clause` saw; without them `£` is an invalid PICTURE character.
+  **`currency_signs`** maps each of them to its declared currency string
+  (`{"#": "EUR"}`, from `parser.currency_signs`), so the record-image editor
+  knows what the position shows; `metadata["currency_signs"]` when non-empty,
+  restored by `from_json` (#491). A string of n characters fills the one
+  position that shows it, so `size` is n - 1 more than the `$` spelling's
+  (`'CHF '` with `PIC FFFF,FF9.99`: 14, not 11). A letter symbol is added by
+  `_picture_clause` from the pattern itself (it is not a CURRENCY token).
 * **`decimal_point_is_comma`**: `SPECIAL-NAMES. DECIMAL-POINT IS
   COMMA` -- `,` is the decimal point and `.` a simple insertion character.
   Sized and validated through the default spelling (`,`/`.` exchanged,
@@ -462,7 +483,10 @@ Both compensated for in [generators.md](generators.md)'s data generator:
   consumer wanting the field's full domain has to expand the range itself
   (and bound the expansion — `VALUE 1 THRU 999999` is legal COBOL). A signed
   range end keeps its marker too (`88 X VALUE -5 THRU -1.` →
-  `["-5", "THROUGH:-1"]`, distinct from `VALUE -5, -1` → `["-5", "-1"]`).
+  `["-5", "THROUGH:-1"]`, distinct from `VALUE -5, -1` → `["-5", "-1"]`),
+  and so does a figurative end (`VALUE LOW-VALUE THRU HIGH-VALUE` →
+  `["LOW-VALUE", "THROUGH:HIGH-VALUE"]`; before #468 the marker was dropped
+  and the range read as two values). `ALL` is never a range end.
 
 ## `calculate_size()` and `_storage.py`
 
@@ -480,7 +504,13 @@ the usage sets (`PACKED_USAGES`, `BINARY_FIXED_USAGES`, `BINARY_NATIVE_USAGES`,
 `FLOAT_USAGES`, `POINTER_USAGES`, `PICTURELESS_USAGES`) and the fixed widths
 (`INDEX_BYTES` 4, `POINTER_BYTES` 4 for `POINTER` / `POINTER-32` /
 `FUNCTION-POINTER` / `OBJECT REFERENCE`, `PROCEDURE_POINTER_BYTES` 8 — IBM:
-two words, `POINTER_64_BYTES` 8).
+two words, `POINTER_64_BYTES` 8). COBOL 2002 words (#524): `FLOAT-SHORT` /
+`FLOAT-LONG` are in the single / double float sets; `FIXED_SIZE_USAGES` sizes
+`FLOAT-EXTENDED` 16, `BINARY-CHAR` 1, `BINARY-SHORT` 2, `BINARY-LONG` 4,
+`BINARY-DOUBLE` 8. `KNOWN_USAGES` / `is_known_usage()` name every USAGE
+word the package can size; any other word is warned about by the parser and
+reported by the layout paths (an unknown word still falls through to the
+DISPLAY/PICTURE arithmetic).
 
 Never give `calculate_size()` its own copy of the byte arithmetic: a private
 copy drifts (usage spellings such as `BINARY` / `COMPUTATIONAL-3` missed,
@@ -666,7 +696,8 @@ Fields that are easy to miss, grouped by node.
   (see [analysis.md](analysis.md)).
 * `ArithmeticStatement.source_operands: list[str] | None` -- the
   operands written before TO/FROM/GIVING, duplicates kept, set by the
-  ADD/SUBTRACT parsers; `None` on a node built any other way. **Not
+  ADD/SUBTRACT parsers and by MULTIPLY/DIVIDE's GIVING form (both operands,
+  #495); `None` for MULTIPLY/DIVIDE format 1 and on a node built any other way. **Not
   serialized.** `operands` cannot stand in for it: `set_target`/`set_giving`
   append a name only when absent, so `ADD A B GIVING B` and `ADD A GIVING B`
   leave the same `[A, B]`. Read by `analysis/const_fold.py`.
@@ -690,6 +721,12 @@ Fields that are easy to miss, grouped by node.
   CHARACTERS` form) xor `data_item` (the `BASED` data-item form),
   `initialized`, `returning_target`. `FreeStatement` — `pointer_names:
   list[str]`.
+* `ContinueStatement` — `delay_expression` (text of `CONTINUE AFTER expr
+  SECONDS`, else `None`; in `to_dict()` only when set) and
+  `delay_expression_tree` (not serialized), #578.
+* `CancelStatement` — `program_names` and the parallel
+  `program_names_literal: list[bool]` (`CANCEL 'X'` vs `CANCEL X`, #479;
+  serialized only when some name is a literal).
 
 **Control (`control.py`)**
 
@@ -706,6 +743,9 @@ Fields that are easy to miss, grouped by node.
 
 * `UnstringStatement.tallying_variable` (`TALLYING IN counter`);
   `.delimiters` collects every `OR`-joined delimiter.
+* `StringStatement.groups` — `[{"sources": [...], "delimiter": d}]`, which
+  sources each `DELIMITED BY` applies to (serialized as `"groups"`, #576);
+  the flat `operands` / `delimiters` stay for compatibility.
 * `SetStatement.groups` — additional `targets TO/UP/DOWN value` groups of a
   multi-group SET (serialized as `"groups"`); each group dict's
   `"value_is_entry"` key is that group's own `SET p TO ENTRY 'X'`

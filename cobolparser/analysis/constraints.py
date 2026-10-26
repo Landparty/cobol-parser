@@ -19,6 +19,7 @@ the posture Phases 1-3 already established.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
@@ -34,13 +35,19 @@ from ..models.statements.base import (
 )
 from ..models.statements.control import (
     EvaluateStatement,
+    GoStatement,
     IfStatement,
     PerformStatement,
     SearchStatement,
 )
 from ..models.statements.data import MoveStatement
 from ..models.statements.io import IOReadStatement
-from .boundary_inventory import BoundaryRef, BoundaryReport, _condition_field_names
+from .boundary_inventory import (
+    BoundaryRef,
+    BoundaryReport,
+    _condition_field_names,
+    call_argument_data_name,
+)
 
 if TYPE_CHECKING:
     # Deferred: cobolparser.generators (reached via generators/__init__.py's
@@ -333,17 +340,47 @@ class BranchConstraints:
         }
 
 
+@dataclass(frozen=True)
+class TransferSite:
+    """One out-of-line ``PERFORM p`` or ``GO TO p``, with the branch arms
+    that must be taken for it to run (#310).
+
+    `BranchConstraints.enclosing` only reaches the top of its own paragraph;
+    a branch in a paragraph that another paragraph PERFORMs from inside an IF
+    arm is reached only when that arm is taken too. `ScenarioPlanner` joins a
+    branch's paragraph to the sites that transfer control to it to fold
+    those arms into the scenario's path condition.
+    """
+
+    paragraph: str
+    target: str
+    kind: str  # "PERFORM" | "GOTO" | "GOTO_DEPENDING"
+    enclosing: tuple[tuple[str, str], ...] = ()
+    line: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "paragraph": self.paragraph,
+            "target": self.target,
+            "kind": self.kind,
+            "enclosing": [list(pair) for pair in self.enclosing],
+            "line": self.line,
+        }
+
+
 @dataclass
 class ConstraintReport:
     branches: list[BranchConstraints] = field(default_factory=list)
     sequence_constraints: list[SequenceConstraint] = field(default_factory=list)
     unsupported: list[str] = field(default_factory=list)
+    transfer_sites: list[TransferSite] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "branches": [b.to_dict() for b in self.branches],
             "sequence_constraints": [s.to_dict() for s in self.sequence_constraints],
             "unsupported": list(self.unsupported),
+            "transfer_sites": [t.to_dict() for t in self.transfer_sites],
         }
 
 
@@ -363,16 +400,24 @@ class ConstraintExtractor:
         ast: CobolProgram,
         index: ProgramLayoutIndex,
         boundary_report: BoundaryReport,
+        *,
+        extra_fed_names: Iterable[str] = (),
     ) -> ConstraintReport:
+        """``extra_fed_names`` -- data names to treat as boundary-fed on top
+        of what ``boundary_report`` feeds: a subprogram's own PROCEDURE
+        DIVISION USING parameters, which its caller supplies
+        (``ProgramFixtureGenerator(entry_parameters=True)``)."""
         report = ConstraintReport()
         procedure = ast.get_division("PROCEDURE")
         if procedure is None:
             return report
 
         fed_names = _boundary_fed_names(boundary_report)
+        fed_names.update(name.upper() for name in extra_fed_names)
         eof_flags = _collect_eof_flags(ast)
 
         for paragraph_name, statement, enclosing in _walk_statements(procedure):
+            _record_transfer_site(statement, paragraph_name, enclosing, report)
             if isinstance(statement, IfStatement) and statement.condition is not None:
                 self._extract_if(
                     statement, paragraph_name, index, fed_names, report, enclosing
@@ -1431,7 +1476,10 @@ def _boundary_fed_names(report: BoundaryReport) -> set[str]:
             fed.update(name.upper() for name in boundary.record_names)
         for arg in boundary.call_args:
             if arg.direction in ("IN", "BIDIRECTIONAL"):
-                fed.add(arg.name.upper())
+                # ``ADDRESS OF X`` feeds X; constants feed nothing (#582).
+                data_name = call_argument_data_name(arg.name)
+                if data_name is not None:
+                    fed.add(data_name.upper())
     return fed
 
 
@@ -1659,6 +1707,29 @@ def _walk_list(
             yield from _walk_list(paragraph_name, nested, deeper)
 
 
+def _record_transfer_site(
+    statement: Any,
+    paragraph_name: str,
+    enclosing: tuple[tuple[str, str], ...],
+    report: ConstraintReport,
+) -> None:
+    """Record *statement* as a `TransferSite` when it is an out-of-line
+    ``PERFORM p [THRU q]`` (its first paragraph: the rest of a THRU range is
+    reached by falling through) or a ``GO TO``."""
+    line = statement.location.line if getattr(statement, "location", None) else None
+    if isinstance(statement, PerformStatement) and statement.target_paragraph:
+        targets, kind = [statement.target_paragraph], "PERFORM"
+    elif isinstance(statement, GoStatement) and statement.target_paragraphs:
+        targets = list(statement.target_paragraphs)
+        kind = "GOTO_DEPENDING" if statement.depending_on_variable else "GOTO"
+    else:
+        return
+    for target in targets:
+        report.transfer_sites.append(
+            TransferSite(paragraph_name, target, kind, enclosing, line)
+        )
+
+
 def _branch_id(paragraph_name: str | None, location: SourceLocation | None) -> str:
     line = location.line if location else "?"
     column = location.column if location else "?"
@@ -1670,5 +1741,6 @@ __all__ = [
     "SequenceConstraint",
     "BranchConstraints",
     "ConstraintReport",
+    "TransferSite",
     "ConstraintExtractor",
 ]

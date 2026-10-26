@@ -920,7 +920,10 @@ class CobolProgram(ASTNode):
             if isinstance(node, CobolDataItem):
                 data_item_count += 1
             elif isinstance(node, (CobolParagraph, CobolSection)):
-                procedure_count += 1
+                # Only PROCEDURE DIVISION procedures: WORKING-STORAGE,
+                # LOCAL-STORAGE, LINKAGE and FILE are sections too (#508).
+                if node.division_name in (None, "PROCEDURE"):
+                    procedure_count += 1
             elif isinstance(node, CobolStatement):
                 # By class, not ``node_type == "Statement"``: EXEC CICS /
                 # EXEC IMS keep their historical ``EXEC_CICS`` / ``EXEC_IMS``
@@ -979,10 +982,13 @@ class CobolProgram(ASTNode):
             _strip_locations(result["divisions"])
 
         if config.include_metadata:
+            from cobolparser import __version__
+
+            # No ``created_at``: a timestamp would make the JSON of the same
+            # input differ run to run, and the placeholder one was a lie (#508).
             metadata = {
                 "statistics": self.get_statistics(),
-                "parser_version": "1.0.0",
-                "created_at": "2024-01-01T00:00:00Z",  # Would be actual timestamp
+                "parser_version": __version__,
                 **(self._metadata or {}),
             }
 
@@ -1277,6 +1283,7 @@ def _data_item_from(data: dict[str, Any]) -> "CobolDataItem":
             _location_from(pic),
             currency_symbols=set(pic_meta.get("currency_symbols", ())),
             decimal_point_is_comma=bool(pic_meta.get("decimal_point_is_comma")),
+            currency_signs=dict(pic_meta.get("currency_signs") or {}),
         )
         for field in _PICTURE_FIELDS:
             if field in pic:

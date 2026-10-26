@@ -112,7 +112,16 @@ _detect_fixed_format = detect_fixed_format
 
 @dataclass
 class ParseResult:
-    """Result of parsing operation with AST and metadata."""
+    """Result of parsing operation with AST and metadata.
+
+    ``ast`` is ``None`` only when lexing, preprocessing, file I/O or the
+    parser itself failed (or a ``FAIL_FAST`` error stopped the parse). Text
+    in which no division is recognised still yields a ``CobolProgram``
+    named ``"UNKNOWN"`` with no divisions, next to a "No recognizable COBOL
+    division found" error -- callers that partially report on failed
+    parses (``lint``, ``health``) rely on it. Test ``ast.divisions``, not
+    just ``ast is not None``, for "something usable exists" (#368).
+    """
 
     ast: CobolProgram | None
     errors: list[ParseError]
@@ -207,6 +216,9 @@ class CobolParser:
         #: ``SPECIAL-NAMES. DECIMAL-POINT IS COMMA`` (decided by the lexer
         #: from the whole source): PICTURE strings exchange ``,`` and ``.``.
         self.decimal_point_is_comma: bool = False
+        #: ``SPECIAL-NAMES. CURRENCY SIGN``: each declared PICTURE currency
+        #: symbol's currency string (decided by the lexer), ``{"#": "EUR"}``.
+        self.currency_signs: dict[str, str] = {}
         #: True when this parse normalized fixed-format source to free-form
         #: text: column 1 of every lexed line is then the old column 8, so
         #: Area A is columns 1-4 and Area B starts at
@@ -322,6 +334,7 @@ class CobolParser:
 
         self._begin_parse()
         self.decimal_point_is_comma = False
+        self.currency_signs = {}
         self.source_is_fixed_format = False
         # Set up front, not only on the success path: a FAIL_FAST lexer
         # error or a propagated ParseError returns early, and its result
@@ -536,6 +549,7 @@ class CobolParser:
         self.decimal_point_is_comma = bool(
             getattr(lexer, "decimal_point_is_comma", False)
         )
+        self.currency_signs = dict(getattr(lexer, "currency_signs", {}) or {})
         logger.debug("Lexer produced %d tokens for %s", len(self.tokens), filename)
 
         if lexer.has_errors():

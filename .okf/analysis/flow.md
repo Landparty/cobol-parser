@@ -112,9 +112,16 @@ step deliberately.
   (not `STOP 'literal'`, which only pauses for the operator), `GOBACK`, `EXIT
   PROGRAM`, a CICS terminator (below), any non-`DEPENDING` `GoStatement`
   (including the operand-less alterable `GO TO.`, which always jumps wherever
-  an ALTER last pointed it), or `EXIT SECTION`. Statements nested in an
-  IF/EVALUATE arm never count: a conditional GO TO or STOP RUN still lets the
-  paragraph fall through when the condition is false. A bare `SECTION` header
+  an ALTER last pointed it), or `EXIT SECTION`. A terminator nested in one
+  IF/EVALUATE arm does not count: a conditional GO TO or STOP RUN still lets
+  the paragraph fall through when the condition is false. An **exhaustive**
+  branch whose every arm terminates does (`_procedures.branch_terminates`,
+  used by both `_is_terminator` copies, recursively): an IF with an ELSE, or
+  an EVALUATE with a WHEN OTHER, every arm reaching a terminator -- the
+  legacy `IF c GO TO A ELSE GO TO B END-IF` dispatch (#586). An empty WHEN
+  shares the next WHEN's statements (`WHEN 1 WHEN 2 STOP RUN`); a trailing
+  empty one counts as falling through. Pinned in
+  `tests/regression/test_issue_586_exhaustive_branch_terminator.py`. A bare `SECTION` header
   has no statements of its own, so it never terminates. Known boundary: a
   terminator inside an unconditional inline `PERFORM ... END-PERFORM` is not a
   top-level statement and is not seen.
@@ -156,6 +163,8 @@ so a retry loop ending in `RETURN TRANSID(...) RESP(...)`, the usual shop
 form, is `MEDIUM` like the GOBACK equivalent, not a `HIGH` lint error
 (review of PR #453: applying the RESP exemption to the escape flag too left
 that loop HIGH). Pinned in `tests/unit/analysis/test_cics_terminators.py`.
+`_cics.py` also holds `cics_identifier_options()` (the non-literal options
+the data-use sweeps read, #588; see [data-use.md](data-use.md)).
 
 ## DeadCodeAnalyzer
 
@@ -280,7 +289,11 @@ the [history](../history/analysis.md).
 
 **Reachability differs from `ProgramFlowAnalyzer` by design.**
 `graph.build_fall_through_edges` emits a `FALL_THROUGH` edge between *any* two
-adjacent non-terminating procedures, PERFORM targets included, so
+adjacent non-terminating procedures, PERFORM targets included (except out of
+a DECLARATIVES section: its last member, and an EXIT SECTION in it, get no
+edge, since a USE procedure returns to the runtime -- `declarative_sections`,
+#533; the edge into the next declarative section or past END DECLARATIVES
+made MCP `callers_of("MAIN")` report the last USE paragraph), so
 `flow_report.unreachable_nodes` under-reports the same way. Changing that is a
 CFG-shape question with a much wider blast radius (flowcharts,
 `ScenarioPlanner` arm reachability, `TechnicalDebtAnalyzer`'s
@@ -338,6 +351,11 @@ orchestrator). All public names import from `cobolparser.analysis.program_flow`.
   deliberately uses explicit edges only -- member hops have no
   `(source, target)` edge record and would misclassify cycles as `MIXED`.
   Pinned by `tests/unit/analysis/test_program_flow_thru_reachability.py`.
+  When the THRU end is a SECTION, `range_members` runs through that
+  section's last paragraph (`_section_last_member`), not just its header:
+  stopping at the header left the section's paragraphs out of reachability,
+  `recursion_risk`, the flowchart's `[THRU n]` and MCP `callers_of` (#577;
+  `const_fold._range_statements` already did this).
 * **Fall-through suppression reads `terminating_paragraphs` only.**
   `ProcedureScanner._scan_paragraph_statements` fills it with every paragraph
   holding a top-level terminator (`ProcedureScanner._is_terminator`, mirroring
@@ -395,7 +413,10 @@ it for THEN/ELSE/WHEN/WHEN OTHER (`to_dict()` only when non-None); the
 flowcharts render it instead of the bare keyword (see generators.md).
 Clause fidelity matters because `cobol-parser diff` compares this text: `SET x
 UP BY v` / `DOWN BY v` / `TO FALSE` are rendered as written, ADD/SUBTRACT take
-their sources from `source_operands` and append ` GIVING ...`, PERFORM renders
+their sources from `source_operands` and append ` GIVING ...`, MULTIPLY /
+DIVIDE ... GIVING render `MULTIPLY x BY y GIVING z` / `DIVIDE x {INTO|BY} y
+GIVING z [REMAINDER r]` from `division_mode` (the generic fallback dropped
+INTO/BY, so `diff` showed `DIVIDE A B C -> DIVIDE A B C`; #495), PERFORM renders
 ` VARYING v FROM x BY y` / ` n TIMES` (the UNTIL guard is the diff renderer's
 job, `ast_diff._statement_text`) and COMPUTE / ADD / SUBTRACT render each
 receiver with its own `ROUNDED [MODE IS m]` (`rounding_of`; #274, #517).
@@ -447,9 +468,23 @@ Finds recursion-driven infinite-loop risks. Two mechanisms, both surfaced as
   paragraph (`_perform_range`), not at the header node -- the header's
   fall-through into its first paragraph is not "leaving the range", so
   `S. S1. PERFORM S.` is reported.
+- **Cost is linear per cycle** (#373). `cycle_details` holds one cycle per
+  back edge with its full path, so the "GO TO restart" idiom (every
+  paragraph may `GO TO 0000-START`) yields N cycles of length ~N. The edge
+  maps, node map and PERFORM ranges are built once per report
+  (`_FlowIndex`); `_closed_by_perform_range_end` collects the PERFORM-only
+  hops' range ends then tests each fall-through-only hop by set lookup;
+  `_reenters_own_perform_range` needs exactly one non-fall-through hop; the
+  escape test is cached per strongly connected component. 800 paragraphs:
+  17 s -> 0.4 s, output unchanged. One risk per cycle is still reported (N
+  near-identical risks for that idiom). Pinned by
+  `tests/regression/test_issue_373_recursion_check_restart_idiom.py`.
 - **Self-recursive CALL** — a CALL (static, or dynamic and resolved via
   `DynamicCallAnalyzer`, which this analyzer runs internally) whose target
-  equals the program's own `PROGRAM-ID`. `HIGH`, or `LOW` when the
+  is a name the program answers to (`_names_answered_to`: its `PROGRAM-ID`
+  plus every `ENTRY 'name'` in its own code -- a CALL to an alternate entry
+  re-enters the same load module, #515; the container check below uses the
+  same set). `HIGH`, or `LOW` when the
   `PROGRAM-ID` is declared `IS RECURSIVE` (re-entry legal; base case
   unverifiable). Only the unit's *own* statements are walked
   (`_own_statements`: `get_all_statements()` minus every node of
@@ -485,12 +520,20 @@ below always does this.
 **Two numbers per procedure**: `cyclomatic_complexity` (1 plus one decision
 point per IF, per WHEN arm on EVALUATE/SEARCH excluding WHEN OTHER/default,
 per loop-form PERFORM -- TIMES/UNTIL/VARYING, a bare `PERFORM target` is not
-a decision point since it always runs exactly once -- per target of a
+a decision point since it always runs exactly once; each AFTER phrase of a
+PERFORM VARYING adds one more decision *and* one more nesting level, being a
+nested loop with its own UNTIL, so the AFTER form scores what the nested
+inline-PERFORM form does (#514) -- per target of a
 computed `GO TO ... DEPENDING ON` (an N-way branch plus the out-of-range
 fall-through, scored like an N-arm EVALUATE; a plain GO TO adds nothing and
-neither changes nesting depth) -- and per *present*
-exception-handling clause: AT END, INVALID KEY, AT EOP, ON SIZE ERROR, ON
-OVERFLOW, ON EXCEPTION, and their NOT- counterparts, each independently);
+neither changes nesting depth) -- and per *present* exception-handling
+clause **pair** (`_CLAUSE_PAIRS`): AT END / NOT AT END, INVALID KEY / NOT
+INVALID KEY, AT EOP / NOT AT EOP, ON SIZE ERROR / NOT ON SIZE ERROR, ON
+OVERFLOW / NOT ON OVERFLOW, ON EXCEPTION / NOT ON EXCEPTION add 1 whether
+one or both bodies are written -- they are the two outcomes of one test,
+as IF ... ELSE is one decision; counting each body scored the recommended
+explicit-both-outcomes style worse (#553). SEARCH's AT END adds nothing: a
+SEARCH already has its not-found path and is scored one per WHEN);
 `extended_complexity` adds one per boolean AND/OR operator in every
 condition tree on top of that (`IF A AND B OR C` has more distinct paths
 than a bare `IF A`, even though both are "one IF" for classic McCabe). Also
@@ -504,8 +547,8 @@ external-program targets, neither of which belong in an in-program fan
 count), and a LOW/MODERATE/HIGH `rating` from `ComplexityThresholds`
 (defaults `moderate=10`/`high=20`, overridable per analysis run).
 
-**Walk mechanics.** The clause-list attribute check
-(`at_end_clause`/`invalid_key_clause`/.../`on_exception`/`on_overflow`) is a
+**Walk mechanics.** The clause-pair attribute check (both bodies of a pair
+are walked; `at_end_clause`/`not_at_end_clause`/.../`on_exception`) is a
 local re-derivation of the same set `program_flow/scanner.py`'s
 `_CLAUSE_BODY_ATTRS` and `constraints.py`'s `_NESTED_STATEMENT_ATTRS`
 establish -- most of these are already reachable via the generic
@@ -581,8 +624,12 @@ paragraph *identity*, not by name: a paragraph name may repeat across
 sections, and keying on the bare name lets one `P1` in a Type-1 group drop
 another section's `P1` -- and with it a whole Type-2 group -- from the Type-2
 pass (see #353). `CloneMember.name` is still the
-bare uppercased paragraph name (callers join on it); its `location` tells
-two same-named members apart. Groups below
+bare uppercased paragraph name; a member whose name is shared with a
+paragraph in another section also carries `qualified_name` (`"CALC OF
+S1"`, the same `ProcedureIndex` key the flow graph and dead-code items use,
+in `to_dict()` only when set). Join on `qualified_name or name`: matching
+the bare name made every section's `CALC` a clone offender in `health`
+when only one of them was a clone (#555). Groups below
 `min_clone_statements` (default 3 -- two bare `EXIT.` paragraphs matching
 each other isn't meaningful redundancy) are dropped.
 
@@ -594,7 +641,7 @@ and its mode -- rounding modes are `_DETAIL_KEYWORDS`, never renamed; #517), an 
 INVALID KEY / ON SIZE ERROR / ON EXCEPTION body, `UPON`, `CORRESPONDING`, a
 STRING delimiter or the INSPECT phrase Type-1 clones. A leaf is `(type,
 operands, clauses, details)`: `clauses` fingerprints every present clause body
-(the `_CLAUSE_ATTRS` set `complexity.py` uses, recursively through `_fp`, so
+(the same attributes `complexity.py`'s `_CLAUSE_PAIRS` pairs up, recursively through `_fp`, so
 their statements also count towards `statement_count`), and `details` is the
 statement's `to_dict()` minus `_DETAIL_SKIP_KEYS` (position, node
 bookkeeping, what the tuple already holds, and `possible_values` -- a
@@ -615,7 +662,8 @@ consistent rename. Because case is folded outside quotes (#391),
 AST *marks* as literals (static CALL target, INVOKE method literal, STOP
 literal, EVALUATE `WHEN` Literal with `quoted` and Range bounds with
 `start_quoted` / `end_quoted`), so a case-only difference there still breaks
-Type-1. Where the AST does not mark them -- CANCEL targets, ACCEPT ... FROM
+Type-1. Where the AST does not mark them -- CANCEL targets (marked since
+#479 by `CancelStatement.program_names_literal`, not yet read here), ACCEPT ... FROM
 ENVIRONMENT names, EXEC CICS option values, literal arguments inside a COMPUTE
 `expression`, XML/JSON `clause_text` -- a case-only literal difference reads as
 the same text, so Type-1 can group them.
@@ -635,7 +683,10 @@ user word (`1ST-NAME`); see [data-use.md](data-use.md).
 `report.paragraph_fingerprints: list[ParagraphFingerprint]` -- per paragraph:
 `name`, `location`, `statement_count`, and both digests (`type1`, `type2`) as
 16-hex-character blake2b over a canonical serialization of the same
-`_Fingerprinter` tuple the grouping uses.
+`_Fingerprinter` tuple the grouping uses; plus `body_lines` `[first, last]`,
+the source lines the paragraph's statements span (header excluded, nested
+statements included), which `scan` maps through a copybook source map into
+`body_origin` (#470).
 
 The reason it exists: `clone_groups` can only answer "which paragraphs in
 *this* program duplicate each other". The commoner shape of COBOL

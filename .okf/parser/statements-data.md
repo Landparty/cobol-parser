@@ -69,7 +69,11 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   MULTIPLY/DIVIDE's `BY` / `INTO` operand (`_consume_arithmetic_operand`) folds
   qualifiers and signs the same way. ADD/SUBTRACT record `source_operands` (the
   operand list before TO/FROM/GIVING, duplicates kept) so a consumer can tell an
-  addend from a target of the same name (`.operands` dedups).
+  addend from a target of the same name (`.operands` dedups). MULTIPLY/DIVIDE
+  record it for the GIVING form only, as `[first, second]` (both are sending
+  items; `MULTIPLY A BY B GIVING B` left one operand once GIVING names were
+  filtered from `.operands`, #495); format 1 leaves it `None`, since its BY/INTO
+  operand is a receiver.
 - **Targets.** `_consume_arithmetic_target` (ADD `TO`, SUBTRACT `FROM`, and
   MULTIPLY/DIVIDE format 1) folds `(subscript)` groups and `OF` / `IN` chains
   (`"Y OF Z"`, `"NAME ( SUB1 , SUB2 )"`). `ArithmeticStatement.target` is the
@@ -187,7 +191,10 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   REPLACING) loops until neither qualifier matches, so `BEFORE` and `AFTER
   INITIAL` may both appear in either order (each at most once); its delimiter is
   read by `_consume_inspect_value`, so `BEFORE INITIAL SPACE` (figurative) and
-  `AFTER INITIAL ENT(2)` are taken whole. `CONVERTING` takes subscripted /
+  `AFTER INITIAL ENT(2)` are taken whole, and so is an intrinsic operand
+  (`FUNCTION LOWER-CASE(A)` -> `"FUNCTION LOWER-CASE ( A )"`; read as an
+  identifier it had become two TALLYING operands, a bare `FUNCTION` after BY,
+  and a dropped CONVERTING clause, #506). `CONVERTING` takes subscripted /
   figurative operands and keeps its BEFORE/AFTER phrase as `converting_before` /
   `converting_after` (in `to_dict()` only when present). The outer "consume to
   period" trailer in `parse()` breaks on a statement boundary and owns the H9
@@ -202,6 +209,11 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   only when the next token is operand-shaped (`_next_is_delimiter`), so
   `DELIMITED INTO X` leaves INTO for its own clause. Operands and delimiters are
   re-quoted literals (`literal_operand_text`).
+- **STRING groups** (#576). Besides the flat `operands` / `delimiters`,
+  `StringStatement.groups` is `[{"sources": [...], "delimiter": d}]`: each
+  `DELIMITED BY` closes the sources read since the previous one; trailing
+  sources with no `DELIMITED BY` form a last group with `delimiter: None`.
+  Built in the model's `add_operand` / `add_delimiter`.
 - **UNSTRING.** `DELIMITED BY d1 OR d2 ...` collects every delimiter
   (`delimiters`), with `delimiter_all` a parallel bool list emitted by `to_dict()`
   only when some delimiter is `ALL`. `_parse_into_targets` accepts a comma list

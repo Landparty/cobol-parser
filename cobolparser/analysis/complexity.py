@@ -13,17 +13,19 @@ Two complexity numbers are reported per procedure:
 
 - ``cyclomatic_complexity`` -- classic McCabe: 1 plus one decision point per
   IF, per WHEN arm (EVALUATE/SEARCH, excluding WHEN OTHER/the default), per
-  loop-form PERFORM (TIMES/UNTIL/VARYING -- a bare ``PERFORM target`` is not
+  loop-form PERFORM and per AFTER phrase of a PERFORM VARYING (TIMES/UNTIL/
+  VARYING -- a bare ``PERFORM target`` is not
   a decision point, it always runs exactly once), per target of a computed
   ``GO TO ... DEPENDING ON`` (an N-target computed GO TO is an N-way branch
   plus the out-of-range fall-through, scored like an N-arm EVALUATE), and
-  per present
-  exception-handling clause (AT END, INVALID KEY, AT EOP, ON SIZE ERROR, ON
-  OVERFLOW, ON EXCEPTION, and their NOT- counterparts) -- each such clause is
-  itself a branch, independent of what a solver's cyclomatic count over a
-  compiled CFG would show, but the metric this module targets is "how many
-  distinct paths does a reader/tester need to reason about," which every one
-  of these clauses adds to.
+  one per present exception-handling clause *pair* (AT END / NOT AT END,
+  INVALID KEY / NOT INVALID KEY, AT EOP / NOT AT EOP, ON SIZE ERROR / NOT ON
+  SIZE ERROR, ON OVERFLOW / NOT ON OVERFLOW, ON EXCEPTION / NOT ON
+  EXCEPTION). A clause and its NOT- twin are the two outcomes of one binary
+  test (EOF or not), exactly as IF ... ELSE is one decision, so writing
+  both bodies adds 1, not 2 (#553). SEARCH's AT END adds nothing: a SEARCH
+  already has its not-found path (it falls through) and is scored one per
+  WHEN.
 - ``extended_complexity`` -- the same base plus one per boolean AND/OR
   operator in every condition tree, since ``IF A AND B OR C`` has more
   distinct paths through it than a bare ``IF A``, even though both are "one
@@ -57,8 +59,10 @@ from .program_flow.edges import GOTO_EDGE_TYPES, PERFORM_EDGE_TYPES
 from .program_flow.scanner import LEADING_SENTENCES_NODE, leading_sentences
 
 # Clause-list attributes that hold nested statements executed only when the
-# clause's condition (an exception, an EOF, an overflow) actually fires --
-# each present, non-empty clause is therefore its own decision point. A local
+# clause's condition (an exception, an EOF, an overflow) actually fires or
+# does not -- grouped in (positive, NOT-) pairs, because the two are the two
+# outcomes of one test: a pair with either side present is one decision
+# point, however many of its bodies are written (#553). A local
 # re-derivation of the same attribute set ``program_flow/scanner.py``'s
 # ``_CLAUSE_BODY_ATTRS`` and ``constraints.py``'s ``_NESTED_STATEMENT_ATTRS``
 # already establish (this module's own convention per the OKF: re-derived per
@@ -69,19 +73,13 @@ from .program_flow.scanner import LEADING_SENTENCES_NODE, leading_sentences
 # already reachable via the generic child walk below, but checking the full
 # set directly (rather than only the CALL-specific gap) is cheap and matches
 # established precedent.
-_CLAUSE_ATTRS: tuple[str, ...] = (
-    "at_end_clause",
-    "not_at_end_clause",
-    "invalid_key_clause",
-    "not_invalid_key_clause",
-    "at_eop_clause",
-    "not_at_eop_clause",
-    "on_size_error",
-    "not_on_size_error",
-    "on_overflow",
-    "not_on_overflow",
-    "on_exception",
-    "not_on_exception",
+_CLAUSE_PAIRS: tuple[tuple[str, str], ...] = (
+    ("at_end_clause", "not_at_end_clause"),
+    ("invalid_key_clause", "not_invalid_key_clause"),
+    ("at_eop_clause", "not_at_eop_clause"),
+    ("on_size_error", "not_on_size_error"),
+    ("on_overflow", "not_on_overflow"),
+    ("on_exception", "not_on_exception"),
 )
 
 _LOOP_PERFORM_TYPES = frozenset({"TIMES", "UNTIL", "VARYING"})
@@ -414,9 +412,13 @@ class ComplexityAnalyzer:
                 isinstance(node, PerformStatement)
                 and node.perform_type in _LOOP_PERFORM_TYPES
             ):
-                counts["decisions"] += 1
-                counts["max_depth"] = max(counts["max_depth"], depth + 1)
-                child_depth = depth + 1
+                # Each AFTER phrase is a loop nested inside the previous one,
+                # with its own UNTIL test: score it as the nested inline
+                # PERFORM VARYING it is equivalent to (#514).
+                loops = 1 + len(node.after_clauses or ())
+                counts["decisions"] += loops
+                counts["max_depth"] = max(counts["max_depth"], depth + loops)
+                child_depth = depth + loops
             elif isinstance(node, GoStatement) and node.depending_on_variable:
                 # A computed GO TO is an N-way branch (plus fall-through when
                 # the variable is out of range): one decision per target, the
@@ -430,11 +432,16 @@ class ComplexityAnalyzer:
                 counts["bool_ops"] += 1
 
             if isinstance(node, CobolStatement):
-                for attr in _CLAUSE_ATTRS:
-                    clause = getattr(node, attr, None)
-                    if clause:
+                for pair in _CLAUSE_PAIRS:
+                    clauses = [getattr(node, attr, None) for attr in pair]
+                    if not any(clauses):
+                        continue
+                    # SEARCH's not-found path exists with or without an
+                    # AT END body; its WHENs are already counted above.
+                    if not isinstance(node, SearchStatement):
                         counts["decisions"] += 1
-                        for stmt in clause:
+                    for clause in clauses:
+                        for stmt in clause or ():
                             walk(stmt, child_depth)
 
             for child in getattr(node, "children", []):

@@ -49,6 +49,13 @@ the record-relative byte offset/length `layout_offsets` computes) and
 | `sql` | `[SCHEMA.]TABLE.COLUMN` | `_sql_flow.analyze_sql` (SELECT INTO, FETCH through its DECLARE CURSOR, INSERT, UPDATE SET; MERGE/CTE are caveats, as is a FROM sub-select or a `TABLE(...)` table function -- matched on `TABLE` followed by `(`, so an ordinary table named `TABLE_CUST` / `TABLES_CFG` is traced, #340) |
 | `console` | `SYSIN` / `SYSOUT` (or the ACCEPT's `FROM` source) | ACCEPT / DISPLAY; `ACCEPT FROM DATE` / `DAY` / `DAY-OF-WEEK` / `TIME` (with or without a format qualifier) make no port -- the runtime's clock, not data entering the program |
 
+A contained program's nodes include its containers' GLOBAL records
+(`unused_variables.inherited_data_records`, laid out from the owning
+program's `compute_program_data_items`), so `DISPLAY A` of a GLOBAL `A` in
+the inner unit is an `A -> SYSOUT` edge, not a "not declared" caveat
+(#504). The item is keyed in the inner report like its own; no cross-program
+join links it to the container's node yet.
+
 Edge kinds: `move` (group MOVE is a byte overlay; CORRESPONDING pairs by
 name; literal reference modification narrows the range; a non-literal
 start or length -- `REC(WS-POS:10)` -- is `_Ref.loose_window`: the operand
@@ -92,7 +99,8 @@ occurrence. Its bytes are every occurrence's (`_placements`: one range per
 occurrence, or a single spanning range past `_PLACEMENT_CAP` = 1024), so a
 group MOVE / READ / WRITE / CALL maps each occurrence where it really lies,
 and every edge through a table field is **inexact** -- never a wrong exact
-field. A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
+field. That includes EXEC SQL host-variable edges (`_visit_sql`, #507: a
+multi-row FETCH writes every occurrence). A reference with literal subscripts (`AMT(3)`, `T(2,1)`, one per
 OCCURS level, within bounds) on an elementary field gets its own item node
 `R.AMT(3)` at the occurrence's offset, joined both ways to `R.AMT` by
 inexact `occurrence` edges, and an exact edge to its own bytes on every port
@@ -184,6 +192,9 @@ field one match reaches is a hit even when it is another match -- one
 multi-source trace never reported a start. `impact()` adds the caveat
 `PROG: AMT matches N fields: ...; qualify with OF to trace one`, also
 listed in `ImpactResult.ambiguous` (#540) -- on the no-flow path too.
+The start name is split by `_names.split_qualified_name`, so `IN` works
+wherever `OF` does (`field-impact "AMT IN IN-REC"`, #541; `FieldFlowAnalyzer`
+`_resolve` shares it).
 `ImpactResult.to_text()` lists every hit `to_dict()` does: items and ports
 (prefixed `port `) under their program, tables and datasets on their own
 lines (#528: ports were dropped, so a DISPLAY-only field read as feeding

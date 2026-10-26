@@ -32,6 +32,14 @@ The cross-program module. It walks a whole tree of COBOL source, parses every
 file through `batch.py` (parallel, per-file fault isolation) and aggregates the
 results into one graph with two kinds of edge:
 
+* **Only PROGRAM and CLASS units are nodes (#500).** A FACTORY / OBJECT
+  paragraph or a METHOD-ID (`unit_kind`, `_OO_MEMBER_KINDS`) cannot be the
+  target of a CALL, so it is never a program id; what its statements CALL is
+  attributed to its class (`_node_statements()`). `CALL 'AUDIT'` to an
+  external program therefore no longer resolves to a method of that name,
+  and two classes no longer raise "duplicate PROGRAM-ID FACTORY". INVOKE is
+  still not an edge. Pinned by
+  `tests/regression/test_issue_500_oo_units_not_programs.py`.
 * **Diagram ids are unique per diagram (#494).** `to_dot()` / `to_mermaid()`
   take every node id from one `_NodeIds` allocator (`P_` programs, known and
   external alike, then `C_` members, pre-allocated in declaration order), so
@@ -263,6 +271,10 @@ DIVISION uses each parameter, reusing xref's role vocabulary:
   since naming an entry's own parameter neither reads nor writes it.
 * A group whose fields xref reports as duplicated → `unknown`, rather than
   inferred from a same-named WORKING-STORAGE field.
+* An operand the entry point takes `BY VALUE` is graded from the caller's
+  side (`_as_passed`): `input-output` / `output` become `input`, since the
+  callee writes only its own copy (#490); `unknown` stays. Per entry point:
+  the same item BY REFERENCE on an ENTRY keeps `input-output` there.
 
 Operand *order* is preserved verbatim from the USING clause and is sorted
 nowhere in the module — it is the whole point of `call_example()`.
@@ -312,8 +324,21 @@ and FD-vs-SD kind); data items keyed by section plus qualified path
 plus the SIGN / JUSTIFIED / SYNCHRONIZED / BLANK WHEN ZERO / EXTERNAL / GLOBAL
 flags and level-88 names and values — an entry with no data-name, which the
 parser names `ANONYMOUS-<level>-<line>`, is keyed as a positional `FILLER`,
-so a line shift does not report it removed and re-added);
-procedures (added, removed, renamed,
+so a line shift does not report it removed and re-added; and the **order of
+each group's subordinates**, #545: a field reordered within its group is
+`data-item-moved`, with its position and record-relative byte offset before
+and after -- swapping two fields moves every offset after them, so it must
+not diff clean. Same `SequenceMatcher` rule as procedures: an inserted or
+removed field moves nothing, a swap reports one item; level-88 order is not
+compared. Offsets come from `layout_offsets.compute_record_layout`, omitted
+when ambiguous. Pinned by
+`tests/regression/test_issue_545_diff_data_item_order.py`); procedures (the
+unnamed paragraph holding statements before the first header, or a whole
+header-less PROCEDURE DIVISION, is compared as `(PROCEDURE DIVISION)`
+(`ast_diff.UNNAMED_PARAGRAPH`) -- skipped, every edit there diffed clean, #516;
+adding a header to it reads as a rename; pinned by
+`tests/regression/test_issue_516_diff_unnamed_paragraph.py`) (added,
+removed, renamed,
 **moved** — reordered without a body change, reported separately so a pure
 reshuffle never reads as a rewrite — and body-changed); and statements within
 matched paragraphs.
@@ -343,7 +368,11 @@ see the pair was considered and declined.
 **Positions are relative order, not line numbers.** Matched procedures from both
 sides run through `SequenceMatcher` and only those outside its matching blocks
 are reported moved — so inserting one paragraph at the top does not report every
-following paragraph as moved, and a pure reformat reports nothing at all.
+following paragraph as moved, and a pure reformat reports nothing at all. A
+paragraph's owning section is compared *through the section match*
+(`_report_moves`' `section_names`), so renaming a section moves none of its
+paragraphs; one that leaves the renamed section for another is still moved
+(#311).
 
 **Spellings are not changes.** A PICTURE is compared by
 its character positions, repeat factors written out (`_picture_positions`:
@@ -351,12 +380,19 @@ its character positions, repeat factors written out (`_picture_positions`:
 (`_canonical_usage`, the `_storage.py` synonym sets: `COMP` = `BINARY` =
 `COMP-4` = `COMPUTATIONAL`, `COMP-3` = `PACKED-DECIMAL`). `COMP-5` stays
 distinct from `COMP` (no truncation to the PICTURE). The change still reports
-both strings as coded. A VALUE is still compared as written (`+12` vs `12`,
-`'AB'` vs `'AB  '` on `PIC X(4)` read as changes).
+both strings as coded. A VALUE is compared by `_canonical_value` (#543):
+figurative constants fold singular/plural (`ZERO` = `ZEROS` = `ZEROES`,
+`HIGH-VALUE` = `HIGH-VALUES`, ...; `ALL` is kept and significant), a numeric
+literal compares as a `Decimal` (`7` = `007`, `+5` = `5.0`), hex digits
+case-insensitively, and a quoted literal's text case-sensitively (`'ab'` vs
+`'AB'` is a change; before #543 it was not). Padding is still not modelled:
+`'AB'` vs `'AB  '` on `PIC X(4)` reads as a change. Procedure-side
+condition text is not canonicalized: `IF A = ZERO` -> `IF A = ZEROS` is a
+`condition-changed`.
 
 Statement comparison has dedicated signatures for MOVE, PERFORM, CALL, GO TO,
 IF, EVALUATE, SEARCH, OPEN, EXEC SQL, EXEC CICS, COMPUTE,
-INSPECT, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
+INSPECT, STRING, UNSTRING, ACCEPT and DISPLAY. **Every other statement compares on its
 operands, its rendered text *and* its own `to_dict()` fields** (locations and
 nested statement bodies stripped — those are compared on their own), so an
 unmodelled edit over-reports rather than reading as unchanged. The rendered
@@ -370,9 +406,11 @@ ADD / SUBTRACT / MULTIPLY / DIVIDE get the same through their `to_dict()`
 (`rounded_targets`, `rounding_modes`).
 The dedicated signatures carry the markers a value alone hides (#316): CALL
 includes `is_dynamic` (`CALL 'X'` → `CALL X` is a `call-target-changed`, and
-the detail text quotes a static target), and UNSTRING includes
+the detail text quotes a static target; CANCEL compares `program_names_literal` through its `to_dict()` and quotes literal names in the detail text, #479), and UNSTRING includes
 `delimiter_all` (`DELIMITED BY ALL ','`) with a detail text spelling out
-source, delimiters and INTO targets. (WHEN selectors carry theirs via
+source, delimiters and INTO targets. STRING compares `groups` (which sources
+each `DELIMITED BY` applies to, #576) and its detail text spells them out, so
+moving a source between delimiter groups is a `statement-changed`. (WHEN selectors carry theirs via
 `_selector_text`'s `FIG:` / `ID:` / quoted renderings, #313.)
 
 Determinism: the same pair always produces byte-identical `to_dict()` — changes
