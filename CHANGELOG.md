@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **MCP server: `business_rules`, `diff_programs`, `decode_record` and
+  `gen_fixtures` tools, and five prompts** (`cobolparser/mcp/`): the
+  server's v3 tool set. `business_rules` gives a program's decisions,
+  validations and calculations as decision tables cited on disk;
+  `diff_programs` the behavioural diff between two versions, each side cited
+  in its own file; `decode_record` reads a data file under the root through
+  a copybook's layout, a page of records at a time (encoding defaults from
+  `cobol.yml`'s `data:`); `gen_fixtures` returns the `gen-fixtures` bundle
+  inline (rows aligned to columns, 3 per sequence, seed from `cobol.yml` or
+  0). The prompts `explain_program`, `review_program`, `plan_change`,
+  `document_business_rules` and `onboard_codebase` carry the "run the tool,
+  cite it, read the caveats" method to clients without skills. Additive:
+  `MCP_SURFACE_VERSION` stays "1".
+
 * **`cobol-parser business-rules`: business rule extraction**
   (`analysis/business_rules.py`, `BusinessRuleExtractor`): the program's
   rules as a catalogue a reader can check. Every IF / EVALUATE / SEARCH is a

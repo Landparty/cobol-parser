@@ -220,6 +220,37 @@ first library feature this server would pull forward.
   `PROCEDURE DIVISION USING` line (library fix in `field_lineage.py`).
 - No new caveat kind; `MCP_SURFACE_VERSION` stays "1".
 
+## Phase 4 as built (2026-10-27)
+
+- **Four tools, `slice` not yet.** `business_rules`, `diff_programs`,
+  `decode_record` and `gen_fixtures` wrap analyzers that already existed;
+  `slice` still waits for the library feature (`docs/feature-ideas.md`
+  #31). No library change.
+- **`business_rules`** memoizes the report beside the parse like the other
+  per-program reports. `kind` and `procedure` filter; `summary` counts the
+  whole program, so a filtered answer never reads as the whole catalogue. A
+  calculation's `condition` (a copy of its formula) is dropped, and empty
+  fields are left out.
+- **`diff_programs`** parses both sides through the workspace (one config,
+  so the diff means something) and cites each side in its own file.
+- **`decode_record`** reads at most the first 16 MiB of a data file
+  (`MAX_DECODE_BYTES`) and pages 10 records at a time with `skip`; the
+  field list is given once and each record is a name -> value map, with
+  per-record `errors`. Encoding arguments default to `cobol.yml`'s `data:`.
+  The data file goes through the same workspace guard as any other read.
+- **`gen_fixtures`** runs on the workspace's parse (so `>>DEFINE`, source
+  format and skip-missing copybooks apply) rather than
+  `analyze_from_file`, which re-parses with strict copybooks. Rows are a
+  list per row aligned to `columns`, 3 per sequence by default; the seed
+  defaults to `cobol.yml`'s `seed`, else 0, so the tool stays idempotent
+  (the CLI's default seed is random). `callee_path` directories outside the
+  root are skipped with a caveat: a callee is a whole program, which the
+  guard would refuse to read there.
+- **Prompts** (open question 3): `explain_program`, `review_program`,
+  `plan_change`, `document_business_rules` and `onboard_codebase`, in
+  `cobolparser/mcp/prompts.py` (no SDK import), registered by `server.py`.
+- Adding tools and prompts is additive: `MCP_SURFACE_VERSION` stays "1".
+
 ## The one library change v1 needs: source-mapped locations everywhere
 
 Today only `LintAnalyzer` (`lint.apply_source_map`) and `FieldFlowAnalyzer`
@@ -298,7 +329,8 @@ Because `tools.py` never imports the SDK, switching later costs one module.
 3. **v2 cross-program.** Root-wide graph cache, `callers_of` at program level,
    `impact_of_change`, `where_from`, `codebase_overview`. Built (see "Phase 3
    as built").
-4. **v3** as listed above, `slice` first once the library has it.
+4. **v3** as listed above. Built except `slice` (see "Phase 4 as built"),
+   which comes once the library has it.
 
 ## Open questions
 
@@ -306,6 +338,6 @@ Because `tools.py` never imports the SDK, switching later costs one module.
    the official SDK (see "SDK choice").
 2. ~~stdio only for now, or HTTP too?~~ Decided: stdio only. The backend
    can call `CobolTools` directly.
-3. Should the server ship the `cobol-analysis` skill's guidance as MCP
-   *prompts*, so clients without skills get the same "run the tool, cite it,
-   read the caveats" instructions?
+3. ~~Should the server ship the `cobol-analysis` skill's guidance as MCP
+   *prompts*?~~ Done in Phase 4: five task prompts that each carry the
+   "run the tool, cite it, read the caveats" method.
