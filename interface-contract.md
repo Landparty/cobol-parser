@@ -338,9 +338,14 @@ methods returning the same dicts. User guide: `docs/mcp-server.md`.
 What a client depends on:
 
 - The tool names `codebase_overview`, `program_brief`, `explain_symbol`,
-  `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`
-  and `read_source`, and their argument names. (`callers_of`'s `file`
-  became optional on 2026-10-15, which no existing call notices.)
+  `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`,
+  `read_source`, `business_rules`, `diff_programs`, `decode_record` and
+  `gen_fixtures` (the last four added 2026-10-27), and their argument
+  names. (`callers_of`'s `file` became optional on 2026-10-15, which no
+  existing call notices.)
+- The prompt names `explain_program`, `review_program`, `plan_change`,
+  `document_business_rules` and `onboard_codebase`, and their argument
+  names (`cobolparser/mcp/prompts.py`). A prompt's text may change freely.
 - The envelope every tool returns: `surface_version`, `answer`, `caveats`
   (`kind`, `detail`, optional `effect`), `truncated` (`field`, `shown`,
   `total`) and, for tools about a program, `program` (`file`,

@@ -406,6 +406,28 @@ class Workspace:
         self._cache.clear()
         self._indexes.clear()
 
+    def callee_directories(self, response: Response) -> list[str]:
+        """``cobol.yml``'s ``callee_path`` directories that are under the
+        root. A callee is a whole program, not a copybook member, so a
+        directory outside the root is skipped (with a caveat) rather than
+        opened to reads the guard would refuse."""
+        kept: list[str] = []
+        skipped: list[str] = []
+        for entry in self.config.callee_path:
+            if _under(Path(entry).resolve(), self.root):
+                kept.append(entry)
+            else:
+                skipped.append(entry)
+        if skipped:
+            response.caveat(
+                "incomplete-analysis",
+                "callee directories outside the workspace were not searched: "
+                + ", ".join(skipped),
+                "CALL arguments to programs found only there are classified "
+                "without the callee's own PROCEDURE DIVISION USING",
+            )
+        return kept
+
     # -- paths ---------------------------------------------------------------
 
     def _within(self, path: Path) -> bool:

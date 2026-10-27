@@ -57,6 +57,10 @@ class TestServer:
             "record_layout",
             "lint",
             "read_source",
+            "business_rules",
+            "diff_programs",
+            "decode_record",
+            "gen_fixtures",
         }
         for tool in listed:
             assert tool.annotations is not None
@@ -66,6 +70,56 @@ class TestServer:
         assert by_name["explain_symbol"].inputSchema["required"] == ["file", "name"]
         assert by_name["callers_of"].inputSchema["required"] == ["name"]
         assert by_name["where_from"].inputSchema["required"] == ["field"]
+        assert by_name["diff_programs"].inputSchema["required"] == [
+            "old_file",
+            "new_file",
+        ]
+        assert by_name["decode_record"].inputSchema["required"] == ["copybook"]
+
+    def test_v3_tools_answer_over_the_session(self) -> None:
+        _, results = _session(
+            [
+                ("business_rules", {"file": "DB2BATCH.cbl"}),
+                (
+                    "diff_programs",
+                    {"old_file": "BATCHSEQ.cbl", "new_file": "BATCHSEQ.cbl"},
+                ),
+                ("decode_record", {"copybook": "copybooks/DCLCUST.cpy"}),
+                ("gen_fixtures", {"file": "BATCHSEQ.cbl", "limit": 1}),
+                ("business_rules", {"file": "DB2BATCH.cbl", "kind": "bogus"}),
+            ]
+        )
+        rules, diff, layout, fixtures, bad = results
+        assert rules.structuredContent["answer"]["rules"]
+        assert diff.structuredContent["answer"]["summary"]["total_changes"] == 0
+        assert layout.structuredContent["answer"]["fields"]
+        assert fixtures.structuredContent["answer"]["scenarios"]
+        assert bad.isError is True
+
+    def test_prompts_are_listed_and_rendered(self) -> None:
+        pytest.importorskip("mcp")
+        from mcp.shared.memory import create_connected_server_and_client_session
+
+        from cobolparser.mcp.prompts import PROMPTS
+        from cobolparser.mcp.server import build_server
+
+        server = build_server(_workspace())
+
+        async def run() -> tuple[Any, Any]:
+            async with create_connected_server_and_client_session(
+                server._mcp_server
+            ) as client:
+                listed = await client.list_prompts()
+                got = await client.get_prompt(
+                    "explain_program", {"file": "BATCHSEQ.cbl"}
+                )
+                return listed, got
+
+        listed, got = asyncio.run(run())
+        assert [p.name for p in listed.prompts] == [p.name for p in PROMPTS]
+        assert all(p.description for p in listed.prompts)
+        text = got.messages[0].content.text
+        assert "BATCHSEQ.cbl" in text and "program_brief" in text
 
     def test_calls_return_the_envelope(self) -> None:
         _, results = _session(

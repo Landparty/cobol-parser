@@ -3,13 +3,15 @@
 `cobol-parser mcp` lets an AI agent ask exact questions about COBOL source:
 what a field is and where it is used, what is wrong with a program, what the
 code at a cited line says, and, across the whole workspace, which programs
-call a program and what a copybook or field change reaches. It speaks the
+call a program and what a copybook or field change reaches. It also extracts
+a program's business rules, diffs two versions of a program, decodes data
+files through a copybook and generates test data. It speaks the
 [Model Context Protocol](https://modelcontextprotocol.io) over stdio, so any
 MCP client can use it: Claude Code, Claude desktop, Cursor, or an Agent SDK
 application.
 
 It is read-only. It never changes a file and never runs anything from the
-workspace.
+workspace: generated test data and decoded records come back in the answer.
 
 ## Install and connect
 
@@ -103,6 +105,19 @@ Python.
 | `lint(file, rules?, min_severity?, limit?)` | "What is wrong with this program?" Dead code, unused data items, MOVE mismatches, I/O sequencing, LINKAGE problems, recursion risks, complexity, DCLGEN and SQL/CICS checks, worst first. |
 | `read_source(file, line, before?, after?)` | "Show me the code at `COPYREPL.cbl:32`." Up to 200 numbered lines, always including `line` itself: a larger window is cut from the far end of `before` first. |
 
+### Beyond reading code
+
+| Tool | Ask it |
+|---|---|
+| `business_rules(file, program?, kind?, procedure?, include_technical?, limit?)` | "What business rules does this program implement?" Every IF / EVALUATE / SEARCH as a decision table (one branch per condition, with the actions it runs and their lines), promoted to a `validation` when a branch rejects input, and paragraph-level arithmetic as a `calculation` with its formula. Each rule has its inputs and outputs, the conditions that guard it (`guards`), the branches elsewhere that PERFORM its paragraph (`reached_via`) and why it was classified as it was; level-88 names it tests are spelled out under `condition_names`. File status, end-of-file and SQLCODE / EIB checks are counted but left out unless `include_technical` is true. `kind` and `procedure` narrow the list; the `summary` always counts the whole program. |
+| `diff_programs(old_file, new_file, old_program?, new_program?, category?, rename_threshold?, limit?)` | "What changed between these two versions?" The behaviour, not the lines: PROGRAM-ID and USING interface, files (organization, keys, status), data items (PICTURE, USAGE, VALUE, OCCURS, REDEFINES, level-88 values, field order with the byte offsets before and after), paragraphs added, removed, renamed (by body similarity, `rename_threshold`) or moved, and changed statements (PERFORM and CALL targets, MOVE targets, conditions). Each side is cited in its own file. Reformatting, comments and sequence numbers are no change. |
+| `decode_record(copybook, data_file?, record?, view?, skip?, max_records?, fields?, charset?, endian?, record_format?, record_separator?, record_length?, limit?)` | "What does this record image say?" Reads a data file under the root through a copybook's (or a program's) byte layout: the fields with offsets once, then each record's values, with bytes that do not decode as their PICTURE reported per record under `errors`. COMP-3, binary, zoned and signed fields, ASCII or EBCDIC, fixed or RDW-framed variable records. `charset`, `endian`, `record_format` and `record_separator` default to `cobol.yml`'s `data:` section. Pages of 10 records (`max_records`, `skip`, and `next` says where the next page starts); at most the first 16 MiB of a file are read. `view` reads the same bytes through a REDEFINES overlay; without `data_file`, the answer is the layout and its views alone. |
+| `gen_fixtures(file, program?, mode?, seed?, rows?, scenario?, limit?)` | "Give me test data for this program." The `gen-fixtures` bundle, inline: scenarios (`happy`: one; `branches`: one per reachable branch arm; `all`: those plus empty-input, error-status and boundary-value scenarios), each with the values every mocked boundary supplies (file records as `columns` and `rows`, CALL parameters, SQL rows, CICS data, FILE STATUS / SQLCODE) and the expectations to assert (`call_count`, constant-folded `field_equals`). A branch scenario carries a `verification` saying whether its own data reaches the branch it is named for, and `arm_coverage` lists every arm no scenario reaches, with the reason. Deterministic: the seed defaults to `cobol.yml`'s `seed`, else 0. `rows` (default 3) is per READ / FETCH sequence. `cobol-parser gen-fixtures` writes the full bundle to disk. |
+
+`gen_fixtures` searches `cobol.yml`'s `callee_path` for the programs a CALL
+names, to read their USING parameters; a callee directory outside the root
+is skipped with a caveat.
+
 ### Across programs
 
 These answer over every program under the root (by `cobol.yml`'s
@@ -173,6 +188,21 @@ stop the server from answering pings or a cancellation.
 `surface_version` changes whenever a tool, argument or envelope field changes
 in a way a client could notice.
 
+## Prompts
+
+The server also offers prompts, for clients that show them as a menu (`/`
+commands in Claude Code). Each one asks for a task and spells out which tools
+to call and how to cite the answer, the way the `cobol-analysis` skill does
+for clients that have skills:
+
+| Prompt | Arguments | Asks for |
+|---|---|---|
+| `explain_program` | `file`, `program?` | What a program does, for someone new to it |
+| `review_program` | `file`, `program?` | Defects and risks, worst first, each confirmed in the source |
+| `plan_change` | `name`, `file?` | Everything a change to a field or copybook reaches |
+| `document_business_rules` | `file`, `program?` | The program's business rules in plain language |
+| `onboard_codebase` | none | An overview of the whole workspace |
+
 ## Using the tools from Python
 
 The tools do not need the MCP SDK. The backend, an editor extension or a
@@ -187,5 +217,5 @@ tools.explain_symbol("src/ACCTUPD.cbl", "CUST-BAL")
 
 ## Coming next
 
-Business rules, record decoding, inline test fixtures, program diffs and
-program slicing. See [the design plan](plans/2026-10-15-mcp-server-design.md).
+Program slicing (only the statements that can affect a field), once the
+library has it. See [the design plan](plans/2026-10-15-mcp-server-design.md).

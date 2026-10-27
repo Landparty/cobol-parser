@@ -1,14 +1,14 @@
 ---
 type: Module
 title: MCP Server
-description: cobolparser/mcp/ and `cobol-parser mcp` -- an MCP server (stdio) that lets AI agents question COBOL source; tools as plain functions (tools.py), the response envelope and caveat kinds (envelope.py), the workspace guard, cobol.yml and parse cache (workspace.py), the root-wide cross-program indexes (codebase_index.py), and the one SDK-importing module (server.py).
+description: cobolparser/mcp/ and `cobol-parser mcp` -- an MCP server (stdio) that lets AI agents question COBOL source; tools as plain functions (tools.py), the task prompts (prompts.py), the response envelope and caveat kinds (envelope.py), the workspace guard, cobol.yml and parse cache (workspace.py), the root-wide cross-program indexes (codebase_index.py), and the one SDK-importing module (server.py).
 tags: [mcp, ai, agents, tools, stdio, caveats, source-map]
-timestamp: 2026-10-16T00:00:00Z
+timestamp: 2026-10-27T00:00:00Z
 ---
 
 # MCP Server
 
-<!-- okf:external add_tool FastMCP -->
+<!-- okf:external add_tool FastMCP Prompt from_function -->
 
 `cobol-parser mcp --root DIR` serves COBOL analysis tools to AI agents over
 the Model Context Protocol, on stdin/stdout. Design and later phases:
@@ -19,13 +19,15 @@ the Model Context Protocol, on stdin/stdout. Design and later phases:
 |---|---|---|
 | `cobolparser/mcp/envelope.py` | `Response` (caveats + truncation), `Caveat`, `CAVEAT_KINDS`, `ToolError`, `MCP_SURFACE_VERSION`, limits | no |
 | `cobolparser/mcp/workspace.py` | `Workspace` (path guard, `cobol.yml`, LRU parse cache), `ParsedProgram` (unit selection, `locate()`), `stdout_to_stderr()` | no |
-| `cobolparser/mcp/tools.py` | `CobolTools`: `codebase_overview`, `program_brief`, `explain_symbol`, `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`, `read_source` | no |
+| `cobolparser/mcp/tools.py` | `CobolTools`: `codebase_overview`, `program_brief`, `explain_symbol`, `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`, `read_source`, `business_rules`, `diff_programs`, `decode_record`, `gen_fixtures` | no |
+| `cobolparser/mcp/prompts.py` | `PROMPTS` (`PromptSpec`): `explain_program`, `review_program`, `plan_change`, `document_business_rules`, `onboard_codebase`, each a plain function returning the request text | no |
 | `cobolparser/mcp/codebase_index.py` | `programs_index` / `lineage_index` / `health_index`: facts about every program under the root, cached by `Workspace.index()` | no |
-| `cobolparser/mcp/server.py` | `build_server()`, `run_stdio()`: typed wrappers registered on `FastMCP` | **yes** (`[mcp]` extra) |
+| `cobolparser/mcp/server.py` | `build_server()`, `run_stdio()`: typed wrappers registered on `FastMCP`, and `PROMPTS` through `Prompt.from_function` | **yes** (`[mcp]` extra) |
 
 ## Contents
 
 - [Tools](#tools)
+- [Prompts](#prompts)
 - [Envelope](#envelope)
 - [Workspace](#workspace)
 - [Cross-program indexes](#cross-program-indexes)
@@ -49,6 +51,11 @@ returns a small payload. Every list is capped (`limit`, default 50, max 500).
 | `record_layout(file, record, program, limit)` | `records[]`: `qualified_name` (`X OF Y`), `section`, `declared_at`, offset/length, `redefines`, `fields` in source order each with `declared_at`; an FD name gives every record of the file (`file`); a level-66 RENAMES name gives its range (`level` 66, `renames`: the record, the record's `fields` inside the range; `_renames_records`, #563; one it cannot place is `found: false` with an `incomplete-analysis` caveat) | `compute_record_layout` per 01 plus `flag_record_layout` (SYNC slack -> `offset_ambiguous` + an `incomplete-analysis` caveat, #488; a partial level-88 line gets a caveat whose effect leaves offsets exact; `explain_symbol` carries the same caveat for its item's record); `_declarations()` matches the n-th layout entry of a qualified name to its n-th declaration (FILLER repeats) and re-sorts, since the layout emits a group after its members |
 | `explain_symbol(file, name, program, limit)` | each declaration matching `name` (or `X OF Y` / `X IN Y`, partial chains allowed, resolved by `XrefReport.entries_named`, #541): `declared_at`, `layout` (PICTURE, USAGE, `byte_offset`, `byte_length`, REDEFINES, level-88 values; a level-66 RENAMES item gets the byte range `data-items` places it at, or an `incomplete-analysis` caveat when it cannot be placed, #485, #563; a SPECIAL-NAMES name is found with its xref kind, `mnemonic-name` / `class-name` / ..., declared at the CONFIGURATION SECTION, #519), `references` with role/statement/paragraph, `references_by_role`; `suggestions` when not found | `XrefAnalyzer`, `compute_program_data_items`; not found: `special_register` from xref's `is_special_register()` (no suggestions then) |
 
+| `business_rules(file, program, kind, procedure, include_technical, limit)` | `summary` (whole program: per-kind counts, `technical_rules_excluded`, `rules_in_dead_code`), `rule_count` (after the filters), `rules` (`_rule()`: `rule_id`, kind, statement, procedure/section, `location`, `condition` or `formula` -- a calculation's condition is its formula and is dropped --, `branches` with `actions` (`text`, `location`, nested `rule_id`), `guards`, `reached_via`, `inputs`, `outputs`, `classification`; empty fields left out), `condition_names` (only those the shown rules test), a `note` when technical rules were left out, `suggestions` for a `procedure` matching nothing | `BusinessRuleExtractor`, memoized as `rules` / `rules+technical`; its heuristics caveat passed on as `incomplete-analysis` |
+| `diff_programs(old_file, new_file, old_program, new_program, category, rename_threshold, limit)` | `old` / `new` (`program_info`), `summary` (whole diff: `by_category`, `by_kind`), `changes` (`_change()`: kind, category, symbol, detail, `old` / `new` values, `old_location` cited through the old parse, `new_location` through the new one; `None` keys dropped), a `note` when nothing changed | `ProgramDiffer` on the two selected units; its caveats as `incomplete-analysis` |
+| `decode_record(copybook, data_file, record, view, skip, max_records, fields, charset, endian, record_format, record_separator, record_length, limit)` | `record_name`, `record_length`, `framing_length`, `view`, `views` (name, redefines, offset, length), `fields` (name, offset, length, picture, usage: once, not per record); with a data file `records` (`index`, `file_offset`, `length`, `values` name -> value, `absent`, `errors`), `record_count`, `more_records`, `error_count`, `next` (the `skip` of the next page) | `RecordDecoder.from_copybook_source` (the copybook read with `Workspace.read_text`, COPYs expanded from the config's copybook dirs; each unexpanded member an `unresolved-copybook` caveat), `decode_bytes` on at most `MAX_DECODE_BYTES` (16 MiB) of the file -- a cut file reports no trailing bytes. Encoding: argument, else `config.data`, else built-in (`_encoding_options`). Default page `DEFAULT_DECODE_RECORDS` (10) |
+| `gen_fixtures(file, program, mode, seed, rows, scenario, limit)` | `program_id`, `mode`, `seed`, `bundle_version`, `rows_per_sequence`, `coverage`, `scenario_count`, `scenarios` (`_scenario()`: name, intent, entry, `fixtures` (`boundary` `CATEGORY:KEY`, paragraph, `location`, direction, provenance, `columns`, `rows` as lists aligned to `columns`, terminal, status, unresolved), `expectations`, `unconstrained`, `verification` (`status` + `reasons`, as the CLI prints them)), `arm_coverage` for branches/all (counts + `missed_arms` with reason and `location` from the arm key's `@line`), `replay` | the workspace parse, not `analyze_from_file` (which re-parses with strict copybooks): `ProgramLayoutIndex.build(unit)`, `ProgramFixtureGenerator._resolve_callees` over `Workspace.callee_directories()` (`callee_path` under the root only; the rest a caveat), `BoundaryInventoryAnalyzer`, `generate_with_scenarios`. Seed: argument, else `config.seed`, else 0 (idempotent; the CLI's default is random). `rows` default `DEFAULT_FIXTURE_ROWS` (3), max 100. `bundle.unresolved` folded into one caveat |
+
 Invariants:
 
 - A reference location carries **no column**: xref's column is the
@@ -59,6 +66,15 @@ Invariants:
   about an undeclared or unknown name (`_UNDECLARED_CAVEATS`); elsewhere they
   are tokens a model pays for and cannot use.
 - Lint keeps errors when the list is cut: ordering is severity, then source.
+
+## Prompts
+
+`prompts.py`: one function per prompt, returning the request text (a
+user message); `PromptSpec.description` is the function's docstring. Each
+names the tools to call in order and ends with the shared `_METHOD`
+paragraph (cite `file:line`, read the caveats, narrow a truncated list).
+The prompt *names and arguments* are surface (interface-contract.md); the
+text is not. A test checks every prompt names real `CobolTools` methods.
 
 ## Envelope
 
@@ -204,8 +220,9 @@ rather than running its own.
   registered with `add_tool()` rather than decorators, which
   `disallow_untyped_decorators` would reject when the SDK is untyped.
 - `cobol-parser mcp` without the extra exits 1 naming the install command.
-- Tests: `tests/unit/mcp_server/` (`test_mcp_tools.py` and
-  `test_mcp_codebase.py`, the cross-program tools over copies of
+- Tests: `tests/unit/mcp_server/` (`test_mcp_tools.py`,
+  `test_mcp_v3_tools.py` (business rules, diff, decode, fixtures, prompts)
+  and `test_mcp_codebase.py`, the cross-program tools over copies of
   `tests/samples/enterprise/` and `tests/samples/lineage/`, need no SDK;
   `test_mcp_server.py` drives an in-memory client session and the CLI). The
   directory is not named `mcp`: a test package of that name shadows the SDK.

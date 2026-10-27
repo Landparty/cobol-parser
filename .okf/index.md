@@ -44,7 +44,7 @@ generators) are folders with a short routing page in front.
 | `parse_files`, `scan_files`, batch fault isolation, cross-file clones | [batch.md](batch.md) |
 | z/OS JCL: jobs, steps, DD → dataset bindings (via jcl-parser) | [jcl.md](jcl.md) |
 | CLI subcommands and flags, exit codes, the `cobol.yml` project config | [cli.md](cli.md) |
-| The MCP server for AI agents (`cobol-parser mcp`): tools, envelope, caveats, workspace guard and cache | [mcp.md](mcp.md) |
+| The MCP server for AI agents (`cobol-parser mcp`): tools, prompts, envelope, caveats, workspace guard and cache | [mcp.md](mcp.md) |
 | Test layout, markers, fixtures, coverage floor, where behaviour is pinned | [tests.md](tests.md) |
 | What the backend adapter and mocky-mock consume (summary of `interface-contract.md`) | [integration.md](integration.md) |
 

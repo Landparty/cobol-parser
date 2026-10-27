@@ -21,9 +21,11 @@ from typing import Annotated, Any
 import anyio.from_thread
 import anyio.to_thread
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp.prompts import Prompt
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from .prompts import PROMPTS
 from .tools import CobolTools
 from .workspace import Workspace
 
@@ -58,6 +60,13 @@ change to a copybook or a field reaches, and where_from for where a field's
 value comes from. The first such call indexes every program under the root,
 which takes a while on a large one; later calls reuse the index until a file
 changes.
+
+Beyond reading code: business_rules lists the decisions, validations and
+calculations a program implements; diff_programs says what changed between
+two versions of a program (behaviour, not lines); decode_record reads a data
+file through a copybook's byte layout; gen_fixtures generates test data for
+every file, CALL, SQL and CICS boundary a program touches, scenario by
+scenario.
 """
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
@@ -278,6 +287,210 @@ def build_server(workspace: Workspace) -> FastMCP:
         Start here for a codebase you do not know."""
         return await off_loop(lambda: tools.codebase_overview(limit), ctx)
 
+    async def business_rules(
+        file: File,
+        program: Program = None,
+        kind: Annotated[
+            str | None,
+            Field(
+                description="Only rules of this kind: decision, validation "
+                "or calculation"
+            ),
+        ] = None,
+        procedure: Annotated[
+            str | None,
+            Field(description="Only rules in this paragraph or section"),
+        ] = None,
+        include_technical: Annotated[
+            bool,
+            Field(
+                description="Also list technical rules (FILE STATUS, "
+                "end-of-file flags, SQLCODE, EIB fields)"
+            ),
+        ] = False,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """The business rules a program implements: every IF / EVALUATE /
+        SEARCH as a decision table (one branch per condition, with the
+        actions it takes), promoted to a validation when a branch rejects,
+        and arithmetic as calculations with a formula. Each rule has its
+        inputs, outputs, the conditions that guard it, the paragraphs that
+        reach it and its location; level-88 names are spelled out."""
+        return await off_loop(
+            lambda: tools.business_rules(
+                file, program, kind, procedure, include_technical, limit
+            )
+        )
+
+    async def diff_programs(
+        old_file: Annotated[
+            str, Field(description="The earlier version, relative to the root")
+        ],
+        new_file: Annotated[
+            str, Field(description="The later version, relative to the root")
+        ],
+        old_program: Program = None,
+        new_program: Program = None,
+        category: Annotated[
+            str | None,
+            Field(
+                description="Only changes of this category: program, file, "
+                "data or procedure"
+            ),
+        ] = None,
+        rename_threshold: Annotated[
+            float | None,
+            Field(
+                description="How alike (0-1, default 0.8) two paragraph "
+                "bodies must be to count as a rename rather than a removal "
+                "and an addition"
+            ),
+        ] = None,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """What changed in a program's behaviour between two versions:
+        PROGRAM-ID and interface, files, data items (PICTURE, USAGE, VALUE,
+        OCCURS, REDEFINES, level-88 values, field order with byte offsets),
+        paragraphs added, removed, renamed or moved, and changed statements
+        (PERFORM / CALL targets, MOVE targets, conditions). Reformatting,
+        comments and sequence numbers are not changes."""
+        return await off_loop(
+            lambda: tools.diff_programs(
+                old_file,
+                new_file,
+                old_program,
+                new_program,
+                category,
+                rename_threshold,
+                limit,
+            )
+        )
+
+    async def decode_record(
+        copybook: Annotated[
+            str,
+            Field(
+                description="Copybook (or program) holding the record "
+                "layout, relative to the root"
+            ),
+        ],
+        data_file: Annotated[
+            str | None,
+            Field(
+                description="Data file to read, relative to the root; omit "
+                "it for the layout and its REDEFINES views only"
+            ),
+        ] = None,
+        record: Annotated[
+            str | None,
+            Field(description="01 record to use when the copybook has several"),
+        ] = None,
+        view: Annotated[
+            str | None,
+            Field(
+                description="REDEFINES overlay to read the bytes through "
+                "(names in 'views'; default: the record as declared)"
+            ),
+        ] = None,
+        skip: Annotated[int, Field(description="Records to skip first")] = 0,
+        max_records: Annotated[
+            int | None, Field(description="Records to decode (default 10)")
+        ] = None,
+        fields: Annotated[
+            list[str] | None,
+            Field(
+                description="Only these fields (default: every field, up to " "limit)"
+            ),
+        ] = None,
+        charset: Annotated[
+            str | None,
+            Field(description="ascii or ebcdic (default: cobol.yml, else ascii)"),
+        ] = None,
+        endian: Annotated[
+            str | None,
+            Field(description="Binary byte order: auto, big, little or native"),
+        ] = None,
+        record_format: Annotated[
+            str | None,
+            Field(
+                description="fixed (RECFM=F/FB), variable (RECFM=V/VB, with "
+                "RDWs), variable-bare or auto"
+            ),
+        ] = None,
+        record_separator: Annotated[
+            str | None,
+            Field(description="none, or newline between records"),
+        ] = None,
+        record_length: Annotated[
+            int | None,
+            Field(
+                description="Bytes per fixed-length record, when the file's "
+                "LRECL is not the layout's length"
+            ),
+        ] = None,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """Read a data file (a record image, an EBCDIC extract) through a
+        copybook's byte layout: each record's field values, with the bytes
+        that do not decode as their PICTURE reported per field. COMP-3,
+        binary, zoned and signed fields are decoded exactly. Without a data
+        file: the layout's fields with offsets and its REDEFINES views."""
+        return await off_loop(
+            lambda: tools.decode_record(
+                copybook,
+                data_file,
+                record,
+                view,
+                skip,
+                max_records,
+                fields,
+                charset,
+                endian,
+                record_format,
+                record_separator,
+                record_length,
+                limit,
+            )
+        )
+
+    async def gen_fixtures(
+        file: File,
+        program: Program = None,
+        mode: Annotated[
+            str,
+            Field(
+                description="happy (one scenario), branches (one per "
+                "reachable branch arm) or all (branches plus empty input, "
+                "error status and boundary values)"
+            ),
+        ] = "happy",
+        seed: Annotated[
+            int | None,
+            Field(
+                description="Seed for the generated values (default: "
+                "cobol.yml's seed, else 0); the same seed gives the same data"
+            ),
+        ] = None,
+        rows: Annotated[
+            int | None,
+            Field(description="Rows per READ / FETCH sequence (default 3)"),
+        ] = None,
+        scenario: Annotated[
+            str | None,
+            Field(description="Only scenarios whose name contains this"),
+        ] = None,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """Test data for a program: scenarios (a happy path, or one per
+        branch arm), each with the values every mocked boundary supplies
+        (file records, CALL parameters, SQL rows, CICS data, FILE STATUS /
+        SQLCODE) and what to assert afterwards (call counts, field values
+        that constant-fold). Each branch scenario says whether its own data
+        really reaches the branch it is named for."""
+        return await off_loop(
+            lambda: tools.gen_fixtures(file, program, mode, seed, rows, scenario, limit)
+        )
+
     for tool in (
         codebase_overview,
         program_brief,
@@ -288,8 +501,18 @@ def build_server(workspace: Workspace) -> FastMCP:
         record_layout,
         lint,
         read_source,
+        business_rules,
+        diff_programs,
+        decode_record,
+        gen_fixtures,
     ):
         server.add_tool(tool, annotations=_READ_ONLY, structured_output=True)
+    for spec in PROMPTS:
+        server.add_prompt(
+            Prompt.from_function(
+                spec.function, name=spec.name, description=spec.description
+            )
+        )
     return server
 
 
