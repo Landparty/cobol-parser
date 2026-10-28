@@ -375,6 +375,9 @@ class Workspace:
         #: so a client sees the first cross-program call is alive. Set by the
         #: server around one call; None when nobody listens.
         self.progress: Callable[[float, float | None, str], None] | None = None
+        #: The per-file facts the cross-program indexes are assembled from
+        #: (:class:`.facts.FactsStore`); made on first use when not set.
+        self.facts_store: Any = None
         if config is not None:
             self._use_config(config)
         else:

@@ -24,7 +24,8 @@ the Model Context Protocol, on stdin/stdout. Design and later phases:
 | `cobolparser/mcp/navigation.py` | `read_procedure()`, `find_statements()`, `statement_rows()` / `StatementRow`, the `statements` index (`statements_index()`), `statement_verb()` | no |
 | `cobolparser/mcp/hints.py` | `add_hints()`: the `next` calls per tool, `MAX_HINTS` | no |
 | `cobolparser/mcp/prompts.py` | `PROMPTS` (`PromptSpec`): `explain_program`, `review_program`, `plan_change`, `document_business_rules`, `onboard_codebase`, each a plain function returning the request text | no |
-| `cobolparser/mcp/codebase_index.py` | `programs_index` / `lineage_index` / `health_index`: facts about every program under the root, cached by `Workspace.index()` | no |
+| `cobolparser/mcp/codebase_index.py` | `programs_index` / `lineage_index` / `health_index`: assembled from per-file facts, cached by `Workspace.index()` | no |
+| `cobolparser/mcp/facts.py` | `FileFacts` (one parse's facts for every index), `compute_facts()`, `FactsStore` (current facts kept, stale ones recomputed in a spawn pool, pickled to `cache_dir`, `warm()`), `store_for()`, `surveyed()`, `default_cache_dir()` | no |
 | `cobolparser/mcp/server.py` | `build_server()`, `run_stdio()`: typed wrappers registered on `FastMCP`, and `PROMPTS` through `Prompt.from_function` | **yes** (`[mcp]` extra) |
 
 ## Contents
@@ -199,8 +200,8 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   free and calls run one at a time.
 - **Progress.** The cross-program tools take a FastMCP `Context` (annotated
   with the bare class, `MCPContext`: `Context[...]` is not detected).
-  `off_loop` sets `Workspace.progress` for that one call; `_programs()` in
-  `codebase_index.py` reports `(done, total, "reading FILE")` per file, sent
+  `off_loop` sets `Workspace.progress` for that one call; `FactsStore._compute()`
+  in `facts.py` reports `(done, total, "reading FILE")` per file, sent
   through `anyio.from_thread.run(ctx.report_progress, ...)` at most once a
   `PROGRESS_INTERVAL`. A listener that raises is dropped, never fails the
   build.
@@ -220,19 +221,46 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
 
 ## Cross-program indexes
 
-`codebase_index.py`. Each index is one walk of `Workspace.program_files()`
-(`cobol.yml` `extensions`, default `.cbl`/`.cob`/`.cobol`; hidden
-directories and copybook directories inside the root skipped), parsing each
-file with `cached_or_parse()`: a current cached parse is reused, a fresh one
-never enters the LRU (a walk must not evict what the client asked about).
-Only facts are kept, so one AST is live at a time. Every index records
+`codebase_index.py`, over `facts.py`. Every index is assembled from the
+per-file `FileFacts` of `Workspace.program_files()` (`cobol.yml`
+`extensions`, default `.cbl`/`.cob`/`.cobol`; hidden directories and
+copybook directories inside the root skipped), given by
+`facts.surveyed()` -> `store_for(workspace).facts()`. `compute_facts()`
+parses a file once with `cached_or_parse()` (a current cached parse is
+reused, a fresh one never enters the LRU) and takes from that parse what
+every index needs: `UnitFacts` (`_unit_facts`), its `GraphPart`
+(`CodebaseGraphBuilder.absorb()`; the index joins them with `assemble()`),
+`LineageFacts` per unit, health rows and redundancy fingerprints, and
+`StatementRow`s. `FileFacts.stamps` are the parse's stamps (the file, its
+expanded copybooks, the copybook directories), so after an edit only the
+stale files are recomputed; the index's own `tree_stamps()` still notice an
+added or removed program.
+
+`FactsStore` (`Workspace.facts_store`; `store_for` makes an in-process,
+memory-only one when the CLI set none): with `workers > 1` and at least
+`PARALLEL_THRESHOLD` (12) stale files, a `spawn` `ProcessPoolExecutor`
+whose initializer (`_init_worker`) dup2s stderr over stdout and builds its
+own `Workspace` from the vetted config; a worker that dies costs its file
+(`failed`), not the index. With `cache_dir` the facts are pickled to
+`facts-<sha of root>.pickle` (atomic replace) under a key of
+`FACTS_VERSION`, the package version, the Python version and the config;
+another key starts afresh, an unreadable file is no cache. The CLI default
+is `default_cache_dir()`, never under the root, so a checkout cannot plant
+a pickle. `warm()` (started by `run_stdio` unless `--no-warm-up`) computes
+every stale file in a thread: pooled, outside `Workspace.lock`, with
+`_busy` cleared so `facts()` waits rather than recomputing; in-process, one
+file at a time under `Workspace.lock` then `FactsStore.lock` (the order a
+tool call takes them), so calls interleave. Measured on an 80-program root
+(4 CPUs): every index from cold 9.5 s in one process, 2.8 s with 4
+workers, 0.1 s after a restart from disk; before, each index parsed the
+root itself (4-5 s each). Every index records
 `failed` (file -> reason) and `file_caveats`; tools fold them into a few
 aggregated caveats (`_carry_index_caveats`, `_notes`: `NOTES_SHOWN` named,
 then a count), with the root cut from library notes (`_relative`).
 
 | Index | Built on first | Keeps |
 |---|---|---|
-| `programs` | program-level `callers_of`, `impact_of_change`, `codebase_overview` | `UnitFacts` per unit (id, file, depth, `unit_kind`, `graph_id` (the graph's id, `OUTER/INNER` for a nested unit), `entries`, `_calls` rows with on-disk sites); the `CodebaseGraph` from `CodebaseGraphBuilder.build_from_results()` fed the same parses (no second parse); `copy_sites` |
+| `programs` | program-level `callers_of`, `impact_of_change`, `codebase_overview` | `UnitFacts` per unit (id, file, depth, `unit_kind`, `graph_id` (the graph's id, `OUTER/INNER` for a nested unit), `entries`, `_calls` rows with on-disk sites); the `CodebaseGraph` from `CodebaseGraphBuilder.assemble()` over the files' `GraphPart`s (no second parse); `copy_sites` |
 | `lineage` | field-mode `impact_of_change`, `where_from` | every unit's `FieldFlowAnalyzer` report (after `apply_source_map`) in one `LineageGraph`; JCL under the root (`.jcl`/`.job`, less the members of `configured` procedure libraries) through `load_jobs(jcl, proc_path=...)` when jcl-parser imports (PROCs from `Workspace.proc_directories()`, then `jcl_tools.procedure_libraries()`'s `configured`, the JCLLIB-named directories (`jcllib_directories`) and `discovered`: the libraries the JCL tools read, every file in them stamped; proc_path folders outside are skipped with a problem; with none at all, an unexpanded PROC adds a hint naming `.prc` / PROCLIB / `project.proc_path`; the steps `bindings_from_jobs` could not read become the graph's `join_caveats`), else `jcl_note`; `edge_files` |
 | `health` | `codebase_overview` | grade/score per unit (`TechnicalDebtAnalyzer` sharing the memoized flow and redundancy reports); `cross_file_clone_groups` over a hand-built `ScanReport` (fingerprints stamped with `origin` and, as `scan` does, `body_origin`, #470), members placed on disk |
 

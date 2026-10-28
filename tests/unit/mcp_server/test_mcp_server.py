@@ -246,7 +246,10 @@ class TestServer:
 
 def _recorder(served: list[Workspace]) -> Any:
     def record(
-        workspace: Workspace, tools_spec: str | None = None, budget: int | None = None
+        workspace: Workspace,
+        tools_spec: str | None = None,
+        budget: int | None = None,
+        **kwargs: Any,
     ) -> None:
         served.append(workspace)
 
@@ -399,6 +402,7 @@ class TestCli:
             workspace: Workspace,
             tools_spec: str | None = None,
             budget: int | None = None,
+            **kwargs: Any,
         ) -> None:
             specs.append(tools_spec)
 
@@ -406,6 +410,40 @@ class TestCli:
             self._main("mcp", "--root", str(tmp_path))
             self._main("mcp", "--root", str(tmp_path), "--tools", "core,jcl")
         assert specs == ["auto", "core,jcl"]
+
+    def test_facts_flags(self, tmp_path: Path) -> None:
+        pytest.importorskip("mcp")
+        calls: list[tuple[Workspace, dict[str, Any]]] = []
+
+        def record(workspace: Workspace, *args: Any, **kwargs: Any) -> None:
+            calls.append((workspace, kwargs))
+
+        cache = tmp_path / "cache"
+        with patch("cobolparser.mcp.server.run_stdio", record):
+            self._main("mcp", "--root", str(tmp_path), "--cache-dir", str(cache))
+            self._main(
+                "mcp",
+                "--root",
+                str(tmp_path),
+                "--workers",
+                "1",
+                "--no-disk-cache",
+                "--no-warm-up",
+            )
+        (first, first_kwargs), (second, second_kwargs) = calls
+        assert first.facts_store.cache_dir == cache
+        assert first_kwargs == {"warm_up": True}
+        assert second.facts_store.cache_dir is None
+        assert second.facts_store.workers == 1
+        assert second_kwargs == {"warm_up": False}
+
+    def test_bad_workers_flag(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        pytest.importorskip("mcp")
+        with pytest.raises(SystemExit):
+            self._main("mcp", "--root", str(tmp_path), "--workers", "0")
+        assert "--workers" in capsys.readouterr().err
 
     def test_bad_tools_flag(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

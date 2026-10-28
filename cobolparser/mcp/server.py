@@ -713,6 +713,15 @@ def run_stdio(
     workspace: Workspace,
     tools_spec: str | None = "auto",
     max_answer_bytes: int | None = DEFAULT_ANSWER_BYTES,
+    *,
+    warm_up: bool = True,
 ) -> None:
-    """Serve *workspace* over stdio until the client disconnects."""
-    build_server(workspace, tools_spec, max_answer_bytes).run("stdio")
+    """Serve *workspace* over stdio until the client disconnects; with
+    *warm_up*, every program's facts are computed in the background meanwhile,
+    so the first cross-program question finds them ready."""
+    server = build_server(workspace, tools_spec, max_answer_bytes)
+    if warm_up:
+        from .facts import store_for
+
+        store_for(workspace).warm()
+    server.run("stdio")

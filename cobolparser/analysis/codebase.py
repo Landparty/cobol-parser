@@ -378,6 +378,28 @@ class CopyEdge:
 
 
 @dataclass
+class GraphPart:
+    """What one file contributes to a :class:`CodebaseGraph`
+    (:meth:`CodebaseGraphBuilder.absorb`), picklable, so a file's part can be
+    computed in a worker process or kept between builds while the file is
+    unchanged."""
+
+    path: str
+    nodes: list[ProgramNode] = field(default_factory=list)
+    call_edges: list[CallEdge] = field(default_factory=list)
+    copy_edges: list[CopyEdge] = field(default_factory=list)
+    unresolved: list[str] = field(default_factory=list)
+    errors: list[dict[str, Any]] = field(default_factory=list)
+    #: The program ids found in the file, outermost first; None when the
+    #: parse result was missing, ``[]`` for a path that does not exist.
+    unit_ids: list[str] | None = None
+    #: The PROGRAM-IDs it declares, for the duplicate check across files.
+    declared: list[str] = field(default_factory=list)
+    #: (member, line) of each COPY written in the file.
+    copy_sites: list[tuple[str, int]] = field(default_factory=list)
+
+
+@dataclass
 class CodebaseGraph:
     """The aggregated dependency graph for a whole tree of COBOL source."""
 
@@ -883,55 +905,105 @@ class CodebaseGraphBuilder:
         symbols and cache) that must not parse every file a second time.
         COPY edges still come from each file's raw text, here.
         """
-        # Per-build caches: a copybook edited between two builds on one
-        # long-lived builder must not serve the previous build's chain.
+        self.begin_build()
+        files = self._normalize_paths(paths)
+        parts = [self.absorb(batch_result) for batch_result in results]
+        absorbed = {part.path for part in parts}
+        parts += [self.absorb_missing(path) for path in files if path not in absorbed]
+        return self.assemble(parts)
+
+    def begin_build(self) -> None:
+        """Forget what the previous build resolved: a copybook edited between
+        two builds on one long-lived builder must not serve the previous
+        build's chain. :meth:`build_from_results` calls it; a caller driving
+        :meth:`absorb` / :meth:`assemble` itself calls it first."""
         self._member_paths = {}
         self._member_failures = {}
         self._reported_failures = set()
         self._member_copies = {}
         self._copy_sites = {}
-        files = self._normalize_paths(paths)
 
+    def absorb(self, batch_result: BatchResult) -> GraphPart:
+        """What one file adds to the graph: its program nodes and CALL edges
+        from the parse, and its COPY edges from its raw text. Parts of
+        different files are independent (each may come from another process)
+        and :meth:`assemble` joins them."""
+        path = str(batch_result.path)
+        part = GraphPart(path=path)
+        units_by_path: dict[str, list[str]] = {}
+        self._absorb_parse(
+            batch_result,
+            part.nodes,
+            part.call_edges,
+            part.unresolved,
+            part.errors,
+            units_by_path,
+            part.declared,
+        )
+        part.unit_ids = units_by_path.get(path)
+        if not (part.unit_ids == [] and not os.path.exists(path)):
+            self._collect_copy_edges(
+                path,
+                units_by_path.get(path, [_program_id_from_path(path)]),
+                part.nodes,
+                part.copy_edges,
+                part.unresolved,
+                part.errors,
+            )
+        part.copy_sites = list(self._copy_sites.get(path, []))
+        return part
+
+    def absorb_missing(self, path: str) -> GraphPart:
+        """The part of a file no parse result came back for: its COPY edges
+        only, attributed to the program its file name suggests."""
+        part = GraphPart(path=path)
+        self._collect_copy_edges(
+            path,
+            [_program_id_from_path(path)],
+            part.nodes,
+            part.copy_edges,
+            part.unresolved,
+            part.errors,
+        )
+        part.copy_sites = list(self._copy_sites.get(path, []))
+        return part
+
+    def assemble(self, parts: Iterable[GraphPart]) -> CodebaseGraph:
+        """The graph of every file's :meth:`absorb` part, in the order given
+        (the first file declaring a PROGRAM-ID is the one a duplicate is
+        reported against)."""
         nodes: list[ProgramNode] = []
         call_edges: list[CallEdge] = []
         copy_edges: list[CopyEdge] = []
         unresolved: list[str] = []
         errors: list[dict[str, Any]] = []
-        # path -> the program ids found in it, outermost first
-        units_by_path: dict[str, list[str]] = {}
+        copy_sites: dict[str, list[tuple[str, int]]] = {}
         seen_program_ids: dict[str, str] = {}
-
-        for batch_result in results:
-            self._absorb_parse(
-                batch_result,
-                nodes,
-                call_edges,
-                unresolved,
-                errors,
-                units_by_path,
-                seen_program_ids,
-            )
+        for part in parts:
+            nodes += part.nodes
+            call_edges += part.call_edges
+            copy_edges += part.copy_edges
+            unresolved += part.unresolved
+            errors += [e for e in part.errors if e not in errors]
+            if part.copy_sites:
+                copy_sites[part.path] = list(part.copy_sites)
+            for program_id in part.declared:
+                previous = seen_program_ids.get(program_id)
+                if previous is not None and previous != part.path:
+                    # A nested id is qualified by its outermost program's, so
+                    # a nested ERRHAND in PGMA and one in PGMB never collide.
+                    unresolved.append(
+                        f"duplicate PROGRAM-ID {program_id} in {previous} and "
+                        f"{part.path}: call edges to it cannot be attributed "
+                        "to one file"
+                    )
+                else:
+                    seen_program_ids[program_id] = part.path
 
         if not self.copybook_paths:
             unresolved.append(
                 "no copybook search path configured: COPY members were not "
                 "resolved to files and nested COPY chains were not followed"
-            )
-
-        nodes_by_path: dict[str, list[ProgramNode]] = {}
-        for node in nodes:
-            nodes_by_path.setdefault(node.path, []).append(node)
-
-        for path in files:
-            if units_by_path.get(path) == [] and not os.path.exists(path):
-                continue  # reported above as a missing path
-            self._collect_copy_edges(
-                path,
-                units_by_path.get(path, [_program_id_from_path(path)]),
-                nodes_by_path.get(path, []),
-                copy_edges,
-                unresolved,
-                errors,
             )
 
         call_edges = self._resolve_entry_names(nodes, call_edges, unresolved)
@@ -946,7 +1018,7 @@ class CodebaseGraphBuilder:
             copy_edges=sorted(set(copy_edges), key=CopyEdge._sort_key),
             unresolved=sorted(set(unresolved)),
             errors=sorted(errors, key=lambda e: (str(e["path"]), str(e["error"]))),
-            copy_sites=self._copy_sites,
+            copy_sites=copy_sites,
         )
 
     @staticmethod
@@ -1082,7 +1154,7 @@ class CodebaseGraphBuilder:
         unresolved: list[str],
         errors: list[dict[str, Any]],
         units_by_path: dict[str, list[str]],
-        seen_program_ids: dict[str, str],
+        declared_ids: list[str],
     ) -> None:
         path = str(batch_result.path)
         parse_result = batch_result.result
@@ -1166,16 +1238,7 @@ class CodebaseGraphBuilder:
                 return graph_ids.get(id(target), callee) if target else callee
 
             unit_ids.append(program_id)
-            previous = seen_program_ids.get(program_id)
-            if previous is not None and previous != path:
-                # A nested id is qualified by its outermost program's, so a
-                # nested ERRHAND in PGMA and one in PGMB never collide.
-                unresolved.append(
-                    f"duplicate PROGRAM-ID {program_id} in {previous} and {path}: "
-                    "call edges to it cannot be attributed to one file"
-                )
-            else:
-                seen_program_ids[program_id] = path
+            declared_ids.append(program_id)
 
             node = ProgramNode(
                 program_id=program_id,

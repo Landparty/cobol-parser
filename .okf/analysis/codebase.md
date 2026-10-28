@@ -186,8 +186,15 @@ not read as "a codebase with no programs".
 
 `build_from_results(paths, results)` is `build()` without the parse: the
 caller hands one `BatchResult` per path (an iterable, consumed one at a time,
-so a generator keeps one AST live). The MCP server's `programs` index feeds
-it its own parses ([../mcp.md](../mcp.md)). `CodebaseGraph.copy_sites` (file
+so a generator keeps one AST live). It is `begin_build()` (reset the
+per-build caches), `absorb(batch_result)` per file -> a picklable
+`GraphPart` (nodes, CALL edges, COPY edges from the raw text, unresolved,
+errors, `unit_ids`, `declared` PROGRAM-IDs, `copy_sites`),
+`absorb_missing(path)` for a path no result came back for, then
+`assemble(parts)`: concatenation in order, the duplicate PROGRAM-ID check
+across parts, `_resolve_entry_names()`, sorting. Parts are independent, so
+the MCP server computes them per file in worker processes and keeps them
+while the file is unchanged ([../mcp.md](../mcp.md)). `CodebaseGraph.copy_sites` (file
 -> `(member, line)` of each COPY / EXEC SQL INCLUDE written in a program
 file, source order) records the COPY scan's lines; it is not in `to_dict()`.
 

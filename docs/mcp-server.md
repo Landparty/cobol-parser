@@ -47,6 +47,10 @@ Any client that takes a JSON server list (Claude desktop's
 | `--cache-size N` | 32 | Parsed programs kept in memory. A program is parsed again when it, a copybook it expanded, or a copybook directory changes on disk (so a member added after a "COPY not expanded" caveat is picked up). |
 | `--tools SPEC` | `auto` | Which tools to offer. `auto` is the `core` group, plus the `jcl` group when the root holds a `.jcl` / `.job` / `.prc` / `.proc` file or `cobol.yml` names a `proc_path`. `all` offers every tool; otherwise give a comma-separated list of groups (`core`: the reading tools, `data`: `decode_record`, `gen_fixtures`, `diff_programs`, `jcl`: the JCL tools) and tool names. Each tool's definition is sent to the model on every turn, so a smaller set costs fewer input tokens. |
 | `--max-answer-bytes N` | 24000 | Size budget of one tool result; `0` turns it off. See [Reading an answer](#reading-an-answer). |
+| `--workers N` | CPUs, at most 8 | Processes that parse the root for the cross-program answers; `1` parses in the server itself. |
+| `--cache-dir DIR` | `$XDG_CACHE_HOME/cobol-parser/mcp` (else `~/.cache/cobol-parser/mcp`) | Where what each program gave is kept between starts, one file per root. It is only ever read from a directory you chose, never from under the root. |
+| `--no-disk-cache` | | Keep that in memory only: every start parses the whole root. |
+| `--no-warm-up` | | Do not parse the root at start; the first cross-program question does it. |
 | `--config FILE` / `--no-config` | `cobol.yml` in `--root` | Which `cobol.yml` to use. |
 
 Copybook directories, source format and `>>DEFINE` symbols come from the
@@ -155,12 +159,17 @@ whose commands are read from a dataset rather than in-stream `SYSIN` is not
 traced, and the caveats name that dataset. `depth` caps how many
 program boundaries a path may cross (`0` stays in the program).
 
-The first cross-program call indexes every program under the root: on a
-root of a few hundred programs that takes on the order of a minute. The
-index is kept and reused until a program or copybook it read changes, or a
-program is added or removed. Who-calls-what, field lineage and health are
-three separate indexes, so asking only who calls a program never pays for
-the other two. While an index is built the server sends MCP progress
+Cross-program answers come from every program under the root, each parsed
+once: who-calls-what, field lineage, health and the statement search all
+take what they need from that one parse. The server starts parsing the root
+in the background as soon as it starts (`--no-warm-up` turns that off), in
+several processes (`--workers`), so the first cross-program question
+usually finds the work done or under way; on an 80-program root that is
+about 10 seconds in one process and 3 with four. What each file gave is kept
+on disk (`--cache-dir`), so a restarted server answers at once and parses
+only the files that changed since. After an edit, only the changed program
+(or the programs that COPY the changed copybook) is parsed again. While the
+root is read the server sends MCP progress
 notifications (one per file read, at most once a second) to a client that
 asked for them, so a client that resets its timeout on progress keeps
 waiting. A symlink under the root that leads outside it is skipped, as

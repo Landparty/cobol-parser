@@ -211,21 +211,15 @@ def statements_index(workspace: Workspace) -> StatementsIndex:
     def build() -> tuple[StatementsIndex, dict[str, Stamp]]:
         import time
 
-        from .codebase_index import _programs, _Survey
+        from .codebase_index import _Survey
+        from .facts import surveyed
 
         started = time.monotonic()
         survey = _Survey()
         stamps = workspace.tree_stamps()
         index = StatementsIndex()
-        lines = _Lines(workspace)
-        for path, parsed in _programs(workspace, survey, stamps):
-            if parsed is None:
-                continue
-            response = Response()
-            index.rows.extend(statement_rows(parsed, lines, response))
-            lines._held.clear()
-            for caveat in response.caveats:
-                survey.note(workspace.display(path), caveat)
+        for facts in surveyed(workspace, survey, stamps):
+            index.rows.extend(facts.statements)
         index.files = survey.files
         index.failed = survey.failed
         index.file_caveats = survey.file_caveats
