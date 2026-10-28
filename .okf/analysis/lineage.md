@@ -224,7 +224,8 @@ always a `reformat`, #585), ICETOOL (each `TOOLIN` `COPY` / `SORT` / `MERGE`
 (operands in any order, `-` continuations joined; a command word starts a
 command only at a statement start -- newline, `;`, or after
 `THEN`/`ELSE`/`DO` -- outside parentheses, after `/* */` comments are
-dropped, so `PROD.DELETE.MASTER` does not end the REPRO, #338), IKJEFT01
+dropped, so `PROD.DELETE.MASTER` does not end the REPRO, #338; commands read
+from a `SYSIN` *dataset* are not traced, and a note names the dataset), IKJEFT01
 `RUN PROGRAM(x)` (every one in the SYSTSIN, each bound to the step's DDs, #584).
 A
 blank-named DD continues the concatenation of the DD before it (`_named`);
@@ -245,7 +246,9 @@ controller) binds its DDs to the application program named by the second
 `PARM` positional when the region is `DLI` / `DBB` / `BMP`, not to
 `DFSRRC00` itself, so an IMS batch program's files join. `load_jobs(paths, proc_path)` reads a flat PROC
 folder (`NAME.prc`) as well as a JCLLIB base -- jcl-parser's own loader
-only searches `JCLLIB ORDER=` libraries. `jobs_from_sources(jcl, procs)`
+only searches `JCLLIB ORDER=` libraries. `proc_path` may be one folder or
+several, searched in order (the first that has a member wins; the first
+folder is the JCLLIB base). `jobs_from_sources(jcl, procs)`
 does the same from in-memory text (the backend's stored members). Not built
 on `cobolparser/jcl/`'s model; it shares only `jcl/programs.py` (the
 IKJEFT01 / DFSRRC00 launched-program rules), so `jcl --program` and lineage

@@ -347,11 +347,29 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
     index.jcl_files = [workspace.display(p) for p in jcl]
     for path in jcl:
         stamps[str(path)] = _stamp(str(path))
+    proc_dirs, skipped_procs = workspace.proc_directories()
+    if skipped_procs:
+        index.problems.append(
+            "proc_path folders outside the workspace were not searched: "
+            + ", ".join(skipped_procs)
+        )
+    for folder in proc_dirs:
+        # The folder itself (a PROC added or removed) and each member in it.
+        stamps[str(folder)] = _stamp(str(folder))
+        if folder.is_dir():
+            for member in folder.iterdir():
+                if member.is_file():
+                    stamps[str(member)] = _stamp(str(member))
     if jcl:
         try:
             from ..analysis.lineage_jcl import bindings_from_jobs, load_jobs
 
-            jobs, problems = load_jobs(jcl)
+            jobs, problems = load_jobs(jcl, proc_path=proc_dirs)
+            if not proc_dirs and any("PROCs not expanded" in p for p in problems):
+                problems.append(
+                    "cataloged PROCs are looked up only in the folders "
+                    "cobol.yml lists as project.proc_path, and it lists none"
+                )
         except ImportError:
             index.jcl_note = (
                 f"{len(jcl)} JCL file(s) under the root were not read: "

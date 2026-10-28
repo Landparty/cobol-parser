@@ -117,7 +117,7 @@ cobol-parser complexity <file.cbl>
 cobol-parser health <file.cbl>
 cobol-parser business-rules <file.cbl> [--format json|text] [--include-technical]
 cobol-parser lineage <file.cbl> [--field NAME] [--direction forward|backward] [--format json|text]
-cobol-parser field-impact [FIELD] PATH... [--program NAME] [--table T.C | --dataset DSN] [--direction forward|backward] [--depth N] [--jcl PATH]... [--proc-path DIR] [--bindings FILE.json] [--key-relationships] [--format json|text] [--copybook-path DIR] [--source-format auto|fixed|free] [--define SYMBOL[=VALUE]]
+cobol-parser field-impact [FIELD] PATH... [--program NAME] [--table T.C | --dataset DSN] [--direction forward|backward] [--depth N] [--jcl PATH]... [--proc-path DIR]... [--bindings FILE.json] [--key-relationships] [--format json|text] [--copybook-path DIR] [--source-format auto|fixed|free] [--define SYMBOL[=VALUE]]
 cobol-parser redundancy <file.cbl> [--min-clone-statements N]
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
 cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables|lineage] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR] [--define SYMBOL[=VALUE]] [--encoding ENC] [--source-format auto|fixed|free] [--output FILE] [--compact]
