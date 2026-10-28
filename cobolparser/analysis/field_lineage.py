@@ -54,6 +54,7 @@ from __future__ import annotations
 import re
 from bisect import bisect_left
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from functools import total_ordering
 from typing import Any
@@ -427,6 +428,12 @@ class FieldFlowReport:
     summary: list[PortFlow] = field(default_factory=list)
     key_uses: list[KeyUse] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
+    #: Items a statement changes in place, from their own value (``ADD 1
+    #: TO WS``, ``MULTIPLY 100 BY WS``, ``COMPUTE WS = WS * 2``): one
+    #: source == target edge each (#748). Not in ``edges``, which never
+    #: loops; a path *through* such an item carries a computed value, so
+    #: ``summary`` and ``LineageGraph`` count it as derived.
+    in_place: list[LineageEdge] = field(default_factory=list)
 
     def port(self, kind: str, key: str) -> Port | None:
         for port in self.ports:
@@ -443,6 +450,7 @@ class FieldFlowReport:
             "edges": [e.to_dict() for e in self.edges],
             "summary": [s.to_dict() for s in self.summary],
             "key_uses": [k.to_dict() for k in self.key_uses],
+            "in_place": [e.to_dict() for e in self.in_place],
             "caveats": list(self.caveats),
             "statistics": {
                 "items": len(self.items),
@@ -450,6 +458,7 @@ class FieldFlowReport:
                 "edges": len(self.edges),
                 "summary": len(self.summary),
                 "key_uses": len(self.key_uses),
+                "in_place": len(self.in_place),
             },
         }
 
@@ -496,6 +505,13 @@ def apply_source_map(
             edge = replace(edge, origin_file=origin[0], origin_line=origin[1])
         edges.append(edge)
     report.edges = edges
+    in_place: list[LineageEdge] = []
+    for edge in report.in_place:
+        origin = source_map.get(edge.line) if edge.line else None
+        if origin is not None:
+            edge = replace(edge, origin_file=origin[0], origin_line=origin[1])
+        in_place.append(edge)
+    report.in_place = in_place
     return report
 
 
@@ -629,6 +645,7 @@ class FieldFlowAnalyzer:
         self._record_area: dict[str, str] = {}
         self._ports: dict[tuple[str, str], Port] = {}
         self._edges: dict[tuple[Any, ...], LineageEdge] = {}
+        self._in_place: dict[tuple[Any, ...], LineageEdge] = {}
         self._key_uses: list[KeyUse] = []
         self._caveats: list[str] = []
         self._caveat_set: set[str] = set()
@@ -719,7 +736,11 @@ class FieldFlowAnalyzer:
             set(self._key_uses),
             key=lambda k: (k.line, k.port.sort_key(), k.item, k.statement),
         )
-        report.summary = self._summarize(report.edges)
+        report.in_place = sorted(
+            self._in_place.values(),
+            key=lambda e: (e.line, e.source.sort_key(), e.kind),
+        )
+        report.summary = self._summarize(report.edges, report.in_place)
         report.caveats = list(self._caveats)
         return report
 
@@ -1259,9 +1280,23 @@ class FieldFlowAnalyzer:
         statement: str,
         exact: bool = True,
     ) -> None:
-        if source == target:
-            return
         line = ctx.location.line if ctx.location is not None else 0
+        if source == target:
+            if kind in VALUE_CHANGING_KINDS:
+                self._in_place.setdefault(
+                    (source, kind, line),
+                    LineageEdge(
+                        source=source,
+                        target=target,
+                        kind=kind,
+                        line=line,
+                        statement=statement,
+                        paragraph=ctx.paragraph,
+                        guarded=ctx.guarded,
+                        exact=exact,
+                    ),
+                )
+            return
         key = (source, target, kind, line)
         existing = self._edges.get(key)
         if existing is not None:
@@ -1653,6 +1688,17 @@ class FieldFlowAnalyzer:
                 writes += [r for r in self._refs(value, ROLE_WRITE) if r not in writes]
         statement = stmt.statement_type or type(stmt).__name__
         self_only = self._self_feeding(stmt, reads, writes)
+        if (
+            isinstance(stmt, ArithmeticStatement)
+            and not isinstance(stmt, ComputeStatement)
+            and not (stmt.givings or stmt.giving)
+        ):
+            # Without GIVING every receiver is computed from its own value
+            # (``MULTIPLY 100 BY WS`` is WS = WS * 100), though the xref
+            # roles list it only as written (#748).
+            for tgt in writes:
+                for t in self._pieces(tgt) or self._loose_pieces(tgt):
+                    self._edge(t.node, t.node, kind, ctx, statement, t.exact)
         for src in reads:
             for s in self._pieces(src) or self._loose_pieces(src):
                 for tgt in writes:
@@ -2067,10 +2113,16 @@ class FieldFlowAnalyzer:
     # -- summary -----------------------------------------------------------
 
     @staticmethod
-    def _summarize(edges: list[LineageEdge]) -> list[PortFlow]:
+    def _summarize(
+        edges: list[LineageEdge], in_place: Sequence[LineageEdge] = ()
+    ) -> list[PortFlow]:
         """Every input-port field -> every output-port field it reaches,
         through item nodes only (a port is a boundary, never a pass-through
-        inside one program)."""
+        inside one program). A path through an item changed in place
+        (``in_place``) also carries that change's kind (#748)."""
+        changed: dict[LineageNode, list[str]] = {}
+        for edge in in_place:
+            changed.setdefault(edge.source, []).append(edge.kind)
         out_edges: dict[LineageNode, list[LineageEdge]] = {}
         for edge in edges:
             out_edges.setdefault(edge.source, []).append(edge)
@@ -2110,10 +2162,13 @@ class FieldFlowAnalyzer:
                             cursor, step = parent[cursor]
                             path.append(step)
                         path.reverse()
+                        kinds = [e.kind for e in path]
+                        for step in path[:-1]:
+                            kinds += changed.get(step.target, [])
                         flows[(start, edge.target)] = PortFlow(
                             source=start,
                             target=edge.target,
-                            kinds=tuple(dict.fromkeys(e.kind for e in path)),
+                            kinds=tuple(dict.fromkeys(kinds)),
                             via=tuple(e.target.name for e in path[:-1]),
                             lines=tuple(sorted({e.line for e in path if e.line})),
                             guarded=any(e.guarded for e in path),

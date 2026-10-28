@@ -169,6 +169,12 @@ class DeadCodeAnalyzer:
         # *returns* to the performer -- it does not run on into whatever
         # follows the range in source order.
         self._range_ends: set[str] = set()
+        # Range end -> the start of every THRU range closing on it.
+        self._range_starts: dict[str, set[str]] = {}
+        # (start, end) of every procedure phrase that runs and returns -- a
+        # PERFORM / SORT / MERGE / XML PARSE target, THRU or not -- from
+        # every statement, dead ones included.
+        self._performed_ranges: set[tuple[str, str]] = set()
         # Last paragraph of every section a PERFORM/SORT/MERGE/XML PARSE runs
         # (``PERFORM 1000-INIT`` with no THRU, or a range ending on a
         # section) -> that section. The SECTION form of the ``GO TO
@@ -209,6 +215,13 @@ class DeadCodeAnalyzer:
         # landing point runs on to the next member: ``GO TO P1-EXIT`` inside
         # ``PERFORM P0 THRU P2-EXIT`` lands in P1-EXIT and falls into P2.
         self._jump_targets: set[str] = set()
+        # (range end, jumping procedure) of every plain GO TO onto a THRU
+        # range end. The jump returns to the performer only on a path that
+        # PERFORMed the range: when the jumping procedure lies outside every
+        # range closing on that end, or is itself fallen into or gone to,
+        # the range end runs on into the next procedure (issue #734).
+        # Settled in ``_collect_fallthrough_refs``.
+        self._range_end_jumps: set[tuple[str, str | None]] = set()
         # ``DeadCodeReport.fall_through_edges``: each (from, to) pair a
         # fall-through, section walk or THRU range walk below ran on along.
         self._fall_through_edges: set[tuple[str, str]] = set()
@@ -239,6 +252,8 @@ class DeadCodeAnalyzer:
         self._section_paragraphs = {}
         self._paragraph_sections = {}
         self._range_ends = set()
+        self._range_starts = {}
+        self._performed_ranges = set()
         self._section_exits = {}
         self._section_exit_jumps = set()
         self._sections_entered_by_jump = set()
@@ -248,6 +263,7 @@ class DeadCodeAnalyzer:
         self._fall_through_edges = set()
         self._thru_ranges = []
         self._jump_targets = set()
+        self._range_end_jumps = set()
         self._declarative_procs = set()
 
         proc_division = ast.procedure_division
@@ -636,9 +652,12 @@ class DeadCodeAnalyzer:
                 if thru
                 else self._keys(stmt, start, start_q)
             )
+            starts = self._keys(stmt, start, start_q)
             for end in ends:
+                self._performed_ranges.update((s_key, end) for s_key in starts)
                 if thru:
                     self._range_ends.add(end)
+                    self._range_starts.setdefault(end, set()).update(starts)
                 # A range ending on a section (``PERFORM 1000-INIT``, or
                 # ``... THRU 2000-SEC``) returns after that section's last
                 # paragraph.
@@ -668,6 +687,8 @@ class DeadCodeAnalyzer:
             )
             for key in self._keys(stmt, target, qualifier_key):
                 self._add_goto_ref(key, enclosing_section(stmt))
+                if key in self._range_ends:
+                    self._range_end_jumps.add((key, self._owner(stmt)))
 
     def _collect_sort_refs(self, stmt: SortStatement) -> None:
         """Collect references from a SORT statement's procedures."""
@@ -734,8 +755,90 @@ class DeadCodeAnalyzer:
         runtime edge that does not exist and hides every dead paragraph
         that happens to sit after a performed one. Must run after the entry
         point is seeded, and a single forward pass suffices since
-        fall-through only ever propagates in source order.
+        fall-through only ever propagates in source order -- except that a
+        GO TO onto a THRU range end, written in a procedure this pass makes
+        a fall-through source, makes that range end one too (issue #734):
+        the pass repeats until no such jump adds another.
         """
+        # Which jumps leave their range does not change from pass to pass:
+        # settle it once, by source position (issue #734).
+        position = {key: i for i, key in enumerate(self._ordered_procedures)}
+        spans = self._performed_spans(position)
+        pending: list[tuple[str, str]] = []
+        for end, source in self._range_end_jumps:
+            # ``None``: the leading body, which runs first, never as a
+            # PERFORM.
+            if (
+                source is None
+                or not self._inside_range_to(end, source, position)
+                or self._jumps_out_of_a_range(end, source, position, spans)
+            ):
+                self._fallthrough_sources.add(end)
+            else:
+                pending.append((end, source))
+        while True:
+            before = len(self._fallthrough_sources)
+            self._fallthrough_pass()
+            for end, source in pending:
+                if source in self._fallthrough_sources:
+                    self._fallthrough_sources.add(end)
+            if len(self._fallthrough_sources) == before:
+                return
+
+    def _inside_range_to(self, end: str, source: str, position: dict[str, int]) -> bool:
+        """Whether *source* lies within some THRU range closing on *end*:
+        only then can a GO TO from it onto *end* be the range's early exit.
+        """
+        end_index = position.get(end)
+        source_index = position.get(source)
+        if end_index is None or source_index is None:
+            return True
+        for start in self._range_starts.get(end, ()):
+            start_index = position.get(start)
+            if start_index is None:
+                return True
+            if start_index <= source_index <= end_index:
+                return True
+        return False
+
+    def _performed_spans(self, position: dict[str, int]) -> list[tuple[int, int]]:
+        """(first, last) source position of every PERFORMed range, a
+        section target's last paragraph standing for its end."""
+        spans: set[tuple[int, int]] = set()
+        for start, stop in self._performed_ranges:
+            paras = self._section_paragraphs.get(stop)
+            last = paras[-1] if paras else stop
+            start_index = position.get(start)
+            stop_index = position.get(last)
+            if start_index is not None and stop_index is not None:
+                spans.add((start_index, stop_index))
+        return sorted(spans)
+
+    def _jumps_out_of_a_range(
+        self,
+        end: str,
+        source: str,
+        position: dict[str, int],
+        spans: list[tuple[int, int]],
+    ) -> bool:
+        """Whether some PERFORMed range holding *source* closes before
+        *end*: a GO TO from *source* onto *end* then leaves that PERFORM
+        rather than ending a range at *end* (``PERFORM P2`` alone, with
+        ``GO TO P4`` in P2 and ``PERFORM P2 THRU P4`` elsewhere).
+        """
+        end_index = position.get(end)
+        source_index = position.get(source)
+        if end_index is None or source_index is None:
+            return False
+        for start_index, stop_index in spans:
+            if start_index > source_index:
+                break
+            if source_index <= stop_index < end_index:
+                return True
+        return False
+
+    def _fallthrough_pass(self) -> None:
+        """One forward pass of ``_collect_fallthrough_refs``."""
         for i in range(len(self._ordered_procedures) - 1):
             current = self._ordered_procedures[i]
             next_proc = self._ordered_procedures[i + 1]

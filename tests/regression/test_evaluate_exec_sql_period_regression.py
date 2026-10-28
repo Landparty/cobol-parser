@@ -72,7 +72,7 @@ class TestEvaluateExecSqlPeriodRegression:
             "AddStatement",
         ]
 
-        assert when_100.selectors == [{"type": "Literal", "value": "+ 100"}]
+        assert when_100.selectors == [{"type": "Literal", "value": "+100"}]
         assert [type(s).__name__ for s in when_100.statements] == ["ContinueStatement"]
 
         assert stmt.default_when is not None

@@ -22,7 +22,7 @@ from ...core.interfaces import IStatementParser, ITokenStream
 from ...lexer import TokenType
 from ...models.ast_base import SourceLocation
 from ...models.statements import EvaluateStatement, WhenClause
-from ._conditions import condition_token_text, typed_literal_prefix
+from ._conditions import condition_token_text, join_operand, typed_literal_prefix
 
 # Words that make a WHEN phrase a condition rather than a value. Symbols
 # and logical connectives count anywhere; the relational words
@@ -485,7 +485,7 @@ class EvaluateStatementParser(IStatementParser):
         pairs = [(token, token_type) for token, token_type, _ in kept]
         # A Condition's text keeps string literals quoted: ``WHEN A = "B"``
         # stored as ``A = B`` read the literal as the data name ``B``.
-        condition_text = " ".join(text for _, _, text in kept).strip()
+        condition_text = join_operand([text for _, _, text in kept])
         normalized_tokens = [token for token, _ in pairs]
         single_type = (
             token_types[0]
@@ -493,7 +493,7 @@ class EvaluateStatementParser(IStatementParser):
             else None
         )
 
-        selector_text = " ".join(normalized_tokens).strip()
+        selector_text = join_operand(normalized_tokens)
 
         # Keywords and operators are recognized only as *words*: the lexer
         # strips a string literal's quotes, so WHEN "ANY" / "THRU" / "AND"
@@ -513,8 +513,8 @@ class EvaluateStatementParser(IStatementParser):
             if token_words[:1] in (["THRU"], ["THROUGH"]):
                 negated = words[0] == ["NOT"] and index > 1
                 first = 1 if negated else 0
-                start_value = " ".join(normalized_tokens[first:index]).strip()
-                end_value = " ".join(normalized_tokens[index + 1 :]).strip()
+                start_value = join_operand(normalized_tokens[first:index])
+                end_value = join_operand(normalized_tokens[index + 1 :])
                 if negated:
                     # ``WHEN NOT 1 THRU 5`` selects everything *outside* the
                     # range. As a plain Range it read as ``start="NOT 1"``,

@@ -210,6 +210,7 @@ _FIGURATIVES = frozenset(
     }
 )
 _NUMERIC_LITERAL_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$")
+_SPLIT_SIGN_RE = re.compile(r"^([+-])\s+(?=\d|\.\d)")
 _THROUGH_PREFIX = "THROUGH:"
 #: Special registers that are functions or operators, never data a rule reads.
 _NOT_DATA = frozenset({"DFHRESP", "DFHVALUE", "ADDRESS", "LENGTH"})
@@ -1123,6 +1124,9 @@ class BusinessRuleExtractor:
         text = text.strip()
         if identifier or not text:
             return text
+        # A sign split from its number (``+ 100``) is still a signed
+        # literal, not text (#747).
+        text = _SPLIT_SIGN_RE.sub(r"\1", text)
         if _NUMERIC_LITERAL_RE.match(text) or text.upper() in _FIGURATIVES:
             return text
         if text[:1] in ("'", '"') or is_quoted_literal(text):
