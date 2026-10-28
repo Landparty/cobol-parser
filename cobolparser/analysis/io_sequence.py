@@ -71,6 +71,9 @@ class IOViolationKind(Enum):
     REWRITE_WRONG_MODE = auto()
     DELETE_WRONG_MODE = auto()
     OPEN_AFTER_LOCK = auto()  # OPEN of a file closed WITH LOCK (status 38)
+    # REWRITE of a sequential file whose last I/O was not a READ (#736):
+    # status 43.
+    REWRITE_WITHOUT_READ = auto()
 
 
 @dataclass
@@ -149,9 +152,12 @@ _SEQUENTIAL_ORGANIZATIONS = frozenset(
 # falls out of the branch could have left it in. An open file's state
 # carries its OPEN mode (``"open:INPUT"``; ``"open:"`` when the mode is not
 # known), so arms that open it in different modes merge into two states
-# and no mode violation is claimed unless every path breaks the rule. A
-# file closed WITH LOCK is ``locked``: closed, and not reopenable this run.
+# and no mode violation is claimed unless every path breaks the rule. An
+# open state ending in ``_AFTER_READ`` (``"open:I-O;read"``) is one whose last
+# I/O statement was a READ, which a sequential file's REWRITE needs (#736).
+# A file closed WITH LOCK is ``locked``: closed, and not reopenable this run.
 _OPEN_PREFIX = "open:"
+_AFTER_READ = ";read"
 _CLOSED = "closed"
 _LOCKED = "locked"
 _UNOPENED = "unopened"
@@ -164,6 +170,20 @@ def _open_state(mode: str | None) -> str:
 
 def _is_open(state: str) -> bool:
     return state.startswith(_OPEN_PREFIX)
+
+
+def _mode(state: str) -> str:
+    """The OPEN mode of open *state* (``""`` when it is not known)."""
+    return state[len(_OPEN_PREFIX) :].removesuffix(_AFTER_READ)
+
+
+def _after_io(state: str, verb: str) -> str:
+    """*state* once *verb* ran on the file: a READ marks an open state as
+    read, any other verb clears the mark."""
+    if not _is_open(state):
+        return state
+    base = state.removesuffix(_AFTER_READ)
+    return base + _AFTER_READ if verb == "READ" else base
 
 
 def _any_open(states: frozenset[str]) -> bool:
@@ -909,11 +929,9 @@ class IOSequenceAnalyzer:
             )
         elif isinstance(node, IORewriteStatement):
             # Same as WRITE: REWRITE names the record.
-            self._check_open(
-                self._file_for(node.file_name, node.record_name) or "",
-                "REWRITE",
-                loc,
-            )
+            file_name = self._file_for(node.file_name, node.record_name) or ""
+            self._check_rewrite_after_read(file_name, loc)
+            self._check_open(file_name, "REWRITE", loc)
         elif isinstance(node, IODeleteStatement):
             self._check_open(node.file_name or "", "DELETE", loc)
         elif isinstance(node, IOStartStatement):
@@ -997,8 +1015,18 @@ class IOSequenceAnalyzer:
                         message=f"File '{file_name}' is already open (duplicate OPEN)",
                     )
                 )
-            # Open on every path now, whether or not it was before.
-            self._status[key] = frozenset({_open_state(modes.get(file_name))})
+            # An OPEN of a file that is already open fails (status 41) and
+            # leaves it open in its first mode (#735), and one of a file
+            # closed WITH LOCK fails too; on every other path it opens.
+            kept = frozenset(
+                state for state in states if _is_open(state) or state == _LOCKED
+            )
+            opened = (
+                frozenset({_open_state(modes.get(file_name))})
+                if kept != states
+                else frozenset()
+            )
+            self._status[key] = kept | opened
 
     def _handle_close(self, node: IOCloseStatement, loc: SourceLocation | None) -> None:
         """Process a CLOSE statement."""
@@ -1049,6 +1077,7 @@ class IOSequenceAnalyzer:
         states = self._states(key)
         if _any_open(states):
             self._check_mode(file_name, key, states, verb, loc)
+            self._status[key] = frozenset(_after_io(state, verb) for state in states)
             return
         kind = _OP_TO_VIOLATION.get(verb, IOViolationKind.READ_BEFORE_OPEN)
         self._emit(
@@ -1057,6 +1086,41 @@ class IOSequenceAnalyzer:
                 file_name=file_name,
                 location=loc,
                 message=(f"{verb} on file '{file_name}' before it was OPENed"),
+            )
+        )
+
+    def _check_rewrite_after_read(
+        self, file_name: str, loc: SourceLocation | None
+    ) -> None:
+        """Emit ``REWRITE_WITHOUT_READ`` when a sequential file is open I-O
+        on every path and on none of them was its last I/O statement a READ
+        (#736): the runtime refuses that REWRITE with status 43.
+
+        A READ counts whether or not it hit AT END (those phrases are not
+        forked), and a file whose SELECT is not in the AST, or whose mode is
+        not known on some path, is not judged.
+        """
+        if not file_name:
+            return
+        key = file_name.upper()
+        if self._organization.get(key, "") not in _SEQUENTIAL_ORGANIZATIONS:
+            return
+        states = self._states(key)
+        if not states or not all(
+            _is_open(state) and _mode(state) == "I-O" for state in states
+        ):
+            return
+        if any(state.endswith(_AFTER_READ) for state in states):
+            return
+        self._emit(
+            IOSequenceViolation(
+                kind=IOViolationKind.REWRITE_WITHOUT_READ,
+                file_name=file_name,
+                location=loc,
+                message=(
+                    f"REWRITE on sequential file '{file_name}' whose last I/O "
+                    "statement was not a READ (file status 43)"
+                ),
             )
         )
 
@@ -1083,7 +1147,7 @@ class IOSequenceAnalyzer:
             # A sequential file open I-O can be READ and REWRITten, never
             # written to: WRITE needs OUTPUT or EXTEND.
             allowed = allowed - {"I-O"}
-        modes = {state[len(_OPEN_PREFIX) :] for state in states}
+        modes = {_mode(state) for state in states}
         if "" in modes or modes & allowed:
             return
         shown = " / ".join(sorted(modes))

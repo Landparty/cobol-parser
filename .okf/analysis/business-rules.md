@@ -115,6 +115,9 @@ non-numeric, non-figurative selector is re-quoted -- except the space-joined
 call shape `DFHRESP ( NORMAL )`, which is an expression, a typed literal
 (`X'00'`, `"typed": True`), already in source spelling (#331), and a
 selector marked `"expression"` (`WHEN WS-N + 1`, #333), rendered unquoted.
+A signed number is numeric even with a space after its sign
+(`_SPLIT_SIGN_RE`; the parser already folds it, #747), so `WHEN +100`
+reads `SQLCODE = +100`, never the string `'+ 100'`.
 A negated range
 selector (`WHEN NOT 0 THRU 17`, a `Condition` dict with `negated` plus
 `start`/`end`) reads `NOT (AGE >= 0 AND AGE <= 17)` from those bounds, not

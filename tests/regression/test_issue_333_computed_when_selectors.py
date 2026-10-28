@@ -82,7 +82,7 @@ def test_computed_selector_is_marked(subject: str, selector: str, value: str) ->
 @pytest.mark.parametrize(
     ("subject", "selector", "expected"),
     [
-        ("IN-QTY", "-5", {"type": "Literal", "value": "- 5"}),
+        ("IN-QTY", "-5", {"type": "Literal", "value": "-5"}),
         ("IN-QTY", "5", {"type": "Literal", "value": "5"}),
         ("IN-CD", "'AB'", {"type": "Literal", "value": "AB", "quoted": True}),
         (

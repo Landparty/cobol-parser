@@ -698,21 +698,28 @@ def _cmd_parse(args: argparse.Namespace) -> None:
         output["profiling"] = prof.to_dict()
 
     _json_out(output, args.compact, getattr(args, "output", None))
-    _exit_if_partial_parse(args.file, result)
+    _exit_if_partial_parse(args.file, result, errors_in_output=bool(args.errors))
 
 
-def _exit_if_partial_parse(file: str, result: Any) -> None:
+def _exit_if_partial_parse(
+    file: str, result: Any, errors_in_output: bool = False
+) -> None:
     """Exit 2 after the JSON is out when the parse recovered from errors.
 
     A recovered-but-errored parse must not report success to the shell:
     scripts and CI gate on the exit code, and exiting 0 here silently
-    promoted every partial parse to a clean one.
+    promoted every partial parse to a clean one. The hint to re-run with
+    ``--errors`` is left out when the JSON already carries them (#745).
     """
     if result.errors:
+        where = (
+            "they are in the JSON output's errors"
+            if errors_in_output
+            else "re-run with --errors to include them in the JSON output"
+        )
         print(
             f"warning: parse of {file} completed with "
-            f"{len(result.errors)} error(s); AST may be incomplete "
-            "(re-run with --errors to include them in the JSON output)",
+            f"{len(result.errors)} error(s); AST may be incomplete ({where})",
             file=sys.stderr,
         )
         sys.exit(2)
@@ -2672,8 +2679,20 @@ def _collect_scan_files(args: argparse.Namespace) -> list[str]:
 
     file_list: list[str] = list(args.files)
     file_list.extend(_read_file_list(getattr(args, "files_from", None)))
+    # A directory is no source file: named outright, say so plainly rather
+    # than let it fail as an "Encoding error ... Is a directory" (#737).
+    for path in file_list:
+        if _Path(path).is_dir():
+            pattern = str(_Path(path) / "**" / "*.cbl")
+            _fail(
+                f"{path} is a directory; pass the files in it, e.g. "
+                f"--glob '{pattern}'"
+            )
     for pattern in args.glob:
-        expanded = sorted(_glob.glob(pattern, recursive=True))
+        # ``**`` also matches the directories on the way down.
+        expanded = sorted(
+            p for p in _glob.glob(pattern, recursive=True) if not _Path(p).is_dir()
+        )
         if not expanded:
             print(
                 f"warning: glob pattern {pattern!r} matched no files", file=sys.stderr
