@@ -54,7 +54,7 @@ from .workspace import ParsedProgram, Stamp, Workspace, _stamp
 
 #: Bumped whenever :class:`FileFacts` or anything it holds changes shape:
 #: facts on disk from another version are never read.
-FACTS_VERSION = "2"
+FACTS_VERSION = "3"
 
 #: Below this many files to compute, a pool costs more than it saves.
 PARALLEL_THRESHOLD = 12

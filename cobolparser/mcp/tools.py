@@ -15,6 +15,7 @@ from __future__ import annotations
 import difflib
 import functools
 import itertools
+import os
 import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
@@ -1687,6 +1688,7 @@ class CobolTools:
         """The records of *data_file* read through *copybook*'s layout, or,
         with no data file, the layout's views (its REDEFINES overlays)."""
         from ..generators.data.decoding import RecordDecoder, RecordDecodingError
+        from ..generators.data.encoding import RecordFormat
         from ..generators.data.errors import CopybookLayoutError
 
         if skip < 0:
@@ -1781,20 +1783,35 @@ class CobolTools:
         wanted_records = (
             DEFAULT_DECODE_RECORDS if max_records is None else clamp_limit(max_records)
         )
+        # Fixed-length records with nothing between them sit at a known
+        # stride, so a page past the read window starts by seeking to it.
+        # Any other framing has to be walked from the front, and so stops at
+        # the window (said below, with no `next` that would ask again).
+        stride = 0
+        fmt = opts.resolved_format(
+            [placed.spec for placed in decoder.views.base.fields],
+            varying=decoder.varying is not None,
+        )
+        if fmt is RecordFormat.FIXED and not opts.record_separator:
+            stride = decoder.record_length or decoder.views.framing_length
+        start = skip * stride if stride > 0 else 0
+        local_skip = 0 if start else skip
         try:
             size = data_path.stat().st_size
             with data_path.open("rb") as handle:
+                handle.seek(start)
                 data = handle.read(MAX_DECODE_BYTES)
         except OSError as exc:
             raise ToolError(f"cannot read {data_file}: {exc}") from exc
-        cut = size > len(data)
+        cut = size > start + len(data)
         try:
             with stdout_to_stderr():
                 result = decoder.decode_bytes(
-                    data, view=view, max_records=wanted_records, skip=skip
+                    data, view=view, max_records=wanted_records, skip=local_skip
                 )
         except RecordDecodingError as exc:
             raise ToolError(str(exc)) from exc
+        window_spent = cut and len(result.records) < wanted_records
         for caveat in result.caveats:
             if caveat not in decoder.layout_warnings:
                 response.caveat("incomplete-analysis", caveat)
@@ -1807,21 +1824,23 @@ class CobolTools:
                 "the record length or record format is probably wrong: check "
                 "record_length / record_format before trusting the values",
             )
-        if cut and not result.records:
+        if window_spent:
             response.caveat(
                 "incomplete-analysis",
-                f"only the first {MAX_DECODE_BYTES} bytes of {data_file} "
-                f"({size} bytes) were read, and they held no record past "
-                f"skip={skip}",
-                "lower skip, or decode a smaller extract of the file",
+                f"only {MAX_DECODE_BYTES} bytes of {data_file} ({size} bytes) "
+                "are read per call, and under this record format each read "
+                "starts at the front of the file: records past "
+                f"byte {start + len(data)} cannot be reached",
+                "decode a smaller extract of the file, or read it as fixed-"
+                "length records with no separator if that is what it holds",
             )
         names = {p.spec.column for p in shown_fields}
         records = []
         for decoded in result.records:
             values = {f.name: f.value for f in decoded.fields if f.name in names}
             entry: dict[str, Any] = {
-                "index": decoded.index,
-                "file_offset": decoded.file_offset,
+                "index": decoded.index + (skip if start else 0),
+                "file_offset": decoded.file_offset + start,
                 "length": decoded.length,
                 "values": values,
             }
@@ -1844,7 +1863,7 @@ class CobolTools:
                 "records": records,
             }
         )
-        if more:
+        if more and not window_spent:
             answer["next"] = (
                 f"more records follow: ask again with skip={skip + len(records)}"
             )
@@ -2017,6 +2036,16 @@ class CobolTools:
         program_info = parsed.program_info(unit)
         callee_dirs = self.workspace.callee_directories(response)
 
+        refused_callees: list[str] = []
+
+        def accept(found: str) -> bool:
+            # The directory is under the root, but a member of it may be a
+            # link out of it: vetted like every other file a tool opens.
+            if self.workspace.under_root(Path(found)):
+                return True
+            refused_callees.append(found)
+            return False
+
         def build() -> Any:
             generator = ProgramFixtureGenerator(DataGeneratorOptions(rows=row_count))
             index = ProgramLayoutIndex.build(unit)
@@ -2024,6 +2053,7 @@ class CobolTools:
                 unit,
                 callee_dirs or None,
                 debug_lines=bool(self.workspace.config.debug_lines),
+                accept=accept,
             )
             report = BoundaryInventoryAnalyzer().analyze(
                 unit, index, callee_indexes=callee_indexes, callee_asts=callee_asts
@@ -2033,6 +2063,21 @@ class CobolTools:
             )
 
         bundle = _attempt(response, "test fixtures", build)
+        if refused_callees:
+            response.caveat(
+                "incomplete-analysis",
+                "callee files that resolve outside the workspace were not read: "
+                + ", ".join(
+                    sorted(
+                        {
+                            Path(os.path.relpath(f, self.workspace.root)).as_posix()
+                            for f in refused_callees
+                        }
+                    )
+                ),
+                "CALL arguments to those programs are classified without the "
+                "callee's own PROCEDURE DIVISION USING",
+            )
         if bundle is None:
             return response.build({"found": False, "scenarios": []}, program_info)
         cap = clamp_limit(limit)

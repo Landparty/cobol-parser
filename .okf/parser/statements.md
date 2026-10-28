@@ -325,6 +325,10 @@ terms and was O(n^2) (#375). Its token-cleaning pass:
 - Recombines `>=` / `<=` / `<>`, which the lexer emits as two single-character
   tokens (`_COMPOUND_SYMBOL_OPS`); otherwise `IF X >= 5` reads as `GREATER` with
   right operand `"= 5"`.
+- Joins each operand with `join_operand()`, which folds a leading `+` / `-`
+  (at the start or after `(`) into the unsigned number after it: `IF A = -7`
+  has right operand `-7`, not `- 7`. `evaluate_parser.py` uses it for
+  selector values and range bounds too (#747).
 - Drops the `TO` / `THAN` connective after a relational word (`EQUAL TO B` ->
   right operand `B`) and folds `GREATER [THAN] OR EQUAL [TO]` into
   `GREATER_OR_EQUAL` / `LESS_OR_EQUAL` (not an OR of two conditions).

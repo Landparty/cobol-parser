@@ -25,7 +25,7 @@ from cobolparser.analysis.lineage_graph import LineageGraph
 from cobolparser.analysis.lineage_jcl import bindings_from_jobs, load_jobs
 
 flow = FieldFlowAnalyzer().analyze(ast)   # FieldFlowReport: program_id/items/ports/
-                                          # edges/summary/key_uses/caveats
+                                          # edges/summary/key_uses/in_place/caveats
 jobs, errors = load_jobs(["JOB1.jcl"], proc_path="procs/")
 bindings, passthroughs = bindings_from_jobs(jobs)
 graph = LineageGraph([flow, ...], bindings, passthroughs)
@@ -142,6 +142,22 @@ INSPECT (counters; the inspected item excepted), STRING or UNSTRING
 `MULTIPLY n BY b c` is `b = b * n; c = c * n`. COMPUTE
 (`COMPUTE A B = A + 1` feeds B), a GIVING form, and a receiver that is also
 a sending operand keep their edges.
+
+**A value changed in place is derived** (#748). `edges` never loop, so
+the rule above left `MOVE IN TO WS` / `MULTIPLY 100 BY WS` / `MOVE WS TO
+OUT` reading as a plain copy. Each such change is recorded in the report's
+`in_place` (a source == target `LineageEdge`, one per statement and kind;
+`apply_source_map` stamps them too): every receiver of ADD / SUBTRACT /
+MULTIPLY / DIVIDE without GIVING, and any value-changing read-and-write of
+one item (`COMPUTE WS = WS * 2`, an INSPECT'd / STRING-pointer item).
+`_summarize` adds the change's kind to a port flow that passes through the
+item, and `LineageGraph._with_in_place` inserts a hop for it into every
+impact path through the item, so `derived` holds. The hop is `exact` when
+the change's line lies between the hops into and out of the item, else
+`candidate` (it may run before the value arrives, or on a later loop
+iteration). The text form shows it as `WS-AMT (MULTIPLY line 22)`. An
+added key: `LINEAGE_VERSION` stays "2". Pinned by
+`tests/regression/test_lineage_in_place_change_issue_748.py`.
 
 **Alias edges are never chained with one of their own class**
 (`overlay_class`; summary BFS and `LineageGraph._trace` both carry the

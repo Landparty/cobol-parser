@@ -135,7 +135,7 @@ Subcommands that take none of the COBOL parse flags (`--source-format`,
 |------|---------|
 | `0` | Ran to completion; findings alone never change it. Analyzer subcommands exit 0 on a partial parse too, printing `warning: <file> parsed with N error(s); analysis may be incomplete` to stderr (`_parse_result_or_fail`) |
 | `1` | The CLI failed (`_fail()`): unreadable file, `ast is None`, unwritable output, a `cobol.yml` error, a missing extra, an invalid option value |
-| `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`); `batch` had a file with a `read_error` or `success=false`; `scan` had a file in `failures`, and `codebase-graph` / `copybook-impact` a file in the graph's `errors` (missing, unreadable or parsed with errors) -- output still written, a `warning:` on stderr, plus `error: no such file or directory: X` per missing path (`_exit_on_graph_errors`, #325, owner's option (a): any failed file, as `batch`); `gen-fixtures --strict` found unresolved items |
+| `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`; with `--errors` it says the errors are in the JSON instead of the re-run hint, #745); `batch` had a file with a `read_error` or `success=false`; `scan` had a file in `failures`, and `codebase-graph` / `copybook-impact` a file in the graph's `errors` (missing, unreadable or parsed with errors) -- output still written, a `warning:` on stderr, plus `error: no such file or directory: X` per missing path (`_exit_on_graph_errors`, #325, owner's option (a): any failed file, as `batch`); `gen-fixtures --strict` found unresolved items |
 | `3` | `lint --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
 | `141` | stdout closed (128 + SIGPIPE) |
 
@@ -749,6 +749,11 @@ dicts come back, so a worker's peak memory is one file's AST.
   command line caps at 8191 characters and the COBOL Analyzer extension spawns
   via `shell: true` there. An unreadable list exits 1 rather than scanning
   nothing.
+* A directory named as a file (argument or `--files-from` line) exits 1 with
+  `X is a directory; pass the files in it, e.g. --glob 'X/**/*.cbl'`, and a
+  `--glob` drops the directories its `**` walks through (#737; shared with
+  `batch` via `_collect_scan_files`). Before, each one was a `failures` entry
+  reading "Encoding error ... Is a directory".
 * `--source-format` reaches the parse as `ScanOptions.free_form` +
   `ScanOptions.preprocess_fixed`, the pair `_source_format_kwargs()` hands
   every single-file subcommand (forwarding only `free_form` would leave

@@ -479,6 +479,13 @@ class Workspace:
             )
         return kept
 
+    def under_root(self, path: Path) -> bool:
+        """Whether *path*, with every link resolved, is under the root."""
+        try:
+            return _under(path.resolve(), self.root)
+        except (OSError, RuntimeError):
+            return False
+
     def proc_directories(self) -> tuple[list[Path], list[str]]:
         """``cobol.yml``'s ``proc_path`` directories: those under the root
         (resolved), and the entries skipped because they are not. JCL PROCs
