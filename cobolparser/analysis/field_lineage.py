@@ -137,6 +137,16 @@ _CLOCK_ACCEPT_SOURCES = frozenset({"DATE", "DAY", "DAY-OF-WEEK", "TIME"})
 #: than a copy of it.
 VALUE_CHANGING_KINDS = frozenset({"arith", "string", "aggregate", "sql-expr"})
 
+#: Statements whose exact, unconditional edge into a field replaces all of
+#: its value: what the field held before cannot reach a later read of it in
+#: the same paragraph (:attr:`FieldFlowReport.overwrites`). ``ADD`` and the
+#: string verbs keep part of the old value, so they are not here; a READ
+#: INTO at end of file or an SQL SELECT INTO finding no row leaves the field
+#: as it was, so a consumer says "may be overwritten" for those.
+OVERWRITING_STATEMENTS = frozenset(
+    {"MOVE", "READ INTO", "RETURN INTO", "EXEC SQL", "ACCEPT"}
+)
+
 # Leading ASSIGN-name segments that are a device class or organization code,
 # never part of the DD name (``UT-S-INFILE`` is DD ``INFILE``). The same list
 # the LegacyLens backend's ``normalize_ddname`` strips, so the two agree on
@@ -427,6 +437,11 @@ class FieldFlowReport:
     summary: list[PortFlow] = field(default_factory=list)
     key_uses: list[KeyUse] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
+    #: The edges that replace a field's whole value unconditionally, in a
+    #: named paragraph (see :data:`OVERWRITING_STATEMENTS`): a value written
+    #: to that field earlier in the paragraph does not reach a read of it
+    #: later in the paragraph.
+    overwrites: list[LineageEdge] = field(default_factory=list)
 
     def port(self, kind: str, key: str) -> Port | None:
         for port in self.ports:
@@ -444,6 +459,7 @@ class FieldFlowReport:
             "summary": [s.to_dict() for s in self.summary],
             "key_uses": [k.to_dict() for k in self.key_uses],
             "caveats": list(self.caveats),
+            "overwrites": [e.to_dict() for e in self.overwrites],
             "statistics": {
                 "items": len(self.items),
                 "ports": len(self.ports),
@@ -489,13 +505,18 @@ def apply_source_map(
     """
     if not source_map:
         return report
-    edges: list[LineageEdge] = []
-    for edge in report.edges:
-        origin = source_map.get(edge.line) if edge.line else None
-        if origin is not None:
-            edge = replace(edge, origin_file=origin[0], origin_line=origin[1])
-        edges.append(edge)
-    report.edges = edges
+
+    def mapped(edges: list[LineageEdge]) -> list[LineageEdge]:
+        out: list[LineageEdge] = []
+        for edge in edges:
+            origin = source_map.get(edge.line) if edge.line else None
+            if origin is not None:
+                edge = replace(edge, origin_file=origin[0], origin_line=origin[1])
+            out.append(edge)
+        return out
+
+    report.edges = mapped(report.edges)
+    report.overwrites = mapped(report.overwrites)
     return report
 
 
@@ -721,6 +742,16 @@ class FieldFlowAnalyzer:
         )
         report.summary = self._summarize(report.edges)
         report.caveats = list(self._caveats)
+        report.overwrites = [
+            edge
+            for edge in report.edges
+            if edge.target.kind == ITEM
+            and edge.exact
+            and not edge.guarded
+            and edge.paragraph is not None
+            and edge.line > 0
+            and edge.statement in OVERWRITING_STATEMENTS
+        ]
         return report
 
     def _caveat(self, text: str) -> None:

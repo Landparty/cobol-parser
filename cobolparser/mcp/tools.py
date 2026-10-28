@@ -1185,7 +1185,11 @@ class CobolTools:
 
         hits = [_hit(hit, index, self.workspace, response) for hit in result.hits]
         hits.sort(
-            key=lambda h: (_CONFIDENCE_RANK.get(h["confidence"], 9), len(h["path"]))
+            key=lambda h: (
+                _CONFIDENCE_RANK.get(h["confidence"], 9),
+                "may_be_overwritten" in h,
+                len(h["path"]),
+            )
         )
         shown = response.cap(hits, cap, "hits")
         ends = _trail_ends(hits)
@@ -1240,6 +1244,7 @@ class CobolTools:
             "datasets": result.datasets,
             "hit_count": len(hits),
             "by_confidence": _counts(h["confidence"] for h in hits),
+            "may_be_overwritten": sum("may_be_overwritten" in h for h in hits),
             "trail_ends": response.cap(ends, cap, "trail_ends"),
             "hits": shown,
             "notes": list(result.notes),
@@ -1249,7 +1254,11 @@ class CobolTools:
                 "one step per line; exact hits first. location is the "
                 "statement that reaches it (null for a join through a dataset, "
                 "table or CALL); derived: the value is computed on the way, "
-                "not only copied. trail_ends: the hits no other trail runs "
+                "not only copied. may_be_overwritten: a statement replaces "
+                "the value on the way, in the same paragraph, before the path "
+                "reads it again (a SELECT INTO finding no row or a READ INTO "
+                "at end of file would not); such hits come after the others "
+                "of their confidence. trail_ends: the hits no other trail runs "
                 "through (the "
                 + ("ultimate sources" if direction == "backward" else "final receivers")
                 + ")."
@@ -2632,6 +2641,16 @@ def _hit(
         entry["file"] = index.program_files.get(hit.program.upper())
     entry["location"] = arrived
     entry["path"] = steps
+    overwritten = []
+    for kill in getattr(hit, "overwritten", ()):
+        if kill.origin_file:
+            file = workspace.display(kill.origin_file)
+        else:
+            file = index.program_files.get(kill.program.upper())
+        where = f" at {file}:{kill.line}" if file else ""
+        overwritten.append(f"{kill.field} by {kill.statement}{where}")
+    if overwritten:
+        entry["may_be_overwritten"] = overwritten
     return entry
 
 

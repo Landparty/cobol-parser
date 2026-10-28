@@ -80,7 +80,11 @@ make a flow *derived*. Each edge carries `line`, `paragraph`, `guarded`
 -- edges carry a bare `line`, so `lint.stamp_report_origins` does not
 reach them. `summary` is every input-port field -> output-port field the
 program connects; `key_uses` are items used as READ/START/RECORD KEY or in
-a SQL `WHERE col = :hv`.
+a SQL `WHERE col = :hv`. `overwrites` (JSON `"overwrites"`, edge dicts) are
+the edges into an item that replace all of it: exact, unguarded, in a named
+paragraph, statement in `OVERWRITING_STATEMENTS` (MOVE, READ INTO, RETURN
+INTO, EXEC SQL, ACCEPT; not ADD or the string verbs, which keep part of the
+old value); `apply_source_map` stamps them too.
 
 **Operands** (`_refs`) go through one path for MOVE, arithmetic, STRING,
 CALL arguments, DISPLAY/ACCEPT, READ INTO / WRITE FROM: xref's
@@ -168,7 +172,15 @@ as unbound). A PROGRAM-ID seen in more than one report keeps the first and
 adds a caveat, which `impact()` returns only when the query reaches that
 program. Queries `impact(field, program, direction,
 depth)`, `impact_table` (schema optional), `impact_dataset` run a 0-1 BFS
-where *depth* counts entries into a program. `key_relationships()` names
+where *depth* counts entries into a program. Flow-sensitivity is a mark,
+not a cut: `_overwritten()` checks each field a hit's path passes through,
+and when the edge writing it and the edge reading it next are in one
+paragraph with an overwrite of that field strictly between (parsed lines,
+`_EdgeInfo.seq_line` / `paragraph`), the hit carries an `Overwrite`
+(`ImpactHit.overwritten`; `"overwritten"` in `to_dict()` only when set).
+Across paragraphs (a PERFORM) nothing is claimed; the start field itself is
+never checked (it holds each of its values in turn). Only the path shown
+is checked, the BFS's shortest. `key_relationships()` names
 candidate dataset/table key relationships with the program and line as
 evidence. Joins iterate ports in sorted order so output is identical on
 every run, whatever `PYTHONHASHSEED`.

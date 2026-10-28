@@ -145,7 +145,13 @@ Both lineage answers list exact hits first, count them by confidence
 through, which for `where_from` are the original sources. A hit whose path
 begins with an earlier hit's path names that hit (`from_hit`, 0-based) and
 how many of its steps it shares (`after_step`), and lists only the rest;
-`full_paths: true` gives every path whole.
+`full_paths: true` gives every path whole. A hit with `may_be_overwritten`
+names a statement that replaces the value on the way, in the same paragraph,
+before the path reads it again: `MOVE A TO WS-X`, then `MOVE B TO WS-X`,
+then `DISPLAY WS-X` does not display A. Such hits come after the others of
+their confidence, and the answer counts them; they stay listed because a
+`SELECT INTO` that finds no row, or a `READ INTO` at end of file, leaves the
+old value in place.
 
 Field flows cross programs through `CALL ... USING` arguments, DB2 columns,
 and datasets. Datasets are joined through the JCL under the root (`.jcl` and
