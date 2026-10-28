@@ -177,10 +177,14 @@ worker's peak memory is one file's AST.
 * `scan_one(path, options) -> FileScan` — one file; **never raises**. This is
   what runs in each worker.
 * `ANALYZERS` = `("health", "redundancy", "complexity", "dead-code",
-  "unused-variables", "lineage")`, each keyed by its single-file subcommand
+  "unused-variables", "lineage", "lint")`, each keyed by its single-file subcommand
   name (`health` = `TechnicalDebtAnalyzer`, `redundancy` =
   `RedundancyAnalyzer` honouring `min_clone_statements`, `lineage` =
-  `FieldFlowAnalyzer`). `DEFAULT_ANALYZERS` = `("health", "redundancy")`:
+  `FieldFlowAnalyzer`). `lint` is in `FILE_ANALYZERS`: it runs once per
+  file (it lints every unit itself) into `FileScan.reports["lint"]`
+  (serialized only when non-empty), not per unit; see
+  [analysis/lint.md](analysis/lint.md#sarif-output), which also covers
+  `scan --format sarif`. `DEFAULT_ANALYZERS` = `("health", "redundancy")`:
   `health` is the grade a portfolio sorts on; `redundancy` is the only one
   that emits the paragraph fingerprints cross-file clones need. Analyzer
   imports are local to each branch, so a scan pays only for what it runs.
@@ -203,6 +207,29 @@ arguments, so a worker signature cannot drift from its call site):
 | `preprocess_fixed` | `None` | `None` auto-detects, `True`/`False` force/disable fixed-format normalization (CLI `--source-format fixed\|free`, cobol.yml `source_format:`) |
 | `debug_lines` | `False` | compile `D`-in-column-7 lines (CLI `--debug-lines`, cobol.yml `project.debug_lines`) |
 | `defined_symbols` | `()` | conditional-compilation `(name, value)` pairs (CLI `--define`, cobol.yml `project.define`): handed to the expander with copybook paths, else evaluated by `preprocess_conditional_compilation` before `parse_cobol` (#324) |
+| `cache_dir` | `None` | a `FactsCache` directory (CLI `--cache-dir`): see "Incremental cache" below |
+
+### Incremental cache (`_facts_cache.py`)
+
+`FactsCache(directory, namespace, settings)` keeps one JSON value per file
+under `directory/namespace/xx/<sha256>.json`, next to the `(mtime_ns, size)`
+stamp of every file and directory it was computed from (None = the path did
+not exist), and `get(path)` returns it only while every stamp still holds.
+The key hashes `CACHE_FORMAT`, the package `__version__` (an upgrade never
+serves an old analysis), the namespace, `repr(settings)` and the absolute
+path. Writes are a temp file `os.replace`d over the entry (workers share one
+directory); a corrupt or unreadable entry, or a failed write, is a miss,
+never an error. `directory_stamps(dirs)` stamps each copybook directory and
+its direct subdirectories (`COPY X OF LIB`): a member added on the search
+path changes a directory mtime though no file the parse read changed.
+
+`scan_one` with `cache_dir`: the key's settings are `ScanOptions.
+cache_settings()` (every field but `cache_dir`), the stamps are the program
+(taken *before* the parse, so an edit during it is a later miss), every file
+in the expansion source map and `directory_stamps(copybook_paths)`. A hit is
+`FileScan.from_dict()` with `from_cache=True`; a file with an `error` is
+never stored. `summary.cached_file_count` appears only when `cache_dir` is
+set. Pinned by `tests/unit/test_facts_cache.py`.
 
 ### Report shape
 

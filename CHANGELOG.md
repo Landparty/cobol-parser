@@ -9,6 +9,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **SARIF 2.1.0 output** for `lint`, `scan` and `call-check`
+  (`--format sarif`; `cobolparser/analysis/sarif.py`), for GitHub code
+  scanning and IDE problem panes. Findings inside an expanded copybook
+  point at the copybook; paths under the working directory are relative to
+  `%SRCROOT%`; caveats, rules that did not run and files that failed are run
+  notifications. Validated against the OASIS schema. `scan` gains a `lint`
+  analyzer (once per file, in the file's new `reports` key), which
+  `--format sarif` runs.
+* **A large-program performance lane** (`tests/performance/test_large_program.py`).
+  Every analyzer is timed on a generated program against a per-analyzer
+  budget: 4,000 lines in the normal suite (a few seconds), 40,000 lines
+  plus a linear-scaling check with `COBOLPARSER_PERF=1`. Skipped under
+  coverage, like the other timing tests.
+* **An incremental cache for `scan`** (`scan --cache-dir DIR`,
+  `ScanOptions.cache_dir`; `cobolparser/_facts_cache.py`). Each file's
+  report is kept on disk next to the stamp of the program, every copybook
+  it expanded and every copybook directory, and reused only while all of
+  them are unchanged and the options and package version are the same. A
+  re-scan of a shop that changed a few programs parses only those. The
+  reports are identical to an uncached run (pinned by tests); the summary
+  gains `cached_file_count` when the cache is on.
+* **`call-check`: every CALL against the program it calls, across files**
+  (`CallInterfaceChecker`, `cobolparser/analysis/call_interface.py`).
+  `linkage-check` compares a CALL with its callee only inside one file and
+  only by count and passing mode; this reads a whole tree and also compares
+  each argument's byte length with the callee's LINKAGE item (shorter is an
+  error -- the callee addresses bytes past it -- longer is info), the
+  storage class (COMP-3 against DISPLAY, ...) and RETURNING. Dynamic CALLs
+  are checked against every target their tracked values name, ENTRY names
+  and nested programs resolve as COBOL does, and anything that could not
+  be compared is listed in `unchecked` rather than passed silently.
+  `--fail-on` exits 3 for a CI gate. Clean (0 findings) over the 121
+  inter-program CALLs of the NIST suite.
+
+* **User-defined functions (`FUNCTION-ID`, Enterprise COBOL 6.4).** A
+  `FUNCTION-ID` unit used to fail the whole file with "PROGRAM-ID is
+  mandatory". It now parses as its own unit (`unit_kind` "FUNCTION", with
+  the `AS` literal as `external_name`), `END FUNCTION` closes it, and the
+  REPOSITORY paragraph's `FUNCTION name` / `FUNCTION ALL INTRINSIC` /
+  `CLASS name IS 'x'` entries are read (`CobolProgram.repository()`,
+  `user_function_names()`). `FUNCTION name(...)` invoking a declared
+  function is a `function` edge in `codebase-graph` (and so in the MCP
+  server's `callers_of`), and `program-signature` shows such a unit's
+  `call_example` as `FUNCTION NAME(args)`.
+
 * **MCP server: PL/I and assembler programs in the cross-program answers.**
   With the new `[pl1]` / `[hlasm]` extras (the sibling `landparty-pl1-parser`
   and `hlasmparser`), every PL/I and assembler source under the root is read
@@ -197,6 +242,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`dead-code` is linear in the length of a PERFORM chain.** Its
+  reachability worklist admitted one PERFORM target per round and re-ran
+  the whole fall-through pass each time, so a program whose paragraphs
+  PERFORM one another in a long chain took quadratic time (3.8 s on a
+  40,000-line program, now 0.38 s). Reports are unchanged: byte-identical
+  on every NIST and sample program. `lint`, `redundancy` and `health`,
+  which run it, gain the same.
 * **MCP `decode_record` pages past its 16 MiB read window.** Every page
   was read from the start of the file, so records past the first 16 MiB
   could not be reached, and once `skip` passed the window the answer kept

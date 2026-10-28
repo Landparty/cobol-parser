@@ -253,7 +253,7 @@ class ProcedureDivisionParser(BaseDivisionParser):
                 next_value = (
                     next_token.value.upper() if next_token and next_token.value else ""
                 )
-                if next_value in ("PROGRAM", "DIVISION"):
+                if next_value in ("PROGRAM", "FUNCTION", "DIVISION"):
                     break
                 if next_value in _OO_UNIT_END_WORDS:
                     break
@@ -271,6 +271,10 @@ class ProcedureDivisionParser(BaseDivisionParser):
             # PROCEDURE DIVISION of a FACTORY / OBJECT paragraph and starts
             # the next unit; the program-level parser takes over from here.
             if token_value in ("METHOD-ID", "CLASS-ID"):
+                break
+            # A FUNCTION-ID with no IDENTIFICATION DIVISION header in front
+            # starts the next unit the same way.
+            if token_value == "FUNCTION-ID":
                 break
 
             # Skip stray control markers so following statements can be recovered.

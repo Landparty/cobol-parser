@@ -14,6 +14,49 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-28 -- merge main; FUNCTION callers in the MCP server
+
+[mcp.md](mcp.md): `_calls` rows with `via: "FUNCTION"`, so `callers_of` /
+`program_brief` / `check_claims` see user-defined function invocations
+(`FACTS_VERSION` 5). The MCP disk cache drafted on this branch was dropped
+for main's `mcp/facts.py`; `_facts_cache.py` now backs `scan` only.
+
+## 2026-10-28 -- SARIF output for lint, scan and call-check
+
+[analysis/lint.md](analysis/lint.md): `sarif.py` and `scan`'s file-level
+`lint` analyzer. [batch.md](batch.md): `FILE_ANALYZERS`,
+`FileScan.reports`. [cli.md](cli.md): the `--format sarif` choices.
+[analysis.md](analysis.md): module map row.
+
+## 2026-10-28 -- large-program performance lane; dead-code worklist linear
+
+[tests.md](tests.md): `tests/performance/test_large_program.py`, its two
+lanes and budgets. [analysis/flow.md](analysis/flow.md): the dead-code
+worklist admits the reference closure per round (`_fresh_refs`).
+
+## 2026-10-28 -- incremental cache for scan
+
+[batch.md](batch.md): `ScanOptions.cache_dir` / `scan --cache-dir` and the
+`FactsCache` itself (`_facts_cache.py`). [cli.md](cli.md): the flag.
+[tests.md](tests.md): `test_facts_cache.py`. (The MCP server's own disk
+cache is `mcp/facts.py`, see [mcp.md](mcp.md).)
+
+## 2026-10-28 -- call-check: cross-program CALL interface checking
+
+[analysis/codebase.md](analysis/codebase.md): `CallInterfaceChecker`
+(`call_interface.py`), every CALL against its callee's interface across
+files. [cli.md](cli.md): the `call-check` subcommand and its exit codes.
+[analysis.md](analysis.md): module map row.
+
+## 2026-10-28 -- FUNCTION-ID: user-defined functions
+
+[parser/divisions.md](parser/divisions.md): `FUNCTION-ID` units
+(`unit_kind` "FUNCTION", `external_name`) and the REPOSITORY paragraph's
+entries; [parser/orchestration.md](parser/orchestration.md): `END FUNCTION`
+closes the unit. [ast-models.md](ast-models.md): `repository()` /
+`user_function_names()`. [analysis/codebase.md](analysis/codebase.md):
+`function` call edges, FUNCTION `call_example`.
+
 ## 2026-10-28 -- MCP server bug hunt: argument handling, EBCDIC columns
 
 [mcp.md](mcp.md): `lint` takes `rules` / `min_severity` in any case;

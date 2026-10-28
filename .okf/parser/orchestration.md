@@ -248,7 +248,9 @@ first is returned as `ParseResult.ast` and the rest are attached to
 `ast.contained_programs` (also reachable via `get_all_statements()` and
 `to_dict()["contained_programs"]`), with one summary warning that counts every
 unit via `program_units()`. `_peek_is_end_program()` /
-`_consume_end_program_marker()` consume `END PROGRAM [name] [.]` between units.
+`_consume_end_program_marker()` consume `END PROGRAM [name] [.]` between units,
+and `END FUNCTION [name] [.]` after a `FUNCTION-ID` unit (`unit_kind`
+`"FUNCTION"`, a separately compiled unit like a stacked program).
 `CobolProgram.program_units()` enumerates every unit (outermost first, in source
 order). The tree stays flat (every PROGRAM unit hangs off the first), so the
 source nesting is recorded apart (#532): `_open_programs` is a stack of the

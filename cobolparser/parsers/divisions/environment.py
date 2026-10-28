@@ -174,7 +174,7 @@ class EnvironmentDivisionParser(BaseDivisionParser):
                     "special_names", config_data["special_names"]
                 )
             if isinstance(config_data, dict):
-                for key in ("source_computer", "object_computer"):
+                for key in ("source_computer", "object_computer", "repository"):
                     if key in config_data:
                         config_section.set_metadata(key, config_data[key])
             division_node.add_section(config_section)

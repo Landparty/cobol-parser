@@ -103,7 +103,7 @@ class CobolProgram(ASTNode):             # CobolProgram(program_name, location);
     divisions: list[CobolDivision]       # property, from an internal name -> division dict
     identification_division / environment_division / data_division / procedure_division
     contained_programs: list[CobolProgram]
-    unit_kind: str                       # "PROGRAM" | "CLASS" | "FACTORY" | "OBJECT" | "METHOD"
+    unit_kind: str                       # "PROGRAM" | "CLASS" | "FACTORY" | "OBJECT" | "METHOD" | "FUNCTION"
     program_attributes: list[str]        # property: INITIAL / COMMON / RECURSIVE subset
     is_recursive: bool                   # property
 
@@ -151,8 +151,15 @@ FD/SD entries are `CobolFileDescription(file_name, location, record_type="FD")`
   object-oriented COBOL, `"CLASS"` / `"FACTORY"` / `"OBJECT"` / `"METHOD"`
   (serialized as `unit_kind`). A class contains its factory and object units,
   which contain their methods, all via `contained_programs`, so
-  `program_units()` enumerates every method. Identification-division metadata
-  carries `unit_kind`, `inherits` and `program_attributes`.
+  `program_units()` enumerates every method. `"FUNCTION"` is a user-defined
+  function (`FUNCTION-ID`, Enterprise COBOL 6.4), a separately compiled unit
+  like a stacked program. Identification-division metadata carries
+  `unit_kind`, `inherits` and `program_attributes` (and `external_name` on a
+  FUNCTION unit).
+* `repository()` -- the CONFIGURATION SECTION `REPOSITORY` paragraph as a dict
+  (`functions` / `intrinsic` / `all_intrinsic` / `classes`, see
+  [parser/divisions.md](parser/divisions.md)), or None; `user_function_names()`
+  lists the declared user-defined functions, uppercased.
 * `program_attributes` (`["INITIAL", "COMMON", "RECURSIVE"]` subset, source
   order) and `is_recursive`.
 * `CobolSection.is_declarative` (metadata `declarative`) for sections between

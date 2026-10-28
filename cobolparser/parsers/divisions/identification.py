@@ -143,13 +143,17 @@ class IdentificationDivisionParser(BaseDivisionParser):
             "program_id": None,
             # "PROGRAM" for a PROGRAM-ID unit, "CLASS" for a CLASS-ID unit
             # and "METHOD" for a METHOD-ID unit (IBM Enterprise COBOL
-            # object-oriented syntax for Java interoperability).
+            # object-oriented syntax for Java interoperability), "FUNCTION"
+            # for a FUNCTION-ID unit (a user-defined function, Enterprise
+            # COBOL 6.4).
             "unit_kind": "PROGRAM",
             # PROGRAM-ID attributes in source order: INITIAL, COMMON,
             # RECURSIVE. Empty for a plain program.
             "program_attributes": [],
             # CLASS-ID only: the INHERITS class name, if any.
             "inherits": None,
+            # FUNCTION-ID only: the ``AS literal`` external name, if any.
+            "external_name": None,
             "author": None,
             "installation": None,
             "date_written": None,
@@ -195,6 +199,12 @@ class IdentificationDivisionParser(BaseDivisionParser):
                 in_comment_entry = False
                 content["program_id"] = self.parse_method_id_clause(token_stream)
                 content["unit_kind"] = "METHOD"
+            elif token_value == "FUNCTION-ID":
+                in_comment_entry = False
+                name, external = self.parse_function_id_clause(token_stream)
+                content["program_id"] = name
+                content["unit_kind"] = "FUNCTION"
+                content["external_name"] = external
             elif self._at_oo_unit_start(token_stream, token_value):
                 # ``FACTORY.`` / ``OBJECT.`` / ``METHOD-ID.`` open the next
                 # unit of a class definition (a class with no ENVIRONMENT
@@ -221,11 +231,11 @@ class IdentificationDivisionParser(BaseDivisionParser):
                 token_stream.consume()
 
         # Validate mandatory PROGRAM-ID (or CLASS-ID / METHOD-ID for an
-        # object-oriented unit)
+        # object-oriented unit, FUNCTION-ID for a user-defined function)
         if not content["program_id"]:
             raise ParseError(
-                "PROGRAM-ID (or CLASS-ID / METHOD-ID) is mandatory in "
-                "IDENTIFICATION DIVISION"
+                "PROGRAM-ID (or CLASS-ID / METHOD-ID / FUNCTION-ID) is mandatory "
+                "in IDENTIFICATION DIVISION"
             )
 
         return content
@@ -398,6 +408,41 @@ class IdentificationDivisionParser(BaseDivisionParser):
             token_stream.consume()
         return method_name
 
+    @staticmethod
+    def parse_function_id_clause(
+        token_stream: ITokenStream,
+    ) -> tuple[str, str | None]:
+        """Parse ``FUNCTION-ID[.] function-name [AS literal] [.]``.
+
+        A user-defined function (IBM Enterprise COBOL 6.4). The stream is
+        positioned at the ``FUNCTION-ID`` word. Returns ``(name,
+        external_name)``, the latter the ``AS`` literal without its quotes,
+        or None.
+        """
+        token_stream.consume()  # FUNCTION-ID
+        token_stream.skip_whitespace_and_comments()
+        period = token_stream.peek(0)
+        if period is not None and period.value == ".":
+            token_stream.consume()
+        token_stream.skip_whitespace_and_comments()
+        if token_stream.is_empty():
+            raise ParseError("Expected function name after FUNCTION-ID.")
+        name = _unit_name(token_stream.consume().value)
+        external: str | None = None
+        token_stream.skip_whitespace_and_comments()
+        nxt = token_stream.peek(0)
+        if nxt is not None and nxt.value and nxt.value.upper() == "AS":
+            token_stream.consume()
+            token_stream.skip_whitespace_and_comments()
+            literal = token_stream.peek(0)
+            if literal is not None and literal.value and literal.value != ".":
+                external = _unit_name(token_stream.consume().value)
+            token_stream.skip_whitespace_and_comments()
+            nxt = token_stream.peek(0)
+        if nxt is not None and nxt.value == ".":
+            token_stream.consume()
+        return name, external
+
     def _parse_clause_value(
         self, token_stream: ITokenStream, in_comment_entry: bool = False
     ) -> str:
@@ -542,5 +587,9 @@ class IdentificationDivisionParser(BaseDivisionParser):
                 "security": division_content.get("security"),
             }
         )
+        if division_content.get("unit_kind") == "FUNCTION":
+            division_node.metadata["external_name"] = division_content.get(
+                "external_name"
+            )
 
         return division_node

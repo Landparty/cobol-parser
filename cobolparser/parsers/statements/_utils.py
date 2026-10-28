@@ -880,7 +880,7 @@ def bare_end_starts_at_end_clause(stream: ITokenStream) -> bool:
     return not (
         lookahead
         and lookahead.value
-        and lookahead.value.upper() in ("PROGRAM", "DIVISION")
+        and lookahead.value.upper() in ("PROGRAM", "FUNCTION", "DIVISION")
     )
 
 

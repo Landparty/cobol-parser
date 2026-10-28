@@ -49,6 +49,7 @@ _SUBCOMMANDS = frozenset(
         "diff",
         "codebase-graph",
         "copybook-impact",
+        "call-check",
         "sql-cics-check",
         "business-rules",
         "lineage",
@@ -2655,6 +2656,27 @@ def _build_scan_parser(subparsers: argparse._SubParsersAction) -> None:
             "copybook's is)"
         ),
     )
+    p.add_argument(
+        "--cache-dir",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Keep each file's report in DIR and reuse it on the next scan "
+            "while the file, its copybooks and the copybook directories are "
+            "unchanged (summary.cached_file_count counts the reused ones)"
+        ),
+    )
+    p.add_argument(
+        "--format",
+        choices=["json", "sarif"],
+        default="json",
+        dest="output_format",
+        help=(
+            "json (default) or a SARIF 2.1.0 log of the lint findings of "
+            "every file (GitHub code scanning). sarif runs the lint "
+            "analyzer, alone unless --analyzer names others too"
+        ),
+    )
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -2753,6 +2775,13 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         _fail("--workers must be >= 1")
 
     analyzers = parse_analyzer_list(args.analyzer)
+    sarif = getattr(args, "output_format", "json") == "sarif"
+    if sarif:
+        analyzers = (
+            ("lint",)
+            if not args.analyzer
+            else tuple(dict.fromkeys((*analyzers, "lint")))
+        )
     source_format = _source_format_kwargs(args)
     options = ScanOptions(
         analyzers=analyzers,
@@ -2768,6 +2797,7 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         preprocess_fixed=source_format["preprocess_fixed"],
         debug_lines=bool(source_format.get("debug_lines", False)),
         defined_symbols=_defined_symbol_pairs(args),
+        cache_dir=args.cache_dir,
     )
 
     try:
@@ -2777,6 +2807,38 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         # comma-separated spelling this flag accepts, so the check lives in
         # scan_files and its message is already the one to print.
         _fail(str(exc))
+
+    if sarif:
+        from ..analysis.sarif import (
+            SarifNotification,
+            lint_notifications,
+            lint_results,
+            sarif_log,
+        )
+
+        results = []
+        notes = []
+        for scanned in report.ok_files:
+            lint = scanned.reports.get("lint") or {}
+            results += lint_results(lint, scanned.path)
+            notes += lint_notifications(lint, scanned.path)
+        notes += [
+            SarifNotification(
+                message=f"not scanned: {f.error}", level="error", file=f.path
+            )
+            for f in report.failed_files
+        ]
+        _json_out(
+            sarif_log(results, notes), args.compact, getattr(args, "output", None)
+        )
+        if report.failed_files:
+            print(
+                f"warning: {len(report.failed_files)} of {len(report.files)} "
+                "file(s) could not be scanned",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        return
 
     output = report.to_dict()
     if args.clones:
@@ -2980,13 +3042,14 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--format",
-        choices=["json", "text"],
+        choices=["json", "text", "sarif"],
         default="json",
         dest="output_format",
         help=(
             "json (default) emits the full LintReport; text emits one "
             "grep-friendly 'file:line:column: severity [rule] message' line "
-            "per finding plus a summary."
+            "per finding plus a summary; sarif emits a SARIF 2.1.0 log "
+            "(GitHub code scanning, IDE problem panes)."
         ),
     )
     p.set_defaults(func=_cmd_lint)
@@ -3164,6 +3227,17 @@ def _cmd_lint(args: argparse.Namespace) -> None:
             )
         _text_out(
             _lint_text_report(report, args.file),
+            getattr(args, "output", None),
+        )
+    elif args.output_format == "sarif":
+        from ..analysis.sarif import lint_notifications, lint_results, sarif_log
+
+        data = report.to_dict()
+        _json_out(
+            sarif_log(
+                lint_results(data, args.file), lint_notifications(data, args.file)
+            ),
+            args.compact,
             getattr(args, "output", None),
         )
     else:
@@ -3945,6 +4019,159 @@ def _cmd_copybook_impact(args: argparse.Namespace) -> None:
 
     _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
     _exit_on_graph_errors(graph)
+
+
+# -- Subcommand: call-check ---------------------------------------------------
+
+
+def _build_call_check_parser(subparsers: argparse._SubParsersAction) -> None:
+    from ..analysis.call_interface import SEVERITIES
+
+    p = subparsers.add_parser(
+        "call-check",
+        help="Check every CALL against the interface of the program it reaches, "
+        "across files: argument count, BY VALUE/REFERENCE, byte lengths, "
+        "usages and RETURNING",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser call-check ./src\n"
+            "  cobol-parser call-check ./src --copybook-path ./copybooks "
+            "--fail-on error\n"
+            "  cobol-parser call-check CALLER.cbl SUBPGM.cbl --format text\n"
+            "\n"
+            "Exit codes:\n"
+            "  0  the run completed (findings or not)\n"
+            "  2  a file was missing or failed to parse; the report is incomplete\n"
+            "  3  --fail-on was given and a finding at or above it was reported"
+        ),
+    )
+    p.add_argument(
+        "paths",
+        nargs="+",
+        metavar="PATH",
+        help="One directory to walk, or any number of COBOL source files",
+    )
+    p.add_argument(
+        "--extension",
+        action="append",
+        dest="extensions",
+        metavar="EXT",
+        help="Source extension to walk for, repeatable "
+        "(default: .cbl, .cob, .cobol)",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Worker processes for the batch parse (default: chosen by size)",
+    )
+    p.add_argument(
+        "--min-severity",
+        choices=list(SEVERITIES),
+        default="info",
+        help="Drop findings below this severity from the output (default: info)",
+    )
+    p.add_argument(
+        "--fail-on",
+        choices=[*SEVERITIES, "never"],
+        default="never",
+        help="Exit 3 when a finding at or above this severity was reported "
+        "(default: never)",
+    )
+    p.add_argument(
+        "--format",
+        choices=["json", "text", "sarif"],
+        default="json",
+        dest="output_format",
+        help="json (default), one 'file:line: severity: [kind] message' "
+        "line per finding plus a summary, or a SARIF 2.1.0 log (GitHub code "
+        "scanning, IDE problem panes)",
+    )
+    _add_compact_arg(p)
+    _add_copybook_args(p)
+    _add_output_arg(p)
+    _add_debug_lines_arg(p)
+    p.set_defaults(func=_cmd_call_check)
+
+
+def _program_files(args: argparse.Namespace) -> list[str]:
+    """The source files named on the command line: the files given, or every
+    program under the one directory given (the codebase-graph rule)."""
+    from ..analysis.codebase import DEFAULT_PROGRAM_EXTENSIONS
+
+    directories = [p for p in args.paths if os.path.isdir(p)]
+    if directories and len(args.paths) > 1:
+        _fail("give either one directory to walk or a list of files, not both")
+    if not directories:
+        missing = [p for p in args.paths if not os.path.exists(p)]
+        for path in missing:
+            print(f"error: no such file or directory: {path}", file=sys.stderr)
+        if missing:
+            sys.exit(2)
+        return list(args.paths)
+    extensions = tuple(args.extensions or DEFAULT_PROGRAM_EXTENSIONS)
+    wanted = {(e if e.startswith(".") else f".{e}").lower() for e in extensions}
+    found: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(directories[0]):
+        dirnames.sort()
+        for filename in sorted(filenames):
+            if os.path.splitext(filename)[1].lower() in wanted:
+                found.append(os.path.join(dirpath, filename))
+    return found
+
+
+def _cmd_call_check(args: argparse.Namespace) -> None:
+    from ..analysis.call_interface import SEVERITIES, CallInterfaceChecker
+
+    if args.workers is not None and args.workers < 1:
+        _fail("--workers must be >= 1")
+    files = _program_files(args)
+    report = CallInterfaceChecker(
+        copybook_paths=list(args.copybook_path or []),
+        workers=args.workers,
+        debug_lines=bool(getattr(args, "debug_lines", False)),
+    ).check_files(files)
+
+    cutoff = SEVERITIES.index(args.min_severity)
+    report.findings = [
+        f for f in report.findings if SEVERITIES.index(f.severity) <= cutoff
+    ]
+    # Like lint: --fail-on judges the findings shown, not those filtered out.
+    worst = report.worst_severity()
+    if args.output_format == "text":
+        _text_out(report.to_text(), getattr(args, "output", None))
+    elif args.output_format == "sarif":
+        from ..analysis.sarif import (
+            call_check_notifications,
+            call_check_results,
+            sarif_log,
+        )
+
+        _json_out(
+            sarif_log(call_check_results(report), call_check_notifications(report)),
+            args.compact,
+            getattr(args, "output", None),
+        )
+    else:
+        _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+
+    if report.errors:
+        print(
+            f"warning: {len(report.errors)} file(s) failed to parse cleanly; "
+            "the report is incomplete",
+            file=sys.stderr,
+        )
+    fail_on = getattr(args, "fail_on", "never")
+    if (
+        fail_on != "never"
+        and worst is not None
+        and SEVERITIES.index(worst) <= SEVERITIES.index(fail_on)
+    ):
+        sys.exit(3)
+    if report.errors:
+        sys.exit(2)
 
 
 # -- Subcommand: sql-cics-check -----------------------------------------------
@@ -4741,6 +4968,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_diff_parser(subparsers)
     _build_codebase_graph_parser(subparsers)
     _build_copybook_impact_parser(subparsers)
+    _build_call_check_parser(subparsers)
     _build_analyzer_parser(
         subparsers,
         "sql-cics-check",

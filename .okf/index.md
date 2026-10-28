@@ -81,9 +81,9 @@ it with `git config core.hooksPath .githooks`) and by the test suite:
   must run; backticked `cobolparser.*` names, class/function names and repo
   paths must exist; links and anchors must resolve; the CLI table in
   `cli.md` must match argparse; and counts the code can answer (there are
-  <!-- okf:gen analysis-module-count -->33<!-- /okf:gen --> analysis
+  <!-- okf:gen analysis-module-count -->35<!-- /okf:gen --> analysis
   modules, <!-- okf:gen tokentype-count -->244<!-- /okf:gen --> `TokenType`
-  members, <!-- okf:gen cli-subcommand-count -->39<!-- /okf:gen -->
+  members, <!-- okf:gen cli-subcommand-count -->40<!-- /okf:gen -->
   subcommands) are written as `<!-- okf:gen NAME -->` spans that must equal
   the generator's output. After a code change that moves one, run
   `python scripts/okf_check.py --write`. `tests/test_okf_claims.py` runs the

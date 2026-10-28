@@ -63,7 +63,14 @@ ANALYZERS: tuple[str, ...] = (
     "dead-code",
     "unused-variables",
     "lineage",
+    "lint",
 )
+
+#: Analyzers that run once per *file* rather than once per unit: ``lint``
+#: already covers every program unit in a file (a contained program left
+#: unexamined would read as clean), so per unit it would report each
+#: contained program's findings again. Their report is ``FileScan.reports``.
+FILE_ANALYZERS: frozenset[str] = frozenset({"lint"})
 
 #: What ``scan`` runs when the caller names nothing. ``health`` is the
 #: composite grade a portfolio view sorts on; ``redundancy`` is the only
@@ -109,6 +116,19 @@ class ScanOptions:
     #: code under ``>>IF DBG DEFINED`` vanished and its PERFORM targets read
     #: as dead (#324).
     defined_symbols: tuple[tuple[str, str], ...] = ()
+    #: A directory for :class:`~cobolparser._facts_cache.FactsCache`: a file
+    #: whose source, copybooks and copybook directories are unchanged since
+    #: a scan with the same options gets that scan's report back without
+    #: being parsed. None (the default) caches nothing.
+    cache_dir: str | None = None
+
+    def cache_settings(self) -> tuple[Any, ...]:
+        """Every option that changes a file's report (not the cache itself)."""
+        return tuple(
+            (name, getattr(self, name))
+            for name in self.__dataclass_fields__
+            if name != "cache_dir"
+        )
 
 
 @dataclass
@@ -136,6 +156,15 @@ class UnitScan:
             out["failed_analyzers"] = self.failed_analyzers
         return out
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> UnitScan:
+        return cls(
+            program_name=data["program_name"],
+            depth=int(data["depth"]),
+            reports=dict(data.get("reports") or {}),
+            failed_analyzers=dict(data.get("failed_analyzers") or {}),
+        )
+
 
 @dataclass
 class FileScan:
@@ -159,6 +188,26 @@ class FileScan:
     #: Lossy-decode warnings: bytes of the source its encoding could not
     #: map, replaced with U+FFFD (#522). Serialized only when non-empty.
     decode_warnings: list[str] = field(default_factory=list)
+    #: Reports of the :data:`FILE_ANALYZERS` that ran (``lint``: a
+    #: ``LintReport.to_dict()``, every finding stamped with its on-disk
+    #: ``origin``). Serialized only when non-empty.
+    reports: dict[str, Any] = field(default_factory=dict)
+    #: True when the report came from :attr:`ScanOptions.cache_dir` rather
+    #: than a parse. Not serialized per file; counted in the summary.
+    from_cache: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FileScan:
+        """The inverse of :meth:`to_dict`."""
+        return cls(
+            path=data["path"],
+            units=[UnitScan.from_dict(u) for u in data.get("units") or []],
+            error=data.get("error"),
+            parse_error_count=int(data.get("parse_error_count") or 0),
+            copybook_error=data.get("copybook_error"),
+            decode_warnings=list(data.get("decode_warnings") or []),
+            reports=dict(data.get("reports") or {}),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"path": self.path}
@@ -172,6 +221,8 @@ class FileScan:
             out["copybook_error"] = self.copybook_error
         if self.decode_warnings:
             out["decode_warnings"] = list(self.decode_warnings)
+        if self.reports:
+            out["reports"] = dict(self.reports)
         return out
 
 
@@ -206,6 +257,11 @@ class ScanReport:
                 "scanned_file_count": len(ok),
                 "failed_file_count": len(failed),
                 "program_unit_count": sum(len(f.units) for f in ok),
+                **(
+                    {"cached_file_count": sum(f.from_cache for f in self.files)}
+                    if self.options.cache_dir
+                    else {}
+                ),
             },
             "files": [f.to_dict() for f in ok],
             "failures": [f.to_dict() for f in failed],
@@ -278,6 +334,8 @@ def _scan_unit(
     """Every requested analyzer over one unit, each failing on its own."""
     scan = UnitScan(program_name=unit.program_name or "", depth=depth)
     for name in options.analyzers:
+        if name in FILE_ANALYZERS:
+            continue
         try:
             scan.reports[name] = _run_analyzer(name, unit, options, source_map)
         except Exception as exc:  # noqa: BLE001 -- see the module docstring
@@ -319,7 +377,41 @@ def _units_with_depth(program: Any, depth: int = 0) -> list[tuple[Any, int]]:
 
 
 def scan_one(path: str, options: ScanOptions) -> FileScan:
-    """Parse and analyze one file. Never raises -- see the module docstring."""
+    """Parse and analyze one file. Never raises -- see the module docstring.
+
+    With :attr:`ScanOptions.cache_dir`, a file nothing it depends on has
+    changed in is answered from the cache, and a fresh report is stored.
+    """
+    if not options.cache_dir:
+        return _scan_one(path, options)
+    from ._facts_cache import FactsCache, directory_stamps, stamp
+
+    cache = FactsCache(options.cache_dir, "scan", options.cache_settings())
+    held = cache.get(path)
+    if held is not None:
+        try:
+            cached = FileScan.from_dict(held)
+        except (KeyError, TypeError, ValueError):
+            pass
+        else:
+            cached.path = path
+            cached.from_cache = True
+            return cached
+    own = stamp(path)
+    sources: set[str] = set()
+    scan = _scan_one(path, options, sources)
+    if scan.error is None:
+        stamps = {path: own, **{s: stamp(s) for s in sources if s != path}}
+        stamps.update(directory_stamps(options.copybook_paths))
+        cache.put(path, scan.to_dict(), stamps)
+    return scan
+
+
+def _scan_one(
+    path: str, options: ScanOptions, sources: set[str] | None = None
+) -> FileScan:
+    """:func:`scan_one` without the cache. Adds every file the parse read
+    (the program and the copybooks expanded into it) to *sources*."""
     from .preprocess import PreprocessingError
     from .preprocess.copybook_expander import read_program_source
 
@@ -357,6 +449,8 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
         decode_warnings=decode_warnings,
     )
     source_map = getattr(result, "expansion_source_map", None)
+    if sources is not None and source_map:
+        sources.update(file for file, _ in source_map.values())
     for unit, depth in _units_with_depth(result.ast):
         unit_scan = _scan_unit(unit, depth, options, source_map)
         if source_map:
@@ -369,7 +463,45 @@ def scan_one(path: str, options: ScanOptions) -> FileScan:
             stamp_report_origins(unit_scan.reports, source_map)
             _stamp_body_origins(unit_scan.reports.get("redundancy"), source_map)
         scan.units.append(unit_scan)
+    if "lint" in options.analyzers:
+        scan.reports["lint"] = _lint_file(path, result, options, source_map)
     return scan
+
+
+def _lint_file(
+    path: str,
+    result: Any,
+    options: ScanOptions,
+    source_map: dict[int, tuple[str, int]] | None,
+) -> dict[str, Any]:
+    """The ``lint`` subcommand's report for one parse: every unit, the parse
+    errors as findings, and each finding placed on disk (its file, line and
+    editor column). A lint that raises is a failed rule, never a lost file."""
+    from .analysis.lint import (
+        LintAnalyzer,
+        LintReport,
+        add_parse_errors,
+        apply_source_map,
+        source_column_offsets,
+    )
+
+    try:
+        report = LintAnalyzer().analyze(result.ast)
+        add_parse_errors(report, list(result.errors))
+        if not source_map:
+            source_map = {
+                f.location.line: (path, f.location.line)
+                for f in report.findings
+                if f.location is not None
+            }
+        apply_source_map(
+            report, source_map, source_column_offsets(path, options.preprocess_fixed)
+        )
+    except Exception as exc:  # noqa: BLE001 -- see the module docstring
+        report = LintReport(
+            failed_rules=[{"rule": "lint", "error": f"{type(exc).__name__}: {exc}"}]
+        )
+    return report.to_dict()
 
 
 def _stamp_body_origins(

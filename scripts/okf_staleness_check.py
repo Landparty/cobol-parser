@@ -214,6 +214,7 @@ OKF_MAP = [
         [".okf/analysis/sql-cics-ims.md"],
     ),
     ("cobolparser/analysis/lint.py", [".okf/analysis/lint.md"]),
+    ("cobolparser/analysis/sarif.py", [".okf/analysis/lint.md"]),
     ("cobolparser/analysis/field_lineage.py", [".okf/analysis/lineage.md"]),
     ("cobolparser/analysis/lineage_graph.py", [".okf/analysis/lineage.md"]),
     ("cobolparser/analysis/lineage_jcl.py", [".okf/analysis/lineage.md"]),
@@ -221,6 +222,7 @@ OKF_MAP = [
     ("cobolparser/analysis/business_rules.py", [".okf/analysis/business-rules.md"]),
     ("cobolparser/analysis/codebase.py", [".okf/analysis/codebase.md"]),
     ("cobolparser/analysis/program_signature.py", [".okf/analysis/codebase.md"]),
+    ("cobolparser/analysis/call_interface.py", [".okf/analysis/codebase.md"]),
     ("cobolparser/analysis/ast_diff.py", [".okf/analysis/codebase.md"]),
     (
         "cobolparser/analysis/boundary_inventory.py",
@@ -263,6 +265,7 @@ OKF_MAP = [
     ("cobolparser/generators/data/bundle.py", [".okf/generators/fixtures.md"]),
     ("cobolparser/batch.py", [".okf/batch.md"]),
     ("cobolparser/scan.py", [".okf/batch.md"]),
+    ("cobolparser/_facts_cache.py", [".okf/batch.md"]),
     ("cobolparser/cli/", [".okf/cli.md"]),
     ("cobolparser/config/", [".okf/cli.md"]),
     ("cobolparser/mcp/", [".okf/mcp.md"]),

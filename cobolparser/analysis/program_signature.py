@@ -149,6 +149,9 @@ class EntryPoint:
     #: The ``RETURNING`` operand of ``PROCEDURE DIVISION USING ... RETURNING``
     #: (``None`` when there is none).
     returning: str | None = None
+    #: True for a user-defined function (a FUNCTION-ID unit): it is invoked
+    #: as ``FUNCTION name(arg ...)`` rather than CALLed.
+    is_function: bool = False
 
     @property
     def parameter_count(self) -> int:
@@ -159,8 +162,12 @@ class EntryPoint:
 
         The shape an editor shows at the call site, and the reason the
         operand *order* is preserved verbatim from the USING clause rather
-        than sorted anywhere in this module.
+        than sorted anywhere in this module. A user-defined function's is
+        the ``FUNCTION name(arg ...)`` reference that invokes it.
         """
+        if self.is_function:
+            arguments = " ".join(p.name for p in self.parameters)
+            return f"FUNCTION {self.name}({arguments})"
         text = f'CALL "{self.name}"'
         if self.parameters:
             # A BY phrase governs every following operand until the next
@@ -191,6 +198,7 @@ class EntryPoint:
             "returning": self.returning,
             "call_example": self.call_example(),
             "location": self.location.to_dict() if self.location else None,
+            **({"is_function": True} if self.is_function else {}),
         }
 
 
@@ -536,6 +544,7 @@ class ProgramSignatureExtractor:
                         ],
                         returning=returning,
                         location=proc_div.location,
+                        is_function=ast.unit_kind == "FUNCTION",
                     )
                 )
 

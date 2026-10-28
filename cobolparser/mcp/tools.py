@@ -2452,6 +2452,26 @@ def _calls(
         row["sites"].append(
             {"location": parsed.locate(cics.location.line, None, response)}
         )
+    declared = frozenset(unit.user_function_names())
+    if declared:
+        # FUNCTION name(...) of a user-defined function the REPOSITORY
+        # paragraph declares: control passes to that FUNCTION-ID unit.
+        from ..analysis.language_env_analyzer import function_references
+
+        for statement in _own_statements(unit):
+            for name in function_references(statement, declared):
+                if name not in declared:
+                    continue
+                row = rows.get((name, "FUNCTION"))
+                if row is None:
+                    row = rows[(name, "FUNCTION")] = {
+                        "program": name,
+                        "via": "FUNCTION",
+                        "dynamic": False,
+                        "sites": [],
+                    }
+                line = statement.location.line if statement.location else None
+                row["sites"].append({"location": parsed.locate(line, None, response)})
     return list(rows.values())
 
 
