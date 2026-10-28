@@ -368,14 +368,25 @@ class TestDatasetUsers:
         assert tools.dataset_users("PROD.TRAN.DAILY(0)")["answer"]["use_count"] == 2
         assert tools.dataset_users("PROD.TRAN.DAILY(+1)")["answer"]["use_count"] == 0
 
-    def test_wildcards(self, root: Path) -> None:
-        answer = tools_for(root).dataset_users("PROD.INV.*")["answer"]
+    def test_wildcards_follow_zos_filters(self, root: Path) -> None:
+        tools = tools_for(root)
+        # '*' stays within one qualifier ...
+        answer = tools.dataset_users("PROD.INV.*")["answer"]
+        assert {u["dataset"] for u in answer["uses"]} == {
+            "PROD.INV.TRANS(0)",
+            "PROD.INV.MASTER",
+        }
+        # ... and '**' spans any number of them.
+        answer = tools.dataset_users("PROD.INV.**")["answer"]
         assert {u["dataset"] for u in answer["uses"]} == {
             "PROD.INV.TRANS(0)",
             "PROD.INV.TRANS.GOOD",
             "PROD.INV.MASTER",
             "PROD.INV.REPORT.D",
         }
+        assert {
+            u["dataset"] for u in tools.dataset_users("**.MASTER")["answer"]["uses"]
+        } == {"PROD.INV.MASTER", "PROD.ACCT.MASTER"}
         good = [u for u in answer["uses"] if u["dataset"] == "PROD.INV.TRANS.GOOD"]
         assert {u["access"] for u in good} == {"create", "exclusive"}
         percent = tools_for(root).dataset_users("PROD.INV.REPORT.%")["answer"]
@@ -404,12 +415,89 @@ class TestDatasetUsers:
             tools_for(root).dataset_users("''")
 
     def test_limit(self, root: Path) -> None:
-        result = tools_for(root).dataset_users("PROD.*", limit=2)
+        result = tools_for(root).dataset_users("PROD.**", limit=2)
         assert len(result["answer"]["uses"]) == 2
         assert result["truncated"][0]["field"] == "uses"
 
 
 # -- the index and the extra -------------------------------------------------
+
+
+class TestReviewFixes:
+    def test_a_program_source_never_shadows_a_procedure_member(
+        self, root: Path
+    ) -> None:
+        # A procedure named after the program it runs, in a mixed directory:
+        # PAYPROC.cbl sorts before PAYPROC.prc.
+        (root / "procs" / "PAYPROC.cbl").write_text(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PAYPROC.\n"
+        )
+        answer = tools_for(root).jcl_job("jobs/PAYROLL2.jcl")["answer"]
+        assert answer["procedures"] == [
+            {"name": "PAYPROC", "source": "procs/PAYPROC.prc"}
+        ]
+        assert "RUNPAY.EXTRACT" in [s["name"] for s in answer["jobs"][0]["steps"]]
+
+    def test_concatenation_after_an_override_is_cited_card_by_card(
+        self, root: Path
+    ) -> None:
+        (root / "procs" / "LIBPROC.prc").write_text(
+            "//LIBPROC PROC\n"
+            "//PS1     EXEC PGM=INVUPDT\n"
+            "//STEPLIB  DD DSN=P.LIB1,DISP=SHR\n"
+            "//         DD DSN=P.LIB2,DISP=SHR\n"
+            "//         DD DSN=P.LIB3,DISP=SHR\n"
+            "//         PEND\n"
+        )
+        (root / "jobs" / "LIBJOB.jcl").write_text(
+            "//LIBJOB JOB (A),'B'\n"
+            "//*\n"
+            "//R1 EXEC LIBPROC\n"
+            "//PS1.STEPLIB DD DSN=O.LIB1,DISP=SHR\n"
+            "//        DD DSN=O.LIB2,DISP=SHR\n"
+        )
+        tools = tools_for(root)
+        uses = tools.dataset_users("*.LIB%")["answer"]["uses"]
+        located = {u["dataset"]: u["location"] for u in uses}
+        assert located == {
+            "O.LIB1": {"file": "jobs/LIBJOB.jcl", "line": 4},
+            "O.LIB2": {"file": "jobs/LIBJOB.jcl", "line": 5},
+            "P.LIB3": {"file": "procs/LIBPROC.prc", "line": 5},
+        }
+        for dataset, location in located.items():
+            assert dataset in card(root, location)
+        step = tools.jcl_job("jobs/LIBJOB.jcl", step="PS1")["answer"]["jobs"][0][
+            "steps"
+        ][0]
+        (steplib,) = step["dds"]
+        assert [m["location"] for m in steplib["concatenated"]] == [
+            located["O.LIB2"],
+            located["P.LIB3"],
+        ]
+
+    def test_a_source_that_does_not_parse_keeps_the_steps(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(self: Workspace, file: str) -> None:
+            raise ToolError(f"{file} could not be parsed")
+
+        monkeypatch.setattr(Workspace, "program", refuse)
+        result = tools_for(root).jobs_running("READER")
+        assert result["answer"]["step_count"] == 2
+        assert "files" not in result["answer"]
+        assert "analyzer-failed" in kinds(result)
+
+    def test_a_utility_parses_no_program(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(self: Workspace, file: str) -> None:
+            raise AssertionError(f"parsed {file}")
+
+        monkeypatch.setattr(Workspace, "program", refuse)
+        monkeypatch.setattr(Workspace, "cached_or_parse", refuse)
+        answer = tools_for(root).jobs_running("SORT")["answer"]
+        assert answer["step_count"] == 1
+        assert "source" not in answer
 
 
 class TestIndex:
@@ -436,7 +524,7 @@ class TestIndex:
 
         monkeypatch.setattr(jcl_parser.JclParser, "parse", parse)
         tools = tools_for(root)
-        result = tools.dataset_users("PROD.*")
+        result = tools.dataset_users("PROD.**")
         assert "incomplete-analysis" in kinds(result)
         assert any("payproc.jcl" in c["detail"] for c in result["caveats"])
         with pytest.raises(ToolError, match="cannot read payproc.jcl.*boom"):

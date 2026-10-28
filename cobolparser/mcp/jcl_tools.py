@@ -28,13 +28,14 @@ named after it.
 
 from __future__ import annotations
 
-import fnmatch
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .._lines import split_source_lines
 from ..jcl.models import DDStatement, JclJob, JclParseResult, JobStep
 from ..models.program import CobolProgram
 from .envelope import Response, ToolError, clamp_limit
@@ -55,6 +56,9 @@ INSTALL_HINT = (
     "the JCL tools read JCL through jcl-parser, which is not installed: "
     "pip install 'cobol-parser[jcl]'"
 )
+
+#: An unnamed DD card: a concatenation member.
+_UNNAMED_DD = re.compile(r"^//\s+DD(\s|$)")
 
 #: ``DISP=`` status -> what the step does with the dataset.
 _ACCESS = {"SHR": "read", "OLD": "exclusive", "NEW": "create", "MOD": "extend"}
@@ -111,10 +115,10 @@ def jcl_index(workspace: Workspace) -> JclIndex:
         started = time.monotonic()
         stamps = workspace.tree_stamps()
         libraries = sorted({p.parent for p in workspace.files_named(PROC_SUFFIXES)})
-        members = _library_members(libraries)
+        members = _library_members(libraries, PROC_SUFFIXES)
         for member in members.values():
             stamps[str(member)] = _stamp(str(member))
-        parser = JclParser(libraries)
+        parser = JclParser(libraries, PROC_SUFFIXES)
         files = workspace.files_named(JCL_SUFFIXES)
         index = JclIndex(libraries=libraries, members=members)
         for done, path in enumerate(files):
@@ -171,7 +175,7 @@ class _Locator:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 text = ""
-            self._lines[path] = text.splitlines()
+            self._lines[path] = split_source_lines(text)
         lines = self._lines[path]
         return lines[line - 1].upper() if 0 < line <= len(lines) else ""
 
@@ -191,17 +195,43 @@ class _Locator:
     def step(self, step: JobStep) -> dict[str, Any] | None:
         return self.at(self.member(step) or self.jfile.path, step.line)
 
-    def dd(self, step: JobStep | None, dd: DDStatement) -> Path:
-        """The file *dd*'s card is in."""
+    def dd(
+        self,
+        step: JobStep | None,
+        dd: DDStatement,
+        owner: Path | None = None,
+    ) -> Path:
+        """The file *dd*'s card is in.
+
+        *owner* is the file of the card that heads *dd*'s concatenation, when
+        *dd* is an unnamed member of one: a member that follows an override
+        on the invocation is coded in the job file too, but only when the
+        job file really has an unnamed DD card at its line.
+        """
         member = None if step is None else self.member(step)
         if member is None or step is None:
             return self.jfile.path
         procstep = step.name.split(".", 1)[1].upper()
-        if self._text(self.jfile.path, dd.line).startswith(
-            f"//{procstep}.{dd.name.upper()} "
-        ):
+        text = self._text(self.jfile.path, dd.line)
+        if text.startswith(f"//{procstep}.{dd.name.upper()} "):
             return self.jfile.path
+        if owner == self.jfile.path and _UNNAMED_DD.match(text):
+            # The two files share line numbers: a dataset name coded on only
+            # one of the two cards settles which it is.
+            dataset = (dd.dataset or "").upper()
+            in_member = bool(dataset) and dataset in self._text(member, dd.line)
+            if not in_member or dataset in text:
+                return self.jfile.path
         return member
+
+    def flattened(
+        self, step: JobStep | None, dd: DDStatement
+    ) -> list[tuple[DDStatement, Path]]:
+        """*dd* and its concatenation members, each with its card's file."""
+        head = self.dd(step, dd)
+        return [(dd, head)] + [
+            (member, self.dd(step, member, head)) for member in dd.flatten()[1:]
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +269,8 @@ def _dd_row(
     *,
     instream: bool = False,
 ) -> dict[str, Any]:
-    path = locator.dd(step, dd)
+    cards = locator.flattened(step, dd)
+    path = cards[0][1]
     row: dict[str, Any] = {"ddname": dd.name, "kind": _kind(dd)}
     if dd.dataset is not None:
         row["dataset"] = dd.dataset
@@ -264,9 +295,9 @@ def _dd_row(
             {
                 "dataset": member.dataset,
                 "kind": _kind(member),
-                "location": locator.at(path, member.line),
+                "location": locator.at(member_path, member.line),
             }
-            for member in dd.flatten()[1:]
+            for member, member_path in cards[1:]
         ]
     return row
 
@@ -292,12 +323,6 @@ def _step_row(
         _dd_row(dd, step, locator, instream=instream) for dd in step.dd_statements
     ]
     return row
-
-
-def _runs(step: JobStep, program: str) -> bool:
-    return (step.program or "").upper() == program or program in (
-        step.effective_programs()
-    )
 
 
 def _carry_file(jfile: JclFile, response: Response) -> None:
@@ -384,7 +409,7 @@ def jcl_job(
     if jfile is None:  # JCL under another suffix (a member with none)
         from ..jcl.parser import JclParser
 
-        jfile = _parse(JclParser(index.libraries), workspace, path)
+        jfile = _parse(JclParser(index.libraries, PROC_SUFFIXES), workspace, path)
     if jfile.result is None:
         raise ToolError(f"cannot read {jfile.display}: {jfile.failure}")
     result = jfile.result
@@ -509,11 +534,12 @@ def jobs_running(
     matches: list[tuple[JclFile, JclJob, JobStep]] = []
     for jfile in index.parsed():
         assert jfile.result is not None
+        running = {id(step) for step in jfile.result.steps_running(name)}
         matches += [
             (jfile, job, step)
             for job in jfile.result.jobs
             for step in job.steps
-            if _runs(step, name)
+            if id(step) in running
         ]
     shown = response.cap(matches, clamp_limit(limit), "steps")
     locators: dict[Path, _Locator] = {}
@@ -550,22 +576,44 @@ def _program_selects(
 ) -> dict[str, Any] | None:
     """The COBOL source of *name* and its ``SELECT``s, or None when the
     program is not under the root."""
-    file = _source_files(workspace).get(name)
+    file = _source_files(workspace).get(name) or _declaring_file(workspace, name)
     if file is None:
-        from .codebase_index import programs_index
-
-        units = programs_index(workspace).units_named(name)
-        if not units:
-            return None
-        file = units[0].file
+        return None
     from .tools import _attempt
 
-    parsed = workspace.program(file)
+    try:
+        parsed = workspace.program(file)
+    except ToolError as exc:
+        # The steps stand without the source; only the SELECT join is lost.
+        response.caveat(
+            "analyzer-failed",
+            f"{file} (the source of {name}): {exc}",
+            "its SELECT files are not bound to the steps' DDs",
+        )
+        return None
     unit = parsed.ast.find_program_unit(name) or parsed.ast
     files = _attempt(response, "SELECT files", lambda: _selects(parsed, unit, response))
     if files is None:
         return None
     return {"source": parsed.program_info(unit), "files": files}
+
+
+def _declaring_file(workspace: Workspace, name: str) -> str | None:
+    """The program file whose text declares ``PROGRAM-ID. name``, for a source
+    not named after its load module. A text scan, not a parse: a utility
+    such as SORT or IEFBR14 is in no file, and finding that out must not
+    cost a parse of every program under the root."""
+    declares = re.compile(
+        rf"PROGRAM-ID\s*\.?\s*['\"]?{re.escape(name)}(?![\w-])", re.IGNORECASE
+    )
+    for path in workspace.program_files():
+        try:
+            text = path.read_text(encoding="latin-1")
+        except OSError:
+            continue
+        if declares.search(text):
+            return workspace.display(path)
+    return None
 
 
 def _selects(
@@ -645,18 +693,53 @@ def _base(dataset: str) -> str:
     return dataset.split("(", 1)[0]
 
 
+def _filter_regex(pattern: str) -> re.Pattern[str]:
+    """A z/OS dataset name filter as a regex: ``%`` is one character, ``*``
+    any characters within one qualifier, ``**`` any number of qualifiers
+    (``A.**`` is ``A`` and everything under it)."""
+    out = ""
+    qualifiers = pattern.split(".")
+    for n, qualifier in enumerate(qualifiers):
+        if qualifier == "**":
+            if n == 0:
+                out = r"(?:[^.]+\.)*" if len(qualifiers) > 1 else r".+"
+            else:
+                out = out[:-2] + r"(?:\.[^.]+)*\."
+            continue
+        out += "".join(
+            "[^.]*" if c == "*" else "[^.]" if c == "%" else re.escape(c)
+            for c in qualifier
+        )
+        out += r"\."
+    if out.endswith(r"\."):
+        out = out[:-2]
+    return re.compile(out)
+
+
 def _matcher(pattern: str) -> Callable[[str], bool]:
     wanted = pattern.strip().strip("'").upper()
     if not wanted:
         raise ToolError("no dataset given")
-    if any(c in wanted for c in "*?%"):
-        glob = wanted.replace("%", "?")
-        return lambda ds: fnmatch.fnmatchcase(ds, glob) or fnmatch.fnmatchcase(
-            _base(ds), glob
-        )
+    if any(c in wanted for c in "*%"):
+        regex = _filter_regex(wanted)
+        return lambda ds: bool(regex.fullmatch(ds) or regex.fullmatch(_base(ds)))
     if "(" in wanted:
         return lambda ds: ds == wanted
     return lambda ds: _base(ds) == wanted
+
+
+def _cards(
+    result: JclParseResult, locator: _Locator
+) -> list[tuple[JclJob, JobStep | None, DDStatement, Path]]:
+    """Every DD card, as ``all_dd_statements()`` lists them, with its file."""
+    out: list[tuple[JclJob, JobStep | None, DDStatement, Path]] = []
+    for job in result.jobs:
+        for dd in job.dd_statements:
+            out += [(job, None, m, p) for m, p in locator.flattened(None, dd)]
+        for step in job.steps:
+            for dd in step.dd_statements:
+                out += [(job, step, m, p) for m, p in locator.flattened(step, dd)]
+    return out
 
 
 def dataset_users(
@@ -672,7 +755,7 @@ def dataset_users(
     for jfile in index.parsed():
         assert jfile.result is not None
         locator = _Locator(jfile, index, workspace)
-        for job, step, dd in jfile.result.all_dd_statements():
+        for job, step, dd, path in _cards(jfile.result, locator):
             if dd.dataset is None or not matches(dd.dataset.upper()):
                 continue
             row: dict[str, Any] = {
@@ -684,7 +767,7 @@ def dataset_users(
                 "ddname": dd.name,
                 "disposition": dd.disposition,
                 "access": _access(dd.disposition),
-                "location": locator.at(locator.dd(step, dd), dd.line),
+                "location": locator.at(path, dd.line),
             }
             if dd.dataset.startswith("&&"):
                 row["temporary"] = True

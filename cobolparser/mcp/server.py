@@ -541,8 +541,9 @@ def build_server(workspace: Workspace) -> FastMCP:
             str,
             Field(
                 description="Dataset name; a GDG generation or member is "
-                "matched by its base name unless given, and * / % are "
-                "wildcards (PROD.INV.*)"
+                "matched by its base name unless given. z/OS filter "
+                "wildcards: % one character, * within one qualifier "
+                "(PROD.INV.*), ** any number of qualifiers (PROD.**)"
             ),
         ],
         limit: Limit = None,
