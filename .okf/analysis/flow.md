@@ -238,7 +238,14 @@ the [history](../history/analysis.md).
   a paragraph PERFORMed only from dead code is dead (lint says "can never be
   reached"). THRU range ends and section exits are collected from *every*
   statement up front, which keeps each round monotone. Pinned by
-  `TestTransitiveDeadCode`.
+  `TestTransitiveDeadCode`. Each round first admits the plain reference
+  closure (`_fresh_refs`: names `_add_ref` added for the first time, so an
+  inner round never rescans every procedure), and only then runs the
+  fall-through pass, THRU walk and section propagation: one round per
+  PERFORM link made a 300-paragraph chain cost 302 whole fall-through
+  passes, quadratic (3.8 s at 40,000 lines, 0.38 s now, every report on
+  the NIST and sample programs byte-identical).
+  `regression/test_dead_code_perform_chain_rounds.py`.
 * **THRU ranges are walked, not blanket-marked** (#381). Ranges are recorded
   during collection (`_thru_ranges`) and walked by `_mark_thru_ranges` right
   after `_collect_fallthrough_refs`, inside the worklist, in source order: a

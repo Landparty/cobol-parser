@@ -84,6 +84,7 @@ python -m pytest -m "io"            # IO statement tests
 python -m pytest tests/regression/ -v
 python -m pytest tests/contracts/ -v
 python -m pytest tests/performance/ -v
+COBOLPARSER_PERF=1 python -m pytest tests/performance/test_large_program.py   # 40k-line lane, ~80 s
 
 # Lint and format
 python -m ruff check .

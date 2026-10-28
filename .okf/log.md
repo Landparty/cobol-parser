@@ -14,6 +14,12 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-28 -- large-program performance lane; dead-code worklist linear
+
+[tests.md](tests.md): `tests/performance/test_large_program.py`, its two
+lanes and budgets. [analysis/flow.md](analysis/flow.md): the dead-code
+worklist admits the reference closure per round (`_fresh_refs`).
+
 ## 2026-10-28 -- incremental cache for scan and the MCP indexes
 
 [batch.md](batch.md): `ScanOptions.cache_dir` / `scan --cache-dir` and the

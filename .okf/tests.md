@@ -108,7 +108,7 @@ tests/
                                #   test_open_findings_high_regressions.py / ..._medium_regressions.py:
                                #     reports/open-findings.md H1-H8 / M-series
                                #   test_nist_edge_case_fixes.py: minimal repros of NIST edge cases
-  performance/                 # test_factory_performance.py (`slow`; absolute floors skipped under a tracer)
+  performance/                 # test_factory_performance.py (`slow`; absolute floors skipped under a tracer); test_large_program.py (per-analyzer time budgets on a generated program: 4,000 lines by default, 40,000 plus a x4-size scaling check under COBOLPARSER_PERF=1)
                                # + bench_cython_vs_pure.py (a script, not collected)
   samples/                     # shared COBOL fixtures: 48 *.cbl at top level
     copybook_programs/         # programs with COPY statements
@@ -127,7 +127,7 @@ a collection error):
 | Marker | Meaning |
 |--------|---------|
 | `integration` | Integration tests |
-| `slow` | Slow-running tests (only `tests/performance/test_factory_performance.py` today) |
+| `slow` | Slow-running tests (`tests/performance/test_factory_performance.py` and `test_large_program.py`) |
 | `contract` | API contract tests |
 | `io` | IO statement tests (OPEN, CLOSE, READ, WRITE, REWRITE, DELETE, START, ACCEPT, DISPLAY, UNLOCK) |
 
@@ -366,6 +366,20 @@ comfortably uninstrumented -- the number describes the tracer, not the
 factory. Any `--no-cov` run (e.g. CI's `build` job) enforces the floors;
 only a coverage run skips them. The ratio-based overhead assertion is
 unaffected.
+
+**The large-program lane** (`tests/performance/test_large_program.py`,
+skipped under a tracer the same way). `generate_program(lines)` writes a
+fixed-format program of ten-line paragraphs (IF / COMPUTE / MOVE /
+EVALUATE, then PERFORM or every fifth a GO TO of the next), every line
+within column 72. `BUDGETS` holds seconds per analyzer at 40,000 lines
+(about three times the 2026-10-28 measurement); the default lane runs
+4,000 lines against the budgets scaled down (floor 1 s), about 3 s in all.
+`COBOLPARSER_PERF=1` runs 40,000 lines against the full budgets, plus
+`test_scales_linearly`: each analyzer at 10,000 and 40,000 lines, ratio
+under `MAX_SCALING_RATIO` 8 (linear is 4, quadratic 16); about 80 s. A new
+analyzer needs a budget (`test_every_analyzer_has_a_budget`). Its first run
+found the dead-code worklist quadratic (see
+[analysis/flow.md](analysis/flow.md)).
 
 ## CI/CD
 

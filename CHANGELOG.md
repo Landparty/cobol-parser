@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **A large-program performance lane** (`tests/performance/test_large_program.py`).
+  Every analyzer is timed on a generated program against a per-analyzer
+  budget: 4,000 lines in the normal suite (a few seconds), 40,000 lines
+  plus a linear-scaling check with `COBOLPARSER_PERF=1`. Skipped under
+  coverage, like the other timing tests.
 * **An incremental cache for `scan` and the MCP server's root-wide indexes**
   (`scan --cache-dir DIR`, `ScanOptions.cache_dir`; `mcp --cache-dir DIR`,
   `Workspace(cache_dir=...)`; `cobolparser/_facts_cache.py`). Each file's
@@ -216,6 +221,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CopyStatement.sql_include`; the un-expanding parse path is unchanged.
 
 ### Fixed
+
+* **`dead-code` is linear in the length of a PERFORM chain.** Its
+  reachability worklist admitted one PERFORM target per round and re-ran
+  the whole fall-through pass each time, so a program whose paragraphs
+  PERFORM one another in a long chain took quadratic time (3.8 s on a
+  40,000-line program, now 0.38 s). Reports are unchanged: byte-identical
+  on every NIST and sample program. `lint`, `redundancy` and `health`,
+  which run it, gain the same.
 
 * **`ADD n TO ZERO GIVING x` parses.** In the GIVING format the TO operand
   is only read, so a literal or figurative constant is valid there (IBM

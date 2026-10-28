@@ -152,6 +152,9 @@ class DeadCodeAnalyzer:
     def __init__(self) -> None:
         self._procedure_names: dict[str, tuple[str, SourceLocation]] = {}
         self._referenced_names: set[str] = set()
+        #: Names :meth:`_add_ref` added for the first time since the worklist
+        #: last looked, so a round need not rescan every procedure.
+        self._fresh_refs: list[str] = []
         self._ordered_procedures: list[str] = []
         # Maps section name -> list of paragraph names within that section
         self._section_paragraphs: dict[str, list[str]] = {}
@@ -248,6 +251,7 @@ class DeadCodeAnalyzer:
         """
         self._procedure_names = {}
         self._referenced_names = set()
+        self._fresh_refs = []
         self._ordered_procedures = []
         self._section_paragraphs = {}
         self._paragraph_sections = {}
@@ -296,11 +300,24 @@ class DeadCodeAnalyzer:
         # HANDLE labels -- admits a procedure's statements only once the
         # procedure itself is reached.
         admitted: set[str | None] = set()
+        procedures = set(self._ordered_procedures)
         pending: list[str | None] = [None]
         while pending:
-            admitted.update(pending)
-            for owner in pending:
-                self._collect_references(by_owner.get(owner, []))
+            # Admit the plain closure first: a PERFORM chain P1 -> P2 -> ...
+            # would otherwise take one round, and one whole fall-through
+            # pass, per link -- quadratic in a long program. Every step here
+            # is monotone, so the order rounds admit procedures in does not
+            # change the fixpoint.
+            while pending:
+                admitted.update(pending)
+                self._fresh_refs = []
+                for owner in pending:
+                    self._collect_references(by_owner.get(owner, []))
+                pending = [
+                    key
+                    for key in dict.fromkeys(self._fresh_refs)
+                    if key in procedures and key not in admitted
+                ]
             self._collect_fallthrough_refs()
             # Needs this round's fall-through sources and jump targets: a
             # THRU range member is reached by running on from the one before
@@ -1011,8 +1028,9 @@ class DeadCodeAnalyzer:
 
     def _add_ref(self, key: str | None) -> None:
         """Add a procedure key as referenced."""
-        if key:
+        if key and key not in self._referenced_names:
             self._referenced_names.add(key)
+            self._fresh_refs.append(key)
 
     def _add_jump_ref(self, key: str | None) -> None:
         """Add a procedure reached by a transfer that does *not* return.
