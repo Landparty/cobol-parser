@@ -106,6 +106,9 @@ tests/
                                #   test_open_findings_high_regressions.py / ..._medium_regressions.py:
                                #     reports/open-findings.md H1-H8 / M-series
                                #   test_nist_edge_case_fixes.py: minimal repros of NIST edge cases
+  eval/                        # the MCP benchmark's tasks next to the code (tests/eval/README.md)
+    test_answer_keys.py        # `integration` in-file: every tasks.json task's tool answer states its key's facts, over the shop build_shop.py assembles (shop/ + samples + NIST); a task without a test fails
+                               # + run_eval.py (a script, not collected: headless Claude Code with/without the MCP server, a judge, a report; writes .eval-runs/)
   performance/                 # test_factory_performance.py (`slow`; absolute floors skipped under a tracer)
                                # + bench_cython_vs_pure.py (a script, not collected)
   samples/                     # shared COBOL fixtures: 48 *.cbl at top level

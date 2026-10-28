@@ -1,0 +1,126 @@
+[
+ {
+  "id": "C01-exportlayout",
+  "kind": "single-program",
+  "q": "In the CardDemo export record EXPORT-RECORD (used by CBEXPORT), what are the byte offset (0-based) and length of EXP-ACCT-CURR-CYC-DEBIT and of EXP-TRAN-AMT, and what is the total record length?",
+  "facts": [
+   "EXP-ACCT-CURR-CYC-DEBIT is at offset 120 (0-based)",
+   "EXP-ACCT-CURR-CYC-DEBIT is 8 bytes (PIC S9(10)V99 COMP, binary)",
+   "EXP-TRAN-AMT is at offset 172 (0-based)",
+   "EXP-TRAN-AMT is 6 bytes (PIC S9(09)V99 COMP-3)",
+   "EXPORT-RECORD is 500 bytes (the REDEFINES variants overlay the 460-byte EXPORT-RECORD-DATA starting at offset 40)"
+  ]
+ },
+ {
+  "id": "C02-rejects",
+  "kind": "business rules",
+  "q": "In the daily transaction posting batch program CBTRN02C, list every reason a daily transaction is rejected, with its reason code, and what happens to a rejected transaction.",
+  "facts": [
+   "Code 100 'INVALID CARD NUMBER FOUND': the card number is not in the card cross-reference file (XREF READ INVALID KEY)",
+   "Code 101 'ACCOUNT RECORD NOT FOUND': the account from the xref is not in the account file",
+   "Code 102 'OVERLIMIT TRANSACTION': ACCT-CURR-CYC-CREDIT - ACCT-CURR-CYC-DEBIT + transaction amount exceeds ACCT-CREDIT-LIMIT",
+   "Code 103 'TRANSACTION RECEIVED AFTER ACCT EXPIRATION': ACCT-EXPIRAION-DATE is earlier than the first 10 characters of DALYTRAN-ORIG-TS",
+   "Rejected transactions are written to the rejects file (DALYREJS) with the reason code and description, the reject count is incremented, and the program ends with RETURN-CODE 4 if any were rejected",
+   "Code 109 is NOT a rejection of the input (it is set when the account REWRITE fails after posting); listing 109 as a reject reason without that qualification is wrong"
+  ]
+ },
+ {
+  "id": "C03-reportpath",
+  "kind": "jcl + program",
+  "q": "Which transactions end up in the transaction report produced by CBTRN03C in production JCL? Trace the data from its source dataset through every job step, including any filtering or sorting along the way.",
+  "facts": [
+   "Job TRANREPT runs it",
+   "Step STEP05R runs cataloged procedure REPROC (IDCAMS REPRO, procedure step PRC001) to unload AWS.M2.CARDDEMO.TRANSACT.VSAM.KSDS into AWS.M2.CARDDEMO.TRANSACT.BKUP(+1)",
+   "A SORT step (also named STEP05R) reads TRANSACT.BKUP(+1), keeps only transactions whose processing date (TRAN-PROC-DT, positions 305-314) is between 2022-01-01 and 2022-07-06, sorts by card number, and writes AWS.M2.CARDDEMO.TRANSACT.DALY(+1)",
+   "STEP10R runs CBTRN03C reading TRANSACT.DALY(+1) as TRANFILE",
+   "CBTRN03C additionally filters on TRAN-PROC-TS(1:10) between WS-START-DATE and WS-END-DATE read from the DATEPARM dataset (AWS.M2.CARDDEMO.DATEPARM)",
+   "The report is written to AWS.M2.CARDDEMO.TRANREPT(+1) (DD TRANREPT)"
+  ]
+ },
+ {
+  "id": "C04-copyimpact",
+  "kind": "cross-program",
+  "q": "If the account record copybook CVACT01Y changes, which programs must be recompiled?",
+  "facts": [
+   "CBACT01C, CBACT04C, CBEXPORT, CBIMPORT are listed",
+   "CBSTM03A, CBTRN01C, CBTRN02C are listed",
+   "COACTUPC, COACTVWC, COBIL00C, COTRN02C are listed",
+   "COACCT01 (app-vsam-mq) is listed",
+   "COPAUA0C and COPAUS0C (app-authorization-ims-db2-mq) are listed",
+   "No program that does not COPY CVACT01Y is listed (exactly these 14)"
+  ]
+ },
+ {
+  "id": "C05-callers",
+  "kind": "cross-program",
+  "q": "Which programs call the date-validation subprogram CSUTLDTC, and from where (file:line, paragraph)?",
+  "facts": [
+   "COTRN02C calls it twice, at COTRN02C.cbl lines 393 and 413 (VALIDATE-INPUT-DATA-FIELDS)",
+   "CORPT00C calls it twice, at CORPT00C.cbl lines 392 and 412 (PROCESS-ENTER-KEY)",
+   "COACTUPC calls it through copybook CSUTLDPY (CALL at CSUTLDPY.cpy line 293, paragraph EDIT-DATE-LE), which COACTUPC copies at line 4232",
+   "No other callers are claimed"
+  ]
+ },
+ {
+  "id": "C06-transactwriters",
+  "kind": "jcl",
+  "q": "Which jobs change the contents of the VSAM file AWS.M2.CARDDEMO.TRANSACT.VSAM.KSDS (write records to it, load it, delete it or redefine it), and how? Which jobs only read it?",
+  "facts": [
+   "POSTTRAN STEP15: CBTRN02C opens TRANSACT-FILE (DD TRANFILE) OUTPUT and writes the posted transactions, even though the DD says DISP=SHR",
+   "TRANFILE job: IDCAMS deletes the cluster (STEP05), defines it again (STEP10) and REPROs AWS.M2.CARDDEMO.DALYTRAN.PS.INIT into it (STEP15)",
+   "TRANBKP job: backs it up through REPROC to TRANSACT.BKUP(+1), then deletes (STEP05) and redefines (STEP10) it empty",
+   "COMBTRAN STEP10: IDCAMS REPRO loads AWS.M2.CARDDEMO.TRANSACT.COMBINED(+1) into it",
+   "Read-only users include CBEXPORT (CBEXPORT job), the CREASTMT SORT step and the TRANREPT unload; these are not claimed to change it"
+  ]
+ },
+ {
+  "id": "C07-interest",
+  "kind": "business rules + jcl",
+  "q": "How does CardDemo compute monthly interest? Give the formula, where the rate comes from, what records are written or updated, and which datasets they go to in production JCL.",
+  "facts": [
+   "Program CBACT04C, run by job INTCALC STEP15 (PARM='2022071800')",
+   "Monthly interest = TRAN-CAT-BAL * DIS-INT-RATE / 1200, per transaction category balance record",
+   "The rate comes from the disclosure group file (DISCGRP, AWS.M2.CARDDEMO.DISCGRP.VSAM.KSDS); if the account's group is not found (status 23) it retries with group 'DEFAULT'; no interest when the rate is 0",
+   "Each interest amount is written as a new transaction (type 01, category 05, source 'System', description 'Int. for a/c <acct>') to DD TRANSACT = AWS.M2.CARDDEMO.SYSTRAN(+1)",
+   "The account's total interest is added to ACCT-CURR-BAL and ACCT-CURR-CYC-CREDIT / ACCT-CURR-CYC-DEBIT are reset to 0 (REWRITE of AWS.M2.CARDDEMO.ACCTDATA.VSAM.KSDS)",
+   "Fees (1400-COMPUTE-FEES) are not implemented"
+  ]
+ },
+ {
+  "id": "C08-external",
+  "kind": "workspace-wide",
+  "q": "List every program that is CALLed somewhere in this workspace (static CALL or a dynamic CALL whose target can be traced) but whose source is not in the workspace, and name the calling programs for each.",
+  "facts": [
+   "CEE3ABD (from many CardDemo batch programs: CBACT01C-04C, CBCUS01C, CBEXPORT, CBIMPORT, CBSTM03A, CBTRN01C-03C) and CEEDAYS (from CSUTLDTC)",
+   "CBLTDLI (from DBUNLDGS, PAUDBLOD, PAUDBUNL)",
+   "MQ calls MQOPEN, MQGET, MQCLOSE, MQPUT, MQPUT1 (from COACCT01, CODATE01, COPAUA0C)",
+   "COBDATFT (called by CBACT01C) and MVSWAIT (called by COBSWAIT) are identified; their only source is assembler in carddemo/asm, so either listing them as having no COBOL source or noting that their assembler source is present counts as correct",
+   "DSNTIAC (dynamic CALL via LIT-DSNTIAC from COTRTLIC)",
+   "FIC401M (from IC401M) and XXXXXXXX (from IC222A) in the NIST programs",
+   "No program whose source is present is listed: e.g. CSUTLDTC and CBSTM03B are present, and NESTEDPROG is a program nested inside IC401M"
+  ]
+ },
+ {
+  "id": "C09-deadcode",
+  "kind": "single-program (large)",
+  "q": "In COACTUPC.cbl (the account update screen), which paragraphs can never be executed?",
+  "facts": [
+   "1230-EDIT-ALPHANUM-REQD (and its -EXIT) is never performed",
+   "1240-EDIT-ALPHANUM-OPT (and its -EXIT) is never performed",
+   "No live paragraph is claimed dead (e.g. 1225-EDIT-ALPHA-REQD and 1235-EDIT-ALPHA-OPT are used); mentioning 0000-MAIN-EXIT as unreachable after EXEC CICS RETURN is fine"
+  ]
+ },
+ {
+  "id": "C10-posting",
+  "kind": "program + jcl",
+  "q": "When job POSTTRAN posts a valid daily transaction, which datasets does it read and update, and exactly how are the account balances changed?",
+  "facts": [
+   "Input is AWS.M2.CARDDEMO.DALYTRAN.PS (DD DALYTRAN); card lookup in AWS.M2.CARDDEMO.CARDXREF.VSAM.KSDS (XREFFILE)",
+   "A transaction record (with a DB2-format processing timestamp) is written to AWS.M2.CARDDEMO.TRANSACT.VSAM.KSDS (TRANFILE)",
+   "The transaction category balance in AWS.M2.CARDDEMO.TCATBALF.VSAM.KSDS is increased by the amount (record created if the account/type/category key is not found)",
+   "In AWS.M2.CARDDEMO.ACCTDATA.VSAM.KSDS, ACCT-CURR-BAL is increased by the amount",
+   "ACCT-CURR-CYC-CREDIT is increased when the amount is >= 0, otherwise ACCT-CURR-CYC-DEBIT is increased (by the negative amount)",
+   "Rejected transactions go to AWS.M2.CARDDEMO.DALYREJS(+1)"
+  ]
+ }
+]
