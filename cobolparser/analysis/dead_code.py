@@ -760,61 +760,80 @@ class DeadCodeAnalyzer:
         a fall-through source, makes that range end one too (issue #734):
         the pass repeats until no such jump adds another.
         """
+        # Which jumps leave their range does not change from pass to pass:
+        # settle it once, by source position (issue #734).
+        position = {key: i for i, key in enumerate(self._ordered_procedures)}
+        spans = self._performed_spans(position)
+        pending: list[tuple[str, str]] = []
+        for end, source in self._range_end_jumps:
+            # ``None``: the leading body, which runs first, never as a
+            # PERFORM.
+            if (
+                source is None
+                or not self._inside_range_to(end, source, position)
+                or self._jumps_out_of_a_range(end, source, position, spans)
+            ):
+                self._fallthrough_sources.add(end)
+            else:
+                pending.append((end, source))
         while True:
             before = len(self._fallthrough_sources)
             self._fallthrough_pass()
-            for end, source in self._range_end_jumps:
-                # ``None``: the leading body, which runs first, never as a
-                # PERFORM.
-                if (
-                    source is None
-                    or source in self._fallthrough_sources
-                    or not self._inside_range_to(end, source)
-                    or self._jumps_out_of_a_range(end, source)
-                ):
+            for end, source in pending:
+                if source in self._fallthrough_sources:
                     self._fallthrough_sources.add(end)
             if len(self._fallthrough_sources) == before:
                 return
 
-    def _inside_range_to(self, end: str, source: str) -> bool:
+    def _inside_range_to(self, end: str, source: str, position: dict[str, int]) -> bool:
         """Whether *source* lies within some THRU range closing on *end*:
         only then can a GO TO from it onto *end* be the range's early exit.
         """
-        try:
-            end_index = self._ordered_procedures.index(end)
-            source_index = self._ordered_procedures.index(source)
-        except ValueError:
+        end_index = position.get(end)
+        source_index = position.get(source)
+        if end_index is None or source_index is None:
             return True
         for start in self._range_starts.get(end, ()):
-            try:
-                start_index = self._ordered_procedures.index(start)
-            except ValueError:
+            start_index = position.get(start)
+            if start_index is None:
                 return True
             if start_index <= source_index <= end_index:
                 return True
         return False
 
-    def _jumps_out_of_a_range(self, end: str, source: str) -> bool:
+    def _performed_spans(self, position: dict[str, int]) -> list[tuple[int, int]]:
+        """(first, last) source position of every PERFORMed range, a
+        section target's last paragraph standing for its end."""
+        spans: set[tuple[int, int]] = set()
+        for start, stop in self._performed_ranges:
+            paras = self._section_paragraphs.get(stop)
+            last = paras[-1] if paras else stop
+            start_index = position.get(start)
+            stop_index = position.get(last)
+            if start_index is not None and stop_index is not None:
+                spans.add((start_index, stop_index))
+        return sorted(spans)
+
+    def _jumps_out_of_a_range(
+        self,
+        end: str,
+        source: str,
+        position: dict[str, int],
+        spans: list[tuple[int, int]],
+    ) -> bool:
         """Whether some PERFORMed range holding *source* closes before
         *end*: a GO TO from *source* onto *end* then leaves that PERFORM
         rather than ending a range at *end* (``PERFORM P2`` alone, with
         ``GO TO P4`` in P2 and ``PERFORM P2 THRU P4`` elsewhere).
         """
-        order = self._ordered_procedures
-        try:
-            end_index = order.index(end)
-            source_index = order.index(source)
-        except ValueError:
+        end_index = position.get(end)
+        source_index = position.get(source)
+        if end_index is None or source_index is None:
             return False
-        for start, stop in self._performed_ranges:
-            paras = self._section_paragraphs.get(stop)
-            last = paras[-1] if paras else stop
-            try:
-                start_index = order.index(start)
-                stop_index = order.index(last)
-            except ValueError:
-                continue
-            if start_index <= source_index <= stop_index < end_index:
+        for start_index, stop_index in spans:
+            if start_index > source_index:
+                break
+            if source_index <= stop_index < end_index:
                 return True
         return False
 

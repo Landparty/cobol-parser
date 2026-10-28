@@ -68,7 +68,7 @@ _JCLLIB = re.compile(
 #: A DD card that starts in-stream data: ``DD *`` or ``DD DATA``, with the
 #: ``DLM=`` that ends it when it has one.
 _INSTREAM_DD = re.compile(
-    r"^//\S*\s+DD\s+(\*|DATA)(?=[\s,]|$)(?:.*?\bDLM=(?:'([^']{2})'|(\S{2})))?",
+    r"^//(?!\*)\S*\s+DD\s+(\*|DATA)(?=[\s,]|$)(?:.*?\bDLM=(?:'([^']{2})'|(\S{2})))?",
     re.IGNORECASE,
 )
 

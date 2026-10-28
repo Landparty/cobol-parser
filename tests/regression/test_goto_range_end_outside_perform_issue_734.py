@@ -111,3 +111,35 @@ P4.
 P5.
     DISPLAY 'P5'.
 """)
+
+
+def test_many_exit_ranges_stay_fast() -> None:
+    """The #734 settling ran in O(jumps x ranges x procedures): 1,500
+    ``PERFORM Pn THRU Pn-EXIT`` with a ``GO TO Pn-EXIT`` each took ~95 s."""
+    import time
+
+    n = 1500
+    lines = [
+        "       IDENTIFICATION DIVISION.",
+        "       PROGRAM-ID. BIG.",
+        "       DATA DIVISION.",
+        "       WORKING-STORAGE SECTION.",
+        "       01 WS-A PIC 9.",
+        "       PROCEDURE DIVISION.",
+        "       MAIN.",
+    ]
+    lines += [f"           PERFORM P{i} THRU P{i}-EXIT" for i in range(n)]
+    lines.append("           STOP RUN.")
+    for i in range(n):
+        lines += [
+            f"       P{i}.",
+            f"           IF WS-A = 1 GO TO P{i}-EXIT END-IF",
+            "           MOVE 1 TO WS-A.",
+            f"       P{i}-EXIT.",
+            "           EXIT.",
+        ]
+    ast = parse_cobol("\n".join(lines) + "\n", "BIG.cbl").ast
+    began = time.perf_counter()
+    report = DeadCodeAnalyzer().analyze(ast)
+    assert time.perf_counter() - began < 10
+    assert report.dead_items == []

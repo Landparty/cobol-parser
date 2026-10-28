@@ -82,6 +82,11 @@ def test_in_stream_job_jcllib_is_not_the_outer_jobs() -> None:
     assert _jcllib_names(text) == ["OUTER.PROCS"]
 
 
+def test_commented_out_dd_data_starts_no_in_stream_data() -> None:
+    text = "//J JOB\n" "//*SYSUT1 DD DATA,DLM=@@\n" "//LIB JCLLIB ORDER=(A.PROCS)\n"
+    assert _jcllib_names(text) == ["A.PROCS"]
+
+
 def test_dd_star_data_ends_at_the_next_card() -> None:
     text = (
         "//J JOB\n"
