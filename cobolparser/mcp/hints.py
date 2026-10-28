@@ -149,6 +149,19 @@ def _datasets(answer: dict[str, Any], result: dict[str, Any]) -> Iterable[_Hint]
             return
 
 
+def _slice(answer: dict[str, Any], result: dict[str, Any]) -> Iterable[_Hint]:
+    file = _program_file(result)
+    paragraphs = answer.get("paragraphs") or []
+    if file and len(paragraphs) == 1 and paragraphs[0].get("paragraph"):
+        yield _call("read_procedure", file=file, name=paragraphs[0]["paragraph"])
+    if answer.get("ports") and answer.get("found"):
+        # Values cross the program boundary: the lineage tools follow them.
+        if answer.get("direction") == "backward":
+            yield _call("where_from", field=answer.get("field"), file=file)
+        else:
+            yield _call("impact_of_change", name=answer.get("field"), file=file)
+
+
 _HINTERS: dict[str, Callable[[dict[str, Any], dict[str, Any]], Iterable[_Hint]]] = {
     "program_brief": _brief,
     "explain_symbol": _symbol,
@@ -157,6 +170,7 @@ _HINTERS: dict[str, Callable[[dict[str, Any], dict[str, Any]], Iterable[_Hint]]]
     "impact_of_change": _impact,
     "codebase_overview": _overview,
     "lint": _lint,
+    "slice": _slice,
     "jobs_running": _jobs,
     "dataset_users": _datasets,
 }

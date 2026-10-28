@@ -64,7 +64,10 @@ Start with program_brief to learn what a program is and touches; then
 explain_symbol for a data name, callers_of for a paragraph, record_layout for
 a record's bytes, lint for what is wrong, business_rules for the decisions
 and calculations it implements, read_procedure for a whole paragraph, and
-read_source to show the code at a cited line. find_statements searches
+read_source to show the code at a cited line. slice gives only the
+statements that compute a field (or that it feeds), under their paragraphs:
+read it before reading a whole program to explain one value.
+find_statements searches
 parsed statements (by verb, operand, literal or paragraph) in one file or
 the whole root: prefer it to a text search, which matches comments and
 misses copybook code.
@@ -149,6 +152,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "read_source",
         "read_procedure",
         "find_statements",
+        "slice",
     ),
     "data": ("decode_record", "gen_fixtures", "diff_programs"),
     "jcl": ("jcl_job", "jobs_running", "dataset_users"),
@@ -316,6 +320,28 @@ def build_server(
                 verb, operand, role, literal, paragraph, file, program, limit
             ),
             ctx,
+        )
+
+    async def slice(  # the tool's name; shadows the builtin only here
+        file: File,
+        field: Annotated[
+            str, Field(description="Data item ('X OF Y' when it repeats)")
+        ],
+        direction: Annotated[
+            str,
+            Field(description="backward: what feeds it; forward: what it feeds"),
+        ] = "backward",
+        program: Program = None,
+        limit: Limit = None,
+        aliases: Annotated[
+            bool, Field(description="Also follow inexact REDEFINES aliases")
+        ] = False,
+    ) -> dict[str, Any]:
+        """Only the statements of one program that can affect a field (or
+        that it affects), with the IFs they run under, each cited."""
+        return await off_loop(
+            "slice",
+            lambda: tools.slice(file, field, direction, program, limit, aliases),
         )
 
     async def lint(
@@ -664,6 +690,7 @@ def build_server(
         read_source,
         read_procedure,
         find_statements,
+        slice,
         business_rules,
         diff_programs,
         decode_record,

@@ -1904,6 +1904,23 @@ class CobolTools:
 
         return read_procedure(self.workspace, file, name, program)
 
+    def slice(
+        self,
+        file: str,
+        field: str,
+        direction: str = "backward",
+        program: str | None = None,
+        limit: int | None = None,
+        aliases: bool = False,
+    ) -> dict[str, Any]:
+        """The statements that can affect *field*, or that it affects, in
+        one program (:mod:`.slicing`)."""
+        from .slicing import slice_field
+
+        return slice_field(
+            self.workspace, file, field, direction, program, limit, aliases
+        )
+
     def find_statements(
         self,
         verb: str | None = None,

@@ -59,6 +59,7 @@ class TestServer:
             "read_source",
             "read_procedure",
             "find_statements",
+            "slice",
             "business_rules",
             "diff_programs",
             "decode_record",
