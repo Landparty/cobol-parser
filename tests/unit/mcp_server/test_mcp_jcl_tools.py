@@ -11,7 +11,11 @@ import pytest
 
 from cobolparser.config.project import ProjectConfig
 from cobolparser.mcp import CobolTools, ToolError, Workspace
-from cobolparser.mcp.jcl_tools import INSTALL_HINT, MAX_INSTREAM_LINES
+from cobolparser.mcp.jcl_tools import (
+    INSTALL_HINT,
+    MAX_INSTREAM_LINES,
+    _jcllib_names,
+)
 
 pytest.importorskip("jclparser")
 
@@ -527,6 +531,15 @@ class TestProcedureLibraries:
         assert extract["location"]["file"] == "lib/PROD.MY.PROCS/PAYPROC"
         answer = got["result"]["answer"]
         assert "lib/PROD.MY.PROCS" in answer["procedure_libraries"]
+
+    def test_jcllib_order_continued_over_cards(self) -> None:
+        text = (
+            "//J        JOB (A)\n"
+            "//PROCS    JCLLIB ORDER=(PROD.A,\n"
+            "//             'PROD.B')   A COMMENT\n"
+            "//         JCLLIB ORDER=PROD.C\n"
+        )
+        assert _jcllib_names(text) == ["PROD.A", "PROD.B", "PROD.C"]
 
     def test_missing_jcllib_library_is_a_caveat(self, root: Path) -> None:
         (root / "jobs" / "PAYROLL2.jcl").write_text(

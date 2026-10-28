@@ -56,10 +56,25 @@ PROC_SUFFIXES: tuple[str, ...] = (".prc", ".proc")
 LIBRARY_SUFFIXES: tuple[str, ...] = (".prc", ".proc", ".jcl", ".cntl", "")
 
 #: ``// JCLLIB ORDER=(A.B,C.D)`` or ``ORDER=A.B``: the libraries a job's
-#: procedures are searched in first.
+#: procedures are searched in first. A parenthesized list may be continued
+#: over several cards.
 _JCLLIB = re.compile(
-    r"^//\S*\s+JCLLIB\s+ORDER=\(?([^)\s]+)\)?", re.IGNORECASE | re.MULTILINE
+    r"^//\S*\s+JCLLIB\s+ORDER=(\([^)]*\)|[^\s,]+)", re.IGNORECASE | re.MULTILINE
 )
+
+
+def _jcllib_names(text: str) -> list[str]:
+    """The libraries every ``JCLLIB ORDER=`` of *text* names, upper-cased,
+    in order, each once."""
+    names: list[str] = []
+    for match in _JCLLIB.finditer(text):
+        operand = re.sub(r"^//", " ", match.group(1), flags=re.MULTILINE)
+        for raw in re.split(r"[,\s()]+", operand):
+            name = raw.strip("'").upper()
+            if name and name not in names:
+                names.append(name)
+    return names
+
 
 #: In-stream data lines ``jcl_job`` shows per DD (a SORT's control cards,
 #: a TSO step's ``RUN PROGRAM``); the count is always given.
@@ -140,17 +155,12 @@ class Libraries:
 
         order: list[tuple[Path, tuple[str, ...]]] = []
         missing: list[str] = []
-        for match in _JCLLIB.finditer(text):
-            for raw in match.group(1).split(","):
-                name = raw.strip().strip("'").upper()
-                if not name:
-                    continue
-                directory = self.by_name.get(name)
-                if directory is None:
-                    if name not in missing:
-                        missing.append(name)
-                else:
-                    order.append((directory, LIBRARY_SUFFIXES))
+        for name in _jcllib_names(text):
+            directory = self.by_name.get(name)
+            if directory is None:
+                missing.append(name)
+            else:
+                order.append((directory, LIBRARY_SUFFIXES))
         order += [(d, LIBRARY_SUFFIXES) for d in self.configured]
         order += [(d, PROC_SUFFIXES) for d in self.discovered]
         members: dict[str, Path] = {}
@@ -169,11 +179,10 @@ def jcllib_directories(libraries: Libraries, files: list[Path]) -> list[Path]:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for match in _JCLLIB.finditer(text):
-            for raw in match.group(1).split(","):
-                directory = libraries.by_name.get(raw.strip().strip("'").upper())
-                if directory is not None and directory not in found:
-                    found.append(directory)
+        for name in _jcllib_names(text):
+            directory = libraries.by_name.get(name)
+            if directory is not None and directory not in found:
+                found.append(directory)
     return found
 
 
