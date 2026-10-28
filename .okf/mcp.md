@@ -21,6 +21,7 @@ the Model Context Protocol, on stdin/stdout. Design and later phases:
 | `cobolparser/mcp/workspace.py` | `Workspace` (path guard, `cobol.yml`, LRU parse cache), `ParsedProgram` (unit selection, `locate()`), `stdout_to_stderr()` | no |
 | `cobolparser/mcp/tools.py` | `CobolTools`: `codebase_overview`, `program_brief`, `explain_symbol`, `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`, `read_source`, `business_rules`, `diff_programs`, `decode_record`, `gen_fixtures`, and `jcl_job` / `jobs_running` / `dataset_users` delegating to `jcl_tools.py` | no |
 | `cobolparser/mcp/jcl_tools.py` | the JCL tools (`jcl_job`, `jobs_running`, `dataset_users`), the `jcl` index (`jcl_index`, `JclIndex`, `JclFile`), `_Locator` (job file vs procedure member), `INSTALL_HINT`; reads JCL through `cobolparser.jcl`, so the `[jcl]` extra | no |
+| `cobolparser/mcp/languages.py` | PL/I and assembler sources read through the sibling parsers (`[pl1]` / `[hlasm]` extras): `LANGUAGE_SUFFIXES`, `SourceFacts`, `read_facts()`, the `languages` index (`languages_index`, `LanguagesIndex`, `source_files`), `facts_for()`, `parser_available()`, `install_hint()`, `LIMITS` | no |
 | `cobolparser/mcp/claims.py` | `check_claims()`, `CLAIM_KINDS`, `MAX_CLAIMS` (25), one checker per kind (`_CHECKERS`) | no |
 | `cobolparser/mcp/slicing.py` | `slice_field()` (the `slice` tool), `MAX_SLICE_STATEMENTS` | no |
 | `cobolparser/mcp/navigation.py` | `read_procedure()`, `find_statements()`, `statement_rows()` / `StatementRow`, the `statements` index (`statements_index()`), `statement_verb()` | no |
@@ -102,6 +103,45 @@ group and names the tools left out. `compact_schema()` strips pydantic's
 from each advertised input schema (arguments are still validated against
 the signature), and the docstrings and `Field` descriptions are one line:
 together about 43% fewer schema characters for `all` than before.
+
+### PL/I and assembler
+
+`languages.py` reads every `.pli` / `.pl1` (through `pl1_parser`, the
+`[pl1]` extra) and `.asm` / `.s` / `.hlasm` / `.alc` (through `hlasmparser`,
+the `[hlasm]` extra; `.mac` stays a source not analyzed) file under the root
+that `cobol.yml` does not count as COBOL, into a `SourceFacts`: `program_id`
+(PL/I `program_name` / the first CSECT, else the stem), `entries` (stem,
+PL/I `ENTRY` and the main procedure's `entry_names`, assembler CSECTs and
+`_assembler_names()`), `sections`, `calls` in the `_calls` row shape
+(PL/I: one row per `(target, CALL|FETCH)`, an aliased call's
+`external_name` half skipped so the row is the real program with
+`local_name`; an entry variable or dynamic call is `dynamic` with no
+candidates; assembler: `subprogram_call` deps by `command`, an `EPLOC=`
+one `dynamic` with the `DC` value as complete `candidates`, `EXEC CICS
+LINK` / `XCTL` from `PROGRAM(...)` in `raw_operands`), `includes`,
+`services` (assembler CICS / SQL / MQ / IMS). The `languages` index
+(`Workspace.index`, tree stamps plus each file's) re-reads only files whose
+stamp changed; a language whose parser does not import is listed in
+`not_installed`, never read. It is not part of `FactsStore`: the parses are
+cheap.
+
+`_absorb_other_languages()` (end of `_build_programs`) adds each analyzed
+source as a `UnitFacts` (`language`), its includes to `copy_sites` (with
+`language`), and rewrites the graph's `call_edges`: an edge to a foreign
+unit's entry name goes to the unit (`entry` set, like #521), and each
+foreign row becomes edges (`cics-link` / `cics-xctl` by `via`, else
+`call`). So `codebase_overview` (`language`, `program_units_by_language`,
+`_other_language_caveats()`: one caveat per missing parser with its install
+command, one per read language with `LIMITS`), program-level `callers_of`,
+`check_claims` `calls` (the callee's entry names count) / `copies`, and the
+JCL tools (`_other_language_source()`: `jobs_running`'s `source`,
+`jcl_job`'s `program_sources`, looked up once per program name per call) all see them. `program_brief` and
+`callers_of` on such a file dispatch through `_other_language_path()`
+(`_other_language_brief()`); every other file tool hits
+`Workspace._refuse_other_language()`, a `ToolError` naming the tools that
+read it. `Workspace.other_sources()` leaves out suffixes whose parser
+imports. `impact_of_change` treats a name in `copy_sites` as a member and
+lists `included_by_other_languages`.
 
 ## Prompts
 
@@ -291,6 +331,10 @@ rather than running its own.
   registered with `add_tool()` rather than decorators, which
   `disallow_untyped_decorators` would reject when the SDK is untyped.
 - `cobol-parser mcp` without the extra exits 1 naming the install command.
+- `[pl1]` (`landparty-pl1-parser>=2.0.0`) and `[hlasm]` (`hlasmparser>=0.2.0`)
+  are read only by `languages.py`, imported per language on first use; not
+  in `[dev]` until they are on PyPI, so CI skips
+  `test_mcp_languages.py` (`importorskip`). mypy ignores their imports.
 - The JCL tools need the `[jcl]` extra (`jcl-parser`, also in `[dev]`) at
   call time, not at import: the server always lists them, and without
   `jclparser` each raises `ToolError(INSTALL_HINT)` (`require_jcl()`), so a

@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **MCP server: PL/I and assembler programs in the cross-program answers.**
+  With the new `[pl1]` / `[hlasm]` extras (the sibling `landparty-pl1-parser`
+  and `hlasmparser`), every PL/I and assembler source under the root is read
+  once and joins the call graph: `codebase_overview` lists it with its
+  `language` (and `program_units_by_language`), its CALL / FETCH / LINK /
+  XCTL / EXEC CICS LINK edges count in `calls`, `called_by`, entry programs
+  and cycles, and a COBOL `CALL` to an assembler `ENTRY` name reaches its
+  routine. Program-level `callers_of` finds callers in every language,
+  `program_brief` on a `.pli` / `.asm` file gives its names, procedures or
+  CSECTs, calls, includes and CICS / SQL / MQ / IMS requests, `jobs_running`
+  and `jcl_job` name the PL/I or assembler source of a step's program,
+  `impact_of_change` lists `included_by_other_languages` for a member, and
+  `check_claims` checks their `calls` and `copies`. What those parsers do not
+  read (file I/O, PL/I EXEC SQL / CICS) is an `incomplete-analysis` caveat;
+  without an extra the files stay `in_workspace_not_analyzed`, with a caveat
+  naming the install command.
 * **`cobol.yml` `project.proc_path`: folders of cataloged JCL PROCs**,
   searched in order. The MCP server expands a job's `EXEC proc` steps from
   them (only folders inside its root), so field flows cross jobs built from

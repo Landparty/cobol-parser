@@ -1,0 +1,13 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PAYCALC.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-DATE              PIC X(8).
+       LINKAGE SECTION.
+       01  LK-EMP               PIC X(80).
+       01  LK-COUNT             PIC S9(9) COMP.
+       PROCEDURE DIVISION USING LK-EMP LK-COUNT.
+       MAIN-PARA.
+           CALL 'DATECONV' USING WS-DATE
+           ADD 1 TO LK-COUNT
+           GOBACK.

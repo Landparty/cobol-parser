@@ -32,6 +32,11 @@ fast = ["cython>=3.0"]
 # `cobolparser.jcl` reads JCL through the sibling jcl-parser package; the
 # rest of the library has no runtime dependency.
 jcl = ["jcl-parser>=2.0.0"]
+# The MCP server reads the PL/I and assembler programs under its root
+# through the sibling parsers (cobolparser/mcp/languages.py), so a mixed
+# codebase is one call graph. Neither is needed by the rest of the library.
+pl1 = ["landparty-pl1-parser>=2.0.0"]
+hlasm = ["hlasmparser>=0.2.0"]
 # `cobol-parser mcp`: the MCP server (cobolparser/mcp/server.py). Pinned below
 # 2, whose SDK renames FastMCP; only server.py imports it.
 mcp = ["mcp>=1.10,<2"]
@@ -212,6 +217,13 @@ strict_equality = true
 # job does not install it.
 [[tool.mypy.overrides]]
 module = ["jclparser", "jclparser.*"]
+ignore_missing_imports = true
+
+# The PL/I and assembler parsers are the optional [pl1] / [hlasm] extras,
+# read only by cobolparser/mcp/languages.py. They are not in [dev] until
+# they are published to PyPI: install them from their repositories.
+[[tool.mypy.overrides]]
+module = ["pl1_parser", "pl1_parser.*", "hlasmparser", "hlasmparser.*"]
 ignore_missing_imports = true
 
 # The MCP SDK is the optional [mcp] extra; only cobolparser/mcp/server.py

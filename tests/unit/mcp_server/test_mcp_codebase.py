@@ -621,7 +621,15 @@ class TestCodebaseOverview:
 
 class TestOtherSources:
     """A CALL into assembler (or PL/I, BMS, ...) under the root is a call
-    into the workspace, not to a missing program."""
+    into the workspace, not to a missing program. Here without the PL/I and
+    assembler parsers, as when the [pl1] / [hlasm] extras are not installed
+    (with them, see test_mcp_languages.py)."""
+
+    @pytest.fixture(autouse=True)
+    def _no_sibling_parsers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from cobolparser.mcp import languages
+
+        monkeypatch.setattr(languages, "parser_available", lambda language: False)
 
     @pytest.fixture
     def root(self, tmp_path: Path) -> Path:
