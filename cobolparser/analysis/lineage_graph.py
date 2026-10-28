@@ -164,6 +164,31 @@ class _EdgeInfo:
     #: map (``apply_source_map``): a copybook's line and the program's own
     #: line of the same number are told apart by it (#489).
     origin_file: str | None = None
+    #: The paragraph of the statement and its line in the parsed text, which
+    #: order two edges of one program (see ``LineageGraph._overwritten``).
+    paragraph: str | None = None
+    seq_line: int = 0
+
+
+@dataclass(frozen=True)
+class Overwrite:
+    """A statement on an impact path's way that replaces the value the path
+    carries before the path reads it again: the path is one the value may
+    not take."""
+
+    program: str
+    field: str
+    line: int
+    statement: str
+    origin_file: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "program": self.program,
+            "field": self.field,
+            "line": self.line,
+            "statement": self.statement,
+        }
 
 
 @dataclass(frozen=True)
@@ -203,6 +228,9 @@ class ImpactHit:
     field: str
     node_kind: str
     path: tuple[Hop, ...]
+    #: Statements that overwrite, unconditionally and in the same paragraph,
+    #: a field between the path writing it and reading it again.
+    overwritten: tuple[Overwrite, ...] = ()
 
     @property
     def derived(self) -> bool:
@@ -225,6 +253,11 @@ class ImpactHit:
             "derived": self.derived,
             "confidence": self.confidence,
             "path": [hop.to_dict() for hop in self.path],
+            **(
+                {"overwritten": [o.to_dict() for o in self.overwritten]}
+                if self.overwritten
+                else {}
+            ),
         }
 
 
@@ -430,6 +463,12 @@ class LineageGraph:
         self._out: dict[NodeKey, list[tuple[NodeKey, _EdgeInfo]]] = {}
         self._in: dict[NodeKey, list[tuple[NodeKey, _EdgeInfo]]] = {}
         self._joins: list[tuple[NodeKey, NodeKey, _EdgeInfo]] = []
+        #: field -> (paragraph, parsed line, statement, line on disk, file)
+        #: of each statement replacing all of its value (the reports'
+        #: ``overwrites``).
+        self._overwrites: dict[NodeKey, list[tuple[str, int, str, int, str | None]]] = (
+            {}
+        )
         #: Item -> the statements that change it in place (a report's
         #: ``in_place``, #748): a path through one carries a computed value.
         self._in_place: dict[NodeKey, list[_EdgeInfo]] = {}
@@ -489,12 +528,27 @@ class LineageGraph:
                         confidence="exact" if edge.get("exact", True) else "overlap",
                         guarded=bool(edge.get("guarded")),
                         origin_file=(edge.get("origin") or {}).get("file"),
+                        paragraph=edge.get("paragraph"),
+                        seq_line=int(edge.get("line") or 0),
                     ),
                 )
                 if src[2] != ITEM:
                     read.setdefault(program, set()).add(src)
                 if dst[2] != ITEM:
                     written.setdefault(program, set()).add(dst)
+            for edge in data.get("overwrites") or []:
+                origin = edge.get("origin") or {}
+                self._overwrites.setdefault(
+                    self._pnode(program, edge["target"]), []
+                ).append(
+                    (
+                        edge.get("paragraph") or "",
+                        int(edge.get("line") or 0),
+                        edge.get("statement") or "",
+                        int(origin.get("line") or edge.get("line") or 0),
+                        origin.get("file"),
+                    )
+                )
             for edge in data.get("in_place") or []:
                 self._in_place.setdefault(
                     self._pnode(program, edge["source"]), []
@@ -1061,10 +1115,12 @@ class LineageGraph:
                 # parameter are two-way ports and still trail ends (#510).
                 continue
             path: list[Hop] = []
+            chain: list[tuple[NodeKey, _EdgeInfo]] = []
             nodes: list[NodeKey] = []
             cursor = state
             while cursor[0] not in start_set or cursor[1]:
                 prev, info = parent[cursor]
+                chain.append((cursor[0], info))
                 p, n, _ = self._describe(cursor[0])
                 path.append(
                     Hop(
@@ -1080,10 +1136,45 @@ class LineageGraph:
                 nodes.append(cursor[0])
                 cursor = prev
             path.reverse()
+            chain.reverse()
             nodes.reverse()
             path = self._with_in_place(path, nodes)
-            hits.append((node, ImpactHit(program, name, kind, tuple(path))))
+            overwritten = self._overwritten(chain, adjacency is self._out)
+            hits.append(
+                (node, ImpactHit(program, name, kind, tuple(path), overwritten))
+            )
         return hits
+
+    def _overwritten(
+        self, chain: list[tuple[NodeKey, _EdgeInfo]], forward: bool
+    ) -> tuple[Overwrite, ...]:
+        """The overwrites between the edge a path writes each field over and
+        the edge it reads the field over next. Only within one paragraph,
+        where statement order is source order: across a PERFORM the order
+        is unknown and nothing is claimed."""
+        found: list[Overwrite] = []
+        for k in range(len(chain) - 1):
+            node, here = chain[k]
+            _nxt, after = chain[k + 1]
+            kills = self._overwrites.get(node)
+            if not kills:
+                continue
+            # Forward, the path arrives over the write and leaves over the
+            # read; backward, the other way round.
+            write, read = (here, after) if forward else (after, here)
+            paragraph = write.paragraph
+            if not paragraph or read.paragraph != paragraph:
+                continue
+            for kill_paragraph, line, statement, disk_line, file in kills:
+                if kill_paragraph == paragraph and (
+                    write.seq_line < line < read.seq_line
+                ):
+                    program, field_name, _ = self._describe(node)
+                    found.append(
+                        Overwrite(program or "", field_name, disk_line, statement, file)
+                    )
+                    break
+        return tuple(found)
 
     def _with_in_place(self, path: list[Hop], nodes: list[NodeKey]) -> list[Hop]:
         """*path* with a hop for each item it passes *through* that a

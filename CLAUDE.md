@@ -135,7 +135,7 @@ cobol-parser diff <old.cbl> <new.cbl> [--format json|text] [--rename-threshold R
 cobol-parser codebase-graph PATH... [--format json|dot|mermaid] [--extension EXT] [--workers N] [--copybook-path DIR]
 cobol-parser copybook-impact <member> PATH... [--extension EXT] [--workers N] [--copybook-path DIR]
 cobol-parser jcl <job.jcl> [--dd-map] [--bindings] [--program NAME] [--proc-path DIR]... [--strict]   # needs the [jcl] extra
-cobol-parser mcp [--root DIR] [--cache-size N]   # MCP server on stdio for AI agents; needs the [mcp] extra ([mcp,jcl] for the JCL tools)
+cobol-parser mcp [--root DIR] [--cache-size N] [--tools auto|all|GROUP,TOOL...] [--max-answer-bytes N] [--workers N] [--cache-dir DIR] [--no-disk-cache] [--no-warm-up]   # MCP server on stdio for AI agents; needs the [mcp] extra ([mcp,jcl] for the JCL tools)
 # Parsing subcommands also take [--error-recovery fail-fast|collect-all] (default collect-all)
 ```
 

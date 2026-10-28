@@ -1,0 +1,8 @@
+version: 1
+project:
+  copybook_path:
+    - orders/copy
+    - enterprise/copybooks
+    - legacy/copy
+  dialect: ibm-enterprise
+  extensions: [.cbl, .CBL]
