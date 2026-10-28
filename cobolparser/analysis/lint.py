@@ -92,6 +92,9 @@ _SEVERITY_IO: dict[str, str] = {
     "REWRITE_WRONG_MODE": "error",
     "DELETE_WRONG_MODE": "error",
     "OPEN_AFTER_LOCK": "error",
+    # A warning, as settled in #736: the newest rule, and the only one
+    # that depends on which statement ran last rather than on the mode.
+    "REWRITE_WITHOUT_READ": "warning",
 }
 
 # LINKAGE: an argument-count mismatch or an unknown entry point is a wrong

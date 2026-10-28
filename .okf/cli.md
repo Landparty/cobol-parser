@@ -749,6 +749,11 @@ dicts come back, so a worker's peak memory is one file's AST.
   command line caps at 8191 characters and the COBOL Analyzer extension spawns
   via `shell: true` there. An unreadable list exits 1 rather than scanning
   nothing.
+* A directory named as a file (argument or `--files-from` line) exits 1 with
+  `X is a directory; pass the files in it, e.g. --glob 'X/**/*.cbl'`, and a
+  `--glob` drops the directories its `**` walks through (#737; shared with
+  `batch` via `_collect_scan_files`). Before, each one was a `failures` entry
+  reading "Encoding error ... Is a directory".
 * `--source-format` reaches the parse as `ScanOptions.free_form` +
   `ScanOptions.preprocess_fixed`, the pair `_source_format_kwargs()` hands
   every single-file subcommand (forwarding only `free_form` would leave

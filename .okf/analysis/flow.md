@@ -209,7 +209,8 @@ PERFORMed only from dead code is dead too. A reached procedure references:
   in order up to the first terminator (`_propagate_section_references`); a
   `p THRU q` range is walked the same way (`_mark_thru_ranges`); a GO TO onto
   a THRU range end or a PERFORMed section's last paragraph (`_section_exits`)
-  is a reference, not a fall-through source.
+  is a reference, not a fall-through source -- unless the jump can run
+  outside a PERFORM of that range (#734, below).
 
 `_ordered_procedures` matches source order (see [Procedure roots and
 terminators](#procedure-roots-and-terminators)). Each rule below is pinned in
@@ -250,6 +251,18 @@ the [history](../history/analysis.md).
   range. Both ends stay referenced unconditionally; an obsolete stub every
   path jumps over is reported. Pinned by `TestThruRangeSkippedMembers` and
   `TestThruRangeNestedAndSectionExits`.
+* **A GO TO onto a range end returns only inside a PERFORM of the range**
+  (#734). Every plain GO TO onto a range end is recorded with the procedure
+  it is written in (`_range_end_jumps`), and `_collect_fallthrough_refs`
+  makes the range end a fall-through source when that procedure lies outside
+  every THRU range closing on it (`_inside_range_to`, from `_range_starts`),
+  or is itself a fall-through source (fallen into, or gone to): on that path
+  there is no PERFORM to return to and the range end runs on. Its forward
+  pass repeats until no such jump adds a source. Only the #381 shape -- the
+  jumping paragraph reached solely through the PERFORM -- keeps the paragraph
+  after the range end dead. Found by running random programs under GnuCOBOL
+  and checking no executed paragraph is reported dead. Pinned by
+  `tests/regression/test_goto_range_end_outside_perform_issue_734.py`.
 * **Section exits** (#312, the SECTION form of `GO TO nnnn-EXIT`). The last
   paragraph of every section a PERFORM / SORT / MERGE / XML PARSE runs
   (`_section_exits`) is treated like a THRU range end: a GO TO onto it is a

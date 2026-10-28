@@ -731,7 +731,8 @@ report: IOSequenceReport = IOSequenceAnalyzer().analyze(ast)
 #                  DELETE_BEFORE_OPEN, START_BEFORE_OPEN, DOUBLE_OPEN,
 #                  CLOSE_NOT_OPEN, DOUBLE_CLOSE, FILE_LEFT_OPEN,
 #                  READ_WRONG_MODE, START_WRONG_MODE, WRITE_WRONG_MODE,
-#                  REWRITE_WRONG_MODE, DELETE_WRONG_MODE, OPEN_AFTER_LOCK
+#                  REWRITE_WRONG_MODE, DELETE_WRONG_MODE, OPEN_AFTER_LOCK,
+#                  REWRITE_WITHOUT_READ
 ```
 
 Validates that IO operations follow legal COBOL sequencing rules (file must be
@@ -812,6 +813,25 @@ between arms (`IF .. OPEN INPUT f ELSE OPEN OUTPUT f`) is no error. All six
 are lint errors. Limit: an EXTERNAL file opened by a CALLed program (NIST
 IC227A) is invisible to the walk, as for the `*_BEFORE_OPEN` kinds. Pinned by
 `tests/regression/test_issue_548_io_open_mode.py`.
+
+**A failed OPEN changes nothing** (#735). An OPEN of a file already open
+fails (status 41) and leaves it open in its *first* mode, and one of a file
+locked fails too, so `_handle_open` keeps every open / locked state and adds
+the new mode only for the paths where the file was closed or never opened.
+Tracking the second OPEN's mode flagged legal READs and missed illegal WRITEs
+after every DOUBLE_OPEN.
+
+**A sequential REWRITE needs a READ just before it** (#736). An open state
+whose last I/O statement on the file was a READ carries `;read`
+(`open:I-O;read`, `_after_io`); every other verb clears it, and `_mode()`
+strips it wherever a mode is compared. A REWRITE of a file whose SELECT is
+SEQUENTIAL, open I-O on every path with the mark on none, is
+`REWRITE_WITHOUT_READ` (status 43) -- a lint *warning*, not an error. A READ
+counts whether or not it hit AT END (handlers are not forked), so a REWRITE
+after a READ at end of file is not caught. Keyed files are not judged.
+Both rules matched GnuCOBOL 3.1.2's FILE STATUS on 1,000 random
+OPEN/READ/WRITE/REWRITE/CLOSE sequences. Pinned by
+`tests/regression/test_io_sequence_failed_open_rewrite_issue_735_736.py`.
 
 **`CLOSE f REEL` / `CLOSE f UNIT` keep the file open.** They close only the
 current volume (`close_options[f]["reel"/"unit"]`).
