@@ -188,6 +188,30 @@ def typed_literal_prefix(token: Token) -> str:
     return ""
 
 
+_UNSIGNED_NUMBER_RE = re.compile(r"^(?:\d+(?:[.,]\d+)?|[.,]\d+)$")
+
+
+def join_operand(parts: list[str]) -> str:
+    """*parts* joined with spaces, a sign token folded into the number it
+    signs (#747): the lexer splits ``+100`` into ``+`` and ``100``, and
+    ``"+ 100"`` reads as text rather than as a signed literal. Only a sign
+    that leads the operand or follows ``(`` is a sign; ``A - 1`` keeps its
+    binary minus.
+    """
+    out: list[str] = []
+    for part in parts:
+        if (
+            out
+            and out[-1] in ("+", "-")
+            and (len(out) == 1 or out[-2] == "(")
+            and _UNSIGNED_NUMBER_RE.match(part)
+        ):
+            out[-1] += part
+        else:
+            out.append(part)
+    return " ".join(out).strip()
+
+
 def condition_token_text(token: Token) -> str:
     """Text for one condition token, re-quoting string literals.
 
@@ -362,8 +386,8 @@ def build_condition_expression(
     if op_idx is not None and resolved_op:
         left_parts = [t for t in cleaned[:op_idx] if t.upper() != "IS"]
         right_parts = cleaned[op_idx + 1 :]
-        lhs = " ".join(left_parts).strip() if left_parts else None
-        rhs = " ".join(right_parts).strip() if right_parts else None
+        lhs = join_operand(left_parts) if left_parts else None
+        rhs = join_operand(right_parts) if right_parts else None
         if lhs:
             expr = ConditionalExpression(resolved_op, location)
             expr.set_left_operand(lhs)

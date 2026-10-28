@@ -65,6 +65,15 @@ arm.
   Subjects (`_parse_subjects`) do use `condition_token_text()` (`EVALUATE 'X'` ->
   `'X'`); the flow scanner's `WHEN <value>` edge labels follow the unquoted
   selector shape. Pinned by `tests/regression/test_evaluate_space_literal_when.py`.
+- **A leading sign is part of its number** (#747). `WHEN +100`, `WHEN -5
+  THRU +5` and `IF A = -7` arrive as a sign token and a number;
+  `_conditions.join_operand()` folds a `+`/`-` at the start of an operand (or
+  after `(`) into the unsigned number that follows, so selector `value` /
+  bounds, `selector_text`, condition text and comparison operands read `+100`,
+  never `+ 100` (which business-rules rendered as the string `'+ 100'`).
+  A binary minus (`A - 5`) keeps its spaces. `BusinessRuleExtractor._literal`
+  also treats `^[+-]\s+\d` as numeric. Pinned by
+  `tests/regression/test_signed_literal_text_issue_747.py`.
 - **Classify on `(token, TokenType)` pairs, not joined text.** `ANY`,
   `THRU` / `THROUGH` and the condition words (`AND OR NOT = < > <= >= <>`) are
   keywords only when not a `STRING_LITERAL`, so `WHEN "ANY"` / `"THRU"` / `"AND"`

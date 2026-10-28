@@ -58,16 +58,53 @@ LIBRARY_SUFFIXES: tuple[str, ...] = (".prc", ".proc", ".jcl", ".cntl", "")
 #: ``// JCLLIB ORDER=(A.B,C.D)`` or ``ORDER=A.B``: the libraries a job's
 #: procedures are searched in first. A parenthesized list may be continued
 #: over several cards.
+#: A ``//*`` comment card never matches: commenting out a JCLLIB line is how
+#: a job is switched back from a test library (#749).
 _JCLLIB = re.compile(
-    r"^//\S*\s+JCLLIB\s+ORDER=(\([^)]*\)|[^\s,]+)", re.IGNORECASE | re.MULTILINE
+    r"^//(?!\*)\S*\s+JCLLIB\s+ORDER=(\([^)]*\)|[^\s,]+)",
+    re.IGNORECASE | re.MULTILINE,
 )
+
+#: A DD card that starts in-stream data: ``DD *`` or ``DD DATA``, with the
+#: ``DLM=`` that ends it when it has one.
+_INSTREAM_DD = re.compile(
+    r"^//\S*\s+DD\s+(\*|DATA)(?=[\s,]|$)(?:.*?\bDLM=(?:'([^']{2})'|(\S{2})))?",
+    re.IGNORECASE,
+)
+
+
+def _job_cards(text: str) -> str:
+    """*text* without its in-stream data: the records after a ``DD *`` /
+    ``DD DATA`` card up to the ``/*`` (or ``DLM=``) that ends them. A
+    ``DD *`` also ends at the next ``//`` card; ``DD DATA`` does not. A job
+    submitted through INTRDR has its own JCLLIB, which is not the outer
+    job's (#749)."""
+    kept: list[str] = []
+    delimiter: str | None = None
+    ends_at_card = False
+    for line in split_source_lines(text):
+        if delimiter is not None:
+            if line.startswith(delimiter):
+                delimiter = None
+                continue
+            if not (ends_at_card and line.startswith("//")):
+                kept.append("")
+                continue
+            delimiter = None
+        kept.append(line)
+        match = _INSTREAM_DD.match(line)
+        if match:
+            delimiter = match.group(2) or match.group(3) or "/*"
+            ends_at_card = match.group(1) == "*" and delimiter == "/*"
+    return "\n".join(kept)
 
 
 def _jcllib_names(text: str) -> list[str]:
     """The libraries every ``JCLLIB ORDER=`` of *text* names, upper-cased,
-    in order, each once."""
+    in order, each once. Comment cards and in-stream data are not looked
+    at."""
     names: list[str] = []
-    for match in _JCLLIB.finditer(text):
+    for match in _JCLLIB.finditer(_job_cards(text)):
         operand = re.sub(r"^//", " ", match.group(1), flags=re.MULTILINE)
         for raw in re.split(r"[,\s()]+", operand):
             name = raw.strip("'").upper()

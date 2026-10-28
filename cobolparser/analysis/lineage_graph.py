@@ -301,10 +301,20 @@ class ImpactResult:
                     tags.append(hit.confidence)
                 # Read from the hit back toward the start: "<-" (fed by)
                 # going forward, "->" (feeds) going backward.
+                # An in-place change (#748) repeats its item's node: shown
+                # once, with the statement that changed it.
+                steps: list[str] = []
+                previous: Hop | None = None
+                for h in hit.path[:-1]:
+                    if h.kind in ("redefines", "occurrence"):
+                        continue
+                    if previous is not None and h.label == previous.label:
+                        steps[-1] = f"{h.label} ({h.statement or h.kind} line {h.line})"
+                    else:
+                        steps.append(h.label)
+                    previous = h
                 via = (" <- " if self.direction == "forward" else " -> ").join(
-                    h.label
-                    for h in reversed(hit.path[:-1])
-                    if h.kind not in ("redefines", "occurrence")
+                    reversed(steps)
                 )
                 label = f"port {hit.field}" if hit.node_kind == "port" else hit.field
                 lines.append(
@@ -420,6 +430,9 @@ class LineageGraph:
         self._out: dict[NodeKey, list[tuple[NodeKey, _EdgeInfo]]] = {}
         self._in: dict[NodeKey, list[tuple[NodeKey, _EdgeInfo]]] = {}
         self._joins: list[tuple[NodeKey, NodeKey, _EdgeInfo]] = []
+        #: Item -> the statements that change it in place (a report's
+        #: ``in_place``, #748): a path through one carries a computed value.
+        self._in_place: dict[NodeKey, list[_EdgeInfo]] = {}
         self._recording = False
         self._build(join_edges, join_caveats, unjoined)
 
@@ -482,6 +495,22 @@ class LineageGraph:
                     read.setdefault(program, set()).add(src)
                 if dst[2] != ITEM:
                     written.setdefault(program, set()).add(dst)
+            for edge in data.get("in_place") or []:
+                self._in_place.setdefault(
+                    self._pnode(program, edge["source"]), []
+                ).append(
+                    _EdgeInfo(
+                        kind=edge.get("kind") or "",
+                        line=int(
+                            (edge.get("origin") or {}).get("line")
+                            or edge.get("line")
+                            or 0
+                        ),
+                        statement=edge.get("statement") or "",
+                        guarded=bool(edge.get("guarded")),
+                        origin_file=(edge.get("origin") or {}).get("file"),
+                    )
+                )
         # Sorted, so the joins add edges (and so report paths) in the same
         # order on every run: a set of tuples of str iterates in hash order.
         written_ports = {p: sorted(v, key=repr) for p, v in written.items()}
@@ -1032,6 +1061,7 @@ class LineageGraph:
                 # parameter are two-way ports and still trail ends (#510).
                 continue
             path: list[Hop] = []
+            nodes: list[NodeKey] = []
             cursor = state
             while cursor[0] not in start_set or cursor[1]:
                 prev, info = parent[cursor]
@@ -1047,10 +1077,47 @@ class LineageGraph:
                         info.origin_file,
                     )
                 )
+                nodes.append(cursor[0])
                 cursor = prev
             path.reverse()
+            nodes.reverse()
+            path = self._with_in_place(path, nodes)
             hits.append((node, ImpactHit(program, name, kind, tuple(path))))
         return hits
+
+    def _with_in_place(self, path: list[Hop], nodes: list[NodeKey]) -> list[Hop]:
+        """*path* with a hop for each item it passes *through* that a
+        statement changes in place (#748): ``MOVE IN TO WS`` / ``MULTIPLY
+        100 BY WS`` / ``MOVE WS TO OUT`` makes OUT a computed value, not a
+        copy. The change is ``exact`` when it sits between the two hops in
+        the same program's lines, ``candidate`` otherwise (it may run
+        before the value arrives, or only on some iterations of a loop).
+        """
+        if not self._in_place:
+            return path
+        out: list[Hop] = []
+        for index, hop in enumerate(path):
+            out.append(hop)
+            if index + 1 >= len(path):
+                break
+            changes = self._in_place.get(nodes[index])
+            if not changes:
+                continue
+            low, high = sorted((hop.line, path[index + 1].line))
+            between = [c for c in changes if low < c.line < high]
+            change = (between or changes)[0]
+            out.append(
+                Hop(
+                    hop.program,
+                    hop.node,
+                    change.kind,
+                    change.line,
+                    change.statement,
+                    "exact" if between else "candidate",
+                    change.origin_file,
+                )
+            )
+        return out
 
     def _finish(
         self, result: ImpactResult, hits: list[ImpactHit], starts: list[NodeKey]
