@@ -243,7 +243,9 @@ class TestServer:
 
 
 def _recorder(served: list[Workspace]) -> Any:
-    def record(workspace: Workspace, tools_spec: str | None = None) -> None:
+    def record(
+        workspace: Workspace, tools_spec: str | None = None, budget: int | None = None
+    ) -> None:
         served.append(workspace)
 
     return record
@@ -391,7 +393,11 @@ class TestCli:
         pytest.importorskip("mcp")
         specs: list[str | None] = []
 
-        def record(workspace: Workspace, tools_spec: str | None = None) -> None:
+        def record(
+            workspace: Workspace,
+            tools_spec: str | None = None,
+            budget: int | None = None,
+        ) -> None:
             specs.append(tools_spec)
 
         with patch("cobolparser.mcp.server.run_stdio", record):

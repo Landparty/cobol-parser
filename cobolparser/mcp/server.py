@@ -25,6 +25,8 @@ from mcp.server.fastmcp.prompts import Prompt
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from .envelope import DEFAULT_ANSWER_BYTES, fit_budget
+from .hints import add_hints
 from .prompts import PROMPTS
 from .tools import CobolTools
 from .workspace import Workspace
@@ -48,6 +50,10 @@ Every result has the same envelope:
   say so rather than presenting an incomplete answer as complete.
 - truncated: lists that were cut to the limit, with their true totals.
   Narrow the question or raise limit instead of assuming completeness.
+  An answer is also kept under a size budget: a list cut to fit it says
+  reason "answer budget".
+- next (when present): ready-made calls that usually answer the follow-up
+  question. Suggestions, not facts.
 """
 
 #: One paragraph of guidance per tool group, sent only when a tool of the
@@ -210,9 +216,15 @@ def compact_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMCP:
+def build_server(
+    workspace: Workspace,
+    tools_spec: str | None = "all",
+    max_answer_bytes: int | None = DEFAULT_ANSWER_BYTES,
+) -> FastMCP:
     """An MCP server answering about *workspace*, not yet running, offering
-    the tools *tools_spec* selects (:func:`select_tools`)."""
+    the tools *tools_spec* selects (:func:`select_tools`), each result cut
+    to *max_answer_bytes* (:func:`~.envelope.fit_budget`; None or 0: no
+    budget) and given next-step hints (:mod:`.hints`)."""
     enabled = select_tools(tools_spec, workspace)
     tools = CobolTools(workspace)
     server = FastMCP(
@@ -220,16 +232,21 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
     )
 
     async def off_loop(
-        call: Callable[[], dict[str, Any]], ctx: MCPContext | None = None
+        name: str,
+        call: Callable[[], dict[str, Any]],
+        ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
         def locked() -> dict[str, Any]:
             # The parse cache and the stdout redirect are process-wide.
             with workspace.lock:
                 workspace.progress = _progress_reporter(ctx) if ctx else None
                 try:
-                    return call()
+                    result = call()
                 finally:
                     workspace.progress = None
+            # Hints first: they are a few dozen bytes the budget leaves be.
+            add_hints(name, result, enabled)
+            return fit_budget(result, max_answer_bytes)
 
         # A cancelled request answers at once; its thread finishes on its
         # own and only then releases the lock to the next call.
@@ -247,7 +264,9 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         after: Annotated[int, Field(description="Lines to show after")] = 10,
     ) -> dict[str, Any]:
         """Numbered source lines around file:line (at most 200)."""
-        return await off_loop(lambda: tools.read_source(file, line, before, after))
+        return await off_loop(
+            "read_source", lambda: tools.read_source(file, line, before, after)
+        )
 
     async def lint(
         file: File,
@@ -263,7 +282,9 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
     ) -> dict[str, Any]:
         """Every lint rule over a program in one pass; findings worst first,
         each with its location."""
-        return await off_loop(lambda: tools.lint(file, rules, min_severity, limit))
+        return await off_loop(
+            "lint", lambda: tools.lint(file, rules, min_severity, limit)
+        )
 
     async def explain_symbol(
         file: File,
@@ -278,7 +299,9 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
     ) -> dict[str, Any]:
         """A name's declaration (PICTURE, USAGE, offset, length, REDEFINES,
         level-88 values) and every reference with its role and paragraph."""
-        return await off_loop(lambda: tools.explain_symbol(file, name, program, limit))
+        return await off_loop(
+            "explain_symbol", lambda: tools.explain_symbol(file, name, program, limit)
+        )
 
     async def program_brief(
         file: File, program: Program = None, limit: Limit = None
@@ -286,7 +309,9 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         """A program on one page: interface, files and their C/R/U/D use,
         SQL tables, calls, CICS/DL/I, unreachable paragraphs, health, worst
         lint findings. Start here."""
-        return await off_loop(lambda: tools.program_brief(file, program, limit))
+        return await off_loop(
+            "program_brief", lambda: tools.program_brief(file, program, limit)
+        )
 
     async def callers_of(
         name: Annotated[
@@ -304,7 +329,9 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         """Every PERFORM / GO TO / fall-through into a paragraph, and whether
         it is reachable; for a PROGRAM-ID, every CALL / LINK / XCTL to it
         under the root."""
-        return await off_loop(lambda: tools.callers_of(file, name, program, limit), ctx)
+        return await off_loop(
+            "callers_of", lambda: tools.callers_of(file, name, program, limit), ctx
+        )
 
     async def record_layout(
         file: File,
@@ -317,7 +344,9 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
     ) -> dict[str, Any]:
         """A record's byte map: every field with PICTURE, USAGE, offset,
         length, OCCURS, REDEFINES and level-88 values."""
-        return await off_loop(lambda: tools.record_layout(file, record, program, limit))
+        return await off_loop(
+            "record_layout", lambda: tools.record_layout(file, record, program, limit)
+        )
 
     async def impact_of_change(
         name: Annotated[
@@ -335,6 +364,7 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         for a field, everything its value flows into across programs, files,
         CALLs and DB2 columns."""
         return await off_loop(
+            "impact_of_change",
             lambda: tools.impact_of_change(
                 name, file, program, depth, limit, full_paths
             ),
@@ -355,6 +385,7 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         """Where a field's value comes from across programs: the fields,
         datasets, DB2 columns and CALL arguments that flow into it."""
         return await off_loop(
+            "where_from",
             lambda: tools.where_from(field, file, program, depth, limit, full_paths),
             ctx,
         )
@@ -364,7 +395,9 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
     ) -> dict[str, Any]:
         """The whole workspace on one page: programs and health grades, call
         graph, missing programs and copybooks, duplicated code."""
-        return await off_loop(lambda: tools.codebase_overview(limit), ctx)
+        return await off_loop(
+            "codebase_overview", lambda: tools.codebase_overview(limit), ctx
+        )
 
     async def business_rules(
         file: File,
@@ -386,9 +419,10 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         """A program's decisions, validations and calculations as decision
         tables, with inputs, outputs, guards and locations."""
         return await off_loop(
+            "business_rules",
             lambda: tools.business_rules(
                 file, program, kind, procedure, include_technical, limit
-            )
+            ),
         )
 
     async def diff_programs(
@@ -413,6 +447,7 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         """What changed in behaviour between two versions of a program:
         interface, files, data items, paragraphs and statements."""
         return await off_loop(
+            "diff_programs",
             lambda: tools.diff_programs(
                 old_file,
                 new_file,
@@ -421,7 +456,7 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
                 category,
                 rename_threshold,
                 limit,
-            )
+            ),
         )
 
     async def decode_record(
@@ -474,6 +509,7 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         """Decode a data file's records through a copybook layout (COMP-3,
         binary, zoned, EBCDIC); without a data file, the layout and views."""
         return await off_loop(
+            "decode_record",
             lambda: tools.decode_record(
                 copybook,
                 data_file,
@@ -488,7 +524,7 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
                 record_separator,
                 record_length,
                 limit,
-            )
+            ),
         )
 
     async def gen_fixtures(
@@ -515,7 +551,10 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         """Test-data scenarios for a program: values for every mocked file,
         CALL, SQL and CICS boundary, and what to assert afterwards."""
         return await off_loop(
-            lambda: tools.gen_fixtures(file, program, mode, seed, rows, scenario, limit)
+            "gen_fixtures",
+            lambda: tools.gen_fixtures(
+                file, program, mode, seed, rows, scenario, limit
+            ),
         )
 
     async def jcl_job(
@@ -535,7 +574,7 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
     ) -> dict[str, Any]:
         """One JCL file's jobs, steps and DD statements, procedures
         expanded, with the COBOL source of each program run."""
-        return await off_loop(lambda: tools.jcl_job(file, job, step, limit))
+        return await off_loop("jcl_job", lambda: tools.jcl_job(file, job, step, limit))
 
     async def jobs_running(
         program: Annotated[
@@ -546,7 +585,9 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
     ) -> dict[str, Any]:
         """Every JCL step that runs a program, each SELECT file bound to its
         DD and dataset, and DDs the step does not code."""
-        return await off_loop(lambda: tools.jobs_running(program, limit))
+        return await off_loop(
+            "jobs_running", lambda: tools.jobs_running(program, limit)
+        )
 
     async def dataset_users(
         dataset: Annotated[
@@ -557,7 +598,9 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
     ) -> dict[str, Any]:
         """Every job, step and program that uses a dataset, and whether it
         reads, creates, extends or writes it."""
-        return await off_loop(lambda: tools.dataset_users(dataset, limit))
+        return await off_loop(
+            "dataset_users", lambda: tools.dataset_users(dataset, limit)
+        )
 
     for tool in (
         codebase_overview,
@@ -614,6 +657,10 @@ def _progress_reporter(
     return report
 
 
-def run_stdio(workspace: Workspace, tools_spec: str | None = "auto") -> None:
+def run_stdio(
+    workspace: Workspace,
+    tools_spec: str | None = "auto",
+    max_answer_bytes: int | None = DEFAULT_ANSWER_BYTES,
+) -> None:
     """Serve *workspace* over stdio until the client disconnects."""
-    build_server(workspace, tools_spec).run("stdio")
+    build_server(workspace, tools_spec, max_answer_bytes).run("stdio")

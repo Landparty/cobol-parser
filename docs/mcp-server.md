@@ -46,6 +46,7 @@ Any client that takes a JSON server list (Claude desktop's
 | `--root DIR` | `.` | The directory the server answers about. Paths outside it, and outside its copybook directories, are refused; see [What the server can read](#what-the-server-can-read). |
 | `--cache-size N` | 32 | Parsed programs kept in memory. A program is parsed again when it, a copybook it expanded, or a copybook directory changes on disk (so a member added after a "COPY not expanded" caveat is picked up). |
 | `--tools SPEC` | `auto` | Which tools to offer. `auto` is the `core` group, plus the `jcl` group when the root holds a `.jcl` / `.job` / `.prc` / `.proc` file or `cobol.yml` names a `proc_path`. `all` offers every tool; otherwise give a comma-separated list of groups (`core`: the reading tools, `data`: `decode_record`, `gen_fixtures`, `diff_programs`, `jcl`: the JCL tools) and tool names. Each tool's definition is sent to the model on every turn, so a smaller set costs fewer input tokens. |
+| `--max-answer-bytes N` | 24000 | Size budget of one tool result; `0` turns it off. See [Reading an answer](#reading-an-answer). |
 | `--config FILE` / `--no-config` | `cobol.yml` in `--root` | Which `cobol.yml` to use. |
 
 Copybook directories, source format and `>>DEFINE` symbols come from the
@@ -230,7 +231,14 @@ Every tool returns the same envelope:
   `unmapped-location` and `program-unit-selected`. A quiet answer with a
   caveat is not a clean one.
 - **Truncated** lists every list that was cut to `limit` (default 50, at most
-  500), with its true total.
+  500), with its true total. The server also keeps each result under a size
+  budget (`--max-answer-bytes`, default 24000, about 6k tokens): while a
+  result is over it, its longest list is halved from the end, and the cut is
+  listed here with `"reason": "answer budget"`.
+- **Next** (`next`, when present) lists one or two ready-made calls that
+  usually answer the follow-up question, such as
+  `read_source(file="ORDEDIT.cbl", line=75)` after `explain_symbol`. They
+  only name tools the server offers. They are suggestions, not facts.
 - A request that cannot be answered at all, such as a path outside the
   workspace, an unknown `program` or a `cobol.yml` that no longer reads,
   comes back as an error result naming the problem.

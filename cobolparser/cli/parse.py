@@ -4369,6 +4369,14 @@ def _build_mcp_parser(subparsers: argparse._SubParsersAction) -> None:
         "(core, data, jcl) and tool names. Every tool's definition is sent "
         "to the model on every turn, so fewer tools cost fewer tokens",
     )
+    p.add_argument(
+        "--max-answer-bytes",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Size budget of one tool result: longer lists are halved until "
+        "it fits, each cut listed under truncated (default: 24000; 0: none)",
+    )
     p.set_defaults(func=_cmd_mcp)
 
 
@@ -4401,7 +4409,14 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
         select_tools(args.tools, workspace)
     except ValueError as exc:
         _fail(str(exc))
-    run_stdio(workspace, args.tools)
+    from ..mcp.envelope import DEFAULT_ANSWER_BYTES
+
+    budget = (
+        DEFAULT_ANSWER_BYTES if args.max_answer_bytes is None else args.max_answer_bytes
+    )
+    if budget < 0:
+        _fail("--max-answer-bytes must be 0 or more")
+    run_stdio(workspace, args.tools, budget or None)
 
 
 def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:

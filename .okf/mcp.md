@@ -21,6 +21,7 @@ the Model Context Protocol, on stdin/stdout. Design and later phases:
 | `cobolparser/mcp/workspace.py` | `Workspace` (path guard, `cobol.yml`, LRU parse cache), `ParsedProgram` (unit selection, `locate()`), `stdout_to_stderr()` | no |
 | `cobolparser/mcp/tools.py` | `CobolTools`: `codebase_overview`, `program_brief`, `explain_symbol`, `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`, `read_source`, `business_rules`, `diff_programs`, `decode_record`, `gen_fixtures`, and `jcl_job` / `jobs_running` / `dataset_users` delegating to `jcl_tools.py` | no |
 | `cobolparser/mcp/jcl_tools.py` | the JCL tools (`jcl_job`, `jobs_running`, `dataset_users`), the `jcl` index (`jcl_index`, `JclIndex`, `JclFile`), `_Locator` (job file vs procedure member), `INSTALL_HINT`; reads JCL through `cobolparser.jcl`, so the `[jcl]` extra | no |
+| `cobolparser/mcp/hints.py` | `add_hints()`: the `next` calls per tool, `MAX_HINTS` | no |
 | `cobolparser/mcp/prompts.py` | `PROMPTS` (`PromptSpec`): `explain_program`, `review_program`, `plan_change`, `document_business_rules`, `onboard_codebase`, each a plain function returning the request text | no |
 | `cobolparser/mcp/codebase_index.py` | `programs_index` / `lineage_index` / `health_index`: facts about every program under the root, cached by `Workspace.index()` | no |
 | `cobolparser/mcp/server.py` | `build_server()`, `run_stdio()`: typed wrappers registered on `FastMCP`, and `PROMPTS` through `Prompt.from_function` | **yes** (`[mcp]` extra) |
@@ -110,7 +111,14 @@ refused, and a lossy decode is an `incomplete-analysis` caveat on every
 answer about it.
 
 Every tool returns `{"surface_version", "answer", "caveats", "truncated",
-"program"?}` (`Response.build`). A location anywhere in `answer` is
+"program"?, "next"?}` (`Response.build`). Two passes in `server.py`'s
+`off_loop`, not in `CobolTools` (a Python caller gets neither): `hints.add_hints()`
+adds `next`, at most `MAX_HINTS` (2) `tool(arg="v")` strings derived from the
+answer alone, naming only offered tools, and never failing the call; then
+`envelope.fit_budget(result, max_answer_bytes)` (`--max-answer-bytes`,
+`DEFAULT_ANSWER_BYTES` 24000, compact-JSON bytes) halves the answer's
+largest list from the end until it fits, each cut a `truncated` entry with
+`reason: "answer budget"` (an earlier `limit` cut keeps its `total`). A location anywhere in `answer` is
 `{"file", "line", "column"?}` in the file on disk, root-relative when it can
 be; `null` with an `unmapped-location` caveat when the source map has no
 entry. `caveats[].kind` is closed: <!-- okf:gen mcp-caveat-kinds -->`unresolved-copybook`, `partial-parse`, `analyzer-failed`, `incomplete-analysis`, `ambiguous-name`, `duplicate-declaration`, `unmapped-location`, `program-unit-selected`<!-- /okf:gen -->.
