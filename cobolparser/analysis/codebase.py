@@ -384,6 +384,68 @@ class CopyEdge:
 
 
 @dataclass
+class FileGraphFacts:
+    """One program file's part of a :class:`CodebaseGraph`, apart from its
+    COPY edges: :meth:`CodebaseGraphBuilder.file_facts` of its parse.
+
+    ``unit_ids`` are the graph ids of its units, outermost first; ``parsed``
+    is False for a file that produced no AST (``unit_ids`` is then the id
+    assumed from the file name, or empty for a missing file).
+    """
+
+    path: str
+    nodes: list[ProgramNode] = field(default_factory=list)
+    call_edges: list[CallEdge] = field(default_factory=list)
+    unresolved: list[str] = field(default_factory=list)
+    errors: list[dict[str, Any]] = field(default_factory=list)
+    unit_ids: list[str] = field(default_factory=list)
+    parsed: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "nodes": [node.to_dict() for node in self.nodes],
+            "call_edges": [edge.to_dict() for edge in self.call_edges],
+            "unresolved": list(self.unresolved),
+            "errors": [dict(error) for error in self.errors],
+            "unit_ids": list(self.unit_ids),
+            "parsed": self.parsed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FileGraphFacts:
+        return cls(
+            path=str(data["path"]),
+            nodes=[
+                ProgramNode(
+                    program_id=n["program_id"],
+                    path=n["path"],
+                    calls=list(n["calls"]),
+                    copies=list(n["copies"]),
+                    parse_failed=bool(n["parse_failed"]),
+                    entries=list(n.get("entries", [])),
+                )
+                for n in data["nodes"]
+            ],
+            call_edges=[
+                CallEdge(
+                    caller=e["caller"],
+                    callee=e["callee"],
+                    is_dynamic=bool(e["is_dynamic"]),
+                    resolved=bool(e["resolved"]),
+                    kind=e["kind"],
+                    entry=e.get("entry"),
+                )
+                for e in data["call_edges"]
+            ],
+            unresolved=list(data["unresolved"]),
+            errors=[dict(error) for error in data["errors"]],
+            unit_ids=list(data["unit_ids"]),
+            parsed=bool(data["parsed"]),
+        )
+
+
+@dataclass
 class CodebaseGraph:
     """The aggregated dependency graph for a whole tree of COBOL source."""
 
@@ -879,7 +941,7 @@ class CodebaseGraphBuilder:
         )
 
     def build_from_results(
-        self, paths: list[str], results: Iterable[BatchResult]
+        self, paths: list[str], results: Iterable[BatchResult | FileGraphFacts]
     ) -> CodebaseGraph:
         """Build the graph for *paths* from parses the caller already made.
 
@@ -888,6 +950,8 @@ class CodebaseGraphBuilder:
         parses on demand keeps a single AST live, as :meth:`build` does. For
         a caller with its own parse settings (the MCP server's ``>>DEFINE``
         symbols and cache) that must not parse every file a second time.
+        An item may also be the :meth:`file_facts` of a parse made earlier
+        (the MCP server keeps them on disk), which needs no AST at all.
         COPY edges still come from each file's raw text, here.
         """
         # Per-build caches: a copybook edited between two builds on one
@@ -908,9 +972,10 @@ class CodebaseGraphBuilder:
         units_by_path: dict[str, list[str]] = {}
         seen_program_ids: dict[str, str] = {}
 
-        for batch_result in results:
-            self._absorb_parse(
-                batch_result,
+        for item in results:
+            facts = item if isinstance(item, FileGraphFacts) else self.file_facts(item)
+            self._absorb_facts(
+                facts,
                 nodes,
                 call_edges,
                 unresolved,
@@ -1081,17 +1146,16 @@ class CodebaseGraphBuilder:
             debug_lines=self.debug_lines,
         )
 
-    def _absorb_parse(
-        self,
-        batch_result: BatchResult,
-        nodes: list[ProgramNode],
-        call_edges: list[CallEdge],
-        unresolved: list[str],
-        errors: list[dict[str, Any]],
-        units_by_path: dict[str, list[str]],
-        seen_program_ids: dict[str, str],
-    ) -> None:
+    def file_facts(self, batch_result: BatchResult) -> FileGraphFacts:
+        """What one parse adds to the graph: its nodes, call edges and
+        notes. Depends on that file alone, so it can be kept and reused
+        while the file and its copybooks are unchanged."""
         path = str(batch_result.path)
+        facts = FileGraphFacts(path=path)
+        nodes = facts.nodes
+        call_edges = facts.call_edges
+        unresolved = facts.unresolved
+        errors = facts.errors
         parse_result = batch_result.result
         ast = parse_result.ast if parse_result is not None else None
         parse_errors = list(parse_result.errors) if parse_result is not None else []
@@ -1103,8 +1167,7 @@ class CodebaseGraphBuilder:
             unresolved.append(
                 f"{path}: no such file or directory; it is not in the graph"
             )
-            units_by_path[path] = []
-            return
+            return facts
 
         if ast is None:
             reason = batch_result.read_error or (
@@ -1116,9 +1179,9 @@ class CodebaseGraphBuilder:
                 f"{path}: not parsed ({reason}); its CALL edges are unknown and "
                 f"its program id is assumed from the file name ({fallback})"
             )
-            units_by_path[path] = [fallback]
+            facts.unit_ids = [fallback]
             nodes.append(ProgramNode(program_id=fallback, path=path, parse_failed=True))
-            return
+            return facts
 
         for warning in parse_result.warnings if parse_result is not None else []:
             if str(warning).startswith("Lossy decode of "):
@@ -1145,8 +1208,9 @@ class CodebaseGraphBuilder:
                 "some CALL/COPY edges in this file may be missing"
             )
 
+        facts.parsed = True
         units = ast.program_units()
-        unit_ids: list[str] = []
+        unit_ids = facts.unit_ids
         for unit in units:
             # Outermost first, so a contained unit's own data pool wins for
             # its own dynamic calls (the outer pass sees it first, the inner
@@ -1173,17 +1237,6 @@ class CodebaseGraphBuilder:
                 return graph_ids.get(id(target), callee) if target else callee
 
             unit_ids.append(program_id)
-            previous = seen_program_ids.get(program_id)
-            if previous is not None and previous != path:
-                # A nested id is qualified by its outermost program's, so a
-                # nested ERRHAND in PGMA and one in PGMB never collide.
-                unresolved.append(
-                    f"duplicate PROGRAM-ID {program_id} in {previous} and {path}: "
-                    "call edges to it cannot be attributed to one file"
-                )
-            else:
-                seen_program_ids[program_id] = path
-
             node = ProgramNode(
                 program_id=program_id,
                 path=path,
@@ -1238,8 +1291,39 @@ class CodebaseGraphBuilder:
                         tracker,
                     )
             nodes.append(node)
+        return facts
 
-        units_by_path[path] = unit_ids
+    @staticmethod
+    def _absorb_facts(
+        facts: FileGraphFacts,
+        nodes: list[ProgramNode],
+        call_edges: list[CallEdge],
+        unresolved: list[str],
+        errors: list[dict[str, Any]],
+        units_by_path: dict[str, list[str]],
+        seen_program_ids: dict[str, str],
+    ) -> None:
+        """Add one file's facts to the build, in file order: the first file
+        to declare a PROGRAM-ID keeps it."""
+        path = facts.path
+        nodes.extend(facts.nodes)
+        call_edges.extend(facts.call_edges)
+        unresolved.extend(facts.unresolved)
+        errors.extend(facts.errors)
+        units_by_path[path] = list(facts.unit_ids)
+        if not facts.parsed:
+            return
+        for program_id in facts.unit_ids:
+            previous = seen_program_ids.get(program_id)
+            if previous is not None and previous != path:
+                # A nested id is qualified by its outermost program's, so a
+                # nested ERRHAND in PGMA and one in PGMB never collide.
+                unresolved.append(
+                    f"duplicate PROGRAM-ID {program_id} in {previous} and {path}: "
+                    "call edges to it cannot be attributed to one file"
+                )
+            else:
+                seen_program_ids[program_id] = path
 
     @staticmethod
     def _absorb_call(

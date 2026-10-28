@@ -120,7 +120,7 @@ cobol-parser lineage <file.cbl> [--field NAME] [--direction forward|backward] [-
 cobol-parser field-impact [FIELD] PATH... [--program NAME] [--table T.C | --dataset DSN] [--direction forward|backward] [--depth N] [--jcl PATH]... [--proc-path DIR]... [--bindings FILE.json] [--key-relationships] [--format json|text] [--copybook-path DIR] [--source-format auto|fixed|free] [--define SYMBOL[=VALUE]]
 cobol-parser redundancy <file.cbl> [--min-clone-statements N]
 cobol-parser batch prog1.cbl prog2.cbl [--stats]
-cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables|lineage] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR] [--define SYMBOL[=VALUE]] [--encoding ENC] [--source-format auto|fixed|free] [--output FILE] [--compact]
+cobol-parser scan FILE... [--glob PATTERN] [--files-from LIST] [--analyzer health|redundancy|complexity|dead-code|unused-variables|lineage] [--clones] [--min-clone-members N] [--min-clone-statements N] [--workers N] [--copybook-path DIR] [--define SYMBOL[=VALUE]] [--encoding ENC] [--source-format auto|fixed|free] [--cache-dir DIR] [--output FILE] [--compact]
 cobol-parser io-sequence <file.cbl>
 cobol-parser move-type-check <file.cbl>
 cobol-parser linkage-check <file.cbl>
@@ -136,7 +136,7 @@ cobol-parser codebase-graph PATH... [--format json|dot|mermaid] [--extension EXT
 cobol-parser copybook-impact <member> PATH... [--extension EXT] [--workers N] [--copybook-path DIR]
 cobol-parser call-check PATH... [--extension EXT] [--workers N] [--copybook-path DIR] [--min-severity error|warning|info] [--fail-on error|warning|info|never] [--format json|text]
 cobol-parser jcl <job.jcl> [--dd-map] [--bindings] [--program NAME] [--proc-path DIR]... [--strict]   # needs the [jcl] extra
-cobol-parser mcp [--root DIR] [--cache-size N]   # MCP server on stdio for AI agents; needs the [mcp] extra ([mcp,jcl] for the JCL tools)
+cobol-parser mcp [--root DIR] [--cache-size N] [--cache-dir DIR]   # MCP server on stdio for AI agents; needs the [mcp] extra ([mcp,jcl] for the JCL tools)
 # Parsing subcommands also take [--error-recovery fail-fast|collect-all] (default collect-all)
 ```
 
@@ -242,6 +242,8 @@ COBOL source (.cbl/.cob)
 **`cobolparser/batch.py`** -- `parse_files(paths)` for parallel multi-file parsing using `ProcessPoolExecutor`. Returns `List[BatchResult]`. Supports executor reuse for repeated batches. `parse_files_with_copybooks(paths, copybook_paths=...)` parses each file with copybook expansion enabled.
 
 **`cobolparser/scan.py`** -- `scan_files(paths, ScanOptions(...))` runs *analyzers* (not just the parse) over many files in one process: the parse and the analysis both happen inside the worker and only the small report dicts come back, so a worker's peak memory is one file's AST rather than the whole shop's -- which is why this is a separate module from `batch.py` rather than another entry point on it. Per-file fault isolation, every program unit reported (contained programs included, each with its `depth`), and an analyzer that raises named in that unit's `failed_analyzers` with its other reports intact. `cross_file_clone_groups(report)` merges every scanned paragraph's fingerprints into clone groups spanning programs, ranked by duplicated volume (statements x members) rather than by how many files they span -- boilerplate `0000-MAIN-PROCESS` scaffolding spreads across every file in a shop and would otherwise bury the real findings. Backs the `scan` CLI subcommand and the COBOL Analyzer extension's Analyze Workspace. See `.okf/batch.md`
+
+**`cobolparser/_facts_cache.py`** -- `FactsCache`: an on-disk cache of one JSON value per file, valid while the stamp (`mtime_ns`, size) of every file and directory it came from holds, keyed by package version, namespace, settings and path; atomic writes, a corrupt entry is a miss. Backs `scan --cache-dir` (`ScanOptions.cache_dir`) and `mcp --cache-dir` (`Workspace(cache_dir=...)`, the root-wide indexes' per-file facts, incl. `CodebaseGraphBuilder.file_facts()` / `FileGraphFacts`). See `.okf/batch.md`, `.okf/mcp.md`
 
 **`cobolparser/profiling.py`** -- `ProfilerContext` wraps any parse call with `cProfile`, `tracemalloc`, and optional `psutil` CPU accounting. Returns `ProfilingResult` (wall-clock, CPU, peak memory, top `FunctionProfile` entries). Install the `profiling` extra (`pip install -e ".[profiling]"`) to enable CPU accounting; the module imports `psutil` lazily so the package remains usable without it.
 

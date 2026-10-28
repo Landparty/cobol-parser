@@ -299,8 +299,12 @@ class Workspace:
         root: str | Path,
         config: ProjectConfig | None = None,
         cache_size: int = DEFAULT_CACHE_SIZE,
+        cache_dir: str | Path | None = None,
     ) -> None:
         self.root = Path(root).resolve()
+        #: Where the root-wide indexes keep each program's facts between
+        #: sessions (``mcp --cache-dir``); None keeps them in memory only.
+        self.cache_dir = str(cache_dir) if cache_dir is not None else None
         if not self.root.is_dir():
             raise ToolError(f"workspace root is not a directory: {root}")
         #: Copybook directories the config named that were refused outright
@@ -627,6 +631,19 @@ class Workspace:
             value, stamps = build()
         self._indexes[name] = (value, stamps)
         return value
+
+    def facts_cache(self, namespace: str) -> Any:
+        """A :class:`~cobolparser._facts_cache.FactsCache` for one index's
+        per-program facts under :attr:`cache_dir`, or None without one. Its
+        key holds the root and the whole config, so a ``cobol.yml`` edit (a
+        new copybook path, a ``>>DEFINE``) never serves an old answer."""
+        if self.cache_dir is None:
+            return None
+        from .._facts_cache import FactsCache
+
+        return FactsCache(
+            self.cache_dir, f"mcp-{namespace}", (str(self.root), repr(self.config))
+        )
 
     def report_progress(self, done: float, total: float | None, message: str) -> None:
         """Pass progress to whoever listens; a listener that fails (a client

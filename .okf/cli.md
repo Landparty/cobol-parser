@@ -107,7 +107,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `ims-dli` | `file` | — | A (no profiling) | `IMSSegmentAnalyzer` |
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
-| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected) | A without `--program` | `scan_version` report |
+| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected), `--cache-dir DIR` (off) | A without `--program` | `scan_version` report |
 | `lint` | `file` | `--rule RULE`... (all), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text}` (json) | A (`--program` default: every unit); +prof | findings; exit 3 on `--fail-on` |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
@@ -123,7 +123,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `jcl` | `file` | `--dd-map`, `--bindings`, `--program NAME`, `--proc-path DIR`..., `--strict` | `--compact`, `-o` | job JSON; needs `[jcl]` extra; exit 3 on `--strict` |
 | `le-info` | `[name ...]` | `--kind {service,function,all}` (all) | `--compact`, `-o` | LE / intrinsic signature catalogue |
 | `config` | — | `--json` | `--compact`, `-o` | effective `cobol.yml` |
-| `mcp` | — | `--root DIR` (`.`), `--cache-size N` (32) | — | MCP server on stdio until the client disconnects; needs `[mcp]` extra; `cobol.yml` read from `--root` itself, never a parent; outside copybook dirs serve members only, dangerous ones refused (see [mcp.md](mcp.md#workspace)) |
+| `mcp` | — | `--root DIR` (`.`), `--cache-size N` (32), `--cache-dir DIR` (off) | — | MCP server on stdio until the client disconnects; needs `[mcp]` extra; `cobol.yml` read from `--root` itself, never a parent; outside copybook dirs serve members only, dangerous ones refused (see [mcp.md](mcp.md#workspace)) |
 
 Subcommands that take none of the COBOL parse flags (`--source-format`,
 `--dialect`, `--debug-lines`, `--define`, `--error-recovery`): `gen-data`,

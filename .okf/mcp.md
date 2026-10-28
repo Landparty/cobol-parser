@@ -225,6 +225,27 @@ without expansion uses its own file; anything else is `null` with
 `unmapped-location`. Join hops (dataset,
 table, CALL) have no line and no `location`.
 
+**On-disk cache** (`Workspace(cache_dir=...)`, `cobol-parser mcp
+--cache-dir DIR`; off by default). `_per_file()` wraps the walk: every
+program's *per-file* part of an index is a JSON value computed by the
+index's `compute(path, parsed, display)` and kept in a `FactsCache`
+(`_facts_cache.py`, see [batch.md](batch.md#incremental-cache-_facts_cachepy))
+under namespace `mcp-<index>`, keyed by the root and `repr(config)` (a
+`cobol.yml` edit never serves old facts), with the parse's own
+`ParsedProgram.stamps` (program, copybooks, copybook directories). The entry
+also holds the caveats noted for that file and those stamps, so a hit
+restores both without parsing. Cross-file steps always run at merge time,
+in file order: duplicate PROGRAM-IDs and the first-wins `program_files`,
+`edge_files` ambiguity, ENTRY resolution, the COPY walk (raw text, not
+cached), the JCL join, cross-file clones. For `programs` that needed
+`CodebaseGraphBuilder.file_facts(batch_result) -> FileGraphFacts` (nodes,
+call edges, notes, unit ids of one file; `to_dict`/`from_dict`), which
+`build_from_results` accepts in place of a `BatchResult`. A file that failed
+is never stored. Pinned by `tests/unit/mcp_server/test_mcp_index_cache.py`
+(a warm workspace answers identically and parses nothing). Measured on the
+459 NIST programs (2026-10-28): `programs` + `health` 144 s cold, 22 s warm;
+what is left warm is mostly the COPY walk's raw-text scan.
+
 Cost: on 459 NIST programs with copybooks, the `programs` index takes about
 a minute (56 s measured); `extract_copy_statements` (the COPY lexer) is the largest single cost,
 which is why the index reuses the builder's COPY scan for its COPY lines

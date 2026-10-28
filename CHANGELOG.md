@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **An incremental cache for `scan` and the MCP server's root-wide indexes**
+  (`scan --cache-dir DIR`, `ScanOptions.cache_dir`; `mcp --cache-dir DIR`,
+  `Workspace(cache_dir=...)`; `cobolparser/_facts_cache.py`). Each file's
+  result is kept on disk next to the stamp of the program, every copybook
+  it expanded and every copybook directory, and reused only while all of
+  them are unchanged and the options (or `cobol.yml`) and package version
+  are the same. A re-scan of a shop that changed a few programs parses only
+  those; a new MCP session answers its first cross-program question without
+  re-parsing the root. The answers are identical to an uncached run (pinned
+  by tests); `scan`'s summary gains `cached_file_count` when the cache is
+  on. `CodebaseGraphBuilder.file_facts()` / `FileGraphFacts` expose one
+  file's part of the codebase graph so it can be kept.
 * **`call-check`: every CALL against the program it calls, across files**
   (`CallInterfaceChecker`, `cobolparser/analysis/call_interface.py`).
   `linkage-check` compares a CALL with its callee only inside one file and

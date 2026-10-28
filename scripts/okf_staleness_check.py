@@ -264,6 +264,7 @@ OKF_MAP = [
     ("cobolparser/generators/data/bundle.py", [".okf/generators/fixtures.md"]),
     ("cobolparser/batch.py", [".okf/batch.md"]),
     ("cobolparser/scan.py", [".okf/batch.md"]),
+    ("cobolparser/_facts_cache.py", [".okf/batch.md", ".okf/mcp.md"]),
     ("cobolparser/cli/", [".okf/cli.md"]),
     ("cobolparser/config/", [".okf/cli.md"]),
     ("cobolparser/mcp/", [".okf/mcp.md"]),

@@ -14,6 +14,15 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-28 -- incremental cache for scan and the MCP indexes
+
+[batch.md](batch.md): `ScanOptions.cache_dir` / `scan --cache-dir` and the
+`FactsCache` itself (`_facts_cache.py`). [mcp.md](mcp.md): `mcp
+--cache-dir`, `_per_file()`, `CodebaseGraphBuilder.file_facts()` /
+`FileGraphFacts` (also [analysis/codebase.md](analysis/codebase.md)).
+[cli.md](cli.md): both flags. [tests.md](tests.md): the
+two test files.
+
 ## 2026-10-28 -- call-check: cross-program CALL interface checking
 
 [analysis/codebase.md](analysis/codebase.md): `CallInterfaceChecker`

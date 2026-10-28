@@ -2656,6 +2656,16 @@ def _build_scan_parser(subparsers: argparse._SubParsersAction) -> None:
             "copybook's is)"
         ),
     )
+    p.add_argument(
+        "--cache-dir",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Keep each file's report in DIR and reuse it on the next scan "
+            "while the file, its copybooks and the copybook directories are "
+            "unchanged (summary.cached_file_count counts the reused ones)"
+        ),
+    )
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -2769,6 +2779,7 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         preprocess_fixed=source_format["preprocess_fixed"],
         debug_lines=bool(source_format.get("debug_lines", False)),
         defined_symbols=_defined_symbol_pairs(args),
+        cache_dir=args.cache_dir,
     )
 
     try:
@@ -4519,6 +4530,16 @@ def _build_mcp_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Parsed programs to keep in memory (default: 32)",
     )
+    p.add_argument(
+        "--cache-dir",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Keep each program's part of the root-wide indexes in DIR, so a "
+            "new session parses only the programs (and copybooks) changed "
+            "since the last one"
+        ),
+    )
     p.set_defaults(func=_cmd_mcp)
 
 
@@ -4535,7 +4556,9 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
 
     config = args._project_config if getattr(args, "_config_explicit", False) else None
     try:
-        workspace = Workspace(args.root, config, cache_size=args.cache_size)
+        workspace = Workspace(
+            args.root, config, cache_size=args.cache_size, cache_dir=args.cache_dir
+        )
     except (ToolError, ConfigError) as exc:
         _fail(str(exc))
     for directory, reason in workspace.refused_copybook_dirs:

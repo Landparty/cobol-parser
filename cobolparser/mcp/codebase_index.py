@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import functools
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -175,13 +175,17 @@ def _entry_names(unit: CobolProgram) -> list[str]:
 
 
 def _programs(
-    workspace: Workspace, survey: _Survey, stamps: dict[str, Stamp]
+    workspace: Workspace,
+    survey: _Survey,
+    stamps: dict[str, Stamp],
+    only: list[Path] | None = None,
 ) -> Iterator[tuple[Path, ParsedProgram | None]]:
-    """Every program file under the root, parsed; None for one that failed
-    (recorded in ``survey.failed``). Fills *stamps* with what was read."""
+    """Every program file under the root (or just *only*), parsed; None for
+    one that failed (recorded in ``survey.failed``). Fills *stamps* with
+    what was read."""
     from .workspace import _stamp
 
-    paths = workspace.program_files()
+    paths = workspace.program_files() if only is None else only
     for done, path in enumerate(paths):
         display = workspace.display(path)
         workspace.report_progress(done, len(paths), f"reading {display}")
@@ -202,6 +206,89 @@ def _programs(
         for caveat in parsed.caveats:
             survey.note(display, caveat)
         yield path, parsed
+
+
+def _per_file(
+    workspace: Workspace,
+    survey: _Survey,
+    stamps: dict[str, Stamp],
+    namespace: str,
+    compute: Callable[[Path, ParsedProgram, str], Any],
+) -> Iterator[tuple[Path, Any]]:
+    """``(path, facts)`` for every program file under the root: *compute*'s
+    JSON-shaped facts for its parse, or None for a file that failed.
+
+    With :attr:`.Workspace.cache_dir`, a file whose source, copybooks and
+    copybook directories are unchanged since an earlier build is not parsed
+    at all: its facts, the caveats noted for it and its stamps come back
+    from the cache.
+    """
+    cache = workspace.facts_cache(namespace)
+    if cache is None:
+        for path, parsed in _programs(workspace, survey, stamps):
+            yield path, (
+                None
+                if parsed is None
+                else compute(path, parsed, workspace.display(path))
+            )
+        return
+
+    def held(path: Path) -> Any:
+        entry = cache.get(str(path))
+        try:
+            return (
+                entry["facts"],
+                [Caveat(**c) for c in entry["caveats"]],
+                {
+                    name: tuple(value) if value is not None else None
+                    for name, value in entry["stamps"].items()
+                },
+            )
+        except (TypeError, KeyError, ValueError):
+            return None
+
+    remaining: list[Path] = []
+    hits: dict[Path, Any] = {}
+    for path in workspace.program_files():
+        found = held(path)
+        if found is None:
+            remaining.append(path)
+        else:
+            hits[path] = found
+    misses = iter(_programs(workspace, survey, stamps, only=remaining))
+    for path in workspace.program_files():
+        if path not in hits:
+            missed, parsed = next(misses)
+            assert missed == path
+            if parsed is None:
+                yield path, None
+                continue
+            display = workspace.display(path)
+            facts = compute(path, parsed, display)
+            cache.put(
+                str(path),
+                {
+                    "facts": facts,
+                    "caveats": [
+                        {"kind": c.kind, "detail": c.detail, "effect": c.effect}
+                        for c in survey.file_caveats.get(display, [])
+                    ],
+                    "stamps": {
+                        name: list(value) if value is not None else None
+                        for name, value in parsed.stamps.items()
+                    },
+                },
+                parsed.stamps,
+            )
+            yield path, facts
+            continue
+        facts, caveats, file_stamps = hits[path]
+        display = workspace.display(path)
+        survey.files.append(display)
+        stamps.update(file_stamps)
+        for caveat in caveats:
+            survey.note(display, caveat)
+        yield path, facts
 
 
 def _analyzer_failed(survey: _Survey, file: str, what: str, exc: Exception) -> None:
@@ -229,7 +316,13 @@ def programs_index(workspace: Workspace) -> ProgramsIndex:
 
 
 def _build_programs(workspace: Workspace) -> tuple[ProgramsIndex, dict[str, Stamp]]:
-    from ..analysis.codebase import CodebaseGraphBuilder, program_graph_ids
+    from dataclasses import asdict
+
+    from ..analysis.codebase import (
+        CodebaseGraphBuilder,
+        FileGraphFacts,
+        program_graph_ids,
+    )
     from ..batch import BatchResult
     from .tools import _calls, _flow
 
@@ -237,40 +330,45 @@ def _build_programs(workspace: Workspace) -> tuple[ProgramsIndex, dict[str, Stam
     index = ProgramsIndex()
     stamps = workspace.tree_stamps()
     files = [str(p) for p in workspace.program_files()]
+    builder = CodebaseGraphBuilder(copybook_paths=list(workspace.config.copybook_path))
 
-    def results() -> Iterator[BatchResult]:
-        for path, parsed in _programs(workspace, index, stamps):
-            display = workspace.display(path)
-            if parsed is None:
+    def compute(path: Path, parsed: ParsedProgram, display: str) -> dict[str, Any]:
+        response = Response()
+        graph_ids = program_graph_ids(parsed.ast.program_units(), str(Path(str(path))))
+        units: list[dict[str, Any]] = []
+        for unit, depth in _units_with_depth(parsed.ast):
+            facts = UnitFacts(
+                program_id=unit.program_name or "",
+                file=display,
+                depth=depth,
+                unit_kind=unit.unit_kind,
+                graph_id=graph_ids.get(id(unit), ""),
+                entries=_entry_names(unit),
+            )
+            try:
+                facts.calls = _calls(parsed, unit, _flow(parsed, unit), response)
+            except Exception as exc:  # noqa: BLE001
+                _analyzer_failed(index, display, "called programs", exc)
+            units.append(asdict(facts))
+        for caveat in response.caveats:
+            index.note(display, caveat)
+        graph = builder.file_facts(
+            BatchResult(path=Path(str(path)), result=parsed.result, read_error=None)
+        )
+        return {"units": units, "graph": graph.to_dict()}
+
+    def results() -> Iterator[BatchResult | FileGraphFacts]:
+        for path, facts in _per_file(workspace, index, stamps, "programs", compute):
+            if facts is None:
                 yield BatchResult(
-                    path=Path(str(path)), result=None, read_error=index.failed[display]
+                    path=Path(str(path)),
+                    result=None,
+                    read_error=index.failed[workspace.display(path)],
                 )
                 continue
-            response = Response()
-            graph_ids = program_graph_ids(
-                parsed.ast.program_units(), str(Path(str(path)))
-            )
-            for unit, depth in _units_with_depth(parsed.ast):
-                facts = UnitFacts(
-                    program_id=unit.program_name or "",
-                    file=display,
-                    depth=depth,
-                    unit_kind=unit.unit_kind,
-                    graph_id=graph_ids.get(id(unit), ""),
-                    entries=_entry_names(unit),
-                )
-                try:
-                    facts.calls = _calls(parsed, unit, _flow(parsed, unit), response)
-                except Exception as exc:  # noqa: BLE001
-                    _analyzer_failed(index, display, "called programs", exc)
-                index.units.append(facts)
-            for caveat in response.caveats:
-                index.note(display, caveat)
-            yield BatchResult(
-                path=Path(str(path)), result=parsed.result, read_error=None
-            )
+            index.units.extend(UnitFacts(**unit) for unit in facts["units"])
+            yield FileGraphFacts.from_dict(facts["graph"])
 
-    builder = CodebaseGraphBuilder(copybook_paths=list(workspace.config.copybook_path))
     index.graph = builder.build_from_results(files, results())
     for file, sites in index.graph.copy_sites.items():
         display = workspace.display(file)
@@ -304,10 +402,9 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
     index = LineageIndex()
     stamps = workspace.tree_stamps()
     reports: list[dict[str, Any]] = []
-    for path, parsed in _programs(workspace, index, stamps):
-        if parsed is None:
-            continue
-        display = workspace.display(path)
+
+    def compute(path: Path, parsed: ParsedProgram, display: str) -> dict[str, Any]:
+        units: list[dict[str, Any]] = []
         for unit, _depth in _units_with_depth(parsed.ast):
             name = unit.program_name or "<unnamed>"
             try:
@@ -317,16 +414,9 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
                 report = apply_source_map(report, parsed.source_map)
             except Exception as exc:  # noqa: BLE001
                 _analyzer_failed(index, display, f"field lineage of {name}", exc)
-                index.problems.append(f"{display}: {name}: no lineage report")
+                units.append({"problem": f"{display}: {name}: no lineage report"})
                 continue
-            data = report.to_dict()
-            program = str(data.get("program_id") or "").upper()
-            reports.append(data)
-            if program in index.program_files:
-                continue  # LineageGraph keeps the first; its caveat says so
-            index.program_files[program] = display
-            if parsed.source_map:
-                index.expanded.add(program)
+            edges = []
             for edge in report.edges:
                 line = edge.origin_line or edge.line
                 if not line:
@@ -334,7 +424,27 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
                 file = (
                     workspace.display(edge.origin_file) if edge.origin_file else display
                 )
-                key = (program, line, edge.kind, edge.statement)
+                edges.append([line, edge.kind, edge.statement, file])
+            units.append({"report": report.to_dict(), "edges": edges})
+        return {"units": units, "expanded": bool(parsed.source_map)}
+
+    for path, facts in _per_file(workspace, index, stamps, "lineage", compute):
+        if facts is None:
+            continue
+        for unit_facts in facts["units"]:
+            if "problem" in unit_facts:
+                index.problems.append(unit_facts["problem"])
+                continue
+            data = unit_facts["report"]
+            program = str(data.get("program_id") or "").upper()
+            reports.append(data)
+            if program in index.program_files:
+                continue  # LineageGraph keeps the first; its caveat says so
+            index.program_files[program] = workspace.display(path)
+            if facts["expanded"]:
+                index.expanded.add(program)
+            for line, kind, statement, file in unit_facts["edges"]:
+                key = (program, line, kind, statement)
                 if key in index.edge_files and index.edge_files[key] != file:
                     index.edge_files[key] = None  # ambiguous: never guess
                 else:
@@ -434,13 +544,9 @@ def _build_health(workspace: Workspace) -> tuple[HealthIndex, dict[str, Stamp]]:
     stamps = workspace.tree_stamps()
     scan = ScanReport()
     expanded: set[str] = set()
-    for path, parsed in _programs(workspace, index, stamps):
-        if parsed is None:
-            continue
-        display = workspace.display(path)
-        if parsed.source_map:
-            expanded.add(str(path))
-        file_scan = FileScan(path=str(path))
+
+    def compute(path: Path, parsed: ParsedProgram, display: str) -> dict[str, Any]:
+        units: list[dict[str, Any]] = []
         for unit, depth in _units_with_depth(parsed.ast):
             name = unit.program_name or "<unnamed>"
             try:
@@ -453,26 +559,41 @@ def _build_health(workspace: Workspace) -> tuple[HealthIndex, dict[str, Stamp]]:
             except Exception as exc:  # noqa: BLE001
                 _analyzer_failed(index, display, f"health of {name}", exc)
                 continue
-            index.units.append(
-                {
-                    "program": unit.program_name,
-                    "unit_kind": unit.unit_kind,
-                    "file": display,
-                    "depth": depth,
-                    "grade": debt.grade,
-                    "score": debt.score,
-                }
-            )
             fingerprints = stamp_report_origins(redundancy.to_dict(), parsed.source_map)
             if parsed.source_map:
                 # A body COPYed under each program's own header is one
                 # source, as in ``scan`` (#470).
                 _stamp_body_origins(fingerprints, parsed.source_map)
+            units.append(
+                {
+                    "row": {
+                        "program": unit.program_name,
+                        "unit_kind": unit.unit_kind,
+                        "file": display,
+                        "depth": depth,
+                        "grade": debt.grade,
+                        "score": debt.score,
+                    },
+                    "name": name,
+                    "depth": depth,
+                    "fingerprints": fingerprints,
+                }
+            )
+        return {"units": units, "expanded": bool(parsed.source_map)}
+
+    for path, facts in _per_file(workspace, index, stamps, "health", compute):
+        if facts is None:
+            continue
+        if facts["expanded"]:
+            expanded.add(str(path))
+        file_scan = FileScan(path=str(path))
+        for unit_facts in facts["units"]:
+            index.units.append(unit_facts["row"])
             file_scan.units.append(
                 UnitScan(
-                    program_name=name,
-                    depth=depth,
-                    reports={"redundancy": fingerprints},
+                    program_name=unit_facts["name"],
+                    depth=unit_facts["depth"],
+                    reports={"redundancy": unit_facts["fingerprints"]},
                 )
             )
         scan.files.append(file_scan)
