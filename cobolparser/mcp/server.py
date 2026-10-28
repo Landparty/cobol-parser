@@ -66,7 +66,8 @@ a record's bytes, lint for what is wrong, business_rules for the decisions
 and calculations it implements, read_procedure for a whole paragraph, and
 read_source to show the code at a cited line. slice gives only the
 statements that compute a field (or that it feeds), under their paragraphs:
-read it before reading a whole program to explain one value.
+read it before reading a whole program to explain one value. Before you
+answer, pass the checkable statements of your answer to check_claims.
 find_statements searches
 parsed statements (by verb, operand, literal or paragraph) in one file or
 the whole root: prefer it to a text search, which matches comments and
@@ -153,6 +154,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "read_procedure",
         "find_statements",
         "slice",
+        "check_claims",
     ),
     "data": ("decode_record", "gen_fixtures", "diff_programs"),
     "jcl": ("jcl_job", "jobs_running", "dataset_users"),
@@ -343,6 +345,21 @@ def build_server(
             "slice",
             lambda: tools.slice(file, field, direction, program, limit, aliases),
         )
+
+    async def check_claims(
+        claims: Annotated[
+            list[dict[str, Any]],
+            Field(
+                description="Each {kind, subject, object, file?, program?}; kind: "
+                "calls, copies, performs, unreachable, reachable, writes_field, "
+                "sets_only_in, reads_dataset, writes_dataset, flows_to"
+            ),
+        ],
+        ctx: MCPContext | None = None,
+    ) -> dict[str, Any]:
+        """Check statements of a draft answer: each confirmed, contradicted
+        (with evidence) or not checkable (with why)."""
+        return await off_loop("check_claims", lambda: tools.check_claims(claims), ctx)
 
     async def lint(
         file: File,
@@ -691,6 +708,7 @@ def build_server(
         read_procedure,
         find_statements,
         slice,
+        check_claims,
         business_rules,
         diff_programs,
         decode_record,

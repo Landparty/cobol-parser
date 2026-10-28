@@ -1921,6 +1921,13 @@ class CobolTools:
             self.workspace, file, field, direction, program, limit, aliases
         )
 
+    def check_claims(self, claims: list[dict[str, Any]]) -> dict[str, Any]:
+        """Each claim confirmed, contradicted or not checkable
+        (:mod:`.claims`)."""
+        from .claims import check_claims
+
+        return check_claims(self, claims)
+
     def find_statements(
         self,
         verb: str | None = None,
