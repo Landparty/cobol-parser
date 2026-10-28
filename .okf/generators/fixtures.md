@@ -541,6 +541,9 @@ statically-CALLed program name — a search across `callee_paths` directories
 trying `NAME`/`name` × `""`/`.cbl`/`.CBL`/`.cob`/`.COB`. A callee that fails
 to parse is skipped (falls through to the caller-dataflow rung), not a hard
 error — one bad `--callee-path` entry should not sink the whole bundle.
+An optional `accept(path) -> bool` vets each file found before it is
+opened (the MCP server passes `Workspace.under_root`, so a symlink out of
+the root is never read); a refused file is treated as not found.
 
 **`write_csv_dir`.** One `GeneratedDataset`-shaped CSV per fixture whose
 `layout`/`sequence` are both non-empty, or whose `layout` is non-empty with

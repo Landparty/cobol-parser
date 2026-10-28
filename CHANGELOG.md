@@ -181,6 +181,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **MCP `decode_record` pages past its 16 MiB read window.** Every page
+  was read from the start of the file, so records past the first 16 MiB
+  could not be reached, and once `skip` passed the window the answer kept
+  pointing `next` at the same request. Fixed-length records with no
+  separator are now read by seeking to the page; other framings still stop
+  at the window, but say so and give no `next`.
+
+* **MCP `gen_fixtures` no longer reads a callee linked from outside the
+  root.** Only the `callee_path` folder was checked against the workspace,
+  so a symlinked callee file in it was parsed although every other tool
+  refuses it. It is now skipped with a caveat naming it.
+
 * **`ADD n TO ZERO GIVING x` parses.** In the GIVING format the TO operand
   is only read, so a literal or figurative constant is valid there (IBM
   Enterprise COBOL); the parser required an identifier, and the six AWS
