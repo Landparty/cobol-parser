@@ -96,6 +96,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `business_rules.py` | `BusinessRuleExtractor` | [business-rules](analysis/business-rules.md) |
 | `codebase.py` | `CodebaseGraphBuilder`, `CopybookImpactAnalyzer` | [codebase](analysis/codebase.md) |
 | `program_signature.py` | `ProgramSignatureExtractor`, `extract_signatures` | [codebase](analysis/codebase.md) |
+| `call_interface.py` | `CallInterfaceChecker` | [codebase](analysis/codebase.md) |
 | `ast_diff.py` | `ProgramDiffer` | [codebase](analysis/codebase.md) |
 | `boundary_inventory.py` | `BoundaryInventoryAnalyzer` | [fixtures-support](analysis/fixtures-support.md) |
 | `constraints.py` | `ConstraintExtractor` | [fixtures-support](analysis/fixtures-support.md) |
@@ -120,6 +121,7 @@ from cobolparser.analysis import IMSSegmentAnalyzer, HostVariableResolver
 from cobolparser.analysis.program_flow import FlowEdgeType, LEADING_SENTENCES_NODE
 from cobolparser.analysis.xref import XrefAnalyzer
 from cobolparser.analysis.program_signature import ProgramSignatureExtractor, extract_signatures
+from cobolparser.analysis.call_interface import CallInterfaceChecker
 from cobolparser.analysis.codebase import CodebaseGraphBuilder, CopybookImpactAnalyzer
 from cobolparser.analysis.sql_cics_lint import SqlCicsAnalyzer
 from cobolparser.analysis.ast_diff import ProgramDiffer

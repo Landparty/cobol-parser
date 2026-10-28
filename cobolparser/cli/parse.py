@@ -49,6 +49,7 @@ _SUBCOMMANDS = frozenset(
         "diff",
         "codebase-graph",
         "copybook-impact",
+        "call-check",
         "sql-cics-check",
         "business-rules",
         "lineage",
@@ -3947,6 +3948,145 @@ def _cmd_copybook_impact(args: argparse.Namespace) -> None:
     _exit_on_graph_errors(graph)
 
 
+# -- Subcommand: call-check ---------------------------------------------------
+
+
+def _build_call_check_parser(subparsers: argparse._SubParsersAction) -> None:
+    from ..analysis.call_interface import SEVERITIES
+
+    p = subparsers.add_parser(
+        "call-check",
+        help="Check every CALL against the interface of the program it reaches, "
+        "across files: argument count, BY VALUE/REFERENCE, byte lengths, "
+        "usages and RETURNING",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser call-check ./src\n"
+            "  cobol-parser call-check ./src --copybook-path ./copybooks "
+            "--fail-on error\n"
+            "  cobol-parser call-check CALLER.cbl SUBPGM.cbl --format text\n"
+            "\n"
+            "Exit codes:\n"
+            "  0  the run completed (findings or not)\n"
+            "  2  a file was missing or failed to parse; the report is incomplete\n"
+            "  3  --fail-on was given and a finding at or above it was reported"
+        ),
+    )
+    p.add_argument(
+        "paths",
+        nargs="+",
+        metavar="PATH",
+        help="One directory to walk, or any number of COBOL source files",
+    )
+    p.add_argument(
+        "--extension",
+        action="append",
+        dest="extensions",
+        metavar="EXT",
+        help="Source extension to walk for, repeatable "
+        "(default: .cbl, .cob, .cobol)",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Worker processes for the batch parse (default: chosen by size)",
+    )
+    p.add_argument(
+        "--min-severity",
+        choices=list(SEVERITIES),
+        default="info",
+        help="Drop findings below this severity from the output (default: info)",
+    )
+    p.add_argument(
+        "--fail-on",
+        choices=[*SEVERITIES, "never"],
+        default="never",
+        help="Exit 3 when a finding at or above this severity was reported "
+        "(default: never)",
+    )
+    p.add_argument(
+        "--format",
+        choices=["json", "text"],
+        default="json",
+        dest="output_format",
+        help="json (default) or one 'file:line: severity: [kind] message' "
+        "line per finding plus a summary",
+    )
+    _add_compact_arg(p)
+    _add_copybook_args(p)
+    _add_output_arg(p)
+    _add_debug_lines_arg(p)
+    p.set_defaults(func=_cmd_call_check)
+
+
+def _program_files(args: argparse.Namespace) -> list[str]:
+    """The source files named on the command line: the files given, or every
+    program under the one directory given (the codebase-graph rule)."""
+    from ..analysis.codebase import DEFAULT_PROGRAM_EXTENSIONS
+
+    directories = [p for p in args.paths if os.path.isdir(p)]
+    if directories and len(args.paths) > 1:
+        _fail("give either one directory to walk or a list of files, not both")
+    if not directories:
+        missing = [p for p in args.paths if not os.path.exists(p)]
+        for path in missing:
+            print(f"error: no such file or directory: {path}", file=sys.stderr)
+        if missing:
+            sys.exit(2)
+        return list(args.paths)
+    extensions = tuple(args.extensions or DEFAULT_PROGRAM_EXTENSIONS)
+    wanted = {(e if e.startswith(".") else f".{e}").lower() for e in extensions}
+    found: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(directories[0]):
+        dirnames.sort()
+        for filename in sorted(filenames):
+            if os.path.splitext(filename)[1].lower() in wanted:
+                found.append(os.path.join(dirpath, filename))
+    return found
+
+
+def _cmd_call_check(args: argparse.Namespace) -> None:
+    from ..analysis.call_interface import SEVERITIES, CallInterfaceChecker
+
+    if args.workers is not None and args.workers < 1:
+        _fail("--workers must be >= 1")
+    files = _program_files(args)
+    report = CallInterfaceChecker(
+        copybook_paths=list(args.copybook_path or []),
+        workers=args.workers,
+        debug_lines=bool(getattr(args, "debug_lines", False)),
+    ).check_files(files)
+
+    worst = report.worst_severity()
+    cutoff = SEVERITIES.index(args.min_severity)
+    report.findings = [
+        f for f in report.findings if SEVERITIES.index(f.severity) <= cutoff
+    ]
+    if args.output_format == "text":
+        _text_out(report.to_text(), getattr(args, "output", None))
+    else:
+        _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
+
+    if report.errors:
+        print(
+            f"warning: {len(report.errors)} file(s) failed to parse cleanly; "
+            "the report is incomplete",
+            file=sys.stderr,
+        )
+    fail_on = getattr(args, "fail_on", "never")
+    if (
+        fail_on != "never"
+        and worst is not None
+        and SEVERITIES.index(worst) <= SEVERITIES.index(fail_on)
+    ):
+        sys.exit(3)
+    if report.errors:
+        sys.exit(2)
+
+
 # -- Subcommand: sql-cics-check -----------------------------------------------
 
 
@@ -4674,6 +4814,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_diff_parser(subparsers)
     _build_codebase_graph_parser(subparsers)
     _build_copybook_impact_parser(subparsers)
+    _build_call_check_parser(subparsers)
     _build_analyzer_parser(
         subparsers,
         "sql-cics-check",

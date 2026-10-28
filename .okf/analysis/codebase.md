@@ -1,8 +1,8 @@
 ---
 type: Module
 title: Codebase and Interface Analyzers
-description: Cross-program and program-comparison analyzers -- CodebaseGraphBuilder / CopybookImpactAnalyzer (codebase.py, the CALL/COPY graph over a whole tree), ProgramSignatureExtractor (program_signature.py, what a callee expects from its callers), and ProgramDiffer (ast_diff.py, behaviour-level diff of two ASTs); plus a pointer to the JCL adapter.
-tags: [analysis, codebase-graph, copybook-impact, program-signature, ast-diff, call-graph]
+description: Cross-program and program-comparison analyzers -- CodebaseGraphBuilder / CopybookImpactAnalyzer (codebase.py, the CALL/COPY graph over a whole tree), ProgramSignatureExtractor (program_signature.py, what a callee expects from its callers), CallInterfaceChecker (call_interface.py, every CALL against that interface across files), and ProgramDiffer (ast_diff.py, behaviour-level diff of two ASTs); plus a pointer to the JCL adapter.
+tags: [analysis, codebase-graph, copybook-impact, program-signature, call-check, ast-diff, call-graph]
 timestamp: 2026-10-15T00:00:00Z
 ---
 
@@ -22,6 +22,7 @@ in [lineage.md](lineage.md).
 
 * [CodebaseGraphBuilder / CopybookImpactAnalyzer](#codebasegraphbuilder--copybookimpactanalyzer)
 * [ProgramSignatureExtractor](#programsignatureextractor)
+* [CallInterfaceChecker](#callinterfacechecker)
 * [ProgramDiffer](#programdiffer)
 * [JCL](#jcl)
 * [See also](#see-also)
@@ -297,6 +298,44 @@ default rather than the outermost: a caller may target a contained program as
 readily as the outer one, and reporting only the outermost would hide the other
 entry points from exactly the consumer that needs them. `--program` still
 narrows. Tests: `tests/unit/analysis/test_program_signature.py`.
+
+## CallInterfaceChecker
+
+```python
+report = CallInterfaceChecker(copybook_paths=[...]).check_files(paths)
+# or .check_results(batch_results) / .check_programs([(path, ast), ...])
+report.findings        # list[CallInterfaceFinding]: kind/severity/message/caller/
+                       #   callee/path/line/callee_path/position/argument/parameter
+report.checked_calls   # CALL sites matched to an entry among the files
+report.external_calls  # target -> count: callee not among the files (not a finding)
+report.unchecked       # what could not be compared, one line each
+report.errors          # files that did not parse cleanly
+```
+
+Every CALL across a set of files against the entry it reaches
+(`ProgramSignatureExtractor`'s entries: PROCEDURE DIVISION USING and every
+ENTRY). `LinkageChecker` does count and mode only, and only within one file;
+this is the cross-file one, and adds shape. Kinds: `argument-count` (error),
+`passing-mode` (error: callee BY VALUE needs caller BY VALUE; callee BY
+REFERENCE takes REFERENCE or CONTENT), `length` (shorter argument = error,
+longer = info), `usage` (warning: storage class by `_USAGE_CLASS`, so COMP /
+COMP-4 / BINARY agree; then numeric vs alphanumeric DISPLAY), `returning`
+(warning, one side only). A callee with no USING has a zero-operand primary
+entry. Targets: a static name, every `possible_values` target of a dynamic
+CALL (an incomplete set is noted in `unchecked`), and a nested program by
+COBOL scope (`nested_program_called`, graph id `OUTER/INNER`). A target
+declared in two files is not checked (noted).
+
+Argument shapes (`_argument_shape`): a quoted literal is its length, `X'..'`
+half its digits; numeric literals, figurative constants, `ADDRESS OF` /
+`LENGTH OF`, `OMITTED`, a name declared twice, an OCCURS item without a
+subscript and a reference modification without a literal length are compared
+by count and mode only and named in `unchecked`. `(start:len)` with a literal
+length is that many bytes; a subscripted element is one occurrence. Files are
+parsed in chunks of `_CHUNK_SIZE` and reduced to `_Interface` / `_CallSite`
+before the next chunk, so few ASTs are live at once. Backs the `call-check`
+CLI subcommand. Over the 459 NIST programs: 121 checked calls, 0 findings.
+Tests: `tests/unit/analysis/test_call_interface.py`.
 
 ## ProgramDiffer
 

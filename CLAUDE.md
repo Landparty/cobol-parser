@@ -134,6 +134,7 @@ cobol-parser sql-cics-check <file.cbl>
 cobol-parser diff <old.cbl> <new.cbl> [--format json|text] [--rename-threshold RATIO]
 cobol-parser codebase-graph PATH... [--format json|dot|mermaid] [--extension EXT] [--workers N] [--copybook-path DIR]
 cobol-parser copybook-impact <member> PATH... [--extension EXT] [--workers N] [--copybook-path DIR]
+cobol-parser call-check PATH... [--extension EXT] [--workers N] [--copybook-path DIR] [--min-severity error|warning|info] [--fail-on error|warning|info|never] [--format json|text]
 cobol-parser jcl <job.jcl> [--dd-map] [--bindings] [--program NAME] [--proc-path DIR]... [--strict]   # needs the [jcl] extra
 cobol-parser mcp [--root DIR] [--cache-size N]   # MCP server on stdio for AI agents; needs the [mcp] extra ([mcp,jcl] for the JCL tools)
 # Parsing subcommands also take [--error-recovery fail-fast|collect-all] (default collect-all)
@@ -203,7 +204,7 @@ COBOL source (.cbl/.cob)
 
 **`cobolparser/dialects/le_signatures.py`** -- Call signatures for IBM Language Environment callable services and COBOL intrinsic functions: per operand, its direction, its exact COBOL declaration, whether it may be omitted, and whether it repeats. Coverage of the LE services is partial *and reported* (`services_without_signature()`), so "no signature catalogued" is never mistaken for "not an LE service"; the intrinsic half is complete and pinned by a test. `IBM_LE_SERVICE_INFO` is derived from it. Backs the `le-info` CLI subcommand and the COBOL Analyzer extension's LE hover. See `.okf/analysis.md`
 
-**`cobolparser/analysis/`** -- <!-- okf:gen analysis-module-count -->33<!-- /okf:gen --> static analysis modules (plus the `program_flow/` package and the private helpers <!-- okf:gen analysis-private-helpers -->`_cics.py`, `_files.py`, `_names.py`, `_procedures.py`, `_sql_flow.py`, `_sql_whenever.py`<!-- /okf:gen -->). The list below covers the ones with their own entry here; `.okf/analysis.md` is the complete and current index:
+**`cobolparser/analysis/`** -- <!-- okf:gen analysis-module-count -->34<!-- /okf:gen --> static analysis modules (plus the `program_flow/` package and the private helpers <!-- okf:gen analysis-private-helpers -->`_cics.py`, `_files.py`, `_names.py`, `_procedures.py`, `_sql_flow.py`, `_sql_whenever.py`<!-- /okf:gen -->). The list below covers the ones with their own entry here; `.okf/analysis.md` is the complete and current index:
 - `value_tracker.py` -- `DynamicCallAnalyzer` tracks possible values for variables in dynamic CALL statements via MOVE and VALUE clause analysis
 - `io_coverage_reporter.py` -- Machine-readable IO coverage reports (`CoverageStatus`, `TestType`)
 - `io_diagnostics.py` -- IO operation diagnostics
@@ -213,6 +214,7 @@ COBOL source (.cbl/.cob)
 - `dead_code.py` -- Unreferenced paragraph/section detection
 - `unused_variables.py` -- `UnusedVariableAnalyzer` detects DATA DIVISION items (FILE/WORKING-STORAGE/LOCAL-STORAGE/LINKAGE) never referenced in PROCEDURE DIVISION, including group items, level-88 condition names, REDEFINES propagation, and OCCURS ... DEPENDING ON. Backs the `unused-variables` CLI subcommand
 - `host_var_resolver.py` -- SQL host variable resolution
+- `call_interface.py` -- `CallInterfaceChecker` checks every CALL across a set of files against the interface of the program (or ENTRY) it reaches: argument count, BY VALUE / BY REFERENCE, byte length (a shorter argument is an error: the callee addresses bytes past it), storage class / category, and RETURNING. A CALL to a program not among the files is counted in `external_calls`, not reported; whatever could not be compared is listed in `unchecked`. Backs the `call-check` CLI subcommand. See `.okf/analysis/codebase.md`
 - `dclgen_check.py` -- `DclgenChecker` cross-checks every EXEC SQL `:host-var` against the DCLGEN `DECLARE TABLE` column of its name (matching `CUST_ID` to `CUST-ID` the way DCLGEN itself does), grading category / scale / precision / length / usage / sign / missing-null-indicator mismatches -- the ones a DB2 precompiler accepts and a runtime quietly acts on. Backs the `dclgen-check` CLI subcommand and the `dclgen-check` lint rule. Reports what it could *not* check per host variable, so a quiet report is never mistaken for a checked one. See `.okf/analysis.md`
 - `ims_segment_analyzer.py` -- IMS DLI segment analysis
 - `language_env_analyzer.py` -- IBM Language Environment detection

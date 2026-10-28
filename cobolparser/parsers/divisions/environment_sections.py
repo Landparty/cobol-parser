@@ -191,7 +191,10 @@ def _repository_paragraph(tokens: list[Any]) -> dict[str, Any]:
                 functions.extend(names)
             continue
         if word == "CLASS" and i + 1 < len(words):
-            entry: dict[str, Any] = {"name": words[i + 1].upper(), "external_name": None}
+            entry: dict[str, Any] = {
+                "name": words[i + 1].upper(),
+                "external_name": None,
+            }
             i += 2
             if i < len(words) and words[i].upper() == "IS":
                 i += 1

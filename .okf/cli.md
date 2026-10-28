@@ -8,7 +8,7 @@ timestamp: 2026-10-15T00:00:00Z
 
 # CLI
 
-The `cobol-parser` command: <!-- okf:gen cli-subcommand-count -->39<!-- /okf:gen --> subcommands that parse, tokenize, preprocess,
+The `cobol-parser` command: <!-- okf:gen cli-subcommand-count -->40<!-- /okf:gen --> subcommands that parse, tokenize, preprocess,
 expand, analyze, generate/decode/compare record data for, and graph COBOL
 (plus one for JCL and one for the LE catalogue), all built with `argparse` in
 `cobolparser/cli/parse.py`, and the `cobol.yml` project config every
@@ -115,6 +115,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `diff` | `old new` | `--format {json,text}` (json), `--rename-threshold RATIO` (0.8) | A without `--program` | `DiffReport` |
 | `codebase-graph` | `PATH ...` | `--format {json,dot,mermaid}` (json), `--extension EXT`... (`.cbl .cob .cobol`), `--workers N` (by size) | `--compact`, `--copybook-path`, `-o`, dl | graph |
 | `copybook-impact` | `member PATH ...` | `--extension`..., `--workers` | `--compact`, `--copybook-path`, `-o`, dl | `ImpactReport` |
+| `call-check` | `PATH ...` | `--extension`..., `--workers`, `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text}` (json) | `--compact`, `--copybook-path`, `-o`, dl | `CallInterfaceReport`; exit 3 on `--fail-on`, 2 when a file is missing or failed to parse |
 | `sql-cics-check` | `file` | — | A; +prof | `SqlCicsReport` |
 | `business-rules` | `file` | `--format {json,text}` (json), `--include-technical` | A; +prof | `BusinessRuleReport` |
 | `lineage` | `file` | `--field NAME`, `--direction {forward,backward}` (forward), `--format {json,text}` (json) | A (no profiling) | `FieldFlowReport` |
@@ -135,8 +136,8 @@ Subcommands that take none of the COBOL parse flags (`--source-format`,
 |------|---------|
 | `0` | Ran to completion; findings alone never change it. Analyzer subcommands exit 0 on a partial parse too, printing `warning: <file> parsed with N error(s); analysis may be incomplete` to stderr (`_parse_result_or_fail`) |
 | `1` | The CLI failed (`_fail()`): unreadable file, `ast is None`, unwritable output, a `cobol.yml` error, a missing extra, an invalid option value |
-| `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`; with `--errors` it says the errors are in the JSON instead of the re-run hint, #745); `batch` had a file with a `read_error` or `success=false`; `scan` had a file in `failures`, and `codebase-graph` / `copybook-impact` a file in the graph's `errors` (missing, unreadable or parsed with errors) -- output still written, a `warning:` on stderr, plus `error: no such file or directory: X` per missing path (`_exit_on_graph_errors`, #325, owner's option (a): any failed file, as `batch`); `gen-fixtures --strict` found unresolved items |
-| `3` | `lint --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
+| `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`; with `--errors` it says the errors are in the JSON instead of the re-run hint, #745); `batch` had a file with a `read_error` or `success=false`; `scan` had a file in `failures`, and `codebase-graph` / `copybook-impact` a file in the graph's `errors` (missing, unreadable or parsed with errors) -- output still written, a `warning:` on stderr, plus `error: no such file or directory: X` per missing path (`_exit_on_graph_errors`, #325, owner's option (a): any failed file, as `batch`); `gen-fixtures --strict` found unresolved items; `call-check` had a missing file (before any parse) or a file that failed to parse (after the report) |
+| `3` | `lint --fail-on` / `call-check --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
 | `141` | stdout closed (128 + SIGPIPE) |
 
 Exit 2 on a partial parse lets scripts gating on `$?` tell a partial parse
@@ -240,7 +241,7 @@ stated" stays distinct from "equals the default"):
   it leaves out `source_format`, which auto-detection settles for a
   copybook; their `define` warning stays. Every
   subcommand that parses COBOL has `--debug-lines`; `batch`, `gen-fixtures`,
-  `codebase-graph`, `copybook-impact`, `gen-data`, `decode`, `compare`,
+  `codebase-graph`, `copybook-impact`, `call-check`, `gen-data`, `decode`, `compare`,
   `tokenize` and `expand` still lack `--define` and/or `--source-format`.
 * **`--free-form`** passed by the user suppresses filling `source_format`:
   `_source_format_kwargs()` reads `--source-format` first, so a config value
@@ -311,7 +312,7 @@ Default `collect-all` (`ErrorRecoveryMode` via `_add_error_recovery_arg()` /
 `unused-variables`, `program-flow`, `redundancy`, `business-rules`,
 `lineage`, `diff`; not by `tokenize`, `preprocess`, `expand`, `gen-data`,
 `decode`, `compare`, `gen-fixtures`, `codebase-graph`, `copybook-impact`,
-`field-impact`, `jcl`, `le-info`, `config`.
+`call-check`, `field-impact`, `jcl`, `le-info`, `config`.
 
 ### `--copybook-path` / `--define`
 

@@ -221,6 +221,7 @@ OKF_MAP = [
     ("cobolparser/analysis/business_rules.py", [".okf/analysis/business-rules.md"]),
     ("cobolparser/analysis/codebase.py", [".okf/analysis/codebase.md"]),
     ("cobolparser/analysis/program_signature.py", [".okf/analysis/codebase.md"]),
+    ("cobolparser/analysis/call_interface.py", [".okf/analysis/codebase.md"]),
     ("cobolparser/analysis/ast_diff.py", [".okf/analysis/codebase.md"]),
     (
         "cobolparser/analysis/boundary_inventory.py",

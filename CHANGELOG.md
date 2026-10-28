@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **`call-check`: every CALL against the program it calls, across files**
+  (`CallInterfaceChecker`, `cobolparser/analysis/call_interface.py`).
+  `linkage-check` compares a CALL with its callee only inside one file and
+  only by count and passing mode; this reads a whole tree and also compares
+  each argument's byte length with the callee's LINKAGE item (shorter is an
+  error -- the callee addresses bytes past it -- longer is info), the
+  storage class (COMP-3 against DISPLAY, ...) and RETURNING. Dynamic CALLs
+  are checked against every target their tracked values name, ENTRY names
+  and nested programs resolve as COBOL does, and anything that could not
+  be compared is listed in `unchecked` rather than passed silently.
+  `--fail-on` exits 3 for a CI gate. Clean (0 findings) over the 121
+  inter-program CALLs of the NIST suite.
+
 * **User-defined functions (`FUNCTION-ID`, Enterprise COBOL 6.4).** A
   `FUNCTION-ID` unit used to fail the whole file with "PROGRAM-ID is
   mandatory". It now parses as its own unit (`unit_kind` "FUNCTION", with

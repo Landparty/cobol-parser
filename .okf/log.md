@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-28 -- call-check: cross-program CALL interface checking
+
+[analysis/codebase.md](analysis/codebase.md): `CallInterfaceChecker`
+(`call_interface.py`), every CALL against its callee's interface across
+files. [cli.md](cli.md): the `call-check` subcommand and its exit codes.
+[analysis.md](analysis.md): module map row.
+
 ## 2026-10-28 -- FUNCTION-ID: user-defined functions
 
 [parser/divisions.md](parser/divisions.md): `FUNCTION-ID` units
