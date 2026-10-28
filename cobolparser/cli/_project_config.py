@@ -65,6 +65,7 @@ NO_CONFIG_FLAG_HELP = (
 _BINDINGS: dict[str, Callable[[ProjectConfig], Any]] = {
     "copybook_path": lambda c: list(c.copybook_path) or None,
     "callee_path": lambda c: list(c.callee_path) or None,
+    "proc_path": lambda c: list(c.proc_path) or None,
     "source_format": lambda c: c.source_format,
     "debug_lines": lambda c: c.debug_lines,
     "dialect": lambda c: c.dialect,

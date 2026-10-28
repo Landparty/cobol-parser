@@ -56,7 +56,7 @@ searches the same copybook libraries as one run from the project root.
 A leading `~` and `$VAR` / `${VAR}` are expanded first, the way your shell
 expands them in `--copybook-path ~/cpy`, so `~/copybooks` and
 `$SHOP_ROOT/copybooks` mean what they say (an unset variable is left as
-written). A `copybook_path` or `callee_path` entry that is not an existing
+written). A `copybook_path`, `callee_path` or `proc_path` entry that is not an existing
 directory is never dropped silently: `cobol-parser config` marks it
 `(not an existing directory)` (and `--json` lists it under
 `missing_directories`), and every command that uses that setting prints a
@@ -106,6 +106,7 @@ rather than read under the wrong rules.
 |-----|------|-------|
 | `copybook_path` | string or list | `--copybook-path` |
 | `callee_path` | string or list | `--callee-path` (`gen-fixtures`) |
+| `proc_path` | string or list | `--proc-path` (`field-impact`), and the folders the MCP server expands a job's cataloged `EXEC` PROCs from; searched in order, first match wins |
 | `source_format` | `auto` \| `fixed` \| `free` | `--source-format` |
 | `debug_lines` | `true` \| `false` | `--debug-lines` / `--no-debug-lines` (compile fixed-format `D`-in-column-7 lines as code) |
 | `dialect` | `ibm-enterprise` | `--dialect` |

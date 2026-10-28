@@ -149,7 +149,9 @@ free-form member in a fixed listing; 6 for a fixed-format member in a
 free-form listing). `source_column_offsets(main_file, preprocess_fixed)`
 builds that function for one parse -- judging the program the way
 `CobolParser` does and each copybook the way the expander did, and leaving a
-line after `>>SOURCE FORMAT FREE` unshifted -- and is what both the `lint`
+line after `>>SOURCE FORMAT FREE` unshifted; each file is read through
+`read_program_source`, in the encoding the parse detected (an EBCDIC file
+read as UTF-8 has no lines to judge) -- and is what both the `lint`
 CLI and the MCP server (`cobolparser/mcp/`) pass. `LintFinding.column_known` (not serialized) is False for a
 parse error that gave only a line; such a finding gets no `origin_column`.
 `stamp_report_origins` leaves an existing `origin` alone so the CLI's dict

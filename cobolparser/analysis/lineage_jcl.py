@@ -280,6 +280,15 @@ def bindings_from_jobs(
                 continue
             if program == "IDCAMS":
                 passthroughs += _repro_passthroughs(dds, job_name, step_name)
+                commands = _dsns(dds, "SYSIN")
+                if commands:
+                    # A REPRO there would be a copy, but nothing says one
+                    # is: the flow stops here, and says so.
+                    notes.append(
+                        f"{_step_label(program, step_name, job_name)}: IDCAMS "
+                        f"commands are read from {', '.join(commands)}, which "
+                        "is not in-stream; a REPRO among them is not traced"
+                    )
                 continue
             programs = [program]
             if program in _TSO_PROGRAMS:
@@ -573,15 +582,17 @@ def _flat_procs(base: Path | None) -> dict[str, str]:
 
 
 def load_jobs(
-    paths: Iterable[str | Path], proc_path: str | Path | None = None
+    paths: Iterable[str | Path],
+    proc_path: str | Path | Iterable[str | Path] | None = None,
 ) -> tuple[list[Any], list[str]]:
     """Parse and PROC-expand JCL files with jcl-parser.
 
-    ``proc_path`` is either a folder of PROC members (``NAME.prc`` /
-    ``NAME.jcl`` / no suffix) or a JCLLIB base holding one sub-folder per
-    library; both are searched. Returns the jobs and one message per file that
-    could not be read or expanded. Raises ``ImportError`` when jcl-parser is
-    not installed.
+    ``proc_path`` is a folder of PROC members (``NAME.prc`` / ``NAME.jcl`` /
+    no suffix) or a JCLLIB base holding one sub-folder per library, or a list
+    of them searched in order (the first folder holding a member wins; the
+    first one is the JCLLIB base). Returns the jobs and one message per file
+    that could not be read or expanded. Raises ``ImportError`` when jcl-parser
+    is not installed.
     """
     files: list[Path] = []
     for raw in paths:
@@ -601,8 +612,17 @@ def load_jobs(
             sources[str(path)] = path.read_text(errors="replace")
         except OSError as exc:
             problems.append(f"{path}: {exc}")
-    base = Path(proc_path) if proc_path else None
-    jobs, parse_problems = jobs_from_sources(sources, _flat_procs(base), base)
+    if proc_path is None:
+        bases: list[Path] = []
+    elif isinstance(proc_path, (str, Path)):
+        bases = [Path(proc_path)] if str(proc_path) else []
+    else:
+        bases = [Path(entry) for entry in proc_path if str(entry)]
+    procs: dict[str, str] = {}
+    for base in reversed(bases):
+        procs.update(_flat_procs(base))
+    jcllib_base = bases[0] if bases else None
+    jobs, parse_problems = jobs_from_sources(sources, procs, jcllib_base)
     return jobs, problems + parse_problems
 
 

@@ -17,10 +17,14 @@ What this module adds on top of ``jclparser``:
   so one job's syntax error costs only that job.
 * **Procedure libraries without guessing.**  Procedures are found in-stream
   first, then in the directories passed as ``proc_paths`` (one member per
-  file, named after the procedure, any extension).  ``jclparser``'s bundled
-  IBM utility templates and the ``JCL_PROCLIB_PATH`` environment variable are
-  deliberately *not* consulted: a template's dataset names are not this
-  shop's, and a result must not depend on the caller's environment.
+  file, named after the procedure, any extension), then -- last, for the
+  IBM-supplied names only (``DLIBATCH``, ``IMSBATCH``, ``DSNUPROC``, ...) --
+  in ``jclparser``'s bundled templates of those procedures, so the standard
+  ``EXEC DLIBATCH,MBR=prog`` still says which program it runs.  A template is
+  not the shop's PROCLIB member, so every expansion from one is reported in
+  ``unresolved``, and its cards are cited at no line.  The
+  ``JCL_PROCLIB_PATH`` environment variable is deliberately *not* consulted:
+  a result must not depend on the caller's environment.
 * **Nothing dropped silently.**  A procedure found nowhere keeps its
   invocation step and is reported in ``unresolved``; a job ``jclparser``
   rejects lands in ``errors`` with its line; ``jclparser``'s own warnings are
@@ -31,7 +35,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -74,28 +78,45 @@ def _require_jclparser() -> None:
 # -- Procedure libraries ----------------------------------------------------
 
 
-def _library_members(proc_paths: Sequence[str | os.PathLike[str]]) -> dict[str, Path]:
-    """Member name -> file, first directory wins, as a PROCLIB concatenation."""
+def _library_members(
+    proc_paths: Sequence[str | os.PathLike[str]],
+    suffixes: Sequence[str] | None = None,
+) -> dict[str, Path]:
+    """Member name -> file, first directory wins, as a PROCLIB concatenation.
+
+    ``suffixes`` (lower-cased, with the dot) limits the members to files named
+    so; ``None`` takes every file, whatever its suffix.
+    """
     members: dict[str, Path] = {}
     for directory in proc_paths:
         base = Path(directory)
         if not base.is_dir():
             continue
         for entry in sorted(base.iterdir()):
-            if entry.is_file():
-                members.setdefault(entry.stem.upper(), entry)
+            if not entry.is_file():
+                continue
+            if suffixes is not None and entry.suffix.lower() not in suffixes:
+                continue
+            members.setdefault(entry.stem.upper(), entry)
     return members
 
 
 def _make_loaders(
     proc_paths: Sequence[str | os.PathLike[str]],
+    suffixes: Sequence[str] | None = None,
+    library: Mapping[str, Path] | None = None,
 ) -> tuple[Any, Any]:
-    """(procedure loader, INCLUDE member loader) over ``proc_paths``; one pair
-    per parse, so each member is read and parsed once."""
+    """(procedure loader, INCLUDE member loader) over ``proc_paths`` -- or
+    over *library*, member name -> file, when the caller has resolved it --;
+    one pair per parse, so each member is read and parsed once."""
     from jclparser.include_loader import IncludeMemberLoader
     from jclparser.proc_loader import ProcedureLoader
 
-    members = _library_members(proc_paths)
+    members = (
+        {name.upper(): Path(path) for name, path in library.items()}
+        if library is not None
+        else _library_members(proc_paths, suffixes)
+    )
 
     def _read(name: str) -> str | None:
         path = members.get(name.upper())
@@ -182,6 +203,48 @@ def _shift_lines(items: Iterable[Any], delta: int) -> None:
         for dd in item.dd_statements:
             if dd.line_number:
                 dd.line_number += delta
+
+
+#: Added to a template procedure's line numbers so its cards are told apart,
+#: after the expansion, from an override coded in the job file.
+_TEMPLATE_LINE = 1_000_000
+
+
+class _Templates:
+    """``jclparser``'s templates of the IBM-supplied procedures, as the loader
+    after the procedure libraries: records each name it serves.
+
+    A template's cards are in no file of the caller's, so its line numbers are
+    moved out of reach (:data:`_TEMPLATE_LINE`) for the expansion to drop.
+    """
+
+    def __init__(self) -> None:
+        self.names: list[str] = []
+
+    def loader(self) -> Any | None:
+        try:
+            from jclparser.builtin_procs import BUILTIN_UTILITY_PROCS
+        except ImportError:  # pragma: no cover - a jcl-parser without them
+            return None
+        from jclparser.proc_loader import ProcedureLoader
+
+        names = self.names
+
+        class _TemplateLoader(ProcedureLoader):
+            def load_procedure(
+                self, name: str, libraries: Sequence[str] | None = None
+            ) -> _JProc | None:
+                key = name.upper()
+                text = BUILTIN_UTILITY_PROCS.get(key)
+                proc = None if text is None else _library_proc(text, key)
+                if proc is None:
+                    return None
+                _shift_lines(proc.steps, _TEMPLATE_LINE)
+                if key not in names:
+                    names.append(key)
+                return proc
+
+        return _TemplateLoader()
 
 
 class _Missing:
@@ -526,6 +589,16 @@ def _drop_applied_overrides(invocation: JobStep, expanded: list[JobStep]) -> Non
     ]
 
 
+def _drop_template_lines(step: JobStep, invocation_line: int) -> None:
+    """A step expanded from a template: cited at the ``EXEC`` that invoked it,
+    its template cards at no line (an override keeps its own)."""
+    step.line = invocation_line
+    for top in step.dd_statements:
+        for dd in top.flatten():
+            if dd.line >= _TEMPLATE_LINE:
+                dd.line = 0
+
+
 class _JobConverter:
     def __init__(
         self,
@@ -535,8 +608,13 @@ class _JobConverter:
         unresolved: list[str],
         errors: list[dict[str, Any]],
         preamble: Iterable[str] = (),
+        templates: bool = True,
     ) -> None:
         self.job = job
+        #: Whether jclparser's IBM procedure templates are the last resort.
+        self.templates = templates
+        #: The procedures expanded from one of those templates.
+        self.template_names: set[str] = set()
         self.offset = offset
         self.library_loader = library_loader
         self.unresolved = unresolved
@@ -599,11 +677,14 @@ class _JobConverter:
             InlineProcedureLoader,
         )
 
+        templates = _Templates()
+        template_loader = templates.loader() if self.templates else None
         missing = _Missing()
         loader = CompositeProcedureLoader(
             [
                 InlineProcedureLoader(self.job.procedures),
                 self.library_loader,
+                *([template_loader] if template_loader is not None else []),
                 missing.loader(),
             ]
         )
@@ -632,6 +713,14 @@ class _JobConverter:
                 "procedure path, so its steps and DD statements could not be "
                 "expanded"
             )
+        for name in [] if quiet else templates.names:
+            self.unresolved.append(
+                f"PROC {name} (line {step.line_number + self.offset}): expanded "
+                "from jcl-parser's template of the IBM-supplied procedure, not "
+                "your PROCLIB; add the member to the procedure path for an "
+                "exact answer"
+            )
+            self.template_names.add(name)
         for warning in [] if quiet else exploded.warnings:
             if warning not in self.unresolved:
                 self.unresolved.append(warning)
@@ -652,7 +741,10 @@ class _JobConverter:
                 name = str(procedure).upper()
                 inline = name in self._inline_names() and name not in self.preamble
                 origin = self.offset if inline else 0
-                out.append(_step(item, origin, conds, procedure=name))
+                expanded = _step(item, origin, conds, procedure=name)
+                if name in templates.names:
+                    _drop_template_lines(expanded, step.line_number + self.offset)
+                out.append(expanded)
 
         walk(exploded.steps, list(enclosing))
         return out
@@ -744,28 +836,56 @@ class JclParser:
 
     ``proc_paths`` are directories searched, in order, for cataloged
     procedures (``EXEC name`` with no in-stream ``PROC name``) and ``INCLUDE``
-    members: one member per file, named after the member, any extension.
-    The parser is stateless between calls.
+    members: one member per file, named after the member, any extension --
+    or, with ``member_suffixes`` (e.g. ``(".prc", ".proc")``), only files
+    with one of those suffixes, so a program source of the same name in a
+    mixed directory is never read as a procedure. ``library`` (member name ->
+    file) replaces that lookup with one the caller resolved.  A procedure
+    found in neither is expanded from ``jclparser``'s template when it is an
+    IBM-supplied one (``DLIBATCH``, ``DSNUPROC``, ...), and noted in
+    ``unresolved``; ``ibm_templates=False`` leaves it unexpanded.  The parser
+    is stateless between calls.
     """
 
     #: How many unreadable cards one job may have before it is given up on.
     MAX_RECOVERIES = 50
 
     def __init__(
-        self, proc_paths: Sequence[str | os.PathLike[str]] | None = None
+        self,
+        proc_paths: Sequence[str | os.PathLike[str]] | None = None,
+        member_suffixes: Sequence[str] | None = None,
+        library: Mapping[str, str | os.PathLike[str]] | None = None,
+        *,
+        ibm_templates: bool = True,
     ) -> None:
         self.proc_paths = list(proc_paths or [])
+        self.ibm_templates = ibm_templates
+        self.member_suffixes = (
+            None
+            if member_suffixes is None
+            else tuple(s.lower() for s in member_suffixes)
+        )
+        #: Member name -> file, resolved by the caller (directories with
+        #: different member rules, a JCLLIB order); replaces ``proc_paths``.
+        self.library = (
+            None
+            if library is None
+            else {name.upper(): Path(path) for name, path in library.items()}
+        )
 
     def parse(self, text: str, *, filename: str = "<jcl>") -> JclParseResult:
         """Parse JCL source ``text``."""
         _require_jclparser()
 
-        library_loader, member_loader = _make_loaders(self.proc_paths)
+        library_loader, member_loader = _make_loaders(
+            self.proc_paths, self.member_suffixes, self.library
+        )
         jobs: list[JclJob] = []
         procedures: dict[str, list[JobStep]] = {}
         symbols: dict[str, str] = {}
         errors: list[dict[str, Any]] = []
         unresolved: list[str] = []
+        templates: list[str] = []
 
         chunks = _split_jobs(text)
         preamble = self._preamble_procedures(chunks, member_loader)
@@ -782,7 +902,13 @@ class JclParser:
                     unresolved.append(warning)
             _note_duplicate_procedures(job, offset, unresolved)
             converter = _JobConverter(
-                job, offset, library_loader, unresolved, errors, _names(borrowed)
+                job,
+                offset,
+                library_loader,
+                unresolved,
+                errors,
+                _names(borrowed),
+                templates=self.ibm_templates,
             )
             converter.job_card = _statement_text(chunk, job.line_number)
             converted = converter.convert()
@@ -807,6 +933,7 @@ class JclParser:
             for name, steps in converter.procedures().items():
                 procedures.setdefault(name, steps)
             symbols.update(job.set_statements)
+            templates += sorted(set(converter.template_names) - set(templates))
 
         return JclParseResult(
             jobs=jobs,
@@ -815,6 +942,7 @@ class JclParser:
             errors=errors,
             unresolved=unresolved,
             filename=filename,
+            template_procedures=templates,
         )
 
     def _parse_job(
@@ -890,6 +1018,9 @@ def parse_jcl(
     *,
     filename: str = "<jcl>",
     proc_paths: Sequence[str | os.PathLike[str]] | None = None,
+    ibm_templates: bool = True,
 ) -> JclParseResult:
     """Parse JCL source ``text``.  Convenience wrapper around :class:`JclParser`."""
-    return JclParser(proc_paths).parse(text, filename=filename)
+    return JclParser(proc_paths, ibm_templates=ibm_templates).parse(
+        text, filename=filename
+    )

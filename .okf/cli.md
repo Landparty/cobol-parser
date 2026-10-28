@@ -118,7 +118,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `sql-cics-check` | `file` | — | A; +prof | `SqlCicsReport` |
 | `business-rules` | `file` | `--format {json,text}` (json), `--include-technical` | A; +prof | `BusinessRuleReport` |
 | `lineage` | `file` | `--field NAME`, `--direction {forward,backward}` (forward), `--format {json,text}` (json) | A (no profiling) | `FieldFlowReport` |
-| `field-impact` | `[FIELD] PATH ...` | `--program NAME` (every program with that field), `--table T.C`, `--dataset DSN`, `--direction` (forward), `--depth N` (unlimited), `--jcl PATH`..., `--proc-path DIR`, `--bindings FILE.json`, `--key-relationships`, `--workers N`, `--format {json,text}` (json) | `--compact`, `--copybook-path`, `--source-format`, `--define`, `-o`, dl | `ImpactResult`; exit 1 when the start matches nothing |
+| `field-impact` | `[FIELD] PATH ...` | `--program NAME` (every program with that field), `--table T.C`, `--dataset DSN`, `--direction` (forward), `--depth N` (unlimited), `--jcl PATH`..., `--proc-path DIR`... (from `project.proc_path`), `--bindings FILE.json`, `--key-relationships`, `--workers N`, `--format {json,text}` (json) | `--compact`, `--copybook-path`, `--source-format`, `--define`, `-o`, dl | `ImpactResult`; exit 1 when the start matches nothing |
 | `jcl` | `file` | `--dd-map`, `--bindings`, `--program NAME`, `--proc-path DIR`..., `--strict` | `--compact`, `-o` | job JSON; needs `[jcl]` extra; exit 3 on `--strict` |
 | `le-info` | `[name ...]` | `--kind {service,function,all}` (all) | `--compact`, `-o` | LE / intrinsic signature catalogue |
 | `config` | — | `--json` | `--compact`, `-o` | effective `cobol.yml` |
@@ -194,7 +194,7 @@ stated" stays distinct from "equals the default"):
 | Section | Keys → `ProjectConfig` field |
 |---|---|
 | top level | `version`, `project`, `data`, `lint`, `mockymock`, `analyzer` (anything else is an error) |
-| `project:` | `copybook_path`, `callee_path` (lists, resolved against the file's directory), `source_format` (`auto\|fixed\|free`), `debug_lines` (bool), `dialect` (`ibm-enterprise`), `error_recovery` (`collect-all\|fail-fast`), `seed`, `extensions`, `define` (normalized to `SYMBOL=VALUE`) |
+| `project:` | `copybook_path`, `callee_path`, `proc_path` (lists, resolved against the file's directory), `source_format` (`auto\|fixed\|free`), `debug_lines` (bool), `dialect` (`ibm-enterprise`), `error_recovery` (`collect-all\|fail-fast`), `seed`, `extensions`, `define` (normalized to `SYMBOL=VALUE`) |
 | `data:` → `DataDefaults` | `charset`, `endian`, `record_format`, `record_separator`, `rows` |
 | `lint:` → `LintDefaults` | `rules`, `min_severity`, `fail_on` |
 | `mockymock:` / `analyzer:` | validated only as mappings, carried verbatim on `ProjectConfig.tools`; `tool_section(name)` returns the mapping or `{}` |
@@ -223,7 +223,7 @@ stated" stays distinct from "equals the default"):
   a throwaway parser whose optional defaults are a sentinel (append actions get
   `None`: argparse's append copies-and-appends to the default, and a non-list
   sentinel would raise). Runs only when a config file was found.
-* **Bound dests** — `copybook_path`, `callee_path`, `source_format`,
+* **Bound dests** — `copybook_path`, `callee_path`, `proc_path`, `source_format`,
   `debug_lines`, `dialect`, `error_recovery`, `seed`, `extensions`, `define`,
   `charset`, `endian`, `record_format`, `record_separator`, `rows`, `rules`,
   `min_severity`, `fail_on`. `extensions`/`rules` are argparse *dests*, not
@@ -776,7 +776,8 @@ data item (a single-report `LineageGraph`). See [analysis.md](analysis.md).
 `scan_files(..., analyzers=("lineage",))` and joins the reports in a
 `LineageGraph`. Start: FIELD (narrow with `--program`), `--table
 [SCHEMA.]TABLE.COLUMN` or `--dataset DSN` — exactly one. Bindings: `--jcl`
-(needs jcl-parser; `--proc-path` is a flat PROC folder or a JCLLIB base)
+(needs jcl-parser; `--proc-path` is a flat PROC folder or a JCLLIB base,
+repeatable and searched in order, the first folder doubling as the JCLLIB base)
 and/or `--bindings` (`{"bindings": [...], "passthroughs": [...]}`, dict forms
 of `DatasetBinding` / `Passthrough`; `jcl --bindings` output works as-is: a
 row with no `program` or `dataset` is skipped, and a malformed row is a

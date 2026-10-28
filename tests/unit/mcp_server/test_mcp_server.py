@@ -61,6 +61,9 @@ class TestServer:
             "diff_programs",
             "decode_record",
             "gen_fixtures",
+            "jcl_job",
+            "jobs_running",
+            "dataset_users",
         }
         for tool in listed:
             assert tool.annotations is not None
@@ -75,6 +78,9 @@ class TestServer:
             "new_file",
         ]
         assert by_name["decode_record"].inputSchema["required"] == ["copybook"]
+        assert by_name["jcl_job"].inputSchema["required"] == ["file"]
+        assert by_name["jobs_running"].inputSchema["required"] == ["program"]
+        assert by_name["dataset_users"].inputSchema["required"] == ["dataset"]
 
     def test_v3_tools_answer_over_the_session(self) -> None:
         _, results = _session(

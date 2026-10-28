@@ -3,7 +3,7 @@ type: Module
 title: JCL
 description: The ddname -> dataset join a COBOL SELECT resolves through, read from z/OS JCL by the jcl-parser package; cobolparser.jcl is the adapter that shapes its model for this toolchain.
 tags: [jcl, zos, dd, dataset, job, step, proc, bindings, jcl-parser]
-timestamp: 2026-10-15T00:00:00Z
+timestamp: 2026-10-28T00:00:00Z
 ---
 
 # JCL
@@ -31,7 +31,7 @@ for IKJEFT01/1A/1B `RUN PROGRAM(x)`, `ims_program(parm)` for DFSRRC00
 `PARM='DLI|DBB|BMP,x,...'`; pure text, shared with field lineage's
 `lineage_jcl` so the two JCL consumers agree, #493).
 Entry points: `parse_jcl(text, *, filename="<jcl>", proc_paths=None)`,
-`JclParser(proc_paths=None).parse(text, *, filename=...)` / `.parse_file(path)`,
+`JclParser(proc_paths=None, member_suffixes=None, library=None).parse(text, *, filename=...)` / `.parse_file(path)`,
 then `resolve_dd_bindings(result)`. CLI: `cobol-parser jcl` (below).
 
 `jcl-parser` is an **optional extra**: `pip install 'cobol-parser[jcl]'`
@@ -76,7 +76,7 @@ this package exposes none of it.
 
 | Class | Holds |
 |-------|-------|
-| `JclParseResult` | `jobs`, `procedures`, `symbols`, `errors`, `unresolved`, `filename` |
+| `JclParseResult` | `jobs`, `procedures`, `symbols`, `errors`, `unresolved`, `filename`, `template_procedures` |
 | `JclJob` | `name`, `steps`, `parameters`, job-level `dd_statements` (JOBLIB), `line` |
 | `JobStep` | `name`, `program`, `procedure`, `parm`, `dd_statements`, `condition`, `parameters`, `line` |
 | `DDStatement` | `name`, `dataset`, `disposition`, `sysout`, `is_dummy`, `is_instream`, `instream_lines`, `concatenated`, `record_format`, `record_length`, `parameters`, `procstep`, `line` |
@@ -152,13 +152,26 @@ dataset bind nothing there and are skipped, #547).
   card.
 * **Procedure libraries, no guessing.** Lookup order: in-stream, then
   `proc_paths` (directories; one member per file named after it, any
-  extension, first directory wins; the member name is what `EXEC` resolves,
+  extension -- or only `JclParser(..., member_suffixes=(".prc", ...))`'s,
+  so a same-named program source in a mixed
+  directory is never read as a procedure --, first directory wins; or
+  `library=` an explicit member name -> file mapping used instead, which
+  is how the MCP JCL tools pass a job's `JCLLIB` libraries and the root's
+  PROCLIB folders resolved per file; the member name is what `EXEC` resolves,
   whatever the member's PROC label says, and a member with no PROC statement
-  is its own body; each member is read once per parse), else the invocation
-  is kept unexpanded and
+  is its own body; each member is read once per parse), then jclparser's
+  bundled templates of IBM-supplied procedures (`builtin_procs.BUILTIN_UTILITY_PROCS`:
+  `DLIBATCH`, `IMSBATCH`, `DBBBATCH`, `DSNUPROC`, `IGYWCL`, ...; #744), else
+  the invocation is kept unexpanded and
   noted (`PROC NAME (line N): ... neither defined in this file nor found on the
-  procedure path`). `INCLUDE MEMBER=` reads from the same directories.
-  jclparser's bundled IBM-utility PROC templates, `JCLLIB ORDER` library
+  procedure path`). A template expansion is noted too (`PROC NAME (line N):
+  expanded from jcl-parser's template ... not your PROCLIB`) and named in
+  `JclParseResult.template_procedures`; its steps are cited at the invoking
+  `EXEC` line and its own DD cards at line 0 (they are in no file of the
+  caller's; the template's lines are shifted by `_TEMPLATE_LINE` before the
+  expansion so an override coded in the job file keeps its line).
+  `JclParser(..., ibm_templates=False)` turns the templates off.
+  `INCLUDE MEMBER=` reads from the same directories. `JCLLIB ORDER` library
   lookup and the `JCL_PROCLIB_PATH` environment variable are **not** used.
 * **Notes in `unresolved`:** every jclparser warning (unmatched ELSE/ENDIF,
   missing PEND, unrecognised statements, override naming no step, a symbol

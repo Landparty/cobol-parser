@@ -347,11 +347,47 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
     index.jcl_files = [workspace.display(p) for p in jcl]
     for path in jcl:
         stamps[str(path)] = _stamp(str(path))
+    proc_dirs, skipped_procs = workspace.proc_directories()
+    if skipped_procs:
+        index.problems.append(
+            "proc_path folders outside the workspace were not searched: "
+            + ", ".join(skipped_procs)
+        )
+    # The libraries the JCL tools expand from too: proc_path folders first,
+    # then PROCLIB-named folders, JCLLIB-named folders and .prc / .proc ones.
+    from .jcl_tools import jcllib_directories, procedure_libraries
+
+    libraries = procedure_libraries(workspace)
+    # A .jcl member of a procedure library is a procedure, not a job.
+    jcl = [p for p in jcl if p.parent not in libraries.configured]
+    index.jcl_files = [workspace.display(p) for p in jcl]
+    proc_dirs = list(
+        dict.fromkeys(
+            proc_dirs
+            + libraries.configured
+            + jcllib_directories(libraries, jcl)
+            + libraries.discovered
+        )
+    )
+    for folder in proc_dirs:
+        # The folder itself (a PROC added or removed) and each member in it.
+        stamps[str(folder)] = _stamp(str(folder))
+        if folder.is_dir():
+            for member in folder.iterdir():
+                if member.is_file():
+                    stamps[str(member)] = _stamp(str(member))
     if jcl:
         try:
             from ..analysis.lineage_jcl import bindings_from_jobs, load_jobs
 
-            jobs, problems = load_jobs(jcl)
+            jobs, problems = load_jobs(jcl, proc_path=proc_dirs)
+            if not proc_dirs and any("PROCs not expanded" in p for p in problems):
+                problems.append(
+                    "cataloged PROCs are looked up in .prc / .proc files, "
+                    "folders named like a PROCLIB or for a JCLLIB library, "
+                    "and the folders cobol.yml lists as project.proc_path; "
+                    "there is none under the root"
+                )
         except ImportError:
             index.jcl_note = (
                 f"{len(jcl)} JCL file(s) under the root were not read: "

@@ -67,6 +67,12 @@ two versions of a program (behaviour, not lines); decode_record reads a data
 file through a copybook's byte layout; gen_fixtures generates test data for
 every file, CALL, SQL and CICS boundary a program touches, scenario by
 scenario.
+
+How programs are run (needs the [jcl] extra; without it these tools answer
+with the install command): jobs_running for every JCL step that runs a
+program, with each of its SELECT files bound to a DD and a dataset;
+dataset_users for every job, step and program that reads or writes a
+dataset; jcl_job to read one JCL file's jobs, steps and DD statements.
 """
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
@@ -491,6 +497,62 @@ def build_server(workspace: Workspace) -> FastMCP:
             lambda: tools.gen_fixtures(file, program, mode, seed, rows, scenario, limit)
         )
 
+    async def jcl_job(
+        file: Annotated[
+            str,
+            Field(description="JCL file, relative to the workspace root"),
+        ],
+        job: Annotated[
+            str | None,
+            Field(description="Only the job of this name (default: every job)"),
+        ] = None,
+        step: Annotated[
+            str | None,
+            Field(
+                description="Only the step of this name; a procedure step "
+                "matches by its own name too (STEP or INVOKE.STEP)"
+            ),
+        ] = None,
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """Read one JCL file: each job's steps (program, PARM, COND or IF
+        condition), every DD statement (dataset, DISP and what it means,
+        SYSOUT, DUMMY, in-stream data, RECFM/LRECL), cataloged and in-stream
+        procedures expanded, and the COBOL source file of each program run.
+        Lines in a procedure member are cited in that member."""
+        return await off_loop(lambda: tools.jcl_job(file, job, step, limit))
+
+    async def jobs_running(
+        program: Annotated[
+            str,
+            Field(description="Program name, as PGM= names it"),
+        ],
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """Every JCL step under the workspace root that runs a program
+        (PGM=, or launched through IKJEFT01 / DFSRRC00), with its DD
+        statements. When the program's COBOL source is under the root, each
+        SELECT file is bound to its DD and dataset, and a DD the program
+        needs that the step does not code is listed."""
+        return await off_loop(lambda: tools.jobs_running(program, limit))
+
+    async def dataset_users(
+        dataset: Annotated[
+            str,
+            Field(
+                description="Dataset name; a GDG generation or member is "
+                "matched by its base name unless given. z/OS filter "
+                "wildcards: % one character, * within one qualifier "
+                "(PROD.INV.*), ** any number of qualifiers (PROD.**)"
+            ),
+        ],
+        limit: Limit = None,
+    ) -> dict[str, Any]:
+        """Every job, step and program under the workspace root that uses a
+        dataset, and how (DISP=: read, create, extend, exclusive). Pair with
+        jobs_running to get from a DD to the COBOL file that reads it."""
+        return await off_loop(lambda: tools.dataset_users(dataset, limit))
+
     for tool in (
         codebase_overview,
         program_brief,
@@ -505,6 +567,9 @@ def build_server(workspace: Workspace) -> FastMCP:
         diff_programs,
         decode_record,
         gen_fixtures,
+        jobs_running,
+        dataset_users,
+        jcl_job,
     ):
         server.add_tool(tool, annotations=_READ_ONLY, structured_output=True)
     for spec in PROMPTS:

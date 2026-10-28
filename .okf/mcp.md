@@ -3,7 +3,7 @@ type: Module
 title: MCP Server
 description: cobolparser/mcp/ and `cobol-parser mcp` -- an MCP server (stdio) that lets AI agents question COBOL source; tools as plain functions (tools.py), the task prompts (prompts.py), the response envelope and caveat kinds (envelope.py), the workspace guard, cobol.yml and parse cache (workspace.py), the root-wide cross-program indexes (codebase_index.py), and the one SDK-importing module (server.py).
 tags: [mcp, ai, agents, tools, stdio, caveats, source-map]
-timestamp: 2026-10-27T00:00:00Z
+timestamp: 2026-10-28T00:00:00Z
 ---
 
 # MCP Server
@@ -19,7 +19,8 @@ the Model Context Protocol, on stdin/stdout. Design and later phases:
 |---|---|---|
 | `cobolparser/mcp/envelope.py` | `Response` (caveats + truncation), `Caveat`, `CAVEAT_KINDS`, `ToolError`, `MCP_SURFACE_VERSION`, limits | no |
 | `cobolparser/mcp/workspace.py` | `Workspace` (path guard, `cobol.yml`, LRU parse cache), `ParsedProgram` (unit selection, `locate()`), `stdout_to_stderr()` | no |
-| `cobolparser/mcp/tools.py` | `CobolTools`: `codebase_overview`, `program_brief`, `explain_symbol`, `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`, `read_source`, `business_rules`, `diff_programs`, `decode_record`, `gen_fixtures` | no |
+| `cobolparser/mcp/tools.py` | `CobolTools`: `codebase_overview`, `program_brief`, `explain_symbol`, `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`, `read_source`, `business_rules`, `diff_programs`, `decode_record`, `gen_fixtures`, and `jcl_job` / `jobs_running` / `dataset_users` delegating to `jcl_tools.py` | no |
+| `cobolparser/mcp/jcl_tools.py` | the JCL tools (`jcl_job`, `jobs_running`, `dataset_users`), the `jcl` index (`jcl_index`, `JclIndex`, `JclFile`), `_Locator` (job file vs procedure member), `INSTALL_HINT`; reads JCL through `cobolparser.jcl`, so the `[jcl]` extra | no |
 | `cobolparser/mcp/prompts.py` | `PROMPTS` (`PromptSpec`): `explain_program`, `review_program`, `plan_change`, `document_business_rules`, `onboard_codebase`, each a plain function returning the request text | no |
 | `cobolparser/mcp/codebase_index.py` | `programs_index` / `lineage_index` / `health_index`: facts about every program under the root, cached by `Workspace.index()` | no |
 | `cobolparser/mcp/server.py` | `build_server()`, `run_stdio()`: typed wrappers registered on `FastMCP`, and `PROMPTS` through `Prompt.from_function` | **yes** (`[mcp]` extra) |
@@ -55,6 +56,9 @@ returns a small payload. Every list is capped (`limit`, default 50, max 500).
 | `diff_programs(old_file, new_file, old_program, new_program, category, rename_threshold, limit)` | `old` / `new` (`program_info`), `summary` (whole diff: `by_category`, `by_kind`), `changes` (`_change()`: kind, category, symbol, detail, `old` / `new` values, `old_location` cited through the old parse, `new_location` through the new one; `None` keys dropped), a `note` when nothing changed | `ProgramDiffer` on the two selected units; its caveats as `incomplete-analysis` |
 | `decode_record(copybook, data_file, record, view, skip, max_records, fields, charset, endian, record_format, record_separator, record_length, limit)` | `record_name`, `record_length`, `framing_length`, `view`, `views` (name, redefines, offset, length), `fields` (name, offset, length, picture, usage: once, not per record); with a data file `records` (`index`, `file_offset`, `length`, `values` name -> value, `absent`, `errors`), `record_count`, `more_records`, `error_count`, `next` (the `skip` of the next page) | `RecordDecoder.from_copybook_source` (the copybook read with `Workspace.read_text`, COPYs expanded from the config's copybook dirs; each unexpanded member an `unresolved-copybook` caveat), `decode_bytes` on at most `MAX_DECODE_BYTES` (16 MiB) of the file -- a cut file reports no trailing bytes. Encoding: argument, else `config.data`, else built-in (`_encoding_options`). Default page `DEFAULT_DECODE_RECORDS` (10) |
 | `gen_fixtures(file, program, mode, seed, rows, scenario, limit)` | `program_id`, `mode`, `seed`, `bundle_version`, `rows_per_sequence`, `coverage`, `scenario_count`, `scenarios` (`_scenario()`: name, intent, entry, `fixtures` (`boundary` `CATEGORY:KEY`, paragraph, `location`, direction, provenance, `columns`, `rows` as lists aligned to `columns`, terminal, status, unresolved), `expectations`, `unconstrained`, `verification` (`status` + `reasons`, as the CLI prints them)), `arm_coverage` for branches/all (counts + `missed_arms` with reason and `location` from the arm key's `@line`), `replay` | the workspace parse, not `analyze_from_file` (which re-parses with strict copybooks): `ProgramLayoutIndex.build(unit)`, `ProgramFixtureGenerator._resolve_callees` over `Workspace.callee_directories()` (`callee_path` under the root only; the rest a caveat), `BoundaryInventoryAnalyzer`, `generate_with_scenarios`. Seed: argument, else `config.seed`, else 0 (idempotent; the CLI's default is random). `rows` default `DEFAULT_FIXTURE_ROWS` (3), max 100. `bundle.unresolved` folded into one caveat |
+| `jcl_job(file, job, step, limit)` | `file`, `jobs` (name, `location`, `parameters`, job-level `dds`, `step_count`, `steps`: `_step_row()` -- name, `location`, `program`, `runs` (a launcher's `effective_programs()`), `from_procedure` / `invokes_procedure`, `parm`, `condition`, `dds`: `_dd_row()` -- `ddname`, `kind` (dataset/temporary/sysout/dummy/instream/unnamed), `dataset`, `disposition`, `access` (`_access()`: SHR read, OLD exclusive, NEW or omitted create, MOD extend), `sysout_class`, RECFM/LRECL, `unapplied_override`, `instream_line_count` + first `MAX_INSTREAM_LINES` (20) `instream_lines`, `concatenated`), `program_sources` (PGM -> COBOL file by stem: a load module is named after its source member), `procedures` (`in-stream`, a member path, `jcl-parser template` (an IBM-supplied procedure found nowhere under the root, #744), or `expanded: false`), `symbols`, `errors` (cited) | `JclParser(library=members)`, *members* from `Libraries.for_text()`, a PROCLIB concatenation (first member of a name wins): the file's `JCLLIB ORDER=` libraries (`_jcllib_names()`, a parenthesized list may run over several cards; a directory under the root named exactly so, `by_name`; one with none -> `JclFile.missing_libraries` -> `incomplete-analysis`), then `configured` (`Workspace.proc_directories()` + any directory whose name contains `PROCLIB`; members with `LIBRARY_SUFFIXES`: none, `.prc`, `.proc`, `.jcl`, `.cntl`; a `.jcl` file there is not a job), then `discovered` (directories holding `.prc` / `.proc`; only those suffixes, so a same-named `.cbl` never shadows one); answer `procedure_libraries` = `JclFile.libraries`, the directories searched; skipped proc_path entries -> caveat (`_carry_libraries`); `errors` -> `partial-parse`, `unresolved` -> `incomplete-analysis`. A file in the `jcl` index is reused; another suffix is parsed on the spot. `_Locator`: a step expanded from a cataloged member is cited in the member; its DD in the job file only when that line really is `//PROCSTEP.DD ` (the two share line numbers); an unnamed concatenation member after such an override in the job file only when that line is an unnamed `// DD` card and the dataset name does not settle it for the member (`flattened()`); lines read with `split_source_lines` |
+| `jobs_running(program, limit)` | `program`, `jcl_files`, `step_count`, `steps` (`file`, `job` + `_step_row()`; with the source: DD rows carry `cobol_files`, and `dds_not_coded` lists non-OPTIONAL, non-SD SELECTs whose DD the step lacks), `source` (`program_info`), `files` (`_selects()`: `file_name`, `ddname` via `normalize_ddname`, `optional`, `assign_using` (DD unknown), `sort_work_file`, `declared_at`), a `note` when no step runs it | steps matched by `PGM=` or `effective_programs()` across the `jcl` index; source by file stem, else `_declaring_file()` (a `PROGRAM-ID.` text scan, never a parse: a utility such as SORT costs no parse of the root); a source that does not parse is an `analyzer-failed` caveat, the steps still answered; matched with `JclParseResult.steps_running()`; SELECTs of the unit only (`_contained_node_ids`), SD from `_file_facts` |
+| `dataset_users(dataset, limit)` | `dataset`, `use_count`, `by_access` (access -> programs, `JOB.STEP` for a DD with no program), `jobs`, `uses` (dataset as coded, file, job, step, `programs`, ddname, disposition, `access`, `location`, `temporary`), `temporary_note`, a `note` when none | `_cards()`: `all_dd_statements()`'s order (job-level DDs included, step `None`) with each concatenation member placed by `_Locator.flattened()`; `_matcher()`: base name (member / GDG generation stripped) unless the pattern has `(`; `_filter_regex()`: z/OS filter wildcards, `%` one character, `*` within a qualifier, `**` any number of qualifiers |
 
 Invariants:
 
@@ -66,6 +70,18 @@ Invariants:
   about an undeclared or unknown name (`_UNDECLARED_CAVEATS`); elsewhere they
   are tokens a model pays for and cannot use.
 - Lint keeps errors when the list is cut: ordering is severity, then source.
+- Enumerated arguments are case-insensitive: `lint`'s `rules` and
+  `min_severity` like `business_rules`' `kind`, `diff_programs`' `category`
+  and `gen_fixtures`' `mode`.
+- `where_from` / `impact_of_change` with `program` and no `file` limit the
+  start to that PROGRAM-ID wherever it is declared (an unknown one is a
+  `ToolError` with close names); before, `program` was dropped and every
+  program answered.
+- A name `explain_symbol`, `record_layout` or `callers_of` cannot find in the
+  selected unit, but another unit of the same file declares, gets
+  `declared_in_program_units` and a `hint` to pass `program=`
+  (`_declared_elsewhere`): the default unit is the outermost, so a name only
+  a nested program declares otherwise reads as missing.
 
 ## Prompts
 
@@ -134,7 +150,8 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   `resolve()`) re-checks the root's `cobol.yml` and compares its `(mtime_ns, size)`; a
   change reloads it, recomputes the guard's directories and clears the
   cache. A `ConfigError` becomes a `ToolError` and is retried next call.
-  Copybook paths, source format, `debug_lines` and `define` come from it; no
+  Copybook paths, source format, `debug_lines` and `define` come from it (`define: [X=]` is
+  the empty value, as the CLI reads `--define X=`); no
   tool takes them.
 - **Parse.** Always `COLLECT_ALL`. With copybook paths it expands with
   `skip_missing_copybooks=True`, so a missing member is left as written and
@@ -194,7 +211,7 @@ then a count), with the root cut from library notes (`_relative`).
 | Index | Built on first | Keeps |
 |---|---|---|
 | `programs` | program-level `callers_of`, `impact_of_change`, `codebase_overview` | `UnitFacts` per unit (id, file, depth, `unit_kind`, `graph_id` (the graph's id, `OUTER/INNER` for a nested unit), `entries`, `_calls` rows with on-disk sites); the `CodebaseGraph` from `CodebaseGraphBuilder.build_from_results()` fed the same parses (no second parse); `copy_sites` |
-| `lineage` | field-mode `impact_of_change`, `where_from` | every unit's `FieldFlowAnalyzer` report (after `apply_source_map`) in one `LineageGraph`; JCL under the root (`.jcl`/`.job`) through `load_jobs` when jcl-parser imports (the steps `bindings_from_jobs` could not read become the graph's `join_caveats`), else `jcl_note`; `edge_files` |
+| `lineage` | field-mode `impact_of_change`, `where_from` | every unit's `FieldFlowAnalyzer` report (after `apply_source_map`) in one `LineageGraph`; JCL under the root (`.jcl`/`.job`, less the members of `configured` procedure libraries) through `load_jobs(jcl, proc_path=...)` when jcl-parser imports (PROCs from `Workspace.proc_directories()`, then `jcl_tools.procedure_libraries()`'s `configured`, the JCLLIB-named directories (`jcllib_directories`) and `discovered`: the libraries the JCL tools read, every file in them stamped; proc_path folders outside are skipped with a problem; with none at all, an unexpanded PROC adds a hint naming `.prc` / PROCLIB / `project.proc_path`; the steps `bindings_from_jobs` could not read become the graph's `join_caveats`), else `jcl_note`; `edge_files` |
 | `health` | `codebase_overview` | grade/score per unit (`TechnicalDebtAnalyzer` sharing the memoized flow and redundancy reports); `cross_file_clone_groups` over a hand-built `ScanReport` (fingerprints stamped with `origin` and, as `scan` does, `body_origin`, #470), members placed on disk |
 
 Lineage locations: a `LineageGraph` hop carries its edge's origin line and,
@@ -220,8 +237,15 @@ rather than running its own.
   registered with `add_tool()` rather than decorators, which
   `disallow_untyped_decorators` would reject when the SDK is untyped.
 - `cobol-parser mcp` without the extra exits 1 naming the install command.
+- The JCL tools need the `[jcl]` extra (`jcl-parser`, also in `[dev]`) at
+  call time, not at import: the server always lists them, and without
+  `jclparser` each raises `ToolError(INSTALL_HINT)` (`require_jcl()`), so a
+  client learns the install command instead of reading "no JCL".
 - Tests: `tests/unit/mcp_server/` (`test_mcp_tools.py`,
-  `test_mcp_v3_tools.py` (business rules, diff, decode, fixtures, prompts)
+  `test_mcp_v3_tools.py` (business rules, diff, decode, fixtures, prompts),
+  `test_mcp_jcl_tools.py` (the JCL tools over `tests/samples/lineage/` +
+  `tests/samples/jcl/` and a cataloged procedure member; skipped without
+  `jclparser`)
   and `test_mcp_codebase.py`, the cross-program tools over copies of
   `tests/samples/enterprise/` and `tests/samples/lineage/`, need no SDK;
   `test_mcp_server.py` drives an in-memory client session and the CLI). The

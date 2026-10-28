@@ -137,13 +137,15 @@ def _root_config_file(root: Path) -> Path | None:
 
 
 def _defined_symbols(defines: tuple[str, ...]) -> dict[str, str] | None:
-    """``cobol.yml``'s ``define`` entries (``SYMBOL=VALUE``) as a dict."""
+    """``cobol.yml``'s ``define`` entries (``SYMBOL=VALUE``) as a dict, read
+    as the CLI's ``--define`` reads them: ``SYMBOL`` alone is ``TRUE``, and
+    ``SYMBOL=`` is the empty value, not ``TRUE``."""
     if not defines:
         return None
     symbols: dict[str, str] = {}
     for entry in defines:
-        key, _, value = entry.partition("=")
-        symbols[key.strip()] = value.strip() if value else "TRUE"
+        key, equals, value = entry.partition("=")
+        symbols[key.strip()] = value.strip() if equals else "TRUE"
     return symbols
 
 
@@ -427,6 +429,21 @@ class Workspace:
                 "without the callee's own PROCEDURE DIVISION USING",
             )
         return kept
+
+    def proc_directories(self) -> tuple[list[Path], list[str]]:
+        """``cobol.yml``'s ``proc_path`` directories: those under the root
+        (resolved), and the entries skipped because they are not. JCL PROCs
+        are read like any other workspace file, so a folder outside the root
+        is not opened."""
+        kept: list[Path] = []
+        skipped: list[str] = []
+        for entry in self.config.proc_path:
+            resolved = Path(entry).resolve()
+            if _under(resolved, self.root):
+                kept.append(resolved)
+            else:
+                skipped.append(entry)
+        return kept, skipped
 
     # -- paths ---------------------------------------------------------------
 

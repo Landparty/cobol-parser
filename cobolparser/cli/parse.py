@@ -3461,10 +3461,12 @@ def _build_field_impact_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--proc-path",
+        action="append",
         default=None,
         metavar="DIR",
         help="Folder of cataloged PROCs (NAME.prc / NAME.jcl), or a JCLLIB "
-        "base, used to expand EXEC PROC= steps in --jcl",
+        "base, used to expand EXEC PROC= steps in --jcl (repeatable, searched "
+        "in order)",
     )
     p.add_argument(
         "--bindings",
@@ -4413,6 +4415,7 @@ def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:
             {
                 "copybook_path": list(config.copybook_path),
                 "callee_path": list(config.callee_path),
+                "proc_path": list(config.proc_path),
                 "source_format": config.source_format,
                 "debug_lines": config.debug_lines,
                 "dialect": config.dialect,
@@ -4481,7 +4484,8 @@ def _cmd_config(args: argparse.Namespace) -> None:
                     f"    - {entry}"
                     + (
                         "  (not an existing directory)"
-                        if key in ("copybook_path", "callee_path") and entry in missing
+                        if key in ("copybook_path", "callee_path", "proc_path")
+                        and entry in missing
                         else ""
                     )
                     for entry in value

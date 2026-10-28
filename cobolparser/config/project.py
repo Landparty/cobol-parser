@@ -24,6 +24,7 @@ Shape (every key optional)::
     project:                        # shared by every tool
       copybook_path: [copybooks]    # string or list, relative to this file
       callee_path: [src/subprograms]
+      proc_path: [proclib]          # cataloged JCL PROCs (NAME.prc, ...)
       source_format: fixed          # auto | fixed | free
       debug_lines: false            # compile D-in-column-7 lines as code
       dialect: ibm-enterprise
@@ -151,6 +152,8 @@ class ProjectConfig:
     # search the same copybook libraries as one run from the project root.
     copybook_path: tuple[str, ...] = ()
     callee_path: tuple[str, ...] = ()
+    # Folders of cataloged JCL PROCs, for expanding a job's EXEC PROC= steps.
+    proc_path: tuple[str, ...] = ()
     source_format: str | None = None
     # Compile fixed-format debugging lines (D in column 7) as code; None
     # when the file does not say, so the built-in default (off) applies.
@@ -168,7 +171,8 @@ class ProjectConfig:
     tools: dict[str, Any] = field(default_factory=dict)
 
     def missing_directories(self) -> list[tuple[str, str]]:
-        """``(key, path)`` for each ``copybook_path`` / ``callee_path`` entry
+        """``(key, path)`` for each ``copybook_path`` / ``callee_path`` /
+        ``proc_path`` entry
         that is not an existing directory, checked now (not at load time, so
         a long-lived reader sees a directory created since). A typo there
         otherwise only surfaced as "Copybook 'X' not found" on some later
@@ -178,6 +182,7 @@ class ProjectConfig:
             for key, entries in (
                 ("project.copybook_path", self.copybook_path),
                 ("project.callee_path", self.callee_path),
+                ("project.proc_path", self.proc_path),
             )
             for entry in entries
             if not Path(entry).is_dir()
@@ -329,6 +334,7 @@ def _severity(
 _PROJECT_KEYS = (
     "copybook_path",
     "callee_path",
+    "proc_path",
     "source_format",
     "debug_lines",
     "dialect",
@@ -409,6 +415,7 @@ def build_config(document: Any, source: Path) -> ProjectConfig:
         callee_path=_path_list(
             project.get("callee_path"), "project.callee_path", source
         ),
+        proc_path=_path_list(project.get("proc_path"), "project.proc_path", source),
         source_format=_enum(
             project.get("source_format"),
             _SOURCE_FORMATS,

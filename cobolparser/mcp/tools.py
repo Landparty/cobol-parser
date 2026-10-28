@@ -189,15 +189,17 @@ class CobolTools:
         from ..analysis.lint import SEVERITIES, LintAnalyzer, filter_by_severity
 
         config = self.workspace.config.lint
-        selected = rules or list(config.rules) or None
-        severity = min_severity or config.min_severity or "info"
+        # Rule ids and severities are lower-case words, matched as every
+        # other enumerated argument here is: "WARNING" is "warning".
+        selected = [r.strip().lower() for r in rules or ()] or list(config.rules)
+        severity = (min_severity or config.min_severity or "info").strip().lower()
         if severity not in SEVERITIES:
             raise ToolError(
                 f"unknown severity {severity!r} (expected one of "
                 f"{', '.join(SEVERITIES)})"
             )
         try:
-            analyzer = LintAnalyzer(selected)
+            analyzer = LintAnalyzer(selected or None)
         except ValueError as exc:
             raise ToolError(str(exc)) from exc
 
@@ -269,6 +271,15 @@ class CobolTools:
                     "translator-supplied item: the compiler provides it, so "
                     "the program never declares it"
                 )
+            _declared_elsewhere(
+                not_found,
+                parsed,
+                unit,
+                lambda other: any(
+                    e.definition is not None
+                    for e in XrefAnalyzer().analyze(other).entries_named(wanted)
+                ),
+            )
             return response.build(not_found, program_info)
 
         if len(matches) > 1:
@@ -573,7 +584,18 @@ class CobolTools:
             # Not a procedure here: a program, if any program under the root
             # is called or named so.
             names = sorted({n.key.upper() for n in flow.nodes})
-            return self._program_callers(wanted, response, cap, program_info, names)
+            result = self._program_callers(wanted, response, cap, program_info, names)
+            if not result["answer"].get("found"):
+                _declared_elsewhere(
+                    result["answer"],
+                    parsed,
+                    unit,
+                    lambda other: any(
+                        n.key.upper() == wanted or n.name.upper() == wanted
+                        for n in _flow(parsed, other).nodes
+                    ),
+                )
+            return result
 
         # Reachability is DeadCodeAnalyzer's (the same answer as the brief's
         # lint section): the flow graph draws a fall-through out of every
@@ -718,6 +740,16 @@ class CobolTools:
                     "found": False,
                     "suggestions": difflib.get_close_matches(wanted, names, n=5),
                 }
+            )
+            _declared_elsewhere(
+                answer,
+                parsed,
+                unit,
+                lambda other: bool(
+                    (_file_facts(parsed, other)).get(wanted)
+                    or _data_items_named(other, wanted)
+                    or _renames_node(other, wanted.split(" OF ")[0].strip())
+                ),
             )
             return response.build(answer, program_info)
         if len(items) > 1 and fact is None:
@@ -1088,6 +1120,17 @@ class CobolTools:
                 programs = [u.program_name or "" for u in parsed.ast.program_units()]
         index = lineage_index(self.workspace)
         _carry_index_caveats(index, response, "field flows")
+        if file is None and program:
+            # No file, one program: the start is limited to that PROGRAM-ID
+            # wherever it is declared, never silently widened to every one.
+            chosen = " ".join(program.split()).upper()
+            known = {str(p).upper() for p in index.graph.reports}
+            if chosen not in known:
+                raise ToolError(
+                    f"no program under the root has PROGRAM-ID {chosen!r}"
+                    + _did_you_mean(chosen, sorted(known))
+                )
+            programs = [chosen]
         wanted = field.upper().replace(" IN ", " OF ")
         result = index.graph.impact(wanted, programs, direction, depth)
         if not result.start_found:
@@ -1765,6 +1808,33 @@ class CobolTools:
         except ValueError as exc:
             raise ToolError(f"bad encoding option: {exc}") from exc
 
+    # -- JCL (the [jcl] extra; implemented in .jcl_tools) --------------------
+
+    def jcl_job(
+        self,
+        file: str,
+        job: str | None = None,
+        step: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """One JCL file's jobs, steps and DD statements, cited on disk."""
+        from .jcl_tools import jcl_job
+
+        return jcl_job(self.workspace, file, job, step, limit)
+
+    def jobs_running(self, program: str, limit: int | None = None) -> dict[str, Any]:
+        """Every JCL step under the root that runs *program*, each of its
+        ``SELECT`` files bound to a DD and a dataset."""
+        from .jcl_tools import jobs_running
+
+        return jobs_running(self.workspace, program, limit)
+
+    def dataset_users(self, dataset: str, limit: int | None = None) -> dict[str, Any]:
+        """Every job, step and program under the root that uses *dataset*."""
+        from .jcl_tools import dataset_users
+
+        return dataset_users(self.workspace, dataset, limit)
+
     # -- gen_fixtures --------------------------------------------------------
 
     def gen_fixtures(
@@ -2372,6 +2442,44 @@ def _notes(
         return
     detail = _listed(notes, separator="; ")
     response.caveat(kind, f"{lead}: {detail}" if lead else detail, effect)
+
+
+def _declared_elsewhere(
+    answer: dict[str, Any],
+    parsed: ParsedProgram,
+    unit: CobolProgram,
+    declares: Callable[[CobolProgram], bool],
+) -> None:
+    """Name the other program units of *parsed* that *declares*, on a
+    not-found *answer* about *unit*.
+
+    A tool answers about one unit (the outermost by default), so a name
+    declared only in a nested or stacked program reads as missing; the
+    answer says where it is rather than leave "not found" to stand.
+    """
+    others = []
+    for other in parsed.ast.program_units():
+        if other is unit:
+            continue
+        try:
+            with stdout_to_stderr():
+                found = declares(other)
+        except Exception:  # noqa: BLE001 -- only a hint; never fail the answer
+            continue
+        if found:
+            others.append(other.program_name or "<unnamed>")
+    if others:
+        answer["declared_in_program_units"] = others
+        answer["hint"] = (
+            f"not in {unit.program_name or '<unnamed>'}, but declared in "
+            f"{', '.join(others)} of this file: pass program= to ask about it"
+        )
+
+
+def _did_you_mean(wanted: str, names: list[str]) -> str:
+    """`` (did you mean X, Y?)`` for an error message, or ``""``."""
+    close = difflib.get_close_matches(wanted, names, n=3)
+    return f" (did you mean {', '.join(close)}?)" if close else ""
 
 
 def _listed(items: list[str], separator: str = ", ") -> str:
