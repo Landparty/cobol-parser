@@ -461,9 +461,14 @@ def source_column_offsets(
     from ..preprocess.source_format import detect_fixed_format
 
     def read(path: str) -> str | None:
+        # Decoded as the parse decoded it (#522): read as UTF-8, an EBCDIC
+        # file has no line breaks and no fixed-format columns to find.
+        from ..preprocess import PreprocessingError
+        from ..preprocess.copybook_expander import read_program_source
+
         try:
-            return Path(path).read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            return read_program_source(path)
+        except (OSError, PreprocessingError):
             return None
 
     def same_file(path: str) -> bool:

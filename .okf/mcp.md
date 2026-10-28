@@ -70,6 +70,18 @@ Invariants:
   about an undeclared or unknown name (`_UNDECLARED_CAVEATS`); elsewhere they
   are tokens a model pays for and cannot use.
 - Lint keeps errors when the list is cut: ordering is severity, then source.
+- Enumerated arguments are case-insensitive: `lint`'s `rules` and
+  `min_severity` like `business_rules`' `kind`, `diff_programs`' `category`
+  and `gen_fixtures`' `mode`.
+- `where_from` / `impact_of_change` with `program` and no `file` limit the
+  start to that PROGRAM-ID wherever it is declared (an unknown one is a
+  `ToolError` with close names); before, `program` was dropped and every
+  program answered.
+- A name `explain_symbol`, `record_layout` or `callers_of` cannot find in the
+  selected unit, but another unit of the same file declares, gets
+  `declared_in_program_units` and a `hint` to pass `program=`
+  (`_declared_elsewhere`): the default unit is the outermost, so a name only
+  a nested program declares otherwise reads as missing.
 
 ## Prompts
 
@@ -138,7 +150,8 @@ bad severity) raises `ToolError`, which the SDK returns as an error result.
   `resolve()`) re-checks the root's `cobol.yml` and compares its `(mtime_ns, size)`; a
   change reloads it, recomputes the guard's directories and clears the
   cache. A `ConfigError` becomes a `ToolError` and is retried next call.
-  Copybook paths, source format, `debug_lines` and `define` come from it; no
+  Copybook paths, source format, `debug_lines` and `define` come from it (`define: [X=]` is
+  the empty value, as the CLI reads `--define X=`); no
   tool takes them.
 - **Parse.** Always `COLLECT_ALL`. With copybook paths it expands with
   `skip_missing_copybooks=True`, so a missing member is left as written and

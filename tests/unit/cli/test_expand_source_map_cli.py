@@ -160,14 +160,20 @@ class TestLintReportsOrigins:
         # printed as if it were the real one.
         from pathlib import Path
 
-        real_read_text = Path.read_text
+        from cobolparser.preprocess import copybook_expander
 
-        def read_text(self, *args, **kwargs):
-            if self.name == "CUSTOMER.cpy":
+        real_read = copybook_expander.read_program_source
+
+        def read_program_source(path, *args, **kwargs):
+            # The column pass re-reads each file; the expansion does not
+            # come through here, so only the re-read fails.
+            if Path(path).name == "CUSTOMER.cpy":
                 raise OSError("gone")
-            return real_read_text(self, *args, **kwargs)
+            return real_read(path, *args, **kwargs)
 
-        with patch.object(Path, "read_text", read_text):
+        with patch.object(
+            copybook_expander, "read_program_source", read_program_source
+        ):
             out = _run_text(
                 capsys,
                 "lint",
