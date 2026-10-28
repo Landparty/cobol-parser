@@ -17,6 +17,8 @@ workspace: generated test data and decoded records come back in the answer.
 
 ```bash
 pip install 'cobol-parser[mcp]'
+# with the JCL tools (jobs_running, dataset_users, jcl_job):
+pip install 'cobol-parser[mcp,jcl]'
 ```
 
 Claude Code:
@@ -147,6 +149,25 @@ notifications (one per file read, at most once a second) to a client that
 asked for them, so a client that resets its timeout on progress keeps
 waiting. A symlink under the root that leads outside it is skipped, as
 `read_source` would refuse it.
+
+### How programs are run (JCL)
+
+These read the JCL under the root (`.jcl` and `.job` files) and need the
+`[jcl]` extra (`pip install 'cobol-parser[jcl]'`). Without it each answers
+with a tool error naming that command, never with an empty answer that would
+read as "no JCL". Cataloged procedures are looked up in every directory under
+the root holding a `.prc` / `.proc` member (one member per procedure, named
+after it); in-stream procedures are always expanded. A step expanded from a
+cataloged procedure is cited in the member, and an override DD coded on the
+invocation in the job file.
+
+| Tool | Ask it |
+|---|---|
+| `jobs_running(program, limit?)` | "How is `INVUPDT` run?" Every step that runs the program (`PGM=`, or launched through IKJEFT01's `RUN PROGRAM` or DFSRRC00's `PARM`), with its PARM, condition and DD statements. When the program's source is under the root (a file named after it, else the program whose PROGRAM-ID it is), its `files` list each `SELECT` with its DD name, each DD row says which COBOL file it backs (`cobol_files`), and `dds_not_coded` lists the files the step gives no DD (OPTIONAL files and SORT work files left out). |
+| `dataset_users(dataset, limit?)` | "Who reads or writes `PROD.INV.MASTER`?" Every DD naming the dataset: file, job, step, programs, DD name, DISP and what it means (`read` SHR, `exclusive` OLD, `create` NEW, `extend` MOD), with `by_access` grouping the programs. A GDG generation or member is matched by its base name unless the name you give has one; `*` and `%` are wildcards. |
+| `jcl_job(file, job?, step?, limit?)` | "What does this JCL do?" One file's jobs and steps: program, PARM, COND / IF condition, every DD (dataset, DISP, SYSOUT, DUMMY, in-stream data with its first lines, RECFM / LRECL, concatenations), the procedures expanded and where they were read, the `SET` symbols, and `program_sources`: the COBOL file under the root for each program run. |
+
+The JCL is parsed once and kept until a JCL file or procedure member changes.
 
 ## Reading an answer
 
