@@ -115,7 +115,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `diff` | `old new` | `--format {json,text}` (json), `--rename-threshold RATIO` (0.8) | A without `--program` | `DiffReport` |
 | `codebase-graph` | `PATH ...` | `--format {json,dot,mermaid}` (json), `--extension EXT`... (`.cbl .cob .cobol`), `--workers N` (by size) | `--compact`, `--copybook-path`, `-o`, dl | graph |
 | `copybook-impact` | `member PATH ...` | `--extension`..., `--workers` | `--compact`, `--copybook-path`, `-o`, dl | `ImpactReport` |
-| `call-check` | `PATH ...` | `--extension`..., `--workers`, `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif}` (json) | `--compact`, `--copybook-path`, `-o`, dl | `CallInterfaceReport` (or SARIF); exit 3 on `--fail-on`, 2 when a file is missing or failed to parse |
+| `call-check` | `PATH ...` | `--extension`..., `--workers`, `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif}` (json) | `--compact`, `--copybook-path`, `-o`, dl | `CallInterfaceReport` (or SARIF); exit 3 on `--fail-on` (judged on the findings `--min-severity` keeps, as `lint`), 2 when a file is missing or failed to parse |
 | `sql-cics-check` | `file` | — | A; +prof | `SqlCicsReport` |
 | `business-rules` | `file` | `--format {json,text}` (json), `--include-technical` | A; +prof | `BusinessRuleReport` |
 | `lineage` | `file` | `--field NAME`, `--direction {forward,backward}` (forward), `--format {json,text}` (json) | A (no profiling) | `FieldFlowReport` |

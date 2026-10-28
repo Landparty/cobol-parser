@@ -4134,11 +4134,12 @@ def _cmd_call_check(args: argparse.Namespace) -> None:
         debug_lines=bool(getattr(args, "debug_lines", False)),
     ).check_files(files)
 
-    worst = report.worst_severity()
     cutoff = SEVERITIES.index(args.min_severity)
     report.findings = [
         f for f in report.findings if SEVERITIES.index(f.severity) <= cutoff
     ]
+    # Like lint: --fail-on judges the findings shown, not those filtered out.
+    worst = report.worst_severity()
     if args.output_format == "text":
         _text_out(report.to_text(), getattr(args, "output", None))
     elif args.output_format == "sarif":

@@ -395,6 +395,32 @@ class TestCheckFiles:
         (finding,) = report.findings
         assert finding.parameter.byte_length == 10
 
+    def test_cli_fail_on_judges_the_findings_shown(
+        self, tmp_path: Path, capsys, monkeypatch
+    ):
+        (tmp_path / "CALLEE.cbl").write_text(CALLEE)
+        (tmp_path / "CALLER.cbl").write_text(
+            _caller(
+                "           CALL 'CALLEE' USING WS-REC WS-COUNT BY VALUE WS-FLAG\n"
+                "               RETURNING WS-COUNT\n"
+            )
+        )
+
+        def run(*argv: str) -> int:
+            monkeypatch.setattr(sys, "argv", ["cobol-parser", "call-check", *argv])
+            try:
+                main()
+            except SystemExit as exc:
+                return int(exc.code or 0)
+            return 0
+
+        assert run(str(tmp_path), "--fail-on", "warning") == 3
+        assert json.loads(capsys.readouterr().out)["summary"]["warning"] == 1
+        # The only finding is a warning: filtered out, it cannot fail the run.
+        assert (
+            run(str(tmp_path), "--min-severity", "error", "--fail-on", "warning") == 0
+        )
+
     def test_cli(self, tmp_path: Path, capsys, monkeypatch):
         (tmp_path / "CALLEE.cbl").write_text(CALLEE)
         (tmp_path / "CALLER.cbl").write_text(

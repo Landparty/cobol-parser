@@ -69,7 +69,7 @@ tests/
     test_function_id.py              # FUNCTION-ID units (IBM 6.4 user-defined functions): unit_kind/external_name, END FUNCTION, REPOSITORY entries, function_references, codebase `function` edges, FUNCTION call_example
     test_fast_import.py              # Cython import guard: extensions load when compiled (importorskip otherwise), pure Python is the default even when compiled, swapped in only under COBOLPARSER_ACCEL=1, accelerators_enabled() spellings
     analysis/                  # 48 files: every analyzer
-      test_call_interface.py   # CallInterfaceChecker / call-check: count, passing mode, length (short=error, long=info), usage, RETURNING, argument shapes, dynamic/ENTRY/nested targets, CLI exit codes
+      test_call_interface.py   # CallInterfaceChecker / call-check: count, passing mode, length (short=error, long=info), usage, RETURNING, argument shapes, dynamic/ENTRY/nested targets, CLI exit codes (--fail-on after --min-severity)
       test_boundary_inventory.py  # BoundaryInventoryAnalyzer: per-category key/layout/direction, nested-body reachability, CALL argument-direction ladder, structure-qualified SQL host variables, ACCEPT filtering, IOLogger cross-check
       test_constraints.py      # ConstraintExtractor: relational/level-88/figurative/class-sign forms, AND/OR/NOT via De Morgan, EVALUATE TRUE + 88s, WHEN OTHER, SEARCH WHEN (#348), PERFORM-UNTIL SequenceConstraint
       test_domains.py          # domains.solve(): numeric/text/enum domains, witness-satisfies-constraint property, Unsatisfiable never returns a value, level-88 pick re-checked against gt/ge/lt/le (#244), TestFloatDomain: COMP-1/COMP-2 signed fractional domain (#551)
