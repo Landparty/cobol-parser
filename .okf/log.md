@@ -14,6 +14,17 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-28 -- MCP server bug hunt: argument handling, EBCDIC columns
+
+[mcp.md](mcp.md): `lint` takes `rules` / `min_severity` in any case;
+`where_from` / `impact_of_change` honour `program` without `file`; a name
+declared only in another program unit of the file is named
+(`declared_in_program_units`); `cobol.yml` `define: [X=]` is the empty
+value, as the CLI's `--define X=` is. [analysis/lint.md](analysis/lint.md):
+`source_column_offsets()` reads each file in its detected encoding, so an
+EBCDIC program's columns are no longer 7 short (CLI `lint` and the MCP
+server alike).
+
 ## 2026-10-26 -- the cobol-analysis skill is the one copy mocky-mock ships
 
 [tests.md](tests.md): `test_cobol_analysis_skill.py` checks the skill's
