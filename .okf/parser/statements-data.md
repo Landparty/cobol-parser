@@ -86,7 +86,12 @@ first. Node fields are in [ast-models.md](../ast-models.md).
   (`is_corresponding`), not an operand. `_consume_additional_arithmetic_targets`
   continues the list across commas / spaces / ROUNDED and stops at
   `_ADDITIONAL_TARGET_STOP_KEYWORDS` (includes `REMAINDER` and `SIZE`), at a
-  statement boundary and at the H9 paragraph check.
+  statement boundary and at the H9 paragraph check. When no identifier
+  follows `TO` / `FROM`, `_consume_literal_target` takes a numeric literal
+  (optionally signed) or figurative constant: SUBTRACT `FROM` always, ADD `TO`
+  only when `GIVING` follows (`ADD 8 TO ZERO GIVING X`, AWS CardDemo's
+  file-status idiom); without GIVING the TO operand is the receiver, so a
+  literal there is still "ADD ... TO requires a target identifier".
 - **GIVING.** `consume_keyword_and_operand` reads the first GIVING target
   (skipping layout before and after the keyword, so a GIVING on its own
   continuation line is found; folding subscripts and qualifiers);

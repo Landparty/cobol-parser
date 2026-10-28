@@ -134,7 +134,12 @@ Field flows cross programs through `CALL ... USING` arguments, DB2 columns,
 and datasets. Datasets are joined through the JCL under the root (`.jcl` and
 `.job` files), which needs the `[jcl]` extra (`pip install
 'cobol-parser[jcl]'`); without it, or without JCL, a flow stops at the file it
-is written to, and the caveats name each unbound file. `depth` caps how many
+is written to, and the caveats name each unbound file. A step that runs a
+cataloged PROC (`EXEC REPROC`) is expanded only when `cobol.yml` lists the
+folder holding it under `project.proc_path`, and only from folders inside
+the root; otherwise the caveats say which PROC was not found. An IDCAMS step
+whose commands are read from a dataset rather than in-stream `SYSIN` is not
+traced, and the caveats name that dataset. `depth` caps how many
 program boundaries a path may cross (`0` stays in the program).
 
 The first cross-program call indexes every program under the root: on a

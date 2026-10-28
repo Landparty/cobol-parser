@@ -118,9 +118,19 @@ class AddStatementParser(IStatementParser):
                 _consume_optional_rounded(token_stream, stmt, target)
                 _consume_additional_arithmetic_targets(token_stream, stmt, start_column)
             else:
-                report_or_raise(
-                    ctx, "ADD ... TO requires a target identifier", start_loc
-                )
+                # ``ADD 8 TO ZERO GIVING X``: in the GIVING format the TO
+                # operand is only read, so a literal or figurative constant
+                # is valid there (IBM Enterprise COBOL; AWS CardDemo's
+                # file-status routines use exactly this form). Without
+                # GIVING it would be the receiver, which a literal cannot be.
+                literal = _consume_literal_target(token_stream)
+                _skip_newlines(token_stream)
+                if literal and peek_value_upper(token_stream) == "GIVING":
+                    stmt.set_target(literal)
+                else:
+                    report_or_raise(
+                        ctx, "ADD ... TO requires a target identifier", start_loc
+                    )
             giving = consume_keyword_and_operand(token_stream, "GIVING")
             if giving:
                 stmt.set_giving(giving)
@@ -187,25 +197,7 @@ class SubtractStatementParser(IStatementParser):
             _skip_newlines(token_stream)
             tok = token_stream.peek()
             target_set = False
-            if tok and tok.type in (TokenType.MINUS, TokenType.PLUS):
-                # Sign-prefixed FROM target: e.g. FROM -1000000 GIVING Y
-                next_tok = token_stream.peek(1)
-                if (
-                    next_tok
-                    and next_tok.type
-                    in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
-                    and next_tok.value
-                ):
-                    sign = tok.value or ""
-                    token_stream.consume()
-                    stmt.set_target(sign + next_tok.value)
-                    token_stream.consume()
-                    target_set = True
-                else:
-                    report_or_raise(
-                        ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
-                    )
-            elif tok and tok.type == TokenType.IDENTIFIER and tok.value:
+            if tok and tok.type == TokenType.IDENTIFIER and tok.value:
                 # Identifier targets may carry a subscript group (e.g.
                 # ``FROM VARIABLE (H, I, 1)``); reuse the same helper ADD's
                 # TO target and COMPUTE's targets already use so it isn't
@@ -214,23 +206,15 @@ class SubtractStatementParser(IStatementParser):
                 if target:
                     stmt.set_target(target)
                     target_set = True
-            elif (
-                tok
-                and tok.type
-                in (
-                    TokenType.NUMERIC_LITERAL,
-                    TokenType.LEVEL_NUMBER,
-                    TokenType.FIGURATIVE_CONSTANT,
-                )
-                and tok.value
-            ):
-                stmt.set_target(tok.value)
-                token_stream.consume()
-                target_set = True
             else:
-                report_or_raise(
-                    ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
-                )
+                literal = _consume_literal_target(token_stream)
+                if literal:
+                    stmt.set_target(literal)
+                    target_set = True
+                else:
+                    report_or_raise(
+                        ctx, "SUBTRACT ... FROM requires a target identifier", start_loc
+                    )
             if target_set:
                 _consume_optional_rounded(token_stream, stmt, stmt.targets[-1])
                 # SUBTRACT allows multiple FROM targets, each individually
@@ -465,6 +449,42 @@ def _consume_arithmetic_target(stream: ITokenStream) -> str | None:
 
     # Optional subscript group and/or OF/IN qualifier chain.
     return consume_optional_qualifiers(stream, value)
+
+
+def _consume_literal_target(stream: ITokenStream) -> str | None:
+    """Consume a literal in a TO/FROM operand position, or return ``None``.
+
+    The GIVING formats of ADD and SUBTRACT only read their TO/FROM operand,
+    so it may be a numeric literal (``FROM 100``), a sign-prefixed one
+    (``FROM -1000000``) or a figurative constant (``TO ZERO``). Nothing is
+    consumed when the next token is none of these.
+    """
+    tok = stream.peek()
+    if not tok:
+        return None
+    if tok.type in (TokenType.MINUS, TokenType.PLUS):
+        next_tok = stream.peek(1)
+        if (
+            next_tok
+            and next_tok.type in (TokenType.NUMERIC_LITERAL, TokenType.LEVEL_NUMBER)
+            and next_tok.value
+        ):
+            stream.consume()
+            stream.consume()
+            return (tok.value or "") + next_tok.value
+        return None
+    if (
+        tok.type
+        in (
+            TokenType.NUMERIC_LITERAL,
+            TokenType.LEVEL_NUMBER,
+            TokenType.FIGURATIVE_CONSTANT,
+        )
+        and tok.value
+    ):
+        stream.consume()
+        return tok.value
+    return None
 
 
 def _consume_optional_rounded(

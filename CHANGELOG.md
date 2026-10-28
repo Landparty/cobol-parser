@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **`cobol.yml` `project.proc_path`: folders of cataloged JCL PROCs**,
+  searched in order. The MCP server expands a job's `EXEC proc` steps from
+  them (only folders inside its root), so field flows cross jobs built from
+  shared PROCs; `field-impact --proc-path` is now repeatable and defaults to
+  it. Found benchmarking the server on AWS CardDemo, whose jobs `EXEC REPROC`
+  stopped every flow.
+
 * **MCP server: `business_rules`, `diff_programs`, `decode_record` and
   `gen_fixtures` tools, and five prompts** (`cobolparser/mcp/`): the
   server's v3 tool set. `business_rules` gives a program's decisions,
@@ -173,6 +180,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CopyStatement.sql_include`; the un-expanding parse path is unchanged.
 
 ### Fixed
+
+* **`ADD n TO ZERO GIVING x` parses.** In the GIVING format the TO operand
+  is only read, so a literal or figurative constant is valid there (IBM
+  Enterprise COBOL); the parser required an identifier, and the six AWS
+  CardDemo batch programs whose file-status routine uses this form parsed
+  only in part. Without GIVING a literal is still rejected.
+
+* **An IDCAMS step whose commands come from a dataset is named.** Lineage
+  traces REPRO only from in-stream `SYSIN`; a `SYSIN DD DSN=...` step now
+  adds a note naming that dataset instead of dropping the flow silently.
 
 * **A file opening with `>>SOURCE FORMAT FREE` parses in any column, with
   no false warning** (#502). Every parse warned "unknown compiler directive
