@@ -135,7 +135,7 @@ foreign row becomes edges (`cics-link` / `cics-xctl` by `via`, else
 command, one per read language with `LIMITS`), program-level `callers_of`,
 `check_claims` `calls` (the callee's entry names count) / `copies`, and the
 JCL tools (`_other_language_source()`: `jobs_running`'s `source`,
-`jcl_job`'s `program_sources`) all see them. `program_brief` and
+`jcl_job`'s `program_sources`, looked up once per program name per call) all see them. `program_brief` and
 `callers_of` on such a file dispatch through `_other_language_path()`
 (`_other_language_brief()`); every other file tool hits
 `Workspace._refuse_other_language()`, a `ToolError` naming the tools that

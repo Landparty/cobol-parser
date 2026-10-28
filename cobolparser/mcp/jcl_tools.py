@@ -655,6 +655,9 @@ def jcl_job(
     cap = clamp_limit(limit)
     sources = _source_files(workspace)
     programs: dict[str, str | None] = {}
+    # Looked up once per program name: each lookup checks the languages
+    # index's stamps, a walk of the root.
+    others: dict[str, dict[str, Any] | None] = {}
     rows = []
     for each in jobs:
         steps = each.steps
@@ -670,7 +673,9 @@ def jcl_job(
             for name in s.effective_programs():
                 found = sources.get(name)
                 if found is None:
-                    other = _other_language_source(workspace, name)
+                    if name not in others:
+                        others[name] = _other_language_source(workspace, name)
+                    other = others[name]
                     found = other["file"] if other else None
                 programs[name] = found
         rows.append(_job_row(each, shown, locator))
