@@ -277,6 +277,56 @@ class TestJobsRunning:
         assert launched["runs"] == ["READER"]
         assert {d["ddname"] for d in launched["dds_not_coded"]} == {"FEEIN", "MASTER"}
 
+    def test_an_ibm_procedure_not_under_the_root_is_expanded_from_its_template(
+        self, root: Path
+    ) -> None:
+        # #744: EXEC DLIBATCH,MBR=prog is how an IMS batch program is run, and
+        # IBM's PROCLIB is seldom copied next to the JCL.
+        (root / "jobs" / "IMSJOB.jcl").write_text(
+            "//IMSJOB   JOB (ACCT),'IMS',CLASS=A\n"
+            "//*\n"
+            "//STEP1    EXEC DLIBATCH,MBR=READER,PSB=READPSB\n"
+            "//G.FEEIN  DD DSN=PROD.FEE.IMS,DISP=SHR\n"
+        )
+        tools = tools_for(root)
+        result = tools.jobs_running("READER")
+        answer = result["answer"]
+        assert answer["step_count"] == 3
+        (step,) = [s for s in answer["steps"] if s["job"] == "IMSJOB"]
+        assert step["name"] == "STEP1.G"
+        assert step["runs"] == ["READER"]
+        assert step["location"] == {"file": "jobs/IMSJOB.jcl", "line": 3}
+        dds = {dd["ddname"]: dd for dd in step["dds"]}
+        assert dds["FEEIN"]["cobol_files"] == ["FEE-FILE"]
+        assert dds["FEEIN"]["location"] == {"file": "jobs/IMSJOB.jcl", "line": 4}
+        # The template's own cards are in no file under the root.
+        assert dds["STEPLIB"].get("location") is None
+        assert [d["ddname"] for d in step["dds_not_coded"]] == ["MASTER"]
+        assert "incomplete-analysis" in kinds(result)
+        assert any(
+            "jobs/IMSJOB.jcl (DLIBATCH)" in c["detail"]
+            and "templates" in c["detail"]
+            for c in result["caveats"]
+        )
+        # A template is no unresolved procedure.
+        assert not any(
+            "IMSJOB" in c["detail"] and "unresolved procedures" in c["detail"]
+            for c in result["caveats"]
+        )
+        job_result = tools.jcl_job("jobs/IMSJOB.jcl")
+        assert any(
+            "PROC DLIBATCH (line 3): expanded from jcl-parser's template"
+            in c["detail"]
+            and "not your PROCLIB" in c["effect"]
+            for c in job_result["caveats"]
+        )
+        job = job_result["answer"]
+        assert job["procedures"] == [
+            {"name": "DLIBATCH", "source": "jcl-parser template"}
+        ]
+        users = tools.dataset_users("PROD.FEE.IMS")["answer"]
+        assert users["by_access"] == {"read": ["READER"]}
+
     def test_dds_not_coded_skip_sort_work_files(self, root: Path) -> None:
         answer = tools_for(root).jobs_running("MISC")["answer"]
         files = {f["file_name"]: f for f in answer["files"]}

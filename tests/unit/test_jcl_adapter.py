@@ -68,12 +68,54 @@ class TestProcedureLibraries:
         assert [s.name for s in result.jobs[0].steps] == ["RUN"]
         assert any("PROC NIGHTLY (line 2)" in n for n in result.unresolved)
 
-    def test_builtin_ibm_templates_are_not_used(self):
-        # jclparser ships templates for IBM-supplied procedures; their dataset
-        # names are not this shop's, so they are never substituted in.
+    def test_builtin_ibm_templates_are_the_last_resort(self):
+        # #744: jclparser ships templates for IBM-supplied procedures; one
+        # expands an invocation found nowhere else, and says it is a template.
         result = parse_jcl("//J JOB 1\n//S1 EXEC DSNUPROC,SYSTEM=DB2P\n//\n")
+        assert [s.name for s in result.jobs[0].steps] == ["S1", "S1.DSNUPROC"]
+        assert result.template_procedures == ["DSNUPROC"]
+        assert any(
+            "PROC DSNUPROC (line 2): expanded from jcl-parser's template" in n
+            for n in result.unresolved
+        )
+
+    def test_builtin_ibm_templates_can_be_turned_off(self):
+        result = parse_jcl(
+            "//J JOB 1\n//S1 EXEC DSNUPROC,SYSTEM=DB2P\n//\n", ibm_templates=False
+        )
         assert [s.name for s in result.jobs[0].steps] == ["S1"]
-        assert any("PROC DSNUPROC" in n for n in result.unresolved)
+        assert result.template_procedures == []
+        assert any("neither defined in this file" in n for n in result.unresolved)
+
+    def test_a_site_member_beats_the_template(self, tmp_path):
+        (tmp_path / "DLIBATCH").write_text(
+            "//DLIBATCH PROC MBR=X\n//G EXEC PGM=SITEDLI,PARM='&MBR'\n// PEND\n"
+        )
+        result = parse_jcl(
+            "//J JOB 1\n//S1 EXEC DLIBATCH,MBR=PROG\n//\n", proc_paths=[tmp_path]
+        )
+        assert result.jobs[0].step("S1.G").program == "SITEDLI"
+        assert result.template_procedures == []
+
+    def test_dlibatch_template_runs_its_mbr_program(self):
+        # The standard IMS batch invocation: DFSRRC00's PARM names the program.
+        text = (
+            "//J JOB 1\n"
+            "//*\n"
+            "//S1 EXEC DLIBATCH,MBR=ACCTPRG,PSB=ACCTPPSB\n"
+            "//G.PURGEIN DD DSN=PROD.ACCT.PURGE,DISP=SHR\n"
+            "//\n"
+        )
+        result = parse_jcl(text)
+        (step,) = result.steps_running("ACCTPRG")
+        assert step.name == "S1.G" and step.program == "DFSRRC00"
+        # Cited at the EXEC that invoked the template; the override keeps its
+        # own card, the template's cards are in no file of the caller's.
+        assert step.line == 3
+        lines = {dd.name: dd.line for dd in step.dd_statements}
+        assert lines["PURGEIN"] == 4
+        assert lines["STEPLIB"] == 0
+        assert all(dd.line == 0 for dd in step.dd("STEPLIB").flatten())
 
     def test_include_member_is_read_from_the_procedure_path(self, proclib):
         result = parse_jcl(

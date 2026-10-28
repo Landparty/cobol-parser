@@ -317,9 +317,17 @@ def _carry_file(jfile: JclFile, response: Response) -> None:
     _notes(
         response,
         "incomplete-analysis",
-        list(result.unresolved),
+        [n for n in result.unresolved if not _is_template_note(n)],
         "a procedure or INCLUDE member not found, or a symbol left "
         "unsubstituted, may hide steps or change dataset names",
+        lead=jfile.display,
+    )
+    _notes(
+        response,
+        "incomplete-analysis",
+        [n for n in result.unresolved if _is_template_note(n)],
+        "its steps and DD names are IBM's defaults, not your PROCLIB's; put "
+        "the procedure member under the root for an exact answer",
         lead=jfile.display,
     )
 
@@ -346,11 +354,34 @@ def _carry_index(index: JclIndex, response: Response) -> None:
     _notes(
         response,
         "incomplete-analysis",
-        [f.display for f in index.parsed() if f.result and f.result.unresolved],
+        [
+            f.display
+            for f in index.parsed()
+            if f.result and any(not _is_template_note(n) for n in f.result.unresolved)
+        ],
         "a procedure or symbol not found there may hide steps or change "
         "dataset names; jcl_job on a file says which",
         lead="JCL files with unresolved procedures or symbols",
     )
+    _notes(
+        response,
+        "incomplete-analysis",
+        [
+            f"{f.display} ({', '.join(f.result.template_procedures)})"
+            for f in index.parsed()
+            if f.result and f.result.template_procedures
+        ],
+        "their steps and DD names are IBM's defaults, not your PROCLIB's; put "
+        "the procedure member under the root for an exact answer",
+        lead="JCL files whose IBM-supplied procedures were expanded from "
+        "jcl-parser's generic templates",
+    )
+
+
+def _is_template_note(note: str) -> bool:
+    """An ``unresolved`` note saying a procedure came from a template, which
+    the template caveat already covers."""
+    return "expanded from jcl-parser's template" in note
 
 
 def _source_files(workspace: Workspace) -> dict[str, str]:
@@ -483,6 +514,8 @@ def _procedures(
                     "name": name,
                     "source": workspace.display(index.members[name]),
                 }
+            elif name in result.template_procedures:
+                seen[name] = {"name": name, "source": "jcl-parser template"}
             else:
                 seen[name] = {"name": name, "source": None, "expanded": False}
     return list(seen.values())

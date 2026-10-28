@@ -164,7 +164,13 @@ read as "no JCL". Cataloged procedures are looked up in every directory under
 the root holding a `.prc` / `.proc` member (one member per procedure, named
 after it); in-stream procedures are always expanded. A step expanded from a
 cataloged procedure is cited in the member, and an override DD coded on the
-invocation in the job file.
+invocation in the job file. An IBM-supplied procedure that is not under the
+root (`DLIBATCH`, `IMSBATCH`, `DBBBATCH`, `DSNUPROC`, `IGYWCL`, ...) is
+expanded from jcl-parser's generic template of it, so `EXEC DLIBATCH,MBR=PROG`
+still counts as a step running `PROG`. The template is not your PROCLIB
+member, so each such answer carries an `incomplete-analysis` caveat saying
+so, and the template's own DD cards are cited at no line; put the real member
+under the root for an exact answer.
 
 | Tool | Ask it |
 |---|---|

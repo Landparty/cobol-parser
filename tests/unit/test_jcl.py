@@ -921,6 +921,7 @@ class TestSerialization:
             "symbols",
             "errors",
             "unresolved",
+            "template_procedures",
         }
         job = data["jobs"][0]
         assert set(job) == {
