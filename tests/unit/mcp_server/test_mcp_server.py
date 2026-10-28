@@ -57,6 +57,8 @@ class TestServer:
             "record_layout",
             "lint",
             "read_source",
+            "read_procedure",
+            "find_statements",
             "business_rules",
             "diff_programs",
             "decode_record",

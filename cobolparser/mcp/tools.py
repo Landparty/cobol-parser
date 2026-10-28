@@ -1885,6 +1885,43 @@ class CobolTools:
 
     # -- JCL (the [jcl] extra; implemented in .jcl_tools) --------------------
 
+    # -- navigation ---------------------------------------------------------
+
+    def read_procedure(
+        self, file: str, name: str, program: str | None = None
+    ) -> dict[str, Any]:
+        """One paragraph or section of *file*, whole (:mod:`.navigation`)."""
+        from .navigation import read_procedure
+
+        return read_procedure(self.workspace, file, name, program)
+
+    def find_statements(
+        self,
+        verb: str | None = None,
+        operand: str | None = None,
+        role: str | None = None,
+        literal: str | None = None,
+        paragraph: str | None = None,
+        file: str | None = None,
+        program: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Statements by verb / operand / literal / paragraph
+        (:mod:`.navigation`)."""
+        from .navigation import find_statements
+
+        return find_statements(
+            self.workspace,
+            verb,
+            operand,
+            role,
+            literal,
+            paragraph,
+            file,
+            program,
+            limit,
+        )
+
     def jcl_job(
         self,
         file: str,

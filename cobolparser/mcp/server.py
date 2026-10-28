@@ -63,8 +63,11 @@ _GROUP_GUIDE: dict[str, str] = {
 Start with program_brief to learn what a program is and touches; then
 explain_symbol for a data name, callers_of for a paragraph, record_layout for
 a record's bytes, lint for what is wrong, business_rules for the decisions
-and calculations it implements, and read_source to show the code at a cited
-line.
+and calculations it implements, read_procedure for a whole paragraph, and
+read_source to show the code at a cited line. find_statements searches
+parsed statements (by verb, operand, literal or paragraph) in one file or
+the whole root: prefer it to a text search, which matches comments and
+misses copybook code.
 
 Across programs: codebase_overview for the whole workspace, callers_of with a
 program name for every CALL/LINK/XCTL to it, impact_of_change for what a
@@ -144,6 +147,8 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
         "lint",
         "business_rules",
         "read_source",
+        "read_procedure",
+        "find_statements",
     ),
     "data": ("decode_record", "gen_fixtures", "diff_programs"),
     "jcl": ("jcl_job", "jobs_running", "dataset_users"),
@@ -266,6 +271,51 @@ def build_server(
         """Numbered source lines around file:line (at most 200)."""
         return await off_loop(
             "read_source", lambda: tools.read_source(file, line, before, after)
+        )
+
+    async def read_procedure(
+        file: File,
+        name: Annotated[str, Field(description="Paragraph or section")],
+        program: Program = None,
+    ) -> dict[str, Any]:
+        """One whole paragraph or section, numbered, COPY lines cited in
+        their copybook."""
+        return await off_loop(
+            "read_procedure", lambda: tools.read_procedure(file, name, program)
+        )
+
+    async def find_statements(
+        verb: Annotated[
+            str | None,
+            Field(description="Verb or its start: WRITE, EXEC CICS, EXEC SQL SELECT"),
+        ] = None,
+        operand: Annotated[
+            str | None, Field(description="Data or file name used by the statement")
+        ] = None,
+        role: Annotated[
+            str | None, Field(description="Operand role: read, write, condition, ...")
+        ] = None,
+        literal: Annotated[
+            str | None, Field(description="Text on the statement's line")
+        ] = None,
+        paragraph: Annotated[
+            str | None, Field(description="Only statements in this paragraph")
+        ] = None,
+        file: Annotated[
+            str | None, Field(description="Only this file (default: the whole root)")
+        ] = None,
+        program: Program = None,
+        limit: Limit = None,
+        ctx: MCPContext | None = None,
+    ) -> dict[str, Any]:
+        """Parsed statements matching every filter given (copybook code
+        included, comments not), in one file or under the root."""
+        return await off_loop(
+            "find_statements",
+            lambda: tools.find_statements(
+                verb, operand, role, literal, paragraph, file, program, limit
+            ),
+            ctx,
         )
 
     async def lint(
@@ -612,6 +662,8 @@ def build_server(
         record_layout,
         lint,
         read_source,
+        read_procedure,
+        find_statements,
         business_rules,
         diff_programs,
         decode_record,
