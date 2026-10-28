@@ -131,7 +131,14 @@ copybook directories are skipped).
 |---|---|
 | `codebase_overview(limit?)` | "What is in this checkout?" Every program unit with its health grade and how many programs it calls and is called by; the call graph's entry programs, most-called programs, programs called but not present (vendor, system, or kept elsewhere) and call cycles; the most-used and missing copybooks; the worst health scores; and paragraphs duplicated between programs, most duplicated code first. |
 | `impact_of_change(name, file?, program?, depth?, limit?)` | "What breaks if I change `CUSTREC`?" For a copybook member (a name a COPY names, or `CUSTREC.cpy`): every program that COPYs it, with the COPY lines, the programs that reach it through another member (with the chain), and the fields it declares. For a field (with `file`, or a name no COPY names): everything its value flows into, across programs, each hit with the path of statements that carries it. |
-| `where_from(field, file?, program?, depth?, limit?)` | "Where does `FEE-FEE` come from?" The same paths, backward: every field, file, dataset, DB2 column and CALL argument that flows into it. |
+| `where_from(field, file?, program?, depth?, limit?, full_paths?)` | "Where does `FEE-FEE` come from?" The same paths, backward: every field, file, dataset, DB2 column and CALL argument that flows into it. |
+
+Both lineage answers list exact hits first, count them by confidence
+(`by_confidence`), and name the `trail_ends`: the hits no other trail runs
+through, which for `where_from` are the original sources. A hit whose path
+begins with an earlier hit's path names that hit (`from_hit`, 0-based) and
+how many of its steps it shares (`after_step`), and lists only the rest;
+`full_paths: true` gives every path whole.
 
 Field flows cross programs through `CALL ... USING` arguments, DB2 columns,
 and datasets. Datasets are joined through the JCL under the root (`.jcl` and

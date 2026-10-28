@@ -1832,9 +1832,16 @@ class FieldFlowAnalyzer:
             return
         verb = "REWRITE" if isinstance(stmt, IORewriteStatement) else "WRITE"
         for record in self._operand(stmt.record_name, ROLE_READ):
+            # WRITE flat-REC FROM structured-REC: the record has no fields
+            # of its own, so going through it would map every source field
+            # onto the whole record (inexact) and on to every byte of the
+            # file. The bytes written are the source's, field for field.
+            direct: list[_Ref] = []
             if stmt.from_clause:
                 for src in self._refs(stmt.from_clause, ROLE_READ):
                     self._overlay(src, record, "move", ctx, f"{verb} FROM")
+                    if self._writes_through(src, record):
+                        direct.append(self._as_ref(src))
             root = self._items[record].root
             file_name = self._record_file.get(root)
             if file_name is None:
@@ -1843,15 +1850,31 @@ class FieldFlowAnalyzer:
                     "could find, so its file is not traced"
                 )
                 continue
-            self._to_port(
-                record,
-                self._file_port(file_name),
-                "write",
-                ctx,
-                verb,
-                into_program=False,
-                out_of_program=True,
-            )
+            for operand in direct or [self._as_ref(record)]:
+                self._to_port(
+                    operand,
+                    self._file_port(file_name),
+                    "write",
+                    ctx,
+                    verb,
+                    into_program=False,
+                    out_of_program=True,
+                )
+
+    def _writes_through(self, source: str | _Ref, record: str) -> bool:
+        """Whether ``WRITE record FROM source`` puts *source*'s fields on the
+        file at their own offsets: *record* is elementary,
+        *source* a group read whole that fits in it (a longer one would be
+        truncated, which the pieces would not show)."""
+        ref = self._as_ref(source)
+        src, rec = self._items.get(ref.qname), self._items.get(record)
+        if src is None or rec is None or rec.children or not src.children:
+            return False
+        if ref.window is not None or ref.loose_window:
+            return False
+        if self._pieces(ref) is None or self._pieces(self._as_ref(record)) is None:
+            return False
+        return bool(src.length) and bool(rec.length) and src.length <= rec.length
 
     def _visit_report_writer(self, stmt: CobolStatement, ctx: _Context) -> None:
         """GENERATE / TERMINATE: the ``SOURCE`` / ``SUM`` operands of the

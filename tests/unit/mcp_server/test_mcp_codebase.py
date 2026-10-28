@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -380,7 +381,7 @@ class TestFieldLineage:
     def test_forward_across_a_call_and_a_job(self, lineage_root: Path) -> None:
         pytest.importorskip("jclparser")
         tools = CobolTools(workspace(lineage_root))
-        result = tools.impact_of_change("WS-FEE", "WRITER.cbl")
+        result = tools.impact_of_change("WS-FEE", "WRITER.cbl", full_paths=True)
         answer = result["answer"]
         assert answer["kind"] == "field"
         assert answer["programs"] == ["READER", "SUBPGM", "WRITER"]
@@ -394,6 +395,44 @@ class TestFieldLineage:
         assert "READ" in line_of(lineage_root, read["location"])
         assert any("DD FEEIN" in step for step in read["path"])
         assert any("WRITER.cbl:38" in step for step in read["path"])
+
+    def test_shared_paths_rebuild_the_full_ones(self, lineage_root: Path) -> None:
+        pytest.importorskip("jclparser")
+        tools = CobolTools(workspace(lineage_root))
+        full = tools.impact_of_change("WS-FEE", "WRITER.cbl", full_paths=True)
+        shared = tools.impact_of_change("WS-FEE", "WRITER.cbl")
+        hits = shared["answer"]["hits"]
+        assert any("from_hit" in h for h in hits)
+        rebuilt: list[list[str]] = []
+        for hit in hits:
+            prefix: list[str] = []
+            if "from_hit" in hit:
+                assert hit["from_hit"] < len(rebuilt)
+                prefix = rebuilt[hit["from_hit"]][: hit["after_step"]]
+            rebuilt.append(prefix + hit["path"])
+        assert rebuilt == [h["path"] for h in full["answer"]["hits"]]
+        assert len(json.dumps(shared)) < len(json.dumps(full))
+
+    def test_hits_are_exact_first_and_trail_ends_listed(
+        self, lineage_root: Path
+    ) -> None:
+        pytest.importorskip("jclparser")
+        answer = CobolTools(workspace(lineage_root)).where_from(
+            "FEE-FEE", "READER.cbl"
+        )["answer"]
+        ranks = {"exact": 0, "overlap": 1, "candidate": 2, "opaque": 3}
+        order = [ranks[h["confidence"]] for h in answer["hits"]]
+        assert order == sorted(order)
+        assert sum(answer["by_confidence"].values()) == answer["hit_count"]
+        assert any("PROD.TRAN.DAILY" in end for end in answer["trail_ends"])
+        passed = {
+            step.split(" (", 1)[0]
+            for h in CobolTools(workspace(lineage_root)).where_from(
+                "FEE-FEE", "READER.cbl", full_paths=True
+            )["answer"]["hits"]
+            for step in h["path"][:-1]
+        }
+        assert not passed & set(answer["trail_ends"])
 
     def test_backward(self, lineage_root: Path) -> None:
         pytest.importorskip("jclparser")

@@ -16,7 +16,7 @@ import difflib
 import functools
 import itertools
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
@@ -963,6 +963,7 @@ class CobolTools:
         program: str | None = None,
         depth: int | None = None,
         limit: int | None = None,
+        full_paths: bool = False,
     ) -> dict[str, Any]:
         """What a change to copybook member or field *name* reaches.
 
@@ -983,7 +984,7 @@ class CobolTools:
             index = programs_index(self.workspace)
             if suffix in _MEMBER_SUFFIXES or member in index.graph.members:
                 return self._copybook_impact(member, cap)
-        return self._lineage(text, file, program, depth, cap, "forward")
+        return self._lineage(text, file, program, depth, cap, "forward", full_paths)
 
     def where_from(
         self,
@@ -992,12 +993,19 @@ class CobolTools:
         program: str | None = None,
         depth: int | None = None,
         limit: int | None = None,
+        full_paths: bool = False,
     ) -> dict[str, Any]:
-        """Where the value of *field* comes from, across programs."""
+        """Where the value of *field* comes from, across programs.
+
+        Paths shared with an earlier hit are given once (``from_hit``)
+        unless *full_paths*.
+        """
         text = " ".join(field.split())
         if not text:
             raise ToolError("no field name given")
-        return self._lineage(text, file, program, depth, clamp_limit(limit), "backward")
+        return self._lineage(
+            text, file, program, depth, clamp_limit(limit), "backward", full_paths
+        )
 
     def _copybook_impact(self, member: str, cap: int) -> dict[str, Any]:
         from ..analysis.codebase import CopybookImpactAnalyzer
@@ -1100,6 +1108,7 @@ class CobolTools:
         depth: int | None,
         cap: int,
         direction: str,
+        full: bool = False,
     ) -> dict[str, Any]:
         from .codebase_index import lineage_index
 
@@ -1161,6 +1170,13 @@ class CobolTools:
             return response.build(missing, program_info)
 
         hits = [_hit(hit, index, self.workspace, response) for hit in result.hits]
+        hits.sort(
+            key=lambda h: (_CONFIDENCE_RANK.get(h["confidence"], 9), len(h["path"]))
+        )
+        shown = response.cap(hits, cap, "hits")
+        ends = _trail_ends(hits)
+        if not full:
+            _share_paths(shown)
         reached = set(result.programs) | {p.upper() for p in programs or []}
         for caveat in result.caveats:
             if caveat in result.ambiguous:
@@ -1209,14 +1225,27 @@ class CobolTools:
             "tables": result.tables,
             "datasets": result.datasets,
             "hit_count": len(hits),
-            "hits": response.cap(hits, cap, "hits"),
+            "by_confidence": _counts(h["confidence"] for h in hits),
+            "trail_ends": response.cap(ends, cap, "trail_ends"),
+            "hits": shown,
             "notes": list(result.notes),
             "legend": (
                 "each hit is a field (or a table column, a dataset byte range, "
                 "or the port where a trail ends) with its path from the start, "
-                "one step per line; location is the statement that reaches it "
-                "(null for a join through a dataset, table or CALL); derived: "
-                "the value is computed on the way, not only copied"
+                "one step per line; exact hits first. location is the "
+                "statement that reaches it (null for a join through a dataset, "
+                "table or CALL); derived: the value is computed on the way, "
+                "not only copied. trail_ends: the hits no other trail runs "
+                "through (the "
+                + ("ultimate sources" if direction == "backward" else "final receivers")
+                + ")."
+                + (
+                    ""
+                    if full
+                    else " A hit with from_hit continues hit number from_hit "
+                    "(0-based): its path starts with that hit's first "
+                    "after_step steps, and only the rest is listed."
+                )
             ),
         }
         return response.build(answer, program_info)
@@ -2521,6 +2550,63 @@ def _hit(
     entry["location"] = arrived
     entry["path"] = steps
     return entry
+
+
+#: Hits are listed most certain first.
+_CONFIDENCE_RANK = {"exact": 0, "overlap": 1, "candidate": 2, "opaque": 3}
+
+
+def _counts(values: Iterable[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _step_node(step: str) -> str:
+    """The node a ``NODE (STATEMENT at file:line)`` step names."""
+    return step.split(" (", 1)[0]
+
+
+def _trail_ends(hits: list[dict[str, Any]]) -> list[str]:
+    """The hits no other hit's trail passes through: where each trail
+    really ends, rather than every field on the way."""
+    passed: set[str] = set()
+    for hit in hits:
+        passed.update(_step_node(step) for step in hit["path"][:-1])
+    ends: list[str] = []
+    for hit in hits:
+        if not hit["path"]:
+            continue
+        node = _step_node(hit["path"][-1])
+        if node not in passed and node not in ends:
+            ends.append(node)
+    return ends
+
+
+def _share_paths(hits: list[dict[str, Any]]) -> None:
+    """Shorten each hit's ``path`` to what it adds to an earlier hit's.
+
+    A backward trail through three programs reaches a dozen fields, each
+    hit repeating every step before it; the repeats were most of a 40 KB
+    answer. A hit whose path begins with at least two steps of an earlier
+    one names it (``from_hit``, ``after_step``) and lists only the rest.
+    """
+    full = [list(h["path"]) for h in hits]
+    for i, hit in enumerate(hits):
+        best, best_len = None, 1
+        for j in range(i):
+            common = 0
+            for a, b in zip(full[i], full[j], strict=False):
+                if a != b:
+                    break
+                common += 1
+            if common > best_len:
+                best, best_len = j, common
+        if best is not None:
+            hit["from_hit"] = best
+            hit["after_step"] = best_len
+            hit["path"] = full[i][best_len:]
 
 
 def _hop_location(

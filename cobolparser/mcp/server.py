@@ -115,6 +115,10 @@ OptionalFile = Annotated[
     str | None,
     Field(description="File declaring the field (default: every program)"),
 ]
+FullPaths = Annotated[
+    bool,
+    Field(description="Every hit's whole path, not shared with earlier hits"),
+]
 Depth = Annotated[
     int | None,
     Field(description="Max program boundaries to cross (0: stay in the program)"),
@@ -324,13 +328,17 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         program: Program = None,
         depth: Depth = None,
         limit: Limit = None,
+        full_paths: FullPaths = False,
         ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
         """What a change reaches: for a copybook, every program COPYing it;
         for a field, everything its value flows into across programs, files,
         CALLs and DB2 columns."""
         return await off_loop(
-            lambda: tools.impact_of_change(name, file, program, depth, limit), ctx
+            lambda: tools.impact_of_change(
+                name, file, program, depth, limit, full_paths
+            ),
+            ctx,
         )
 
     async def where_from(
@@ -341,12 +349,14 @@ def build_server(workspace: Workspace, tools_spec: str | None = "all") -> FastMC
         program: Program = None,
         depth: Depth = None,
         limit: Limit = None,
+        full_paths: FullPaths = False,
         ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
         """Where a field's value comes from across programs: the fields,
         datasets, DB2 columns and CALL arguments that flow into it."""
         return await off_loop(
-            lambda: tools.where_from(field, file, program, depth, limit), ctx
+            lambda: tools.where_from(field, file, program, depth, limit, full_paths),
+            ctx,
         )
 
     async def codebase_overview(
