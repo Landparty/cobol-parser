@@ -177,7 +177,13 @@ program source of the same name is never read as one. Symbolic parameters
 procedures are expanded too, and `jcl_job` lists the `procedure_libraries` it
 searched. A `JCLLIB` library with no folder under the root is a caveat. A
 step expanded from a cataloged procedure is cited in the member, and an
-override DD coded on the invocation in the job file.
+override DD coded on the invocation in the job file. An IBM-supplied procedure found in none of
+those (`DLIBATCH`, `IMSBATCH`, `DBBBATCH`, `DSNUPROC`, `IGYWCL`, ...) is
+expanded from jcl-parser's generic template of it, so `EXEC DLIBATCH,MBR=PROG`
+still counts as a step running `PROG`. The template is not your PROCLIB
+member, so each such answer carries an `incomplete-analysis` caveat saying
+so, and the template's own DD cards are cited at no line; put the real member
+under the root for an exact answer.
 
 | Tool | Ask it |
 |---|---|

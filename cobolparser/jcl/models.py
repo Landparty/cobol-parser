@@ -262,7 +262,9 @@ class JclParseResult:
     ``symbols`` holds the values established by ``SET`` statements (procedure
     defaults and ``EXEC`` symbolic overrides are applied while expanding a
     procedure invocation and are deliberately not merged into this global
-    table).
+    table).  ``template_procedures`` names each procedure expanded from
+    ``jclparser``'s template of an IBM-supplied procedure (``DLIBATCH``, ...)
+    because neither this file nor the procedure path defines it.
     """
 
     jobs: list[JclJob]
@@ -271,6 +273,7 @@ class JclParseResult:
     errors: list[dict[str, Any]]
     unresolved: list[str]
     filename: str = "<jcl>"
+    template_procedures: list[str] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -338,6 +341,7 @@ class JclParseResult:
             "symbols": {name: self.symbols[name] for name in sorted(self.symbols)},
             "errors": [dict(error) for error in self.errors],
             "unresolved": list(self.unresolved),
+            "template_procedures": list(self.template_procedures),
         }
 
 
