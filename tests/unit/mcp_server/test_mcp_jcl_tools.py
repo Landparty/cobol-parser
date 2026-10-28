@@ -1,0 +1,486 @@
+"""The JCL MCP tools (jcl_job, jobs_running, dataset_users), which read the
+JCL under the root through the optional [jcl] extra -- none needs the SDK."""
+
+from __future__ import annotations
+
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+from cobolparser.config.project import ProjectConfig
+from cobolparser.mcp import CobolTools, ToolError, Workspace
+from cobolparser.mcp.jcl_tools import INSTALL_HINT, MAX_INSTREAM_LINES
+
+pytest.importorskip("jclparser")
+
+SAMPLES = Path(__file__).resolve().parents[2] / "samples"
+
+#: payproc.jcl's in-stream PROC, as a cataloged member of its own.
+PAYPROC = """\
+//PAYPROC  PROC HLQ=TEST.PAY,MEMBER=DEFAULT,SOUT=*
+//EXTRACT  EXEC PGM=PAYEXTR,PARM='&MEMBER'
+//PAYMAST  DD DSN=&HLQ..MASTER,DISP=SHR
+//PAYEXT   DD DSN=&&PAYWORK,DISP=(NEW,PASS),
+//            UNIT=SYSDA,SPACE=(CYL,(5,5)),
+//            DCB=(RECFM=FB,LRECL=120,BLKSIZE=12000)
+//SYSPRINT DD SYSOUT=&SOUT
+//REPORT   EXEC PGM=PAYRPT
+//PAYEXT   DD DSN=&&PAYWORK,DISP=(OLD,DELETE)
+//PAYRPT   DD SYSOUT=&SOUT
+//SYSPRINT DD SYSOUT=&SOUT
+//         PEND
+"""
+
+#: Invokes PAYPROC from the library, overriding one DD in each step.
+CATALOGED = """\
+//PAYROLL2 JOB (99999),'PAYROLL',CLASS=B
+//*
+//RUNPAY   EXEC PAYPROC,HLQ=PROD.PAY,MEMBER=WEEKLY
+//EXTRACT.PAYMAST DD DSN=PROD.PAY.MASTER.WEEKLY,DISP=SHR
+//REPORT.PAYRPT DD DSN=PROD.PAY.REPORT(+1),DISP=(NEW,CATLG,DELETE),
+//            DCB=(RECFM=FBA,LRECL=133)
+//
+"""
+
+#: Runs MISC (SELECTs INFILE, OUTFILE and SD SORTWK01) without OUTFILE, and
+#: READER through the TSO launcher.
+MISCJOB = """\
+//MISCJOB  JOB (ACCT),'MISC',CLASS=A
+//STEP1    EXEC PGM=MISC
+//INFILE   DD  DSN=PROD.TRAN.DAILY(0),DISP=SHR
+//         DD  DSN=PROD.TRAN.EXTRA,DISP=SHR
+//STEP2    EXEC PGM=IKJEFT01
+//SYSTSPRT DD  SYSOUT=*
+//SYSTSIN  DD  *
+  DSN SYSTEM(DB2P)
+  RUN PROGRAM(READER) PLAN(READPLAN)
+  END
+/*
+"""
+
+
+@pytest.fixture
+def root(tmp_path: Path) -> Path:
+    """The lineage programs and the sample JCL, with a procedure library."""
+    target = tmp_path / "src"
+    shutil.copytree(SAMPLES / "lineage", target)
+    for jcl in (SAMPLES / "jcl").glob("*.jcl"):
+        shutil.copy(jcl, target / jcl.name)
+    (target / "procs").mkdir()
+    (target / "procs" / "PAYPROC.prc").write_text(PAYPROC)
+    (target / "jobs").mkdir()
+    (target / "jobs" / "PAYROLL2.jcl").write_text(CATALOGED)
+    (target / "jobs" / "MISCJOB.jcl").write_text(MISCJOB)
+    return target
+
+
+def tools_for(root: Path) -> CobolTools:
+    return CobolTools(Workspace(root, ProjectConfig()))
+
+
+def card(root: Path, location: dict) -> str:
+    """The JCL card a location cites."""
+    lines = (root / location["file"]).read_text().splitlines()
+    return lines[location["line"] - 1]
+
+
+def kinds(result: dict) -> list[str]:
+    return [c["kind"] for c in result["caveats"]]
+
+
+# -- jcl_job -----------------------------------------------------------------
+
+
+class TestJclJob:
+    def test_steps_and_dds_are_cited_at_their_cards(self, root: Path) -> None:
+        result = tools_for(root).jcl_job("invupdt.jcl")
+        assert result["caveats"] == []
+        (job,) = result["answer"]["jobs"]
+        assert job["name"] == "INVUPD01"
+        assert job["parameters"]["CLASS"] == "A"
+        assert card(root, job["location"]).startswith("//INVUPD01 JOB")
+        (joblib,) = job["dds"]
+        assert joblib["ddname"] == "JOBLIB"
+        assert [m["dataset"] for m in joblib["concatenated"]] == ["SYS1.COB2LIB"]
+        assert [s["name"] for s in job["steps"]] == ["STEP010", "STEP020"]
+        for step in job["steps"]:
+            assert card(root, step["location"]).startswith(f"//{step['name']} ")
+            for dd in step["dds"]:
+                assert card(root, dd["location"]).startswith(f"//{dd['ddname']} ")
+        update = job["steps"][1]
+        assert update["program"] == "INVUPDT"
+        assert update["condition"] == "(4,LT,STEP010)"
+        dds = {dd["ddname"]: dd for dd in update["dds"]}
+        # SET symbols are substituted; DISP says what the step does.
+        assert dds["INVFILE"]["dataset"] == "PROD.INV.MASTER"
+        assert dds["INVFILE"]["access"] == "read"
+        assert dds["RPTFILE"]["access"] == "create"
+        assert dds["RPTFILE"]["record_format"] == "FBA"
+        assert dds["RPTFILE"]["record_length"] == 133
+        assert dds["SYSPRINT"]["kind"] == "sysout"
+        assert result["answer"]["symbols"] == {"CYCLE": "D", "HLQ": "PROD.INV"}
+
+    def test_instream_data_is_shown(self, root: Path) -> None:
+        result = tools_for(root).jcl_job("invupdt.jcl", step="STEP010")
+        (step,) = result["answer"]["jobs"][0]["steps"]
+        sysin = next(dd for dd in step["dds"] if dd["ddname"] == "SYSIN")
+        assert sysin["kind"] == "instream"
+        assert sysin["instream_line_count"] == 2
+        assert sysin["instream_lines"][0].strip() == "EDIT MODE=STRICT"
+        assert next(dd for dd in step["dds"] if dd["ddname"] == "SYSUDUMP")["kind"] == (
+            "dummy"
+        )
+
+    def test_instream_data_is_capped(self, root: Path) -> None:
+        lines = "\n".join(f"  CARD {n}" for n in range(MAX_INSTREAM_LINES + 5))
+        (root / "big.jcl").write_text(
+            f"//BIG JOB (A),'B'\n//S1 EXEC PGM=SORT\n//SYSIN DD *\n{lines}\n/*\n"
+        )
+        step = tools_for(root).jcl_job("big.jcl")["answer"]["jobs"][0]["steps"][0]
+        (sysin,) = step["dds"]
+        assert sysin["instream_line_count"] == MAX_INSTREAM_LINES + 5
+        assert len(sysin["instream_lines"]) == MAX_INSTREAM_LINES
+
+    def test_in_stream_procedure_is_cited_in_the_job_file(self, root: Path) -> None:
+        answer = tools_for(root).jcl_job("payproc.jcl")["answer"]
+        assert answer["procedures"] == [{"name": "PAYPROC", "source": "in-stream"}]
+        steps = answer["jobs"][0]["steps"]
+        assert steps[0]["invokes_procedure"] == "PAYPROC"
+        extract = steps[1]
+        assert extract["name"] == "RUNPAY.EXTRACT"
+        assert extract["from_procedure"] == "PAYPROC"
+        assert extract["parm"] == "WEEKLY"
+        assert extract["location"]["file"] == "payproc.jcl"
+        assert card(root, extract["location"]).startswith("//EXTRACT ")
+
+    def test_cataloged_procedure_is_cited_in_its_member(self, root: Path) -> None:
+        answer = tools_for(root).jcl_job("jobs/PAYROLL2.jcl")["answer"]
+        assert answer["procedures"] == [
+            {"name": "PAYPROC", "source": "procs/PAYPROC.prc"}
+        ]
+        steps = {s["name"]: s for s in answer["jobs"][0]["steps"]}
+        extract = steps["RUNPAY.EXTRACT"]
+        assert extract["location"]["file"] == "procs/PAYPROC.prc"
+        assert card(root, extract["location"]).startswith("//EXTRACT ")
+        dds = {dd["ddname"]: dd for dd in extract["dds"]}
+        # The override is in the job file, the rest in the member -- even
+        # where the two share a line number.
+        assert dds["PAYMAST"]["dataset"] == "PROD.PAY.MASTER.WEEKLY"
+        assert dds["PAYMAST"]["location"]["file"] == "jobs/PAYROLL2.jcl"
+        assert card(root, dds["PAYMAST"]["location"]).startswith("//EXTRACT.PAYMAST")
+        assert dds["PAYEXT"]["location"]["file"] == "procs/PAYPROC.prc"
+        assert dds["PAYEXT"]["kind"] == "temporary"
+        assert card(root, dds["PAYEXT"]["location"]).startswith("//PAYEXT ")
+        assert answer["program_sources"] == {"PAYEXTR": None, "PAYRPT": None}
+
+    def test_missing_procedure_is_a_caveat(self, root: Path) -> None:
+        (root / "procs" / "PAYPROC.prc").unlink()
+        (root / "procs" / "OTHER.prc").write_text("//OTHER PROC\n//S EXEC PGM=X\n")
+        result = tools_for(root).jcl_job("jobs/PAYROLL2.jcl")
+        assert "incomplete-analysis" in kinds(result)
+        assert result["answer"]["procedures"] == [
+            {"name": "PAYPROC", "source": None, "expanded": False}
+        ]
+        (step,) = result["answer"]["jobs"][0]["steps"]
+        assert {dd.get("unapplied_override") for dd in step["dds"]} == {
+            "EXTRACT.PAYMAST",
+            "REPORT.PAYRPT",
+        }
+
+    def test_program_sources_are_matched_by_member_name(self, root: Path) -> None:
+        answer = tools_for(root).jcl_job("FEEJOB.jcl")["answer"]
+        assert answer["program_sources"] == {
+            "WRITER": "WRITER.cbl",
+            "SORT": None,
+            "READER": "READER.cbl",
+        }
+
+    def test_launcher_step_names_what_it_runs(self, root: Path) -> None:
+        answer = tools_for(root).jcl_job("jobs/MISCJOB.jcl", step="STEP2")["answer"]
+        (step,) = answer["jobs"][0]["steps"]
+        assert step["program"] == "IKJEFT01"
+        assert step["runs"] == ["READER"]
+        assert answer["program_sources"] == {"READER": "READER.cbl"}
+
+    def test_filters(self, root: Path) -> None:
+        tools = tools_for(root)
+        answer = tools.jcl_job("payproc.jcl", job="payroll1", step="report")["answer"]
+        assert [s["name"] for s in answer["jobs"][0]["steps"]] == ["RUNPAY.REPORT"]
+        with pytest.raises(ToolError, match="no job named 'NOPE'.*PAYROLL1"):
+            tools.jcl_job("payproc.jcl", job="NOPE")
+        with pytest.raises(ToolError, match="no step named 'NOPE'.*RUNPAY"):
+            tools.jcl_job("payproc.jcl", step="NOPE")
+
+    def test_limit_cuts_steps(self, root: Path) -> None:
+        result = tools_for(root).jcl_job("FEEJOB.jcl", limit=1)
+        assert len(result["answer"]["jobs"][0]["steps"]) == 1
+        assert result["answer"]["jobs"][0]["step_count"] == 3
+        assert result["truncated"] == [
+            {"field": "FEEJOB.steps", "shown": 1, "total": 3}
+        ]
+
+    def test_errors_are_cited_and_a_caveat(self, root: Path) -> None:
+        (root / "bad.jcl").write_text(
+            "//BADJOB JOB (A),'B'\n//S1 EXEC PGM=A\n//IN DD DSN=X,DISP=SHR\n"
+            "//S2 EXEC PGM=B,COND=(4,LT\n//OUT DD SYSOUT=*\n"
+        )
+        result = tools_for(root).jcl_job("bad.jcl")
+        assert "partial-parse" in kinds(result)
+        errors = result["answer"]["errors"]
+        assert errors and errors[0]["location"]["file"] == "bad.jcl"
+        assert errors[0]["message"]
+
+    def test_jcl_under_another_suffix(self, root: Path) -> None:
+        shutil.copy(root / "FEEJOB.jcl", root / "FEEJOB.txt")
+        answer = tools_for(root).jcl_job("FEEJOB.txt")["answer"]
+        assert answer["file"] == "FEEJOB.txt"
+        assert answer["jobs"][0]["steps"][0]["location"]["file"] == "FEEJOB.txt"
+
+    def test_no_job_in_file(self, root: Path) -> None:
+        (root / "empty.jcl").write_text("//* only a comment\n")
+        answer = tools_for(root).jcl_job("empty.jcl")["answer"]
+        assert answer["jobs"] == []
+        assert "note" in answer
+
+    def test_path_guard_still_applies(self, root: Path) -> None:
+        with pytest.raises(ToolError, match="outside the workspace"):
+            tools_for(root).jcl_job("../elsewhere.jcl")
+
+
+# -- jobs_running ------------------------------------------------------------
+
+
+class TestJobsRunning:
+    def test_selects_are_bound_to_dds_and_datasets(self, root: Path) -> None:
+        result = tools_for(root).jobs_running("reader")
+        answer = result["answer"]
+        assert answer["program"] == "READER"
+        assert answer["source"] == {"file": "READER.cbl", "program_id": "READER"}
+        assert {f["file_name"]: f["ddname"] for f in answer["files"]} == {
+            "FEE-FILE": "FEEIN",
+            "MAST-FILE": "MASTER",
+        }
+        for f in answer["files"]:
+            assert "SELECT " + f["file_name"] in card(root, f["declared_at"])
+        # FEEJOB's STEP030 by PGM=, MISCJOB's STEP2 through IKJEFT01.
+        assert answer["step_count"] == 2
+        by_job = {s["job"]: s for s in answer["steps"]}
+        direct = by_job["FEEJOB"]
+        assert card(root, direct["location"]).startswith("//STEP030 ")
+        fee = next(dd for dd in direct["dds"] if dd["ddname"] == "FEEIN")
+        assert fee["cobol_files"] == ["FEE-FILE"]
+        assert fee["dataset"] == "PROD.FEE.SUMMARY(+1)"
+        assert "dds_not_coded" not in direct
+        launched = by_job["MISCJOB"]
+        assert launched["runs"] == ["READER"]
+        assert {d["ddname"] for d in launched["dds_not_coded"]} == {"FEEIN", "MASTER"}
+
+    def test_dds_not_coded_skip_sort_work_files(self, root: Path) -> None:
+        answer = tools_for(root).jobs_running("MISC")["answer"]
+        files = {f["file_name"]: f for f in answer["files"]}
+        assert files["IN-FILE"]["ddname"] == "INFILE"  # UT-S- stripped
+        assert files["SRT-FILE"]["sort_work_file"] is True
+        (step,) = answer["steps"]
+        assert step["dds_not_coded"] == [{"file_name": "OUT-FILE", "ddname": "OUTFILE"}]
+        (infile,) = step["dds"]
+        assert [m["dataset"] for m in infile["concatenated"]] == ["PROD.TRAN.EXTRA"]
+
+    def test_optional_and_dynamic_files(self, root: Path) -> None:
+        (root / "OPTPGM.cbl").write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. OPTPGM.\n"
+            "       ENVIRONMENT DIVISION.\n"
+            "       INPUT-OUTPUT SECTION.\n"
+            "       FILE-CONTROL.\n"
+            "           SELECT OPTIONAL OPT-FILE ASSIGN TO OPTDD.\n"
+            "           SELECT DYN-FILE ASSIGN USING WS-NAME.\n"
+            "       DATA DIVISION.\n"
+            "       FILE SECTION.\n"
+            "       FD  OPT-FILE.\n"
+            "       01  OPT-REC PIC X(10).\n"
+            "       FD  DYN-FILE.\n"
+            "       01  DYN-REC PIC X(10).\n"
+            "       WORKING-STORAGE SECTION.\n"
+            "       01  WS-NAME PIC X(44).\n"
+            "       PROCEDURE DIVISION.\n"
+            "           GOBACK.\n"
+        )
+        (root / "OPTJOB.jcl").write_text("//OPTJOB JOB (A),'B'\n//S1 EXEC PGM=OPTPGM\n")
+        answer = tools_for(root).jobs_running("OPTPGM")["answer"]
+        files = {f["file_name"]: f for f in answer["files"]}
+        assert files["OPT-FILE"]["optional"] is True
+        assert files["DYN-FILE"]["ddname"] is None
+        assert files["DYN-FILE"]["assign_using"] == "WS-NAME"
+        assert "dds_not_coded" not in answer["steps"][0]
+
+    def test_source_found_by_program_id_when_the_file_is_named_otherwise(
+        self, root: Path
+    ) -> None:
+        (root / "READER.cbl").rename(root / "rdr0001.cbl")
+        answer = tools_for(root).jobs_running("READER")["answer"]
+        assert answer["source"]["file"] == "rdr0001.cbl"
+
+    def test_program_without_source_or_jcl(self, root: Path) -> None:
+        answer = tools_for(root).jobs_running("PAYEXTR")["answer"]
+        assert "source" not in answer
+        # The in-stream PROC of payproc.jcl and the cataloged one.
+        assert {(s["file"], s["name"]) for s in answer["steps"]} == {
+            ("payproc.jcl", "RUNPAY.EXTRACT"),
+            ("jobs/PAYROLL2.jcl", "RUNPAY.EXTRACT"),
+        }
+        never = tools_for(root).jobs_running("SUBPGM")["answer"]
+        assert never["steps"] == []
+        assert "callers_of" in never["note"]
+
+    def test_empty_root(self, tmp_path: Path) -> None:
+        answer = tools_for(tmp_path).jobs_running("X")["answer"]
+        assert answer["jcl_files"] == 0
+        assert "no .jcl / .job file" in answer["note"]
+
+    def test_no_program(self, root: Path) -> None:
+        with pytest.raises(ToolError, match="no program"):
+            tools_for(root).jobs_running("  ")
+
+    def test_files_with_errors_are_summarized(self, root: Path) -> None:
+        (root / "bad.jcl").write_text(
+            "//BADJOB JOB (A),'B'\n//S1 EXEC PGM=READER,COND=(4,LT\n"
+        )
+        result = tools_for(root).jobs_running("READER")
+        assert "partial-parse" in kinds(result)
+
+
+# -- dataset_users -----------------------------------------------------------
+
+
+class TestDatasetUsers:
+    def test_generations_match_their_base(self, root: Path) -> None:
+        answer = tools_for(root).dataset_users("prod.fee.summary")["answer"]
+        assert answer["use_count"] == 2
+        assert answer["by_access"] == {"create": ["SORT"], "read": ["READER"]}
+        assert answer["jobs"] == ["FEEJOB"]
+        for use in answer["uses"]:
+            assert card(root, use["location"]).startswith(f"//{use['ddname']} ")
+
+    def test_exact_generation(self, root: Path) -> None:
+        tools = tools_for(root)
+        assert tools.dataset_users("PROD.TRAN.DAILY(0)")["answer"]["use_count"] == 2
+        assert tools.dataset_users("PROD.TRAN.DAILY(+1)")["answer"]["use_count"] == 0
+
+    def test_wildcards(self, root: Path) -> None:
+        answer = tools_for(root).dataset_users("PROD.INV.*")["answer"]
+        assert {u["dataset"] for u in answer["uses"]} == {
+            "PROD.INV.TRANS(0)",
+            "PROD.INV.TRANS.GOOD",
+            "PROD.INV.MASTER",
+            "PROD.INV.REPORT.D",
+        }
+        good = [u for u in answer["uses"] if u["dataset"] == "PROD.INV.TRANS.GOOD"]
+        assert {u["access"] for u in good} == {"create", "exclusive"}
+        percent = tools_for(root).dataset_users("PROD.INV.REPORT.%")["answer"]
+        assert percent["use_count"] == 1
+
+    def test_job_level_dd(self, root: Path) -> None:
+        answer = tools_for(root).dataset_users("SYS1.COB2LIB")["answer"]
+        (use,) = answer["uses"]
+        assert use["step"] is None
+        assert use["programs"] == []
+        assert answer["by_access"] == {"read": ["INVUPD01.JOB"]}
+
+    def test_temporary_dataset(self, root: Path) -> None:
+        answer = tools_for(root).dataset_users("&&PAYWORK")["answer"]
+        # Both steps of the procedure, in-stream (PAYROLL1) and cataloged.
+        assert answer["use_count"] == 4
+        assert answer["jobs"] == ["PAYROLL1", "PAYROLL2"]
+        assert all(u["temporary"] for u in answer["uses"])
+        assert "temporary_note" in answer
+
+    def test_not_found(self, root: Path) -> None:
+        answer = tools_for(root).dataset_users("NO.SUCH.DATA")["answer"]
+        assert answer["uses"] == []
+        assert "note" in answer
+        with pytest.raises(ToolError, match="no dataset"):
+            tools_for(root).dataset_users("''")
+
+    def test_limit(self, root: Path) -> None:
+        result = tools_for(root).dataset_users("PROD.*", limit=2)
+        assert len(result["answer"]["uses"]) == 2
+        assert result["truncated"][0]["field"] == "uses"
+
+
+# -- the index and the extra -------------------------------------------------
+
+
+class TestIndex:
+    def test_a_changed_file_is_reread(self, root: Path) -> None:
+        tools = tools_for(root)
+        assert tools.dataset_users("NEW.DATA")["answer"]["use_count"] == 0
+        (root / "jobs" / "NEW.jcl").write_text(
+            "//NEWJOB JOB (A),'B'\n//S1 EXEC PGM=X\n//D DD DSN=NEW.DATA,DISP=MOD\n"
+        )
+        answer = tools.dataset_users("NEW.DATA")["answer"]
+        assert answer["by_access"] == {"extend": ["X"]}
+
+    def test_a_file_that_fails_is_named(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cobolparser.jcl import parser as jcl_parser
+
+        real = jcl_parser.JclParser.parse
+
+        def parse(self: object, text: str, *, filename: str = "<jcl>") -> object:
+            if filename.endswith("payproc.jcl"):
+                raise RuntimeError("boom")
+            return real(self, text, filename=filename)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(jcl_parser.JclParser, "parse", parse)
+        tools = tools_for(root)
+        result = tools.dataset_users("PROD.*")
+        assert "incomplete-analysis" in kinds(result)
+        assert any("payproc.jcl" in c["detail"] for c in result["caveats"])
+        with pytest.raises(ToolError, match="cannot read payproc.jcl.*boom"):
+            tools.jcl_job("payproc.jcl")
+
+    def test_without_the_extra_every_tool_names_the_install(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(sys.modules, "jclparser", None)
+        tools = tools_for(root)
+        for call in (
+            lambda: tools.jcl_job("FEEJOB.jcl"),
+            lambda: tools.jobs_running("READER"),
+            lambda: tools.dataset_users("PROD.ACCT.MASTER"),
+        ):
+            with pytest.raises(ToolError) as raised:
+                call()
+            assert str(raised.value) == INSTALL_HINT
+
+
+def test_tools_answer_over_an_mcp_session(root: Path) -> None:
+    pytest.importorskip("mcp")
+    import asyncio
+
+    from mcp.shared.memory import create_connected_server_and_client_session
+
+    from cobolparser.mcp.server import build_server
+
+    server = build_server(Workspace(root, ProjectConfig()))
+
+    async def run() -> list:
+        async with create_connected_server_and_client_session(
+            server._mcp_server
+        ) as client:
+            return [
+                await client.call_tool("jcl_job", {"file": "FEEJOB.jcl"}),
+                await client.call_tool("jobs_running", {"program": "WRITER"}),
+                await client.call_tool("dataset_users", {"dataset": "&&FEES"}),
+            ]
+
+    job, running, users = asyncio.run(run())
+    assert job.structuredContent["answer"]["jobs"][0]["name"] == "FEEJOB"
+    assert running.structuredContent["answer"]["step_count"] == 1
+    assert users.structuredContent["answer"]["by_access"] == {
+        "create": ["WRITER"],
+        "exclusive": ["SORT"],
+    }

@@ -340,8 +340,10 @@ What a client depends on:
 - The tool names `codebase_overview`, `program_brief`, `explain_symbol`,
   `callers_of`, `impact_of_change`, `where_from`, `record_layout`, `lint`,
   `read_source`, `business_rules`, `diff_programs`, `decode_record` and
-  `gen_fixtures` (the last four added 2026-10-27), and their argument
-  names. (`callers_of`'s `file` became optional on 2026-10-15, which no
+  `gen_fixtures` (the last four added 2026-10-27), `jcl_job`,
+  `jobs_running` and `dataset_users` (added 2026-10-28; they answer only
+  with the `[jcl]` extra installed, and otherwise raise a tool error naming
+  `pip install 'cobol-parser[jcl]'`), and their argument names. (`callers_of`'s `file` became optional on 2026-10-15, which no
   existing call notices.)
 - The prompt names `explain_program`, `review_program`, `plan_change`,
   `document_business_rules` and `onboard_codebase`, and their argument

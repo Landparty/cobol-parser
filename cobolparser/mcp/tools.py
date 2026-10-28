@@ -1765,6 +1765,33 @@ class CobolTools:
         except ValueError as exc:
             raise ToolError(f"bad encoding option: {exc}") from exc
 
+    # -- JCL (the [jcl] extra; implemented in .jcl_tools) --------------------
+
+    def jcl_job(
+        self,
+        file: str,
+        job: str | None = None,
+        step: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """One JCL file's jobs, steps and DD statements, cited on disk."""
+        from .jcl_tools import jcl_job
+
+        return jcl_job(self.workspace, file, job, step, limit)
+
+    def jobs_running(self, program: str, limit: int | None = None) -> dict[str, Any]:
+        """Every JCL step under the root that runs *program*, each of its
+        ``SELECT`` files bound to a DD and a dataset."""
+        from .jcl_tools import jobs_running
+
+        return jobs_running(self.workspace, program, limit)
+
+    def dataset_users(self, dataset: str, limit: int | None = None) -> dict[str, Any]:
+        """Every job, step and program under the root that uses *dataset*."""
+        from .jcl_tools import dataset_users
+
+        return dataset_users(self.workspace, dataset, limit)
+
     # -- gen_fixtures --------------------------------------------------------
 
     def gen_fixtures(
