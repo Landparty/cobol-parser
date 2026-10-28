@@ -147,6 +147,9 @@ def test_the_mcp_server_expands_procs_from_proc_path(tmp_path: Path) -> None:
     root = tmp_path / "lineage"
     shutil.copytree(LINEAGE, root)
     _proc_job(root)
+    # A suffix-less member in a folder named like nothing in particular: only
+    # project.proc_path says it is a procedure library.
+    (root / "proc" / "READPROC.prc").rename(root / "proc" / "READPROC")
 
     without = CobolTools(Workspace(root, ProjectConfig())).impact_of_change(
         "WS-FEE", "WRITER.cbl"
@@ -156,6 +159,16 @@ def test_the_mcp_server_expands_procs_from_proc_path(tmp_path: Path) -> None:
     assert "project.proc_path" in details
 
     tools = CobolTools(Workspace(root, ProjectConfig(proc_path=(str(root / "proc"),))))
+    answer = tools.impact_of_change("WS-FEE", "WRITER.cbl")["answer"]
+    assert "READER" in answer["programs"]
+
+
+def test_the_mcp_server_finds_prc_members_without_proc_path(tmp_path: Path) -> None:
+    pytest.importorskip("jclparser")
+    root = tmp_path / "lineage"
+    shutil.copytree(LINEAGE, root)
+    _proc_job(root)
+    tools = CobolTools(Workspace(root, ProjectConfig()))
     answer = tools.impact_of_change("WS-FEE", "WRITER.cbl")["answer"]
     assert "READER" in answer["programs"]
 

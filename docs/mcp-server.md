@@ -137,9 +137,9 @@ and datasets. Datasets are joined through the JCL under the root (`.jcl` and
 `.job` files), which needs the `[jcl]` extra (`pip install
 'cobol-parser[jcl]'`); without it, or without JCL, a flow stops at the file it
 is written to, and the caveats name each unbound file. A step that runs a
-cataloged PROC (`EXEC REPROC`) is expanded only when `cobol.yml` lists the
-folder holding it under `project.proc_path`, and only from folders inside
-the root; otherwise the caveats say which PROC was not found. An IDCAMS step
+cataloged PROC (`EXEC REPROC`) is expanded from the same procedure libraries
+the JCL tools below read, all inside the root; otherwise the caveats say
+which PROC was not found. An IDCAMS step
 whose commands are read from a dataset rather than in-stream `SYSIN` is not
 traced, and the caveats name that dataset. `depth` caps how many
 program boundaries a path may cross (`0` stays in the program).
@@ -160,12 +160,25 @@ waiting. A symlink under the root that leads outside it is skipped, as
 These read the JCL under the root (`.jcl` and `.job` files) and need the
 `[jcl]` extra (`pip install 'cobol-parser[jcl]'`). Without it each answers
 with a tool error naming that command, never with an empty answer that would
-read as "no JCL". Cataloged procedures are looked up in every directory under
-the root holding a `.prc` / `.proc` member (one member per procedure, named
-after it); in-stream procedures are always expanded. A step expanded from a
-cataloged procedure is cited in the member, and an override DD coded on the
-invocation in the job file. An IBM-supplied procedure that is not under the
-root (`DLIBATCH`, `IMSBATCH`, `DBBBATCH`, `DSNUPROC`, `IGYWCL`, ...) is
+read as "no JCL". In-stream procedures are always expanded, and cataloged ones are
+looked up like a PROCLIB concatenation, first member of a name winning:
+
+1. the libraries the job's own `JCLLIB ORDER=` names, each a folder under the
+   root named exactly as the library (`PROD.MY.PROCS/`);
+2. the folders `cobol.yml` lists as `project.proc_path`, and any folder whose
+   name contains `PROCLIB` (`SYS1.PROCLIB/`);
+3. every other folder holding a `.prc` / `.proc` member.
+
+Members are files named after the procedure: in the first two kinds of
+folder with no suffix, `.prc`, `.proc`, `.jcl` or `.cntl` (a `.jcl` file
+there is a procedure, not a job); elsewhere only `.prc` / `.proc`, so a
+program source of the same name is never read as one. Symbolic parameters
+(`&HLQ`) are substituted from the `EXEC` and the `PROC` defaults, nested
+procedures are expanded too, and `jcl_job` lists the `procedure_libraries` it
+searched. A `JCLLIB` library with no folder under the root is a caveat. A
+step expanded from a cataloged procedure is cited in the member, and an
+override DD coded on the invocation in the job file. An IBM-supplied procedure found in none of
+those (`DLIBATCH`, `IMSBATCH`, `DBBBATCH`, `DSNUPROC`, `IGYWCL`, ...) is
 expanded from jcl-parser's generic template of it, so `EXEC DLIBATCH,MBR=PROG`
 still counts as a step running `PROG`. The template is not your PROCLIB
 member, so each such answer carries an `incomplete-analysis` caveat saying
@@ -175,7 +188,7 @@ under the root for an exact answer.
 | Tool | Ask it |
 |---|---|
 | `jobs_running(program, limit?)` | "How is `INVUPDT` run?" Every step that runs the program (`PGM=`, or launched through IKJEFT01's `RUN PROGRAM` or DFSRRC00's `PARM`), with its PARM, condition and DD statements. When the program's source is under the root (a file named after it, else the program whose PROGRAM-ID it is), its `files` list each `SELECT` with its DD name, each DD row says which COBOL file it backs (`cobol_files`), and `dds_not_coded` lists the files the step gives no DD (OPTIONAL files and SORT work files left out). |
-| `dataset_users(dataset, limit?)` | "Who reads or writes `PROD.INV.MASTER`?" Every DD naming the dataset: file, job, step, programs, DD name, DISP and what it means (`read` SHR, `exclusive` OLD, `create` NEW, `extend` MOD), with `by_access` grouping the programs. A GDG generation or member is matched by its base name unless the name you give has one; `*` and `%` are wildcards. |
+| `dataset_users(dataset, limit?)` | "Who reads or writes `PROD.INV.MASTER`?" Every DD naming the dataset: file, job, step, programs, DD name, DISP and what it means (`read` SHR, `exclusive` OLD, `create` NEW, `extend` MOD), with `by_access` grouping the programs. A GDG generation or member is matched by its base name unless the name you give has one. Wildcards follow z/OS dataset filters: `%` is one character, `*` any characters within one qualifier (`PROD.INV.*`), `**` any number of qualifiers (`PROD.**`, `**.MASTER`). |
 | `jcl_job(file, job?, step?, limit?)` | "What does this JCL do?" One file's jobs and steps: program, PARM, COND / IF condition, every DD (dataset, DISP, SYSOUT, DUMMY, in-stream data with its first lines, RECFM / LRECL, concatenations), the procedures expanded and where they were read, the `SET` symbols, and `program_sources`: the COBOL file under the root for each program run. |
 
 The JCL is parsed once and kept until a JCL file or procedure member changes.
