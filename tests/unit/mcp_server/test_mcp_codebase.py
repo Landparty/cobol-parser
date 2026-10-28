@@ -617,3 +617,50 @@ class TestCodebaseOverview:
         assert len(result["answer"]["programs"]) == 3
         truncated = {t["field"]: t for t in result["truncated"]}
         assert truncated["programs"]["total"] == 34
+
+
+class TestOtherSources:
+    """A CALL into assembler (or PL/I, BMS, ...) under the root is a call
+    into the workspace, not to a missing program."""
+
+    @pytest.fixture
+    def root(self, tmp_path: Path) -> Path:
+        (tmp_path / "MAINP.cbl").write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. MAINP.\n"
+            "       PROCEDURE DIVISION.\n"
+            '           CALL "COBDATFT"\n'
+            '           CALL "MVSWAIT"\n'
+            '           CALL "GONE"\n'
+            "           GOBACK.\n"
+        )
+        (tmp_path / "asm").mkdir()
+        (tmp_path / "asm" / "DATEUTIL.asm").write_text(
+            "* not a label CSECT\nCOBDATFT CSECT\n         ENTRY DATEALT\n         END\n"
+        )
+        (tmp_path / "asm" / "MVSWAIT.asm").write_text("         BR 14\n")
+        return tmp_path
+
+    def test_names_come_from_stem_csect_and_entry(self, root: Path) -> None:
+        names = workspace(root).other_sources()
+        assert {"DATEUTIL", "COBDATFT", "DATEALT", "MVSWAIT"} <= set(names)
+        assert "NOT" not in names
+        assert names["COBDATFT"][0][1] == "assembler"
+
+    def test_overview_does_not_call_them_missing(self, root: Path) -> None:
+        answer = CobolTools(workspace(root)).codebase_overview()["answer"]
+        graph = answer["call_graph"]
+        assert [r["program"] for r in graph["not_in_workspace"]] == ["GONE"]
+        present = {r["program"]: r for r in graph["in_workspace_not_analyzed"]}
+        assert set(present) == {"COBDATFT", "MVSWAIT"}
+        assert present["COBDATFT"]["sources"] == [
+            {"file": "asm/DATEUTIL.asm", "language": "assembler"}
+        ]
+        assert answer["index"]["other_sources_not_analyzed"] == {"assembler": 2}
+
+    def test_program_callers_point_at_the_source(self, root: Path) -> None:
+        answer = CobolTools(workspace(root)).callers_of(None, "COBDATFT")["answer"]
+        assert answer["sources_not_analyzed"][0]["file"] == "asm/DATEUTIL.asm"
+        assert "assembler" in answer["note"]
+        gone = CobolTools(workspace(root)).callers_of(None, "GONE")["answer"]
+        assert "external to this workspace" in gone["note"]

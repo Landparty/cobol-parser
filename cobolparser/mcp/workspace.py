@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import sys
 import threading
 from collections import OrderedDict
@@ -44,6 +45,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .._lines import split_source_lines
 from ..config.project import (
     CONFIG_FILE_NAMES,
     ConfigError,
@@ -284,6 +286,50 @@ class ParsedProgram:
             if offset is not None:
                 located["column"] = column + offset
         return located
+
+
+#: Suffixes of the sources the tools do not parse, with their language.
+OTHER_SOURCE_LANGUAGES: dict[str, str] = {
+    ".asm": "assembler",
+    ".s": "assembler",
+    ".mac": "assembler",
+    ".hlasm": "assembler",
+    ".alc": "assembler",
+    ".pli": "PL/I",
+    ".pl1": "PL/I",
+    ".bms": "BMS mapset",
+    ".rexx": "REXX",
+    ".rex": "REXX",
+    ".c": "C",
+    ".ezt": "Easytrieve",
+}
+
+#: ``LABEL CSECT`` / ``LABEL START`` / `` ENTRY NAME`` in an assembler source.
+_ASM_SECTION = re.compile(r"^([A-Z@#$][A-Z0-9@#$]{0,7})\s+(?:CSECT|RSECT|START)\b")
+_ASM_ENTRY = re.compile(r"^\s+ENTRY\s+([A-Z@#$][A-Z0-9@#$,]*)")
+
+#: Bytes of an assembler source read for its section names.
+_ASM_SCAN_BYTES = 256 * 1024
+
+
+def _assembler_names(path: Path) -> set[str]:
+    """The CSECT / START labels and ENTRY names *path* declares."""
+    try:
+        with path.open("rb") as handle:
+            text = handle.read(_ASM_SCAN_BYTES).decode("latin-1")
+    except OSError:
+        return set()
+    names: set[str] = set()
+    for line in split_source_lines(text.upper()):
+        if line.startswith("*"):
+            continue
+        match = _ASM_SECTION.match(line)
+        if match:
+            names.add(match.group(1))
+        entry = _ASM_ENTRY.match(line)
+        if entry:
+            names.update(n for n in entry.group(1).split(",") if n)
+    return names
 
 
 class Workspace:
@@ -598,6 +644,24 @@ class Workspace:
                     continue
                 if self._within(path):
                     found.append(path)
+        return found
+
+    def other_sources(self) -> dict[str, list[tuple[Path, str]]]:
+        """Source files under the root these tools do not parse (assembler,
+        PL/I, BMS, REXX, ...), by the program names they define: the file
+        stem (a load module is named after its member) plus, for assembler,
+        each ``CSECT`` / ``START`` label and ``ENTRY`` name. Each value is a
+        list of ``(path, language)``. A CALL to one of these names is a call
+        into the workspace, not to a missing program."""
+        found: dict[str, list[tuple[Path, str]]] = {}
+        programs = self._program_suffixes()
+        for path in self._files_with_suffix(set(OTHER_SOURCE_LANGUAGES) - programs):
+            language = OTHER_SOURCE_LANGUAGES[path.suffix.lower()]
+            names = {path.stem.upper()}
+            if language == "assembler":
+                names |= _assembler_names(path)
+            for name in names:
+                found.setdefault(name, []).append((path, language))
         return found
 
     def has_jcl(self) -> bool:

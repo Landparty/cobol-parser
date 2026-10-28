@@ -917,7 +917,21 @@ class CobolTools:
                 "which one a CALL reaches depends on the load library order, "
                 "which the source does not say",
             )
-        if not declared:
+        other = (
+            self.workspace.other_sources().get(wanted.upper()) if not declared else None
+        )
+        if other:
+            answer["sources_not_analyzed"] = [
+                {"file": self.workspace.display(path), "language": language}
+                for path, language in other
+            ]
+            answer["note"] = (
+                f"no COBOL program under the root has PROGRAM-ID {wanted}, but "
+                f"its source is here in {other[0][1]} "
+                f"({self.workspace.display(other[0][0])}), which these tools "
+                "do not parse: read it with read_source"
+            )
+        elif not declared:
             answer["note"] = (
                 f"no program under the root has PROGRAM-ID {wanted}: it is "
                 "external to this workspace (a vendor or system program, or "
@@ -1327,6 +1341,15 @@ class CobolTools:
         for edge in graph.call_edges:
             if edge.callee not in declared:
                 external.setdefault(edge.callee, set()).add(edge.caller)
+        other_sources = self.workspace.other_sources()
+        not_parsed = {p: c for p, c in external.items() if p.upper() in other_sources}
+        for program_id in not_parsed:
+            del external[program_id]
+        languages: dict[str, int] = {}
+        for _path, language in {
+            entry for entries in other_sources.values() for entry in entries
+        }:
+            languages[language] = languages.get(language, 0) + 1
         most_called = sorted(
             ((p, len(c)) for p, c in callers_of.items() if p in declared),
             key=lambda pc: (-pc[1], pc[0]),
@@ -1372,6 +1395,11 @@ class CobolTools:
             "index": {
                 **index.summary(),
                 "program_units": len(index.units),
+                **(
+                    {"other_sources_not_analyzed": dict(sorted(languages.items()))}
+                    if languages
+                    else {}
+                ),
             },
             "programs": response.cap(
                 sorted(programs, key=lambda r: (r["program"].upper(), r["file"])),
@@ -1391,6 +1419,24 @@ class CobolTools:
                     ],
                     cap,
                     "call_graph.not_in_workspace",
+                ),
+                "in_workspace_not_analyzed": response.cap(
+                    [
+                        {
+                            "program": p,
+                            "called_by": sorted(c),
+                            "sources": [
+                                {
+                                    "file": self.workspace.display(path),
+                                    "language": language,
+                                }
+                                for path, language in other_sources[p.upper()]
+                            ],
+                        }
+                        for p, c in sorted(not_parsed.items())
+                    ],
+                    cap,
+                    "call_graph.in_workspace_not_analyzed",
                 ),
                 "cycles": response.cap(graph.cycles(), cap, "call_graph.cycles"),
                 "unresolved_dynamic_calls": dynamic,
