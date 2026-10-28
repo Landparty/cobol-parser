@@ -329,6 +329,28 @@ class TestGenFixtures:
         assert none["scenarios"] == []
         assert none["suggestions"] == ["happy path"]
 
+    def test_a_callee_linked_from_outside_the_root_is_not_read(
+        self, tmp_path: Path
+    ) -> None:
+        lineage = Path(__file__).resolve().parents[2] / "samples" / "lineage"
+        root, outside = tmp_path / "root", tmp_path / "outside"
+        (root / "callees").mkdir(parents=True)
+        outside.mkdir()
+        shutil.copy(lineage / "WRITER.cbl", root / "WRITER.cbl")
+        shutil.copy(lineage / "SUBPGM.cbl", outside / "SUBPGM.cbl")
+        try:
+            (root / "callees" / "SUBPGM.cbl").symlink_to(outside / "SUBPGM.cbl")
+        except OSError:
+            pytest.skip("symlinks are not available here")
+        tools = tools_for(root, callee_path=(str(root / "callees"),))
+        result = tools.gen_fixtures("WRITER.cbl")
+        assert any(
+            "resolve outside the workspace were not read" in c["detail"]
+            and "callees/SUBPGM.cbl" in c["detail"]
+            for c in result["caveats"]
+        )
+        assert "callee-source" not in json.dumps(result["answer"])
+
     def test_callee_directories_outside_the_root_are_skipped(
         self, root: Path, tmp_path: Path
     ) -> None:
@@ -445,6 +467,29 @@ class TestFailures:
         # 20 bytes hold two 9-byte records; the cut tail is no "trailing" bytes.
         assert answer["record_count"] == 2
         assert answer["more_records"] is True
-        far = tools.decode_record("ACCT.cpy", "ACCT.DAT", skip=4)
-        assert far["answer"]["records"] == []
-        assert any("only the first 20 bytes" in c["detail"] for c in far["caveats"])
+        # Fixed-length records with no separator are paged by seeking, so a
+        # page past the read window is still reachable.
+        far = tools.decode_record("ACCT.cpy", "ACCT.DAT", skip=4)["answer"]
+        assert [r["index"] for r in far["records"]] == [4]
+        assert far["records"][0]["file_offset"] == 36
+        assert far["more_records"] is False
+
+    def test_a_framing_walked_from_the_front_stops_at_the_window(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_accounts(root, 5, Charset.ASCII)
+        data = (root / "ACCT.DAT").read_bytes()
+        records = [data[i : i + 9] for i in range(0, len(data), 9)]
+        (root / "ACCT.TXT").write_bytes(b"".join(r + b"\n" for r in records))
+        monkeypatch.setattr("cobolparser.mcp.tools.MAX_DECODE_BYTES", 25)
+        tools = tools_for(root)
+        page = tools.decode_record(
+            "ACCT.cpy", "ACCT.TXT", record_separator="newline", max_records=3
+        )
+        answer = page["answer"]
+        # 25 bytes hold two 10-byte lines: a short page, said so, and no
+        # `next` asking for a page this call can never return.
+        assert answer["record_count"] == 2
+        assert answer["more_records"] is True
+        assert "next" not in answer
+        assert any("cannot be reached" in c["detail"] for c in page["caveats"])

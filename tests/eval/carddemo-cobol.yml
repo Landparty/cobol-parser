@@ -1,0 +1,14 @@
+version: 1
+project:
+  copybook_path:
+    - carddemo/cpy
+    - carddemo/cpy-bms
+    - carddemo/app-authorization-ims-db2-mq/cpy
+    - carddemo/app-authorization-ims-db2-mq/cpy-bms
+    - carddemo/app-transaction-type-db2/cpy
+    - carddemo/app-transaction-type-db2/cpy-bms
+    - nist/copy
+  dialect: ibm-enterprise
+  extensions: [.cbl, .CBL]
+  proc_path:
+    - carddemo/proc

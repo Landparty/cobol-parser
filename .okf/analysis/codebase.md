@@ -192,19 +192,17 @@ not read as "a codebase with no programs".
 
 `build_from_results(paths, results)` is `build()` without the parse: the
 caller hands one `BatchResult` per path (an iterable, consumed one at a time,
-so a generator keeps one AST live). The MCP server's `programs` index feeds
-it its own parses ([../mcp.md](../mcp.md)). `CodebaseGraph.copy_sites` (file
+so a generator keeps one AST live). It is `begin_build()` (reset the
+per-build caches), `absorb(batch_result)` per file -> a picklable
+`GraphPart` (nodes, CALL edges, COPY edges from the raw text, unresolved,
+errors, `unit_ids`, `declared` PROGRAM-IDs, `copy_sites`),
+`absorb_missing(path)` for a path no result came back for, then
+`assemble(parts)`: concatenation in order, the duplicate PROGRAM-ID check
+across parts, `_resolve_entry_names()`, sorting. Parts are independent, so
+the MCP server computes them per file in worker processes and keeps them
+while the file is unchanged ([../mcp.md](../mcp.md)). `CodebaseGraph.copy_sites` (file
 -> `(member, line)` of each COPY / EXEC SQL INCLUDE written in a program
 file, source order) records the COPY scan's lines; it is not in `to_dict()`.
-
-An item of *results* may instead be a `FileGraphFacts`: one file's part of
-the graph apart from its COPY edges (nodes, call edges, notes, `unit_ids`,
-`parsed`), as `file_facts(batch_result)` computes it from a parse, with
-`to_dict()` / `from_dict()`. It depends on that file alone; everything that
-crosses files runs in `_absorb_facts` at merge time, in file order (the
-first file to declare a PROGRAM-ID keeps it, the duplicate note names both),
-then ENTRY resolution and the COPY walk. The MCP `--cache-dir` keeps it on
-disk ([../mcp.md](../mcp.md)).
 
 Backs the `codebase-graph` and `copybook-impact` CLI subcommands. Tests:
 `tests/unit/analysis/test_codebase.py`.

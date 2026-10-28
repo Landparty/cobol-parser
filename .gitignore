@@ -172,3 +172,6 @@ baselines
 # Runtime-generated log files
 error_log.txt
 **/error_log.txt
+
+# MCP benchmark runs (tests/eval/run_eval.py)
+.eval-runs/

@@ -123,7 +123,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `jcl` | `file` | `--dd-map`, `--bindings`, `--program NAME`, `--proc-path DIR`..., `--strict` | `--compact`, `-o` | job JSON; needs `[jcl]` extra; exit 3 on `--strict` |
 | `le-info` | `[name ...]` | `--kind {service,function,all}` (all) | `--compact`, `-o` | LE / intrinsic signature catalogue |
 | `config` | — | `--json` | `--compact`, `-o` | effective `cobol.yml` |
-| `mcp` | — | `--root DIR` (`.`), `--cache-size N` (32), `--cache-dir DIR` (off) | — | MCP server on stdio until the client disconnects; needs `[mcp]` extra; `cobol.yml` read from `--root` itself, never a parent; outside copybook dirs serve members only, dangerous ones refused (see [mcp.md](mcp.md#workspace)) |
+| `mcp` | — | `--root DIR` (`.`), `--cache-size N` (32), `--tools SPEC` (`auto`), `--max-answer-bytes N` (24000), `--workers N` (CPUs, at most 8), `--cache-dir DIR` (`default_cache_dir()`), `--no-disk-cache`, `--no-warm-up` | — | MCP server on stdio until the client disconnects; needs `[mcp]` extra; `cobol.yml` read from `--root` itself, never a parent; outside copybook dirs serve members only, dangerous ones refused (see [mcp.md](mcp.md#workspace)) |
 
 Subcommands that take none of the COBOL parse flags (`--source-format`,
 `--dialect`, `--debug-lines`, `--define`, `--error-recovery`): `gen-data`,

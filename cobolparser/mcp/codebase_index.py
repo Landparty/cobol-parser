@@ -16,11 +16,12 @@ program never pays for field lineage:
 * ``health`` -- every unit's health grade, and the duplicated paragraphs
   that span programs.
 
-Each build parses every program once, through the workspace's own settings
-(``cobol.yml``'s copybook paths, source format and ``>>DEFINE`` symbols),
-using a cached parse when it is current but never filling the cache. Only
-small facts are kept: a root of thousands of programs never has more than
-one AST live.
+Every index is assembled from per-file facts (:mod:`.facts`): each program
+is parsed once, through the workspace's own settings (``cobol.yml``'s
+copybook paths, source format and ``>>DEFINE`` symbols), and that one parse
+feeds all of them; after an edit only the changed files are parsed again.
+Only small facts are kept: a root of thousands of programs never has more
+than one AST live per worker.
 
 A program that cannot be parsed is named, never skipped silently: every
 index carries ``failed`` (file -> why) and the per-file caveats of the ones
@@ -29,15 +30,13 @@ that parsed with recovery or with a COPY left unexpanded.
 
 from __future__ import annotations
 
-import functools
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from ..models.program import CobolProgram
-from .envelope import Caveat, Response, ToolError
+from .envelope import Caveat
 from .workspace import ParsedProgram, Stamp, Workspace
 
 
@@ -61,6 +60,9 @@ class UnitFacts:
     #: ``program_brief``'s ``calls`` rows: target, via, dynamic, candidates
     #: and the sites (on-disk locations) of every CALL / LINK / XCTL.
     calls: list[dict[str, Any]] = field(default_factory=list)
+    #: ``COBOL``, or ``PL/I`` / ``assembler`` for a source read through a
+    #: sibling parser (:mod:`.languages`).
+    language: str = "COBOL"
 
     @property
     def is_call_target(self) -> bool:
@@ -99,8 +101,13 @@ class _Survey:
 class ProgramsIndex(_Survey):
     units: list[UnitFacts] = field(default_factory=list)
     graph: Any = None  # CodebaseGraph
-    #: MEMBER -> every COPY of it in a program file: {file, line}.
+    #: MEMBER -> every COPY of it in a program file: {file, line}; a PL/I
+    #: ``%INCLUDE`` or an assembler ``COPY`` adds ``language``.
     copy_sites: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    #: Language -> source files of it read through a sibling parser.
+    other_language_files: dict[str, int] = field(default_factory=dict)
+    #: Language -> files of it left unread: its parser is not installed.
+    not_installed: dict[str, list[str]] = field(default_factory=dict)
 
     def units_named(self, program_id: str) -> list[UnitFacts]:
         """The units a ``CALL 'program_id'`` could reach: those whose
@@ -174,134 +181,6 @@ def _entry_names(unit: CobolProgram) -> list[str]:
     )
 
 
-def _programs(
-    workspace: Workspace,
-    survey: _Survey,
-    stamps: dict[str, Stamp],
-    only: list[Path] | None = None,
-) -> Iterator[tuple[Path, ParsedProgram | None]]:
-    """Every program file under the root (or just *only*), parsed; None for
-    one that failed (recorded in ``survey.failed``). Fills *stamps* with
-    what was read."""
-    from .workspace import _stamp
-
-    paths = workspace.program_files() if only is None else only
-    for done, path in enumerate(paths):
-        display = workspace.display(path)
-        workspace.report_progress(done, len(paths), f"reading {display}")
-        survey.files.append(display)
-        try:
-            parsed = workspace.cached_or_parse(path)
-        except ToolError as exc:
-            survey.failed[display] = str(exc)
-            stamps[str(path)] = _stamp(str(path))
-            yield path, None
-            continue
-        except Exception as exc:  # noqa: BLE001 -- one file must not sink the root
-            survey.failed[display] = f"{type(exc).__name__}: {exc}"
-            stamps[str(path)] = _stamp(str(path))
-            yield path, None
-            continue
-        stamps.update(parsed.stamps)
-        for caveat in parsed.caveats:
-            survey.note(display, caveat)
-        yield path, parsed
-
-
-def _per_file(
-    workspace: Workspace,
-    survey: _Survey,
-    stamps: dict[str, Stamp],
-    namespace: str,
-    compute: Callable[[Path, ParsedProgram, str], Any],
-) -> Iterator[tuple[Path, Any]]:
-    """``(path, facts)`` for every program file under the root: *compute*'s
-    JSON-shaped facts for its parse, or None for a file that failed.
-
-    With :attr:`.Workspace.cache_dir`, a file whose source, copybooks and
-    copybook directories are unchanged since an earlier build is not parsed
-    at all: its facts, the caveats noted for it and its stamps come back
-    from the cache.
-    """
-    cache = workspace.facts_cache(namespace)
-    if cache is None:
-        for path, parsed in _programs(workspace, survey, stamps):
-            yield path, (
-                None
-                if parsed is None
-                else compute(path, parsed, workspace.display(path))
-            )
-        return
-
-    def held(path: Path) -> Any:
-        entry = cache.get(str(path))
-        try:
-            return (
-                entry["facts"],
-                [Caveat(**c) for c in entry["caveats"]],
-                {
-                    name: tuple(value) if value is not None else None
-                    for name, value in entry["stamps"].items()
-                },
-            )
-        except (TypeError, KeyError, ValueError):
-            return None
-
-    remaining: list[Path] = []
-    hits: dict[Path, Any] = {}
-    for path in workspace.program_files():
-        found = held(path)
-        if found is None:
-            remaining.append(path)
-        else:
-            hits[path] = found
-    misses = iter(_programs(workspace, survey, stamps, only=remaining))
-    for path in workspace.program_files():
-        if path not in hits:
-            missed, parsed = next(misses)
-            assert missed == path
-            if parsed is None:
-                yield path, None
-                continue
-            display = workspace.display(path)
-            facts = compute(path, parsed, display)
-            cache.put(
-                str(path),
-                {
-                    "facts": facts,
-                    "caveats": [
-                        {"kind": c.kind, "detail": c.detail, "effect": c.effect}
-                        for c in survey.file_caveats.get(display, [])
-                    ],
-                    "stamps": {
-                        name: list(value) if value is not None else None
-                        for name, value in parsed.stamps.items()
-                    },
-                },
-                parsed.stamps,
-            )
-            yield path, facts
-            continue
-        facts, caveats, file_stamps = hits[path]
-        display = workspace.display(path)
-        survey.files.append(display)
-        stamps.update(file_stamps)
-        for caveat in caveats:
-            survey.note(display, caveat)
-        yield path, facts
-
-
-def _analyzer_failed(survey: _Survey, file: str, what: str, exc: Exception) -> None:
-    survey.note(
-        file,
-        Caveat(
-            "analyzer-failed",
-            f"{file}: {what} could not be analyzed: {type(exc).__name__}: {exc}",
-            f"cross-program answers miss what {file} would add",
-        ),
-    )
-
-
 # ---------------------------------------------------------------------------
 # programs
 # ---------------------------------------------------------------------------
@@ -316,68 +195,129 @@ def programs_index(workspace: Workspace) -> ProgramsIndex:
 
 
 def _build_programs(workspace: Workspace) -> tuple[ProgramsIndex, dict[str, Stamp]]:
-    from dataclasses import asdict
-
-    from ..analysis.codebase import (
-        CodebaseGraphBuilder,
-        FileGraphFacts,
-        program_graph_ids,
-    )
-    from ..batch import BatchResult
-    from .tools import _calls, _flow
+    from ..analysis.codebase import CodebaseGraphBuilder
+    from .facts import surveyed
 
     started = time.monotonic()
     index = ProgramsIndex()
     stamps = workspace.tree_stamps()
-    files = [str(p) for p in workspace.program_files()]
+    all_facts = surveyed(workspace, index, stamps)
+    for facts in all_facts:
+        index.units.extend(facts.units)
     builder = CodebaseGraphBuilder(copybook_paths=list(workspace.config.copybook_path))
-
-    def compute(path: Path, parsed: ParsedProgram, display: str) -> dict[str, Any]:
-        response = Response()
-        graph_ids = program_graph_ids(parsed.ast.program_units(), str(Path(str(path))))
-        units: list[dict[str, Any]] = []
-        for unit, depth in _units_with_depth(parsed.ast):
-            facts = UnitFacts(
-                program_id=unit.program_name or "",
-                file=display,
-                depth=depth,
-                unit_kind=unit.unit_kind,
-                graph_id=graph_ids.get(id(unit), ""),
-                entries=_entry_names(unit),
-            )
-            try:
-                facts.calls = _calls(parsed, unit, _flow(parsed, unit), response)
-            except Exception as exc:  # noqa: BLE001
-                _analyzer_failed(index, display, "called programs", exc)
-            units.append(asdict(facts))
-        for caveat in response.caveats:
-            index.note(display, caveat)
-        graph = builder.file_facts(
-            BatchResult(path=Path(str(path)), result=parsed.result, read_error=None)
-        )
-        return {"units": units, "graph": graph.to_dict()}
-
-    def results() -> Iterator[BatchResult | FileGraphFacts]:
-        for path, facts in _per_file(workspace, index, stamps, "programs", compute):
-            if facts is None:
-                yield BatchResult(
-                    path=Path(str(path)),
-                    result=None,
-                    read_error=index.failed[workspace.display(path)],
-                )
-                continue
-            index.units.extend(UnitFacts(**unit) for unit in facts["units"])
-            yield FileGraphFacts.from_dict(facts["graph"])
-
-    index.graph = builder.build_from_results(files, results())
+    index.graph = builder.assemble(f.graph_part for f in all_facts)
     for file, sites in index.graph.copy_sites.items():
         display = workspace.display(file)
         for member, line in sites:
             index.copy_sites.setdefault(member, []).append(
                 {"file": display, "line": line}
             )
+    _absorb_other_languages(workspace, index, stamps)
     index.seconds = time.monotonic() - started
     return index, stamps
+
+
+def _absorb_other_languages(
+    workspace: Workspace, index: ProgramsIndex, stamps: dict[str, Stamp]
+) -> None:
+    """The PL/I and assembler programs under the root, as units of the
+    index and edges of its call graph: a CALL from COBOL to an assembler
+    routine then reaches a program in the workspace, and the routine's own
+    CALLs count in ``calls`` / ``called_by`` and in the cycles."""
+    from ..analysis.codebase import (
+        CALL_KIND_CALL,
+        CALL_KIND_CICS_LINK,
+        CALL_KIND_CICS_XCTL,
+        CallEdge,
+    )
+    from .languages import languages_index
+
+    languages = languages_index(workspace)
+    index.not_installed = dict(languages.not_installed)
+    for source in languages.sources:
+        stamps[source.path] = source.stamp
+        index.files.append(source.display)
+        for caveat in source.caveats:
+            index.note(source.display, caveat)
+        if source.failed is not None:
+            index.failed[source.display] = source.failed
+            continue
+        index.other_language_files[source.language] = (
+            index.other_language_files.get(source.language, 0) + 1
+        )
+        index.units.append(
+            UnitFacts(
+                program_id=source.program_id,
+                file=source.display,
+                depth=0,
+                graph_id=source.program_id,
+                entries=list(source.entries),
+                calls=source.calls,
+                language=source.language,
+            )
+        )
+        for include in source.includes:
+            site = dict(include.get("location") or {"file": source.display})
+            site["language"] = source.language
+            index.copy_sites.setdefault(include["member"], []).append(site)
+
+    graph = index.graph
+    declared = {
+        (u.graph_id or u.program_id).upper() for u in index.units if u.is_call_target
+    }
+    # A CALL to an assembler ENTRY name, a PL/I procedure's member name, ...
+    # reaches that program: the same rule COBOL's ENTRY names follow (#521).
+    by_entry: dict[str, str] = {}
+    for unit in index.units:
+        if unit.language == "COBOL":
+            continue
+        for entry in unit.entries:
+            if entry not in declared:
+                by_entry.setdefault(entry, unit.program_id.upper())
+    edges = []
+    for edge in graph.call_edges:
+        owner = by_entry.get(edge.callee)
+        if owner is not None:
+            edge = CallEdge(
+                caller=edge.caller,
+                callee=owner,
+                is_dynamic=edge.is_dynamic,
+                resolved=edge.resolved,
+                kind=edge.kind,
+                entry=edge.callee,
+            )
+        edges.append(edge)
+    kinds = {
+        "EXEC CICS LINK": CALL_KIND_CICS_LINK,
+        "EXEC CICS XCTL": CALL_KIND_CICS_XCTL,
+    }
+    for unit in index.units:
+        if unit.language == "COBOL":
+            continue
+        caller = unit.program_id.upper()
+        for row in unit.calls:
+            kind = kinds.get(str(row.get("via")), CALL_KIND_CALL)
+            if row.get("dynamic"):
+                targets = [str(c).upper() for c in row.get("candidates") or []]
+                resolved = bool(row.get("candidates_complete"))
+            else:
+                targets = [str(row.get("program") or "").upper()]
+                resolved = True
+            for target in targets:
+                if not target:
+                    continue
+                owner = target if target in declared else by_entry.get(target)
+                edges.append(
+                    CallEdge(
+                        caller=caller,
+                        callee=owner or target,
+                        is_dynamic=bool(row.get("dynamic")),
+                        resolved=resolved,
+                        kind=kind,
+                        entry=target if owner and owner != target else None,
+                    )
+                )
+    graph.call_edges = sorted(set(edges), key=CallEdge._sort_key)
 
 
 # ---------------------------------------------------------------------------
@@ -394,57 +334,24 @@ def lineage_index(workspace: Workspace) -> LineageIndex:
 
 
 def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]]:
-    from ..analysis.field_lineage import apply_source_map
     from ..analysis.lineage_graph import LineageGraph
+    from .facts import surveyed
     from .workspace import _stamp
 
     started = time.monotonic()
     index = LineageIndex()
     stamps = workspace.tree_stamps()
     reports: list[dict[str, Any]] = []
-
-    def compute(path: Path, parsed: ParsedProgram, display: str) -> dict[str, Any]:
-        units: list[dict[str, Any]] = []
-        for unit, _depth in _units_with_depth(parsed.ast):
-            name = unit.program_name or "<unnamed>"
-            try:
-                report = parsed.report(
-                    "lineage", unit, functools.partial(_field_flow, unit)
-                )
-                report = apply_source_map(report, parsed.source_map)
-            except Exception as exc:  # noqa: BLE001
-                _analyzer_failed(index, display, f"field lineage of {name}", exc)
-                units.append({"problem": f"{display}: {name}: no lineage report"})
-                continue
-            edges = []
-            for edge in report.edges:
-                line = edge.origin_line or edge.line
-                if not line:
-                    continue
-                file = (
-                    workspace.display(edge.origin_file) if edge.origin_file else display
-                )
-                edges.append([line, edge.kind, edge.statement, file])
-            units.append({"report": report.to_dict(), "edges": edges})
-        return {"units": units, "expanded": bool(parsed.source_map)}
-
-    for path, facts in _per_file(workspace, index, stamps, "lineage", compute):
-        if facts is None:
-            continue
-        for unit_facts in facts["units"]:
-            if "problem" in unit_facts:
-                index.problems.append(unit_facts["problem"])
-                continue
-            data = unit_facts["report"]
-            program = str(data.get("program_id") or "").upper()
-            reports.append(data)
-            if program in index.program_files:
+    for facts in surveyed(workspace, index, stamps):
+        index.problems += facts.lineage_problems
+        for unit in facts.lineage:
+            reports.append(unit.report)
+            if unit.program in index.program_files:
                 continue  # LineageGraph keeps the first; its caveat says so
-            index.program_files[program] = workspace.display(path)
-            if facts["expanded"]:
-                index.expanded.add(program)
-            for line, kind, statement, file in unit_facts["edges"]:
-                key = (program, line, kind, statement)
+            index.program_files[unit.program] = facts.display
+            if facts.expanded:
+                index.expanded.add(unit.program)
+            for key, file in unit.edge_files:
                 if key in index.edge_files and index.edge_files[key] != file:
                     index.edge_files[key] = None  # ambiguous: never guess
                 else:
@@ -530,70 +437,27 @@ def health_index(workspace: Workspace) -> HealthIndex:
 
 
 def _build_health(workspace: Workspace) -> tuple[HealthIndex, dict[str, Stamp]]:
-    from ..analysis.lint import stamp_report_origins
-    from ..scan import (
-        FileScan,
-        ScanReport,
-        UnitScan,
-        _stamp_body_origins,
-        cross_file_clone_groups,
-    )
+    from ..scan import FileScan, ScanReport, UnitScan, cross_file_clone_groups
+    from .facts import surveyed
 
     started = time.monotonic()
     index = HealthIndex()
     stamps = workspace.tree_stamps()
     scan = ScanReport()
     expanded: set[str] = set()
-
-    def compute(path: Path, parsed: ParsedProgram, display: str) -> dict[str, Any]:
-        units: list[dict[str, Any]] = []
-        for unit, depth in _units_with_depth(parsed.ast):
-            name = unit.program_name or "<unnamed>"
-            try:
-                redundancy = parsed.report(
-                    "redundancy", unit, functools.partial(_redundancy, unit)
-                )
-                debt = parsed.report(
-                    "debt", unit, functools.partial(_debt, parsed, unit, redundancy)
-                )
-            except Exception as exc:  # noqa: BLE001
-                _analyzer_failed(index, display, f"health of {name}", exc)
-                continue
-            fingerprints = stamp_report_origins(redundancy.to_dict(), parsed.source_map)
-            if parsed.source_map:
-                # A body COPYed under each program's own header is one
-                # source, as in ``scan`` (#470).
-                _stamp_body_origins(fingerprints, parsed.source_map)
-            units.append(
-                {
-                    "row": {
-                        "program": unit.program_name,
-                        "unit_kind": unit.unit_kind,
-                        "file": display,
-                        "depth": depth,
-                        "grade": debt.grade,
-                        "score": debt.score,
-                    },
-                    "name": name,
-                    "depth": depth,
-                    "fingerprints": fingerprints,
-                }
-            )
-        return {"units": units, "expanded": bool(parsed.source_map)}
-
-    for path, facts in _per_file(workspace, index, stamps, "health", compute):
-        if facts is None:
+    for facts in surveyed(workspace, index, stamps):
+        if facts.failed is not None:
             continue
-        if facts["expanded"]:
-            expanded.add(str(path))
-        file_scan = FileScan(path=str(path))
-        for unit_facts in facts["units"]:
-            index.units.append(unit_facts["row"])
+        if facts.expanded:
+            expanded.add(facts.path)
+        index.units.extend(facts.health)
+        file_scan = FileScan(path=facts.path)
+        for name, depth, fingerprints in facts.fingerprints:
             file_scan.units.append(
                 UnitScan(
-                    program_name=unit_facts["name"],
-                    depth=unit_facts["depth"],
-                    reports={"redundancy": unit_facts["fingerprints"]},
+                    program_name=name,
+                    depth=depth,
+                    reports={"redundancy": fingerprints},
                 )
             )
         scan.files.append(file_scan)

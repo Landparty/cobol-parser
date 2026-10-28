@@ -1,0 +1,161 @@
+[
+ {
+  "id": "T01-layout",
+  "kind": "single-program",
+  "q": "In the order record ORD-REC (copybook used by the order programs), what is the byte offset (0-based) and length in bytes of ORD-DISC-PCT, and what is the total length of ORD-REC in bytes?",
+  "facts": [
+   "ORD-DISC-PCT starts at byte offset 98 (0-based; 99 if 1-based is clearly stated)",
+   "ORD-DISC-PCT is 2 bytes long (PIC V999 COMP-3)",
+   "ORD-REC is 110 bytes long in total"
+  ]
+ },
+ {
+  "id": "T02-deadcode",
+  "kind": "single-program",
+  "q": "Which paragraphs in ORDPOST can never be executed?",
+  "facts": [
+   "9000-OLD-RECALC is unreachable",
+   "9100-OLD-AUDIT is unreachable",
+   "No other paragraph (0000-MAIN, 1000-NEXT, 2000-POST, 3000-WRITE-HIST) is claimed to be dead"
+  ]
+ },
+ {
+  "id": "T03-callers",
+  "kind": "cross-program",
+  "q": "Which programs in this workspace can call the program POSTINTL, and how (static or dynamic CALL, from which paragraph, under what condition)?",
+  "facts": [
+   "ORDPOST is the only caller",
+   "The call is a dynamic CALL through the variable WS-POST-PGM (orders/ORDPOST.cbl around line 42)",
+   "It is made from paragraph 2000-POST",
+   "POSTINTL is chosen when the ship-to address is foreign (ADDR-FOREIGN / ADDR-STATE = 'XX'), otherwise POSTDOM; held orders (ORD-HELD) are not posted"
+  ]
+ },
+ {
+  "id": "T04-copyimpact",
+  "kind": "cross-program",
+  "q": "If the layout of copybook ADDRREC changes, which programs must be recompiled? Explain how each one includes it.",
+  "facts": [
+   "ORDEDIT is affected",
+   "ORDVAL is affected",
+   "ORDPOST is affected",
+   "POSTDOM is affected",
+   "POSTINTL is affected",
+   "All five include ADDRREC indirectly, through COPY ORDREC (ORDREC copies ADDRREC); none copies ADDRREC directly",
+   "ORDRPT and DATECHK are NOT listed as affected (no false positives)"
+  ]
+ },
+ {
+  "id": "T05-jobsrunning",
+  "kind": "jcl",
+  "q": "How is program ORDRPT run in production JCL? For every job and step that runs it, give the dataset name (or SYSOUT) bound to each of its files.",
+  "facts": [
+   "Job ORDNIGHT runs it in STEP040 via cataloged procedure ORDRPTP (procedure step RPT)",
+   "In ORDNIGHT, ORDHIST (HIST-FILE) is PROD.ORD.HISTORY(+1)",
+   "In ORDNIGHT, RPTOUT (RPT-FILE) is PROD.ORD.DAILY.REPORT(+1) because of the RPT.RPTOUT override DD",
+   "Job ORDMONTH runs it in STEP010 via ORDRPTP",
+   "In ORDMONTH, ORDHIST is PROD.ORD.HISTORY(0)",
+   "In ORDMONTH, RPTOUT is SYSOUT=*"
+  ]
+ },
+ {
+  "id": "T06-datasetusers",
+  "kind": "jcl",
+  "q": "Which jobs, steps and programs use the dataset PROD.ORD.REJECTS, and what does each do to it (read, write/append, create, delete)?",
+  "facts": [
+   "Job ORDNIGHT, STEP010 (procedure ORDEDITP, step EDIT) runs ORDEDIT with DD ORDREJ on it",
+   "ORDEDIT's use is DISP=MOD: it appends to (extends) the dataset",
+   "Job ORDMONTH STEP020 runs IEFBR14 with DD REJECTS DISP=(OLD,DELETE,KEEP), i.e. it deletes the dataset",
+   "No other users are claimed"
+  ]
+ },
+ {
+  "id": "T07-lineage",
+  "kind": "cross-program lineage",
+  "q": "Trace where the value printed in RPT-TOTAL by program ORDRPT ultimately comes from, back to the original input dataset. Name every program, field and dataset on the way.",
+  "facts": [
+   "In ORDRPT, RPT-TOTAL is moved from WS-TOTAL, which accumulates HIST-AMT (ADD HIST-AMT TO WS-TOTAL)",
+   "HIST-AMT is read from dataset PROD.ORD.HISTORY (DD ORDHIST)",
+   "ORDPOST writes PROD.ORD.HISTORY and sets HIST-AMT from ORD-AMT",
+   "ORDPOST reads ORD-AMT from PROD.ORD.GOOD.SORTED (DD ORDGOOD)",
+   "PROD.ORD.GOOD.SORTED is produced by the SORT step (STEP020) from PROD.ORD.GOOD",
+   "ORDEDIT writes PROD.ORD.GOOD (WRITE OK-REC FROM ORD-REC)",
+   "ORDEDIT computes ORD-AMT from ORD-QTY * ORD-UNIT-PRICE (with the ORD-DISC-PCT discount for web orders)",
+   "The original input is PROD.ORD.DAILY(0) (DD ORDIN of ORDEDIT)"
+  ]
+ },
+ {
+  "id": "T08-rules",
+  "kind": "business rules",
+  "q": "In the nightly order edit (program ORDEDIT, including any subprograms it calls), list every condition under which an order is rejected, and the condition under which it is put on hold.",
+  "facts": [
+   "Rejected when ORD-QTY is not greater than zero",
+   "Rejected when ORD-CUST-ID is zero",
+   "Rejected when ORDVAL returns a non-zero code",
+   "ORDVAL fails (rc 4) when DATECHK rejects ORD-DATE: month outside 1-12 or day outside 1-31",
+   "ORDVAL fails (rc 8) for a foreign address (ADDR-STATE = 'XX') ordered by phone (ORD-CHANNEL = 'P')",
+   "ORDVAL fails (rc 12) when ADDR-ZIP is zero (for a non-foreign address)",
+   "Held when the priced ORD-AMT exceeds 50,000.00 (WS-HOLD-LIMIT)"
+  ]
+ },
+ {
+  "id": "T09-symbol",
+  "kind": "single-program",
+  "q": "In enterprise/COPYREPL.cbl, where is OUT-CITY declared (file and line), what is its PICTURE, and what is its byte offset and length within WS-OUT-CUSTOMER? Where is it used in the procedure division?",
+  "facts": [
+   "Declared in enterprise/copybooks/CUSTREC.cpy line 10 (as :PFX:-CITY, renamed by COPY ... REPLACING ==:PFX:== BY ==OUT==)",
+   "PICTURE X(20)",
+   "Byte offset 75 (0-based) within WS-OUT-CUSTOMER",
+   "Length 20 bytes",
+   "Read by the DISPLAY at COPYREPL.cbl line 44 (it is also implicitly filled by the group MOVE WS-IN-CUSTOMER TO WS-OUT-CUSTOMER; mentioning that is fine)"
+  ]
+ },
+ {
+  "id": "T10-procoverride",
+  "kind": "jcl",
+  "q": "In job PAYROLL1, which dataset does program PAYEXTR read through DD PAYMAST, and which dataset does PAYRPT write its report to (DD PAYRPT)?",
+  "facts": [
+   "PAYMAST is PROD.PAY.MASTER.WEEKLY (the EXTRACT.PAYMAST override), not &HLQ..MASTER / PROD.PAY.MASTER",
+   "PAYRPT is PROD.PAY.REPORT(+1) (the REPORT.PAYRPT override), not SYSOUT"
+  ]
+ },
+ {
+  "id": "H01-external",
+  "kind": "workspace-wide",
+  "q": "List every program that is called somewhere in this workspace (by CALL, including dynamic CALLs whose target can be traced, or by EXEC CICS LINK/XCTL) but whose source is NOT in the workspace. For each, name the program(s) that call it.",
+  "facts": [
+   "CBLTDLI (called by IMSDLIB and IMSMPP)",
+   "The 9 LE services CEE3ABD, CEEDATE, CEEDAYS, CEEFRST, CEEGMT, CEEGTST, CEEHDLR, CEEHDLU, CEEMOUT (called by LESERV)",
+   "The 8 MQ calls MQBACK, MQCLOSE, MQCMIT, MQCONN, MQDISC, MQGET, MQOPEN, MQPUT1 (called by MQBATCH)",
+   "DSNTIAR (called by DB2BATCH)",
+   "CUSTAUDT (EXEC CICS LINK) and CMENU (EXEC CICS XCTL), both from CICSONLN",
+   "FIC401M (called by IC401M)",
+   "RATECALC (dynamic CALL WS-DYN-NAME from SUBPROG)",
+   "SUBA (dynamic CALL WS-PGM from MISC)",
+   "XXXXXXXX (called by IC222A, a deliberate call to a non-existent program)",
+   "No program whose source IS in the workspace is listed as missing (e.g. DATECHK, POSTDOM, POSTINTL, SUBPGM, FACTORL, LOGGER, IC222A-1, IC102A are all present)"
+  ]
+ },
+ {
+  "id": "H02-nestedcopy",
+  "kind": "cross-program",
+  "q": "If copybook WSFLAGS changes, which programs are affected, and how does each include it?",
+  "facts": [
+   "COPYREPL is affected",
+   "COPYREPL includes it indirectly: COPY WSCOUNTS OF COPYLIB SUPPRESS (COPYREPL.cbl line 20), and WSCOUNTS.cpy copies WSFLAGS",
+   "No other program is claimed to be affected"
+  ]
+ },
+ {
+  "id": "H03-feeimpact",
+  "kind": "cross-program lineage",
+  "q": "If the value WRITER puts in OUT-FEE is wrong, which fields in which other programs end up receiving that wrong value? Follow it through the JCL, and say whether it reaches anything the programs display or write.",
+  "facts": [
+   "WRITER writes OUT-FEE to OUTFILE, which job FEEJOB STEP010 binds to the temporary dataset &&FEES",
+   "SORT (STEP020) reads &&FEES and writes PROD.FEE.SUMMARY(+1)",
+   "The SORT's SUM FIELDS=(20,7,ZD) sums exactly the OUT-FEE bytes (positions 20-26) per key, so the value arrives aggregated, not as written",
+   "READER (STEP030) reads it through DD FEEIN into FEE-REC.FEE-FEE",
+   "READER moves FEE-FEE to WS-FEE",
+   "WS-FEE is then overwritten by the EXEC SQL SELECT BALANCE INTO :WS-FEE before DISPLAY WS-FEE, so the wrong fee is NOT what READER displays (and READER writes nothing)"
+  ]
+ }
+]

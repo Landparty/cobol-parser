@@ -683,5 +683,95 @@ def test_tools_answer_over_an_mcp_session(root: Path) -> None:
     assert running.structuredContent["answer"]["step_count"] == 1
     assert users.structuredContent["answer"]["by_access"] == {
         "create": ["WRITER"],
-        "exclusive": ["SORT"],
+        # SORTIN: what SORT does with it, not what DISP=OLD says.
+        "read": ["SORT"],
     }
+
+
+class TestAccessFromTheProgram:
+    """dataset_users says what a step does with a dataset from the program's
+    OPEN mode or the utility's control statements, not only from DISP."""
+
+    @pytest.fixture
+    def shop(self, tmp_path: Path) -> Path:
+        (tmp_path / "LOADER.cbl").write_text(
+            "       IDENTIFICATION DIVISION.\n"
+            "       PROGRAM-ID. LOADER.\n"
+            "       ENVIRONMENT DIVISION.\n"
+            "       INPUT-OUTPUT SECTION.\n"
+            "       FILE-CONTROL.\n"
+            "           SELECT IN-FILE ASSIGN TO INDD.\n"
+            "           SELECT OUT-FILE ASSIGN TO OUTDD.\n"
+            "           SELECT LOG-FILE ASSIGN TO LOGDD.\n"
+            "       DATA DIVISION.\n"
+            "       FILE SECTION.\n"
+            "       FD  IN-FILE.\n"
+            "       01  IN-REC  PIC X(80).\n"
+            "       FD  OUT-FILE.\n"
+            "       01  OUT-REC PIC X(80).\n"
+            "       FD  LOG-FILE.\n"
+            "       01  LOG-REC PIC X(80).\n"
+            "       PROCEDURE DIVISION.\n"
+            "           OPEN INPUT IN-FILE OUTPUT OUT-FILE EXTEND LOG-FILE\n"
+            "           READ IN-FILE\n"
+            "           WRITE OUT-REC FROM IN-REC\n"
+            "           WRITE LOG-REC FROM IN-REC\n"
+            "           CLOSE IN-FILE OUT-FILE LOG-FILE\n"
+            "           GOBACK.\n"
+        )
+        (tmp_path / "LOAD.jcl").write_text(
+            "//LOAD     JOB (ACCT),'LOAD',CLASS=A\n"
+            "//STEP1    EXEC PGM=LOADER\n"
+            "//INDD     DD  DSN=PROD.IN,DISP=SHR\n"
+            "//OUTDD    DD  DSN=PROD.MASTER,DISP=SHR\n"
+            "//LOGDD    DD  DSN=PROD.LOG,DISP=OLD\n"
+            "//STEP2    EXEC PGM=IDCAMS\n"
+            "//SYSPRINT DD  SYSOUT=*\n"
+            "//SRC      DD  DSN=PROD.MASTER,DISP=SHR\n"
+            "//DST      DD  DSN=PROD.VSAM,DISP=OLD\n"
+            "//SYSIN    DD  *\n"
+            "  REPRO INFILE(SRC) OUTFILE(DST)\n"
+            "/*\n"
+            "//STEP3    EXEC PGM=UNKNOWN\n"
+            "//X        DD  DSN=PROD.MASTER,DISP=SHR\n"
+            "//STEP4    EXEC PGM=SORT\n"
+            "//SORTIN   DD  DSN=PROD.MASTER,DISP=SHR\n"
+            "//OUT1     DD  DSN=PROD.SPLIT.A,DISP=OLD\n"
+            "//SYSIN    DD  *\n"
+            "  SORT FIELDS=COPY\n"
+            "  OUTFIL FNAMES=(OUT1)\n"
+            "/*\n"
+            "//STEP5    EXEC PGM=ICETOOL\n"
+            "//TOOLMSG  DD  SYSOUT=*\n"
+            "//DFSMSG   DD  SYSOUT=*\n"
+            "//FROMDD   DD  DSN=PROD.MASTER,DISP=SHR\n"
+            "//TODD     DD  DSN=PROD.COPY,DISP=OLD\n"
+            "//TOOLIN   DD  *\n"
+            "  COPY FROM(FROMDD) TO(TODD)\n"
+            "/*\n"
+        )
+        return tmp_path
+
+    def test_open_modes_and_utility_roles(self, shop: Path) -> None:
+        tools = CobolTools(Workspace(shop, ProjectConfig()))
+        rows = {
+            (u["dataset"], u["step"]): u
+            for u in tools.dataset_users("PROD.**")["answer"]["uses"]
+        }
+        master = rows[("PROD.MASTER", "STEP1")]
+        assert (master["access"], master["access_from"]) == ("write", "program")
+        assert master["disposition_access"] == "read"
+        assert rows[("PROD.IN", "STEP1")]["access"] == "read"
+        assert rows[("PROD.LOG", "STEP1")]["access"] == "extend"
+        assert (
+            rows[("PROD.MASTER", "STEP2")]["access"],
+            rows[("PROD.MASTER", "STEP2")]["access_from"],
+        ) == ("read", "utility")
+        assert rows[("PROD.VSAM", "STEP2")]["access"] == "write"
+        unknown = rows[("PROD.MASTER", "STEP3")]
+        assert (unknown["access"], unknown["access_from"]) == ("read", "disp")
+        assert "disposition_access" not in unknown
+        assert rows[("PROD.SPLIT.A", "STEP4")]["access"] == "write"
+        assert rows[("PROD.MASTER", "STEP4")]["access"] == "read"
+        assert rows[("PROD.COPY", "STEP5")]["access"] == "write"
+        assert rows[("PROD.MASTER", "STEP5")]["access"] == "read"

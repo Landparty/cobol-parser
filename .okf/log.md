@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-28 -- merge main; FUNCTION callers in the MCP server
+
+[mcp.md](mcp.md): `_calls` rows with `via: "FUNCTION"`, so `callers_of` /
+`program_brief` / `check_claims` see user-defined function invocations
+(`FACTS_VERSION` 5). The MCP disk cache drafted on this branch was dropped
+for main's `mcp/facts.py`; `_facts_cache.py` now backs `scan` only.
+
 ## 2026-10-28 -- SARIF output for lint, scan and call-check
 
 [analysis/lint.md](analysis/lint.md): `sarif.py` and `scan`'s file-level
@@ -27,14 +34,12 @@ entries, including both 2026-09-15 sections, were found there on
 lanes and budgets. [analysis/flow.md](analysis/flow.md): the dead-code
 worklist admits the reference closure per round (`_fresh_refs`).
 
-## 2026-10-28 -- incremental cache for scan and the MCP indexes
+## 2026-10-28 -- incremental cache for scan
 
 [batch.md](batch.md): `ScanOptions.cache_dir` / `scan --cache-dir` and the
-`FactsCache` itself (`_facts_cache.py`). [mcp.md](mcp.md): `mcp
---cache-dir`, `_per_file()`, `CodebaseGraphBuilder.file_facts()` /
-`FileGraphFacts` (also [analysis/codebase.md](analysis/codebase.md)).
-[cli.md](cli.md): both flags. [tests.md](tests.md): the
-two test files.
+`FactsCache` itself (`_facts_cache.py`). [cli.md](cli.md): the flag.
+[tests.md](tests.md): `test_facts_cache.py`. (The MCP server's own disk
+cache is `mcp/facts.py`, see [mcp.md](mcp.md).)
 
 ## 2026-10-28 -- call-check: cross-program CALL interface checking
 

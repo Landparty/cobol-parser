@@ -1,0 +1,18 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. POSTINTL.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-INTL-RATE              PIC V999 VALUE .045.
+       01  WS-INTL-MIN               PIC S9(5)V99 COMP-3 VALUE 25.00.
+       LINKAGE SECTION.
+           COPY ORDREC.
+       01  LS-FEE                    PIC S9(5)V99 COMP-3.
+       01  LS-REGION                 PIC X(4).
+       PROCEDURE DIVISION USING ORD-REC LS-FEE LS-REGION.
+       0000-POST.
+           COMPUTE LS-FEE ROUNDED = ORD-AMT * WS-INTL-RATE
+           IF LS-FEE < WS-INTL-MIN
+               MOVE WS-INTL-MIN TO LS-FEE
+           END-IF
+           MOVE 'INTL' TO LS-REGION
+           GOBACK.

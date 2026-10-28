@@ -15,8 +15,9 @@ from __future__ import annotations
 import difflib
 import functools
 import itertools
+import os
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
@@ -379,6 +380,9 @@ class CobolTools:
         """What *file* (or one program unit in it) is, on one page."""
         from ..analysis.lint import LintAnalyzer
 
+        other = self._other_language_path(file)
+        if other is not None:
+            return self._other_language_brief(other, clamp_limit(limit))
         parsed = self.workspace.program(file)
         response = Response()
         _carry_parse_caveats(parsed, response)
@@ -541,6 +545,81 @@ class CobolTools:
                 }
         return response.build(answer, parsed.program_info(unit))
 
+    # -- PL/I and assembler ---------------------------------------------------
+
+    def _other_language_path(self, file: str) -> Path | None:
+        """*file*'s path when it is a PL/I or assembler source, else None."""
+        from .languages import language_of
+
+        if language_of(file) is None:
+            return None
+        path = self.workspace.resolve(file)
+        if path.suffix.lower() in self.workspace._program_suffixes():
+            return None
+        return path
+
+    def _other_language_brief(self, path: Path, cap: int) -> dict[str, Any]:
+        """``program_brief`` of a PL/I or assembler source: its names, its
+        procedures or sections, what it CALLs and includes, its CICS / SQL /
+        MQ / IMS requests, who CALLs it and which JCL steps run it."""
+        from .codebase_index import programs_index
+        from .languages import LIMITS, facts_for
+
+        source = facts_for(self.workspace, path)
+        response = Response()
+        for caveat in source.caveats:
+            response.caveat(caveat.kind, caveat.detail, caveat.effect)
+        if source.failed is not None:
+            raise ToolError(
+                f"cannot read {source.display} as {source.language}: {source.failed}"
+            )
+        response.caveat(
+            "incomplete-analysis",
+            LIMITS[source.language],
+            "files, record layouts, field lineage and health are not "
+            "available for this program",
+        )
+        answer: dict[str, Any] = {
+            "program_id": source.program_id,
+            "language": source.language,
+            "file": source.display,
+            "line_count": source.line_count,
+        }
+        if source.entries:
+            answer["also_called_as"] = source.entries
+        kind = "procedures" if source.language == "PL/I" else "sections"
+        answer[kind] = response.cap(source.sections, cap, kind)
+        answer["calls"] = response.cap(source.calls, cap, "calls")
+        answer["includes"] = response.cap(source.includes, cap, "includes")
+        if source.services:
+            counts: dict[str, dict[str, int]] = {}
+            for service in source.services:
+                label = str(service.get("target") or service["command"])
+                held = counts.setdefault(service["kind"], {})
+                held[label] = held.get(label, 0) + 1
+            answer["services"] = {k: dict(sorted(v.items())) for k, v in counts.items()}
+            answer["service_requests"] = response.cap(
+                source.services, cap, "service_requests"
+            )
+        index = programs_index(self.workspace)
+        names = source.names()
+        callers = sorted(
+            {
+                unit.program_id
+                for unit in index.units
+                for row in unit.calls
+                if str(row.get("program") or "").upper() in names
+                or names & {str(c).upper() for c in row.get("candidates") or []}
+            }
+        )
+        answer["called_by"] = response.cap(callers, cap, "called_by")
+        if not callers:
+            answer["note"] = (
+                "no program under the root CALLs it: it is started by JCL "
+                "(jobs_running), CICS or IMS, or is called from elsewhere"
+            )
+        return response.build(answer)
+
     # -- callers_of ----------------------------------------------------------
 
     def callers_of(
@@ -562,6 +641,11 @@ class CobolTools:
         cap = clamp_limit(limit)
         response = Response()
         if file is None:
+            return self._program_callers(wanted, response, cap, None, [])
+        other = self._other_language_path(file)
+        if other is not None:
+            # PL/I and assembler procedures are not indexed: a name is a
+            # program here.
             return self._program_callers(wanted, response, cap, None, [])
         parsed = self.workspace.program(file)
         _carry_parse_caveats(parsed, response)
@@ -849,6 +933,8 @@ class CobolTools:
                         "via": row.get("via"),
                         "location": site.get("location"),
                     }
+                    if unit.language != "COBOL":
+                        caller["language"] = unit.language
                     if reaches_nested:
                         caller["nested"] = True
                     if site.get("paragraph"):
@@ -871,6 +957,8 @@ class CobolTools:
                 where["contained"] = True
             if unit.unit_kind != "PROGRAM":
                 where["unit_kind"] = unit.unit_kind
+            if unit.language != "COBOL":
+                where["language"] = unit.language
             declared.append(where)
         if not callers and not declared:
             known = sorted(
@@ -917,7 +1005,21 @@ class CobolTools:
                 "which one a CALL reaches depends on the load library order, "
                 "which the source does not say",
             )
-        if not declared:
+        other = (
+            self.workspace.other_sources().get(wanted.upper()) if not declared else None
+        )
+        if other:
+            answer["sources_not_analyzed"] = [
+                {"file": self.workspace.display(path), "language": language}
+                for path, language in other
+            ]
+            answer["note"] = (
+                f"no COBOL program under the root has PROGRAM-ID {wanted}, but "
+                f"its source is here in {other[0][1]} "
+                f"({self.workspace.display(other[0][0])}), which these tools "
+                "do not parse: read it with read_source" + _install_note(other[0][0])
+            )
+        elif not declared:
             answer["note"] = (
                 f"no program under the root has PROGRAM-ID {wanted}: it is "
                 "external to this workspace (a vendor or system program, or "
@@ -963,6 +1065,7 @@ class CobolTools:
         program: str | None = None,
         depth: int | None = None,
         limit: int | None = None,
+        full_paths: bool = False,
     ) -> dict[str, Any]:
         """What a change to copybook member or field *name* reaches.
 
@@ -981,9 +1084,13 @@ class CobolTools:
         if file is None or suffix in _MEMBER_SUFFIXES or "/" in text:
             member = _normalize_member(text)
             index = programs_index(self.workspace)
-            if suffix in _MEMBER_SUFFIXES or member in index.graph.members:
+            if (
+                suffix in _MEMBER_SUFFIXES
+                or member in index.graph.members
+                or member in index.copy_sites
+            ):
                 return self._copybook_impact(member, cap)
-        return self._lineage(text, file, program, depth, cap, "forward")
+        return self._lineage(text, file, program, depth, cap, "forward", full_paths)
 
     def where_from(
         self,
@@ -992,12 +1099,19 @@ class CobolTools:
         program: str | None = None,
         depth: int | None = None,
         limit: int | None = None,
+        full_paths: bool = False,
     ) -> dict[str, Any]:
-        """Where the value of *field* comes from, across programs."""
+        """Where the value of *field* comes from, across programs.
+
+        Paths shared with an earlier hit are given once (``from_hit``)
+        unless *full_paths*.
+        """
         text = " ".join(field.split())
         if not text:
             raise ToolError("no field name given")
-        return self._lineage(text, file, program, depth, clamp_limit(limit), "backward")
+        return self._lineage(
+            text, file, program, depth, clamp_limit(limit), "backward", full_paths
+        )
 
     def _copybook_impact(self, member: str, cap: int) -> dict[str, Any]:
         from ..analysis.codebase import CopybookImpactAnalyzer
@@ -1007,6 +1121,26 @@ class CobolTools:
         response = Response()
         _carry_index_caveats(index, response, "COPY statements")
         graph = index.graph
+        # A PL/I %INCLUDE or an assembler COPY of the member: not in the
+        # COBOL COPY graph, so listed on its own.
+        included = [s for s in index.copy_sites.get(member, []) if s.get("language")]
+        if included and member not in graph.members:
+            return response.build(
+                {
+                    "name": member,
+                    "kind": "copybook",
+                    "found": True,
+                    "program_count": len(
+                        {self._unit_in(index, s["file"]) for s in included}
+                    ),
+                    "copied_by": [],
+                    "included_by_other_languages": response.cap(
+                        self._included_rows(index, included),
+                        cap,
+                        "included_by_other_languages",
+                    ),
+                }
+            )
         report = CopybookImpactAnalyzer(graph).analyze(member)
         if member not in graph.members:
             return response.build(
@@ -1086,6 +1220,17 @@ class CobolTools:
                     nested, cap, "copied_through_other_members"
                 ),
                 "fields": response.cap(report.fields, cap, "fields"),
+                **(
+                    {
+                        "included_by_other_languages": response.cap(
+                            self._included_rows(index, included),
+                            cap,
+                            "included_by_other_languages",
+                        )
+                    }
+                    if included
+                    else {}
+                ),
                 "next": "for where one of these fields' values go, ask "
                 "impact_of_change with that field and the file of a program "
                 "that copies the member",
@@ -1100,6 +1245,7 @@ class CobolTools:
         depth: int | None,
         cap: int,
         direction: str,
+        full: bool = False,
     ) -> dict[str, Any]:
         from .codebase_index import lineage_index
 
@@ -1161,6 +1307,17 @@ class CobolTools:
             return response.build(missing, program_info)
 
         hits = [_hit(hit, index, self.workspace, response) for hit in result.hits]
+        hits.sort(
+            key=lambda h: (
+                _CONFIDENCE_RANK.get(h["confidence"], 9),
+                "may_be_overwritten" in h,
+                len(h["path"]),
+            )
+        )
+        shown = response.cap(hits, cap, "hits")
+        ends = _trail_ends(hits)
+        if not full:
+            _share_paths(shown)
         reached = set(result.programs) | {p.upper() for p in programs or []}
         for caveat in result.caveats:
             if caveat in result.ambiguous:
@@ -1209,17 +1366,61 @@ class CobolTools:
             "tables": result.tables,
             "datasets": result.datasets,
             "hit_count": len(hits),
-            "hits": response.cap(hits, cap, "hits"),
+            "by_confidence": _counts(h["confidence"] for h in hits),
+            "may_be_overwritten": sum("may_be_overwritten" in h for h in hits),
+            "trail_ends": response.cap(ends, cap, "trail_ends"),
+            "hits": shown,
             "notes": list(result.notes),
             "legend": (
                 "each hit is a field (or a table column, a dataset byte range, "
                 "or the port where a trail ends) with its path from the start, "
-                "one step per line; location is the statement that reaches it "
-                "(null for a join through a dataset, table or CALL); derived: "
-                "the value is computed on the way, not only copied"
+                "one step per line; exact hits first. location is the "
+                "statement that reaches it (null for a join through a dataset, "
+                "table or CALL); derived: the value is computed on the way, "
+                "not only copied. may_be_overwritten: a statement replaces "
+                "the value on the way, in the same paragraph, before the path "
+                "reads it again (a SELECT INTO finding no row or a READ INTO "
+                "at end of file would not); such hits come after the others "
+                "of their confidence. trail_ends: the hits no other trail runs "
+                "through (the "
+                + ("ultimate sources" if direction == "backward" else "final receivers")
+                + ")."
+                + (
+                    ""
+                    if full
+                    else " A hit with from_hit continues hit number from_hit "
+                    "(0-based): its path starts with that hit's first "
+                    "after_step steps, and only the rest is listed."
+                )
             ),
         }
         return response.build(answer, program_info)
+
+    @staticmethod
+    def _unit_in(index: Any, file: str) -> str:
+        """The program declared in *file* (a PL/I or assembler source)."""
+        return next((u.program_id for u in index.units if u.file == file), file)
+
+    def _included_rows(
+        self, index: Any, sites: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """One row per PL/I or assembler program including a member."""
+        rows: dict[str, dict[str, Any]] = {}
+        for site in sites:
+            row = rows.setdefault(
+                site["file"],
+                {
+                    "program": self._unit_in(index, site["file"]),
+                    "file": site["file"],
+                    "language": site["language"],
+                    "include_sites": [],
+                },
+            )
+            if site.get("line"):
+                row["include_sites"].append(
+                    {"file": site["file"], "line": site["line"]}
+                )
+        return list(rows.values())
 
     def _is_member(self, name: str, parsed: ParsedProgram | None) -> bool:
         """Whether *name* is a copybook member: one *parsed* expanded, or one
@@ -1287,6 +1488,8 @@ class CobolTools:
                 row["contained"] = True
             if unit.unit_kind != "PROGRAM":
                 row["unit_kind"] = unit.unit_kind
+            if unit.language != "COBOL":
+                row["language"] = unit.language
             programs.append(row)
 
         declared = {
@@ -1298,6 +1501,15 @@ class CobolTools:
         for edge in graph.call_edges:
             if edge.callee not in declared:
                 external.setdefault(edge.callee, set()).add(edge.caller)
+        other_sources = self.workspace.other_sources()
+        not_parsed = {p: c for p, c in external.items() if p.upper() in other_sources}
+        for program_id in not_parsed:
+            del external[program_id]
+        languages: dict[str, int] = {}
+        for _path, language in {
+            entry for entries in other_sources.values() for entry in entries
+        }:
+            languages[language] = languages.get(language, 0) + 1
         most_called = sorted(
             ((p, len(c)) for p, c in callers_of.items() if p in declared),
             key=lambda pc: (-pc[1], pc[0]),
@@ -1339,10 +1551,23 @@ class CobolTools:
             key=lambda u: (-u["score"], u["program"] or ""),
         )
 
+        by_language: dict[str, int] = {}
+        for unit in index.units:
+            by_language[unit.language] = by_language.get(unit.language, 0) + 1
         answer: dict[str, Any] = {
             "index": {
                 **index.summary(),
                 "program_units": len(index.units),
+                **(
+                    {"program_units_by_language": dict(sorted(by_language.items()))}
+                    if set(by_language) != {"COBOL"}
+                    else {}
+                ),
+                **(
+                    {"other_sources_not_analyzed": dict(sorted(languages.items()))}
+                    if languages
+                    else {}
+                ),
             },
             "programs": response.cap(
                 sorted(programs, key=lambda r: (r["program"].upper(), r["file"])),
@@ -1362,6 +1587,24 @@ class CobolTools:
                     ],
                     cap,
                     "call_graph.not_in_workspace",
+                ),
+                "in_workspace_not_analyzed": response.cap(
+                    [
+                        {
+                            "program": p,
+                            "called_by": sorted(c),
+                            "sources": [
+                                {
+                                    "file": self.workspace.display(path),
+                                    "language": language,
+                                }
+                                for path, language in other_sources[p.upper()]
+                            ],
+                        }
+                        for p, c in sorted(not_parsed.items())
+                    ],
+                    cap,
+                    "call_graph.in_workspace_not_analyzed",
                 ),
                 "cycles": response.cap(graph.cycles(), cap, "call_graph.cycles"),
                 "unresolved_dynamic_calls": dynamic,
@@ -1421,6 +1664,7 @@ class CobolTools:
                 "could not all be traced",
                 "the call graph may miss edges from them",
             )
+        _other_language_caveats(index, response)
         return response.build(answer)
 
     # -- business_rules ------------------------------------------------------
@@ -1603,6 +1847,7 @@ class CobolTools:
         """The records of *data_file* read through *copybook*'s layout, or,
         with no data file, the layout's views (its REDEFINES overlays)."""
         from ..generators.data.decoding import RecordDecoder, RecordDecodingError
+        from ..generators.data.encoding import RecordFormat
         from ..generators.data.errors import CopybookLayoutError
 
         if skip < 0:
@@ -1697,20 +1942,35 @@ class CobolTools:
         wanted_records = (
             DEFAULT_DECODE_RECORDS if max_records is None else clamp_limit(max_records)
         )
+        # Fixed-length records with nothing between them sit at a known
+        # stride, so a page past the read window starts by seeking to it.
+        # Any other framing has to be walked from the front, and so stops at
+        # the window (said below, with no `next` that would ask again).
+        stride = 0
+        fmt = opts.resolved_format(
+            [placed.spec for placed in decoder.views.base.fields],
+            varying=decoder.varying is not None,
+        )
+        if fmt is RecordFormat.FIXED and not opts.record_separator:
+            stride = decoder.record_length or decoder.views.framing_length
+        start = skip * stride if stride > 0 else 0
+        local_skip = 0 if start else skip
         try:
             size = data_path.stat().st_size
             with data_path.open("rb") as handle:
+                handle.seek(start)
                 data = handle.read(MAX_DECODE_BYTES)
         except OSError as exc:
             raise ToolError(f"cannot read {data_file}: {exc}") from exc
-        cut = size > len(data)
+        cut = size > start + len(data)
         try:
             with stdout_to_stderr():
                 result = decoder.decode_bytes(
-                    data, view=view, max_records=wanted_records, skip=skip
+                    data, view=view, max_records=wanted_records, skip=local_skip
                 )
         except RecordDecodingError as exc:
             raise ToolError(str(exc)) from exc
+        window_spent = cut and len(result.records) < wanted_records
         for caveat in result.caveats:
             if caveat not in decoder.layout_warnings:
                 response.caveat("incomplete-analysis", caveat)
@@ -1723,21 +1983,23 @@ class CobolTools:
                 "the record length or record format is probably wrong: check "
                 "record_length / record_format before trusting the values",
             )
-        if cut and not result.records:
+        if window_spent:
             response.caveat(
                 "incomplete-analysis",
-                f"only the first {MAX_DECODE_BYTES} bytes of {data_file} "
-                f"({size} bytes) were read, and they held no record past "
-                f"skip={skip}",
-                "lower skip, or decode a smaller extract of the file",
+                f"only {MAX_DECODE_BYTES} bytes of {data_file} ({size} bytes) "
+                "are read per call, and under this record format each read "
+                "starts at the front of the file: records past "
+                f"byte {start + len(data)} cannot be reached",
+                "decode a smaller extract of the file, or read it as fixed-"
+                "length records with no separator if that is what it holds",
             )
         names = {p.spec.column for p in shown_fields}
         records = []
         for decoded in result.records:
             values = {f.name: f.value for f in decoded.fields if f.name in names}
             entry: dict[str, Any] = {
-                "index": decoded.index,
-                "file_offset": decoded.file_offset,
+                "index": decoded.index + (skip if start else 0),
+                "file_offset": decoded.file_offset + start,
                 "length": decoded.length,
                 "values": values,
             }
@@ -1760,7 +2022,7 @@ class CobolTools:
                 "records": records,
             }
         )
-        if more:
+        if more and not window_spent:
             answer["next"] = (
                 f"more records follow: ask again with skip={skip + len(records)}"
             )
@@ -1809,6 +2071,67 @@ class CobolTools:
             raise ToolError(f"bad encoding option: {exc}") from exc
 
     # -- JCL (the [jcl] extra; implemented in .jcl_tools) --------------------
+
+    # -- navigation ---------------------------------------------------------
+
+    def read_procedure(
+        self, file: str, name: str, program: str | None = None
+    ) -> dict[str, Any]:
+        """One paragraph or section of *file*, whole (:mod:`.navigation`)."""
+        from .navigation import read_procedure
+
+        return read_procedure(self.workspace, file, name, program)
+
+    def slice(
+        self,
+        file: str,
+        field: str,
+        direction: str = "backward",
+        program: str | None = None,
+        limit: int | None = None,
+        aliases: bool = False,
+    ) -> dict[str, Any]:
+        """The statements that can affect *field*, or that it affects, in
+        one program (:mod:`.slicing`)."""
+        from .slicing import slice_field
+
+        return slice_field(
+            self.workspace, file, field, direction, program, limit, aliases
+        )
+
+    def check_claims(self, claims: list[dict[str, Any]]) -> dict[str, Any]:
+        """Each claim confirmed, contradicted or not checkable
+        (:mod:`.claims`)."""
+        from .claims import check_claims
+
+        return check_claims(self, claims)
+
+    def find_statements(
+        self,
+        verb: str | None = None,
+        operand: str | None = None,
+        role: str | None = None,
+        literal: str | None = None,
+        paragraph: str | None = None,
+        file: str | None = None,
+        program: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Statements by verb / operand / literal / paragraph
+        (:mod:`.navigation`)."""
+        from .navigation import find_statements
+
+        return find_statements(
+            self.workspace,
+            verb,
+            operand,
+            role,
+            literal,
+            paragraph,
+            file,
+            program,
+            limit,
+        )
 
     def jcl_job(
         self,
@@ -1872,6 +2195,16 @@ class CobolTools:
         program_info = parsed.program_info(unit)
         callee_dirs = self.workspace.callee_directories(response)
 
+        refused_callees: list[str] = []
+
+        def accept(found: str) -> bool:
+            # The directory is under the root, but a member of it may be a
+            # link out of it: vetted like every other file a tool opens.
+            if self.workspace.under_root(Path(found)):
+                return True
+            refused_callees.append(found)
+            return False
+
         def build() -> Any:
             generator = ProgramFixtureGenerator(DataGeneratorOptions(rows=row_count))
             index = ProgramLayoutIndex.build(unit)
@@ -1879,6 +2212,7 @@ class CobolTools:
                 unit,
                 callee_dirs or None,
                 debug_lines=bool(self.workspace.config.debug_lines),
+                accept=accept,
             )
             report = BoundaryInventoryAnalyzer().analyze(
                 unit, index, callee_indexes=callee_indexes, callee_asts=callee_asts
@@ -1888,6 +2222,21 @@ class CobolTools:
             )
 
         bundle = _attempt(response, "test fixtures", build)
+        if refused_callees:
+            response.caveat(
+                "incomplete-analysis",
+                "callee files that resolve outside the workspace were not read: "
+                + ", ".join(
+                    sorted(
+                        {
+                            Path(os.path.relpath(f, self.workspace.root)).as_posix()
+                            for f in refused_callees
+                        }
+                    )
+                ),
+                "CALL arguments to those programs are classified without the "
+                "callee's own PROCEDURE DIVISION USING",
+            )
         if bundle is None:
             return response.build({"found": False, "scenarios": []}, program_info)
         cap = clamp_limit(limit)
@@ -2103,6 +2452,26 @@ def _calls(
         row["sites"].append(
             {"location": parsed.locate(cics.location.line, None, response)}
         )
+    declared = frozenset(unit.user_function_names())
+    if declared:
+        # FUNCTION name(...) of a user-defined function the REPOSITORY
+        # paragraph declares: control passes to that FUNCTION-ID unit.
+        from ..analysis.language_env_analyzer import function_references
+
+        for statement in _own_statements(unit):
+            for name in function_references(statement, declared):
+                if name not in declared:
+                    continue
+                row = rows.get((name, "FUNCTION"))
+                if row is None:
+                    row = rows[(name, "FUNCTION")] = {
+                        "program": name,
+                        "via": "FUNCTION",
+                        "dynamic": False,
+                        "sites": [],
+                    }
+                line = statement.location.line if statement.location else None
+                row["sites"].append({"location": parsed.locate(line, None, response)})
     return list(rows.values())
 
 
@@ -2400,6 +2769,41 @@ def _worth_showing(value: Any) -> bool:
     return value is not None and value is not False and value != []
 
 
+def _install_note(path: Path) -> str:
+    """How to have *path* analyzed, when only a missing parser stops it."""
+    from .languages import install_hint, language_of
+
+    language = language_of(path)
+    return (
+        ""
+        if language is None
+        else f" (or install its parser: {install_hint(language)})"
+    )
+
+
+def _other_language_caveats(index: Any, response: Response) -> None:
+    """What the programs index could not read of the PL/I and assembler
+    sources under the root, and what it read of them only in part."""
+    from .languages import LIMITS, install_hint
+
+    for language, files in sorted(index.not_installed.items()):
+        response.caveat(
+            "incomplete-analysis",
+            f"{len(files)} {language} file(s) under the root were not read: "
+            f"the {language} parser is not installed ({install_hint(language)})",
+            "CALLs from them are missing; CALLs to them count as "
+            "in_workspace_not_analyzed",
+        )
+    for language in sorted(index.other_language_files):
+        response.caveat(
+            "incomplete-analysis",
+            f"{index.other_language_files[language]} {language} file(s) read "
+            f"through a sibling parser: {LIMITS[language]}",
+            f"{language} programs are in the call graph, but have no health "
+            "grade, no field lineage and no file I/O",
+        )
+
+
 def _carry_index_caveats(index: Any, response: Response, what: str) -> None:
     """A root-wide index's gaps, as a few caveats rather than one per file."""
     if index.failed:
@@ -2520,7 +2924,74 @@ def _hit(
         entry["file"] = index.program_files.get(hit.program.upper())
     entry["location"] = arrived
     entry["path"] = steps
+    overwritten = []
+    for kill in getattr(hit, "overwritten", ()):
+        if kill.origin_file:
+            file = workspace.display(kill.origin_file)
+        else:
+            file = index.program_files.get(kill.program.upper())
+        where = f" at {file}:{kill.line}" if file else ""
+        overwritten.append(f"{kill.field} by {kill.statement}{where}")
+    if overwritten:
+        entry["may_be_overwritten"] = overwritten
     return entry
+
+
+#: Hits are listed most certain first.
+_CONFIDENCE_RANK = {"exact": 0, "overlap": 1, "candidate": 2, "opaque": 3}
+
+
+def _counts(values: Iterable[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _step_node(step: str) -> str:
+    """The node a ``NODE (STATEMENT at file:line)`` step names."""
+    return step.split(" (", 1)[0]
+
+
+def _trail_ends(hits: list[dict[str, Any]]) -> list[str]:
+    """The hits no other hit's trail passes through: where each trail
+    really ends, rather than every field on the way."""
+    passed: set[str] = set()
+    for hit in hits:
+        passed.update(_step_node(step) for step in hit["path"][:-1])
+    ends: list[str] = []
+    for hit in hits:
+        if not hit["path"]:
+            continue
+        node = _step_node(hit["path"][-1])
+        if node not in passed and node not in ends:
+            ends.append(node)
+    return ends
+
+
+def _share_paths(hits: list[dict[str, Any]]) -> None:
+    """Shorten each hit's ``path`` to what it adds to an earlier hit's.
+
+    A backward trail through three programs reaches a dozen fields, each
+    hit repeating every step before it; the repeats were most of a 40 KB
+    answer. A hit whose path begins with at least two steps of an earlier
+    one names it (``from_hit``, ``after_step``) and lists only the rest.
+    """
+    full = [list(h["path"]) for h in hits]
+    for i, hit in enumerate(hits):
+        best, best_len = None, 1
+        for j in range(i):
+            common = 0
+            for a, b in zip(full[i], full[j], strict=False):
+                if a != b:
+                    break
+                common += 1
+            if common > best_len:
+                best, best_len = j, common
+        if best is not None:
+            hit["from_hit"] = best
+            hit["after_step"] = best_len
+            hit["path"] = full[i][best_len:]
 
 
 def _hop_location(

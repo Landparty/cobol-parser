@@ -22,18 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   budget: 4,000 lines in the normal suite (a few seconds), 40,000 lines
   plus a linear-scaling check with `COBOLPARSER_PERF=1`. Skipped under
   coverage, like the other timing tests.
-* **An incremental cache for `scan` and the MCP server's root-wide indexes**
-  (`scan --cache-dir DIR`, `ScanOptions.cache_dir`; `mcp --cache-dir DIR`,
-  `Workspace(cache_dir=...)`; `cobolparser/_facts_cache.py`). Each file's
-  result is kept on disk next to the stamp of the program, every copybook
+* **An incremental cache for `scan`** (`scan --cache-dir DIR`,
+  `ScanOptions.cache_dir`; `cobolparser/_facts_cache.py`). Each file's
+  report is kept on disk next to the stamp of the program, every copybook
   it expanded and every copybook directory, and reused only while all of
-  them are unchanged and the options (or `cobol.yml`) and package version
-  are the same. A re-scan of a shop that changed a few programs parses only
-  those; a new MCP session answers its first cross-program question without
-  re-parsing the root. The answers are identical to an uncached run (pinned
-  by tests); `scan`'s summary gains `cached_file_count` when the cache is
-  on. `CodebaseGraphBuilder.file_facts()` / `FileGraphFacts` expose one
-  file's part of the codebase graph so it can be kept.
+  them are unchanged and the options and package version are the same. A
+  re-scan of a shop that changed a few programs parses only those. The
+  reports are identical to an uncached run (pinned by tests); the summary
+  gains `cached_file_count` when the cache is on.
 * **`call-check`: every CALL against the program it calls, across files**
   (`CallInterfaceChecker`, `cobolparser/analysis/call_interface.py`).
   `linkage-check` compares a CALL with its callee only inside one file and
@@ -58,6 +54,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server's `callers_of`), and `program-signature` shows such a unit's
   `call_example` as `FUNCTION NAME(args)`.
 
+* **MCP server: PL/I and assembler programs in the cross-program answers.**
+  With the new `[pl1]` / `[hlasm]` extras (the sibling `landparty-pl1-parser`
+  and `hlasmparser`), every PL/I and assembler source under the root is read
+  once and joins the call graph: `codebase_overview` lists it with its
+  `language` (and `program_units_by_language`), its CALL / FETCH / LINK /
+  XCTL / EXEC CICS LINK edges count in `calls`, `called_by`, entry programs
+  and cycles, and a COBOL `CALL` to an assembler `ENTRY` name reaches its
+  routine. Program-level `callers_of` finds callers in every language,
+  `program_brief` on a `.pli` / `.asm` file gives its names, procedures or
+  CSECTs, calls, includes and CICS / SQL / MQ / IMS requests, `jobs_running`
+  and `jcl_job` name the PL/I or assembler source of a step's program,
+  `impact_of_change` lists `included_by_other_languages` for a member, and
+  `check_claims` checks their `calls` and `copies`. What those parsers do not
+  read (file I/O, PL/I EXEC SQL / CICS) is an `incomplete-analysis` caveat;
+  without an extra the files stay `in_workspace_not_analyzed`, with a caveat
+  naming the install command.
 * **`cobol.yml` `project.proc_path`: folders of cataloged JCL PROCs**,
   searched in order. The MCP server expands a job's `EXEC proc` steps from
   them (only folders inside its root), so field flows cross jobs built from
@@ -237,6 +249,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   40,000-line program, now 0.38 s). Reports are unchanged: byte-identical
   on every NIST and sample program. `lint`, `redundancy` and `health`,
   which run it, gain the same.
+* **MCP `decode_record` pages past its 16 MiB read window.** Every page
+  was read from the start of the file, so records past the first 16 MiB
+  could not be reached, and once `skip` passed the window the answer kept
+  pointing `next` at the same request. Fixed-length records with no
+  separator are now read by seeking to the page; other framings still stop
+  at the window, but say so and give no `next`.
+
+* **MCP `gen_fixtures` no longer reads a callee linked from outside the
+  root.** Only the `callee_path` folder was checked against the workspace,
+  so a symlinked callee file in it was parsed although every other tool
+  refuses it. It is now skipped with a caveat naming it.
 
 * **`ADD n TO ZERO GIVING x` parses.** In the GIVING format the TO operand
   is only read, so a literal or figurative constant is valid there (IBM

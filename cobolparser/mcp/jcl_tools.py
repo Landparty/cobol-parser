@@ -655,6 +655,9 @@ def jcl_job(
     cap = clamp_limit(limit)
     sources = _source_files(workspace)
     programs: dict[str, str | None] = {}
+    # Looked up once per program name: each lookup checks the languages
+    # index's stamps, a walk of the root.
+    others: dict[str, dict[str, Any] | None] = {}
     rows = []
     for each in jobs:
         steps = each.steps
@@ -668,7 +671,13 @@ def jcl_job(
         shown = response.cap(steps, cap, f"{each.name}.steps")
         for s in shown:
             for name in s.effective_programs():
-                programs[name] = sources.get(name)
+                found = sources.get(name)
+                if found is None:
+                    if name not in others:
+                        others[name] = _other_language_source(workspace, name)
+                    other = others[name]
+                    found = other["file"] if other else None
+                programs[name] = found
         rows.append(_job_row(each, shown, locator))
     if step and not any(row["steps"] for row in rows):
         names = [s.name for j in jobs for s in j.steps]
@@ -791,6 +800,17 @@ def jobs_running(
     if selects is not None:
         answer["source"] = selects["source"]
         answer["files"] = selects["files"]
+    else:
+        other = _other_language_source(workspace, name)
+        if other is not None:
+            answer["source"] = other
+            response.caveat(
+                "incomplete-analysis",
+                f"{name} is {other['language']} source ({other['file']}), whose "
+                "parser reads no file declarations",
+                "its DDs are not bound to the files it opens; dataset access "
+                "comes from DISP alone",
+            )
     if not matches:
         answer["note"] = (
             f"no JCL step under the root runs {name}"
@@ -826,6 +846,24 @@ def _program_selects(
     if files is None:
         return None
     return {"source": parsed.program_info(unit), "files": files}
+
+
+def _other_language_source(workspace: Workspace, name: str) -> dict[str, Any] | None:
+    """The PL/I or assembler program *name* under the root (by its program
+    name, else an entry name or the file stem), when its parser is
+    installed: ``{program_id, file, language}``."""
+    from .languages import languages_index, source_files
+
+    if not source_files(workspace):
+        return None
+    found = languages_index(workspace).named(name)
+    if not found:
+        return None
+    return {
+        "program_id": found[0].program_id,
+        "file": found[0].display,
+        "language": found[0].language,
+    }
 
 
 def _declaring_file(workspace: Workspace, name: str) -> str | None:
@@ -972,6 +1010,154 @@ def _cards(
     return out
 
 
+#: Open mode -> what the program does with the file, before DISP says
+#: whether the dataset was new.
+_OPEN_USE = {"INPUT": "read", "OUTPUT": "write", "I-O": "update", "EXTEND": "extend"}
+
+_SORT_PROGRAMS = frozenset({"SORT", "ICEMAN", "DFSORT", "SYNCSORT", "SORTD"})
+_COPY_PROGRAMS = frozenset({"IEBGENER", "ICEGENER", "IEBCOPY", "IEBPTPCH"})
+_OUTFIL_FNAMES_RE = re.compile(r"\bFNAMES\s*=\s*\(?([A-Z0-9@#$, ]+)\)?")
+_ICETOOL_FROM_RE = re.compile(r"\bFROM\s*\(\s*([A-Z0-9@#$]+)\s*\)")
+_ICETOOL_TO_RE = re.compile(r"\bTO\s*\(\s*([A-Z0-9@#$, ]+)\s*\)")
+
+
+def _instream(step: JobStep, ddname: str) -> str:
+    return "\n".join(
+        line
+        for dd in step.dd_statements
+        if dd.name and dd.name.upper() == ddname
+        for line in dd.instream_lines
+    ).upper()
+
+
+def _utility_uses(step: JobStep) -> dict[str, str] | None:
+    """For a utility step, DD name (or ``DSN:`` + dataset name) -> read or
+    write, from what the utility does with each DD; None for a program
+    that is no utility this knows."""
+    from ..analysis.lineage_jcl import _REPRO_IN_RE, _REPRO_OUT_RE, _repro_commands
+
+    program = (step.program or "").upper()
+    uses: dict[str, str] = {}
+    if program in _SORT_PROGRAMS:
+        for dd in step.dd_statements:
+            name = (dd.name or "").upper()
+            if name.startswith(("SORTIN", "SORTJNF")):
+                uses[name] = "read"
+            elif name == "SORTOUT" or name.startswith("SORTOF"):
+                uses[name] = "write"
+        for match in _OUTFIL_FNAMES_RE.finditer(_instream(step, "SYSIN")):
+            for name in match.group(1).replace(",", " ").split():
+                uses[name] = "write"
+        return uses
+    if program in _COPY_PROGRAMS:
+        return {"SYSUT1": "read", "SYSUT2": "write"}
+    if program == "ICETOOL":
+        toolin = _instream(step, "TOOLIN")
+        for match in _ICETOOL_FROM_RE.finditer(toolin):
+            uses[match.group(1)] = "read"
+        for match in _ICETOOL_TO_RE.finditer(toolin):
+            for name in match.group(1).replace(",", " ").split():
+                uses[name] = "write"
+        return uses
+    if program == "IDCAMS":
+        for command in _repro_commands(_instream(step, "SYSIN")):
+            for regex, use in ((_REPRO_IN_RE, "read"), (_REPRO_OUT_RE, "write")):
+                found = regex.search(command)
+                if found is None:
+                    continue
+                if found.group(1) in ("INFILE", "IFILE", "OUTFILE", "OFILE"):
+                    uses[found.group(2)] = use
+                else:
+                    uses["DSN:" + found.group(2)] = use
+        return uses
+    return None
+
+
+def _combine(use: str, disposition_access: str) -> str:
+    """A program's *use* of a file, said with what DISP adds: a written
+    dataset DISP=NEW is created; DISP=MOD with OUTPUT or EXTEND extends."""
+    if use in ("write", "extend") and disposition_access == "create":
+        return "create"
+    if use == "write" and disposition_access == "extend":
+        return "extend"
+    return use
+
+
+class _ProgramUses:
+    """Per COBOL program under the root: DD name -> open modes, read once."""
+
+    def __init__(self, workspace: Workspace, response: Response) -> None:
+        self.workspace = workspace
+        self.response = response
+        self._held: dict[str, dict[str, set[str]] | None] = {}
+
+    def of(self, program: str) -> dict[str, set[str]] | None:
+        name = program.upper()
+        if name not in self._held:
+            self._held[name] = self._read(name)
+        return self._held[name]
+
+    def _read(self, name: str) -> dict[str, set[str]] | None:
+        from .tools import _attempt, _crud
+
+        selects = _program_selects(self.workspace, name, Response())
+        if selects is None:
+            return None
+        file = _source_files(self.workspace).get(name) or _declaring_file(
+            self.workspace, name
+        )
+        if file is None:
+            return None
+        parsed = self.workspace.program(file)
+        unit = parsed.ast.find_program_unit(name) or parsed.ast
+        crud = _attempt(self.response, "file use", lambda: _crud(parsed, unit))
+        if crud is None:
+            return None
+        modes = {
+            e.file_name.upper(): {str(m).upper() for m in e.open_modes}
+            for e in crud.file_entries
+        }
+        by_dd: dict[str, set[str]] = {}
+        for row in selects["files"]:
+            if row.get("ddname"):
+                by_dd.setdefault(row["ddname"].upper(), set()).update(
+                    modes.get(row["file_name"].upper(), set())
+                )
+        return by_dd
+
+
+def _step_access(
+    step: JobStep | None,
+    dd: DDStatement,
+    by_disp: str,
+    programs: _ProgramUses,
+) -> tuple[str, str]:
+    """(access, what it was read from: program / utility / disp) of *dd*
+    in *step*."""
+    if step is None:
+        return by_disp, "disp"
+    ddname = (dd.name or "").upper()
+    utility = _utility_uses(step)
+    if utility is not None:
+        use = utility.get(ddname) or utility.get(f"DSN:{(dd.dataset or '').upper()}")
+        if use:
+            return _combine(use, by_disp), "utility"
+        return by_disp, "disp"
+    uses: set[str] = set()
+    for program in step.effective_programs():
+        modes = programs.of(program)
+        if modes is None or ddname not in modes:
+            continue
+        uses.update(_OPEN_USE.get(m, m.lower()) for m in modes[ddname])
+    if not uses:
+        return by_disp, "disp"
+    # Several open modes in one run: the strongest says what can happen.
+    for strongest in ("update", "write", "extend", "read"):
+        if strongest in uses:
+            return _combine(strongest, by_disp), "program"
+    return by_disp, "disp"
+
+
 def dataset_users(
     workspace: Workspace, dataset: str, limit: int | None = None
 ) -> dict[str, Any]:
@@ -982,6 +1168,7 @@ def dataset_users(
     _carry_index(index, response)
 
     found: list[dict[str, Any]] = []
+    programs = _ProgramUses(workspace, response)
     for jfile in index.parsed():
         assert jfile.result is not None
         locator = _Locator(jfile, workspace)
@@ -996,9 +1183,13 @@ def dataset_users(
                 "programs": [] if step is None else step.effective_programs(),
                 "ddname": dd.name,
                 "disposition": dd.disposition,
-                "access": _access(dd.disposition),
                 "location": locator.at(path, dd.line),
             }
+            access, source = _step_access(step, dd, _access(dd.disposition), programs)
+            row["access"] = access
+            row["access_from"] = source
+            if source != "disp":
+                row["disposition_access"] = _access(dd.disposition)
             if dd.dataset.startswith("&&"):
                 row["temporary"] = True
             found.append(row)
@@ -1016,6 +1207,11 @@ def dataset_users(
         "jobs": sorted({row["job"] for row in found}),
         "uses": response.cap(found, clamp_limit(limit), "uses"),
         "jcl_files": len(index.files),
+        "access_legend": "access_from program: the COBOL program's OPEN mode "
+        "for the DD (read, write, update, extend; create when DISP=NEW); "
+        "utility: what SORT, IEBGENER, IDCAMS REPRO or ICETOOL do with the "
+        "DD; disp: only DISP= was known (SHR/OLD say nothing about reading "
+        "or writing)",
     }
     if not found:
         answer["note"] = "no DD under the root names this dataset" + (

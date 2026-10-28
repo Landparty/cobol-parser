@@ -25,6 +25,8 @@ from mcp.server.fastmcp.prompts import Prompt
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from .envelope import DEFAULT_ANSWER_BYTES, fit_budget
+from .hints import add_hints
 from .prompts import PROMPTS
 from .tools import CobolTools
 from .workspace import Workspace
@@ -48,82 +50,216 @@ Every result has the same envelope:
   say so rather than presenting an incomplete answer as complete.
 - truncated: lists that were cut to the limit, with their true totals.
   Narrow the question or raise limit instead of assuming completeness.
+  An answer is also kept under a size budget: a list cut to fit it says
+  reason "answer budget".
+- next (when present): ready-made calls that usually answer the follow-up
+  question. Suggestions, not facts.
+"""
 
+#: One paragraph of guidance per tool group, sent only when a tool of the
+#: group is offered (the instructions are tokens too).
+_GROUP_GUIDE: dict[str, str] = {
+    "core": """\
 Start with program_brief to learn what a program is and touches; then
 explain_symbol for a data name, callers_of for a paragraph, record_layout for
-a record's bytes, lint for what is wrong, and read_source to show the code at
-a cited line.
+a record's bytes, lint for what is wrong, business_rules for the decisions
+and calculations it implements, read_procedure for a whole paragraph, and
+read_source to show the code at a cited line. slice gives only the
+statements that compute a field (or that it feeds), under their paragraphs:
+read it before reading a whole program to explain one value. Before you
+answer, pass the checkable statements of your answer to check_claims.
+find_statements searches
+parsed statements (by verb, operand, literal or paragraph) in one file or
+the whole root: prefer it to a text search, which matches comments and
+misses copybook code.
 
 Across programs: codebase_overview for the whole workspace, callers_of with a
 program name for every CALL/LINK/XCTL to it, impact_of_change for what a
 change to a copybook or a field reaches, and where_from for where a field's
-value comes from. The first such call indexes every program under the root,
-which takes a while on a large one; later calls reuse the index until a file
-changes.
-
-Beyond reading code: business_rules lists the decisions, validations and
-calculations a program implements; diff_programs says what changed between
-two versions of a program (behaviour, not lines); decode_record reads a data
-file through a copybook's byte layout; gen_fixtures generates test data for
-every file, CALL, SQL and CICS boundary a program touches, scenario by
-scenario.
-
+value comes from. The first such call indexes every program under the root;
+later calls reuse the index until a file changes. PL/I and assembler programs
+(with the [pl1] / [hlasm] extras) are in the call graph, callers_of and
+program_brief too; the other tools read COBOL only.
+""",
+    "data": """\
+Data and versions: diff_programs says what changed between two versions of a
+program (behaviour, not lines); decode_record reads a data file through a
+copybook's byte layout; gen_fixtures generates test data for every file,
+CALL, SQL and CICS boundary a program touches, scenario by scenario.
+""",
+    "jcl": """\
 How programs are run (needs the [jcl] extra; without it these tools answer
 with the install command): jobs_running for every JCL step that runs a
 program, with each of its SELECT files bound to a DD and a dataset;
 dataset_users for every job, step and program that reads or writes a
 dataset; jcl_job to read one JCL file's jobs, steps and DD statements.
-"""
+""",
+}
+
+
+def instructions_for(enabled: set[str]) -> str:
+    """The server instructions for the tools in *enabled*."""
+    parts = [INSTRUCTIONS]
+    for group, names in TOOL_GROUPS.items():
+        if enabled & set(names):
+            parts.append(_GROUP_GUIDE[group])
+    hidden = [t for t in ALL_TOOLS if t not in enabled]
+    if hidden:
+        parts.append(
+            "Not offered by this server (start it with --tools all for "
+            f"them): {', '.join(hidden)}.\n"
+        )
+    return "\n".join(parts)
+
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True)
 
 File = Annotated[
     str,
-    Field(description="COBOL source file, relative to the workspace root"),
+    Field(description="Source file, relative to the root"),
 ]
 Program = Annotated[
     str | None,
-    Field(
-        description="PROGRAM-ID of one program unit, when the file holds "
-        "several (default: the outermost)"
-    ),
+    Field(description="PROGRAM-ID of a unit (default: the outermost)"),
 ]
 Limit = Annotated[
     int | None,
-    Field(description="Most items to return in a list (default 50, max 500)"),
+    Field(description="Max list length (default 50)"),
 ]
 OptionalFile = Annotated[
     str | None,
-    Field(
-        description="COBOL source file the field is declared in, relative to "
-        "the workspace root (omit it: every program declaring the name)"
-    ),
+    Field(description="File declaring the field (default: every program)"),
+]
+FullPaths = Annotated[
+    bool,
+    Field(description="Every hit's whole path, not shared with earlier hits"),
 ]
 Depth = Annotated[
     int | None,
-    Field(
-        description="Most program boundaries (dataset, CALL, DB2 table) a "
-        "path may cross (default: no limit; 0 stays in the program)"
-    ),
+    Field(description="Max program boundaries to cross (0: stay in the program)"),
 ]
 
 
-def build_server(workspace: Workspace) -> FastMCP:
-    """An MCP server answering about *workspace*, not yet running."""
+#: The tools by group. ``--tools`` takes a profile, group or tool names.
+TOOL_GROUPS: dict[str, tuple[str, ...]] = {
+    "core": (
+        "codebase_overview",
+        "program_brief",
+        "explain_symbol",
+        "callers_of",
+        "impact_of_change",
+        "where_from",
+        "record_layout",
+        "lint",
+        "business_rules",
+        "read_source",
+        "read_procedure",
+        "find_statements",
+        "slice",
+        "check_claims",
+    ),
+    "data": ("decode_record", "gen_fixtures", "diff_programs"),
+    "jcl": ("jcl_job", "jobs_running", "dataset_users"),
+}
+
+ALL_TOOLS: tuple[str, ...] = tuple(t for g in TOOL_GROUPS.values() for t in g)
+
+
+def select_tools(spec: str | None, workspace: Workspace) -> set[str]:
+    """The tool names *spec* enables over *workspace*.
+
+    *spec* is ``all``, ``auto`` (the default: ``core``, plus ``jcl`` when
+    the root holds JCL), or a comma-separated list of group and tool names.
+    Every tool definition is sent to the model on every turn, so a tool the
+    workspace cannot use is tokens spent for nothing.
+    """
+    spec = (spec or "auto").strip().lower()
+    if spec == "all":
+        return set(ALL_TOOLS)
+    if spec == "auto":
+        enabled = set(TOOL_GROUPS["core"])
+        if workspace.has_jcl():
+            enabled |= set(TOOL_GROUPS["jcl"])
+        return enabled
+    enabled = set()
+    for part in (p.strip() for p in spec.split(",")):
+        if not part:
+            continue
+        if part in TOOL_GROUPS:
+            enabled |= set(TOOL_GROUPS[part])
+        elif part in ALL_TOOLS:
+            enabled.add(part)
+        else:
+            choices = ", ".join(("all", "auto", *TOOL_GROUPS, *ALL_TOOLS))
+            raise ValueError(f"unknown tool or group {part!r} (choose from {choices})")
+    if not enabled:
+        raise ValueError("--tools selects no tool")
+    return enabled
+
+
+def compact_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """*schema* without what costs tokens and tells a model nothing: the
+    ``title`` pydantic derives from each name, and the ``anyOf [T, null]``
+    plus ``default: null`` of an optional argument (not being ``required``
+    already says it may be left out). Arguments are still validated against
+    the full signature; only the advertised schema shrinks."""
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, list):
+            return [walk(n) for n in node]
+        if not isinstance(node, dict):
+            return node
+        out = {k: walk(v) for k, v in node.items() if k != "title"}
+        variants = out.get("anyOf")
+        if isinstance(variants, list) and {"type": "null"} in variants:
+            rest = [v for v in variants if v != {"type": "null"}]
+            if len(rest) == 1 and isinstance(rest[0], dict):
+                del out["anyOf"]
+                out = {**rest[0], **out}
+        if "default" in out and out["default"] is None:
+            del out["default"]
+        return out
+
+    result: dict[str, Any] = walk(schema)
+    if isinstance(schema.get("properties"), dict):
+        # A property *named* title is an argument, not a schema keyword.
+        result["properties"] = {
+            name: walk(prop) for name, prop in schema["properties"].items()
+        }
+    return result
+
+
+def build_server(
+    workspace: Workspace,
+    tools_spec: str | None = "all",
+    max_answer_bytes: int | None = DEFAULT_ANSWER_BYTES,
+) -> FastMCP:
+    """An MCP server answering about *workspace*, not yet running, offering
+    the tools *tools_spec* selects (:func:`select_tools`), each result cut
+    to *max_answer_bytes* (:func:`~.envelope.fit_budget`; None or 0: no
+    budget) and given next-step hints (:mod:`.hints`)."""
+    enabled = select_tools(tools_spec, workspace)
     tools = CobolTools(workspace)
-    server = FastMCP("cobol-parser", instructions=INSTRUCTIONS, log_level="WARNING")
+    server = FastMCP(
+        "cobol-parser", instructions=instructions_for(enabled), log_level="WARNING"
+    )
 
     async def off_loop(
-        call: Callable[[], dict[str, Any]], ctx: MCPContext | None = None
+        name: str,
+        call: Callable[[], dict[str, Any]],
+        ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
         def locked() -> dict[str, Any]:
             # The parse cache and the stdout redirect are process-wide.
             with workspace.lock:
                 workspace.progress = _progress_reporter(ctx) if ctx else None
                 try:
-                    return call()
+                    result = call()
                 finally:
                     workspace.progress = None
+            # Hints first: they are a few dozen bytes the budget leaves be.
+            add_hints(name, result, enabled)
+            return fit_budget(result, max_answer_bytes)
 
         # A cancelled request answers at once; its thread finishes on its
         # own and only then releases the lock to the next call.
@@ -140,20 +276,98 @@ def build_server(workspace: Workspace) -> FastMCP:
         before: Annotated[int, Field(description="Lines to show before")] = 10,
         after: Annotated[int, Field(description="Lines to show after")] = 10,
     ) -> dict[str, Any]:
-        """The source lines around file:line (at most 200), numbered as an
-        editor numbers them. Use it to show the code behind a citation."""
-        return await off_loop(lambda: tools.read_source(file, line, before, after))
+        """Numbered source lines around file:line (at most 200)."""
+        return await off_loop(
+            "read_source", lambda: tools.read_source(file, line, before, after)
+        )
+
+    async def read_procedure(
+        file: File,
+        name: Annotated[str, Field(description="Paragraph or section")],
+        program: Program = None,
+    ) -> dict[str, Any]:
+        """One whole paragraph or section, numbered, COPY lines cited in
+        their copybook."""
+        return await off_loop(
+            "read_procedure", lambda: tools.read_procedure(file, name, program)
+        )
+
+    async def find_statements(
+        verb: Annotated[
+            str | None,
+            Field(description="Verb or its start: WRITE, EXEC CICS, EXEC SQL SELECT"),
+        ] = None,
+        operand: Annotated[
+            str | None, Field(description="Data or file name used by the statement")
+        ] = None,
+        role: Annotated[
+            str | None, Field(description="Operand role: read, write, condition, ...")
+        ] = None,
+        literal: Annotated[
+            str | None, Field(description="Text on the statement's line")
+        ] = None,
+        paragraph: Annotated[
+            str | None, Field(description="Only statements in this paragraph")
+        ] = None,
+        file: Annotated[
+            str | None, Field(description="Only this file (default: the whole root)")
+        ] = None,
+        program: Program = None,
+        limit: Limit = None,
+        ctx: MCPContext | None = None,
+    ) -> dict[str, Any]:
+        """Parsed statements matching every filter given (copybook code
+        included, comments not), in one file or under the root."""
+        return await off_loop(
+            "find_statements",
+            lambda: tools.find_statements(
+                verb, operand, role, literal, paragraph, file, program, limit
+            ),
+            ctx,
+        )
+
+    async def slice(  # the tool's name; shadows the builtin only here
+        file: File,
+        field: Annotated[
+            str, Field(description="Data item ('X OF Y' when it repeats)")
+        ],
+        direction: Annotated[
+            str,
+            Field(description="backward: what feeds it; forward: what it feeds"),
+        ] = "backward",
+        program: Program = None,
+        limit: Limit = None,
+        aliases: Annotated[
+            bool, Field(description="Also follow inexact REDEFINES aliases")
+        ] = False,
+    ) -> dict[str, Any]:
+        """Only the statements of one program that can affect a field (or
+        that it affects), with the IFs they run under, each cited."""
+        return await off_loop(
+            "slice",
+            lambda: tools.slice(file, field, direction, program, limit, aliases),
+        )
+
+    async def check_claims(
+        claims: Annotated[
+            list[dict[str, Any]],
+            Field(
+                description="Each {kind, subject, object, file?, program?}; kind: "
+                "calls, copies, performs, unreachable, reachable, writes_field, "
+                "sets_only_in, reads_dataset, writes_dataset, flows_to"
+            ),
+        ],
+        ctx: MCPContext | None = None,
+    ) -> dict[str, Any]:
+        """Check statements of a draft answer: each confirmed, contradicted
+        (with evidence) or not checkable (with why)."""
+        return await off_loop("check_claims", lambda: tools.check_claims(claims), ctx)
 
     async def lint(
         file: File,
         rules: Annotated[
             list[str] | None,
-            Field(
-                description="Rules to run (default: all, or cobol.yml's lint "
-                "rules): dead-code, unused-variables, move-type-check, "
-                "io-sequence, linkage-check, recursion-check, complexity, "
-                "dclgen-check, sql-cics-check"
-            ),
+            Field(description="Rule ids to run (default: all)"),
         ] = None,
         min_severity: Annotated[
             str | None,
@@ -161,108 +375,96 @@ def build_server(workspace: Workspace) -> FastMCP:
         ] = None,
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """Everything wrong with a program in one pass: dead code, unused
-        data items, MOVE type mismatches, I/O sequencing, LINKAGE problems,
-        recursion risks, complexity, DCLGEN and SQL/CICS checks. Findings are
-        worst first, each with its location on disk."""
-        return await off_loop(lambda: tools.lint(file, rules, min_severity, limit))
+        """Every lint rule over a program in one pass; findings worst first,
+        each with its location."""
+        return await off_loop(
+            "lint", lambda: tools.lint(file, rules, min_severity, limit)
+        )
 
     async def explain_symbol(
         file: File,
         name: Annotated[
             str,
             Field(
-                description="Data item, condition name (level 88), paragraph, "
-                "section or file name; qualify as 'X OF Y' when it is ambiguous"
+                description="Data, condition, paragraph or file name ('X OF Y' to qualify)"
             ),
         ],
         program: Program = None,
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """What a name is and where it is used: its declaration (with
-        PICTURE, USAGE, byte offset and length, REDEFINES, level-88 values),
-        then every reference with its role (read, write, condition, ...),
-        statement and paragraph. Suggests close names when it is not found."""
-        return await off_loop(lambda: tools.explain_symbol(file, name, program, limit))
+        """A name's declaration (PICTURE, USAGE, offset, length, REDEFINES,
+        level-88 values) and every reference with its role and paragraph."""
+        return await off_loop(
+            "explain_symbol", lambda: tools.explain_symbol(file, name, program, limit)
+        )
 
     async def program_brief(
         file: File, program: Program = None, limit: Limit = None
     ) -> dict[str, Any]:
-        """What a program is, on one page: size, entry points, calling
-        interface (USING parameters and a CALL example), files with their
-        organization and C/R/U/D use, SQL tables, called programs (dynamic
-        CALL candidates included), CICS and DL/I commands, unreachable
-        paragraphs, health grade and the worst lint findings. Start here."""
-        return await off_loop(lambda: tools.program_brief(file, program, limit))
+        """A program on one page: interface, files and their C/R/U/D use,
+        SQL tables, calls, CICS/DL/I, unreachable paragraphs, health, worst
+        lint findings; a PL/I or assembler file: its calls and includes.
+        Start here."""
+        return await off_loop(
+            "program_brief", lambda: tools.program_brief(file, program, limit)
+        )
 
     async def callers_of(
         name: Annotated[
             str,
-            Field(
-                description="Paragraph or section ('PARA OF SECTION' when the "
-                "name repeats), or a PROGRAM-ID"
-            ),
+            Field(description="Paragraph, section or PROGRAM-ID"),
         ],
         file: Annotated[
             str | None,
-            Field(
-                description="COBOL source file the paragraph is in, relative "
-                "to the workspace root; omit it to ask about a program"
-            ),
+            Field(description="File holding the paragraph; omit for a PROGRAM-ID"),
         ] = None,
         program: Program = None,
         limit: Limit = None,
         ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
-        """Who transfers control to a paragraph or section: every PERFORM,
-        PERFORM THRU range, GO TO, SORT/MERGE procedure, CICS HANDLE, SQL
-        WHENEVER and fall-through, with its location, plus whether the
-        paragraph is reachable at all. For a program, every CALL, EXEC CICS
-        LINK and XCTL to it from any program under the root (dynamic CALLs
-        included where their target can be traced)."""
-        return await off_loop(lambda: tools.callers_of(file, name, program, limit), ctx)
+        """Every PERFORM / GO TO / fall-through into a paragraph, and whether
+        it is reachable; for a PROGRAM-ID, every CALL / LINK / XCTL to it
+        under the root."""
+        return await off_loop(
+            "callers_of", lambda: tools.callers_of(file, name, program, limit), ctx
+        )
 
     async def record_layout(
         file: File,
         record: Annotated[
             str,
-            Field(
-                description="Record or group name ('X OF Y' when it repeats), "
-                "or a file (FD) name for all of its records"
-            ),
+            Field(description="Record, group or FD name"),
         ],
         program: Program = None,
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """The byte map of a record: every field in source order with level,
-        PICTURE, USAGE, byte offset and length from the start of the 01
-        record, OCCURS, REDEFINES, level-88 values and where it is declared.
-        Use it to read or build a record image or to check a field's
-        position."""
-        return await off_loop(lambda: tools.record_layout(file, record, program, limit))
+        """A record's byte map: every field with PICTURE, USAGE, offset,
+        length, OCCURS, REDEFINES and level-88 values."""
+        return await off_loop(
+            "record_layout", lambda: tools.record_layout(file, record, program, limit)
+        )
 
     async def impact_of_change(
         name: Annotated[
             str,
-            Field(
-                description="Copybook member (name or file name) or data "
-                "item ('X OF Y' when it repeats)"
-            ),
+            Field(description="Copybook member or data item"),
         ],
         file: OptionalFile = None,
         program: Program = None,
         depth: Depth = None,
         limit: Limit = None,
+        full_paths: FullPaths = False,
         ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
-        """What a change reaches. For a copybook member: every program that
-        COPYs it, directly or through another member, with the COPY lines,
-        and the fields it declares. For a field: everything its value flows
-        into, across programs, through MOVEs, arithmetic, files (joined by the
-        JCL under the root), CALL arguments and DB2 columns, each with the
-        path of statements that carries it."""
+        """What a change reaches: for a copybook, every program COPYing it;
+        for a field, everything its value flows into across programs, files,
+        CALLs and DB2 columns."""
         return await off_loop(
-            lambda: tools.impact_of_change(name, file, program, depth, limit), ctx
+            "impact_of_change",
+            lambda: tools.impact_of_change(
+                name, file, program, depth, limit, full_paths
+            ),
+            ctx,
         )
 
     async def where_from(
@@ -273,35 +475,33 @@ def build_server(workspace: Workspace) -> FastMCP:
         program: Program = None,
         depth: Depth = None,
         limit: Limit = None,
+        full_paths: FullPaths = False,
         ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
-        """Where a field's value comes from, across programs: every field,
-        file, dataset, DB2 column or CALL argument that flows into it, each
-        with the path of statements that carries it."""
+        """Where a field's value comes from across programs: the fields,
+        datasets, DB2 columns and CALL arguments that flow into it."""
         return await off_loop(
-            lambda: tools.where_from(field, file, program, depth, limit), ctx
+            "where_from",
+            lambda: tools.where_from(field, file, program, depth, limit, full_paths),
+            ctx,
         )
 
     async def codebase_overview(
         limit: Limit = None, ctx: MCPContext | None = None
     ) -> dict[str, Any]:
-        """The whole workspace on one page: every program with its health
-        grade and how many programs it calls and is called by; the call
-        graph's entry programs, most-called programs, programs called but
-        not present, and call cycles; the most-used and missing copybooks;
-        the worst health scores; and paragraphs duplicated between programs.
-        Start here for a codebase you do not know."""
-        return await off_loop(lambda: tools.codebase_overview(limit), ctx)
+        """The whole workspace on one page: programs (COBOL, PL/I, assembler)
+        and health grades, call graph, missing programs and copybooks,
+        duplicated code."""
+        return await off_loop(
+            "codebase_overview", lambda: tools.codebase_overview(limit), ctx
+        )
 
     async def business_rules(
         file: File,
         program: Program = None,
         kind: Annotated[
             str | None,
-            Field(
-                description="Only rules of this kind: decision, validation "
-                "or calculation"
-            ),
+            Field(description="decision, validation or calculation"),
         ] = None,
         procedure: Annotated[
             str | None,
@@ -309,23 +509,17 @@ def build_server(workspace: Workspace) -> FastMCP:
         ] = None,
         include_technical: Annotated[
             bool,
-            Field(
-                description="Also list technical rules (FILE STATUS, "
-                "end-of-file flags, SQLCODE, EIB fields)"
-            ),
+            Field(description="Include FILE STATUS / EOF / SQLCODE rules"),
         ] = False,
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """The business rules a program implements: every IF / EVALUATE /
-        SEARCH as a decision table (one branch per condition, with the
-        actions it takes), promoted to a validation when a branch rejects,
-        and arithmetic as calculations with a formula. Each rule has its
-        inputs, outputs, the conditions that guard it, the paragraphs that
-        reach it and its location; level-88 names are spelled out."""
+        """A program's decisions, validations and calculations as decision
+        tables, with inputs, outputs, guards and locations."""
         return await off_loop(
+            "business_rules",
             lambda: tools.business_rules(
                 file, program, kind, procedure, include_technical, limit
-            )
+            ),
         )
 
     async def diff_programs(
@@ -339,28 +533,18 @@ def build_server(workspace: Workspace) -> FastMCP:
         new_program: Program = None,
         category: Annotated[
             str | None,
-            Field(
-                description="Only changes of this category: program, file, "
-                "data or procedure"
-            ),
+            Field(description="program, file, data or procedure"),
         ] = None,
         rename_threshold: Annotated[
             float | None,
-            Field(
-                description="How alike (0-1, default 0.8) two paragraph "
-                "bodies must be to count as a rename rather than a removal "
-                "and an addition"
-            ),
+            Field(description="Similarity counted as a rename (default 0.8)"),
         ] = None,
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """What changed in a program's behaviour between two versions:
-        PROGRAM-ID and interface, files, data items (PICTURE, USAGE, VALUE,
-        OCCURS, REDEFINES, level-88 values, field order with byte offsets),
-        paragraphs added, removed, renamed or moved, and changed statements
-        (PERFORM / CALL targets, MOVE targets, conditions). Reformatting,
-        comments and sequence numbers are not changes."""
+        """What changed in behaviour between two versions of a program:
+        interface, files, data items, paragraphs and statements."""
         return await off_loop(
+            "diff_programs",
             lambda: tools.diff_programs(
                 old_file,
                 new_file,
@@ -369,23 +553,17 @@ def build_server(workspace: Workspace) -> FastMCP:
                 category,
                 rename_threshold,
                 limit,
-            )
+            ),
         )
 
     async def decode_record(
         copybook: Annotated[
             str,
-            Field(
-                description="Copybook (or program) holding the record "
-                "layout, relative to the root"
-            ),
+            Field(description="Copybook or program with the layout"),
         ],
         data_file: Annotated[
             str | None,
-            Field(
-                description="Data file to read, relative to the root; omit "
-                "it for the layout and its REDEFINES views only"
-            ),
+            Field(description="Data file (omit for the layout only)"),
         ] = None,
         record: Annotated[
             str | None,
@@ -393,10 +571,7 @@ def build_server(workspace: Workspace) -> FastMCP:
         ] = None,
         view: Annotated[
             str | None,
-            Field(
-                description="REDEFINES overlay to read the bytes through "
-                "(names in 'views'; default: the record as declared)"
-            ),
+            Field(description="REDEFINES view to read through"),
         ] = None,
         skip: Annotated[int, Field(description="Records to skip first")] = 0,
         max_records: Annotated[
@@ -404,24 +579,19 @@ def build_server(workspace: Workspace) -> FastMCP:
         ] = None,
         fields: Annotated[
             list[str] | None,
-            Field(
-                description="Only these fields (default: every field, up to " "limit)"
-            ),
+            Field(description="Only these fields"),
         ] = None,
         charset: Annotated[
             str | None,
-            Field(description="ascii or ebcdic (default: cobol.yml, else ascii)"),
+            Field(description="ascii or ebcdic"),
         ] = None,
         endian: Annotated[
             str | None,
-            Field(description="Binary byte order: auto, big, little or native"),
+            Field(description="auto, big, little or native"),
         ] = None,
         record_format: Annotated[
             str | None,
-            Field(
-                description="fixed (RECFM=F/FB), variable (RECFM=V/VB, with "
-                "RDWs), variable-bare or auto"
-            ),
+            Field(description="fixed, variable, variable-bare or auto"),
         ] = None,
         record_separator: Annotated[
             str | None,
@@ -429,19 +599,14 @@ def build_server(workspace: Workspace) -> FastMCP:
         ] = None,
         record_length: Annotated[
             int | None,
-            Field(
-                description="Bytes per fixed-length record, when the file's "
-                "LRECL is not the layout's length"
-            ),
+            Field(description="LRECL when not the layout's length"),
         ] = None,
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """Read a data file (a record image, an EBCDIC extract) through a
-        copybook's byte layout: each record's field values, with the bytes
-        that do not decode as their PICTURE reported per field. COMP-3,
-        binary, zoned and signed fields are decoded exactly. Without a data
-        file: the layout's fields with offsets and its REDEFINES views."""
+        """Decode a data file's records through a copybook layout (COMP-3,
+        binary, zoned, EBCDIC); without a data file, the layout and views."""
         return await off_loop(
+            "decode_record",
             lambda: tools.decode_record(
                 copybook,
                 data_file,
@@ -456,7 +621,7 @@ def build_server(workspace: Workspace) -> FastMCP:
                 record_separator,
                 record_length,
                 limit,
-            )
+            ),
         )
 
     async def gen_fixtures(
@@ -464,18 +629,11 @@ def build_server(workspace: Workspace) -> FastMCP:
         program: Program = None,
         mode: Annotated[
             str,
-            Field(
-                description="happy (one scenario), branches (one per "
-                "reachable branch arm) or all (branches plus empty input, "
-                "error status and boundary values)"
-            ),
+            Field(description="happy, branches or all"),
         ] = "happy",
         seed: Annotated[
             int | None,
-            Field(
-                description="Seed for the generated values (default: "
-                "cobol.yml's seed, else 0); the same seed gives the same data"
-            ),
+            Field(description="Random seed (default: cobol.yml, else 0)"),
         ] = None,
         rows: Annotated[
             int | None,
@@ -487,14 +645,13 @@ def build_server(workspace: Workspace) -> FastMCP:
         ] = None,
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """Test data for a program: scenarios (a happy path, or one per
-        branch arm), each with the values every mocked boundary supplies
-        (file records, CALL parameters, SQL rows, CICS data, FILE STATUS /
-        SQLCODE) and what to assert afterwards (call counts, field values
-        that constant-fold). Each branch scenario says whether its own data
-        really reaches the branch it is named for."""
+        """Test-data scenarios for a program: values for every mocked file,
+        CALL, SQL and CICS boundary, and what to assert afterwards."""
         return await off_loop(
-            lambda: tools.gen_fixtures(file, program, mode, seed, rows, scenario, limit)
+            "gen_fixtures",
+            lambda: tools.gen_fixtures(
+                file, program, mode, seed, rows, scenario, limit
+            ),
         )
 
     async def jcl_job(
@@ -508,19 +665,13 @@ def build_server(workspace: Workspace) -> FastMCP:
         ] = None,
         step: Annotated[
             str | None,
-            Field(
-                description="Only the step of this name; a procedure step "
-                "matches by its own name too (STEP or INVOKE.STEP)"
-            ),
+            Field(description="Only this step (STEP or INVOKE.STEP)"),
         ] = None,
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """Read one JCL file: each job's steps (program, PARM, COND or IF
-        condition), every DD statement (dataset, DISP and what it means,
-        SYSOUT, DUMMY, in-stream data, RECFM/LRECL), cataloged and in-stream
-        procedures expanded, and the COBOL source file of each program run.
-        Lines in a procedure member are cited in that member."""
-        return await off_loop(lambda: tools.jcl_job(file, job, step, limit))
+        """One JCL file's jobs, steps and DD statements, procedures
+        expanded, with the COBOL source of each program run."""
+        return await off_loop("jcl_job", lambda: tools.jcl_job(file, job, step, limit))
 
     async def jobs_running(
         program: Annotated[
@@ -529,29 +680,24 @@ def build_server(workspace: Workspace) -> FastMCP:
         ],
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """Every JCL step under the workspace root that runs a program
-        (PGM=, or launched through IKJEFT01 / DFSRRC00), with its DD
-        statements. When the program's COBOL source is under the root, each
-        SELECT file is bound to its DD and dataset, and a DD the program
-        needs that the step does not code is listed."""
-        return await off_loop(lambda: tools.jobs_running(program, limit))
+        """Every JCL step that runs a program, each SELECT file bound to its
+        DD and dataset, and DDs the step does not code."""
+        return await off_loop(
+            "jobs_running", lambda: tools.jobs_running(program, limit)
+        )
 
     async def dataset_users(
         dataset: Annotated[
             str,
-            Field(
-                description="Dataset name; a GDG generation or member is "
-                "matched by its base name unless given. z/OS filter "
-                "wildcards: % one character, * within one qualifier "
-                "(PROD.INV.*), ** any number of qualifiers (PROD.**)"
-            ),
+            Field(description="Dataset name; z/OS wildcards %, *, ** allowed"),
         ],
         limit: Limit = None,
     ) -> dict[str, Any]:
-        """Every job, step and program under the workspace root that uses a
-        dataset, and how (DISP=: read, create, extend, exclusive). Pair with
-        jobs_running to get from a DD to the COBOL file that reads it."""
-        return await off_loop(lambda: tools.dataset_users(dataset, limit))
+        """Every job, step and program that uses a dataset, and whether it
+        reads, creates, extends or writes it."""
+        return await off_loop(
+            "dataset_users", lambda: tools.dataset_users(dataset, limit)
+        )
 
     for tool in (
         codebase_overview,
@@ -563,6 +709,10 @@ def build_server(workspace: Workspace) -> FastMCP:
         record_layout,
         lint,
         read_source,
+        read_procedure,
+        find_statements,
+        slice,
+        check_claims,
         business_rules,
         diff_programs,
         decode_record,
@@ -571,7 +721,12 @@ def build_server(workspace: Workspace) -> FastMCP:
         dataset_users,
         jcl_job,
     ):
+        if tool.__name__ not in enabled:
+            continue
         server.add_tool(tool, annotations=_READ_ONLY, structured_output=True)
+        registered = server._tool_manager.get_tool(tool.__name__)
+        if registered is not None:
+            registered.parameters = compact_schema(registered.parameters)
     for spec in PROMPTS:
         server.add_prompt(
             Prompt.from_function(
@@ -603,6 +758,19 @@ def _progress_reporter(
     return report
 
 
-def run_stdio(workspace: Workspace) -> None:
-    """Serve *workspace* over stdio until the client disconnects."""
-    build_server(workspace).run("stdio")
+def run_stdio(
+    workspace: Workspace,
+    tools_spec: str | None = "auto",
+    max_answer_bytes: int | None = DEFAULT_ANSWER_BYTES,
+    *,
+    warm_up: bool = True,
+) -> None:
+    """Serve *workspace* over stdio until the client disconnects; with
+    *warm_up*, every program's facts are computed in the background meanwhile,
+    so the first cross-program question finds them ready."""
+    server = build_server(workspace, tools_spec, max_answer_bytes)
+    if warm_up:
+        from .facts import store_for
+
+        store_for(workspace).warm()
+    server.run("stdio")

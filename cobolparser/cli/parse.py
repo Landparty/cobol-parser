@@ -4606,14 +4606,48 @@ def _build_mcp_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Parsed programs to keep in memory (default: 32)",
     )
     p.add_argument(
+        "--tools",
+        default="auto",
+        metavar="SPEC",
+        help="Tools to offer: auto (default: core, plus the JCL tools when "
+        "the root holds JCL), all, or a comma-separated list of groups "
+        "(core, data, jcl) and tool names. Every tool's definition is sent "
+        "to the model on every turn, so fewer tools cost fewer tokens",
+    )
+    p.add_argument(
+        "--max-answer-bytes",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Size budget of one tool result: longer lists are halved until "
+        "it fits, each cut listed under truncated (default: 24000; 0: none)",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Processes that parse programs for the cross-program indexes "
+        "(default: the CPUs, at most 8; 1: parse in the server process)",
+    )
+    p.add_argument(
         "--cache-dir",
         default=None,
         metavar="DIR",
-        help=(
-            "Keep each program's part of the root-wide indexes in DIR, so a "
-            "new session parses only the programs (and copybooks) changed "
-            "since the last one"
-        ),
+        help="Where per-file facts are kept between server starts, so a "
+        "restarted server parses only what changed (default: "
+        "$XDG_CACHE_HOME/cobol-parser/mcp, else ~/.cache/cobol-parser/mcp)",
+    )
+    p.add_argument(
+        "--no-disk-cache",
+        action="store_true",
+        help="Keep facts in memory only: every start parses the whole root",
+    )
+    p.add_argument(
+        "--no-warm-up",
+        action="store_true",
+        help="Do not parse the root in the background at start; the first "
+        "cross-program question does it instead",
     )
     p.set_defaults(func=_cmd_mcp)
 
@@ -4627,13 +4661,12 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
             f"pip install 'cobol-parser[mcp]' ({exc})"
         )
     from ..mcp.envelope import ToolError
+    from ..mcp.server import select_tools
     from ..mcp.workspace import Workspace
 
     config = args._project_config if getattr(args, "_config_explicit", False) else None
     try:
-        workspace = Workspace(
-            args.root, config, cache_size=args.cache_size, cache_dir=args.cache_dir
-        )
+        workspace = Workspace(args.root, config, cache_size=args.cache_size)
     except (ToolError, ConfigError) as exc:
         _fail(str(exc))
     for directory, reason in workspace.refused_copybook_dirs:
@@ -4644,7 +4677,29 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
             f"readable: {reason}",
             file=sys.stderr,
         )
-    run_stdio(workspace)
+    try:
+        select_tools(args.tools, workspace)
+    except ValueError as exc:
+        _fail(str(exc))
+    from ..mcp.envelope import DEFAULT_ANSWER_BYTES
+
+    budget = (
+        DEFAULT_ANSWER_BYTES if args.max_answer_bytes is None else args.max_answer_bytes
+    )
+    if budget < 0:
+        _fail("--max-answer-bytes must be 0 or more")
+    from ..mcp.facts import FactsStore, default_cache_dir
+
+    if args.workers is not None and args.workers < 1:
+        _fail("--workers must be 1 or more")
+    workspace.facts_store = FactsStore(
+        workspace,
+        workers=args.workers,
+        cache_dir=(
+            None if args.no_disk_cache else (args.cache_dir or default_cache_dir())
+        ),
+    )
+    run_stdio(workspace, args.tools, budget or None, warm_up=not args.no_warm_up)
 
 
 def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:

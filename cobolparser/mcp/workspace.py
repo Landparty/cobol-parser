@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import sys
 import threading
 from collections import OrderedDict
@@ -44,6 +45,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .._lines import split_source_lines
 from ..config.project import (
     CONFIG_FILE_NAMES,
     ConfigError,
@@ -286,6 +288,50 @@ class ParsedProgram:
         return located
 
 
+#: Suffixes of the sources the tools do not parse, with their language.
+OTHER_SOURCE_LANGUAGES: dict[str, str] = {
+    ".asm": "assembler",
+    ".s": "assembler",
+    ".mac": "assembler",
+    ".hlasm": "assembler",
+    ".alc": "assembler",
+    ".pli": "PL/I",
+    ".pl1": "PL/I",
+    ".bms": "BMS mapset",
+    ".rexx": "REXX",
+    ".rex": "REXX",
+    ".c": "C",
+    ".ezt": "Easytrieve",
+}
+
+#: ``LABEL CSECT`` / ``LABEL START`` / `` ENTRY NAME`` in an assembler source.
+_ASM_SECTION = re.compile(r"^([A-Z@#$][A-Z0-9@#$]{0,7})\s+(?:CSECT|RSECT|START)\b")
+_ASM_ENTRY = re.compile(r"^\s+ENTRY\s+([A-Z@#$][A-Z0-9@#$,]*)")
+
+#: Bytes of an assembler source read for its section names.
+_ASM_SCAN_BYTES = 256 * 1024
+
+
+def _assembler_names(path: Path) -> set[str]:
+    """The CSECT / START labels and ENTRY names *path* declares."""
+    try:
+        with path.open("rb") as handle:
+            text = handle.read(_ASM_SCAN_BYTES).decode("latin-1")
+    except OSError:
+        return set()
+    names: set[str] = set()
+    for line in split_source_lines(text.upper()):
+        if line.startswith("*"):
+            continue
+        match = _ASM_SECTION.match(line)
+        if match:
+            names.add(match.group(1))
+        entry = _ASM_ENTRY.match(line)
+        if entry:
+            names.update(n for n in entry.group(1).split(",") if n)
+    return names
+
+
 class Workspace:
     """A root directory, its ``cobol.yml``, and a cache of parsed programs.
 
@@ -299,12 +345,8 @@ class Workspace:
         root: str | Path,
         config: ProjectConfig | None = None,
         cache_size: int = DEFAULT_CACHE_SIZE,
-        cache_dir: str | Path | None = None,
     ) -> None:
         self.root = Path(root).resolve()
-        #: Where the root-wide indexes keep each program's facts between
-        #: sessions (``mcp --cache-dir``); None keeps them in memory only.
-        self.cache_dir = str(cache_dir) if cache_dir is not None else None
         if not self.root.is_dir():
             raise ToolError(f"workspace root is not a directory: {root}")
         #: Copybook directories the config named that were refused outright
@@ -333,6 +375,9 @@ class Workspace:
         #: so a client sees the first cross-program call is alive. Set by the
         #: server around one call; None when nobody listens.
         self.progress: Callable[[float, float | None, str], None] | None = None
+        #: The per-file facts the cross-program indexes are assembled from
+        #: (:class:`.facts.FactsStore`); made on first use when not set.
+        self.facts_store: Any = None
         if config is not None:
             self._use_config(config)
         else:
@@ -434,6 +479,13 @@ class Workspace:
             )
         return kept
 
+    def under_root(self, path: Path) -> bool:
+        """Whether *path*, with every link resolved, is under the root."""
+        try:
+            return _under(path.resolve(), self.root)
+        except (OSError, RuntimeError):
+            return False
+
     def proc_directories(self) -> tuple[list[Path], list[str]]:
         """``cobol.yml``'s ``proc_path`` directories: those under the root
         (resolved), and the entries skipped because they are not. JCL PROCs
@@ -529,6 +581,7 @@ class Workspace:
     def program(self, file: str) -> ParsedProgram:
         """The parsed program in *file*, from the cache when still current."""
         path = self.resolve(file)
+        self._refuse_other_language(path)
         key = str(path)
         cached = self._cache.get(key)
         if cached is not None and all(
@@ -542,6 +595,20 @@ class Workspace:
         while len(self._cache) > self.cache_size:
             self._cache.popitem(last=False)
         return parsed
+
+    def _refuse_other_language(self, path: Path) -> None:
+        """A PL/I or assembler source is no COBOL program: say which tools
+        do read it rather than report a failed COBOL parse."""
+        from .languages import language_of
+
+        language = language_of(path)
+        if language is None or path.suffix.lower() in self._program_suffixes():
+            return
+        raise ToolError(
+            f"{self.display(path)} is {language} source, not COBOL: "
+            "program_brief, callers_of (by program name), codebase_overview "
+            "and read_source read it; the other tools are COBOL only"
+        )
 
     def cached_or_parse(self, path: Path) -> ParsedProgram:
         """*path* parsed, from the cache when current, else parsed afresh
@@ -604,6 +671,44 @@ class Workspace:
                     found.append(path)
         return found
 
+    def other_sources(self) -> dict[str, list[tuple[Path, str]]]:
+        """Source files under the root these tools do not parse (assembler,
+        PL/I, BMS, REXX, ...), by the program names they define: the file
+        stem (a load module is named after its member) plus, for assembler,
+        each ``CSECT`` / ``START`` label and ``ENTRY`` name. Each value is a
+        list of ``(path, language)``. A CALL to one of these names is a call
+        into the workspace, not to a missing program.
+
+        A PL/I or assembler source whose parser is installed is analyzed
+        (:mod:`.languages`), so it is not one of these."""
+        from .languages import LANGUAGE_SUFFIXES, parser_available
+
+        found: dict[str, list[tuple[Path, str]]] = {}
+        programs = self._program_suffixes()
+        analyzed = {
+            suffix
+            for suffix, language in LANGUAGE_SUFFIXES.items()
+            if parser_available(language)
+        }
+        suffixes = set(OTHER_SOURCE_LANGUAGES) - programs - analyzed
+        for path in self._files_with_suffix(suffixes):
+            language = OTHER_SOURCE_LANGUAGES[path.suffix.lower()]
+            names = {path.stem.upper()}
+            if language == "assembler":
+                names |= _assembler_names(path)
+            for name in names:
+                found.setdefault(name, []).append((path, language))
+        return found
+
+    def has_jcl(self) -> bool:
+        """Whether any JCL job or procedure file is under the root, which is
+        what decides that the JCL tools are worth offering."""
+        suffixes = {".jcl", ".job", ".prc", ".proc"}
+        for _directory, names in self._walk():
+            if any(Path(n).suffix.lower() in suffixes for n in names):
+                return True
+        return bool(self.config.proc_path)
+
     def tree_stamps(self) -> dict[str, Stamp]:
         """The stamp of every directory under the root: a file added to or
         removed from one changes its mtime, so an index built over the root
@@ -631,19 +736,6 @@ class Workspace:
             value, stamps = build()
         self._indexes[name] = (value, stamps)
         return value
-
-    def facts_cache(self, namespace: str) -> Any:
-        """A :class:`~cobolparser._facts_cache.FactsCache` for one index's
-        per-program facts under :attr:`cache_dir`, or None without one. Its
-        key holds the root and the whole config, so a ``cobol.yml`` edit (a
-        new copybook path, a ``>>DEFINE``) never serves an old answer."""
-        if self.cache_dir is None:
-            return None
-        from .._facts_cache import FactsCache
-
-        return FactsCache(
-            self.cache_dir, f"mcp-{namespace}", (str(self.root), repr(self.config))
-        )
 
     def report_progress(self, done: float, total: float | None, message: str) -> None:
         """Pass progress to whoever listens; a listener that fails (a client

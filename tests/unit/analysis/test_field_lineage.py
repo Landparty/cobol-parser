@@ -639,3 +639,47 @@ def test_renames_item_that_cannot_be_placed_is_a_caveat() -> None:
         c.startswith("RENAMES item R-AB not traced") and "NOPE" in c
         for c in report.caveats
     )
+
+
+WRITE_FROM_FLAT = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. FLATOUT.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT OUT-FILE ASSIGN TO OUTDD.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  OUT-FILE.
+       01  OUT-REC                PIC X(20).
+       WORKING-STORAGE SECTION.
+       01  WS-REC.
+           05  WS-ID              PIC X(10).
+           05  WS-AMT             PIC 9(6).
+       01  WS-LONG                PIC X(30).
+       PROCEDURE DIVISION.
+           WRITE OUT-REC FROM WS-REC
+           WRITE OUT-REC FROM WS-LONG
+           GOBACK.
+"""
+
+
+class TestWriteFromFlatRecord:
+    """WRITE flat-REC FROM structured-REC puts each source field on the
+    file at its own bytes, exactly, instead of the whole record."""
+
+    def test_source_fields_reach_their_own_bytes(self) -> None:
+        result = parse_cobol(WRITE_FROM_FLAT, "FLATOUT.cbl")
+        assert result.ast is not None
+        report = FieldFlowAnalyzer().analyze(result.ast)
+        to_file = {
+            (e.source.label(), e.target.label(), e.exact)
+            for e in report.edges
+            if e.target.label().startswith("file:")
+        }
+        assert ("WS-REC.WS-ID", "file:OUTDD@0+10", True) in to_file
+        assert ("WS-REC.WS-AMT", "file:OUTDD@10+6", True) in to_file
+        assert not any(
+            src.startswith("WS-REC") and "@0+20" in dst for src, dst, _ in to_file
+        )
+        # A source longer than the record is truncated: through the record.
+        assert ("OUT-REC", "file:OUTDD@0+20", True) in to_file

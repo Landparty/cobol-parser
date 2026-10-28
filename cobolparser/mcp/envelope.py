@@ -12,6 +12,8 @@ is a change to the surface, so it bumps :data:`MCP_SURFACE_VERSION`.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -116,3 +118,63 @@ class Response:
         if program is not None:
             result["program"] = program
         return result
+
+
+#: Default size budget of one serialized result, in bytes (``--max-answer-
+#: bytes``): about 6k tokens. A larger answer is mostly lists a model skims.
+DEFAULT_ANSWER_BYTES = 24_000
+
+
+def _size(value: Any) -> int:
+    return len(json.dumps(value, default=str, separators=(",", ":")))
+
+
+def _lists(node: Any, path: str) -> Iterator[tuple[str, list[Any], Any, Any]]:
+    """Every list under *node* as ``(dotted path, list, parent, key)``."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            sub = f"{path}.{key}" if path else str(key)
+            if isinstance(value, list):
+                yield sub, value, node, key
+            yield from _lists(value, sub)
+    elif isinstance(node, list):
+        for number, value in enumerate(node):
+            yield from _lists(value, f"{path}[{number}]")
+
+
+def fit_budget(result: dict[str, Any], max_bytes: int | None) -> dict[str, Any]:
+    """*result* with its answer's longest lists halved until the whole
+    result fits in *max_bytes*, each cut recorded in ``truncated`` (with
+    ``reason: "answer budget"``) like a ``limit`` cut. Lists are cut from
+    the end, so an item that refers to an earlier one (``from_hit``) still
+    finds it. A list is never cut below one item; the result may then stay
+    over budget."""
+    if not max_bytes or _size(result) <= max_bytes:
+        return result
+    answer = result.get("answer")
+    truncated: list[dict[str, Any]] = result.setdefault("truncated", [])
+    while _size(result) > max_bytes:
+        candidates = [
+            (_size(items), path, items, parent, key)
+            for path, items, parent, key in _lists(answer, "")
+            if len(items) > 1
+        ]
+        if not candidates:
+            break
+        _, path, items, parent, key = max(candidates, key=lambda c: c[0])
+        keep = len(items) // 2
+        entry = next((t for t in truncated if t.get("field") == path), None)
+        if entry is None:
+            truncated.append(
+                {
+                    "field": path,
+                    "shown": keep,
+                    "total": len(items),
+                    "reason": "answer budget",
+                }
+            )
+        else:
+            entry["shown"] = keep
+            entry["reason"] = "answer budget"
+        parent[key] = items[:keep]
+    return result

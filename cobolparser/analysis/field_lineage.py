@@ -138,6 +138,16 @@ _CLOCK_ACCEPT_SOURCES = frozenset({"DATE", "DAY", "DAY-OF-WEEK", "TIME"})
 #: than a copy of it.
 VALUE_CHANGING_KINDS = frozenset({"arith", "string", "aggregate", "sql-expr"})
 
+#: Statements whose exact, unconditional edge into a field replaces all of
+#: its value: what the field held before cannot reach a later read of it in
+#: the same paragraph (:attr:`FieldFlowReport.overwrites`). ``ADD`` and the
+#: string verbs keep part of the old value, so they are not here; a READ
+#: INTO at end of file or an SQL SELECT INTO finding no row leaves the field
+#: as it was, so a consumer says "may be overwritten" for those.
+OVERWRITING_STATEMENTS = frozenset(
+    {"MOVE", "READ INTO", "RETURN INTO", "EXEC SQL", "ACCEPT"}
+)
+
 # Leading ASSIGN-name segments that are a device class or organization code,
 # never part of the DD name (``UT-S-INFILE`` is DD ``INFILE``). The same list
 # the LegacyLens backend's ``normalize_ddname`` strips, so the two agree on
@@ -428,6 +438,11 @@ class FieldFlowReport:
     summary: list[PortFlow] = field(default_factory=list)
     key_uses: list[KeyUse] = field(default_factory=list)
     caveats: list[str] = field(default_factory=list)
+    #: The edges that replace a field's whole value unconditionally, in a
+    #: named paragraph (see :data:`OVERWRITING_STATEMENTS`): a value written
+    #: to that field earlier in the paragraph does not reach a read of it
+    #: later in the paragraph.
+    overwrites: list[LineageEdge] = field(default_factory=list)
     #: Items a statement changes in place, from their own value (``ADD 1
     #: TO WS``, ``MULTIPLY 100 BY WS``, ``COMPUTE WS = WS * 2``): one
     #: source == target edge each (#748). Not in ``edges``, which never
@@ -452,6 +467,7 @@ class FieldFlowReport:
             "key_uses": [k.to_dict() for k in self.key_uses],
             "in_place": [e.to_dict() for e in self.in_place],
             "caveats": list(self.caveats),
+            "overwrites": [e.to_dict() for e in self.overwrites],
             "statistics": {
                 "items": len(self.items),
                 "ports": len(self.ports),
@@ -498,20 +514,19 @@ def apply_source_map(
     """
     if not source_map:
         return report
-    edges: list[LineageEdge] = []
-    for edge in report.edges:
-        origin = source_map.get(edge.line) if edge.line else None
-        if origin is not None:
-            edge = replace(edge, origin_file=origin[0], origin_line=origin[1])
-        edges.append(edge)
-    report.edges = edges
-    in_place: list[LineageEdge] = []
-    for edge in report.in_place:
-        origin = source_map.get(edge.line) if edge.line else None
-        if origin is not None:
-            edge = replace(edge, origin_file=origin[0], origin_line=origin[1])
-        in_place.append(edge)
-    report.in_place = in_place
+
+    def mapped(edges: list[LineageEdge]) -> list[LineageEdge]:
+        out: list[LineageEdge] = []
+        for edge in edges:
+            origin = source_map.get(edge.line) if edge.line else None
+            if origin is not None:
+                edge = replace(edge, origin_file=origin[0], origin_line=origin[1])
+            out.append(edge)
+        return out
+
+    report.edges = mapped(report.edges)
+    report.overwrites = mapped(report.overwrites)
+    report.in_place = mapped(report.in_place)
     return report
 
 
@@ -742,6 +757,16 @@ class FieldFlowAnalyzer:
         )
         report.summary = self._summarize(report.edges, report.in_place)
         report.caveats = list(self._caveats)
+        report.overwrites = [
+            edge
+            for edge in report.edges
+            if edge.target.kind == ITEM
+            and edge.exact
+            and not edge.guarded
+            and edge.paragraph is not None
+            and edge.line > 0
+            and edge.statement in OVERWRITING_STATEMENTS
+        ]
         return report
 
     def _caveat(self, text: str) -> None:
@@ -1878,9 +1903,16 @@ class FieldFlowAnalyzer:
             return
         verb = "REWRITE" if isinstance(stmt, IORewriteStatement) else "WRITE"
         for record in self._operand(stmt.record_name, ROLE_READ):
+            # WRITE flat-REC FROM structured-REC: the record has no fields
+            # of its own, so going through it would map every source field
+            # onto the whole record (inexact) and on to every byte of the
+            # file. The bytes written are the source's, field for field.
+            direct: list[_Ref] = []
             if stmt.from_clause:
                 for src in self._refs(stmt.from_clause, ROLE_READ):
                     self._overlay(src, record, "move", ctx, f"{verb} FROM")
+                    if self._writes_through(src, record):
+                        direct.append(self._as_ref(src))
             root = self._items[record].root
             file_name = self._record_file.get(root)
             if file_name is None:
@@ -1889,15 +1921,31 @@ class FieldFlowAnalyzer:
                     "could find, so its file is not traced"
                 )
                 continue
-            self._to_port(
-                record,
-                self._file_port(file_name),
-                "write",
-                ctx,
-                verb,
-                into_program=False,
-                out_of_program=True,
-            )
+            for operand in direct or [self._as_ref(record)]:
+                self._to_port(
+                    operand,
+                    self._file_port(file_name),
+                    "write",
+                    ctx,
+                    verb,
+                    into_program=False,
+                    out_of_program=True,
+                )
+
+    def _writes_through(self, source: str | _Ref, record: str) -> bool:
+        """Whether ``WRITE record FROM source`` puts *source*'s fields on the
+        file at their own offsets: *record* is elementary,
+        *source* a group read whole that fits in it (a longer one would be
+        truncated, which the pieces would not show)."""
+        ref = self._as_ref(source)
+        src, rec = self._items.get(ref.qname), self._items.get(record)
+        if src is None or rec is None or rec.children or not src.children:
+            return False
+        if ref.window is not None or ref.loose_window:
+            return False
+        if self._pieces(ref) is None or self._pieces(self._as_ref(record)) is None:
+            return False
+        return bool(src.length) and bool(rec.length) and src.length <= rec.length
 
     def _visit_report_writer(self, stmt: CobolStatement, ctx: _Context) -> None:
         """GENERATE / TERMINATE: the ``SOURCE`` / ``SUM`` operands of the

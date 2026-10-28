@@ -196,3 +196,17 @@ class TestSignature:
         signature = ProgramSignatureExtractor().analyze(parse_cobol(source).ast)
         assert "is_function" not in signature.entry_points[0].to_dict()
         assert signature.entry_points[0].call_example() == 'CALL "P" USING A'
+
+
+class TestMcpCallers:
+    def test_callers_of_a_function(self, tmp_path: Path):
+        from cobolparser.config.project import ProjectConfig
+        from cobolparser.mcp import CobolTools, Workspace
+
+        (tmp_path / "fn.cbl").write_text(FUNCTION_AND_CALLER)
+        tools = CobolTools(Workspace(tmp_path, ProjectConfig()))
+        answer = tools.callers_of(None, "DOUBLER")["answer"]
+        assert answer["calling_programs"] == ["CALLER"]
+        lines = [c["location"]["line"] for c in answer["callers"]]
+        assert lines == [24, 25, 26]
+        assert {c["via"] for c in answer["callers"]} == {"FUNCTION"}

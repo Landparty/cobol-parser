@@ -15,6 +15,7 @@ import dataclasses
 import os
 import random
 import zlib
+from collections.abc import Callable
 
 from ..analysis.boundary_inventory import (
     Boundary,
@@ -1183,7 +1184,12 @@ class ProgramFixtureGenerator:
         callee_paths: list[str] | None,
         *,
         debug_lines: bool = False,
+        accept: Callable[[str], bool] | None = None,
     ) -> tuple[dict[str, ProgramLayoutIndex], dict[str, CobolProgram]]:
+        """The callees *ast* CALLs statically, found as source files in
+        *callee_paths*. *accept*, when given, vets each file found before it
+        is opened (the MCP server's path guard); a refused file is treated
+        as not found."""
         callee_indexes: dict[str, ProgramLayoutIndex] = {}
         callee_asts: dict[str, CobolProgram] = {}
 
@@ -1209,7 +1215,7 @@ class ProgramFixtureGenerator:
             if not name or name in callee_asts:
                 continue
             found = self._find_callee_file(name, callee_paths)
-            if found is None:
+            if found is None or (accept is not None and not accept(found)):
                 continue
             try:
                 callee_index = ProgramLayoutIndex.from_file(
