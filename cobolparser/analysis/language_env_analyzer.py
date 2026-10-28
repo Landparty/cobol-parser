@@ -339,6 +339,31 @@ def _collect_text_fields(stmt: CobolStatement) -> list[str]:
     return fields
 
 
+def function_references(
+    stmt: CobolStatement, user_functions: frozenset[str] = frozenset()
+) -> list[str]:
+    """Names of the functions ``FUNCTION name`` invokes in *stmt*, in order.
+
+    An intrinsic's name is always recognized; so is each of
+    *user_functions*, the user-defined functions (FUNCTION-ID units) the
+    statement's unit declares in its REPOSITORY paragraph. Any other name is
+    only taken when ``FUNCTION`` is a separate word before it, since a
+    concatenated ``FUNCTIONX`` may as well be a data name.
+    """
+    names: list[str] = []
+    for text in _collect_text_fields(stmt):
+        for match in _FUNCTION_RE.finditer(text):
+            name = match.group(2).upper()
+            if (
+                not match.group(1)
+                and name not in _IBM_INTRINSIC_FUNCTIONS
+                and name not in user_functions
+            ):
+                continue
+            names.append(name)
+    return names
+
+
 class LanguageEnvironmentAnalyzer:
     """Detect COBOL intrinsic function usage and IBM LE callable service calls.
 

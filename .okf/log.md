@@ -14,6 +14,15 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-28 -- FUNCTION-ID: user-defined functions
+
+[parser/divisions.md](parser/divisions.md): `FUNCTION-ID` units
+(`unit_kind` "FUNCTION", `external_name`) and the REPOSITORY paragraph's
+entries; [parser/orchestration.md](parser/orchestration.md): `END FUNCTION`
+closes the unit. [ast-models.md](ast-models.md): `repository()` /
+`user_function_names()`. [analysis/codebase.md](analysis/codebase.md):
+`function` call edges, FUNCTION `call_example`.
+
 ## 2026-10-28 -- MCP server bug hunt: argument handling, EBCDIC columns
 
 [mcp.md](mcp.md): `lint` takes `rules` / `min_severity` in any case;

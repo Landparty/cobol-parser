@@ -180,7 +180,11 @@ class ReadStatementParser(IStatementParser):
         following_val = token_value_upper(following)
         if following_val == "END":
             after_end, _ = peek_past_noise(token_stream, following_at + 1)
-            owns_not = token_value_upper(after_end) not in ("PROGRAM", "DIVISION")
+            owns_not = token_value_upper(after_end) not in (
+                "PROGRAM",
+                "FUNCTION",
+                "DIVISION",
+            )
         else:
             owns_not = following is not None and following.type in (
                 TokenType.AT,

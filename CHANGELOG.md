@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **User-defined functions (`FUNCTION-ID`, Enterprise COBOL 6.4).** A
+  `FUNCTION-ID` unit used to fail the whole file with "PROGRAM-ID is
+  mandatory". It now parses as its own unit (`unit_kind` "FUNCTION", with
+  the `AS` literal as `external_name`), `END FUNCTION` closes it, and the
+  REPOSITORY paragraph's `FUNCTION name` / `FUNCTION ALL INTRINSIC` /
+  `CLASS name IS 'x'` entries are read (`CobolProgram.repository()`,
+  `user_function_names()`). `FUNCTION name(...)` invoking a declared
+  function is a `function` edge in `codebase-graph` (and so in the MCP
+  server's `callers_of`), and `program-signature` shows such a unit's
+  `call_example` as `FUNCTION NAME(args)`.
+
 * **`cobol.yml` `project.proc_path`: folders of cataloged JCL PROCs**,
   searched in order. The MCP server expands a job's `EXEC proc` steps from
   them (only folders inside its root), so field flows cross jobs built from

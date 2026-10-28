@@ -76,8 +76,13 @@ results into one graph with two kinds of edge:
   its known targets, each marked `resolved=False`, so the edge set is never
   mistaken for an exhaustive one. `EXEC CICS LINK PROGRAM(...)` and `EXEC
   CICS XCTL PROGRAM(...)` are call edges too (#315), told apart by
-  `CallEdge.kind` (`call` / `cics-link` / `cics-xctl`; `to_dict()` carries
-  it). `PROGRAM('X')` is static (read off `ExecCicsStatement.literal_options`,
+  `CallEdge.kind` (`call` / `cics-link` / `cics-xctl` / `function`;
+  `to_dict()` carries it). A `function` edge (`CALL_KIND_FUNCTION`, label
+  `FUNCTION`) is a `FUNCTION name(...)` reference to a user-defined function
+  the caller's REPOSITORY paragraph declares (`user_function_names()`, found
+  by `language_env_analyzer.function_references`); an undeclared name is no
+  edge, since IBM takes it for an intrinsic. The FUNCTION-ID unit is an
+  ordinary graph node. `PROGRAM('X')` is static (read off `ExecCicsStatement.literal_options`,
   since `options` holds literals unquoted); `PROGRAM(WS-X)` takes
   `DynamicCallAnalyzer.resolve_variable("WS-X")`, the same values and
   incomplete flag `CALL WS-X` would get, or is reported in `unresolved`.
@@ -247,7 +252,9 @@ sig.unchecked                   # what could not be determined exactly
 `by_clause`, `location`, and a `declaration()` rendering the operand as a
 caller would have to write it (a group item is described by level and length
 rather than a fabricated picture). `EntryPoint.kind` is `"procedure-division"`
-or `"entry-statement"`. `by_clause` is the callee's declared passing mode
+or `"entry-statement"`. On a FUNCTION-ID unit the primary entry has
+`is_function=True` (serialized only when true) and `call_example()` is the
+invoking reference, `FUNCTION DOUBLER(ARG-IN)`, not a CALL. `by_clause` is the callee's declared passing mode
 (`"REFERENCE"` / `"VALUE"`, from the division's `using_parameter_modes`
 metadata) on the primary entry, and from `EntryStatement.parameter_modes` on
 an ENTRY statement's operands (see #402);

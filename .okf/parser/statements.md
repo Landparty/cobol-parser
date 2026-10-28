@@ -230,7 +230,7 @@ must stop at a boundary *without consuming it*. The rules:
 | `collect_operands` | the generic operand collector of the newer verb parsers (subscripts/qualifiers folded, literals re-quoted, separators skipped, statement- and H9-boundary aware) |
 | `literal_operand_text(token)` | `raw_value` for a typed literal, `quote_literal(value)` for any other string literal |
 | `is_procedure_name_token` | an identifier or an all-digit NUMERIC_LITERAL / LEVEL_NUMBER (procedure names may be all digits); used by PERFORM, GO TO, ALTER |
-| `bare_end_starts_at_end_clause` | a bare `END` is an `AT END` only when it does not start `END PROGRAM` / `END DIVISION` |
+| `bare_end_starts_at_end_clause` | a bare `END` is an `AT END` only when it does not start `END PROGRAM` / `END FUNCTION` / `END DIVISION` |
 | `matches_word` | value-based match for verbs with no `TokenType` |
 | `collect_clause_stmts`, `parse_invalid_key_clauses`, `parse_size_error_clauses` | handler bodies, see below |
 | `try_parse_nested_statement` | parses one nested statement; an exception not already recorded (`_already_recorded`, set by `report_or_raise`) becomes a warning "Nested statement parse failed and was skipped: ..." -- except `RecursionError` (nesting hundreds deep), re-raised so the statement loop records "Statement nested too deeply to parse ..." as an **error** and `success` is False (#375; it used to be a warning with statements missing) |

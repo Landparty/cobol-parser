@@ -140,6 +140,75 @@ def _computer_paragraph(name: str, tokens: list[Any]) -> dict[str, Any]:
     return entry
 
 
+def _strip_quotes(text: str) -> str:
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        return text[1:-1]
+    return text
+
+
+def _repository_paragraph(tokens: list[Any]) -> dict[str, Any]:
+    """The entries of a CONFIGURATION SECTION ``REPOSITORY`` paragraph.
+
+    ``FUNCTION name [AS literal]`` declares a user-defined function (a
+    FUNCTION-ID, Enterprise COBOL 6.4) the unit may invoke;
+    ``FUNCTION ALL INTRINSIC`` / ``FUNCTION name ... INTRINSIC`` declare
+    intrinsic functions usable without the word FUNCTION; ``CLASS name IS
+    literal`` names an object-oriented class. Returns ``{"functions":
+    [{"name", "external_name"}], "intrinsic": [...], "all_intrinsic": bool,
+    "classes": [{"name", "external_name"}]}``.
+    """
+    functions: list[dict[str, Any]] = []
+    intrinsic: list[str] = []
+    all_intrinsic = False
+    classes: list[dict[str, Any]] = []
+    kept = [t for t in tokens if t.value and t.value != "."]
+    words = [str(t.value) for t in kept]
+    literal = [t.type == TokenType.STRING_LITERAL for t in kept]
+    i = 0
+    while i < len(words):
+        word = words[i].upper()
+        if word == "FUNCTION":
+            # One entry runs to the next FUNCTION / CLASS word; it lists
+            # intrinsic names when it ends in INTRINSIC, prototypes else.
+            i += 1
+            names: list[dict[str, Any]] = []
+            is_intrinsic = False
+            while i < len(words) and words[i].upper() not in ("FUNCTION", "CLASS"):
+                upper = words[i].upper()
+                if upper == "INTRINSIC":
+                    is_intrinsic = True
+                elif upper == "ALL" and names == []:
+                    all_intrinsic = True
+                elif upper == "AS" and names and i + 1 < len(words):
+                    names[-1]["external_name"] = _strip_quotes(words[i + 1])
+                    i += 1
+                else:
+                    names.append({"name": upper, "external_name": None})
+                i += 1
+            if is_intrinsic:
+                intrinsic.extend(n["name"] for n in names)
+            else:
+                functions.extend(names)
+            continue
+        if word == "CLASS" and i + 1 < len(words):
+            entry: dict[str, Any] = {"name": words[i + 1].upper(), "external_name": None}
+            i += 2
+            if i < len(words) and words[i].upper() == "IS":
+                i += 1
+            if i < len(words) and (literal[i] or words[i][:1] in ("'", '"')):
+                entry["external_name"] = _strip_quotes(words[i])
+                i += 1
+            classes.append(entry)
+            continue
+        i += 1
+    return {
+        "functions": functions,
+        "intrinsic": intrinsic,
+        "all_intrinsic": all_intrinsic,
+        "classes": classes,
+    }
+
+
 class ConfigurationSectionParser:
     """Parses the CONFIGURATION SECTION and its SPECIAL-NAMES paragraph."""
 
@@ -188,6 +257,7 @@ class ConfigurationSectionParser:
 
         special_names: dict[str, Any] = {}
         computers: dict[str, dict[str, Any]] = {}
+        repository: dict[str, Any] | None = None
 
         def _at_stop() -> bool:
             token = token_stream.peek(0)
@@ -243,6 +313,19 @@ class ConfigurationSectionParser:
                     if tok.type not in _NOISE_TYPES:
                         entry_tokens.append(tok)
                 computers[v] = _computer_paragraph(v, entry_tokens)
+            elif v == "REPOSITORY":
+                token_stream.consume()
+                repo_tokens: list[Any] = []
+                while not token_stream.is_empty() and not _at_stop():
+                    tok = token_stream.peek(0)
+                    if tok is None or tok.type == TokenType.EOF:
+                        break
+                    if tok.value.upper() in _CONFIGURATION_PARAGRAPHS:
+                        break
+                    token_stream.consume()
+                    if tok.type not in _NOISE_TYPES:
+                        repo_tokens.append(tok)
+                repository = _repository_paragraph(repo_tokens)
             else:
                 token_stream.consume()
 
@@ -255,6 +338,8 @@ class ConfigurationSectionParser:
             result["source_computer"] = computers["SOURCE-COMPUTER"]
         if "OBJECT-COMPUTER" in computers:
             result["object_computer"] = computers["OBJECT-COMPUTER"]
+        if repository is not None:
+            result["repository"] = repository
         return result
 
     def _parse_special_names_paragraph(

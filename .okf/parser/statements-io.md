@@ -39,7 +39,7 @@ semantics in [dialects.md](../dialects.md).
 ## READ, WRITE, REWRITE, DELETE
 
 - **READ**: `AT` is optional (`END` / `NOT END`; a bare `END` is an AT END only
-  when it does not start `END PROGRAM` / `END DIVISION`); a separator may precede
+  when it does not start `END PROGRAM` / `END FUNCTION` / `END DIVISION`); a separator may precede
   the handler (`READ F ; AT END`). The `INTO` target and `KEY` name fold
   qualifiers / subscripts. `READ F WITH LOCK KEY IS k` is accepted.
 - **WRITE**:

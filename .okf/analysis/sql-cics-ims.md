@@ -280,6 +280,10 @@ Detects COBOL intrinsic function references (`FUNCTION LENGTH`,
 DISABLED'` names no function `KEYS`). `FUNCTION` must be its own word (no name
 character before it, so `WS-FUNCTIONAL` / `DLI-FUNCTIONS` are data names), and
 the no-blank form (`FUNCTIONLENGTH`) is accepted only for a known intrinsic.
+`function_references(stmt, user_functions)` is the same scan as a public
+helper returning the names in order; a name in *user_functions* (a REPOSITORY-
+declared user-defined function) is accepted in the no-blank form too. The
+codebase graph uses it for `function` edges.
 IF / PERFORM UNTIL conditions (their operands live on the condition tree) and
 STRING's split `"FUNCTION"`, `"UPPER-CASE ( X )"` operands are scanned too,
 and so are EVALUATE WHEN selectors (`text`, `value`, range `start`/`end`; a

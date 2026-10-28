@@ -458,6 +458,30 @@ class CobolProgram(ASTNode):
         """Check if program has a specific division."""
         return name in self._divisions
 
+    def repository(self) -> dict[str, Any] | None:
+        """This unit's CONFIGURATION SECTION ``REPOSITORY`` paragraph, or None.
+
+        ``{"functions": [{"name", "external_name"}], "intrinsic": [...],
+        "all_intrinsic": bool, "classes": [{"name", "external_name"}]}``;
+        ``functions`` are the user-defined functions (FUNCTION-ID units)
+        the unit declares it invokes.
+        """
+        environment = self.get_division("ENVIRONMENT")
+        if environment is None:
+            return None
+        section = environment._sections.get("CONFIGURATION")
+        repository = section.get_metadata("repository") if section else None
+        return repository if isinstance(repository, dict) else None
+
+    def user_function_names(self) -> list[str]:
+        """Names of the user-defined functions the REPOSITORY declares."""
+        repository = self.repository() or {}
+        return [
+            str(entry["name"]).upper()
+            for entry in repository.get("functions") or []
+            if isinstance(entry, dict) and entry.get("name")
+        ]
+
     def get_data_items(self) -> list["CobolDataItem"]:
         """Get all data items defined in the program."""
         data_items = []

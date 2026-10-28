@@ -19,7 +19,9 @@ and aggregates the results into a single graph with two kinds of edge:
   questions see them with no extra step (#315). A quoted ``PROGRAM('X')`` is
   a static edge; a data-name operand is resolved through the same
   :class:`~.value_tracker.DynamicCallAnalyzer` value set a dynamic CALL
-  gets, or reported unresolved.
+  gets, or reported unresolved. ``FUNCTION name(...)`` invoking a
+  user-defined function the caller's REPOSITORY paragraph declares is a
+  ``function`` edge to that FUNCTION-ID unit.
 - **copy edges** -- ``program A copies member X``, and ``member X copies
   member Y`` for nested copybooks. A DB2 ``EXEC SQL INCLUDE X END-EXEC`` is
   a copy edge too, with the same ``COPY`` label and the same unresolved-member
@@ -90,6 +92,7 @@ from ..preprocess.copybook_expander import read_program_source
 from ..preprocess.models import CopybookSearchPath
 from ..preprocess.path_resolver import PathResolver
 from ._names import callee_names
+from .language_env_analyzer import function_references
 from .value_tracker import DynamicCallAnalyzer
 
 __all__ = [
@@ -130,6 +133,9 @@ _UNNAMED_PROGRAM = "UNKNOWN"
 CALL_KIND_CALL = "call"
 CALL_KIND_CICS_LINK = "cics-link"
 CALL_KIND_CICS_XCTL = "cics-xctl"
+#: ``FUNCTION name(...)`` invoking a user-defined function (a FUNCTION-ID
+#: unit, Enterprise COBOL 6.4) the caller's REPOSITORY paragraph declares.
+CALL_KIND_FUNCTION = "function"
 
 #: CICS commands that name another program to run, by :attr:`CallEdge.kind`.
 _CICS_TRANSFER_KINDS = {"LINK": CALL_KIND_CICS_LINK, "XCTL": CALL_KIND_CICS_XCTL}
@@ -787,6 +793,7 @@ def _call_edge_label(edge: CallEdge) -> str:
     verb = {
         CALL_KIND_CICS_LINK: "CICS LINK",
         CALL_KIND_CICS_XCTL: "CICS XCTL",
+        CALL_KIND_FUNCTION: "FUNCTION",
     }.get(edge.kind, "CALL")
     if edge.entry is not None:
         verb = f"{verb} ENTRY {edge.entry}"
@@ -1187,8 +1194,18 @@ class CodebaseGraphBuilder:
             # Built on first need: only a CICS transfer through a data-name
             # asks for the unit's tracked values.
             trackers: dict[int, DynamicCallAnalyzer] = {}
+            user_functions: dict[int, frozenset[str]] = {}
             for owner, statement in _node_statements(unit):
                 tracker = trackers.get(id(owner))
+                declared_functions = user_functions.get(id(owner))
+                if declared_functions is None:
+                    declared_functions = user_functions[id(owner)] = frozenset(
+                        owner.user_function_names()
+                    )
+                if declared_functions:
+                    self._absorb_function_references(
+                        statement, program_id, node, call_edges, declared_functions
+                    )
                 if isinstance(statement, EntryStatement) and statement.entry_name:
                     entry = _normalize_program_name(statement.entry_name)
                     if entry and entry not in node.entries:
@@ -1281,6 +1298,22 @@ class CodebaseGraphBuilder:
                     resolved=not incomplete,
                 )
             )
+
+    @staticmethod
+    def _absorb_function_references(
+        statement: CobolStatement,
+        program_id: str,
+        node: ProgramNode,
+        call_edges: list[CallEdge],
+        declared: frozenset[str],
+    ) -> None:
+        """A ``function`` edge per user-defined function *statement* invokes."""
+        for name in function_references(statement, declared):
+            if name in declared:
+                node.calls.append(name)
+                call_edges.append(
+                    CallEdge(caller=program_id, callee=name, kind=CALL_KIND_FUNCTION)
+                )
 
     @staticmethod
     def _absorb_cics_transfer(

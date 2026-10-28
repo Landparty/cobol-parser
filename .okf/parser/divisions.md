@@ -107,6 +107,15 @@ Individual statement parsers are in [statements.md](statements.md).
   last thing before `FACTORY.`), and `ProcedureDivisionParser` (a factory's or
   object's PROCEDURE DIVISION is usually empty and followed by `METHOD-ID`;
   `END METHOD` etc. are in `_OO_UNIT_END_WORDS`).
+- **REPOSITORY.** `ConfigurationSectionParser` reads the paragraph's entries
+  (`_repository_paragraph`) into CONFIGURATION section metadata `repository`:
+  `{"functions": [{"name", "external_name"}], "intrinsic": [...],
+  "all_intrinsic": bool, "classes": [{"name", "external_name"}]}`.
+  `FUNCTION name [AS literal]` is a user-defined function prototype;
+  an entry ending in `INTRINSIC` (`FUNCTION ALL INTRINSIC`, `FUNCTION TRIM
+  INTRINSIC`) lists intrinsics; `CLASS name IS 'java.X'` a class. Read with
+  `CobolProgram.repository()` / `user_function_names()`. Pinned by
+  `tests/unit/test_function_id.py`.
 - **Layout between keywords.** A lookahead for the *next word* must step over
   NEWLINE tokens (`_skip_newlines`, `peek_past_noise`); a bare `peek(1)` sees the
   line break and silently changes the parse. Division-level sites that rely on
@@ -137,6 +146,13 @@ Individual statement parsers are in [statements.md](statements.md).
   class/method name so the "mandatory" check and the program-name plumbing are
   unchanged). `parse_class_id_clause` / `parse_method_id_clause` are static so
   `CobolParser._handle_oo_unit_marker` can reuse them for header-less units.
+- **FUNCTION-ID.** `FUNCTION-ID[.] name [AS literal] [.]` (a user-defined
+  function, Enterprise COBOL 6.4) is accepted in the same position:
+  `unit_kind` = `"FUNCTION"`, metadata `external_name` (the `AS` literal,
+  unquoted, or None; the key exists only on a FUNCTION unit). Before this the
+  whole compilation unit failed with "PROGRAM-ID is mandatory". `END FUNCTION`
+  ends the unit's PROCEDURE DIVISION wherever `END PROGRAM` does (the procedure
+  loop, `bare_end_starts_at_end_clause`, READ's `NOT AT END` lookahead).
 
 ## ENVIRONMENT DIVISION
 

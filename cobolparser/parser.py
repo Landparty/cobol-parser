@@ -986,7 +986,7 @@ class CobolParser:
         return True
 
     def _peek_is_end_program(self) -> bool:
-        """True if the stream is at an ``END PROGRAM`` marker."""
+        """True if the stream is at an ``END PROGRAM`` / ``END FUNCTION`` marker."""
         if not self.stream:
             return False
         idx = 1
@@ -997,17 +997,17 @@ class CobolParser:
             if token.type.name in ("NEWLINE", "WHITESPACE", "COMMENT"):
                 idx += 1
                 continue
-            return bool(token.value) and token.value.upper() == "PROGRAM"
+            return bool(token.value) and token.value.upper() in ("PROGRAM", "FUNCTION")
         return False
 
     def _consume_end_program_marker(self) -> None:
-        """Consume ``END PROGRAM [name] [.]`` from the stream."""
+        """Consume ``END PROGRAM|FUNCTION [name] [.]`` from the stream."""
         if not self.stream:
             return
         self.stream.consume()  # END
         self.stream.skip_whitespace_and_comments()
         token = self.stream.peek()
-        if token and token.value and token.value.upper() == "PROGRAM":
+        if token and token.value and token.value.upper() in ("PROGRAM", "FUNCTION"):
             self.stream.consume()
         self.stream.skip_whitespace_and_comments()
         token = self.stream.peek()
