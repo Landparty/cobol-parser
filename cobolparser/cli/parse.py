@@ -4360,6 +4360,15 @@ def _build_mcp_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Parsed programs to keep in memory (default: 32)",
     )
+    p.add_argument(
+        "--tools",
+        default="auto",
+        metavar="SPEC",
+        help="Tools to offer: auto (default: core, plus the JCL tools when "
+        "the root holds JCL), all, or a comma-separated list of groups "
+        "(core, data, jcl) and tool names. Every tool's definition is sent "
+        "to the model on every turn, so fewer tools cost fewer tokens",
+    )
     p.set_defaults(func=_cmd_mcp)
 
 
@@ -4372,6 +4381,7 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
             f"pip install 'cobol-parser[mcp]' ({exc})"
         )
     from ..mcp.envelope import ToolError
+    from ..mcp.server import select_tools
     from ..mcp.workspace import Workspace
 
     config = args._project_config if getattr(args, "_config_explicit", False) else None
@@ -4387,7 +4397,11 @@ def _cmd_mcp(args: argparse.Namespace) -> None:
             f"readable: {reason}",
             file=sys.stderr,
         )
-    run_stdio(workspace)
+    try:
+        select_tools(args.tools, workspace)
+    except ValueError as exc:
+        _fail(str(exc))
+    run_stdio(workspace, args.tools)
 
 
 def _config_to_dict(config: ProjectConfig) -> dict[str, Any]:

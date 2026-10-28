@@ -45,6 +45,7 @@ Any client that takes a JSON server list (Claude desktop's
 |---|---|---|
 | `--root DIR` | `.` | The directory the server answers about. Paths outside it, and outside its copybook directories, are refused; see [What the server can read](#what-the-server-can-read). |
 | `--cache-size N` | 32 | Parsed programs kept in memory. A program is parsed again when it, a copybook it expanded, or a copybook directory changes on disk (so a member added after a "COPY not expanded" caveat is picked up). |
+| `--tools SPEC` | `auto` | Which tools to offer. `auto` is the `core` group, plus the `jcl` group when the root holds a `.jcl` / `.job` / `.prc` / `.proc` file or `cobol.yml` names a `proc_path`. `all` offers every tool; otherwise give a comma-separated list of groups (`core`: the reading tools, `data`: `decode_record`, `gen_fixtures`, `diff_programs`, `jcl`: the JCL tools) and tool names. Each tool's definition is sent to the model on every turn, so a smaller set costs fewer input tokens. |
 | `--config FILE` / `--no-config` | `cobol.yml` in `--root` | Which `cobol.yml` to use. |
 
 Copybook directories, source format and `>>DEFINE` symbols come from the

@@ -242,6 +242,103 @@ class TestServer:
         assert workspace.progress is None
 
 
+def _recorder(served: list[Workspace]) -> Any:
+    def record(workspace: Workspace, tools_spec: str | None = None) -> None:
+        served.append(workspace)
+
+    return record
+
+
+class TestToolSelection:
+    def test_auto_is_core_plus_jcl_only_with_jcl(self, tmp_path: Path) -> None:
+        pytest.importorskip("mcp")
+        from cobolparser.mcp.server import TOOL_GROUPS, select_tools
+
+        (tmp_path / "A.cbl").write_text("")
+        bare = select_tools("auto", Workspace(tmp_path, ProjectConfig()))
+        assert bare == set(TOOL_GROUPS["core"])
+        (tmp_path / "RUN.jcl").write_text("//RUN JOB\n")
+        with_jcl = select_tools(None, Workspace(tmp_path, ProjectConfig()))
+        assert with_jcl == set(TOOL_GROUPS["core"]) | set(TOOL_GROUPS["jcl"])
+
+    def test_groups_and_names(self) -> None:
+        pytest.importorskip("mcp")
+        from cobolparser.mcp.server import ALL_TOOLS, select_tools
+
+        ws = _workspace()
+        assert select_tools("all", ws) == set(ALL_TOOLS)
+        assert select_tools("data, read_source", ws) == {
+            "decode_record",
+            "gen_fixtures",
+            "diff_programs",
+            "read_source",
+        }
+        with pytest.raises(ValueError, match="unknown tool or group 'nope'"):
+            select_tools("nope", ws)
+
+    def test_only_selected_tools_are_listed(self) -> None:
+        pytest.importorskip("mcp")
+        from mcp.shared.memory import create_connected_server_and_client_session
+
+        from cobolparser.mcp.server import build_server
+
+        server = build_server(_workspace(), "read_source,lint")
+
+        async def run() -> list[Any]:
+            async with create_connected_server_and_client_session(
+                server._mcp_server
+            ) as client:
+                return (await client.list_tools()).tools
+
+        listed = asyncio.run(run())
+        assert {t.name for t in listed} == {"read_source", "lint"}
+        assert "codebase_overview" in (server.instructions or "")
+        assert "--tools all" in (server.instructions or "")
+
+    def test_schema_is_compacted(self) -> None:
+        pytest.importorskip("mcp")
+        from cobolparser.mcp.server import compact_schema
+
+        schema = {
+            "title": "fArguments",
+            "type": "object",
+            "properties": {
+                "title": {"title": "Title", "type": "string"},
+                "file": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                    "default": None,
+                    "description": "d",
+                    "title": "File",
+                },
+                "rules": {
+                    "anyOf": [
+                        {"type": "array", "items": {"type": "string"}},
+                        {"type": "null"},
+                    ],
+                    "default": None,
+                },
+                "seed": {"type": "integer", "default": 0},
+            },
+            "required": ["title"],
+        }
+        assert compact_schema(schema) == {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "file": {"type": "string", "description": "d"},
+                "rules": {"type": "array", "items": {"type": "string"}},
+                "seed": {"type": "integer", "default": 0},
+            },
+            "required": ["title"],
+        }
+
+    def test_optional_arguments_still_accept_null(self) -> None:
+        _, (result,) = _session(
+            [("program_brief", {"file": "BATCHSEQ.cbl", "program": None})]
+        )
+        assert result.isError is False
+
+
 class TestCli:
     def _main(self, *argv: str) -> None:
         from cobolparser.cli.parse import main
@@ -255,7 +352,7 @@ class TestCli:
             "version: 1\nproject:\n  dialect: ibm-enterprise\n"
         )
         served: list[Workspace] = []
-        with patch("cobolparser.mcp.server.run_stdio", served.append):
+        with patch("cobolparser.mcp.server.run_stdio", _recorder(served)):
             self._main("mcp", "--root", str(tmp_path), "--cache-size", "3")
         (workspace,) = served
         assert workspace.root == tmp_path.resolve()
@@ -266,7 +363,7 @@ class TestCli:
         pytest.importorskip("mcp")
         (tmp_path / "cobol.yml").write_text("version: 1\n")
         served: list[Workspace] = []
-        with patch("cobolparser.mcp.server.run_stdio", served.append):
+        with patch("cobolparser.mcp.server.run_stdio", _recorder(served)):
             self._main("--no-config", "mcp", "--root", str(tmp_path))
         assert served[0].config.source is None
 
@@ -282,13 +379,34 @@ class TestCli:
             f'version: 1\nproject:\n  copybook_path: ["/", "{books}"]\n'
         )
         served: list[Workspace] = []
-        with patch("cobolparser.mcp.server.run_stdio", served.append):
+        with patch("cobolparser.mcp.server.run_stdio", _recorder(served)):
             self._main("mcp", "--root", str(root))
         (workspace,) = served
         assert workspace.config.copybook_path == (str(books),)
         err = capsys.readouterr().err
         assert err.count("is refused") == 1
         assert "the filesystem root" in err
+
+    def test_tools_flag(self, tmp_path: Path) -> None:
+        pytest.importorskip("mcp")
+        specs: list[str | None] = []
+
+        def record(workspace: Workspace, tools_spec: str | None = None) -> None:
+            specs.append(tools_spec)
+
+        with patch("cobolparser.mcp.server.run_stdio", record):
+            self._main("mcp", "--root", str(tmp_path))
+            self._main("mcp", "--root", str(tmp_path), "--tools", "core,jcl")
+        assert specs == ["auto", "core,jcl"]
+
+    def test_bad_tools_flag(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        pytest.importorskip("mcp")
+        with pytest.raises(SystemExit) as exc:
+            self._main("mcp", "--root", str(tmp_path), "--tools", "bogus")
+        assert exc.value.code == 1
+        assert "unknown tool or group" in capsys.readouterr().err
 
     def test_bad_root(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         pytest.importorskip("mcp")

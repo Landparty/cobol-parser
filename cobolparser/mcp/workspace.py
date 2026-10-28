@@ -600,6 +600,15 @@ class Workspace:
                     found.append(path)
         return found
 
+    def has_jcl(self) -> bool:
+        """Whether any JCL job or procedure file is under the root, which is
+        what decides that the JCL tools are worth offering."""
+        suffixes = {".jcl", ".job", ".prc", ".proc"}
+        for _directory, names in self._walk():
+            if any(Path(n).suffix.lower() in suffixes for n in names):
+                return True
+        return bool(self.config.proc_path)
+
     def tree_stamps(self) -> dict[str, Stamp]:
         """The stamp of every directory under the root: a file added to or
         removed from one changes its mtime, so an index built over the root

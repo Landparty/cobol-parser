@@ -83,6 +83,16 @@ Invariants:
   (`_declared_elsewhere`): the default unit is the outermost, so a name only
   a nested program declares otherwise reads as missing.
 
+Tool selection (`server.py`): `TOOL_GROUPS` (`core`, `data`, `jcl`) and
+`select_tools(spec, workspace)`; `--tools auto` (the CLI default) is `core`
+plus `jcl` when `Workspace.has_jcl()`; `build_server(workspace)` defaults to
+`all`. `instructions_for(enabled)` sends one guide paragraph per offered
+group and names the tools left out. `compact_schema()` strips pydantic's
+`title`s and the `anyOf [T, null]` / `default: null` of optional arguments
+from each advertised input schema (arguments are still validated against
+the signature), and the docstrings and `Field` descriptions are one line:
+together about 43% fewer schema characters for `all` than before.
+
 ## Prompts
 
 `prompts.py`: one function per prompt, returning the request text (a
