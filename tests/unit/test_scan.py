@@ -22,6 +22,7 @@ import pytest
 from cobolparser.scan import (
     ANALYZERS,
     DEFAULT_ANALYZERS,
+    FILE_ANALYZERS,
     SCAN_VERSION,
     CrossFileCloneGroup,
     ScanOptions,
@@ -411,7 +412,10 @@ class TestNonDefaultAnalyzers:
         raise into `failed_analyzers` for every unit in the shop."""
         path = _write(tmp_path, "A.cbl", _program("PROGA", "ONLY-PARA", _BODY))
         scan = scan_one(path, ScanOptions(analyzers=ANALYZERS))
-        assert set(scan.units[0].reports) == set(ANALYZERS)
+        # File-level analyzers (lint) report once per file, not per unit.
+        assert set(scan.units[0].reports) == set(ANALYZERS) - FILE_ANALYZERS
+        assert set(scan.reports) == set(FILE_ANALYZERS)
+        assert scan.reports["lint"]["failed_rules"] == []
         assert scan.units[0].failed_analyzers == {}
 
 

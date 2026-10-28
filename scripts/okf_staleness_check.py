@@ -214,6 +214,7 @@ OKF_MAP = [
         [".okf/analysis/sql-cics-ims.md"],
     ),
     ("cobolparser/analysis/lint.py", [".okf/analysis/lint.md"]),
+    ("cobolparser/analysis/sarif.py", [".okf/analysis/lint.md"]),
     ("cobolparser/analysis/field_lineage.py", [".okf/analysis/lineage.md"]),
     ("cobolparser/analysis/lineage_graph.py", [".okf/analysis/lineage.md"]),
     ("cobolparser/analysis/lineage_jcl.py", [".okf/analysis/lineage.md"]),

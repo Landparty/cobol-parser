@@ -2666,6 +2666,17 @@ def _build_scan_parser(subparsers: argparse._SubParsersAction) -> None:
             "unchanged (summary.cached_file_count counts the reused ones)"
         ),
     )
+    p.add_argument(
+        "--format",
+        choices=["json", "sarif"],
+        default="json",
+        dest="output_format",
+        help=(
+            "json (default) or a SARIF 2.1.0 log of the lint findings of "
+            "every file (GitHub code scanning). sarif runs the lint "
+            "analyzer, alone unless --analyzer names others too"
+        ),
+    )
     _add_compact_arg(p)
     _add_source_format_args(p)
     _add_dialect_arg(p)
@@ -2764,6 +2775,13 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         _fail("--workers must be >= 1")
 
     analyzers = parse_analyzer_list(args.analyzer)
+    sarif = getattr(args, "output_format", "json") == "sarif"
+    if sarif:
+        analyzers = (
+            ("lint",)
+            if not args.analyzer
+            else tuple(dict.fromkeys((*analyzers, "lint")))
+        )
     source_format = _source_format_kwargs(args)
     options = ScanOptions(
         analyzers=analyzers,
@@ -2789,6 +2807,38 @@ def _cmd_scan(args: argparse.Namespace) -> None:
         # comma-separated spelling this flag accepts, so the check lives in
         # scan_files and its message is already the one to print.
         _fail(str(exc))
+
+    if sarif:
+        from ..analysis.sarif import (
+            SarifNotification,
+            lint_notifications,
+            lint_results,
+            sarif_log,
+        )
+
+        results = []
+        notes = []
+        for scanned in report.ok_files:
+            lint = scanned.reports.get("lint") or {}
+            results += lint_results(lint, scanned.path)
+            notes += lint_notifications(lint, scanned.path)
+        notes += [
+            SarifNotification(
+                message=f"not scanned: {f.error}", level="error", file=f.path
+            )
+            for f in report.failed_files
+        ]
+        _json_out(
+            sarif_log(results, notes), args.compact, getattr(args, "output", None)
+        )
+        if report.failed_files:
+            print(
+                f"warning: {len(report.failed_files)} of {len(report.files)} "
+                "file(s) could not be scanned",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        return
 
     output = report.to_dict()
     if args.clones:
@@ -2992,13 +3042,14 @@ def _build_lint_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--format",
-        choices=["json", "text"],
+        choices=["json", "text", "sarif"],
         default="json",
         dest="output_format",
         help=(
             "json (default) emits the full LintReport; text emits one "
             "grep-friendly 'file:line:column: severity [rule] message' line "
-            "per finding plus a summary."
+            "per finding plus a summary; sarif emits a SARIF 2.1.0 log "
+            "(GitHub code scanning, IDE problem panes)."
         ),
     )
     p.set_defaults(func=_cmd_lint)
@@ -3176,6 +3227,17 @@ def _cmd_lint(args: argparse.Namespace) -> None:
             )
         _text_out(
             _lint_text_report(report, args.file),
+            getattr(args, "output", None),
+        )
+    elif args.output_format == "sarif":
+        from ..analysis.sarif import lint_notifications, lint_results, sarif_log
+
+        data = report.to_dict()
+        _json_out(
+            sarif_log(
+                lint_results(data, args.file), lint_notifications(data, args.file)
+            ),
+            args.compact,
             getattr(args, "output", None),
         )
     else:
@@ -4020,11 +4082,12 @@ def _build_call_check_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--format",
-        choices=["json", "text"],
+        choices=["json", "text", "sarif"],
         default="json",
         dest="output_format",
-        help="json (default) or one 'file:line: severity: [kind] message' "
-        "line per finding plus a summary",
+        help="json (default), one 'file:line: severity: [kind] message' "
+        "line per finding plus a summary, or a SARIF 2.1.0 log (GitHub code "
+        "scanning, IDE problem panes)",
     )
     _add_compact_arg(p)
     _add_copybook_args(p)
@@ -4078,6 +4141,18 @@ def _cmd_call_check(args: argparse.Namespace) -> None:
     ]
     if args.output_format == "text":
         _text_out(report.to_text(), getattr(args, "output", None))
+    elif args.output_format == "sarif":
+        from ..analysis.sarif import (
+            call_check_notifications,
+            call_check_results,
+            sarif_log,
+        )
+
+        _json_out(
+            sarif_log(call_check_results(report), call_check_notifications(report)),
+            args.compact,
+            getattr(args, "output", None),
+        )
     else:
         _json_out(report.to_dict(), args.compact, getattr(args, "output", None))
 

@@ -107,15 +107,15 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `ims-dli` | `file` | — | A (no profiling) | `IMSSegmentAnalyzer` |
 | `dclgen-check` | `file` | — | A; +prof | `DclgenChecker` |
 | `redundancy` | `file` | `--min-clone-statements N` (3) | A; +prof | `RedundancyAnalyzer` |
-| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected), `--cache-dir DIR` (off) | A without `--program` | `scan_version` report |
-| `lint` | `file` | `--rule RULE`... (all), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text}` (json) | A (`--program` default: every unit); +prof | findings; exit 3 on `--fail-on` |
+| `scan` | `[files ...]` | `--glob`..., `--files-from FILE`, `--analyzer NAME`... (`health,redundancy`), `--clones`, `--min-clone-members N` (2), `--min-clone-statements N` (3), `--workers N` (CPU count), `--encoding` (detected), `--cache-dir DIR` (off), `--format {json,sarif}` (json; sarif runs `lint`) | A without `--program` | `scan_version` report, or a SARIF log of every file's lint findings |
+| `lint` | `file` | `--rule RULE`... (all), `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif}` (json) | A (`--program` default: every unit); +prof | findings (or a SARIF 2.1.0 log); exit 3 on `--fail-on` |
 | `data-items` | `file` | — | A; +prof | `compute_program_data_items()` |
 | `program-signature` | `file` | — | A (`--program` default: every unit); +prof | `{"signatures": [...]}` |
 | `xref` | `file` | — | A; +prof | `XrefReport` |
 | `diff` | `old new` | `--format {json,text}` (json), `--rename-threshold RATIO` (0.8) | A without `--program` | `DiffReport` |
 | `codebase-graph` | `PATH ...` | `--format {json,dot,mermaid}` (json), `--extension EXT`... (`.cbl .cob .cobol`), `--workers N` (by size) | `--compact`, `--copybook-path`, `-o`, dl | graph |
 | `copybook-impact` | `member PATH ...` | `--extension`..., `--workers` | `--compact`, `--copybook-path`, `-o`, dl | `ImpactReport` |
-| `call-check` | `PATH ...` | `--extension`..., `--workers`, `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text}` (json) | `--compact`, `--copybook-path`, `-o`, dl | `CallInterfaceReport`; exit 3 on `--fail-on`, 2 when a file is missing or failed to parse |
+| `call-check` | `PATH ...` | `--extension`..., `--workers`, `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--format {json,text,sarif}` (json) | `--compact`, `--copybook-path`, `-o`, dl | `CallInterfaceReport` (or SARIF); exit 3 on `--fail-on`, 2 when a file is missing or failed to parse |
 | `sql-cics-check` | `file` | — | A; +prof | `SqlCicsReport` |
 | `business-rules` | `file` | `--format {json,text}` (json), `--include-technical` | A; +prof | `BusinessRuleReport` |
 | `lineage` | `file` | `--field NAME`, `--direction {forward,backward}` (forward), `--format {json,text}` (json) | A (no profiling) | `FieldFlowReport` |

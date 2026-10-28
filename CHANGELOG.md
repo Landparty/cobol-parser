@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **SARIF 2.1.0 output** for `lint`, `scan` and `call-check`
+  (`--format sarif`; `cobolparser/analysis/sarif.py`), for GitHub code
+  scanning and IDE problem panes. Findings inside an expanded copybook
+  point at the copybook; paths under the working directory are relative to
+  `%SRCROOT%`; caveats, rules that did not run and files that failed are run
+  notifications. Validated against the OASIS schema. `scan` gains a `lint`
+  analyzer (once per file, in the file's new `reports` key), which
+  `--format sarif` runs.
 * **A large-program performance lane** (`tests/performance/test_large_program.py`).
   Every analyzer is timed on a generated program against a per-analyzer
   budget: 4,000 lines in the normal suite (a few seconds), 40,000 lines

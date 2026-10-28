@@ -63,7 +63,14 @@ ANALYZERS: tuple[str, ...] = (
     "dead-code",
     "unused-variables",
     "lineage",
+    "lint",
 )
+
+#: Analyzers that run once per *file* rather than once per unit: ``lint``
+#: already covers every program unit in a file (a contained program left
+#: unexamined would read as clean), so per unit it would report each
+#: contained program's findings again. Their report is ``FileScan.reports``.
+FILE_ANALYZERS: frozenset[str] = frozenset({"lint"})
 
 #: What ``scan`` runs when the caller names nothing. ``health`` is the
 #: composite grade a portfolio view sorts on; ``redundancy`` is the only
@@ -181,6 +188,10 @@ class FileScan:
     #: Lossy-decode warnings: bytes of the source its encoding could not
     #: map, replaced with U+FFFD (#522). Serialized only when non-empty.
     decode_warnings: list[str] = field(default_factory=list)
+    #: Reports of the :data:`FILE_ANALYZERS` that ran (``lint``: a
+    #: ``LintReport.to_dict()``, every finding stamped with its on-disk
+    #: ``origin``). Serialized only when non-empty.
+    reports: dict[str, Any] = field(default_factory=dict)
     #: True when the report came from :attr:`ScanOptions.cache_dir` rather
     #: than a parse. Not serialized per file; counted in the summary.
     from_cache: bool = False
@@ -195,6 +206,7 @@ class FileScan:
             parse_error_count=int(data.get("parse_error_count") or 0),
             copybook_error=data.get("copybook_error"),
             decode_warnings=list(data.get("decode_warnings") or []),
+            reports=dict(data.get("reports") or {}),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -209,6 +221,8 @@ class FileScan:
             out["copybook_error"] = self.copybook_error
         if self.decode_warnings:
             out["decode_warnings"] = list(self.decode_warnings)
+        if self.reports:
+            out["reports"] = dict(self.reports)
         return out
 
 
@@ -320,6 +334,8 @@ def _scan_unit(
     """Every requested analyzer over one unit, each failing on its own."""
     scan = UnitScan(program_name=unit.program_name or "", depth=depth)
     for name in options.analyzers:
+        if name in FILE_ANALYZERS:
+            continue
         try:
             scan.reports[name] = _run_analyzer(name, unit, options, source_map)
         except Exception as exc:  # noqa: BLE001 -- see the module docstring
@@ -447,7 +463,45 @@ def _scan_one(
             stamp_report_origins(unit_scan.reports, source_map)
             _stamp_body_origins(unit_scan.reports.get("redundancy"), source_map)
         scan.units.append(unit_scan)
+    if "lint" in options.analyzers:
+        scan.reports["lint"] = _lint_file(path, result, options, source_map)
     return scan
+
+
+def _lint_file(
+    path: str,
+    result: Any,
+    options: ScanOptions,
+    source_map: dict[int, tuple[str, int]] | None,
+) -> dict[str, Any]:
+    """The ``lint`` subcommand's report for one parse: every unit, the parse
+    errors as findings, and each finding placed on disk (its file, line and
+    editor column). A lint that raises is a failed rule, never a lost file."""
+    from .analysis.lint import (
+        LintAnalyzer,
+        LintReport,
+        add_parse_errors,
+        apply_source_map,
+        source_column_offsets,
+    )
+
+    try:
+        report = LintAnalyzer().analyze(result.ast)
+        add_parse_errors(report, list(result.errors))
+        if not source_map:
+            source_map = {
+                f.location.line: (path, f.location.line)
+                for f in report.findings
+                if f.location is not None
+            }
+        apply_source_map(
+            report, source_map, source_column_offsets(path, options.preprocess_fixed)
+        )
+    except Exception as exc:  # noqa: BLE001 -- see the module docstring
+        report = LintReport(
+            failed_rules=[{"rule": "lint", "error": f"{type(exc).__name__}: {exc}"}]
+        )
+    return report.to_dict()
 
 
 def _stamp_body_origins(

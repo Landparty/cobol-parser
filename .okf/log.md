@@ -14,6 +14,13 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-28 -- SARIF output for lint, scan and call-check
+
+[analysis/lint.md](analysis/lint.md): `sarif.py` and `scan`'s file-level
+`lint` analyzer. [batch.md](batch.md): `FILE_ANALYZERS`,
+`FileScan.reports`. [cli.md](cli.md): the `--format sarif` choices.
+[analysis.md](analysis.md): module map row.
+
 ## 2026-10-28 -- large-program performance lane; dead-code worklist linear
 
 [tests.md](tests.md): `tests/performance/test_large_program.py`, its two

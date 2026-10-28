@@ -157,6 +157,48 @@ parse error that gave only a line; such a finding gets no `origin_column`.
 `stamp_report_origins` leaves an existing `origin` alone so the CLI's dict
 pass does not erase it. Detail in [../cli.md](../cli.md).
 
+## SARIF output
+
+`sarif.py` turns the findings-shaped reports into one SARIF 2.1.0 log (one
+run): `lint --format sarif`, `scan --format sarif` and `call-check --format
+sarif`. `lint_results(report_dict, source_file)` reads a
+`LintReport.to_dict()` (so it serves `scan`'s per-file dicts as well as the
+CLI's report): a finding's `origin` wins over its `location`, so a finding
+inside an expanded copybook points at the copybook and its on-disk column;
+without `origin`, the source file and the bare line. `call_check_results`
+maps each `CallInterfaceFinding` to rule `call-check/<kind>` at the CALL's
+line. `sarif_log(results, notifications, base=cwd)`:
+
+* `level`: error -> `error`, warning -> `warning`, info -> `note`.
+* `rules`: one entry per rule id that produced a result, in first-seen
+  order, `shortDescription` from `RULE_DESCRIPTIONS`; `ruleIndex` points
+  into it.
+* Locations: a path under *base* is relative (posix) with `uriBaseId`
+  `%SRCROOT%` (declared in `originalUriBaseIds`), which is what GitHub code
+  scanning resolves against the checkout; anything else is an absolute
+  `file:` URI. No line -> no `locations` (never a made-up line 1).
+  `startColumn` only when known.
+* `properties` carry `kind` / `symbol` (lint) or `caller` / `callee` /
+  `callee_path` / `position` (call-check).
+* Lint `caveats` and `failed_rules`, call-check `unchecked` and parse
+  `errors`, and `scan`'s failed files are `invocations[0].
+  toolExecutionNotifications` (failed ones at `error`), so a quiet log is
+  not mistaken for a checked program.
+
+Validated against the OASIS `sarif-schema-2.1.0.json` on 2026-10-28 (not
+vendored: the suite runs offline); `tests/unit/analysis/test_sarif.py` pins
+the shape. The exit codes of each subcommand are unchanged by the format
+(`--fail-on` still exits 3; `scan` exits 2 on a failed file).
+
+In `scan`, `lint` is a *file-level* analyzer (`scan.FILE_ANALYZERS`): it
+covers every unit of a file already, so it runs once per file into
+`FileScan.reports["lint"]`, with parse errors as findings and every finding
+placed on disk, rather than once per unit (which would repeat each
+contained program's findings). It does not get the CLI's
+`copybook_item_names` (the unexpanded second parse), so an unused copybook
+item is graded warning there rather than info. `scan --format sarif` runs
+`lint` alone, or adds it to the `--analyzer` list given.
+
 ## See also
 
 * [../analysis.md](../analysis.md) -- routing page, calling conventions, module map

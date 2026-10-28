@@ -177,10 +177,14 @@ worker's peak memory is one file's AST.
 * `scan_one(path, options) -> FileScan` — one file; **never raises**. This is
   what runs in each worker.
 * `ANALYZERS` = `("health", "redundancy", "complexity", "dead-code",
-  "unused-variables", "lineage")`, each keyed by its single-file subcommand
+  "unused-variables", "lineage", "lint")`, each keyed by its single-file subcommand
   name (`health` = `TechnicalDebtAnalyzer`, `redundancy` =
   `RedundancyAnalyzer` honouring `min_clone_statements`, `lineage` =
-  `FieldFlowAnalyzer`). `DEFAULT_ANALYZERS` = `("health", "redundancy")`:
+  `FieldFlowAnalyzer`). `lint` is in `FILE_ANALYZERS`: it runs once per
+  file (it lints every unit itself) into `FileScan.reports["lint"]`
+  (serialized only when non-empty), not per unit; see
+  [analysis/lint.md](analysis/lint.md#sarif-output), which also covers
+  `scan --format sarif`. `DEFAULT_ANALYZERS` = `("health", "redundancy")`:
   `health` is the grade a portfolio sorts on; `redundancy` is the only one
   that emits the paragraph fingerprints cross-file clones need. Analyzer
   imports are local to each branch, so a scan pays only for what it runs.
