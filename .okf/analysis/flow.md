@@ -256,8 +256,11 @@ the [history](../history/analysis.md).
   it is written in (`_range_end_jumps`), and `_collect_fallthrough_refs`
   makes the range end a fall-through source when that procedure lies outside
   every THRU range closing on it (`_inside_range_to`, from `_range_starts`),
-  or is itself a fall-through source (fallen into, or gone to): on that path
-  there is no PERFORM to return to and the range end runs on. Its forward
+  sits in a PERFORMed range that closes before the range end, so the jump
+  leaves that PERFORM (`_jumps_out_of_a_range`, from `_performed_ranges`:
+  every PERFORM / SORT / MERGE / XML PARSE phrase, THRU or not), or is itself
+  a fall-through source (fallen into, or gone to): on that path there is no
+  PERFORM of the range to return to and the range end runs on. Its forward
   pass repeats until no such jump adds a source. Only the #381 shape -- the
   jumping paragraph reached solely through the PERFORM -- keeps the paragraph
   after the range end dead. Found by running random programs under GnuCOBOL

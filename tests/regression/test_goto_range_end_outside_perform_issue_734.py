@@ -92,3 +92,22 @@ P2.
 P3.
     DISPLAY 'P3'.
 """) == ["P3"]
+
+
+def test_go_to_out_of_a_smaller_perform_runs_past_the_range_end() -> None:
+    # Runs P0 P2 P4 P5: P2 is PERFORMed on its own, so its GO TO P4 leaves
+    # that PERFORM; P2 THRU P4 is never running.
+    assert "P5" not in _dead("""
+P0.
+    PERFORM P2
+    STOP RUN.
+P2.
+    GO TO P4.
+P3.
+    PERFORM P2 THRU P4
+    STOP RUN.
+P4.
+    DISPLAY 'P4'.
+P5.
+    DISPLAY 'P5'.
+""")

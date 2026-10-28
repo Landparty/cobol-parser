@@ -171,6 +171,10 @@ class DeadCodeAnalyzer:
         self._range_ends: set[str] = set()
         # Range end -> the start of every THRU range closing on it.
         self._range_starts: dict[str, set[str]] = {}
+        # (start, end) of every procedure phrase that runs and returns -- a
+        # PERFORM / SORT / MERGE / XML PARSE target, THRU or not -- from
+        # every statement, dead ones included.
+        self._performed_ranges: set[tuple[str, str]] = set()
         # Last paragraph of every section a PERFORM/SORT/MERGE/XML PARSE runs
         # (``PERFORM 1000-INIT`` with no THRU, or a range ending on a
         # section) -> that section. The SECTION form of the ``GO TO
@@ -249,6 +253,7 @@ class DeadCodeAnalyzer:
         self._paragraph_sections = {}
         self._range_ends = set()
         self._range_starts = {}
+        self._performed_ranges = set()
         self._section_exits = {}
         self._section_exit_jumps = set()
         self._sections_entered_by_jump = set()
@@ -647,8 +652,9 @@ class DeadCodeAnalyzer:
                 if thru
                 else self._keys(stmt, start, start_q)
             )
-            starts = self._keys(stmt, start, start_q) if thru else []
+            starts = self._keys(stmt, start, start_q)
             for end in ends:
+                self._performed_ranges.update((s_key, end) for s_key in starts)
                 if thru:
                     self._range_ends.add(end)
                     self._range_starts.setdefault(end, set()).update(starts)
@@ -764,6 +770,7 @@ class DeadCodeAnalyzer:
                     source is None
                     or source in self._fallthrough_sources
                     or not self._inside_range_to(end, source)
+                    or self._jumps_out_of_a_range(end, source)
                 ):
                     self._fallthrough_sources.add(end)
             if len(self._fallthrough_sources) == before:
@@ -784,6 +791,30 @@ class DeadCodeAnalyzer:
             except ValueError:
                 return True
             if start_index <= source_index <= end_index:
+                return True
+        return False
+
+    def _jumps_out_of_a_range(self, end: str, source: str) -> bool:
+        """Whether some PERFORMed range holding *source* closes before
+        *end*: a GO TO from *source* onto *end* then leaves that PERFORM
+        rather than ending a range at *end* (``PERFORM P2`` alone, with
+        ``GO TO P4`` in P2 and ``PERFORM P2 THRU P4`` elsewhere).
+        """
+        order = self._ordered_procedures
+        try:
+            end_index = order.index(end)
+            source_index = order.index(source)
+        except ValueError:
+            return False
+        for start, stop in self._performed_ranges:
+            paras = self._section_paragraphs.get(stop)
+            last = paras[-1] if paras else stop
+            try:
+                start_index = order.index(start)
+                stop_index = order.index(last)
+            except ValueError:
+                continue
+            if start_index <= source_index <= stop_index < end_index:
                 return True
         return False
 
