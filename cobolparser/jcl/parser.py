@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -100,13 +100,19 @@ def _library_members(
 def _make_loaders(
     proc_paths: Sequence[str | os.PathLike[str]],
     suffixes: Sequence[str] | None = None,
+    library: Mapping[str, Path] | None = None,
 ) -> tuple[Any, Any]:
-    """(procedure loader, INCLUDE member loader) over ``proc_paths``; one pair
-    per parse, so each member is read and parsed once."""
+    """(procedure loader, INCLUDE member loader) over ``proc_paths`` -- or
+    over *library*, member name -> file, when the caller has resolved it --;
+    one pair per parse, so each member is read and parsed once."""
     from jclparser.include_loader import IncludeMemberLoader
     from jclparser.proc_loader import ProcedureLoader
 
-    members = _library_members(proc_paths, suffixes)
+    members = (
+        {name.upper(): Path(path) for name, path in library.items()}
+        if library is not None
+        else _library_members(proc_paths, suffixes)
+    )
 
     def _read(name: str) -> str | None:
         path = members.get(name.upper())
@@ -758,8 +764,9 @@ class JclParser:
     members: one member per file, named after the member, any extension --
     or, with ``member_suffixes`` (e.g. ``(".prc", ".proc")``), only files
     with one of those suffixes, so a program source of the same name in a
-    mixed directory is never read as a procedure. The parser is stateless
-    between calls.
+    mixed directory is never read as a procedure. ``library`` (member name ->
+    file) replaces that lookup with one the caller resolved. The parser is
+    stateless between calls.
     """
 
     #: How many unreadable cards one job may have before it is given up on.
@@ -769,6 +776,7 @@ class JclParser:
         self,
         proc_paths: Sequence[str | os.PathLike[str]] | None = None,
         member_suffixes: Sequence[str] | None = None,
+        library: Mapping[str, str | os.PathLike[str]] | None = None,
     ) -> None:
         self.proc_paths = list(proc_paths or [])
         self.member_suffixes = (
@@ -776,13 +784,20 @@ class JclParser:
             if member_suffixes is None
             else tuple(s.lower() for s in member_suffixes)
         )
+        #: Member name -> file, resolved by the caller (directories with
+        #: different member rules, a JCLLIB order); replaces ``proc_paths``.
+        self.library = (
+            None
+            if library is None
+            else {name.upper(): Path(path) for name, path in library.items()}
+        )
 
     def parse(self, text: str, *, filename: str = "<jcl>") -> JclParseResult:
         """Parse JCL source ``text``."""
         _require_jclparser()
 
         library_loader, member_loader = _make_loaders(
-            self.proc_paths, self.member_suffixes
+            self.proc_paths, self.member_suffixes, self.library
         )
         jobs: list[JclJob] = []
         procedures: dict[str, list[JobStep]] = {}

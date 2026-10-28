@@ -44,9 +44,22 @@ from .workspace import ParsedProgram, Stamp, Workspace, _stamp
 #: Suffixes of the JCL files the root-wide tools read.
 JCL_SUFFIXES: tuple[str, ...] = (".jcl", ".job")
 
-#: Suffixes of cataloged procedure members; their directories are the
-#: procedure libraries.
+#: Suffixes of cataloged procedure members; a directory under the root
+#: holding one is a procedure library, whose members are only files so named
+#: (a program source of the same name beside them is never read as one).
 PROC_SUFFIXES: tuple[str, ...] = (".prc", ".proc")
+
+#: Members of a directory named as a procedure library -- ``cobol.yml``'s
+#: ``project.proc_path``, or a ``JCLLIB ORDER=`` library -- may also be
+#: ``.jcl`` / ``.cntl`` files or have no suffix at all, as members
+#: downloaded from a PDS usually do.
+LIBRARY_SUFFIXES: tuple[str, ...] = (".prc", ".proc", ".jcl", ".cntl", "")
+
+#: ``// JCLLIB ORDER=(A.B,C.D)`` or ``ORDER=A.B``: the libraries a job's
+#: procedures are searched in first.
+_JCLLIB = re.compile(
+    r"^//\S*\s+JCLLIB\s+ORDER=\(?([^)\s]+)\)?", re.IGNORECASE | re.MULTILINE
+)
 
 #: In-stream data lines ``jcl_job`` shows per DD (a SORT's control cards,
 #: a TSO step's ``RUN PROGRAM``); the count is always given.
@@ -91,15 +104,99 @@ class JclFile:
     display: str
     result: JclParseResult | None = None
     failure: str | None = None
+    #: Procedure name (upper-cased) -> the member its expansion read.
+    members: dict[str, Path] = field(default_factory=dict)
+    #: ``JCLLIB ORDER=`` libraries no directory under the root is named for.
+    missing_libraries: list[str] = field(default_factory=list)
+    #: The procedure libraries searched for this file, in order.
+    libraries: list[Path] = field(default_factory=list)
+
+
+@dataclass
+class Libraries:
+    """Where the root's cataloged procedures are, in search order.
+
+    A job's ``JCLLIB ORDER=`` libraries come first (a directory under the
+    root named exactly as the library, ``SYS1.PROCLIB/``), then ``cobol.yml``'s
+    ``project.proc_path`` folders and any directory whose name contains
+    ``PROCLIB`` (members with any of :data:`LIBRARY_SUFFIXES`), then every
+    other directory holding a ``.prc`` / ``.proc`` member. The first member of
+    a name wins, as in a PROCLIB concatenation.
+    """
+
+    #: ``proc_path`` folders, then folders named like a PROCLIB.
+    configured: list[Path] = field(default_factory=list)
+    #: ``proc_path`` entries outside the root, never opened.
+    skipped: list[str] = field(default_factory=list)
+    discovered: list[Path] = field(default_factory=list)
+    #: Upper-cased directory name -> the directory, for ``JCLLIB ORDER=``.
+    by_name: dict[str, Path] = field(default_factory=dict)
+
+    def for_text(self, text: str) -> tuple[dict[str, Path], list[str], list[Path]]:
+        """The members a JCL file's procedures resolve to, the ``JCLLIB``
+        libraries of it no directory is named for, and the directories
+        searched, in order."""
+        from ..jcl.parser import _library_members
+
+        order: list[tuple[Path, tuple[str, ...]]] = []
+        missing: list[str] = []
+        for match in _JCLLIB.finditer(text):
+            for raw in match.group(1).split(","):
+                name = raw.strip().strip("'").upper()
+                if not name:
+                    continue
+                directory = self.by_name.get(name)
+                if directory is None:
+                    if name not in missing:
+                        missing.append(name)
+                else:
+                    order.append((directory, LIBRARY_SUFFIXES))
+        order += [(d, LIBRARY_SUFFIXES) for d in self.configured]
+        order += [(d, PROC_SUFFIXES) for d in self.discovered]
+        members: dict[str, Path] = {}
+        for directory, suffixes in order:
+            for name, path in _library_members([directory], suffixes).items():
+                members.setdefault(name, path)
+        searched = list(dict.fromkeys(d for d, _ in order))
+        return members, missing, searched
+
+
+def jcllib_directories(libraries: Libraries, files: list[Path]) -> list[Path]:
+    """The directories the ``JCLLIB ORDER=`` statements of *files* name."""
+    found: list[Path] = []
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in _JCLLIB.finditer(text):
+            for raw in match.group(1).split(","):
+                directory = libraries.by_name.get(raw.strip().strip("'").upper())
+                if directory is not None and directory not in found:
+                    found.append(directory)
+    return found
+
+
+def procedure_libraries(workspace: Workspace) -> Libraries:
+    """The root's procedure libraries (see :class:`Libraries`)."""
+    configured, skipped = workspace.proc_directories()
+    discovered = sorted(
+        {p.parent for p in workspace.files_named(PROC_SUFFIXES)} - set(configured)
+    )
+    by_name: dict[str, Path] = {}
+    for directory, _names in workspace._walk():
+        path = Path(directory).resolve()
+        by_name.setdefault(path.name.upper(), path)
+        if "PROCLIB" in path.name.upper() and path not in configured:
+            configured.append(path)
+    discovered = [d for d in discovered if d not in configured]
+    return Libraries(configured, skipped, discovered, by_name)
 
 
 @dataclass
 class JclIndex:
     files: list[JclFile] = field(default_factory=list)
-    #: Directories searched for cataloged procedures, in order.
-    libraries: list[Path] = field(default_factory=list)
-    #: Procedure name (upper-cased) -> the member file it was read from.
-    members: dict[str, Path] = field(default_factory=dict)
+    libraries: Libraries = field(default_factory=Libraries)
     seconds: float = 0.0
 
     def parsed(self) -> list[JclFile]:
@@ -110,21 +207,26 @@ def jcl_index(workspace: Workspace) -> JclIndex:
     """Every JCL file under the root, parsed; rebuilt when one changes."""
 
     def build() -> tuple[JclIndex, dict[str, Stamp]]:
-        from ..jcl.parser import JclParser, _library_members
-
         started = time.monotonic()
         stamps = workspace.tree_stamps()
-        libraries = sorted({p.parent for p in workspace.files_named(PROC_SUFFIXES)})
-        members = _library_members(libraries, PROC_SUFFIXES)
-        for member in members.values():
-            stamps[str(member)] = _stamp(str(member))
-        parser = JclParser(libraries, PROC_SUFFIXES)
-        files = workspace.files_named(JCL_SUFFIXES)
-        index = JclIndex(libraries=libraries, members=members)
+        libraries = procedure_libraries(workspace)
+        for directory in libraries.configured:
+            # A proc_path folder may sit where the tree walk does not look.
+            stamps[str(directory)] = _stamp(str(directory))
+        # A .jcl member of a procedure library is a procedure, not a job.
+        files = [
+            p
+            for p in workspace.files_named(JCL_SUFFIXES)
+            if p.parent not in libraries.configured
+        ]
+        index = JclIndex(libraries=libraries)
         for done, path in enumerate(files):
             workspace.report_progress(done, len(files), "reading JCL")
             stamps[str(path)] = _stamp(str(path))
-            index.files.append(_parse(parser, workspace, path))
+            jfile = _parse(libraries, workspace, path)
+            for member in jfile.members.values():
+                stamps[str(member)] = _stamp(str(member))
+            index.files.append(jfile)
         index.seconds = time.monotonic() - started
         return index, stamps
 
@@ -133,18 +235,32 @@ def jcl_index(workspace: Workspace) -> JclIndex:
     return result
 
 
-def _parse(parser: Any, workspace: Workspace, path: Path) -> JclFile:
+def _parse(libraries: Libraries, workspace: Workspace, path: Path) -> JclFile:
+    """*path* parsed with the procedure members its own ``JCLLIB`` and the
+    root's libraries resolve to."""
+    from ..jcl.parser import JclParser
+
     display = workspace.display(path)
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         return JclFile(path, display, failure=str(exc))
+    members, missing, searched = libraries.for_text(text)
+    jfile = JclFile(
+        path,
+        display,
+        members=members,
+        missing_libraries=missing,
+        libraries=searched,
+    )
     try:
-        return JclFile(path, display, parser.parse(text, filename=display))
+        jfile.result = JclParser(library=members).parse(text, filename=display)
+        return jfile
     except ImportError as exc:
         raise ToolError(INSTALL_HINT) from exc
     except Exception as exc:  # noqa: BLE001 -- reported as the file's failure
-        return JclFile(path, display, failure=f"{type(exc).__name__}: {exc}")
+        jfile.failure = f"{type(exc).__name__}: {exc}"
+        return jfile
 
 
 # ---------------------------------------------------------------------------
@@ -161,11 +277,11 @@ class _Locator:
     reading the line it claims and checking it is that card.
     """
 
-    def __init__(self, jfile: JclFile, index: JclIndex, workspace: Workspace):
+    def __init__(self, jfile: JclFile, workspace: Workspace):
         assert jfile.result is not None
         self.jfile = jfile
         self.workspace = workspace
-        self.members = index.members
+        self.members = jfile.members
         self.in_stream = {name.upper() for name in jfile.result.procedures}
         self._lines: dict[Path, list[str]] = {}
 
@@ -344,8 +460,42 @@ def _carry_file(jfile: JclFile, response: Response) -> None:
         "incomplete-analysis",
         list(result.unresolved),
         "a procedure or INCLUDE member not found, or a symbol left "
-        "unsubstituted, may hide steps or change dataset names",
+        "unsubstituted, may hide steps or change dataset names; a cataloged "
+        "procedure is found in a .prc / .proc file, a folder named like a "
+        "PROCLIB, or a folder cobol.yml lists as project.proc_path",
         lead=jfile.display,
+    )
+
+
+def _carry_libraries(
+    libraries: Libraries, files: list[JclFile], response: Response
+) -> None:
+    """Procedure libraries that could not be searched: a ``proc_path`` folder
+    outside the root, a ``JCLLIB`` library no directory is named for."""
+    from .tools import _notes
+
+    effect = (
+        "a procedure only that library holds is left unexpanded, or one of "
+        "the same name from another library is used instead"
+    )
+    if libraries.skipped:
+        response.caveat(
+            "incomplete-analysis",
+            "cobol.yml proc_path folders outside the workspace were not "
+            f"searched: {', '.join(libraries.skipped)}",
+            effect,
+        )
+    _notes(
+        response,
+        "incomplete-analysis",
+        [
+            f"{f.display} ({', '.join(f.missing_libraries)})"
+            for f in files
+            if f.missing_libraries
+        ],
+        effect + "; put each library's members in a folder of the library's "
+        "name under the root",
+        lead="JCLLIB ORDER libraries with no folder under the root",
     )
 
 
@@ -353,6 +503,7 @@ def _carry_index(index: JclIndex, response: Response) -> None:
     """The root's JCL gaps, summarized: one caveat per kind, not per file."""
     from .tools import _notes
 
+    _carry_libraries(index.libraries, index.parsed(), response)
     _notes(
         response,
         "incomplete-analysis",
@@ -407,15 +558,14 @@ def jcl_job(
     index = jcl_index(workspace)
     jfile = next((f for f in index.files if f.path == path), None)
     if jfile is None:  # JCL under another suffix (a member with none)
-        from ..jcl.parser import JclParser
-
-        jfile = _parse(JclParser(index.libraries, PROC_SUFFIXES), workspace, path)
+        jfile = _parse(index.libraries, workspace, path)
     if jfile.result is None:
         raise ToolError(f"cannot read {jfile.display}: {jfile.failure}")
     result = jfile.result
     response = Response()
-    locator = _Locator(jfile, index, workspace)
+    locator = _Locator(jfile, workspace)
     _carry_file(jfile, response)
+    _carry_libraries(index.libraries, [jfile], response)
 
     jobs = result.jobs
     if job:
@@ -452,9 +602,10 @@ def jcl_job(
     answer: dict[str, Any] = {"file": jfile.display, "jobs": rows}
     if programs:
         answer["program_sources"] = programs
-    procedures = _procedures(jobs, result, index, workspace)
+    procedures = _procedures(jobs, jfile, workspace)
     if procedures:
         answer["procedures"] = procedures
+        answer["procedure_libraries"] = [workspace.display(d) for d in jfile.libraries]
     if result.symbols:
         answer["symbols"] = {k: result.symbols[k] for k in sorted(result.symbols)}
     if result.errors:
@@ -489,12 +640,12 @@ def _job_row(job: JclJob, steps: list[JobStep], locator: _Locator) -> dict[str, 
 
 def _procedures(
     jobs: list[JclJob],
-    result: JclParseResult,
-    index: JclIndex,
+    jfile: JclFile,
     workspace: Workspace,
 ) -> list[dict[str, Any]]:
     """Every procedure the jobs invoke, and where its cards were read."""
-    in_stream = {name.upper() for name in result.procedures}
+    assert jfile.result is not None
+    in_stream = {name.upper() for name in jfile.result.procedures}
     seen: dict[str, dict[str, Any]] = {}
     for job in jobs:
         for step in job.steps:
@@ -503,10 +654,10 @@ def _procedures(
                 continue
             if name in in_stream:
                 seen[name] = {"name": name, "source": "in-stream"}
-            elif name in index.members:
+            elif name in jfile.members:
                 seen[name] = {
                     "name": name,
-                    "source": workspace.display(index.members[name]),
+                    "source": workspace.display(jfile.members[name]),
                 }
             else:
                 seen[name] = {"name": name, "source": None, "expanded": False}
@@ -545,7 +696,7 @@ def jobs_running(
     locators: dict[Path, _Locator] = {}
     rows = []
     for jfile, job, step in shown:
-        locator = locators.setdefault(jfile.path, _Locator(jfile, index, workspace))
+        locator = locators.setdefault(jfile.path, _Locator(jfile, workspace))
         row: dict[str, Any] = {"file": jfile.display, "job": job.name}
         row.update(_step_row(step, locator))
         if selects is not None:
@@ -754,7 +905,7 @@ def dataset_users(
     found: list[dict[str, Any]] = []
     for jfile in index.parsed():
         assert jfile.result is not None
-        locator = _Locator(jfile, index, workspace)
+        locator = _Locator(jfile, workspace)
         for job, step, dd, path in _cards(jfile.result, locator):
             if dd.dataset is None or not matches(dd.dataset.upper()):
                 continue

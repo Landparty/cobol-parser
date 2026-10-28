@@ -353,6 +353,22 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
             "proc_path folders outside the workspace were not searched: "
             + ", ".join(skipped_procs)
         )
+    # The libraries the JCL tools expand from too: proc_path folders first,
+    # then PROCLIB-named folders, JCLLIB-named folders and .prc / .proc ones.
+    from .jcl_tools import jcllib_directories, procedure_libraries
+
+    libraries = procedure_libraries(workspace)
+    # A .jcl member of a procedure library is a procedure, not a job.
+    jcl = [p for p in jcl if p.parent not in libraries.configured]
+    index.jcl_files = [workspace.display(p) for p in jcl]
+    proc_dirs = list(
+        dict.fromkeys(
+            proc_dirs
+            + libraries.configured
+            + jcllib_directories(libraries, jcl)
+            + libraries.discovered
+        )
+    )
     for folder in proc_dirs:
         # The folder itself (a PROC added or removed) and each member in it.
         stamps[str(folder)] = _stamp(str(folder))
@@ -367,8 +383,10 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
             jobs, problems = load_jobs(jcl, proc_path=proc_dirs)
             if not proc_dirs and any("PROCs not expanded" in p for p in problems):
                 problems.append(
-                    "cataloged PROCs are looked up only in the folders "
-                    "cobol.yml lists as project.proc_path, and it lists none"
+                    "cataloged PROCs are looked up in .prc / .proc files, "
+                    "folders named like a PROCLIB or for a JCLLIB library, "
+                    "and the folders cobol.yml lists as project.proc_path; "
+                    "there is none under the root"
                 )
         except ImportError:
             index.jcl_note = (

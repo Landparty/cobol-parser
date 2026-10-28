@@ -500,6 +500,58 @@ class TestReviewFixes:
         assert "source" not in answer
 
 
+class TestProcedureLibraries:
+    """Where cataloged PROCs come from: JCLLIB, proc_path, PROCLIB folders."""
+
+    def _move_payproc(self, root: Path, folder: str, name: str) -> Path:
+        (root / "procs" / "PAYPROC.prc").unlink()
+        target = root / folder
+        target.mkdir(parents=True, exist_ok=True)
+        (target / name).write_text(PAYPROC)
+        return target / name
+
+    def _extract(self, root: Path, config: ProjectConfig | None = None) -> dict:
+        tools = CobolTools(Workspace(root, config or ProjectConfig()))
+        result = tools.jcl_job("jobs/PAYROLL2.jcl")
+        steps = {s["name"]: s for s in result["answer"]["jobs"][0]["steps"]}
+        return {"result": result, "steps": steps}
+
+    def test_jcllib_library_folder(self, root: Path) -> None:
+        self._move_payproc(root, "lib/PROD.MY.PROCS", "PAYPROC")
+        (root / "jobs" / "PAYROLL2.jcl").write_text(
+            CATALOGED.replace("//*\n", "//PROCS    JCLLIB ORDER=(PROD.MY.PROCS)\n", 1)
+        )
+        got = self._extract(root)
+        extract = got["steps"]["RUNPAY.EXTRACT"]
+        assert extract["program"] == "PAYEXTR"
+        assert extract["location"]["file"] == "lib/PROD.MY.PROCS/PAYPROC"
+        answer = got["result"]["answer"]
+        assert "lib/PROD.MY.PROCS" in answer["procedure_libraries"]
+
+    def test_missing_jcllib_library_is_a_caveat(self, root: Path) -> None:
+        (root / "jobs" / "PAYROLL2.jcl").write_text(
+            CATALOGED.replace("//*\n", "//PROCS    JCLLIB ORDER=NOT.THERE\n", 1)
+        )
+        caveats = self._extract(root)["result"]["caveats"]
+        assert any("NOT.THERE" in c["detail"] for c in caveats)
+
+    def test_proc_path_takes_suffix_less_members(self, root: Path) -> None:
+        member = self._move_payproc(root, "cfg", "PAYPROC")
+        assert "RUNPAY.EXTRACT" not in self._extract(root)["steps"]
+        got = self._extract(root, ProjectConfig(proc_path=(str(member.parent),)))
+        extract = got["steps"]["RUNPAY.EXTRACT"]
+        assert extract["location"]["file"] == "cfg/PAYPROC"
+
+    def test_proclib_named_folder(self, root: Path) -> None:
+        self._move_payproc(root, "SYS1.PROCLIB", "PAYPROC.jcl")
+        got = self._extract(root)
+        extract = got["steps"]["RUNPAY.EXTRACT"]
+        assert extract["location"]["file"] == "SYS1.PROCLIB/PAYPROC.jcl"
+        # A .jcl member of a procedure library is not read as a job.
+        overview = tools_for(root).jcl_job("SYS1.PROCLIB/PAYPROC.jcl")
+        assert overview["answer"]["jobs"] == []
+
+
 class TestIndex:
     def test_a_changed_file_is_reread(self, root: Path) -> None:
         tools = tools_for(root)
