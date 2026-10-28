@@ -581,6 +581,7 @@ class Workspace:
     def program(self, file: str) -> ParsedProgram:
         """The parsed program in *file*, from the cache when still current."""
         path = self.resolve(file)
+        self._refuse_other_language(path)
         key = str(path)
         cached = self._cache.get(key)
         if cached is not None and all(
@@ -594,6 +595,20 @@ class Workspace:
         while len(self._cache) > self.cache_size:
             self._cache.popitem(last=False)
         return parsed
+
+    def _refuse_other_language(self, path: Path) -> None:
+        """A PL/I or assembler source is no COBOL program: say which tools
+        do read it rather than report a failed COBOL parse."""
+        from .languages import language_of
+
+        language = language_of(path)
+        if language is None or path.suffix.lower() in self._program_suffixes():
+            return
+        raise ToolError(
+            f"{self.display(path)} is {language} source, not COBOL: "
+            "program_brief, callers_of (by program name), codebase_overview "
+            "and read_source read it; the other tools are COBOL only"
+        )
 
     def cached_or_parse(self, path: Path) -> ParsedProgram:
         """*path* parsed, from the cache when current, else parsed afresh
@@ -662,10 +677,21 @@ class Workspace:
         stem (a load module is named after its member) plus, for assembler,
         each ``CSECT`` / ``START`` label and ``ENTRY`` name. Each value is a
         list of ``(path, language)``. A CALL to one of these names is a call
-        into the workspace, not to a missing program."""
+        into the workspace, not to a missing program.
+
+        A PL/I or assembler source whose parser is installed is analyzed
+        (:mod:`.languages`), so it is not one of these."""
+        from .languages import LANGUAGE_SUFFIXES, parser_available
+
         found: dict[str, list[tuple[Path, str]]] = {}
         programs = self._program_suffixes()
-        for path in self._files_with_suffix(set(OTHER_SOURCE_LANGUAGES) - programs):
+        analyzed = {
+            suffix
+            for suffix, language in LANGUAGE_SUFFIXES.items()
+            if parser_available(language)
+        }
+        suffixes = set(OTHER_SOURCE_LANGUAGES) - programs - analyzed
+        for path in self._files_with_suffix(suffixes):
             language = OTHER_SOURCE_LANGUAGES[path.suffix.lower()]
             names = {path.stem.upper()}
             if language == "assembler":

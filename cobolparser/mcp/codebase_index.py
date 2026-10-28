@@ -60,6 +60,9 @@ class UnitFacts:
     #: ``program_brief``'s ``calls`` rows: target, via, dynamic, candidates
     #: and the sites (on-disk locations) of every CALL / LINK / XCTL.
     calls: list[dict[str, Any]] = field(default_factory=list)
+    #: ``COBOL``, or ``PL/I`` / ``assembler`` for a source read through a
+    #: sibling parser (:mod:`.languages`).
+    language: str = "COBOL"
 
     @property
     def is_call_target(self) -> bool:
@@ -98,8 +101,13 @@ class _Survey:
 class ProgramsIndex(_Survey):
     units: list[UnitFacts] = field(default_factory=list)
     graph: Any = None  # CodebaseGraph
-    #: MEMBER -> every COPY of it in a program file: {file, line}.
+    #: MEMBER -> every COPY of it in a program file: {file, line}; a PL/I
+    #: ``%INCLUDE`` or an assembler ``COPY`` adds ``language``.
     copy_sites: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    #: Language -> source files of it read through a sibling parser.
+    other_language_files: dict[str, int] = field(default_factory=dict)
+    #: Language -> files of it left unread: its parser is not installed.
+    not_installed: dict[str, list[str]] = field(default_factory=dict)
 
     def units_named(self, program_id: str) -> list[UnitFacts]:
         """The units a ``CALL 'program_id'`` could reach: those whose
@@ -204,8 +212,112 @@ def _build_programs(workspace: Workspace) -> tuple[ProgramsIndex, dict[str, Stam
             index.copy_sites.setdefault(member, []).append(
                 {"file": display, "line": line}
             )
+    _absorb_other_languages(workspace, index, stamps)
     index.seconds = time.monotonic() - started
     return index, stamps
+
+
+def _absorb_other_languages(
+    workspace: Workspace, index: ProgramsIndex, stamps: dict[str, Stamp]
+) -> None:
+    """The PL/I and assembler programs under the root, as units of the
+    index and edges of its call graph: a CALL from COBOL to an assembler
+    routine then reaches a program in the workspace, and the routine's own
+    CALLs count in ``calls`` / ``called_by`` and in the cycles."""
+    from ..analysis.codebase import (
+        CALL_KIND_CALL,
+        CALL_KIND_CICS_LINK,
+        CALL_KIND_CICS_XCTL,
+        CallEdge,
+    )
+    from .languages import languages_index
+
+    languages = languages_index(workspace)
+    index.not_installed = dict(languages.not_installed)
+    for source in languages.sources:
+        stamps[source.path] = source.stamp
+        index.files.append(source.display)
+        for caveat in source.caveats:
+            index.note(source.display, caveat)
+        if source.failed is not None:
+            index.failed[source.display] = source.failed
+            continue
+        index.other_language_files[source.language] = (
+            index.other_language_files.get(source.language, 0) + 1
+        )
+        index.units.append(
+            UnitFacts(
+                program_id=source.program_id,
+                file=source.display,
+                depth=0,
+                graph_id=source.program_id,
+                entries=list(source.entries),
+                calls=source.calls,
+                language=source.language,
+            )
+        )
+        for include in source.includes:
+            site = dict(include.get("location") or {"file": source.display})
+            site["language"] = source.language
+            index.copy_sites.setdefault(include["member"], []).append(site)
+
+    graph = index.graph
+    declared = {
+        (u.graph_id or u.program_id).upper() for u in index.units if u.is_call_target
+    }
+    # A CALL to an assembler ENTRY name, a PL/I procedure's member name, ...
+    # reaches that program: the same rule COBOL's ENTRY names follow (#521).
+    by_entry: dict[str, str] = {}
+    for unit in index.units:
+        if unit.language == "COBOL":
+            continue
+        for entry in unit.entries:
+            if entry not in declared:
+                by_entry.setdefault(entry, unit.program_id.upper())
+    edges = []
+    for edge in graph.call_edges:
+        owner = by_entry.get(edge.callee)
+        if owner is not None:
+            edge = CallEdge(
+                caller=edge.caller,
+                callee=owner,
+                is_dynamic=edge.is_dynamic,
+                resolved=edge.resolved,
+                kind=edge.kind,
+                entry=edge.callee,
+            )
+        edges.append(edge)
+    kinds = {
+        "EXEC CICS LINK": CALL_KIND_CICS_LINK,
+        "EXEC CICS XCTL": CALL_KIND_CICS_XCTL,
+    }
+    for unit in index.units:
+        if unit.language == "COBOL":
+            continue
+        caller = unit.program_id.upper()
+        for row in unit.calls:
+            kind = kinds.get(str(row.get("via")), CALL_KIND_CALL)
+            if row.get("dynamic"):
+                targets = [str(c).upper() for c in row.get("candidates") or []]
+                resolved = bool(row.get("candidates_complete"))
+            else:
+                targets = [str(row.get("program") or "").upper()]
+                resolved = True
+            for target in targets:
+                if not target:
+                    continue
+                owner = target if target in declared else by_entry.get(target)
+                edges.append(
+                    CallEdge(
+                        caller=caller,
+                        callee=owner or target,
+                        is_dynamic=bool(row.get("dynamic")),
+                        resolved=resolved,
+                        kind=kind,
+                        entry=target if owner and owner != target else None,
+                    )
+                )
+    graph.call_edges = sorted(set(edges), key=CallEdge._sort_key)
 
 
 # ---------------------------------------------------------------------------

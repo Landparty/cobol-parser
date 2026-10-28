@@ -668,7 +668,11 @@ def jcl_job(
         shown = response.cap(steps, cap, f"{each.name}.steps")
         for s in shown:
             for name in s.effective_programs():
-                programs[name] = sources.get(name)
+                found = sources.get(name)
+                if found is None:
+                    other = _other_language_source(workspace, name)
+                    found = other["file"] if other else None
+                programs[name] = found
         rows.append(_job_row(each, shown, locator))
     if step and not any(row["steps"] for row in rows):
         names = [s.name for j in jobs for s in j.steps]
@@ -791,6 +795,17 @@ def jobs_running(
     if selects is not None:
         answer["source"] = selects["source"]
         answer["files"] = selects["files"]
+    else:
+        other = _other_language_source(workspace, name)
+        if other is not None:
+            answer["source"] = other
+            response.caveat(
+                "incomplete-analysis",
+                f"{name} is {other['language']} source ({other['file']}), whose "
+                "parser reads no file declarations",
+                "its DDs are not bound to the files it opens; dataset access "
+                "comes from DISP alone",
+            )
     if not matches:
         answer["note"] = (
             f"no JCL step under the root runs {name}"
@@ -826,6 +841,24 @@ def _program_selects(
     if files is None:
         return None
     return {"source": parsed.program_info(unit), "files": files}
+
+
+def _other_language_source(workspace: Workspace, name: str) -> dict[str, Any] | None:
+    """The PL/I or assembler program *name* under the root (by its program
+    name, else an entry name or the file stem), when its parser is
+    installed: ``{program_id, file, language}``."""
+    from .languages import languages_index, source_files
+
+    if not source_files(workspace):
+        return None
+    found = languages_index(workspace).named(name)
+    if not found:
+        return None
+    return {
+        "program_id": found[0].program_id,
+        "file": found[0].display,
+        "language": found[0].language,
+    }
 
 
 def _declaring_file(workspace: Workspace, name: str) -> str | None:

@@ -77,7 +77,9 @@ Across programs: codebase_overview for the whole workspace, callers_of with a
 program name for every CALL/LINK/XCTL to it, impact_of_change for what a
 change to a copybook or a field reaches, and where_from for where a field's
 value comes from. The first such call indexes every program under the root;
-later calls reuse the index until a file changes.
+later calls reuse the index until a file changes. PL/I and assembler programs
+(with the [pl1] / [hlasm] extras) are in the call graph, callers_of and
+program_brief too; the other tools read COBOL only.
 """,
     "data": """\
 Data and versions: diff_programs says what changed between two versions of a
@@ -401,7 +403,8 @@ def build_server(
     ) -> dict[str, Any]:
         """A program on one page: interface, files and their C/R/U/D use,
         SQL tables, calls, CICS/DL/I, unreachable paragraphs, health, worst
-        lint findings. Start here."""
+        lint findings; a PL/I or assembler file: its calls and includes.
+        Start here."""
         return await off_loop(
             "program_brief", lambda: tools.program_brief(file, program, limit)
         )
@@ -486,8 +489,9 @@ def build_server(
     async def codebase_overview(
         limit: Limit = None, ctx: MCPContext | None = None
     ) -> dict[str, Any]:
-        """The whole workspace on one page: programs and health grades, call
-        graph, missing programs and copybooks, duplicated code."""
+        """The whole workspace on one page: programs (COBOL, PL/I, assembler)
+        and health grades, call graph, missing programs and copybooks,
+        duplicated code."""
         return await off_loop(
             "codebase_overview", lambda: tools.codebase_overview(limit), ctx
         )

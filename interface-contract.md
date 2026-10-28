@@ -353,6 +353,12 @@ What a client depends on:
   `total`) and, for tools about a program, `program` (`file`,
   `program_id`, `program_units`).
 - Locations as `{"file", "line", "column"?}`, root-relative paths on disk.
+- With the `[pl1]` / `[hlasm]` extras (added 2026-10-28), PL/I and assembler
+  programs appear in the cross-program answers with an optional `language`
+  key (absent means COBOL), and `program_brief` on such a file answers with
+  `language`, `procedures` or `sections`, `calls`, `includes`, `services`,
+  `called_by` instead of the COBOL sections. Every other file tool refuses
+  such a file with a tool error, as it refused it before as a failed parse.
 - The closed `caveats[].kind` vocabulary, `cobolparser.mcp.CAVEAT_KINDS`.
 
 **Versioning contract:** removing or renaming a tool or argument, removing or

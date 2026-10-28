@@ -380,6 +380,9 @@ class CobolTools:
         """What *file* (or one program unit in it) is, on one page."""
         from ..analysis.lint import LintAnalyzer
 
+        other = self._other_language_path(file)
+        if other is not None:
+            return self._other_language_brief(other, clamp_limit(limit))
         parsed = self.workspace.program(file)
         response = Response()
         _carry_parse_caveats(parsed, response)
@@ -542,6 +545,81 @@ class CobolTools:
                 }
         return response.build(answer, parsed.program_info(unit))
 
+    # -- PL/I and assembler ---------------------------------------------------
+
+    def _other_language_path(self, file: str) -> Path | None:
+        """*file*'s path when it is a PL/I or assembler source, else None."""
+        from .languages import language_of
+
+        if language_of(file) is None:
+            return None
+        path = self.workspace.resolve(file)
+        if path.suffix.lower() in self.workspace._program_suffixes():
+            return None
+        return path
+
+    def _other_language_brief(self, path: Path, cap: int) -> dict[str, Any]:
+        """``program_brief`` of a PL/I or assembler source: its names, its
+        procedures or sections, what it CALLs and includes, its CICS / SQL /
+        MQ / IMS requests, who CALLs it and which JCL steps run it."""
+        from .codebase_index import programs_index
+        from .languages import LIMITS, facts_for
+
+        source = facts_for(self.workspace, path)
+        response = Response()
+        for caveat in source.caveats:
+            response.caveat(caveat.kind, caveat.detail, caveat.effect)
+        if source.failed is not None:
+            raise ToolError(
+                f"cannot read {source.display} as {source.language}: {source.failed}"
+            )
+        response.caveat(
+            "incomplete-analysis",
+            LIMITS[source.language],
+            "files, record layouts, field lineage and health are not "
+            "available for this program",
+        )
+        answer: dict[str, Any] = {
+            "program_id": source.program_id,
+            "language": source.language,
+            "file": source.display,
+            "line_count": source.line_count,
+        }
+        if source.entries:
+            answer["also_called_as"] = source.entries
+        kind = "procedures" if source.language == "PL/I" else "sections"
+        answer[kind] = response.cap(source.sections, cap, kind)
+        answer["calls"] = response.cap(source.calls, cap, "calls")
+        answer["includes"] = response.cap(source.includes, cap, "includes")
+        if source.services:
+            counts: dict[str, dict[str, int]] = {}
+            for service in source.services:
+                label = str(service.get("target") or service["command"])
+                held = counts.setdefault(service["kind"], {})
+                held[label] = held.get(label, 0) + 1
+            answer["services"] = {k: dict(sorted(v.items())) for k, v in counts.items()}
+            answer["service_requests"] = response.cap(
+                source.services, cap, "service_requests"
+            )
+        index = programs_index(self.workspace)
+        names = source.names()
+        callers = sorted(
+            {
+                unit.program_id
+                for unit in index.units
+                for row in unit.calls
+                if str(row.get("program") or "").upper() in names
+                or names & {str(c).upper() for c in row.get("candidates") or []}
+            }
+        )
+        answer["called_by"] = response.cap(callers, cap, "called_by")
+        if not callers:
+            answer["note"] = (
+                "no program under the root CALLs it: it is started by JCL "
+                "(jobs_running), CICS or IMS, or is called from elsewhere"
+            )
+        return response.build(answer)
+
     # -- callers_of ----------------------------------------------------------
 
     def callers_of(
@@ -563,6 +641,11 @@ class CobolTools:
         cap = clamp_limit(limit)
         response = Response()
         if file is None:
+            return self._program_callers(wanted, response, cap, None, [])
+        other = self._other_language_path(file)
+        if other is not None:
+            # PL/I and assembler procedures are not indexed: a name is a
+            # program here.
             return self._program_callers(wanted, response, cap, None, [])
         parsed = self.workspace.program(file)
         _carry_parse_caveats(parsed, response)
@@ -850,6 +933,8 @@ class CobolTools:
                         "via": row.get("via"),
                         "location": site.get("location"),
                     }
+                    if unit.language != "COBOL":
+                        caller["language"] = unit.language
                     if reaches_nested:
                         caller["nested"] = True
                     if site.get("paragraph"):
@@ -872,6 +957,8 @@ class CobolTools:
                 where["contained"] = True
             if unit.unit_kind != "PROGRAM":
                 where["unit_kind"] = unit.unit_kind
+            if unit.language != "COBOL":
+                where["language"] = unit.language
             declared.append(where)
         if not callers and not declared:
             known = sorted(
@@ -930,7 +1017,7 @@ class CobolTools:
                 f"no COBOL program under the root has PROGRAM-ID {wanted}, but "
                 f"its source is here in {other[0][1]} "
                 f"({self.workspace.display(other[0][0])}), which these tools "
-                "do not parse: read it with read_source"
+                "do not parse: read it with read_source" + _install_note(other[0][0])
             )
         elif not declared:
             answer["note"] = (
@@ -997,7 +1084,11 @@ class CobolTools:
         if file is None or suffix in _MEMBER_SUFFIXES or "/" in text:
             member = _normalize_member(text)
             index = programs_index(self.workspace)
-            if suffix in _MEMBER_SUFFIXES or member in index.graph.members:
+            if (
+                suffix in _MEMBER_SUFFIXES
+                or member in index.graph.members
+                or member in index.copy_sites
+            ):
                 return self._copybook_impact(member, cap)
         return self._lineage(text, file, program, depth, cap, "forward", full_paths)
 
@@ -1030,6 +1121,26 @@ class CobolTools:
         response = Response()
         _carry_index_caveats(index, response, "COPY statements")
         graph = index.graph
+        # A PL/I %INCLUDE or an assembler COPY of the member: not in the
+        # COBOL COPY graph, so listed on its own.
+        included = [s for s in index.copy_sites.get(member, []) if s.get("language")]
+        if included and member not in graph.members:
+            return response.build(
+                {
+                    "name": member,
+                    "kind": "copybook",
+                    "found": True,
+                    "program_count": len(
+                        {self._unit_in(index, s["file"]) for s in included}
+                    ),
+                    "copied_by": [],
+                    "included_by_other_languages": response.cap(
+                        self._included_rows(index, included),
+                        cap,
+                        "included_by_other_languages",
+                    ),
+                }
+            )
         report = CopybookImpactAnalyzer(graph).analyze(member)
         if member not in graph.members:
             return response.build(
@@ -1109,6 +1220,17 @@ class CobolTools:
                     nested, cap, "copied_through_other_members"
                 ),
                 "fields": response.cap(report.fields, cap, "fields"),
+                **(
+                    {
+                        "included_by_other_languages": response.cap(
+                            self._included_rows(index, included),
+                            cap,
+                            "included_by_other_languages",
+                        )
+                    }
+                    if included
+                    else {}
+                ),
                 "next": "for where one of these fields' values go, ask "
                 "impact_of_change with that field and the file of a program "
                 "that copies the member",
@@ -1274,6 +1396,32 @@ class CobolTools:
         }
         return response.build(answer, program_info)
 
+    @staticmethod
+    def _unit_in(index: Any, file: str) -> str:
+        """The program declared in *file* (a PL/I or assembler source)."""
+        return next((u.program_id for u in index.units if u.file == file), file)
+
+    def _included_rows(
+        self, index: Any, sites: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """One row per PL/I or assembler program including a member."""
+        rows: dict[str, dict[str, Any]] = {}
+        for site in sites:
+            row = rows.setdefault(
+                site["file"],
+                {
+                    "program": self._unit_in(index, site["file"]),
+                    "file": site["file"],
+                    "language": site["language"],
+                    "include_sites": [],
+                },
+            )
+            if site.get("line"):
+                row["include_sites"].append(
+                    {"file": site["file"], "line": site["line"]}
+                )
+        return list(rows.values())
+
     def _is_member(self, name: str, parsed: ParsedProgram | None) -> bool:
         """Whether *name* is a copybook member: one *parsed* expanded, or one
         the programs index (only when already built) saw a COPY name."""
@@ -1340,6 +1488,8 @@ class CobolTools:
                 row["contained"] = True
             if unit.unit_kind != "PROGRAM":
                 row["unit_kind"] = unit.unit_kind
+            if unit.language != "COBOL":
+                row["language"] = unit.language
             programs.append(row)
 
         declared = {
@@ -1401,10 +1551,18 @@ class CobolTools:
             key=lambda u: (-u["score"], u["program"] or ""),
         )
 
+        by_language: dict[str, int] = {}
+        for unit in index.units:
+            by_language[unit.language] = by_language.get(unit.language, 0) + 1
         answer: dict[str, Any] = {
             "index": {
                 **index.summary(),
                 "program_units": len(index.units),
+                **(
+                    {"program_units_by_language": dict(sorted(by_language.items()))}
+                    if set(by_language) != {"COBOL"}
+                    else {}
+                ),
                 **(
                     {"other_sources_not_analyzed": dict(sorted(languages.items()))}
                     if languages
@@ -1506,6 +1664,7 @@ class CobolTools:
                 "could not all be traced",
                 "the call graph may miss edges from them",
             )
+        _other_language_caveats(index, response)
         return response.build(answer)
 
     # -- business_rules ------------------------------------------------------
@@ -2588,6 +2747,41 @@ def _worth_showing(value: Any) -> bool:
     ``byte_offset`` 0 is information; ``0 in (None, [], False)`` is True.
     """
     return value is not None and value is not False and value != []
+
+
+def _install_note(path: Path) -> str:
+    """How to have *path* analyzed, when only a missing parser stops it."""
+    from .languages import install_hint, language_of
+
+    language = language_of(path)
+    return (
+        ""
+        if language is None
+        else f" (or install its parser: {install_hint(language)})"
+    )
+
+
+def _other_language_caveats(index: Any, response: Response) -> None:
+    """What the programs index could not read of the PL/I and assembler
+    sources under the root, and what it read of them only in part."""
+    from .languages import LIMITS, install_hint
+
+    for language, files in sorted(index.not_installed.items()):
+        response.caveat(
+            "incomplete-analysis",
+            f"{len(files)} {language} file(s) under the root were not read: "
+            f"the {language} parser is not installed ({install_hint(language)})",
+            "CALLs from them are missing; CALLs to them count as "
+            "in_workspace_not_analyzed",
+        )
+    for language in sorted(index.other_language_files):
+        response.caveat(
+            "incomplete-analysis",
+            f"{index.other_language_files[language]} {language} file(s) read "
+            f"through a sibling parser: {LIMITS[language]}",
+            f"{language} programs are in the call graph, but have no health "
+            "grade, no field lineage and no file I/O",
+        )
 
 
 def _carry_index_caveats(index: Any, response: Response, what: str) -> None:

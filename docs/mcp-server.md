@@ -19,7 +19,14 @@ workspace: generated test data and decoded records come back in the answer.
 pip install 'cobol-parser[mcp]'
 # with the JCL tools (jobs_running, dataset_users, jcl_job):
 pip install 'cobol-parser[mcp,jcl]'
+# with the PL/I and assembler programs in the call graph too:
+pip install 'cobol-parser[mcp,jcl,pl1,hlasm]'
 ```
+
+The `[pl1]` and `[hlasm]` extras install the sibling parsers
+(`landparty-pl1-parser`, `hlasmparser`). Until they are published to PyPI,
+install them from their repositories first (`pip install -e ../pl1-parser
+-e ../hlasm-parser`). See [PL/I and assembler](#pli-and-assembler).
 
 Claude Code:
 
@@ -182,6 +189,53 @@ notifications (one per file read, at most once a second) to a client that
 asked for them, so a client that resets its timeout on progress keeps
 waiting. A symlink under the root that leads outside it is skipped, as
 `read_source` would refuse it.
+
+### PL/I and assembler
+
+A mainframe checkout is rarely COBOL alone. With the `[pl1]` extra every
+`.pli` / `.pl1` file under the root is read through the PL/I parser, and with
+the `[hlasm]` extra every `.asm` / `.s` / `.hlasm` / `.alc` file through the
+assembler parser (`.mac` macro members are not programs and are not read).
+Each is parsed once and kept until it changes. They then take part in the
+answers that are about programs rather than COBOL data:
+
+- `codebase_overview` lists them with a `language` (`PL/I`, `assembler`),
+  counts `program_units_by_language`, and their CALLs are edges of the one
+  call graph: `calls`, `called_by`, `entry_programs`, `most_called`,
+  `not_in_workspace` and `cycles` cross languages. A PL/I `CALL` / `FETCH`
+  (an aliased entry, `DCL X ENTRY EXTERNAL('REAL')`, counts as a call to
+  `REAL`), an assembler `CALL` / `LINK` / `XCTL` / `LOAD` / `ATTACH`
+  (`EPLOC=` resolved through its `DC`) and an assembler
+  `EXEC CICS LINK` / `XCTL PROGRAM(...)` are calls.
+- A program is reached by its name (the main procedure, the first `CSECT`)
+  and also by its file stem, an `ENTRY` name or another `CSECT`, the way a
+  COBOL `ENTRY` name reaches its program: `CALL 'DATECONV'` from COBOL
+  reaches the routine in `DATERTN.asm` that declares `ENTRY DATECONV`.
+- `callers_of` with a program name finds callers in every language
+  (`language` on each caller and declaration that is not COBOL).
+- `program_brief` on a PL/I or assembler file gives its name, the other names
+  that reach it, its procedures (PL/I) or CSECTs / DSECTs, its calls, its
+  `%INCLUDE` / `COPY` members, its CICS / SQL / MQ / IMS requests (assembler)
+  and who calls it.
+- `impact_of_change` on a member also lists the PL/I and assembler programs
+  that include it (`included_by_other_languages`); `check_claims`' `calls`
+  and `copies` kinds check them.
+- `jobs_running` names a PL/I or assembler `source`, and `jcl_job`'s
+  `program_sources` maps a step's program to its file in any language.
+
+The sibling parsers read less than the COBOL one, and every answer that uses
+them says so in an `incomplete-analysis` caveat: neither reads file
+declarations or record I/O, so these programs have no `files`, their DDs are
+not bound to their files, and their dataset access comes from DISP alone;
+the PL/I parser does not read `EXEC SQL` / `EXEC CICS`. They have no health
+grade, no field lineage and no statements: `explain_symbol`, `lint`,
+`where_from` and the other COBOL tools refuse such a file with an error that
+says which tools read it. `read_source` reads any file under the root.
+
+Without an extra, the files of that language are listed, as before, as
+`in_workspace_not_analyzed` (a CALL to them is a call into the workspace, not
+to a missing program), and `codebase_overview` carries a caveat naming the
+install command.
 
 ### How programs are run (JCL)
 

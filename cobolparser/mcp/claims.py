@@ -117,6 +117,11 @@ def _calls(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
     units = index.units_named(caller)
     if not units:
         raise ToolError(f"no program under the root is named {caller}")
+    # A CALL to one of the callee's ENTRY names reaches it too (#521): an
+    # assembler routine's ENTRY, a PL/I program's member name.
+    callees = {callee} | {
+        entry for unit in index.units_named(callee) for entry in unit.entries
+    }
     sites: list[Any] = []
     others: list[str] = []
     open_dynamic: list[Any] = []
@@ -124,7 +129,7 @@ def _calls(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
         for row in unit.calls:
             target = _norm(row.get("program"))
             candidates = [_norm(c) for c in row.get("candidates") or []]
-            if target == callee or callee in candidates:
+            if target in callees or callees & set(candidates):
                 sites += [s.get("location") for s in row.get("sites") or []]
             elif row.get("dynamic") and not row.get("candidates_complete"):
                 open_dynamic += [s.get("location") for s in row.get("sites") or []]
@@ -158,7 +163,11 @@ def _copies(tools: CobolTools, claim: dict[str, Any]) -> _Verdict:
         raise ToolError(f"no program under the root is named {program}")
     files = {u.file for u in units}
     member_key = member.rsplit(".", 1)[0] if "." in member else member
-    sites = [s for s in index.copy_sites.get(member_key, []) if s.get("file") in files]
+    sites = [
+        {"file": s.get("file"), "line": s.get("line")}
+        for s in index.copy_sites.get(member_key, [])
+        if s.get("file") in files
+    ]
     if sites:
         return CONFIRMED, f"{program} copies {member_key}", sites
     copied = sorted(
