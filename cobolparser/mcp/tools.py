@@ -42,12 +42,20 @@ MAX_SOURCE_LINES = 200
 #: JCL steps a brief lists under run_by (jobs_running has them all).
 BRIEF_RUN_BY = 10
 
+#: Programs a brief's ``call_tree`` lists (``follow_calls``), each with the
+#: files and tables it uses; ``jobs_running`` with follow_calls lists them all.
+BRIEF_CALL_TREE = 25
+
 #: Lint findings a program brief shows (worst first); ``lint`` has the rest.
 BRIEF_LINT = 5
 
 #: Length of the "top" lists in a codebase overview (most called, most used
 #: copybooks, worst health, duplicated code); ``limit`` can only lower it.
 OVERVIEW_TOP = 10
+
+#: Members shown per duplicated-code group in a codebase overview: enough to
+#: see where the copies are; ``member_count`` says how many there are.
+OVERVIEW_CLONE_MEMBERS = 3
 
 #: Notes named one by one in a caveat that summarizes many.
 NOTES_SHOWN = 5
@@ -378,14 +386,31 @@ class CobolTools:
     # -- program_brief -------------------------------------------------------
 
     def program_brief(
-        self, file: str, program: str | None = None, limit: int | None = None
+        self,
+        file: str,
+        program: str | None = None,
+        limit: int | None = None,
+        follow_calls: bool = False,
     ) -> dict[str, Any]:
-        """What *file* (or one program unit in it) is, on one page."""
+        """What *file* (or one program unit in it) is, on one page; with
+        *follow_calls*, also every program it runs in turn, each with the
+        files and SQL tables it uses (``call_tree``)."""
         from ..analysis.lint import LintAnalyzer
 
         other = self._other_language_path(file)
         if other is not None:
-            return self._other_language_brief(other, clamp_limit(limit))
+            result = self._other_language_brief(other, clamp_limit(limit))
+            if follow_calls:
+                response = Response()
+                self._brief_call_tree(
+                    str(result["answer"].get("program_id") or other.stem),
+                    result["answer"],
+                    response,
+                    clamp_limit(limit),
+                )
+                result["caveats"] += [c.to_dict() for c in response.caveats]
+                result["truncated"] += response.truncated
+            return result
         parsed = self.workspace.program(file)
         response = Response()
         _carry_parse_caveats(parsed, response)
@@ -552,7 +577,69 @@ class CobolTools:
                 Path(str(parsed.path)).stem.upper(),
             } - {""}
             self._brief_run_by(answer, response, names, cap)
+        if follow_calls:
+            self._brief_call_tree(unit.program_name or "", answer, response, cap)
         return response.build(answer, parsed.program_info(unit))
+
+    def _brief_call_tree(
+        self, name: str, answer: dict[str, Any], response: Response, cap: int
+    ) -> None:
+        """``answer["call_tree"]``: every program *name* runs through CALL /
+        LINK / XCTL, breadth first, each COBOL one with its ``files`` and
+        ``sql_tables`` (C/R/U/D) and CICS command counts, so a transaction's
+        whole footprint is one answer instead of one brief per program."""
+        from .codebase_index import call_chain
+
+        chain: tuple[list[dict[str, Any]], list[str]] | None = _attempt(
+            response, "call tree", lambda: call_chain(self.workspace, name)
+        )
+        rows, notes = chain or ([], [])
+        shown = response.cap(rows, min(cap, BRIEF_CALL_TREE), "call_tree")
+        for row in shown:
+            if row.get("language") != "COBOL" or not row.get("file"):
+                continue
+            file, callee = str(row["file"]), str(row["program"])
+            uses = _attempt(
+                response,
+                f"file and table use of {callee}",
+                functools.partial(self._program_uses, file, callee),
+            )
+            if uses:
+                row.update(uses)
+        answer["call_tree"] = shown
+        if shown:
+            answer.setdefault("access_legend", "C=create R=read U=update D=delete")
+        _notes(
+            response,
+            "incomplete-analysis",
+            notes,
+            "programs those dynamic CALLs reach are missing from call_tree",
+            lead="the call chain could not be followed everywhere",
+        )
+
+    def _program_uses(self, file: str, program: str) -> dict[str, Any]:
+        """The files and SQL tables one program uses (C/R/U/D) and its CICS
+        command counts: the footprint part of its brief."""
+        parsed = self.workspace.program(file)
+        unit = parsed.ast.find_program_unit(program) or parsed.ast
+        crud = _crud(parsed, unit)
+        out: dict[str, Any] = {}
+        files = [
+            {"name": e.file_name, "access": e.crud.as_string()}
+            for e in sorted(crud.file_entries, key=lambda e: e.file_name)
+        ]
+        tables = [
+            {"name": e.table_name, "access": e.crud.as_string()}
+            for e in sorted(crud.table_entries, key=lambda e: e.table_name)
+        ]
+        if files:
+            out["files"] = files
+        if tables:
+            out["sql_tables"] = tables
+        cics = _verb_counts(_own_statements(unit), "EXEC_CICS", "cics_command")
+        if cics:
+            out["cics_commands"] = cics
+        return out
 
     def _brief_run_by(
         self,
@@ -1559,21 +1646,18 @@ class CobolTools:
         """The programs under the root, how they call each other and share
         copybooks, their health, and the code duplicated between them.
         *language* (COBOL, PL/I, assembler) and *path* (a folder, or a glob
-        of root-relative paths) narrow the ``programs`` list; the other
-        sections stay root-wide."""
+        of root-relative paths) narrow the answer to those programs: the
+        call graph, copybooks, health and duplicated code are then counted
+        over them alone."""
         from .codebase_index import health_index, programs_index
 
         wanted_language = _language_named(language) if language else None
         cap = clamp_limit(limit)
         top = min(cap, OVERVIEW_TOP)
+        members_shown = min(top, OVERVIEW_CLONE_MEMBERS)
         response = Response()
         index = programs_index(self.workspace)
         health = health_index(self.workspace)
-        _carry_index_caveats(index, response, "programs")
-        for caveats in health.file_caveats.values():
-            for caveat in caveats:
-                if caveat.kind == "analyzer-failed":
-                    response.caveat(caveat.kind, caveat.detail, caveat.effect)
         graph = index.graph
 
         grades = {(u["program"] or "", u["file"]): u for u in health.units}
@@ -1583,6 +1667,9 @@ class CobolTools:
             callers_of.setdefault(edge.callee, set()).add(edge.caller)
             callees_of.setdefault(edge.caller, set()).add(edge.callee)
         programs = []
+        scoped = wanted_language is not None or path is not None
+        scope_ids: set[str] = set()
+        scope_files: set[str] = set()
         for unit in index.units:
             # The graph's id: a nested program's is qualified (#532). A
             # FACTORY / OBJECT / METHOD-ID unit has no graph node of its
@@ -1615,6 +1702,21 @@ class CobolTools:
             if path is not None and not _path_matches(unit.file, path):
                 continue
             programs.append(row)
+            scope_ids.add(pid or unit.program_id.upper())
+            scope_files.add(unit.file)
+
+        def in_scope(program_id: str) -> bool:
+            return not scoped or program_id.upper() in scope_ids
+
+        _carry_index_caveats(
+            index, response, "programs", scope_files if scoped else None
+        )
+        for file, caveats in health.file_caveats.items():
+            if scoped and file not in scope_files:
+                continue
+            for caveat in caveats:
+                if caveat.kind == "analyzer-failed":
+                    response.caveat(caveat.kind, caveat.detail, caveat.effect)
 
         declared = {
             (u.graph_id or u.program_id).upper()
@@ -1623,7 +1725,7 @@ class CobolTools:
         }
         external: dict[str, set[str]] = {}
         for edge in graph.call_edges:
-            if edge.callee not in declared:
+            if edge.callee not in declared and in_scope(edge.caller):
                 external.setdefault(edge.callee, set()).add(edge.caller)
         other_sources = self.workspace.other_sources()
         not_parsed = {p: c for p, c in external.items() if p.upper() in other_sources}
@@ -1635,17 +1737,24 @@ class CobolTools:
         }:
             languages[language] = languages.get(language, 0) + 1
         most_called = sorted(
-            ((p, len(c)) for p, c in callers_of.items() if p in declared),
+            (
+                (p, len(c))
+                for p, c in callers_of.items()
+                if p in declared and in_scope(p)
+            ),
             key=lambda pc: (-pc[1], pc[0]),
         )
         entry = sorted(
             u.program_id
             for u in index.units
-            if not u.depth and u.program_id.upper() not in callers_of
+            if not u.depth
+            and u.program_id.upper() not in callers_of
+            and (not scoped or u.file in scope_files)
         )
         dynamic = sum(
             1
             for u in index.units
+            if not scoped or u.file in scope_files
             for row in u.calls
             if row.get("dynamic") and not row.get("candidates_complete")
             for _ in row.get("sites") or []
@@ -1655,23 +1764,53 @@ class CobolTools:
             (
                 (
                     m,
-                    len(graph.programs_using(m)),
-                    len(graph.programs_using(m, transitive=False)),
+                    sum(1 for p in graph.programs_using(m) if in_scope(p)),
+                    sum(
+                        1
+                        for p in graph.programs_using(m, transitive=False)
+                        if in_scope(p)
+                    ),
                 )
                 for m in graph.members
             ),
             key=lambda mu: (-mu[1], mu[0]),
         )
+        usage = [u for u in usage if u[1]]
         unresolved_members = sorted(
-            {e.member for e in graph.copy_edges if e.path is None and not e.nested}
+            {
+                e.member
+                for e in graph.copy_edges
+                if e.path is None and not e.nested and in_scope(e.program)
+            }
         )
+        graded_units = [
+            u for u in health.units if not scoped or u["file"] in scope_files
+        ]
+        clones = [
+            {
+                **group,
+                "member_count": len(group["members"]),
+                "members": [
+                    m
+                    for m in group["members"]
+                    if not scoped
+                    or (m.get("location") or {}).get("file") in scope_files
+                ],
+            }
+            for group in health.clones
+        ]
+        clones = [g for g in clones if g["members"]]
+        cycles = [c for c in graph.cycles() if any(in_scope(p) for p in c)]
+        gaps = [self._relative(note) for note in graph.unresolved]
+        if scoped:
+            gaps = [g for g in gaps if g.split(":", 1)[0] in scope_files]
 
         bands: dict[str, int] = {}
-        for graded_unit in health.units:
+        for graded_unit in graded_units:
             grade = graded_unit["grade"] or "ungraded"
             bands[grade] = bands.get(grade, 0) + 1
         worst = sorted(
-            (u for u in health.units if u["score"] is not None),
+            (u for u in graded_units if u["score"] is not None),
             key=lambda u: (-u["score"], u["program"] or ""),
         )
 
@@ -1711,7 +1850,11 @@ class CobolTools:
                 "programs",
             ),
             "call_graph": {
-                "edges": len(graph.call_edges),
+                "edges": sum(
+                    1
+                    for e in graph.call_edges
+                    if in_scope(e.caller) or in_scope(e.callee)
+                ),
                 "entry_programs": response.cap(entry, cap, "call_graph.entry_programs"),
                 "most_called": [
                     {"program": p, "called_by": n} for p, n in most_called[:top]
@@ -1742,11 +1885,11 @@ class CobolTools:
                     cap,
                     "call_graph.in_workspace_not_analyzed",
                 ),
-                "cycles": response.cap(graph.cycles(), cap, "call_graph.cycles"),
+                "cycles": response.cap(cycles, cap, "call_graph.cycles"),
                 "unresolved_dynamic_calls": dynamic,
             },
             "copybooks": {
-                "members": len(graph.members),
+                "members": len(usage),
                 "most_used": [
                     {"member": m, "programs": n, "copied_directly_by": d}
                     for m, n, d in usage[:top]
@@ -1765,33 +1908,40 @@ class CobolTools:
                 "A <= 10 < B <= 25 < C <= 45 < D <= 70 < F",
             },
             "duplicated_code": {
-                "group_count": len(health.clones),
+                "group_count": len(clones),
                 "groups": [
-                    {
-                        **group,
-                        "member_count": len(group["members"]),
-                        "members": response.cap(
-                            group["members"],
-                            top,
-                            f"duplicated_code.groups[{number}].members",
-                        ),
-                    }
-                    for number, group in enumerate(
-                        response.cap(health.clones, top, "duplicated_code.groups")
-                    )
+                    {**group, "members": group["members"][:members_shown]}
+                    for group in response.cap(clones, top, "duplicated_code.groups")
                 ],
                 "ranking": "most duplicated statements first (statements x "
                 "copies); a copybook paragraph included by many programs is "
                 "one copy",
             },
         }
+        cut = [
+            g
+            for g in answer["duplicated_code"]["groups"]
+            if g["member_count"] > len(g["members"])
+        ]
+        if cut:
+            response.truncated.append(
+                {
+                    "field": "duplicated_code.groups[].members",
+                    "shown": members_shown,
+                    "groups_cut": len(cut),
+                    "note": "member_count is every copy; impact_of_change or "
+                    "read_procedure on one member for more",
+                }
+            )
+        if scoped:
+            answer["scope"] = "every section is counted over the matched programs only"
         _notes(
             response,
             "incomplete-analysis",
-            [self._relative(note) for note in graph.unresolved],
+            gaps,
             "call and COPY edges near these are missing or only approximately "
             "attributed",
-            lead=f"{len(graph.unresolved)} gap(s) in the call and COPY graph",
+            lead=f"{len(gaps)} gap(s) in the call and COPY graph",
         )
         if dynamic:
             response.caveat(
@@ -2943,18 +3093,24 @@ def _other_language_caveats(index: Any, response: Response) -> None:
         )
 
 
-def _carry_index_caveats(index: Any, response: Response, what: str) -> None:
-    """A root-wide index's gaps, as a few caveats rather than one per file."""
-    if index.failed:
+def _carry_index_caveats(
+    index: Any, response: Response, what: str, files: set[str] | None = None
+) -> None:
+    """A root-wide index's gaps, as a few caveats rather than one per file;
+    with *files*, only the gaps in those files."""
+    failed = {f: why for f, why in index.failed.items() if files is None or f in files}
+    if failed:
         _notes(
             response,
             "incomplete-analysis",
-            [f"{file}: {why}" for file, why in sorted(index.failed.items())],
+            [f"{file}: {why}" for file, why in sorted(failed.items())],
             f"{what} in the program files that could not be parsed are missing",
-            lead=f"{len(index.failed)} program file(s) could not be parsed",
+            lead=f"{len(failed)} program file(s) could not be parsed",
         )
     by_kind: dict[str, list[str]] = {}
     for file, caveats in sorted(index.file_caveats.items()):
+        if files is not None and file not in files:
+            continue
         for caveat in caveats:
             by_kind.setdefault(caveat.kind, []).append(file)
     effects = {
@@ -2964,11 +3120,11 @@ def _carry_index_caveats(index: Any, response: Response, what: str) -> None:
         "analyzer-failed": f"{what} from those files are missing",
     }
     for kind, effect in effects.items():
-        files = sorted(set(by_kind.get(kind, [])))
-        if files:
+        named = sorted(set(by_kind.get(kind, [])))
+        if named:
             response.caveat(
                 kind,
-                f"{len(files)} program file(s): {_listed(files)}",
+                f"{len(named)} program file(s): {_listed(named)}",
                 effect,
             )
 

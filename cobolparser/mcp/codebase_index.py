@@ -528,13 +528,16 @@ def call_chain(
     breadth first, in any language: one row per program reached (``program``,
     ``language`` and ``file`` when it is under the root, the ``called_by``
     program and ``via``, ``dynamic`` for a target taken from a data item, and
-    ``depth``, 1 for a direct callee). Also the notes on what could not be
-    followed (a dynamic CALL whose targets are not all known)."""
+    ``depth``, 1 for a direct callee, and ``at``, the first call site).
+    A program reached from several callers is listed once, the others in
+    ``also_called_by``. Also the notes on what could not be followed (a
+    dynamic CALL whose targets are not all known)."""
     index = programs_index(workspace)
     other = workspace.other_sources()
     rows: list[dict[str, Any]] = []
     notes: list[str] = []
     seen = {program.upper()}
+    listed: dict[str, dict[str, Any]] = {}
     frontier = [program.upper()]
     for depth in range(1, max_depth + 1):
         following: list[str] = []
@@ -555,7 +558,14 @@ def call_chain(
                             "all be traced"
                         )
                     for target in targets:
-                        if not target or target in seen:
+                        if not target:
+                            continue
+                        if target in seen:
+                            again = listed.get(target)
+                            if again is not None and caller != again["called_by"]:
+                                others = again.setdefault("also_called_by", [])
+                                if caller not in others:
+                                    others.append(caller)
                             continue
                         seen.add(target)
                         hit: dict[str, Any] = {
@@ -564,6 +574,11 @@ def call_chain(
                             "via": row.get("via"),
                             "depth": depth,
                         }
+                        sites = row.get("sites") or []
+                        if sites and sites[0].get("location"):
+                            where = sites[0]["location"]
+                            hit["at"] = f"{where['file']}:{where['line']}"
+                        listed[target] = hit
                         if row.get("dynamic"):
                             hit["dynamic"] = True
                         units = [u for u in index.units_named(target) if not u.depth]

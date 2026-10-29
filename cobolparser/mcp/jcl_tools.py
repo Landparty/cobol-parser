@@ -117,6 +117,28 @@ def _jcllib_names(text: str) -> list[str]:
 #: a TSO step's ``RUN PROGRAM``); the count is always given.
 MAX_INSTREAM_LINES = 20
 
+#: Jobs ``jobs_running`` lays out step by step (``jobs``); ``steps`` lists
+#: every step that runs the program whatever this says.
+JOB_FLOWS_SHOWN = 5
+
+#: Steps of one job ``jobs_running`` lays out in its ``jobs`` flow.
+JOB_FLOW_STEPS = 40
+
+#: Control-card lines a job flow shows per DD (SYSIN, SYMNAMES, ...).
+FLOW_CONTROL_LINES = 12
+
+#: Suffixes of a control-card member a SYSIN ``DD DSN=LIB(MEMBER)`` may name
+#: under the root (a PDS member downloaded as ``ctl/MEMBER.ctl``).
+CONTROL_SUFFIXES: frozenset[str] = frozenset(
+    {"", ".ctl", ".cntl", ".ctlcard", ".card", ".sysin", ".srt", ".sort", ".txt"}
+)
+
+#: DD names a job flow leaves out: libraries and print, not data.
+_FLOW_SKIPPED_DDS = frozenset({"STEPLIB", "JOBLIB", "SYSLIB", "SYSUDUMP", "SYSABEND"})
+
+#: What counts as writing a dataset in a job flow.
+_WRITES = frozenset({"create", "write", "extend", "update", "exclusive"})
+
 INSTALL_HINT = (
     "the JCL tools read JCL through jcl-parser, which is not installed: "
     "pip install 'cobol-parser[jcl]'"
@@ -888,6 +910,35 @@ def jobs_running(
                 "its DDs are not bound to the files it opens; dataset access "
                 "comes from DISP alone",
             )
+    jobs: dict[tuple[str, str], tuple[JclFile, JclJob, set[int]]] = {}
+    for jfile, job, step in matches:
+        held = jobs.setdefault((jfile.display, job.name or ""), (jfile, job, set()))
+        held[2].add(id(step))
+    flows = response.cap(
+        list(jobs.values()), min(clamp_limit(limit), JOB_FLOWS_SHOWN), "jobs"
+    )
+    if flows:
+        # A utility's jobs (SORT runs in hundreds) are laid out from DISP
+        # and the utilities' own DD roles: no COBOL program is parsed for
+        # them, as for the rest of this answer.
+        programs = (
+            _ProgramUses(workspace, response)
+            if selects is not None
+            else _NoProgramUses(workspace, response)
+        )
+        members = _ControlMembers(workspace)
+        answer["jobs"] = [
+            _job_flow(
+                jfile,
+                job,
+                locators.setdefault(jfile.path, _Locator(jfile, workspace)),
+                programs,
+                members,
+                running,
+                response,
+            )
+            for jfile, job, running in flows
+        ]
     _also_named(workspace, name, answer, response)
     if follow_calls:
         _follow_calls(workspace, name, answer, response, clamp_limit(limit))
@@ -899,6 +950,173 @@ def jobs_running(
             "by CICS or IMS, or run by JCL that is not under the root"
         )
     return response.build(answer)
+
+
+class _ControlMembers:
+    """Control-card members under the root by name (``ctl/REPROCT.ctl`` for
+    ``DSN=AWS.CNTL(REPROCT)``), walked once per call when first needed."""
+
+    def __init__(self, workspace: Workspace) -> None:
+        self.workspace = workspace
+        self._by_name: dict[str, list[Path]] | None = None
+
+    def find(self, member: str, near: str) -> Path | None:
+        if self._by_name is None:
+            self._by_name = {}
+            for directory, names in self.workspace._walk():
+                for entry in names:
+                    path = Path(directory, entry)
+                    if path.suffix.lower() not in CONTROL_SUFFIXES:
+                        continue
+                    try:
+                        path = path.resolve()
+                    except (OSError, RuntimeError):
+                        continue
+                    if not self.workspace._within(path):
+                        continue
+                    self._by_name.setdefault(path.stem.upper(), []).append(path)
+        found = self._by_name.get(member.upper(), [])
+        if not found:
+            return None
+        # The member nearest the job wins (the most leading folders in
+        # common, then the shallowest): two applications under one root may
+        # each have a REPROCT.
+        here = near.split("/")[:-1]
+
+        def distance(path: Path) -> tuple[int, int, str]:
+            parts = self.workspace.display(path).split("/")
+            shared = 0
+            for mine, theirs in zip(here, parts[:-1], strict=False):
+                if mine != theirs:
+                    break
+                shared += 1
+            return (-shared, len(parts), str(path))
+
+        found = sorted(found, key=distance)
+        return found[0]
+
+
+#: ``LIB(MEMBER)``: a PDS member, not a GDG generation such as ``(+1)``.
+_MEMBER_RE = re.compile(r"\(([A-Z@#$][A-Z0-9@#$]{0,7})\)$", re.IGNORECASE)
+
+
+def _control_lines(text: str) -> list[str]:
+    """The control statements of a SYSIN member: blank lines and ``/* */``
+    comment lines dropped, the sequence area (73-80) cut."""
+    out = []
+    for line in split_source_lines(text):
+        card = line[:72].rstrip()
+        stripped = card.strip()
+        if not stripped or stripped.startswith("/*") or stripped.startswith("*"):
+            continue
+        out.append(stripped)
+    return out
+
+
+def _job_flow(
+    jfile: JclFile,
+    job: JclJob,
+    locator: _Locator,
+    programs: _ProgramUses,
+    members: _ControlMembers,
+    running: set[int],
+    response: Response,
+) -> dict[str, Any]:
+    """One job, step by step: what each step runs, the datasets it reads and
+    writes (by what the program or utility does with each DD, else DISP),
+    the control cards it is given (in-stream, or the SYSIN member under the
+    root), and ``fed_by``: the earlier step that wrote what this one reads.
+    So "where does this report's data come from" is one answer, not a read
+    of the JCL and every procedure it expands."""
+    written_by: dict[str, str] = {}
+    steps: list[dict[str, Any]] = []
+    for step in job.steps[:JOB_FLOW_STEPS]:
+        row: dict[str, Any] = {"step": step.name}
+        if step.program:
+            row["program"] = step.program
+            runs = step.effective_programs()
+            if runs != [step.program.upper()]:
+                row["runs"] = runs
+        if step.procedure:
+            key = "from_procedure" if "." in (step.name or "") else "invokes_procedure"
+            row[key] = step.procedure
+        if step.condition:
+            row["condition"] = step.condition
+        if id(step) in running:
+            row["runs_the_program"] = True
+        reads: list[str] = []
+        writes: list[str] = []
+        fed_by: dict[str, str] = {}
+        control: list[dict[str, Any]] = []
+        for dd in step.dd_statements:
+            ddname = (dd.name or "").upper()
+            if ddname in _FLOW_SKIPPED_DDS:
+                continue
+            if dd.is_instream:
+                lines = [ln.strip() for ln in dd.instream_lines if ln.strip()]
+                if lines:
+                    entry: dict[str, Any] = {
+                        "dd": dd.name,
+                        "lines": lines[:FLOW_CONTROL_LINES],
+                    }
+                    if len(lines) > FLOW_CONTROL_LINES:
+                        entry["line_count"] = len(lines)
+                    control.append(entry)
+                continue
+            for member_dd, _path in locator.flattened(step, dd):
+                dataset = member_dd.dataset
+                if not dataset or member_dd.sysout is not None or member_dd.is_dummy:
+                    continue
+                if dataset.upper() == "NULLFILE":
+                    continue
+                if ddname in ("SYSIN", "SYMNAMES", "TOOLIN", "DFSPARM", "CTLCARD"):
+                    found = _MEMBER_RE.search(dataset)
+                    path = (
+                        members.find(found.group(1), jfile.display) if found else None
+                    )
+                    if path is not None:
+                        lines = _control_lines(Workspace.read_text(path))
+                        control.append(
+                            {
+                                "dd": dd.name,
+                                "member": dataset,
+                                "file": locator.workspace.display(path),
+                                "lines": lines[:FLOW_CONTROL_LINES],
+                            }
+                        )
+                        continue
+                access, _from = _step_access(
+                    step, member_dd, _access(member_dd.disposition), programs
+                )
+                label = f"{dd.name}={dataset}"
+                base = _base(dataset).upper()
+                if access in _WRITES:
+                    writes.append(f"{label} ({access})")
+                else:
+                    reads.append(label)
+                    if base in written_by:
+                        fed_by[dataset] = written_by[base]
+                if access in _WRITES:
+                    written_by[base] = step.name or ""
+        if reads:
+            row["reads"] = reads
+        if writes:
+            row["writes"] = writes
+        if fed_by:
+            row["fed_by"] = fed_by
+        if control:
+            row["control"] = control
+        steps.append(row)
+    flow: dict[str, Any] = {"file": jfile.display, "job": job.name, "steps": steps}
+    if len(job.steps) > JOB_FLOW_STEPS:
+        response.truncated.append(
+            {
+                "field": f"jobs[{job.name}].steps",
+                "shown": JOB_FLOW_STEPS,
+                "total": len(job.steps),
+            }
+        )
+    return flow
 
 
 def _follow_calls(
@@ -1310,6 +1528,13 @@ class _ProgramUses:
                     modes.get(row["file_name"].upper(), set())
                 )
         return by_dd
+
+
+class _NoProgramUses(_ProgramUses):
+    """No program's open modes: every step falls back to DISP."""
+
+    def of(self, program: str) -> dict[str, set[str]] | None:
+        return None
 
 
 def _step_access(
