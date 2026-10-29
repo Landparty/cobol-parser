@@ -577,7 +577,9 @@ nodes (`ExecCicsStatement` / `ExecImsStatement`) live with their parsers in
 * `ExecSQLStatement.tables` holds full, qualified names (`BANK.ACCOUNT`,
   `LOC.SCHEMA.TABLE`); the FROM/INTO/UPDATE/JOIN regexes match qualified names
   (`_SQL_TABLE_NAME`). A regex stopping at the first `.` would report every
-  qualified table's schema as a table too. A DB2 delimited identifier
+  qualified table's schema as a table too. `#`, `@` and `$` are name
+  characters there, first one included (`T#TAB`, `SCH#.T@B`): a regex
+  stopping at them added a truncated phantom table, listed first (#770). A DB2 delimited identifier
   (`FROM "PROD"."CUST"`) is listed unquoted, verbatim (`PROD.CUST`); see
   [dialects.md](dialects.md#delimited-identifiers) (#597).
 * `MERGE INTO tgt USING src ...` has `sql_type == "MERGE"`; `tables` lists the

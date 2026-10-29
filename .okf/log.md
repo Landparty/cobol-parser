@@ -14,6 +14,14 @@ deliberate. Anything else appended to the bottom is a mistake: five
 entries, including both 2026-09-15 sections, were found there on
 2026-09-15 and moved back up.
 
+## 2026-10-29 -- issues #754, #765, #770
+
+[parser/statements-io.md](parser/statements-io.md): `_SQL_TABLE_NAME`
+accepts `#@$` (#770). [analysis/lineage.md](analysis/lineage.md):
+`Capacity.group`, sign loss into an alphanumeric receiver (#765).
+[mcp.md](mcp.md): dynamic-call `candidates` stripped by `_call_targets()`
+(#754), `FACTS_VERSION` 8.
+
 ## 2026-10-29 -- field_equals holds where it is checked
 
 [analysis/fixtures-support.md](analysis/fixtures-support.md): the

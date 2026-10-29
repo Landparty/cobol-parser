@@ -129,7 +129,9 @@ skips statement separators in its body.
   word when it is in `IBMEnterpriseCobol.EXEC_DLI_COMMANDS`, else `UNKNOWN`
   (`_IMS_CALL_TYPES` is that set, not a copy -- #481). `parse_exec_sql`
   (`models/sql_statements.py`) is a literal/comment-aware tokenizer: statement
-  kind, tables (FROM / INTO / UPDATE / JOIN), host variables including
+  kind, tables (FROM / INTO / UPDATE / JOIN; `_SQL_TABLE_NAME` takes `#`, `@`
+  and `$` like a DB2 ordinary identifier, so `T#TAB` is one table, not a
+  phantom `T` beside it, #770), host variables including
   `:VAR:IND`, and for SELECTs `select_columns` + `where_present`.
   `DeclareTableStatement` accepts a qualified `DECLARE SCHEMA.TABLE TABLE`
   (spaces around the period tolerated, name normalized).
