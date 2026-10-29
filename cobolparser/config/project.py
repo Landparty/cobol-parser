@@ -14,7 +14,7 @@ an error.
 
 Precedence at every call site is **explicit CLI flag > config file >
 built-in default**. This module never overrides a flag the user actually
-passed; see `cobolparser.cli.parse._apply_project_config` for the one place
+passed; see `cobolparser.cli._project_config.apply_project_config` for the one place
 that merge happens.
 
 Shape (every key optional)::

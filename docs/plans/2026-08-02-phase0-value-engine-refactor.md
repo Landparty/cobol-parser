@@ -1,7 +1,7 @@
 # Phase 0 — Split the value engine out of `copybook_data.py`
 
 **Date:** 2026-08-02
-**Status:** Ready to implement
+**Status:** Done. The value engine is `cobolparser/generators/data/values.py`.
 **Parent:** [`2026-08-02-program-data-generation-design.md`](2026-08-02-program-data-generation-design.md)
 **Type:** Pure refactor — **zero behavior change**
 

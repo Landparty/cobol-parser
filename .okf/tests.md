@@ -8,9 +8,9 @@ timestamp: 2026-10-28T00:00:00Z
 
 # Tests
 
-The suite lives under `tests/` and runs with plain pytest: **~14,730 tests
-collected from 555 `test_*.py` files** (`python -m pytest tests --collect-only
--q --no-cov`, 2026-10-17). Configuration is `[tool.pytest.ini_options]` in
+The suite lives under `tests/` and runs with plain pytest: **~15,580 tests
+collected from 633 `test_*.py` files** (`python -m pytest tests --collect-only
+-q --no-cov`, 2026-10-29). Configuration is `[tool.pytest.ini_options]` in
 `pyproject.toml` (`testpaths = ["tests"]`, `--strict-markers`, coverage on by
 default with a **90% floor**, branch coverage enabled). Two shared fixtures
 (`parser`, `samples_dir`) come from `tests/conftest.py`; four markers

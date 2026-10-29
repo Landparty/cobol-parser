@@ -6,6 +6,8 @@ This document describes exactly what two external consumers call into `cobolpars
 2. **The sibling `mocky-mock` repo's generators surface** (`mockymock generate --with-data` / `mockymock fixtures`) — see "Generators Surface (mocky-mock)" near the end of this document.
 3. **MCP clients** of `cobol-parser mcp` (AI agents) — see "MCP Surface" at the end of this document.
 
+<!-- okf:external CobolLegacyParser ParserResult program_structure CopybookResolver parse_content UnsupportedBundleVersionError -- backend adapter and mocky-mock names, not this package's -->
+
 **Adapter source:** `backend/src/parsers/cobol/parser.py`
 **Import path in backend:** `from ..dependencies import CobolParser, CobolProgram, DialectType, ErrorRecoveryMode, DynamicCallAnalyzer, ProgramFlowAnalyzer, CobolParseError`
 

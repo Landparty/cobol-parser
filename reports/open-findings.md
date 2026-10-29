@@ -1,4 +1,4 @@
-# cobolparser — Open Findings (as of 2026-09-09, post-review)
+# cobolparser — Open Findings (as of 2026-09-09; the LOW list spot-checked 2026-10-29)
 
 > **Status of `reports/audit-2026-09-16.md`:** all four findings in that
 > pass are **fixed at HEAD** — the HIGH `ConstantFolder` one (both halves of
@@ -85,9 +85,10 @@ Measured on the same suite, same commit:
 | build | reported total | `--cov-fail-under=90` |
 |---|---|---|
 | `build_ext --inplace` run | 54.32% | fails |
-| `COBOLPARSER_SKIP_EXT=1` | **91.76%** | passes |
+| pure Python (no `build_ext`; `COBOLPARSER_ACCEL` unset) | **91.76%** | passes |
 
-So `ci.yml` splits them: `build` runs the suite `--no-cov` on the 3.11/3.12/
+So `ci.yml` splits them (when enabled; every line of it is currently
+commented out, so measure locally on the pure-Python build): `build` runs the suite `--no-cov` on the 3.11/3.12/
 3.13 matrix *after* `build_ext` (that job exists to exercise the extensions),
 and a separate `coverage` job installs pure-Python and enforces the floor.
 The same reasoning already sat in `pyproject.toml`'s cibuildwheel
@@ -147,8 +148,9 @@ this was measured (2026-07-09) and have not been re-measured since.
   variable" from "tracked, resolved to zero possible values" (the latter
   state is structurally unreachable in the current code, which is itself
   part of the ambiguity).
-- **`ProfilerContext` over-reports peak memory when tracemalloc is already
-  active** — `tracemalloc.reset_peak()` is never called in
+- ~~**`ProfilerContext` over-reports peak memory when tracemalloc is already
+  active**~~ — **fixed**: the peak is now measured above what was traced at
+  entry, and `peak_memory_exact` says when it is only an upper bound. — `tracemalloc.reset_peak()` is never called in
   `profiling.py`, so if tracemalloc was started by something else before
   `ProfilerContext.__enter__` runs, the reported peak includes
   pre-existing allocations. (Not reachable via two literal nested
@@ -186,7 +188,9 @@ this was measured (2026-07-09) and have not been re-measured since.
   string no longer appears anywhere under `tests/`; the suite reports 3
   skips, all from elsewhere. The entry had been carried forward unverified
   since 2026-08-10.
-- ~~**The test suite runs nowhere in CI**~~ — **fixed 2026-09-07.** pytest now
+- **The test suite runs nowhere in CI** — fixed 2026-09-07, then **open
+  again by choice**: `ci.yml` was commented out to save cost, so the suite and
+  the coverage floor are run locally before pushing. Was: pytest now
   runs in `ci.yml`'s `build` job on every PR, after `build_ext` so it
   exercises the Cython extensions; a dedicated `coverage` job enforces the
   90% floor on the pure-Python build. See `reports/audit-2026-09-07.md` (M3).

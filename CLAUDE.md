@@ -34,7 +34,7 @@ This repo uses a structured knowledge base at `.okf/`. **Load `.okf/index.md` at
 | Test layout, markers, coverage floor | `.okf/tests.md` |
 | Backend adapter dict shape (summary of `interface-contract.md`) | `.okf/integration.md` |
 
-The OKF is more specific and more current than this file for the above topics. When they conflict, trust the OKF. Point-in-time history lives in `.okf/history/` and `.okf/log.md` and is not loaded by default. The pre-commit hook also runs `scripts/okf_check.py`, which tests what the OKF files (and this one) claim against the code; `python scripts/okf_check.py --write` refreshes its generated `<!-- okf:gen -->` spans.
+The OKF is more specific and more current than this file for the above topics. When they conflict, trust the OKF. Point-in-time history lives in `.okf/history/` and `.okf/log.md` and is not loaded by default. The pre-commit hook also runs `scripts/okf_check.py`, which tests what the OKF files claim against the code, and the same for this file, `README.md`, `interface-contract.md` and the user guides in `docs/` (its `EXTRA_FILES`); `python scripts/okf_check.py --write` refreshes its generated `<!-- okf:gen -->` spans.
 
 This file is the short orientation. Module-by-module detail, report shapes and caveats live in the OKF topic files above; the full CLI reference is the generated subcommand table in `.okf/cli.md`.
 
@@ -195,8 +195,8 @@ Layout, markers, fixtures and the per-directory breakdown: `.okf/tests.md`. `tes
 
 ## Other Directories
 
-- `docs/` -- user guides ([`docs/mcp-server.md`](docs/mcp-server.md), [`docs/project-config.md`](docs/project-config.md), [`docs/fixture-bundle-schema.md`](docs/fixture-bundle-schema.md)), design docs in `docs/plans/`, and the idea backlog in [`docs/feature-ideas.md`](docs/feature-ideas.md)
+- `docs/` -- [`docs/README.md`](docs/README.md) maps where each kind of doc lives; user guides ([`docs/mcp-server.md`](docs/mcp-server.md), [`docs/project-config.md`](docs/project-config.md), [`docs/fixture-bundle-schema.md`](docs/fixture-bundle-schema.md)), design docs in `docs/plans/`, and the idea backlog in [`docs/feature-ideas.md`](docs/feature-ideas.md)
 - `scripts/` -- `okf_check.py` (OKF claims vs. code, run by the pre-commit hook), `okf_staleness_check.py` (which OKF file a source file maps to), `validate_io_coverage.py`
 - `tools/` -- IO catalog, IO coverage, metrics and perf-threshold utilities
-- `benchmarks/`, `reports/` -- benchmark programs and audit reports
+- `benchmarks/`, `reports/` -- benchmark programs; dated audit reports and `reports/open-findings.md`
 - `.pre-commit-config.yaml` -- ruff, ruff-format, black and mypy hooks; `pre-commit run --all-files` matches what CI would check

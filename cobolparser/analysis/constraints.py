@@ -825,7 +825,7 @@ def _roll_up_branch_gaps(report: ConstraintReport) -> None:
     """Copy every branch-level gap into the report-level ``unsupported`` list.
 
     :attr:`ConstraintReport.unsupported` is documented -- here, in
-    ``CLAUDE.md`` and in the public examples -- as the place gaps are never
+    ``.okf/analysis/fixtures-support.md`` and in the public examples -- as the place gaps are never
     silently dropped.  It used to hold only the gaps appended to it directly
     (the PERFORM UNTIL paths), while everything a *branch* could not model
     lived on :attr:`BranchConstraints.unsupported` and nowhere else.  A

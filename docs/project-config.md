@@ -106,13 +106,13 @@ rather than read under the wrong rules.
 |-----|------|-------|
 | `copybook_path` | string or list | `--copybook-path` |
 | `callee_path` | string or list | `--callee-path` (`gen-fixtures`) |
-| `proc_path` | string or list | `--proc-path` (`field-impact`), and the folders the MCP server expands a job's cataloged `EXEC` PROCs from; searched in order, first match wins |
+| `proc_path` | string or list | `--proc-path` (`field-impact`, `widen-check`, `jcl`), and the folders the MCP server expands a job's cataloged `EXEC` PROCs from; searched in order, first match wins |
 | `source_format` | `auto` \| `fixed` \| `free` | `--source-format` |
 | `debug_lines` | `true` \| `false` | `--debug-lines` / `--no-debug-lines` (compile fixed-format `D`-in-column-7 lines as code) |
 | `dialect` | `ibm-enterprise` | `--dialect` |
 | `error_recovery` | `collect-all` \| `fail-fast` | `--error-recovery` |
 | `seed` | integer | `--seed` |
-| `extensions` | list | `--extension` (`codebase-graph`, `copybook-impact`) |
+| `extensions` | list | `--extension` (`codebase-graph`, `copybook-impact`, `call-check`), and the files the MCP server treats as programs |
 | `define` | mapping or list | `--define` |
 
 `define` takes either shape:
@@ -130,8 +130,8 @@ In the mapping shape each value is a single string, number or `true`/`false`
 
 A key fills a command's flag only when the command has that flag. A few
 commands still have no `--define` or `--source-format` (`batch`,
-`gen-fixtures`, `codebase-graph`, `copybook-impact`, `gen-data`, `decode`,
-`compare`; `tokenize` has no `--define`, `expand` no `--source-format`).
+`gen-fixtures`, `codebase-graph`, `copybook-impact`, `call-check`,
+`gen-data`, `decode`, `compare`; `tokenize` has no `--define`, `expand` no `--source-format`).
 When the config sets `define`, a non-`auto` `source_format` or `debug_lines:
 true` and the command cannot apply it, the command prints a `warning:` on
 stderr naming the key rather than quietly parsing a different program.
@@ -162,6 +162,11 @@ the same name on `gen-data`, `decode` and `compare`; `rows` fills `--rows` on
 | `rules` | list of rule ids (`dead-code`, `unused-variables`, `move-type-check`, `io-sequence`, `linkage-check`, `recursion-check`, `complexity`, `dclgen-check`, `sql-cics-check`) |
 | `min_severity` | `error` \| `warning` \| `info` |
 | `fail_on` | `error` \| `warning` \| `info` \| `never` |
+
+Like every key, these fill a flag by name wherever a subcommand has it.
+`call-check` and `widen-check` have `--min-severity` and `--fail-on` too, so
+`fail_on: error` here makes them exit 3 on an error finding as well as
+`lint`. Pass `--fail-on never` on the command line to opt one run out.
 
 ### `mockymock:` and `analyzer:`
 
