@@ -545,6 +545,8 @@ class TokenType(IntEnum):
     NOT_SIGN = auto()  # '¬' (logical-NOT glyph), the left half of
     # embedded SQL's '¬=' (not-equal) on EBCDIC-derived mainframe
     # source; see SINGLE_CHAR_TOKENS.
+    SQL_NAME_CHAR = auto()  # '#' / '@', part of a DB2 name (``ACCT#``);
+    # merged into the name inside EXEC blocks, see SINGLE_CHAR_TOKENS.
 
     # Special tokens
     NEWLINE = auto()
@@ -654,6 +656,13 @@ class _CobolLexerPure:
         # renders logical NOT; embedded EXEC SQL text legitimately uses
         # '¬=' as an alternate not-equal spelling, mirroring '!=' above.
         "¬": TokenType.NOT_SIGN,
+        # '#' and '@' are letters of a DB2 ordinary identifier (``ACCT#``,
+        # ``@ADDR``) -- like '$', which already lexes as CURRENCY. Inside an
+        # EXEC block `_merge_exec_name_chars` glues them back into the name
+        # they abut; outside one they stay invalid (`_flag_stray_sql_chars`)
+        # unless SPECIAL-NAMES declared them a currency symbol.
+        "#": TokenType.SQL_NAME_CHAR,
+        "@": TokenType.SQL_NAME_CHAR,
     }
 
     # COBOL keywords mapping
@@ -2196,6 +2205,7 @@ class _CobolLexerPure:
         path returns the same list object).
         """
         self._merge_concatenated_literals()
+        self._merge_exec_name_chars()
         self._flag_stray_sql_chars()
         self._retype_operator_currency_symbols()
         self._retype_legacy_verb_data_names()
@@ -2492,9 +2502,86 @@ class _CobolLexerPure:
                 last_index = len(merged) - 1
         tokens[:] = merged
 
+    #: Token types a DB2 name may be glued from (``ACCT#1`` lexes as
+    #: IDENTIFIER, SQL_NAME_CHAR, NUMERIC_LITERAL).
+    _NAME_PART_TYPES = frozenset(
+        {
+            TokenType.IDENTIFIER,
+            TokenType.NUMERIC_LITERAL,
+            TokenType.LEVEL_NUMBER,
+            TokenType.SQL_NAME_CHAR,
+            TokenType.CURRENCY,
+        }
+    )
+
+    #: '#' / '@' and '$' (CURRENCY), the non-letters of a DB2 name.
+    _NAME_CHAR_TYPES = frozenset({TokenType.SQL_NAME_CHAR, TokenType.CURRENCY})
+
+    def _merge_exec_name_chars(self) -> None:
+        """Inside ``EXEC ... END-EXEC``, glue each '#' / '@' token to the
+        words it abuts into one IDENTIFIER: DB2 names may hold '#', '@' and
+        '$' (``SELECT ACCT# INTO :WS-ACCT FROM T``), and the character-level
+        lexer split them apart -- '#' used to fail the whole parse with
+        "Invalid character", and ``X$Y`` came out as ``X $ Y``. Abutting means same line, no gap between the
+        tokens' columns; a keyword abutting the character (``SELECT#``) is
+        glued too. Outside an EXEC block nothing changes here.
+        """
+        tokens = self.tokens
+        if not any(
+            t.type in (TokenType.SQL_NAME_CHAR, TokenType.CURRENCY) for t in tokens
+        ):
+            return
+        merged: list[Token] = []
+        in_exec = False
+        # Whether merged[-1] is a name already glued around a '#' / '@'.
+        glued = False
+        for token in tokens:
+            ttype = token.type
+            if ttype == TokenType.EXEC:
+                in_exec = True
+            elif ttype == TokenType.END_EXEC:
+                in_exec = False
+            if in_exec and merged and self._abuts(merged[-1], token):
+                prev = merged[-1]
+                name_char = ttype in self._NAME_CHAR_TYPES
+                if (
+                    (name_char and self._name_part(prev))
+                    or (prev.type in self._NAME_CHAR_TYPES and self._name_part(token))
+                    or (glued and (name_char or self._name_part(token)))
+                ):
+                    merged[-1] = Token(
+                        TokenType.IDENTIFIER, prev.value + token.value, prev.location
+                    )
+                    glued = True
+                    continue
+            merged.append(token)
+            glued = False
+        tokens[:] = merged
+
+    def _name_part(self, token: Token) -> bool:
+        """A token that can be one piece of a glued DB2 name: a word (an
+        identifier or a keyword spelled with letters, digits, '-' and '_'),
+        a number, or one of the name characters."""
+        if token.type in self._NAME_PART_TYPES:
+            return True
+        value = token.value or ""
+        return (
+            token.type != TokenType.STRING_LITERAL
+            and any(ch.isalnum() for ch in value)
+            and all(ch.isalnum() or ch in "-_" for ch in value)
+        )
+
+    @staticmethod
+    def _abuts(prev: Token, token: Token) -> bool:
+        prev_loc = prev.location
+        loc = token.location
+        if prev_loc is None or loc is None or prev_loc.line != loc.line:
+            return False
+        return loc.column == prev_loc.column + len(prev.value or "")
+
     def _flag_stray_sql_chars(self) -> None:
-        """Record an "Invalid character" error for '!' / '|' / '¬' tokens
-        outside any ``EXEC ... END-EXEC`` block.
+        """Record an "Invalid character" error for '!' / '|' / '¬' / '#' /
+        '@' tokens outside any ``EXEC ... END-EXEC`` block.
 
         These characters lex to BANG/PIPE/NOT_SIGN tokens solely so embedded
         EXEC SQL text (``!=``, ``||``, ``¬=``) round-trips instead of
@@ -2512,6 +2599,15 @@ class _CobolLexerPure:
                 in_exec = True
             elif ttype == TokenType.END_EXEC:
                 in_exec = False
+            elif not in_exec and ttype == TokenType.SQL_NAME_CHAR:
+                if token.value in self._currency_symbols:
+                    # A declared PICTURE currency symbol (``CURRENCY SIGN
+                    # IS 'EUR' WITH PICTURE SYMBOL '#'``).
+                    token.type = TokenType.CURRENCY
+                else:
+                    self.errors.append(
+                        LexerError(f"Invalid character: {token.value}", token.location)
+                    )
             elif not in_exec and ttype in (
                 TokenType.BANG,
                 TokenType.PIPE,

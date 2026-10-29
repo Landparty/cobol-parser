@@ -91,3 +91,33 @@ def test_address_of_resolves_against_its_field() -> None:
 )
 def test_call_argument_data_name(text: str, expected: str | None) -> None:
     assert call_argument_data_name(text) == expected
+
+
+PARTIAL_SOURCE = """\
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PARTS.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-I PIC 9(4) COMP VALUE 1.
+       01  WS-KEY PIC X(10).
+       01  WS-TAB.
+           05  WS-CODE PIC X(4) OCCURS 10 TIMES.
+       PROCEDURE DIVISION.
+           CALL 'SUBC' USING WS-CODE(WS-I)
+           CALL 'SUBR' USING WS-KEY(1:4)
+           GOBACK.
+"""
+
+
+def test_a_partial_argument_says_why_no_value_is_generated(tmp_path) -> None:
+    """A subscripted or reference-modified argument passes part of the
+    item: no value is generated (writing the whole item would touch bytes
+    the callee never sees), and the note says that instead of claiming the
+    name could not be found (mocky-mock sweep, 2026-10-29)."""
+    path = tmp_path / "PARTS.cbl"
+    path.write_text(PARTIAL_SOURCE)
+    bundle = ProgramFixtureGenerator().generate_from_file(str(path), seed=1)
+    gaps = [u for u in bundle.unresolved if "argument" in u]
+    assert len(gaps) == 2
+    assert all("subscripted or reference-modified" in gap for gap in gaps)
+    assert not any("not resolvable" in gap for gap in gaps)

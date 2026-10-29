@@ -82,7 +82,7 @@ it with `git config core.hooksPath .githooks`) and by the test suite:
   paths must exist; links and anchors must resolve; the CLI table in
   `cli.md` must match argparse; and counts the code can answer (there are
   <!-- okf:gen analysis-module-count -->36<!-- /okf:gen --> analysis
-  modules, <!-- okf:gen tokentype-count -->244<!-- /okf:gen --> `TokenType`
+  modules, <!-- okf:gen tokentype-count -->245<!-- /okf:gen --> `TokenType`
   members, <!-- okf:gen cli-subcommand-count -->41<!-- /okf:gen -->
   subcommands) are written as `<!-- okf:gen NAME -->` spans that must equal
   the generator's output. After a code change that moves one, run

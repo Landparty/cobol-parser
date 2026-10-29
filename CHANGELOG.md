@@ -118,6 +118,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **`#` and `@` in DB2 names inside EXEC SQL.** `SELECT ACCT# ... FROM
+  T#TAB` failed the whole parse with `Invalid character: #`; the characters
+  are now glued into the name they abut inside an EXEC block (`$` too, so
+  `X$Y` no longer comes out as `X $ Y`). Outside an EXEC block they are
+  still errors, unless SPECIAL-NAMES declares them a currency symbol.
+* **`gen-fixtures`: a partial CALL argument says why it gets no value.** A
+  subscripted or reference-modified argument (`WS-CODE(WS-I)`,
+  `WS-KEY(1:4)`) passes part of an item, so no value is generated for it;
+  the unresolved note now says so instead of "not resolvable in layout
+  index".
+
 * **widen-check: four wrong answers fixed** (#757, #759, #760, #761). An
   edited receiver with no sign symbol (`ZZ,ZZ9`) now loses the sign of a
   field that gains one; a receiver fed through a literal subscript
