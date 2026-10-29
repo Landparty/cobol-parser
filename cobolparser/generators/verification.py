@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from ..analysis.constraints import FieldConstraint
+from ..analysis.constraints import CorrelationConstraint, FieldConstraint
 from .data.bundle import BoundaryFixture, Scenario
 from .scenarios import PlannedScenario
 
@@ -307,6 +307,77 @@ def _verdict_for(
     )
 
 
+def _rows_with(
+    names: tuple[str, str], fixtures: list[BoundaryFixture]
+) -> list[list[tuple[str, str]]]:
+    """For every fixture whose layout holds both qualified names, the
+    (field, source) values of its rows in row order. Each fixture is its own
+    sequence: a record before is only ever a row of the same one."""
+    found: list[list[tuple[str, str]]] = []
+    for fixture in fixtures:
+        columns = {spec.qualified_name: spec.column for spec in fixture.layout}
+        if names[0] in columns and names[1] in columns:
+            found.append(
+                [
+                    (row.get(columns[names[0]], ""), row.get(columns[names[1]], ""))
+                    for row in fixture.sequence
+                ]
+            )
+    return found
+
+
+def _correlation_verdict(
+    link: CorrelationConstraint, fixtures: list[BoundaryFixture]
+) -> FieldVerdict:
+    """Does some row of some sequence meet *link* against the row before?"""
+    field_name = link.field.spec.qualified_name
+    source_name = link.source.spec.qualified_name if link.source else ""
+    label = f"{field_name} vs the previous record's {source_name}"
+    sequences = _rows_with((field_name, source_name), fixtures)
+    if not sequences:
+        return FieldVerdict(
+            field=label,
+            status="absent",
+            detail=(
+                "no fixture in this scenario generates both fields, so nothing "
+                "pins the comparison between consecutive records"
+            ),
+        )
+    meeting: list[int] = []
+    undecidable = False
+    for rows in sequences:
+        for n in range(1, len(rows)):
+            result = _relational(link.op, rows[n][0], rows[n - 1][1])
+            if result is None:
+                undecidable = True
+            elif result and n not in meeting:
+                meeting.append(n)
+    if meeting:
+        return FieldVerdict(
+            field=label,
+            status="satisfied",
+            detail=(
+                f"row(s) {', '.join(str(n) for n in sorted(meeting))} meet it "
+                "against the row before"
+            ),
+            rows=tuple(sorted(meeting)),
+        )
+    if undecidable:
+        return FieldVerdict(
+            field=label,
+            status="unknown",
+            detail=f"could not be decided from the generated values ({link.op})",
+        )
+    return FieldVerdict(
+        field=label,
+        status="violated",
+        detail=(
+            f"no generated row meets {link.op} against the row before it "
+            f"({sum(len(rows) for rows in sequences)} row(s) checked)"
+        ),
+    )
+
+
 def verify_scenario(
     planned: PlannedScenario, scenario: Scenario
 ) -> ScenarioVerification:
@@ -319,7 +390,7 @@ def verify_scenario(
     verdicts = [
         _verdict_for(field_name, constraints, _values_for(field_name, fixtures))
         for field_name, constraints in sorted(planned.field_constraints.items())
-    ]
+    ] + [_correlation_verdict(link, fixtures) for link in planned.correlations]
     status = (
         "verified"
         if not planned.path_gaps

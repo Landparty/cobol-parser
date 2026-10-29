@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **Cross-record scenarios in `gen-fixtures`.** A branch that compares a
+  record with the one before it (`IF TXN-BRANCH = WS-PREV-BRANCH`, with
+  `MOVE TXN-BRANCH TO WS-PREV-BRANCH` later in the same paragraph) is now
+  recognized (`CorrelationConstraint`, `BranchConstraints.correlations`)
+  instead of left unsupported, and its scenario pins two consecutive rows
+  (`PlannedScenario.row_witnesses`) so the second record really reaches the
+  arm; self-verification checks the pair. Only an unconditional carrier
+  MOVE in the comparing paragraph, after the comparison, with no other
+  write, counts; anything else stays unsupported, as before. Checked by
+  running the generated rows through GnuCOBOL.
 * **`widen-check`: what a PICTURE change breaks, across programs**
   (`cobolparser/analysis/field_widening.py`, `FieldWideningAnalyzer`).
   `cobol-parser widen-check CUST-ID --to '9(9)' ./cobol [--jcl ...]` follows

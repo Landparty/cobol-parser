@@ -14,8 +14,12 @@ paragraph (`BranchConstraints.enclosing`) and, when its paragraph is
 PERFORMed or reached by GO TO from exactly one guarded place, that place's
 arms too (`_ParagraphReach`, #310). Where a path cannot be pinned the
 scenario carries a `path_gaps` reason and is `unverified`. Data-dependent
-reachability (a correlation between records) is still out of scope, so a
-coverage summary here is arm coverage, not full path coverage.
+reachability (a correlation between records) is planned only for the one
+shape the constraint extractor recognizes -- a field compared with the
+previous record's value through a carrier item (`CorrelationConstraint`):
+such an arm gets two pinned rows (`PlannedScenario.row_witnesses`), the
+record before and the record that reaches it. A coverage summary here is
+arm coverage, not full path coverage.
 """
 
 from __future__ import annotations
@@ -28,8 +32,10 @@ from typing import Any
 
 from ..analysis.boundary_inventory import BoundaryReport
 from ..analysis.constraints import (
+    _FLIPPED_RELATIONAL,
     BranchConstraints,
     ConstraintReport,
+    CorrelationConstraint,
     FieldConstraint,
     SequenceConstraint,
 )
@@ -169,15 +175,18 @@ class PlannedScenario:
     #: 0-based row index -> {qualified field name: witness value}, overriding
     #: `witnesses` for that ONE row of a multi-row (READ/FETCH) sequence.
     #:
-    #: Groundwork for branches whose reachability is a property of the
-    #: *sequence*, not of any single record: "a prior '05' record sharing a
-    #: key with a following '09' record" cannot be expressed by `witnesses`,
-    #: which pins one value to every row. Nothing populates this yet -- the
-    #: analysis that would recognize such a correlation is not built (see
-    #: docs/plans/2026-09-04-cross-record-correlation-design.md); it exists so the
-    #: pinning path is no longer the blocker, and so a caller assembling a
-    #: correlated scenario by hand has a supported way to say it.
+    #: For branches whose reachability is a property of the *sequence*, not
+    #: of any single record: "a record sharing its key with the record
+    #: before it" cannot be expressed by `witnesses`, which pins one value to
+    #: every row. The planner fills it for an arm with `correlations` (see
+    #: docs/plans/2026-09-04-cross-record-correlation-design.md); a caller
+    #: assembling a correlated scenario by hand can set it too.
     row_witnesses: dict[int, dict[str, str]] = field(default_factory=dict)
+    #: The cross-record comparisons this scenario's arm (and its path)
+    #: requires, which `row_witnesses` pins: row 0 is the record before,
+    #: row 1 the record that reaches the arm. Checked against the emitted
+    #: rows by `verification.verify_scenario`.
+    correlations: list[CorrelationConstraint] = field(default_factory=list)
     sequence_constraints: list[SequenceConstraint] = field(default_factory=list)
     #: "<CATEGORY>:<KEY>" -> an overriding status value (e.g. FILE STATUS
     #: "23", SQLCODE "-911") for the fixed error-status family.
@@ -193,7 +202,11 @@ class PlannedScenario:
     path_gaps: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        extra: dict[str, Any] = {}
+        if self.correlations:
+            extra["correlations"] = [c.to_dict() for c in self.correlations]
         return {
+            **extra,
             "name": self.name,
             "intent": self.intent,
             "field_constraints": {
@@ -264,6 +277,11 @@ class ScenarioPlanner:
             for b in constraint_report.branches
             for arm_id, constraints in b.arms.items()
         }
+        correlations_by_key: dict[tuple[str, str], list[CorrelationConstraint]] = {
+            (b.branch_id, arm_id): linked
+            for b in constraint_report.branches
+            for arm_id, linked in b.correlations.items()
+        }
 
         reach = _ParagraphReach(constraint_report, flow_report)
 
@@ -326,11 +344,30 @@ class ScenarioPlanner:
                 outer, reach_gaps = reach.path_to(branch.parent_proc)
                 enclosing = outer + branch.enclosing
                 options, path_gaps = _path_options(enclosing, arms_by_key)
-                path_gaps = reach_gaps + path_gaps
+                path_correlations, correlation_gaps = _path_correlations(
+                    enclosing, correlations_by_key
+                )
+                path_gaps = reach_gaps + path_gaps + correlation_gaps
+                correlations = path_correlations + branch.correlations.get(arm_id, [])
                 witnesses, unsat_reason, path = _solve_with_path(
                     options, branch.arms[arm_id]
                 )
                 constraints = path + branch.arms[arm_id]
+                row_witnesses: dict[int, dict[str, str]] = {}
+                if unsat_reason is None and correlations:
+                    row_witnesses, correlation_reason = _solve_correlations(
+                        correlations, constraints, witnesses, boundary_report
+                    )
+                    if correlation_reason is not None:
+                        details.append(
+                            ArmOutcome(
+                                arm_key,
+                                branch.parent_proc,
+                                "missed",
+                                reason=correlation_reason,
+                            )
+                        )
+                        continue
                 if unsat_reason is not None:
                     details.append(
                         ArmOutcome(
@@ -360,11 +397,18 @@ class ScenarioPlanner:
                 if path:
                     enclosing_keys = ", ".join(f"{bid}/{aid}" for bid, aid in enclosing)
                     intent += f" (path condition from {enclosing_keys} included)"
+                if correlations:
+                    intent += (
+                        "; rows 0 and 1 are pinned so the second record meets: "
+                        + "; ".join(c.describe() for c in correlations)
+                    )
                 scenario = PlannedScenario(
                     name=name,
                     intent=intent,
                     field_constraints=by_field,
                     witnesses=witnesses,
+                    row_witnesses=row_witnesses,
+                    correlations=correlations,
                     arm_keys=[arm_key],
                     path_gaps=path_gaps,
                 )
@@ -492,6 +536,105 @@ def _path_options(
             + ", so reaching this arm is not pinned by the generated data"
         )
     return options, gaps
+
+
+def _path_correlations(
+    enclosing: tuple[tuple[str, str], ...],
+    correlations_by_key: dict[tuple[str, str], list[CorrelationConstraint]],
+) -> tuple[list[CorrelationConstraint], list[str]]:
+    """The cross-record comparisons of the enclosing arms on a path, plus a
+    gap for an enclosing arm that is one alternative of several (an OR
+    split) with a comparison in it: `_path_options` picks the alternative by
+    its field conjuncts alone, so the comparison may not be the one taken."""
+    found: list[CorrelationConstraint] = []
+    gaps: list[str] = []
+    for branch_id, arm_id in enclosing:
+        exact = correlations_by_key.get((branch_id, arm_id))
+        if exact:
+            found.extend(exact)
+            continue
+        if any(
+            key[0] == branch_id and _base_arm_id(key[1]) == arm_id and key[1] != arm_id
+            for key in correlations_by_key
+        ):
+            gaps.append(
+                f"enclosing arm {branch_id}/{arm_id} compares consecutive records "
+                "in one of its alternatives, which is not pinned by the "
+                "generated data"
+            )
+    return found, gaps
+
+
+def _solve_correlations(
+    correlations: list[CorrelationConstraint],
+    constraints: list[FieldConstraint],
+    witnesses: dict[str, str],
+    boundary_report: BoundaryReport,
+) -> tuple[dict[int, dict[str, str]], str | None]:
+    """Two pinned rows meeting every comparison: row 1 (the record that
+    reaches the arm) gets the compared field's value -- its scenario witness
+    when the arm constrains it, else any value its PICTURE allows -- and row
+    0 (the record before) a value of the carried field that satisfies the
+    comparison against it.
+
+    Returns ``(row_witnesses, None)``, or ``({}, reason)`` when the
+    comparisons cannot all hold, or the two fields are not both fed by one
+    READ (only a read sequence has a record before).
+    """
+    reads = [
+        {name.upper() for name in b.record_names}
+        for b in boundary_report.boundaries
+        if b.ref.category == "READ"
+    ]
+    rows: dict[int, dict[str, str]] = {0: {}, 1: {}}
+    for link in correlations:
+        source = link.source
+        assert source is not None
+        if not any(
+            link.field.record.name.upper() in records
+            and source.record.name.upper() in records
+            for records in reads
+        ):
+            return {}, (
+                f"compares {link.field.spec.qualified_name} with "
+                f"{source.spec.qualified_name} from the record before, but the "
+                "two are not read by one READ sequence"
+            )
+        name = link.field.spec.qualified_name
+        current = rows[1].get(name) or witnesses.get(name)
+        if current is None:
+            own = [c for c in constraints if c.field.spec.qualified_name == name]
+            solved = solve(link.field.spec, own)
+            if isinstance(solved, Unsatisfiable):
+                return {}, f"unsatisfiable: {name}: {solved.reason}"
+            assert isinstance(solved, Witness)
+            current = solved.value
+        rows[1][name] = current
+        before = FieldConstraint(
+            source, _FLIPPED_RELATIONAL[link.op], (current.strip(),), link.origin
+        )
+        source_name = source.spec.qualified_name
+        pinned = rows[0].get(source_name)
+        if pinned is not None:
+            check = solve(
+                source.spec,
+                [before, FieldConstraint(source, "eq", (pinned.strip(),), link.origin)],
+            )
+            if isinstance(check, Unsatisfiable):
+                return {}, (
+                    f"unsatisfiable: the record before must give {source_name} "
+                    "two different values"
+                )
+            continue
+        solved = solve(source.spec, [before])
+        if isinstance(solved, Unsatisfiable):
+            return {}, (
+                f"unsatisfiable: no value of {source_name} in the record before "
+                f"meets {link.describe()}: {solved.reason}"
+            )
+        assert isinstance(solved, Witness)
+        rows[0][source_name] = solved.value
+    return rows, None
 
 
 #: Flow edges into a paragraph that `_ParagraphReach` cannot attach a guard
@@ -845,7 +988,10 @@ def _scenario_name(
     name = f"{proc}: {where} {arm}"
     if "#" in arm_id:
         constraints = branch.arms.get(arm_id) or []
-        disjunct = " AND ".join(_render_constraint(c) for c in constraints)
+        disjunct = " AND ".join(
+            [_render_constraint(c) for c in constraints]
+            + [_render_correlation(c) for c in branch.correlations.get(arm_id, [])]
+        )
         name += f" [{disjunct or 'alt ' + arm_id.split('#', 1)[1]}]"
     return name
 
@@ -853,6 +999,12 @@ def _scenario_name(
 #: Longest a merged scenario's spelled-out name may get before the later
 #: arms are summarized as "(+N more arms)".
 _MAX_MERGED_NAME = 120
+
+
+def _render_correlation(c: CorrelationConstraint) -> str:
+    symbol = {"eq": "=", "ne": "<>", "lt": "<", "le": "<=", "gt": ">", "ge": ">="}
+    source = c.source.spec.name if c.source is not None else "?"
+    return f"{c.field.spec.name} {symbol.get(c.op, c.op)} previous {source}"
 
 
 def _merged_name(arm_names: list[str]) -> str:
@@ -986,11 +1138,14 @@ def _merge_candidates(
                 (
                     s
                     for s in open_scenarios
-                    if s.field_constraints and _compatible(s, candidate, shared_areas)
+                    if s.field_constraints
+                    and not s.row_witnesses
+                    and _compatible(s, candidate, shared_areas)
                 ),
                 None,
             )
-            if candidate.field_constraints
+            # Two pinned rows are one scenario's own sequence: never merged.
+            if candidate.field_constraints and not candidate.row_witnesses
             else None
         )
         if target is None:

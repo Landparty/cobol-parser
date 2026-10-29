@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from .._literals import is_quoted_literal, typed_literal_content, unquote_literal
 from ..generators.data.layout import all_literal_operand, condition_values_exhaustive
 from ..models.ast_base import SourceLocation
+from ..models.data_items import ConditionNameItem
 from ..models.program import CobolDivision, CobolParagraph, CobolProgram
 from ..models.statements.base import (
     CobolExpression,
@@ -253,6 +254,46 @@ class FieldConstraint:
 
 
 @dataclass(frozen=True)
+class CorrelationConstraint(FieldConstraint):
+    """A comparison between two *rows* of one read sequence: `field` on
+    row n against `source` on row n + `offset` (-1: the record before).
+
+    ``IF F1-GUICHET = WS-PREV-GUICHET``, where the only write to
+    `WS-PREV-GUICHET` is an unconditional ``MOVE F1-GUICHET TO
+    WS-PREV-GUICHET`` later in the same paragraph, compares each record's
+    `F1-GUICHET` with the previous record's: `carrier` names the
+    working-storage item that holds the value from one record to the next
+    (see `_Carriers`). `values` is empty: what the field is compared with is
+    another row's value, which only the planner can pick
+    (`ScenarioPlanner`, `PlannedScenario.row_witnesses`).
+    """
+
+    source: ResolvedField | None = None
+    carrier: str = ""
+    offset: int = -1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "field": self.field.spec.qualified_name,
+            "op": self.op,
+            "source": self.source.spec.qualified_name if self.source else None,
+            "carrier": self.carrier,
+            "offset": self.offset,
+            "origin": self.origin,
+        }
+
+    def describe(self) -> str:
+        source = self.source.spec.qualified_name if self.source else "?"
+        symbol = {"eq": "=", "ne": "<>", "lt": "<", "le": "<=", "gt": ">"}.get(
+            self.op, ">="
+        )
+        return (
+            f"{self.field.spec.qualified_name} {symbol} the previous record's "
+            f"{source} (carried in {self.carrier})"
+        )
+
+
+@dataclass(frozen=True)
 class SequenceConstraint:
     """The EOF/loop-flag idiom: a READ boundary's sequence length is the knob.
 
@@ -323,9 +364,22 @@ class BranchConstraints:
     #: an earlier WHEN instead (#509). An unconditional empty arm (`WHEN
     #: OTHER` with no earlier WHEN at all) is NOT listed here.
     unmodeled_arms: dict[str, str] = field(default_factory=dict)
+    #: Arm id -> its conjuncts that compare two records of one read
+    #: sequence (`CorrelationConstraint`), kept apart from `arms` so a
+    #: consumer that solves one row at a time never sees them as field
+    #: constraints. An arm listed here is never unconditional, even when its
+    #: `arms` entry is empty.
+    correlations: dict[str, list[CorrelationConstraint]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        extra: dict[str, Any] = {}
+        if self.correlations:
+            extra["correlations"] = {
+                arm: [c.to_dict() for c in constraints]
+                for arm, constraints in self.correlations.items()
+            }
         return {
+            **extra,
             "branch_id": self.branch_id,
             "parent_proc": self.parent_proc,
             "line": self.line,
@@ -415,12 +469,19 @@ class ConstraintExtractor:
         fed_names = _boundary_fed_names(boundary_report)
         fed_names.update(name.upper() for name in extra_fed_names)
         eof_flags = _collect_eof_flags(ast)
+        carriers = _Carriers(ast, procedure, index, fed_names)
 
         for paragraph_name, statement, enclosing in _walk_statements(procedure):
             _record_transfer_site(statement, paragraph_name, enclosing, report)
             if isinstance(statement, IfStatement) and statement.condition is not None:
                 self._extract_if(
-                    statement, paragraph_name, index, fed_names, report, enclosing
+                    statement,
+                    paragraph_name,
+                    index,
+                    fed_names,
+                    report,
+                    enclosing,
+                    carriers,
                 )
             elif isinstance(statement, EvaluateStatement):
                 self._extract_evaluate(
@@ -457,17 +518,30 @@ class ConstraintExtractor:
         fed_names: set[str],
         report: ConstraintReport,
         enclosing: tuple[tuple[str, str], ...] = (),
+        carriers: _Carriers | None = None,
     ) -> None:
         branch_id = _branch_id(paragraph_name, statement.location)
         line = statement.location.line if statement.location else None
         column = statement.location.column if statement.location else None
         arms: dict[str, list[FieldConstraint]] = {}
+        correlations: dict[str, list[CorrelationConstraint]] = {}
         unsupported: list[str] = []
+        site = (
+            _CarrierSite(carriers, paragraph_name, line or 0, enclosing)
+            if carriers is not None
+            else None
+        )
 
         then_variants = _extract_expr(
-            statement.condition, False, index, fed_names, f"IF@{line}", unsupported
+            statement.condition,
+            False,
+            index,
+            fed_names,
+            f"IF@{line}",
+            unsupported,
+            site,
         )
-        _register_variants(arms, "THEN", then_variants)
+        _register_variants(arms, "THEN", then_variants, correlations)
 
         else_variants = _extract_expr(
             statement.condition,
@@ -476,8 +550,9 @@ class ConstraintExtractor:
             fed_names,
             f"IF@{line}/ELSE",
             unsupported,
+            site,
         )
-        _register_variants(arms, "ELSE", else_variants)
+        _register_variants(arms, "ELSE", else_variants, correlations)
 
         if arms or unsupported:
             report.branches.append(
@@ -489,6 +564,7 @@ class ConstraintExtractor:
                     arms=arms,
                     unsupported=unsupported,
                     enclosing=enclosing,
+                    correlations=correlations,
                 )
             )
 
@@ -776,6 +852,7 @@ def _extract_expr(
     fed_names: set[str],
     origin: str,
     unsupported: list[str],
+    site: _CarrierSite | None = None,
 ) -> list[list[FieldConstraint]]:
     """Recursively extract *expr* into a list of AND-conjunct variants.
 
@@ -803,7 +880,13 @@ def _extract_expr(
             # Rejecting it left the commonest negated-88 idiom (`IF NOT
             # EOF-REACHED`) with both arms unmodeled.
             return _extract_expr(
-                expr.left_condition, not negate, index, fed_names, origin, unsupported
+                expr.left_condition,
+                not negate,
+                index,
+                fed_names,
+                origin,
+                unsupported,
+                site,
             )
         if expr.operator not in ("AND", "OR"):
             unsupported.append(
@@ -812,10 +895,10 @@ def _extract_expr(
             return []
         is_conjunction = (expr.operator == "AND") != negate
         left = _extract_expr(
-            expr.left_condition, negate, index, fed_names, origin, unsupported
+            expr.left_condition, negate, index, fed_names, origin, unsupported, site
         )
         right = _extract_expr(
-            expr.right_condition, negate, index, fed_names, origin, unsupported
+            expr.right_condition, negate, index, fed_names, origin, unsupported, site
         )
         if is_conjunction:
             if not left or not right:
@@ -829,7 +912,7 @@ def _extract_expr(
 
     if isinstance(expr, ConditionalExpression):
         constraint = _extract_comparison(
-            expr, negate, index, fed_names, origin, unsupported
+            expr, negate, index, fed_names, origin, unsupported, site
         )
         return [[constraint]] if constraint is not None else []
 
@@ -841,14 +924,23 @@ def _register_variants(
     arms: dict[str, list[FieldConstraint]],
     base_arm_id: str,
     variants: list[list[FieldConstraint]],
+    correlations: dict[str, list[CorrelationConstraint]] | None = None,
 ) -> None:
+    """Register each variant as an arm; a `CorrelationConstraint` conjunct
+    goes to *correlations* under the same arm id (only `_extract_if` builds
+    them, and it always passes the dict)."""
     if not variants:
         return
-    if len(variants) == 1:
-        arms[base_arm_id] = variants[0]
-        return
-    for i, variant in enumerate(variants, start=1):
-        arms[f"{base_arm_id}#{i}"] = variant
+    ids = (
+        [base_arm_id]
+        if len(variants) == 1
+        else [f"{base_arm_id}#{i}" for i in range(1, len(variants) + 1)]
+    )
+    for arm_id, variant in zip(ids, variants, strict=True):
+        arms[arm_id] = [c for c in variant if not isinstance(c, CorrelationConstraint)]
+        linked = [c for c in variant if isinstance(c, CorrelationConstraint)]
+        if linked and correlations is not None:
+            correlations[arm_id] = linked
 
 
 def _extract_comparison(
@@ -858,6 +950,7 @@ def _extract_comparison(
     fed_names: set[str],
     origin: str,
     unsupported: list[str],
+    site: _CarrierSite | None = None,
 ) -> FieldConstraint | None:
     op_name = expr.operator
     if op_name in _RELATIONAL_OPS:
@@ -877,6 +970,7 @@ def _extract_comparison(
             fed_names,
             origin,
             unsupported,
+            site=site,
         )
 
     if op_name == "CONDITION_NAME":
@@ -1198,6 +1292,7 @@ def _build_relational_constraint(
     unsupported: list[str],
     *,
     quoted_operands: bool = True,
+    site: _CarrierSite | None = None,
 ) -> FieldConstraint | None:
     if not left_text:
         unsupported.append(f"{origin}: comparison missing left operand")
@@ -1206,6 +1301,10 @@ def _build_relational_constraint(
     right_field = index.resolve(right_text) if right_text else None
 
     if left_field is not None and right_field is not None:
+        if site is not None:
+            correlation = site.correlation(left_field, op, right_field, origin)
+            if correlation is not None:
+                return correlation
         unsupported.append(
             f"{origin}: comparison between two resolved fields not supported in v1: "
             f"{left_field.spec.qualified_name} vs {right_field.spec.qualified_name}"
@@ -1467,6 +1566,192 @@ def _parse_relational_text(
 
 
 # -- boundary-fed / figurative / literal helpers ------------------------------
+
+
+# -- cross-record carriers ------------------------------------------------------
+
+#: Xref roles that may change an item's value.
+_WRITING_ROLES = frozenset(
+    {"write", "call-argument", "host-variable", "reference", "file-operation"}
+)
+
+
+@dataclass(frozen=True)
+class _CarrierSite:
+    """Where a comparison sits, for deciding whether a field it names
+    carries a value from the previous record (`_Carriers.correlation`)."""
+
+    carriers: _Carriers
+    paragraph: str
+    line: int
+    enclosing: tuple[tuple[str, str], ...]
+
+    def correlation(
+        self,
+        left: ResolvedField,
+        op: str,
+        right: ResolvedField,
+        origin: str,
+    ) -> CorrelationConstraint | None:
+        return self.carriers.correlation(self, left, op, right, origin)
+
+
+class _Carriers:
+    """Working-storage items that hold a boundary-fed field's value from one
+    record to the next: ``MOVE F1-KEY TO WS-PREV-KEY`` at the end of the
+    paragraph that compares ``F1-KEY = WS-PREV-KEY``.
+
+    "Exact by construction, or absent": an item is a carrier only when all
+    of these hold, and a comparison naming anything else stays unsupported
+    as before --
+
+    * it is not boundary-fed itself, is declared once, and neither it nor a
+      group above it REDEFINES or is REDEFINED;
+    * the only statement that may change it, or any group above it, or set
+      one of its level-88 names, is one ``MOVE source TO it`` (xref roles);
+    * that MOVE is not CORRESPONDING, its source is a single boundary-fed
+      field, and it sits unconditionally (no enclosing branch arm) in the
+      comparison's own paragraph, *after* the comparison -- so when the
+      comparison runs, the item still holds the value the previous run of the
+      paragraph moved there.
+
+    A MOVE before the comparison would carry the *current* record, which is
+    not a cross-record correlation; it stays unsupported.
+    """
+
+    def __init__(
+        self,
+        ast: CobolProgram,
+        procedure: CobolDivision,
+        index: ProgramLayoutIndex,
+        fed_names: set[str],
+    ) -> None:
+        self._ast = ast
+        self._procedure = procedure
+        self._index = index
+        self._fed = fed_names
+        self._moves: dict[str, list[tuple[str, MoveStatement, bool]]] | None = None
+        self._xref: Any = None
+
+    def _collect(self) -> dict[str, list[tuple[str, MoveStatement, bool]]]:
+        if self._moves is None:
+            self._moves = {}
+            for paragraph, statement, enclosing in _walk_statements(self._procedure):
+                if not isinstance(statement, MoveStatement):
+                    continue
+                for target in statement.targets:
+                    resolved = self._index.resolve(str(target))
+                    if resolved is not None:
+                        self._moves.setdefault(
+                            resolved.spec.qualified_name.upper(), []
+                        ).append((paragraph or "", statement, bool(enclosing)))
+        return self._moves
+
+    def _references(self) -> Any:
+        if self._xref is None:
+            from .xref import XrefAnalyzer
+
+            self._xref = XrefAnalyzer().analyze(self._ast)
+        return self._xref
+
+    def correlation(
+        self,
+        site: _CarrierSite,
+        left: ResolvedField,
+        op: str,
+        right: ResolvedField,
+        origin: str,
+    ) -> CorrelationConstraint | None:
+        left_fed = _is_boundary_fed(left, self._fed)
+        right_fed = _is_boundary_fed(right, self._fed)
+        if left_fed == right_fed:
+            return None
+        fed, carrier = (left, right) if left_fed else (right, left)
+        if not left_fed:
+            op = _FLIPPED_RELATIONAL[op]
+        source = self._carried(site, carrier)
+        if source is None:
+            return None
+        return CorrelationConstraint(
+            fed,
+            op,
+            (),
+            origin,
+            source=source,
+            carrier=carrier.spec.qualified_name,
+        )
+
+    def _carried(
+        self, site: _CarrierSite, carrier: ResolvedField
+    ) -> ResolvedField | None:
+        """The boundary-fed field *carrier* holds from the previous record,
+        or None when it is not a carrier at this site."""
+        qname = carrier.spec.qualified_name.upper()
+        moves = self._collect().get(qname, [])
+        if len(moves) != 1:
+            return None
+        paragraph, move, guarded = moves[0]
+        if (
+            guarded
+            or move.is_corresponding
+            or paragraph.upper() != (site.paragraph or "").upper()
+            or move.location is None
+            or move.location.line <= site.line
+            or not move.source
+        ):
+            return None
+        source = self._index.resolve(str(move.source))
+        if source is None or not _is_boundary_fed(source, self._fed):
+            return None
+        if not self._only_written_by(carrier, move.location.line):
+            return None
+        return source
+
+    def _only_written_by(self, carrier: ResolvedField, line: int) -> bool:
+        """True when the MOVE at *line* is the one statement that may change
+        *carrier*'s value (through it, a group above it, or a level-88 name
+        of it), and no REDEFINES touches it."""
+        segments = carrier.spec.qualified_name.upper().split(".")
+        chain = [carrier.record]
+        node: Any = carrier.record
+        for name in segments[1:]:
+            node = next(
+                (
+                    child
+                    for child in getattr(node, "children", [])
+                    if str(getattr(child, "name", "")).upper() == name
+                ),
+                None,
+            )
+            if node is None:
+                return False
+            chain.append(node)
+        names = {str(item.name).upper() for item in chain}
+        if any(getattr(item, "redefines", None) for item in chain):
+            return False
+        for item in self._ast.traverse_depth_first():
+            if str(getattr(item, "redefines", "") or "").upper() in names:
+                return False
+        report = self._references()
+        writes = 0
+        for depth, item in enumerate(chain):
+            qualified = " OF ".join(reversed(segments[: depth + 1]))
+            entries = report.entries_named(qualified)
+            if len(entries) != 1:
+                return False
+            for ref in entries[0].references:
+                if ref.role not in _WRITING_ROLES:
+                    continue
+                if item is chain[-1] and ref.location.line == line and writes == 0:
+                    writes += 1
+                    continue
+                return False
+        for child in getattr(chain[-1], "children", []):
+            if isinstance(child, ConditionNameItem):
+                for entry in report.entries_named(str(child.name)):
+                    if any(r.role in _WRITING_ROLES for r in entry.references):
+                        return False
+        return writes == 1
 
 
 def _boundary_fed_names(report: BoundaryReport) -> set[str]:
@@ -1738,6 +2023,7 @@ def _branch_id(paragraph_name: str | None, location: SourceLocation | None) -> s
 
 __all__ = [
     "FieldConstraint",
+    "CorrelationConstraint",
     "SequenceConstraint",
     "BranchConstraints",
     "ConstraintReport",

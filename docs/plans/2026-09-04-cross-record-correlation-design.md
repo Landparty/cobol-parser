@@ -1,6 +1,13 @@
 # Cross-record correlation in scenario planning
 
-**Status:** design + groundwork landed; the analysis itself is not built.
+**Status:** built (2026-10-29) for the carrier shape below: carrier
+detection (`analysis/constraints.py`, `_Carriers`, `CorrelationConstraint`),
+two-row planning (`generators/scenarios.py`, `_solve_correlations`) and
+verification (`generators/verification.py`). Items 1 and 2 of "What is
+still missing" are done for an unconditional carrier MOVE in the comparing
+paragraph; a carrier written in another paragraph, or only on some arms
+(the `'05'`-then-`'09'` case in "The gap", where row *n-1* must itself take
+an arm), is still refused and stays unsupported.
 **Scope:** `generators/scenarios.py` (`ScenarioPlanner`),
 `generators/program_fixtures.py`, `analysis/constraints.py`.
 
