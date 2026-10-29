@@ -39,6 +39,9 @@ _UNDECLARED_CAVEATS: tuple[str, ...] = (
 #: Most lines :meth:`CobolTools.read_source` returns in one call.
 MAX_SOURCE_LINES = 200
 
+#: JCL steps a brief lists under run_by (jobs_running has them all).
+BRIEF_RUN_BY = 10
+
 #: Lint findings a program brief shows (worst first); ``lint`` has the rest.
 BRIEF_LINT = 5
 
@@ -543,7 +546,30 @@ class CobolTools:
                         _finding(f, parsed, response) for f in ordered[:BRIEF_LINT]
                     ],
                 }
+        if unit is parsed.ast or not parsed.ast.contained_programs:
+            names = {
+                (unit.program_name or "").upper(),
+                Path(str(parsed.path)).stem.upper(),
+            } - {""}
+            self._brief_run_by(answer, response, names, cap)
         return response.build(answer, parsed.program_info(unit))
+
+    def _brief_run_by(
+        self,
+        answer: dict[str, Any],
+        response: Response,
+        names: set[str],
+        cap: int,
+    ) -> None:
+        """``answer["run_by"]``: the JCL steps that run the program, so the
+        brief says how it is started without a second call. Left out when
+        there is no JCL to look in; a JCL failure costs only this field."""
+        from .jcl_tools import run_by
+
+        steps = _attempt(response, "JCL steps", lambda: run_by(self.workspace, names))
+        if steps is None:
+            return
+        answer["run_by"] = response.cap(steps, min(cap, BRIEF_RUN_BY), "run_by")
 
     # -- PL/I and assembler ---------------------------------------------------
 
@@ -613,10 +639,11 @@ class CobolTools:
             }
         )
         answer["called_by"] = response.cap(callers, cap, "called_by")
-        if not callers:
+        self._brief_run_by(answer, response, names | {path.stem.upper()}, cap)
+        if not callers and not answer.get("run_by"):
             answer["note"] = (
-                "no program under the root CALLs it: it is started by JCL "
-                "(jobs_running), CICS or IMS, or is called from elsewhere"
+                "no program under the root CALLs it and no JCL step under the "
+                "root runs it: it is started by CICS or IMS, or from elsewhere"
             )
         return response.build(answer)
 
@@ -990,6 +1017,7 @@ class CobolTools:
             "caller_count": len(callers),
             "calling_programs": sorted({c["program"] for c in callers}),
             "callers": response.cap(callers, cap, "callers"),
+            "coverage": _coverage(self.workspace, index),
         }
         if out_of_scope:
             answer["out_of_scope_callers"] = sorted(out_of_scope)
@@ -1005,14 +1033,16 @@ class CobolTools:
                 "which one a CALL reaches depends on the load library order, "
                 "which the source does not say",
             )
-        other = (
-            self.workspace.other_sources().get(wanted.upper()) if not declared else None
-        )
+        other = self.workspace.other_sources().get(wanted.upper())
         if other:
+            # Even beside a declaration: a second source of the same name
+            # (an assembler twin of a COBOL routine) is what a reader most
+            # needs to hear about.
             answer["sources_not_analyzed"] = [
                 {"file": self.workspace.display(path), "language": language}
                 for path, language in other
             ]
+        if other and not declared:
             answer["note"] = (
                 f"no COBOL program under the root has PROGRAM-ID {wanted}, but "
                 f"its source is here in {other[0][1]} "
@@ -1039,17 +1069,87 @@ class CobolTools:
                 "a scheduler) or is no longer used"
             )
         if unresolved:
-            answer["unresolved_dynamic_calls"] = response.cap(
-                unresolved, cap, "unresolved_dynamic_calls"
-            )
-            response.caveat(
-                "incomplete-analysis",
-                f"{len(unresolved)} dynamic CALL/LINK/XCTL site(s) take their "
-                "target from a data item whose values could not all be traced",
-                f"any of them may also reach {wanted}; they are listed in "
-                "unresolved_dynamic_calls",
-            )
+            self._unresolved_near(answer, response, cap, wanted, unresolved)
         return response.build(answer, program_info)
+
+    def _unresolved_near(
+        self,
+        answer: dict[str, Any],
+        response: Response,
+        cap: int,
+        wanted: str,
+        unresolved: list[dict[str, Any]],
+    ) -> None:
+        """The untraced dynamic CALL sites that could reach *wanted*: those in
+        the top-level folder of a declaration or a caller of it (an
+        application, in a root holding several), and those whose source text
+        names it. The others, in folders that never mention it, are counted:
+        a value set the analysis could not trace is still built from
+        literals somewhere, and none of them spells this name."""
+        anchors = {
+            _top_folder(str(where["file"]))
+            for where in answer.get("declared_in", [])
+            if where.get("file")
+        } | {
+            _top_folder(str(c["location"]["file"]))
+            for c in answer.get("callers", [])
+            if (c.get("location") or {}).get("file")
+        }
+        names = re.compile(rf"(?<![\w-]){re.escape(wanted)}(?![\w-])", re.IGNORECASE)
+        near: list[dict[str, Any]] = []
+        far: list[dict[str, Any]] = []
+        for row in unresolved:
+            file = str((row.get("location") or {}).get("file") or "")
+            if (
+                not anchors
+                or not file
+                or _top_folder(file) in anchors
+                or self._file_names(file, names)
+            ):
+                near.append(row)
+            else:
+                far.append(row)
+        if near:
+            answer["unresolved_dynamic_calls"] = response.cap(
+                near, cap, "unresolved_dynamic_calls"
+            )
+        parts: list[str] = []
+        effects: list[str] = []
+        if near:
+            parts.append(
+                f"{len(near)} dynamic CALL/LINK/XCTL site(s) near {wanted} take "
+                "their target from a data item whose values could not all be "
+                "traced"
+            )
+            effects.append(
+                f"any of them may also reach {wanted}; they are listed in "
+                "unresolved_dynamic_calls"
+            )
+        if far:
+            folders = sorted({_top_folder(str(r["location"]["file"])) for r in far})
+            answer["unresolved_dynamic_calls_elsewhere"] = {
+                "count": len(far),
+                "folders": folders,
+            }
+            parts.append(
+                f"{len(far)} untraced dynamic CALL/LINK/XCTL site(s) in other "
+                f"folders ({', '.join(folders)}), whose source never names "
+                f"{wanted}, are only counted"
+            )
+            effects.append(
+                "those could reach it only through a name read at run time "
+                "(a file, a commarea, a table)"
+            )
+        detail, effect = "; ".join(parts), "; ".join(effects)
+        response.caveat("incomplete-analysis", detail, effect)
+
+    def _file_names(self, file: str, names: re.Pattern[str]) -> bool:
+        """Whether the source *file* (relative to the root) matches *names*."""
+        try:
+            text = (self.workspace.root / file).read_text(encoding="latin-1")
+        except OSError:
+            return True  # unreadable: it may well name it
+        return bool(names.search(text))
 
     def _relative(self, text: str) -> str:
         """*text* (a library note) with the root's absolute path cut, so it
@@ -1134,8 +1234,9 @@ class CobolTools:
                         {self._unit_in(index, s["file"]) for s in included}
                     ),
                     "copied_by": [],
+                    "coverage": _coverage(self.workspace, index),
                     "included_by_other_languages": response.cap(
-                        self._included_rows(index, included),
+                        self._included_rows(index, included, member),
                         cap,
                         "included_by_other_languages",
                     ),
@@ -1220,10 +1321,11 @@ class CobolTools:
                     nested, cap, "copied_through_other_members"
                 ),
                 "fields": response.cap(report.fields, cap, "fields"),
+                "coverage": _coverage(self.workspace, index),
                 **(
                     {
                         "included_by_other_languages": response.cap(
-                            self._included_rows(index, included),
+                            self._included_rows(index, included, member),
                             cap,
                             "included_by_other_languages",
                         )
@@ -1402,17 +1504,26 @@ class CobolTools:
         return next((u.program_id for u in index.units if u.file == file), file)
 
     def _included_rows(
-        self, index: Any, sites: list[dict[str, Any]]
+        self, index: Any, sites: list[dict[str, Any]], member: str
     ) -> list[dict[str, Any]]:
-        """One row per PL/I or assembler program including a member."""
+        """One row per PL/I or assembler program including a member, with
+        the files under the root that member could be for its language (a
+        PL/I ``.inc`` is not the COBOL ``.cpy`` of the same name)."""
+        from .languages import member_files
+
         rows: dict[str, dict[str, Any]] = {}
+        found: dict[str, list[str]] = {}
         for site in sites:
+            language = site["language"]
+            if language not in found:
+                found[language] = member_files(self.workspace, language, member)
             row = rows.setdefault(
                 site["file"],
                 {
                     "program": self._unit_in(index, site["file"]),
                     "file": site["file"],
-                    "language": site["language"],
+                    "language": language,
+                    "member_files": found[language],
                     "include_sites": [],
                 },
             )
@@ -1439,11 +1550,20 @@ class CobolTools:
 
     # -- codebase_overview ---------------------------------------------------
 
-    def codebase_overview(self, limit: int | None = None) -> dict[str, Any]:
+    def codebase_overview(
+        self,
+        limit: int | None = None,
+        language: str | None = None,
+        path: str | None = None,
+    ) -> dict[str, Any]:
         """The programs under the root, how they call each other and share
-        copybooks, their health, and the code duplicated between them."""
+        copybooks, their health, and the code duplicated between them.
+        *language* (COBOL, PL/I, assembler) and *path* (a folder, or a glob
+        of root-relative paths) narrow the ``programs`` list; the other
+        sections stay root-wide."""
         from .codebase_index import health_index, programs_index
 
+        wanted_language = _language_named(language) if language else None
         cap = clamp_limit(limit)
         top = min(cap, OVERVIEW_TOP)
         response = Response()
@@ -1490,6 +1610,10 @@ class CobolTools:
                 row["unit_kind"] = unit.unit_kind
             if unit.language != "COBOL":
                 row["language"] = unit.language
+            if wanted_language is not None and unit.language != wanted_language:
+                continue
+            if path is not None and not _path_matches(unit.file, path):
+                continue
             programs.append(row)
 
         declared = {
@@ -1569,6 +1693,18 @@ class CobolTools:
                     else {}
                 ),
             },
+            **(
+                {
+                    "programs_filter": {
+                        k: v
+                        for k, v in (("language", wanted_language), ("path", path))
+                        if v
+                    },
+                    "programs_matched": len(programs),
+                }
+                if wanted_language or path
+                else {}
+            ),
             "programs": response.cap(
                 sorted(programs, key=lambda r: (r["program"].upper(), r["file"])),
                 cap,
@@ -2145,12 +2281,15 @@ class CobolTools:
 
         return jcl_job(self.workspace, file, job, step, limit)
 
-    def jobs_running(self, program: str, limit: int | None = None) -> dict[str, Any]:
+    def jobs_running(
+        self, program: str, limit: int | None = None, follow_calls: bool = False
+    ) -> dict[str, Any]:
         """Every JCL step under the root that runs *program*, each of its
-        ``SELECT`` files bound to a DD and a dataset."""
+        ``SELECT`` files bound to a DD and a dataset; with *follow_calls*,
+        the programs it CALLs in turn, in any language."""
         from .jcl_tools import jobs_running
 
-        return jobs_running(self.workspace, program, limit)
+        return jobs_running(self.workspace, program, limit, follow_calls)
 
     def dataset_users(self, dataset: str, limit: int | None = None) -> dict[str, Any]:
         """Every job, step and program under the root that uses *dataset*."""
@@ -2832,6 +2971,73 @@ def _carry_index_caveats(index: Any, response: Response, what: str) -> None:
                 f"{len(files)} program file(s): {_listed(files)}",
                 effect,
             )
+
+
+def _coverage(workspace: Workspace, index: Any) -> dict[str, Any]:
+    """What a root-wide answer looked through: the source files read, by
+    language, and the sources under the root no parser here reads. So an
+    empty or short list can be taken at its word, or not."""
+    read: dict[str, set[str]] = {}
+    for unit in index.units:
+        if unit.language != "COBOL":
+            read.setdefault(unit.language, set()).add(unit.file)
+    others = set().union(*read.values()) if read else set()
+    read["COBOL"] = set(index.files) - others
+    out: dict[str, Any] = {
+        "files_read": {lang: len(files) for lang, files in sorted(read.items())}
+    }
+    skipped: dict[str, set[str]] = {}
+    for entries in workspace.other_sources().values():
+        for path, language in entries:
+            skipped.setdefault(language, set()).add(str(path))
+    if skipped:
+        out["files_not_analyzed"] = {
+            lang: len(paths) for lang, paths in sorted(skipped.items())
+        }
+    if index.failed:
+        out["files_failed"] = len(index.failed)
+    return out
+
+
+#: Spellings a ``language`` argument may use, upper-cased.
+_LANGUAGE_NAMES = {
+    "COBOL": "COBOL",
+    "CBL": "COBOL",
+    "PL/I": "PL/I",
+    "PLI": "PL/I",
+    "PL1": "PL/I",
+    "PL/1": "PL/I",
+    "ASSEMBLER": "assembler",
+    "ASM": "assembler",
+    "HLASM": "assembler",
+}
+
+
+def _language_named(text: str) -> str:
+    """The language *text* names, as answers spell it."""
+    found = _LANGUAGE_NAMES.get(text.strip().upper())
+    if found is None:
+        raise ToolError(f"unknown language {text!r}: give COBOL, PL/I or assembler")
+    return found
+
+
+def _path_matches(file: str, pattern: str) -> bool:
+    """Whether root-relative *file* is under folder *pattern*, or matches it
+    as a glob (``*``, ``?``, ``[...]``)."""
+    import fnmatch
+
+    wanted = pattern.strip().strip("/").replace("\\", "/")
+    if any(c in wanted for c in "*?["):
+        return fnmatch.fnmatchcase(file, wanted) or fnmatch.fnmatchcase(
+            file.lower(), wanted.lower()
+        )
+    return file == wanted or file.startswith(wanted + "/")
+
+
+def _top_folder(file: str) -> str:
+    """The first folder of a root-relative *file*, "" for one at the root."""
+    head, sep, _rest = file.partition("/")
+    return head if sep else ""
 
 
 def _notes(

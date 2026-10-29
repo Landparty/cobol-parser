@@ -553,22 +553,46 @@ def _carry_libraries(
     )
 
 
-def _carry_index(index: JclIndex, response: Response) -> None:
-    """The root's JCL gaps, summarized: one caveat per kind, not per file."""
+def _carry_index(
+    index: JclIndex,
+    response: Response,
+    needle: str | None = None,
+    answer_files: set[str] | None = None,
+) -> None:
+    """The root's JCL gaps, summarized: one caveat per kind, not per file.
+
+    With *needle* (the program or dataset asked about), only the gaps that
+    could change this answer are spelled out: those in the files the answer
+    came from (*answer_files*) and in files whose text names *needle*. A gap
+    in any other file is counted in one caveat, so the answer to a question
+    about one application is not buried in the JCL gaps of every other one.
+    """
     from .tools import _notes
 
-    _carry_libraries(index.libraries, index.parsed(), response)
+    files = index.files
+    others: list[JclFile] = []
+    if needle:
+        near = answer_files or set()
+        relevant = [
+            f
+            for f in files
+            if _has_gap(f) and (f.display in near or _mentions(f, needle))
+        ]
+        others = [f for f in files if _has_gap(f) and f not in relevant]
+        files = relevant
+    parsed = [f for f in files if f.result is not None]
+    _carry_libraries(index.libraries, parsed, response)
     _notes(
         response,
         "incomplete-analysis",
-        [f"{f.display}: {f.failure}" for f in index.files if f.failure],
+        [f"{f.display}: {f.failure}" for f in files if f.failure],
         "the steps in those files are not in this answer",
         lead="JCL files that could not be read",
     )
     _notes(
         response,
         "partial-parse",
-        [f.display for f in index.parsed() if f.result and f.result.errors],
+        [f.display for f in parsed if f.result and f.result.errors],
         "statements that could not be read are missing; jcl_job on a file "
         "names the lines",
         lead="JCL files read with errors",
@@ -578,7 +602,7 @@ def _carry_index(index: JclIndex, response: Response) -> None:
         "incomplete-analysis",
         [
             f.display
-            for f in index.parsed()
+            for f in parsed
             if f.result and any(not _is_template_note(n) for n in f.result.unresolved)
         ],
         "a procedure or symbol not found there may hide steps or change "
@@ -590,7 +614,7 @@ def _carry_index(index: JclIndex, response: Response) -> None:
         "incomplete-analysis",
         [
             f"{f.display} ({', '.join(f.result.template_procedures)})"
-            for f in index.parsed()
+            for f in parsed
             if f.result and f.result.template_procedures
         ],
         "their steps and DD names are IBM's defaults, not your PROCLIB's; put "
@@ -598,6 +622,55 @@ def _carry_index(index: JclIndex, response: Response) -> None:
         lead="JCL files whose IBM-supplied procedures were expanded from "
         "jcl-parser's generic templates",
     )
+    if others:
+        response.caveat(
+            "incomplete-analysis",
+            f"{len(others)} other JCL file(s) under the root have gaps "
+            "(statements that could not be read, procedures, symbols or "
+            f"JCLLIB libraries not found) but do not name {needle}",
+            f"a step there reaches {needle} only through a procedure or "
+            "symbol that is not under the root; jcl_job on a file lists its "
+            "gaps",
+        )
+
+
+def _has_gap(jfile: JclFile) -> bool:
+    """Whether *jfile* could not be read whole, or left something unresolved."""
+    result = jfile.result
+    if result is None:
+        return True
+    return bool(
+        jfile.missing_libraries
+        or result.errors
+        or result.unresolved
+        or result.template_procedures
+    )
+
+
+def _mentions(jfile: JclFile, needle: str) -> bool:
+    """Whether the text of *jfile*, or of a procedure member it EXECs, names
+    *needle* as a whole word (a dataset name: as a whole qualifier run)."""
+
+    def word(text: str) -> re.Pattern[str]:
+        return re.compile(rf"(?<![\w@#$.]){re.escape(text)}(?![\w@#$])", re.IGNORECASE)
+
+    def text_of(path: Path) -> str | None:
+        try:
+            return path.read_text(encoding="latin-1")
+        except OSError:
+            return None
+
+    wanted = word(needle)
+    text = text_of(jfile.path)
+    if text is None or wanted.search(text):
+        return True  # unreadable: it may well name it
+    for procedure, member in jfile.members.items():
+        if not word(procedure).search(text):
+            continue
+        body = text_of(member)
+        if body is None or wanted.search(body):
+            return True
+    return False
 
 
 def _is_template_note(note: str) -> bool:
@@ -758,16 +831,19 @@ def _procedures(
 
 
 def jobs_running(
-    workspace: Workspace, program: str, limit: int | None = None
+    workspace: Workspace,
+    program: str,
+    limit: int | None = None,
+    follow_calls: bool = False,
 ) -> dict[str, Any]:
     """Every JCL step under the root that runs *program*, joined to its
-    COBOL source's ``SELECT`` files."""
+    COBOL source's ``SELECT`` files; with *follow_calls*, also every program
+    it runs in turn through CALL / LINK / XCTL, in any language."""
     name = program.strip().upper()
     if not name:
         raise ToolError("no program given")
     index = jcl_index(workspace)
     response = Response()
-    _carry_index(index, response)
     selects = _program_selects(workspace, name, response)
 
     matches: list[tuple[JclFile, JclJob, JobStep]] = []
@@ -780,6 +856,7 @@ def jobs_running(
             for step in job.steps
             if id(step) in running
         ]
+    _carry_index(index, response, name, {jfile.display for jfile, _, _ in matches})
     shown = response.cap(matches, clamp_limit(limit), "steps")
     locators: dict[Path, _Locator] = {}
     rows = []
@@ -811,6 +888,9 @@ def jobs_running(
                 "its DDs are not bound to the files it opens; dataset access "
                 "comes from DISP alone",
             )
+    _also_named(workspace, name, answer, response)
+    if follow_calls:
+        _follow_calls(workspace, name, answer, response, clamp_limit(limit))
     if not matches:
         answer["note"] = (
             f"no JCL step under the root runs {name}"
@@ -819,6 +899,112 @@ def jobs_running(
             "by CICS or IMS, or run by JCL that is not under the root"
         )
     return response.build(answer)
+
+
+def _follow_calls(
+    workspace: Workspace,
+    name: str,
+    answer: dict[str, Any],
+    response: Response,
+    cap: int,
+) -> None:
+    """What a step running *name* executes beyond it: ``answer["calls"]``,
+    the call chain in any language, and ``answer["languages_run"]``."""
+    from .codebase_index import call_chain
+    from .tools import _notes
+
+    rows, notes = call_chain(workspace, name)
+    languages = {
+        str(s.get("language"))
+        for s in [answer.get("source") or {}, *answer.get("sources", [])]
+        if s.get("language")
+    }
+    if answer.get("source") and "language" not in answer["source"]:
+        languages.add("COBOL")
+    languages |= {str(r["language"]) for r in rows if r.get("language")}
+    # A program found in two languages runs as one of them: both are named,
+    # the duplicate-declaration caveat (or the row's also_in) says which.
+    languages |= {str(alt["language"]) for r in rows for alt in r.get("also_in", [])}
+    answer["calls"] = response.cap(rows, cap, "calls")
+    answer["languages_run"] = sorted(languages)
+    _notes(
+        response,
+        "incomplete-analysis",
+        notes,
+        "programs those dynamic CALLs reach are missing from calls",
+        lead="the call chain could not be followed everywhere",
+    )
+
+
+def _named_sources(workspace: Workspace, name: str) -> list[dict[str, str]]:
+    """Every source under the root that could be load module *name*, in any
+    language: an outermost program unit of that name (COBOL, PL/I or
+    assembler), a program file of that stem, and a source of that name these
+    tools do not parse. ``{file, language}`` each, in a stable order."""
+    from .codebase_index import programs_index
+
+    found: dict[str, str] = {}
+    for unit in programs_index(workspace).units_named(name):
+        if not unit.depth:
+            found.setdefault(unit.file, unit.language)
+    for path in workspace.program_files():
+        if path.stem.upper() == name:
+            found.setdefault(workspace.display(path), "COBOL")
+    for path, language in workspace.other_sources().get(name, []):
+        found.setdefault(workspace.display(path), language)
+    return [{"file": f, "language": lang} for f, lang in sorted(found.items())]
+
+
+def _also_named(
+    workspace: Workspace, name: str, answer: dict[str, Any], response: Response
+) -> None:
+    """When more than one source could be *name*, list them all in
+    ``answer["sources"]``: the JCL names a load module, and which source it
+    was built from is up to the load library, not the JCL."""
+    try:
+        sources = _named_sources(workspace, name)
+    except Exception:  # noqa: BLE001 -- the steps stand without this
+        return
+    if len(sources) < 2:
+        return
+    answer["sources"] = sources
+    response.caveat(
+        "duplicate-declaration",
+        f"{len(sources)} sources under the root could be program {name}: "
+        + ", ".join(f"{s['file']} ({s['language']})" for s in sources),
+        "which one a step runs depends on the STEPLIB / JOBLIB load library, "
+        "which the source does not say; the files bound to DDs here come from "
+        "source",
+    )
+
+
+def run_by(workspace: Workspace, names: set[str]) -> list[dict[str, Any]] | None:
+    """The JCL steps under the root that run a program called any of
+    *names* (its PROGRAM-ID, its member name): ``{job, step, file,
+    location}`` each, for a brief; None when the ``[jcl]`` extra is missing
+    or the root holds no JCL."""
+    if not jcl_available():
+        return None
+    index = jcl_index(workspace)
+    if not index.files:
+        return None
+    rows: list[dict[str, Any]] = []
+    for jfile in index.parsed():
+        assert jfile.result is not None
+        locator: _Locator | None = None
+        for name in sorted(names):
+            for step in jfile.result.steps_running(name):
+                job = next((j for j in jfile.result.jobs if step in j.steps), None)
+                locator = locator or _Locator(jfile, workspace)
+                rows.append(
+                    {
+                        "job": job.name if job else None,
+                        "step": step.name,
+                        "file": jfile.display,
+                        "location": locator.step(step),
+                    }
+                )
+    return rows
 
 
 def _program_selects(
@@ -1165,7 +1351,6 @@ def dataset_users(
     matches = _matcher(dataset)
     index = jcl_index(workspace)
     response = Response()
-    _carry_index(index, response)
 
     found: list[dict[str, Any]] = []
     programs = _ProgramUses(workspace, response)
@@ -1194,6 +1379,13 @@ def dataset_users(
                 row["temporary"] = True
             found.append(row)
 
+    wanted = dataset.strip().strip("'").upper()
+    _carry_index(
+        index,
+        response,
+        None if any(c in wanted for c in "*%") else _base(wanted),
+        {row["file"] for row in found},
+    )
     by_access: dict[str, list[str]] = {}
     for row in found:
         bucket = by_access.setdefault(row["access"], [])

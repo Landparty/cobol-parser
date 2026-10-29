@@ -342,7 +342,7 @@ def _build_lineage(workspace: Workspace) -> tuple[LineageIndex, dict[str, Stamp]
     index = LineageIndex()
     stamps = workspace.tree_stamps()
     reports: list[dict[str, Any]] = []
-    for facts in surveyed(workspace, index, stamps):
+    for facts in surveyed(workspace, index, stamps, heavy=True):
         index.problems += facts.lineage_problems
         for unit in facts.lineage:
             reports.append(unit.report)
@@ -515,3 +515,82 @@ def _debt(parsed: ParsedProgram, unit: CobolProgram, redundancy: Any) -> Any:
     return TechnicalDebtAnalyzer().analyze(
         unit, flow_report=_flow(parsed, unit), redundancy_report=redundancy
     )
+
+
+#: How many CALL levels :func:`call_chain` follows below the program run.
+CALL_CHAIN_DEPTH = 6
+
+
+def call_chain(
+    workspace: Workspace, program: str, max_depth: int = CALL_CHAIN_DEPTH
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Every program *program* runs through its CALLs, LINKs and XCTLs,
+    breadth first, in any language: one row per program reached (``program``,
+    ``language`` and ``file`` when it is under the root, the ``called_by``
+    program and ``via``, ``dynamic`` for a target taken from a data item, and
+    ``depth``, 1 for a direct callee). Also the notes on what could not be
+    followed (a dynamic CALL whose targets are not all known)."""
+    index = programs_index(workspace)
+    other = workspace.other_sources()
+    rows: list[dict[str, Any]] = []
+    notes: list[str] = []
+    seen = {program.upper()}
+    frontier = [program.upper()]
+    for depth in range(1, max_depth + 1):
+        following: list[str] = []
+        for caller in frontier:
+            for unit in index.units_named(caller):
+                if unit.depth:
+                    continue
+                for row in unit.calls:
+                    targets = (
+                        [str(c).upper() for c in row.get("candidates") or []]
+                        if row.get("dynamic")
+                        else [str(row.get("program") or "").upper()]
+                    )
+                    if row.get("dynamic") and not row.get("candidates_complete"):
+                        notes.append(
+                            f"{caller} ({unit.file}): {row.get('via')} "
+                            f"{row.get('program')} has targets that could not "
+                            "all be traced"
+                        )
+                    for target in targets:
+                        if not target or target in seen:
+                            continue
+                        seen.add(target)
+                        hit: dict[str, Any] = {
+                            "program": target,
+                            "called_by": caller,
+                            "via": row.get("via"),
+                            "depth": depth,
+                        }
+                        if row.get("dynamic"):
+                            hit["dynamic"] = True
+                        units = [u for u in index.units_named(target) if not u.depth]
+                        if units:
+                            hit["language"] = units[0].language
+                            hit["file"] = units[0].file
+                            if len(units) > 1:
+                                hit["also_in"] = [
+                                    {"file": u.file, "language": u.language}
+                                    for u in units[1:]
+                                ]
+                            following.append(target)
+                        elif target in other:
+                            path, language = other[target][0]
+                            hit["language"] = language
+                            hit["file"] = workspace.display(path)
+                            hit["analyzed"] = False
+                        else:
+                            hit["in_workspace"] = False
+                        rows.append(hit)
+        if not following:
+            break
+        frontier = following
+    else:
+        if frontier:
+            notes.append(
+                f"the chain was followed {max_depth} CALL levels deep; "
+                "programs below that are not listed"
+            )
+    return rows, notes

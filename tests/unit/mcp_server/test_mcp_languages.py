@@ -151,17 +151,28 @@ class TestCallGraph:
         assert verdicts == ["confirmed", "confirmed", "confirmed", "contradicted"]
         assert results[2]["evidence"] == [{"file": "DATERTN.asm", "line": 5}]
 
-    def test_an_included_member(self, tools: CobolTools) -> None:
-        answer = tools.impact_of_change("PAYREC")["answer"]
+    def test_an_included_member(self, root: Path) -> None:
+        # The PL/I member, and a COBOL copybook of the same name that a PL/I
+        # %INCLUDE never reads.
+        (root / "include").mkdir()
+        (root / "include" / "PAYREC.inc").write_text(" DCL 1 PAYREC;\n")
+        (root / "PAYREC.cpy").write_text("       01 PAYREC PIC X.\n")
+        answer = CobolTools(Workspace(root)).impact_of_change("PAYREC")["answer"]
         assert answer["found"] is True
         assert answer["included_by_other_languages"] == [
             {
                 "program": "PAYDRV",
                 "file": "PAYDRV.pli",
                 "language": "PL/I",
+                "member_files": ["include/PAYREC.inc"],
                 "include_sites": [{"file": "PAYDRV.pli", "line": 3}],
             }
         ]
+        assert answer["coverage"]["files_read"] == {
+            "COBOL": 1,
+            "PL/I": 1,
+            "assembler": 1,
+        }
 
 
 class TestBrief:
@@ -172,7 +183,17 @@ class TestBrief:
         assert answer["program_id"] == "PAYDRV"
         assert [p["name"] for p in answer["procedures"]] == ["PAYDRV", "SUMMARY"]
         assert answer["called_by"] == []
-        assert "jobs_running" in answer["note"]
+        # Not CALLed, but run: the brief names the step, not a guess.
+        pytest.importorskip("jclparser")
+        assert answer["run_by"] == [
+            {
+                "job": "PAYJOB",
+                "step": "STEP1",
+                "file": "PAYJOB.jcl",
+                "location": {"file": "PAYJOB.jcl", "line": 2},
+            }
+        ]
+        assert "note" not in answer
         assert any("DECLARE FILE" in c["detail"] for c in result["caveats"])
 
     def test_assembler_brief(self, tools: CobolTools) -> None:

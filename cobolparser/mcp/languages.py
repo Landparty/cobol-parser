@@ -47,6 +47,18 @@ LANGUAGE_SUFFIXES: dict[str, str] = {
     ".s": ASSEMBLER,
     ".hlasm": ASSEMBLER,
     ".alc": ASSEMBLER,
+    # Micro Focus / Rocket (``.mlc``) and IBM DBB / zAppBuild (``.assemble``,
+    # ``.asmpgm``) names for an assembler program.
+    ".mlc": ASSEMBLER,
+    ".assemble": ASSEMBLER,
+    ".asmpgm": ASSEMBLER,
+}
+
+#: Language -> the suffixes a member it includes (``%INCLUDE`` / ``COPY``)
+#: is kept under, on a PC checkout of a library.
+MEMBER_SUFFIXES: dict[str, tuple[str, ...]] = {
+    PLI: (".inc", ".incl", ".plinc", ".pli", ".pl1"),
+    ASSEMBLER: (".mac", ".maclib", ".asm", ".asmcopy"),
 }
 
 #: Language -> (module imported, install command).
@@ -387,11 +399,18 @@ def _build(workspace: Workspace) -> tuple[LanguagesIndex, dict[str, Stamp]]:
     index = LanguagesIndex()
     stamps = workspace.tree_stamps()
     previous = workspace.built_index("languages")
+    if not isinstance(previous, LanguagesIndex):
+        # A restarted server: the sources read last time, from the facts
+        # store's cache directory (each still checked against its stamp).
+        from .facts import store_for
+
+        previous = store_for(workspace).load_extra("languages")
     held = (
         {s.path: s for s in previous.sources}
         if isinstance(previous, LanguagesIndex)
         else {}
     )
+    read_any = False
     available: dict[str, bool] = {}
     for path in source_files(workspace):
         language = LANGUAGE_SUFFIXES[path.suffix.lower()]
@@ -406,7 +425,12 @@ def _build(workspace: Workspace) -> tuple[LanguagesIndex, dict[str, Stamp]]:
             index.sources.append(old)
             continue
         index.sources.append(read_facts(workspace, path))
+        read_any = True
     index.seconds = time.monotonic() - started
+    if read_any or len(held) != len(index.sources):
+        from .facts import store_for
+
+        store_for(workspace).save_extra("languages", index)
     return index, stamps
 
 
@@ -426,3 +450,17 @@ def facts_for(workspace: Workspace, path: Path) -> SourceFacts:
         if held is not None and held.stamp == _stamp(str(path)):
             return held
     return read_facts(workspace, path)
+
+
+def member_files(workspace: Workspace, language: str, member: str) -> list[str]:
+    """The files under the root that could be member *member* as a *language*
+    program includes it: named after it, with one of that language's
+    :data:`MEMBER_SUFFIXES`. Which one the compiler reads is up to its
+    SYSLIB, so all are given."""
+    suffixes = MEMBER_SUFFIXES.get(language, ())
+    wanted = member.strip().upper()
+    return sorted(
+        workspace.display(path)
+        for path in workspace.files_named(suffixes)
+        if path.stem.upper() == wanted
+    )
