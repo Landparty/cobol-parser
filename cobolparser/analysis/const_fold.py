@@ -900,7 +900,8 @@ def _site_operands(stmt: Any) -> list[str]:
 def _site_fields(stmt: Any, index: ProgramLayoutIndex) -> list[str]:
     """Qualified names of the elementary fields a DISPLAY/WRITE shows: each
     operand that resolves to one, and for a WRITE of a group record every
-    elementary field under it."""
+    named elementary field under it (a FILLER has no name a test could
+    check)."""
     fields: list[str] = []
     for operand in _site_operands(stmt):
         resolved = _safe_resolve(index, operand)
@@ -910,7 +911,11 @@ def _site_fields(stmt: Any, index: ProgramLayoutIndex) -> list[str]:
             base, has_suffix = _base_name(operand)
             if not has_suffix:
                 for qpath in _group_paths(index, base):
-                    fields.extend(_facts(index).leaves_under(qpath))
+                    fields.extend(
+                        leaf
+                        for leaf in _facts(index).leaves_under(qpath)
+                        if leaf.rsplit(".", 1)[-1].upper() != "FILLER"
+                    )
     return fields
 
 

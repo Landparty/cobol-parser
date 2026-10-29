@@ -904,8 +904,8 @@ internal env) rather than approximating:
   CICS/DLI cases above) conservatively poisons every name in its `.operands`
   -- a fail-safe default, not a silent skip.
 * A `DISPLAY` operand that resolves to an elementary field is an
-  observation point; a `WRITE` of a group record observes every elementary
-  field under it (`_site_fields`, used the same way for walked, poisoned and
+  observation point; a `WRITE` of a group record observes every named
+  elementary field under it, never a FILLER (`_site_fields`, used the same way for walked, poisoned and
   unreached sites). Pinned by
   `tests/unit/analysis/test_const_fold.py::TestWholeRecordWrite`. `GO TO`, `STOP RUN`, `GOBACK`, and `EXIT
   PROGRAM` all stop the walk outright (unreachable code after them is never

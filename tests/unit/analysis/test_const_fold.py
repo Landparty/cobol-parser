@@ -1853,3 +1853,17 @@ class TestWholeRecordWrite:
             "           END-IF"
         )
         assert fold.known == {}
+
+    def test_a_filler_under_the_record_is_never_observed(self):
+        from cobolparser.analysis.const_fold import _site_fields
+
+        source = _FILE_PROGRAM.replace(
+            "           05  OUT-STATUS      PIC X(3).\n",
+            "           05  FILLER          PIC X(2).\n"
+            "           05  OUT-STATUS      PIC X(3).\n",
+        ).format(body="           WRITE OUT-REC")
+        result = parse_cobol(source, filename="w.cbl")
+        assert result.ast is not None and result.errors == [], result.errors
+        index = ProgramLayoutIndex.build(result.ast)
+        (write,) = result.ast.find_all_by_type("IOWriteStatement")
+        assert _site_fields(write, index) == ["OUT-REC.OUT-ID", "OUT-REC.OUT-STATUS"]
