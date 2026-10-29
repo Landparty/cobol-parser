@@ -54,6 +54,7 @@ _SUBCOMMANDS = frozenset(
         "business-rules",
         "lineage",
         "field-impact",
+        "widen-check",
         "jcl",
         "config",
         "mcp",
@@ -3532,30 +3533,7 @@ def _build_field_impact_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar="N",
         help="Joins between programs a path may cross (default: unlimited)",
     )
-    p.add_argument(
-        "--jcl",
-        action="append",
-        default=[],
-        metavar="PATH",
-        help="JCL file or directory whose DD statements bind programs to "
-        "datasets (repeatable; needs jcl-parser installed)",
-    )
-    p.add_argument(
-        "--proc-path",
-        action="append",
-        default=None,
-        metavar="DIR",
-        help="Folder of cataloged PROCs (NAME.prc / NAME.jcl), or a JCLLIB "
-        "base, used to expand EXEC PROC= steps in --jcl (repeatable, searched "
-        "in order)",
-    )
-    p.add_argument(
-        "--bindings",
-        default=None,
-        metavar="FILE.json",
-        help='Bindings computed elsewhere: {"bindings": [{"program", "ddname", '
-        '"dataset", "job"?, "step"?}], "passthroughs": [...]}',
-    )
+    _add_binding_args(p)
     p.add_argument(
         "--key-relationships",
         action="store_true",
@@ -3582,6 +3560,65 @@ def _build_field_impact_parser(subparsers: argparse._SubParsersAction) -> None:
     _add_source_format_args(p)
     _add_define_args(p)
     p.set_defaults(func=_cmd_field_impact)
+
+
+def _add_binding_args(p: argparse.ArgumentParser) -> None:
+    """``--jcl`` / ``--proc-path`` / ``--bindings``: how programs' DDs are
+    bound to datasets, for the commands built on ``LineageGraph``."""
+    p.add_argument(
+        "--jcl",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="JCL file or directory whose DD statements bind programs to "
+        "datasets (repeatable; needs jcl-parser installed)",
+    )
+    p.add_argument(
+        "--proc-path",
+        action="append",
+        default=None,
+        metavar="DIR",
+        help="Folder of cataloged PROCs (NAME.prc / NAME.jcl), or a JCLLIB "
+        "base, used to expand EXEC PROC= steps in --jcl (repeatable, searched "
+        "in order)",
+    )
+    p.add_argument(
+        "--bindings",
+        default=None,
+        metavar="FILE.json",
+        help='Bindings computed elsewhere: {"bindings": [{"program", "ddname", '
+        '"dataset", "job"?, "step"?}], "passthroughs": [...]}',
+    )
+
+
+def _lineage_reports(
+    args: argparse.Namespace, targets: list[str]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Every lineage report under *targets* and the problems (files that
+    produced none); exits when there is no report at all."""
+    from ..analysis.lineage_graph import reports_from_scan
+    from ..scan import ScanOptions, scan_files
+
+    files = _cobol_files(targets)
+    source_format = _source_format_kwargs(args)
+    scan = scan_files(
+        files,
+        ScanOptions(
+            analyzers=("lineage",),
+            copybook_paths=tuple(args.copybook_path or []),
+            free_form=bool(source_format["free_form"]),
+            preprocess_fixed=source_format["preprocess_fixed"],
+            debug_lines=bool(source_format.get("debug_lines", False)),
+            defined_symbols=_defined_symbol_pairs(args),
+        ),
+        workers=args.workers,
+    )
+    reports, problems = reports_from_scan(scan)
+    if not reports:
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        _fail("no COBOL program under the given paths produced a lineage report")
+    return reports, problems
 
 
 def _cobol_files(paths: list[str]) -> list[str]:
@@ -3686,8 +3723,7 @@ def _load_bindings(
 
 
 def _cmd_field_impact(args: argparse.Namespace) -> None:
-    from ..analysis.lineage_graph import LineageGraph, reports_from_scan
-    from ..scan import ScanOptions, scan_files
+    from ..analysis.lineage_graph import LineageGraph
 
     starts = sum(bool(x) for x in (args.table, args.dataset))
     if starts > 1:
@@ -3701,25 +3737,7 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
     if args.depth is not None and args.depth < 0:
         _fail("--depth must be >= 0")
 
-    files = _cobol_files(targets)
-    source_format = _source_format_kwargs(args)
-    scan = scan_files(
-        files,
-        ScanOptions(
-            analyzers=("lineage",),
-            copybook_paths=tuple(args.copybook_path or []),
-            free_form=bool(source_format["free_form"]),
-            preprocess_fixed=source_format["preprocess_fixed"],
-            debug_lines=bool(source_format.get("debug_lines", False)),
-            defined_symbols=_defined_symbol_pairs(args),
-        ),
-        workers=args.workers,
-    )
-    reports, problems = reports_from_scan(scan)
-    if not reports:
-        for problem in problems:
-            print(problem, file=sys.stderr)
-        _fail("no COBOL program under the given paths produced a lineage report")
+    reports, problems = _lineage_reports(args, targets)
     bindings, passthroughs, jcl_problems, jcl_caveats = _load_bindings(args)
     graph = LineageGraph(reports, bindings, passthroughs, join_caveats=jcl_caveats)
 
@@ -3755,6 +3773,148 @@ def _cmd_field_impact(args: argparse.Namespace) -> None:
     if not result.start_found:
         # The report above says so too; the exit code is for scripts.
         _fail(f"{', '.join(result.start)}: no such field in any report")
+
+
+# -- Subcommand: widen-check --------------------------------------------------
+
+
+def _build_widen_check_parser(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "widen-check",
+        help="What a PICTURE change to one field breaks across programs: "
+        "every receiver that truncates the new value, and every record, "
+        "file, dataset, CALL and REDEFINES whose layout must change with it",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  cobol-parser widen-check CUST-ID --to '9(9)' ./cobol "
+            "--copybook-path ./copybook\n"
+            "  cobol-parser widen-check WS-AMT --to 'S9(11)V99' --usage COMP-3 "
+            "./cobol --program PAYCALC --jcl ./jcl --format text\n\n"
+            "A narrowing (--to smaller than today) is checked the other way: "
+            "every field that feeds FIELD with more than the new PICTURE holds."
+            "\n\nExit status:\n"
+            "  0  checked (findings or not)\n"
+            "  1  no source produced a report, FIELD matches nothing, or the "
+            "arguments are wrong\n"
+            "  3  --fail-on was given and a finding at or above it was reported"
+        ),
+    )
+    p.add_argument("field", metavar="FIELD", help="The data item to change")
+    p.add_argument(
+        "targets",
+        nargs="+",
+        metavar="PATH",
+        help="COBOL source files or directories to walk",
+    )
+    p.add_argument(
+        "--to",
+        required=True,
+        dest="new_picture",
+        metavar="PIC",
+        help="The new PICTURE, e.g. '9(9)' or 'PIC S9(7)V99'",
+    )
+    p.add_argument(
+        "--usage",
+        default=None,
+        dest="new_usage",
+        metavar="USAGE",
+        help="The new USAGE (default: the field keeps its own)",
+    )
+    p.add_argument(
+        "--program",
+        default=None,
+        metavar="NAME",
+        help="PROGRAM-ID that owns FIELD (default: every program with a field "
+        "of that name)",
+    )
+    p.add_argument(
+        "--depth",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Joins between programs a value path may cross (default: unlimited)",
+    )
+    _add_binding_args(p)
+    p.add_argument(
+        "--min-severity",
+        choices=["error", "warning", "info"],
+        default="info",
+        help="Report only findings at or above this severity (default: info)",
+    )
+    p.add_argument(
+        "--fail-on",
+        choices=["error", "warning", "info", "never"],
+        default="never",
+        help="Exit 3 when a reported finding is at or above this severity "
+        "(default: never)",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Worker processes for the parse (default: chosen by size)",
+    )
+    p.add_argument(
+        "--format",
+        choices=["json", "text"],
+        default="json",
+        dest="output_format",
+        help="Output format (default: json)",
+    )
+    _add_compact_arg(p)
+    _add_copybook_args(p)
+    _add_output_arg(p)
+    _add_source_format_args(p)
+    _add_define_args(p)
+    p.set_defaults(func=_cmd_widen_check)
+
+
+def _cmd_widen_check(args: argparse.Namespace) -> None:
+    from ..analysis.field_widening import FieldWideningAnalyzer
+    from ..analysis.lineage_graph import LineageGraph
+
+    targets = list(args.targets)
+    field_name = args.field
+    if args.workers is not None and args.workers < 1:
+        _fail("--workers must be >= 1")
+    if args.depth is not None and args.depth < 0:
+        _fail("--depth must be >= 0")
+    reports, problems = _lineage_reports(args, targets)
+    bindings, passthroughs, jcl_problems, jcl_caveats = _load_bindings(args)
+    graph = LineageGraph(reports, bindings, passthroughs, join_caveats=jcl_caveats)
+    report = FieldWideningAnalyzer(graph).analyze(
+        field_name,
+        args.new_picture,
+        program=args.program,
+        new_usage=args.new_usage,
+        depth=args.depth,
+    )
+    report.findings = [
+        f for f in report.findings if _severity_at_least(f.severity, args.min_severity)
+    ]
+    all_problems = problems + jcl_problems
+    if args.output_format == "text":
+        text = report.to_text()
+        if all_problems:
+            text += "Problems:\n" + "".join(f"  - {p}\n" for p in all_problems)
+        _text_out(text, getattr(args, "output", None))
+    else:
+        output = report.to_dict()
+        output["problems"] = all_problems
+        _json_out(output, args.compact, getattr(args, "output", None))
+    if not report.start_found:
+        _fail(f"{field_name.upper()}: no such field in any report")
+    if not report.starts:
+        _fail(f"{field_name.upper()}: nothing to check (see caveats)")
+    worst = report.worst_severity()
+    if (
+        args.fail_on != "never"
+        and worst is not None
+        and _severity_at_least(worst, args.fail_on)
+    ):
+        sys.exit(3)
 
 
 # -- Subcommand: diff ---------------------------------------------------------
@@ -4982,6 +5142,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _build_business_rules_parser(subparsers)
     _build_lineage_parser(subparsers)
     _build_field_impact_parser(subparsers)
+    _build_widen_check_parser(subparsers)
     _build_jcl_parser(subparsers)
     _build_le_info_parser(subparsers)
     _build_config_parser(subparsers)

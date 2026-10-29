@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+* **`widen-check`: what a PICTURE change breaks, across programs**
+  (`cobolparser/analysis/field_widening.py`, `FieldWideningAnalyzer`).
+  `cobol-parser widen-check CUST-ID --to '9(9)' ./cobol [--jcl ...]` follows
+  the field's value through the cross-program lineage graph and reports
+  every receiver that would cut the new value (high-order digits, decimal
+  places, characters, sign; reported once, where the cut happens, and
+  graded `info` when the old value was already cut), and, when the byte
+  length changes, every layout that has to change with it: the record's
+  later fields, REDEFINES, group MOVE / READ INTO / WRITE FROM partners,
+  the file's LRECL and every other program bound to the same dataset, the
+  callee's LINKAGE record or the callers' arguments. Programs declaring the
+  same field (a shared copybook) and DB2 columns the value reaches are
+  listed for review. A narrowing is checked the other way, against the
+  fields that feed it. `--min-severity`, `--fail-on` (exit 3).
+* Lineage reports carry optional `picture` / `usage` / `redefines` on
+  items and a top-level `overlays` list (group-level byte transfers between
+  records). Additive: `lineage_version` stays "2"; the MCP server's
+  `FACTS_VERSION` moves to "6" so cached facts are recomputed.
+
 * **SARIF 2.1.0 output** for `lint`, `scan` and `call-check`
   (`--format sarif`; `cobolparser/analysis/sarif.py`), for GitHub code
   scanning and IDE problem panes. Findings inside an expanded copybook

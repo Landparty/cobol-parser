@@ -429,6 +429,34 @@ class PortFlow:
         }
 
 
+@dataclass(frozen=True)
+class Overlay:
+    """One group-level byte-for-byte transfer between two records: *source*
+    and *target* are the operands' qualified names, with their lengths."""
+
+    source: str
+    target: str
+    source_length: int
+    target_length: int
+    line: int
+    statement: str
+    origin_file: str | None = None
+    origin_line: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "source": self.source,
+            "target": self.target,
+            "source_length": self.source_length,
+            "target_length": self.target_length,
+            "line": self.line,
+            "statement": self.statement,
+        }
+        if self.origin_line is not None:
+            data["origin"] = {"file": self.origin_file, "line": self.origin_line}
+        return data
+
+
 @dataclass
 class FieldFlowReport:
     program_id: str
@@ -449,6 +477,11 @@ class FieldFlowReport:
     #: loops; a path *through* such an item carries a computed value, so
     #: ``summary`` and ``LineageGraph`` count it as derived.
     in_place: list[LineageEdge] = field(default_factory=list)
+    #: Byte-for-byte transfers between two different records where at least
+    #: one side is a group (a group MOVE, READ INTO, WRITE FROM, RETURN
+    #: INTO): which fields meet depends on both layouts, so a change to one
+    #: record's layout moves what the other receives (``field_widening``).
+    overlays: list[Overlay] = field(default_factory=list)
 
     def port(self, kind: str, key: str) -> Port | None:
         for port in self.ports:
@@ -468,6 +501,7 @@ class FieldFlowReport:
             "in_place": [e.to_dict() for e in self.in_place],
             "caveats": list(self.caveats),
             "overwrites": [e.to_dict() for e in self.overwrites],
+            "overlays": [o.to_dict() for o in self.overlays],
             "statistics": {
                 "items": len(self.items),
                 "ports": len(self.ports),
@@ -527,6 +561,13 @@ def apply_source_map(
     report.edges = mapped(report.edges)
     report.overwrites = mapped(report.overwrites)
     report.in_place = mapped(report.in_place)
+    overlays: list[Overlay] = []
+    for overlay in report.overlays:
+        origin = source_map.get(overlay.line) if overlay.line else None
+        if origin is not None:
+            overlay = replace(overlay, origin_file=origin[0], origin_line=origin[1])
+        overlays.append(overlay)
+    report.overlays = overlays
     return report
 
 
@@ -556,6 +597,10 @@ class _Item:
     #: ``"numeric"``, ``"numeric-edited"`` or ``""`` (anything else), for an
     #: elementary item: which items ADD/SUBTRACT CORRESPONDING pair up.
     category: str = ""
+    #: PICTURE / USAGE as the layout spells them (``None`` when absent):
+    #: what a value of the item can hold, for ``field_widening``.
+    picture: str | None = None
+    usage: str | None = None
 
 
 _FLOAT_USAGES = frozenset(
@@ -661,6 +706,7 @@ class FieldFlowAnalyzer:
         self._ports: dict[tuple[str, str], Port] = {}
         self._edges: dict[tuple[Any, ...], LineageEdge] = {}
         self._in_place: dict[tuple[Any, ...], LineageEdge] = {}
+        self._overlays: dict[tuple[str, str, int, str], Overlay] = {}
         self._key_uses: list[KeyUse] = []
         self._caveats: list[str] = []
         self._caveat_set: set[str] = set()
@@ -739,6 +785,13 @@ class FieldFlowAnalyzer:
                 "length": item.length,
                 "record": item.root,
                 **({"occurs": item.occurs} if item.occurs is not None else {}),
+                **({"picture": item.picture} if item.picture else {}),
+                **({"usage": item.usage} if item.usage else {}),
+                **(
+                    {"redefines": item.redefines_chain[-1]}
+                    if item.redefines_chain
+                    else {}
+                ),
             }
             for item in self._items.values()
         ]
@@ -756,6 +809,9 @@ class FieldFlowAnalyzer:
             key=lambda e: (e.line, e.source.sort_key(), e.kind),
         )
         report.summary = self._summarize(report.edges, report.in_place)
+        report.overlays = sorted(
+            self._overlays.values(), key=lambda o: (o.line, o.source, o.target)
+        )
         report.caveats = list(self._caveats)
         report.overwrites = [
             edge
@@ -850,6 +906,8 @@ class FieldFlowAnalyzer:
                         else None
                     ),
                     category=_category(entry.get("picture"), entry.get("usage")),
+                    picture=entry.get("picture"),
+                    usage=entry.get("usage"),
                 )
                 self._items[item.qname] = item
                 self._by_raw.setdefault(item.raw, []).append(item.qname)
@@ -1365,6 +1423,12 @@ class FieldFlowAnalyzer:
         sources = self._pieces(src_ref)
         targets = self._pieces(tgt_ref)
         loose = src_ref.loose_window or tgt_ref.loose_window
+        if (src.children or tgt.children) and src.root != tgt.root:
+            line = ctx.location.line if ctx.location is not None else 0
+            self._overlays.setdefault(
+                (src.qname, tgt.qname, line, statement),
+                Overlay(src.qname, tgt.qname, src.length, tgt.length, line, statement),
+            )
         if not src.children and not tgt.children and sources and targets:
             s, t = sources[0], targets[0]
             exact = s.exact and t.exact and not loose

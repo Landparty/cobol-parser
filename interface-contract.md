@@ -94,6 +94,12 @@ graph = LineageGraph(reports, join_edges=state["edges"],
   `#n`-suffixed `qualified_name`s for the n-th item sharing a name
   (`"FILLER#2"`), an optional `occurs` key on `items` entries, and table
   fields mapped to every occurrence's bytes (inexact) instead of the first.
+- Additive, `lineage_version` unchanged (2026-10-29): `items` entries carry
+  optional `picture`, `usage` and `redefines` (the redefined name) keys, and
+  the report a top-level `overlays` list -- group-level byte-for-byte
+  transfers between two records (`{source, target, source_length,
+  target_length, line, statement, origin?}`). A stored report without them
+  still loads; `FieldWideningAnalyzer` then lists its fields as unchecked.
 - `join_edges()` is unchanged. `join_state()` adds what the joins said besides
   their edges; `LineageGraph(..., join_edges=..., join_caveats=...,
   unjoined=...)` restores it, and both keyword arguments are optional
