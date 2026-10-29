@@ -8,7 +8,7 @@ timestamp: 2026-10-15T00:00:00Z
 
 # CLI
 
-The `cobol-parser` command: <!-- okf:gen cli-subcommand-count -->40<!-- /okf:gen --> subcommands that parse, tokenize, preprocess,
+The `cobol-parser` command: <!-- okf:gen cli-subcommand-count -->41<!-- /okf:gen --> subcommands that parse, tokenize, preprocess,
 expand, analyze, generate/decode/compare record data for, and graph COBOL
 (plus one for JCL and one for the LE catalogue), all built with `argparse` in
 `cobolparser/cli/parse.py`, and the `cobol.yml` project config every
@@ -120,6 +120,7 @@ Verified against `python -m cobolparser <cmd> --help` on 2026-10-15. Order is
 | `business-rules` | `file` | `--format {json,text}` (json), `--include-technical` | A; +prof | `BusinessRuleReport` |
 | `lineage` | `file` | `--field NAME`, `--direction {forward,backward}` (forward), `--format {json,text}` (json) | A (no profiling) | `FieldFlowReport` |
 | `field-impact` | `[FIELD] PATH ...` | `--program NAME` (every program with that field), `--table T.C`, `--dataset DSN`, `--direction` (forward), `--depth N` (unlimited), `--jcl PATH`..., `--proc-path DIR`... (from `project.proc_path`), `--bindings FILE.json`, `--key-relationships`, `--workers N`, `--format {json,text}` (json) | `--compact`, `--copybook-path`, `--source-format`, `--define`, `-o`, dl | `ImpactResult`; exit 1 when the start matches nothing |
+| `widen-check` | `FIELD PATH ...` | `--to PIC` (required), `--usage USAGE` (kept), `--program NAME`, `--depth N`, `--jcl PATH`..., `--proc-path DIR`..., `--bindings FILE.json`, `--min-severity {error,warning,info}` (info), `--fail-on {error,warning,info,never}` (never), `--workers N`, `--format {json,text}` (json) | `--compact`, `--copybook-path`, `--source-format`, `--define`, `-o`, dl | `WideningReport`; exit 1 when nothing produced a report, the field matches nothing or nothing could be checked; exit 3 on `--fail-on` (judged on the findings `--min-severity` keeps) |
 | `jcl` | `file` | `--dd-map`, `--bindings`, `--program NAME`, `--proc-path DIR`..., `--strict` | `--compact`, `-o` | job JSON; needs `[jcl]` extra; exit 3 on `--strict` |
 | `le-info` | `[name ...]` | `--kind {service,function,all}` (all) | `--compact`, `-o` | LE / intrinsic signature catalogue |
 | `config` | — | `--json` | `--compact`, `-o` | effective `cobol.yml` |
@@ -137,7 +138,7 @@ Subcommands that take none of the COBOL parse flags (`--source-format`,
 | `0` | Ran to completion; findings alone never change it. Analyzer subcommands exit 0 on a partial parse too, printing `warning: <file> parsed with N error(s); analysis may be incomplete` to stderr (`_parse_result_or_fail`) |
 | `1` | The CLI failed (`_fail()`): unreadable file, `ast is None`, unwritable output, a `cobol.yml` error, a missing extra, an invalid option value |
 | `2` | Argparse rejected the arguments; `parse` (incl. `--find-type`) got a recovered-but-errored parse — JSON still printed, summary on stderr (`_exit_if_partial_parse`; with `--errors` it says the errors are in the JSON instead of the re-run hint, #745); `batch` had a file with a `read_error` or `success=false`; `scan` had a file in `failures`, and `codebase-graph` / `copybook-impact` a file in the graph's `errors` (missing, unreadable or parsed with errors) -- output still written, a `warning:` on stderr, plus `error: no such file or directory: X` per missing path (`_exit_on_graph_errors`, #325, owner's option (a): any failed file, as `batch`); `gen-fixtures --strict` found unresolved items; `call-check` had a missing file (before any parse) or a file that failed to parse (after the report) |
-| `3` | `lint --fail-on` / `call-check --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
+| `3` | `lint --fail-on` / `call-check --fail-on` / `widen-check --fail-on` threshold hit; `jcl --strict` hit an unparseable card |
 | `141` | stdout closed (128 + SIGPIPE) |
 
 Exit 2 on a partial parse lets scripts gating on `$?` tell a partial parse

@@ -55,7 +55,7 @@ from .workspace import ParsedProgram, Stamp, Workspace, _stamp
 
 #: Bumped whenever :class:`FileFacts` or anything it holds changes shape:
 #: facts on disk from another version are never read.
-FACTS_VERSION = "6"
+FACTS_VERSION = "7"
 
 #: The fields only the lineage and statement indexes read. They are most of
 #: the bytes of a file's facts (a field-flow report per unit), so on disk they

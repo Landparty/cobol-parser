@@ -1,8 +1,8 @@
 ---
 type: Module
 title: Field Lineage
-description: Field-level data lineage -- FieldFlowAnalyzer (field_lineage.py, one program's value-flow graph between data items and ports), LineageGraph (lineage_graph.py, cross-program joins through datasets, CALL arguments and DB2 columns, impact queries), lineage_jcl.py (DD bindings from jcl-parser jobs) and _sql_flow.py (embedded SQL host variable <-> column flows).
-tags: [analysis, field-lineage, lineage-graph, impact, jcl, sql-flow, ports]
+description: Field-level data lineage -- FieldFlowAnalyzer (field_lineage.py, one program's value-flow graph between data items and ports), LineageGraph (lineage_graph.py, cross-program joins through datasets, CALL arguments and DB2 columns, impact queries), FieldWideningAnalyzer (field_widening.py, what a PICTURE change truncates or misaligns), lineage_jcl.py (DD bindings from jcl-parser jobs) and _sql_flow.py (embedded SQL host variable <-> column flows).
+tags: [analysis, field-lineage, lineage-graph, impact, widening, jcl, sql-flow, ports]
 timestamp: 2026-10-16T00:00:00Z
 ---
 
@@ -14,8 +14,9 @@ program's may-flow value graph between data items and *ports* (files, CALL
 arguments, linkage, SQL columns, console), and `LineageGraph(reports,
 bindings, passthroughs)` joins many programs' reports and answers impact
 queries. DD-to-dataset bindings come from JCL via `lineage_jcl.py`. Backs the
-`lineage` and `field-impact` CLI subcommands and `scan --analyzer lineage`.
-Start with [API](#api), then the layer you need.
+`lineage`, `field-impact` and `widen-check` CLI subcommands and `scan
+--analyzer lineage`. Start with [API](#api), then the layer you need;
+[Field widening](#field-widening) is built on layer 2.
 
 ## API
 
@@ -32,6 +33,10 @@ graph = LineageGraph([flow, ...], bindings, passthroughs)
 hits = graph.impact("CUST-ID", program="PROG1", direction="forward", depth=None)
 graph.impact_table("CUSTOMER.CUST_ID") / graph.impact_dataset("PROD.CUST.MASTER")
 graph.key_relationships() / graph.join_edges() / graph.join_state()
+
+from cobolparser.analysis.field_widening import FieldWideningAnalyzer
+widen = FieldWideningAnalyzer(graph).analyze("CUST-ID", "9(9)", program="PROG1")
+widen.findings   # WideningFinding: kind/severity/program/field/message/line/...
 ```
 
 ## Layer 1: one program
@@ -85,6 +90,15 @@ the edges into an item that replace all of it: exact, unguarded, in a named
 paragraph, statement in `OVERWRITING_STATEMENTS` (MOVE, READ INTO, RETURN
 INTO, EXEC SQL, ACCEPT; not ADD or the string verbs, which keep part of the
 old value); `apply_source_map` stamps them too.
+
+`overlays` (JSON `"overlays"`, `Overlay`) are the byte-for-byte transfers
+between two *different* records where at least one operand is a group
+(group MOVE, READ INTO, WRITE FROM, RETURN INTO), recorded in `_overlay`
+with both operands' qualified names and lengths, stamped by
+`apply_source_map` (`origin`). Items also carry optional `picture`, `usage`
+and `redefines` (the redefined name, last of the chain) -- what
+`field_widening` sizes receivers with. All additive: `LINEAGE_VERSION` stays
+"2", `mcp/facts.py`'s `FACTS_VERSION` moved to "7".
 
 **Operands** (`_refs`) go through one path for MOVE, arithmetic, STRING,
 CALL arguments, DISPLAY/ACCEPT, READ INTO / WRITE FROM: xref's
@@ -242,6 +256,44 @@ reported (#510: any onward edge used to hide it).
 `origin.file` after `apply_source_map`, set in `_reach`) says which file a
 hop's line is in; it is not in `Hop.to_dict()` (#489, used by the MCP server).
 
+## Field widening
+
+`FieldWideningAnalyzer(graph).analyze(field, new_picture, program=None,
+new_usage=None, depth=None)` -> `WideningReport` (`WIDENING_VERSION` "1";
+`starts`, `findings`, `unchecked`, `caveats`, `start_found`,
+`worst_severity()`, `to_dict()` / `to_text()`). Backs `widen-check`. One
+start per field the name matches (`LineageGraph._start_groups`); a group, a
+PICTURE `PictureClause` cannot size, or an item with no `picture` in its
+report is a caveat and no start. Finding kinds:
+
+* `truncation` -- forward `impact()` hits that are items: the new capacity
+  is carried along the path (`Capacity.through` at every item hop), so a cut
+  is reported where it happens, once. `Capacity` is integer / decimal digits
+  (+ sign) for numeric and numeric-edited items, characters for the rest
+  (a group: its bytes); `losses()` follows MOVE alignment. Severity: `info`
+  when the old value lost the same things (`pre_existing`), `warning` when
+  only decimal places are new, the path is derived (arithmetic) or not
+  `exact`, else `error`. A derived pre-existing loss is dropped (a rate, a
+  running total: the arithmetic's business). A path through a `redefines` /
+  `occurrence` hop is aliasing, not a receiver: skipped. When the new
+  PICTURE is narrower in any way (`old.losses(new)`), a backward trace flags
+  the nearest feeders holding more than the new capacity.
+* `layout` -- only when the byte length changes (`storage_size` of old and
+  new PICTURE x enclosing OCCURS): the record's later fields shift (`info`);
+  a REDEFINES over or by the record, and each `overlays` entry touching it
+  (`warning`); file ports a record field meets -> LRECL (`warning`) plus
+  every *other* program bound to the same dataset (`error`); CALL ports ->
+  the callee's LINKAGE record (`warning`); LINKAGE ports -> every caller's
+  argument record (`error`: the callee addresses past it).
+* `same-layout` (`info`) -- another program's item with the same qualified
+  name (minus `#n`) and PICTURE: a shared copybook or a copy.
+* `column` (`warning`) -- a DB2 column the value reaches; its type is not in
+  the source, so it is named for review.
+
+Findings are de-duplicated on (program, field, kind) and sorted by severity.
+Tests: `tests/unit/analysis/test_field_widening.py`,
+`tests/unit/cli/test_widen_check_cli.py`; samples in `tests/samples/widening/`.
+
 ## Bindings from JCL
 
 **Bindings (`lineage_jcl.py`).** `bindings_from_jobs(jobs)` turns
@@ -312,7 +364,7 @@ fixtures in `tests/samples/lineage/`.
   which the operand and CALL handling reuse
 * [codebase.md](codebase.md) -- `ProgramSignatureExtractor` (linkage ports)
 * [../jcl.md](../jcl.md) -- the separate `cobolparser.jcl` adapter (not used here)
-* [../cli.md](../cli.md) -- `lineage`, `field-impact`
+* [../cli.md](../cli.md) -- `lineage`, `field-impact`, `widen-check`
 * [../batch.md](../batch.md) -- `scan --analyzer lineage`
 * `docs/plans/2026-10-08-field-lineage-design.md` -- design
 * [history](../history/analysis.md) -- archived dated notes

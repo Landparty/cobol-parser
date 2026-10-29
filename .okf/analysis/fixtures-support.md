@@ -547,8 +547,22 @@ yields the same `ge` constraint as `WHEN X >= 1` and its `OR` is not taken
 for a connective (#387). `complexity.py`'s `_BOOL_WORD_RE` likewise skips
 the OR of `OR EQUAL`.
 
-**Two-field comparisons are unsupported in v1** (`IF F1-QTY > F1-STATUS`) --
-stated as a parent-plan limitation, not attempted.
+**Two-field comparisons are unsupported** (`IF F1-QTY > F1-STATUS`), with
+one exception: a boundary-fed field against a *carrier* of one, which is a
+comparison with the previous record (`CorrelationConstraint`, a
+`FieldConstraint` subclass with `source`, `carrier`, `offset=-1` and empty
+`values`, kept apart in `BranchConstraints.correlations[arm_id]`, never in
+`arms`; `to_dict()` lists `correlations` only when there are some). Only
+`_extract_if` passes a `_CarrierSite`; EVALUATE / SEARCH / PERFORM UNTIL keep
+the old refusal. `_Carriers` decides, "exact by construction, or absent": the
+item is not boundary-fed; exactly one MOVE targets it, not CORRESPONDING,
+from one boundary-fed field, unconditional (no enclosing arm), in the
+comparison's own paragraph and on a later line; xref shows no other
+value-changing role (`write`, `call-argument`, `host-variable`,
+`reference`, `file-operation`) on it or any group above it, no level-88 of
+it is SET, and no REDEFINES touches the chain. Anything else (a MOVE before
+the comparison carries the *current* record) keeps the unchanged
+"comparison between two resolved fields not supported in v1" reason.
 
 **Numeric witnesses are picked on the field's decimal grid.**
 `domains.NumericDomain.pick()` enumerates candidates in integer units of

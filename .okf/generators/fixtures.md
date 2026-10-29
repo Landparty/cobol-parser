@@ -237,14 +237,10 @@ the internal `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers:
 * **Per-row witnesses** — `override.row_witnesses` (0-based row index →
   `{qualified name: value}`) overrides `witnesses` for one row only, and
   `_sequence_length` raises the generated row count so a pinned row always
-  exists. Groundwork, not yet wired: `ScenarioPlanner` populates it nowhere.
-  It exists because the flat `witnesses` dict makes a whole class of branch
-  *inexpressible* — one reachable only when a prior record correlates with a
-  following one ("a prior `'05'` record sharing a key with a following `'09'`
-  record"). Reachability in `ScenarioPlanner` is CFG-shaped
-  (`flow_report.unreachable_nodes`), never data-shaped, so such an arm is
-  counted `targeted` and gets a scenario named for it that never reaches it.
-  Design + remaining work:
+  exists. The flat `witnesses` dict cannot express a branch reachable only
+  when a record correlates with the one before it; `ScenarioPlanner` fills
+  `row_witnesses` for such an arm (see [Cross-record
+  correlation](#cross-record-correlation)). Design:
   [docs/plans/2026-09-04-cross-record-correlation-design.md](../../docs/plans/2026-09-04-cross-record-correlation-design.md).
 * **Sequence length** — `override.sequence_constraints` (matched by
   `(category, key)`) overrides a READ boundary's row count, e.g. the "empty
@@ -269,6 +265,32 @@ the internal `_build_fixture`/`_build_call_fixture`/`_status_dict` helpers:
 `FixtureBundle.scenario_coverage` (additive field — `bundle_version` stays
 `1`) carries `ScenarioPlan.coverage.to_dict()` verbatim, `None` for a
 `mode="happy"` bundle since that mode never attempts branch targeting.
+
+## Cross-record correlation
+
+An arm whose condition compares a boundary-fed field with the *previous*
+record's value (`IF TXN-BRANCH = WS-PREV-BRANCH`, `MOVE TXN-BRANCH TO
+WS-PREV-BRANCH` later in the paragraph) carries a
+`BranchConstraints.correlations[arm_id]` list of `CorrelationConstraint`s
+(the extractor side: [../analysis/fixtures-support.md](../analysis/fixtures-support.md)).
+`ScenarioPlanner.plan()` gathers the arm's own plus its exact enclosing
+arms' (`_path_correlations`; an OR-split enclosing arm with one is a
+`path_gaps` entry) and `_solve_correlations()` pins two rows: row 1 gets the
+compared field's value (its scenario witness, else `solve(spec, own)`), row 0
+a value of the carried field meeting the flipped operator against it. Both
+fields must belong to one READ boundary's records, else the arm is `missed`
+("not read by one READ sequence"); an unsatisfiable pair is `missed` too
+("unsatisfiable: no value of X in the record before ..."). The scenario
+keeps `correlations` (in `PlannedScenario.to_dict()` only when non-empty),
+says so in its `intent`, is never merged, and an OR-split disjunct is named
+for its comparison (`[F1-KEY <> previous F1-KEY]`).
+`verification.verify_scenario` adds one verdict per correlation, labelled
+`"<field> vs the previous record's <source>"`: `satisfied` when some row
+n >= 1 of a fixture holding both fields meets it against row n - 1. Bundles
+of programs with no correlation are unchanged (`BUNDLE_VERSION` stays).
+Pinned by `tests/unit/generators/test_cross_record_correlation.py`, incl. a
+GnuCOBOL run of `tests/samples/correlation/BRKRPT.cbl` (skipped without
+`cobc`) showing only the correlated scenario reaches its paragraph.
 
 ## Entry parameters
 
@@ -724,7 +746,9 @@ conjuncts must hold simultaneously) and lands in `coverage.missed` with
   across `branches`/`all`, unknown-mode `ValueError`
 * `tests/unit/generators/test_scenario_verification.py` — `verify_scenario`
   verdicts (satisfied/violated/absent/unknown); `test_row_witnesses.py` —
-  `PlannedScenario.row_witnesses` plumbing (populated by nothing yet)
+  `PlannedScenario.row_witnesses` plumbing; `test_cross_record_correlation.py`
+  — carrier detection and its refusals, two-row planning, correlation
+  verdicts, the BRKRPT bundle (and its GnuCOBOL run)
 * `tests/regression/test_fixturedemo_golden.py` — `examples/fixtures/FIXTUREDEMO.cbl`
   at seed 42 must keep producing the exact golden `FixtureBundle` JSON
 * `tests/unit/test_scenario_planner.py` — single-IF THEN/ELSE targeting with

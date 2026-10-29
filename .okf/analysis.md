@@ -92,6 +92,7 @@ Report origins after copybook expansion: [analysis/lint.md](analysis/lint.md).
 | `sarif.py` | `sarif_log`, `SarifResult`, `SarifNotification`, `lint_results`, `call_check_results` | [lint](analysis/lint.md#sarif-output) |
 | `field_lineage.py` | `FieldFlowAnalyzer` | [lineage](analysis/lineage.md) |
 | `lineage_graph.py` | `LineageGraph` | [lineage](analysis/lineage.md) |
+| `field_widening.py` | `FieldWideningAnalyzer` | [lineage](analysis/lineage.md) |
 | `lineage_jcl.py` | `bindings_from_jobs`, `load_jobs`, `jobs_from_sources` | [lineage](analysis/lineage.md) |
 | `_sql_flow.py` | `analyze_sql` | [lineage](analysis/lineage.md) |
 | `business_rules.py` | `BusinessRuleExtractor` | [business-rules](analysis/business-rules.md) |
