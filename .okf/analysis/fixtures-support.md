@@ -568,8 +568,11 @@ alphabetic source) or national, at least its characters, and no JUSTIFIED
 RIGHT unless the sizes match. And no READ / RETURN may run between the
 comparison and the MOVE (`_refills_between`, #762): directly in the
 paragraph, or in a paragraph it PERFORMs there (THRU ranges, sections,
-nested PERFORMs; an unknown target counts as a read) -- the MOVE would carry
-the record just read, which the comparison then sees as "the previous" one.
+nested PERFORMs; an unknown target, or a GO TO out of the performed range,
+counts as a read) -- the MOVE would carry the record just read, which the
+comparison then sees as "the previous" one. A GO TO in the paragraph between
+the two refuses the carrier too (the MOVE is skipped on that path); lines
+are compared inclusively.
 Anything else (a MOVE before
 the comparison carries the *current* record) keeps the unchanged
 "comparison between two resolved fields not supported in v1" reason.

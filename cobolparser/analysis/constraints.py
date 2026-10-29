@@ -1720,16 +1720,19 @@ class _Carriers:
         """True when a READ or RETURN may run after the comparison and before
         the carrying MOVE in the comparison's paragraph -- directly, or in a
         paragraph PERFORMed there. The MOVE would then carry the record just
-        read, which the comparison next sees as "the previous" one."""
+        read, which the comparison next sees as "the previous" one. A GO TO
+        there counts too: on that path the MOVE is skipped, and the carrier
+        keeps an older record. Lines are compared inclusively, so a READ
+        written on the comparison's or the MOVE's own line is not missed."""
         paragraph = (site.paragraph or "").upper()
         for name, statement, _enclosing in _walk_statements(self._procedure):
             if (name or "").upper() != paragraph:
                 continue
             location = getattr(statement, "location", None)
             line = location.line if location is not None else None
-            if line is None or not site.line < line < move_line:
+            if line is None or not site.line <= line <= move_line:
                 continue
-            if isinstance(statement, (IOReadStatement, ReturnStatement)):
+            if isinstance(statement, (IOReadStatement, ReturnStatement, GoStatement)):
                 return True
             if isinstance(statement, PerformStatement) and self._performs_a_read(
                 statement
@@ -1739,7 +1742,9 @@ class _Carriers:
 
     def _performs_a_read(self, perform: PerformStatement) -> bool:
         """True when the out-of-line paragraphs *perform* runs (THRU ranges,
-        sections, nested PERFORMs) may READ or RETURN, or cannot be found."""
+        sections, nested PERFORMs) may READ or RETURN, or cannot be found. A
+        GO TO out of the range leaves it for code not followed here, so it
+        counts as a read; one within it (``GO TO X-EXIT``) does not."""
         if not perform.target_paragraph:
             return False  # inline: its statements are walked in place
         paragraphs = _all_paragraphs(self._procedure)
@@ -1759,12 +1764,19 @@ class _Carriers:
             run = _procedure_run(paragraphs, sections, *key)
             if run is None:
                 return True  # not found: it may read
+            names = {str(p.paragraph_name or "").upper() for p in run}
             for paragraph in run:
                 for _name, statement, _enclosing in _walk_list(
                     paragraph.paragraph_name, paragraph.statements, ()
                 ):
                     if isinstance(statement, (IOReadStatement, ReturnStatement)):
                         return True
+                    if isinstance(statement, GoStatement):
+                        targets: list[str | None] = list(
+                            statement.target_paragraphs
+                        ) or [statement.target_paragraph]
+                        if any(str(t or "").upper() not in names for t in targets):
+                            return True
                     if isinstance(statement, PerformStatement) and (
                         statement.target_paragraph
                     ):

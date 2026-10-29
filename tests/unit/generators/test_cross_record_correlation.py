@@ -224,6 +224,30 @@ class TestCarrierDetection:
             + _CARRY,
             "",
         ),
+        "a GO TO that skips the move": (
+            _PREV,
+            """\
+           IF F1-KEY = WS-PREV-KEY
+               GO TO LOOP-EXIT
+           END-IF
+""" + _CARRY,
+            """\
+       LOOP-EXIT.
+           EXIT.
+""",
+        ),
+        "read after a GO TO out of a performed range": (
+            _PREV,
+            _COMPARE + "           PERFORM CHK-PARA THRU CHK-EXIT\n" + _CARRY,
+            """\
+       CHK-PARA.
+           GO TO READ-PARA.
+       CHK-EXIT.
+           EXIT.
+       READ-PARA.
+           READ F1 AT END SET END-OF-FILE TO TRUE END-READ.
+""",
+        ),
         "read in a paragraph performed before the move": (
             _PREV,
             _COMPARE + "           PERFORM NEXT-PARA\n" + _CARRY,
@@ -235,6 +259,30 @@ class TestCarrierDetection:
 """,
         ),
     }
+
+    def test_go_to_within_a_performed_range_keeps_the_carrier(self) -> None:
+        compare = """\
+           IF F1-KEY = WS-PREV-KEY
+               PERFORM SHOW-PARA THRU SHOW-EXIT
+           END-IF
+"""
+        _ast, _b, constraints = _analyze(
+            _program(
+                _PREV,
+                compare + _CARRY,
+                """\
+       SHOW-PARA.
+           IF F1-TYPE = '01'
+               GO TO SHOW-EXIT
+           END-IF
+           DISPLAY 'SAME KEY'.
+       SHOW-EXIT.
+           EXIT.
+""",
+            )
+        )
+        (compared,) = [b for b in constraints.branches if b.correlations]
+        assert compared.correlations["THEN"]
 
     def test_wider_carrier_and_a_performed_paragraph_that_reads_nothing(
         self,
