@@ -1,7 +1,7 @@
 # Program-Scoped Data Generation — Per-Phase Implementation Plans
 
 **Date:** 2026-08-02
-**Status:** Ready to implement, phase by phase
+**Status:** Done. See the parent design for where each part landed.
 **Parent design:** [`2026-08-02-program-data-generation-design.md`](2026-08-02-program-data-generation-design.md)
 **Phase 0 (value-engine refactor)** has its own detailed plan:
 [`2026-08-02-phase0-value-engine-refactor.md`](2026-08-02-phase0-value-engine-refactor.md).

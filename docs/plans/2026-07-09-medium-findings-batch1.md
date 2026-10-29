@@ -1,5 +1,8 @@
 # Medium Findings Batch 1 (M1,M2,M3,M4,M5,M7,M8,M9,M14,M16) Implementation Plan
 
+> **Status:** Done. M1 to M16 are fixed and pinned by regression tests (see
+> `reports/open-findings.md`). The checklists below are the original plan.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix the 10 well-contained MEDIUM findings from `reports/open-findings.md` (M1, M2, M3, M4, M5, M7, M8, M9, M14, M16), each with a TDD-driven repro-becomes-regression-test cycle, matching the rigor already applied to H1-H9.

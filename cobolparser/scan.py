@@ -451,6 +451,9 @@ def _scan_one(
     source_map = getattr(result, "expansion_source_map", None)
     if sources is not None and source_map:
         sources.update(file for file, _ in source_map.values())
+    if sources is not None:
+        # A member that only COPYs another adds no line to the map (#763).
+        sources.update(getattr(result, "expansion_copybooks", None) or [])
     for unit, depth in _units_with_depth(result.ast):
         unit_scan = _scan_unit(unit, depth, options, source_map)
         if source_map:

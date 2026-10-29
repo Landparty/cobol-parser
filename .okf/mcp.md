@@ -279,8 +279,10 @@ reused, a fresh one never enters the LRU) and takes from that parse what
 every index needs: `UnitFacts` (`_unit_facts`), its `GraphPart`
 (`CodebaseGraphBuilder.absorb()`; the index joins them with `assemble()`),
 `LineageFacts` per unit, health rows and redundancy fingerprints, and
-`StatementRow`s. `FileFacts.stamps` are the parse's stamps (the file, its
-expanded copybooks, the copybook directories), so after an edit only the
+`StatementRow`s. `FileFacts.stamps` are the parse's stamps (the file, every
+copybook the expander opened -- the source map's files plus
+`ParseResult.expansion_copybooks`, so a member that only COPYs another is
+stamped too, #763 -- and the copybook directories), so after an edit only the
 stale files are recomputed; the index's own `tree_stamps()` still notice an
 added or removed program.
 

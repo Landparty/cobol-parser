@@ -106,7 +106,7 @@ Major groups:
 | Operators | `EQUAL`, `LESS`, `GREATER`, `PLUS`, `MINUS`, `MULTIPLY_OP`, `DIVIDE_OP`, `POWER`, `AND`, `OR`, `NOT`, … |
 | Punctuation | `PERIOD`, `COMMA`, `SEMICOLON`, `COLON`, `LEFT_PAREN`, `RIGHT_PAREN` |
 | Embedded EXEC | `EXEC`, `SQL`, `CICS`, `END_EXEC` (there are no fused `EXEC_SQL`/`EXEC_CICS`/`EXEC_IMS` tokens; the EXEC parsers read the word after `EXEC`) |
-| EXEC-SQL-only characters | `BANG`, `PIPE`, `NOT_SIGN` (error outside `EXEC ... END-EXEC`) |
+| EXEC-SQL-only characters | `BANG`, `PIPE`, `NOT_SIGN`, `SQL_NAME_CHAR` (`#` / `@`; error outside `EXEC ... END-EXEC`) |
 | Layout / other | `NEWLINE`, `EOF`, `COMMENT`, `COMMENT_ENTRY`, `CURRENCY` |
 
 ## Fixed-format column layout
@@ -494,7 +494,7 @@ result by
 
 ## Stray SQL characters post-pass
 
-`!`, `|` and `¬` (tokens `BANG`, `PIPE`, `NOT_SIGN`) are errors outside `EXEC ... END-EXEC`.
+`!`, `|`, `¬`, `#` and `@` (tokens `BANG`, `PIPE`, `NOT_SIGN`, `SQL_NAME_CHAR`) are errors outside `EXEC ... END-EXEC`.
 
 `CobolLexer._flag_stray_sql_chars()` runs at the end of `tokenize()` (both
 the pure-Python and `_lexer_fast.pyx` implementations call it — the fast
@@ -505,6 +505,15 @@ so embedded EXEC SQL (`!=`, `||`, `¬=`) round-trips; accepting them
 everywhere would let garbage like `MOVE BOGUS !!! TO WS-A` parse
 "successfully" with zero diagnostics. Pinned by
 `tests/regression/test_stray_sql_chars.py`.
+
+`#` and `@` are letters of a DB2 ordinary identifier (`ACCT#`, `@ADDR`,
+`T#TAB`), like `$`. `CobolLexer._merge_exec_name_chars()` runs first: inside
+an EXEC block it glues each `SQL_NAME_CHAR` or `CURRENCY` token to the words
+it abuts (same line, no gap) into one IDENTIFIER, so `SELECT ACCT#` and
+`X$Y` round-trip unchanged. Before, `#` failed the whole parse with
+`Invalid character: #`. Outside an EXEC block a `#` / `@` declared as a
+SPECIAL-NAMES currency symbol is retyped `CURRENCY`; any other is an error.
+Pinned by `tests/regression/test_sql_name_chars.py`.
 
 ## Line splitting (`_lines.py`)
 

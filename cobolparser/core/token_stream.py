@@ -1,3 +1,9 @@
+"""The token cursor that statement and division parsers read from.
+
+``TokenStream`` wraps the lexer's token list with peek, consume and expect,
+and ``transaction()`` rolls the position back when a speculative parse fails.
+"""
+
 from contextlib import contextmanager
 from typing import Any
 

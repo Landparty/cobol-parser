@@ -182,6 +182,23 @@ class TestScanCache:
         assert not after.from_cache
         assert after.to_dict() != before.to_dict()
 
+    def test_edited_wrapper_copybook_is_rescanned(self, tmp_path: Path) -> None:
+        """#763: a member that only COPYs another adds no line to the source
+        map, but editing it changes the program."""
+        program, books, cache = _layout(tmp_path)
+        (books / "TESTCPY.cpy").write_text("           COPY INNERA.\n")
+        (books / "INNERA.cpy").write_text("       05 FIELD-A PIC X(5).\n")
+        (books / "INNERB.cpy").write_text("       05 FIELD-B PIC X(5).\n")
+        before = scan_one(str(program), _options(books, cache))
+        assert scan_one(str(program), _options(books, cache)).from_cache
+        wrapper = books / "TESTCPY.cpy"
+        wrapper.write_text("           COPY INNERB.\n")
+        _touch(wrapper)
+        after = scan_one(str(program), _options(books, cache))
+        assert not after.from_cache
+        assert "FIELD-B" in json.dumps(after.to_dict())
+        assert after.to_dict() != before.to_dict()
+
     def test_new_member_in_a_copybook_directory_is_rescanned(
         self, tmp_path: Path
     ) -> None:

@@ -1,7 +1,7 @@
 # Closed-source PyPI release for cobol-parser
 
 **Date:** 2026-08-14
-**Status:** Approved for implementation
+**Status:** Superseded. The closed-source build mode was removed; the package is AGPL-3.0-or-later and ships `.py` source.
 
 ## Goal
 

@@ -45,7 +45,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OKF_DIR = REPO_ROOT / ".okf"
 # Files outside .okf/ that carry the same claims and are checked the same way.
-EXTRA_FILES = [REPO_ROOT / "CLAUDE.md"]
+EXTRA_FILES = [
+    REPO_ROOT / "CLAUDE.md",
+    REPO_ROOT / "README.md",
+    REPO_ROOT / "interface-contract.md",
+    REPO_ROOT / "docs" / "README.md",
+    REPO_ROOT / "docs" / "mcp-server.md",
+    REPO_ROOT / "docs" / "project-config.md",
+    REPO_ROOT / "docs" / "fixture-bundle-schema.md",
+    REPO_ROOT / "docs" / "enterprise-program-types.md",
+]
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))

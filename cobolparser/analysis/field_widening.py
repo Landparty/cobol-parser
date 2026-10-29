@@ -186,8 +186,16 @@ def capacity_of(
         True,
         max(0, clause.integer_digits),
         max(0, clause.decimal_digits or 0),
-        signed=clause.is_signed or clause.is_numeric_edited,
+        signed=clause.is_signed
+        or (clause.is_numeric_edited and _edited_sign(clause.pattern or "")),
     )
+
+
+def _edited_sign(pattern: str) -> bool:
+    """True when a numeric-edited PICTURE shows a sign (``+``, ``-``, ``CR``,
+    ``DB``); ``ZZ,ZZ9`` drops it (#757)."""
+    upper = pattern.upper()
+    return "+" in upper or "-" in upper or "CR" in upper or "DB" in upper
 
 
 def _byte_size(picture: str, usage: str | None) -> int | None:
@@ -204,10 +212,22 @@ def _byte_size(picture: str, usage: str | None) -> int | None:
 
 
 def _aliased(hit: ImpactHit) -> bool:
-    """True when the path passes a REDEFINES (or another alias of the same
-    bytes): the field shares storage rather than receiving a value, which
-    is a layout question (see ``FieldWideningAnalyzer._layout``)."""
-    return any(hop.kind in ("redefines", "occurrence") for hop in hit.path)
+    """True when the path passes a REDEFINES: the field shares storage rather
+    than receiving a value, which is a layout question (see
+    ``FieldWideningAnalyzer._layout``). An ``occurrence`` hop (``T.A`` ->
+    ``T.A(2)``) is no alias: it is the same field at one subscript, and what
+    that reference feeds receives the value (#759)."""
+    return any(hop.kind == "redefines" for hop in hit.path)
+
+
+def _under(qname: str, group: str) -> bool:
+    """True when item *qname* is *group* or lies under it."""
+    return qname == group or qname.startswith(group + ".")
+
+
+def _base(node: str) -> str:
+    """An item key without its literal subscripts: ``T.A(2)`` -> ``T.A``."""
+    return _SUBSCRIPT_RE.sub("", node)
 
 
 # --------------------------------------------------------------------------
@@ -531,20 +551,20 @@ class FieldWideningAnalyzer:
         for hit in hits:
             if hit.node_kind != "item" or _aliased(hit):
                 continue
+            if (hit.program, _base(hit.field)) == (start.program, start.qname):
+                continue  # the start itself, at one subscript
             # What of the new (and old) value survives up to the hit.
             carried_new, carried_old = start.new, start.old
             previous: tuple[str | None, str] | None = None
             last: Capacity | None | str = None
             for hop in hit.path:
-                if (hop.program, hop.node) == previous:
+                here = (hop.program, _base(hop.node))
+                if here == previous or here == (start.program, start.qname):
                     continue
-                previous = (hop.program, hop.node)
+                previous = here
                 cap = self._capacity(hop.program, hop.node)
                 last = cap
-                if hop is hit.path[-1] or (hop.program, hop.node) == (
-                    hit.program,
-                    hit.field,
-                ):
+                if hop is hit.path[-1] or here == (hit.program, _base(hit.field)):
                     break
                 if isinstance(cap, Capacity):
                     carried_new = carried_new.through(cap)
@@ -608,6 +628,8 @@ class FieldWideningAnalyzer:
         # Nearest feeders first: one cut is reported where it happens.
         for hit in sorted(hits, key=lambda h: len(h.path)):
             if hit.node_kind != "item" or _aliased(hit):
+                continue
+            if (hit.program, _base(hit.field)) == (start.program, start.qname):
                 continue
             cap = self._capacity(hit.program, hit.field)
             if cap == "?":
@@ -692,20 +714,36 @@ class FieldWideningAnalyzer:
             if not redefined:
                 continue
             target = self._resolve_raw(items, redefined)
-            if target == record or item.get("record") == record and qname != record:
-                other = qname if target == record else target
-                if other is None or other == record:
+            if target is None:
+                continue
+            if target == record:
+                other = qname  # another record over this one
+            elif qname == record:
+                other = target  # this record over another
+            elif item.get("record") == record:
+                # Inside the record: only a REDEFINES whose bytes hold the
+                # changed field is out of step; one after it just shifts
+                # with its target (#760).
+                if _under(start.qname, qname):
+                    other = target
+                elif _under(start.qname, target):
+                    other = qname
+                else:
                     continue
-                found.append(
-                    WideningFinding(
-                        "layout",
-                        "warning",
-                        program,
-                        other,
-                        f"{qname} REDEFINES {redefined}: {size}, and {other} still "
-                        "describes the old layout of the same bytes",
-                    )
+            else:
+                continue
+            if other == record:
+                continue
+            found.append(
+                WideningFinding(
+                    "layout",
+                    "warning",
+                    program,
+                    other,
+                    f"{qname} REDEFINES {redefined}: {size}, and {other} still "
+                    "describes the old layout of the same bytes",
                 )
+            )
         # Group moves against another record.
         for overlay in data.get("overlays") or []:
             src, tgt = str(overlay["source"]).upper(), str(overlay["target"]).upper()
@@ -836,13 +874,12 @@ class FieldWideningAnalyzer:
                         "their old offsets",
                     )
                 )
-                callee_record = self._linkage_record(callee.upper(), position)
-                if callee_record is not None:
+                for owner, callee_record in self._linkage_records(key):
                     found.append(
                         WideningFinding(
                             "layout",
                             "warning",
-                            callee.upper(),
+                            owner,
                             callee_record,
                             f"LINKAGE parameter {position}, passed {record} by "
                             f"{program}: {size}, and {callee_record} still "
@@ -850,15 +887,15 @@ class FieldWideningAnalyzer:
                         )
                     )
             elif kind == PORT_LINKAGE:
-                _entry, _, position = key.rpartition("#")
-                for caller, argument in self._callers(program, position):
+                entry, _, position = key.rpartition("#")
+                for caller, argument in self._callers(program, key):
                     found.append(
                         WideningFinding(
                             "layout",
                             "error",
                             caller,
                             argument,
-                            f"passes argument {position} to {program}, whose "
+                            f"passes argument {position} to {entry}, whose "
                             f"LINKAGE record {record} {size.split(' ', 1)[1]}: "
                             "the callee now addresses bytes past the argument "
                             "unless the caller's record changes too",
@@ -866,27 +903,32 @@ class FieldWideningAnalyzer:
                     )
         return found
 
-    def _linkage_record(self, program: str, position: str) -> str | None:
-        data = self.graph.reports.get(program)
-        if data is None:
-            return None
-        items = self._items[program]
-        for edge in data.get("edges") or []:
-            port, node = edge["source"], edge["target"]
-            if (
-                port["kind"] == PORT_LINKAGE
-                and str(port["name"]).endswith(f"#{position}")
-                and node["kind"] == ITEM
-            ):
-                item = items.get(str(node["name"]).upper())
-                if item is not None:
-                    return str(item.get("record") or node["name"])
-        return None
-
-    def _callers(self, program: str, position: str) -> list[tuple[str, str]]:
-        """(caller, argument record) of every CALL of *program* in the graph
-        passing argument *position*."""
+    def _linkage_records(self, port_key: str) -> list[tuple[str, str]]:
+        """(program, LINKAGE record) of every program whose entry point
+        *port_key* (``NAME#n``: a PROGRAM-ID or an ENTRY name) receives, so
+        a CALL of an ENTRY finds the record the ENTRY's USING names (#761)."""
         out: set[tuple[str, str]] = set()
+        wanted = port_key.upper()
+        for program, data in self.graph.reports.items():
+            items = self._items[program]
+            for edge in data.get("edges") or []:
+                port, node = edge["source"], edge["target"]
+                if (
+                    port["kind"] == PORT_LINKAGE
+                    and str(port["name"]).upper() == wanted
+                    and node["kind"] == ITEM
+                ):
+                    item = items.get(str(node["name"]).upper())
+                    if item is not None:
+                        out.add((program, str(item.get("record") or node["name"])))
+        return sorted(out)
+
+    def _callers(self, program: str, port_key: str) -> list[tuple[str, str]]:
+        """(caller, argument record) of every CALL in the graph passing the
+        argument the LINKAGE port *port_key* (``NAME#n``, the PROGRAM-ID or
+        an ENTRY name) receives."""
+        out: set[tuple[str, str]] = set()
+        wanted = port_key.upper()
         for caller, data in self.graph.reports.items():
             if caller == program:
                 continue
@@ -895,11 +937,12 @@ class FieldWideningAnalyzer:
                 node, port = edge["source"], edge["target"]
                 if (
                     port["kind"] == PORT_CALL
-                    and str(port["name"]) == f"{program}#{position}"
+                    and str(port["name"]).upper() == wanted
                     and node["kind"] == ITEM
                 ):
-                    item = items.get(str(node["name"]).upper()) or {}
-                    out.add((caller, str(item.get("record") or node["name"])))
+                    name = str(node["name"]).upper()
+                    item = items.get(name) or items.get(_base(name)) or {}
+                    out.add((caller, str(item.get("record") or name)))
         return sorted(out)
 
     def _same_layout(self, start: _Start) -> list[WideningFinding]:

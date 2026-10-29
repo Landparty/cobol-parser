@@ -744,10 +744,21 @@ class ProgramFixtureGenerator:
                 continue
             arg_fields = self._fields_for_names([data_name], index)
             if not arg_fields:
-                unresolved.append(
-                    f"{ref.category} {ref.key}: argument {arg.name} not resolvable "
-                    "in layout index"
-                )
+                if "(" in data_name:
+                    # ``WS-CODE(WS-I)`` / ``WS-KEY(1:4)``: only one element
+                    # or a slice of the item is passed, and a value written
+                    # to the whole item would touch bytes the callee never
+                    # sees -- so none is generated rather than a wrong one.
+                    unresolved.append(
+                        f"{ref.category} {ref.key}: argument {arg.name} is "
+                        "subscripted or reference-modified -- only part of "
+                        "the item is passed, so no value is generated for it"
+                    )
+                else:
+                    unresolved.append(
+                        f"{ref.category} {ref.key}: argument {arg.name} not "
+                        "resolvable in layout index"
+                    )
                 continue
             if arg.direction in ("IN", "BIDIRECTIONAL"):
                 fields.extend(arg_fields)

@@ -1,7 +1,7 @@
 # Design: Mermaid program-flow fidelity (recursion, GO TO, STOP RUN, conditions)
 
 Date: 2026-08-11
-Status: approved (brainstormed in-session)
+Status: built (`generators/flowchart.py`)
 Scope: `cobol-parser` only.
 Companion doc (consumer): `mocky-mock-vscode-extension`'s
 `docs/superpowers/specs/2026-08-11-program-flow-webview-design.md` — a new

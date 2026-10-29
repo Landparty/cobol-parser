@@ -861,7 +861,7 @@ class TestCobolLexerProgramText:
         lexer = CobolLexer("")
 
         # Test with invalid character
-        text = "MOVE @ WS-VAR."  # @ is invalid
+        text = "MOVE ~ WS-VAR."  # ~ is invalid
         lexer.tokenize_program_text(text, 0, 8)
 
         # Should have recorded an error
@@ -869,7 +869,13 @@ class TestCobolLexerProgramText:
         error = lexer.errors[0]
         assert isinstance(error, LexerError)
         assert "Invalid character" in error.message
-        assert "@" in error.message
+        assert "~" in error.message
+
+        # '@' lexes (it is a letter of a DB2 name inside EXEC SQL); outside
+        # an EXEC block the tokenize() post-pass reports it instead.
+        lexer = CobolLexer("       MOVE @ WS-VAR.\n")
+        lexer.tokenize()
+        assert any("Invalid character: @" in e.message for e in lexer.errors)
 
 
 class TestCobolLexerTokenizeMethod:

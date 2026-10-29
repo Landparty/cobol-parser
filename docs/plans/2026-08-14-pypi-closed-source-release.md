@@ -1,5 +1,9 @@
 # Closed-Source PyPI Release Implementation Plan
 
+> **Status: superseded.** The closed-source build mode was built and then
+> removed: the package is AGPL-3.0-or-later and its wheels ship `.py`
+> source. Kept as history only; do not follow these steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Publish `cobolparser` to public PyPI as fully compiled, closed-source wheels (no readable `.py` business logic), without touching how the backend consumes this library today.
@@ -8,7 +12,7 @@
 
 **Tech Stack:** setuptools, Cython >=3.0, cibuildwheel, GitHub Actions, `pypa/gh-action-pypi-publish`.
 
-**Spec:** [docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md](../specs/2026-08-14-pypi-closed-source-release-design.md)
+**Spec:** [2026-08-14-pypi-closed-source-release-design.md](2026-08-14-pypi-closed-source-release-design.md)
 
 ## Global Constraints
 
@@ -152,7 +156,7 @@ Closed-source release build (used only by release CI, never local dev):
 Cythonizes every cobolparser/**/*.py module (except __init__.py files, which
 stay plain Python re-export stubs) in addition to the 3 accelerators above,
 and excludes every compiled module's .py source from the built distribution.
-See docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
+See docs/plans/2026-08-14-pypi-closed-source-release-design.md.
 """
 
 import os
@@ -290,7 +294,7 @@ with:
 build = "cp311-* cp312-* cp313-*"
 # Full closed-source build: every cobolparser module compiles, not just the
 # 3 hot-path accelerators. See setup.py and
-# docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
+# docs/plans/2026-08-14-pypi-closed-source-release-design.md.
 environment = { COBOLPARSER_CLOSED_SOURCE = "1" }
 test-requires = "pytest"
 # Smoke-test against the INSTALLED wheel (not the source tree): verify
@@ -433,7 +437,7 @@ jobs:
   # (OIDC) -- no stored API token/secret. Requires a one-time manual step on
   # pypi.org registering this repo/workflow as a trusted publisher for the
   # "cobolparser" project; see
-  # docs/superpowers/specs/2026-08-14-pypi-closed-source-release-design.md.
+  # docs/plans/2026-08-14-pypi-closed-source-release-design.md.
   publish-pypi:
     needs: [release-please, build-binary-wheels]
     if: ${{ needs.release-please.outputs.releases_created == 'true' }}

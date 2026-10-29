@@ -310,6 +310,13 @@ class TestCmdGenerate:
 
 
 class TestCmdRender:
+    @pytest.fixture(autouse=True)
+    def _artifact_in_cwd(self, tmp_path, monkeypatch):
+        """cmd_render reads its input before rendering; give it one to read
+        rather than depending on a coverage.json left in the checkout."""
+        (tmp_path / "coverage.json").write_text(json.dumps(SAMPLE_ARTIFACT))
+        monkeypatch.chdir(tmp_path)
+
     def _make_render_args(
         self, fmt="markdown", output=None, input_file="coverage.json"
     ):
