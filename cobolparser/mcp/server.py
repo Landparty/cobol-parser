@@ -14,6 +14,7 @@ Needs the ``[mcp]`` extra: ``pip install 'cobol-parser[mcp]'``.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from typing import Annotated, Any
@@ -36,10 +37,13 @@ from .workspace import Workspace
 MCPContext = Context
 
 INSTRUCTIONS = """\
-Tools for answering questions about COBOL source with an exact parser,
-instead of reading a program by eye. COBOL programs are long, their meaning
-is spread across copybooks, and byte layouts are easy to get wrong, so prefer
-these tools and cite what they return.
+Tools for answering questions about a mainframe codebase (COBOL, with the
+PL/I, assembler and JCL around it) with exact parsers, instead of reading
+programs by eye. COBOL programs are long, their meaning is spread across
+copybooks, and byte layouts are easy to get wrong, so prefer these tools and
+cite what they return. Root-wide answers carry coverage (the files read, by
+language, and those no parser here reads): when it covers the question, a
+short or empty list is the whole answer, with no text search needed.
 
 Every result has the same envelope:
 - answer: the tool's own result. Every location is {file, line[, column]}
@@ -76,10 +80,12 @@ misses copybook code.
 Across programs: codebase_overview for the whole workspace, callers_of with a
 program name for every CALL/LINK/XCTL to it, impact_of_change for what a
 change to a copybook or a field reaches, and where_from for where a field's
-value comes from. The first such call indexes every program under the root;
-later calls reuse the index until a file changes. PL/I and assembler programs
-(with the [pl1] / [hlasm] extras) are in the call graph, callers_of and
-program_brief too; the other tools read COBOL only.
+value comes from. codebase_overview takes language and path to list only
+the PL/I, assembler or COBOL programs, or one application's. The root is
+indexed in the background at start; later calls reuse the index until a file
+changes. PL/I and assembler programs (with the [pl1] / [hlasm] extras) are in
+the call graph, callers_of and program_brief too; the other tools read COBOL
+only.
 """,
     "data": """\
 Data and versions: diff_programs says what changed between two versions of a
@@ -90,9 +96,11 @@ CALL, SQL and CICS boundary a program touches, scenario by scenario.
     "jcl": """\
 How programs are run (needs the [jcl] extra; without it these tools answer
 with the install command): jobs_running for every JCL step that runs a
-program, with each of its SELECT files bound to a DD and a dataset;
+program, with each of its SELECT files bound to a DD and a dataset (with
+follow_calls, also every program it CALLs in turn and its language);
 dataset_users for every job, step and program that reads or writes a
 dataset; jcl_job to read one JCL file's jobs, steps and DD statements.
+program_brief names the steps that run a program under run_by.
 """,
 }
 
@@ -487,13 +495,24 @@ def build_server(
         )
 
     async def codebase_overview(
-        limit: Limit = None, ctx: MCPContext | None = None
+        limit: Limit = None,
+        language: Annotated[
+            str | None,
+            Field(description="Only programs in COBOL, PL/I or assembler"),
+        ] = None,
+        path: Annotated[
+            str | None,
+            Field(description="Only programs under this folder (or glob)"),
+        ] = None,
+        ctx: MCPContext | None = None,
     ) -> dict[str, Any]:
         """The whole workspace on one page: programs (COBOL, PL/I, assembler)
         and health grades, call graph, missing programs and copybooks,
-        duplicated code."""
+        duplicated code. language / path narrow the programs list."""
         return await off_loop(
-            "codebase_overview", lambda: tools.codebase_overview(limit), ctx
+            "codebase_overview",
+            lambda: tools.codebase_overview(limit, language, path),
+            ctx,
         )
 
     async def business_rules(
@@ -679,11 +698,20 @@ def build_server(
             Field(description="Program name, as PGM= names it"),
         ],
         limit: Limit = None,
+        follow_calls: Annotated[
+            bool,
+            Field(
+                description="Also list every program it CALLs / LINKs / XCTLs "
+                "in turn, with its language"
+            ),
+        ] = False,
     ) -> dict[str, Any]:
         """Every JCL step that runs a program, each SELECT file bound to its
-        DD and dataset, and DDs the step does not code."""
+        DD and dataset, and DDs the step does not code; with follow_calls,
+        the COBOL, PL/I and assembler code the step runs through CALLs."""
         return await off_loop(
-            "jobs_running", lambda: tools.jobs_running(program, limit)
+            "jobs_running",
+            lambda: tools.jobs_running(program, limit, follow_calls),
         )
 
     async def dataset_users(
@@ -770,7 +798,36 @@ def run_stdio(
     so the first cross-program question finds them ready."""
     server = build_server(workspace, tools_spec, max_answer_bytes)
     if warm_up:
-        from .facts import store_for
-
-        store_for(workspace).warm()
+        warm_indexes(workspace)
     server.run("stdio")
+
+
+def warm_indexes(workspace: Workspace) -> threading.Thread:
+    """Compute every program's facts in the background, then build the
+    call/COPY graph and the JCL index from them, so the first cross-program
+    question (``callers_of``, ``jobs_running``, ...) finds them built. Each
+    index is built under :attr:`Workspace.lock`, so a tool call meanwhile
+    waits for at most one of them, and a failure only means it is built on
+    first use instead."""
+    from .codebase_index import programs_index
+    from .facts import store_for
+
+    def run() -> None:
+        facts_thread = store_for(workspace).warm()
+        if facts_thread is not None:
+            facts_thread.join()
+        builders: list[Callable[[Workspace], Any]] = [programs_index]
+        from .jcl_tools import jcl_available, jcl_index
+
+        if jcl_available():
+            builders.append(jcl_index)
+        for build in builders:
+            try:
+                with workspace.lock:
+                    build(workspace)
+            except Exception:  # noqa: BLE001 -- warm-up is best-effort
+                continue
+
+    thread = threading.Thread(target=run, name="cobol-index-warmup", daemon=True)
+    thread.start()
+    return thread
